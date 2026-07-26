@@ -1,0 +1,25 @@
+---
+/**
+ * /use-cases/<slug> — generated from the registry.
+ *
+ * A route claim, nothing more — the page itself is UseCasePage, and its
+ * content is the registry entry for `slug`. All three locales point at the
+ * same component; Astro resolves the locale from the URL and paraglide-astro
+ * wraps the render, so `m.*()` inside the component returns English.
+ *
+ * Physical per-locale files rather than leaning on i18n `fallbackType:
+ * "rewrite"`: a fallback-generated page reports the English `Astro.url.pathname`
+ * (so it self-canonicalises to English) and never enters the sitemap.
+ *
+ * Nothing here may call a Paraglide message. `getStaticPaths()` runs outside
+ * the locale storage and would resolve every locale to English.
+ */
+import UseCasePage from "../../components/page/UseCasePage.astro";
+import { useCaseSlugs } from "../../lib/use-cases";
+
+export const getStaticPaths = () => useCaseSlugs.map((slug) => ({ params: { slug } }));
+
+const { slug } = Astro.params;
+---
+
+<UseCasePage slug={slug!} />

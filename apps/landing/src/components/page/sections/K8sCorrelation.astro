@@ -1,0 +1,129 @@
+---
+/**
+ * Kubernetes · span → pod.
+ *
+ * Moved out of the old kubernetes-monitoring page. The two panels used to
+ * carry three-dot titlebars; they are `.live-frame`s now, so the frame head
+ * states the route and the constant instead of imitating a window.
+ *
+ * Sits on `bg-bg` — both panels are `.live-frame`, which is `--bg-deep`.
+ */
+import * as m from "../../../paraglide/messages";
+
+const spans = [
+	{ service: "api-gateway", op: "POST /checkout", ms: "1.18s", width: "100%", left: "0%", indent: "", token: "var(--service-1)", warn: false },
+	{ service: "order-service", op: "createOrder", ms: "425ms", width: "36%", left: "8%", indent: "pl-5", token: "var(--service-3)", warn: false },
+	{ service: "payment-svc", op: "processPayment", ms: "612ms", width: "52%", left: "30%", indent: "pl-10", token: "var(--severity-warn)", warn: true },
+	{ service: "inventory-svc", op: "reserveItems", ms: "98ms", width: "14%", left: "60%", indent: "pl-10", token: "var(--service-5)", warn: false },
+];
+
+const attributes = [
+	{ key: m.page_k8s_correlation_attr_pod(), value: "payment-svc-78f4d6c89b-x7k2p" },
+	{ key: m.page_k8s_correlation_attr_node(), value: "ip-10-0-1-44.ec2.internal" },
+	{ key: m.page_k8s_correlation_attr_ns(), value: "default" },
+];
+---
+
+<section class="bg-bg">
+	<div class="shell py-16 md:py-24">
+		<div class="mb-10 max-w-2xl md:mb-14">
+			<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">
+				{m.page_k8s_correlation_eyebrow()}
+			</p>
+			<h2
+				class="mt-4 font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+			>
+				{m.page_k8s_correlation_title()}
+			</h2>
+			<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">
+				{m.page_k8s_correlation_lede()}
+			</p>
+		</div>
+
+		<div class="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[1fr_auto_1fr]">
+			<!-- The trace -->
+			<div class="live-frame min-w-0">
+				<div class="live-frame__head">
+					<span>{m.page_k8s_correlation_trace_label()}</span>
+					<span class="text-fg tabular-nums">1.18s</span>
+				</div>
+				<div class="space-y-2 p-4">
+					<p class="op-key mb-3">{m.page_k8s_correlation_waterfall()}</p>
+					{
+						spans.map((span) => (
+							<div class={`flex items-center gap-2 ${span.indent}`}>
+								<span class="w-20 shrink-0 truncate font-mono text-[9px] text-fg-muted">
+									{span.service}
+								</span>
+								<div class="relative h-5 flex-1 bg-bg">
+									<div
+										class={`absolute inset-y-0 flex items-center px-2 ${
+											span.warn ? "ring-1 ring-[color:var(--severity-warn)]" : ""
+										}`}
+										style={`width: ${span.width}; left: ${span.left}; background: color-mix(in oklab, ${span.token} ${
+											span.warn ? "60%" : "75%"
+										}, transparent);`}
+									>
+										<span class="truncate text-[8px] font-medium text-fg">{span.op}</span>
+									</div>
+								</div>
+								<span
+									class={`w-10 shrink-0 text-right font-mono text-[9px] tabular-nums ${
+										span.warn ? "text-[color:var(--severity-warn)]" : "text-fg-muted"
+									}`}
+								>
+									{span.ms}
+								</span>
+							</div>
+						))
+					}
+				</div>
+			</div>
+
+			<!-- The join -->
+			<div class="hidden flex-col items-center justify-center px-2 lg:flex">
+				<svg viewBox="0 0 80 24" width="80" height="24" aria-hidden="true">
+					<line
+						x1="0"
+						y1="12"
+						x2="62"
+						y2="12"
+						stroke="var(--border)"
+						stroke-width="1.5"
+						stroke-dasharray="3 3"></line>
+					<polygon points="62,7 74,12 62,17" fill="var(--muted-foreground)"></polygon>
+				</svg>
+				<span class="op-key mt-2 max-w-[10rem] text-center leading-snug">
+					{m.page_k8s_correlation_arrow_caption()}
+				</span>
+			</div>
+
+			<!-- The pod -->
+			<div class="live-frame min-w-0">
+				<div class="live-frame__head">
+					<span>{m.page_k8s_correlation_pod_label()}</span>
+					<span class="live-frame__live">
+						<span class="live-frame__live-dot"></span>
+						{m.page_k8s_correlation_pod_status()}
+					</span>
+				</div>
+				<div class="p-4">
+					<p class="op-key">pod</p>
+					<p class="mt-2 break-all font-mono text-xs leading-snug text-fg md:text-sm">
+						payment-svc-78f4d6c89b-x7k2p
+					</p>
+					<dl class="mt-5">
+						{
+							attributes.map((attr) => (
+								<div class="grid grid-cols-[140px_1fr] items-baseline gap-2 border-t border-border py-2.5">
+									<dt class="font-mono text-[10px] text-fg-muted">{attr.key}</dt>
+									<dd class="break-all font-mono text-[11px] text-fg">{attr.value}</dd>
+								</div>
+							))
+						}
+					</dl>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>

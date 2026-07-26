@@ -3,28 +3,20 @@
  * 02 · Incident — the pinned-pane walkthrough. The page's centrepiece.
  *
  * One narrative carries alert → trace → logs → agent, so the page doesn't need
- * four separate sections for them. Left column scrolls through four steps; the
- * right pane pins and swaps its plate as each step reaches the middle of the
- * viewport.
+ * four separate sections for them. The mechanism now lives in
+ * `components/page/ScrollStory.astro`, which the use-case pages also run; what
+ * stays here is the material, because that is what makes this instance the
+ * homepage's argument rather than a page template.
  *
  * The device is the lede made literal: the frame head holds a trace id that
  * never changes while the route beside it and the plate beneath it both do.
  * Steps are marked by the surface they open — `alert`, `trace`, `logs`,
  * `agent` — not by ordinals; the eyebrow already numbers this section 02, and
- * a second `01–04` under it numbers nothing the reader needs. Position comes
- * from the rail instead, which is also why no step is ever dimmed: two steps
- * are on screen at once and both stay fully legible.
- *
- * Mechanics: `self-start` on the sticky grid item is mandatory — a grid item
- * defaults to `align-self: stretch`, which silently kills `position: sticky`.
- * The sticky wrapper takes no height of its own, so the frame *is* the box and
- * there is no empty band to notice. `data-active="1"` plus `data-on` on the
- * first pane/step/route ship in the markup, so step one is lit before any JS
- * runs, and the whole thing degrades to a plain four-item list under reduced
- * motion (rules live with the other freeze rules in global.css).
+ * a second `01–04` under it numbers nothing the reader needs. No clock here:
+ * the homepage's claim is that the identifier holds, not that it was fast.
  */
 import * as m from "../../paraglide/messages";
-import MediaFrame from "./MediaFrame.astro";
+import ScrollStory from "../page/ScrollStory.astro";
 
 /**
  * The one constant. Not a message key for the same reason AgentSection's tool
@@ -69,125 +61,13 @@ const steps = [
 ];
 ---
 
-<section id="how-it-works" class="border-t border-border bg-bg" data-scrollstory data-active="1">
-	<div class="shell pt-16 md:pt-32">
-		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.incident_eyebrow()}</p>
-		<h2
-			class="mt-4 max-w-[20ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px] lg:text-[54px]"
-		>
-			{m.incident_title()}
-		</h2>
-		<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">{m.incident_lede()}</p>
-	</div>
-
-	<div class="shell grid gap-12 pb-16 md:pb-32 lg:grid-cols-[0.8fr_1.38fr] lg:gap-20">
-		<!-- Pinned pane. `self-start` is load-bearing; without it the grid item
-		     stretches and sticky stops working. No height either — the frame
-		     sizes the box, so the pane can't float in dead space. -->
-		<div data-sticky class="sticky top-24 order-2 hidden self-start lg:block">
-			<div class="story-frame">
-				<div class="story-frame__head">
-					<!-- The constant. Everything else in this section swaps. -->
-					<span>trace <span class="text-fg">{TRACE_ID}</span></span>
-					<span class="story-frame__route">
-						{
-							steps.map((step, i) => (
-								<span data-route={i + 1} data-on={i === 0 ? "" : undefined}>
-									{step.route}
-								</span>
-							))
-						}
-					</span>
-				</div>
-				<div class="story-frame__stage">
-					{
-						steps.map((step, i) => (
-							<img
-								data-pane={i + 1}
-								data-on={i === 0 ? "" : undefined}
-								src={step.src}
-								alt={step.shot}
-								width={992}
-								height={600}
-								loading="lazy"
-								decoding="async"
-							/>
-						))
-					}
-				</div>
-			</div>
-		</div>
-
-		<ol class="story-steps order-1">
-			{
-				steps.map((step, i) => (
-					<li
-						data-step={i + 1}
-						data-on={i === 0 ? "" : undefined}
-						class="grid grid-cols-[9px_1fr] gap-x-6 py-12 lg:py-36"
-					>
-						<span class="story-node" aria-hidden="true" />
-						<!-- The pinned frame carries the trace id on desktop; below lg it's
-						     hidden, so each step carries it instead. Four steps, four
-						     surfaces, the same id every time — which is the claim the lede
-						     makes and the only reason it repeats. `leading-none` pins the
-						     row to the 10px label, so the node's centre is a fixed offset
-						     from the step's top padding and the rail meets it in every
-						     locale (see --story-node-y). -->
-						<div class="col-start-2 flex items-baseline justify-between gap-4 leading-none">
-							<span class="story-surface">{step.surface}</span>
-							<span class="story-trace lg:hidden">
-								trace <span class="text-fg">{TRACE_ID}</span>
-							</span>
-						</div>
-						<h3 class="col-start-2 mt-3 font-display text-xl leading-snug tracking-[-0.01em] text-fg md:text-2xl">
-							{step.title}
-						</h3>
-						<p class="col-start-2 mt-4 max-w-[46ch] text-sm leading-relaxed text-fg-muted">{step.body}</p>
-						<div data-inline class="col-start-2 mt-7 lg:hidden">
-							<MediaFrame label={step.shot} src={step.src} />
-						</div>
-					</li>
-				))
-			}
-		</ol>
-	</div>
-</section>
-
-<script>
-	// One observer, no scroll handler, no rAF loop. The collapsed rootMargin
-	// leaves a 10% band at the vertical centre, so exactly one step is
-	// intersecting at a time and the active index never thrashes.
-	//
-	// Three attributes come off one index: `data-active` on the root (kept for
-	// anything that needs the number), `data-on` on the current step/pane/route,
-	// and `data-passed` on the steps behind it — which is what fills the rail
-	// without CSS having to enumerate step numbers.
-	const root = document.querySelector<HTMLElement>("[data-scrollstory]");
-
-	if (root && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-		const steps = [...root.querySelectorAll<HTMLElement>("[data-step]")];
-		const panes = [...root.querySelectorAll<HTMLElement>("[data-pane]")];
-		const routes = [...root.querySelectorAll<HTMLElement>("[data-route]")];
-
-		const activate = (index: number) => {
-			root.dataset.active = String(index + 1);
-			for (const [i, step] of steps.entries()) {
-				step.toggleAttribute("data-on", i === index);
-				step.toggleAttribute("data-passed", i < index);
-			}
-			for (const [i, pane] of panes.entries()) pane.toggleAttribute("data-on", i === index);
-			for (const [i, route] of routes.entries()) route.toggleAttribute("data-on", i === index);
-		};
-
-		const observer = new IntersectionObserver(
-			(entries) => {
-				for (const entry of entries) {
-					if (entry.isIntersecting) activate(steps.indexOf(entry.target as HTMLElement));
-				}
-			},
-			{ rootMargin: "-45% 0px -45% 0px", threshold: 0 },
-		);
-		for (const step of steps) observer.observe(step);
-	}
-</script>
+<ScrollStory
+	id="how-it-works"
+	class="border-t border-border"
+	constant={TRACE_ID}
+	constantLabel="trace"
+	steps={steps}
+	eyebrow={m.incident_eyebrow()}
+	title={m.incident_title()}
+	lede={m.incident_lede()}
+/>

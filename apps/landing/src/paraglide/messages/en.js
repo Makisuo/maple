@@ -5256,3 +5256,1691 @@ export const hero_shot_traces_line = () => `Follow one request end to end.`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_map_line = () => `Watch traffic move between services.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_panel_eyebrow = () => `The surface`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cap_eyebrow = () => `What it does`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_artifact_eyebrow = () => `In motion`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_story_eyebrow = () => `The path`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_outcome_label = () => `outcome`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cross_eyebrow = () => `Keep going`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cross_features_title = () => `Surfaces that share this data`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cross_usecases_title = () => `The same data, other jobs`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cta_title = () => `Point OTLP at Maple.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cta_lede = () => `One endpoint, one key. Traces, logs, metrics and sessions land on the same trace id from the first request.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_seo_title = () => `Distributed Tracing | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_seo_desc = () => `Open one trace and read where the time went — waterfall, flamegraph and service flow over the same spans, with every attribute the SDK sent.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_hero_title = () => `Read where the time went`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_hero_lede = () => `A trace is one request laid out end to end. Maple keeps every span the SDK sent, with its attributes, its parent, and its exact millisecond offset — so a slow request stops being a guess.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_panel_title = () => `One request, 18 spans, one screen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_panel_lede = () => `Select any span and its full attribute set opens beside the waterfall — the SQL it ran, the status it returned, the pod it ran on. Nothing is summarised away.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_title = () => `Four ways to read the same spans`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_1_title = () => `Waterfall`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_1_body = () => `Spans nested by parent, bars scaled to the trace's own duration. A 1.24 s request with a 480 ms child reads as a shape before you read a number.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_2_title = () => `Flamegraph`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_2_body = () => `The same spans stacked by depth instead of time. Fifty sibling db.query spans at one level is an N+1, and it is visible as a wall rather than a list.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_3_title = () => `Service flow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_3_body = () => `The trace collapsed to the services it crossed and the calls between them. Use it when the question is which boundary, not which line.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_4_title = () => `Attributes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_4_body = () => `Every key the SDK sent, stored as sent. db.statement, http.status_code, exception.type and your own custom keys are all queryable, not just displayable.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_5_title = () => `Jump to logs`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_5_body = () => `Spans and logs carry the same trace id, so any span opens the log lines written while it was running. No timestamp arithmetic across two tools.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_artifact_title = () => `The real flamegraph, on a real trace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_artifact_lede = () => `This is the component the product renders, running on a fixture trace. Hover a span to read its service, duration and share of the total.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_seo_title = () => `Browser Sessions | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_seo_desc = () => `Watch the session the user actually had, then open the trace behind any moment in it. Replay, console, network and spans share one session id.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_hero_title = () => `Watch it happen, then open the trace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_hero_lede = () => `A replay shows you what the user did. The trace under it shows you why it failed. Both carry the same session id, so the jump between them is one click, not a reconstruction.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_panel_title = () => `The recording and the evidence, side by side`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_panel_lede = () => `The viewport plays back exactly as rendered, with console lines, network requests and thrown exceptions on the same timeline as the clicks that caused them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_title = () => `What the recording carries`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_1_title = () => `Every event, in order`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_1_body = () => `Navigations, clicks, inputs, console lines, network calls and errors land in one ordered stream. Each row carries the trace id that was live when it happened.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_2_title = () => `Pixel-accurate replay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_2_body = () => `The DOM is recorded, not the screen. Scroll position, hover state and mid-typing input values play back as the user left them, at any window size.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_3_title = () => `From a moment to a span`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_3_body = () => `Pause on the failed click and open the request it fired. The replay and the waterfall are two views of one session id, not two products stitched by timestamp.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_4_title = () => `Console and network, inline`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_4_body = () => `Requests are recorded with method, status and duration. A 500 on POST /checkout shows up in the stream at the second it returned, not in a separate tab.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_5_title = () => `Masked before it leaves`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_5_body = () => `Inputs and text nodes are masked in the browser, before anything is sent. Sampling rate and redaction rules are config, not a support request.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_artifact_title = () => `A session, playing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_artifact_lede = () => `The cursor travels to Pay now, the click lands, and the event stream fills in beside it — each entry carrying the trace id it belongs to.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_seo_title = () => `Log Management | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_seo_desc = () => `Search structured logs across every service, filter by severity and resource attribute, and open the trace that produced any line.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_hero_title = () => `Search the logs, keep the trace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_hero_lede = () => `Logs arrive structured, with their resource attributes and their trace id intact. That means a search result is not a dead end — every line opens the request that wrote it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_panel_title = () => `Severity, service and attribute, in one filter rail`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_panel_lede = () => `Facets are computed from the rows actually in range, so the counts beside each severity are the counts you are about to see, not a stale summary.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_title = () => `What you can ask of a log line`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_1_title = () => `Search the body and the attributes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_1_body = () => `Resource and log attributes are columns, not a blob. Filter on service.name, deployment.environment or your own keys the same way you filter on the message text.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_2_title = () => `Severity as meaning`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_2_body = () => `The six OTel severity levels keep their own colour and their own facet. WARN and ERROR are one click apart, and neither is buried in a text match.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_3_title = () => `Open the trace behind the line`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_3_body = () => `Any line carrying a trace id opens its request, positioned at the span that was running when the line was written.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_4_title = () => `Volume before detail`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_4_body = () => `The histogram above the results is stacked by severity, so a burst of ERROR at 14:20 is visible before you have read a single line.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_5_title = () => `Sent the way OTel defines it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_5_body = () => `Logs come in over OTLP alongside traces and metrics. No log-shipping agent, no second pipeline to keep alive, no separate retention to reason about.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_artifact_title = () => `The stream, running`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_artifact_lede = () => `Lines arrive as they are written, each one tagged with its service and severity. This is the tail view, and it is the same rows the search returns.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_seo_title = () => `Metrics & Dashboards | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_seo_desc = () => `Browse every metric your services emit, then build dashboards on the same warehouse the trace list reads from — so a chart and a trace can never disagree.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_hero_title = () => `Charts that read the same data as the traces`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_hero_lede = () => `Every widget queries the same warehouse the trace list does. When a dashboard shows p99 at 380 ms, the traces behind that number are one click away and they agree.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_panel_title = () => `Every metric, with its type and its cardinality`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_panel_lede = () => `The explorer lists what your services actually emit, not what a template expects. Cardinality is shown per metric, because that is the number that decides what a query costs.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_title = () => `Building a board`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_1_title = () => `Time series`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_1_body = () => `p50, p95 and p99 on one axis, each on its own percentile colour. Latency charts use the percentile tokens, so p99 is the same red-orange everywhere in the product.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_2_title = () => `Stat and threshold`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_2_body = () => `A single scalar with the line it must stay under. Apdex against its target, error rate against its budget — the comparison is part of the widget, not a note beside it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_3_title = () => `Variables`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_3_body = () => `Declare $service or $env once and every widget on the board follows the selector. One dashboard covers twelve services instead of twelve dashboards drifting apart.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_4_title = () => `Attribute autocomplete`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_4_body = () => `Group-by suggestions come from the attributes that metric actually carries, so you cannot build a chart that groups by a key nothing emits.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_5_title = () => `Chart to trace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_5_body = () => `Select a range on any latency chart and open the traces inside it. The chart is an index into the spans, not a picture of them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_artifact_title = () => `Log volume, by severity`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_artifact_lede = () => `Sixty five-minute buckets stacked by level. The warn cluster and the error blip after it are the shape a stat tile would have flattened away.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_seo_title = () => `Service Catalog & Map | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_seo_desc = () => `Every service with its latency percentiles, error rate and throughput, and a live map of who calls whom — both built from spans, not from a config file.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_hero_title = () => `The map draws itself from the spans`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_hero_lede = () => `There is no topology to declare. Maple reads parent-child relationships out of the traces you already send, so a new service appears on the map the first time it is called.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_panel_title = () => `Twelve services, one table`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_panel_lede = () => `Latency percentiles, error rate and throughput per service, over the range you picked. Sort by p99 and the row that needs you is the top row.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_title = () => `Reading the neighbourhood`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_1_title = () => `Edges are real calls`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_1_body = () => `Every line between two nodes is a parent-child span pair that actually happened, carrying its own request rate and error rate. Nothing on the map is declared.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_2_title = () => `Databases and caches too`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_2_body = () => `Client spans become nodes, so Postgres, Redis and every third-party API sit on the map beside your own services with the same latency columns.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_3_title = () => `One hop, two hops`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_3_body = () => `Focus a node and the map collapses to what it talks to. A forty-service estate becomes the six services that matter to the question you are asking.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_4_title = () => `Colour by identity`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_4_body = () => `Each service holds one of sixteen hues, and holds it everywhere — the map, the waterfall, the charts. Colour means which service, never how healthy.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_5_title = () => `Deploys on the same axis`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_5_body = () => `A service's detail view marks releases against its latency, so a step change lines up with the version that introduced it instead of a hunch.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_artifact_title = () => `Traffic, moving`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_artifact_lede = () => `Each node carries its request rate, error rate and average latency. The flow along an edge is that edge's traffic, not decoration.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_seo_title = () => `Error Tracking | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_seo_desc = () => `Exceptions grouped into issues by type and normalised message, each one linked to the span that threw it and the release that introduced it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_hero_title = () => `142 events, one issue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_hero_lede = () => `Exceptions are grouped by what they are, not by how many times they happened. Each issue keeps its first occurrence, its latest, and the span that threw every one of them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_panel_title = () => `Grouped, counted, and still traceable`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_panel_lede = () => `The list is issues, not events — each row carrying its type, the services it hits, its count over the range and when it was last seen.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_title = () => `From an issue to a fix`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_1_title = () => `Grouping`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_1_body = () => `ConnectionTimeout out of payment-svc is one issue, not 142 events. The fingerprint is exception.type plus the message with ids, timestamps and hosts normalised out.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_2_title = () => `The span that threw it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_2_body = () => `An error is an event on a span, so every issue opens the trace it belongs to — with the arguments, the query and the status code that were live at the time.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_3_title = () => `New, or new again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_3_body = () => `Issues carry first-seen and last-seen, so a regression reads differently from a first appearance. A resolved issue that fires again reopens rather than starting over.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_4_title = () => `Owned by someone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_4_body = () => `Claim an issue, set its severity, leave the note. State and comments live with the issue, so the next person on call reads what you already ruled out.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_5_title = () => `Triaged before you wake`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_5_body = () => `A detector runs every five minutes and sets a severity from the issue's own rate and spread. Manual severity always wins over the detector's, and the detector's over the AI's.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_seo_title = () => `AI & MCP Integration | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_seo_desc = () => `Maple ships an MCP server, so Claude Code and any other MCP client can read your traces, logs and metrics and work an incident with the same tools you do.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_hero_title = () => `Give the agent the same tools you use`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_hero_lede = () => `The MCP server exposes the product's own queries — find_slow_traces, diagnose_service, search_logs — over an open protocol. Read-only by default, and scoped to one org.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_panel_title = () => `One endpoint, any MCP client`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_panel_lede = () => `Point Claude Code, or anything else that speaks MCP, at the endpoint on this page. Tools are the same queries the dashboard runs, against the same warehouse.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_title = () => `What an agent can actually do`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_1_title = () => `Ask about a service`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_1_body = () => `diagnose_service reads p99 by service.version, error rate and throughput over a window and returns what changed, not a chart image the model has to squint at.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_2_title = () => `Pull the traces behind it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_2_body = () => `find_slow_traces and inspect_trace return real spans with real attributes. The agent reads db.statement, not a summary of it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_3_title = () => `Read the source that ran`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_3_body = () => `Link a repository and search_source_code plus read_source_file let the agent get from a stack frame to the function, so its proposal cites a line rather than a guess.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_4_title = () => `Write, when you allow it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_4_body = () => `Claiming an issue, setting a severity or opening an alert rule are separate write tools. Read-only is the default posture, and mutations need approval.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_5_title = () => `Scoped to one org`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_5_body = () => `Every tool call is filtered by the org on the key, in the query itself. An agent cannot read across a tenant boundary because the query it runs cannot express it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_artifact_title = () => `An agent working the incident`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_artifact_lede = () => `Five tool calls from list_services to propose_fix. Every step is a query you could have run yourself, which is why the answer is checkable.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_k8s_cap_title = () => `Cluster and application, one pipeline`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_seo_title = () => `API Performance Monitoring | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_seo_desc = () => `An SLO breach, traced to the release that caused it. Follow checkout p99 from the alert through the dashboard to the commit that took it from 120 ms to 380 ms.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_hero_title = () => `The p99 moved. Find out which release moved it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_hero_lede = () => `An SLO is only useful if a breach points somewhere. This one goes from a threshold crossing to the commit that caused it in three surfaces, without leaving the same time range.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_story_title = () => `Threshold to commit, in three minutes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_story_lede = () => `One SLO holds the whole path together: checkout p99 at or under 200 ms. Every surface below is filtered to the window where it stopped being true.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_1_title = () => `The alert states the breach, not the symptom`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_1_body = () => `The rule is written against the SLO, so the notification carries the threshold, the observed value and the evaluation window. 380 ms against 200 ms, sustained across three windows.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_2_title = () => `The dashboard narrows it to one endpoint`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_2_body = () => `p50 has not moved. p99 has. That shape means a slow tail on one route rather than a service-wide slowdown, and the route breakdown names it: POST /checkout.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_3_title = () => `Two releases, side by side`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_3_body = () => `Split the same endpoint by service.version and the step change has an owner: p99 120 ms on abc123, 380 ms on def456. The traces under def456 carry 50 db.query spans where the earlier ones carry 3.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_outcome_line = () => `Reverted def456 at T+9:20. p99 back under the threshold on the next evaluation window.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_metric_1_label = () => `alert to cause`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_metric_2_label = () => `p99, before and after`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_metric_3_label = () => `db spans per request`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_title = () => `What made the path short`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_1_title = () => `The alert knows its own SLO`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_1_body = () => `Rules are written against a percentile and a threshold, so a firing alert already contains the comparison. Nothing has to be looked up to know how far out it is.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_2_title = () => `Version is an attribute, so it is a filter`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_2_body = () => `service.version rides on every span the SDK sends. Comparing two releases is a group-by, not an export into a spreadsheet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_3_title = () => `The percentile keeps its traces`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_3_body = () => `p99 is computed from spans that are still there. Selecting the spike on the chart opens the requests inside it, so the number and the evidence are never separate artifacts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_seo_title = () => `E-Commerce Observability | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_seo_desc = () => `Checkout failures during a flash sale, traced from the alert to the Stripe timeout and the retry-exhaustion logs behind it — one order id the whole way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_hero_title = () => `Checkout is failing. Which orders, and why.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_hero_lede = () => `During a sale, an error rate is not the question — the question is which customers lost their basket and what stopped them. One order id carries the answer across all three surfaces.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_story_title = () => `One order, from the alert to the timeout`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_story_lede = () => `order_8421 is a real order that failed. Every surface below is filtered to it, so nothing has to be matched up by timestamp between two tools.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_1_title = () => `The alert fires on the checkout route only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_1_body = () => `Error rate on POST /checkout crosses its threshold while the rest of the site holds. That scoping is the first fact: this is not the sale traffic, it is the payment path.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_2_title = () => `The trace ends at Stripe`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_2_body = () => `Open one failed order and the waterfall is unambiguous. Three retries sit at the bottom, red, each timing out at exactly 1.75 s — the client's own deadline, not the provider's.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_3_title = () => `The logs say the pool was empty`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_3_body = () => `The lines written during those spans carry the same trace id. Retry budget exhausted, then connection pool at capacity — the timeout was a symptom of waiting for a connection, not of Stripe being slow.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_outcome_line = () => `Pool raised and the retry budget cut to two. Checkout error rate back to baseline within one evaluation window.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_metric_1_label = () => `alert to root cause`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_metric_2_label = () => `retries per failed order`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_metric_3_label = () => `timeout, every time`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_title = () => `Why the order id held`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_1_title = () => `Business ids are just attributes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_1_body = () => `Set order.id on the span once and it is filterable everywhere spans are — the trace list, the error issue, the log search. No separate index to maintain.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_2_title = () => `Outbound calls are spans too`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_2_body = () => `The Stripe call is a client span with its own duration and status, so a third-party timeout is measured rather than inferred from your own error rate.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_3_title = () => `Logs are joined, not searched twice`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_3_body = () => `The lines behind a span are reached from the span, not from a text query narrowed by hand to the same minute. That is the step that usually costs the most time.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_seo_title = () => `Microservices Debugging | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_seo_desc = () => `Latency doubled with no deploy in sight. Follow one release across the service map, a trace and its logs to the connection pool that ran dry two hops away.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_hero_title = () => `Nobody deployed. Latency doubled anyway.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_hero_lede = () => `In a distributed system the service that got slow is rarely the service that broke. The map shows which edge degraded first, and the trace shows how far the wait propagated.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_story_title = () => `Two hops from the symptom to the cause`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_story_lede = () => `payment-svc@1.4.2 is the release that shipped four hours before the symptom. It holds the path together — the map, the trace and the logs are all filtered to it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_1_title = () => `The map shows a slow edge, not a slow service`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_1_body = () => `api-gateway is the service being paged about, but its own spans are fine. The degraded edge is two hops in: payment-svc to user-db, average up from 12 ms to 210 ms.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_2_title = () => `The trace shows the wait, not the work`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_2_body = () => `Open a slow request and the db span is almost all of it. The query itself is 4 ms; the span is 210 ms. The difference is time spent before the query ever ran.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_3_title = () => `The logs name the release`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_3_body = () => `Lines from that span read pool wait 206 ms, acquired after 3 attempts. Filter by service.version and they start at 1.4.2 — which raised concurrency without raising the pool.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_outcome_line = () => `Pool size raised to match the new concurrency. The p95 edge latency returned to 14 ms without a rollback.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_metric_1_label = () => `hops from the page`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_metric_2_label = () => `edge latency, before and after`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_metric_3_label = () => `of the span was waiting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_title = () => `What made the cascade readable`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_1_title = () => `Edges carry their own latency`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_1_body = () => `The map measures each caller-callee pair separately, so a dependency that degraded for one caller and not another is visible as one edge, not an average across the service.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_2_title = () => `A db span is wait plus work`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_2_body = () => `Because the client span wraps acquisition as well as execution, pool starvation shows up as a gap between span duration and query duration instead of hiding inside a single number.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_3_title = () => `No deploy is still a deploy`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_3_body = () => `service.version on every span means the question changes from who deployed to what version is this span from. A four-hour-old release is as findable as a four-minute-old one.`

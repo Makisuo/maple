@@ -363,6 +363,24 @@
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Dot-grid veil.
+   The product's own /infra texture (16×16 in --border), faded off
+   toward the edges by a radial mask. The hero backdrop on every
+   top-level page. DESIGN.md reserves this texture for sparing use —
+   it belongs behind a headline, never on a card body.
+   Absolutely positioned, so its host needs `position: relative`.
+   ────────────────────────────────────────────────────────────── */
+.dot-grid-veil {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background-image: radial-gradient(var(--border) 1px, transparent 1px);
+	background-size: 16px 16px;
+	-webkit-mask-image: radial-gradient(ellipse 70% 50% at 50% 28%, black, transparent);
+	mask-image: radial-gradient(ellipse 70% 50% at 50% 28%, black, transparent);
+}
+
+/* ──────────────────────────────────────────────────────────────
    Live artifact frame.
    Container around every live demo. Soft 1px border, no glass,
    no blur, deep-ink background, generous padding, monospace inset.
@@ -896,13 +914,38 @@
 	transform: none;
 }
 
-/* One fixed box for all four plates, so the frame can't change height mid-swap.
-   All four are authored at exactly 992/600 and fill it edge to edge; `contain`
-   is the safety net, so a future plate at another ratio insets against the deep
-   floor rather than getting cropped. */
+/* The clock cell, used by the use-case stories only. Same swapping-grid
+   construction as the route so the head can't shift, but foreground rather
+   than amber: the route is the thing that changes surface, the clock is just
+   how little time it took. Two amber items in one head would be noise, and the
+   page's amber budget is spent on the closing CTA. */
+.story-frame__clock {
+	display: grid;
+	justify-items: end;
+	min-width: 6ch;
+}
+.story-frame__clock > span {
+	grid-area: 1 / 1;
+	opacity: 0;
+	transform: translateY(4px);
+	color: var(--foreground);
+	transition:
+		opacity var(--story-swap) var(--story-ease),
+		transform var(--story-swap) var(--story-ease);
+}
+.story-frame__clock > span[data-on] {
+	opacity: 1;
+	transform: none;
+}
+
+/* One fixed box for every plate in a story, so the frame can't change height
+   mid-swap. Each story sets --story-aspect to whichever capture family it runs
+   (992/600 for the flow and strip shots, 1280/660 for the surface ones);
+   `contain` is the safety net, so a plate at another ratio insets against the
+   deep floor rather than getting cropped. */
 .story-frame__stage {
 	position: relative;
-	aspect-ratio: 992 / 600;
+	aspect-ratio: var(--story-aspect, 992 / 600);
 }
 /* z-index, not opacity alone: the incoming plate fades in over the outgoing
    one, so two dark dashboards don't cross at 50% and read as a dip. Same fix
@@ -930,17 +973,22 @@
 /* Rail. Each step owns the hairline running from its own node down to the
    next one, so the fill is just `data-passed` and nothing counts steps.
    --story-node-y is the node's centre: the step's top padding plus half the
-   9px dot, which is also where the segment has to start to land on the next
-   node instead of stopping short of it. It has to track the step's `py-*`
-   utility by hand — which is also why the copy stays top-aligned in the step
-   box rather than centred: centring would float the node off the rail. */
+   10px label row, which is also where the segment has to start to land on the
+   next node instead of stopping short of it.
+   The step's block padding lives HERE, not as a `py-*` utility in the markup,
+   because the rail offset is derived from it — one source, so the two can't
+   drift when a step's spacing is tuned. It is also why the copy stays
+   top-aligned in the step box rather than centred: centring would float the
+   node off the rail. */
 .story-steps [data-step] {
 	position: relative;
-	--story-node-y: calc(3rem + 5px); /* py-12 + half the 10px label row */
+	--story-step-pad: 3rem;
+	--story-node-y: calc(var(--story-step-pad) + 5px);
+	padding-block: var(--story-step-pad);
 }
 @media (min-width: 1024px) {
 	.story-steps [data-step] {
-		--story-node-y: calc(9rem + 5px); /* lg:py-36 */
+		--story-step-pad: 9rem;
 	}
 }
 .story-steps [data-step]::before,
@@ -995,8 +1043,13 @@
 	box-shadow: 0 0 0 4px color-mix(in oklab, var(--primary) 14%, transparent);
 }
 
+/* .op-key is the same token wearing a different hat: the mono key gutter that
+   runs down the left edge of a feature page, from SurfacePanel's fact list
+   through CapabilityLedger's operation column. It is deliberately identical to
+   .story-surface — a key is a key, whether it labels a step or a row. */
 .story-surface,
-.story-trace {
+.story-trace,
+.op-key {
 	font-family: var(--font-mono);
 	font-size: 10px;
 	font-weight: 500;

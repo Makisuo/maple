@@ -1,0 +1,145 @@
+---
+/**
+ * FeaturePage — the single template behind all eight `/features/*` routes, in
+ * all three locales.
+ *
+ * The spine, and its tonal cadence:
+ *
+ *   00  PageHero            bg-bg       dot-grid veil       (page top)
+ *   01  SurfacePanel        bg-bg       border-t            tone flat → hairline
+ *   02  ArtifactSection     bg-bg       border-t            tone flat → hairline
+ *   03  [extra sections]    per section                     kubernetes only
+ *   04  CapabilityLedger    bg-bg-deep  no border           tone steps → tone is the rule
+ *   05  CrossLinks          bg-bg-deep  border-t            tone flat → hairline
+ *   06  PageCta             amber                           the one peak
+ *
+ * The tonal rule is tighter here than on the homepage because these pages carry
+ * more frames: `.live-frame` is itself `--bg-deep`, so any section holding one
+ * must sit on `bg-bg` or the frame dissolves into its own floor. That, not
+ * taste, is why 01 and 02 are both quiet.
+ *
+ * A feature page gets ONE live artifact. Several carry an amber
+ * `.live-frame__live` pulse and `--severity-warn` fills, which share the
+ * primary hue; two of them plus the closing CTA reads speckled rather than rare.
+ */
+import * as m from "../../paraglide/messages";
+import { featureBySlug } from "../../lib/features";
+import { featurePath, useCasePath } from "../../lib/page-registry";
+import { useCaseBySlug } from "../../lib/use-cases";
+import Layout from "../../layouts/Layout.astro";
+import Footer from "../Footer.astro";
+import Nav from "../Nav.astro";
+import SeoHead from "../SeoHead.astro";
+import ArtifactSection from "./ArtifactSection.astro";
+import CapabilityLedger from "./CapabilityLedger.astro";
+import CrossLinks from "./CrossLinks.astro";
+import PageCta from "./PageCta.astro";
+import PageHero from "./PageHero.astro";
+import SurfacePanel from "./SurfacePanel.astro";
+import { ARTIFACTS, EXTRA_SECTIONS } from "./slots";
+
+interface Props {
+	slug: string;
+}
+
+const { slug } = Astro.props;
+const feature = featureBySlug(slug);
+if (!feature) throw new Error(`FeaturePage: unknown feature slug "${slug}"`);
+
+const locale = Astro.currentLocale ?? "en";
+
+// Messages are called HERE, during render, never at module scope and never in
+// getStaticPaths — Paraglide resolves the locale per call.
+const title = feature.seoTitle();
+const description = feature.seoDescription();
+
+const Artifact = feature.artifact ? ARTIFACTS[feature.artifact.id] : null;
+
+// Resolved here rather than inside the template: Astro's compiler can't parse a
+// block-bodied arrow that returns a component from an expression container.
+const extraSections = feature.extraSections.map((id) => EXTRA_SECTIONS[id]);
+
+const crossLinks = [
+	...feature.related.flatMap((related) => {
+		const entry = featureBySlug(related);
+		return entry ? [{ href: featurePath(locale, entry.slug), name: entry.navLabel(), desc: entry.navDesc() }] : [];
+	}),
+	...feature.relatedUseCases.flatMap((related) => {
+		const entry = useCaseBySlug(related);
+		return entry ? [{ href: useCasePath(locale, entry.slug), name: entry.navLabel(), desc: entry.navDesc() }] : [];
+	}),
+];
+---
+
+<Layout title={title} description={description} ogType="article" alternates={feature.locales}>
+	<SeoHead title={title} description={description} />
+	<Nav />
+
+	<PageHero
+		eyebrow={feature.navLabel()}
+		title={feature.heroTitle()}
+		lede={feature.heroLede()}
+		breadcrumb={[
+			{ label: m.breadcrumb_home(), href: "/" },
+			{ label: m.breadcrumb_features(), href: "/#features" },
+			{ label: feature.navLabel() },
+		]}
+	/>
+
+	{
+		feature.panel && (
+			<SurfacePanel
+				class="border-t border-border"
+				route={feature.panel.route}
+				constant={feature.panel.constant}
+				shot={feature.panel.plate.alt}
+				src={feature.panel.plate.src}
+				caption={feature.panel.plate.caption}
+				width={feature.panel.plate.width}
+				height={feature.panel.plate.height}
+				facts={feature.panel.facts}
+				eyebrow={m.page_panel_eyebrow()}
+				title={feature.panel.title()}
+				lede={feature.panel.lede()}
+			/>
+		)
+	}
+
+	<!-- Always hairlined: whatever precedes it — the hero or the panel — is also
+	     bg-bg, so the tone never steps here and cannot be the separator. -->
+	{
+		feature.artifact && Artifact && (
+			<ArtifactSection
+				class="border-t border-border"
+				eyebrow={m.page_artifact_eyebrow()}
+				title={feature.artifact.title()}
+				lede={feature.artifact.lede()}
+				wide={feature.artifact.wide}
+			>
+				<Artifact />
+			</ArtifactSection>
+		)
+	}
+
+	{extraSections.map((Section) => <Section />)}
+
+	<CapabilityLedger
+		eyebrow={m.page_cap_eyebrow()}
+		title={feature.capTitle()}
+		items={feature.capabilities.map((capability) => ({
+			op: capability.op,
+			title: capability.title(),
+			body: capability.body(),
+		}))}
+	/>
+
+	<CrossLinks
+		class="border-t border-border"
+		eyebrow={m.page_cross_eyebrow()}
+		title={m.page_cross_features_title()}
+		links={crossLinks}
+	/>
+
+	<PageCta title={m.page_cta_title()} lede={m.page_cta_lede()} />
+	<Footer />
+</Layout>

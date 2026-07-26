@@ -202,8 +202,10 @@ function Waterfall({
 						<div
 							key={s.spanId}
 							onClick={() => onSelectSpan(s)}
+							// Row fill only. A 2px coloured left stripe is banned by name in
+							// DESIGN.md §6 — selection is carried by tone, like everywhere else.
 							className={`flex items-center px-4 py-1.5 text-[10px] transition-colors cursor-pointer ${
-								isSelected ? "bg-primary/5 border-l-2 border-l-primary" : "hover:bg-muted/20"
+								isSelected ? "bg-primary/10" : "hover:bg-muted/20"
 							}`}
 						>
 							<div
@@ -235,7 +237,7 @@ function Waterfall({
 									: `${(s.durationMs / 1000).toFixed(2)}s`}
 							</span>
 							<span className="w-12 text-right shrink-0">
-								<span className="text-[8px] px-1 py-0.5 bg-green-500/10 text-green-400">
+								<span className="text-[8px] px-1 py-0.5 bg-[color:var(--severity-info)]/10 text-[color:var(--severity-info)]">
 									{s.statusCode}
 								</span>
 							</span>
@@ -265,19 +267,16 @@ export function TraceVisualization() {
 	}
 
 	return (
-		<div className="rounded-xl border border-border bg-[var(--bg-elevated)] overflow-hidden">
+		// `.live-frame` rather than a bespoke box, so this reads as the same kind
+		// of object as every other artifact on the site. Its head states the route
+		// and the trace id, the way SurfacePanel's and the story frame's do.
+		<div className="live-frame">
+			<div className="live-frame__head">
+				<span>/traces</span>
+				<span className="text-fg normal-case tracking-normal">a3f8c1d2e5b7f901</span>
+			</div>
 			{/* Trace detail header */}
 			<div className="px-4 py-3 border-b border-border bg-background">
-				<div className="flex items-center justify-between mb-2">
-					<div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-						<span>Traces</span>
-						<span className="text-muted-foreground">/</span>
-						<span className="text-primary font-mono">a3f8c1d2</span>
-					</div>
-					<span className="text-[9px] text-muted-foreground border border-border px-2 py-0.5 font-mono">
-						a3f8c1d2e5b7f901
-					</span>
-				</div>
 				<div className="text-xs text-foreground font-medium mb-2">POST /checkout</div>
 				<div className="text-[10px] text-muted-foreground mb-3">8 spans across 4 services</div>
 				<div className="flex flex-wrap items-center gap-2">
@@ -294,7 +293,7 @@ export function TraceVisualization() {
 					<span className="text-[9px] border border-border px-1.5 py-0.5 text-muted-foreground">
 						203ms
 					</span>
-					<span className="text-[9px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span>
+					<span className="text-[9px] px-1.5 py-0.5 bg-[color:var(--severity-info)]/10 text-[color:var(--severity-info)]">Ok</span>
 				</div>
 			</div>
 

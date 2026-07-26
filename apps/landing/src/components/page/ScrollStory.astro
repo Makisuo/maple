@@ -1,0 +1,222 @@
+---
+/**
+ * ScrollStory — the pinned-pane walkthrough, extracted from the homepage's
+ * IncidentStory so the use-case pages can run it on their own material.
+ *
+ * The device is one constant held in the frame head while the route beside it
+ * and the plate beneath it both swap. What makes each instance a different
+ * argument is what kind of object that constant is: the homepage holds a trace
+ * id (one request, four surfaces), a use case holds an SLO, an order id or a
+ * deploy (one threshold / customer / release, three surfaces). Use cases also
+ * carry a clock, because their claim is partly about how little time it took.
+ *
+ * Mechanics inherited from IncidentStory and worth not re-deriving:
+ * `self-start` on the sticky grid item is mandatory — a grid item defaults to
+ * `align-self: stretch`, which silently kills `position: sticky`. The sticky
+ * wrapper takes no height of its own, so the frame *is* the box. `data-on`
+ * ships on the first step/pane/route in the markup, so step one is lit before
+ * any JS runs. Step block padding lives in global.css (`--story-step-pad`),
+ * not as a `py-*` utility here, because the rail's node offset is derived
+ * from it.
+ *
+ * `inlineOnly` renders the same layout that `<lg` and `prefers-reduced-motion`
+ * already produce: no pinned pane, a MediaFrame under each step. Use it when
+ * fewer than two plates are real assets — a pinned pane crossfading between
+ * identical placeholder dot-grids reads as broken, not as pending.
+ */
+import MediaFrame from "../home/MediaFrame.astro";
+
+export interface StoryStep {
+	/** The surface this step opens — "alert", "trace", "logs". Never translated. */
+	surface: string;
+	/** The route shown in the frame head, e.g. "/traces". Never translated. */
+	route: string;
+	/** Elapsed clock, e.g. "T+1:10". Omit on stories that aren't timed. */
+	elapsed?: string;
+	title: string;
+	body: string;
+	/** Alt text for the plate, and the placeholder's label while `src` is unset. */
+	shot: string;
+	src?: string;
+}
+
+interface Props {
+	/** The one thing that never changes — trace id, order id, deploy. Literal. */
+	constant: string;
+	/** What kind of thing the constant is: "trace", "order", "deploy". Literal. */
+	constantLabel: string;
+	steps: StoryStep[];
+	/** Capture aspect of this story's plates, e.g. "1280 / 660". */
+	aspect?: string;
+	inlineOnly?: boolean;
+	eyebrow: string;
+	title: string;
+	lede: string;
+	id?: string;
+	class?: string;
+}
+
+// Explicitly annotated: without it `steps` infers as `any` here, and every
+// callback parameter in the template below goes implicitly-any with it.
+const {
+	constant,
+	constantLabel,
+	steps,
+	aspect = "992 / 600",
+	inlineOnly = false,
+	eyebrow,
+	title,
+	lede,
+	id,
+	class: className = "",
+}: Props = Astro.props;
+
+const [aspectW, aspectH] = aspect.split("/").map((n) => Number(n.trim()));
+const timed = steps.some((step) => step.elapsed);
+---
+
+<section id={id} class={`bg-bg ${className}`} data-scrollstory data-active="1">
+	<div class="shell pt-16 md:pt-32">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{eyebrow}</p>
+		<h2
+			class="mt-4 max-w-[20ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px] lg:text-[54px]"
+		>
+			{title}
+		</h2>
+		<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">{lede}</p>
+	</div>
+
+	<div class="shell grid gap-12 pb-16 md:pb-32 lg:grid-cols-[0.8fr_1.38fr] lg:gap-20">
+		<!-- Pinned pane. `self-start` is load-bearing; without it the grid item
+		     stretches and sticky stops working. No height either — the frame
+		     sizes the box, so the pane can't float in dead space. -->
+		{
+			!inlineOnly && (
+				<div data-sticky class="sticky top-24 order-2 hidden self-start lg:block">
+					<div class="story-frame">
+						<div class="story-frame__head">
+							{/* The constant. Everything else in this section swaps. */}
+							<span>
+								{constantLabel} <span class="text-fg">{constant}</span>
+							</span>
+							<span class="flex items-center gap-4">
+								<span class="story-frame__route">
+									{steps.map((step, i) => (
+										<span data-route={i + 1} data-on={i === 0 ? "" : undefined}>
+											{step.route}
+										</span>
+									))}
+								</span>
+								{timed && (
+									<span class="story-frame__clock">
+										{steps.map((step, i) => (
+											<span data-clock={i + 1} data-on={i === 0 ? "" : undefined}>
+												{step.elapsed}
+											</span>
+										))}
+									</span>
+								)}
+							</span>
+						</div>
+						<div class="story-frame__stage" style={`--story-aspect: ${aspect};`}>
+							{steps.map((step, i) => (
+								<img
+									data-pane={i + 1}
+									data-on={i === 0 ? "" : undefined}
+									src={step.src}
+									alt={step.shot}
+									width={aspectW}
+									height={aspectH}
+									loading="lazy"
+									decoding="async"
+								/>
+							))}
+						</div>
+					</div>
+				</div>
+			)
+		}
+
+		<ol class={`story-steps order-1 ${inlineOnly ? "lg:col-span-2" : ""}`}>
+			{
+				steps.map((step, i) => (
+					<li data-step={i + 1} data-on={i === 0 ? "" : undefined} class="grid grid-cols-[9px_1fr] gap-x-6">
+						<span class="story-node" aria-hidden="true" />
+						{/* The pinned frame carries the constant on desktop; below lg it's
+						    hidden, so each step carries it instead — the same id on every
+						    surface is the claim the lede makes, and the only reason it
+						    repeats. `leading-none` pins the row to the 10px label, so the
+						    node's centre is a fixed offset from the step's top padding and
+						    the rail meets it in every locale (see --story-node-y). */}
+						<div class="col-start-2 flex items-baseline justify-between gap-4 leading-none">
+							<span class="story-surface">{step.surface}</span>
+							<span class={`story-trace ${inlineOnly ? "" : "lg:hidden"}`}>
+								{step.elapsed ? (
+									<>
+										{step.elapsed} · {constantLabel} <span class="text-fg">{constant}</span>
+									</>
+								) : (
+									<>
+										{constantLabel} <span class="text-fg">{constant}</span>
+									</>
+								)}
+							</span>
+						</div>
+						<h3 class="col-start-2 mt-3 font-display text-xl leading-snug tracking-[-0.01em] text-fg md:text-2xl">
+							{step.title}
+						</h3>
+						<p class="col-start-2 mt-4 max-w-[46ch] text-sm leading-relaxed text-fg-muted">{step.body}</p>
+						<div data-inline class={`col-start-2 mt-7 ${inlineOnly ? "max-w-2xl" : "lg:hidden"}`}>
+							<MediaFrame label={step.shot} src={step.src} width={aspectW} height={aspectH} />
+						</div>
+					</li>
+				))
+			}
+		</ol>
+	</div>
+</section>
+
+<script>
+	// One observer per story, no scroll handler, no rAF loop. The collapsed
+	// rootMargin leaves a 10% band at the vertical centre, so exactly one step is
+	// intersecting at a time and the active index never thrashes.
+	//
+	// Four attributes come off one index: `data-active` on the root (kept for
+	// anything that needs the number), `data-on` on the current step/pane/route/
+	// clock, and `data-passed` on the steps behind it — which is what fills the
+	// rail without CSS having to enumerate step numbers.
+	//
+	// querySelectorAll, and every inner query scoped to its own root: more than
+	// one story can exist per page now that use cases run this too.
+	if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+		for (const root of document.querySelectorAll<HTMLElement>("[data-scrollstory]")) {
+			const steps = [...root.querySelectorAll<HTMLElement>("[data-step]")];
+			if (steps.length === 0) continue;
+
+			const panes = [...root.querySelectorAll<HTMLElement>("[data-pane]")];
+			const routes = [...root.querySelectorAll<HTMLElement>("[data-route]")];
+			const clocks = [...root.querySelectorAll<HTMLElement>("[data-clock]")];
+
+			const activate = (index: number) => {
+				root.dataset.active = String(index + 1);
+				for (const [i, step] of steps.entries()) {
+					step.toggleAttribute("data-on", i === index);
+					step.toggleAttribute("data-passed", i < index);
+				}
+				for (const [i, pane] of panes.entries()) pane.toggleAttribute("data-on", i === index);
+				for (const [i, route] of routes.entries()) route.toggleAttribute("data-on", i === index);
+				for (const [i, clock] of clocks.entries()) clock.toggleAttribute("data-on", i === index);
+			};
+
+			const observer = new IntersectionObserver(
+				(entries) => {
+					for (const entry of entries) {
+						if (entry.isIntersecting) activate(steps.indexOf(entry.target as HTMLElement));
+					}
+				},
+				{ rootMargin: "-45% 0px -45% 0px", threshold: 0 },
+			);
+			for (const step of steps) observer.observe(step);
+		}
+	}
+</script>

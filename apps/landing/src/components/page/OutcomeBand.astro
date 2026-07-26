@@ -1,0 +1,56 @@
+---
+/**
+ * OutcomeBand — the use-case page's full stop.
+ *
+ * The homepage's story dissolves into the platform sheet; a use case has to
+ * land, because its whole argument is that the path ended somewhere. One
+ * declarative sentence with the resolution in it, then the two or three
+ * numbers that make it checkable.
+ *
+ * Numbers sit on the homepage's stat-rail construction — hairline dividers,
+ * no cards, no fills — which is also the reason this is not the banned
+ * hero-metric template: the numbers are the footnote to the sentence, not the
+ * headline with a label under it.
+ */
+interface Props {
+	/** e.g. "outcome" — the gutter key. Literal. */
+	label: string;
+	line: string;
+	metrics: { value: string; label: string }[];
+	class?: string;
+}
+
+const { label, line, metrics, class: className = "" } = Astro.props;
+---
+
+<section class={`bg-bg-deep ${className}`}>
+	<div class="shell py-14 md:py-20">
+		<div class="grid gap-8 lg:grid-cols-[1.25fr_0.75fr] lg:items-center lg:gap-16">
+			<div class="min-w-0">
+				<p class="op-key">{label}</p>
+				<p
+					class="mt-4 max-w-[46ch] font-display text-xl font-medium leading-snug tracking-[-0.01em] text-fg md:text-2xl"
+				>
+					{line}
+				</p>
+			</div>
+
+			<dl class="flex flex-wrap gap-y-6">
+				{
+					metrics.map((metric, i) => (
+						<div
+							class={`flex flex-col gap-1.5 ${
+								i === 0 ? "pr-8" : "border-l border-border pl-6 pr-8 md:pl-8"
+							}`}
+						>
+							<dd class="font-display text-2xl font-semibold tabular-nums tracking-tight text-fg md:text-3xl">
+								{metric.value}
+							</dd>
+							<dt class="text-xs text-fg-muted">{metric.label}</dt>
+						</div>
+					))
+				}
+			</dl>
+		</div>
+	</div>
+</section>

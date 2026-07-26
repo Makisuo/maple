@@ -3,6 +3,8 @@ import { getRelativeLocaleUrl } from "astro:i18n";
 import * as m from "../paraglide/messages";
 import LanguageSwitcher from "./LanguageSwitcher.astro";
 import { getGitHubStars, formatStars } from "../lib/github-stars";
+import { features } from "../lib/features";
+import { featurePath } from "../lib/page-registry";
 
 const locale = Astro.currentLocale ?? "en";
 const l = (path: string) => getRelativeLocaleUrl(locale, path);
@@ -57,13 +59,12 @@ const stars = await getGitHubStars();
             <div>
                 <h4 class="text-[10px] text-foreground font-medium uppercase tracking-wider mb-4">{m.footer_features()}</h4>
                 <ul class="space-y-2">
-                    <li><a href={l("/features/distributed-tracing")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_distributed_tracing()}</a></li>
-                    <li><a href={l("/features/log-management")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_log_management()}</a></li>
-                    <li><a href={l("/features/metrics-dashboards")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_metrics_dashboards()}</a></li>
-                    <li><a href={l("/features/service-catalog")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_service_catalog()}</a></li>
-                    <li><a href={l("/features/error-tracking")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_error_tracking()}</a></li>
-                    <li><a href={l("/features/ai-mcp-integration")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_ai_mcp()}</a></li>
-                    <li><a href={l("/features/kubernetes-monitoring")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_kubernetes()}</a></li>
+                    <!-- Derived from the registry. The hand-written list carried
+                         seven of the eight features — browser-sessions had been
+                         missing since it shipped. -->
+                    {features.map((feature) => (
+                        <li><a href={featurePath(locale, feature.slug)} class="text-fg-muted text-xs hover:text-foreground transition-colors">{feature.navLabel()}</a></li>
+                    ))}
                 </ul>
             </div>
 

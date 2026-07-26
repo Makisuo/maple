@@ -1,0 +1,18 @@
+---
+/**
+ * The trace explorer artifact — the product's real Flamegraph and
+ * TraceFlowView from `@maple/ui`, running on a fixture trace.
+ *
+ * A thin Astro wrapper rather than putting the React component straight in the
+ * artifact map: Astro generates a hydration script from the *static import* at
+ * the call site, so a component pulled out of a `Record` can't take a
+ * `client:*` directive. Wrapping it here keeps every entry in that map a plain
+ * Astro component.
+ *
+ * `client:visible` because it pulls ReactFlow — there is no reason to load that
+ * before the section scrolls into view.
+ */
+import { TraceVisualization } from "../../TraceVisualization";
+---
+
+<TraceVisualization client:visible />

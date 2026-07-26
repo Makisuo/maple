@@ -111,7 +111,7 @@ export const nav_distributed_tracing = () => `分散トレーシング`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_browser_sessions = () => `Browser Sessions`
+export const nav_browser_sessions = () => `ブラウザセッション`
 
 
 /**
@@ -783,7 +783,7 @@ export const k8s_eyebrow = () => `06 · Kubernetes`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const k8s_title = () => `The pod underneath the slow span.`
+export const k8s_title = () => `遅いスパンの下にあるPod。`
 
 
 /**
@@ -791,7 +791,7 @@ export const k8s_title = () => `The pod underneath the slow span.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const k8s_lede = () => `Drop a Helm chart on your cluster. Kubelet, host, and kube-state metrics start flowing in. Every span your apps emit arrives carrying pod, node, and namespace, so a slow request lands you on the exact replica that served it.`
+export const k8s_lede = () => `クラスタにHelmチャートを導入するだけ。kubelet、ホスト、kube-stateのメトリクスがOTLPで流れ込み、OpenTelemetry Operatorが全スパンにPodとノードのIDを刻みます。`
 
 
 /**
@@ -1175,7 +1175,7 @@ export const cta_bookend_lede = () => `14日間の無料トライアル。カー
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_primary = () => `Start free trial`
+export const cta_bookend_primary = () => `無料トライアルを開始`
 
 
 /**
@@ -4031,7 +4031,7 @@ export const page_k8s_correlation_arrow_caption = () => `admission時にk8s.pod.
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_k8s_correlation_pod_status = () => `Active`
+export const page_k8s_correlation_pod_status = () => `稼働中`
 
 
 /**
@@ -5256,3 +5256,1691 @@ export const hero_shot_traces_line = () => `1つのリクエストを最初か�
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_map_line = () => `サービス間のトラフィックを可視化。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_panel_eyebrow = () => `画面`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cap_eyebrow = () => `できること`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_artifact_eyebrow = () => `動き`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_story_eyebrow = () => `経路`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_outcome_label = () => `結果`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cross_eyebrow = () => `次は`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cross_features_title = () => `このデータを共有する画面`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cross_usecases_title = () => `同じデータで、別の仕事`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cta_title = () => `OTLPをMapleに向ける。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cta_lede = () => `エンドポイントとキーが1つずつ。トレース、ログ、メトリクス、セッションが、最初のリクエストから同じトレースIDに集まります。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_seo_title = () => `分散トレーシング | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_seo_desc = () => `1つのトレースを開けば、時間がどこで消えたかが読み取れます。同じスパンをウォーターフォール、フレームグラフ、サービスフローで表示し、SDKが送信した全属性を保持します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_hero_title = () => `時間がどこで消えたかを読む`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_hero_lede = () => `トレースは1つのリクエストを端から端まで並べたものです。MapleはSDKが送信した全スパンを、属性、親スパン、正確なミリ秒オフセットとともに保持します。遅いリクエストは推測ではなくなります。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_panel_title = () => `1リクエスト、18スパン、1画面`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_panel_lede = () => `スパンを選択すると、実行したSQL、返したステータス、動作したPodなど、全属性がウォーターフォールの横に開きます。要約されて消える情報はありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_title = () => `同じスパンを読む4つの方法`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_1_title = () => `ウォーターフォール`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_1_body = () => `スパンは親子関係でネストされ、バーはトレース自身の所要時間にスケールされます。480msの子を持つ1.24sのリクエストは、数値を読む前に形として見えます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_2_title = () => `フレームグラフ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_2_body = () => `同じスパンを時間ではなく深さで積み上げます。同一階層に50個のdb.queryスパンが並べばN+1であり、リストではなく壁として見えます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_3_title = () => `サービスフロー`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_3_body = () => `トレースを、通過したサービスとその間の呼び出しに集約します。どの行かではなく、どの境界かが問題のときに使います。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_4_title = () => `属性`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_4_body = () => `SDKが送信した全キーを、送信されたまま保存します。db.statement、http.status_code、exception.type、独自のカスタムキーはすべて表示できるだけでなく、クエリ可能です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_5_title = () => `ログへ移動`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_5_body = () => `スパンとログは同じトレースIDを持つため、任意のスパンから、その実行中に書き込まれたログ行を開けます。2つのツール間でタイムスタンプを計算する必要はありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_artifact_title = () => `実際のトレース上の、実際のフレームグラフ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_artifact_lede = () => `これは製品が実際にレンダリングしているコンポーネントを、サンプルトレースで動かしたものです。スパンにカーソルを合わせると、サービス名、所要時間、全体に占める割合が読み取れます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_seo_title = () => `ブラウザセッション | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_seo_desc = () => `ユーザーが実際に体験したセッションを再生し、その任意の瞬間の裏側にあるトレースを開けます。リプレイ、コンソール、ネットワーク、スパンが1つのセッションIDを共有します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_hero_title = () => `実際の操作を見て、トレースを開く`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_hero_lede = () => `リプレイはユーザーが何をしたかを示し、その下のトレースはなぜ失敗したかを示します。両者は同じセッションIDを持つため、行き来はクリック1回で済み、状況を組み立て直す必要はありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_panel_title = () => `録画と証拠を並べて表示`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_panel_lede = () => `ビューポートはレンダリングされたとおりに再生され、コンソール行、ネットワークリクエスト、発生した例外が、それらを引き起こしたクリックと同じタイムライン上に並びます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_title = () => `録画に含まれるもの`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_1_title = () => `すべてのイベントを順番どおりに`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_1_body = () => `ナビゲーション、クリック、入力、コンソール行、ネットワーク呼び出し、エラーが1つの順序付きストリームに並びます。各行には、その時点で有効だったトレースIDが記録されます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_2_title = () => `ピクセル単位で正確なリプレイ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_2_body = () => `画面ではなくDOMを記録します。スクロール位置、ホバー状態、入力途中の値まで、ユーザーが残したまま、どのウィンドウサイズでも再生されます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_3_title = () => `ある瞬間からスパンへ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_3_body = () => `失敗したクリックで一時停止し、そこで発火したリクエストを開きます。リプレイとウォーターフォールは1つのセッションIDに対する2つのビューであり、タイムスタンプで繋ぎ合わせた別製品ではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_4_title = () => `コンソールとネットワークをインラインで`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_4_body = () => `リクエストはメソッド、ステータス、所要時間とともに記録されます。POST /checkoutの500は、別タブではなく、返ってきたその秒にストリーム上に現れます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_5_title = () => `送信前にマスク`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_5_body = () => `入力欄とテキストノードは、何かが送信される前にブラウザ側でマスクされます。サンプリング率と秘匿ルールは設定項目であり、サポートへの依頼ではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_artifact_title = () => `再生中のセッション`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_artifact_lede = () => `カーソルが「今すぐ支払う」まで移動し、クリックが実行され、その横でイベントストリームが埋まっていきます。各エントリには、それが属するトレースIDが付いています。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_seo_title = () => `ログ管理 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_seo_desc = () => `全サービスの構造化ログを検索し、重大度やリソース属性で絞り込み、任意の行を生成したトレースを開けます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_hero_title = () => `ログを検索し、トレースを保つ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_hero_lede = () => `ログはリソース属性とトレースIDを保ったまま、構造化された状態で届きます。つまり検索結果は行き止まりではなく、どの行からでも、それを書き込んだリクエストを開けます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_panel_title = () => `重大度・サービス・属性を1つのフィルタレールに`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_panel_lede = () => `ファセットは実際に範囲内にある行から計算されるため、各重大度の横の件数は、これから表示される件数そのものであり、古い集計ではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_title = () => `ログ1行に対してできること`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_1_title = () => `本文と属性を検索`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_1_body = () => `リソース属性とログ属性はブロブではなくカラムです。service.name、deployment.environment、独自のキーを、メッセージ本文と同じ方法で絞り込めます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_2_title = () => `意味としての重大度`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_2_body = () => `OTelの6段階の重大度は、それぞれ固有の色とファセットを持ちます。WARNとERRORはクリック1回の距離にあり、どちらもテキスト一致に埋もれません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_3_title = () => `行の裏側のトレースを開く`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_3_body = () => `トレースIDを持つ行からは、そのリクエストを開けます。しかも、その行が書き込まれた時点で実行中だったスパンの位置に移動します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_4_title = () => `詳細の前にボリューム`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_4_body = () => `結果の上のヒストグラムは重大度別に積み上げられているため、14:20のERRORの急増は、1行も読まないうちに見て取れます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_5_title = () => `OTelの定義どおりに送信`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_5_body = () => `ログはトレースやメトリクスと同じOTLPで届きます。ログ転送エージェントも、維持すべき第2のパイプラインも、別途考慮すべき保持期間もありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_artifact_title = () => `流れ続けるストリーム`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_artifact_lede = () => `行は書き込まれるそばから届き、それぞれにサービスと重大度のタグが付きます。これはテイル表示であり、検索が返すのと同じ行です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_seo_title = () => `メトリクスとダッシュボード | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_seo_desc = () => `サービスが送出する全メトリクスを一覧し、トレース一覧と同じウェアハウス上にダッシュボードを構築できます。チャートとトレースが食い違うことはありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_hero_title = () => `トレースと同じデータを読むチャート`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_hero_lede = () => `すべてのウィジェットは、トレース一覧と同じウェアハウスに問い合わせます。ダッシュボードがp99を380msと表示したとき、その数値の裏にあるトレースはクリック1回の距離にあり、値も一致します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_panel_title = () => `全メトリクスを、型とカーディナリティとともに`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_panel_lede = () => `エクスプローラは、テンプレートが想定するものではなく、サービスが実際に送出しているものを一覧します。カーディナリティはメトリクスごとに表示されます。クエリのコストを決めるのがこの数値だからです。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_title = () => `ボードを組み立てる`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_1_title = () => `時系列`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_1_body = () => `p50、p95、p99を1つの軸に並べ、それぞれパーセンタイル専用の色で描きます。レイテンシチャートはパーセンタイル用トークンを使うため、p99は製品全体で同じ赤橙色です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_2_title = () => `スタットとしきい値`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_2_body = () => `単一のスカラー値と、それが下回るべきラインを表示します。Apdexと目標値、エラー率と許容予算。比較はウィジェットの一部であり、横に添えたメモではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_3_title = () => `変数`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_3_body = () => `$serviceや$envを一度宣言すれば、ボード上の全ウィジェットがそのセレクタに追従します。12個のダッシュボードが少しずつずれていく代わりに、1つで12サービスをカバーできます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_4_title = () => `属性の自動補完`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_4_body = () => `グループ化の候補は、そのメトリクスが実際に持つ属性から提示されます。何も送出していないキーでグループ化するチャートは作れません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_5_title = () => `チャートからトレースへ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_5_body = () => `任意のレイテンシチャートで範囲を選択すると、その中のトレースを開けます。チャートはスパンの絵ではなく、スパンへのインデックスです。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_artifact_title = () => `重大度別のログ量`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_artifact_lede = () => `5分刻みの60バケットをレベル別に積み上げています。warnの塊とその後のerrorの跳ね上がりは、スタットタイルなら平坦にならしてしまう形です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_seo_title = () => `サービスカタログとマップ | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_seo_desc = () => `各サービスのレイテンシパーセンタイル、エラー率、スループットに加え、どのサービスがどこを呼んでいるかのライブマップ。いずれも設定ファイルではなくスパンから構築されます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_hero_title = () => `マップはスパンから自動的に描かれる`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_hero_lede = () => `宣言すべきトポロジーはありません。Mapleは既に送信されているトレースから親子関係を読み取るため、新しいサービスは最初に呼び出された時点でマップに現れます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_panel_title = () => `12のサービスを1つの表に`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_panel_lede = () => `選択した期間について、サービスごとのレイテンシパーセンタイル、エラー率、スループットを表示します。p99でソートすれば、対応が必要な行が最上段に来ます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_title = () => `近隣を読み解く`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_1_title = () => `エッジは実際の呼び出し`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_1_body = () => `2つのノードを結ぶ線はすべて、実際に発生した親子スパンのペアであり、それぞれ固有のリクエスト率とエラー率を持ちます。マップ上に宣言されたものはありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_2_title = () => `データベースやキャッシュも`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_2_body = () => `クライアントスパンもノードになるため、Postgres、Redis、各種サードパーティAPIが、自社サービスと同じレイテンシ列を持ってマップ上に並びます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_3_title = () => `1ホップ、2ホップ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_3_body = () => `ノードをフォーカスすると、マップはその通信相手だけに絞り込まれます。40サービスの構成が、いま問うている疑問に関係する6サービスになります。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_4_title = () => `アイデンティティで色分け`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_4_body = () => `各サービスは16色のうち1つを持ち、マップ、ウォーターフォール、チャートのどこでもその色を保ちます。色が示すのはどのサービスかであり、健全性ではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_5_title = () => `同じ軸上のデプロイ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_5_body = () => `サービス詳細ではリリースがレイテンシに対して印付けされるため、段差のある変化は、勘ではなく、それを持ち込んだバージョンと一致します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_artifact_title = () => `流れるトラフィック`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_artifact_lede = () => `各ノードはリクエスト率、エラー率、平均レイテンシを表示します。エッジ上の流れはそのエッジのトラフィックであり、装飾ではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_seo_title = () => `エラートラッキング | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_seo_desc = () => `例外を型と正規化済みメッセージでissueにグルーピングし、それぞれを送出したスパンと、持ち込んだリリースに紐付けます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_hero_title = () => `142件のイベント、1つのissue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_hero_lede = () => `例外は発生回数ではなく、何であるかによってグルーピングされます。各issueは初回発生、最新発生、そしてそれらすべてを送出したスパンを保持します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_panel_title = () => `グルーピングされ、集計され、なおトレース可能`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_panel_lede = () => `一覧はイベントではなくissueです。各行は型、影響を受けるサービス、期間内の件数、最終発生時刻を持ちます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_title = () => `issueから修正まで`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_1_title = () => `グルーピング`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_1_body = () => `payment-svcから出るConnectionTimeoutは142件のイベントではなく1つのissueです。フィンガープリントはexception.typeと、ID・タイムスタンプ・ホスト名を正規化して除いたメッセージから作られます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_2_title = () => `例外を送出したスパン`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_2_body = () => `エラーはスパン上のイベントであるため、どのissueからも、それが属するトレースを開けます。当時有効だった引数、クエリ、ステータスコードもそのまま残っています。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_3_title = () => `新規、あるいは再発`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_3_body = () => `issueは初回発生と最終発生を保持するため、リグレッションは初出とは異なる見え方になります。解決済みのissueが再発した場合は、新規作成ではなく再オープンされます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_4_title = () => `誰かが担当する`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_4_body = () => `issueを引き受け、重大度を設定し、メモを残します。状態とコメントはissueとともに残るため、次のオンコール担当者は、あなたが既に除外した可能性を読めます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_5_title = () => `起きる前にトリアージ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_5_body = () => `ディテクタは5分ごとに実行され、issue自身の発生率と影響範囲から重大度を設定します。手動で設定した重大度は常にディテクタより優先され、ディテクタはAIより優先されます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_seo_title = () => `AIとMCP連携 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_seo_desc = () => `MapleはMCPサーバーを内蔵しています。Claude Codeをはじめとする任意のMCPクライアントが、トレース・ログ・メトリクスを読み取り、あなたと同じツールでインシデントに対応できます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_hero_title = () => `エージェントに、あなたと同じツールを渡す`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_hero_lede = () => `MCPサーバーは、find_slow_traces、diagnose_service、search_logsといった製品自身のクエリをオープンなプロトコルで公開します。デフォルトは読み取り専用で、1つの組織にスコープされます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_panel_title = () => `1つのエンドポイント、あらゆるMCPクライアント`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_panel_lede = () => `Claude Code、あるいはMCPを話す任意のクライアントを、このページのエンドポイントに向けるだけです。ツールはダッシュボードが実行するのと同じクエリを、同じウェアハウスに対して実行します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_title = () => `エージェントが実際にできること`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_1_title = () => `サービスについて尋ねる`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_1_body = () => `diagnose_serviceは、指定期間のservice.version別のp99、エラー率、スループットを読み取り、モデルが目を凝らす必要のあるチャート画像ではなく、何が変わったかを返します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_2_title = () => `その裏のトレースを取り出す`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_2_body = () => `find_slow_tracesとinspect_traceは、実際の属性を持つ実際のスパンを返します。エージェントが読むのはdb.statementそのものであり、その要約ではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_3_title = () => `実行されたソースを読む`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_3_body = () => `リポジトリを連携すると、search_source_codeとread_source_fileにより、エージェントはスタックフレームから該当関数までたどれます。提案は推測ではなく、特定の行を根拠にできます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_4_title = () => `許可したときだけ書き込む`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_4_body = () => `issueの引き受け、重大度の設定、アラートルールの作成は、それぞれ別の書き込みツールです。デフォルトは読み取り専用で、変更には承認が必要です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_5_title = () => `1つの組織にスコープ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_5_body = () => `すべてのツール呼び出しは、キーに紐づく組織によってクエリ自体でフィルタされます。エージェントがテナント境界を越えて読み取ることはできません。実行するクエリがそれを表現できないからです。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_artifact_title = () => `インシデントに対応するエージェント`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_artifact_lede = () => `list_servicesからpropose_fixまで、5回のツール呼び出し。どのステップも自分で実行できたはずのクエリであり、だからこそ答えを検証できます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_k8s_cap_title = () => `クラスタとアプリケーションを1本のパイプラインで`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_seo_title = () => `APIパフォーマンス監視 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_seo_desc = () => `SLO違反を、原因となったリリースまで追跡します。checkoutのp99を、アラートからダッシュボード、そして120msを380msに変えたコミットまで追いかけます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_hero_title = () => `p99が動いた。どのリリースが動かしたかを突き止める。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_hero_lede = () => `SLOは、違反が何かを指し示してこそ役に立ちます。ここでは、しきい値超過から原因のコミットまで、同じ時間範囲のまま3つの画面でたどります。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_story_title = () => `しきい値からコミットまで、3分`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_story_lede = () => `1つのSLOが全経路を貫きます。checkoutのp99が200ms以下であること。以下のすべての画面は、それが成り立たなくなった時間帯に絞り込まれています。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_1_title = () => `アラートは症状ではなく違反を示す`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_1_body = () => `ルールはSLOに対して書かれているため、通知にはしきい値、観測値、評価ウィンドウが含まれます。200msに対して380ms、3ウィンドウ連続で継続。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_2_title = () => `ダッシュボードで1つのエンドポイントに絞る`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_2_body = () => `p50は動いていない。p99だけが動いている。この形はサービス全体の低速化ではなく、特定ルートの遅いテールを意味し、ルート別内訳がそれを特定します。POST /checkout。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_3_title = () => `2つのリリースを並べて比較`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_3_body = () => `同じエンドポイントをservice.versionで分割すると、段差の原因が特定できます。abc123ではp99が120ms、def456では380ms。def456配下のトレースは50個のdb.queryスパンを持ち、以前は3個でした。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_outcome_line = () => `T+9:20にdef456をリバート。次の評価ウィンドウでp99はしきい値を下回りました。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_metric_1_label = () => `アラートから原因まで`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_metric_2_label = () => `p99の前後`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_metric_3_label = () => `リクエストあたりのDBスパン数`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_title = () => `経路を短くしたもの`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_1_title = () => `アラートが自分のSLOを知っている`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_1_body = () => `ルールはパーセンタイルとしきい値に対して書かれるため、発報したアラートには既に比較結果が含まれます。どれだけ外れているかを知るために何かを調べる必要はありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_2_title = () => `バージョンは属性であり、フィルタになる`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_2_body = () => `service.versionはSDKが送信する全スパンに乗ります。2つのリリースの比較はGROUP BYであり、スプレッドシートへのエクスポートではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_3_title = () => `パーセンタイルはトレースを保持する`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_3_body = () => `p99は今も残っているスパンから計算されます。チャート上のスパイクを選択すればその中のリクエストが開くため、数値と証拠が別物になることはありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_seo_title = () => `Eコマースの可観測性 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_seo_desc = () => `フラッシュセール中の決済失敗を、アラートからStripeのタイムアウト、その裏のリトライ枯渇ログまで追跡します。1つの注文IDで最後まで。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_hero_title = () => `決済が失敗している。どの注文が、なぜ。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_hero_lede = () => `セール中に問われるのはエラー率ではありません。どの顧客がカートを失い、何がそれを止めたのかが問題です。1つの注文IDが、3つの画面すべてで答えを運びます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_story_title = () => `1つの注文を、アラートからタイムアウトまで`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_story_lede = () => `order_8421は実際に失敗した注文です。以下のすべての画面はこの注文に絞り込まれているため、2つのツール間でタイムスタンプを突き合わせる必要はありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_1_title = () => `アラートはcheckoutルートだけで発報する`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_1_body = () => `サイト全体は持ちこたえている一方で、POST /checkoutのエラー率だけがしきい値を超えます。この絞り込みが最初の事実です。セールのトラフィックではなく、決済経路の問題です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_2_title = () => `トレースはStripeで止まる`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_2_body = () => `失敗した注文を1つ開けば、ウォーターフォールは明白です。3回のリトライが最下部に赤く並び、いずれもちょうど1.75秒でタイムアウトしています。プロバイダ側ではなく、クライアント自身の期限です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_3_title = () => `ログはプールが空だったと語る`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_3_body = () => `それらのスパン中に書き込まれた行は、同じトレースIDを持ちます。リトライ予算の枯渇、続いてコネクションプールの上限到達。タイムアウトはStripeが遅いのではなく、接続待ちの症状でした。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_outcome_line = () => `プールを拡張し、リトライ予算を2回に削減。checkoutのエラー率は1評価ウィンドウ以内にベースラインへ戻りました。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_metric_1_label = () => `アラートから根本原因まで`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_metric_2_label = () => `失敗注文あたりのリトライ回数`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_metric_3_label = () => `毎回同じタイムアウト値`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_title = () => `注文IDが最後まで通った理由`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_1_title = () => `業務IDもただの属性`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_1_body = () => `スパンにorder.idを一度設定すれば、トレース一覧、エラーissue、ログ検索など、スパンが存在するあらゆる場所で絞り込めます。別途インデックスを維持する必要はありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_2_title = () => `外部呼び出しもスパン`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_2_body = () => `Stripeへの呼び出しは、固有の所要時間とステータスを持つクライアントスパンです。サードパーティのタイムアウトは、自社のエラー率から推測するのではなく実測されます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_3_title = () => `ログは結合されるもので、二度検索するものではない`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_3_body = () => `スパンの裏にある行には、同じ分に手作業で絞り込んだテキスト検索ではなく、スパンから直接たどり着けます。通常もっとも時間を食うのがこの工程です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_seo_title = () => `マイクロサービスのデバッグ | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_seo_desc = () => `デプロイの心当たりがないままレイテンシが倍増。1つのリリースを、サービスマップ、トレース、ログを通じて、2ホップ先で枯渇したコネクションプールまで追跡します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_hero_title = () => `誰もデプロイしていない。それでもレイテンシは倍になった。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_hero_lede = () => `分散システムでは、遅くなったサービスが壊れたサービスであることはまれです。マップはどのエッジが最初に劣化したかを示し、トレースは待ちがどこまで波及したかを示します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_story_title = () => `症状から原因まで2ホップ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_story_lede = () => `payment-svc@1.4.2は、症状の4時間前にリリースされたバージョンです。これが全経路を貫きます。マップ、トレース、ログはすべてこれで絞り込まれています。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_1_title = () => `マップは遅いサービスではなく、遅いエッジを示す`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_1_body = () => `呼び出されているのはapi-gatewayですが、そのスパン自体に問題はありません。劣化しているエッジは2ホップ先、payment-svcからuser-dbで、平均が12msから210msに悪化しています。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_2_title = () => `トレースは処理ではなく待ちを示す`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_2_body = () => `遅いリクエストを開くと、そのほとんどがdbスパンです。クエリ自体は4ms、スパンは210ms。その差は、クエリが実行される前に費やされた時間です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_3_title = () => `ログがリリースを名指しする`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_3_body = () => `そのスパンのログ行にはpool wait 206ms、3回目の試行で取得と記録されています。service.versionで絞り込むと1.4.2から始まっており、このリリースはプールを増やさずに並列度だけを上げていました。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_outcome_line = () => `新しい並列度に合わせてプールサイズを拡張。エッジのp95レイテンシは、ロールバックなしで14msに戻りました。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_metric_1_label = () => `呼び出しからのホップ数`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_metric_2_label = () => `エッジレイテンシの前後`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_metric_3_label = () => `がスパン内の待ち時間`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_title = () => `連鎖を読み解けた理由`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_1_title = () => `エッジは固有のレイテンシを持つ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_1_body = () => `マップは呼び出し元と呼び出し先のペアごとに個別に計測します。ある呼び出し元にだけ劣化した依存関係は、サービス全体の平均ではなく、1本のエッジとして見えます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_2_title = () => `dbスパンは待ちと処理の合計`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_2_body = () => `クライアントスパンは実行だけでなく接続取得も含むため、プールの枯渇は、単一の数値の中に隠れるのではなく、スパン所要時間とクエリ所要時間の差として現れます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_3_title = () => `デプロイしていないつもりでもデプロイである`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_3_body = () => `全スパンにservice.versionが付いていれば、問いは「誰がデプロイしたか」から「このスパンはどのバージョンのものか」に変わります。4時間前のリリースも4分前のものと同じように見つかります。`

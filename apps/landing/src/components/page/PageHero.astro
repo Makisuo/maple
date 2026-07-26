@@ -1,0 +1,80 @@
+---
+/**
+ * PageHero — the hero for feature and use-case pages.
+ *
+ * The old FeatureHero is still in the tree serving /pricing, /observability,
+ * /opentelemetry, /roadmap, /best-… and /integrations/*, so this is an
+ * addition rather than an edit. What changes on the pages that adopt it:
+ * a 60px line grid becomes the system's own 16×16 dot grid (the /infra
+ * texture); `max-w-6xl` becomes `.shell`, so the hero finally lines up with
+ * the nav and footer above and below it; the `rounded-full` amber pill becomes
+ * the 0.18em eyebrow every homepage section uses; `font-bold` becomes
+ * `font-semibold`.
+ *
+ * No amber accent word in the title. Colouring a word in the headline is a
+ * homepage move; these pages spend their one amber event on the closing CTA.
+ *
+ * The breadcrumb renders inside this component so it sits on the same axis as
+ * everything else. It keeps its own BreadcrumbList JSON-LD.
+ */
+import { buttonVariants } from "@maple/ui/components/ui/button";
+import * as m from "../../paraglide/messages";
+import Breadcrumb from "../Breadcrumb.astro";
+import { HeroCta } from "../HeroCta";
+
+interface Props {
+	eyebrow: string;
+	title: string;
+	lede: string;
+	breadcrumb: { label: string; href?: string }[];
+	/**
+	 * Use-case pages only: the literal signal that opens the story, e.g.
+	 * "checkout p99 380 ms · threshold 200 ms". Never translated — it is
+	 * product data, and the pages below it show it verbatim.
+	 */
+	signal?: string;
+}
+
+const { eyebrow, title, lede, breadcrumb, signal } = Astro.props;
+---
+
+<section class="relative overflow-hidden bg-bg">
+	<div class="dot-grid-veil" aria-hidden="true"></div>
+
+	<div class="relative">
+		<Breadcrumb items={breadcrumb} class="shell pt-24 md:pt-28" />
+
+		<div class="shell pb-16 pt-8 md:pb-24 md:pt-10">
+			<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{eyebrow}</p>
+
+			<h1
+				class="mt-5 max-w-[20ch] font-display text-[2.375rem] font-semibold leading-[1.03] tracking-[-0.025em] text-fg sm:text-5xl lg:text-6xl"
+			>
+				{title}
+			</h1>
+
+			<p class="mt-6 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-base">{lede}</p>
+
+			{
+				signal && (
+					<p class="mt-7 inline-flex items-center gap-2.5 rounded-lg border border-border bg-bg-elevated px-3.5 py-2 font-mono text-[12.5px] text-fg">
+						<span class="op-key">signal</span>
+						{signal}
+					</p>
+				)
+			}
+
+			<div class="mt-10 flex flex-wrap items-center gap-3">
+				<HeroCta client:load className={buttonVariants({ size: "xl" })} />
+				<a
+					href="https://github.com/Makisuo/maple"
+					target="_blank"
+					rel="noopener noreferrer"
+					class={buttonVariants({ variant: "outline", size: "xl" })}
+				>
+					{m.cta_github()}
+				</a>
+			</div>
+		</div>
+	</div>
+</section>

@@ -1,4 +1,6 @@
 ---
+import { getRelativeLocaleUrl } from "astro:i18n";
+
 interface Props {
     title: string;
     description: string;
@@ -11,8 +13,13 @@ interface Props {
 const { title, description, type = "WebPage", url, includeOrganization = false, competitorName } = Astro.props;
 
 const siteUrl = Astro.site?.toString().replace(/\/$/, '') ?? 'https://maple.dev';
+// Same fix as Layout's canonical: Astro.url.pathname reports the English path
+// on a fallback-rewritten locale route, so the JSON-LD url would disagree with
+// the canonical. Rebuild it from the locale instead.
+const currentLocale = Astro.currentLocale ?? 'en';
+const pathWithoutLocale = Astro.url.pathname.replace(/^\/(ja|ko)(\/|$)/, '/').replace(/\/+/g, '/');
 const resolvedUrl =
-    url ?? (Astro.site ? new URL(Astro.url.pathname, Astro.site).toString() : undefined);
+    url ?? (Astro.site ? new URL(getRelativeLocaleUrl(currentLocale, pathWithoutLocale), Astro.site).toString() : undefined);
 
 const jsonLd = {
     "@context": "https://schema.org",

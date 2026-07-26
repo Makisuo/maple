@@ -15,6 +15,9 @@ import * as m from "../paraglide/messages"
 import { broadcastSignedIn } from "./auth-signal"
 import { ClerkProvider } from "./ClerkProvider"
 import { formatStars } from "../lib/github-stars"
+import { features } from "../lib/features"
+import { featurePath, useCasePath } from "../lib/page-registry"
+import { useCases } from "../lib/use-cases"
 import { GithubStarButton, Octocat } from "./GithubStarButton"
 
 const PUBLISHABLE_KEY = import.meta.env.PUBLIC_CLERK_PUBLISHABLE_KEY
@@ -88,66 +91,21 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 	const ctaCollapsed = useHeaderCtaCollapsed()
 	const l = (path: string) => (locale === "en" ? path : `/${locale}${path}`)
 
-	const featureLinks: MenuLink[] = [
-		{
-			href: l("/features/distributed-tracing"),
-			label: () => m.nav_distributed_tracing(),
-			desc: () => m.nav_desc_distributed_tracing(),
-		},
-		{
-			href: l("/features/browser-sessions"),
-			label: () => m.nav_browser_sessions(),
-			desc: () => m.nav_desc_browser_sessions(),
-		},
-		{
-			href: l("/features/metrics-dashboards"),
-			label: () => m.nav_metrics_dashboards(),
-			desc: () => m.nav_desc_metrics_dashboards(),
-		},
-		{
-			href: l("/features/log-management"),
-			label: () => m.nav_log_management(),
-			desc: () => m.nav_desc_log_management(),
-		},
-		{
-			href: l("/features/service-catalog"),
-			label: () => m.nav_service_catalog(),
-			desc: () => m.nav_desc_service_catalog(),
-		},
-		{
-			href: l("/features/error-tracking"),
-			label: () => m.nav_error_tracking(),
-			desc: () => m.nav_desc_error_tracking(),
-		},
-		{
-			href: l("/features/ai-mcp-integration"),
-			label: () => m.nav_ai_mcp(),
-			desc: () => m.nav_desc_ai_mcp(),
-		},
-		{
-			href: l("/features/kubernetes-monitoring"),
-			label: () => m.nav_kubernetes(),
-			desc: () => m.nav_desc_kubernetes(),
-		},
-	]
+	// Derived from the registries rather than hand-listed, so adding a feature
+	// can't leave the nav pointing at seven of eight. `navLabel`/`navDesc` are
+	// stored uncalled for the same reason MenuLink holds thunks — Paraglide
+	// resolves the locale per call, at render.
+	const featureLinks: MenuLink[] = features.map((feature) => ({
+		href: featurePath(locale, feature.slug),
+		label: feature.navLabel,
+		desc: feature.navDesc,
+	}))
 
-	const useCaseLinks: MenuLink[] = [
-		{
-			href: l("/use-cases/ecommerce-observability"),
-			label: () => m.nav_ecommerce(),
-			desc: () => m.nav_desc_ecommerce(),
-		},
-		{
-			href: l("/use-cases/microservices-debugging"),
-			label: () => m.nav_microservices(),
-			desc: () => m.nav_desc_microservices(),
-		},
-		{
-			href: l("/use-cases/api-performance"),
-			label: () => m.nav_api_performance(),
-			desc: () => m.nav_desc_api_performance(),
-		},
-	]
+	const useCaseLinks: MenuLink[] = useCases.map((useCase) => ({
+		href: useCasePath(locale, useCase.slug),
+		label: useCase.navLabel,
+		desc: useCase.navDesc,
+	}))
 
 	const integrationLinks: MenuLink[] = [
 		{ href: l("/integrations/nextjs"), label: () => m.nav_nextjs(), desc: () => m.nav_desc_nextjs() },

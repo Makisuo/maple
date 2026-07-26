@@ -1,0 +1,67 @@
+---
+/**
+ * ArtifactSection — prose column plus one live artifact.
+ *
+ * The section that carries the interactive proof: a thing that moves, next to
+ * the sentence explaining what it's doing. Same two-column skeleton as the
+ * homepage's Agent and Kubernetes sections.
+ *
+ * Must sit on `bg-bg`, never `bg-bg-deep`: `.live-frame` is itself `--bg-deep`,
+ * so a deep floor would dissolve the artifact's own body into the page.
+ *
+ * One artifact per page. Several of these carry an amber `.live-frame__live`
+ * pulse and `--severity-warn` fills, which share the primary hue — stack two
+ * of them plus the closing CTA and the page reads speckled rather than rare.
+ */
+interface Props {
+	eyebrow: string;
+	title: string;
+	lede: string;
+	/** Hairline-ruled supporting points, same construction as KubernetesSection. */
+	points?: { title: string; desc: string }[];
+	/** Give the artifact the wider track. Off by default. */
+	wide?: boolean;
+	class?: string;
+}
+
+const { eyebrow, title, lede, points = [], wide = false, class: className = "" } = Astro.props;
+const columns = wide ? "lg:grid-cols-[0.78fr_1.22fr]" : "lg:grid-cols-[0.85fr_1.15fr]";
+---
+
+<section class={`bg-bg ${className}`}>
+	<div class="shell py-16 md:py-32">
+		<div class={`grid gap-12 ${columns} lg:items-center lg:gap-20`}>
+			<!-- min-w-0: a grid item defaults to `min-width: auto`, so a
+			     non-wrapping <pre> or table inside an artifact would otherwise push
+			     the track — and with it the document — wider than the viewport. -->
+			<div class="min-w-0">
+				<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{eyebrow}</p>
+				<h2
+					class="mt-4 max-w-[18ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+				>
+					{title}
+				</h2>
+				<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted">{lede}</p>
+
+				{
+					points.length > 0 && (
+						<dl class="mt-8">
+							{points.map((point) => (
+								<div class="border-t border-border py-4">
+									<dt class="text-[13px] font-medium text-fg">{point.title}</dt>
+									<dd class="mt-1.5 max-w-[56ch] text-[13px] leading-relaxed text-fg-muted">
+										{point.desc}
+									</dd>
+								</div>
+							))}
+						</dl>
+					)
+				}
+			</div>
+
+			<div class="min-w-0">
+				<slot />
+			</div>
+		</div>
+	</div>
+</section>
