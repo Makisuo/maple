@@ -12,6 +12,7 @@
 		"./*": "./src/*"
 	},
 	"scripts": {
+		"test": "vitest run",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
@@ -32,7 +33,8 @@
 	"devDependencies": {
 		"@types/react": "catalog:react",
 		"@types/react-dom": "catalog:react",
-		"typescript": "catalog:tooling"
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
 	},
 	"peerDependencies": {
 		"react": "^19.0.0",

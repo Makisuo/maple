@@ -388,7 +388,7 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 		}),
 	)
 
-	it.effect("single-flights concurrent cold capability probes for the same route", () =>
+	it.effect("keeps concurrent cold capability probes request-local", () =>
 		Effect.gen(function* () {
 			let versionQueries = 0
 			let releaseVersionQuery: (() => void) | undefined
@@ -429,7 +429,7 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 						unsafeCompiledQuery<{ readonly c: number }>({
 							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
 						}),
-					{ context: "capability-single-flight" },
+					{ context: "capability-request-local" },
 				)
 
 			const leader = yield* Effect.forkChild(query())
@@ -440,7 +440,7 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			yield* Fiber.join(leader)
 			yield* Fiber.join(follower)
 
-			assert.strictEqual(versionQueries, 1)
+			assert.strictEqual(versionQueries, 2)
 		}),
 	)
 

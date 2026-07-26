@@ -660,6 +660,7 @@
         "@types/react": "catalog:react",
         "@types/react-dom": "catalog:react",
         "typescript": "catalog:tooling",
+        "vitest": "catalog:",
       },
       "peerDependencies": {
         "react": "^19.0.0",

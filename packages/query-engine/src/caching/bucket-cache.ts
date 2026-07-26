@@ -1,7 +1,7 @@
 import type { OrgId } from "@maple/domain"
 import type { TimeseriesPoint } from "../query-engine"
 import { parseWarehouseDateTime } from "../datetime"
-import { Clock, Config, Context, Deferred, Effect, Layer, Option } from "effect"
+import { Clock, Config, Context, Effect, Layer, Option } from "effect"
 import { EdgeCacheService } from "./edge-cache"
 
 /**
@@ -366,10 +366,6 @@ const isBucketCacheSegmentData = (
 
 // --- Service -------------------------------------------------------------
 
-interface DeferredAwaiter<E = unknown> {
-	readonly await: Effect.Effect<BucketCacheOutcome, E>
-}
-
 export interface BucketCacheServiceShape {
 	readonly enabled: boolean
 	readonly getOrComputeBuckets: <E, R>(
@@ -406,7 +402,6 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 			const fillConcurrency = Math.max(1, Math.floor(configuredFillConcurrency))
 			const segmentBucketCount = Math.max(1, Math.floor(configuredSegmentBucketCount))
 			const readConcurrency = Math.max(1, Math.floor(configuredReadConcurrency))
-			const inFlight = new Map<string, DeferredAwaiter<any>>()
 
 			const getOrComputeBuckets = Effect.fn("BucketCacheService.getOrComputeBuckets")(function* <E, R>(
 				request: BucketCacheRequest,
@@ -418,7 +413,6 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 				const fingerprint = yield* Effect.promise(() =>
 					generateFingerprint(request.orgId, request.query, request.bucketSeconds),
 				)
-				const composite = `${fingerprint}|${request.startMs}-${request.endMs}`
 
 				yield* Effect.annotateCurrentSpan({
 					"cache.fingerprint": fingerprint.slice(0, 12),
@@ -427,16 +421,16 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 					orgId: request.orgId,
 				})
 
-				const existingAwaiter = inFlight.get(composite)
-				if (existingAwaiter) {
-					yield* Effect.annotateCurrentSpan("cache.dedup.waited", true)
-					return (yield* existingAwaiter.await) as BucketCacheOutcome
-				}
-
-				const deferred = yield* Deferred.make<BucketCacheOutcome, E>()
-				const awaiter = { await: Deferred.await(deferred) } satisfies DeferredAwaiter<E>
-				inFlight.set(composite, awaiter)
-
+				// Do not coalesce requests through process-global Deferred/Promise
+				// state. This service is constructed once for the Worker isolate, so
+				// such state is shared by unrelated request contexts. Cloudflare
+				// forbids one request from awaiting I/O initiated by another and
+				// throws "Cannot perform I/O on behalf of a different request".
+				//
+				// Concurrent cold misses may therefore compute the same range more
+				// than once. The shared cache backend still serves later callers;
+				// safe cross-request single-flight would require a Durable Object or
+				// another request-neutral coordinator.
 				const readOrCompute = Effect.gen(function* () {
 					const requestedStarts = requestedBucketStarts(request.startMs, request.endMs, bucketMs)
 					const requestedSet = new Set(requestedStarts)
@@ -631,17 +625,7 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 					}),
 				)
 
-				const outcome = yield* readOrCompute.pipe(
-					Effect.tap((value) => Deferred.succeed(deferred, value)),
-					Effect.tapError((error) => Deferred.fail(deferred, error)),
-					Effect.onInterrupt(() => Deferred.interrupt(deferred)),
-					Effect.ensuring(
-						Effect.sync(() => {
-							if (inFlight.get(composite) === awaiter) inFlight.delete(composite)
-						}),
-					),
-				)
-				return outcome
+				return yield* readOrCompute
 			})
 
 			return { enabled, getOrComputeBuckets } satisfies BucketCacheServiceShape

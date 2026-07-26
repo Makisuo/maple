@@ -1,4 +1,4 @@
-import { Cause, Clock, Deferred, Duration, Effect, HashMap, Option, Ref, Schedule, Schema } from "effect"
+import { Cause, Clock, Duration, Effect, HashMap, Option, Ref, Schedule, Schema } from "effect"
 import {
 	MAX_RAW_SQL_RESULT_BYTES,
 	MAX_RAW_SQL_RESULT_ROWS,
@@ -94,10 +94,6 @@ interface CachedCapabilities {
 	readonly expiresAt: number
 }
 
-interface CapabilityAwaiter {
-	readonly await: Effect.Effect<WarehouseCapabilities>
-}
-
 const sqlClientCacheKey = (config: ResolvedWarehouseConfig): string =>
 	config.kind === "tinybird"
 		? `tinybird:${config.host}:${config.token}`
@@ -152,7 +148,6 @@ const clientTimeoutMs = (
 export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQueryServiceShape => {
 	const clientCache = new Map<string, CachedClient>()
 	const capabilitiesCache = Ref.makeUnsafe(HashMap.empty<string, CachedCapabilities>())
-	const capabilitiesInFlight = Ref.makeUnsafe(HashMap.empty<string, CapabilityAwaiter>())
 
 	const getCachedOrCreateClient = (
 		cacheKey: string,
@@ -292,7 +287,6 @@ WHERE name = 'enable_full_text_index'`,
 		const resolved = yield* deps.resolveRoute(tenant, purpose, "capabilities")
 		const nowMs = yield* Clock.currentTimeMillis
 		const configKey = sqlClientCacheKey(resolved.config)
-		const inFlightKey = `${resolved.clientCacheKey}\u0000${configKey}`
 		const cache = yield* Ref.get(capabilitiesCache)
 		const cached = Option.getOrUndefined(HashMap.get(cache, resolved.clientCacheKey))
 		if (cached && cached.cacheKey === configKey && cached.expiresAt > nowMs) {
@@ -303,74 +297,40 @@ WHERE name = 'enable_full_text_index'`,
 			return cached.capabilities
 		}
 
-		const deferred = yield* Deferred.make<WarehouseCapabilities>()
-		const candidate = { await: Deferred.await(deferred) } satisfies CapabilityAwaiter
-		type CapabilitySelection = {
-			readonly awaiter: CapabilityAwaiter
-			readonly leader: boolean
-		}
-		const selected = yield* Ref.modify(
-			capabilitiesInFlight,
-			(current): readonly [CapabilitySelection, HashMap.HashMap<string, CapabilityAwaiter>] =>
-				Option.match(HashMap.get(current, inFlightKey), {
-					onNone: () => [
-						{ awaiter: candidate, leader: true },
-						HashMap.set(current, inFlightKey, candidate),
-					],
-					onSome: (awaiter) => [{ awaiter, leader: false }, current],
-				}),
-		)
-
 		const dialect = BackendDialect[resolved.config.kind]
-		const cacheOutcome = selected.leader ? "miss" : "deduplicated"
-		let capabilities: WarehouseCapabilities
-		if (selected.leader) {
-			capabilities = yield* Deferred.complete(
-				deferred,
-				inspectCapabilities(
-					getCachedOrCreateClient(resolved.clientCacheKey, resolved.config, nowMs),
-					!dialect.stripTinybirdRestrictedSettings,
-				).pipe(
-					Effect.tap((result) =>
-						Ref.update(capabilitiesCache, (current) =>
-							HashMap.set(current, resolved.clientCacheKey, {
-								capabilities: result,
-								cacheKey: configKey,
-								expiresAt: nowMs + CAPABILITIES_CACHE_TTL_MS,
-							}),
-						),
-					),
-					Effect.withSpan("WarehouseQueryService.inspectCapabilities", {
-						kind: "client",
-						attributes: {
-							orgId: tenant.orgId,
-							"db.client": dialect.dbClient,
-							"db.system.name": dialect.dbSystemName,
-							"peer.service": dialect.peerService,
-							"warehouse.backend": resolved.config.kind,
-							"warehouse.route": purpose,
-							"warehouse.config_source": resolved.source,
-							"maple.query.capabilities.cache": "miss",
-						},
+		// This executor is Worker-isolate scoped. Do not share an in-flight
+		// Deferred between capability probes: its leader can own Cloudflare I/O
+		// that a follower request is forbidden to await. The completed
+		// capabilities are plain data and remain safe to cache across requests.
+		const capabilities = yield* inspectCapabilities(
+			getCachedOrCreateClient(resolved.clientCacheKey, resolved.config, nowMs),
+			!dialect.stripTinybirdRestrictedSettings,
+		).pipe(
+			Effect.tap((result) =>
+				Ref.update(capabilitiesCache, (current) =>
+					HashMap.set(current, resolved.clientCacheKey, {
+						capabilities: result,
+						cacheKey: configKey,
+						expiresAt: nowMs + CAPABILITIES_CACHE_TTL_MS,
 					}),
 				),
-			).pipe(
-				Effect.andThen(candidate.await),
-				Effect.ensuring(
-					Ref.update(capabilitiesInFlight, (current) =>
-						Option.match(HashMap.get(current, inFlightKey), {
-							onNone: () => current,
-							onSome: (awaiter) =>
-								awaiter === candidate ? HashMap.remove(current, inFlightKey) : current,
-						}),
-					),
-				),
-			)
-		} else {
-			capabilities = yield* selected.awaiter.await
-		}
+			),
+			Effect.withSpan("WarehouseQueryService.inspectCapabilities", {
+				kind: "client",
+				attributes: {
+					orgId: tenant.orgId,
+					"db.client": dialect.dbClient,
+					"db.system.name": dialect.dbSystemName,
+					"peer.service": dialect.peerService,
+					"warehouse.backend": resolved.config.kind,
+					"warehouse.route": purpose,
+					"warehouse.config_source": resolved.source,
+					"maple.query.capabilities.cache": "miss",
+				},
+			}),
+		)
 		yield* Effect.annotateCurrentSpan({
-			"maple.query.capabilities.cache": cacheOutcome,
+			"maple.query.capabilities.cache": "miss",
 			"maple.query.capabilities.metadata_available": capabilities.metadataAvailable,
 			"warehouse.backend": resolved.config.kind,
 			"warehouse.route": purpose,
