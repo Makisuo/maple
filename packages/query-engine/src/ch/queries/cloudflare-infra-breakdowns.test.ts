@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import { compileCH, compileUnion, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import {
 	CLOUDFLARE_BREAKDOWN_DIMENSIONS,
+	CLOUDFLARE_BREAKDOWN_OTHER_KEY,
 	cloudflareBreakdownMetrics,
 	cloudflareZoneBreakdownCoverageRowSchema,
 	cloudflareZoneBreakdownCoverageSQL,
@@ -88,6 +89,34 @@ describe("cloudflareZoneBreakdownTimeseriesSQL", () => {
 		expect(sql).toContain("geo.country_iso_code']")
 		expect(sql).toContain("GROUP BY bucket, key")
 		expect(sql).toContain("ORDER BY bucket ASC, key ASC")
+	})
+
+	it("folds every key outside topKeys into the shared `other` bucket", () => {
+		// Without this the grouping is unbounded: a zone taking scanner traffic emits a distinct
+		// path per probe, and the chart gets one <Area> and one legend chip per key.
+		const { sql } = compileCH(
+			cloudflareZoneBreakdownTimeseriesSQL("path", {}, ["/api/users", "/health"]),
+			timeseriesParams,
+		)
+		expect(sql).toContain("IN ('/api/users', '/health')")
+		expect(sql).toContain(`'${CLOUDFLARE_BREAKDOWN_OTHER_KEY}'`)
+		expect(sql).toContain("if(")
+		// The fold lives in the projection, so every row still contributes to some series.
+		expect(sql).toContain("GROUP BY bucket, key")
+	})
+
+	it("escapes topKeys rather than interpolating them raw", () => {
+		const { sql } = compileCH(
+			cloudflareZoneBreakdownTimeseriesSQL("path", {}, ["/a'b"]),
+			timeseriesParams,
+		)
+		expect(sql).toContain("'/a\\'b'")
+	})
+
+	it("leaves the grouping alone when no topKeys are given", () => {
+		const { sql } = compileCH(cloudflareZoneBreakdownTimeseriesSQL("statusClass"), timeseriesParams)
+		expect(sql).not.toContain("if(")
+		expect(sql).not.toContain(`'${CLOUDFLARE_BREAKDOWN_OTHER_KEY}'`)
 	})
 })
 

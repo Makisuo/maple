@@ -4,8 +4,9 @@
 
 import { useMemo } from "react"
 
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
 import { cloudflareZoneSecurityResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { formatNumber } from "@/lib/format"
 import { ColumnHead, TableShell } from "../primitives/data-table"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
@@ -56,7 +57,9 @@ export function CloudflareZoneSecuritySection({
 	filters: CloudflareFilters
 	syncId?: string
 }) {
-	const result = useAtomValue(
+	// Retained: this section hides itself on an empty result, so a bare read made it disappear and
+	// reappear on every filter toggle, shifting everything below it.
+	const result = useRetainedRefreshableResultValue(
 		cloudflareZoneSecurityResultAtom({
 			data: { serviceName, startTime, endTime, bucketSeconds, ...filters },
 		}),

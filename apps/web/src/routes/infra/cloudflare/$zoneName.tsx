@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
 
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -40,6 +40,7 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatNumber } from "@/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -120,7 +121,11 @@ function ZoneDetailPage() {
 		})
 	}
 
-	const facetsResult = useAtomValue(
+	// Retained, not bare: the selected filters are part of the atom key, so every checkbox toggle
+	// instantiates a fresh atom whose first emission is `Initial`. Reading that directly replaced the
+	// whole sidebar with a skeleton on each click and reset every section's open/search/show-all
+	// state. Retaining the last success keeps the sections in place and merely dims the counts.
+	const facetsResult = useRetainedRefreshableResultValue(
 		cloudflareZoneFacetsResultAtom({ data: { serviceName, startTime, endTime, ...filters } }),
 	)
 
@@ -193,14 +198,14 @@ function ZoneDetailContent({
 }) {
 	const bucketSeconds = chartBucketSeconds(startTime, endTime)
 
-	const detailResult = useAtomValue(
+	const detailResult = useRetainedRefreshableResultValue(
 		cloudflareZoneDetailResultAtom({
 			data: { serviceName, startTime, endTime, bucketSeconds, ...filters },
 		}),
 	)
 	// The list rollup carries the bytes/visits/latency KPIs; picking this
 	// zone's row client-side shares the 30s-cached atom with the list page.
-	const zonesResult = useAtomValue(
+	const zonesResult = useRetainedRefreshableResultValue(
 		cloudflareZonesResultAtom({ data: { startTime, endTime, ...filters } }),
 	)
 	const zoneRow = Result.builder(zonesResult)

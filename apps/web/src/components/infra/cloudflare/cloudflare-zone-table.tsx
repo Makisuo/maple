@@ -26,9 +26,15 @@ type SortKey =
 	| "ttfbP99Ms"
 	| "originP99Ms"
 
+// The server caps the list at 500 zones, so the row area scrolls rather than pushing every section
+// below it off the page. Roughly nine rows before the scroll starts.
+const TABLE_MAX_HEIGHT = 460
+
 interface CloudflareZoneTableProps {
 	zones: ReadonlyArray<CloudflareZoneRow>
 	waiting?: boolean
+	/** Overrides the "no traffic" empty when the list is empty because of a filter, not the window. */
+	emptyMessage?: string
 }
 
 export function CloudflareZoneTableLoading() {
@@ -61,7 +67,7 @@ export function CloudflareZoneTableLoading() {
 	)
 }
 
-export function CloudflareZoneTable({ zones, waiting }: CloudflareZoneTableProps) {
+export function CloudflareZoneTable({ zones, waiting, emptyMessage }: CloudflareZoneTableProps) {
 	const { sorted, sortKey, sortDir, handleSort } = useTableSort<CloudflareZoneRow, SortKey>(zones, {
 		initialKey: "requests",
 		stringKeys: ["zoneName"],
@@ -82,7 +88,8 @@ export function CloudflareZoneTable({ zones, waiting }: CloudflareZoneTableProps
 			ariaLabel="Cloudflare zones"
 			waiting={waiting}
 			isEmpty={sorted.length === 0}
-			emptyMessage="No zone traffic in the selected window."
+			emptyMessage={emptyMessage ?? "No zone traffic in the selected window."}
+			maxHeight={TABLE_MAX_HEIGHT}
 			header={
 				<>
 					<ColumnHead<SortKey>

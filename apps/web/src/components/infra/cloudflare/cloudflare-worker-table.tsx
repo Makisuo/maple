@@ -24,6 +24,9 @@ interface CloudflareWorkerTableProps {
 const ROW_CLASS =
 	"flex items-center gap-4 border-b border-border/40 px-4 py-3 last:border-0 hover:bg-muted/40"
 
+// Matches the zone table: the server caps at 500 scripts, so scroll rather than grow the page.
+const TABLE_MAX_HEIGHT = 460
+
 export function CloudflareWorkerTableLoading() {
 	return (
 		<TableSkeleton
@@ -64,6 +67,7 @@ export function CloudflareWorkerTable({ workers, waiting }: CloudflareWorkerTabl
 			waiting={waiting}
 			isEmpty={sorted.length === 0}
 			emptyMessage="No Worker invocations in the selected window."
+			maxHeight={TABLE_MAX_HEIGHT}
 			header={
 				<>
 					<ColumnHead<SortKey>

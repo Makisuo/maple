@@ -101,6 +101,24 @@ export const CLOUDFLARE_BREAKDOWN_DIMENSIONS = Object.keys(
 	BREAKDOWNS,
 ) as ReadonlyArray<CloudflareBreakdownDimension>
 
+/**
+ * Series cap for the stacked chart above the breakdown table. High-cardinality dimensions (paths on
+ * a zone that attracts scanner traffic) can carry thousands of distinct keys inside one window;
+ * plotting them all means thousands of `<Area>` elements and a legend longer than the page. The
+ * chart's job is "which handful carries the traffic, and how did that shift" — six answers that.
+ */
+export const CLOUDFLARE_BREAKDOWN_SERIES_LIMIT = 6
+
+/**
+ * Bucket key the tail folds into once {@link CLOUDFLARE_BREAKDOWN_SERIES_LIMIT} is exceeded. Folded,
+ * not dropped, so the stack still totals to the zone's attributed traffic.
+ *
+ * Deliberately the same literal the poller already writes for its own per-window tail
+ * (`mapping.ts`): both mean "everything not listed individually", and giving them separate keys put
+ * two indistinguishable `other` series next to each other in the legend.
+ */
+export const CLOUDFLARE_BREAKDOWN_OTHER_KEY = "other"
+
 /** Metric families a breakdown reads — the handler feeds these to `cloudflareIgnoredFiltersFor`. */
 export const cloudflareBreakdownMetrics = (
 	dimension: CloudflareBreakdownDimension,
@@ -209,19 +227,33 @@ export function cloudflareZoneBreakdownTotalsSQL(
 		.format("JSON")
 }
 
-/** Bucketed request counts per dimension value, for the stacked chart above the table. */
+/**
+ * Bucketed request counts per dimension value, for the stacked chart above the table.
+ *
+ * `topKeys` bounds the series count: keys outside it collapse into
+ * {@link CLOUDFLARE_BREAKDOWN_OTHER_KEY} inside the GROUP BY, so the result is at most
+ * `buckets × (topKeys.length + 1)` rows however many distinct paths the zone actually saw. The
+ * caller gets these from the totals query, which is already ranked by requests. Passing none keeps
+ * the unbounded grouping — only safe for the fixed-vocabulary dimensions.
+ */
 export function cloudflareZoneBreakdownTimeseriesSQL(
 	dimension: CloudflareBreakdownDimension,
 	opts: CloudflareFilterOpts = {},
+	topKeys: ReadonlyArray<string> = [],
 ) {
 	const spec = BREAKDOWNS[dimension]
+	const seriesKey = ($: CloudflareMetricsAccessor) => {
+		const key = keyExpr($, dimension)
+		if (topKeys.length === 0) return key
+		return CH.if_(key.in_(...topKeys), key, CH.lit(CLOUDFLARE_BREAKDOWN_OTHER_KEY))
+	}
 	return from(MetricsSum)
 		.select(($) => ({
 			bucket: CH.formatDateTime(
 				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
 				ISO_Z_FORMAT,
 			),
-			key: keyExpr($, dimension),
+			key: seriesKey($),
 			requests: CH.sum($.Value),
 		}))
 		.where(($) => [

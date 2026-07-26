@@ -6,12 +6,76 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/colla
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "../ui/input-group"
 import { Label } from "../ui/label"
 import { getServiceColor } from "../../lib/colors"
+import { formatNumber } from "../../lib/format"
 import { cn } from "../../lib/utils"
 import { FILTER_SECTION_LABEL } from "./filter-styles"
 
 export interface FilterOption {
 	name: string
 	count: number
+}
+
+/**
+ * Matches rendered while searching. Without a cap, one character in a 200-option facet paints every
+ * near-match — which is neither useful nor cheap. Past this the answer is a longer search term.
+ */
+export const MAX_SEARCH_RESULTS = 50
+
+export interface VisibleFilterOptions {
+	visible: ReadonlyArray<FilterOption>
+	/** Whether the collapsed view is hiding options behind "Show N more". */
+	hasMore: number
+	/** Matches the search cap dropped, so the section can say so instead of looking complete. */
+	overflowingMatches: number
+}
+
+/**
+ * Which options a section actually paints, given what's selected, typed, and expanded.
+ *
+ * Selected options sort first. Facets are ranked by traffic, so a value chosen from deep in the list
+ * would otherwise vanish behind "Show N more" the moment the counts refresh — leaving no way to
+ * untick it from the section it was ticked in. `Array#sort` is stable, so traffic rank survives
+ * inside each group.
+ */
+export function visibleFilterOptions({
+	options,
+	selected,
+	search,
+	showAll,
+	maxVisible,
+	getOptionLabel,
+}: {
+	options: ReadonlyArray<FilterOption>
+	selected: ReadonlyArray<string>
+	/** Empty when the section isn't searchable or nothing is typed. */
+	search: string
+	showAll: boolean
+	maxVisible: number
+	getOptionLabel?: (name: string) => string
+}): VisibleFilterOptions {
+	const labelFor = (name: string) => getOptionLabel?.(name) ?? name
+
+	let ordered = options
+	if (selected.length > 0) {
+		const chosen = new Set(selected)
+		ordered = [...options].sort((a, b) => Number(chosen.has(b.name)) - Number(chosen.has(a.name)))
+	}
+
+	if (search === "") {
+		return {
+			visible: showAll ? ordered : ordered.slice(0, maxVisible),
+			hasMore: Math.max(0, ordered.length - maxVisible),
+			overflowingMatches: 0,
+		}
+	}
+
+	const needle = search.toLowerCase()
+	const matches = ordered.filter((o) => labelFor(o.name).toLowerCase().includes(needle))
+	return {
+		visible: matches.slice(0, MAX_SEARCH_RESULTS),
+		hasMore: 0,
+		overflowingMatches: Math.max(0, matches.length - MAX_SEARCH_RESULTS),
+	}
 }
 
 interface FilterSectionBaseProps {
@@ -48,16 +112,28 @@ function FilterSectionBase({
 	const [showAll, setShowAll] = React.useState(false)
 	const [searchText, setSearchText] = React.useState("")
 	const inputRef = React.useRef<HTMLInputElement>(null)
+	// Deferred so the input paints on the keystroke and the option list trails it. A high-cardinality
+	// facet (200 paths) re-filters and re-renders every match otherwise, on every character.
+	const deferredSearch = React.useDeferredValue(searchText)
 
 	const labelFor = (name: string) => getOptionLabel?.(name) ?? name
 
-	const filteredOptions =
-		searchable && searchText
-			? options.filter((o) => labelFor(o.name).toLowerCase().includes(searchText.toLowerCase()))
-			: options
-
-	const visibleOptions = showAll || searchText ? filteredOptions : filteredOptions.slice(0, maxVisible)
-	const hasMore = !searchText && filteredOptions.length > maxVisible
+	const {
+		visible: visibleOptions,
+		hasMore,
+		overflowingMatches,
+	} = React.useMemo(
+		() =>
+			visibleFilterOptions({
+				options,
+				selected,
+				search: searchable ? deferredSearch : "",
+				showAll,
+				maxVisible,
+				getOptionLabel,
+			}),
+		[options, selected, searchable, deferredSearch, showAll, maxVisible, getOptionLabel],
+	)
 
 	const toggleOption = (name: string) => {
 		if (selected.includes(name)) {
@@ -69,9 +145,12 @@ function FilterSectionBase({
 
 	const handleOpenChange = (open: boolean) => {
 		setIsOpen(open)
+		// Only reset what's actually dirty. Writing these unconditionally re-rendered the panel
+		// mid-collapse, and because `searchText` feeds `useDeferredValue` that scheduled a second,
+		// transition-priority render that landed while Base UI was animating the measured height.
 		if (!open) {
-			setSearchText("")
-			setShowAll(false)
+			if (searchText !== "") setSearchText("")
+			if (showAll) setShowAll(false)
 		}
 	}
 
@@ -96,7 +175,9 @@ function FilterSectionBase({
 					)}
 					<ChevronDownIcon
 						className={cn(
-							"size-3.5 shrink-0 text-muted-foreground/40 transition-[transform,color] group-hover:text-muted-foreground",
+							// Duration matches the panel's 200ms; without it the chevron settles at
+							// 150ms and reads as arriving before the section has finished closing.
+							"size-3.5 shrink-0 text-muted-foreground/40 transition-[transform,color] duration-200 ease-out group-hover:text-muted-foreground",
 							isOpen && "rotate-180",
 						)}
 					/>
@@ -160,20 +241,29 @@ function FilterSectionBase({
 										{OptionIcon && <OptionIcon className="size-3.5 shrink-0" />}
 										<span className="truncate">{labelFor(option.name)}</span>
 									</Label>
-									<span className="text-xs text-muted-foreground tabular-nums">
-										{option.count.toLocaleString()}
+									<span
+										className="text-xs text-muted-foreground tabular-nums"
+										title={option.count.toLocaleString()}
+									>
+										{formatNumber(option.count)}
 									</span>
 								</div>
 							)
 						})
 					)}
-					{hasMore && (
+					{overflowingMatches > 0 && (
+						<p className="text-xs text-muted-foreground py-1">
+							{overflowingMatches.toLocaleString()} more match
+							{overflowingMatches === 1 ? "" : "es"} — keep typing to narrow
+						</p>
+					)}
+					{hasMore > 0 && (
 						<button
 							type="button"
 							onClick={() => setShowAll(!showAll)}
 							className="text-xs text-muted-foreground hover:text-foreground transition-colors"
 						>
-							{showAll ? "Show less" : `Show ${options.length - maxVisible} more`}
+							{showAll ? "Show less" : `Show ${hasMore} more`}
 						</button>
 					)}
 				</div>

@@ -40,6 +40,15 @@ export function errorRateClass(rate: number): string {
 export const OTHER_ZONES_SERIES = "Other zones"
 export const OTHER_ZONES_COLOR = "color-mix(in oklab, var(--muted-foreground) 45%, transparent)"
 
+/**
+ * The pooled tail of a high-cardinality breakdown. Both the poller (its per-window top-N tail) and
+ * the API (every key outside the chart's top-N) write this same key, so the stack still totals to
+ * the zone's attributed traffic and the legend carries exactly one "everything else" series.
+ * Mirrors `CLOUDFLARE_BREAKDOWN_OTHER_KEY` in the query engine.
+ */
+export const BREAKDOWN_OTHER_KEY = "other"
+export const BREAKDOWN_OTHER_LABEL = "Other"
+
 // Status classes carry severity; cache statuses shade from "answered at the
 // edge" (primary) to "went to origin" (muted). Both are fixed, meaningful
 // mappings — not palette-by-index.

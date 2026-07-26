@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useDeferredValue, useMemo, useState, type ReactNode } from "react"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -8,7 +8,8 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
-import { CloudflareIcon } from "@/components/icons"
+import { CloudflareIcon, MagnifierIcon, XmarkIcon } from "@/components/icons"
+import type { CloudflareZoneRow } from "@/api/warehouse/cloudflare-infra"
 import { PageHero } from "@/components/infra/primitives/page-hero"
 import {
 	CloudflareKpiCards,
@@ -34,6 +35,7 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -120,11 +122,19 @@ function CloudflarePage() {
 function CloudflareData({ startTime, endTime }: { startTime: string; endTime: string }) {
 	const bucketSeconds = chartBucketSeconds(startTime, endTime)
 
-	const zonesResult = useAtomValue(cloudflareZonesResultAtom({ data: { startTime, endTime } }))
-	const timeseriesResult = useAtomValue(
+	// Retained so a manual refresh or a time-range nudge fades the current numbers instead of
+	// replacing the whole page with skeletons; it also wires these atoms to PageRefreshProvider.
+	const zonesResult = useRetainedRefreshableResultValue(
+		cloudflareZonesResultAtom({ data: { startTime, endTime } }),
+	)
+	const timeseriesResult = useRetainedRefreshableResultValue(
 		cloudflareZoneTimeseriesResultAtom({ data: { startTime, endTime, bucketSeconds } }),
 	)
-	const workersResult = useAtomValue(cloudflareWorkersResultAtom({ data: { startTime, endTime } }))
+	const workersResult = useRetainedRefreshableResultValue(
+		cloudflareWorkersResultAtom({ data: { startTime, endTime } }),
+	)
+	const [zoneFilter, setZoneFilter] = useState("")
+	const zoneQuery = useDeferredValue(zoneFilter).trim().toLowerCase()
 
 	const timeseries = Result.builder(timeseriesResult)
 		.onSuccess((r) => r)
@@ -264,15 +274,14 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 										</div>
 									</div>
 								)}
-							<section className="space-y-3">
-								<h2 className="text-sm font-medium text-foreground">
-									Zones
-									<span className="ml-2 font-mono text-xs text-muted-foreground">
-										{response.zones.length}
-									</span>
-								</h2>
-								<CloudflareZoneTable zones={response.zones} waiting={result.waiting} />
-							</section>
+							<ZonesSection zones={response.zones} query={zoneQuery} waiting={result.waiting}>
+								<SectionFilter
+									value={zoneFilter}
+									onChange={setZoneFilter}
+									placeholder={`Filter ${response.zones.length} zones`}
+									label="Filter zones by name"
+								/>
+							</ZonesSection>
 						</div>
 					)
 				})
@@ -298,5 +307,87 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 			</section>
 			<CloudflarePlatformSection startTime={startTime} endTime={endTime} />
 		</div>
+	)
+}
+
+/**
+ * The zone list is capped by the server at 500, not by anything human. Filtering by name beats
+ * scrolling for it, and the count reads `shown of total` so a filtered view never looks like the
+ * whole picture.
+ */
+function ZonesSection({
+	zones,
+	query,
+	waiting,
+	children,
+}: {
+	zones: ReadonlyArray<CloudflareZoneRow>
+	query: string
+	waiting?: boolean
+	children: ReactNode
+}) {
+	const matches = useMemo(
+		() => (query === "" ? zones : zones.filter((zone) => zone.zoneName.toLowerCase().includes(query))),
+		[zones, query],
+	)
+
+	return (
+		<section className="space-y-3">
+			<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+				<h2 className="text-sm font-medium text-foreground">
+					Zones
+					<span className="ml-2 font-mono text-xs text-muted-foreground">
+						{matches.length === zones.length
+							? zones.length
+							: `${matches.length} of ${zones.length}`}
+					</span>
+				</h2>
+				{zones.length > 1 ? children : null}
+			</div>
+			<CloudflareZoneTable
+				zones={matches}
+				waiting={waiting}
+				emptyMessage={
+					query === "" ? undefined : `No zones match "${query}" in the selected window.`
+				}
+			/>
+		</section>
+	)
+}
+
+/** Compact filter field for a section header. Same chrome as the breakdown panel's toolbar. */
+function SectionFilter({
+	value,
+	onChange,
+	placeholder,
+	label,
+}: {
+	value: string
+	onChange: (value: string) => void
+	placeholder: string
+	label: string
+}) {
+	return (
+		<label className="flex h-6 w-56 items-center gap-1.5 rounded-sm border border-border/70 bg-background/60 px-2 transition-colors focus-within:border-ring">
+			<MagnifierIcon size={11} className="shrink-0 text-muted-foreground" />
+			<input
+				type="search"
+				value={value}
+				onChange={(event) => onChange(event.target.value)}
+				placeholder={placeholder}
+				aria-label={label}
+				className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus-visible:outline-none [&::-webkit-search-cancel-button]:hidden"
+			/>
+			{value ? (
+				<button
+					type="button"
+					onClick={() => onChange("")}
+					aria-label="Clear filter"
+					className="shrink-0 rounded-xs p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring"
+				>
+					<XmarkIcon size={9} />
+				</button>
+			) : null}
+		</label>
 	)
 }

@@ -1160,11 +1160,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						params,
 						{ rowSchema: CH.cloudflareZoneBreakdownTotalsRowSchema },
 					)
-					const bucketsCompiled = CH.compile(
-						CH.cloudflareZoneBreakdownTimeseriesSQL(payload.dimension, filters),
-						{ ...params, bucketSeconds: payload.bucketSeconds },
-						{ rowSchema: CH.cloudflareZoneBreakdownTimeseriesRowSchema },
-					)
 					// Coverage is deliberately unfiltered: it answers "what did the poller collect
 					// here", which the UI needs in order to say "not collected yet" rather than
 					// "no traffic" for a window that predates the dataset.
@@ -1176,7 +1171,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const zoneTotalCompiled = CH.compile(CH.cloudflareZoneCountersSQL(filters), params, {
 						rowSchema: CH.cloudflareZoneCountersRowSchema,
 					})
-					const [totalRows, bucketRows, coverageRows, zoneRows] = yield* Effect.all(
+					const [totalRows, coverageRows, zoneRows] = yield* Effect.all(
 						[
 							mapExecError(
 								warehouse.compiledQuery(tenant, totalsCompiled, {
@@ -1184,13 +1179,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 									context: "cloudflareInfraZoneBreakdownTotals",
 								}),
 								"cloudflareInfraZoneBreakdownTotals query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, bucketsCompiled, {
-									profile: "aggregation",
-									context: "cloudflareInfraZoneBreakdownTimeseries",
-								}),
-								"cloudflareInfraZoneBreakdownTimeseries query failed",
 							),
 							mapExecError(
 								warehouse.compiledQuery(tenant, coverageCompiled, {
@@ -1207,8 +1195,42 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								"cloudflareInfraZoneBreakdownZoneTotal query failed",
 							),
 						],
-						{ concurrency: 4 },
+						{ concurrency: 3 },
 					)
+					// The chart runs after the totals rather than beside them: totals are already
+					// ranked by requests, so they name the series worth plotting. Without that the
+					// grouping is unbounded — a zone taking scanner traffic returns a distinct path
+					// per probe, and the response grows to buckets × thousands of keys. One extra
+					// round trip over the same warm scan buys a payload that can't blow up.
+					// The poller's own tail bucket is dropped from the picks, not plotted as a peer —
+					// it means the same thing as the fold, so it merges into it and leaves the slot
+					// for a real key.
+					const topKeys = totalRows
+						.filter((row) => row.key !== CH.CLOUDFLARE_BREAKDOWN_OTHER_KEY)
+						.slice(0, CH.CLOUDFLARE_BREAKDOWN_SERIES_LIMIT)
+						.map((row) => row.key)
+					const bucketRows: ReadonlyArray<CH.CloudflareZoneBreakdownTimeseriesOutput> =
+						topKeys.length === 0
+							? []
+							: yield* mapExecError(
+									warehouse.compiledQuery(
+										tenant,
+										CH.compile(
+											CH.cloudflareZoneBreakdownTimeseriesSQL(
+												payload.dimension,
+												filters,
+												topKeys,
+											),
+											{ ...params, bucketSeconds: payload.bucketSeconds },
+											{ rowSchema: CH.cloudflareZoneBreakdownTimeseriesRowSchema },
+										),
+										{
+											profile: "aggregation",
+											context: "cloudflareInfraZoneBreakdownTimeseries",
+										},
+									),
+									"cloudflareInfraZoneBreakdownTimeseries query failed",
+								)
 					const coverage = coverageRows[0]
 					const zoneRequests = zoneRows.find((row) => row.serviceName === payload.serviceName)
 					// Breakdown metrics are a per-window top-N fold of what Cloudflare returned, so

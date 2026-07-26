@@ -3,7 +3,8 @@
 // counters on their implementing Worker). The whole section hides itself for
 // accounts without either dataset — most orgs never see it.
 
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import type { CloudflareDurableObjectRow, CloudflareQueueRow } from "@/api/warehouse/cloudflare-infra"
 import { cloudflarePlatformResourcesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatNumber } from "@/lib/format"
@@ -167,7 +168,11 @@ function DurableObjectTable({
 }
 
 export function CloudflarePlatformSection({ startTime, endTime }: { startTime: string; endTime: string }) {
-	const result = useAtomValue(cloudflarePlatformResourcesResultAtom({ data: { startTime, endTime } }))
+	// Retained: this section hides itself on an empty result, so a bare read made it vanish and
+	// return on every page refresh.
+	const result = useRetainedRefreshableResultValue(
+		cloudflarePlatformResourcesResultAtom({ data: { startTime, endTime } }),
+	)
 
 	return Result.builder(result)
 		.onSuccess((data, r) => {

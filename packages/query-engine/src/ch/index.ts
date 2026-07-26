@@ -451,6 +451,8 @@ export {
 // Queries — Cloudflare zone breakdowns (generic per-dimension totals/timeseries) + filter facets
 export {
 	CLOUDFLARE_BREAKDOWN_DIMENSIONS,
+	CLOUDFLARE_BREAKDOWN_OTHER_KEY,
+	CLOUDFLARE_BREAKDOWN_SERIES_LIMIT,
 	cloudflareBreakdownMetrics,
 	cloudflareZoneBreakdownCoverageRowSchema,
 	cloudflareZoneBreakdownCoverageSQL,
