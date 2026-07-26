@@ -2,21 +2,15 @@
  * Example stack: a Cloudflare Worker and the Maple resources that observe it,
  * declared side by side.
  *
- * The interesting part is the seam — `Maple.IngestKeys` reads the org's ingest
- * credentials and hands them to the Worker as a secret binding, so the thing
- * being observed and the alerts watching it ship as one unit.
- *
  *   MAPLE_API_KEY=maple_ak_… CLOUDFLARE_ACCOUNT_ID=… bun alchemy deploy
  *
  * Requires `@maple-dev/alchemy` to be built first (`bun run --cwd ../../lib/alchemy-maple build`).
  */
-import path from "node:path"
 import * as Maple from "@maple-dev/alchemy"
 import * as Alchemy from "alchemy"
 import * as Cloudflare from "alchemy/Cloudflare"
 import { Effect, Layer } from "effect"
-
-const SERVICE_NAME = "checkout"
+import Api, { SERVICE_NAME } from "./src/Api.ts"
 
 export default Alchemy.Stack(
 	"maple-example",
@@ -28,23 +22,9 @@ export default Alchemy.Stack(
 		state: Cloudflare.state(),
 	},
 	Effect.gen(function* () {
-		// The org's ingest keys — a read-only singleton. `privateKey` is a
-		// `Redacted<string>` output, so it never lands in logs or plan output.
-		const ingest = yield* Maple.IngestKeys("ingest")
-
-		// The workload. Feeding `ingest.privateKey` into `env` is what orders the
-		// two: Alchemy reads the keys before it deploys the Worker.
-		const checkout = yield* Cloudflare.Worker("checkout-api", {
-			name: "checkout-api",
-			main: path.join(import.meta.dirname, "src", "worker.ts"),
-			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
-			url: true,
-			env: {
-				MAPLE_INGEST_KEY: ingest.privateKey,
-				MAPLE_ENDPOINT: "https://ingest.maple.dev",
-				OTEL_SERVICE_NAME: SERVICE_NAME,
-			},
-		})
+		// The Worker. Its ingest-key binding pulls `Maple.IngestKeys` into the
+		// graph, so the keys are read before the Worker deploys.
+		const api = yield* Api
 
 		// Where alerts go. Channel secrets are write-only server-side.
 		const slack = yield* Maple.AlertDestination("oncall-slack", {
@@ -93,6 +73,6 @@ export default Alchemy.Stack(
 			scopes: ["dashboards:write"],
 		})
 
-		return { url: checkout.url, ciKeyId: ciKey.keyId }
+		return { url: api.url, ciKeyId: ciKey.keyId }
 	}),
 )
