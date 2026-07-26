@@ -101,6 +101,14 @@ const CATALOG: ReadonlyArray<CatalogEntry> = [
 
 export const catalogEntry = (id: IntegrationId): CatalogEntry => CATALOG.find((entry) => entry.id === id)!
 
+/**
+ * Whether a value names an integration in the catalog. External OAuth callbacks
+ * redirect back with `?integration=<id>`, so the id arrives as untrusted input
+ * and has to be narrowed before it reaches `catalogEntry`.
+ */
+export const isIntegrationId = (value: string): value is IntegrationId =>
+	CATALOG.some((entry) => entry.id === value)
+
 interface CardStatus {
 	readonly label: string
 	readonly variant: "success" | "warning" | "error" | "outline"
