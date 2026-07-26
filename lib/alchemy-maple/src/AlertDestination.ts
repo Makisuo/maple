@@ -59,7 +59,20 @@ export type AlertDestination = Resource<
  * })
  * ```
  */
-export const AlertDestination = Resource<AlertDestination>("Maple.AlertDestination")
+const AlertDestinationResource = Resource<AlertDestination>("Maple.AlertDestination")
+
+/**
+ * Alchemy types resource props as `InputProps<Props>` — a mapped type, which
+ * collapses a discriminated union to the keys its members share. That erases
+ * every channel-specific field (`webhook_url`, `integration_key`, `url`,
+ * `member_user_ids`), making the resource uncallable. Restore the union on the
+ * call signature; props are forwarded untouched, and `alertDestinationProps`
+ * keeps the round-trip honest in the type test.
+ */
+type AlertDestinationConstructor = Omit<typeof AlertDestinationResource, never> &
+	((id: string, props: AlertDestinationProps) => Effect.Effect<AlertDestination, never, Providers>)
+
+export const AlertDestination = AlertDestinationResource as AlertDestinationConstructor
 
 const WireDestination = Schema.Struct({
 	id: Schema.String,

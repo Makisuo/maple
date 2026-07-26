@@ -354,6 +354,7 @@
     "examples/alchemy-maple": {
       "name": "@maple-examples/alchemy",
       "devDependencies": {
+        "@cloudflare/workers-types": "4.20260603.1",
         "@maple-dev/alchemy": "workspace:*",
         "alchemy": "2.0.0-beta.64",
         "effect": "catalog:effect",
