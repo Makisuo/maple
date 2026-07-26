@@ -1,7 +1,7 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
-import { Clock, ConfigProvider, Effect, Layer, Schema } from "effect"
+import { Clock, ConfigProvider, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { OrgId } from "@maple/domain/http"
-import { aiTriageRuns, aiTriageSettings } from "@maple/db"
+import { aiTriageSettings, investigations } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Database } from "@/lib/DatabaseLive"
 import { Env } from "@/lib/Env"
@@ -36,14 +36,19 @@ const makeLayer = () => {
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const ORG = asOrgId("org_enqueue_test")
 
-const fakeBinding = () => {
-	const created: Array<{ id?: string }> = []
+const fakeBinding = (status = 202) => {
+	const created: Array<{ url: string; method: string; authorization: string | null; body: unknown }> = []
 	return {
 		created,
 		binding: {
-			create: async (options?: { id?: string }) => {
-				created.push({ id: options?.id })
-				return {}
+			fetch: async (request: Request) => {
+				created.push({
+					url: request.url,
+					method: request.method,
+					authorization: request.headers.get("authorization"),
+					body: await request.json(),
+				})
+				return new Response(null, { status })
 			},
 		},
 	}
@@ -67,7 +72,8 @@ const baseInput = (binding: unknown, incidentId: string) => ({
 	incidentKind: "error" as const,
 	incidentId,
 	context: { kind: "error" },
-	workflowBinding: binding,
+	agentBinding: binding,
+	internalServiceToken: Option.some(Redacted.make("test-internal-token")),
 })
 
 describe("maybeEnqueueTriage", () => {
@@ -88,10 +94,17 @@ describe("maybeEnqueueTriage", () => {
 			const first = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
 			assert.isTrue(first.enqueued)
 			assert.lengthOf(created, 1)
-			assert.strictEqual(created[0]?.id, first.runId)
+			assert.include(created[0]?.url ?? "", `inv-${first.investigationId}`)
+			assert.strictEqual(created[0]?.method, "POST")
+			assert.strictEqual(created[0]?.authorization, "Bearer maple_svc_test-internal-token")
+			const body = created[0]?.body as { readonly message?: string }
+			assert.include(body.message ?? "", '"incidentId":"incident-1"')
+			assert.include(body.message ?? "", '"snapshot"')
 
 			const second = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
-			assert.deepStrictEqual(second, { enqueued: false, reason: "duplicate" })
+			assert.isFalse(second.enqueued)
+			assert.strictEqual(second.reason, "duplicate")
+			assert.strictEqual(second.investigationId, first.investigationId)
 			assert.lengthOf(created, 1)
 		}).pipe(Effect.provide(makeLayer())),
 	)
@@ -115,17 +128,17 @@ describe("maybeEnqueueTriage", () => {
 
 			const result = yield* maybeEnqueueTriage({
 				...baseInput(undefined, "incident-1"),
-				workflowBinding: undefined,
+				agentBinding: undefined,
 			})
 			assert.isFalse(result.enqueued)
 			assert.strictEqual(result.reason, "no_binding")
 
 			const rows = yield* database.execute((db) =>
-				db.select().from(aiTriageRuns).where(eq(aiTriageRuns.orgId, ORG)),
+				db.select().from(investigations).where(eq(investigations.orgId, ORG)),
 			)
 			assert.lengthOf(rows, 1)
 			assert.strictEqual(rows[0]?.status, "failed")
-			assert.strictEqual(rows[0]?.error, "workflow_binding_unavailable")
+			assert.include(rows[0]?.error ?? "", "agent_unavailable")
 		}).pipe(Effect.provide(makeLayer())),
 	)
 
@@ -134,51 +147,76 @@ describe("maybeEnqueueTriage", () => {
 			yield* enableSettings
 			const database = yield* Database
 			const failingBinding = {
-				create: async () => {
-					throw new Error("workflow boom")
+				fetch: async () => {
+					throw new Error("agent boom")
 				},
 			}
 
 			const result = yield* maybeEnqueueTriage(baseInput(failingBinding, "incident-1"))
-			assert.deepStrictEqual(result, { enqueued: false, reason: "error" })
+			assert.isFalse(result.enqueued)
+			assert.strictEqual(result.reason, "error")
 
 			const rows = yield* database.execute((db) =>
-				db.select().from(aiTriageRuns).where(eq(aiTriageRuns.orgId, ORG)),
+				db.select().from(investigations).where(eq(investigations.orgId, ORG)),
 			)
 			assert.lengthOf(rows, 1)
 			assert.strictEqual(rows[0]?.status, "failed")
-			assert.strictEqual(rows[0]?.error, "workflow_create_failed: workflow boom")
+			assert.include(rows[0]?.error ?? "", "start_failed")
 		}).pipe(Effect.provide(makeLayer())),
 	)
 
-	it.effect("reclaims a stranded non-terminal run instead of reporting duplicate", () =>
+	it.effect("marks terminal agent rejections as non-retryable", () =>
+		Effect.gen(function* () {
+			yield* enableSettings
+			const database = yield* Database
+			const { binding } = fakeBinding(401)
+
+			const result = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
+			assert.isFalse(result.enqueued)
+			assert.strictEqual(result.reason, "rejected")
+
+			const rows = yield* database.execute((db) =>
+				db.select().from(investigations).where(eq(investigations.orgId, ORG)),
+			)
+			assert.strictEqual(rows[0]?.status, "failed")
+			assert.include(rows[0]?.error ?? "", "start_rejected")
+			assert.notInclude(rows[0]?.error ?? "", "retry")
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("marks a stranded investigation failed with a retryable reason", () =>
 		Effect.gen(function* () {
 			yield* enableSettings
 			const database = yield* Database
 			const nowMs = yield* Clock.currentTimeMillis
-			const { binding, created } = fakeBinding()
+			const { binding } = fakeBinding()
 
-			// First enqueue claims the slot, then we simulate a dead workflow: the
-			// row stays `running` and stops making progress for >15 minutes.
+			// First start claims the slot, then we simulate an autonomous turn
+			// that stopped making progress for more than 15 minutes.
 			const first = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
 			assert.isTrue(first.enqueued)
 			yield* database.execute((db) =>
 				db
-					.update(aiTriageRuns)
-					.set({ status: "running", updatedAt: new Date(nowMs - 16 * 60 * 1000) })
-					.where(eq(aiTriageRuns.orgId, ORG)),
+					.update(investigations)
+					.set({
+						status: "investigating",
+						startedAt: new Date(nowMs - 16 * 60 * 1000),
+						updatedAt: new Date(nowMs - 16 * 60 * 1000),
+					})
+					.where(eq(investigations.orgId, ORG)),
 			)
 
 			const second = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
-			assert.isTrue(second.enqueued)
-			assert.lengthOf(created, 2)
+			assert.isFalse(second.enqueued)
+			assert.strictEqual(second.reason, "duplicate")
 
 			const rows = yield* database.execute((db) =>
-				db.select().from(aiTriageRuns).where(eq(aiTriageRuns.orgId, ORG)),
+				db.select().from(investigations).where(eq(investigations.orgId, ORG)),
 			)
 			assert.lengthOf(rows, 1)
-			assert.strictEqual(rows[0]?.id, second.runId)
-			assert.strictEqual(rows[0]?.status, "queued")
+			assert.strictEqual(rows[0]?.id, first.investigationId)
+			assert.strictEqual(rows[0]?.status, "failed")
+			assert.include(rows[0]?.error ?? "", "retry")
 		}).pipe(Effect.provide(makeLayer())),
 	)
 
@@ -191,11 +229,15 @@ describe("maybeEnqueueTriage", () => {
 			const first = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
 			assert.isTrue(first.enqueued)
 			yield* database.execute((db) =>
-				db.update(aiTriageRuns).set({ status: "running" }).where(eq(aiTriageRuns.orgId, ORG)),
+				db
+					.update(investigations)
+					.set({ status: "investigating" })
+					.where(eq(investigations.orgId, ORG)),
 			)
 
 			const second = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
-			assert.deepStrictEqual(second, { enqueued: false, reason: "duplicate" })
+			assert.isFalse(second.enqueued)
+			assert.strictEqual(second.reason, "duplicate")
 			assert.lengthOf(created, 1)
 		}).pipe(Effect.provide(makeLayer())),
 	)

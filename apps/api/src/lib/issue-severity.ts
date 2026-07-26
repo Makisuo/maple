@@ -7,7 +7,14 @@
  */
 import { createHash, randomUUID } from "node:crypto"
 import type { AiTriageResult, IssueSeverity } from "@maple/domain/http"
-import { ActorId, ErrorIssueEventId, ErrorIssueId, OrgId } from "@maple/domain/primitives"
+import {
+	ActorId,
+	ErrorIssueEventId,
+	ErrorIssueId,
+	type InvestigationId,
+	IssueEscalationId,
+	OrgId,
+} from "@maple/domain/primitives"
 import { actors, errorIssues, errorIssueEvents, issueEscalations } from "@maple/db"
 import type { MapleDatabaseTransaction, MaplePgClient } from "@maple/db/client"
 import { and, eq, ne, isNull, or } from "drizzle-orm"
@@ -24,6 +31,7 @@ export type TriageSeverityDb = MaplePgClient | MapleDatabaseTransaction
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId)
 const decodeEventId = Schema.decodeUnknownSync(ErrorIssueEventId)
+const decodeEscalationId = Schema.decodeUnknownSync(IssueEscalationId)
 
 const SEVERITY_RANK: Record<IssueSeverity, number> = {
 	critical: 4,
@@ -113,6 +121,8 @@ export interface ApplyTriageSeverityInput {
 	readonly orgId: OrgId
 	readonly issueId: ErrorIssueId
 	readonly runId: string
+	/** Durable investigation id; omitted by the short-lived legacy workflow. */
+	readonly investigationId?: InvestigationId
 	readonly severity: IssueSeverity
 	readonly confidence: AiTriageResult["confidence"]
 	readonly timestamp: number
@@ -196,17 +206,19 @@ export const applyTriageSeverity = async (
 		await db
 			.insert(issueEscalations)
 			.values({
-				id: deterministicUuid(`ai-triage-escalation:${input.runId}`),
+				id: decodeEscalationId(deterministicUuid(`ai-triage-escalation:${input.runId}`)),
 				orgId: input.orgId,
 				issueId: input.issueId,
 				severity: input.severity,
 				source: "ai",
 				reason,
 				runId: input.runId,
+				investigationId: input.investigationId ?? null,
 				payloadJson: {
 					confidence: input.confidence,
 					...(input.result ? { triage: input.result } : {}),
 				},
+				deliveryResultsJson: [],
 				status: "queued",
 				attempts: 0,
 				dedupeKey: escalationDedupeKey(input.orgId, input.issueId, input.severity),

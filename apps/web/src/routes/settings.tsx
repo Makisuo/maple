@@ -11,8 +11,7 @@ import { ApiKeysSection } from "@/components/settings/api-keys-section"
 import { DeveloperSection } from "@/components/settings/developer-section"
 import { McpSection } from "@/components/settings/mcp-section"
 import { NotificationsSection } from "@/components/settings/notifications-section"
-import { EscalationPolicySection } from "@/components/settings/escalation-policy-section"
-import { AiTriageSettingsSection } from "@/components/settings/ai-triage-settings-section"
+import { AutomationSection } from "@/components/settings/automation-section"
 import { OrgClickHouseSettingsSection } from "@/components/settings/org-clickhouse-settings-section"
 import { OrganizationSection } from "@/components/settings/organization-section"
 import {
@@ -24,7 +23,7 @@ import {
 } from "@/components/settings/settings-nav"
 
 /** Pre-hub tabs that moved to /integrations — kept decodable so old deep links redirect. */
-const legacyTabValues = ["connectors", "integrations"] as const
+const legacyTabValues = ["connectors", "integrations", "escalations", "ai"] as const
 
 const SettingsSearch = Schema.Struct({
 	tab: Schema.optional(Schema.Literals([...settingsTabValues, ...legacyTabValues])),
@@ -51,6 +50,9 @@ function SettingsPage() {
 	// Pre-hub deep links: these tabs moved to the Integrations hub.
 	if (search.tab === "connectors" || search.tab === "integrations") {
 		return <Navigate to="/integrations" replace />
+	}
+	if (search.tab === "escalations" || search.tab === "ai") {
+		return <Navigate to="/settings" search={{ tab: "automation" }} replace />
 	}
 
 	const activeTab: SettingsTab = (
@@ -113,8 +115,9 @@ function SettingsPage() {
 			)}
 			{activeTab === "mcp" && <McpSection />}
 			{activeTab === "notifications" && <NotificationsSection />}
-			{activeTab === "escalations" && <EscalationPolicySection isAdmin={isAdmin} />}
-			{activeTab === "ai" && <AiTriageSettingsSection isAdmin={isAdmin} hasEntitlement={canAccessAi} />}
+			{activeTab === "automation" && (
+				<AutomationSection isAdmin={isAdmin} hasEntitlement={canAccessAi} />
+			)}
 			{activeTab === "billing" && <BillingSection />}
 			{activeTab === "data-platform" && (
 				<OrgClickHouseSettingsSection isAdmin={isAdmin} hasEntitlement={canAccessDataPlatform} />

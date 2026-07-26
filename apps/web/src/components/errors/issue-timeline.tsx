@@ -1,4 +1,4 @@
-import type { ErrorIssueEventDocument } from "@maple/domain/http"
+import type { ErrorIssueEventDocument, IssueEscalationAttemptDocument } from "@maple/domain/http"
 import { cn } from "@maple/ui/lib/utils"
 import { ActorChip } from "./actor-chip"
 import { formatRelativeTime } from "@/lib/format"
@@ -29,12 +29,12 @@ const DOT_CLASS: Record<ErrorIssueEventDocument["type"], string> = {
 	release: "bg-violet-500/60",
 	lease_expired: "bg-amber-500",
 	comment: "bg-muted-foreground",
-	agent_note: "bg-violet-500 shadow-[0_0_0_3px_oklch(0.65_0.16_290/0.25)]",
+	agent_note: "bg-violet-500",
 	fix_proposed: "bg-success",
 	regression: "bg-destructive",
 	snooze: "bg-muted-foreground/70",
 	unsnooze: "bg-muted-foreground/70",
-	ai_triage: "bg-violet-500 shadow-[0_0_0_3px_oklch(0.65_0.16_290/0.25)]",
+	ai_triage: "bg-violet-500",
 	anomaly_linked: "bg-amber-500",
 	severity_change: "bg-orange-500",
 }
@@ -97,14 +97,63 @@ function renderPayload(event: ErrorIssueEventDocument): string | null {
 	}
 }
 
-export function IssueTimeline({ events }: { events: ReadonlyArray<ErrorIssueEventDocument> }) {
-	if (events.length === 0) {
+export function IssueTimeline({
+	events,
+	escalations = [],
+}: {
+	events: ReadonlyArray<ErrorIssueEventDocument>
+	escalations?: ReadonlyArray<IssueEscalationAttemptDocument>
+}) {
+	const items = [
+		...events.map((event) => ({ kind: "event" as const, createdAt: event.createdAt, event })),
+		...escalations.map((escalation) => ({
+			kind: "escalation" as const,
+			createdAt: escalation.createdAt,
+			escalation,
+		})),
+	].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+
+	if (items.length === 0) {
 		return <div className="py-6 text-center text-sm text-muted-foreground">No events recorded yet.</div>
 	}
 
 	return (
 		<ol className="relative ml-16 border-l border-border/60">
-			{events.map((event) => {
+			{items.map((item) => {
+				if (item.kind === "escalation") {
+					const escalation = item.escalation
+					const destinations = escalation.deliveries
+						.map(
+							(delivery) =>
+								`${delivery.destinationName ?? delivery.destinationId}: ${delivery.status}`,
+						)
+						.join(", ")
+					const body =
+						destinations ||
+						escalation.skipReason?.replaceAll("_", " ") ||
+						`${escalation.attempts} delivery attempt${escalation.attempts === 1 ? "" : "s"}`
+					return (
+						<li key={`escalation:${escalation.id}`} className="relative py-3 pl-4">
+							<span className="absolute -left-16 top-4 w-12 text-right text-[11px] tabular-nums text-muted-foreground">
+								{formatRelativeTime(escalation.createdAt)}
+							</span>
+							<span
+								aria-hidden
+								className="absolute -left-[5px] top-4 block size-2.5 rounded-full bg-orange-500 ring-2 ring-background"
+							/>
+							<div className="flex flex-wrap items-center gap-2 text-sm">
+								<span className="font-medium text-foreground">Escalation</span>
+								<span className="font-mono text-[11px] capitalize text-muted-foreground">
+									{escalation.severity} · {escalation.status}
+								</span>
+							</div>
+							<div className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+								{body}
+							</div>
+						</li>
+					)
+				}
+				const event = item.event
 				const body = renderPayload(event)
 				return (
 					<li key={event.id} className="relative py-3 pl-4">

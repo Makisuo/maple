@@ -1,5 +1,5 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { OrgId } from "@maple/domain/http"
 import { AlertIncidentId, AlertRuleId } from "@maple/domain/primitives"
@@ -64,7 +64,8 @@ const baseInput = (overrides: Partial<Parameters<typeof upsertAlertIssue>[0]> = 
 	incidentId: INCIDENT_1,
 	serviceName: "checkout",
 	timestamp: T0,
-	workflowBinding: undefined,
+	agentBinding: undefined,
+	internalServiceToken: Option.none(),
 	...overrides,
 })
 

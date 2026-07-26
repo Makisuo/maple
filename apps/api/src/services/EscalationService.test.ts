@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Clock, ConfigProvider, Effect, Layer, Schema } from "effect"
-import { ErrorIssueId, OrgId } from "@maple/domain/http"
-import { errorIssues, issueEscalationPolicies, issueEscalations } from "@maple/db"
+import { AlertDestinationId, ErrorIssueId, IssueEscalationId, OrgId } from "@maple/domain/http"
+import { alertDestinations, errorIssues, issueEscalationPolicies, issueEscalations } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Database } from "@/lib/DatabaseLive"
 import { Env } from "@/lib/Env"
@@ -48,7 +48,20 @@ const makeHarness = (
 				if (options.dieOnDispatch) {
 					throw new Error("dispatcher exploded")
 				}
-				return dispatchResult
+				return {
+					...dispatchResult,
+					destinations: destinationIds.map((destinationId) => ({
+						destinationId,
+						destinationName: "On-call",
+						status:
+							dispatchResult.delivered > 0
+								? ("delivered" as const)
+								: dispatchResult.failed > 0
+									? ("failed" as const)
+									: ("missing" as const),
+						error: dispatchResult.failed > 0 ? "delivery_failed" : null,
+					})),
+				}
 			}),
 	})
 	const testDb = createTestDb(createdDbs)
@@ -59,8 +72,11 @@ const makeHarness = (
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asIssueId = Schema.decodeUnknownSync(ErrorIssueId)
+const asDestinationId = Schema.decodeUnknownSync(AlertDestinationId)
+const asEscalationId = Schema.decodeUnknownSync(IssueEscalationId)
 const asRecord = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))
 const ORG = asOrgId("org_escalation_test")
+const DESTINATION_ID = asDestinationId("00000000-0000-4000-8000-000000000001")
 
 // Seed timestamps come from the Effect Clock (the TestClock under it.effect)
 // so rows and the service — which reads Clock.currentTimeMillis — share one
@@ -97,7 +113,7 @@ const seedEscalation = (
 		const now = yield* Clock.currentTimeMillis
 		yield* database.execute((db) =>
 			db.insert(issueEscalations).values({
-				id: randomUUID(),
+				id: asEscalationId(randomUUID()),
 				orgId: ORG,
 				issueId,
 				severity: "high",
@@ -118,6 +134,26 @@ const seedPolicy = (rulesJson: ReadonlyArray<unknown>, enabled = true) =>
 		const database = yield* Database
 		const now = yield* Clock.currentTimeMillis
 		yield* database.execute((db) =>
+			db
+				.insert(alertDestinations)
+				.values({
+					id: DESTINATION_ID,
+					orgId: ORG,
+					name: "On-call",
+					type: "webhook",
+					enabled: true,
+					configJson: { url: "https://example.test/escalations" },
+					secretCiphertext: "test",
+					secretIv: "test",
+					secretTag: "test",
+					createdAt: new Date(now),
+					updatedAt: new Date(now),
+					createdBy: "user_test",
+					updatedBy: "user_test",
+				})
+				.onConflictDoNothing(),
+		)
+		yield* database.execute((db) =>
 			db.insert(issueEscalationPolicies).values({
 				orgId: ORG,
 				enabled,
@@ -136,7 +172,7 @@ const loadEscalations = Effect.gen(function* () {
 })
 
 const highRule = (overrides: Record<string, unknown> = {}) => [
-	{ severity: "high", destinationIds: [randomUUID()], ...overrides },
+	{ severity: "high", destinationIds: [DESTINATION_ID], ...overrides },
 ]
 
 describe("EscalationService.runEscalationTick", () => {
@@ -161,6 +197,14 @@ describe("EscalationService.runEscalationTick", () => {
 			const rows = yield* loadEscalations
 			assert.strictEqual(rows[0]?.status, "sent")
 			assert.strictEqual(rows[0]?.attempts, 1)
+			assert.deepStrictEqual(rows[0]?.deliveryResultsJson, [
+				{
+					destinationId: DESTINATION_ID,
+					destinationName: "On-call",
+					status: "delivered",
+					error: null,
+				},
+			])
 		}).pipe(Effect.provide(layer))
 	})
 
@@ -291,19 +335,26 @@ describe("EscalationService.runEscalationTick", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
-	it.effect("skips when dispatch reaches no enabled destinations", () => {
-		const { calls, layer } = makeHarness({ delivered: 0, failed: 0 })
+	it.effect("skips when the route only contains disabled destinations", () => {
+		const { calls, layer } = makeHarness()
 		return Effect.gen(function* () {
 			const issueId = asIssueId(randomUUID())
 			yield* seedIssue(issueId)
 			yield* seedEscalation(issueId)
 			yield* seedPolicy(highRule())
+			const database = yield* Database
+			yield* database.execute((db) =>
+				db
+					.update(alertDestinations)
+					.set({ enabled: false })
+					.where(eq(alertDestinations.id, DESTINATION_ID)),
+			)
 
 			const service = yield* EscalationService
 			const result = yield* service.runEscalationTick()
 
 			assert.deepStrictEqual(result, { processed: 1, sent: 0, skipped: 1, failed: 0, retried: 0 })
-			assert.lengthOf(calls, 1)
+			assert.lengthOf(calls, 0)
 			const rows = yield* loadEscalations
 			assert.strictEqual(rows[0]?.status, "skipped")
 			assert.strictEqual(rows[0]?.error, "no_enabled_destinations")
@@ -352,6 +403,14 @@ describe("EscalationService.runEscalationTick", () => {
 			let rows = yield* loadEscalations
 			assert.strictEqual(rows[0]?.status, "queued")
 			assert.strictEqual(rows[0]?.attempts, 1)
+			assert.deepStrictEqual(rows[0]?.deliveryResultsJson, [
+				{
+					destinationId: DESTINATION_ID,
+					destinationName: "On-call",
+					status: "failed",
+					error: "delivery_failed",
+				},
+			])
 
 			const second = yield* service.runEscalationTick()
 			assert.strictEqual(second.retried, 1)
@@ -361,6 +420,14 @@ describe("EscalationService.runEscalationTick", () => {
 			rows = yield* loadEscalations
 			assert.strictEqual(rows[0]?.status, "failed")
 			assert.strictEqual(rows[0]?.attempts, 3)
+			assert.deepStrictEqual(rows[0]?.deliveryResultsJson, [
+				{
+					destinationId: DESTINATION_ID,
+					destinationName: "On-call",
+					status: "failed",
+					error: "delivery_failed",
+				},
+			])
 		}).pipe(Effect.provide(layer))
 	})
 })

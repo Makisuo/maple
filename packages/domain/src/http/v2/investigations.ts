@@ -6,7 +6,13 @@ import { InvestigationConfidence, InvestigationSeededBy, InvestigationStatus } f
 import { TraceId, UserId } from "../../primitives"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
+import {
+	V2InvalidRequestError,
+	V2NotFoundError,
+	V2RateLimitError,
+	V2ServiceUnavailableError,
+	V2UpstreamError,
+} from "./errors"
 import { encodePublicId, PublicIdPrefixes } from "./public-id"
 import {
 	AlertIncidentPublicId,
@@ -138,6 +144,32 @@ const V2AiTriageResult = Schema.Struct({
 	}),
 )
 
+const V2InvestigationSnapshot = Schema.Struct({
+	title: Schema.String,
+	scope: Schema.NullOr(Schema.String),
+	status: Schema.String,
+	severity: Schema.NullOr(IssueSeverity),
+	facts: Schema.Array(
+		Schema.Struct({
+			label: Schema.String,
+			value: Schema.String,
+		}),
+	),
+	references: Schema.Array(
+		Schema.Struct({
+			label: Schema.String,
+			url: Schema.String,
+		}),
+	),
+	incidentStartedAt: Schema.NullOr(Timestamp),
+	incidentEndedAt: Schema.NullOr(Timestamp),
+}).pipe(
+	Schema.encodeKeys({
+		incidentStartedAt: "incident_started_at",
+		incidentEndedAt: "incident_ended_at",
+	}),
+)
+
 // ---------------------------------------------------------------------------
 // Resource
 // ---------------------------------------------------------------------------
@@ -151,6 +183,16 @@ const investigationExample = {
 		incident_kind: "error",
 		incident_id: encodePublicId(PublicIdPrefixes.errorIncident, "018f2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"),
 		issue_id: "iss_YofPTrK9782DWwcnXhpcCw",
+	},
+	snapshot: {
+		title: "Checkout timeout rate increased",
+		scope: "checkout-api",
+		status: "open",
+		severity: "high",
+		facts: [],
+		references: [],
+		incident_started_at: "2026-07-15T09:04:00.000Z",
+		incident_ended_at: null,
 	},
 	report: null,
 	model: "claude-opus-4-8",
@@ -178,6 +220,10 @@ export const V2Investigation = Schema.Struct({
 		examples: ["diagnosed"],
 	}),
 	subject: V2InvestigationSubject,
+	snapshot: V2InvestigationSnapshot.annotate({
+		description:
+			"A display-ready snapshot captured when the investigation was opened, retained even after source telemetry expires.",
+	}),
 	report: Schema.NullOr(V2AiTriageResult).annotate({
 		description:
 			"The latest structured AI diagnosis, or `null` until the first diagnosis lands. The report's internal fields are an evolving shape — treat it as a diagnosis blob, not a stability-committed schema.",
@@ -226,6 +272,7 @@ export type V2Investigation = Schema.Schema.Type<typeof V2Investigation>
 
 export const V2InvestigationCreateParams = Schema.Struct({
 	subject: V2InvestigationCreateSubject,
+	snapshot: Schema.optionalKey(V2InvestigationSnapshot),
 }).annotate({
 	identifier: "InvestigationCreateParams",
 	title: "Investigation create parameters",
@@ -285,6 +332,7 @@ export const V2InvestigationsListQuery = Schema.Struct({
 export type V2InvestigationsListQuery = Schema.Schema.Type<typeof V2InvestigationsListQuery>
 
 const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+const startErrors = [...commonErrors, V2RateLimitError, V2UpstreamError] as const
 
 const InvestigationList = ListOf(V2Investigation).annotate({
 	identifier: "InvestigationList",
@@ -325,13 +373,27 @@ export class V2InvestigationsApiGroup extends HttpApiGroup.make("investigations"
 		HttpApiEndpoint.post("create", "/", {
 			payload: V2InvestigationCreateParams,
 			success: V2Investigation,
-			error: [...commonErrors],
+			error: [...startErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "createInvestigation",
 				summary: "Open an investigation",
 				description:
 					"Opens an investigation over an incident or an ad-hoc question. Incident-anchored investigations return the existing war-room if one is already open. Requires the `investigations:write` scope.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("restart", "/:id/restart", {
+			params: { id: InvestigationPublicId },
+			success: V2Investigation,
+			error: [...startErrors, V2NotFoundError],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "restartInvestigation",
+				summary: "Restart an investigation",
+				description:
+					"Starts a replacement autonomous pass while retaining the previous report until a new diagnosis lands. Requires the `investigations:write` scope.",
 			}),
 		),
 	)

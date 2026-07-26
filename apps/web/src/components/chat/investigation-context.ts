@@ -4,7 +4,7 @@ import { narrowAlertSignal } from "@/components/ai-triage/breach"
 import { signalLabel, type AlertContext } from "./alert-context"
 
 /** The three things Maple can investigate. Kind is carried by the attached resource, not the URL. */
-const InvestigationKindSchema = Schema.Literals(["alert", "anomaly", "error"])
+const InvestigationKindSchema = Schema.Literals(["alert", "anomaly", "error", "freeform"])
 export type InvestigationKind = typeof InvestigationKindSchema.Type
 
 /** A single labelled fact — shown on the attachment card and folded into the chat preamble. */
@@ -130,6 +130,7 @@ const KIND_NOUN: Record<InvestigationKind, string> = {
 	alert: "alert",
 	anomaly: "anomaly",
 	error: "error",
+	freeform: "question",
 }
 
 export const investigationNoun = (kind: InvestigationKind): string => KIND_NOUN[kind]
@@ -138,6 +139,15 @@ export const investigationNoun = (kind: InvestigationKind): string => KIND_NOUN[
 export const investigationSuggestions = (ctx: InvestigationContext): string[] => {
 	const scope = ctx.scope ?? ctx.refs?.serviceName ?? "the affected service"
 	const windowM = ctx.windowMinutes ?? 15
+
+	if (ctx.kind === "freeform") {
+		return [
+			"Summarize the strongest evidence",
+			"What data is still missing?",
+			"Show the most relevant traces",
+			"What should we do next?",
+		]
+	}
 
 	if (ctx.kind === "error") {
 		return [

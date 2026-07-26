@@ -256,6 +256,15 @@ export const rateLimited = () =>
 		},
 	})
 
+export const investigationQuotaReached = (retryableAt: string) =>
+	new V2RateLimitError({
+		error: {
+			type: "rate_limit_error",
+			code: "investigation_daily_quota",
+			message: `Daily investigation quota reached. Retry after ${retryableAt}.`,
+		},
+	})
+
 export const upstreamError = (code: string, message: string) =>
 	new V2UpstreamError({ error: { type: "api_error", code, message } })
 

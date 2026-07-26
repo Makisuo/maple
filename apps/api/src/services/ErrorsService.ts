@@ -26,6 +26,13 @@ import {
 	type ErrorNotificationPolicyUpsertRequest,
 	ErrorPersistenceError,
 	ErrorValidationError,
+	EscalationDestinationOutcome,
+	EscalationPolicyEvaluationDocument,
+	type EscalationPolicyEvaluationRequest,
+	EscalationSkipReason,
+	IssueEscalationAttemptDocument,
+	IssueEscalationAttemptsResponse,
+	IssueEscalationId as IssueEscalationIdSchema,
 	IssueEscalationPolicyDocument,
 	IssueEscalationPolicyRule,
 	type IssueEscalationPolicyUpsertRequest,
@@ -62,6 +69,7 @@ import {
 	type ErrorNotificationPolicyRow,
 	issueEscalationPolicies,
 	type IssueEscalationPolicyRow,
+	type IssueEscalationRow,
 	issueEscalations,
 	orgClickHouseSettings,
 	orgIngestKeys,
@@ -70,8 +78,9 @@ import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "driz
 import { CH, parseWarehouseDateTime, warehouseDateTimeToIso } from "@maple/query-engine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
-import { AI_TRIAGE_WORKFLOW_BINDING, maybeEnqueueTriage } from "../lib/ai-triage-enqueue"
+import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "../lib/ai-triage-enqueue"
 import { escalationDedupeKey, escalationReasonFor } from "../lib/issue-severity"
+import { evaluateEscalationPolicy } from "../lib/escalation-policy"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "../lib/DatabaseLive"
 import { selectDistinctOrgIds } from "../lib/distinct-org-ids"
@@ -91,6 +100,7 @@ const encodeIssueSeverityListCursor = (fields: IssueSeverityListCursorFields): s
 const decodeErrorIncidentIdSync = Schema.decodeUnknownSync(ErrorIncidentDocument.fields.id)
 const decodeActorIdSync = Schema.decodeUnknownSync(ActorIdSchema)
 const decodeEventIdSync = Schema.decodeUnknownSync(ErrorIssueEventIdSchema)
+const decodeIssueEscalationIdSync = Schema.decodeUnknownSync(IssueEscalationIdSchema)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.firstSeenAt)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
@@ -425,6 +435,18 @@ export interface ErrorsServiceShape {
 		userId: UserId,
 		request: IssueEscalationPolicyUpsertRequest,
 	) => Effect.Effect<IssueEscalationPolicyDocument, ErrorPersistenceError | ErrorValidationError>
+	readonly evaluateEscalationPolicy: (
+		orgId: OrgId,
+		request: EscalationPolicyEvaluationRequest,
+	) => Effect.Effect<EscalationPolicyEvaluationDocument, ErrorPersistenceError>
+	readonly listIssueEscalations: (
+		orgId: OrgId,
+		issueId: ErrorIssueId,
+	) => Effect.Effect<IssueEscalationAttemptsResponse, ErrorPersistenceError>
+	readonly listRecentEscalations: (
+		orgId: OrgId,
+		limit?: number,
+	) => Effect.Effect<IssueEscalationAttemptsResponse, ErrorPersistenceError>
 	readonly runTick: () => Effect.Effect<
 		{
 			readonly orgsProcessed: number
@@ -454,15 +476,17 @@ const make: Effect.Effect<
 	// Optional: present only inside a Worker isolate. Used to kick off the
 	// AI triage Workflow when an incident opens (org opt-in).
 	const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
-	const aiTriageWorkflowBinding = Option.match(workerEnv, {
+	const investigationAgentBinding = Option.match(workerEnv, {
 		onNone: () => undefined,
-		onSome: (e) => e[AI_TRIAGE_WORKFLOW_BINDING],
+		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
 	})
+	const investigationServiceToken = env.INTERNAL_SERVICE_TOKEN
 
 	const newErrorIssueId = () => decodeErrorIssueIdSync(randomUUID())
 	const newErrorIncidentId = () => decodeErrorIncidentIdSync(randomUUID())
 	const newActorId = () => decodeActorIdSync(randomUUID())
 	const newEventId = () => decodeEventIdSync(randomUUID())
+	const newIssueEscalationId = () => decodeIssueEscalationIdSync(randomUUID())
 
 	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 		database.execute(fn).pipe(
@@ -1723,14 +1747,16 @@ const make: Effect.Effect<
 			db
 				.insert(issueEscalations)
 				.values({
-					id: randomUUID(),
+					id: newIssueEscalationId(),
 					orgId,
 					issueId,
 					severity: to,
 					source,
 					reason,
 					runId: null,
+					investigationId: null,
 					payloadJson: {},
+					deliveryResultsJson: [],
 					status: "queued",
 					attempts: 0,
 					dedupeKey: escalationDedupeKey(orgId, issueId, to),
@@ -2146,6 +2172,93 @@ const make: Effect.Effect<
 		)
 
 		return escalationRowToDocument(merged)
+	})
+
+	const decodeEscalationDeliveries = Schema.decodeUnknownOption(Schema.Array(EscalationDestinationOutcome))
+	const decodeEscalationSkipReason = Schema.decodeUnknownOption(EscalationSkipReason)
+
+	const escalationAttemptDocument = (row: IssueEscalationRow) =>
+		new IssueEscalationAttemptDocument({
+			id: row.id,
+			issueId: row.issueId,
+			investigationId: row.investigationId,
+			severity: row.severity,
+			source: row.source,
+			reason: row.reason,
+			status: row.status,
+			attempts: row.attempts,
+			skipReason:
+				row.status === "skipped" ? Option.getOrNull(decodeEscalationSkipReason(row.error)) : null,
+			deliveries: Option.getOrElse(decodeEscalationDeliveries(row.deliveryResultsJson), () => []),
+			createdAt: isoFromDate(row.createdAt),
+			processedAt: row.processedAt ? isoFromDate(row.processedAt) : null,
+		})
+
+	const evaluatePolicy: ErrorsServiceShape["evaluateEscalationPolicy"] = Effect.fn(
+		"ErrorsService.evaluateEscalationPolicy",
+	)(function* (orgId, request) {
+		yield* Effect.annotateCurrentSpan({ orgId })
+		const policy = yield* loadEscalationPolicyRow(orgId)
+		const rules =
+			policy == null ? [] : Option.getOrElse(decodeEscalationRules(policy.rulesJson), () => [])
+		const referencedIds = Array.from(new Set(rules.flatMap((rule) => rule.destinationIds)))
+		const enabledRows =
+			referencedIds.length === 0
+				? []
+				: yield* dbExecute((db) =>
+						db
+							.select({ id: alertDestinations.id })
+							.from(alertDestinations)
+							.where(
+								and(
+									eq(alertDestinations.orgId, orgId),
+									eq(alertDestinations.enabled, true),
+									inArray(alertDestinations.id, referencedIds),
+								),
+							),
+					)
+		const decision = evaluateEscalationPolicy({
+			enabled: policy?.enabled ?? false,
+			rules,
+			severity: request.severity,
+			source: request.source,
+			...(request.confidence === undefined ? {} : { confidence: request.confidence }),
+			enabledDestinationIds: new Set(enabledRows.map((row) => row.id)),
+		})
+		return new EscalationPolicyEvaluationDocument({
+			outcome: decision.outcome,
+			destinationIds: [...decision.destinationIds],
+			skipReason: decision.skipReason,
+		})
+	})
+
+	const listIssueEscalations: ErrorsServiceShape["listIssueEscalations"] = Effect.fn(
+		"ErrorsService.listIssueEscalations",
+	)(function* (orgId, issueId) {
+		yield* Effect.annotateCurrentSpan({ orgId, issueId })
+		const rows = yield* dbExecute((db) =>
+			db
+				.select()
+				.from(issueEscalations)
+				.where(and(eq(issueEscalations.orgId, orgId), eq(issueEscalations.issueId, issueId)))
+				.orderBy(desc(issueEscalations.createdAt)),
+		)
+		return new IssueEscalationAttemptsResponse({ attempts: rows.map(escalationAttemptDocument) })
+	})
+
+	const listRecentEscalations: ErrorsServiceShape["listRecentEscalations"] = Effect.fn(
+		"ErrorsService.listRecentEscalations",
+	)(function* (orgId, limit) {
+		yield* Effect.annotateCurrentSpan({ orgId })
+		const rows = yield* dbExecute((db) =>
+			db
+				.select()
+				.from(issueEscalations)
+				.where(eq(issueEscalations.orgId, orgId))
+				.orderBy(desc(issueEscalations.createdAt))
+				.limit(limit ?? 25),
+		)
+		return new IssueEscalationAttemptsResponse({ attempts: rows.map(escalationAttemptDocument) })
 	})
 
 	const issueLinkUrl = (issueId: string) =>
@@ -2675,7 +2788,8 @@ const make: Effect.Effect<
 							lastSeen: row.lastSeen,
 							issueId,
 						},
-						workflowBinding: aiTriageWorkflowBinding,
+						agentBinding: investigationAgentBinding,
+						internalServiceToken: investigationServiceToken,
 					}).pipe(Effect.provideService(Database, database))
 
 					return { touched: 1, opened: 1 }
@@ -3044,6 +3158,9 @@ const make: Effect.Effect<
 		upsertNotificationPolicy,
 		getEscalationPolicy,
 		upsertEscalationPolicy,
+		evaluateEscalationPolicy: evaluatePolicy,
+		listIssueEscalations,
+		listRecentEscalations,
 		runTick,
 	})
 })

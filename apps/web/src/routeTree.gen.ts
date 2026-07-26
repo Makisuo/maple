@@ -37,6 +37,7 @@ import { Route as ServicesIndexRouteImport } from './routes/services/index'
 import { Route as ReplaysIndexRouteImport } from './routes/replays/index'
 import { Route as MetricsIndexRouteImport } from './routes/metrics/index'
 import { Route as LogsIndexRouteImport } from './routes/logs/index'
+import { Route as InvestigationsIndexRouteImport } from './routes/investigations/index'
 import { Route as InfraIndexRouteImport } from './routes/infra/index'
 import { Route as ErrorsIndexRouteImport } from './routes/errors/index'
 import { Route as DashboardsIndexRouteImport } from './routes/dashboards/index'
@@ -210,6 +211,11 @@ const MetricsIndexRoute = MetricsIndexRouteImport.update({
 const LogsIndexRoute = LogsIndexRouteImport.update({
   id: '/logs/',
   path: '/logs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvestigationsIndexRoute = InvestigationsIndexRouteImport.update({
+  id: '/investigations/',
+  path: '/investigations/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InfraIndexRoute = InfraIndexRouteImport.update({
@@ -436,6 +442,7 @@ export interface FileRoutesByFullPath {
   '/dashboards/': typeof DashboardsIndexRoute
   '/errors/': typeof ErrorsIndexRoute
   '/infra/': typeof InfraIndexRoute
+  '/investigations/': typeof InvestigationsIndexRoute
   '/logs/': typeof LogsIndexRoute
   '/metrics/': typeof MetricsIndexRoute
   '/replays/': typeof ReplaysIndexRoute
@@ -500,6 +507,7 @@ export interface FileRoutesByTo {
   '/dashboards': typeof DashboardsIndexRoute
   '/errors': typeof ErrorsIndexRoute
   '/infra': typeof InfraIndexRoute
+  '/investigations': typeof InvestigationsIndexRoute
   '/logs': typeof LogsIndexRoute
   '/metrics': typeof MetricsIndexRoute
   '/replays': typeof ReplaysIndexRoute
@@ -565,6 +573,7 @@ export interface FileRoutesById {
   '/dashboards/': typeof DashboardsIndexRoute
   '/errors/': typeof ErrorsIndexRoute
   '/infra/': typeof InfraIndexRoute
+  '/investigations/': typeof InvestigationsIndexRoute
   '/logs/': typeof LogsIndexRoute
   '/metrics/': typeof MetricsIndexRoute
   '/replays/': typeof ReplaysIndexRoute
@@ -631,6 +640,7 @@ export interface FileRouteTypes {
     | '/dashboards/'
     | '/errors/'
     | '/infra/'
+    | '/investigations/'
     | '/logs/'
     | '/metrics/'
     | '/replays/'
@@ -695,6 +705,7 @@ export interface FileRouteTypes {
     | '/dashboards'
     | '/errors'
     | '/infra'
+    | '/investigations'
     | '/logs'
     | '/metrics'
     | '/replays'
@@ -759,6 +770,7 @@ export interface FileRouteTypes {
     | '/dashboards/'
     | '/errors/'
     | '/infra/'
+    | '/investigations/'
     | '/logs/'
     | '/metrics/'
     | '/replays/'
@@ -824,6 +836,7 @@ export interface RootRouteChildren {
   DashboardsIndexRoute: typeof DashboardsIndexRoute
   ErrorsIndexRoute: typeof ErrorsIndexRoute
   InfraIndexRoute: typeof InfraIndexRoute
+  InvestigationsIndexRoute: typeof InvestigationsIndexRoute
   LogsIndexRoute: typeof LogsIndexRoute
   MetricsIndexRoute: typeof MetricsIndexRoute
   ReplaysIndexRoute: typeof ReplaysIndexRoute
@@ -1041,6 +1054,13 @@ declare module '@tanstack/react-router' {
       path: '/logs'
       fullPath: '/logs/'
       preLoaderRoute: typeof LogsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/investigations/': {
+      id: '/investigations/'
+      path: '/investigations'
+      fullPath: '/investigations/'
+      preLoaderRoute: typeof InvestigationsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/infra/': {
@@ -1328,6 +1348,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardsIndexRoute: DashboardsIndexRoute,
   ErrorsIndexRoute: ErrorsIndexRoute,
   InfraIndexRoute: InfraIndexRoute,
+  InvestigationsIndexRoute: InvestigationsIndexRoute,
   LogsIndexRoute: LogsIndexRoute,
   MetricsIndexRoute: MetricsIndexRoute,
   ReplaysIndexRoute: ReplaysIndexRoute,

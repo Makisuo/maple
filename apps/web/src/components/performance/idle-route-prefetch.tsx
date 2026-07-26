@@ -73,6 +73,7 @@ export function IdleRoutePrefetch() {
 					const path = queue.shift()
 					if (!path) return
 					const route = router.routesByPath[path]
+					if (!route) return
 					void Promise.resolve(router.loadRouteChunk(route))
 						.catch(() => {
 							// Prefetch is opportunistic. Navigation retains its normal chunk
