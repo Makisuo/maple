@@ -1,5 +1,5 @@
 import { memo } from "react"
-import { MessageResponse } from "./message"
+import { MessageResponse } from "./message-response"
 import { parseAnnotations, InlineTrace, InlineService, InlineError, InlineLog } from "./inline"
 
 interface RichTextProps {

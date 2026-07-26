@@ -22,18 +22,8 @@ import {
 	type PageContextPayload,
 } from "./auto-contexts"
 import type { ChatContext } from "./context-preamble"
-import { parseToolProposal } from "./tool-proposal"
-import { parseDiagnosisMarker } from "./diagnosis-marker"
-import { DiagnosisReportCard } from "./diagnosis-report-card"
 import { PageContextChips } from "./page-context-chips"
-import {
-	Conversation,
-	ConversationContent,
-	ConversationEmptyState,
-	ConversationScrollButton,
-} from "@/components/ai-elements/conversation"
-import { Message, MessageContent } from "@/components/ai-elements/message"
-import { RichText } from "@/components/ai-elements/rich-text"
+import { ChatTranscript, findDiagnosisMessageId } from "./chat-transcript"
 import {
 	PromptInput,
 	PromptInputTextarea,
@@ -41,52 +31,9 @@ import {
 	PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
-import { Shimmer } from "@/components/ai-elements/shimmer"
-import { ThinkingIndicator } from "@/components/ai-elements/thinking-indicator"
-import { Tool, ToolRow, toolLabel } from "@/components/ai-elements/tool"
-import { ToolGroup } from "@/components/ai-elements/tool-group"
-import { ApprovalCard } from "./approval-card"
 import { makeChatApplyPayload } from "./chat-apply-payload"
-import type { UIMessage } from "@/components/ai-elements/types"
 import type { AiTriageResult } from "@maple/domain/http"
 
-type ToolPart = {
-	type: string
-	toolCallId: string
-	toolName?: string
-	state: string
-	input?: unknown
-	output?: unknown
-	errorText?: string
-}
-
-function isToolPart(part: UIMessage["parts"][number]): boolean {
-	return part.type.startsWith("tool-") || part.type === "dynamic-tool"
-}
-
-function toolNameFor(part: ToolPart): string {
-	if (part.type.startsWith("tool-")) return part.type.replace(/^tool-/, "")
-	return part.toolName ?? "unknown"
-}
-
-function deriveToolStatus(state: string): "running" | "completed" | "error" {
-	if (state === "output-available") return "completed"
-	if (state === "output-error" || state === "output-denied") return "error"
-	return "running"
-}
-
-function shouldShowThinkingIndicator(
-	message: UIMessage,
-	isLoading: boolean,
-	isLastMessage: boolean,
-): boolean {
-	if (!isLoading || !isLastMessage || message.role !== "assistant") return false
-	const parts = message.parts
-	if (parts.length === 0) return true
-	const lastPart = parts[parts.length - 1]
-	if (lastPart.type === "text" && (lastPart as { state?: string }).state === "streaming") return false
-	return true
-}
 
 const DEFAULT_SUGGESTIONS = [
 	"What's the overall system health?",
@@ -107,6 +54,10 @@ interface ChatConversationProps {
 	readOnly?: boolean
 	/** Preserved DB report for migrated/pruned conversations without a tool marker. */
 	fallbackDiagnosis?: AiTriageResult | null
+	/** Message to open the transcript on, from a `?m=` permalink. */
+	focusMessageId?: string
+	/** Builds a shareable permalink for a message; omit where the thread isn't shareable. */
+	permalinkFor?: (messageId: string) => string
 }
 
 export function ChatConversation({
@@ -119,6 +70,8 @@ export function ChatConversation({
 	widgetFixContext,
 	readOnly = false,
 	fallbackDiagnosis = null,
+	focusMessageId,
+	permalinkFor,
 }: ChatConversationProps) {
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	useTypeAnywhereFocus(textareaRef, isActive && !readOnly)
@@ -167,18 +120,7 @@ export function ChatConversation({
 	}, [mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
 
 	const { messages, status, isLoading, sendMessage } = useFlueChat({ tabId, context })
-	const hasDiagnosisMarker = useMemo(
-		() =>
-			messages.some((message) =>
-				message.parts.some(
-					(part) =>
-						isToolPart(part) &&
-						(part as ToolPart).state === "output-available" &&
-						parseDiagnosisMarker((part as ToolPart).output) !== null,
-				),
-			),
-		[messages],
-	)
+	const diagnosisMessageId = useMemo(() => findDiagnosisMessageId(messages), [messages])
 
 	// Apply an approved proposal via Maple's authenticated API (propose-then-apply).
 	const applyProposal = useAtomSet(MapleApiAtomClient.mutation("chat", "apply"), {
@@ -257,222 +199,52 @@ export function ChatConversation({
 			) : null}
 			{isInvestigationMode && <InvestigationAttachmentCard ctx={investigationContext!} />}
 			{isWidgetFixMode && <WidgetFixAttachmentCard ctx={widgetFixContext!} />}
-			<Conversation className="flex-1 min-h-0">
-				<ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6">
-					{!hasSettled && messages.length === 0 ? (
+			<ChatTranscript
+				messages={messages}
+				isLoading={isLoading}
+				resolvedApprovals={resolvedApprovals}
+				onApprove={handleApprove}
+				onDeny={(toolCallId) => resolveApproval(toolCallId, "denied")}
+				fallbackDiagnosis={fallbackDiagnosis && !diagnosisMessageId ? fallbackDiagnosis : null}
+				diagnosisMessageId={diagnosisMessageId}
+				focusMessageId={focusMessageId}
+				permalinkFor={permalinkFor}
+				readOnly={readOnly}
+				emptyState={
+					!hasSettled ? (
 						<ConversationLoadingSkeleton />
-					) : messages.length === 0 && !fallbackDiagnosis ? (
-						readOnly ? (
-							<div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-								<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
-									Shared conversation
-								</p>
-								<p className="max-w-sm text-sm text-muted-foreground">
-									This shared conversation is unavailable or empty. It may have been
-									deleted, or belong to a different workspace than the one you're signed in
-									to.
-								</p>
-							</div>
-						) : isInvestigationMode ? (
-							<div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
-								<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
-									Ready to investigate
-								</p>
-								<p className="max-w-sm text-sm text-muted-foreground">
-									The {investigationNoun(investigationContext!.kind)} above is attached to
-									every message in this thread. Start with a suggestion or ask your own
-									question.
-								</p>
-							</div>
-						) : isWidgetFixMode ? (
-							<div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
-								<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
-									Diagnosing widget…
-								</p>
-								<p className="max-w-sm text-sm text-muted-foreground">
-									Maple AI is reading the broken widget config and the validation error. It
-									will propose a corrected widget JSON for you to approve.
-								</p>
-							</div>
-						) : (
-							<ConversationEmptyState
-								title="Maple AI"
-								description="Ask me about your traces, logs, errors, and services."
-							>
-								<div className="mt-4 flex flex-col items-center gap-3">
-									<div className="space-y-1 text-center">
-										<h3 className="text-sm font-medium">Maple AI</h3>
-										<p className="text-muted-foreground text-sm">
-											Ask me about your traces, logs, errors, and services.
-										</p>
-									</div>
-									<Suggestions className="mt-2 justify-center">
-										{suggestions.map((s) => (
-											<Suggestion
-												key={s}
-												suggestion={s}
-												onClick={() => handleSend(s)}
-											/>
-										))}
-									</Suggestions>
-								</div>
-							</ConversationEmptyState>
-						)
+					) : readOnly ? (
+						<EmptyNotice title="Shared conversation">
+							This shared conversation is unavailable or empty. It may have been deleted, or
+							belong to a different workspace than the one you're signed in to.
+						</EmptyNotice>
+					) : isInvestigationMode ? (
+						<EmptyNotice title="Ready to investigate">
+							The {investigationNoun(investigationContext!.kind)} above is attached to every
+							message in this thread. Start with a suggestion or ask your own question.
+						</EmptyNotice>
+					) : isWidgetFixMode ? (
+						<EmptyNotice title="Diagnosing widget…">
+							Maple AI is reading the broken widget config and the validation error. It will
+							propose a corrected widget JSON for you to approve.
+						</EmptyNotice>
 					) : (
-						<>
-							{fallbackDiagnosis && !hasDiagnosisMarker ? (
-								<DiagnosisReportCard report={fallbackDiagnosis} />
-							) : null}
-							{messages.map((message, messageIndex) => {
-								const isLastMessage = messageIndex === messages.length - 1
-								return (
-									<Message key={message.id} from={message.role}>
-										<MessageContent>
-											{(() => {
-												const nodes: ReactNode[] = []
-												let toolBuf: ToolPart[] = []
-												const flushTools = () => {
-													if (toolBuf.length === 0) return
-													const buf = toolBuf
-													toolBuf = []
-													if (buf.length === 1) {
-														const t = buf[0]!
-														nodes.push(
-															<Tool
-																key={t.toolCallId ?? `tool-${nodes.length}`}
-																toolName={toolNameFor(t)}
-																toolCallId={t.toolCallId}
-																state={t.state}
-																input={t.input}
-																output={t.output}
-																errorText={t.errorText}
-															/>,
-														)
-														return
-													}
-													const runningCount = buf.filter(
-														(t) => deriveToolStatus(t.state) === "running",
-													).length
-													const errorCount = buf.filter(
-														(t) => deriveToolStatus(t.state) === "error",
-													).length
-													const lastRunning = [...buf]
-														.reverse()
-														.find((t) => deriveToolStatus(t.state) === "running")
-													nodes.push(
-														<ToolGroup
-															key={`group-${buf[0]!.toolCallId ?? nodes.length}`}
-															count={buf.length}
-															runningCount={runningCount}
-															errorCount={errorCount}
-															completedCount={buf.length - runningCount}
-															currentLabel={
-																lastRunning
-																	? toolLabel(toolNameFor(lastRunning))
-																	: undefined
-															}
-														>
-															{buf.map((t) => (
-																<ToolRow
-																	key={t.toolCallId}
-																	toolName={toolNameFor(t)}
-																	toolCallId={t.toolCallId}
-																	state={t.state}
-																	input={t.input}
-																	output={t.output}
-																	errorText={t.errorText}
-																/>
-															))}
-														</ToolGroup>,
-													)
-												}
-												for (let i = 0; i < message.parts.length; i++) {
-													const part = message.parts[i]!
-													if (part.type === "text") {
-														flushTools()
-														nodes.push(
-															<RichText key={`text-${i}`}>
-																{part.text}
-															</RichText>,
-														)
-														continue
-													}
-													if (isToolPart(part)) {
-														const tp = part as ToolPart
-														const diagnosis =
-															tp.state === "output-available"
-																? parseDiagnosisMarker(tp.output)
-																: null
-														if (diagnosis) {
-															flushTools()
-															nodes.push(
-																<DiagnosisReportCard
-																	key={tp.toolCallId ?? `diagnosis-${i}`}
-																	report={diagnosis.report}
-																/>,
-															)
-															continue
-														}
-														const proposal =
-															tp.state === "output-available"
-																? parseToolProposal(tp.output)
-																: null
-														if (proposal) {
-															flushTools()
-															const resolved = resolvedApprovals.get(
-																tp.toolCallId,
-															)
-															nodes.push(
-																<ApprovalCard
-																	key={tp.toolCallId ?? `approval-${i}`}
-																	toolName={proposal.tool}
-																	input={proposal.input}
-																	resolved={resolved}
-																	onApprove={() =>
-																		handleApprove(
-																			tp.toolCallId,
-																			proposal.tool,
-																			proposal.input,
-																		)
-																	}
-																	onDeny={() =>
-																		resolveApproval(
-																			tp.toolCallId,
-																			"denied",
-																		)
-																	}
-																/>,
-															)
-															continue
-														}
-														toolBuf.push(tp)
-														continue
-													}
-												}
-												flushTools()
-												return nodes
-											})()}
-											{shouldShowThinkingIndicator(
-												message,
-												isLoading,
-												isLastMessage,
-											) && <ThinkingIndicator />}
-										</MessageContent>
-									</Message>
-								)
-							})}
-							{isLoading && messages[messages.length - 1]?.role === "user" && (
-								<Message from="assistant">
-									<MessageContent>
-										<Shimmer>Thinking…</Shimmer>
-									</MessageContent>
-								</Message>
-							)}
-						</>
-					)}
-				</ConversationContent>
-				<ConversationScrollButton />
-			</Conversation>
+						<div className="flex flex-col items-center gap-3">
+							<div className="space-y-1 text-center">
+								<h3 className="font-medium text-sm">Maple AI</h3>
+								<p className="text-muted-foreground text-sm">
+									Ask me about your traces, logs, errors, and services.
+								</p>
+							</div>
+							<Suggestions className="mt-2 justify-center">
+								{suggestions.map((s) => (
+									<Suggestion key={s} suggestion={s} onClick={() => handleSend(s)} />
+								))}
+							</Suggestions>
+						</div>
+					)
+				}
+			/>
 
 			{!readOnly && (
 				<div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -502,14 +274,21 @@ export function ChatConversation({
 							disabled={isLoading}
 						/>
 						<PromptInputFooter>
-							<PromptInputSubmit
-								status={status}
-								disabled={isLoading && status !== "streaming"}
-							/>
+							<PromptInputSubmit status={status} disabled={isLoading} />
 						</PromptInputFooter>
 					</PromptInput>
 				</div>
 			)}
+		</div>
+	)
+}
+
+
+function EmptyNotice({ title, children }: { title: string; children: ReactNode }) {
+	return (
+		<div className="flex flex-col items-center justify-center gap-2 text-center">
+			<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">{title}</p>
+			<p className="max-w-sm text-sm text-muted-foreground">{children}</p>
 		</div>
 	)
 }

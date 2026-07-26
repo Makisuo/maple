@@ -3,6 +3,8 @@
 /* Design tokens are shared with apps/landing — do not re-declare token names
    here (enforced by `bun run check:tokens`). Must come after tailwindcss. */
 @import "@maple/ui/styles/tokens.css";
+/* `scroll-fade-*` / `shimmer` utilities the shadcn chat primitives depend on. */
+@import "@maple/ui/styles/shadcn-utilities.css";
 @import "@fontsource-variable/geist-mono";
 @import "@fontsource-variable/geist";
 

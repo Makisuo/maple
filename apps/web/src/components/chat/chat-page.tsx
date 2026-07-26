@@ -24,6 +24,8 @@ interface ChatPageProps {
 	/** When set, render a read-only view of a teammate's shared conversation. */
 	sharedTabId?: string
 	sharedTitle?: string
+	/** Message id from a `?m=` permalink: open the transcript scrolled to it. */
+	focusMessageId?: string
 }
 
 export function ChatPage({
@@ -33,13 +35,14 @@ export function ChatPage({
 	widgetFixContext,
 	sharedTabId,
 	sharedTitle,
+	focusMessageId,
 }: ChatPageProps) {
 	const orgId = useMapleOrganizationId()
 	if (!orgId) return null
 	return (
 		<FlueClientProvider>
 			{sharedTabId ? (
-				<SharedChatView tabId={sharedTabId} title={sharedTitle} />
+				<SharedChatView tabId={sharedTabId} title={sharedTitle} focusMessageId={focusMessageId} />
 			) : (
 				<ChatPageInner
 					orgId={orgId}
@@ -47,10 +50,25 @@ export function ChatPage({
 					mode={mode}
 					investigationContext={investigationContext}
 					widgetFixContext={widgetFixContext}
+					focusMessageId={focusMessageId}
 				/>
 			)}
 		</FlueClientProvider>
 	)
+}
+
+/**
+ * Read-only link to a conversation, optionally pinned to one message. Carries only
+ * the tab id — the conversation itself lives in an org-scoped agent, so the link
+ * resolves for signed-in teammates in the same workspace and no one else.
+ */
+function shareUrl(tab: Pick<ChatTab, "id" | "title">, messageId?: string): string {
+	const url = new URL("/chat", window.location.origin)
+	url.searchParams.set("shared", tab.id)
+	const title = tab.title.trim()
+	if (title) url.searchParams.set("title", title)
+	if (messageId) url.searchParams.set("m", messageId)
+	return url.toString()
 }
 
 interface ChatPageInnerProps {
@@ -59,6 +77,7 @@ interface ChatPageInnerProps {
 	mode?: "investigation" | "widget-fix"
 	investigationContext?: InvestigationContext
 	widgetFixContext?: WidgetFixContext
+	focusMessageId?: string
 }
 
 function ChatPageInner({
@@ -67,6 +86,7 @@ function ChatPageInner({
 	mode,
 	investigationContext,
 	widgetFixContext,
+	focusMessageId,
 }: ChatPageInnerProps) {
 	const { tabs, activeTabId, createTab, closeTab, setActiveTab, renameTab, ensureTab } = useChatTabs(
 		orgId,
@@ -89,16 +109,10 @@ function ChatPageInner({
 	}, [])
 
 	// Build a read-only share link for the conversation and copy it to the clipboard.
-	// The link carries only the tab id (the conversation lives in an org-scoped agent),
-	// so it resolves for signed-in teammates in the same workspace and no one else.
 	const handleShare = useCallback((tab: ChatTab) => {
 		if (typeof window === "undefined") return
-		const url = new URL("/chat", window.location.origin)
-		url.searchParams.set("shared", tab.id)
-		const title = tab.title.trim()
-		if (title) url.searchParams.set("title", title)
 		navigator.clipboard
-			.writeText(url.toString())
+			.writeText(shareUrl(tab))
 			.then(() => toast.success("Share link copied to clipboard"))
 			.catch(() => toast.error("Failed to copy share link"))
 	}, [])
@@ -166,6 +180,8 @@ function ChatPageInner({
 								isActive={tab.id === activeTabId}
 								onFirstMessage={(id, text) => renameTab(id, text)}
 								onLoadingChange={handleLoadingChange}
+								focusMessageId={tab.id === activeTabId ? focusMessageId : undefined}
+								permalinkFor={(messageId) => shareUrl(tab, messageId)}
 								mode={
 									isInvestigationTab
 										? "investigation"
@@ -277,7 +293,15 @@ function ChatPageInner({
  * same workspace. The tab is intentionally NOT added to `useChatTabs`, so a
  * shared link never pollutes the viewer's own conversation list.
  */
-function SharedChatView({ tabId, title }: { tabId: string; title?: string }) {
+function SharedChatView({
+	tabId,
+	title,
+	focusMessageId,
+}: {
+	tabId: string
+	title?: string
+	focusMessageId?: string
+}) {
 	const heading = title?.trim() || "Shared conversation"
 	return (
 		<SidebarProvider open={false} onOpenChange={() => {}} className="h-svh overflow-hidden">
@@ -308,7 +332,15 @@ function SharedChatView({ tabId, title }: { tabId: string; title?: string }) {
 					<div className="relative min-h-0 flex-1 bg-background">
 						<div className="flex h-full flex-col">
 							<Suspense fallback={<ChatConversationFallback />}>
-								<ChatConversation tabId={tabId} isActive readOnly />
+								<ChatConversation
+									tabId={tabId}
+									isActive
+									readOnly
+									focusMessageId={focusMessageId}
+									permalinkFor={(messageId) =>
+										shareUrl({ id: tabId, title: title ?? "" }, messageId)
+									}
+								/>
 							</Suspense>
 						</div>
 					</div>
