@@ -180,7 +180,8 @@ export function RangeFilterSection({
 					)}
 					<ChevronDownIcon
 						className={cn(
-							"size-3.5 shrink-0 text-muted-foreground/40 transition-[transform,color] group-hover:text-muted-foreground",
+							// Duration matches the panel's 200ms, as in `FilterSection`.
+							"size-3.5 shrink-0 text-muted-foreground/40 transition-[transform,color] duration-200 ease-out group-hover:text-muted-foreground",
 							isOpen && "rotate-180",
 						)}
 					/>
