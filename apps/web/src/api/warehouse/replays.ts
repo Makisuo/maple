@@ -127,6 +127,9 @@ export const getReplaysFacets = Effect.fn("SessionReplays.facets")(function* ({
 		countries: result.countries,
 		devices: result.devices,
 		errorCount: result.errorCount,
+		durationBuckets: result.durationBuckets,
+		durationP50: result.durationP50,
+		durationP95: result.durationP95,
 	}
 })
 

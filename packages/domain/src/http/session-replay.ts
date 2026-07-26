@@ -100,6 +100,14 @@ export class ReplaysFacetsResponse extends Schema.Class<ReplaysFacetsResponse>("
 	devices: Schema.Array(ReplayFacetItem),
 	/** Distinct sessions with at least one recorded error, within the current filter. */
 	errorCount: Schema.Number,
+	/** Session-length distribution: `name` is the bucket floor in ms, `count` the
+	 *  sessions in it. Buckets are half-octaves from 1s, so each ceiling is
+	 *  floor × √2. Unordered — the client sorts numerically. */
+	durationBuckets: Schema.Array(ReplayFacetItem),
+	/** Session-length percentiles (ms) over the same population as the buckets;
+	 *  0 when no completed session falls in the window. */
+	durationP50: Schema.Number,
+	durationP95: Schema.Number,
 }) {}
 
 // --- Detail ---

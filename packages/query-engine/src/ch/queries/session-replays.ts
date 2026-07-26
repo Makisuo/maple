@@ -43,6 +43,38 @@ function arrayLength<T>(array: CH.Expr<ReadonlyArray<T>>): CH.Expr<number> {
 	return compileFnCall<number>("length", array)
 }
 
+// floor / log2 / pow — plain numeric functions the DSL doesn't export, needed
+// only by the duration histogram below. Declared here like argMax above.
+function floor_(value: CH.Expr<number>): CH.Expr<number> {
+	return compileFnCall<number>("floor", value)
+}
+
+function log2(value: CH.Expr<number>): CH.Expr<number> {
+	return compileFnCall<number>("log2", value)
+}
+
+function pow(base: number, exponent: CH.Expr<number>): CH.Expr<number> {
+	return compileFnCall<number>("pow", CH.lit(base), exponent)
+}
+
+// greatest(value, floor) over a nullable numeric column — clamps and, since
+// callers pair it with a `> 0` predicate that already excludes NULLs, narrows.
+function greatestNonNull(value: CH.Expr<number | null>, floor: number): CH.Expr<number> {
+	return compileFnCall<number>("greatest", value, CH.lit(floor))
+}
+
+// assumeNotNull(x) — drops the Nullable wrapper for callers whose WHERE has
+// already excluded NULLs.
+function assumeNotNull<T>(value: CH.Expr<T | null>): CH.Expr<T> {
+	return compileFnCall<T>("assumeNotNull", value)
+}
+
+// ifNotFinite(x, fallback) — quantile() over an empty set yields nan, and
+// casting that to an integer is a hard error.
+function ifNotFinite(value: CH.Expr<number>, fallback: number): CH.Expr<number> {
+	return compileFnCall<number>("ifNotFinite", value, CH.lit(fallback))
+}
+
 // ---------------------------------------------------------------------------
 // List query
 // ---------------------------------------------------------------------------
@@ -405,11 +437,57 @@ export function sessionReplaysFacetsQuery(
 			.orderBy(["count", "desc"])
 			.limit(limit)
 
+	// Session-length distribution, as half-octave log buckets from 1s:
+	//   floor_ms = round(pow(2, floor(log2(clamped_s) * 2) / 2) * 1000)
+	// so buckets run 1s, 1.41s, 2s, 2.83s, 4s … and each ceiling is floor × √2
+	// (the sidebar derives it that way rather than duplicating this formula).
+	// Anything ≤ 1s clamps into the first bucket.
+	//
+	// Only the completed Version=2 row carries a DurationMs (see this file's
+	// header), so `DurationMs > 0` yields one row per finished session without a
+	// GROUP BY SessionId — keeping this branch flat like the facet branches
+	// above. NULL durations (in-progress sessions) fail the predicate and drop
+	// out, matching how the list query treats them. The count is uniq(SessionId)
+	// rather than count() so un-merged duplicate v2 rows can't inflate a bucket.
+	const bucketFloorMs = ($: ColumnAccessor<typeof SessionReplays.columns>): CH.Expr<number> =>
+		CH.round_(pow(2, floor_(log2(greatestNonNull($.DurationMs, 1000).div(1000)).mul(2)).div(2)).mul(1000))
+
+	const durationHistogram = from(SessionReplays)
+		.select(($) => ({
+			name: CH.toString_(CH.toUInt64(bucketFloorMs($))),
+			count: CH.uniq($.SessionId),
+			facetType: CH.lit("durationBucket"),
+		}))
+		.where(($) => [...baseWhere($), $.DurationMs.gt(0)])
+		.groupBy("name")
+		.limit(40)
+
+	// Percentiles for the preset chips ("> p50 · 47s"). Same predicate as the
+	// histogram, so both describe the same population. Un-merged duplicate v2
+	// rows would weight a session twice here — immaterial for a preset threshold.
+	//
+	// The cast to UInt64 is load-bearing: every other branch's count is uniq()'s
+	// UInt64, and ClickHouse rejects a UNION ALL that mixes it with quantile()'s
+	// Float64 ("no supertype for types Float64, UInt64"). Durations are whole
+	// milliseconds anyway. ifNotFinite guards the empty-window case, where
+	// quantile returns nan and the cast would otherwise throw.
+	const durationStat = (label: string, q: number) =>
+		from(SessionReplays)
+			.select(($) => ({
+				name: CH.lit(label),
+				count: CH.toUInt64(ifNotFinite(CH.round_(CH.quantile(q)(assumeNotNull($.DurationMs))), 0)),
+				facetType: CH.lit("durationStat"),
+			}))
+			.where(($) => [...baseWhere($), $.DurationMs.gt(0)])
+
 	return unionAll(
 		makeFacet("service", ($) => $.ServiceName),
 		makeFacet("browser", ($) => $.BrowserName),
 		makeFacet("country", ($) => $.Country),
 		makeFacet("device", ($) => $.DeviceType),
+		durationHistogram,
+		durationStat("p50", 0.5),
+		durationStat("p95", 0.95),
 		// Distinct sessions with at least one recorded error (drives the "Has
 		// errors" toggle count). Its own hasErrors filter is omitted here.
 		from(SessionReplays)

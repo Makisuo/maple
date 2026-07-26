@@ -93,12 +93,21 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 						rows
 							.filter((row) => row.facetType === facetType)
 							.map((row) => ({ name: row.name, count: Number(row.count) }))
+					// The percentile branches ride the same {name, count} shape as the
+					// facets, with the quantile in `count` — read them back by label.
+					const stat = (name: string) =>
+						Number(
+							rows.find((row) => row.facetType === "durationStat" && row.name === name)?.count ?? 0,
+						)
 					return new ReplaysFacetsResponse({
 						services: pick("service"),
 						browsers: pick("browser"),
 						countries: pick("country"),
 						devices: pick("device"),
 						errorCount: Number(rows.find((row) => row.facetType === "error")?.count ?? 0),
+						durationBuckets: pick("durationBucket"),
+						durationP50: stat("p50"),
+						durationP95: stat("p95"),
 					})
 				}),
 			)
