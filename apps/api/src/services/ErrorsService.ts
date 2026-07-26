@@ -225,7 +225,7 @@ export const isBusyDatabaseError = (error: DatabaseError): boolean => {
 	return false
 }
 
-const BUSY_RETRY_SCHEDULE = Schedule.exponential("50 millis", 2.0).pipe(Schedule.both(Schedule.recurs(3)))
+const BUSY_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
 
 // ---------------------------------------------------------------------------
 // Transition matrix. Rows = from, values = set of allowed "to" states.

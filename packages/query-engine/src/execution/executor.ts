@@ -104,9 +104,8 @@ const sqlClientCacheKey = (config: ResolvedWarehouseConfig): string =>
 // recover from by trying again. Caps at 2 retries (3 attempts total) to bound worst-case
 // tail latency: at concurrency=4 in the alerting tick, a fully-degraded warehouse can
 // still let the tick finish within its 60s window.
-const TRANSIENT_RETRY_SCHEDULE = Schedule.exponential("100 millis", 2.0).pipe(
-	Schedule.both(Schedule.recurs(2)),
-)
+// `Schedule.max` recurs only while every schedule does, so `recurs(2)` is the cap.
+const TRANSIENT_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("100 millis", 2.0), Schedule.recurs(2)])
 
 const isTransientUpstreamError = (error: unknown): error is WarehouseUpstreamError =>
 	error instanceof WarehouseUpstreamError

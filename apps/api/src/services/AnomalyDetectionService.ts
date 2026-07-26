@@ -136,7 +136,7 @@ const isBusyDatabaseError = (error: DatabaseError): boolean => {
 	return inner !== undefined && BUSY_ERROR_PATTERN.test(inner)
 }
 
-const BUSY_RETRY_SCHEDULE = Schedule.exponential("50 millis", 2.0).pipe(Schedule.both(Schedule.recurs(3)))
+const BUSY_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
 
 /**
  * Adapt a drizzle incident row (timestamptz → Date, jsonb → unknown[]) to the
