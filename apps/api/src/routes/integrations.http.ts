@@ -49,6 +49,7 @@ import {
 	decodeTopTrafficResponse,
 	HTTP_DATASET,
 	toGraphqlTime,
+	topTrafficFilterVariables,
 	topTrafficQuery,
 	type TopTrafficGroupShape,
 } from "../services/cloudflare-analytics/queries"
@@ -246,6 +247,17 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 							)
 						}
 						const limit = Math.min(Math.max(Math.floor(payload.limit ?? 15), 1), 50)
+						// Cloudflare applies these before ranking, which is the whole point: the live
+						// lookup can reach keys the stored per-window top-N folded into "other".
+						const filter = {
+							contains: payload.contains?.slice(0, 200),
+							hosts: payload.hosts,
+							countries: payload.countries,
+							methods: payload.methods,
+							cacheStatuses: payload.cacheStatuses,
+						}
+						const filterVariables = topTrafficFilterVariables(filter)
+						const isFiltered = Object.keys(filterVariables).length > 0
 						// Minute-align the window so repeated dashboard refreshes within the TTL share
 						// a cache entry instead of each minting a unique key. Floor the start but CEIL
 						// the end (with a one-minute floor on the width): flooring both would collapse
@@ -291,11 +303,12 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 							const result = yield* graphqlQuery(
 								accessToken,
 								{
-									query: topTrafficQuery({ dimension: payload.dimension, limit }),
+									query: topTrafficQuery({ dimension: payload.dimension, limit, filter }),
 									variables: {
 										zoneTags: [zoneId],
 										start: toGraphqlTime(startMs),
 										end: toGraphqlTime(endMs),
+										...filterVariables,
 									},
 								},
 								env.MAPLE_CLOUDFLARE_API_BASE_URL,
@@ -367,11 +380,29 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 								.slice(0, limit)
 							return new CloudflareTopTrafficResponse({ rows, unavailableReason: null })
 						})
+						// The filter digest MUST be in the key — a filtered/unfiltered collision would
+						// serve one user's drill-down as another's overview. Sorted so two equivalent
+						// selections share an entry.
+						const filterDigest = isFiltered
+							? JSON.stringify(
+									Object.fromEntries(
+										Object.entries(filterVariables)
+											.sort(([a], [b]) => a.localeCompare(b))
+											.map(([key, value]) => [
+												key,
+												Array.isArray(value) ? [...value].sort() : value,
+											]),
+									),
+								)
+							: ""
 						const cached = yield* edgeCache.getOrCompute(
 							{
 								bucket: "cf-top-traffic",
-								key: `${tenant.orgId}:${payload.zoneName}:${payload.dimension}:${startMs}:${endMs}:${limit}`,
-								ttlSeconds: 60,
+								key: `${tenant.orgId}:${payload.zoneName}:${payload.dimension}:${startMs}:${endMs}:${limit}:${filterDigest}`,
+								// Filters explode the key space, so hit rate drops exactly when the
+								// upstream budget matters most. An ad-hoc drill-down doesn't need
+								// 60s freshness — this endpoint shares the poller's Cloudflare quota.
+								ttlSeconds: isFiltered ? 300 : 60,
 								schema: CloudflareTopTrafficResponse,
 							},
 							compute,

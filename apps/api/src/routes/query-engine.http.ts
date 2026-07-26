@@ -28,7 +28,9 @@ import {
 	CloudflareInfraZoneDetailResponse,
 	CloudflareInfraZoneHostsResponse,
 	CloudflareInfraZoneSecurityResponse,
+	CloudflareInfraZoneBreakdownResponse,
 	CloudflareInfraZoneDnsResponse,
+	CloudflareInfraZoneFacetsResponse,
 	CloudflareInfraPlatformResourcesResponse,
 	CloudflareInfraWorkersResponse,
 	CloudflareInfraWorkerTimeseriesResponse,
@@ -92,6 +94,44 @@ const mapExecError = <A, E, R>(effect: Effect.Effect<A, E, R>, context: string):
 	effect.pipe(
 		Effect.tapError(() => Effect.annotateCurrentSpan({ "maple.query_engine.failed_step": context })),
 	)
+
+/**
+ * Payload → query-engine filter opts. Every Cloudflare zone endpoint carries the same optional
+ * filter bag, and which of them a given panel can honor depends on the metric families it reads —
+ * `CH.cloudflareIgnoredFiltersFor` answers that, and the answer ships in the response so the UI can
+ * mark a panel zone-wide instead of pretending the filter applied.
+ */
+const toCloudflareFilters = (payload: {
+	readonly hosts?: ReadonlyArray<string> | undefined
+	readonly cacheStatuses?: ReadonlyArray<string> | undefined
+	readonly statusClasses?: ReadonlyArray<string> | undefined
+	readonly paths?: ReadonlyArray<string> | undefined
+	readonly pathContains?: string | undefined
+	readonly countries?: ReadonlyArray<string> | undefined
+	readonly methods?: ReadonlyArray<string> | undefined
+	readonly protocols?: ReadonlyArray<string> | undefined
+	readonly deviceTypes?: ReadonlyArray<string> | undefined
+	readonly firewallActions?: ReadonlyArray<string> | undefined
+	readonly firewallSources?: ReadonlyArray<string> | undefined
+	readonly firewallRuleIds?: ReadonlyArray<string> | undefined
+	readonly dnsQueryNames?: ReadonlyArray<string> | undefined
+	readonly dnsResponseCodes?: ReadonlyArray<string> | undefined
+}): CH.CloudflareFilterOpts => ({
+	hosts: payload.hosts,
+	cacheStatuses: payload.cacheStatuses,
+	statusClasses: payload.statusClasses,
+	paths: payload.paths,
+	pathContains: payload.pathContains,
+	countries: payload.countries,
+	methods: payload.methods,
+	protocols: payload.protocols,
+	deviceTypes: payload.deviceTypes,
+	firewallActions: payload.firewallActions,
+	firewallSources: payload.firewallSources,
+	firewallRuleIds: payload.firewallRuleIds,
+	dnsQueryNames: payload.dnsQueryNames,
+	dnsResponseCodes: payload.dnsResponseCodes,
+})
 
 const isMissingServiceOperationsRollup = (error: unknown): boolean => {
 	if (typeof error !== "object" || error === null) return false
@@ -832,7 +872,8 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// Counters (metrics_sum) + percentiles (metrics_gauge) run
 					// concurrently, then merge by ServiceName — same shape as
 					// serviceCloudflareStats above.
-					const countersCompiled = CH.compile(CH.cloudflareZoneCountersSQL(), params, {
+					const filters = toCloudflareFilters(payload)
+					const countersCompiled = CH.compile(CH.cloudflareZoneCountersSQL(filters), params, {
 						rowSchema: CH.cloudflareZoneCountersRowSchema,
 					})
 					const latencyCompiled = CH.compile(CH.cloudflareZoneLatencySQL(), params, {
@@ -875,14 +916,24 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							originP99Ms: latency?.originP99Ms ?? 0,
 						}
 					})
-					return new CloudflareInfraZonesResponse({ data })
+					return new CloudflareInfraZonesResponse({
+						data,
+						// The latency columns are zone-wide by construction, so a dimension filter
+						// narrows the counters but never the percentiles beside them.
+						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [
+							CH.CF_METRIC.requests,
+							CH.CF_METRIC.bytes,
+							CH.CF_METRIC.visits,
+						]),
+					})
 				}),
 			)
 			.handle("cloudflareInfraZoneTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					const filters = toCloudflareFilters(payload)
 					const compiled = CH.compile(
-						CH.cloudflareZoneTimeseriesSQL(),
+						CH.cloudflareZoneTimeseriesSQL(filters),
 						{
 							orgId: tenant.orgId,
 							startTime: payload.startTime,
@@ -900,6 +951,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					)
 					return new CloudflareInfraZoneTimeseriesResponse({
 						data: rows.map((row) => ({ ...row })),
+						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [CH.CF_METRIC.requests]),
 					})
 				}),
 			)
@@ -913,10 +965,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						endTime: payload.endTime,
 						bucketSeconds: payload.bucketSeconds,
 					}
-					const statusCompiled = CH.compile(CH.cloudflareZoneStatusTimeseriesSQL(), params, {
+					const filters = toCloudflareFilters(payload)
+					const statusCompiled = CH.compile(CH.cloudflareZoneStatusTimeseriesSQL(filters), params, {
 						rowSchema: CH.cloudflareZoneStatusTimeseriesRowSchema,
 					})
-					const cacheCompiled = CH.compile(CH.cloudflareZoneCacheTimeseriesSQL(), params, {
+					const cacheCompiled = CH.compile(CH.cloudflareZoneCacheTimeseriesSQL(filters), params, {
 						rowSchema: CH.cloudflareZoneCacheTimeseriesRowSchema,
 					})
 					const latencyCompiled = CH.compile(CH.cloudflareZoneLatencyTimeseriesSQL(), params, {
@@ -952,6 +1005,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						statusBuckets: statusRows.map((row) => ({ ...row })),
 						cacheBuckets: cacheRows.map((row) => ({ ...row })),
 						latencyBuckets: latencyRows.map((row) => ({ ...row })),
+						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [CH.CF_METRIC.requests]),
+						latencyIgnoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [
+							CH.CF_METRIC.edgeTtfb,
+							CH.CF_METRIC.originDuration,
+						]),
 					})
 				}),
 			)
@@ -964,11 +1022,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						startTime: payload.startTime,
 						endTime: payload.endTime,
 					}
-					const totalsCompiled = CH.compile(CH.cloudflareZoneHostBreakdownSQL(), params, {
+					const filters = toCloudflareFilters(payload)
+					const totalsCompiled = CH.compile(CH.cloudflareZoneHostBreakdownSQL(filters), params, {
 						rowSchema: CH.cloudflareZoneHostBreakdownRowSchema,
 					})
 					const bucketsCompiled = CH.compile(
-						CH.cloudflareZoneHostTimeseriesSQL(),
+						CH.cloudflareZoneHostTimeseriesSQL(filters),
 						{ ...params, bucketSeconds: payload.bucketSeconds },
 						{ rowSchema: CH.cloudflareZoneHostTimeseriesRowSchema },
 					)
@@ -994,6 +1053,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new CloudflareInfraZoneHostsResponse({
 						totals: totalRows.map((row) => ({ ...row })),
 						buckets: bucketRows.map((row) => ({ ...row })),
+						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [CH.CF_METRIC.requests]),
 					})
 				}),
 			)
@@ -1006,12 +1066,13 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						startTime: payload.startTime,
 						endTime: payload.endTime,
 					}
+					const filters = toCloudflareFilters(payload)
 					const bucketsCompiled = CH.compile(
-						CH.cloudflareZoneFirewallTimeseriesSQL(),
+						CH.cloudflareZoneFirewallTimeseriesSQL(filters),
 						{ ...params, bucketSeconds: payload.bucketSeconds },
 						{ rowSchema: CH.cloudflareZoneFirewallTimeseriesRowSchema },
 					)
-					const topCompiled = CH.compile(CH.cloudflareZoneFirewallTopSQL(), params, {
+					const topCompiled = CH.compile(CH.cloudflareZoneFirewallTopSQL(filters), params, {
 						rowSchema: CH.cloudflareZoneFirewallTopRowSchema,
 					})
 					const [bucketRows, topRows] = yield* Effect.all(
@@ -1036,6 +1097,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new CloudflareInfraZoneSecurityResponse({
 						buckets: bucketRows.map((row) => ({ ...row })),
 						top: topRows.map((row) => ({ ...row })),
+						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [CH.CF_METRIC.firewallEvents]),
 					})
 				}),
 			)
@@ -1048,12 +1110,13 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						startTime: payload.startTime,
 						endTime: payload.endTime,
 					}
+					const filters = toCloudflareFilters(payload)
 					const bucketsCompiled = CH.compile(
-						CH.cloudflareZoneDnsTimeseriesSQL(),
+						CH.cloudflareZoneDnsTimeseriesSQL(filters),
 						{ ...params, bucketSeconds: payload.bucketSeconds },
 						{ rowSchema: CH.cloudflareZoneDnsTimeseriesRowSchema },
 					)
-					const namesCompiled = CH.compile(CH.cloudflareZoneDnsBreakdownSQL(), params, {
+					const namesCompiled = CH.compile(CH.cloudflareZoneDnsBreakdownSQL(filters), params, {
 						rowSchema: CH.cloudflareZoneDnsBreakdownRowSchema,
 					})
 					const [bucketRows, nameRows] = yield* Effect.all(
@@ -1078,7 +1141,162 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new CloudflareInfraZoneDnsResponse({
 						buckets: bucketRows.map((row) => ({ ...row })),
 						names: nameRows.map((row) => ({ ...row })),
+						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [CH.CF_METRIC.dnsQueries]),
 					})
+				}),
+			)
+			.handle("cloudflareInfraZoneBreakdown", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const filters = toCloudflareFilters(payload)
+					const params = {
+						orgId: tenant.orgId,
+						serviceName: payload.serviceName,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+					}
+					const totalsCompiled = CH.compile(
+						CH.cloudflareZoneBreakdownTotalsSQL(payload.dimension, filters, payload.limit ?? 100),
+						params,
+						{ rowSchema: CH.cloudflareZoneBreakdownTotalsRowSchema },
+					)
+					const bucketsCompiled = CH.compile(
+						CH.cloudflareZoneBreakdownTimeseriesSQL(payload.dimension, filters),
+						{ ...params, bucketSeconds: payload.bucketSeconds },
+						{ rowSchema: CH.cloudflareZoneBreakdownTimeseriesRowSchema },
+					)
+					// Coverage is deliberately unfiltered: it answers "what did the poller collect
+					// here", which the UI needs in order to say "not collected yet" rather than
+					// "no traffic" for a window that predates the dataset.
+					const coverageCompiled = CH.compile(
+						CH.cloudflareZoneBreakdownCoverageSQL(payload.dimension),
+						params,
+						{ rowSchema: CH.cloudflareZoneBreakdownCoverageRowSchema },
+					)
+					const zoneTotalCompiled = CH.compile(CH.cloudflareZoneCountersSQL(filters), params, {
+						rowSchema: CH.cloudflareZoneCountersRowSchema,
+					})
+					const [totalRows, bucketRows, coverageRows, zoneRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, totalsCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneBreakdownTotals",
+								}),
+								"cloudflareInfraZoneBreakdownTotals query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, bucketsCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneBreakdownTimeseries",
+								}),
+								"cloudflareInfraZoneBreakdownTimeseries query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, coverageCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneBreakdownCoverage",
+								}),
+								"cloudflareInfraZoneBreakdownCoverage query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, zoneTotalCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneBreakdownZoneTotal",
+								}),
+								"cloudflareInfraZoneBreakdownZoneTotal query failed",
+							),
+						],
+						{ concurrency: 4 },
+					)
+					const coverage = coverageRows[0]
+					const zoneRequests = zoneRows.find((row) => row.serviceName === payload.serviceName)
+					// Breakdown metrics are a per-window top-N fold of what Cloudflare returned, so
+					// they can only ever undercount the zone. Clamp rather than surface a negative.
+					const unattributed = Math.max(
+						0,
+						(zoneRequests?.requests ?? 0) - (coverage?.attributedRequests ?? 0),
+					)
+					return new CloudflareInfraZoneBreakdownResponse({
+						totals: totalRows.map((row) => ({ ...row })),
+						buckets: bucketRows.map((row) => ({ ...row })),
+						unattributed,
+						coverageStart:
+							coverage?.coverageStart != null && coverage.coverageStart !== ""
+								? coverage.coverageStart
+								: null,
+						ignoredFilters: CH.cloudflareIgnoredFiltersFor(
+							filters,
+							CH.cloudflareBreakdownMetrics(payload.dimension),
+						),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneFacets", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const compiled = CH.compileUnion(
+						CH.cloudflareZoneFacetsQuery(toCloudflareFilters(payload)),
+						{
+							orgId: tenant.orgId,
+							serviceName: payload.serviceName,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+						},
+					)
+					const rows = yield* mapExecError(
+						warehouse.compiledQuery(tenant, compiled, {
+							profile: "discovery",
+							// 8 UNION branches each re-read the wide Attributes Map column; cap
+							// read-thread concurrency so the per-thread decompression buffers stay
+							// inside the discovery memory budget — same guard as podFacets.
+							settings: { maxThreads: 4 },
+							context: "cloudflareInfraZoneFacets",
+						}),
+						"cloudflareInfraZoneFacets query failed",
+					)
+					const buckets = {
+						hosts: [] as Array<{ name: string; count: number }>,
+						cacheStatuses: [] as Array<{ name: string; count: number }>,
+						statusClasses: [] as Array<{ name: string; count: number }>,
+						paths: [] as Array<{ name: string; count: number }>,
+						countries: [] as Array<{ name: string; count: number }>,
+						methods: [] as Array<{ name: string; count: number }>,
+						protocols: [] as Array<{ name: string; count: number }>,
+						deviceTypes: [] as Array<{ name: string; count: number }>,
+					}
+					for (const row of rows) {
+						// BYO-ClickHouse returns sum() as a JSON string; compileUnion has no
+						// rowSchema hook, so coerce here — same as podFacets.
+						const entry = { name: String(row.name), count: Number(row.count) || 0 }
+						switch (row.facetType) {
+							case "host":
+								buckets.hosts.push(entry)
+								break
+							case "cacheStatus":
+								buckets.cacheStatuses.push(entry)
+								break
+							case "statusClass":
+								buckets.statusClasses.push(entry)
+								break
+							case "path":
+								buckets.paths.push(entry)
+								break
+							case "country":
+								buckets.countries.push(entry)
+								break
+							case "method":
+								buckets.methods.push(entry)
+								break
+							case "protocol":
+								buckets.protocols.push(entry)
+								break
+							case "deviceType":
+								buckets.deviceTypes.push(entry)
+								break
+						}
+					}
+					return new CloudflareInfraZoneFacetsResponse({ data: buckets })
 				}),
 			)
 			.handle("cloudflareInfraPlatformResources", ({ payload }) =>

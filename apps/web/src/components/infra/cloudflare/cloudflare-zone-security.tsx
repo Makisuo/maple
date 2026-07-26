@@ -9,6 +9,8 @@ import { cloudflareZoneSecurityResultAtom } from "@/lib/services/atoms/warehouse
 import { formatNumber } from "@/lib/format"
 import { ColumnHead, TableShell } from "../primitives/data-table"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
+import { PanelScope } from "./panel-scope"
+import type { CloudflareFilters } from "./filters"
 
 // Actions carry severity: outright blocks render hot, challenges in the warn
 // ramp, pass-through actions (skip/log/allow) stay muted.
@@ -44,16 +46,20 @@ export function CloudflareZoneSecuritySection({
 	startTime,
 	endTime,
 	bucketSeconds,
+	filters,
 	syncId,
 }: {
 	serviceName: string
 	startTime: string
 	endTime: string
 	bucketSeconds: number
+	filters: CloudflareFilters
 	syncId?: string
 }) {
 	const result = useAtomValue(
-		cloudflareZoneSecurityResultAtom({ data: { serviceName, startTime, endTime, bucketSeconds } }),
+		cloudflareZoneSecurityResultAtom({
+			data: { serviceName, startTime, endTime, bucketSeconds, ...filters },
+		}),
 	)
 
 	return Result.builder(result)
@@ -72,6 +78,13 @@ export function CloudflareZoneSecuritySection({
 						colors={ACTION_COLORS}
 						order={ACTION_ORDER}
 						syncId={syncId}
+						scope={
+							<PanelScope
+								filters={filters}
+								ignoredFilters={data.ignoredFilters}
+								reason="Firewall events carry their own dimensions"
+							/>
+						}
 					/>
 					<SecurityTopTable top={data.top} waiting={r.waiting} />
 				</div>

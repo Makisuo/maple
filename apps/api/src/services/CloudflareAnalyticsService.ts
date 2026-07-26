@@ -82,7 +82,9 @@ import {
 	mapDnsGroups,
 	mapDurableObjectsGroups,
 	mapFirewallGroups,
+	mapHttpDimensionGroups,
 	mapHttpGroups,
+	mapHttpPathGroups,
 	mapQueueBacklogGroups,
 	mapQueueConsumersGroups,
 	mapWorkersGroups,
@@ -96,6 +98,8 @@ import {
 	decodeDnsZoneNode,
 	decodeDurableObjectsAccountNode,
 	decodeFirewallZoneNode,
+	decodeHttpDimensionsZoneNode,
+	decodeHttpPathsZoneNode,
 	decodeHttpZoneNode,
 	decodeQueueBacklogAccountNode,
 	decodeQueueConsumersAccountNode,
@@ -110,6 +114,10 @@ import {
 	FIREWALL_DATASET,
 	firewallSelection,
 	HTTP_DATASET,
+	HTTP_DIMENSIONS_DATASET,
+	HTTP_PATHS_DATASET,
+	httpDimensionsSelection,
+	httpPathsSelection,
 	httpSelection,
 	MAX_ZONES_PER_QUERY,
 	QUEUE_BACKLOG_DATASET,
@@ -245,6 +253,18 @@ const decodeError = (dataset: string) =>
 		message: `Cloudflare GraphQL ${dataset} analytics response had an unexpected shape`,
 	})
 
+/**
+ * Zone HTTP settings are the same node for every `httpRequestsAdaptiveGroups`-backed dataset, so
+ * the path/dimension datasets ride the existing `settingsQuery` unchanged.
+ */
+const httpZoneSettingsNode = (
+	decoded: SettingsResponseShape,
+	row: CloudflareAnalyticsStateRow,
+): DatasetSettingsShape | null | undefined => {
+	const zone = (decoded.viewer.zones ?? []).find((entry) => entry.zoneTag === row.zoneId)
+	return zone === undefined ? undefined : (zone.settings?.httpRequestsAdaptiveGroups ?? null)
+}
+
 const httpDataset: DatasetDef = {
 	id: HTTP_DATASET,
 	scope: "zone",
@@ -265,10 +285,63 @@ const httpDataset: DatasetDef = {
 				}),
 			),
 		),
-	settingsNode: (decoded, row) => {
-		const zone = (decoded.viewer.zones ?? []).find((entry) => entry.zoneTag === row.zoneId)
-		return zone === undefined ? undefined : (zone.settings?.httpRequestsAdaptiveGroups ?? null)
-	},
+	settingsNode: httpZoneSettingsNode,
+}
+
+/**
+ * Paths get their own DatasetDef rather than two more aliases on {@link httpDataset} because
+ * `partForError` attributes GraphQL errors to a dataset *by alias*: a plan that gates
+ * `clientRequestPath` would otherwise disable requests, bytes, visits and latency along with it.
+ * Its own entry costs one state row per zone and isolates that failure.
+ *
+ * The empty `availableFieldsNeedle` keeps `quantilesAvailable` true, so this dataset batches into
+ * the same zone document as `http_requests` — zero extra GraphQL calls in steady state.
+ */
+const httpPathsDataset: DatasetDef = {
+	id: HTTP_PATHS_DATASET,
+	scope: "zone",
+	quantileNeedles: [],
+	availableFieldsNeedle: "",
+	aliases: ["paths", "pathErrors"],
+	selection: httpPathsSelection,
+	mapNode: (node, target) =>
+		decodeHttpPathsZoneNode(node).pipe(
+			Effect.mapError(() => decodeError("HTTP paths")),
+			Effect.map((decoded) =>
+				mapHttpPathGroups({
+					orgId: target.orgId,
+					zoneId: target.row.zoneId,
+					zoneName: target.row.zoneName ?? target.row.zoneId,
+					groups: decoded.paths ?? [],
+					errors: decoded.pathErrors ?? [],
+				}),
+			),
+		),
+	settingsNode: httpZoneSettingsNode,
+}
+
+/** Country + client (method/protocol/device) breakdowns; same isolation argument as paths. */
+const httpDimensionsDataset: DatasetDef = {
+	id: HTTP_DIMENSIONS_DATASET,
+	scope: "zone",
+	quantileNeedles: [],
+	availableFieldsNeedle: "",
+	aliases: ["countryAgg", "clientAgg"],
+	selection: httpDimensionsSelection,
+	mapNode: (node, target) =>
+		decodeHttpDimensionsZoneNode(node).pipe(
+			Effect.mapError(() => decodeError("HTTP dimensions")),
+			Effect.map((decoded) =>
+				mapHttpDimensionGroups({
+					orgId: target.orgId,
+					zoneId: target.row.zoneId,
+					zoneName: target.row.zoneName ?? target.row.zoneId,
+					countries: decoded.countryAgg ?? [],
+					clients: decoded.clientAgg ?? [],
+				}),
+			),
+		),
+	settingsNode: httpZoneSettingsNode,
 }
 
 const workersDataset: DatasetDef = {
@@ -413,6 +486,8 @@ const durableObjectsDataset: DatasetDef = {
 
 const DATASETS: ReadonlyArray<DatasetDef> = [
 	httpDataset,
+	httpPathsDataset,
+	httpDimensionsDataset,
 	firewallDataset,
 	dnsDataset,
 	workersDataset,

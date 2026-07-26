@@ -184,6 +184,15 @@ export class CloudflareTopTrafficRequest extends Schema.Class<CloudflareTopTraff
 	endTime: Schema.Number,
 	/** Top-N size; defaults to 15, capped at 50. */
 	limit: Schema.optionalKey(Schema.Number),
+	/**
+	 * Server-side substring match, applied by Cloudflare before ranking. This is what makes the
+	 * live lookup worth having: it reaches keys the stored per-window top-N never kept.
+	 */
+	contains: Schema.optionalKey(Schema.String),
+	hosts: Schema.optionalKey(Schema.Array(Schema.String)),
+	countries: Schema.optionalKey(Schema.Array(Schema.String)),
+	methods: Schema.optionalKey(Schema.Array(Schema.String)),
+	cacheStatuses: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
 export class CloudflareTopTrafficRow extends Schema.Class<CloudflareTopTrafficRow>("CloudflareTopTrafficRow")(

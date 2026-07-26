@@ -26,18 +26,24 @@ const FALLBACK_SERIES_COLOR = "var(--chart-5)"
 export function ChartCard({
 	title,
 	legend,
+	scope,
 	children,
 	className,
 }: {
 	title: string
 	legend: ReactNode
+	/** Scope marker: what this panel is actually filtered to. See PanelScope. */
+	scope?: ReactNode
 	children: ReactNode
 	className?: string
 }) {
 	return (
 		<div className={cn("rounded-md border bg-card", className)}>
 			<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 pt-2.5">
-				<span className="text-[11px] font-medium text-muted-foreground">{title}</span>
+				<div className="flex flex-wrap items-center gap-2">
+					<span className="text-[11px] font-medium text-muted-foreground">{title}</span>
+					{scope}
+				</div>
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">{legend}</div>
 			</div>
 			{children}
@@ -52,9 +58,17 @@ export interface StackedBreakdownChartProps {
 	/** Fixed legend/stack order; unlisted series append after, alphabetically. */
 	order: ReadonlyArray<string>
 	syncId?: string
+	scope?: ReactNode
 }
 
-export function StackedBreakdownChart({ title, rows, colors, order, syncId }: StackedBreakdownChartProps) {
+export function StackedBreakdownChart({
+	title,
+	rows,
+	colors,
+	order,
+	syncId,
+	scope,
+}: StackedBreakdownChartProps) {
 	const gradientPrefix = useId().replace(/:/g, "")
 	const { data, series } = useMemo(() => {
 		const transformed = transformRows(rows, makeBucketLabeler(rows.map((r) => r.bucket)))
@@ -78,6 +92,7 @@ export function StackedBreakdownChart({ title, rows, colors, order, syncId }: St
 	return (
 		<ChartCard
 			title={title}
+			scope={scope}
 			legend={series.map((s) => (
 				<span key={s} className="inline-flex items-center gap-1.5">
 					<span
@@ -185,9 +200,11 @@ export function StackedBreakdownChart({ title, rows, colors, order, syncId }: St
 export function CloudflareZoneStatusChart({
 	buckets,
 	syncId,
+	scope,
 }: {
 	buckets: ReadonlyArray<CloudflareZoneStatusBucket>
 	syncId?: string
+	scope?: ReactNode
 }) {
 	const rows = useMemo(
 		() => buckets.map((b) => ({ bucket: b.bucket, attributeValue: b.statusClass, value: b.requests })),
@@ -200,6 +217,7 @@ export function CloudflareZoneStatusChart({
 			colors={STATUS_CLASS_COLORS}
 			order={STATUS_CLASS_ORDER}
 			syncId={syncId}
+			scope={scope}
 		/>
 	)
 }
@@ -207,9 +225,11 @@ export function CloudflareZoneStatusChart({
 export function CloudflareZoneCacheChart({
 	buckets,
 	syncId,
+	scope,
 }: {
 	buckets: ReadonlyArray<CloudflareZoneCacheBucket>
 	syncId?: string
+	scope?: ReactNode
 }) {
 	const rows = useMemo(
 		() => buckets.map((b) => ({ bucket: b.bucket, attributeValue: b.cacheStatus, value: b.requests })),
@@ -222,6 +242,7 @@ export function CloudflareZoneCacheChart({
 			colors={CACHE_STATUS_COLORS}
 			order={CACHE_STATUS_ORDER}
 			syncId={syncId}
+			scope={scope}
 		/>
 	)
 }
@@ -252,9 +273,11 @@ function LatencyLegendSwatch({ color, dashed }: { color: string; dashed?: boolea
 export function CloudflareZoneLatencyChart({
 	buckets,
 	syncId,
+	scope,
 }: {
 	buckets: ReadonlyArray<CloudflareZoneLatencyBucket>
 	syncId?: string
+	scope?: ReactNode
 }) {
 	const { data, activeSeries } = useMemo(() => {
 		const labeler = makeBucketLabeler(buckets.map((b) => b.bucket))
@@ -290,6 +313,7 @@ export function CloudflareZoneLatencyChart({
 	return (
 		<ChartCard
 			title="Latency percentiles"
+			scope={scope}
 			legend={activeSeries.map((s) => (
 				<span key={s.key} className="inline-flex items-center gap-1.5">
 					<LatencyLegendSwatch color={s.color} dashed={s.dashed} />

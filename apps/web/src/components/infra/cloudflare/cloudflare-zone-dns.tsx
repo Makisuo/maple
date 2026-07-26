@@ -11,6 +11,8 @@ import { formatNumber } from "@/lib/format"
 import { ColumnHead, TableShell } from "../primitives/data-table"
 import { formatPercent } from "../format"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
+import { PanelScope } from "./panel-scope"
+import type { CloudflareFilters } from "./filters"
 
 // NOERROR is healthy; NXDOMAIN is the interesting signal (typo storms,
 // subdomain scanning); server-side failures render hot.
@@ -32,16 +34,20 @@ export function CloudflareZoneDnsSection({
 	startTime,
 	endTime,
 	bucketSeconds,
+	filters,
 	syncId,
 }: {
 	serviceName: string
 	startTime: string
 	endTime: string
 	bucketSeconds: number
+	filters: CloudflareFilters
 	syncId?: string
 }) {
 	const result = useAtomValue(
-		cloudflareZoneDnsResultAtom({ data: { serviceName, startTime, endTime, bucketSeconds } }),
+		cloudflareZoneDnsResultAtom({
+			data: { serviceName, startTime, endTime, bucketSeconds, ...filters },
+		}),
 	)
 
 	return Result.builder(result)
@@ -60,6 +66,13 @@ export function CloudflareZoneDnsSection({
 						colors={RESPONSE_CODE_COLORS}
 						order={RESPONSE_CODE_ORDER}
 						syncId={syncId}
+						scope={
+							<PanelScope
+								filters={filters}
+								ignoredFilters={data.ignoredFilters}
+								reason="DNS analytics is a separate dataset with its own dimensions"
+							/>
+						}
 					/>
 					<DnsNamesTable names={data.names} waiting={r.waiting} />
 				</div>

@@ -189,6 +189,8 @@ interface FetchOptions {
 	readonly zones?: ReadonlyArray<typeof zoneFixture>
 	readonly zonesStatus?: number
 	readonly graphqlErrors?: ReadonlyArray<{ message: string; path?: ReadonlyArray<string | number> }>
+	/** When set, every outbound GraphQL document is captured here (batching assertions). */
+	readonly graphqlQueries?: Array<string>
 	/** Live Worker scripts the REST enumeration returns (default: my-worker). */
 	readonly workerScripts?: ReadonlyArray<{ id: string }>
 	/** Hyperdrive configs the REST enumeration returns (default: none). Mutable so a test can change the upstream set between polls. */
@@ -243,6 +245,7 @@ const mockCloudflareFetch =
 		}
 		if (url.includes("/graphql")) {
 			const body = JSON.parse(await readRequestBody(input, init)) as { query: string }
+			options.graphqlQueries?.push(body.query)
 			if (options.graphqlErrors) {
 				return jsonResponse({ data: null, errors: options.graphqlErrors })
 			}
@@ -1018,6 +1021,42 @@ describe("CloudflareAnalyticsService", () => {
 		)
 	})
 
+	it.effect("the path and dimension datasets ride the HTTP zone document, not extra calls", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		const graphqlQueries: Array<string> = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			// Every zone dataset at the same watermark → one (scope, window) batch key. Backfill is
+			// already at the floor, so exactly one head window runs and the document count is exact.
+			for (const dataset of [
+				"http_requests",
+				"http_paths",
+				"http_dimensions",
+				"firewall_events",
+				"dns_queries",
+			]) {
+				yield* seedStateRow({
+					dataset,
+					zoneId: ZONE_ID,
+					zoneName: ZONE_NAME,
+					watermarkAt: new Date(T0 - 30 * MIN),
+					backfillAt: new Date(BACKFILL_FLOOR),
+					settingsFetchedAt: new Date(T0 - 5 * MIN),
+				})
+			}
+			const service = yield* CloudflareAnalyticsService
+			yield* service.pollOrg(ORG)
+
+			const zoneDocs = graphqlQueries.filter((q) => q.includes("MapleCfZoneAnalytics"))
+			assert.strictEqual(zoneDocs.length, 1)
+			for (const alias of ["groups:", "latency:", "paths:", "pathErrors:", "countryAgg:", "clientAgg:"]) {
+				assert.include(zoneDocs[0]!, alias)
+			}
+		}).pipe(Effect.provide(makeLayer(testDb, captured, { graphqlQueries })))
+	})
+
 	it.effect("a path-attributed 'disabled' error disables only the owning dataset", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []
@@ -1047,6 +1086,42 @@ describe("CloudflareAnalyticsService", () => {
 						{
 							message: "firewallEventsAdaptiveGroups is not enabled for this zone",
 							path: ["viewer", "zones", 0, "firewall"],
+						},
+					],
+				}),
+			),
+		)
+	})
+
+	it.effect("a plan-gated clientRequestPath keeps the rest of the HTTP cube flowing", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			for (const dataset of ["http_requests", "http_paths"]) {
+				yield* seedStateRow({
+					dataset,
+					zoneId: ZONE_ID,
+					zoneName: ZONE_NAME,
+					watermarkAt: new Date(T0 - 30 * MIN),
+					settingsFetchedAt: new Date(T0 - 5 * MIN),
+				})
+			}
+			const service = yield* CloudflareAnalyticsService
+			yield* service.pollOrg(ORG)
+			const rows = yield* loadStateRows
+			// This is the whole reason paths are their own DatasetDef: had `paths` been an alias of
+			// http_requests, this error would have taken requests, bytes, visits and latency with it.
+			assert.isFalse(rows.find((r) => r.dataset === "http_paths")!.enabled)
+			assert.isTrue(rows.find((r) => r.dataset === "http_requests")!.enabled)
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, captured, {
+					graphqlErrors: [
+						{
+							message: "does not have access to the field clientRequestPath",
+							path: ["viewer", "zones", 0, "paths"],
 						},
 					],
 				}),

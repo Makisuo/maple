@@ -435,6 +435,37 @@ export {
 	type CloudflareDurableObjectCountersOutput,
 } from "./queries/cloudflare-infra-extended"
 
+// Queries — Cloudflare zone filters (which dimensions each metric family actually carries)
+export {
+	CF_ATTR,
+	CF_FILTERABLE,
+	CF_METRIC,
+	cloudflareFilterConditions,
+	cloudflareHostAttr,
+	cloudflareIgnoredFilters,
+	cloudflareIgnoredFiltersFor,
+	type CfFilterKey,
+	type CloudflareFilterOpts,
+} from "./queries/cloudflare-infra-filters"
+
+// Queries — Cloudflare zone breakdowns (generic per-dimension totals/timeseries) + filter facets
+export {
+	CLOUDFLARE_BREAKDOWN_DIMENSIONS,
+	cloudflareBreakdownMetrics,
+	cloudflareZoneBreakdownCoverageRowSchema,
+	cloudflareZoneBreakdownCoverageSQL,
+	cloudflareZoneBreakdownTimeseriesRowSchema,
+	cloudflareZoneBreakdownTimeseriesSQL,
+	cloudflareZoneBreakdownTotalsRowSchema,
+	cloudflareZoneBreakdownTotalsSQL,
+	cloudflareZoneFacetsQuery,
+	type CloudflareBreakdownDimension,
+	type CloudflareZoneBreakdownCoverageOutput,
+	type CloudflareZoneBreakdownTimeseriesOutput,
+	type CloudflareZoneBreakdownTotalsOutput,
+	type CloudflareZoneFacetsOutput,
+} from "./queries/cloudflare-infra-breakdowns"
+
 // Queries — Internal observability (Maple's own self-instrumentation)
 export {
 	dbStatementSamplesQuery,
