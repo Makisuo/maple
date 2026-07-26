@@ -90,6 +90,11 @@ const signalsNavItems: SignalsNavItem[] = [
 
 export const investigateNavItems: NavItem[] = [
 	{
+		title: "Investigations",
+		href: "/investigations",
+		icon: PulseIcon,
+	},
+	{
 		title: "Errors",
 		href: "/errors",
 		icon: CircleWarningIcon,

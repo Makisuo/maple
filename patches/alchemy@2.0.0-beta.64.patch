@@ -1,0 +1,26 @@
+diff --git a/lib/Cloudflare/Workers/PythonWorkerBundle.js b/lib/Cloudflare/Workers/PythonWorkerBundle.js
+index bd97b01b2d1b738d621f0f7ca3645ec868da7e5a..5f6a47438e7d01676dca86ac5faad46c1ab1dfe4 100644
+--- a/lib/Cloudflare/Workers/PythonWorkerBundle.js
++++ b/lib/Cloudflare/Workers/PythonWorkerBundle.js
+@@ -14,7 +14,7 @@ import { sha256 } from "../../Util/sha256.js";
+  * directly with Pyodide, so the "bundle" is just the source files plus the
+  * vendored `python_modules/` directory.
+  */
+-export const isPythonMain = (main) => main !== undefined && main.split("?")[0].endsWith(".py");
++export const isPythonMain = (main) => typeof main === "string" && main.split("?")[0].endsWith(".py");
+ /**
+  * The Pyodide cross-compilation targets uv understands, keyed by the Python
+  * version the Workers runtime selects from the compatibility date/flags.
+diff --git a/src/Cloudflare/Workers/PythonWorkerBundle.ts b/src/Cloudflare/Workers/PythonWorkerBundle.ts
+index 5bf934589420f55268480fcd19c932686f6d48ab..b1aa3074d6b057c9c98dbedf2351a4923772501b 100644
+--- a/src/Cloudflare/Workers/PythonWorkerBundle.ts
++++ b/src/Cloudflare/Workers/PythonWorkerBundle.ts
+@@ -16,7 +16,7 @@ import { sha256 } from "../../Util/sha256.ts";
+  * vendored `python_modules/` directory.
+  */
+ export const isPythonMain = (main: string | undefined): main is string =>
+-  main !== undefined && main.split("?")[0].endsWith(".py");
++  typeof main === "string" && main.split("?")[0].endsWith(".py");
+ 
+ /**
+  * The Pyodide cross-compilation targets uv understands, keyed by the Python

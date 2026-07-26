@@ -48,6 +48,7 @@ import { ToolGroup } from "@/components/ai-elements/tool-group"
 import { ApprovalCard } from "./approval-card"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { UIMessage } from "@/components/ai-elements/types"
+import type { AiTriageResult } from "@maple/domain/http"
 
 type ToolPart = {
 	type: string
@@ -104,6 +105,8 @@ interface ChatConversationProps {
 	widgetFixContext?: WidgetFixContext
 	/** Read-only shared view: render the conversation with no composer. */
 	readOnly?: boolean
+	/** Preserved DB report for migrated/pruned conversations without a tool marker. */
+	fallbackDiagnosis?: AiTriageResult | null
 }
 
 export function ChatConversation({
@@ -115,6 +118,7 @@ export function ChatConversation({
 	investigationContext,
 	widgetFixContext,
 	readOnly = false,
+	fallbackDiagnosis = null,
 }: ChatConversationProps) {
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	useTypeAnywhereFocus(textareaRef, isActive && !readOnly)
@@ -163,6 +167,18 @@ export function ChatConversation({
 	}, [mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
 
 	const { messages, status, isLoading, sendMessage } = useFlueChat({ tabId, context })
+	const hasDiagnosisMarker = useMemo(
+		() =>
+			messages.some((message) =>
+				message.parts.some(
+					(part) =>
+						isToolPart(part) &&
+						(part as ToolPart).state === "output-available" &&
+						parseDiagnosisMarker((part as ToolPart).output) !== null,
+				),
+			),
+		[messages],
+	)
 
 	// Apply an approved proposal via Maple's authenticated API (propose-then-apply).
 	const applyProposal = useAtomSet(MapleApiAtomClient.mutation("chat", "apply"), {
@@ -245,7 +261,7 @@ export function ChatConversation({
 				<ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6">
 					{!hasSettled && messages.length === 0 ? (
 						<ConversationLoadingSkeleton />
-					) : messages.length === 0 ? (
+					) : messages.length === 0 && !fallbackDiagnosis ? (
 						readOnly ? (
 							<div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
 								<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
@@ -304,6 +320,9 @@ export function ChatConversation({
 						)
 					) : (
 						<>
+							{fallbackDiagnosis && !hasDiagnosisMarker ? (
+								<DiagnosisReportCard report={fallbackDiagnosis} />
+							) : null}
 							{messages.map((message, messageIndex) => {
 								const isLastMessage = messageIndex === messages.length - 1
 								return (

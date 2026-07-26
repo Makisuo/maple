@@ -84,6 +84,8 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 		listInvestigations: die,
 		getInvestigation: die,
 		createInvestigation: die,
+		createAndStartInvestigation: die,
+		restartInvestigation: die,
 		updateStatus: die,
 		submitDiagnosis: die,
 	}),
@@ -121,6 +123,9 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 		upsertNotificationPolicy: die,
 		getEscalationPolicy: die,
 		upsertEscalationPolicy: die,
+		evaluateEscalationPolicy: die,
+		listIssueEscalations: die,
+		listRecentEscalations: die,
 		runTick: die,
 	}),
 	Layer.succeed(OrganizationService, {

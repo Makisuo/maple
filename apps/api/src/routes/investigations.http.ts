@@ -44,8 +44,20 @@ export const HttpInvestigationsLive = HttpApiBuilder.group(MapleApi, "investigat
 						orgId: tenant.orgId,
 						"maple.investigation.subject_type": payload.subject.type,
 					})
-					return yield* service.createInvestigation(tenant.orgId, tenant.userId, payload)
+					return yield* service.createAndStartInvestigation(tenant.orgId, tenant.userId, payload, {
+						automatic: false,
+					})
 				}).pipe(Effect.withSpan("HttpInvestigations.create")),
+			)
+			.handle("restartInvestigation", ({ params }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					yield* Effect.annotateCurrentSpan({
+						orgId: tenant.orgId,
+						"maple.investigation.id": params.id,
+					})
+					return yield* service.restartInvestigation(tenant.orgId, params.id)
+				}).pipe(Effect.withSpan("HttpInvestigations.restart")),
 			)
 			.handle("updateInvestigationStatus", ({ params, payload }) =>
 				Effect.gen(function* () {

@@ -1,10 +1,9 @@
 import { useState } from "react"
-import { createFileRoute, Link } from "@tanstack/react-router"
-import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
+import { toast } from "sonner"
 
-import { AiTriageCard } from "@/components/ai-triage/ai-triage-card"
-import { encodeInvestigationRef } from "@/components/chat/investigation-context"
 import { PulseIcon } from "@/components/icons"
 import { AnomalyHero } from "@/components/anomalies/anomaly-hero"
 import { AnomalyLinkIssueDialog } from "@/components/anomalies/anomaly-link-issue-dialog"
@@ -23,6 +22,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { SectionHeader } from "@/components/layout/section-header"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { formatRelativeTime } from "@/lib/format"
 import {
 	AlertDialog,
@@ -43,6 +43,7 @@ import { AnomalyIncidentId, type AnomalyIncidentDocument, type ErrorIssueId } fr
 
 const decodeIncidentId = Schema.decodeSync(AnomalyIncidentId)
 const LIVE_REFRESH_INTERVAL_MS = 15_000
+const ANOMALY_LOADING_BREADCRUMBS = [{ label: "Anomalies", href: "/anomalies" }, { label: "…" }] as const
 
 export const Route = createFileRoute("/anomalies/$incidentId")({
 	component: AnomalyDetailPage,
@@ -69,11 +70,9 @@ function AnomalyDetailPage() {
 		enabled: isOpen,
 	})
 
-	const breadcrumbsLoading = [{ label: "Anomalies", href: "/anomalies" }, { label: "…" }] as const
-
 	return Result.builder(incidentResult)
 		.onInitial(() => (
-			<DashboardLayout breadcrumbs={[...breadcrumbsLoading]} title="Anomaly">
+			<DashboardLayout breadcrumbs={[...ANOMALY_LOADING_BREADCRUMBS]} title="Anomaly">
 				<div className="space-y-4">
 					<Skeleton className="h-24 w-full" />
 					<Skeleton className="h-64 w-full" />
@@ -82,7 +81,7 @@ function AnomalyDetailPage() {
 			</DashboardLayout>
 		))
 		.onError((error) => (
-			<DashboardLayout breadcrumbs={[...breadcrumbsLoading]} title="Anomaly">
+			<DashboardLayout breadcrumbs={[...ANOMALY_LOADING_BREADCRUMBS]} title="Anomaly">
 				<Empty>
 					<EmptyHeader>
 						<EmptyTitle>
@@ -117,6 +116,10 @@ function AnomalyDetailBody({
 	const [linkDialogOpen, setLinkDialogOpen] = useState(false)
 	const [resolveConfirmOpen, setResolveConfirmOpen] = useState(false)
 	const [busy, setBusy] = useState(false)
+	const navigate = useNavigate()
+	const createInvestigation = useAtomSet(MapleApiV2AtomClient.mutation("investigations", "create"), {
+		mode: "promiseExit",
+	})
 
 	const isOpen = incident.status === "open"
 	const isStale = isStaleOpenIncident(incident)
@@ -137,22 +140,71 @@ function AnomalyDetailBody({
 
 	const resolve = async () => {
 		setBusy(true)
-		await mutations.resolveIncident(incidentId)
-		setBusy(false)
-		setResolveConfirmOpen(false)
+		try {
+			await mutations.resolveIncident(incidentId)
+			setResolveConfirmOpen(false)
+		} finally {
+			setBusy(false)
+		}
 	}
 
 	const linkTo = async (issueId: ErrorIssueId) => {
 		setBusy(true)
-		const result = await mutations.linkIssue(incidentId, issueId, incident.errorIssueId)
-		setBusy(false)
-		if (Exit.isSuccess(result)) setLinkDialogOpen(false)
+		try {
+			const result = await mutations.linkIssue(incidentId, issueId, incident.errorIssueId)
+			if (Exit.isSuccess(result)) setLinkDialogOpen(false)
+		} finally {
+			setBusy(false)
+		}
 	}
 
 	const unlink = async () => {
 		setBusy(true)
-		await mutations.linkIssue(incidentId, null, incident.errorIssueId)
-		setBusy(false)
+		try {
+			await mutations.linkIssue(incidentId, null, incident.errorIssueId)
+		} finally {
+			setBusy(false)
+		}
+	}
+
+	const investigate = async () => {
+		setBusy(true)
+		try {
+			const result = await createInvestigation({
+				payload: {
+					subject: {
+						type: "incident",
+						incident_kind: "anomaly",
+						incident_id: incidentId,
+						...(incident.errorIssueId ? { issue_id: incident.errorIssueId } : {}),
+					} as never,
+					snapshot: {
+						title: `${SIGNAL_LABEL[incident.signalType]} · ${incident.serviceName}`,
+						scope: incident.deploymentEnv || incident.serviceName,
+						status: incident.status,
+						severity: incident.severity === "critical" ? "critical" : "medium",
+						facts: [
+							{ label: "Signal", value: incident.signalType },
+							{ label: "Service", value: incident.serviceName },
+							{ label: "Last observed", value: String(incident.lastObservedValue) },
+						],
+						references: incident.errorIssueId
+							? [{ label: "Issue", url: `/errors/issues/${incident.errorIssueId}` }]
+							: [],
+						incidentStartedAt: incident.firstTriggeredAt,
+						incidentEndedAt: incident.resolvedAt,
+					},
+				},
+				reactivityKeys: ["investigations"],
+			})
+			if (Exit.isSuccess(result)) {
+				await navigate({ to: "/investigations/$id", params: { id: result.value.id } })
+				return
+			}
+			toast.error(result.cause.toString())
+		} finally {
+			setBusy(false)
+		}
 	}
 
 	return (
@@ -192,19 +244,9 @@ function AnomalyDetailBody({
 							"Resolved"
 						)}
 					</Badge>
-					<Button
-						size="sm"
-						variant="outline"
-						render={
-							<Link
-								to="/investigations/$id"
-								params={{ id: incidentId }}
-								search={{ r: encodeInvestigationRef({ kind: "anomaly", id: incidentId }) }}
-							/>
-						}
-					>
+					<Button size="sm" variant="outline" onClick={() => void investigate()} disabled={busy}>
 						<PulseIcon className="size-3.5" />
-						Investigate with Maple AI
+						{busy ? "Opening…" : "Open investigation"}
 					</Button>
 					{isOpen ? (
 						<Button
@@ -242,11 +284,6 @@ function AnomalyDetailBody({
 							<AnomalyTimeseriesChart incident={incident} timeseries={timeseries} />
 						))
 						.render()}
-				</section>
-
-				<section aria-labelledby="triage-heading">
-					<SectionHeader id="triage-heading" label="AI triage" />
-					<AiTriageCard incidentKind="anomaly" incidentId={incidentId} />
 				</section>
 
 				<section aria-labelledby="linked-issue-heading">

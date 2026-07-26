@@ -9,7 +9,6 @@ import { useIsOrgAdmin } from "@/hooks/use-is-org-admin"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
 	BellIcon,
-	ChatBubbleSparkleIcon,
 	CodeIcon,
 	CreditCardIcon,
 	DatabaseIcon,
@@ -32,8 +31,7 @@ export const settingsTabValues = [
 	"developer",
 	"mcp",
 	"notifications",
-	"escalations",
-	"ai",
+	"automation",
 	"billing",
 	"data-platform",
 ] as const
@@ -47,8 +45,7 @@ export const settingsTabLabels: Record<SettingsTab, string> = {
 	developer: "API Reference",
 	mcp: "MCP",
 	notifications: "Notifications",
-	escalations: "Escalations",
-	ai: "AI",
+	automation: "Automation",
 	billing: "Billing",
 	"data-platform": "Data Platform",
 }
@@ -100,8 +97,7 @@ const navSections: SettingsNavSection[] = [
 		title: "Behavior",
 		items: [
 			{ id: "notifications", label: "Notifications", icon: BellIcon },
-			{ id: "escalations", label: "Escalations", icon: ShieldIcon },
-			{ id: "ai", label: "AI", icon: ChatBubbleSparkleIcon },
+			{ id: "automation", label: "Automation", icon: ShieldIcon },
 		],
 	},
 	{
@@ -163,7 +159,6 @@ export function useVisibleSettingsSections() {
 			...section,
 			items: section.items.filter((item) => {
 				if (item.id === "data-platform") return canAccessDataPlatform
-				if (item.id === "ai") return canAccessAi
 				return true
 			}),
 		}))

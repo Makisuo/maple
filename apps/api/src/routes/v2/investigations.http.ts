@@ -9,18 +9,25 @@ import {
 	InvestigationFreeformSubject,
 	InvestigationId,
 	InvestigationIncidentSubject,
+	InvestigationSubjectSnapshot,
 	type InvestigationNotFoundError,
 	type InvestigationPersistenceError,
+	type InvestigationQuotaError,
+	type InvestigationRejectedError,
+	type InvestigationUnavailableError,
 	TraceId,
 } from "@maple/domain/http"
 import {
 	MapleApiV2,
 	dependencyUnavailable,
+	investigationQuotaReached,
 	paginateOffsetQuery,
 	resourceNotFound,
+	upstreamError,
 } from "@maple/domain/http/v2"
 import type {
 	V2Investigation,
+	V2InvestigationCreateParams,
 	V2InvestigationCreateSubject,
 	V2InvestigationSubject,
 } from "@maple/domain/http/v2"
@@ -123,6 +130,9 @@ const toInternalSubject = (subject: V2InvestigationCreateSubject): Investigation
 				contextRefs: subject.context_refs,
 			})
 
+const toInternalSnapshot = (snapshot: V2InvestigationCreateParams["snapshot"] | undefined) =>
+	snapshot === undefined ? undefined : Schema.decodeUnknownSync(InvestigationSubjectSnapshot)(snapshot)
+
 const toV2Investigation = Effect.fn("HttpV2Investigations.toV2Investigation")(function* (
 	doc: InvestigationDocument,
 ): Effect.fn.Return<V2Investigation, InvestigationSubjectDecodeError> {
@@ -157,6 +167,7 @@ const toV2Investigation = Effect.fn("HttpV2Investigations.toV2Investigation")(fu
 		object: "investigation",
 		status: doc.status,
 		subject: yield* toWireSubject(doc.id, doc.subject),
+		snapshot: doc.snapshot,
 		report,
 		model: doc.model,
 		severity: doc.severity,
@@ -194,6 +205,65 @@ const mapWith404 =
 					Effect.fail(dependencyUnavailable(`investigation_${operation}_unavailable`)),
 			}),
 		)
+
+const mapStartErrors = <A, R>(
+	effect: Effect.Effect<
+		A,
+		| InvestigationPersistenceError
+		| InvestigationNotFoundError
+		| InvestigationQuotaError
+		| InvestigationRejectedError
+		| InvestigationUnavailableError,
+		R
+	>,
+) =>
+	effect.pipe(
+		Effect.catchTags({
+			"@maple/http/investigations/InvestigationNotFoundError": () =>
+				Effect.fail(resourceNotFound("investigation", "No such investigation.")),
+			"@maple/http/investigations/InvestigationPersistenceError": () =>
+				Effect.fail(dependencyUnavailable("investigation_start_unavailable")),
+			"@maple/http/investigations/InvestigationQuotaError": (error) =>
+				Effect.fail(investigationQuotaReached(error.retryableAt)),
+			"@maple/http/investigations/InvestigationRejectedError": (error) =>
+				Effect.fail(
+					upstreamError(
+						"investigation_start_rejected",
+						`The investigation agent rejected the start request with HTTP ${error.status}.`,
+					),
+				),
+			"@maple/http/investigations/InvestigationUnavailableError": (error) =>
+				Effect.fail(dependencyUnavailable(`investigation_${error.reason}`)),
+		}),
+	)
+
+const mapCreateStartErrors = <A, R>(
+	effect: Effect.Effect<
+		A,
+		| InvestigationPersistenceError
+		| InvestigationQuotaError
+		| InvestigationRejectedError
+		| InvestigationUnavailableError,
+		R
+	>,
+) =>
+	effect.pipe(
+		Effect.catchTags({
+			"@maple/http/investigations/InvestigationPersistenceError": () =>
+				Effect.fail(dependencyUnavailable("investigation_start_unavailable")),
+			"@maple/http/investigations/InvestigationQuotaError": (error) =>
+				Effect.fail(investigationQuotaReached(error.retryableAt)),
+			"@maple/http/investigations/InvestigationRejectedError": (error) =>
+				Effect.fail(
+					upstreamError(
+						"investigation_start_rejected",
+						`The investigation agent rejected the start request with HTTP ${error.status}.`,
+					),
+				),
+			"@maple/http/investigations/InvestigationUnavailableError": (error) =>
+				Effect.fail(dependencyUnavailable(`investigation_${error.reason}`)),
+		}),
+	)
 
 const mapSubjectDecodeError = (error: InvestigationSubjectDecodeError) =>
 	Effect.logError(error.message).pipe(
@@ -259,12 +329,32 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const doc = yield* service
-						.createInvestigation(
+						.createAndStartInvestigation(
 							tenant.orgId,
 							tenant.userId,
-							new InvestigationCreateRequest({ subject: toInternalSubject(payload.subject) }),
+							new InvestigationCreateRequest({
+								subject: toInternalSubject(payload.subject),
+								...(payload.snapshot !== undefined
+									? { snapshot: toInternalSnapshot(payload.snapshot) }
+									: {}),
+							}),
+							{ automatic: false },
 						)
-						.pipe(mapPersistenceError("create"))
+						.pipe(mapCreateStartErrors)
+					return yield* toV2Investigation(doc).pipe(
+						Effect.catchTag(
+							"@maple/api/routes/v2/InvestigationSubjectDecodeError",
+							mapSubjectDecodeError,
+						),
+					)
+				}),
+			)
+			.handle("restart", ({ params }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const doc = yield* service
+						.restartInvestigation(tenant.orgId, params.id)
+						.pipe(mapStartErrors)
 					return yield* toV2Investigation(doc).pipe(
 						Effect.catchTag(
 							"@maple/api/routes/v2/InvestigationSubjectDecodeError",

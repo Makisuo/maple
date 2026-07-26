@@ -9,14 +9,17 @@ import {
 	InvestigationIncidentSubject,
 	InvestigationId,
 	InvestigationNotFoundError,
+	InvestigationRejectedError,
 	OrgId,
 	SubmitDiagnosisRequest,
 } from "@maple/domain/http"
 import { ErrorIssueId } from "@maple/domain/primitives"
-import { errorIssues, errorIssueEvents } from "@maple/db"
+import { errorIssues, errorIssueEvents, investigations } from "@maple/db"
 import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
+import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { eq } from "drizzle-orm"
 import { Env } from "@/lib/Env"
+import { Database } from "@/lib/DatabaseLive"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
 import { InvestigationService } from "./InvestigationService"
 
@@ -39,13 +42,16 @@ const testConfig = () =>
 		}),
 	)
 
-const makeHarness = () => {
+const makeHarness = (workerEnvironment?: Record<string, unknown>) => {
 	const testDb = createTestDb(createdDbs)
-	const layer = InvestigationService.layer.pipe(
+	let layer = InvestigationService.layer.pipe(
 		Layer.provideMerge(testDb.layer),
 		Layer.provideMerge(Env.layer),
 		Layer.provide(testConfig()),
 	)
+	if (workerEnvironment !== undefined) {
+		layer = layer.pipe(Layer.provideMerge(Layer.succeed(WorkerEnvironment, workerEnvironment)))
+	}
 	return { testDb, layer }
 }
 
@@ -181,6 +187,61 @@ describe("InvestigationService", () => {
 			assert.instanceOf(error, InvestigationNotFoundError)
 		}).pipe(Effect.provide(makeLayer())),
 	)
+
+	it.effect("starts an autonomous turn with the configured token and preserved context", () => {
+		const requests: Request[] = []
+		const harness = makeHarness({
+			CHAT_FLUE: {
+				fetch: async (request: Request) => {
+					requests.push(request)
+					return new Response(null, { status: 202 })
+				},
+			},
+		})
+		return Effect.gen(function* () {
+			const service = yield* InvestigationService
+			const started = yield* service.createAndStartInvestigation(
+				ORG,
+				null,
+				incidentRequest("err_autonomous_start"),
+				{ automatic: false },
+			)
+			assert.strictEqual(started.status, "investigating")
+			assert.lengthOf(requests, 1)
+			assert.strictEqual(requests[0]?.method, "POST")
+			assert.strictEqual(
+				requests[0]?.headers.get("authorization"),
+				"Bearer maple_svc_test-internal-token",
+			)
+			const body = (yield* Effect.promise(() => requests[0]!.json())) as { message: string }
+			assert.include(body.message, '"incidentId":"err_autonomous_start"')
+			assert.include(body.message, '"snapshot"')
+
+			const database = yield* Database
+			const databaseRows = yield* database.execute((db) =>
+				db.select().from(investigations).where(eq(investigations.id, started.id)),
+			)
+			assert.strictEqual(databaseRows[0]?.autonomousTurns, 1)
+		}).pipe(Effect.provide(harness.layer))
+	})
+
+	it.effect("surfaces terminal agent rejection separately from retryable unavailability", () => {
+		const harness = makeHarness({
+			CHAT_FLUE: {
+				fetch: async () => new Response(null, { status: 401 }),
+			},
+		})
+		return Effect.gen(function* () {
+			const service = yield* InvestigationService
+			const error = yield* Effect.flip(
+				service.createAndStartInvestigation(ORG, null, incidentRequest("err_rejected_start"), {
+					automatic: false,
+				}),
+			)
+			assert.instanceOf(error, InvestigationRejectedError)
+			assert.strictEqual(error.status, 401)
+		}).pipe(Effect.provide(harness.layer))
+	})
 
 	it.effect(
 		"submit_diagnosis writes the issue-linked ai_triage event exactly once across re-diagnosis",

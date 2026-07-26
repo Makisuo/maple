@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
-import { Fragment, useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -38,21 +38,16 @@ import {
 	AlertRuleId,
 	AlertCheckDocument,
 	IsoDateTimeString,
-	type AiTriageResult,
 	type AlertDestinationDocument,
 	type AlertIncidentDocument,
 	type AlertRuleDocument,
 } from "@maple/domain/http"
 import { useAlertDestinationsList, useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
-import { AiTriageCard } from "@/components/ai-triage/ai-triage-card"
-import { AlertChatSheet } from "@/components/alerts/alert-chat-sheet"
-import { toAlertContext, type AlertContext } from "@/components/chat/alert-context"
 import {
 	CheckIcon,
 	PencilIcon,
 	DotsVerticalIcon,
 	CircleWarningIcon,
-	ChevronDownIcon,
 	ChatBubbleSparkleIcon,
 } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
@@ -147,6 +142,9 @@ function RuleDetailContent() {
 		}),
 	)
 	const updateRule = useAtomSet(MapleApiV2AtomClient.mutation("alertRules", "update"), {
+		mode: "promiseExit",
+	})
+	const createInvestigation = useAtomSet(MapleApiV2AtomClient.mutation("investigations", "create"), {
 		mode: "promiseExit",
 	})
 	const { result: checksResult, refresh: refreshChecks } = useAlertRuleChecks(ruleId, since, until)
@@ -281,16 +279,46 @@ function RuleDetailContent() {
 		[ruleIncidents],
 	)
 
-	// Integrated alert chat slide-over, seeded with an incident's context.
-	const [chatContext, setChatContext] = useState<AlertContext | null>(null)
-	const [chatOpen, setChatOpen] = useState(false)
-	// History rows lazily mount their own triage card only when expanded.
-	const [expandedIncidentId, setExpandedIncidentId] = useState<string | null>(null)
-
-	const openAlertChat = (incident: AlertIncidentDocument, result?: AiTriageResult | null) => {
+	const openInvestigation = async (incident: AlertIncidentDocument) => {
 		if (!rule) return
-		setChatContext(toAlertContext(rule, incident, result))
-		setChatOpen(true)
+		const result = await createInvestigation({
+			payload: {
+				subject: {
+					type: "incident",
+					incident_kind: "alert",
+					incident_id: incident.id,
+					...(incident.errorIssueId ? { issue_id: incident.errorIssueId } : {}),
+				} as never,
+				snapshot: {
+					title: rule.name,
+					scope: incident.groupKey ?? "all",
+					status: incident.status,
+					severity: incident.severity === "critical" ? "critical" : "medium",
+					facts: [
+						{ label: "Signal", value: signalLabels[rule.signalType] },
+						{
+							label: "Observed",
+							value: formatSignalValue(rule.signalType, incident.lastObservedValue),
+						},
+						{
+							label: "Threshold",
+							value: formatSignalValue(rule.signalType, incident.threshold),
+						},
+					],
+					references: incident.errorIssueId
+						? [{ label: "Issue", url: `/errors/issues/${incident.errorIssueId}` }]
+						: [],
+					incidentStartedAt: incident.firstTriggeredAt,
+					incidentEndedAt: incident.resolvedAt,
+				},
+			},
+			reactivityKeys: ["investigations"],
+		})
+		if (Exit.isSuccess(result)) {
+			await navigate({ to: "/investigations/$id", params: { id: result.value.id } })
+			return
+		}
+		toast.error(getExitErrorMessage(result, "Failed to open investigation"))
 	}
 
 	const stats = useMemo(() => computeIncidentStats(ruleIncidents), [ruleIncidents])
@@ -507,12 +535,20 @@ function RuleDetailContent() {
 					{Result.isInitial(incidentsResult) ? (
 						<Skeleton className="h-40 w-full" />
 					) : overviewIncident ? (
-						<AiTriageCard
-							incidentKind="alert"
-							incidentId={overviewIncident.id}
-							issueId={overviewIncident.errorIssueId ?? undefined}
-							onOpenChat={(result) => openAlertChat(overviewIncident, result)}
-						/>
+						<div className="flex items-center justify-between gap-4 border border-border px-4 py-3">
+							<div className="min-w-0">
+								<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+									Investigation
+								</p>
+								<p className="truncate text-sm">
+									Review the latest incident in a durable evidence workspace.
+								</p>
+							</div>
+							<Button size="sm" onClick={() => void openInvestigation(overviewIncident)}>
+								<ChatBubbleSparkleIcon size={14} />
+								Open investigation
+							</Button>
+						</div>
 					) : null}
 
 					<div className="space-y-3">
@@ -801,166 +837,114 @@ function RuleDetailContent() {
 									<TableBody>
 										{filteredIncidents.map((incident) => {
 											const isOpen = incident.status === "open"
-											const isExpanded = expandedIncidentId === incident.id
 											return (
-												<Fragment key={incident.id}>
-													<TableRow>
-														<TableCell>
-															<AlertStatusBadge
-																state={isOpen ? "firing" : "resolved"}
-															/>
-														</TableCell>
-														<TableCell>
-															<span className="font-mono text-muted-foreground">
-																{incident.groupKey ?? "all"}
-															</span>
-														</TableCell>
-														<TableCell>
-															<div className="flex flex-wrap gap-1">
-																<Badge
-																	variant="secondary"
-																	className="text-xs font-mono"
-																>
-																	{rule.signalType.replace("_", " ")}:{" "}
-																	{formatSignalValue(
-																		rule.signalType,
-																		incident.lastObservedValue,
-																	)}
-																</Badge>
-																<Badge
-																	variant="secondary"
-																	className="text-xs font-mono"
-																>
-																	threshold:{" "}
-																	{formatSignalValue(
-																		rule.signalType,
-																		incident.threshold,
-																	)}
-																</Badge>
-															</div>
-														</TableCell>
-														<TableCell className="text-xs">
-															{formatAlertDateTimeFull(
-																incident.firstTriggeredAt,
-															)}
-														</TableCell>
-														<TableCell>
-															<span
-																className={cn(
-																	"text-xs tabular-nums",
-																	isOpen && "text-destructive font-medium",
-																)}
+												<TableRow key={incident.id}>
+													<TableCell>
+														<AlertStatusBadge
+															state={isOpen ? "firing" : "resolved"}
+														/>
+													</TableCell>
+													<TableCell>
+														<span className="font-mono text-muted-foreground">
+															{incident.groupKey ?? "all"}
+														</span>
+													</TableCell>
+													<TableCell>
+														<div className="flex flex-wrap gap-1">
+															<Badge
+																variant="secondary"
+																className="text-xs font-mono"
 															>
-																{formatAlertDuration(
-																	incident.firstTriggeredAt,
-																	incident.resolvedAt,
+																{rule.signalType.replace("_", " ")}:{" "}
+																{formatSignalValue(
+																	rule.signalType,
+																	incident.lastObservedValue,
 																)}
-															</span>
-														</TableCell>
-														<TableCell>
-															{incident.errorIssueId != null ? (
-																<Link
-																	to="/errors/issues/$issueId"
-																	params={{
-																		issueId: incident.errorIssueId,
-																	}}
-																	className="text-xs text-primary underline-offset-4 hover:underline"
-																>
-																	View
-																</Link>
-															) : (
-																<span className="text-xs text-muted-foreground/60">
-																	—
-																</span>
+															</Badge>
+															<Badge
+																variant="secondary"
+																className="text-xs font-mono"
+															>
+																threshold:{" "}
+																{formatSignalValue(
+																	rule.signalType,
+																	incident.threshold,
+																)}
+															</Badge>
+														</div>
+													</TableCell>
+													<TableCell className="text-xs">
+														{formatAlertDateTimeFull(incident.firstTriggeredAt)}
+													</TableCell>
+													<TableCell>
+														<span
+															className={cn(
+																"text-xs tabular-nums",
+																isOpen && "text-destructive font-medium",
 															)}
-														</TableCell>
-														<TableCell>
-															<div className="flex items-center justify-end gap-1">
-																<Button
-																	variant="ghost"
-																	size="icon-sm"
-																	aria-label={
-																		isExpanded
-																			? "Hide AI summary"
-																			: "Show AI summary"
-																	}
-																	aria-expanded={isExpanded}
-																	onClick={() =>
-																		setExpandedIncidentId(
-																			isExpanded ? null : incident.id,
-																		)
+														>
+															{formatAlertDuration(
+																incident.firstTriggeredAt,
+																incident.resolvedAt,
+															)}
+														</span>
+													</TableCell>
+													<TableCell>
+														{incident.errorIssueId != null ? (
+															<Link
+																to="/errors/issues/$issueId"
+																params={{
+																	issueId: incident.errorIssueId,
+																}}
+																className="text-xs text-primary underline-offset-4 hover:underline"
+															>
+																View
+															</Link>
+														) : (
+															<span className="text-xs text-muted-foreground/60">
+																—
+															</span>
+														)}
+													</TableCell>
+													<TableCell>
+														<div className="flex items-center justify-end gap-1">
+															<DropdownMenu>
+																<DropdownMenuTrigger
+																	render={
+																		<Button
+																			variant="ghost"
+																			size="icon-sm"
+																		/>
 																	}
 																>
-																	<ChevronDownIcon
-																		size={14}
-																		className={cn(
-																			"transition-transform",
-																			isExpanded && "rotate-180",
-																		)}
-																	/>
-																</Button>
-																<DropdownMenu>
-																	<DropdownMenuTrigger
-																		render={
-																			<Button
-																				variant="ghost"
-																				size="icon-sm"
-																			/>
+																	<DotsVerticalIcon size={14} />
+																</DropdownMenuTrigger>
+																<DropdownMenuContent align="end">
+																	<DropdownMenuItem
+																		onClick={() =>
+																			void openInvestigation(incident)
 																		}
 																	>
-																		<DotsVerticalIcon size={14} />
-																	</DropdownMenuTrigger>
-																	<DropdownMenuContent align="end">
-																		<DropdownMenuItem
-																			onClick={() =>
-																				setExpandedIncidentId(
-																					isExpanded
-																						? null
-																						: incident.id,
-																				)
-																			}
-																		>
-																			<ChatBubbleSparkleIcon
-																				size={14}
-																			/>
-																			{isExpanded
-																				? "Hide AI summary"
-																				: "AI summary"}
-																		</DropdownMenuItem>
-																		<DropdownMenuItem
-																			onClick={() =>
-																				navigate({
-																					to: "/alerts",
-																					search: {
-																						tab: "overview",
-																					},
-																				})
-																			}
-																		>
-																			View all incidents
-																		</DropdownMenuItem>
-																	</DropdownMenuContent>
-																</DropdownMenu>
-															</div>
-														</TableCell>
-													</TableRow>
-													{isExpanded ? (
-														<TableRow className="bg-muted/30 hover:bg-muted/30">
-															<TableCell colSpan={7} className="p-4">
-																<AiTriageCard
-																	incidentKind="alert"
-																	incidentId={incident.id}
-																	issueId={
-																		incident.errorIssueId ?? undefined
-																	}
-																	onOpenChat={(result) =>
-																		openAlertChat(incident, result)
-																	}
-																/>
-															</TableCell>
-														</TableRow>
-													) : null}
-												</Fragment>
+																		<ChatBubbleSparkleIcon size={14} />
+																		Open investigation
+																	</DropdownMenuItem>
+																	<DropdownMenuItem
+																		onClick={() =>
+																			navigate({
+																				to: "/alerts",
+																				search: {
+																					tab: "overview",
+																				},
+																			})
+																		}
+																	>
+																		View all incidents
+																	</DropdownMenuItem>
+																</DropdownMenuContent>
+															</DropdownMenu>
+														</div>
+													</TableCell>
+												</TableRow>
 											)
 										})}
 									</TableBody>
@@ -969,8 +953,6 @@ function RuleDetailContent() {
 						</div>
 					))
 					.render()}
-
-			<AlertChatSheet open={chatOpen} onOpenChange={setChatOpen} alertContext={chatContext} />
 		</DashboardLayout>
 	)
 }

@@ -1,13 +1,21 @@
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
-import { AiTriageCard } from "@/components/ai-triage/ai-triage-card"
-import { encodeInvestigationRef } from "@/components/chat/investigation-context"
 import { Button } from "@maple/ui/components/ui/button"
-import { CopyIcon, PulseIcon } from "@/components/icons"
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@maple/ui/components/ui/alert-dialog"
+import { CopyIcon, DotsVerticalIcon, PulseIcon } from "@/components/icons"
 import { agentPromptFromIssue } from "@/components/errors/agent-debug-prompt"
 import { OpenAnomalyBadge, RelatedAnomaliesSection } from "@/components/anomalies/related-anomalies-section"
 import { AlertSourceCard } from "@/components/errors/alert-source-card"
@@ -15,7 +23,6 @@ import { IssueKindBadge } from "@/components/errors/kind-badge"
 import { SeverityBadge } from "@/components/errors/severity-badge"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { IssueCommentComposer } from "@/components/errors/issue-comment-composer"
-import { IssueHero } from "@/components/errors/issue-hero"
 import { IssueIncidentsTable } from "@/components/errors/issue-incidents-table"
 import { IssueOccurrenceSparkline } from "@/components/errors/issue-occurrence-sparkline"
 import { IssueOccurrencesTable } from "@/components/errors/issue-occurrences-table"
@@ -25,6 +32,7 @@ import { SectionHeader } from "@/components/layout/section-header"
 import { WorkflowBadge } from "@/components/errors/workflow-badge"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { errorIssueDetailFromV2 } from "@/lib/services/error-issues"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -32,23 +40,38 @@ import { ErrorState } from "@/components/common/error-state"
 import {
 	ErrorIssueId,
 	ErrorIssueSetSeverityRequest,
+	EscalationPolicyEvaluationRequest,
+	type IssueEscalationAttemptDocument,
 	type IssueSeverity,
 	type WorkflowState,
 } from "@maple/domain/http"
+import type { V2Investigation } from "@maple/domain/http/v2"
 import {
 	makeIssueClaimPayload,
 	makeIssueCommentPayload,
 	makeIssueReleasePayload,
 	makeIssueTransitionPayload,
 } from "./-issue-mutation-payloads"
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@maple/ui/components/ui/dropdown-menu"
 
 const decodeIssueId = Schema.decodeSync(ErrorIssueId)
+const ISSUE_LOADING_BREADCRUMBS = [
+	{ label: "Errors", href: "/errors" },
+	{ label: "Issues", href: "/errors/issues" },
+	{ label: "…" },
+] as const
 
 export const Route = createFileRoute("/errors/issues/$issueId")({
 	component: IssueDetailPage,
 })
 
 function IssueDetailPage() {
+	const navigate = useNavigate()
 	const { issueId: rawIssueId } = Route.useParams()
 	const issueId = decodeIssueId(rawIssueId)
 
@@ -67,6 +90,17 @@ function IssueDetailPage() {
 	})
 	const eventsResult = useAtomValue(eventsQueryAtom)
 	const refreshEvents = useAtomRefresh(eventsQueryAtom)
+	const investigationsQueryAtom = MapleApiV2AtomClient.query("investigations", "list", {
+		query: { issue_id: issueId, limit: 10 },
+		reactivityKeys: ["investigations", `errorIssue:${issueId}:investigations`],
+	})
+	const investigationsResult = useAtomValue(investigationsQueryAtom)
+	const escalationQueryAtom = MapleApiAtomClient.query("errors", "listIssueEscalations", {
+		params: { issueId },
+		reactivityKeys: [`errorIssue:${issueId}:escalations`],
+	})
+	const escalationResult = useAtomValue(escalationQueryAtom)
+	const { result: destinationsResult } = useAlertDestinationsList()
 
 	const transitionIssue = useAtomSet(MapleApiAtomClient.mutation("errors", "transitionIssue"), {
 		mode: "promiseExit",
@@ -86,14 +120,29 @@ function IssueDetailPage() {
 	const setIssueSeverity = useAtomSet(MapleApiAtomClient.mutation("errors", "setIssueSeverity"), {
 		mode: "promiseExit",
 	})
+	const evaluateEscalation = useAtomSet(MapleApiAtomClient.mutation("errors", "evaluateEscalationPolicy"), {
+		mode: "promiseExit",
+	})
+	const createInvestigation = useAtomSet(MapleApiV2AtomClient.mutation("investigations", "create"), {
+		mode: "promiseExit",
+	})
 
 	const [commentDraft, setCommentDraft] = useState("")
 	const [busy, setBusy] = useState<
-		"state" | "claim" | "release" | "heartbeat" | "comment" | "severity" | null
+		"state" | "claim" | "release" | "heartbeat" | "comment" | "severity" | "investigation" | null
 	>(null)
+	const [severityConfirmation, setSeverityConfirmation] = useState<{
+		readonly severity: IssueSeverity
+		readonly destinationNames: ReadonlyArray<string>
+	} | null>(null)
 
 	const invalidateKeys = useMemo(
-		() => ["errorIssues", `errorIssue:${issueId}`, `errorIssue:${issueId}:events`],
+		() => [
+			"errorIssues",
+			`errorIssue:${issueId}`,
+			`errorIssue:${issueId}:events`,
+			`errorIssue:${issueId}:escalations`,
+		],
 		[issueId],
 	)
 
@@ -144,7 +193,7 @@ function IssueDetailPage() {
 		else toast.error("Release failed")
 	}
 
-	const changeSeverity = async (next: IssueSeverity | null) => {
+	const applySeverity = async (next: IssueSeverity | null) => {
 		setBusy("severity")
 		const result = await setIssueSeverity({
 			params: { issueId },
@@ -156,6 +205,81 @@ function IssueDetailPage() {
 			toast.success(next === null ? "Severity cleared" : `Severity set to ${next}`)
 		} else {
 			toast.error("Severity change failed")
+		}
+	}
+
+	const changeSeverity = async (next: IssueSeverity | null) => {
+		if (next !== null) {
+			const preview = await evaluateEscalation({
+				payload: new EscalationPolicyEvaluationRequest({ severity: next, source: "manual" }),
+			})
+			if (Exit.isFailure(preview)) {
+				toast.error("Could not evaluate the escalation policy. Severity was not changed.")
+				return
+			}
+			if (preview.value.outcome === "route") {
+				const destinations = Result.builder(destinationsResult)
+					.onSuccess((response) => response.destinations)
+					.orElse(() => [])
+				const names = preview.value.destinationIds.map(
+					(id) => destinations.find((destination) => destination.id === id)?.name ?? id,
+				)
+				setSeverityConfirmation({ severity: next, destinationNames: names })
+				return
+			}
+		}
+		await applySeverity(next)
+	}
+
+	const startInvestigation = async (params: {
+		title: string
+		serviceName: string
+		kind: "error" | "alert"
+		incidentId: string | null
+		occurrences: number
+	}) => {
+		setBusy("investigation")
+		const subject =
+			params.incidentId === null
+				? {
+						type: "freeform" as const,
+						title: params.title,
+						prompt: `Investigate this issue: ${params.title}`,
+						context_refs: [{ issue_id: issueId }],
+					}
+				: {
+						type: "incident" as const,
+						incident_kind: params.kind,
+						incident_id: params.incidentId,
+						issue_id: issueId,
+					}
+		const result = await createInvestigation({
+			payload: {
+				subject: subject as never,
+				snapshot: {
+					title: params.title,
+					scope: params.serviceName || null,
+					status: "open",
+					severity: null,
+					facts: [
+						{ label: "Service", value: params.serviceName || "unknown" },
+						{ label: "Occurrences", value: String(params.occurrences) },
+					],
+					references: [{ label: "Issue", url: `/errors/issues/${issueId}` }],
+					incidentStartedAt: null,
+					incidentEndedAt: null,
+				},
+			},
+			reactivityKeys: ["investigations", `errorIssue:${issueId}:investigations`],
+		})
+		setBusy(null)
+		if (Exit.isSuccess(result)) {
+			void navigate({
+				to: "/investigations/$id",
+				params: { id: result.value.id },
+			})
+		} else {
+			toast.error("Investigation could not be started")
 		}
 	}
 
@@ -177,15 +301,9 @@ function IssueDetailPage() {
 		}
 	}
 
-	const breadcrumbsLoading = [
-		{ label: "Errors", href: "/errors" },
-		{ label: "Issues", href: "/errors/issues" },
-		{ label: "…" },
-	] as const
-
 	return Result.builder(detailResult)
 		.onInitial(() => (
-			<DashboardLayout breadcrumbs={[...breadcrumbsLoading]} title="Issue">
+			<DashboardLayout breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]} title="Issue">
 				<div className="space-y-4">
 					<Skeleton className="h-24 w-full" />
 					<Skeleton className="h-20 w-full" />
@@ -194,7 +312,7 @@ function IssueDetailPage() {
 			</DashboardLayout>
 		))
 		.onError((error) => (
-			<DashboardLayout breadcrumbs={[...breadcrumbsLoading]} title="Issue">
+			<DashboardLayout breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]} title="Issue">
 				<ErrorState error={error} title="Failed to load issue" onRetry={refreshDetail} />
 			</DashboardLayout>
 		))
@@ -202,6 +320,22 @@ function IssueDetailPage() {
 			const detail = errorIssueDetailFromV2(v2Detail)
 			const { issue, timeseries, sampleTraces, incidents } = detail
 			const totalInWindow = timeseries.reduce((sum, b) => sum + b.count, 0)
+			const linkedInvestigation = Result.builder(investigationsResult)
+				.onSuccess((response) => response.data[0] ?? null)
+				.orElse(() => null)
+			const escalationAttempts = Result.builder(escalationResult)
+				.onSuccess((response) => response.attempts)
+				.orElse(() => [])
+			const linkedEscalation = linkedInvestigation
+				? (escalationAttempts.find((attempt) => attempt.investigationId === linkedInvestigation.id) ??
+					null)
+				: null
+			const latestIncidentId =
+				issue.kind === "alert"
+					? typeof issue.sourceRef?.latestIncidentId === "string"
+						? issue.sourceRef.latestIncidentId
+						: null
+					: ((incidents.find((incident) => incident.status === "open") ?? incidents[0])?.id ?? null)
 
 			return (
 				<DashboardLayout
@@ -223,45 +357,65 @@ function IssueDetailPage() {
 								</Badge>
 							) : null}
 							<OpenAnomalyBadge issueId={issueId} />
-							{issue.kind === "error" ? (
+							{linkedInvestigation ? (
 								<Button
 									size="sm"
-									variant="outline"
-									onClick={() => {
-										void navigator.clipboard
-											.writeText(agentPromptFromIssue(issue))
-											.then(() =>
-												toast.success(
-													"Copied agent prompt — paste it into your MCP agent",
-												),
-											)
-											.catch(() => toast.error("Copy failed"))
-									}}
+									render={
+										<Link
+											to="/investigations/$id"
+											params={{ id: linkedInvestigation.id }}
+										/>
+									}
 								>
-									<CopyIcon className="size-3.5" />
-									Copy agent prompt
+									<PulseIcon className="size-3.5" />
+									Open investigation
 								</Button>
+							) : (
+								<Button
+									size="sm"
+									disabled={busy === "investigation"}
+									onClick={() =>
+										void startInvestigation({
+											title: issue.exceptionType || "Unknown error",
+											serviceName: issue.serviceName,
+											kind: issue.kind === "alert" ? "alert" : "error",
+											incidentId: latestIncidentId,
+											occurrences: issue.occurrenceCount,
+										})
+									}
+								>
+									<PulseIcon className="size-3.5" />
+									Start investigation
+								</Button>
+							)}
+							{issue.kind === "error" ? (
+								<DropdownMenu>
+									<DropdownMenuTrigger
+										render={
+											<Button
+												size="icon-sm"
+												variant="outline"
+												aria-label="More issue actions"
+											/>
+										}
+									>
+										<DotsVerticalIcon className="size-4" />
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end">
+										<DropdownMenuItem
+											onClick={() => {
+												void navigator.clipboard
+													.writeText(agentPromptFromIssue(issue))
+													.then(() => toast.success("Agent prompt copied"))
+													.catch(() => toast.error("Copy failed"))
+											}}
+										>
+											<CopyIcon className="size-3.5" />
+											Copy agent prompt
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
 							) : null}
-							<Button
-								size="sm"
-								variant="outline"
-								render={
-									<Link
-										to="/investigations/$id"
-										params={{ id: issueId }}
-										search={{
-											r: encodeInvestigationRef({
-												kind: "error",
-												id: issueId,
-												issueId,
-											}),
-										}}
-									/>
-								}
-							>
-								<PulseIcon className="size-3.5" />
-								Investigate with Maple AI
-							</Button>
 						</div>
 					}
 					rightSidebar={
@@ -279,23 +433,29 @@ function IssueDetailPage() {
 				>
 					<div className="space-y-8">
 						<section className="space-y-4">
-							<IssueHero issue={issue} />
+							{issue.exceptionMessage ? (
+								<p className="max-w-4xl text-sm leading-relaxed text-muted-foreground">
+									{issue.exceptionMessage}
+								</p>
+							) : null}
 							{issue.kind === "alert" ? (
 								<AlertSourceCard issue={issue} />
 							) : (
 								<IssueOccurrenceSparkline data={timeseries} />
 							)}
-							<AiTriageCard
-								incidentKind={issue.kind === "alert" ? "alert" : "error"}
-								incidentId={
-									issue.kind === "alert"
-										? typeof issue.sourceRef?.latestIncidentId === "string"
-											? issue.sourceRef.latestIncidentId
-											: null
-										: ((incidents.find((i) => i.status === "open") ?? incidents[0])?.id ??
-											null)
+							<LinkedInvestigationSummary
+								investigation={linkedInvestigation}
+								escalation={linkedEscalation}
+								onStart={() =>
+									void startInvestigation({
+										title: issue.exceptionType || "Unknown error",
+										serviceName: issue.serviceName,
+										kind: issue.kind === "alert" ? "alert" : "error",
+										incidentId: latestIncidentId,
+										occurrences: issue.occurrenceCount,
+									})
 								}
-								issueId={issueId}
+								starting={busy === "investigation"}
 							/>
 						</section>
 
@@ -310,7 +470,9 @@ function IssueDetailPage() {
 										variant="inline"
 									/>
 								))
-								.onSuccess((value) => <IssueTimeline events={value.events} />)
+								.onSuccess((value) => (
+									<IssueTimeline events={value.events} escalations={escalationAttempts} />
+								))
 								.orElse(() => (
 									<Skeleton className="h-20 w-full" />
 								))}
@@ -338,8 +500,112 @@ function IssueDetailPage() {
 							</section>
 						) : null}
 					</div>
+					<AlertDialog
+						open={severityConfirmation !== null}
+						onOpenChange={(open) => {
+							if (!open) setSeverityConfirmation(null)
+						}}
+					>
+						<AlertDialogContent>
+							<AlertDialogHeader>
+								<AlertDialogTitle>Notify escalation destinations?</AlertDialogTitle>
+								<AlertDialogDescription>
+									Changing severity to {severityConfirmation?.severity} will notify{" "}
+									{severityConfirmation?.destinationNames.join(", ")}. Manual severity
+									changes represent explicit human intent and bypass AI confidence gates.
+								</AlertDialogDescription>
+							</AlertDialogHeader>
+							<AlertDialogFooter>
+								<AlertDialogCancel>Cancel</AlertDialogCancel>
+								<AlertDialogAction
+									onClick={() => {
+										const pending = severityConfirmation
+										setSeverityConfirmation(null)
+										if (pending) void applySeverity(pending.severity)
+									}}
+								>
+									Change severity and notify
+								</AlertDialogAction>
+							</AlertDialogFooter>
+						</AlertDialogContent>
+					</AlertDialog>
 				</DashboardLayout>
 			)
 		})
 		.render()
+}
+
+function LinkedInvestigationSummary({
+	investigation,
+	escalation,
+	onStart,
+	starting,
+}: {
+	investigation: V2Investigation | null
+	escalation: IssueEscalationAttemptDocument | null
+	onStart: () => void
+	starting: boolean
+}) {
+	if (!investigation) {
+		return (
+			<div className="flex items-center justify-between gap-4 border px-4 py-3">
+				<div>
+					<p className="text-sm font-medium text-foreground">No linked investigation</p>
+					<p className="mt-0.5 text-xs text-muted-foreground">
+						Start an evidence-backed autonomous pass for this issue.
+					</p>
+				</div>
+				<Button size="sm" variant="outline" onClick={onStart} disabled={starting}>
+					<PulseIcon className="size-3.5" />
+					Start investigation
+				</Button>
+			</div>
+		)
+	}
+
+	return (
+		<div className="grid gap-3 border px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto]">
+			<div className="min-w-0">
+				<div className="flex flex-wrap items-center gap-2">
+					<p className="text-sm font-medium text-foreground">Linked investigation</p>
+					<Badge variant="outline" className="capitalize">
+						{investigation.status}
+					</Badge>
+					{investigation.confidence ? (
+						<span className="text-xs capitalize text-muted-foreground">
+							{investigation.confidence} confidence
+						</span>
+					) : null}
+				</div>
+				<p className="mt-1 truncate text-sm text-muted-foreground">
+					{investigation.report?.suspectedCause ??
+						(investigation.status === "investigating"
+							? "Gathering evidence…"
+							: (investigation.error ?? "No diagnosis submitted"))}
+				</p>
+				{escalation ? (
+					<p className="mt-1 text-xs text-muted-foreground">
+						Escalation: <span className="capitalize text-foreground">{escalation.status}</span>
+						{escalation.deliveries.length > 0
+							? ` · ${escalation.deliveries
+									.map(
+										(delivery) =>
+											`${delivery.destinationName ?? delivery.destinationId} ${delivery.status}`,
+									)
+									.join(", ")}`
+							: escalation.skipReason
+								? ` · ${escalation.skipReason.replaceAll("_", " ")}`
+								: ""}
+					</p>
+				) : null}
+			</div>
+			<Button
+				size="sm"
+				variant="outline"
+				render={<Link to="/investigations/$id" params={{ id: investigation.id }} />}
+			>
+				Open investigation
+			</Button>
+		</div>
+	)
 }

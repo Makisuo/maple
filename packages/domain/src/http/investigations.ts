@@ -77,6 +77,39 @@ export const InvestigationSubject = Schema.Union([
 ]).annotate({ identifier: "@maple/InvestigationSubject", title: "Investigation Subject" })
 export type InvestigationSubject = Schema.Schema.Type<typeof InvestigationSubject>
 
+/**
+ * Stable, normalized rendering context captured when an investigation is
+ * opened. It deliberately contains display-ready strings instead of source
+ * table identifiers so old investigations remain understandable after the
+ * originating telemetry or incident has expired.
+ */
+export class InvestigationSnapshotFact extends Schema.Class<InvestigationSnapshotFact>(
+	"InvestigationSnapshotFact",
+)({
+	label: Schema.String,
+	value: Schema.String,
+}) {}
+
+export class InvestigationSnapshotReference extends Schema.Class<InvestigationSnapshotReference>(
+	"InvestigationSnapshotReference",
+)({
+	label: Schema.String,
+	url: Schema.String,
+}) {}
+
+export class InvestigationSubjectSnapshot extends Schema.Class<InvestigationSubjectSnapshot>(
+	"InvestigationSubjectSnapshot",
+)({
+	title: Schema.String,
+	scope: Schema.NullOr(Schema.String),
+	status: Schema.String,
+	severity: Schema.NullOr(IssueSeverity),
+	facts: Schema.Array(InvestigationSnapshotFact),
+	references: Schema.Array(InvestigationSnapshotReference),
+	incidentStartedAt: Schema.NullOr(IsoDateTimeString),
+	incidentEndedAt: Schema.NullOr(IsoDateTimeString),
+}) {}
+
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------
@@ -85,6 +118,7 @@ export class InvestigationDocument extends Schema.Class<InvestigationDocument>("
 	id: InvestigationId,
 	status: InvestigationStatus,
 	subject: InvestigationSubject,
+	snapshot: InvestigationSubjectSnapshot,
 	/** The latest structured diagnosis, or null until the first `submit_diagnosis`. */
 	report: Schema.NullOr(AiTriageResult),
 	model: Schema.NullOr(Schema.String),
@@ -115,6 +149,7 @@ export class InvestigationCreateRequest extends Schema.Class<InvestigationCreate
 	"InvestigationCreateRequest",
 )({
 	subject: InvestigationSubject,
+	snapshot: Schema.optionalKey(InvestigationSubjectSnapshot),
 }) {}
 
 export class InvestigationStatusUpdateRequest extends Schema.Class<InvestigationStatusUpdateRequest>(
@@ -165,6 +200,35 @@ export class InvestigationNotFoundError extends Schema.TaggedErrorClass<Investig
 	{ httpApiStatus: 404 },
 ) {}
 
+export class InvestigationQuotaError extends Schema.TaggedErrorClass<InvestigationQuotaError>()(
+	"@maple/http/investigations/InvestigationQuotaError",
+	{
+		message: Schema.String,
+		limit: Schema.Number,
+		retryableAt: IsoDateTimeString,
+	},
+	{ httpApiStatus: 429 },
+) {}
+
+export class InvestigationUnavailableError extends Schema.TaggedErrorClass<InvestigationUnavailableError>()(
+	"@maple/http/investigations/InvestigationUnavailableError",
+	{
+		message: Schema.String,
+		reason: Schema.Literals(["automation_disabled", "agent_unavailable", "start_failed"]),
+		retryable: Schema.Boolean,
+	},
+	{ httpApiStatus: 503 },
+) {}
+
+export class InvestigationRejectedError extends Schema.TaggedErrorClass<InvestigationRejectedError>()(
+	"@maple/http/investigations/InvestigationRejectedError",
+	{
+		message: Schema.String,
+		status: Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 400, maximum: 499 })),
+	},
+	{ httpApiStatus: 502 },
+) {}
+
 // ---------------------------------------------------------------------------
 // Query schemas
 // ---------------------------------------------------------------------------
@@ -204,7 +268,27 @@ export class InvestigationApiGroup extends HttpApiGroup.make("investigations")
 		HttpApiEndpoint.post("createInvestigation", "/", {
 			payload: InvestigationCreateRequest,
 			success: InvestigationDocument,
-			error: [InvestigationPersistenceError, InvestigationValidationError, InvestigationNotFoundError],
+			error: [
+				InvestigationPersistenceError,
+				InvestigationValidationError,
+				InvestigationNotFoundError,
+				InvestigationQuotaError,
+				InvestigationRejectedError,
+				InvestigationUnavailableError,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("restartInvestigation", "/:id/restart", {
+			params: { id: InvestigationId },
+			success: InvestigationDocument,
+			error: [
+				InvestigationPersistenceError,
+				InvestigationNotFoundError,
+				InvestigationQuotaError,
+				InvestigationRejectedError,
+				InvestigationUnavailableError,
+			],
 		}),
 	)
 	.add(

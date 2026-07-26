@@ -129,6 +129,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/instrumentation/recommendations/{id}/dismiss",
 			"POST /v2/instrumentation/recommendations/{id}/reopen",
 			"POST /v2/investigations",
+			"POST /v2/investigations/{id}/restart",
 			"POST /v2/investigations/{id}/status",
 			"POST /v2/logs/breakdown",
 			"POST /v2/logs/search",

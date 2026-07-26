@@ -102,7 +102,7 @@ import {
 	Context,
 } from "effect"
 import * as AlertingMetrics from "../lib/AlertingMetrics"
-import { AI_TRIAGE_WORKFLOW_BINDING } from "../lib/ai-triage-enqueue"
+import { INVESTIGATION_AGENT_BINDING } from "../lib/ai-triage-enqueue"
 import { upsertAlertIssue } from "../lib/issue-hub"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import type { TenantContext } from "./AuthService"
@@ -1214,10 +1214,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			// Optional: present only inside a Worker isolate. Used to kick off the
 			// AI triage Workflow for issues created from freshly opened incidents.
 			const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
-			const aiTriageWorkflowBinding = Option.match(workerEnv, {
+			const investigationAgentBinding = Option.match(workerEnv, {
 				onNone: () => undefined,
-				onSome: (e) => e[AI_TRIAGE_WORKFLOW_BINDING],
+				onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
 			})
+			const investigationServiceToken = env.INTERNAL_SERVICE_TOKEN
 			const now = runtime.now
 			const makeUuid = () => runtime.makeUuid()
 			const deliveryTimeoutMs = () => runtime.deliveryTimeoutMs()
@@ -4203,7 +4204,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									? groupKey
 									: (normalized.serviceNames[0] ?? ""),
 							timestamp,
-							workflowBinding: aiTriageWorkflowBinding,
+							agentBinding: investigationAgentBinding,
+							internalServiceToken: investigationServiceToken,
 						}).pipe(Effect.provideService(Database, database))
 					} else {
 						yield* Effect.logWarning(

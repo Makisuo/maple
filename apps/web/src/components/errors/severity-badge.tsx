@@ -9,14 +9,6 @@ export const SEVERITY_TONE: Record<IssueSeverity, string> = {
 	low: "bg-muted text-muted-foreground",
 }
 
-/** Solid severity accent for left bars, dots, and meters (mirrors anomaly-format). */
-export const SEVERITY_ACCENT: Record<IssueSeverity, string> = {
-	critical: "bg-destructive",
-	high: "bg-orange-500",
-	medium: "bg-amber-500",
-	low: "bg-border/60",
-}
-
 export const SEVERITY_LABEL: Record<IssueSeverity, string> = {
 	critical: "Critical",
 	high: "High",

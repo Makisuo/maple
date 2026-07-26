@@ -8,6 +8,7 @@ import type {
 	InvestigationSeededBy,
 	InvestigationStatus,
 	InvestigationSubject,
+	InvestigationSubjectSnapshot,
 } from "@maple/domain/http"
 import type { IssueSeverity } from "@maple/domain/http"
 
@@ -31,6 +32,8 @@ export const investigations = pgTable(
 		seededBy: text("seeded_by").$type<InvestigationSeededBy>().notNull().default("user"),
 		/** Full discriminated subject (incident ref or free-form question + context). */
 		subjectJson: jsonb("subject_json").$type<InvestigationSubject>().notNull(),
+		/** Display-ready context preserved independently of the source incident. */
+		snapshotJson: jsonb("snapshot_json").$type<InvestigationSubjectSnapshot>(),
 		/** Mirrored out of the subject ONLY to back the incident-dedup partial index. */
 		incidentKind: text("incident_kind").$type<AiTriageIncidentKind>(),
 		incidentId: text("incident_id"),
@@ -44,6 +47,8 @@ export const investigations = pgTable(
 		inputTokens: integer("input_tokens"),
 		outputTokens: integer("output_tokens"),
 		error: text("error"),
+		startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+		autonomousTurns: integer("autonomous_turns").notNull().default(0),
 		createdBy: text("created_by").$type<UserId>(),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 		diagnosedAt: timestamp("diagnosed_at", { withTimezone: true, mode: "date" }),

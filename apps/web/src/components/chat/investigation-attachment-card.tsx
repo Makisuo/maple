@@ -13,6 +13,7 @@ const KIND_LABEL: Record<InvestigationKind, string> = {
 	alert: "Attached alert",
 	anomaly: "Attached anomaly",
 	error: "Attached error",
+	freeform: "Investigation subject",
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -42,7 +43,7 @@ export function InvestigationAttachmentCard({
 		<div className={cn("mx-auto w-full max-w-3xl px-4 pt-3", className)}>
 			<div
 				className={cn(
-					"relative overflow-hidden rounded-md border bg-card/80 shadow-sm backdrop-blur-sm",
+					"relative overflow-hidden rounded-md border bg-card/80 backdrop-blur-sm",
 					accent.tint,
 				)}
 			>

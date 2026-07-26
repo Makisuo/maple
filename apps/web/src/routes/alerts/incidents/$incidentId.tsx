@@ -1,16 +1,16 @@
-import { useMemo } from "react"
-import { createFileRoute, Link } from "@tanstack/react-router"
-import { Result } from "@/lib/effect-atom"
-import { Schema } from "effect"
+import { useMemo, useState } from "react"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { Result, useAtomSet } from "@/lib/effect-atom"
+import { Exit, Schema } from "effect"
 
 import {
 	decodeAlertContextFromSearchParam,
 	toAlertContext,
 	type AlertContext,
 } from "@/components/chat/alert-context"
-import { InvestigationView } from "@/components/investigations/investigation-view"
-import { subjectFromAlertContext } from "@/components/investigations/subject"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { useMountEffect } from "@/hooks/use-mount-effect"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -100,6 +100,93 @@ function AlertIncidentPage() {
 		)
 	}
 
-	const subject = subjectFromAlertContext(alertContext, issueId ? { issueId } : undefined)
-	return <InvestigationView subject={subject} />
+	return (
+		<AlertInvestigationRedirect alertContext={alertContext} incidentId={incidentId} issueId={issueId} />
+	)
+}
+
+function AlertInvestigationRedirect({
+	alertContext,
+	incidentId,
+	issueId,
+}: {
+	alertContext: AlertContext
+	incidentId: string
+	issueId?: ErrorIssueId
+}) {
+	const navigate = useNavigate()
+	const create = useAtomSet(MapleApiV2AtomClient.mutation("investigations", "create"), {
+		mode: "promiseExit",
+	})
+	const [failed, setFailed] = useState(false)
+	const openInvestigation = () => {
+		setFailed(false)
+		void create({
+			payload: {
+				subject: {
+					type: "incident",
+					incident_kind: "alert",
+					incident_id: incidentId,
+					...(issueId ? { issue_id: issueId } : {}),
+				} as never,
+				snapshot: {
+					title: alertContext.ruleName,
+					scope: alertContext.groupKey,
+					status: alertContext.eventType === "resolve" ? "resolved" : "open",
+					severity: alertContext.severity === "critical" ? "critical" : "medium",
+					facts: [
+						{ label: "Signal", value: alertContext.signalType },
+						{ label: "Observed", value: String(alertContext.value ?? "no data") },
+					],
+					references: issueId ? [{ label: "Issue", url: `/errors/issues/${issueId}` }] : [],
+					incidentStartedAt: null,
+					incidentEndedAt: null,
+				},
+			},
+			reactivityKeys: ["investigations"],
+		}).then((result) => {
+			if (Exit.isSuccess(result)) {
+				void navigate({
+					to: "/investigations/$id",
+					params: { id: result.value.id },
+					replace: true,
+				})
+			} else {
+				setFailed(true)
+			}
+		})
+	}
+	useMountEffect(openInvestigation)
+	if (failed) {
+		return (
+			<DashboardLayout
+				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Investigation" }]}
+				title="Could not open investigation"
+			>
+				<Empty>
+					<EmptyHeader>
+						<EmptyTitle>Investigation start failed</EmptyTitle>
+						<EmptyDescription>
+							The investigation could not be created. You can safely retry.
+						</EmptyDescription>
+					</EmptyHeader>
+					<Button variant="outline" size="sm" onClick={openInvestigation}>
+						Try again
+					</Button>
+				</Empty>
+			</DashboardLayout>
+		)
+	}
+	return (
+		<DashboardLayout
+			breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Investigation" }]}
+			title="Opening investigation…"
+		>
+			<div className="mx-auto w-full max-w-3xl space-y-4">
+				<Skeleton className="h-4 w-32" />
+				<Skeleton className="h-8 w-3/4" />
+				<Skeleton className="h-40 w-full" />
+			</div>
+		</DashboardLayout>
+	)
 }
