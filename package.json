@@ -1,98 +1,79 @@
 {
-	"name": "maple",
-	"private": true,
-	"workspaces": [
-		"apps/*",
-		"packages/*",
-		"lib/*",
-		"examples/*"
-	],
-	"scripts": {
-		"build": "turbo build",
-		"dev": "turbo dev",
-		"docker:build": "COMPOSE_PARALLEL_LIMIT=1 docker compose build",
-		"docker:up": "COMPOSE_PARALLEL_LIMIT=1 docker compose up --build",
-		"db:up": "docker compose up -d postgres",
-		"db:migrate:local": "DATABASE_URL=postgres://maple:maple@localhost:5499/maple bun run --cwd packages/db db:migrate",
-		"migrate:prod": "bun run --cwd packages/db ps:apply-schema main",
-		"dev:alerting": "bun --filter=@maple/alerting dev",
-		"format": "oxfmt && oxlint --ignore-pattern '.context/**' --fix",
-		"alchemy:build-deps": "turbo build --filter=@maple-dev/effect-sdk --filter=@maple-dev/browser --filter=@maple-dev/clickhouse-builder",
-		"alchemy:deploy": "bun run alchemy:build-deps && alchemy deploy",
-		"alchemy:deploy:prd": "bun run alchemy:build-deps && alchemy deploy --stage prd",
-		"alchemy:deploy:stg": "bun run alchemy:build-deps && alchemy deploy --stage stg",
-		"alchemy:deploy:pr": "bun run alchemy:build-deps && alchemy deploy --stage pr-${PR_NUMBER}",
-		"alchemy:destroy": "alchemy destroy",
-		"alchemy:destroy:stg": "alchemy destroy --stage stg",
-		"alchemy:destroy:pr": "alchemy destroy --stage pr-${PR_NUMBER}",
-		"test": "turbo test",
-		"tinybird:manifest": "bun run ./scripts/generate-tinybird-project-manifest.ts",
-		"tinybird:manifest:check": "bun run ./scripts/generate-tinybird-project-manifest.ts --check",
-		"clickhouse:schema": "bun run ./scripts/generate-clickhouse-schema.ts && bun run ./scripts/generate-clickhouse-schema-sql.ts && bun run ./scripts/generate-clickhouse-insert-mappings.ts && bun run ./scripts/lint-clickhouse-schema.ts",
-		"clickhouse:schema:check": "bun run ./scripts/generate-clickhouse-schema.ts --check && bun run ./scripts/generate-clickhouse-schema-sql.ts --check && bun run ./scripts/generate-clickhouse-insert-mappings.ts --check && bun run ./scripts/lint-clickhouse-schema.ts",
-		"clickhouse:schema:lint": "bun run ./scripts/lint-clickhouse-schema.ts",
-		"knip": "knip",
-		"knip:fix": "knip --fix --allow-remove-files",
-		"typecheck": "turbo typecheck"
-	},
-	"dependencies": {},
-	"devDependencies": {
-		"@cloudflare/workers-types": "4.20260603.1",
-		"@effect/vitest": "4.0.0-beta.93",
-		"@maple/infra": "workspace:*",
-		"@tinybirdco/sdk": "catalog:tinybird",
-		"@types/node": "catalog:tooling",
-		"alchemy": "^0.93.12",
-		"knip": "^6.17.1",
-		"oxfmt": "^0.55.0",
-		"oxlint": "^1.70.0",
-		"portless": "^0.14.0",
-		"turbo": "^2.9.18",
-		"typescript": "catalog:tooling"
-	},
-	"packageManager": "bun@1.3.11",
-	"catalog": {
-		"vite": "^8.0.16",
-		"vitest": "^4.1.9"
-	},
-	"catalogs": {
-		"clickhouse": {
-			"@clickhouse/client-web": "^1.21.0"
-		},
-		"effect": {
-			"@effect/atom-react": "4.0.0-beta.93",
-			"@effect/language-service": "^0.86.2",
-			"@effect/platform-bun": "4.0.0-beta.93",
-			"effect": "4.0.0-beta.93"
-		},
-		"react": {
-			"@types/react": "^19.2.14",
-			"@types/react-dom": "^19.2.3",
-			"react": "^19.2.4",
-			"react-dom": "^19.2.4"
-		},
-		"tailwind": {
-			"@tailwindcss/vite": "^4.3.1",
-			"tailwind-merge": "^3.6.0",
-			"tailwindcss": "^4.3.1",
-			"tw-animate-css": "^1.4.0"
-		},
-		"tinybird": {
-			"@tinybirdco/sdk": "0.0.78"
-		},
-		"tooling": {
-			"@types/node": "^22.10.2",
-			"typescript": "^6.0.2"
-		},
-		"ui": {
-			"@base-ui/react": "^1.6.0",
-			"@xyflow/react": "^12.11.0",
-			"class-variance-authority": "^0.7.1",
-			"clsx": "^2.1.1",
-			"recharts": "^3.9.0"
-		}
-	},
-	"patchedDependencies": {
-		"effect@4.0.0-beta.93": "patches/effect@4.0.0-beta.93.patch"
-	}
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "prepare": "effect-tsgo patch",
+    "clean": "node scripts/clean.mjs",
+    "codegen": "pnpm --recursive --parallel --filter \"./packages/**/*\" run codegen",
+    "codemod": "node scripts/codemod.mjs",
+    "build": "tsc -b tsconfig.packages.json && pnpm --recursive --parallel --filter \"./packages/**/*\" run build",
+    "bundle-analyze": "bash scripts/bundle-analyze.sh",
+    "bundle-compare": "bash scripts/bundle-compare.sh",
+    "bundle-compare-selected": "bash scripts/bundle-compare-selected.sh",
+    "circular": "node scripts/circular.mjs",
+    "test": "vitest",
+    "coverage": "vitest --coverage",
+    "check": "tsc -b tsconfig.json",
+    "typeperf": "pnpm --dir packages/effect exec node typeperf/run.mjs",
+    "typeperf-compare": "pnpm --dir packages/effect exec node typeperf/compare.mjs",
+    "check-recursive": "pnpm --recursive --filter \"./packages/**/*\" exec tsc -b tsconfig.json",
+    "jsdocs": "effect-jsdocs",
+    "lint": "pnpm jsdocs && oxlint -f unix && dprint check",
+    "lint-fix": "pnpm jsdocs && oxlint --fix && dprint fmt",
+    "docgen": "pnpm --recursive --filter \"./packages/**/*\" exec docgen && node scripts/docs.mjs",
+    "ai-docgen": "effect-ai-docgen ai-docs/src -o LLMS.md",
+    "ai-docgen:watch": "pnpm ai-docgen --watch",
+    "test-types": "tstyche --target '>=5.9'",
+    "changeset-version": "changeset version",
+    "changeset-publish": "pnpm codemod && pnpm build && changeset publish"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.29.7",
+    "@babel/core": "^7.29.7",
+    "@babel/plugin-transform-export-namespace-from": "^7.29.7",
+    "@babel/plugin-transform-modules-commonjs": "^7.29.7",
+    "@changesets/changelog-github": "^0.7.0",
+    "@changesets/cli": "^2.31.1",
+    "@effect/ai-docgen": "workspace:^",
+    "@effect/bundle": "workspace:^",
+    "@effect/docgen": "https://pkg.pr.new/Effect-TS/docgen/@effect/docgen@e57e5f5",
+    "@effect/jsdocs": "workspace:^",
+    "@effect/oxc": "workspace:^",
+    "@effect/tsgo": "^0.21.0",
+    "@effect/utils": "workspace:^",
+    "@effect/vitest": "workspace:^",
+    "@faker-js/faker": "^10.5.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-replace": "^6.0.3",
+    "@rollup/plugin-terser": "^1.0.0",
+    "@types/jscodeshift": "^17.3.0",
+    "@types/node": "^25.9.5",
+    "@vitest/browser": "4.1.10",
+    "@vitest/coverage-v8": "4.1.10",
+    "@vitest/expect": "4.1.10",
+    "@vitest/web-worker": "4.1.10",
+    "ast-types": "^0.14.2",
+    "babel-plugin-annotate-pure-calls": "^0.5.0",
+    "dprint": "^0.55.2",
+    "glob": "^13.0.6",
+    "happy-dom": "^20.11.1",
+    "jscodeshift": "^17.4.0",
+    "lalph": "^0.3.139",
+    "madge": "^8.0.0",
+    "oxlint": "1.42.0",
+    "playwright": "^1.61.1",
+    "rollup": "^4.62.2",
+    "rollup-plugin-bundle-stats": "^4.22.2",
+    "rollup-plugin-esbuild": "^6.2.1",
+    "rollup-plugin-visualizer": "^7.0.1",
+    "terser": "^5.49.0",
+    "tstyche": "^7.2.2",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "4.1.10",
+    "vitest-websocket-mock": "^0.5.0",
+    "zod": "^4.4.3"
+  }
 }

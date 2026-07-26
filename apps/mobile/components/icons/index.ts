@@ -1,5 +1,0 @@
-export { GithubIcon } from "./github-icon"
-export { GoogleIcon } from "./google-icon"
-export { SendIcon } from "./send-icon"
-export { StopIcon } from "./stop-icon"
-export { SparklesIcon } from "./sparkles-icon"
