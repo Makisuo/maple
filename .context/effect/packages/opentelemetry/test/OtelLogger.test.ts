@@ -16,7 +16,7 @@ describe("Logger", () => {
       resource: {
         serviceName: "test"
       },
-      logRecordProcessor: [new SimpleLogRecordProcessor(exporter)]
+      logRecordProcessor: [new SimpleLogRecordProcessor({ exporter })]
     })))
 
     it.effect("emits log records", () =>
@@ -31,7 +31,7 @@ describe("Logger", () => {
       const severityExporter = new InMemoryLogRecordExporter()
       const SeverityLayer = NodeSdk.layer(Effect.sync(() => ({
         resource: { serviceName: "test" },
-        logRecordProcessor: [new SimpleLogRecordProcessor(severityExporter)]
+        logRecordProcessor: [new SimpleLogRecordProcessor({ exporter: severityExporter })]
       })))
 
       return Effect.gen(function*() {
@@ -77,7 +77,7 @@ describe("Logger", () => {
           serviceName: "test"
         },
         spanProcessor: [new SimpleSpanProcessor(spanExporter)],
-        logRecordProcessor: [new SimpleLogRecordProcessor(logExporter)]
+        logRecordProcessor: [new SimpleLogRecordProcessor({ exporter: logExporter })]
       })))
 
       return Effect.gen(function*() {

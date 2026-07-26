@@ -297,6 +297,11 @@ export * as Layer from "./Layer.ts"
 export * as LayerMap from "./LayerMap.ts"
 
 /**
+ * @since 4.0.0
+ */
+export * as LayerRef from "./LayerRef.ts"
+
+/**
  * @since 2.0.0
  */
 export * as Logger from "./Logger.ts"
@@ -520,6 +525,11 @@ export * as Schema from "./Schema.ts"
  * @since 4.0.0
  */
 export * as SchemaAST from "./SchemaAST.ts"
+
+/**
+ * @since 4.0.0
+ */
+export * as SchemaError from "./SchemaError.ts"
 
 /**
  * @since 4.0.0

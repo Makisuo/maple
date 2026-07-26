@@ -204,7 +204,7 @@ export declare namespace RpcClient {
  */
 export type FromGroup<Group, E = never> = RpcClient<RpcGroup.Rpcs<Group>, E>
 
-let requestIdCounter = BigInt(0)
+let requestIdCounter = 0
 
 /**
  * Creates an RPC client for an already-decoded message channel, returning the
@@ -681,7 +681,7 @@ export const make: <Rpcs extends Rpc.Any, const Flatten extends boolean = false>
             Effect.flatMap((payload) =>
               send(clientId, {
                 ...message,
-                id: String(message.id),
+                id: message.id,
                 payload,
                 headers: Object.entries(message.headers)
               }, collector && collector.readUnsafe())
@@ -693,7 +693,7 @@ export const make: <Rpcs extends Rpc.Any, const Flatten extends boolean = false>
           if (!entry) return Effect.void
           return send(clientId, {
             _tag: "Ack",
-            requestId: String(message.requestId)
+            requestId: message.requestId
           }) as Effect.Effect<void, RpcClientError>
         }
         case "Interrupt": {
@@ -702,7 +702,7 @@ export const make: <Rpcs extends Rpc.Any, const Flatten extends boolean = false>
           entries.delete(message.requestId)
           return send(clientId, {
             _tag: "Interrupt",
-            requestId: String(message.requestId)
+            requestId: message.requestId
           }) as Effect.Effect<void, RpcClientError>
         }
         case "Eof": {
@@ -1016,7 +1016,7 @@ export const makeProtocolSocket = (options?: {
     const socket = yield* Socket.Socket
     const serialization = yield* RpcSerialization.RpcSerialization
     const hooks = yield* Effect.serviceOption(ConnectionHooks)
-    const requestClientMap = new Map<string, number>()
+    const requestClientMap = new Map<string | number, number>()
 
     const write = yield* socket.writer
 
@@ -1136,9 +1136,10 @@ export const makeProtocolSocket = (options?: {
     }
   }))
 
-const defaultRetryPolicy = Schedule.exponential(500, 1.5).pipe(
-  Schedule.either(Schedule.spaced(5000))
-)
+const defaultRetryPolicy = Schedule.min([
+  Schedule.exponential(500, 1.5),
+  Schedule.spaced(5000)
+])
 
 const makePinger = Effect.fnUntraced(function*<A, E, R>(writePing: Effect.Effect<A, E, R>) {
   let recievedPong = true
@@ -1210,7 +1211,7 @@ export const makeProtocolWorker = (
     const initialMessage = yield* Effect.serviceOption(RpcWorker.InitialMessage)
     const hooks = yield* Effect.serviceOption(ConnectionHooks)
 
-    const entries = new Map<string, {
+    const entries = new Map<string | number, {
       readonly clientId: number
       readonly worker: Worker.Worker<FromServerEncoded, FromClientEncoded | RpcWorker.InitialMessage.Encoded>
       readonly latch: Latch.Latch

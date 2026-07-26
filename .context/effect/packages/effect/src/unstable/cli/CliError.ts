@@ -127,8 +127,9 @@ export type CliError =
  * @category models
  * @since 4.0.0
  */
-export class UnrecognizedOption extends Schema.ErrorClass<UnrecognizedOption>(`${TypeId}/UnrecognizedOption`)({
-  _tag: Schema.tag("UnrecognizedOption"),
+export class UnrecognizedOption extends Schema.TaggedErrorClass<UnrecognizedOption>(
+  `${TypeId}/UnrecognizedOption`
+)("UnrecognizedOption", {
   option: Schema.String,
   command: Schema.optional(Schema.Array(Schema.String)),
   suggestions: Schema.Array(Schema.String)
@@ -178,8 +179,9 @@ export class UnrecognizedOption extends Schema.ErrorClass<UnrecognizedOption>(`$
  * @category models
  * @since 4.0.0
  */
-export class DuplicateOption extends Schema.ErrorClass<DuplicateOption>(`${TypeId}/DuplicateOption`)({
-  _tag: Schema.tag("DuplicateOption"),
+export class DuplicateOption extends Schema.TaggedErrorClass<DuplicateOption>(
+  `${TypeId}/DuplicateOption`
+)("DuplicateOption", {
   option: Schema.String,
   parentCommand: Schema.String,
   childCommand: Schema.String
@@ -232,8 +234,9 @@ export class DuplicateOption extends Schema.ErrorClass<DuplicateOption>(`${TypeI
  * @category models
  * @since 4.0.0
  */
-export class MissingOption extends Schema.ErrorClass<MissingOption>(`${TypeId}/MissingOption`)({
-  _tag: Schema.tag("MissingOption"),
+export class MissingOption extends Schema.TaggedErrorClass<MissingOption>(
+  `${TypeId}/MissingOption`
+)("MissingOption", {
   option: Schema.String
 }) {
   /**
@@ -282,8 +285,9 @@ export class MissingOption extends Schema.ErrorClass<MissingOption>(`${TypeId}/M
  * @category models
  * @since 4.0.0
  */
-export class MissingArgument extends Schema.ErrorClass<MissingArgument>(`${TypeId}/MissingArgument`)({
-  _tag: Schema.tag("MissingArgument"),
+export class MissingArgument extends Schema.TaggedErrorClass<MissingArgument>(
+  `${TypeId}/MissingArgument`
+)("MissingArgument", {
   argument: Schema.String
 }) {
   /**
@@ -337,8 +341,9 @@ export class MissingArgument extends Schema.ErrorClass<MissingArgument>(`${TypeI
  * @category models
  * @since 4.0.0
  */
-export class InvalidValue extends Schema.ErrorClass<InvalidValue>(`${TypeId}/InvalidValue`)({
-  _tag: Schema.tag("InvalidValue"),
+export class InvalidValue extends Schema.TaggedErrorClass<InvalidValue>(
+  `${TypeId}/InvalidValue`
+)("InvalidValue", {
   option: Schema.String,
   value: Schema.String,
   expected: Schema.String,
@@ -357,10 +362,16 @@ export class InvalidValue extends Schema.ErrorClass<InvalidValue>(`${TypeId}/Inv
    * @since 4.0.0
    */
   override get message() {
+    const expectation = this.expected.startsWith("Expected ") || this.expected.startsWith("Expected:")
+      ? this.expected
+      : `Expected: ${this.expected}`
     if (this.kind === "argument") {
-      return `Invalid value for argument <${this.option}>: "${this.value}". Expected: ${this.expected}`
+      return `Invalid value for argument <${this.option}>: "${this.value}". ${expectation}`
     }
-    return `Invalid value for flag --${this.option}: "${this.value}". Expected: ${this.expected}`
+    if (this.value.length === 0) {
+      return `Missing value for flag --${this.option}. ${expectation}`
+    }
+    return `Invalid value for flag --${this.option}: "${this.value}". ${expectation}`
   }
 }
 
@@ -400,8 +411,9 @@ export class InvalidValue extends Schema.ErrorClass<InvalidValue>(`${TypeId}/Inv
  * @category models
  * @since 4.0.0
  */
-export class UnknownSubcommand extends Schema.ErrorClass<UnknownSubcommand>(`${TypeId}/UnknownSubcommand`)({
-  _tag: Schema.tag("UnknownSubcommand"),
+export class UnknownSubcommand extends Schema.TaggedErrorClass<UnknownSubcommand>(
+  `${TypeId}/UnknownSubcommand`
+)("UnknownSubcomand", {
   subcommand: Schema.String,
   parent: Schema.optional(Schema.Array(Schema.String)),
   suggestions: Schema.Array(Schema.String)
@@ -464,8 +476,9 @@ export class UnknownSubcommand extends Schema.ErrorClass<UnknownSubcommand>(`${T
  * @category models
  * @since 4.0.0
  */
-export class UserError extends Schema.ErrorClass<UserError>(`${TypeId}/UserError`)({
-  _tag: Schema.tag("UserError"),
+export class UserError extends Schema.TaggedErrorClass<UserError>(
+  `${TypeId}/UserError`
+)("UserError", {
   cause: Schema.Defect()
 }) {
   /**
@@ -533,8 +546,9 @@ export type NonShowHelpErrors = typeof NonShowHelpErrors.Type
  * @category models
  * @since 4.0.0
  */
-export class ShowHelp extends Schema.ErrorClass<ShowHelp>(`${TypeId}/ShowHelp`)({
-  _tag: Schema.tag("ShowHelp"),
+export class ShowHelp extends Schema.TaggedErrorClass<ShowHelp>(
+  `${TypeId}/ShowHelp`
+)("ShowHelp", {
   commandPath: Schema.Array(Schema.String),
   errors: Schema.Array(NonShowHelpErrors)
 }) {

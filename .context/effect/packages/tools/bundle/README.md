@@ -53,7 +53,7 @@ pnpm bundle-analyze \
   scratchpad/schema-arbitrary.ts
 ```
 
-The wrapper builds the current checkout with `pnpm build:tsgo` before generating
+The wrapper builds the current checkout with `pnpm build` before generating
 analysis artifacts, so the bundle is not produced from stale `dist` files.
 
 By default, artifacts are written to `tmp/bundle-analysis`. Use `--output-dir`
@@ -134,7 +134,7 @@ git worktree remove --force tmp/bundle-base
 
 The wrapper:
 
-- builds the current checkout with `pnpm build:tsgo`;
+- builds the current checkout with `pnpm build`;
 - creates or reuses `tmp/bundle-base` at the requested base ref;
 - builds the base checkout when needed and writes
   `tmp/bundle-base/.bundle-build-stamp` only after a successful build;

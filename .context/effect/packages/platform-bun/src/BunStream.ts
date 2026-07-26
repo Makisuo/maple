@@ -43,26 +43,25 @@ export const fromReadableStream = <A, E>(
       scope,
       options.releaseLockOnEnd ? Effect.sync(() => reader.releaseLock()) : Effect.promise(() => reader.cancel())
     )
-    const readMany = Effect.callback<Bun.ReadableStreamDefaultReadManyResult<A>, E>((resume) => {
+    function readMany(): Pull.Pull<Arr.NonEmptyReadonlyArray<A>, E> {
       const result = reader.readMany()
       if ("then" in result) {
-        result.then((_) => resume(Effect.succeed(_)), (e) => resume(Effect.fail(options.onError(e))))
-      } else {
-        resume(Effect.succeed(result))
+        return Effect.callback<Arr.NonEmptyReadonlyArray<A>, E | Cause.Done>((resume) => {
+          result.then((_) => resume(handleResult(_)), (e) => resume(Effect.fail(options.onError(e))))
+        })
       }
-    })
+      return handleResult(result)
+    }
+    function handleResult(
+      result: Bun.ReadableStreamDefaultReadManyResult<A>
+    ): Pull.Pull<Arr.NonEmptyReadonlyArray<A>, E> {
+      if (result.done) {
+        return Cause.done()
+      } else if (!Arr.isReadonlyArrayNonEmpty(result.value)) {
+        return readMany()
+      }
+      return Effect.succeed(result.value)
+    }
     // @effect-diagnostics-next-line returnEffectInGen:off
-    return Effect.flatMap(
-      readMany,
-      function loop(
-        { done, value }
-      ): Pull.Pull<Arr.NonEmptyReadonlyArray<A>, E> {
-        if (done) {
-          return Cause.done()
-        } else if (!Arr.isReadonlyArrayNonEmpty(value)) {
-          return Effect.flatMap(readMany, loop)
-        }
-        return Effect.succeed(value)
-      }
-    )
+    return Effect.suspend(readMany)
   })))

@@ -191,8 +191,8 @@ export const upgradeChannel = <IE = never>(): Channel.Channel<
  * @category schemas
  * @since 4.0.0
  */
-export const schemaCookies = <A, I extends Readonly<Record<string, string | undefined>>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaCookies = <A, I extends Readonly<Record<string, string | undefined>>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, Schema.SchemaError, RD | HttpServerRequest> => {
   const parse = Schema.decodeUnknownEffect(schema)
@@ -205,8 +205,8 @@ export const schemaCookies = <A, I extends Readonly<Record<string, string | unde
  * @category schemas
  * @since 4.0.0
  */
-export const schemaHeaders = <A, I extends Readonly<Record<string, string | undefined>>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaHeaders = <A, I extends Readonly<Record<string, string | undefined>>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, Schema.SchemaError, HttpServerRequest | RD> => {
   const parse = Schema.decodeUnknownEffect(schema)
@@ -222,10 +222,9 @@ export const schemaHeaders = <A, I extends Readonly<Record<string, string | unde
 export const schemaSearchParams = <
   A,
   I extends Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
-  RD,
-  RE
+  RD
 >(
-  schema: Schema.Codec<A, I, RD, RE>,
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, Schema.SchemaError, ParsedSearchParams | RD> => {
   const parse = Schema.decodeUnknownEffect(schema)
@@ -242,8 +241,8 @@ export const schemaSearchParams = <
  * @category schemas
  * @since 4.0.0
  */
-export const schemaBodyJson = <A, I, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaBodyJson = <A, RD>(
+  schema: Schema.ConstraintDecoder<A, RD>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, HttpServerError | Schema.SchemaError, HttpServerRequest | RD> => {
   const parse = HttpIncomingMessage.schemaBodyJson(schema, options)
@@ -265,12 +264,15 @@ const isMultipart = (request: HttpServerRequest) =>
  * @category schemas
  * @since 4.0.0
  */
-export const schemaBodyForm = <A, I extends Partial<Multipart.Persisted>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaBodyForm = <A, I extends Partial<Multipart.Persisted>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ) => {
   const parseMultipart = Multipart.schemaPersisted(schema)
-  const parseUrlParams = HttpIncomingMessage.schemaBodyUrlParams(schema as Schema.Codec<A, any, RD, RE>, options)
+  const parseUrlParams = HttpIncomingMessage.schemaBodyUrlParams(
+    schema as Schema.ConstraintCodec<A, any, RD, unknown>,
+    options
+  )
   return Effect.flatMap(HttpServerRequest, (request): Effect.Effect<
     A,
     Multipart.MultipartError | Schema.SchemaError | HttpServerError,
@@ -293,10 +295,9 @@ export const schemaBodyForm = <A, I extends Partial<Multipart.Persisted>, RD, RE
 export const schemaBodyUrlParams = <
   A,
   I extends Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
-  RD,
-  RE
+  RD
 >(
-  schema: Schema.Codec<A, I, RD, RE>,
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, HttpServerError | Schema.SchemaError, HttpServerRequest | RD> => {
   const parse = HttpIncomingMessage.schemaBodyUrlParams(schema, options)
@@ -315,8 +316,8 @@ export const schemaBodyUrlParams = <
  * @category schemas
  * @since 4.0.0
  */
-export const schemaBodyMultipart = <A, I extends Partial<Multipart.Persisted>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaBodyMultipart = <A, I extends Partial<Multipart.Persisted>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<
   A,
@@ -342,8 +343,8 @@ export const schemaBodyMultipart = <A, I extends Partial<Multipart.Persisted>, R
  * @category schemas
  * @since 4.0.0
  */
-export const schemaBodyFormJson = <A, I, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaBodyFormJson = <A, RD>(
+  schema: Schema.ConstraintDecoder<A, RD>,
   options?: ParseOptions | undefined
 ) => {
   const parseMultipart = Multipart.schemaJson(schema, options)

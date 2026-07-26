@@ -54,7 +54,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
 echo "Building current checkout..."
-pnpm build:tsgo
+pnpm build
 
 node packages/tools/bundle/src/bin.ts visualize-selected \
   --output-dir "$OUTPUT_DIR" \

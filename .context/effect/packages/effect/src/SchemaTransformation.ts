@@ -871,7 +871,7 @@ export const bigintFromString = new Transformation(
  * )
  * ```
  *
- * @see {@link numberFromString}
+ * @see {@link dateFromMillis}
  * @see {@link dateTimeUtcFromString}
  *
  * @category Coercions
@@ -880,6 +880,46 @@ export const bigintFromString = new Transformation(
 export const dateFromString: Transformation<globalThis.Date, string> = new Transformation(
   SchemaGetter.Date(),
   SchemaGetter.transform(formatDate)
+)
+
+/**
+ * Decodes epoch milliseconds into a `Date` and encodes a `Date` back to epoch
+ * milliseconds.
+ *
+ * **When to use**
+ *
+ * Use when you need a schema transformation for numeric timestamps represented
+ * as milliseconds since the Unix epoch.
+ *
+ * **Details**
+ *
+ * Decoding creates a `Date` from the number like `new Date(ms)`. Encoding
+ * returns the `Date` timestamp like `date.getTime()`.
+ *
+ * **Gotchas**
+ *
+ * This transformation does not validate date validity. `NaN`, `Infinity`, and
+ * `-Infinity` decode to invalid `Date` instances.
+ *
+ * **Example** (Converting milliseconds to a Date)
+ *
+ * ```ts
+ * import { Schema, SchemaTransformation } from "effect"
+ *
+ * const schema = Schema.Number.pipe(
+ *   Schema.decodeTo(Schema.Date, SchemaTransformation.dateFromMillis)
+ * )
+ * ```
+ *
+ * @see {@link dateFromString}
+ * @see {@link SchemaGetter.dateTimeUtcFromInput}
+ *
+ * @category Coercions
+ * @since 4.0.0
+ */
+export const dateFromMillis: Transformation<globalThis.Date, number> = new Transformation(
+  SchemaGetter.Date(),
+  SchemaGetter.transform((date) => date.getTime())
 )
 
 /**
@@ -1762,8 +1802,8 @@ export const timeZoneFromString: Transformation<DateTime.TimeZone, string> = tra
  * UTC, and fails with `InvalidValue` when parsing fails. Encode uses
  * `DateTime.formatIso`.
  *
- * @see {@link dateTimeZonedFromString} for ISO strings that should preserve zoned date-time information
  * @see {@link dateFromString} for decoding into JavaScript `Date`
+ * @see {@link dateTimeZonedFromString} for ISO strings that should preserve zoned date-time information
  *
  * @category transforming
  * @since 4.0.0

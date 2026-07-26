@@ -93,10 +93,9 @@ export const schemaJson = <
     readonly headers?: Readonly<Record<string, string | undefined>> | undefined
     readonly body?: unknown
   },
-  RD,
-  RE
+  RD
 >(
-  schema: Schema.Codec<A, I, RD, RE>,
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ) => {
   const decode = Schema.decodeEffect(Schema.toCodecJson(schema).annotate({ options }))

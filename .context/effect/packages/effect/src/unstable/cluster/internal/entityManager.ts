@@ -18,7 +18,6 @@ import * as Schema from "../../../Schema.ts"
 import * as SchemaIssue from "../../../SchemaIssue.ts"
 import * as Scope from "../../../Scope.ts"
 import type * as Rpc from "../../rpc/Rpc.ts"
-import { RequestId } from "../../rpc/RpcMessage.ts"
 import * as RpcServer from "../../rpc/RpcServer.ts"
 import { AlreadyProcessingMessage, EntityNotAssignedToRunner, MailboxFull, MalformedMessage } from "../ClusterError.ts"
 import * as ClusterMetrics from "../ClusterMetrics.ts"
@@ -67,7 +66,7 @@ export interface EntityManager {
 export type EntityState = {
   readonly address: EntityAddress
   readonly scope: Scope.Scope
-  readonly activeRequests: Map<bigint, {
+  readonly activeRequests: Map<Snowflake.Snowflake, {
     readonly rpc: Rpc.AnyWithProps
     readonly message: Message.IncomingRequestLocal<any>
     sentReply: boolean
@@ -145,7 +144,7 @@ export const make = Effect.fnUntraced(function*<
     )
 
     const activeRequests: EntityState["activeRequests"] = new Map()
-    let defectRequestIds = new Set<bigint>()
+    let defectRequestIds = new Set<Snowflake.Snowflake>()
     let isRestartingDueToDefect = false
 
     // the server is stored in a ref, so if there is a defect, we can
@@ -155,16 +154,18 @@ export const make = Effect.fnUntraced(function*<
       Effect.fnUntraced(function*(scope) {
         let isShuttingDown = false
 
+        const handlerContext = Context.mutate(context, (context) =>
+          context.pipe(
+            Context.add(CurrentAddress, address),
+            Context.add(CurrentRunnerAddress, options.runnerAddress),
+            Context.add(KeepAliveLatch, keepAliveLatch),
+            Context.add(Scope.Scope, scope),
+            Context.add(CurrentLogAnnotations, {})
+          ))
+
         // Initiate the behavior for the entity
         const handlers = yield* (entity.protocol.toHandlers(buildHandlers as any).pipe(
-          Effect.provideService(CurrentLogAnnotations, {}),
-          Effect.provideContext(Context.mutate(context, (context) =>
-            context.pipe(
-              Context.add(CurrentAddress, address),
-              Context.add(CurrentRunnerAddress, options.runnerAddress),
-              Context.add(KeepAliveLatch, keepAliveLatch),
-              Context.add(Scope.Scope, scope)
-            ))),
+          Effect.setContext(handlerContext as Context.Context<any>),
           Effect.sandbox,
           Effect.tapError((cause) => Effect.logError("Defect building entity handlers", cause)),
           Effect.retry(defectRetryPolicy)
@@ -182,7 +183,7 @@ export const make = Effect.fnUntraced(function*<
           onFromServer(response): Effect.Effect<void> {
             switch (response._tag) {
               case "Exit": {
-                const request = activeRequests.get(response.requestId)
+                const request = activeRequests.get(Snowflake.Snowflake(response.requestId))
                 if (!request) return Effect.void
 
                 request.sentReply = true
@@ -190,7 +191,7 @@ export const make = Effect.fnUntraced(function*<
                 if (
                   isShuttingDown &&
                   Exit.hasInterrupts(response.exit) &&
-                  defectRequestIds.has(response.requestId)
+                  defectRequestIds.has(Snowflake.Snowflake(response.requestId))
                 ) {
                   return Effect.void
                 }
@@ -206,19 +207,25 @@ export const make = Effect.fnUntraced(function*<
                   (isShuttingDown || isUninterruptibleForServer(request.message.annotations))
                 ) {
                   if (!isShuttingDown) {
-                    return server.write(0, {
-                      ...request.message.envelope,
-                      id: RequestId(request.message.envelope.requestId),
-                      tag: request.message.envelope.tag as any,
-                      payload: new Request({
+                    return server.write(
+                      0,
+                      {
                         ...request.message.envelope,
-                        lastSentChunk: request.lastSentChunk
-                      } as any) as any
-                    }).pipe(
+                        id: request.message.envelope.requestId as any,
+                        tag: request.message.envelope.tag as any,
+                        payload: new Request({
+                          ...request.message.envelope,
+                          lastSentChunk: request.lastSentChunk
+                        } as any) as any
+                      },
+                      Context.get(request.rpc.annotations, WithTransaction)
+                        ? { onRequest: options.storage.withTransaction }
+                        : undefined
+                    ).pipe(
                       Effect.forkIn(scope)
                     )
                   }
-                  activeRequests.delete(response.requestId)
+                  activeRequests.delete(Snowflake.Snowflake(response.requestId))
                   return options.storage.unregisterReplyHandler(request.message.envelope.requestId)
                 }
                 return retryRespond(
@@ -235,7 +242,7 @@ export const make = Effect.fnUntraced(function*<
                 ).pipe(
                   Effect.flatMap(() => {
                     processedRequestIds.add(request.message.envelope.requestId)
-                    activeRequests.delete(response.requestId)
+                    activeRequests.delete(Snowflake.Snowflake(response.requestId))
 
                     // ensure that the reaper does not remove the entity as we haven't
                     // been "idle" yet
@@ -249,7 +256,7 @@ export const make = Effect.fnUntraced(function*<
                 )
               }
               case "Chunk": {
-                const request = activeRequests.get(response.requestId)
+                const request = activeRequests.get(Snowflake.Snowflake(response.requestId))
                 if (!request) return Effect.void
                 const sequence = request.sequence
                 request.sequence++
@@ -280,7 +287,7 @@ export const make = Effect.fnUntraced(function*<
           }
         }).pipe(
           Scope.provide(scope),
-          Effect.provideContext(handlers)
+          Effect.setContext(Context.merge(handlerContext, handlers))
         )
 
         yield* Scope.addFinalizer(
@@ -294,16 +301,22 @@ export const make = Effect.fnUntraced(function*<
           for (const id of defectRequestIds) {
             const request = activeRequests.get(id)
             if (!request) continue
-            const { lastSentChunk, message } = request
-            yield* server.write(0, {
-              ...message.envelope,
-              id: RequestId(message.envelope.requestId),
-              tag: message.envelope.tag as any,
-              payload: new Request({
+            const { lastSentChunk, message, rpc } = request
+            yield* server.write(
+              0,
+              {
                 ...message.envelope,
-                lastSentChunk
-              } as any) as any
-            })
+                id: message.envelope.requestId as any,
+                tag: message.envelope.tag as any,
+                payload: new Request({
+                  ...message.envelope,
+                  lastSentChunk
+                } as any) as any
+              },
+              Context.get(rpc.annotations, WithTransaction)
+                ? { onRequest: options.storage.withTransaction }
+                : undefined
+            )
           }
           defectRequestIds.clear()
         }
@@ -340,11 +353,11 @@ export const make = Effect.fnUntraced(function*<
     const state: EntityState = {
       scope,
       address,
-      write(clientId, message) {
+      write(clientId, message, writeOptions) {
         if (writeRef.state.current._tag !== "Acquired") {
-          return Effect.flatMap(writeRef.await, (write) => write(clientId, message))
+          return Effect.flatMap(writeRef.await, (write) => write(clientId, message, writeOptions))
         }
-        return writeRef.state.current.value(clientId, message)
+        return writeRef.state.current.value(clientId, message, writeOptions)
       },
       activeRequests,
       lastActiveCheck: clock.currentTimeMillisUnsafe(),
@@ -471,21 +484,23 @@ export const make = Effect.fnUntraced(function*<
                 })
               }
               server.activeRequests.set(message.envelope.requestId, entry)
-              let write = server.write(0, {
-                ...message.envelope,
-                id: RequestId(message.envelope.requestId),
-                payload: new Request({
+              return server.write(
+                0,
+                {
                   ...message.envelope,
-                  lastSentChunk: Option.filter(
-                    message.lastSentReply,
-                    (reply): reply is Reply.Chunk<R> => reply._tag === "Chunk"
-                  )
-                })
-              })
-              if (Context.get(message.annotations, WithTransaction)) {
-                write = options.storage.withTransaction(write)
-              }
-              return write
+                  id: message.envelope.requestId as any,
+                  payload: new Request({
+                    ...message.envelope,
+                    lastSentChunk: Option.filter(
+                      message.lastSentReply,
+                      (reply): reply is Reply.Chunk<R> => reply._tag === "Chunk"
+                    )
+                  })
+                },
+                Context.get(message.annotations, WithTransaction)
+                  ? { onRequest: options.storage.withTransaction }
+                  : undefined
+              )
             }
             case "IncomingEnvelope": {
               const entry = server.activeRequests.get(message.envelope.requestId)
@@ -501,10 +516,10 @@ export const make = Effect.fnUntraced(function*<
               return server.write(
                 0,
                 message.envelope._tag === "AckChunk"
-                  ? { _tag: "Ack", requestId: RequestId(message.envelope.requestId) }
+                  ? { _tag: "Ack", requestId: message.envelope.requestId as any }
                   : {
                     _tag: "Interrupt",
-                    requestId: RequestId(message.envelope.requestId),
+                    requestId: message.envelope.requestId as any,
                     interruptors: []
                   }
               )
@@ -609,9 +624,10 @@ export const make = Effect.fnUntraced(function*<
   })
 })
 
-const defaultRetryPolicy = Schedule.exponential(500, 1.5).pipe(
-  Schedule.either(Schedule.spaced("10 seconds"))
-)
+const defaultRetryPolicy = Schedule.min([
+  Schedule.exponential(500, 1.5),
+  Schedule.spaced("10 seconds")
+])
 
 const makeMessageDecode = <Type extends string, Rpcs extends Rpc.Any>(
   entity: Entity<Type, Rpcs>,

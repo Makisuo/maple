@@ -64,8 +64,8 @@ type ErrorSchemaFromConstraint<E> = E extends ReadonlyArray<Schema.Constraint> ?
 export type HttpApiMiddleware<Provides, E extends ErrorConstraint, Requires> = (
   httpEffect: Effect.Effect<HttpServerResponse, unhandled, Provides>,
   options: {
-    readonly endpoint: HttpApiEndpoint.AnyWithProps
-    readonly group: HttpApiGroup.AnyWithProps
+    readonly endpoint: HttpApiEndpoint.Top
+    readonly group: HttpApiGroup.Top
   }
 ) => Effect.Effect<HttpServerResponse, unhandled | ErrorSchemaFromConstraint<E>["Type"], Requires | HttpRouter.Provided>
 
@@ -90,8 +90,8 @@ export type HttpApiMiddlewareSecurity<
     httpEffect: Effect.Effect<HttpServerResponse, unhandled, Provides>,
     options: {
       readonly credential: HttpApiSecurity.HttpApiSecurity.Type<Security[K]>
-      readonly endpoint: HttpApiEndpoint.AnyWithProps
-      readonly group: HttpApiGroup.AnyWithProps
+      readonly endpoint: HttpApiEndpoint.Top
+      readonly group: HttpApiGroup.Top
     }
   ) => Effect.Effect<
     HttpServerResponse,
@@ -113,8 +113,8 @@ export type HttpApiMiddlewareSecurity<
  */
 export interface HttpApiMiddlewareClient<_E, CE, R> {
   (options: {
-    readonly endpoint: HttpApiEndpoint.AnyWithProps
-    readonly group: HttpApiGroup.AnyWithProps
+    readonly endpoint: HttpApiEndpoint.Top
+    readonly group: HttpApiGroup.Top
     readonly request: HttpClientRequest.HttpClientRequest
     readonly next: (
       request: HttpClientRequest.HttpClientRequest
@@ -420,7 +420,10 @@ export const layerSchemaErrorTransform = <Id, E extends ErrorConstraint, Require
   service: Context.Service<Id, HttpApiMiddleware<never, E, Requires>>,
   transform: (
     error: HttpApiSchemaError,
-    context: { readonly endpoint: HttpApiEndpoint.AnyWithProps; readonly group: HttpApiGroup.AnyWithProps }
+    context: {
+      readonly endpoint: HttpApiEndpoint.Top
+      readonly group: HttpApiGroup.Top
+    }
   ) => Effect.Effect<
     HttpServerResponse,
     ErrorSchemaFromConstraint<E>["Type"] | HttpApiSchemaError,

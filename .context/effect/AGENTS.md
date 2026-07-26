@@ -81,14 +81,14 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 Use the narrowest validation that still covers the change:
 
-| Change type                      | Validation                                                                              |
-| -------------------------------- | --------------------------------------------------------------------------------------- |
-| Code changes                     | `pnpm lint-fix`, targeted `pnpm test <test_file.ts>`, `pnpm check:tsgo`                 |
-| Tests-only changes               | `pnpm lint-fix`, targeted `pnpm test <test_file.ts>`, `pnpm check:tsgo`                 |
-| Type-level/API type changes      | Targeted `pnpm test-types <filename>`, plus `pnpm check:tsgo` when source types changed |
-| JSDoc text/category/link changes | `pnpm lint`                                                                             |
-| JSDoc example changes            | `pnpm lint`; from the changed package directory, run `pnpm docgen`                      |
-| Docs-only changes                | `pnpm lint-fix`; no tests required unless examples or code changed                      |
+| Change type                      | Validation                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| Code changes                     | `pnpm lint-fix`, targeted `pnpm test <test_file.ts>`, `pnpm check`                 |
+| Tests-only changes               | `pnpm lint-fix`, targeted `pnpm test <test_file.ts>`, `pnpm check`                 |
+| Type-level/API type changes      | Targeted `pnpm test-types <filename>`, plus `pnpm check` when source types changed |
+| JSDoc text/category/link changes | `pnpm lint`                                                                        |
+| JSDoc example changes            | `pnpm lint`; from the changed package directory, run `pnpm docgen`                 |
+| Docs-only changes                | `pnpm lint-fix`; no tests required unless examples or code changed                 |
 
 ## Bundle Size Preview
 

@@ -1,4 +1,4 @@
-import { assert, it } from "@effect/vitest"
+import { assert, it, vi } from "@effect/vitest"
 import { Cause, Effect, FileSystem, Layer, Path, Redacted, Schema, Stream } from "effect"
 import { Etag, HttpPlatform } from "effect/unstable/http"
 import {
@@ -21,6 +21,106 @@ const TestServices = Layer.mergeAll(
   Etag.layerWeak,
   HttpPlatform.layer
 ).pipe(Layer.provideMerge(FileSystem.layerNoop({})))
+
+it.effect("reuses response schema transformations by source AST", () => {
+  const SharedSuccess = Schema.String.pipe(HttpApiSchema.asText())
+  const DistinctSuccess = Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/custom" }))
+  const Api = HttpApi.make("Api").add(
+    HttpApiGroup.make("test")
+      .add(HttpApiEndpoint.get("first", "/first", { success: SharedSuccess }))
+      .add(HttpApiEndpoint.get("second", "/second", { success: SharedSuccess }))
+      .add(HttpApiEndpoint.get("distinct", "/distinct", { success: DistinctSuccess }))
+  )
+  const GroupLive = HttpApiBuilder.group(
+    Api,
+    "test",
+    (handlers) =>
+      handlers
+        .handle("first", () => Effect.succeed("first"))
+        .handle("second", () => Effect.succeed("second"))
+        .handle("distinct", () => Effect.succeed("distinct"))
+  )
+
+  return Effect.acquireUseRelease(
+    Effect.sync(() => vi.spyOn(Schema, "decodeTo")),
+    (decodeTo) =>
+      Effect.gen(function*() {
+        yield* Effect.scoped(Layer.build(GroupLive))
+        const responseSchemaCalls = decodeTo.mock.calls.filter(
+          ([schema]) => schema === SharedSuccess || schema === DistinctSuccess
+        )
+        assert.strictEqual(responseSchemaCalls.length, 2)
+      }),
+    (decodeTo) => Effect.sync(() => decodeTo.mockRestore())
+  )
+})
+
+it.layer(TestServices)("HttpApiBuilder payload content types", (it) => {
+  it.effect("round trips mixed-case media types with declared and received parameters", () =>
+    Effect.gen(function*() {
+      const Payload = Schema.Struct({ name: Schema.String }).pipe(
+        HttpApiSchema.asJson({
+          contentType: "Application/Vnd.Effect+JSON; profile=declared"
+        })
+      )
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("test").add(
+          HttpApiEndpoint.post("create", "/create", {
+            headers: {
+              "content-type": Schema.optional(Schema.String)
+            },
+            payload: Payload,
+            success: Schema.Struct({ name: Schema.String })
+          })
+        )
+      )
+      const GroupLive = HttpApiBuilder.group(
+        Api,
+        "test",
+        (handlers) => handlers.handle("create", ({ payload }) => Effect.succeed(payload))
+      )
+
+      const client = yield* HttpApiTest.groups(Api, ["test"]).pipe(Effect.provide(GroupLive))
+      const declared = yield* client.test.create({
+        headers: {},
+        payload: { name: "Ada" }
+      })
+      const received = yield* client.test.create({
+        headers: {
+          "content-type": "application/vnd.effect+json; profile=received"
+        },
+        payload: { name: "Grace" }
+      })
+
+      assert.deepStrictEqual(declared, { name: "Ada" })
+      assert.deepStrictEqual(received, { name: "Grace" })
+    }))
+
+  it.effect("round trips custom form-urlencoded media types", () =>
+    Effect.gen(function*() {
+      const Payload = Schema.Struct({ name: Schema.String }).pipe(
+        HttpApiSchema.asFormUrlEncoded({ contentType: "application/vnd.effect.form" })
+      )
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("test").add(
+          HttpApiEndpoint.post("create", "/create", {
+            payload: Payload,
+            success: Schema.Struct({ name: Schema.String })
+          })
+        )
+      )
+      const GroupLive = HttpApiBuilder.group(
+        Api,
+        "test",
+        (handlers) => handlers.handle("create", ({ payload }) => Effect.succeed(payload))
+      )
+
+      const client = yield* HttpApiTest.groups(Api, ["test"]).pipe(Effect.provide(GroupLive))
+      const result = yield* client.test.create({ payload: { name: "Ada" } })
+
+      assert.deepStrictEqual(result, { name: "Ada" })
+    }))
+})
 
 it.layer(TestServices)("HttpApiBuilder streaming success responses", (it) => {
   it.effect("emits StreamUint8Array handler responses as streamed bytes with the declared content type", () =>
@@ -184,6 +284,193 @@ it.layer(TestServices)("HttpApiBuilder streaming success responses", (it) => {
       assert.deepStrictEqual(Array.from(chunks, (chunk) => textDecoder.decode(chunk)), [
         `data: {"text":"hello"}\n\n`
       ])
+    }))
+
+  it.effect("registers handleAll handlers at runtime", () =>
+    Effect.gen(function*() {
+      const User = Schema.Struct({
+        id: Schema.String,
+        name: Schema.String
+      })
+      const CreateUser = Schema.Struct({
+        name: Schema.String
+      })
+
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("users").add(
+          HttpApiEndpoint.get("getUser", "/users/:id", {
+            params: {
+              id: Schema.String
+            },
+            success: User
+          }),
+          HttpApiEndpoint.post("createUser", "/users", {
+            payload: CreateUser,
+            success: User
+          })
+        )
+      )
+
+      const GroupLive = HttpApiBuilder.group(
+        Api,
+        "users",
+        (handlers) =>
+          handlers.handleAll({
+            getUser: ({ params }) =>
+              Effect.succeed({
+                id: params.id,
+                name: "Ada"
+              }),
+            createUser: {
+              handler: ({ payload }) =>
+                Effect.succeed({
+                  id: "created",
+                  name: payload.name
+                }),
+              options: { uninterruptible: true }
+            }
+          })
+      )
+
+      const client = yield* HttpApiTest.groups(Api, ["users"]).pipe(Effect.provide(GroupLive))
+      const getUser = yield* client.users.getUser({ params: { id: "user-1" } })
+      const createUser = yield* client.users.createUser({ payload: { name: "Grace" } })
+
+      assert.deepStrictEqual(getUser, { id: "user-1", name: "Ada" })
+      assert.deepStrictEqual(createUser, { id: "created", name: "Grace" })
+    }))
+
+  it.effect("rejects unknown endpoint identifiers", () =>
+    Effect.gen(function*() {
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("users").add(
+          HttpApiEndpoint.get("getUser", "/users", { success: Schema.String })
+        )
+      )
+
+      for (const identifier of ["missing", "toString"] as const) {
+        const GroupLive = HttpApiBuilder.group(
+          Api,
+          "users",
+          (handlers) => handlers.handle(identifier as "getUser", () => Effect.succeed("missing"))
+        )
+        const exit = yield* Effect.exit(Effect.scoped(Layer.build(GroupLive)))
+
+        assert.strictEqual(exit._tag, "Failure")
+        if (exit._tag === "Failure") {
+          const error = Cause.squash(exit.cause)
+          assert.instanceOf(error, Error)
+          assert.strictEqual(
+            error.message,
+            `HttpApiEndpoint "${identifier}" not found in HttpApiGroup "users"`
+          )
+        }
+      }
+    }))
+
+  it.effect("rejects duplicate handle and handleAll registrations", () =>
+    Effect.gen(function*() {
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("users").add(
+          HttpApiEndpoint.get("getUser", "/users", { success: Schema.String })
+        )
+      )
+      const HandleLive = HttpApiBuilder.group(
+        Api,
+        "users",
+        (handlers) => {
+          handlers.handle("getUser", () => Effect.succeed("first"))
+          return handlers.handle("getUser", () => Effect.succeed("second"))
+        }
+      )
+      const HandleAllLive = HttpApiBuilder.group(
+        Api,
+        "users",
+        (handlers) => {
+          handlers.handleAll({ getUser: () => Effect.succeed("first") })
+          return handlers.handleAll({ getUser: () => Effect.succeed("second") })
+        }
+      )
+
+      for (const GroupLive of [HandleLive, HandleAllLive]) {
+        const exit = yield* Effect.exit(Effect.scoped(Layer.build(GroupLive)))
+        assert.strictEqual(exit._tag, "Failure")
+        if (exit._tag === "Failure") {
+          const error = Cause.squash(exit.cause)
+          assert.instanceOf(error, Error)
+          assert.strictEqual(
+            error.message,
+            "Handler for HttpApiEndpoint \"getUser\" is already registered in HttpApiGroup \"users\""
+          )
+        }
+      }
+    }))
+
+  it.effect("ignores inherited handleAll properties", () =>
+    Effect.gen(function*() {
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("users").add(
+          HttpApiEndpoint.get("getUser", "/users", {
+            success: Schema.String
+          })
+        )
+      )
+      const implementations: {
+        readonly getUser: () => Effect.Effect<string>
+      } = Object.assign(
+        Object.create({
+          inherited: () => Effect.succeed("inherited")
+        }),
+        {
+          getUser: () => Effect.succeed("own")
+        }
+      )
+      const GroupLive = HttpApiBuilder.group(
+        Api,
+        "users",
+        (handlers) => handlers.handleAll(implementations)
+      )
+
+      const client = yield* HttpApiTest.groups(Api, ["users"]).pipe(Effect.provide(GroupLive))
+
+      assert.strictEqual(yield* client.users.getUser(), "own")
+    }))
+
+  it.effect("executes effectful handler builders", () =>
+    Effect.gen(function*() {
+      const User = Schema.Struct({
+        id: Schema.String,
+        name: Schema.String
+      })
+
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("users").add(
+          HttpApiEndpoint.get("getUser", "/users/:id", {
+            params: {
+              id: Schema.String
+            },
+            success: User
+          })
+        )
+      )
+
+      const GroupLive = HttpApiBuilder.group(
+        Api,
+        "users",
+        (handlers) =>
+          Effect.succeed(
+            handlers.handle("getUser", ({ params }) =>
+              Effect.succeed({
+                id: params.id,
+                name: "Ada"
+              }))
+          )
+      )
+
+      const client = yield* HttpApiTest.groups(Api, ["users"]).pipe(Effect.provide(GroupLive))
+      const getUser = yield* client.users.getUser({ params: { id: "user-1" } })
+
+      assert.deepStrictEqual(getUser, { id: "user-1", name: "Ada" })
     }))
 
   it.effect("does not try another security scheme after the handler fails", () =>

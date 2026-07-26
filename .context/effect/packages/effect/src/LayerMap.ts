@@ -153,7 +153,7 @@ export const make: <
   } | undefined
 ) {
   const context = yield* Effect.context<never>()
-  const memoMap = Layer.CurrentMemoMap.getOrCreate(context)
+  const memoMap = Layer.CurrentMemoMap.forkOrCreate(context)
 
   const rcMap = yield* RcMap.make({
     lookup: (key: K) =>

@@ -854,9 +854,10 @@ const make = Effect.gen(function*() {
         Effect.scoped,
         Effect.catchCause(Effect.logError),
         Effect.repeat(
-          Schedule.exponential(200, 1.5).pipe(
-            Schedule.either(Schedule.spaced({ seconds: 10 }))
-          )
+          Schedule.min([
+            Schedule.exponential(200, 1.5),
+            Schedule.spaced({ seconds: 10 })
+          ])
         ),
         Effect.annotateLogs({
           service: "EventLog",

@@ -1,7 +1,7 @@
 import { assert, describe, expect, it } from "@effect/vitest"
-import { Context, Effect, FileSystem, Layer, Option, Path, Stdio } from "effect"
+import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, Stdio } from "effect"
 import { TestConsole } from "effect/testing"
-import { Argument, CliOutput, Command, Flag, GlobalFlag } from "effect/unstable/cli"
+import { Argument, CliConfig, CliOutput, Command, Flag, GlobalFlag } from "effect/unstable/cli"
 import { toImpl } from "effect/unstable/cli/internal/command"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Cli from "./fixtures/ComprehensiveCli.ts"
@@ -116,6 +116,182 @@ describe("Command", () => {
   })
 
   describe("run", () => {
+    it.effect("should invoke the wizard programmatically from a command handler", () =>
+      Effect.gen(function*() {
+        const captured: Array<ReadonlyArray<string>> = []
+        const target = Command.make("greet", {
+          name: Flag.string("name"),
+          count: Argument.integer("count")
+        })
+        const command = Command.make("launcher", {}, () =>
+          Effect.flatMap(Command.wizard(target), (args) =>
+            Effect.sync(() => {
+              captured.push(args)
+            })))
+
+        const fiber = yield* Command.runWith(command, { version: "1.0.0" })([]).pipe(Effect.forkChild)
+        yield* MockTerminal.inputText("Alice")
+        yield* MockTerminal.inputKey("enter")
+        yield* MockTerminal.inputText("2")
+        yield* MockTerminal.inputKey("enter")
+        yield* Fiber.join(fiber)
+
+        assert.deepStrictEqual(captured, [["greet", "--name", "Alice", "2"]])
+      }).pipe(Effect.provide(TestLayer)))
+
+    it.effect("should run wizard-generated arguments with --wizard", () =>
+      Effect.gen(function*() {
+        const captured: Array<string> = []
+        const command = Command.make("greet", {
+          name: Flag.string("name")
+        }, ({ name }) => Effect.sync(() => captured.push(name)))
+
+        const fiber = yield* Command.runWith(command, { version: "1.0.0" })(["--wizard"]).pipe(Effect.forkChild)
+        yield* MockTerminal.inputText("Alice Smith")
+        yield* MockTerminal.inputKey("enter")
+        yield* MockTerminal.inputKey("enter")
+        yield* Fiber.join(fiber)
+
+        assert.deepStrictEqual(captured, ["Alice Smith"])
+        const output = [...yield* TestConsole.logLines, ...yield* MockTerminal.displayLines].join("\n")
+        assert.include(output, "Command wizard")
+        assert.include(output, "Build a command interactively. Press Ctrl+C to cancel.")
+        assert.include(output, "Current command")
+        assert.include(output, "ROOT")
+        assert.include(output, "FLAGS")
+        assert.include(output, "Name (--name)")
+        assert.include(output, "Command ready")
+        assert.include(output, "$ greet --name 'Alice Smith'")
+        assert.include(output, "Run this command?")
+      }).pipe(Effect.provide(TestLayer)))
+
+    it.effect("should print a message when wizard mode is cancelled", () =>
+      Effect.gen(function*() {
+        let invoked = false
+        const command = Command.make("greet", {
+          name: Flag.string("name")
+        }, () =>
+          Effect.sync(() => {
+            invoked = true
+          }))
+
+        const fiber = yield* Command.runWith(command, { version: "1.0.0" })(["--wizard"]).pipe(Effect.forkChild)
+        yield* MockTerminal.inputKey("c", { ctrl: true })
+        yield* Fiber.join(fiber)
+
+        const output = [...yield* TestConsole.logLines, ...yield* MockTerminal.displayLines].join("\n")
+        assert.isFalse(invoked)
+        assert.include(output, "Wizard cancelled.")
+      }).pipe(Effect.provide(TestLayer)))
+
+    it.effect("should render boolean wizard values consistently", () =>
+      Effect.gen(function*() {
+        const captured: Array<boolean> = []
+        const command = Command.make("deploy", {
+          dryRun: Flag.boolean("dry-run")
+        }, ({ dryRun }) => Effect.sync(() => captured.push(dryRun)))
+
+        const fiber = yield* Command.runWith(command, { version: "1.0.0" })(["--wizard"]).pipe(Effect.forkChild)
+        yield* MockTerminal.inputKey("y")
+        yield* MockTerminal.inputKey("enter")
+        yield* Fiber.join(fiber)
+
+        const output = [...yield* TestConsole.logLines, ...yield* MockTerminal.displayLines].join("\n")
+        assert.deepStrictEqual(captured, [true])
+        assert.include(output, "Dry run (--dry-run)")
+        assert.include(output, "deploy --dry-run true")
+        assert.notInclude(output, "on / off")
+      }).pipe(Effect.provide(TestLayer)))
+
+    it.effect("should start wizard mode at a selected subcommand", () =>
+      Effect.gen(function*() {
+        const captured: Array<string> = []
+        const child = Command.make("child", {
+          value: Argument.string("value")
+        }, ({ value }) => Effect.sync(() => captured.push(value)))
+        const command = Command.make("root").pipe(Command.withSubcommands([child]))
+
+        const fiber = yield* Command.runWith(command, { version: "1.0.0" })(["child", "--wizard"]).pipe(
+          Effect.forkChild
+        )
+        yield* MockTerminal.inputText("selected")
+        yield* MockTerminal.inputKey("enter")
+        yield* MockTerminal.inputKey("enter")
+        yield* Fiber.join(fiber)
+
+        assert.deepStrictEqual(captured, ["selected"])
+      }).pipe(Effect.provide(TestLayer)))
+
+    it.effect("should reject --completions without a shell", () =>
+      Effect.gen(function*() {
+        let invoked = false
+        const command = Command.make("demo", {}, () =>
+          Effect.sync(() => {
+            invoked = true
+          }))
+
+        yield* Command.runWith(command, { version: "1.0.0" })(["--completions"]).pipe(Effect.ignore)
+
+        const stderr = yield* TestConsole.errorLines
+        assert.isFalse(invoked)
+        assert.isTrue(
+          stderr.some((line) =>
+            String(line).includes("Missing value for flag --completions. Expected: bash | zsh | fish | sh")
+          )
+        )
+      }).pipe(Effect.provide(TestLayer)))
+
+    const missingValueCases: ReadonlyArray<{
+      readonly flag: Flag.Flag<unknown>
+      readonly name: string
+      readonly expected: string
+    }> = [
+      { flag: Flag.string("name").pipe(Flag.optional), name: "name", expected: "string" },
+      { flag: Flag.integer("count").pipe(Flag.optional), name: "count", expected: "integer" },
+      { flag: Flag.path("config").pipe(Flag.optional), name: "config", expected: "path" },
+      { flag: Flag.keyValuePair("env").pipe(Flag.optional), name: "env", expected: "key=value" }
+    ]
+
+    for (const { expected, flag, name } of missingValueCases) {
+      it.effect(`should reject --${name} without a ${expected} value`, () =>
+        Effect.gen(function*() {
+          let invoked = false
+          const command = Command.make("demo", { value: flag }, () =>
+            Effect.sync(() => {
+              invoked = true
+            }))
+
+          yield* Command.runWith(command, { version: "1.0.0" })([`--${name}`]).pipe(Effect.ignore)
+
+          const stderr = yield* TestConsole.errorLines
+          assert.isFalse(invoked)
+          assert.isTrue(
+            stderr.some((line) => String(line).includes(`Missing value for flag --${name}. Expected: ${expected}`))
+          )
+        }).pipe(Effect.provide(TestLayer)))
+    }
+
+    it.effect("should render invalid choice values without doubling the Expected prefix", () =>
+      Effect.gen(function*() {
+        let invoked = false
+        const command = Command.make("demo", {
+          size: Flag.choice("size", ["small", "medium", "large"])
+        }, () =>
+          Effect.sync(() => {
+            invoked = true
+          }))
+
+        yield* Command.runWith(command, { version: "1.0.0" })(["--size", "bogus"]).pipe(Effect.ignore)
+
+        const stderr = yield* TestConsole.errorLines
+        assert.isFalse(invoked)
+        assert.isTrue(
+          stderr.some((line) =>
+            String(line).includes(`Invalid value for flag --size: "bogus". Expected: "small" | "medium" | "large"`)
+          )
+        )
+      }).pipe(Effect.provide(TestLayer)))
+
     it.effect("should execute handler with parsed config", () =>
       Effect.gen(function*() {
         const path = yield* Path.Path
@@ -295,6 +471,32 @@ describe("Command", () => {
         yield* runCommand([])
 
         assert.deepStrictEqual(captured, ["eu-west-1", "us-west-2"])
+      }).pipe(Effect.provide(TestLayer)))
+
+    it.effect("should configure built-in global flags per run", () =>
+      Effect.gen(function*() {
+        const command = Command.make("app", {}, () => Effect.void)
+        const runCommand = Command.runWith(command, { version: "1.0.0" })
+        const config = CliConfig.make({
+          builtIns: GlobalFlag.BuiltIns.filter((flag) => flag !== GlobalFlag.LogLevel)
+        })
+
+        yield* runCommand(["--help"]).pipe(Effect.provide(CliConfig.layer(config)))
+        const configuredHelp = yield* TestConsole.logLines
+        assert.isFalse(configuredHelp.some((line) => String(line).includes("--log-level")))
+
+        yield* runCommand(["--log-level", "debug"]).pipe(
+          Effect.provideService(CliConfig.CliConfig, config),
+          Effect.ignore
+        )
+        const errors = yield* TestConsole.errorLines
+        assert.isTrue(errors.some((line) => String(line).includes("Unrecognized flag: --log-level")))
+
+        const helpCountBeforeDefault = (yield* TestConsole.logLines).length
+        yield* runCommand(["--help"])
+        const allHelp = yield* TestConsole.logLines
+        const defaultHelp = allHelp.slice(helpCountBeforeDefault)
+        assert.isTrue(defaultHelp.some((line) => String(line).includes("--log-level")))
       }).pipe(Effect.provide(TestLayer)))
 
     it.effect("should support mixed action and setting global flags", () =>

@@ -78,8 +78,7 @@ function recur(ast: SchemaAST.AST, path: ReadonlyArray<PropertyKey>): Equivalenc
           // handle post rest elements
           // ---------------------------------------------
           for (let j = 0; j < tail.length; j++) {
-            i += j
-            if (!tail[j](a[i], b[i])) {
+            if (!tail[j](a[i + j], b[i + j])) {
               return false
             }
           }

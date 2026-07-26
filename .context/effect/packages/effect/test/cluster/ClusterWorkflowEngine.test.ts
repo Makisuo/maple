@@ -176,8 +176,9 @@ describe.concurrent("ClusterWorkflowEngine", () => {
       expect(flags.get("interrupt3")).toBeFalsy()
     }).pipe(Effect.provide(TestWorkflowLayer)))
 
-  it.effect("Activity.raceAll resumes the first durable activity", () =>
+  it.effect("Activity.raceAll replays the first durable activity", () =>
     Effect.gen(function*() {
+      const flags = yield* Flags
       const sharding = yield* Sharding.Sharding
       yield* TestClock.adjust(1)
 
@@ -187,6 +188,15 @@ describe.concurrent("ClusterWorkflowEngine", () => {
 
       yield* TestClock.adjust(1)
       yield* TestClock.adjust(1000)
+      yield* sharding.pollStorage
+      yield* TestClock.adjust(5000)
+
+      const token = flags.get("durable-race-token")
+      assert(typeof token === "string")
+      yield* DurableDeferred.done(DurableRaceGate, {
+        token: DurableDeferred.Token.make(token),
+        exit: Exit.void
+      })
       yield* sharding.pollStorage
       yield* TestClock.adjust(5000)
 
@@ -254,10 +264,13 @@ describe.concurrent("ClusterWorkflowEngine", () => {
         executionId: executionIdBeforeRegister
       })
 
-      yield* DurableDeferred.done(ShardedDeferred, {
+      // Prime the partial client cache without waiting for the unregistered workflow entity.
+      const beforeRegisterDoneFiber = yield* DurableDeferred.done(ShardedDeferred, {
         token: tokenBeforeRegister,
         exit: Exit.void
-      })
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(beforeRegisterDoneFiber)
 
       yield* engine.register(ShardedDeferredWorkflow, () => Effect.void)
 
@@ -274,6 +287,41 @@ describe.concurrent("ClusterWorkflowEngine", () => {
 
       const envelope = driver.journal.slice(journalLength).find((envelope) =>
         envelope._tag === "Request" && envelope.address.entityType === "Workflow/ShardedDeferredWorkflow"
+      )
+      assert(envelope)
+      assert.strictEqual(envelope.address.shardId.group, "workflow")
+    }).pipe(Effect.scoped, Effect.provide(TestWorkflowEngine)))
+
+  it.effect("routes activities to the workflow shard group after a partial client is cached", () =>
+    Effect.gen(function*() {
+      const driver = yield* MessageStorage.MemoryDriver
+      const engine = yield* WorkflowEngine
+      const payload = { id: "partial-client-before-execute" }
+      const executionId = yield* ShardedDeferredWorkflow.executionId(payload)
+      const token = DurableDeferred.tokenFromExecutionId(ShardedDeferred, {
+        workflow: ShardedDeferredWorkflow,
+        executionId
+      })
+      // Prime the partial client cache without waiting for the unregistered workflow entity.
+      const doneFiber = yield* DurableDeferred.done(ShardedDeferred, {
+        token,
+        exit: Exit.void
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(doneFiber)
+
+      yield* engine.register(ShardedDeferredWorkflow, () =>
+        Activity.make({
+          name: "ShardedActivity",
+          execute: Effect.void
+        }))
+
+      const journalLength = driver.journal.length
+      assert.strictEqual(yield* ShardedDeferredWorkflow.execute(payload), undefined)
+      const envelope = driver.journal.slice(journalLength).find((envelope) =>
+        envelope._tag === "Request" &&
+        envelope.address.entityType === "Workflow/ShardedDeferredWorkflow" &&
+        envelope.tag === "activity"
       )
       assert(envelope)
       assert.strictEqual(envelope.address.shardId.group, "workflow")
@@ -488,6 +536,8 @@ const DurableRaceWorkflow = Workflow.make("DurableRaceWorkflow", {
   idempotencyKey: ({ id }) => id
 })
 
+const DurableRaceGate = DurableDeferred.make("DurableRaceGate")
+
 const DurableRaceWorkflowLayer = DurableRaceWorkflow.toLayer(Effect.fnUntraced(function*() {
   const flags = yield* Flags
 
@@ -497,7 +547,7 @@ const DurableRaceWorkflowLayer = DurableRaceWorkflow.toLayer(Effect.fnUntraced(f
     })
   )
 
-  return yield* Activity.raceAll("race", [
+  const result = yield* Activity.raceAll("race", [
     Activity.make({
       name: "Activity1",
       success: Schema.String,
@@ -535,6 +585,9 @@ const DurableRaceWorkflowLayer = DurableRaceWorkflow.toLayer(Effect.fnUntraced(f
       )
     })
   ])
+  flags.set("durable-race-token", yield* DurableDeferred.token(DurableRaceGate))
+  yield* DurableDeferred.await(DurableRaceGate)
+  return result
 }))
 
 const ParentWorkflow = Workflow.make("ParentWorkflow", {

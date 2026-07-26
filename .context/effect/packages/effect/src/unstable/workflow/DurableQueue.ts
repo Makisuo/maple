@@ -239,9 +239,10 @@ export const process: <
   return yield* DurableDeferred.await(deferred)
 })
 
-const defaultRetrySchedule = Schedule.exponential(500, 1.5).pipe(
-  Schedule.either(Schedule.spaced("1 minute"))
-)
+const defaultRetrySchedule = Schedule.min([
+  Schedule.exponential(500, 1.5),
+  Schedule.spaced("1 minute")
+])
 
 /**
  * Create a worker effect that processes items from the durable queue.

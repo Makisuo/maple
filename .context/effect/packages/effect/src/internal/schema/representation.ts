@@ -95,12 +95,12 @@ export function fromASTs(asts: readonly [SchemaAST.AST, ...Array<SchemaAST.AST>]
     return out
   }
 
-  function getEncodedSchema(last: SchemaAST.Declaration): SchemaAST.AST {
+  function getEncodedSchema(last: SchemaAST.Declaration): SchemaAST.Declaration | SchemaAST.Null {
     const getLink = last.annotations?.toCodecJson ?? last.annotations?.toCodec
     if (Predicate.isFunction(getLink)) {
-      const tps = last.typeParameters.map((tp) => InternalSchema.make(SchemaAST.toEncoded(tp)))
-      const link = getLink(tps)
-      return SchemaAST.replaceEncoding(last, [link])
+      return SchemaAST.replaceEncoding(last, [
+        getLink(last.typeParameters.map((tp) => InternalSchema.make(SchemaAST.toEncoded(tp))))
+      ])
     }
     return SchemaAST.null
   }

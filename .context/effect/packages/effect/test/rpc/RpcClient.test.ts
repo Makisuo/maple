@@ -60,7 +60,7 @@ describe("RpcClient", () => {
   it.effect("defects request when framed HTTP response closes before request completes", () =>
     Effect.gen(function*() {
       const client = yield* RpcClient.make(TestGroup, {
-        generateRequestId: () => RpcMessage.RequestId(BigInt(0))
+        generateRequestId: () => RpcMessage.RequestId("0")
       }).pipe(
         Effect.provide(makeProtocolLayer(
           RpcSerialization.layerNdjson,

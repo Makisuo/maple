@@ -130,3 +130,19 @@ export const TestEntityNoState = TestEntity.toLayer(
 )
 
 export const TestEntityLayer = TestEntityNoState.pipe(Layer.provideMerge(TestEntityState.layer))
+
+export const CallerId = Context.Service<never, string>(
+  "effect/test/cluster/CallerId"
+)
+
+export const ContextBleedEntity = Entity.make("ContextBleedEntity", [
+  Rpc.make("ReadCaller", { success: Schema.String }).annotate(ClusterSchema.Persisted, false),
+  Rpc.make("ReadCallerPersisted", { success: Schema.String }).annotate(ClusterSchema.Persisted, true)
+])
+
+const readCaller = () => Effect.map(Effect.serviceOption(CallerId), Option.getOrElse(() => "none"))
+
+export const ContextBleedLayer = ContextBleedEntity.toLayer({
+  ReadCaller: readCaller,
+  ReadCallerPersisted: readCaller
+})

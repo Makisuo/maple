@@ -350,6 +350,39 @@ describe.sequential("Atom", () => {
     expect(rebuilds).toEqual(2)
   })
 
+  it("keeps parent child links when a parent is read more than once", () => {
+    const flag = Atom.make(true)
+    const base = Atom.make(0)
+    const derived = Atom.make((get) => {
+      const value = get(base)
+      if (get(flag)) {
+        get(base)
+      }
+      return value
+    })
+    const registry = AtomRegistry.make()
+    const unsubscribe = registry.subscribe(derived, () => {
+    }, { immediate: true })
+    const nodes = registry.getNodes()
+    const baseNode = nodes.get(base)
+    const derivedNode = nodes.get(derived)
+
+    assert(baseNode !== undefined)
+    assert(derivedNode !== undefined)
+    assert.strictEqual(baseNode.children.has(derivedNode), true)
+    assert.strictEqual(derivedNode.parents.has(baseNode), true)
+
+    registry.set(flag, false)
+
+    assert.strictEqual(baseNode.children.has(derivedNode), true)
+    assert.strictEqual(derivedNode.parents.has(baseNode), true)
+
+    registry.set(base, 1)
+
+    assert.strictEqual(registry.get(derived), 1)
+    unsubscribe()
+  })
+
   it("refresh derived before mount resolves base effect", async () => {
     const baseAtom = Atom.make(
       Effect.succeed("value").pipe(Effect.delay(100))
@@ -2471,6 +2504,12 @@ describe.sequential("Atom", () => {
       expect(result.value).toEqual(42)
       expect(result.waiting).toEqual(false)
       expect(storage.get("test-key")).toEqual(JSON.stringify(42))
+
+      r.set(atom, 24)
+
+      const updated = r.get(atom)
+      assert(AsyncResult.isSuccess(updated))
+      expect(updated.value).toEqual(24)
     })
   })
 })

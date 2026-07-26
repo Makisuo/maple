@@ -26,6 +26,9 @@ import { OpenAiClient } from "./OpenAiClient.ts"
  */
 export type Model = string
 
+type ConfigOptions = Simplify<Partial<Omit<CreateEmbeddingRequestJson, "input">>>
+type ModelConfig = Omit<ConfigOptions, "model"> & { readonly [x: string]: unknown }
+
 /**
  * Context service for OpenAI embedding model configuration.
  *
@@ -48,17 +51,7 @@ export type Model = string
  */
 export class Config extends Context.Service<
   Config,
-  Simplify<
-    & Partial<
-      Omit<
-        CreateEmbeddingRequestJson,
-        "input"
-      >
-    >
-    & {
-      readonly [x: string]: unknown
-    }
-  >
+  ConfigOptions & { readonly [x: string]: unknown }
 >()("@effect/ai-openai-compat/OpenAiEmbeddingModel/Config") {}
 
 /**
@@ -77,9 +70,9 @@ export class Config extends Context.Service<
  */
 export const model = (
   model: string,
-  options: {
+  options: Omit<ConfigOptions, "model" | "dimensions"> & {
     readonly dimensions: number
-    readonly config?: Omit<typeof Config.Service, "model" | "dimensions">
+    readonly [x: string]: unknown
   }
 ): AiModel.Model<"openai", EmbeddingModel.EmbeddingModel | EmbeddingModel.Dimensions, OpenAiClient> =>
   AiModel.make(
@@ -88,10 +81,7 @@ export const model = (
     Layer.merge(
       layer({
         model,
-        config: {
-          ...options.config,
-          dimensions: options.dimensions
-        }
+        config: options
       }),
       Layer.succeed(EmbeddingModel.Dimensions, options.dimensions)
     )
@@ -127,7 +117,7 @@ export const model = (
  */
 export const make = Effect.fnUntraced(function*({ model, config: providerConfig }: {
   readonly model: string
-  readonly config?: Omit<typeof Config.Service, "model"> | undefined
+  readonly config?: ModelConfig | undefined
 }): Effect.fn.Return<EmbeddingModel.Service, never, OpenAiClient> {
   const client = yield* OpenAiClient
 
@@ -162,7 +152,7 @@ export const make = Effect.fnUntraced(function*({ model, config: providerConfig 
  */
 export const layer = (options: {
   readonly model: string
-  readonly config?: Omit<typeof Config.Service, "model"> | undefined
+  readonly config?: ModelConfig | undefined
 }): Layer.Layer<EmbeddingModel.EmbeddingModel, never, OpenAiClient> =>
   Layer.effect(EmbeddingModel.EmbeddingModel, make(options))
 

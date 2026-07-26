@@ -647,23 +647,42 @@ export const remainder: {
   (divisor: number): (self: number) => number
   (self: number, divisor: number): number
 } = dual(2, (self: number, divisor: number): number => {
-  const selfDecCount = decimalCount(self)
-  const divisorDecCount = decimalCount(divisor)
+  const selfString = self.toString()
+  const divisorString = divisor.toString()
+  if (selfString.includes("e") || divisorString.includes("e")) {
+    if (!globalThis.Number.isFinite(self) || !globalThis.Number.isFinite(divisor) || divisor === 0) {
+      return NaN
+    }
+    return remainderWithScientificNotation(self, divisor)
+  }
+  const selfDecCount = (selfString.split(".")[1] || "").length
+  const divisorDecCount = (divisorString.split(".")[1] || "").length
   const decCount = selfDecCount > divisorDecCount ? selfDecCount : divisorDecCount
   const selfInt = parseInt(self.toFixed(decCount).replace(".", ""))
   const divisorInt = parseInt(divisor.toFixed(decCount).replace(".", ""))
   return (selfInt % divisorInt) / Math.pow(10, decCount)
 })
 
-function decimalCount(n: number): number {
-  const s = n.toString()
-  const eIndex = s.indexOf("e-")
-  if (eIndex !== -1) {
-    const exp = parseInt(s.slice(eIndex + 2))
-    const mantissaDecimals = (s.slice(0, eIndex).split(".")[1] || "").length
-    return mantissaDecimals + exp
+function remainderWithScientificNotation(self: number, divisor: number): number {
+  const [selfCoefficient, selfExponent] = toScientificInteger(self)
+  const [divisorCoefficient, divisorExponent] = toScientificInteger(divisor)
+  const exponent = Math.min(selfExponent, divisorExponent)
+  const selfInteger = selfCoefficient * BigInt(10) ** BigInt(selfExponent - exponent)
+  const divisorInteger = divisorCoefficient * BigInt(10) ** BigInt(divisorExponent - exponent)
+  const out = selfInteger % divisorInteger
+  if (out === BigInt(0)) {
+    return self < 0 || Object.is(self, -0) ? -0 : 0
   }
-  return (s.split(".")[1] || "").length
+  const remainder = globalThis.Number(`${out}e${exponent}`)
+  return remainder === 0 ? Math.sign(self) * globalThis.Number.MIN_VALUE : remainder
+}
+
+function toScientificInteger(n: number): readonly [coefficient: bigint, exponent: number] {
+  const scientific = Math.abs(n).toExponential()
+  const eIndex = scientific.indexOf("e")
+  const digits = scientific.slice(0, eIndex).replace(".", "")
+  const coefficient = BigInt(digits) * (n < 0 ? -BigInt(1) : BigInt(1))
+  return [coefficient, globalThis.Number(scientific.slice(eIndex + 1)) - digits.length + 1]
 }
 
 /**

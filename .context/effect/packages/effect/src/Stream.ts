@@ -1471,7 +1471,7 @@ export const fromAsyncIterable = <A, E>(
  *
  * const program = Effect.gen(function*() {
  *   const schedule = Schedule.spaced("50 millis").pipe(
- *     Schedule.both(Schedule.recurs(2))
+ *     Schedule.upTo({ times: 3 })
  *   )
  *   const stream = Stream.fromSchedule(schedule)
  *   const values = yield* Stream.runCollect(stream)
