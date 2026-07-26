@@ -38,7 +38,8 @@ pub fn build_resource(cfg: ResourceConfig) -> Resource {
     // shells out to git at runtime).
     attrs.push(KeyValue::new(
         "vcs.repository.url.full",
-        env::var("VCS_REPOSITORY_URL").unwrap_or_else(|_| "https://github.com/Makisuo/maple".to_string()),
+        env::var("VCS_REPOSITORY_URL")
+            .unwrap_or_else(|_| "https://github.com/Makisuo/maple".to_string()),
     ));
     if let Some(revision) = detect_head_revision() {
         attrs.push(KeyValue::new("vcs.ref.head.revision", revision));
@@ -50,9 +51,14 @@ pub fn build_resource(cfg: ResourceConfig) -> Resource {
 /// Commit SHA of the running build, from the deploy platform's env vars —
 /// mirrors lib/effect-sdk/src/server/resource.ts (`COMMIT_SHA` chain).
 fn detect_head_revision() -> Option<String> {
-    ["COMMIT_SHA", "RAILWAY_GIT_COMMIT_SHA", "RENDER_GIT_COMMIT", "GITHUB_SHA"]
-        .iter()
-        .find_map(|key| env::var(key).ok().filter(|v| !v.is_empty()))
+    [
+        "COMMIT_SHA",
+        "RAILWAY_GIT_COMMIT_SHA",
+        "RENDER_GIT_COMMIT",
+        "GITHUB_SHA",
+    ]
+    .iter()
+    .find_map(|key| env::var(key).ok().filter(|v| !v.is_empty()))
 }
 
 /// Mirrors lib/effect-sdk/src/server/platform.ts platform detection — first
@@ -183,6 +189,24 @@ fn rustc_version() -> &'static str {
     option_env!("CARGO_PKG_RUST_VERSION").unwrap_or("unknown")
 }
 
+/// Record a failed stage on `span`.
+///
+/// `error.type` and `otel.status_description` are recorded unconditionally so
+/// the failure is always searchable and always carries its reason. The span
+/// status follows the same rule the server span uses (`otel_status_for_rejection`
+/// in main.rs): only a server-side fault is `Error`. A caller-caused rejection —
+/// bad key, undecodable body, invalid OTLP, per-org throttle — leaves the span
+/// `Ok`, because error dashboards count `StatusCode='Error'` and would otherwise
+/// be flooded by things working exactly as designed.
+pub fn record_stage_error(span: &Span, error_type: &str, detail: &str, server_fault: bool) {
+    span.record("error.type", error_type);
+    span.record("otel.status_description", detail);
+    span.record(
+        "otel.status_code",
+        if server_fault { "Error" } else { "Ok" },
+    );
+}
+
 /// Downstream-forward client-kind span. `peer_service` is the canonical name of
 /// the destination service as it appears in the service map (see
 /// `.agents/skills/maple-telemetry-conventions/rules/service-map-attribution.md`
@@ -210,6 +234,205 @@ pub fn forward_client_span(
     )
 }
 
+/// OTLP-over-gRPC server span. The tonic server has no tracing layer, so without
+/// this the gRPC path's `postgres.query` / `forward` / `ingest.*` spans become
+/// disconnected roots. Mirrors the HTTP `ingest` span, with rpc semconv in place
+/// of http.
+pub fn grpc_server_span(rpc_service: &'static str, signal_path: &'static str) -> Span {
+    info_span!(
+        "ingest.grpc",
+        otel.name = %format_args!("{rpc_service}/Export"),
+        otel.kind = "server",
+        otel.status_code = Empty,
+        otel.status_description = Empty,
+        "rpc.system" = "grpc",
+        "rpc.service" = rpc_service,
+        "rpc.method" = "Export",
+        "rpc.grpc.status_code" = Empty,
+        "error.type" = Empty,
+        "maple.signal" = signal_path,
+        "maple.org_id" = Empty,
+        "maple.ingest.key_type" = Empty,
+        "maple.ingest.destination" = Empty,
+    )
+}
+
+/// Ingest-key resolution. Wraps the moka lookup and, on a miss, the HMAC hash
+/// plus the PSBouncer roundtrip — so `postgres.query` nests under this rather
+/// than hanging directly off the server span.
+pub fn auth_internal_span() -> Span {
+    info_span!(
+        "ingest.authenticate",
+        otel.kind = "internal",
+        otel.status_code = Empty,
+        otel.status_description = Empty,
+        "error.type" = Empty,
+        "maple.ingest.cache_hit" = Empty,
+        "maple.ingest.key_type" = Empty,
+        "maple.ingest.key_id" = Empty,
+        "maple.org_id" = Empty,
+        "maple.ingest.self_managed" = Empty,
+        "maple.ingest.clickhouse_ready" = Empty,
+    )
+}
+
+/// Autumn entitlement gate. Parent of the `autumn.check` client span, which only
+/// fires on an entitlement-cache miss.
+pub fn entitlement_internal_span(signal_path: &'static str) -> Span {
+    info_span!(
+        "ingest.entitlement_check",
+        otel.kind = "internal",
+        "maple.signal" = signal_path,
+        "maple.ingest.cache_hit" = Empty,
+        "maple.billing.allowed" = Empty,
+    )
+}
+
+/// Request-body decompression (gzip/deflate).
+pub fn decode_internal_span(content_encoding: &str, body_size: usize) -> Span {
+    info_span!(
+        "ingest.decode",
+        otel.kind = "internal",
+        otel.status_code = Empty,
+        otel.status_description = Empty,
+        "error.type" = Empty,
+        "maple.ingest.content_encoding" = content_encoding,
+        "http.request.body.size" = body_size,
+        "maple.ingest.decoded_bytes" = Empty,
+    )
+}
+
+/// Protobuf/JSON decode plus resource-attribute enrichment.
+pub fn parse_internal_span(payload_format: &'static str, signal_path: &'static str) -> Span {
+    info_span!(
+        "ingest.parse",
+        otel.kind = "internal",
+        otel.status_code = Empty,
+        otel.status_description = Empty,
+        "error.type" = Empty,
+        "maple.ingest.payload_format" = payload_format,
+        "maple.signal" = signal_path,
+        "maple.ingest.item_count" = Empty,
+    )
+}
+
+/// Native pipeline accept — row encoding, backpressure, quota and WAL commit.
+/// Mirrors the `ingest_native_accept_duration_seconds` histogram boundary.
+pub fn accept_internal_span(signal_path: &'static str, destination: &'static str) -> Span {
+    info_span!(
+        "ingest.accept",
+        otel.kind = "internal",
+        otel.status_code = Empty,
+        otel.status_description = Empty,
+        "error.type" = Empty,
+        "maple.signal" = signal_path,
+        "maple.ingest.destination" = destination,
+        "maple.ingest.native_rows" = Empty,
+        "maple.ingest.sampled_dropped" = Empty,
+    )
+}
+
+/// OTLP → NDJSON row encoding, including trace sampling and attribute mapping.
+/// Synchronous CPU work, so callers enter this rather than instrumenting.
+pub fn encode_rows_internal_span(signal_path: &'static str) -> Span {
+    info_span!(
+        "ingest.encode_rows",
+        otel.kind = "internal",
+        otel.status_code = Empty,
+        otel.status_description = Empty,
+        "error.type" = Empty,
+        "maple.signal" = signal_path,
+        "maple.ingest.row_count" = Empty,
+        "maple.ingest.frame_count" = Empty,
+        "maple.ingest.sampled_dropped" = Empty,
+        // Encoded NDJSON size. Compare against `ingest.decode`'s
+        // `maple.ingest.decoded_bytes` to spot encode amplification.
+        "maple.ingest.payload_bytes" = Empty,
+    )
+}
+
+/// Backpressure reservation, per-org queue quota, and the durable WAL append
+/// (the `fsync` runs on a blocking thread, but the span wraps the await so its
+/// wall time is still captured). No single shard attribute: one commit can fan
+/// out across shards, so `maple.ingest.shard`/`lane` are only recorded for the
+/// frame that failed, which is the one you need when debugging.
+pub fn wal_commit_internal_span(destination: &'static str) -> Span {
+    info_span!(
+        "ingest.wal_commit",
+        otel.kind = "internal",
+        otel.status_code = Empty,
+        otel.status_description = Empty,
+        "error.type" = Empty,
+        "maple.ingest.destination" = destination,
+        "maple.ingest.frame_count" = Empty,
+        // How many frames were durably committed before a mid-loop rejection.
+        // A commit is not atomic, so on a 429 this is the difference between
+        // "nothing landed" and "half the payload landed".
+        "maple.ingest.frames_committed" = Empty,
+        "maple.ingest.queued_bytes" = Empty,
+        // Only set on the failing frame.
+        "maple.ingest.shard" = Empty,
+        "maple.ingest.lane" = Empty,
+        "maple.ingest.datasource" = Empty,
+        // Only set on a quota rejection, so you can see how far over the cap
+        // the org was rather than just that it was over.
+        "maple.ingest.org_queue_bytes" = Empty,
+        "maple.ingest.org_queue_limit_bytes" = Empty,
+    )
+}
+
+/// One export attempt against Tinybird or ClickHouse.
+///
+/// One span per *attempt*, not per batch, so a retry storm is visible as a
+/// sequence rather than one long opaque span. `maple.ingest.outcome` is the
+/// field to filter on: `delivered` | `retry` | `dropped` | `shed_circuit_open`.
+/// Only a terminal `dropped` sets `Error` — a retry that later succeeds is not
+/// a failure of the batch, and marking every attempt `Error` would turn a
+/// self-healing blip into an error-rate spike.
+pub fn export_client_span(
+    span_name: &'static str,
+    peer_service: &'static str,
+    datasource: &str,
+    attempt: u32,
+    rows: usize,
+    body_size: usize,
+) -> Span {
+    info_span!(
+        "export",
+        otel.name = span_name,
+        otel.kind = "client",
+        otel.status_code = Empty,
+        otel.status_description = Empty,
+        "error.type" = Empty,
+        "http.request.method" = "POST",
+        "http.request.body.size" = body_size,
+        "http.response.status_code" = Empty,
+        "peer.service" = peer_service,
+        // Recorded by the caller: for ClickHouse it is only known after the
+        // per-org target resolves.
+        "server.address" = Empty,
+        "db.system.name" = Empty,
+        "db.operation.name" = Empty,
+        "db.namespace" = Empty,
+        "maple.ingest.datasource" = datasource,
+        "maple.ingest.attempt" = attempt,
+        "maple.ingest.row_count" = rows,
+        "maple.ingest.outcome" = Empty,
+        "maple.org_id" = Empty,
+    )
+}
+
+/// Per-org sampling-policy and attribute-mapping cache lookups. Parent of
+/// `postgres.query` when either 30s TTL expires.
+pub fn resolve_config_internal_span() -> Span {
+    info_span!(
+        "ingest.resolve_config",
+        otel.kind = "internal",
+        "maple.ingest.sampling_ratio" = Empty,
+        "maple.ingest.attribute_mapping_count" = Empty,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,6 +442,172 @@ mod tests {
             .iter()
             .find(|(k, _)| k.as_str() == key)
             .map(|(_, v)| v.to_string())
+    }
+
+    /// `tracing` only accepts `record()` for fields declared when the span was
+    /// constructed; recording anything else is a silent no-op. That is not a
+    /// compile error and produces no warning, so every deferred field has to be
+    /// asserted here against the site that fills it in.
+    fn assert_declares(span: &Span, fields: &[&str]) {
+        for field in fields {
+            assert!(
+                span.has_field(*field),
+                "span is missing field `{field}`; Span::record for it would silently no-op"
+            );
+        }
+    }
+
+    #[test]
+    fn accept_span_declares_fields_recorded_by_the_native_path() {
+        // Filled in by accept_native_decoded_payload (main.rs). These two were
+        // previously recorded on the server span, which never declared them —
+        // the attributes silently never appeared on any span.
+        assert_declares(
+            &accept_internal_span("traces", "clickhouse"),
+            &[
+                "maple.ingest.native_rows",
+                "maple.ingest.sampled_dropped",
+                "maple.ingest.destination",
+                "maple.signal",
+            ],
+        );
+    }
+
+    #[test]
+    fn auth_span_declares_fields_recorded_by_the_resolver() {
+        // `maple.ingest.cache_hit` is recorded from inside
+        // IngestKeyResolver::resolve_ingest_key; the rest by handle_signal_inner.
+        assert_declares(
+            &auth_internal_span(),
+            &[
+                "maple.ingest.cache_hit",
+                "maple.ingest.key_type",
+                "maple.ingest.key_id",
+                "maple.org_id",
+                "maple.ingest.self_managed",
+                "maple.ingest.clickhouse_ready",
+            ],
+        );
+    }
+
+    /// Every span that `record_stage_error` can be called on must declare its
+    /// three fields, or a failure records nothing at all — the worst case, since
+    /// that is exactly when the span is being read.
+    #[test]
+    fn every_fallible_span_declares_the_stage_error_fields() {
+        let fields = ["error.type", "otel.status_code", "otel.status_description"];
+        for span in [
+            auth_internal_span(),
+            decode_internal_span("gzip", 1),
+            parse_internal_span("protobuf", "traces"),
+            accept_internal_span("traces", "clickhouse"),
+            encode_rows_internal_span("traces"),
+            wal_commit_internal_span("tinybird"),
+            export_client_span("tinybird.export", "tinybird", "spans", 0, 1, 1),
+            grpc_server_span("svc", "traces"),
+        ] {
+            assert_declares(&span, &fields);
+        }
+    }
+
+    #[test]
+    fn wal_commit_span_declares_its_rejection_diagnostics() {
+        // Recorded by commit_frames / record_failing_frame / reserve_org_queue_bytes.
+        assert_declares(
+            &wal_commit_internal_span("clickhouse"),
+            &[
+                "maple.ingest.frames_committed",
+                "maple.ingest.shard",
+                "maple.ingest.lane",
+                "maple.ingest.datasource",
+                "maple.ingest.org_queue_bytes",
+                "maple.ingest.org_queue_limit_bytes",
+            ],
+        );
+    }
+
+    #[test]
+    fn export_span_declares_fields_recorded_by_both_destinations() {
+        // post_tinybird records the http/outcome fields; post_clickhouse also
+        // records the db.* and org fields via clickhouse_export_span.
+        assert_declares(
+            &export_client_span("clickhouse.export", "clickhouse", "spans", 2, 10, 100),
+            &[
+                "http.response.status_code",
+                "server.address",
+                "maple.ingest.outcome",
+                "maple.org_id",
+                "db.system.name",
+                "db.operation.name",
+                "db.namespace",
+            ],
+        );
+    }
+
+    #[test]
+    fn entitlement_span_declares_fields_recorded_by_the_billing_gate() {
+        // `maple.ingest.cache_hit` is recorded from inside
+        // AutumnEntitlements::is_allowed.
+        assert_declares(
+            &entitlement_internal_span("traces"),
+            &["maple.ingest.cache_hit", "maple.billing.allowed"],
+        );
+    }
+
+    #[test]
+    fn payload_spans_declare_their_deferred_fields() {
+        assert_declares(
+            &decode_internal_span("gzip", 1024),
+            &["maple.ingest.decoded_bytes"],
+        );
+        assert_declares(
+            &parse_internal_span("protobuf", "traces"),
+            &["maple.ingest.item_count"],
+        );
+        assert_declares(
+            &resolve_config_internal_span(),
+            &[
+                "maple.ingest.sampling_ratio",
+                "maple.ingest.attribute_mapping_count",
+            ],
+        );
+    }
+
+    #[test]
+    fn pipeline_spans_declare_fields_recorded_by_telemetry() {
+        // record_encode_stats and commit_frames (telemetry.rs).
+        assert_declares(
+            &encode_rows_internal_span("traces"),
+            &[
+                "maple.ingest.row_count",
+                "maple.ingest.frame_count",
+                "maple.ingest.sampled_dropped",
+            ],
+        );
+        assert_declares(
+            &wal_commit_internal_span("tinybird"),
+            &["maple.ingest.frame_count", "maple.ingest.queued_bytes"],
+        );
+    }
+
+    #[test]
+    fn grpc_span_declares_fields_recorded_by_the_tonic_services() {
+        // record_grpc_identity and record_grpc_outcome (main.rs).
+        assert_declares(
+            &grpc_server_span(
+                "opentelemetry.proto.collector.trace.v1.TraceService",
+                "traces",
+            ),
+            &[
+                "maple.org_id",
+                "maple.ingest.key_type",
+                "maple.ingest.destination",
+                "rpc.grpc.status_code",
+                "error.type",
+                "otel.status_code",
+                "otel.status_description",
+            ],
+        );
     }
 
     #[test]

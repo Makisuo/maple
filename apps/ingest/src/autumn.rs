@@ -297,9 +297,13 @@ impl AutumnEntitlements {
     /// customer data.
     pub async fn is_allowed(&self, org_id: &str, feature_id: &str) -> bool {
         let cache_key = format!("{org_id}:{feature_id}");
+        // Recorded on `ingest.entitlement_check` when this runs under the HTTP
+        // path; a no-op elsewhere (the field is only declared on that span).
         if let Some(allowed) = self.cache.get(&cache_key).await {
+            tracing::Span::current().record("maple.ingest.cache_hit", true);
             return allowed;
         }
+        tracing::Span::current().record("maple.ingest.cache_hit", false);
 
         let allowed = self.fetch_allowed(org_id, feature_id).await;
         self.cache.insert(cache_key, allowed).await;
