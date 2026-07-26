@@ -52,6 +52,14 @@ export function activeTraceId(): string | undefined {
 export interface EventCapture {
 	stop: () => void
 	flush: (keepalive?: boolean) => Promise<void>
+	/** Navigations seen this session — becomes `page_views` on the metadata row. */
+	getPageViews: () => number
+	/**
+	 * Errors seen this session — becomes `error_count`, which is what the
+	 * Sessions UI's "has errors" filter tests. Counts uncaught errors and
+	 * rejections plus `console.error`, since both are errors the user hit.
+	 */
+	getErrorCount: () => number
 }
 
 interface BufferedEvent {
@@ -68,8 +76,14 @@ export function startEventCapture(config: ReplayEngineConfig, sessionId: string)
 	let buffer: BufferedEvent[] = []
 	let bufferBytes = 0
 	let seq = 0
+	let pageViews = 0
+	let errorCount = 0
 
 	const emit = (ev: SessionEvent): void => {
+		// Counted here rather than in each capture module so every event type is
+		// tallied on one path, and the totals survive the buffer being flushed.
+		if (ev.type === "navigation") pageViews++
+		else if (ev.type === "error" || (ev.type === "console" && ev.level === "error")) errorCount++
 		buffer.push({ ev, seq: seq++ })
 		bufferBytes += approximateSize(ev)
 		if (bufferBytes >= FLUSH_BYTES) void flush()
@@ -103,6 +117,8 @@ export function startEventCapture(config: ReplayEngineConfig, sessionId: string)
 			for (const off of uninstall) off()
 		},
 		flush,
+		getPageViews: () => pageViews,
+		getErrorCount: () => errorCount,
 	}
 }
 

@@ -41,3 +41,34 @@ describe("buildSessionMetaRow recording marker", () => {
 		expect(row.trace_ids).toEqual(["trace-1"])
 	})
 })
+
+// `error_count` is what the Sessions UI "has errors" filter tests (ErrorCount > 0),
+// and `page_views` feeds the session list. Both were absent from the row for
+// months, so every session reported 0 and the filter matched nothing.
+describe("buildSessionMetaRow session counters", () => {
+	it("writes all three counters on ended rows", () => {
+		const row = buildSessionMetaRow({
+			...base,
+			status: "ended",
+			recorded: true,
+			clickCount: 7,
+			pageViews: 4,
+			errorCount: 2,
+		})
+		expect(row.click_count).toBe(7)
+		expect(row.page_views).toBe(4)
+		expect(row.error_count).toBe(2)
+	})
+
+	it("defaults counters to 0 rather than omitting them", () => {
+		const row = buildSessionMetaRow({ ...base, status: "ended", recorded: false })
+		expect(row.page_views).toBe(0)
+		expect(row.error_count).toBe(0)
+	})
+
+	it("leaves counters off active rows", () => {
+		const row = buildSessionMetaRow({ ...base, status: "active", recorded: true, errorCount: 3 })
+		expect(row).not.toHaveProperty("error_count")
+		expect(row).not.toHaveProperty("page_views")
+	})
+})

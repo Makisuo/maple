@@ -23,6 +23,13 @@ export interface SessionMetaRowInput {
 	readonly serviceVersion?: string | undefined
 	/** Only meaningful on `ended` rows; defaults to 0. */
 	readonly clickCount?: number | undefined
+	/** Navigations observed. Only meaningful on `ended` rows; defaults to 0. */
+	readonly pageViews?: number | undefined
+	/**
+	 * Errors observed. Only meaningful on `ended` rows; defaults to 0. Drives the
+	 * Sessions UI "has errors" filter, which tests `ErrorCount > 0`.
+	 */
+	readonly errorCount?: number | undefined
 	/** Trace ids observed during the session — attached to `ended` rows. */
 	readonly traceIds?: ReadonlyArray<string> | undefined
 	/**
@@ -75,6 +82,8 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, 
 		row.end_time = formatCHDateTime(now)
 		row.duration_ms = Math.max(0, now.getTime() - input.startedAt.getTime())
 		row.click_count = input.clickCount ?? 0
+		row.page_views = input.pageViews ?? 0
+		row.error_count = input.errorCount ?? 0
 		row.trace_ids = input.traceIds ? Array.from(input.traceIds) : []
 	}
 	return row
