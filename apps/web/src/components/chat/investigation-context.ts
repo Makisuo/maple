@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect"
-import { fromBase64Url, toBase64Url } from "@/lib/base64url"
+import { fromBase64Url } from "@/lib/base64url"
 import { narrowAlertSignal } from "@/components/ai-triage/breach"
 import { signalLabel, type AlertContext } from "./alert-context"
 
@@ -68,9 +68,6 @@ const InvestigationRefWireSchema = Schema.Struct({
 	i: Schema.optionalKey(Schema.String),
 })
 const decodeRefWire = Schema.decodeUnknownOption(InvestigationRefWireSchema)
-
-export const encodeInvestigationRef = (ref: InvestigationRef): string =>
-	toBase64Url(JSON.stringify({ k: ref.kind, id: ref.id, ...(ref.issueId ? { i: ref.issueId } : {}) }))
 
 export const decodeInvestigationRef = (raw: string): InvestigationRef | undefined => {
 	try {
