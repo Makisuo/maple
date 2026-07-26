@@ -6,26 +6,33 @@
  * provider is a first-class Worker binding, so the credentials the workload
  * needs and the resources that watch it are declared in the same graph.
  */
+import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import * as Maple from "@maple-dev/alchemy"
 import * as Cloudflare from "alchemy/Cloudflare"
-import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
-import * as Redacted from "effect/Redacted"
-import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 
+/**
+ * One source of truth for the service name: the SDK reports it as
+ * `service.name`, and the alert rules in `alchemy.run.ts` filter on it. If the
+ * two drift, the alerts watch a service that never reports.
+ */
 export const SERVICE_NAME = "checkout"
 
 /** The org's ingest keys — declared once, bound into the Worker below. */
 export const IngestKeys = Maple.IngestKeys("ingest")
 
-const hex = (bytes: number): string =>
-	Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("")
-
-// OTLP/JSON wants nanosecond timestamps as *strings* — a JSON number loses
-// precision past 2^53 and the collector rejects the span.
-const nanos = (ms: number): string => `${Math.trunc(ms)}000000`
+/**
+ * Telemetry is built at module scope: `layer` is stable for the isolate's
+ * lifetime, and `flush(env)` resolves its config lazily on the first call. The
+ * endpoint defaults to https://ingest.maple.dev — set `MAPLE_ENDPOINT` in `env`
+ * below to point a self-hosted deployment somewhere else.
+ */
+const telemetry = MapleCloudflareSDK.make({
+	serviceName: SERVICE_NAME,
+	serviceNamespace: "backend",
+})
 
 export default class Api extends Cloudflare.Worker<Api>()(
 	"checkout-api",
@@ -35,85 +42,49 @@ export default class Api extends Cloudflare.Worker<Api>()(
 		url: true,
 		env: {
 			// Alchemy resolves the resource, ships the value as a Worker secret, and
-			// orders the deploy behind it. It stays `Redacted` in the plan output.
+			// orders the deploy behind it — it stays `Redacted` in the plan output.
+			// The SDK reads it from `env` by name; without it telemetry is a no-op.
 			MAPLE_INGEST_KEY: IngestKeys.pipe(Effect.map((keys) => keys.privateKey)),
-			MAPLE_ENDPOINT: "https://ingest.maple.dev",
-			OTEL_SERVICE_NAME: SERVICE_NAME,
+			// Becomes the `deployment.environment.name` resource attribute.
+			MAPLE_ENVIRONMENT: "production",
 		},
 	},
-	// Built once per isolate, not per request — so config reads and the HTTP
-	// client are set up here, and the handler below stays cheap.
+	// Runs once per isolate, not per request.
 	Effect.gen(function* () {
-		const endpoint = yield* Config.string("MAPLE_ENDPOINT")
-		const ingestKey = yield* Config.redacted("MAPLE_INGEST_KEY")
-		const serviceName = yield* Config.string("OTEL_SERVICE_NAME")
-		const client = yield* HttpClient.HttpClient
-
-		const exportSpan = (name: string, startedAt: number, statusCode: number) =>
-			client
-				.execute(
-					HttpClientRequest.post(`${endpoint}/v1/traces`).pipe(
-						HttpClientRequest.setHeaders({
-							authorization: `Bearer ${Redacted.value(ingestKey)}`,
-						}),
-						HttpClientRequest.setBody(
-							HttpBody.text(
-								JSON.stringify({
-									resourceSpans: [
-										{
-											resource: {
-												attributes: [
-													{
-														key: "service.name",
-														value: { stringValue: serviceName },
-													},
-												],
-											},
-											scopeSpans: [
-												{
-													scope: { name: "checkout-api" },
-													spans: [
-														{
-															traceId: hex(16),
-															spanId: hex(8),
-															name,
-															kind: 2, // SERVER
-															startTimeUnixNano: nanos(startedAt),
-															endTimeUnixNano: nanos(Date.now()),
-															attributes: [
-																{
-																	key: "http.response.status_code",
-																	value: { intValue: statusCode },
-																},
-															],
-															// OTEL HTTP semconv: only 5xx is an error on a SERVER span.
-															status: { code: statusCode >= 500 ? 2 : 1 },
-														},
-													],
-												},
-											],
-										},
-									],
-								}),
-								"application/json",
-							),
-						),
-					),
-				)
-				.pipe(Effect.ignore)
+		// The actual work. `Effect.log` goes to Maple too — the same layer installs
+		// the Tracer and the Effect Logger.
+		const checkout = Effect.gen(function* () {
+			yield* Effect.log("handling checkout request")
+			return yield* HttpServerResponse.json({ ok: true, service: SERVICE_NAME })
+		})
 
 		return {
 			fetch: Effect.gen(function* () {
-				const request = yield* HttpServerRequest
 				const ctx = yield* Cloudflare.WorkerExecutionContext
-				const startedAt = Date.now()
+				const env = yield* Cloudflare.WorkerEnvironment
+				const request = yield* HttpServerRequest
 
-				const response = yield* HttpServerResponse.json({ ok: true, service: serviceName })
+				// The span closes with `checkout`, before the flush is scheduled:
+				// `waitUntil` starts the promise immediately, and a span still open at
+				// that point misses the drain. Custom attributes live under the
+				// `maple.*` namespace by convention.
+				const response = yield* checkout.pipe(
+					Effect.withSpan(`${request.method} /`, {
+						attributes: { "maple.example.stack": "alchemy-maple" },
+					}),
+				)
 
-				// Export after the response is sent, so telemetry never adds latency.
-				yield* ctx.waitUntil(exportSpan(`${request.method} /`, startedAt, response.status))
+				// Drain spans and logs after the response is on the wire.
+				yield* ctx.waitUntil(Effect.promise(() => telemetry.flush(env)))
 				return response
-			}),
+			}).pipe(
+				// Installs the Tracer and the Effect Logger. It goes on the handler
+				// rather than the impl because Alchemy only admits Worker services in a
+				// handler's requirements — and it is cheap: the layer is a few
+				// references over buffers that live in `telemetry`, so the per-event
+				// build keeps nothing of its own.
+				Effect.provide(telemetry.layer),
+			),
 		}
-	}).pipe(Effect.provide(FetchHttpClient.layer)),
+	}),
 ) {}

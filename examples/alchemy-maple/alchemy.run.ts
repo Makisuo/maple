@@ -34,9 +34,10 @@ export default Alchemy.Stack(
 			channel_label: "#incidents",
 		})
 
-		// Alerts on the service name the Worker reports as. `destination_ids` takes
-		// the destination's output, so Alchemy creates the channel first and
-		// refuses to delete it while a rule still points at it.
+		// Alerts on the service name the Worker reports as — `SERVICE_NAME` is the
+		// same constant the SDK sends as `service.name`, so the two can't drift.
+		// `destination_ids` takes the destination's output, so Alchemy creates the
+		// channel first and refuses to delete it while a rule still points at it.
 		yield* Maple.AlertRule("checkout-error-rate", {
 			name: "Checkout error rate",
 			severity: "critical",
