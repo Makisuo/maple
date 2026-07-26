@@ -590,9 +590,13 @@ export const between: {
  * @since 4.0.0
  */
 export const withSchema: {
-  <A, B>(schema: Schema.Codec<B, A, Environment, Environment>): (self: Argument<A>) => Argument<B>
-  <A, B>(self: Argument<A>, schema: Schema.Codec<B, A, Environment, Environment>): Argument<B>
-} = dual(2, <A, B>(self: Argument<A>, schema: Schema.Codec<B, A>) => Param.withSchema(self, schema))
+  <A, B>(schema: Schema.ConstraintCodec<B, A, Environment, unknown>): (self: Argument<A>) => Argument<B>
+  <A, B>(self: Argument<A>, schema: Schema.ConstraintCodec<B, A, Environment, unknown>): Argument<B>
+} = dual(
+  2,
+  <A, B>(self: Argument<A>, schema: Schema.ConstraintCodec<B, A, Environment, unknown>): Argument<B> =>
+    Param.withSchema(self, schema)
+)
 
 /**
  * Creates a positional choice argument with custom value mapping.

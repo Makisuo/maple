@@ -38,7 +38,7 @@ import * as Semaphore from "../../Semaphore.ts"
 import * as Stream from "../../Stream.ts"
 import type * as Rpc from "../rpc/Rpc.ts"
 import * as RpcClient from "../rpc/RpcClient.ts"
-import { type FromServer, RequestId } from "../rpc/RpcMessage.ts"
+import type { FromServer } from "../rpc/RpcMessage.ts"
 import type { MailboxFull, PersistenceError } from "./ClusterError.ts"
 import { AlreadyProcessingMessage, EntityNotAssignedToRunner } from "./ClusterError.ts"
 import * as ClusterMetrics from "./ClusterMetrics.ts"
@@ -1034,148 +1034,151 @@ const make = Effect.gen(function*() {
       MailboxFull | AlreadyProcessingMessage
     >,
     never
-  > = yield* ResourceMap.make(Effect.fnUntraced(function*(entity: Entity<string, any>) {
-    const client = yield* RpcClient.makeNoSerialization(entity.protocol, {
-      spanPrefix: `${entity.type}.client`,
-      disableTracing: !Context.get(entity.protocol.annotations, ClusterSchema.ClientTracingEnabled),
-      supportsAck: true,
-      generateRequestId: () => RequestId(snowflakeGen.nextUnsafe()),
-      flatten: true,
-      onFromClient(options): Effect.Effect<
-        void,
-        MailboxFull | AlreadyProcessingMessage | PersistenceError
-      > {
-        const address = Context.getUnsafe(options.context, ClientAddressTag)
-        switch (options.message._tag) {
-          case "Request": {
-            const fiber = Fiber.getCurrent()!
-            const id = Snowflake.Snowflake(options.message.id)
-            const rpc = entity.protocol.requests.get(options.message.tag)!
-            let respond: (reply: Reply.Reply<any>) => Effect.Effect<void>
-            const envelope = Envelope.makeRequest<any>({
-              requestId: id,
-              address,
-              tag: options.message.tag,
-              payload: options.message.payload,
-              headers: options.message.headers,
-              traceId: options.message.traceId,
-              spanId: options.message.spanId,
-              sampled: options.message.sampled
-            })
-            const message = new Message.OutgoingRequest({
-              envelope,
-              lastReceivedReply: Option.none(),
-              rpc,
-              context: fiber.context as Context.Context<any>,
-              respond: (reply) => respond(reply),
-              annotations: Context.get(rpc.annotations, ClusterSchema.Dynamic)(
-                rpc.annotations,
-                envelope as any
-              )
-            })
-            if (!options.discard) {
-              const entry: ClientRequestEntry = {
-                rpc: rpc as any,
-                context: fiber.currentContext,
-                message
+  > = yield* ResourceMap.make(
+    Effect.fnUntraced(function*(entity: Entity<string, any>) {
+      const client = yield* RpcClient.makeNoSerialization(entity.protocol, {
+        spanPrefix: `${entity.type}.client`,
+        disableTracing: !Context.get(entity.protocol.annotations, ClusterSchema.ClientTracingEnabled),
+        supportsAck: true,
+        generateRequestId: () => snowflakeGen.nextUnsafe() as any,
+        flatten: true,
+        onFromClient(options): Effect.Effect<
+          void,
+          MailboxFull | AlreadyProcessingMessage | PersistenceError
+        > {
+          const address = Context.getUnsafe(options.context, ClientAddressTag)
+          switch (options.message._tag) {
+            case "Request": {
+              const fiber = Fiber.getCurrent()!
+              const id = Snowflake.Snowflake(options.message.id)
+              const rpc = entity.protocol.requests.get(options.message.tag)!
+              let respond: (reply: Reply.Reply<any>) => Effect.Effect<void>
+              const envelope = Envelope.makeRequest<any>({
+                requestId: id,
+                address,
+                tag: options.message.tag,
+                payload: options.message.payload,
+                headers: options.message.headers,
+                traceId: options.message.traceId,
+                spanId: options.message.spanId,
+                sampled: options.message.sampled
+              })
+              const message = new Message.OutgoingRequest({
+                envelope,
+                lastReceivedReply: Option.none(),
+                rpc,
+                context: fiber.context as Context.Context<any>,
+                respond: (reply) => respond(reply),
+                annotations: Context.get(rpc.annotations, ClusterSchema.Dynamic)(
+                  rpc.annotations,
+                  envelope as any
+                )
+              })
+              if (!options.discard) {
+                const entry: ClientRequestEntry = {
+                  rpc: rpc as any,
+                  context: fiber.currentContext,
+                  message
+                }
+                clientRequests.set(id, entry)
+                respond = makeClientRespond(entry, client.write)
+              } else {
+                respond = clientRespondDiscard
               }
-              clientRequests.set(id, entry)
-              respond = makeClientRespond(entry, client.write)
-            } else {
-              respond = clientRespondDiscard
+              return sendOutgoing(message, options.discard)
             }
-            return sendOutgoing(message, options.discard)
-          }
-          case "Ack": {
-            const requestId = Snowflake.Snowflake(options.message.requestId)
-            const entry = clientRequests.get(requestId)
-            if (!entry) return Effect.void
-            return sendOutgoing(
-              new Message.OutgoingEnvelope({
-                envelope: new Envelope.AckChunk({
-                  id: snowflakeGen.nextUnsafe(),
-                  address,
-                  requestId,
-                  replyId: entry.lastChunkId!
+            case "Ack": {
+              const requestId = Snowflake.Snowflake(options.message.requestId)
+              const entry = clientRequests.get(requestId)
+              if (!entry) return Effect.void
+              return sendOutgoing(
+                new Message.OutgoingEnvelope({
+                  envelope: new Envelope.AckChunk({
+                    id: snowflakeGen.nextUnsafe(),
+                    address,
+                    requestId,
+                    replyId: entry.lastChunkId!
+                  }),
+                  rpc: entry.rpc
                 }),
-                rpc: entry.rpc
-              }),
-              false
-            )
-          }
-          case "Interrupt": {
-            const requestId = Snowflake.Snowflake(options.message.requestId)
-            const entry = clientRequests.get(requestId)!
-            if (!entry) return Effect.void
-            clientRequests.delete(requestId)
-            if (ClusterSchema.isUninterruptibleForClient(entry.message.annotations)) {
-              return Effect.void
+                false
+              )
             }
-            // for durable messages, we ignore interrupts on shutdown or as a
-            // result of a shard being resassigned
-            const isTransientInterrupt = MutableRef.get(isShutdown) ||
-              options.message.interruptors.some((id) => internalInterruptors.has(id))
-            if (isTransientInterrupt && Context.get(entry.message.annotations, Persisted)) {
-              return Effect.void
-            }
-            return Effect.ignore(sendOutgoing(
-              new Message.OutgoingEnvelope({
-                envelope: new Envelope.Interrupt({
-                  id: snowflakeGen.nextUnsafe(),
-                  address,
-                  requestId
+            case "Interrupt": {
+              const requestId = Snowflake.Snowflake(options.message.requestId)
+              const entry = clientRequests.get(requestId)!
+              if (!entry) return Effect.void
+              clientRequests.delete(requestId)
+              if (ClusterSchema.isUninterruptibleForClient(entry.message.annotations)) {
+                return Effect.void
+              }
+              // for durable messages, we ignore interrupts on shutdown or as a
+              // result of a shard being resassigned
+              const isTransientInterrupt = MutableRef.get(isShutdown) ||
+                options.message.interruptors.some((id) => internalInterruptors.has(id))
+              if (isTransientInterrupt && Context.get(entry.message.annotations, Persisted)) {
+                return Effect.void
+              }
+              return Effect.ignore(sendOutgoing(
+                new Message.OutgoingEnvelope({
+                  envelope: new Envelope.Interrupt({
+                    id: snowflakeGen.nextUnsafe(),
+                    address,
+                    requestId
+                  }),
+                  rpc: entry.rpc
                 }),
-                rpc: entry.rpc
-              }),
-              false,
-              3
-            ))
+                false,
+                3
+              ))
+            }
           }
+          return Effect.void
         }
-        return Effect.void
-      }
-    })
-
-    yield* Scope.addFinalizer(
-      yield* Effect.scope,
-      Effect.withFiber((fiber) => {
-        internalInterruptors.add(fiber.id)
-        return Effect.void
       })
-    )
 
-    return (entityId: string) => {
-      const id = makeEntityId(entityId)
-      const address = ClientAddressTag.context(makeEntityAddress({
-        shardId: getShardId(id, entity.getShardGroup(entityId as EntityId)),
-        entityId: id,
-        entityType: entity.type
-      }))
-      const clientFn = function(tag: string, payload: any, options?: {
-        readonly context?: Context.Context<never>
-      }) {
-        const context = options?.context ? Context.merge(options.context, address) : address
-        return client.client(tag, payload, {
-          ...options,
-          context
+      yield* Scope.addFinalizer(
+        yield* Effect.scope,
+        Effect.withFiber((fiber) => {
+          internalInterruptors.add(fiber.id)
+          return Effect.void
+        })
+      )
+
+      return (entityId: string) => {
+        const id = makeEntityId(entityId)
+        const address = ClientAddressTag.context(makeEntityAddress({
+          shardId: getShardId(id, entity.getShardGroup(entityId as EntityId)),
+          entityId: id,
+          entityType: entity.type
+        }))
+        const clientFn = function(tag: string, payload: any, options?: {
+          readonly context?: Context.Context<never>
+        }) {
+          const context = options?.context ? Context.merge(options.context, address) : address
+          return client.client(tag, payload, {
+            ...options,
+            context
+          })
+        }
+        const proxyClient: any = {}
+        return new Proxy(proxyClient, {
+          has(_, p) {
+            return entity.protocol.requests.has(p as string)
+          },
+          get(target, p) {
+            if (p in target) {
+              return target[p]
+            } else if (!entity.protocol.requests.has(p as string)) {
+              return undefined
+            }
+            return target[p] = (payload: any, options?: {}) => clientFn(p as string, payload, options)
+          }
         })
       }
-      const proxyClient: any = {}
-      return new Proxy(proxyClient, {
-        has(_, p) {
-          return entity.protocol.requests.has(p as string)
-        },
-        get(target, p) {
-          if (p in target) {
-            return target[p]
-          } else if (!entity.protocol.requests.has(p as string)) {
-            return undefined
-          }
-          return target[p] = (payload: any, options?: {}) => clientFn(p as string, payload, options)
-        }
-      })
-    }
-  }))
+    }),
+    { referential: true }
+  )
 
   const makeClient = <Type extends string, Rpcs extends Rpc.Any>(entity: Entity<Type, Rpcs>): Effect.Effect<
     (
@@ -1196,7 +1199,7 @@ const make = Effect.gen(function*() {
         return write({
           _tag: "Chunk",
           clientId: 0,
-          requestId: RequestId(reply.requestId),
+          requestId: reply.requestId as any,
           values: reply.values
         })
       }
@@ -1205,7 +1208,7 @@ const make = Effect.gen(function*() {
         return write({
           _tag: "Exit",
           clientId: 0,
-          requestId: RequestId(reply.requestId),
+          requestId: reply.requestId as any,
           exit: reply.exit
         })
       }

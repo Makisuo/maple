@@ -35,12 +35,12 @@ import { identity, memoize } from "./Function.ts"
 import * as HashMap_ from "./HashMap.ts"
 import * as HashSet_ from "./HashSet.ts"
 import * as core from "./internal/core.ts"
+import * as InternalRecord from "./internal/record.ts"
 import * as InternalAnnotations from "./internal/schema/annotations.ts"
 import * as InternalArbitrary from "./internal/schema/arbitrary.ts"
 import * as InternalEquivalence from "./internal/schema/equivalence.ts"
 import * as InternalStandard from "./internal/schema/representation.ts"
 import * as InternalSchema from "./internal/schema/schema.ts"
-import { SchemaError } from "./internal/schema/schema.ts"
 import * as JsonPatch from "./JsonPatch.ts"
 import * as JsonSchema from "./JsonSchema.ts"
 import { remainder } from "./Number.ts"
@@ -54,6 +54,7 @@ import * as Redacted_ from "./Redacted.ts"
 import * as Result_ from "./Result.ts"
 import * as Scheduler from "./Scheduler.ts"
 import * as SchemaAST from "./SchemaAST.ts"
+import { isSchemaError, SchemaError } from "./SchemaError.ts"
 import * as SchemaGetter from "./SchemaGetter.ts"
 import * as SchemaIssue from "./SchemaIssue.ts"
 import * as SchemaParser from "./SchemaParser.ts"
@@ -889,31 +890,6 @@ export declare namespace Codec {
 }
 
 /**
- * A schema that additionally supports optic (lens/prism) operations.
- *
- * **Details**
- *
- * `Optic<T, Iso>` extends {@link Schema}`<T>` with an `Iso` type that
- * describes the isomorphic counterpart used by the optic layer. Crucially,
- * decoding and encoding require *no* Effect services (`DecodingServices` and
- * `EncodingServices` are both `never`), which means the optic can operate
- * purely without an Effect runtime.
- *
- * Most primitive schemas (e.g. `Schema.String`, `Schema.Number`) implement
- * `Optic` automatically. You normally interact with this interface through
- * {@link Optic_} utilities rather than constructing it directly.
- *
- * @category models
- * @since 4.0.0
- */
-export interface Optic<out T, out Iso> extends Schema<T> {
-  readonly "Iso": Iso
-  readonly "DecodingServices": never
-  readonly "EncodingServices": never
-  readonly "Rebuild": Optic<T, Iso>
-}
-
-/**
  * A schema that tracks the decoded type `T`, the encoded type `E`, and the
  * Effect services required during decoding (`RD`) and encoding (`RE`).
  *
@@ -924,8 +900,8 @@ export interface Optic<out T, out Iso> extends Schema<T> {
  * Most concrete schemas produced by this module implement `Codec`.
  *
  * For APIs that only need one direction, prefer the narrower views:
- * - {@link ConstraintDecoder}`<T, RD>` — decode-only
- * - {@link ConstraintEncoder}`<E, RE>` — encode-only
+ * - {@link Decoder}`<T, RD>` — decode-only
+ * - {@link Encoder}`<E, RE>` — encode-only
  * - {@link Schema}`<T>` — type-only (no encoded representation)
  *
  * **Example** (Accepting a codec that decodes to `number` from `string`)
@@ -951,6 +927,52 @@ export interface Codec<out T, out E = T, out RD = never, out RE = never> extends
   readonly "DecodingServices": RD
   readonly "EncodingServices": RE
   readonly "Rebuild": Codec<T, E, RD, RE>
+}
+
+/**
+ * A schema that tracks the decoded type `T` and the Effect services required
+ * during decoding (`RD`).
+ *
+ * **When to use**
+ *
+ * Use when you need to preserve a schema's decoded type and decoding service
+ * requirements, but do not need to constrain its encoded representation or
+ * encoding services.
+ *
+ * @see {@link Codec} for preserving both decoded and encoded type information.
+ * @see {@link Encoder} for the encode-only view.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface Decoder<out T, out RD = never> extends Schema<T> {
+  readonly "Encoded": unknown
+  readonly "DecodingServices": RD
+  readonly "EncodingServices": unknown
+  readonly "Rebuild": Decoder<T, RD>
+}
+
+/**
+ * A schema that tracks the encoded type `E` and the Effect services required
+ * during encoding (`RE`).
+ *
+ * **When to use**
+ *
+ * Use when you need to preserve a schema's encoded type and encoding service
+ * requirements, but do not need to constrain its decoded representation or
+ * decoding services.
+ *
+ * @see {@link Codec} for preserving both decoded and encoded type information.
+ * @see {@link Decoder} for the decode-only view.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface Encoder<out E, out RE = never> extends Schema<unknown> {
+  readonly "Encoded": E
+  readonly "DecodingServices": unknown
+  readonly "EncodingServices": RE
+  readonly "Rebuild": Encoder<E, RE>
 }
 
 /**
@@ -982,7 +1004,53 @@ export function revealCodec<T, E, RD, RE>(codec: Codec<T, E, RD, RE>) {
   return codec
 }
 
+/**
+ * A schema that additionally supports optic (lens/prism) operations.
+ *
+ * **Details**
+ *
+ * `Optic<T, Iso>` extends {@link Schema}`<T>` with an `Iso` type that
+ * describes the isomorphic counterpart used by the optic layer. Crucially,
+ * decoding and encoding require *no* Effect services (`DecodingServices` and
+ * `EncodingServices` are both `never`), which means the optic can operate
+ * purely without an Effect runtime.
+ *
+ * Most primitive schemas (e.g. `Schema.String`, `Schema.Number`) implement
+ * `Optic` automatically. You normally interact with this interface through
+ * {@link Optic_} utilities rather than constructing it directly.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface Optic<out T, out Iso> extends Schema<T> {
+  readonly "Iso": Iso
+  readonly "DecodingServices": never
+  readonly "EncodingServices": never
+  readonly "Rebuild": Optic<T, Iso>
+}
+
 export {
+  /**
+   * Returns `true` if `u` is a {@link SchemaError}.
+   *
+   * **Example** (Narrowing Schema errors in a catch block)
+   *
+   * ```ts
+   * import { Schema } from "effect"
+   *
+   * try {
+   *   Schema.decodeUnknownSync(Schema.Number)("oops")
+   * } catch (err) {
+   *   if (Schema.isSchemaError(err)) {
+   *     console.log(err._tag) // "SchemaError"
+   *   }
+   * }
+   * ```
+   *
+   * @category guards
+   * @since 4.0.0
+   */
+  isSchemaError,
   /**
    * Error thrown (or returned as the error channel value) when schema decoding
    * or encoding fails.
@@ -1015,30 +1083,6 @@ export {
    * @since 4.0.0
    */
   SchemaError
-}
-
-/**
- * Returns `true` if `u` is a {@link SchemaError}.
- *
- * **Example** (Narrowing Schema errors in a catch block)
- *
- * ```ts
- * import { Schema } from "effect"
- *
- * try {
- *   Schema.decodeUnknownSync(Schema.Number)("oops")
- * } catch (err) {
- *   if (Schema.isSchemaError(err)) {
- *     console.log(err._tag) // "SchemaError"
- *   }
- * }
- * ```
- *
- * @category guards
- * @since 4.0.0
- */
-export function isSchemaError(u: unknown): u is SchemaError {
-  return Predicate.hasProperty(u, InternalSchema.SchemaErrorTypeId)
 }
 
 function makeStandardResult<A>(exit: Exit_.Exit<StandardSchemaV1.Result<A>>): StandardSchemaV1.Result<A> {
@@ -1328,7 +1372,7 @@ export function decodeUnknownEffect<S extends Constraint>(schema: S, options?: S
     input: unknown,
     options?: SchemaAST.ParseOptions
   ): Effect.Effect<S["Type"], SchemaError, S["DecodingServices"]> => {
-    return InternalSchema.mapSchemaIssueEffect(parser(input, options))
+    return InternalSchema.fromIssueEffect(parser(input, options))
   }
 }
 
@@ -1432,8 +1476,14 @@ function runSchemaErrorSync<A>(
 export function decodeUnknownExit<S extends ConstraintDecoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
   const parser = SchemaParser.decodeUnknownExit(schema, options)
   return (input: unknown, options?: SchemaAST.ParseOptions): Exit_.Exit<S["Type"], SchemaError> => {
-    return InternalSchema.mapSchemaIssueExit(parser(input, options))
+    return fromIssueExit(parser(input, options))
   }
+}
+
+function fromIssueExit<A>(exit: Exit_.Exit<A, SchemaIssue.Issue>): Exit_.Exit<A, SchemaError> {
+  return Exit_.isSuccess(exit)
+    ? Exit_.succeed(exit.value)
+    : Exit_.failCause(Cause_.map(exit.cause, (issue) => new SchemaError(issue)))
 }
 
 /**
@@ -1791,7 +1841,7 @@ export function encodeUnknownEffect<S extends Constraint>(schema: S, options?: S
     input: unknown,
     options?: SchemaAST.ParseOptions
   ): Effect.Effect<S["Encoded"], SchemaError, S["EncodingServices"]> => {
-    return InternalSchema.mapSchemaIssueEffect(parser(input, options))
+    return InternalSchema.fromIssueEffect(parser(input, options))
   }
 }
 
@@ -1856,7 +1906,7 @@ export const encodeEffect: <S extends Constraint>(
 export function encodeUnknownExit<S extends ConstraintEncoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
   const parser = SchemaParser.encodeUnknownExit(schema, options)
   return (input: unknown, options?: SchemaAST.ParseOptions): Exit_.Exit<S["Encoded"], SchemaError> => {
-    return InternalSchema.mapSchemaIssueExit(parser(input, options))
+    return fromIssueExit(parser(input, options))
   }
 }
 
@@ -2757,7 +2807,7 @@ export declare namespace TemplateLiteralParser {
    */
   export type Type<Parts> = Parts extends readonly [infer Head, ...infer Tail] ? readonly [
       Head extends TemplateLiteral.LiteralPart ? Head :
-        Head extends Codec<infer T, unknown, unknown, unknown> ? T
+        Head extends ConstraintDecoder<infer T, unknown> ? T
         : never,
       ...Type<Tail>
     ]
@@ -3196,7 +3246,7 @@ export declare namespace Struct {
     S extends Side,
     O extends keyof F = SideOptionalKeys<F, S>,
     M extends keyof F = SideMutableKeys<F, S>
-  > = [O | M] extends [never] ? ReadonlySide<F, S>
+  > = [O | M] extends [never] ? Simplify<ReadonlySide<F, S>>
     : [M] extends [never] ? Simplify<SetOptional<ReadonlySide<F, S>, O>>
     : [O] extends [never] ? Simplify<SetMutable<ReadonlySide<F, S>, M>>
     : Simplify<
@@ -5649,7 +5699,13 @@ export function withConstructorDefault<S extends Constraint & WithoutConstructor
   defaultValue: Effect.Effect<S["~type.make.in"], SchemaError>
 ) {
   return (schema: S): withConstructorDefault<S> =>
-    make(SchemaAST.withConstructorDefault(schema.ast, InternalSchema.mapSchemaErrorEffect(defaultValue)), { schema })
+    make(SchemaAST.withConstructorDefault(schema.ast, toIssueEffect(defaultValue)), { schema })
+}
+
+function toIssueEffect<A, R>(
+  self: Effect.Effect<A, SchemaError, R>
+): Effect.Effect<A, SchemaIssue.Issue, R> {
+  return Effect.catchCause(self, (cause) => Effect.failCauseSync(() => Cause_.map(cause, (error) => error.issue)))
 }
 
 /**
@@ -5721,7 +5777,7 @@ export function withDecodingDefaultKey<S extends Constraint, R = never>(
   const encode = options?.encodingStrategy === "omit" ? SchemaGetter.omit() : SchemaGetter.passthrough()
   return (self: S): withDecodingDefaultKey<S, R> => {
     return optionalKey(toEncoded(self)).pipe(decodeTo(self, {
-      decode: SchemaGetter.withDefault(InternalSchema.mapSchemaErrorEffect(defaultValue)),
+      decode: SchemaGetter.withDefault(toIssueEffect(defaultValue)),
       encode
     }))
   }
@@ -5829,7 +5885,7 @@ export function withDecodingDefault<S extends Constraint, R = never>(
   const encode = options?.encodingStrategy === "omit" ? SchemaGetter.omit() : SchemaGetter.passthrough()
   return (self: S): withDecodingDefault<S, R> => {
     return optional(toEncoded(self)).pipe(decodeTo(self, {
-      decode: SchemaGetter.withDefault(InternalSchema.mapSchemaErrorEffect(defaultValue)),
+      decode: SchemaGetter.withDefault(toIssueEffect(defaultValue)),
       encode
     }))
   }
@@ -6034,6 +6090,10 @@ type TaggedUnionUtils<
     Members
   >
 > = {
+  /**
+   * Discriminant values in flattened member order.
+   */
+  readonly discriminants: { readonly [I in keyof Flattened]: Flattened[I]["Type"][Tag] }
   readonly cases: Simplify<{ [M in Flattened[number] as M["Type"][Tag]]: M }>
   readonly isAnyOf: <const Keys>(
     keys: ReadonlyArray<Keys>
@@ -6068,7 +6128,12 @@ export type toTaggedUnion<
 > = Union<Members> & TaggedUnionUtils<Tag, Members>
 
 /**
- * Augments an existing {@link Union} of tagged structs with utility methods keyed by the discriminant field.
+ * Augments an existing {@link Union} of tagged structs with utility methods and an ordered tuple of discriminant
+ * values.
+ *
+ * **Gotchas**
+ *
+ * Throws if multiple members use the same discriminant property key.
  *
  * **Example** (Adding tagged-union utilities to an existing union)
  *
@@ -6096,12 +6161,14 @@ export function toTaggedUnion<const Tag extends PropertyKey>(tag: Tag) {
     self: Union<Members>
   ): toTaggedUnion<Tag, Members> => {
     const cases: Record<PropertyKey, unknown> = {}
+    const discriminants: Array<PropertyKey> = []
+    const discriminantKeys = new Set<string | symbol>()
     const guards: Record<PropertyKey, (u: unknown) => boolean> = {}
     const isAnyOf = (keys: ReadonlyArray<PropertyKey>) => (value: Members[number]["Type"]) => keys.includes(value[tag])
 
     walk(self)
 
-    return Object.assign(self, { cases, isAnyOf, guards, match }) as any
+    return Object.assign(self, { cases, discriminants, isAnyOf, guards, match }) as any
 
     function walk(schema: Constraint) {
       const ast = schema.ast
@@ -6117,8 +6184,14 @@ export function toTaggedUnion<const Tag extends PropertyKey>(tag: Tag) {
       if (sentinels.length > 0) {
         const literal = sentinels.find((s) => s.key === tag)?.literal
         if (Predicate.isPropertyKey(literal)) {
-          cases[literal] = schema
-          guards[literal] = is(toType(schema))
+          const key = typeof literal === "number" ? globalThis.String(literal) : literal
+          if (discriminantKeys.has(key)) {
+            throw new globalThis.Error(`Duplicate discriminant: ${globalThis.String(literal)}`)
+          }
+          discriminantKeys.add(key)
+          discriminants.push(literal)
+          InternalRecord.set(cases, literal, schema)
+          InternalRecord.set(guards, literal, is(toType(schema)))
           return
         }
       }
@@ -7497,7 +7570,7 @@ export function isInt(annotations?: Annotations.Filter) {
 export function isInt32(annotations?: Annotations.Filter) {
   return new SchemaAST.FilterGroup(
     [
-      isInt(annotations),
+      isInt(),
       isBetween({ minimum: -2147483648, maximum: 2147483647 })
     ],
     {
@@ -10405,6 +10478,8 @@ const DateString = String.annotate({ expected: "a string in ISO 8601 format that
  * ```
  *
  * @see {@link DateValid} for accepting only valid Date instances
+ * @see {@link DateFromString} for decoding strings into Date instances
+ * @see {@link DateFromMillis} for decoding epoch milliseconds into Date instances
  *
  * @category Date
  * @since 4.0.0
@@ -10464,6 +10539,8 @@ export interface DateFromString extends decodeTo<Date, String> {
  *
  * Invalid date strings can decode to invalid `Date` instances.
  *
+ * @see {@link DateFromMillis} for decoding epoch milliseconds into Date instances
+ * @see {@link DateTimeUtcFromString} for decoding date-time strings into UTC values
  * @see {@link Date} for accepting Date instances directly
  * @see {@link DateValid} for rejecting invalid Date instances
  *
@@ -10471,6 +10548,47 @@ export interface DateFromString extends decodeTo<Date, String> {
  * @since 3.10.0
  */
 export const DateFromString: DateFromString = DateString.pipe(decodeTo(Date, SchemaTransformation.dateFromString))
+
+/**
+ * Type-level representation of {@link DateFromMillis}.
+ *
+ * @category Date
+ * @since 4.0.0
+ */
+export interface DateFromMillis extends decodeTo<Date, Number> {
+  readonly "Rebuild": DateFromMillis
+}
+
+/**
+ * Schema that decodes epoch milliseconds into a JavaScript `Date`.
+ *
+ * **When to use**
+ *
+ * Use to model numeric millisecond timestamps that decode to JavaScript `Date`
+ * objects and encode back to numbers.
+ *
+ * **Details**
+ *
+ * Decoding:
+ * A number of milliseconds since the Unix epoch is decoded as a `Date`.
+ *
+ * Encoding:
+ * A `Date` is encoded as its millisecond timestamp.
+ *
+ * **Gotchas**
+ *
+ * This schema accepts any number, including `NaN`, `Infinity`, and `-Infinity`.
+ * Those values decode to invalid `Date` instances.
+ *
+ * @see {@link DateFromString} for decoding string-encoded dates
+ * @see {@link DateTimeUtcFromMillis} for decoding epoch milliseconds into UTC values
+ *
+ * @category Date
+ * @since 4.0.0
+ */
+export const DateFromMillis: DateFromMillis = Number.pipe(
+  decodeTo(Date, SchemaTransformation.dateFromMillis)
+)
 
 /**
  * Type-level representation of {@link DateValid}.
@@ -12018,6 +12136,10 @@ export interface DateTimeUtcFromString extends decodeTo<DateTimeUtc, String> {
  *
  * - A `DateTime.Utc` is encoded as a UTC ISO 8601 string.
  *
+ * @see {@link DateTimeUtcFromDate} for decoding JavaScript Date values into UTC values
+ * @see {@link DateTimeUtcFromMillis} for decoding epoch milliseconds into UTC values
+ * @see {@link DateFromString} for decoding strings into JavaScript Date instances
+ *
  * @category DateTime
  * @since 4.0.0
  */
@@ -12050,6 +12172,10 @@ export interface DateTimeUtcFromMillis extends decodeTo<instanceOf<DateTime.Utc>
  *
  * Encoding:
  * - A `DateTime.Utc` is encoded as a number of milliseconds since the Unix epoch.
+ *
+ * @see {@link DateTimeUtcFromDate} for decoding JavaScript Date values into UTC values
+ * @see {@link DateTimeUtcFromString} for decoding date-time strings into UTC values
+ * @see {@link DateFromMillis} for decoding epoch milliseconds into JavaScript Date instances
  *
  * @category DateTime
  * @since 4.0.0
@@ -12612,7 +12738,8 @@ function getClassSchemaFactory<S extends Constraint>(
         {
           identifier,
           [SchemaAST.ClassTypeId]: ([from]: readonly [SchemaAST.AST]) => new SchemaAST.Link(from, transformation),
-          toCodec: ([from]: readonly [Codec<S["Encoded"]>]) => new SchemaAST.Link(from.ast, transformation),
+          toCodec: ([from]: readonly [ConstraintCodec<S["Encoded"], S["Encoded"]>]) =>
+            new SchemaAST.Link(from.ast, transformation),
           toArbitrary: ([from]: readonly [Annotations.ToArbitrary.TypeParameter<S["Type"]>]) => () => ({
             arbitrary: from.arbitrary.map((args: S["Type"]) => new self(args)),
             terminal: from.terminal?.map((args: S["Type"]) => new self(args))
@@ -13091,8 +13218,7 @@ export function toFormatter<S extends Constraint>(schema: S, options?: {
             // handle post rest elements
             // ---------------------------------------------
             for (let j = 0; j < tail.length; j++) {
-              i += j
-              out.push(tail[j](t[i]))
+              out.push(tail[j](t[i + j]))
             }
           }
 
@@ -13594,8 +13720,8 @@ type XmlEncoderOptions = {
  * @category Canonical Codecs
  * @since 4.0.0
  */
-export function toEncoderXml<T, E, RD, RE>(
-  codec: Codec<T, E, RD, RE>,
+export function toEncoderXml<T, RE>(
+  codec: ConstraintCodec<T, unknown, unknown, RE>,
   options?: XmlEncoderOptions
 ) {
   const rootName = InternalAnnotations.resolveIdentifier(codec.ast) ?? InternalAnnotations.resolveTitle(codec.ast)
@@ -13930,7 +14056,7 @@ export interface overrideToCodecIso<S extends Constraint, Iso> extends
  * @since 4.0.0
  */
 export function overrideToCodecIso<S extends Constraint, Iso>(
-  to: Codec<Iso>,
+  to: ConstraintCodec<Iso>,
   transformation: {
     readonly decode: SchemaGetter.Getter<S["Type"], Iso>
     readonly encode: SchemaGetter.Getter<Iso, S["Type"]>
@@ -13958,7 +14084,7 @@ export function overrideToCodecIso<S extends Constraint, Iso>(
  * @category converting
  * @since 4.0.0
  */
-export function toDifferJsonPatch<T, E>(schema: Codec<T, E>): Differ<T, JsonPatch.JsonPatch> {
+export function toDifferJsonPatch<T>(schema: ConstraintCodec<T, unknown>): Differ<T, JsonPatch.JsonPatch> {
   const serializer = toCodecJson(schema)
   const get = SchemaParser.encodeSync(serializer)
   const set = SchemaParser.decodeSync(serializer)

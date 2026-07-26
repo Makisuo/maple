@@ -11,7 +11,15 @@ import {
   ShardingConfig,
   Snowflake
 } from "effect/unstable/cluster"
-import { TestEntity, TestEntityNoState, TestEntityState, User } from "./TestEntity.ts"
+import {
+  CallerId,
+  ContextBleedEntity,
+  ContextBleedLayer,
+  TestEntity,
+  TestEntityNoState,
+  TestEntityState,
+  User
+} from "./TestEntity.ts"
 
 describe.concurrent("Sharding", () => {
   it.effect("delivers volatile requests directly to the entity", () =>
@@ -22,6 +30,22 @@ describe.concurrent("Sharding", () => {
       const user = yield* client.GetUserVolatile({ id: 1 })
       expect(user).toEqual(new User({ id: 1, name: "User 1" }))
     }).pipe(Effect.provide(TestSharding)))
+
+  it.effect("does not freeze the first caller's context into the entity server", () =>
+    Effect.gen(function*() {
+      yield* TestClock.adjust(1)
+      const makeClient = yield* ContextBleedEntity.client
+      const client = makeClient("1")
+
+      const first = yield* client.ReadCaller().pipe(Effect.provideService(CallerId, "A"))
+      expect(first).toEqual("A")
+
+      const second = yield* client.ReadCaller()
+      expect(second).toEqual("none")
+
+      const durable = yield* client.ReadCallerPersisted()
+      expect(durable).toEqual("none")
+    }).pipe(Effect.provide(ContextBleedSharding)))
 
   it.effect("persists durable requests until the entity replies", () =>
     Effect.gen(function*() {
@@ -523,6 +547,7 @@ describe.concurrent("Sharding", () => {
   it.effect("WithTransaction is propagated to the entity handler", () =>
     Effect.gen(function*() {
       let isTransaction = false
+      let transactionOpen = false
       yield* Effect.gen(function*() {
         const makeClient = yield* TestEntity.client
         yield* TestClock.adjust(1)
@@ -534,9 +559,20 @@ describe.concurrent("Sharding", () => {
       }).pipe(Effect.provide(TestShardingWithoutStorage.pipe(
         Layer.updateService(MessageStorage.MessageStorage, (storage) => ({
           ...storage,
+          withTransaction(effect) {
+            return Effect.suspend(() => {
+              transactionOpen = true
+              return storage.withTransaction(effect)
+            }).pipe(
+              Effect.ensuring(Effect.sync(() => {
+                transactionOpen = false
+              }))
+            )
+          },
           saveReply(reply) {
             return MessageStorage.MemoryTransaction.use((isTransaction_) => {
               isTransaction = isTransaction_
+              assert.strictEqual(transactionOpen, true)
               return storage.saveReply(reply)
             })
           }
@@ -576,3 +612,5 @@ const TestSharding = TestShardingWithoutStorage.pipe(
   Layer.provideMerge(MessageStorage.layerMemory),
   Layer.provide(TestShardingConfig)
 )
+
+const ContextBleedSharding = ContextBleedLayer.pipe(Layer.provideMerge(TestSharding))

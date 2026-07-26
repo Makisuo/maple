@@ -39,12 +39,12 @@
 	"dependencies": {},
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260603.1",
-		"@effect/platform-node": "4.0.0-beta.93",
-		"@effect/vitest": "4.0.0-beta.93",
+		"@effect/platform-node": "4.0.0-beta.101",
+		"@effect/vitest": "4.0.0-beta.101",
 		"@maple/infra": "workspace:*",
 		"@tinybirdco/sdk": "catalog:tinybird",
 		"@types/node": "catalog:tooling",
-		"alchemy": "2.0.0-beta.61",
+		"alchemy": "2.0.0-beta.64",
 		"effect": "catalog:effect",
 		"knip": "^6.17.1",
 		"oxfmt": "^0.55.0",
@@ -63,10 +63,10 @@
 			"@clickhouse/client-web": "^1.21.0"
 		},
 		"effect": {
-			"@effect/atom-react": "4.0.0-beta.93",
+			"@effect/atom-react": "4.0.0-beta.101",
 			"@effect/language-service": "^0.86.2",
-			"@effect/platform-bun": "4.0.0-beta.93",
-			"effect": "4.0.0-beta.93"
+			"@effect/platform-bun": "4.0.0-beta.101",
+			"effect": "4.0.0-beta.101"
 		},
 		"react": {
 			"@types/react": "^19.2.14",
@@ -96,7 +96,7 @@
 		}
 	},
 	"patchedDependencies": {
-		"effect@4.0.0-beta.93": "patches/effect@4.0.0-beta.93.patch",
-		"@distilled.cloud/cloudflare@0.28.2": "patches/@distilled.cloud%2Fcloudflare@0.28.2.patch"
+		"effect@4.0.0-beta.101": "patches/effect@4.0.0-beta.101.patch",
+		"@distilled.cloud/cloudflare@0.30.1": "patches/@distilled.cloud%2Fcloudflare@0.30.1.patch"
 	}
 }

@@ -313,10 +313,9 @@ export const schemaJson = <
     readonly searchParams: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
     readonly body: any
   }>,
-  RD,
-  RE
+  RD
 >(
-  schema: Schema.Codec<A, I, RD, RE>,
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<
   A,
@@ -368,10 +367,9 @@ export const schemaNoBody = <
     readonly pathParams: Readonly<Record<string, string | undefined>>
     readonly searchParams: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
   }>,
-  RD,
-  RE
+  RD
 >(
-  schema: Schema.Codec<A, I, RD, RE>,
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<
   A,
@@ -410,8 +408,8 @@ export const schemaNoBody = <
  * @category schemas
  * @since 4.0.0
  */
-export const schemaParams = <A, I extends Readonly<Record<string, string | ReadonlyArray<string> | undefined>>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaParams = <A, I extends Readonly<Record<string, string | ReadonlyArray<string> | undefined>>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, Schema.SchemaError, HttpServerRequest.ParsedSearchParams | RouteContext | RD> => {
   const parse = Schema.decodeUnknownEffect(schema)
@@ -429,8 +427,8 @@ export const schemaParams = <A, I extends Readonly<Record<string, string | Reado
  * @category schemas
  * @since 4.0.0
  */
-export const schemaPathParams = <A, I extends Readonly<Record<string, string | undefined>>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaPathParams = <A, I extends Readonly<Record<string, string | undefined>>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, Schema.SchemaError, RouteContext | RD> => {
   const parse = Schema.decodeUnknownEffect(schema)
@@ -1318,12 +1316,15 @@ export const toWebHandler = <
         | Request.Only<"Requires", R>
         | Request.Only<"GlobalRequires", R>
       >
-    ) => Effect.Effect<HttpServerResponse.HttpServerResponse, HE, HR>
+    ) => Effect.Effect<HttpServerResponse.HttpServerResponse, HE, HR | GlobalProvided>
   }
 ): {
-  readonly handler: [HR] extends [never]
+  readonly handler: [Exclude<HR, GlobalProvided>] extends [never]
     ? ((request: globalThis.Request, context?: Context.Context<never> | undefined) => Promise<Response>)
-    : ((request: globalThis.Request, context: Context.Context<HR>) => Promise<Response>)
+    : ((
+      request: globalThis.Request,
+      context: Context.Context<Exclude<HR, GlobalProvided>>
+    ) => Promise<Response>)
   readonly dispose: () => Promise<void>
 } => {
   let middleware: any = options?.middleware

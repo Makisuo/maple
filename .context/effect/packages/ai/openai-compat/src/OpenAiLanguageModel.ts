@@ -60,6 +60,43 @@ type ImageDetail = "auto" | "low" | "high"
 // Configuration
 // =============================================================================
 
+type ConfigOptions = Simplify<
+  & Partial<
+    Omit<CreateResponse, "input" | "tools" | "tool_choice" | "stream" | "text">
+  >
+  & {
+    /**
+     * File ID prefixes used to identify file IDs in Responses API.
+     * When undefined, all file data is treated as base64 content.
+     *
+     * Examples:
+     * - OpenAI: ['file-'] for IDs like 'file-abc123'
+     * - Azure OpenAI: ['assistant-'] for IDs like 'assistant-abc123'
+     */
+    readonly fileIdPrefixes?: ReadonlyArray<string> | undefined
+    /**
+     * Configuration options for a text response from the model.
+     */
+    readonly text?: {
+      /**
+       * Constrains the verbosity of the model's response. Lower values will
+       * result in more concise responses, while higher values will result in
+       * more verbose responses.
+       *
+       * Defaults to `"medium"`.
+       */
+      readonly verbosity?: "low" | "medium" | "high" | undefined
+    } | undefined
+    /**
+     * Whether to use strict JSON schema validation.
+     *
+     * Defaults to `true`.
+     */
+    readonly strictJsonSchema?: boolean | undefined
+  }
+>
+type ModelConfig = Omit<ConfigOptions, "model"> & { readonly [x: string]: unknown }
+
 /**
  * Context service for OpenAI language model configuration.
  *
@@ -76,45 +113,7 @@ type ImageDetail = "auto" | "low" | "high"
  */
 export class Config extends Context.Service<
   Config,
-  Simplify<
-    & Partial<
-      Omit<
-        CreateResponse,
-        "input" | "tools" | "tool_choice" | "stream" | "text"
-      >
-    >
-    & {
-      /**
-       * File ID prefixes used to identify file IDs in Responses API.
-       * When undefined, all file data is treated as base64 content.
-       *
-       * Examples:
-       * - OpenAI: ['file-'] for IDs like 'file-abc123'
-       * - Azure OpenAI: ['assistant-'] for IDs like 'assistant-abc123'
-       */
-      readonly fileIdPrefixes?: ReadonlyArray<string> | undefined
-      /**
-       * Configuration options for a text response from the model.
-       */
-      readonly text?: {
-        /**
-         * Constrains the verbosity of the model's response. Lower values will
-         * result in more concise responses, while higher values will result in
-         * more verbose responses.
-         *
-         * Defaults to `"medium"`.
-         */
-        readonly verbosity?: "low" | "medium" | "high" | undefined
-      } | undefined
-      /**
-       * Whether to use strict JSON schema validation.
-       *
-       * Defaults to `true`.
-       */
-      readonly strictJsonSchema?: boolean | undefined
-      readonly [x: string]: unknown
-    }
-  >
+  ConfigOptions & { readonly [x: string]: unknown }
 >()("@effect/ai-openai-compat/OpenAiLanguageModel/Config") {}
 
 // =============================================================================
@@ -531,7 +530,7 @@ declare module "effect/unstable/ai/Response" {
  */
 export const model = (
   model: string,
-  config?: Omit<typeof Config.Service, "model">
+  config?: ModelConfig
 ): AiModel.Model<"openai", LanguageModel.LanguageModel, OpenAiClient> =>
   AiModel.make("openai", model, layer({ model, config }))
 
@@ -569,7 +568,7 @@ export const model = (
  */
 export const make = Effect.fnUntraced(function*({ model, config: providerConfig }: {
   readonly model: string
-  readonly config?: Omit<typeof Config.Service, "model"> | undefined
+  readonly config?: ModelConfig | undefined
 }): Effect.fn.Return<LanguageModel.Service, never, OpenAiClient> {
   const client = yield* OpenAiClient
 
@@ -677,7 +676,7 @@ export const make = Effect.fnUntraced(function*({ model, config: providerConfig 
  */
 export const layer = (options: {
   readonly model: string
-  readonly config?: Omit<typeof Config.Service, "model"> | undefined
+  readonly config?: ModelConfig | undefined
 }): Layer.Layer<LanguageModel.LanguageModel, never, OpenAiClient> =>
   Layer.effect(LanguageModel.LanguageModel, make(options))
 
@@ -941,7 +940,6 @@ const prepareMessages = Effect.fnUntraced(
                   type: "function_call",
                   name: toolName,
                   call_id: part.id,
-                  // @effect-diagnostics-next-line preferSchemaOverJson:off
                   arguments: JSON.stringify(part.params),
                   ...(Predicate.isNotNull(id) ? { id } : {}),
                   ...(Predicate.isNotNull(status) ? { status } : {})
@@ -987,7 +985,6 @@ const prepareMessages = Effect.fnUntraced(
             messages.push({
               type: "function_call_output",
               call_id: part.id,
-              // @effect-diagnostics-next-line preferSchemaOverJson:off
               output: typeof part.result === "string" ? part.result : JSON.stringify(part.result),
               ...(Predicate.isNotNull(status) ? { status } : {})
             })
@@ -1714,7 +1711,7 @@ const toAssistantChatMessageContent = (
     readonly type: string
     readonly [x: string]: unknown
   }>
-): string | null => {
+): string => {
   let text = ""
   for (const part of content) {
     if (part.type === "output_text" && typeof part.text === "string") {
@@ -1724,7 +1721,7 @@ const toAssistantChatMessageContent = (
       text += part.refusal
     }
   }
-  return text.length > 0 ? text : null
+  return text
 }
 
 const toChatMessageContent = (

@@ -72,7 +72,7 @@ trap cleanup EXIT
 cd "$ROOT"
 
 echo "Building current checkout..."
-pnpm build:tsgo
+pnpm build
 
 BASE_COMMIT="$(git rev-parse "$BASE_REF")"
 
@@ -88,7 +88,7 @@ else
   echo "Creating base worktree at $BASE_DIR ($BASE_REF @ ${BASE_COMMIT:0:8})"
   git worktree add --detach "$BASE_DIR" "$BASE_COMMIT"
   echo "Building base checkout..."
-  (cd "$BASE_DIR" && pnpm install && pnpm build:tsgo)
+  (cd "$BASE_DIR" && pnpm install && pnpm build)
   printf "%s\n" "$BASE_COMMIT" > "$BASE_STAMP"
 fi
 

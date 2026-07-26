@@ -1,6 +1,6 @@
 import { JsonSchema, Schema, SchemaRepresentation } from "effect"
 import { describe, it } from "vitest"
-import { deepStrictEqual, strictEqual } from "../../utils/assert.ts"
+import { assertFalse, assertTrue, deepStrictEqual, strictEqual } from "../../utils/assert.ts"
 
 const json = (annotations?: Schema.Annotations.Annotations) => {
   const representation = SchemaRepresentation.fromAST(Schema.Json.ast).representation
@@ -40,6 +40,7 @@ describe("fromJsonSchemaDocument", () => {
     if (runtime !== undefined) {
       strictEqual(SchemaRepresentation.toCodeDocument(multiDocument).codes[0].runtime, runtime)
     }
+    return document
   }
 
   it("{}", () => {
@@ -1327,6 +1328,181 @@ describe("fromJsonSchemaDocument", () => {
   })
 
   describe("allOf", () => {
+    it("resolves references on either side of an intersection", () => {
+      const definition: JsonSchema.JsonSchema = { type: "string", minLength: 1 }
+      const expected = {
+        representation: {
+          _tag: "String" as const,
+          checks: [
+            { _tag: "Filter" as const, meta: { _tag: "isMinLength" as const, minLength: 1 } },
+            { _tag: "Filter" as const, meta: { _tag: "isMaxLength" as const, maxLength: 2 } }
+          ]
+        },
+        references: {
+          A: {
+            _tag: "String" as const,
+            checks: [{ _tag: "Filter" as const, meta: { _tag: "isMinLength" as const, minLength: 1 } }]
+          }
+        }
+      }
+      for (
+        const schema of [
+          {
+            $ref: "#/$defs/A",
+            allOf: [{ type: "string", maxLength: 2 }],
+            $defs: { A: definition }
+          },
+          {
+            allOf: [{ $ref: "#/$defs/A" }, { type: "string", maxLength: 2 }],
+            $defs: { A: definition }
+          }
+        ]
+      ) {
+        assertFromJsonSchema({ schema }, expected)
+      }
+    })
+
+    it("preserves annotations on array and object intersections", () => {
+      assertFromJsonSchema(
+        {
+          schema: {
+            type: "array",
+            allOf: [{ description: "a" }]
+          }
+        },
+        {
+          representation: {
+            _tag: "Arrays",
+            elements: [],
+            rest: [json()],
+            checks: [],
+            annotations: { description: "a" }
+          }
+        },
+        `Schema.Array(Schema.Json).annotate({ "description": "a" })`
+      )
+      assertFromJsonSchema(
+        {
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            allOf: [{ description: "a" }]
+          }
+        },
+        {
+          representation: {
+            _tag: "Objects",
+            propertySignatures: [],
+            indexSignatures: [],
+            checks: [],
+            annotations: { description: "a" }
+          }
+        },
+        `Schema.Struct({  }).annotate({ "description": "a" })`
+      )
+    })
+
+    it("returns Never when a union has no compatible member", () => {
+      assertFromJsonSchema(
+        {
+          schema: {
+            type: "string",
+            allOf: [{ anyOf: [{ type: "number" }, { type: "boolean" }] }]
+          }
+        },
+        { representation: { _tag: "Never" } },
+        `Schema.Never`
+      )
+    })
+
+    function assertLiteralRefinement(
+      refinement: JsonSchema.JsonSchema,
+      valid: string | number,
+      invalid: string | number
+    ) {
+      for (const literal of [valid, invalid]) {
+        for (const allOf of [[refinement, { const: literal }], [{ const: literal }, refinement]]) {
+          const document = SchemaRepresentation.fromJsonSchemaDocument(
+            JsonSchema.fromSchemaDraft2020_12({ allOf })
+          )
+          const is = Schema.is(SchemaRepresentation.toSchema(document))
+          if (literal === valid) {
+            assertTrue(is(literal))
+          } else {
+            assertFalse(is(literal))
+          }
+        }
+      }
+    }
+
+    describe("literal refinements", () => {
+      const cases: ReadonlyArray<
+        readonly [
+          name: string,
+          refinement: JsonSchema.JsonSchema,
+          valid: string | number,
+          invalid: string | number
+        ]
+      > = [
+        ["minLength", { type: "string", minLength: 2 }, "ab", "a"],
+        ["maxLength", { type: "string", maxLength: 1 }, "a", "ab"],
+        ["pattern", { type: "string", pattern: "^a+$" }, "aa", "ab"],
+        ["integer", { type: "integer" }, 1, 1.5],
+        ["multipleOf", { type: "number", multipleOf: 0.1 }, 0.3, 0.31],
+        [
+          "multipleOf beyond the toFixed precision limit",
+          { type: "number", multipleOf: Number("1e-101") },
+          0,
+          Number("5e-102")
+        ],
+        ["multipleOf with a large scientific operand", { type: "number", multipleOf: 2 }, Number("1e21"), 1],
+        [
+          "multipleOf with a nonzero subnormal remainder",
+          { type: "number", multipleOf: Number("1e-323") },
+          0,
+          Number("1.042e-321")
+        ],
+        ["minimum", { type: "number", minimum: 1 }, 1, 0],
+        ["maximum", { type: "number", maximum: 1 }, 1, 2],
+        ["exclusiveMinimum", { type: "number", exclusiveMinimum: 1 }, 2, 1],
+        ["exclusiveMaximum", { type: "number", exclusiveMaximum: 1 }, 0, 1],
+        [
+          "filter group",
+          { type: "number", allOf: [{ minimum: 1, maximum: 2, description: "range" }] },
+          2,
+          0
+        ]
+      ]
+
+      for (const [name, refinement, valid, invalid] of cases) {
+        it(name, () => {
+          assertLiteralRefinement(refinement, valid, invalid)
+        })
+      }
+
+      it("filters enum members", () => {
+        const expected = {
+          representation: {
+            _tag: "Union" as const,
+            types: [{ _tag: "Literal" as const, literal: "ab" }],
+            mode: "anyOf" as const
+          }
+        }
+        for (
+          const [schema, member] of [
+            [{ type: "string", minLength: 2 }, { enum: ["a", "ab"] }],
+            [{ enum: ["a", "ab"] }, { type: "string", minLength: 2 }]
+          ]
+        ) {
+          assertFromJsonSchema(
+            { schema: { ...schema, allOf: [member] } },
+            expected,
+            `Schema.Literal("ab")`
+          )
+        }
+      })
+    })
+
     it("no type", () => {
       assertFromJsonSchema(
         {
@@ -1935,6 +2111,30 @@ describe("fromJsonSchemaDocument", () => {
     })
 
     describe("type: array", () => {
+      function assertArrayAllOf(
+        a: JsonSchema.JsonSchema,
+        b: JsonSchema.JsonSchema,
+        expected: Parameters<typeof assertFromJsonSchema>[1],
+        runtime: string,
+        valid: ReadonlyArray<unknown>,
+        invalid: ReadonlyArray<unknown>
+      ) {
+        for (const [schema, member] of [[a, b], [b, a]]) {
+          const document = assertFromJsonSchema(
+            { schema: { ...schema, allOf: [member] } },
+            expected,
+            runtime
+          )
+          const is = Schema.is(SchemaRepresentation.toSchema(document))
+          for (const value of valid) {
+            assertTrue(is(value))
+          }
+          for (const value of invalid) {
+            assertFalse(is(value))
+          }
+        }
+      }
+
       it("uniqueItems & uniqueItems", () => {
         assertFromJsonSchema(
           {
@@ -1955,6 +2155,214 @@ describe("fromJsonSchemaDocument", () => {
             }
           },
           `Schema.Array(Schema.Json).check(Schema.isUnique())`
+        )
+      })
+
+      it("combines unequal open prefixes", () => {
+        assertArrayAllOf(
+          {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+            minItems: 1,
+            items: { type: "string" }
+          },
+          {
+            type: "array",
+            prefixItems: [{ type: "string" }, { const: "tail" }],
+            minItems: 2,
+            items: { type: "string" }
+          },
+          {
+            representation: {
+              _tag: "Arrays",
+              elements: [
+                { isOptional: false, type: { _tag: "String", checks: [] } },
+                { isOptional: false, type: { _tag: "Literal", literal: "tail" } }
+              ],
+              rest: [{ _tag: "String", checks: [] }],
+              checks: []
+            }
+          },
+          `Schema.TupleWithRest(Schema.Tuple([Schema.String, Schema.Literal("tail")]), [Schema.String])`,
+          [["head", "tail"], ["head", "tail", "more"]],
+          [["head"], ["head", "other"], ["head", "tail", 1]]
+        )
+      })
+
+      it("truncates optional elements forbidden by a closed tuple", () => {
+        assertArrayAllOf(
+          {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+            minItems: 1,
+            maxItems: 1
+          },
+          {
+            type: "array",
+            prefixItems: [{ type: "string" }, { type: "number" }],
+            minItems: 1,
+            maxItems: 2
+          },
+          {
+            representation: {
+              _tag: "Arrays",
+              elements: [{ isOptional: false, type: { _tag: "String", checks: [] } }],
+              rest: [],
+              checks: []
+            }
+          },
+          `Schema.Tuple([Schema.String])`,
+          [["head"]],
+          [[], ["head", 1]]
+        )
+      })
+
+      it("returns Never when a closed tuple forbids a required element", () => {
+        assertArrayAllOf(
+          {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+            minItems: 1,
+            maxItems: 1
+          },
+          {
+            type: "array",
+            prefixItems: [{ type: "string" }, { type: "number" }],
+            minItems: 2,
+            maxItems: 2
+          },
+          { representation: { _tag: "Never" } },
+          `Schema.Never`,
+          [],
+          [[], ["head"], ["head", 1]]
+        )
+      })
+
+      it("combines an open rest with a closed rest", () => {
+        assertArrayAllOf(
+          {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+            minItems: 1,
+            items: { type: "number" }
+          },
+          {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+            minItems: 1,
+            maxItems: 1
+          },
+          {
+            representation: {
+              _tag: "Arrays",
+              elements: [{ isOptional: false, type: { _tag: "String", checks: [] } }],
+              rest: [],
+              checks: []
+            }
+          },
+          `Schema.Tuple([Schema.String])`,
+          [["head"]],
+          [[], ["head", 1]]
+        )
+      })
+
+      it("closes the tuple when the rest intersection is Never", () => {
+        assertArrayAllOf(
+          {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+            minItems: 1,
+            items: { type: "string" }
+          },
+          {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+            minItems: 1,
+            items: { type: "number" }
+          },
+          {
+            representation: {
+              _tag: "Arrays",
+              elements: [{ isOptional: false, type: { _tag: "String", checks: [] } }],
+              rest: [],
+              checks: []
+            }
+          },
+          `Schema.Tuple([Schema.String])`,
+          [["head"]],
+          [[], ["head", "tail"], ["head", 1]]
+        )
+      })
+
+      it("rejects a required literal that fails rest refinements", () => {
+        assertArrayAllOf(
+          {
+            type: "array",
+            minItems: 1,
+            items: { const: 0 }
+          },
+          {
+            type: "array",
+            prefixItems: [{ type: "number", minimum: 1 }],
+            minItems: 1,
+            maxItems: 1
+          },
+          { representation: { _tag: "Never" } },
+          `Schema.Never`,
+          [],
+          [[], [0]]
+        )
+      })
+
+      it("truncates an optional literal that fails rest refinements", () => {
+        assertArrayAllOf(
+          {
+            type: "array",
+            items: { const: 0 }
+          },
+          {
+            type: "array",
+            prefixItems: [{ type: "number", minimum: 1 }],
+            maxItems: 1
+          },
+          {
+            representation: {
+              _tag: "Arrays",
+              elements: [],
+              rest: [],
+              checks: []
+            }
+          },
+          `Schema.Tuple([])`,
+          [[]],
+          [[0]]
+        )
+      })
+
+      it("preserves a literal that satisfies rest refinements", () => {
+        assertArrayAllOf(
+          {
+            type: "array",
+            minItems: 1,
+            items: { const: 2 }
+          },
+          {
+            type: "array",
+            prefixItems: [{ type: "number", minimum: 1 }],
+            minItems: 1,
+            maxItems: 1
+          },
+          {
+            representation: {
+              _tag: "Arrays",
+              elements: [{ isOptional: false, type: { _tag: "Literal", literal: 2 } }],
+              rest: [],
+              checks: [{ _tag: "Filter", meta: { _tag: "isMinLength", minLength: 1 } }]
+            }
+          },
+          `Schema.Tuple([Schema.Literal(2)]).check(Schema.isMinLength(1))`,
+          [[2]],
+          [[], [0]]
         )
       })
     })

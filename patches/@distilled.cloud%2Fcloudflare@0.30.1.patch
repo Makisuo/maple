@@ -1,9 +1,9 @@
 diff --git a/src/services/workers.ts b/src/services/workers.ts
-index 37a49f4f921ac3aab77cc907d643fb5c5543a522..f60712eace118447f06a27b6c20943f5b851b6bc 100644
+index bc2401ef6453b0d46b75662896787ad9a6c641ad..cebf4f6ebb0ad5a54f63616cde30771f6dd04e09 100644
 --- a/src/services/workers.ts
 +++ b/src/services/workers.ts
-@@ -1722,7 +1722,10 @@ const GetBetaWorkerVersionResponsePlacement4 =
-   /*@__PURE__*/ /*#__PURE__*/ Schema.suspend(() =>
+@@ -1700,7 +1700,10 @@ const GetBetaWorkerVersionResponsePlacement4 =
+   /*@__PURE__*/ Schema.suspend(() =>
      Schema.Struct({
        mode: Schema.Literal("targeted"),
 -      region: Schema.String,
@@ -14,8 +14,8 @@ index 37a49f4f921ac3aab77cc907d643fb5c5543a522..f60712eace118447f06a27b6c20943f5
      }),
    ) as unknown as Schema.Codec<GetBetaWorkerVersionResponsePlacement4>;
  
-@@ -5984,7 +5987,10 @@ const ListScriptsResponseResultPlacement4 =
-   /*@__PURE__*/ /*#__PURE__*/ Schema.suspend(() =>
+@@ -5957,7 +5960,10 @@ const ListScriptsResponseResultPlacement4 =
+   /*@__PURE__*/ Schema.suspend(() =>
      Schema.Struct({
        mode: Schema.Literal("targeted"),
 -      region: Schema.String,

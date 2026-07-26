@@ -1,10 +1,9 @@
 import * as Cause from "../../Cause.ts"
-import * as Data from "../../Data.ts"
 import * as Effect from "../../Effect.ts"
-import * as Exit from "../../Exit.ts"
 import * as Pipeable from "../../Pipeable.ts"
 import type * as Schema from "../../Schema.ts"
 import * as SchemaAST from "../../SchemaAST.ts"
+import { SchemaError } from "../../SchemaError.ts"
 import type { Issue } from "../../SchemaIssue.ts"
 import * as SchemaParser from "../../SchemaParser.ts"
 
@@ -35,54 +34,22 @@ export function make<S extends Schema.Constraint>(ast: S["ast"], options?: objec
   }
   self.ast = ast
   self.rebuild = (ast: SchemaAST.AST) => make(ast, options)
+  const makeEffect = SchemaParser.makeEffect(self)
   self.makeEffect = (input: S["~type.make.in"], options?: Schema.MakeOptions) =>
-    mapSchemaIssueEffect(SchemaParser.makeEffect(self)(input, options))
+    fromIssueEffect(makeEffect(input, options))
   self.make = SchemaParser.make(self)
   self.makeOption = SchemaParser.makeOption(self)
   return self
 }
 
 /** @internal */
-export const SchemaErrorTypeId = "~effect/Schema/SchemaError"
-
-// purposefully not internal
-export class SchemaError extends Data.TaggedError("SchemaError")<{
-  readonly issue: Issue
-}> {
-  readonly [SchemaErrorTypeId]: typeof SchemaErrorTypeId = SchemaErrorTypeId
-  constructor(issue: Issue) {
-    super({ issue })
-  }
-  override get message() {
-    return this.issue.toString()
-  }
-  override toString() {
-    return `SchemaError(${this.message})`
-  }
-}
-
-/** @internal */
-export function mapSchemaIssueEffect<A, R>(
+export function fromIssueEffect<A, R>(
   self: Effect.Effect<A, Issue, R>
 ): Effect.Effect<A, SchemaError, R> {
   return Effect.catchCause(
     self,
     (cause) => Effect.failCauseSync(() => Cause.map(cause, (issue) => new SchemaError(issue)))
   )
-}
-
-/** @internal */
-export function mapSchemaErrorEffect<A, R>(
-  self: Effect.Effect<A, SchemaError, R>
-): Effect.Effect<A, Issue, R> {
-  return Effect.catchCause(self, (cause) => Effect.failCauseSync(() => Cause.map(cause, (error) => error.issue)))
-}
-
-/** @internal */
-export function mapSchemaIssueExit<A>(exit: Exit.Exit<A, Issue>): Exit.Exit<A, SchemaError> {
-  return Exit.isSuccess(exit)
-    ? Exit.succeed(exit.value)
-    : Exit.failCause(Cause.map(exit.cause, (issue) => new SchemaError(issue)))
 }
 
 /** @internal */

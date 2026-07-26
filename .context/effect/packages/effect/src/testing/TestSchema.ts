@@ -167,7 +167,7 @@ export class Asserts<S extends Schema.Constraint> {
    *
    * @see {@link arbitrary} for checking that generated values satisfy the schema
    */
-  verifyLosslessTransformation<S extends Schema.Codec<unknown, unknown>>(this: Asserts<S>, options?: {
+  verifyLosslessTransformation<S extends Schema.ConstraintCodec<unknown, unknown>>(this: Asserts<S>, options?: {
     readonly params?: FastCheck.Parameters<[S["Type"]]>
   }) {
     const decodeUnknownEffect = SchemaParser.decodeUnknownEffect(this.schema)
@@ -272,7 +272,7 @@ export class Asserts<S extends Schema.Constraint> {
    *
    * @see {@link verifyLosslessTransformation} for property-based round-trip checks
    */
-  arbitrary<S extends Schema.Codec<unknown, unknown, never, unknown>>(this: Asserts<S>) {
+  arbitrary<S extends Schema.ConstraintCodec<unknown, unknown>>(this: Asserts<S>) {
     const schema = this.schema
     return {
       verifyGeneration(options?: {

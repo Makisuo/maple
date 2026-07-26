@@ -18,7 +18,7 @@ import * as Html from "./internal/html.ts"
 import * as internal from "./internal/httpApiSwagger.ts"
 import * as OpenApi from "./OpenApi.ts"
 
-const makeHandler = <Id extends string, Groups extends HttpApiGroup.Any>(options: {
+const makeHandler = <Id extends string, Groups extends HttpApiGroup.Constraint>(options: {
   readonly api: HttpApi.HttpApi<Id, Groups>
 }) => {
   const spec = OpenApi.fromApi(options.api)
@@ -56,7 +56,7 @@ const makeHandler = <Id extends string, Groups extends HttpApiGroup.Any>(options
  * @category layers
  * @since 4.0.0
  */
-export const layer = <Id extends string, Groups extends HttpApiGroup.Any>(
+export const layer = <Id extends string, Groups extends HttpApiGroup.Constraint>(
   api: HttpApi.HttpApi<Id, Groups>,
   options?: {
     readonly path?: `/${string}` | undefined

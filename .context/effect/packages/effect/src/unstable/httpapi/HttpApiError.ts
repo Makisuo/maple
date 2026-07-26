@@ -27,6 +27,7 @@ const notAcceptableResponse = HttpServerResponse.empty({ status: 406 })
 const requestTimeoutResponse = HttpServerResponse.empty({ status: 408 })
 const conflictResponse = HttpServerResponse.empty({ status: 409 })
 const goneResponse = HttpServerResponse.empty({ status: 410 })
+const unprocessableEntityResponse = HttpServerResponse.empty({ status: 422 })
 const internalServerErrorResponse = HttpServerResponse.empty({ status: 500 })
 const notImplementedResponse = HttpServerResponse.empty({ status: 501 })
 const serviceUnavailableResponse = HttpServerResponse.empty({ status: 503 })
@@ -300,6 +301,38 @@ export class Gone extends Schema.ErrorClass<Gone>("effect/HttpApiError/Gone")({
  */
 export const GoneNoContent = Gone.pipe(HttpApiSchema.asNoContent({
   decode: () => new Gone({})
+}))
+
+/**
+ * Built-in HTTP API error for a `422 Unprocessable Entity` response. When used
+ * directly as a server response, it renders as an empty response with status 422.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class UnprocessableEntity
+  extends Schema.ErrorClass<UnprocessableEntity>("effect/HttpApiError/UnprocessableEntity")({
+    _tag: Schema.tag("UnprocessableEntity")
+  }, {
+    description: "UnprocessableEntity",
+    httpApiStatus: 422
+  })
+{
+  override readonly [ErrorReporter.ignore] = true;
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(unprocessableEntityResponse)
+  }
+}
+
+/**
+ * No-content schema variant for `UnprocessableEntity`, decoding an empty 422
+ * response into an `UnprocessableEntity` error value.
+ *
+ * @category NoContent errors
+ * @since 4.0.0
+ */
+export const UnprocessableEntityNoContent = UnprocessableEntity.pipe(HttpApiSchema.asNoContent({
+  decode: () => new UnprocessableEntity({})
 }))
 
 /**

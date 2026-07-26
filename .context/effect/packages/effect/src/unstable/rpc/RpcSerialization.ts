@@ -128,9 +128,9 @@ export const jsonRpc = (options?: {
     includesFraming: false,
     makeUnsafe: () => {
       const decoder = new TextDecoder()
-      const batches = new Map<string, {
+      const batches = new Map<string | number, {
         readonly size: number
-        readonly responses: Map<string, RpcMessage.FromServerEncoded>
+        readonly responses: Map<string | number, RpcMessage.FromServerEncoded>
       }>()
       return {
         decode: (bytes) => {
@@ -187,9 +187,9 @@ export const ndJsonRpc = (options?: {
 
 function decodeJsonRpcRaw(
   decoded: JsonRpcMessage | Array<JsonRpcMessage>,
-  batches: Map<string, {
+  batches: Map<string | number, {
     readonly size: number
-    readonly responses: Map<string, RpcMessage.FromServerEncoded>
+    readonly responses: Map<string | number, RpcMessage.FromServerEncoded>
   }>
 ) {
   if (Array.isArray(decoded)) {
@@ -221,13 +221,13 @@ function decodeJsonRpcMessage(decoded: JsonRpcMessage): RpcMessage.FromClientEnc
       return requestId ?
         {
           _tag: tag,
-          requestId: String(requestId)
+          requestId
         } as any :
         { _tag: tag } as any
     }
     return {
       _tag: "Request",
-      id: Predicate.isNotNullish(decoded.id) ? String(decoded.id) : "",
+      id: decoded.id ?? "",
       tag: decoded.method,
       payload: decoded.params ?? null,
       headers: decoded.headers ?? [],
@@ -247,13 +247,13 @@ function decodeJsonRpcMessage(decoded: JsonRpcMessage): RpcMessage.FromClientEnc
   } else if (decoded.chunk === true) {
     return {
       _tag: "Chunk",
-      requestId: String(decoded.id),
+      requestId: decoded.id ?? "",
       values: decoded.result as any
     }
   }
   return {
     _tag: "Exit",
-    requestId: String(decoded.id),
+    requestId: decoded.id ?? "",
     exit: decoded.error != null ?
       {
         _tag: "Failure",
@@ -273,9 +273,9 @@ function decodeJsonRpcMessage(decoded: JsonRpcMessage): RpcMessage.FromClientEnc
 
 function encodeJsonRpcRaw(
   response: RpcMessage.FromServerEncoded | RpcMessage.FromClientEncoded,
-  batches: Map<string, {
+  batches: Map<string | number, {
     readonly size: number
-    readonly responses: Map<string, RpcMessage.FromServerEncoded>
+    readonly responses: Map<string | number, RpcMessage.FromServerEncoded>
   }>
 ) {
   if (!("requestId" in response)) {
@@ -298,9 +298,9 @@ function encodeJsonRpcResponse(
     | RpcMessage.FromServerEncoded
     | RpcMessage.FromClientEncoded
     | Array<RpcMessage.FromServerEncoded | RpcMessage.FromClientEncoded>,
-  batches: Map<string, {
+  batches: Map<string | number, {
     readonly size: number
-    readonly responses: Map<string, RpcMessage.FromServerEncoded>
+    readonly responses: Map<string | number, RpcMessage.FromServerEncoded>
   }>
 ) {
   if (Array.isArray(response) === false) {
@@ -341,7 +341,7 @@ function encodeJsonRpcMessage(response: RpcMessage.FromServerEncoded | RpcMessag
         jsonrpc: "2.0",
         method: response.tag,
         params: response.payload,
-        id: response.id !== "" ? Number(response.id) : "",
+        id: response.id,
         headers: response.headers,
         traceId: response.traceId,
         spanId: response.spanId,
@@ -361,21 +361,21 @@ function encodeJsonRpcMessage(response: RpcMessage.FromServerEncoded | RpcMessag
       return {
         jsonrpc: "2.0",
         chunk: true,
-        id: Number(response.requestId),
+        id: response.requestId,
         result: response.values
       }
     case "Exit": {
       if (response.exit._tag === "Success") {
         return {
           jsonrpc: "2.0",
-          id: response.requestId !== "" ? Number(response.requestId) : undefined,
+          id: response.requestId ?? undefined,
           result: response.exit.value
         } as any
       }
       const error = response.exit.cause.find((failure) => failure._tag === "Fail")
       return {
         jsonrpc: "2.0",
-        id: response.requestId !== "" ? Number(response.requestId) : undefined,
+        id: response.requestId ?? undefined,
         error: response.exit._tag === "Failure" ?
           {
             _tag: "Cause",

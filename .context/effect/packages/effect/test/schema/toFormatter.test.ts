@@ -182,6 +182,18 @@ describe("toFormatter", () => {
     strictEqual(format([Option.none(), Option.none(), Option.some("a")]), `[none(), none(), some("a")]`)
   })
 
+  it("TupleWithRest with multiple post-rest elements", () => {
+    const format = Schema.toFormatter(
+      Schema.TupleWithRest(Schema.Tuple([Schema.String]), [
+        Schema.String,
+        Schema.Number,
+        Schema.Boolean,
+        Schema.String
+      ])
+    )
+    strictEqual(format(["head", "tail", 1, true, "last"]), `["head", "tail", 1, true, "last"]`)
+  })
+
   describe("Struct", () => {
     it("empty", () => {
       const format = Schema.toFormatter(Schema.Struct({}))

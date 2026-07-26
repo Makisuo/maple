@@ -982,6 +982,9 @@ export const orElseResult: {
  * @since 4.0.0
  */
 export const withSchema: {
-  <A, B>(schema: Schema.Codec<B, A, Environment, Environment>): (self: Flag<A>) => Flag<B>
-  <A, B>(self: Flag<A>, schema: Schema.Codec<B, A, Environment, Environment>): Flag<B>
-} = dual(2, <A, B>(self: Flag<A>, schema: Schema.Codec<B, A>) => Param.withSchema(self, schema))
+  <A, B>(schema: Schema.ConstraintCodec<B, A, Environment, unknown>): (self: Flag<A>) => Flag<B>
+  <A, B>(self: Flag<A>, schema: Schema.ConstraintCodec<B, A, Environment, unknown>): Flag<B>
+} = dual(
+  2,
+  <A, B>(self: Flag<A>, schema: Schema.ConstraintCodec<B, A, Environment, unknown>) => Param.withSchema(self, schema)
+)

@@ -70,6 +70,7 @@ describe("DashboardProvider", () => {
 				const provider = yield* Dashboard.Provider
 				return yield* provider.reconcile({
 					id: "service-health",
+					fqn: "test/service-health",
 					instanceId: "i-1",
 					news: { name: "Service health" },
 					olds: undefined,
@@ -93,6 +94,7 @@ describe("DashboardProvider", () => {
 				const provider = yield* Dashboard.Provider
 				return yield* provider.reconcile({
 					id: "service-health",
+					fqn: "test/service-health",
 					instanceId: "i-1",
 					news: { name: "Service health" },
 					olds: { name: "Service health" },
@@ -117,6 +119,7 @@ describe("DashboardProvider", () => {
 				const provider = yield* Dashboard.Provider
 				return yield* provider.reconcile({
 					id: "service-health",
+					fqn: "test/service-health",
 					instanceId: "i-1",
 					news: { name: "Renamed", tags: ["golden"] },
 					olds: { name: "Service health" },
@@ -140,6 +143,7 @@ describe("DashboardProvider", () => {
 				const provider = yield* Dashboard.Provider
 				return yield* provider.reconcile({
 					id: "service-health",
+					fqn: "test/service-health",
 					instanceId: "i-1",
 					news: { name: "Service health" },
 					olds: { name: "Service health" },
@@ -160,6 +164,7 @@ describe("DashboardProvider", () => {
 				const provider = yield* Dashboard.Provider
 				yield* provider.delete({
 					id: "service-health",
+					fqn: "test/service-health",
 					instanceId: "i-1",
 					olds: { name: "Service health" },
 					output: { dashboardId: "dash_gone", name: "Service health" },
@@ -191,6 +196,7 @@ describe("ApiKeyProvider", () => {
 				const provider = yield* ApiKey.Provider
 				return yield* provider.reconcile({
 					id: "ci",
+					fqn: "test/ci",
 					instanceId: "i-1",
 					news: { name: "ci" },
 					olds: undefined,
@@ -214,6 +220,7 @@ describe("ApiKeyProvider", () => {
 				const provider = yield* ApiKey.Provider
 				return yield* provider.reconcile({
 					id: "ci",
+					fqn: "test/ci",
 					instanceId: "i-1",
 					news: { name: "ci" },
 					olds: { name: "ci" },
@@ -239,6 +246,7 @@ describe("ApiKeyProvider", () => {
 				const provider = yield* ApiKey.Provider
 				return yield* provider.reconcile({
 					id: "ci",
+					fqn: "test/ci",
 					instanceId: "i-1",
 					news: { name: "ci", rotate: 2 },
 					olds: { name: "ci", rotate: 1 },
@@ -269,6 +277,7 @@ describe("ApiKeyProvider", () => {
 				const provider = yield* ApiKey.Provider
 				return yield* provider.reconcile({
 					id: "ci",
+					fqn: "test/ci",
 					instanceId: "i-1",
 					news: { name: "ci" },
 					olds: { name: "ci" },

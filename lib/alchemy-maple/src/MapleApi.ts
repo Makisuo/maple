@@ -61,10 +61,12 @@ const errorFromResponse = (status: number, bodyText: string): MapleError => {
 const isRetryable = (error: MapleError): boolean =>
 	error._tag === "Maple::ApiError" && (error.status === 429 || error.status >= 500)
 
-const retryPolicy = Schedule.exponential(Duration.millis(500), 2).pipe(
-	Schedule.either(Schedule.spaced(Duration.seconds(10))),
-	Schedule.both(Schedule.recurs(6)),
-)
+// Exponential backoff capped at 10s (`min` = fastest of the two), bounded to
+// six recurrences (`max` = continue only while every schedule still recurs).
+const retryPolicy = Schedule.max([
+	Schedule.min([Schedule.exponential(Duration.millis(500), 2), Schedule.spaced(Duration.seconds(10))]),
+	Schedule.recurs(6),
+])
 
 export const make = Effect.gen(function* () {
 	const { baseUrl, apiKey } = yield* MapleEnvironment
@@ -89,17 +91,15 @@ export const make = Effect.gen(function* () {
 					),
 				)
 			}
-			const response = yield* httpClient
-				.execute(req)
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new MapleApiError({
-								status: 0,
-								message: `Maple API request failed: ${error.message}`,
-							}),
-					),
-				)
+			const response = yield* httpClient.execute(req).pipe(
+				Effect.mapError(
+					(error) =>
+						new MapleApiError({
+							status: 0,
+							message: `Maple API request failed: ${error.message}`,
+						}),
+				),
+			)
 			// Drain the body either way so the connection is released.
 			const text = yield* response.text.pipe(
 				Effect.mapError(

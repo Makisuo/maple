@@ -11,7 +11,9 @@
 import * as Arr from "../../Array.ts"
 import type { NonEmptyArray } from "../../Array.ts"
 import * as Context from "../../Context.ts"
+import * as Equal from "../../Equal.ts"
 import { constFalse } from "../../Function.ts"
+import * as InternalRecord from "../../internal/record.ts"
 import * as JsonPatch from "../../JsonPatch.ts"
 import { escapeToken } from "../../JsonPointer.ts"
 import * as JsonSchema from "../../JsonSchema.ts"
@@ -208,7 +210,7 @@ export const annotations: (
   transform: Transform
 })
 
-const apiCache = new WeakMap<HttpApi.Any, OpenAPISpec>()
+const apiCache = new WeakMap<HttpApi.Constraint, OpenAPISpec>()
 
 /**
  * This function checks if a given tag exists within the provided context. If
@@ -246,7 +248,7 @@ function processAnnotation<Services, S, I>(
  * @category constructors
  * @since 4.0.0
  */
-export function fromApi<Id extends string, Groups extends HttpApiGroup.Any>(
+export function fromApi<Id extends string, Groups extends HttpApiGroup.Constraint>(
   api: HttpApi.HttpApi<Id, Groups>
 ): OpenAPISpec {
   const cached = apiCache.get(api)
@@ -279,6 +281,8 @@ export function fromApi<Id extends string, Groups extends HttpApiGroup.Any>(
       readonly path: ReadonlyArray<string>
     }
   > = []
+  const pathOperations = new Set<string>()
+  const operationIds = new Set<string>()
 
   processAnnotation(api.annotations, Title, (title) => {
     spec.info.title = title
@@ -331,7 +335,7 @@ export function fromApi<Id extends string, Groups extends HttpApiGroup.Any>(
         operationId: Context.getOrElse(
           endpoint.annotations,
           Identifier,
-          () => group.topLevel ? endpoint.name : `${group.identifier}.${endpoint.name}`
+          () => group.topLevel ? endpoint.identifier : `${group.identifier}.${endpoint.identifier}`
         ),
         parameters: [],
         security: [],
@@ -340,31 +344,6 @@ export function fromApi<Id extends string, Groups extends HttpApiGroup.Any>(
 
       const path = endpoint.path.replace(/:(\w+)\??/g, "{$1}")
       const method = endpoint.method.toLowerCase() as OpenAPISpecMethodName
-
-      function processRequestBodies(payloadMap: HttpApiEndpoint.PayloadMap) {
-        if (payloadMap.size > 0) {
-          const c: OpenApiSpecContent = {}
-          let hasContent = false
-          payloadMap.forEach(({ encoding, schemas }, contentType) => {
-            const filtered = schemas.filter((s) => !HttpApiSchema.isNoContent(s.ast))
-            if (filtered.length === 0) return
-            hasContent = true
-            const asts = filtered.map(SchemaAST.getAST)
-            const ast = asts.length === 1 ? asts[0] : new SchemaAST.Union(asts, "anyOf")
-            pathOps.push({
-              _tag: "schema",
-              ast: toEncodingAST(ast, encoding._tag),
-              path: ["paths", path, method, "requestBody", "content", contentType, "schema"]
-            })
-            c[contentType] = {
-              schema: {}
-            }
-          })
-          if (hasContent) {
-            op.requestBody = { content: c, required: true }
-          }
-        }
-      }
 
       function processResponseBodies(bodies: ResponseBodies, defaultDescription: () => string) {
         for (const [status, { content, descriptions, streamContent }] of bodies) {
@@ -502,15 +481,53 @@ export function fromApi<Id extends string, Groups extends HttpApiGroup.Any>(
         name: string,
         security: HttpApiSecurity
       ) {
-        if (spec.components.securitySchemes[name] !== undefined) {
+        const scheme = makeSecurityScheme(security)
+        if (!Object.hasOwn(spec.components.securitySchemes, name)) {
+          InternalRecord.set(spec.components.securitySchemes, name, scheme)
           return
         }
-        spec.components.securitySchemes[name] = makeSecurityScheme(security)
+        if (
+          !Equal.equals(
+            securitySchemeForComparison(spec.components.securitySchemes[name]),
+            securitySchemeForComparison(scheme)
+          )
+        ) {
+          throw new globalThis.Error(`Conflicting OpenAPI security scheme: ${name}`)
+        }
       }
 
       const hasBody = HttpMethod.hasBody(endpoint.method)
       if (hasBody) {
-        processRequestBodies(endpoint.payload)
+        const schemasByContentType = new Map<string, {
+          readonly encoding: HttpApiSchema.PayloadEncoding
+          readonly schemas: Array<Schema.Top>
+        }>()
+        for (const schema of HttpApiEndpoint.getPayloadSchemas(endpoint)) {
+          if (HttpApiSchema.isNoContent(schema.ast)) continue
+          const encoding = HttpApiSchema.getPayloadEncoding(schema.ast, endpoint.method)
+          const existing = schemasByContentType.get(encoding.contentType)
+          if (existing === undefined) {
+            schemasByContentType.set(encoding.contentType, { encoding, schemas: [schema] })
+          } else {
+            existing.schemas.push(schema)
+          }
+        }
+        if (schemasByContentType.size > 0) {
+          const content: OpenApiSpecContent = {}
+          for (const [contentType, { encoding, schemas }] of schemasByContentType) {
+            const asts = schemas.map(SchemaAST.getAST)
+            const ast = asts.length === 1 ? asts[0] : new SchemaAST.Union(asts, "anyOf")
+            pathOps.push({
+              _tag: "schema",
+              ast: toEncodingAST(ast, encoding._tag),
+              path: ["paths", path, method, "requestBody", "content", contentType, "schema"]
+            })
+            content[contentType] = {
+              schema: {}
+            }
+          }
+          op.requestBody = { content, required: true }
+        }
       }
 
       processParameters(endpoint.params, "path")
@@ -534,10 +551,6 @@ export function fromApi<Id extends string, Groups extends HttpApiGroup.Any>(
         () => "Error"
       )
 
-      if (!spec.paths[path]) {
-        spec.paths[path] = {}
-      }
-
       processAnnotation(endpoint.annotations, Override, (override) => {
         Object.assign(op, override)
       })
@@ -545,6 +558,21 @@ export function fromApi<Id extends string, Groups extends HttpApiGroup.Any>(
         op = transformFn(op) as OpenAPISpecOperation
       })
 
+      const pathOperation = `${method} ${path.replace(/\{[^}]+\}/g, "{}")}`
+      if (pathOperations.has(pathOperation)) {
+        throw new globalThis.Error(`Duplicate OpenAPI operation for ${endpoint.method} ${path}`)
+      }
+      const operationId = op.operationId
+      if (operationId !== undefined) {
+        if (operationIds.has(operationId)) {
+          throw new globalThis.Error(`Duplicate OpenAPI operationId: ${operationId}`)
+        }
+        operationIds.add(operationId)
+      }
+      pathOperations.add(pathOperation)
+      if (!spec.paths[path]) {
+        spec.paths[path] = {}
+      }
       spec.paths[path][method] = op
     }
   })
@@ -627,7 +655,7 @@ type ResponseBodies = Map<
 
 const reservedStreamFailureEvent = "effect/httpapi/stream/failure"
 
-function extractSuccessResponseBodies(endpoint: HttpApiEndpoint.AnyWithProps): ResponseBodies {
+function extractSuccessResponseBodies(endpoint: HttpApiEndpoint.Top): ResponseBodies {
   return extractResponseBodies(
     HttpApiEndpoint.getSuccessSchemas(endpoint),
     HttpApiSchema.getStatusSuccess,
@@ -812,6 +840,16 @@ const makeSecurityScheme = (security: HttpApiSecurity): OpenAPISecurityScheme =>
       }
     }
   }
+}
+
+const securitySchemeForComparison = (scheme: OpenAPISecurityScheme): OpenAPISecurityScheme => {
+  if (scheme.type === "http") {
+    return { ...scheme, scheme: scheme.scheme.toLowerCase() }
+  }
+  if (scheme.in === "header") {
+    return { ...scheme, name: scheme.name.toLowerCase() }
+  }
+  return scheme
 }
 
 /**

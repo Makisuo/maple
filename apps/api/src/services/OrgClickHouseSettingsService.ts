@@ -516,9 +516,7 @@ const CLICKHOUSE_EXEC_TIMEOUT_MS = 20_000
 // DB::Exception text — retrying a bad statement is pointless), and our own
 // request timeouts (statusCode 408 — a 20s hang won't clear on an immediate
 // retry; fail fast and let the user retry once the cluster is reachable).
-const CLICKHOUSE_RETRY_SCHEDULE = Schedule.exponential("100 millis", 2.0).pipe(
-	Schedule.both(Schedule.recurs(2)),
-)
+const CLICKHOUSE_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("100 millis", 2.0), Schedule.recurs(2)])
 
 export const isRetryableUpstream = (
 	error: OrgClickHouseSettingsUpstreamRejectedError | OrgClickHouseSettingsUpstreamUnavailableError,

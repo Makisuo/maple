@@ -170,19 +170,13 @@ export const makeFactory = Effect.gen(function*() {
             }
           ),
         take: (f, opts) =>
-          Effect.uninterruptibleMask(Effect.fnUntraced(function*(restore) {
-            const scope = yield* Scope.make()
+          Effect.scopedWith(Effect.fnUntraced(function*(scope) {
             const item = yield* store.take({
               name: options.name,
               maxAttempts: opts?.maxAttempts ?? 10
-            }).pipe(
-              Scope.provide(scope),
-              restore
-            )
+            }).pipe(Scope.provide(scope))
             const decoded = yield* decodeUnknown(item.element)
-            const exit = yield* Effect.exit(restore(f(decoded, { id: item.id, attempts: item.attempts })))
-            yield* Scope.close(scope, exit)
-            return yield* exit
+            return yield* f(decoded, { id: item.id, attempts: item.attempts })
           }))
       })
     }
@@ -613,7 +607,9 @@ local key_pending = KEYS[2]
 local prefix = ARGV[1]
 
 local entries = redis.call("HGETALL", key_pending)
-for id, payload in pairs(entries) do
+for i = 1, #entries, 2 do
+  local id = entries[i]
+  local payload = entries[i + 1]
   local lock_key = prefix .. id .. ":lock"
   local exists = redis.call("EXISTS", lock_key)
   if exists == 0 then
@@ -673,7 +669,7 @@ redis.call("DEL", key_lock)
 redis.call("HDEL", key_pending, id)
 redis.call("RPUSH", key_failed, payload)
 `,
-    numberOfKeys: 2
+    numberOfKeys: 3
   }
 )
 
@@ -936,10 +932,12 @@ export const makeStoreSql: (
   const elementIds = new Set<number>()
   const refreshLocks: Effect.Effect<void, SqlError> = Effect.suspend((): Effect.Effect<void, SqlError> => {
     if (elementIds.size === 0) return Effect.void
+    const ids = Array.from(elementIds)
     return sql`
       UPDATE ${tableNameSql}
       SET acquired_at = ${sqlNow}
-      WHERE acquired_by = ${workerIdSql}
+      WHERE sequence IN (${sql.literal(ids.join(","))})
+      AND acquired_by = ${workerIdSql}
     `
   })
   const complete = (sequence: number, attempts: number) => {
@@ -1110,7 +1108,7 @@ export const makeStoreSql: (
           takenLatch.closeUnsafe()
           for (let i = 0; i < results.length; i++) {
             const element = results[i]
-            element.element = JSON.parse(element.element)
+            elementIds.add(element.sequence)
           }
           yield* Queue.offerAll(queue, results)
           yield* takenLatch.await
@@ -1165,7 +1163,11 @@ export const makeStoreSql: (
                   : retry(element.sequence, element.attempts + 1, cause),
               onSuccess: () => complete(element.sequence, element.attempts + 1)
             }))
-          )
+          ),
+          Effect.map((element) => ({
+            ...element,
+            element: JSON.parse(element.element)
+          }))
         )
       )
   })
