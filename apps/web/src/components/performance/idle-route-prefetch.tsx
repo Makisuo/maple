@@ -2,7 +2,10 @@ import { useRouter } from "@tanstack/react-router"
 
 import { useMountEffect } from "@/hooks/use-mount-effect"
 
-const COMMON_ROUTE_PATHS = ["/", "/services/", "/traces/", "/logs/"] as const
+// Route ids, not pathnames: `routesById` keys keep the trailing slash that
+// `routesByPath` trims, so these match at runtime as well as in the generated
+// route tree types.
+const COMMON_ROUTE_IDS = ["/", "/services/", "/traces/", "/logs/"] as const
 const INITIAL_QUIET_PERIOD_MS = 1_200
 const BETWEEN_ROUTES_MS = 250
 const MIN_IDLE_TIME_MS = 8
@@ -47,8 +50,8 @@ export function IdleRoutePrefetch() {
 	useMountEffect(() => {
 		if (shouldAvoidBackgroundLoading()) return
 
-		const queue = COMMON_ROUTE_PATHS.filter(
-			(path) => normalizedPath(path) !== normalizedPath(router.state.location.pathname),
+		const queue = COMMON_ROUTE_IDS.filter(
+			(routeId) => normalizedPath(routeId) !== normalizedPath(router.state.location.pathname),
 		)
 		let disposed = false
 		let timeoutId: number | undefined
@@ -70,10 +73,14 @@ export function IdleRoutePrefetch() {
 						return
 					}
 
-					const path = queue.shift()
-					if (!path) return
-					const route = router.routesByPath[path]
-					if (!route) return
+					const routeId = queue.shift()
+					if (!routeId) return
+					const route = router.routesById[routeId]
+					if (!route) {
+						// A stale id must not strand the rest of the queue.
+						schedule(BETWEEN_ROUTES_MS)
+						return
+					}
 					void Promise.resolve(router.loadRouteChunk(route))
 						.catch(() => {
 							// Prefetch is opportunistic. Navigation retains its normal chunk
