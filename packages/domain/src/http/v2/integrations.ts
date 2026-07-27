@@ -19,6 +19,36 @@ const wireExample = <A>(example: object): A => example as A
 // `slack_workspaces` table). These endpoints drive the dashboard's Slack
 // integration card: kick off the install, read status, uninstall, and list
 // channels the bot can post to.
+//
+// Why this file exists here, given `http/integrations.ts` already covers
+// Cloudflare/PlanetScale/GitHub/Hazel:
+//
+//   - It is a *contract*, not an implementation. `apps/web` derives its typed
+//     client straight from `MapleApiV2` (`MapleApiV2AtomClient`), so the group
+//     has to live in a package both the browser and the Worker can import.
+//     Handlers stay in `apps/api/src/routes/v2/integrations.http.ts`. This is
+//     the split the "Adding a v2 resource" checklist in docs/api-v2.md
+//     prescribes, and all twenty v2 groups follow it — nothing about Slack is
+//     special. `http/integrations.ts` is shared for the same reason; it is just
+//     the v1 tier.
+//   - Slack is the first integration built after the v2 migration started, so
+//     it goes straight onto v2 rather than extending a v1 group that is slated
+//     for deletion. The older providers stay on v1 until something public needs
+//     them.
+//   - It is public rather than internal because `/v2/alerts/destinations`
+//     accepts `type: "slack-bot"` with a required `channel_id` and the bot token
+//     never leaves the server: `GET /v2/integrations/slack/channels` is the only
+//     way any caller can discover a valid id.
+//
+// The OAuth *callback* is deliberately not here — Slack redirects a browser, so
+// it is a raw router in `apps/api/src/routes/slack-integration.http.ts` that
+// 302s back to the web app. Same for the service-to-service bot-resolution
+// endpoint the Slack agent calls.
+//
+// Provider-agnostic filename with a provider-scoped group is intentional:
+// scope families are derived from the first path segment under `/v2`, so every
+// future `/v2/integrations/<provider>` group belongs in this file and shares
+// the `integrations:read` / `integrations:write` family.
 // ---------------------------------------------------------------------------
 
 export const V2SlackIntegrationStatus = Schema.Struct({
