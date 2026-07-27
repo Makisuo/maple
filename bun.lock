@@ -219,7 +219,7 @@
         "@expo-google-fonts/geist-mono": "^0.4.1",
         "@expo/metro-runtime": "^55.0.9",
         "@expo/ui": "~55.0.10",
-        "@flue/sdk": "1.0.0-beta.9",
+        "@flue/sdk": "1.0.0-beta.1",
         "@legendapp/list": "^2.0.19",
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/api-logs": "^0.205.0",
@@ -6056,6 +6056,8 @@
     "miniflare/undici": ["undici@7.28.0", "", {}, "sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA=="],
 
     "miniflare/ws": ["ws@8.21.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g=="],
+
+    "mobile/@flue/sdk": ["@flue/sdk@1.0.0-beta.1", "", { "dependencies": { "@durable-streams/client": "^0.2.6" } }, "sha512-61VS3lcPey8ZHLGC6lk94yzuNxSHqaROqmgrswnoH2E/1ILR+ZYoLmKYTbQuOi0lulBl/ykh1WlvTQztFg2/nA=="],
 
     "mobile/expo-ui-ext": ["expo-ui-ext@file:apps/mobile/modules/expo-ui-ext", {}],
 
