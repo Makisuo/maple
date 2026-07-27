@@ -166,8 +166,8 @@ export function SlackIntegrationCard() {
 				<IntegrationEmptyFeatures>
 					<IntegrationEmptyFeature
 						label="Ask Maple"
-						title="Query from Slack"
-						description="Mention the bot to query services, traces, and errors from Slack."
+						title="Query and act from Slack"
+						description="Mention the bot to query services, traces, and errors, or create dashboards and other resources."
 					/>
 					<IntegrationEmptyFeature
 						label="Alert delivery"
@@ -220,8 +220,9 @@ export function SlackIntegrationCard() {
 							</span>
 						</div>
 						<p className="mt-1 text-xs text-muted-foreground">
-							The Maple bot answers questions in Slack and delivers alerts to channels. Create a
-							Slack (bot) destination on an alert rule to route notifications.
+							The Maple bot answers questions, creates dashboards and other resources on request, and
+							delivers alerts to channels. Create a Slack (bot) destination on an alert rule to route
+							notifications.
 						</p>
 					</div>
 

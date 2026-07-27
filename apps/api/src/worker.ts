@@ -345,13 +345,18 @@ const handleQueue = async (
 	}
 }
 
-// Cron handler. Two schedules (see wrangler.jsonc / alchemy.run.ts
+// Cron handler. Three schedules (see wrangler.jsonc / alchemy.run.ts
 // `triggers.crons`), dispatched on `event.cron`:
 //   "0 */12 * * *" — enqueue a periodic VCS sync per installation
 //   "0 * * * *"    — apply scrape-check retention
+//   "0 */6 * * *"  — Slack workspace reconciliation
 // Retention is hourly rather than 12-hourly because a busy target can write
 // ~75k check rows a day, so the 10k-row cap binds within a few hours.
 const SCRAPE_RETENTION_CRON = "0 * * * *"
+// Backstop for SlackEventsRouter's app_uninstalled/tokens_revoked webhook —
+// doesn't need to be tight, it only catches deliveries Slack gave up
+// retrying (or installs that predate the webhook).
+const SLACK_RECONCILE_CRON = "0 */6 * * *"
 
 const handleScheduled = async (
 	event: ScheduledController,
@@ -367,6 +372,20 @@ const handleScheduled = async (
 			})
 		} finally {
 			ctx.waitUntil(flushVcsTelemetry(env))
+		}
+		return
+	}
+
+	if (event.cron === SLACK_RECONCILE_CRON) {
+		const { buildSlackReconcileLayer, runSlackReconciliation, flushSlackTelemetry } = await import(
+			"./slack-reconcile-runtime"
+		)
+		try {
+			await runScheduledEffect(buildSlackReconcileLayer(env), runSlackReconciliation, ctx, {
+				onInterrupt: "graceful",
+			})
+		} finally {
+			ctx.waitUntil(flushSlackTelemetry(env))
 		}
 		return
 	}

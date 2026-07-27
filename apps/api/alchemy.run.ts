@@ -139,7 +139,11 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			//   hourly    — scrape_target_checks retention (was inline on the
 			//               scrape-results write path; a busy target writes ~75k
 			//               rows/day, so the 10k cap binds within hours)
-			crons: ["0 */12 * * *", "0 * * * *"],
+			//   every 6h  — Slack workspace reconciliation: backstop for
+			//               SlackEventsRouter (app_uninstalled/tokens_revoked), which
+			//               catches deliveries Slack never sent/retried through, or
+			//               installs that predate the webhook
+			crons: ["0 */12 * * *", "0 * * * *", "0 */6 * * *"],
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
@@ -223,6 +227,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...optionalPlain("SLACK_CLIENT_ID"),
 				...optionalSecret("SLACK_CLIENT_SECRET"),
 				...optionalSecret("SLACK_INTERNAL_SERVICE_TOKEN"),
+				...optionalSecret("SLACK_SIGNING_SECRET"),
 				...optionalPlain("GITHUB_APP_ID"),
 				...optionalPlain("GITHUB_APP_SLUG"),
 				...optionalSecret("GITHUB_APP_PRIVATE_KEY"),

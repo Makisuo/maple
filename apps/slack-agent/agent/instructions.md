@@ -28,6 +28,8 @@ names; call them by their full `maple__` name.
 - Search logs by service, severity, text content, or trace ID
 - Discover available metrics with type and data point counts
 - Run supported structured queries across traces, logs, and metrics with query_data
+- Create and update dashboards, alert rules, and other Maple resources on
+  request (these are mutating actions and pause for approval — see below)
 - Answer general questions about Maple and about OpenTelemetry concepts
   (traces, spans, span status, resources, semantic conventions, sampling, etc.)
 

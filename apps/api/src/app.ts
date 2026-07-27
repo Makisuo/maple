@@ -49,7 +49,7 @@ import { OAuthDiscoveryRouter } from "./routes/oauth-discovery.http"
 import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "./routes/organizations.http"
 import { PlanetScaleWebhookRouter } from "./routes/planetscale-webhook.http"
-import { SlackCallbackRouter, SlackInternalRouter } from "./routes/slack-integration.http"
+import { SlackCallbackRouter, SlackEventsRouter, SlackInternalRouter } from "./routes/slack-integration.http"
 import { PrometheusScrapeProxyRouter } from "./routes/prometheus-scrape-proxy.http"
 import { ScraperInternalRouter } from "./routes/scraper-internal.http"
 import { VcsWebhookRouter } from "./routes/vcs-webhook.http"
@@ -355,6 +355,7 @@ export const AllRoutes = Layer.mergeAll(
 	ApiV2Routes,
 	IntegrationsCallbackRouter,
 	SlackCallbackRouter,
+	SlackEventsRouter,
 	SlackInternalRouter,
 	OAuthDiscoveryRouter,
 	PlanetScaleWebhookRouter,

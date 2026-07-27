@@ -1,14 +1,14 @@
-import { createCipheriv, randomBytes } from "node:crypto"
+import { createCipheriv, createHmac, randomBytes } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Env } from "../lib/Env"
-import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "../lib/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../lib/test-pglite"
 import { ApiKeysService } from "../services/ApiKeysService"
 import { OAuthStateRepository } from "../services/OAuthStateRepository"
 import { SlackIntegrationService } from "../services/SlackIntegrationService"
 import { slackSecretAad } from "../services/slack-bot-token"
-import { SlackInternalRouter } from "./slack-integration.http"
+import { SlackEventsRouter, SlackInternalRouter } from "./slack-integration.http"
 
 const trackedDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(trackedDbs))
@@ -79,7 +79,7 @@ const insertWorkspace = async (
 	)
 }
 
-const makeConfig = (tokens: { slack?: string; shared?: string } = {}) =>
+const makeConfig = (tokens: { slack?: string; shared?: string; signingSecret?: string } = {}) =>
 	ConfigProvider.layer(
 		ConfigProvider.fromUnknown({
 			PORT: "3472",
@@ -93,6 +93,7 @@ const makeConfig = (tokens: { slack?: string; shared?: string } = {}) =>
 			MAPLE_APP_BASE_URL: "https://web.localhost",
 			...(tokens.slack !== undefined ? { SLACK_INTERNAL_SERVICE_TOKEN: tokens.slack } : {}),
 			...(tokens.shared !== undefined ? { INTERNAL_SERVICE_TOKEN: tokens.shared } : {}),
+			...(tokens.signingSecret !== undefined ? { SLACK_SIGNING_SECRET: tokens.signingSecret } : {}),
 		}),
 	)
 
@@ -103,6 +104,15 @@ const makeRouterLayer = (testDb: TestDb, tokens: { slack?: string; shared?: stri
 		Layer.provide(testDb.layer),
 		Layer.provide(Env.layer),
 		Layer.provide(makeConfig(tokens)),
+	)
+
+const makeEventsRouterLayer = (testDb: TestDb, signingSecret?: string) =>
+	SlackEventsRouter.pipe(
+		Layer.provide(SlackIntegrationService.layer),
+		Layer.provide(Layer.mergeAll(ApiKeysService.layer, OAuthStateRepository.layer)),
+		Layer.provide(testDb.layer),
+		Layer.provide(Env.layer),
+		Layer.provide(makeConfig({ signingSecret })),
 	)
 
 const TEAM_PATH = "/internal/slack/workspaces"
@@ -331,5 +341,264 @@ describe("SlackInternalRouter", () => {
 				}),
 			)
 		}).pipe(Effect.provide(testDb.layer))
+	})
+})
+
+// ---------------------------------------------------------------------------
+// SlackEventsRouter
+// ---------------------------------------------------------------------------
+
+const EVENTS_PATH = "/api/integrations/slack/events"
+const SIGNING_SECRET = "test-signing-secret"
+
+const slackSignatureHeaders = (rawBody: string, secret: string, timestampSeconds: number) => ({
+	"x-slack-signature": `v0=${createHmac("sha256", secret).update(`v0:${timestampSeconds}:${rawBody}`, "utf8").digest("hex")}`,
+	"x-slack-request-timestamp": String(timestampSeconds),
+})
+
+/** POST a raw body to the events endpoint, signing it unless `omitSignature`. */
+const postEvent = (
+	handler: (request: Request) => Promise<Response>,
+	rawBody: string,
+	opts: { signWith?: string; timestampSeconds?: number; omitSignature?: boolean } = {},
+) =>
+	Effect.promise(() => {
+		const timestampSeconds = opts.timestampSeconds ?? Math.floor(Date.now() / 1000)
+		const headers: Record<string, string> = { "content-type": "application/json" }
+		if (!opts.omitSignature) {
+			Object.assign(headers, slackSignatureHeaders(rawBody, opts.signWith ?? SIGNING_SECRET, timestampSeconds))
+		}
+		return handler(
+			new Request(`http://api.localhost${EVENTS_PATH}`, { method: "POST", headers, body: rawBody }),
+		)
+	})
+
+/** Run `body` against a web handler for the events router, disposing after. */
+const withEventsHandler = (
+	testDb: TestDb,
+	signingSecret: string | undefined,
+	body: (handler: (request: Request) => Promise<Response>) => Effect.Effect<void>,
+) => {
+	const { handler, dispose } = HttpRouter.toWebHandler(makeEventsRouterLayer(testDb, signingSecret), {
+		disableLogger: true,
+	})
+	return body((request) => handler(request)).pipe(Effect.ensuring(Effect.promise(dispose)))
+}
+
+const eventCallbackBody = (eventType: string, teamId: string) =>
+	JSON.stringify({
+		token: "verification-token",
+		team_id: teamId,
+		api_app_id: "A123",
+		event: { type: eventType },
+		type: "event_callback",
+		event_id: "Ev0123",
+		event_time: 1700000000,
+	})
+
+describe("SlackEventsRouter", () => {
+	it.effect("answers the url_verification handshake with the raw challenge", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withEventsHandler(
+			testDb,
+			SIGNING_SECRET,
+			Effect.fnUntraced(function* (handler) {
+				const body = JSON.stringify({
+					type: "url_verification",
+					token: "verification-token",
+					challenge: "abc123challenge",
+				})
+				const response = yield* postEvent(handler, body)
+				assert.strictEqual(response.status, 200)
+				const text = yield* Effect.promise(() => response.text())
+				assert.strictEqual(text, "abc123challenge")
+			}),
+		)
+	})
+
+	it.effect("rejects a request signed with the wrong secret", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withEventsHandler(
+			testDb,
+			SIGNING_SECRET,
+			Effect.fnUntraced(function* (handler) {
+				const response = yield* postEvent(handler, eventCallbackBody("app_uninstalled", "T-X"), {
+					signWith: "wrong-secret",
+				})
+				assert.strictEqual(response.status, 401)
+			}),
+		)
+	})
+
+	it.effect("rejects a request with no signature headers", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withEventsHandler(
+			testDb,
+			SIGNING_SECRET,
+			Effect.fnUntraced(function* (handler) {
+				const response = yield* postEvent(handler, eventCallbackBody("app_uninstalled", "T-X"), {
+					omitSignature: true,
+				})
+				assert.strictEqual(response.status, 401)
+			}),
+		)
+	})
+
+	it.effect("rejects a replayed (stale) timestamp even with a correct signature", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withEventsHandler(
+			testDb,
+			SIGNING_SECRET,
+			Effect.fnUntraced(function* (handler) {
+				const staleTimestamp = Math.floor(Date.now() / 1000) - 3600
+				const response = yield* postEvent(handler, eventCallbackBody("app_uninstalled", "T-X"), {
+					timestampSeconds: staleTimestamp,
+				})
+				assert.strictEqual(response.status, 401)
+			}),
+		)
+	})
+
+	it.effect("answers 503 and never reaches signature checking when SLACK_SIGNING_SECRET is unset", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withEventsHandler(
+			testDb,
+			undefined,
+			Effect.fnUntraced(function* (handler) {
+				const response = yield* postEvent(handler, eventCallbackBody("app_uninstalled", "T-X"))
+				assert.strictEqual(response.status, 503)
+			}),
+		)
+	})
+
+	it.effect("returns 400 for an empty body", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withEventsHandler(
+			testDb,
+			SIGNING_SECRET,
+			Effect.fnUntraced(function* (handler) {
+				const response = yield* postEvent(handler, "", { omitSignature: true })
+				assert.strictEqual(response.status, 400)
+			}),
+		)
+	})
+
+	it.effect("returns 400 for a correctly-signed but undecodable payload", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withEventsHandler(
+			testDb,
+			SIGNING_SECRET,
+			Effect.fnUntraced(function* (handler) {
+				const response = yield* postEvent(handler, "not json")
+				assert.strictEqual(response.status, 400)
+			}),
+		)
+	})
+
+	it.effect("revokes the workspace on app_uninstalled and acks 200", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_evt_au",
+					orgId: "org_evt_au",
+					teamId: "T-AU",
+					teamName: "AuOrg",
+					botToken: "xoxb-au",
+					apiKey: "maple_ak_au",
+				}),
+			)
+			yield* withEventsHandler(
+				testDb,
+				SIGNING_SECRET,
+				Effect.fnUntraced(function* (handler) {
+					const response = yield* postEvent(handler, eventCallbackBody("app_uninstalled", "T-AU"))
+					assert.strictEqual(response.status, 200)
+					const text = yield* Effect.promise(() => response.text())
+					assert.strictEqual(text, "ok")
+				}),
+			)
+			const row = yield* Effect.promise(() =>
+				queryFirstRow<{ revoked_at: string | null }>(
+					testDb,
+					"SELECT revoked_at FROM slack_workspaces WHERE team_id = 'T-AU'",
+				),
+			)
+			assert.isNotNull(row?.revoked_at)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("revokes the workspace on tokens_revoked and acks 200", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_evt_tr",
+					orgId: "org_evt_tr",
+					teamId: "T-TR",
+					teamName: "TrOrg",
+					botToken: "xoxb-tr",
+					apiKey: "maple_ak_tr",
+				}),
+			)
+			yield* withEventsHandler(
+				testDb,
+				SIGNING_SECRET,
+				Effect.fnUntraced(function* (handler) {
+					const response = yield* postEvent(handler, eventCallbackBody("tokens_revoked", "T-TR"))
+					assert.strictEqual(response.status, 200)
+				}),
+			)
+			const row = yield* Effect.promise(() =>
+				queryFirstRow<{ revoked_at: string | null }>(
+					testDb,
+					"SELECT revoked_at FROM slack_workspaces WHERE team_id = 'T-TR'",
+				),
+			)
+			assert.isNotNull(row?.revoked_at)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("acks 200 without revoking for an unrelated event type", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_evt_other",
+					orgId: "org_evt_other",
+					teamId: "T-OTHER",
+					teamName: "OtherOrg",
+					botToken: "xoxb-other",
+					apiKey: "maple_ak_other",
+				}),
+			)
+			yield* withEventsHandler(
+				testDb,
+				SIGNING_SECRET,
+				Effect.fnUntraced(function* (handler) {
+					const response = yield* postEvent(handler, eventCallbackBody("app_mention", "T-OTHER"))
+					assert.strictEqual(response.status, 200)
+				}),
+			)
+			const row = yield* Effect.promise(() =>
+				queryFirstRow<{ revoked_at: string | null }>(
+					testDb,
+					"SELECT revoked_at FROM slack_workspaces WHERE team_id = 'T-OTHER'",
+				),
+			)
+			assert.isNull(row?.revoked_at)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("acks 200 for an app_uninstalled event with no matching workspace (idempotent)", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withEventsHandler(
+			testDb,
+			SIGNING_SECRET,
+			Effect.fnUntraced(function* (handler) {
+				const response = yield* postEvent(handler, eventCallbackBody("app_uninstalled", "T-UNKNOWN"))
+				assert.strictEqual(response.status, 200)
+			}),
+		)
 	})
 })

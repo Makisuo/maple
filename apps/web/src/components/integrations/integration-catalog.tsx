@@ -139,7 +139,7 @@ const CATALOG: ReadonlyArray<CatalogEntry> = [
 		id: "slack",
 		name: "Slack",
 		description:
-			"Install the Maple Slack app — ask Maple questions in Slack and route alerts to channels.",
+			"Install the Maple Slack app — ask Maple questions, create dashboards, and route alerts to channels.",
 		icon: SlackIcon,
 		// Theme-aware by construction (see SLACK_ACCENT). The `iconClassName` escape
 		// hatch GitHub uses can't help here: Slack's mark is multicolor, so tinting

@@ -32,7 +32,11 @@ const SLACK_STATE_TTL_MS = 10 * 60_000 // 10 minutes
 const SLACK_OAUTH_ACCESS_URL = "https://slack.com/api/oauth.v2.access"
 const SLACK_OAUTH_REVOKE_URL = "https://slack.com/api/auth.revoke"
 const SLACK_CONVERSATIONS_LIST_URL = "https://slack.com/api/conversations.list"
+const SLACK_AUTH_TEST_URL = "https://slack.com/api/auth.test"
 const SLACK_MAX_CHANNEL_PAGES = 3
+
+/** Why a workspace binding was revoked without going through `uninstall`. */
+export type SlackRevocationReason = "app_uninstalled" | "tokens_revoked" | "reconciliation"
 
 const CROSS_ORG_CONFLICT_MESSAGE =
 	"This Slack workspace is already connected to a different Maple organization. Uninstall it there first."
@@ -96,6 +100,26 @@ const SlackAuthRevokeSchema = Schema.Struct({
 	error: Schema.optionalKey(Schema.String),
 })
 const decodeAuthRevoke = Schema.decodeUnknownEffect(SlackAuthRevokeSchema)
+
+const SlackAuthTestSchema = Schema.Struct({
+	ok: Schema.Boolean,
+	error: Schema.optionalKey(Schema.String),
+})
+const decodeAuthTest = Schema.decodeUnknownEffect(SlackAuthTestSchema)
+
+/**
+ * `auth.test` error codes that definitively mean the bot token is dead —
+ * distinct from transient failures (rate limits, network blips, an unexpected
+ * `ok:false` code we don't recognize), which must NOT trigger a revoke since
+ * {@link reconcileWorkspaces} runs unattended on a cron and a false positive
+ * would silently kill a live integration.
+ */
+const DEAD_TOKEN_AUTH_TEST_ERRORS: ReadonlySet<string> = new Set([
+	"invalid_auth",
+	"account_inactive",
+	"token_revoked",
+	"token_expired",
+])
 
 const SlackConversationsListSchema = Schema.Struct({
 	ok: Schema.Boolean,
@@ -162,6 +186,27 @@ export interface SlackIntegrationServiceShape {
 	readonly resolveForBot: (
 		teamId: string,
 	) => Effect.Effect<SlackBotResolution, IntegrationsNotConnectedError | IntegrationsPersistenceError>
+	/**
+	 * Revoke a workspace binding by Slack team id without calling Slack's
+	 * `auth.revoke` — for the two cases where Slack has already told us (or we've
+	 * already confirmed) the token is dead: an inbound `app_uninstalled` /
+	 * `tokens_revoked` event, or a failed {@link reconcileWorkspaces} probe.
+	 * A no-op (`revoked: false`) when the team has no active row.
+	 */
+	readonly revokeByTeamId: (
+		teamId: string,
+		reason: SlackRevocationReason,
+	) => Effect.Effect<{ readonly revoked: boolean }, IntegrationsPersistenceError>
+	/**
+	 * Backstop for {@link revokeByTeamId}'s event-driven callers: probes every
+	 * active workspace's bot token with `auth.test` and locally revokes any that
+	 * Slack confirms are dead. Catches deliveries the Events API webhook never
+	 * sent (or that exhausted Slack's retries) and installs that predate it.
+	 */
+	readonly reconcileWorkspaces: () => Effect.Effect<
+		{ readonly probed: number; readonly revoked: number },
+		IntegrationsPersistenceError
+	>
 }
 
 export class SlackIntegrationService extends Context.Service<
@@ -798,6 +843,108 @@ export class SlackIntegrationService extends Context.Service<
 			} satisfies SlackBotResolution
 		})
 
+		const revokeByTeamId = Effect.fn("SlackIntegrationService.revokeByTeamId")(function* (
+			teamId: string,
+			reason: SlackRevocationReason,
+		) {
+			yield* Effect.annotateCurrentSpan({ teamId, reason })
+			const rowOption: Option.Option<SlackWorkspaceRow> = yield* database
+				.execute((db) =>
+					db
+						.select()
+						.from(slackWorkspaces)
+						.where(and(eq(slackWorkspaces.teamId, teamId), isNull(slackWorkspaces.revokedAt)))
+						.limit(1),
+				)
+				.pipe(
+					Effect.mapError(toPersistenceError),
+					Effect.map((rows) => Option.fromNullishOr(rows[0])),
+				)
+			if (Option.isNone(rowOption)) return { revoked: false }
+			const row = rowOption.value
+			const orgId = yield* decodeOrgId(row.orgId).pipe(
+				Effect.mapError(
+					(error) =>
+						new IntegrationsPersistenceError({
+							message: `Stored Slack workspace has an invalid orgId: ${error.message}`,
+						}),
+				),
+			)
+			yield* Effect.annotateCurrentSpan({ orgId })
+			const now = yield* Clock.currentTimeMillis
+			// Revoke the minted API key (best-effort — bookkeeping must not fail the
+			// revoke). Unlike `uninstall`, there is no `auth.revoke` call here: the
+			// caller already knows the bot token is dead (Slack told us via the
+			// event, or reconciliation just confirmed it via `auth.test`), so both
+			// secret columns are always dropped below.
+			if (row.apiKeyId) {
+				const keyId = decodeApiKeyIdOption(row.apiKeyId)
+				if (Option.isSome(keyId)) {
+					yield* apiKeys.revoke(orgId, keyId.value).pipe(Effect.ignore)
+				}
+			}
+			yield* database
+				.execute((db) =>
+					db
+						.update(slackWorkspaces)
+						.set({
+							revokedAt: new Date(now),
+							updatedAt: new Date(now),
+							apiKeySecretCiphertext: null,
+							apiKeySecretIv: null,
+							apiKeySecretTag: null,
+							botTokenCiphertext: null,
+							botTokenIv: null,
+							botTokenTag: null,
+						})
+						.where(eq(slackWorkspaces.id, row.id)),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+			yield* Effect.logInfo("Slack workspace revoked remotely", { orgId, teamId, reason })
+			return { revoked: true }
+		})
+
+		/** Ask Slack whether a bot token still works — raw `auth.test` result. */
+		const probeBotToken = Effect.fnUntraced(function* (botToken: string) {
+			const response = yield* httpClient.post(SLACK_AUTH_TEST_URL, {
+				headers: { authorization: `Bearer ${botToken}`, accept: "application/json" },
+			})
+			return yield* decodeAuthTest(yield* response.json)
+		})
+
+		/**
+		 * Probe one workspace's bot token; revoke it locally (best-effort) if
+		 * `auth.test` gives a definitive dead-token answer. Any other outcome —
+		 * `ok:true`, an unrecognized error code, a decrypt failure, a network
+		 * error — leaves the row untouched: only a confirmed-dead token is acted
+		 * on unattended.
+		 */
+		const probeAndRevokeIfDead = Effect.fnUntraced(function* (row: SlackWorkspaceRow) {
+			const outcome = yield* decryptRowSecret(row, "bot_token").pipe(
+				Effect.flatMap(probeBotToken),
+				Effect.match({
+					onFailure: () => false,
+					onSuccess: (decoded) => !decoded.ok && DEAD_TOKEN_AUTH_TEST_ERRORS.has(decoded.error ?? ""),
+				}),
+			)
+			if (!outcome) return false
+			yield* revokeByTeamId(row.teamId, "reconciliation").pipe(Effect.ignore)
+			return true
+		})
+
+		const reconcileWorkspaces = Effect.fn("SlackIntegrationService.reconcileWorkspaces")(function* () {
+			const rows: ReadonlyArray<SlackWorkspaceRow> = yield* database
+				.execute((db) => db.select().from(slackWorkspaces).where(isNull(slackWorkspaces.revokedAt)))
+				.pipe(Effect.mapError(toPersistenceError))
+			const revokedFlags = yield* Effect.forEach(rows, probeAndRevokeIfDead)
+			const revoked = revokedFlags.filter(Boolean).length
+			yield* Effect.annotateCurrentSpan({
+				"slack.reconcile.probed": rows.length,
+				"slack.reconcile.revoked": revoked,
+			})
+			return { probed: rows.length, revoked }
+		})
+
 		return {
 			startInstall,
 			completeInstall,
@@ -805,6 +952,8 @@ export class SlackIntegrationService extends Context.Service<
 			uninstall,
 			listChannels,
 			resolveForBot,
+			revokeByTeamId,
+			reconcileWorkspaces,
 		} satisfies SlackIntegrationServiceShape
 	}),
 }) {
