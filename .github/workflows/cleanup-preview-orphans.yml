@@ -46,11 +46,20 @@ jobs:
         # The machine identity only allowlists the `environment:` form (which is
         # why deploy-prd/stg/pr-preview authenticate and an environment-less job
         # cannot), so running bare silently broke every scheduled sweep.
-        # `pr-preview` is the right one to borrow: same `dev` Infisical env slug
-        # as deploy-pr-preview, and these are the very resources being swept.
-        # It carries no required reviewers and no deployment branch policy, so
-        # scheduled runs are not gated on approval.
-        environment: pr-preview
+        #
+        # `maintenance` is a DEDICATED environment, deliberately not `pr-preview`:
+        # deploy-pr-preview.yml requires `pr-preview` to be approval-gated so
+        # PR-controlled code can't reach Infisical secrets unreviewed, and an
+        # approval gate on an unattended cron run would stall it forever —
+        # silently restoring the exact breakage this workflow exists to prevent.
+        #
+        # Two invariants keep this working; both live outside the repo:
+        #   1. `maintenance` must NEVER gain required reviewers or a deployment
+        #      branch policy (Settings > Environments) — scheduled runs have no
+        #      human to approve them.
+        #   2. `repo:<org>/<repo>:environment:maintenance` must stay allowlisted
+        #      as an OIDC subject on the Infisical machine identity.
+        environment: maintenance
         env:
             INFISICAL_ENV_SLUG: dev
         steps:
