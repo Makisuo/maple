@@ -15,7 +15,7 @@ import { Link } from "@tanstack/react-router"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import { Button } from "@maple/ui/components/ui/button"
 import { AlertWarningIcon, CircleWarningIcon } from "@/components/icons"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 
 /** Metrics scraping is off. Said the same way wherever a metric would have been. */
 export const METRICS_PAUSED_MESSAGE = "Branch metrics are paused — add a metrics token to collect them."
@@ -61,8 +61,8 @@ export function PlanetScaleRevokedNotice() {
 			<CircleWarningIcon />
 			<AlertTitle>PlanetScale authorization revoked</AlertTitle>
 			<AlertDescription>
-				Maple can no longer read this organization, so databases, branches, and metrics are frozen
-				at their last known state. Reconnecting restores them.
+				Maple can no longer read this organization, so databases, branches, and metrics are frozen at
+				their last known state. Reconnecting restores them.
 			</AlertDescription>
 			<AlertAction>
 				<Button size="sm" render={<Link {...integrationLink} />}>

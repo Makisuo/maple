@@ -12,6 +12,7 @@ import {
 } from "@maple/ui/components/ui/dialog"
 import { BellIcon, CheckIcon, GridSquareCirclePlusIcon, LinkIcon } from "@/components/icons"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { encodeAlertChartToSearchParam } from "@/lib/alerts/widget-chart-param"
 import type { WidgetDataSource } from "@/components/dashboard-builder/types"
 import type { MetricsQueryDraft } from "@/lib/query-builder/model"
@@ -36,7 +37,8 @@ interface MetricGraduationActionsProps {
 export function MetricGraduationActions({ draft }: MetricGraduationActionsProps) {
 	const navigate = useNavigate()
 	const [dialogOpen, setDialogOpen] = React.useState(false)
-	const [copied, setCopied] = React.useState(false)
+	// Silent: the button swaps to a check icon, so a toast would double up.
+	const { copied, copy } = useCopyToClipboard("Link", { silent: true })
 
 	const handleCreateAlert = () => {
 		const chart = encodeAlertChartToSearchParam({
@@ -51,12 +53,7 @@ export function MetricGraduationActions({ draft }: MetricGraduationActionsProps)
 		void navigate({ to: "/alerts/create", search: chart ? { chart } : {} })
 	}
 
-	const handleCopyLink = () => {
-		void navigator.clipboard.writeText(window.location.href).then(() => {
-			setCopied(true)
-			setTimeout(() => setCopied(false), 2000)
-		})
-	}
+	const handleCopyLink = () => copy(window.location.href)
 
 	return (
 		<div className="flex items-center gap-2">

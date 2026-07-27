@@ -71,65 +71,72 @@ function InfraPageContent() {
 	)
 
 	return (
-		<DashboardLayout breadcrumbs={[{ label: "Infrastructure" }]}>
-			<div className="space-y-6">
-				<PageHero
-					title="Infrastructure"
-					description="Hosts, containers, and Kubernetes nodes reporting to Maple."
-					actions={heroActions}
-				/>
-
-				{Result.builder(hostsResult)
-					.onInitial(() => (
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Infrastructure" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Scroll>
 						<div className="space-y-6">
-							<HostSummaryCardsLoading />
-							<HostTableLoading />
-						</div>
-					))
-					.onError((err) => <QueryErrorState error={err} />)
-					.onSuccess((response, result) => {
-						const hosts = response.data
-
-						if (hosts.length === 0 && !search.trim()) {
-							return (
-								<Empty className="py-16">
-									<EmptyHeader>
-										<EmptyMedia variant="icon">
-											<ServerIcon size={16} />
-										</EmptyMedia>
-										<EmptyTitle>No hosts reporting yet</EmptyTitle>
-										<EmptyDescription>
-											Install the Maple infrastructure agent on a host, container, or
-											Kubernetes cluster to start collecting CPU, memory, disk, and
-											network metrics.
-										</EmptyDescription>
-									</EmptyHeader>
-									<Button onClick={() => setInstallOpen(true)}>
-										<PlusIcon size={14} />
-										Add host
-									</Button>
-								</Empty>
-							)
-						}
-
-						return (
-							<FleetView
-								hosts={hosts}
-								waiting={Boolean(result.waiting)}
-								startTime={startTime}
-								endTime={endTime}
-								search={search}
-								onSearchChange={setSearch}
-								statusFilter={statusFilter}
-								onStatusFilterChange={setStatusFilter}
+							<PageHero
+								title="Infrastructure"
+								description="Hosts, containers, and Kubernetes nodes reporting to Maple."
+								actions={heroActions}
 							/>
-						)
-					})
-					.render()}
-			</div>
 
-			<InstallHostModal open={installOpen} onOpenChange={setInstallOpen} />
-		</DashboardLayout>
+							{Result.builder(hostsResult)
+								.onInitial(() => (
+									<div className="space-y-6">
+										<HostSummaryCardsLoading />
+										<HostTableLoading />
+									</div>
+								))
+								.onError((err) => <QueryErrorState error={err} />)
+								.onSuccess((response, result) => {
+									const hosts = response.data
+
+									if (hosts.length === 0 && !search.trim()) {
+										return (
+											<Empty className="py-16">
+												<EmptyHeader>
+													<EmptyMedia variant="icon">
+														<ServerIcon size={16} />
+													</EmptyMedia>
+													<EmptyTitle>No hosts reporting yet</EmptyTitle>
+													<EmptyDescription>
+														Install the Maple infrastructure agent on a host,
+														container, or Kubernetes cluster to start collecting
+														CPU, memory, disk, and network metrics.
+													</EmptyDescription>
+												</EmptyHeader>
+												<Button onClick={() => setInstallOpen(true)}>
+													<PlusIcon size={14} />
+													Add host
+												</Button>
+											</Empty>
+										)
+									}
+
+									return (
+										<FleetView
+											hosts={hosts}
+											waiting={Boolean(result.waiting)}
+											startTime={startTime}
+											endTime={endTime}
+											search={search}
+											onSearchChange={setSearch}
+											statusFilter={statusFilter}
+											onStatusFilterChange={setStatusFilter}
+										/>
+									)
+								})
+								.render()}
+						</div>
+
+						<InstallHostModal open={installOpen} onOpenChange={setInstallOpen} />
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

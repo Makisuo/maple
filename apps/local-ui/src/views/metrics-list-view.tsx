@@ -23,7 +23,7 @@ import {
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE } from "../lib/time"
 import { PageShell } from "../components/page-shell"
-import { RefreshButton, TimeRangeSelect, Toolbar, ToolbarSearch, ToolbarStat } from "../components/toolbar"
+import { RefreshButton, TimeRangeSelect, Toolbar, ToolbarSearch, ToolbarStat, ToolbarStats } from "../components/toolbar"
 import { EmptyState, ErrorState, ListSkeleton } from "../components/view-states"
 
 interface MetricsListViewProps {
@@ -73,23 +73,19 @@ export function MetricsListView({ onSelectMetric }: MetricsListViewProps) {
 	)
 
 	const toolbar = (
-		<Toolbar
-			search={
-				<ToolbarSearch
-					query={search ?? ""}
-					onSearch={(value) => setParams({ q: value ?? null })}
-					placeholder="Filter by metric name…"
-				/>
-			}
-			stats={
-				<>
-					<ToolbarStat value={entries.length} label="metrics" />
-					<ToolbarStat value={totalDataPoints} label="datapoints" />
-					<RefreshButton />
-					<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
-				</>
-			}
-		/>
+		<Toolbar>
+			<ToolbarSearch
+				query={search ?? ""}
+				onSearch={(value) => setParams({ q: value ?? null })}
+				placeholder="Filter by metric name…"
+			/>
+			<ToolbarStats>
+				<ToolbarStat value={entries.length} label="metrics" />
+				<ToolbarStat value={totalDataPoints} label="datapoints" />
+				<RefreshButton />
+				<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
+			</ToolbarStats>
+		</Toolbar>
 	)
 
 	return (

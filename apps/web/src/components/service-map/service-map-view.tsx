@@ -1,3 +1,4 @@
+import { formatLatency, formatPercent } from "@maple/ui/format"
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useCallback } from "react"
 import {
 	ReactFlow,
@@ -46,7 +47,7 @@ import {
 } from "@maple/ui/components/ui/empty"
 import { Button } from "@maple/ui/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
-import { formatBucketLabel } from "@/lib/format"
+import { formatBucketLabel } from "@maple/ui/format"
 import {
 	ArrowRightIcon,
 	CloudflareIcon,
@@ -95,11 +96,7 @@ import {
 } from "./service-map-particles"
 import { resolveDbNodePresentation, resolvePlanetScaleDbPresentation } from "./service-map-db"
 import { PlanetScaleTopQueries } from "@/components/infra/planetscale/planetscale-top-queries"
-import {
-	formatStoragePercent,
-	lagClass,
-	utilizationClass,
-} from "@/components/infra/planetscale/metrics"
+import { formatStoragePercent, lagClass, utilizationClass } from "@/components/infra/planetscale/metrics"
 import {
 	buildFlowElements,
 	CLOUDFLARE_COLOR,
@@ -176,11 +173,6 @@ function formatRate(value: number): string {
 	if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
 	if (value >= 1) return value.toFixed(1)
 	return value.toFixed(2)
-}
-
-function formatLatency(ms: number): string {
-	if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`
-	return `${ms.toFixed(1)}ms`
 }
 
 function getHealthDotClass(errorRate: number): string {
@@ -587,11 +579,6 @@ function ServiceDetailPanel({
 	)
 }
 
-function formatPercent(value: number | null): string {
-	if (value == null) return "—"
-	return `${(value * 100).toFixed(0)}%`
-}
-
 function ServiceWorkloadRow({ workload }: { workload: ServiceWorkload }) {
 	const knownKind: "deployment" | "statefulset" | "daemonset" | null =
 		workload.workloadKind === "deployment" ||
@@ -627,13 +614,17 @@ function ServiceWorkloadRow({ workload }: { workload: ServiceWorkload }) {
 				<div className="flex items-center justify-between rounded bg-muted/30 px-2 py-1">
 					<span className="text-muted-foreground">CPU</span>
 					<span className="font-mono tabular-nums text-foreground">
-						{formatPercent(workload.avgCpuLimitUtilization)}
+						{workload.avgCpuLimitUtilization == null
+							? "—"
+							: formatPercent(workload.avgCpuLimitUtilization)}
 					</span>
 				</div>
 				<div className="flex items-center justify-between rounded bg-muted/30 px-2 py-1">
 					<span className="text-muted-foreground">Memory</span>
 					<span className="font-mono tabular-nums text-foreground">
-						{formatPercent(workload.avgMemoryLimitUtilization)}
+						{workload.avgMemoryLimitUtilization == null
+							? "—"
+							: formatPercent(workload.avgMemoryLimitUtilization)}
 					</span>
 				</div>
 			</div>

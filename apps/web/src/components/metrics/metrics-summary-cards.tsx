@@ -1,3 +1,4 @@
+import { formatNumber } from "@maple/ui/format"
 import { Result, useAtomValue, useAtomRefresh } from "@/lib/effect-atom"
 import { PlusIcon, ChartLineIcon, ChartBarIcon, ChartBarTrendUpIcon } from "@/components/icons"
 
@@ -8,16 +9,6 @@ import { type ListMetricsInput } from "@/api/warehouse/metrics"
 import { getMetricsSummaryResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 
 export type MetricType = ListMetricsInput["metricType"]
-
-function formatNumber(num: number): string {
-	if (num >= 1_000_000) {
-		return `${(num / 1_000_000).toFixed(1)}M`
-	}
-	if (num >= 1_000) {
-		return `${(num / 1_000).toFixed(1)}K`
-	}
-	return num.toLocaleString()
-}
 
 const cardConfig = [
 	{

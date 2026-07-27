@@ -22,7 +22,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/u
 import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
 import { type Log, type LogsResponse } from "@/api/warehouse/logs"
 import { LogDetailSheet } from "@/components/logs/log-detail-sheet"
-import { formatDuration } from "@/lib/format"
+import { formatDuration } from "@maple/ui/format"
 import { cn } from "@maple/ui/utils"
 import { getCacheInfo, cacheResultStyles } from "@maple/ui/lib/cache"
 import { getCloudPlatform, outcomeBadgeStyle } from "@maple/ui/lib/cloud-platforms"

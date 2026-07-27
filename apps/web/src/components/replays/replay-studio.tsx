@@ -5,7 +5,7 @@ import { ReplayPlayerProvider } from "@/components/replays/replay-player-context
 import { ReplayEditorTimeline, type SessionTraceSummary } from "@/components/replays/replay-editor-timeline"
 import { SessionEventsPanel, type EventRow } from "@/components/replays/session-events-panel"
 import {
-	formatDuration,
+	formatSessionDuration,
 	recordedMarker,
 	type ReplayPartitionWindow,
 } from "@/components/replays/replay-format"
@@ -147,14 +147,14 @@ export function ReplayStudio({
  *  supplied them). Only an error count > 0 takes colour. */
 function StatStrip({ session }: { session: ReplayStudioSession }) {
 	const items = [
-		{ label: "Duration", value: formatDuration(session.durationMs) },
+		{ label: "Duration", value: formatSessionDuration(session.durationMs) },
 		// `activeTimeMs === undefined` only on the preview fixture; a real session
 		// with no distilled events sends `null`, which renders as "—".
 		...(session.activeTimeMs !== undefined
-			? [{ label: "Active", value: formatDuration(session.activeTimeMs) }]
+			? [{ label: "Active", value: formatSessionDuration(session.activeTimeMs) }]
 			: []),
 		...(session.idleTimeMs !== undefined
-			? [{ label: "Idle", value: formatDuration(session.idleTimeMs) }]
+			? [{ label: "Idle", value: formatSessionDuration(session.idleTimeMs) }]
 			: []),
 		{ label: "Clicks", value: String(session.clickCount) },
 		{ label: "Pages", value: String(session.pageViews || 1) },

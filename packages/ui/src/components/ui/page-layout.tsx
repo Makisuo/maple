@@ -20,6 +20,13 @@ interface PageLayoutContextValue {
 	 * did, filters would render as a sheet with no way to open it.
 	 */
 	filterSidebarCollapsed: boolean
+	/**
+	 * Whether a `FilterSidebar` is actually mounted. The trigger lives in the page header and the
+	 * sidebar in the body, so the trigger cannot see it as a child — without this it would render a
+	 * button that opens a sheet that doesn't exist. Set by `FilterSidebar` on mount.
+	 */
+	hasFilterSidebar: boolean
+	setHasFilterSidebar: (present: boolean) => void
 }
 
 const PageLayoutContext = React.createContext<PageLayoutContextValue | null>(null)
@@ -37,6 +44,7 @@ function usePageLayout() {
 function Root({ children, className }: { children: React.ReactNode; className?: string }) {
 	const [isScrolled, setIsScrolled] = React.useState(false)
 	const [filterSheetOpen, setFilterSheetOpen] = React.useState(false)
+	const [hasFilterSidebar, setHasFilterSidebar] = React.useState(false)
 	const filterSidebarCollapsed = useMediaQuery("max-lg")
 
 	const ctx = React.useMemo(
@@ -46,8 +54,10 @@ function Root({ children, className }: { children: React.ReactNode; className?: 
 			filterSheetOpen,
 			setFilterSheetOpen,
 			filterSidebarCollapsed,
+			hasFilterSidebar,
+			setHasFilterSidebar,
 		}),
-		[isScrolled, filterSheetOpen, filterSidebarCollapsed],
+		[isScrolled, filterSheetOpen, filterSidebarCollapsed, hasFilterSidebar],
 	)
 
 	return (
@@ -62,6 +72,44 @@ function Root({ children, className }: { children: React.ReactNode; className?: 
 /* -------------------------------------------------------------------------------------------------
  * Header
  * -------------------------------------------------------------------------------------------------*/
+
+/**
+ * The page title. Exported so a route rendering custom header content (a title
+ * beside a badge, a breadcrumb-style compound name) still gets the one canonical
+ * `<h1>` instead of hand-rolling the class string — which is how six different
+ * page-title typographies accumulated.
+ */
+function Title({
+	children,
+	title,
+	className,
+}: {
+	children: React.ReactNode
+	/** `title` attribute for the native tooltip when the heading truncates. */
+	title?: string
+	className?: string
+}) {
+	return (
+		<h1
+			data-slot="page-title"
+			className={cn(
+				"font-display text-3xl font-semibold tracking-tight truncate leading-[1.1]",
+				className,
+			)}
+			title={title}
+		>
+			{children}
+		</h1>
+	)
+}
+
+function Description({ children, className }: { children: React.ReactNode; className?: string }) {
+	return (
+		<p data-slot="page-description" className={cn("text-muted-foreground", className)}>
+			{children}
+		</p>
+	)
+}
 
 interface HeaderProps {
 	children?: React.ReactNode
@@ -84,16 +132,11 @@ function Header({ children, title, titleContent, description, className }: Heade
 			)}
 		>
 			<div className="min-w-0 flex-1">
-				{titleContent ??
-					(title && (
-						<h1
-							className="font-display text-3xl font-semibold tracking-tight truncate leading-[1.1]"
-							title={title}
-						>
-							{title}
-						</h1>
-					))}
-				{description && <p className="text-muted-foreground">{description}</p>}
+				{/* `title`/`description` stay plain strings — that's data, and it's the
+				    30-site happy path. They render *through* `Title`/`Description` so
+				    there is exactly one implementation of each. */}
+				{titleContent ?? (title && <Title title={title}>{title}</Title>)}
+				{description && <Description>{description}</Description>}
 			</div>
 			{children}
 		</div>
@@ -163,7 +206,16 @@ function FilterSidebar({
 	className?: string
 	width?: string
 }) {
-	const { filterSidebarCollapsed, filterSheetOpen, setFilterSheetOpen } = usePageLayout()
+	const { filterSidebarCollapsed, filterSheetOpen, setFilterSheetOpen, setHasFilterSidebar } =
+		usePageLayout()
+
+	// Announce presence to the trigger, which sits in the page header and so can't see this as a
+	// child. A layout effect rather than a passive one: it lands before paint, so a filtered page
+	// never shows a frame with the trigger missing.
+	React.useLayoutEffect(() => {
+		setHasFilterSidebar(true)
+		return () => setHasFilterSidebar(false)
+	}, [setHasFilterSidebar])
 
 	if (filterSidebarCollapsed) {
 		return (
@@ -243,11 +295,15 @@ function RightSidebar({ children, className }: { children: React.ReactNode; clas
  * Opens the filter sheet. `children` must be a single interactive element (a Button) — the click
  * handler is cloned onto it rather than wrapped around it, so the trigger stays one real button and
  * keeps its keyboard behaviour.
+ *
+ * Renders nothing unless the sidebar has collapsed to a sheet *and* a `FilterSidebar` is mounted to
+ * open. Callers can therefore drop this in unconditionally; a page with no filters gets no button
+ * rather than one that opens nothing.
  */
 function FilterSidebarTrigger({ children }: { children: React.ReactElement<{ onClick?: () => void }> }) {
-	const { filterSidebarCollapsed, setFilterSheetOpen } = usePageLayout()
+	const { filterSidebarCollapsed, hasFilterSidebar, setFilterSheetOpen } = usePageLayout()
 
-	if (!filterSidebarCollapsed) return null
+	if (!filterSidebarCollapsed || !hasFilterSidebar) return null
 
 	return React.cloneElement(children, { onClick: () => setFilterSheetOpen(true) })
 }
@@ -260,6 +316,8 @@ export const PageLayout = {
 	Root,
 	Header,
 	HeaderActions,
+	Title,
+	Description,
 	StickyArea,
 	Body,
 	FilterSidebar,

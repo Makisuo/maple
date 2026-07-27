@@ -10,13 +10,15 @@ import {
 	InputGroupInput,
 } from "@maple/ui/components/ui/input-group"
 import { CheckIcon, CopyIcon } from "@maple/ui/components/icons"
+import { useClipboard } from "@maple/ui/hooks/use-clipboard"
 
 export function CopyableField({ label, value }: { label: string; value: string }) {
+	const clipboard = useClipboard()
 	const [copied, setCopied] = useState(false)
 
 	async function handleCopy() {
 		try {
-			await navigator.clipboard.writeText(value)
+			await clipboard.copy(value)
 			setCopied(true)
 			setTimeout(() => setCopied(false), 1500)
 		} catch {

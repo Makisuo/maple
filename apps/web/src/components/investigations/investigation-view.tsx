@@ -13,7 +13,7 @@ import { FlueClientProvider } from "@/components/chat/flue-client-provider"
 import type { InvestigationContext } from "@/components/chat/investigation-context"
 import { CircleWarningIcon, PulseIcon } from "@/components/icons"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
@@ -120,64 +120,89 @@ export function InvestigationView({
 	}
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[
-				{ label: "Investigations", href: "/investigations" },
-				{ label: investigation.snapshot.title },
-			]}
-			title={investigation.snapshot.title}
-			description={investigation.snapshot.scope ?? undefined}
-			headerActions={
-				<div className="flex flex-wrap items-center justify-end gap-2">
-					{(investigation.severity ?? investigation.snapshot.severity) ? (
-						<Badge
-							variant="outline"
-							className={cn(
-								"capitalize",
-								SEVERITY_TONE[
-									investigation.severity ?? investigation.snapshot.severity ?? ""
-								],
-							)}
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[
+					{ label: "Investigations", href: "/investigations" },
+					{ label: investigation.snapshot.title },
+				]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title={investigation.snapshot.title}
+							description={investigation.snapshot.scope ?? undefined}
 						>
-							{investigation.severity ?? investigation.snapshot.severity}
-						</Badge>
-					) : null}
-					<Badge variant="outline" className={cn("capitalize", STATUS_TONE[investigation.status])}>
-						{investigation.status}
-					</Badge>
-					{readOnly || investigation.status === "failed" ? (
-						<Button size="sm" variant="outline" onClick={handleRestart} disabled={busy !== null}>
-							{readOnly ? "Reopen" : "Retry"}
-						</Button>
-					) : (
-						<Button size="sm" variant="outline" onClick={handleResolve} disabled={busy !== null}>
-							Resolve
-						</Button>
-					)}
-				</div>
-			}
-		>
-			<div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
-				<section
-					aria-label="Investigation transcript"
-					className="flex min-h-[620px] flex-col overflow-hidden border bg-card/20 xl:h-[calc(100dvh-12rem)]"
-				>
-					<InvestigationStateBanner investigation={investigation} />
-					<EscalationAudit investigation={investigation} />
-					<FlueClientProvider>
-						<ChatConversation
-							tabId={`inv-${investigation.id}`}
-							isActive
-							mode="investigation"
-							investigationContext={context}
-							readOnly={readOnly}
-							fallbackDiagnosis={investigation.report}
-						/>
-					</FlueClientProvider>
-				</section>
-				<ContextRail investigation={investigation} />
-			</div>
-		</DashboardLayout>
+							<div className="flex flex-wrap items-center justify-end gap-2">
+								{(investigation.severity ?? investigation.snapshot.severity) ? (
+									<Badge
+										variant="outline"
+										className={cn(
+											"capitalize",
+											SEVERITY_TONE[
+												investigation.severity ??
+													investigation.snapshot.severity ??
+													""
+											],
+										)}
+									>
+										{investigation.severity ?? investigation.snapshot.severity}
+									</Badge>
+								) : null}
+								<Badge
+									variant="outline"
+									className={cn("capitalize", STATUS_TONE[investigation.status])}
+								>
+									{investigation.status}
+								</Badge>
+								{readOnly || investigation.status === "failed" ? (
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={handleRestart}
+										disabled={busy !== null}
+									>
+										{readOnly ? "Reopen" : "Retry"}
+									</Button>
+								) : (
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={handleResolve}
+										disabled={busy !== null}
+									>
+										Resolve
+									</Button>
+								)}
+							</div>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+							<section
+								aria-label="Investigation transcript"
+								className="flex min-h-[620px] flex-col overflow-hidden border bg-card/20 xl:h-[calc(100dvh-12rem)]"
+							>
+								<InvestigationStateBanner investigation={investigation} />
+								<EscalationAudit investigation={investigation} />
+								<FlueClientProvider>
+									<ChatConversation
+										tabId={`inv-${investigation.id}`}
+										isActive
+										mode="investigation"
+										investigationContext={context}
+										readOnly={readOnly}
+										fallbackDiagnosis={investigation.report}
+									/>
+								</FlueClientProvider>
+							</section>
+							<ContextRail investigation={investigation} />
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

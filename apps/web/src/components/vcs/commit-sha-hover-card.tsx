@@ -1,3 +1,4 @@
+import { formatRelativeFrom, formatRelativeShortFrom } from "@maple/ui/time-format"
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
@@ -256,7 +257,7 @@ function CommitCard({ commit, compact = false }: { commit: VcsCommitDetailRespon
 				<div className="flex items-center justify-between gap-2 text-muted-foreground">
 					<CopyableSha sha={commit.sha} />
 					<span title={formatExact(commit.committedAt)} className="cursor-default">
-						{formatRelative(commit.committedAt)}
+						{formatRelativeFrom(commit.committedAt)}
 					</span>
 				</div>
 			</div>
@@ -359,7 +360,7 @@ function CommitListRowLink({ commit }: { commit: VcsCommitDetailResponse }) {
 						title={formatExact(commit.committedAt)}
 						className="ml-auto shrink-0 tabular-nums text-muted-foreground/80"
 					>
-						{formatRelative(commit.committedAt, { short: true })}
+						{formatRelativeShortFrom(commit.committedAt)}
 					</span>
 				</span>
 			</div>
@@ -603,43 +604,3 @@ function describeError(error: unknown): {
 function formatExact(epochMs: number): string {
 	return new Date(epochMs).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
 }
-
-/**
- * Relative age off a single threshold ladder (s/m/h/d/mo/y).
- *
- *  - Default: the full "3h ago" form, with a seconds tier and a "just now" floor.
- *  - `short`: the compact "3h" form (no suffix, sub-minute collapses to "now") for
- *    the dense commit-list rows where horizontal space is tight.
- */
-export function formatRelative(epochMs: number, { short = false }: { short?: boolean } = {}): string {
-	const diff = Date.now() - epochMs
-	const suffix = short ? "" : " ago"
-	// Sub-minute floor. Default shows a live seconds tier ("Ns ago", "just now" for a
-	// clock-skewed future timestamp); short collapses everything under a minute (incl.
-	// a negative diff) to "now" since the dense list rows have no room for a seconds tier.
-	if (diff < 60_000) {
-		if (short) return "now"
-		if (diff < 0) return "just now"
-		return `${Math.floor(diff / 1000)}s${suffix}`
-	}
-	// Coarsening ladder from minutes up: the first unit whose next boundary the diff
-	// hasn't reached wins (60m→1h, 24h→1d, 30d→1mo, 12mo→1y). `y` uses /365 days, not
-	// /12 months, matching the original.
-	const days = Math.floor(diff / 86_400_000)
-	for (const { limit, div, unit } of RELATIVE_TIERS) {
-		const value = Math.floor(diff / div)
-		if (value < limit) return `${value}${unit}${suffix}`
-	}
-	return `${Math.floor(days / 365)}y${suffix}`
-}
-
-// Minutes-and-up tiers for `formatRelative`, finest unit first. Each entry's
-// `value = floor(diff / div)` is emitted when it's still under `limit` (the point at
-// which the next-coarser unit takes over). The sub-minute tier and the final years
-// fallback are handled inline (they don't fit the uniform `floor(diff/div)` shape).
-const RELATIVE_TIERS = [
-	{ limit: 60, div: 60_000, unit: "m" }, // < 60 minutes
-	{ limit: 24, div: 3_600_000, unit: "h" }, // < 24 hours
-	{ limit: 30, div: 86_400_000, unit: "d" }, // < 30 days
-	{ limit: 12, div: 2_592_000_000, unit: "mo" }, // < 12 months (30-day months)
-] as const

@@ -10,7 +10,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ServiceMapView } from "@/components/service-map/service-map-view"
 import type { DeclutterFocus } from "@/components/service-map/service-map-declutter"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { QueryErrorState } from "@/components/common/query-error-state"
@@ -23,15 +23,13 @@ const ALL_ENVIRONMENTS = "__all__"
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
 
 const serviceMapSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
 	environment: Schema.optional(Schema.String),
 	// Focus mode: dim/hide everything outside a service's neighborhood. Kept in
 	// the URL so a focused view is shareable / survives reloads.
 	focusService: Schema.optional(Schema.String),
 	focusHops: Schema.optional(Schema.Literals([1, 2])),
 	focusMode: Schema.optional(Schema.Literals(["dim", "hide"])),
+	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/service-map")({
@@ -133,56 +131,64 @@ function ServiceMapContent() {
 	}
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Service Map" }]}
-			title="Service Map"
-			description="Visualize service-to-service dependencies and data flow."
-			headerActions={
-				<div className="flex items-center gap-2">
-					<Select
-						items={environmentItems}
-						value={selectedEnvironment}
-						onValueChange={handleEnvironmentChange}
-					>
-						<SelectTrigger size="sm">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{environmentItems.map((item) => (
-								<SelectItem key={item.value} value={item.value}>
-									{item.label}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-					<TimeRangeHeaderControls
-						startTime={search.startTime}
-						endTime={search.endTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-						presets={LONG_RANGE_PRESET_OPTIONS}
-						maxRangeSeconds={ONE_YEAR_SECONDS}
-						onTimeChange={handleTimeChange}
-					/>
-				</div>
-			}
-		>
-			{Result.isFailure(facetsResult) ? (
-				<QueryErrorState
-					error={facetsResult.cause}
-					titleOverride="Failed to load service environments"
-					onRetry={refreshFacets}
-				/>
-			) : (
-				<div className="-mx-4 -mb-4 h-[calc(100vh-10rem)]">
-					<ServiceMapView
-						startTime={effectiveStartTime}
-						endTime={effectiveEndTime}
-						deploymentEnv={deploymentEnv}
-						focus={focus}
-						onFocusChange={handleFocusChange}
-					/>
-				</div>
-			)}
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Service Map" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Service Map"
+							description="Visualize service-to-service dependencies and data flow."
+						>
+							<div className="flex items-center gap-2">
+								<Select
+									items={environmentItems}
+									value={selectedEnvironment}
+									onValueChange={handleEnvironmentChange}
+								>
+									<SelectTrigger size="sm">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{environmentItems.map((item) => (
+											<SelectItem key={item.value} value={item.value}>
+												{item.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+								<TimeRangeHeaderControls
+									startTime={search.startTime}
+									endTime={search.endTime}
+									presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+									presets={LONG_RANGE_PRESET_OPTIONS}
+									maxRangeSeconds={ONE_YEAR_SECONDS}
+									onTimeChange={handleTimeChange}
+								/>
+							</div>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						{Result.isFailure(facetsResult) ? (
+							<QueryErrorState
+								error={facetsResult.cause}
+								titleOverride="Failed to load service environments"
+								onRetry={refreshFacets}
+							/>
+						) : (
+							<div className="-mx-4 -mb-4 h-[calc(100vh-10rem)]">
+								<ServiceMapView
+									startTime={effectiveStartTime}
+									endTime={effectiveEndTime}
+									deploymentEnv={deploymentEnv}
+									focus={focus}
+									onFocusChange={handleFocusChange}
+								/>
+							</div>
+						)}
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

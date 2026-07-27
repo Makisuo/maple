@@ -8,7 +8,7 @@ import {
 	PencilIcon,
 	TrashIcon,
 } from "@/components/icons"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card } from "@maple/ui/components/ui/card"
 import {

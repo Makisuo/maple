@@ -23,26 +23,28 @@ import { PaymentFailedBanner } from "@/components/billing/payment-failed-banner"
 import { Link, defaultParseSearch } from "@tanstack/react-router"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
-interface BreadcrumbItem {
+/* -------------------------------------------------------------------------------------------------
+ * DashboardLayout — the app's page shell, as a compound component.
+ *
+ * Presence is composition: a page has a filter sidebar because it renders
+ * `<DashboardLayout.Filters>`, not because it passed a `filterSidebar` prop that
+ * the shell then had to test for. That removed six ReactNode slot props and the
+ * `hasHeader = title || titleContent || description || headerActions` derivation
+ * they forced.
+ *
+ * The nesting is real, not decorative: `Filters | Content | RightPanel` are flex
+ * siblings inside `Body`, and `Sticky | Scroll` stack inside `Content`. Slot
+ * registration through context or portals could hide that, but both need an
+ * effect or a DOM node that doesn't exist during SSR — so the tree you write is
+ * the tree that renders.
+ *
+ * `breadcrumbs` stays a prop because it is data (a `{label, href}[]`), not
+ * composition.
+ * -----------------------------------------------------------------------------------------------*/
+
+interface BreadcrumbEntry {
 	label: string
 	href?: string
-}
-
-interface DashboardLayoutProps {
-	children: React.ReactNode
-	breadcrumbs: BreadcrumbItem[]
-	title?: string
-	titleContent?: React.ReactNode
-	description?: string
-	headerActions?: React.ReactNode
-	/** Render a filter sidebar flush to the left of the content area, spanning full height. */
-	filterSidebar?: React.ReactNode
-	/** Content pinned above the scrollable children (e.g. volume charts). */
-	stickyContent?: React.ReactNode
-	/** Render actions in the breadcrumb header bar, right-aligned. */
-	breadcrumbActions?: React.ReactNode
-	/** Render a panel on the right side of the content area (e.g. AI chat). */
-	rightSidebar?: React.ReactNode
 }
 
 function parseSearchFromHref(href: string): { pathname: string; search?: Record<string, unknown> } {
@@ -53,20 +55,8 @@ function parseSearchFromHref(href: string): { pathname: string; search?: Record<
 	return { pathname, search: defaultParseSearch(queryString) as Record<string, unknown> }
 }
 
-export function DashboardLayout({
-	children,
-	breadcrumbs,
-	title,
-	titleContent,
-	description,
-	headerActions,
-	filterSidebar,
-	stickyContent,
-	breadcrumbActions,
-	rightSidebar,
-}: DashboardLayoutProps) {
-	const hasHeader = title || titleContent || description || headerActions
-
+/** Sidebar + inset + skip link + `PageLayout.Root`. Everything else composes inside. */
+function Root({ children }: { children: React.ReactNode }) {
 	return (
 		<SidebarProvider>
 			<AppSidebar />
@@ -77,109 +67,160 @@ export function DashboardLayout({
 				>
 					Skip to main content
 				</a>
-				<PageLayout.Root>
-					<header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-						<SidebarTrigger className="-ml-1" />
-						<Separator orientation="vertical" className="mr-2 h-4" />
-						<Breadcrumb>
-							<BreadcrumbList>
-								{breadcrumbs.map((item, index) => (
-									<React.Fragment key={item.label}>
-										{index > 0 && <BreadcrumbSeparator />}
-										<BreadcrumbItem>
-											{item.href ? (
-												(() => {
-													const { pathname, search } = parseSearchFromHref(
-														item.href,
-													)
-													if (!search) {
-														return (
-															<BreadcrumbLink render={<Link to={pathname} />}>
-																{item.label}
-															</BreadcrumbLink>
-														)
-													}
-													return (
-														<BreadcrumbLink
-															render={
-																<Link
-																	to={pathname}
-																	search={search as never}
-																/>
-															}
-														>
-															{item.label}
-														</BreadcrumbLink>
-													)
-												})()
-											) : (
-												<BreadcrumbPage>{item.label}</BreadcrumbPage>
-											)}
-										</BreadcrumbItem>
-									</React.Fragment>
-								))}
-							</BreadcrumbList>
-						</Breadcrumb>
-						<div className="ml-auto flex shrink-0 items-center gap-2">
-							<Tooltip>
-								<TooltipTrigger
-									render={
-										<Button
-											variant="outline"
-											size="icon-sm"
-											aria-label="Open AI chat"
-											onClick={openGlobalChat}
-										/>
-									}
-								>
-									<ChatBubbleSparkleIcon size={16} />
-								</TooltipTrigger>
-								<TooltipContent className="flex items-center gap-1.5">
-									Ask Maple AI <Kbd>C</Kbd>
-								</TooltipContent>
-							</Tooltip>
-							<ConnectButton />
-							{filterSidebar && (
-								<PageLayout.FilterSidebarTrigger>
-									<Button variant="outline" size="icon-sm" aria-label="Open filters">
-										<LayoutLeftIcon size={16} />
-									</Button>
-								</PageLayout.FilterSidebarTrigger>
-							)}
-							{breadcrumbActions}
-						</div>
-					</header>
-					{isClerkAuthEnabled && <PaymentFailedBanner />}
-					{isClerkAuthEnabled && <QuotaBanner />}
-					<PageLayout.Body>
-						{filterSidebar && (
-							<PageLayout.FilterSidebar>{filterSidebar}</PageLayout.FilterSidebar>
-						)}
-						<PageLayout.Content>
-							{(hasHeader || stickyContent) && (
-								<PageLayout.StickyArea>
-									{hasHeader && (
-										<PageLayout.Header
-											title={title}
-											titleContent={titleContent}
-											description={description}
-										>
-											{headerActions && (
-												<PageLayout.HeaderActions>
-													{headerActions}
-												</PageLayout.HeaderActions>
-											)}
-										</PageLayout.Header>
-									)}
-									{stickyContent}
-								</PageLayout.StickyArea>
-							)}
-							<PageLayout.ScrollArea>{children}</PageLayout.ScrollArea>
-						</PageLayout.Content>
-						{rightSidebar && <PageLayout.RightSidebar>{rightSidebar}</PageLayout.RightSidebar>}
-					</PageLayout.Body>
-				</PageLayout.Root>
+				<PageLayout.Root>{children}</PageLayout.Root>
 			</SidebarInset>
 		</SidebarProvider>
 	)
+}
+
+/**
+ * The top bar: sidebar trigger, breadcrumb trail, and the persistent right-hand
+ * cluster (AI chat, connection status, the mobile filter trigger). `children` are
+ * extra page-specific actions, appended to that cluster.
+ */
+function Breadcrumbs({ items, children }: { items: BreadcrumbEntry[]; children?: React.ReactNode }) {
+	return (
+		<header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+			<SidebarTrigger className="-ml-1" />
+			<Separator orientation="vertical" className="mr-2 h-4" />
+			<Breadcrumb>
+				<BreadcrumbList>
+					{items.map((item, index) => (
+						<React.Fragment key={item.label}>
+							{index > 0 && <BreadcrumbSeparator />}
+							<BreadcrumbItem>
+								{item.href ? (
+									(() => {
+										const { pathname, search } = parseSearchFromHref(item.href)
+										if (!search) {
+											return (
+												<BreadcrumbLink render={<Link to={pathname} />}>
+													{item.label}
+												</BreadcrumbLink>
+											)
+										}
+										return (
+											<BreadcrumbLink
+												render={<Link to={pathname} search={search as never} />}
+											>
+												{item.label}
+											</BreadcrumbLink>
+										)
+									})()
+								) : (
+									<BreadcrumbPage>{item.label}</BreadcrumbPage>
+								)}
+							</BreadcrumbItem>
+						</React.Fragment>
+					))}
+				</BreadcrumbList>
+			</Breadcrumb>
+			<div className="ml-auto flex shrink-0 items-center gap-2">
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								variant="outline"
+								size="icon-sm"
+								aria-label="Open AI chat"
+								onClick={openGlobalChat}
+							/>
+						}
+					>
+						<ChatBubbleSparkleIcon size={16} />
+					</TooltipTrigger>
+					<TooltipContent className="flex items-center gap-1.5">
+						Ask Maple AI <Kbd>C</Kbd>
+					</TooltipContent>
+				</Tooltip>
+				<ConnectButton />
+				{/* Self-gating: renders only when the sidebar has collapsed to a sheet *and* a
+				    `Filters` region is mounted to open. Both conditions live in `PageLayout`'s
+				    context, so a page that composes no `Filters` gets no button here. */}
+				<PageLayout.FilterSidebarTrigger>
+					<Button variant="outline" size="icon-sm" aria-label="Open filters">
+						<LayoutLeftIcon size={16} />
+					</Button>
+				</PageLayout.FilterSidebarTrigger>
+				{children}
+			</div>
+		</header>
+	)
+}
+
+/** Billing banners + the horizontal `Filters | Content | RightPanel` row. */
+function Body({ children }: { children: React.ReactNode }) {
+	return (
+		<>
+			{isClerkAuthEnabled && <PaymentFailedBanner />}
+			{isClerkAuthEnabled && <QuotaBanner />}
+			<PageLayout.Body>{children}</PageLayout.Body>
+		</>
+	)
+}
+
+/** Filter rail, flush left of the content and full height. A sheet below `lg`. */
+function Filters({ children }: { children: React.ReactNode }) {
+	return <PageLayout.FilterSidebar>{children}</PageLayout.FilterSidebar>
+}
+
+/** The main column: `Sticky` (optional) above `Scroll`. */
+function Content({ children }: { children: React.ReactNode }) {
+	return <PageLayout.Content>{children}</PageLayout.Content>
+}
+
+/** Pinned above the scroll area — the page header, and anything else that shouldn't scroll away. */
+function Sticky({ children }: { children: React.ReactNode }) {
+	return <PageLayout.StickyArea>{children}</PageLayout.StickyArea>
+}
+
+/**
+ * Page title/description, with `children` as the right-aligned actions.
+ *
+ * `titleContent` is the one remaining slot prop, and deliberately so: a handful
+ * of pages need a heading that isn't a plain string (a service dot beside the
+ * name, a status badge). Put a `DashboardLayout.Title` inside it rather than a
+ * hand-rolled `<h1>` — that's how six different title typographies accumulated.
+ */
+function Header({
+	title,
+	titleContent,
+	description,
+	children,
+}: {
+	title?: string
+	titleContent?: React.ReactNode
+	description?: string
+	children?: React.ReactNode
+}) {
+	return (
+		<PageLayout.Header title={title} titleContent={titleContent} description={description}>
+			{children && <PageLayout.HeaderActions>{children}</PageLayout.HeaderActions>}
+		</PageLayout.Header>
+	)
+}
+
+/** The scrolling page body. */
+function Scroll({ children }: { children: React.ReactNode }) {
+	return <PageLayout.ScrollArea>{children}</PageLayout.ScrollArea>
+}
+
+/** Right-hand panel (e.g. the AI chat dock). Hidden below `lg`. */
+function RightPanel({ children }: { children: React.ReactNode }) {
+	return <PageLayout.RightSidebar>{children}</PageLayout.RightSidebar>
+}
+
+export const DashboardLayout = {
+	Root,
+	Breadcrumbs,
+	Body,
+	Filters,
+	Content,
+	Sticky,
+	Header,
+	Scroll,
+	RightPanel,
+	/** Escape hatch for a page whose title is more than a string (a badge, a service dot). */
+	Title: PageLayout.Title,
+	Description: PageLayout.Description,
 }

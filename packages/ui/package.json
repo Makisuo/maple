@@ -8,6 +8,7 @@
 		"./colors": "./src/lib/colors.ts",
 		"./types": "./src/lib/types.ts",
 		"./format": "./src/lib/format.ts",
+		"./time-format": "./src/lib/time-format.ts",
 		"./lib/cloud-platforms": "./src/lib/cloud-platforms/index.ts",
 		"./*": "./src/*"
 	},
@@ -18,6 +19,7 @@
 	"dependencies": {
 		"@base-ui/react": "catalog:ui",
 		"@maple/domain": "workspace:*",
+		"@maple/query-engine": "workspace:*",
 		"@shadcn/react": "^0.2.1",
 		"@tanstack/react-virtual": "^3.14.3",
 		"@xyflow/react": "catalog:ui",

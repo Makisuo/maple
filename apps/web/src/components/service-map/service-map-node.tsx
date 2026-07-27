@@ -1,3 +1,4 @@
+import { formatLatency } from "@maple/ui/format"
 import { memo } from "react"
 import { Handle, Position } from "@xyflow/react"
 import { cn } from "@maple/ui/utils"
@@ -59,11 +60,6 @@ function formatRate(value: number): string {
 	if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
 	if (value >= 1) return value.toFixed(1)
 	return value.toFixed(2)
-}
-
-function formatLatency(ms: number): string {
-	if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`
-	return `${ms.toFixed(1)}ms`
 }
 
 function getHealthDotClass(errorRate: number): string {

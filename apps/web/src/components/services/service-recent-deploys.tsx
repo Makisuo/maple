@@ -12,9 +12,10 @@ import {
 } from "@/components/vcs/commit-sha-hover-card"
 import type { ReleasePoint } from "@/components/vcs/commit-markers/marker-layout"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { formatNumber } from "@/lib/format"
+import { formatNumber } from "@maple/ui/format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
-import { formatTimeAgo, SectionCard } from "./section-card"
+import { SectionCard } from "./section-card"
+import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
 
 const RAIL_LIMIT = 8
 // Expanded ceiling: bounds mounted commit-resolution subscriptions when a window
@@ -136,7 +137,7 @@ function RowMeta({ deploy, prefix }: { deploy: DeployEntry; prefix?: React.React
 				title={formatFirstSeenExact(deploy.firstSeen)}
 				className="ml-auto shrink-0 cursor-default font-mono tabular-nums text-muted-foreground/70"
 			>
-				{formatTimeAgo(deploy.firstSeen)}
+				{formatRelativeTimeOrDate(deploy.firstSeen)}
 			</span>
 		</>
 	)

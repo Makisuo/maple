@@ -34,7 +34,6 @@ import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { AiTriageResult } from "@maple/domain/http"
 
-
 const DEFAULT_SUGGESTIONS = [
 	"What's the overall system health?",
 	"Show me the slowest traces",
@@ -282,7 +281,6 @@ export function ChatConversation({
 		</div>
 	)
 }
-
 
 function EmptyNotice({ title, children }: { title: string; children: ReactNode }) {
 	return (

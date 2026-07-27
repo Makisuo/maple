@@ -7,9 +7,9 @@ import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import type { CloudflareDurableObjectRow, CloudflareQueueRow } from "@/api/warehouse/cloudflare-infra"
 import { cloudflarePlatformResourcesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { formatNumber } from "@/lib/format"
-import { ColumnHead, TableShell, useTableSort } from "../primitives/data-table"
-import { formatBytes, formatPercent } from "../format"
+import { formatNumber } from "@maple/ui/format"
+import { ColumnHead, DataTable, useTableSort } from "../primitives/data-table"
+import { formatBytes, formatPercent } from "@maple/ui/format"
 import { errorRateClass } from "./constants"
 
 const ROW_CLASS =
@@ -33,57 +33,49 @@ function QueueTable({ queues, waiting }: { queues: ReadonlyArray<CloudflareQueue
 		stringKeys: ["queueName"],
 	})
 	return (
-		<TableShell
-			ariaLabel="Cloudflare queues"
-			waiting={waiting}
-			isEmpty={sorted.length === 0}
-			emptyMessage="No queue activity in the selected window."
-			header={
-				<>
-					<ColumnHead<QueueSortKey>
-						label="Queue"
-						sortKey="queueName"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						width="flex-1 min-w-[220px]"
-					/>
-					<ColumnHead<QueueSortKey>
-						label="Backlog avg"
-						sortKey="backlogMessages"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[110px]"
-					/>
-					<ColumnHead<QueueSortKey>
-						label="Backlog peak"
-						sortKey="backlogMessagesMax"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[110px]"
-					/>
-					<ColumnHead
-						label="Backlog size"
-						align="right"
-						width="w-[110px]"
-						hidden="hidden md:flex"
-					/>
-					<ColumnHead<QueueSortKey>
-						label="Consumers"
-						sortKey="consumerConcurrency"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[110px]"
-					/>
-				</>
-			}
-		>
+		<DataTable.Root ariaLabel="Cloudflare queues" waiting={waiting}>
+			<DataTable.Head>
+				<ColumnHead<QueueSortKey>
+					label="Queue"
+					sortKey="queueName"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					width="flex-1 min-w-[220px]"
+				/>
+				<ColumnHead<QueueSortKey>
+					label="Backlog avg"
+					sortKey="backlogMessages"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[110px]"
+				/>
+				<ColumnHead<QueueSortKey>
+					label="Backlog peak"
+					sortKey="backlogMessagesMax"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[110px]"
+				/>
+				<ColumnHead label="Backlog size" align="right" width="w-[110px]" hidden="hidden md:flex" />
+				<ColumnHead<QueueSortKey>
+					label="Consumers"
+					sortKey="consumerConcurrency"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[110px]"
+				/>
+			</DataTable.Head>
+			{sorted.length === 0 && (
+				<DataTable.Empty>No queue activity in the selected window.</DataTable.Empty>
+			)}
+
 			{sorted.map((queue) => (
 				<div key={queue.serviceName} className={ROW_CLASS}>
 					<div className="min-w-[220px] flex-1 truncate font-mono text-[13px] font-medium text-foreground">
@@ -95,7 +87,7 @@ function QueueTable({ queues, waiting }: { queues: ReadonlyArray<CloudflareQueue
 					{numCell(queue.consumerConcurrency.toFixed(1))}
 				</div>
 			))}
-		</TableShell>
+		</DataTable.Root>
 	)
 }
 
@@ -113,42 +105,39 @@ function DurableObjectTable({
 		{ initialKey: "requests", stringKeys: ["scriptName"] },
 	)
 	return (
-		<TableShell
-			ariaLabel="Durable Objects"
-			waiting={waiting}
-			isEmpty={sorted.length === 0}
-			emptyMessage="No Durable Object activity in the selected window."
-			header={
-				<>
-					<ColumnHead<DoSortKey>
-						label="Worker"
-						sortKey="scriptName"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						width="flex-1 min-w-[220px]"
-					/>
-					<ColumnHead<DoSortKey>
-						label="DO requests"
-						sortKey="requests"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[110px]"
-					/>
-					<ColumnHead<DoSortKey>
-						label="Error rate"
-						sortKey="errorRate"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[110px]"
-					/>
-				</>
-			}
-		>
+		<DataTable.Root ariaLabel="Durable Objects" waiting={waiting}>
+			<DataTable.Head>
+				<ColumnHead<DoSortKey>
+					label="Worker"
+					sortKey="scriptName"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					width="flex-1 min-w-[220px]"
+				/>
+				<ColumnHead<DoSortKey>
+					label="DO requests"
+					sortKey="requests"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[110px]"
+				/>
+				<ColumnHead<DoSortKey>
+					label="Error rate"
+					sortKey="errorRate"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[110px]"
+				/>
+			</DataTable.Head>
+			{sorted.length === 0 && (
+				<DataTable.Empty>No Durable Object activity in the selected window.</DataTable.Empty>
+			)}
+
 			{sorted.map((row) => (
 				<div key={row.serviceName} className={ROW_CLASS}>
 					<div className="min-w-[220px] flex-1 truncate font-mono text-[13px] font-medium text-foreground">
@@ -162,7 +151,7 @@ function DurableObjectTable({
 					</div>
 				</div>
 			))}
-		</TableShell>
+		</DataTable.Root>
 	)
 }
 

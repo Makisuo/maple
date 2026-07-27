@@ -87,26 +87,28 @@ function AlertsPage() {
 		)
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Alerts" }]}
-			titleContent={
-				<div>
-					<div className="flex items-center gap-2">
-						<h1 className="text-2xl font-semibold tracking-tight truncate">Alerts</h1>
-					</div>
-					<p className="text-muted-foreground">
-						Monitor your services and get notified when things go wrong.
-					</p>
-				</div>
-			}
-			headerActions={headerActions}
-			stickyContent={tabBar}
-		>
-			{activeTab === "overview" ? (
-				<AlertsOverviewTab />
-			) : (
-				<AlertsSettingsTab manager={destinationManager} isAdmin={isAdmin} />
-			)}
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Alerts" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Alerts"
+							description="Monitor your services and get notified when things go wrong."
+						>
+							{headerActions}
+						</DashboardLayout.Header>
+						{tabBar}
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						{activeTab === "overview" ? (
+							<AlertsOverviewTab />
+						) : (
+							<AlertsSettingsTab manager={destinationManager} isAdmin={isAdmin} />
+						)}
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

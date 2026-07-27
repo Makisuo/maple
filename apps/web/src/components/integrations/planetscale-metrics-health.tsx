@@ -3,7 +3,7 @@ import { useState } from "react"
 import { cn } from "@maple/ui/utils"
 
 import type { PlanetScaleScrapeTargetSummary } from "@maple/domain/http"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 
 type HealthState = "degraded" | "waiting" | "stalled" | "healthy"
 

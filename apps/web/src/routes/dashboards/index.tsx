@@ -99,66 +99,74 @@ function DashboardListPage() {
 	}
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Dashboards" }]}
-			title="Dashboards"
-			description="Create and manage custom dashboards."
-			headerActions={
-				<div className="flex items-center gap-1">
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() => navigate({ to: "/dashboards/templates" })}
-					>
-						<GridIcon size={14} data-icon="inline-start" />
-						Browse templates
-					</Button>
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={readOnly}
-						onClick={() => importInputRef.current?.click()}
-					>
-						<UploadIcon size={14} data-icon="inline-start" />
-						Import
-					</Button>
-					<Button size="sm" disabled={readOnly} onClick={handleCreate}>
-						<PlusIcon size={14} data-icon="inline-start" />
-						Create Dashboard
-					</Button>
-					<input
-						ref={importInputRef}
-						type="file"
-						accept=".json"
-						aria-label="Import dashboard JSON file"
-						className="hidden"
-						onChange={handleImport}
-					/>
-				</div>
-			}
-		>
-			{persistenceError && (
-				<div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-					{persistenceError}. Dashboard editing is temporarily disabled.
-				</div>
-			)}
-			<Unitflow
-				runtime={unitflowRuntime}
-				rootModel={DashboardsListModel}
-				building={<ListLoading />}
-				failed={() => <ListLoadError />}
-			>
-				{(unit) => (
-					<ModelListBody
-						unit={unit}
-						readOnly={readOnly}
-						onSelect={handleSelect}
-						onCreate={handleCreate}
-						onDelete={deleteDashboard}
-					/>
-				)}
-			</Unitflow>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Dashboards" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Dashboards"
+							description="Create and manage custom dashboards."
+						>
+							<div className="flex items-center gap-1">
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => navigate({ to: "/dashboards/templates" })}
+								>
+									<GridIcon size={14} data-icon="inline-start" />
+									Browse templates
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={readOnly}
+									onClick={() => importInputRef.current?.click()}
+								>
+									<UploadIcon size={14} data-icon="inline-start" />
+									Import
+								</Button>
+								<Button size="sm" disabled={readOnly} onClick={handleCreate}>
+									<PlusIcon size={14} data-icon="inline-start" />
+									Create Dashboard
+								</Button>
+								<input
+									ref={importInputRef}
+									type="file"
+									accept=".json"
+									aria-label="Import dashboard JSON file"
+									className="hidden"
+									onChange={handleImport}
+								/>
+							</div>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						{persistenceError && (
+							<div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+								{persistenceError}. Dashboard editing is temporarily disabled.
+							</div>
+						)}
+						<Unitflow
+							runtime={unitflowRuntime}
+							rootModel={DashboardsListModel}
+							building={<ListLoading />}
+							failed={() => <ListLoadError />}
+						>
+							{(unit) => (
+								<ModelListBody
+									unit={unit}
+									readOnly={readOnly}
+									onSelect={handleSelect}
+									onCreate={handleCreate}
+									onDelete={deleteDashboard}
+								/>
+							)}
+						</Unitflow>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

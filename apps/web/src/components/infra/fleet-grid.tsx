@@ -2,7 +2,9 @@ import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { cn } from "@maple/ui/lib/utils"
 
-import { deriveHostStatus, formatPercent, formatRelative, severityLevel, type HostStatus } from "./format"
+import { deriveHostStatus, severityLevel, type HostStatus } from "./format"
+import { formatPercent } from "@maple/ui/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import {
 	HoneycombSection,
 	type HoneycombCell,
@@ -93,7 +95,7 @@ export function FleetGrid({ hosts }: FleetGridProps) {
 						</div>
 						<div className="border-t pt-1 text-[10px] text-muted-foreground">
 							{status === "active" ? "Active" : status === "idle" ? "Idle" : "Down"} ·{" "}
-							{formatRelative(host.lastSeen)}
+							{formatRelativeTime(host.lastSeen)}
 						</div>
 					</>
 				),

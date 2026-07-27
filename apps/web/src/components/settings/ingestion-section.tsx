@@ -28,7 +28,7 @@ import {
 	PulseIcon,
 } from "@/components/icons"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
-import { formatNumber } from "@/lib/format"
+import { formatNumber } from "@maple/ui/format"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { maskKey } from "@/components/ingest/copyable-field"

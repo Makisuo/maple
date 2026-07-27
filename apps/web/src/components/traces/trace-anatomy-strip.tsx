@@ -2,7 +2,7 @@ import * as React from "react"
 
 import { ServiceSpectrumBar, computeServiceShares } from "@maple/ui/components/traces/service-spectrum-bar"
 import { ServiceDot } from "@maple/ui/components/service-dot"
-import { formatDuration } from "@/lib/format"
+import { formatDuration } from "@maple/ui/format"
 import { cn } from "@maple/ui/utils"
 import { CommitShaHoverCard } from "@/components/vcs/commit-sha-hover-card"
 import { TraceIdBadge } from "@/components/traces/trace-id-badge"

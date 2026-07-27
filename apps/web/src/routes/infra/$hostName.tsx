@@ -73,49 +73,58 @@ function HostDetailPageContent() {
 	)
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Infrastructure", href: "/infra" }, { label: hostName }]}
-			headerActions={toolbar}
-			rightSidebar={rightSidebar}
-		>
-			<div className="space-y-8">
-				{Result.builder(summaryResult)
-					.onInitial(() => <HostDetailHeaderLoading />)
-					.onError((error) => (
-						<ErrorState
-							variant="inline"
-							error={error}
-							title="Failed to load host summary"
-							onRetry={refreshSummary}
-						/>
-					))
-					.onSuccess((r) => <HostDetailHeader summary={r.data} hostName={hostName} />)
-					.render()}
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Infrastructure", href: "/infra" }, { label: hostName }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header>{toolbar}</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="space-y-8">
+							{Result.builder(summaryResult)
+								.onInitial(() => <HostDetailHeaderLoading />)
+								.onError((error) => (
+									<ErrorState
+										variant="inline"
+										error={error}
+										title="Failed to load host summary"
+										onRetry={refreshSummary}
+									/>
+								))
+								.onSuccess((r) => <HostDetailHeader summary={r.data} hostName={hostName} />)
+								.render()}
 
-				<div className="rounded-md border bg-card">
-					<div className="flex items-baseline justify-between gap-3 border-b px-4 py-2.5">
-						<span className="text-sm font-medium">Metrics</span>
-						<span className="text-xs tabular-nums text-muted-foreground">
-							{METRIC_STRIPS.length} signals · {preset}
-						</span>
-					</div>
-					<div className="px-4" {...linkedCursorContainerProps}>
-						{METRIC_STRIPS.map((strip) => (
-							<MetricStrip
-								key={strip.metric}
-								label={strip.label}
-								caption={strip.caption}
-								hostName={hostName}
-								metric={strip.metric}
-								startTime={startTime}
-								endTime={endTime}
-								bucketSeconds={bucketSeconds}
-								syncId={`host-${hostName}`}
-							/>
-						))}
-					</div>
-				</div>
-			</div>
-		</DashboardLayout>
+							<div className="rounded-md border bg-card">
+								<div className="flex items-baseline justify-between gap-3 border-b px-4 py-2.5">
+									<span className="text-sm font-medium">Metrics</span>
+									<span className="text-xs tabular-nums text-muted-foreground">
+										{METRIC_STRIPS.length} signals · {preset}
+									</span>
+								</div>
+								<div className="px-4" {...linkedCursorContainerProps}>
+									{METRIC_STRIPS.map((strip) => (
+										<MetricStrip
+											key={strip.metric}
+											label={strip.label}
+											caption={strip.caption}
+											hostName={hostName}
+											metric={strip.metric}
+											startTime={startTime}
+											endTime={endTime}
+											bucketSeconds={bucketSeconds}
+											syncId={`host-${hostName}`}
+										/>
+									))}
+								</div>
+							</div>
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+				<DashboardLayout.RightPanel>{rightSidebar}</DashboardLayout.RightPanel>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

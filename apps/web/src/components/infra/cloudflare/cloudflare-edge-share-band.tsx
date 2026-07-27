@@ -4,8 +4,8 @@ import { cn } from "@maple/ui/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 
 import type { CloudflareZoneCacheBucket } from "@/api/warehouse/cloudflare-infra"
-import { formatNumber } from "@/lib/format"
-import { formatPercent } from "../format"
+import { formatNumber } from "@maple/ui/format"
+import { formatPercent } from "@maple/ui/format"
 import { EDGE_SERVED_STATUSES } from "./constants"
 
 /**

@@ -77,9 +77,18 @@ function WidgetConfigurePage() {
 
 	if (!activeDashboard || !configureWidget) {
 		return (
-			<DashboardLayout breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "..." }]}>
-				<WidgetEditorSkeleton />
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Dashboards", href: "/dashboards" }, { label: "..." }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Scroll>
+							<WidgetEditorSkeleton />
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 
@@ -109,16 +118,17 @@ function WidgetConfigurePage() {
 				urlValues={{}}
 				onValueChange={() => undefined}
 			>
-				<DashboardLayout
-					breadcrumbs={[
-						{ label: "Dashboards", href: "/dashboards" },
-						{
-							label: activeDashboard.name,
-							href: `/dashboards/${activeDashboard.id}`,
-						},
-						{ label: "Configure Widget" },
-					]}
-					breadcrumbActions={
+				<DashboardLayout.Root>
+					<DashboardLayout.Breadcrumbs
+						items={[
+							{ label: "Dashboards", href: "/dashboards" },
+							{
+								label: activeDashboard.name,
+								href: `/dashboards/${activeDashboard.id}`,
+							},
+							{ label: "Configure Widget" },
+						]}
+					>
 						<div className="flex items-center gap-2">
 							<Button variant="ghost" size="sm" onClick={navigateBack} disabled={isSaving}>
 								&larr; Back
@@ -130,16 +140,21 @@ function WidgetConfigurePage() {
 								{isSaving ? "Saving..." : "Apply"}
 							</Button>
 						</div>
-					}
-				>
-					<WidgetBuilderProvider widget={configureWidget}>
-						<WidgetQueryBuilderPage
-							ref={builderRef}
-							widget={configureWidget}
-							onApply={handleApply}
-						/>
-					</WidgetBuilderProvider>
-				</DashboardLayout>
+					</DashboardLayout.Breadcrumbs>
+					<DashboardLayout.Body>
+						<DashboardLayout.Content>
+							<DashboardLayout.Scroll>
+								<WidgetBuilderProvider widget={configureWidget}>
+									<WidgetQueryBuilderPage
+										ref={builderRef}
+										widget={configureWidget}
+										onApply={handleApply}
+									/>
+								</WidgetBuilderProvider>
+							</DashboardLayout.Scroll>
+						</DashboardLayout.Content>
+					</DashboardLayout.Body>
+				</DashboardLayout.Root>
 
 				{status === "blocked" && (
 					<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">

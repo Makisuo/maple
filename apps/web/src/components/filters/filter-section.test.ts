@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import {
-	MAX_SEARCH_RESULTS,
-	visibleFilterOptions,
-} from "@maple/ui/components/filters/filter-section"
+import { MAX_SEARCH_RESULTS, visibleFilterOptions } from "@maple/ui/components/filters/filter-section"
 
 // Facets arrive ranked by traffic, so the collapsed section shows the five busiest values. That is
 // the right default and the wrong one for a value you just picked: tick a path ranked #40 and the

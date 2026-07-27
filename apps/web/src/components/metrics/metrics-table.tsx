@@ -1,3 +1,5 @@
+import { formatNumber } from "@maple/ui/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { useState } from "react"
 
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -11,33 +13,7 @@ import { MetricTypeBadge } from "./metric-type-badge"
 import { type Metric, type ListMetricsInput } from "@/api/warehouse/metrics"
 import { listMetricsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { QueryErrorState } from "@/components/common/query-error-state"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { ServiceDot } from "@maple/ui/components/service-dot"
-
-function formatNumber(num: number): string {
-	if (num >= 1_000_000) {
-		return `${(num / 1_000_000).toFixed(1)}M`
-	}
-	if (num >= 1_000) {
-		return `${(num / 1_000).toFixed(1)}K`
-	}
-	return num.toLocaleString()
-}
-
-function formatTimeAgo(timestamp: string): string {
-	const date = new Date(normalizeTimestampInput(timestamp))
-	const now = new Date()
-	const diffMs = now.getTime() - date.getTime()
-	const diffSec = Math.floor(diffMs / 1000)
-	const diffMin = Math.floor(diffSec / 60)
-	const diffHour = Math.floor(diffMin / 60)
-	const diffDay = Math.floor(diffHour / 24)
-
-	if (diffSec < 60) return `${diffSec}s ago`
-	if (diffMin < 60) return `${diffMin}m ago`
-	if (diffHour < 24) return `${diffHour}h ago`
-	return `${diffDay}d ago`
-}
 
 interface MetricsTableProps {
 	search: string
@@ -197,7 +173,7 @@ export function MetricsTable({ search, metricType, onOpenMetric, startTime, endT
 										{formatNumber(metric.dataPointCount)}
 									</TableCell>
 									<TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-										{formatTimeAgo(metric.lastSeen)}
+										{formatRelativeTime(metric.lastSeen)}
 									</TableCell>
 								</TableRow>
 							)

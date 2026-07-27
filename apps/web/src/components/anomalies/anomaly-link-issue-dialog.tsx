@@ -16,7 +16,7 @@ import { Spinner } from "@maple/ui/components/ui/spinner"
 
 import { shortIssueId } from "@/components/errors/issue-id"
 import { WorkflowRingIcon } from "@/components/icons"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
 export function AnomalyLinkIssueDialog({

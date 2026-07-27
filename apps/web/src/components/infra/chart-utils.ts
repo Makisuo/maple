@@ -3,7 +3,7 @@
 // share the row→series transform, palette, grid/empty conventions, and the
 // unit-aware value formatting used by tooltips, legend chips, and axes.
 
-import { formatBytesPerSecond, formatLoad, formatPercent } from "./format"
+import { formatBytesPerSecond, formatLoad, formatPercent } from "@maple/ui/format"
 
 export const COLOR_PALETTE = [
 	"var(--chart-1)",

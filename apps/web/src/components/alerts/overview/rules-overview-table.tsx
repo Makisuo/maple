@@ -13,7 +13,7 @@ import { NotifyChannels, SignalBadge, TagChips, TagGroupHeaderRow } from "@/comp
 import { CircleWarningIcon } from "@/components/icons"
 import { comparatorLabels, formatSignalValue } from "@/lib/alerts/form-utils"
 import { worstState } from "@/lib/alerts/rule-status"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"

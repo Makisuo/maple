@@ -24,7 +24,7 @@ import {
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE, formatRelativeTime } from "../lib/time"
 import { PageShell } from "../components/page-shell"
-import { RefreshButton, TimeRangeSelect, Toolbar, ToolbarStat } from "../components/toolbar"
+import { RefreshButton, TimeRangeSelect, Toolbar, ToolbarStat, ToolbarStats } from "../components/toolbar"
 import { EmptyState, ErrorState, ListSkeleton } from "../components/view-states"
 
 interface ErrorsViewProps {
@@ -75,26 +75,22 @@ export function ErrorsView({ onSelectTrace }: ErrorsViewProps) {
 
 	const stats = summary.data
 	const toolbar = (
-		<Toolbar
-			search={<div />}
-			stats={
-				<>
-					<ToolbarStat value={Math.round(stats?.totalErrors ?? 0)} label="errors" danger />
-					<ToolbarStat
-						value={Math.round(stats?.affectedTracesCount ?? 0)}
-						label="affected traces"
-					/>
-					<span className="text-sm text-muted-foreground">
-						<span className="font-medium tabular-nums text-foreground">
-							{((stats?.errorRate ?? 0) * 100).toFixed(2)}%
-						</span>{" "}
-						error rate
-					</span>
-					<RefreshButton />
-					<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
-				</>
-			}
-		/>
+		<Toolbar>
+			{/* No search on this view — the empty span keeps the stats right-aligned. */}
+			<span />
+			<ToolbarStats>
+				<ToolbarStat value={Math.round(stats?.totalErrors ?? 0)} label="errors" danger />
+				<ToolbarStat value={Math.round(stats?.affectedTracesCount ?? 0)} label="affected traces" />
+				<span className="text-sm text-muted-foreground">
+					<span className="font-medium tabular-nums text-foreground">
+						{((stats?.errorRate ?? 0) * 100).toFixed(2)}%
+					</span>{" "}
+					error rate
+				</span>
+				<RefreshButton />
+				<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
+			</ToolbarStats>
+		</Toolbar>
 	)
 
 	return (

@@ -666,55 +666,57 @@ export interface CloudflareZoneBreakdown {
 	ignoredFilters: ReadonlyArray<string>
 }
 
-export const getCloudflareZoneBreakdown = Effect.fn("QueryEngine.getCloudflareZoneBreakdown")(
-	function* ({ data }: { data: CloudflareBreakdownInput }) {
-		const input = yield* decodeInput(BreakdownInputSchema, data, "getCloudflareZoneBreakdown")
-		const result = yield* runWarehouseQuery("cloudflareInfraZoneBreakdown", () =>
-			Effect.gen(function* () {
-				const client = yield* MapleApiAtomClient
-				return yield* client.queryEngine.cloudflareInfraZoneBreakdown({
-					payload: new CloudflareInfraZoneBreakdownRequest({
-						serviceName: input.serviceName,
-						dimension: input.dimension,
-						startTime: input.startTime,
-						endTime: input.endTime,
-						bucketSeconds: input.bucketSeconds,
-						...(input.limit === undefined ? {} : { limit: input.limit }),
-						...cloudflareFilterPayload(input),
-					}),
-				})
+export const getCloudflareZoneBreakdown = Effect.fn("QueryEngine.getCloudflareZoneBreakdown")(function* ({
+	data,
+}: {
+	data: CloudflareBreakdownInput
+}) {
+	const input = yield* decodeInput(BreakdownInputSchema, data, "getCloudflareZoneBreakdown")
+	const result = yield* runWarehouseQuery("cloudflareInfraZoneBreakdown", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.cloudflareInfraZoneBreakdown({
+				payload: new CloudflareInfraZoneBreakdownRequest({
+					serviceName: input.serviceName,
+					dimension: input.dimension,
+					startTime: input.startTime,
+					endTime: input.endTime,
+					bucketSeconds: input.bucketSeconds,
+					...(input.limit === undefined ? {} : { limit: input.limit }),
+					...cloudflareFilterPayload(input),
+				}),
+			})
+		}),
+	)
+	const rows = result.totals.map((row) => ({
+		key: String(row.key ?? ""),
+		requests: Number(row.requests ?? 0),
+		errors5xx: Number(row.errors5xx ?? 0),
+		bytes: Number(row.bytes ?? 0),
+	}))
+	const attributed = rows.reduce((sum, row) => sum + row.requests, 0)
+	const breakdown: CloudflareZoneBreakdown = {
+		totals: rows.map(
+			(row): CloudflareBreakdownTotal => ({
+				...row,
+				errorRate: ratio(row.errors5xx, row.requests),
+				share: ratio(row.requests, attributed),
 			}),
-		)
-		const rows = result.totals.map((row) => ({
-			key: String(row.key ?? ""),
-			requests: Number(row.requests ?? 0),
-			errors5xx: Number(row.errors5xx ?? 0),
-			bytes: Number(row.bytes ?? 0),
-		}))
-		const attributed = rows.reduce((sum, row) => sum + row.requests, 0)
-		const breakdown: CloudflareZoneBreakdown = {
-			totals: rows.map(
-				(row): CloudflareBreakdownTotal => ({
-					...row,
-					errorRate: ratio(row.errors5xx, row.requests),
-					share: ratio(row.requests, attributed),
-				}),
-			),
-			buckets: result.buckets.map(
-				(row): CloudflareBreakdownBucket => ({
-					bucket: String(row.bucket ?? ""),
-					key: String(row.key ?? ""),
-					requests: Number(row.requests ?? 0),
-				}),
-			),
-			unattributed: result.unattributed,
-			coverage: ratio(attributed, attributed + result.unattributed),
-			coverageStart: result.coverageStart,
-			ignoredFilters: result.ignoredFilters,
-		}
-		return breakdown
-	},
-)
+		),
+		buckets: result.buckets.map(
+			(row): CloudflareBreakdownBucket => ({
+				bucket: String(row.bucket ?? ""),
+				key: String(row.key ?? ""),
+				requests: Number(row.requests ?? 0),
+			}),
+		),
+		unattributed: result.unattributed,
+		coverage: ratio(attributed, attributed + result.unattributed),
+		coverageStart: result.coverageStart,
+		ignoredFilters: result.ignoredFilters,
+	}
+	return breakdown
+})
 
 const ZoneFacetsInputSchema = Schema.Struct({
 	serviceName: Schema.String,

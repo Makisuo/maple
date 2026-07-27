@@ -1,6 +1,6 @@
 import type { BaseComponentProps } from "@json-render/react"
 import { cn } from "@maple/ui/utils"
-import { formatDuration } from "@/lib/format"
+import { formatDuration } from "@maple/ui/format"
 
 interface SpanNode {
 	spanId: string

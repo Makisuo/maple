@@ -34,10 +34,10 @@ import {
 	cloudflareZoneBreakdownResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
-import { formatNumber } from "@/lib/format"
+import { formatNumber } from "@maple/ui/format"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
-import { ColumnHead, TableShell, useTableSort } from "../primitives/data-table"
-import { formatBytes, formatPercent } from "../format"
+import { ColumnHead, DataTable, useTableSort } from "../primitives/data-table"
+import { formatBytes, formatPercent } from "@maple/ui/format"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
 import {
 	CACHE_STATUS_COLORS,
@@ -334,10 +334,10 @@ function BreakdownTable({
 	/** Live rows are not page filters — Cloudflare ranked them, the warehouse has no slice for them. */
 	interactive: boolean
 }) {
-	const { sorted, sortKey, sortDir, handleSort } = useTableSort<CloudflareBreakdownTotal, SortKey>(
-		rows,
-		{ initialKey: "requests", stringKeys: ["key"] },
-	)
+	const { sorted, sortKey, sortDir, handleSort } = useTableSort<CloudflareBreakdownTotal, SortKey>(rows, {
+		initialKey: "requests",
+		stringKeys: ["key"],
+	})
 	const selectedValues = filters?.[dimension.filterKey] ?? []
 
 	const head = (label: string, key: SortKey, className: string, hidden?: string) => (
@@ -354,26 +354,28 @@ function BreakdownTable({
 	)
 
 	return (
-		<TableShell
+		<DataTable.Root
 			ariaLabel={`${dimension.column} breakdown`}
 			waiting={waiting}
-			isEmpty={sorted.length === 0}
-			emptyMessage={emptyMessage}
 			maxHeight={TABLE_MAX_HEIGHT}
 			stickySurfaceClass="bg-card"
-			header={
-				<>
-					{head(dimension.column, "key", "flex-1 min-w-[220px]")}
-					{head("Requests", "requests", "w-[110px]")}
-					{head("Error rate", "errorRate", "w-[90px]")}
-					{head("Bandwidth", "bytes", "w-[90px]", "hidden md:flex")}
-				</>
-			}
 		>
+			<DataTable.Head>
+				{head(dimension.column, "key", "flex-1 min-w-[220px]")}
+				{head("Requests", "requests", "w-[110px]")}
+				{head("Error rate", "errorRate", "w-[90px]")}
+				{head("Bandwidth", "bytes", "w-[90px]", "hidden md:flex")}
+			</DataTable.Head>
+			{sorted.length === 0 && <DataTable.Empty>{emptyMessage}</DataTable.Empty>}
+
 			{sorted.map((row) => {
 				const selected = selectedValues.includes(row.key)
 				return (
-					<div key={row.key} className={ROW_CLASS} style={{ backgroundImage: shareTint(row.share) }}>
+					<div
+						key={row.key}
+						className={ROW_CLASS}
+						style={{ backgroundImage: shareTint(row.share) }}
+					>
 						<div className="min-w-[220px] flex-1 truncate">
 							{interactive && onToggleFilter ? (
 								<button
@@ -414,7 +416,7 @@ function BreakdownTable({
 					</div>
 				)
 			})}
-		</TableShell>
+		</DataTable.Root>
 	)
 }
 
@@ -545,9 +547,7 @@ function Footer({
 }) {
 	if (total === 0 && onSearchLive === undefined) return null
 	const parts = [
-		shown === total
-			? `${total} ${dimension.noun}`
-			: `Showing ${shown} of ${total} ${dimension.noun}`,
+		shown === total ? `${total} ${dimension.noun}` : `Showing ${shown} of ${total} ${dimension.noun}`,
 		collectedFrom ? `collected from ${collectedFrom}` : null,
 	].filter((part): part is string => part !== null)
 
