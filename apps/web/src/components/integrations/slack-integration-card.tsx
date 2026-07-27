@@ -56,11 +56,11 @@ const remoteDisconnectDetail = (reason: string, teamName: string | null): string
 		case "app_uninstalled":
 			return `The Maple app was removed from ${workspace}.`
 		case "tokens_revoked":
-			return `The Maple app's access tokens were revoked in ${workspace}.`
+			return `The Maple app's access to ${workspace} was revoked.`
 		default:
 			// "reconciliation" — Maple's periodic check found the token dead without
 			// ever receiving an uninstall event.
-			return `Maple's access to ${workspace} is no longer valid — the app was likely removed in Slack.`
+			return `Maple's access to ${workspace} is no longer valid.`
 	}
 }
 
@@ -81,7 +81,7 @@ function RemoteDisconnectNotice({
 }) {
 	return (
 		<div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
-			<span className="font-medium text-foreground">Slack disconnected this integration.</span>{" "}
+			<span className="font-medium text-foreground">Slack is no longer connected.</span>{" "}
 			{remoteDisconnectDetail(reason, teamName)}
 			{disconnectedAt ? (
 				<span title={absoluteDateTime(disconnectedAt)}>
