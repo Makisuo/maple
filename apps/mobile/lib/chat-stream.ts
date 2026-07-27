@@ -3,6 +3,15 @@
 // agent's events from that prompt's offset until `idle`. The Flue events are
 // mapped onto the same callbacks the mobile reducer consumes, so the message
 // rendering is unchanged from the legacy SSE transport.
+//
+// NOTE: this app is deliberately pinned to `@flue/sdk@1.0.0-beta.1` while the
+// web and the worker run beta.9. beta.9 dropped `agents.stream` in favour of
+// `agents.observe`, which hands back a materialized conversation to subscribe
+// to rather than a stream of deltas — a different shape from the reducer below,
+// so adopting it is a rewrite of this file and its consumer, and one that can
+// only be validated on a device. The wire format is unchanged (the worker still
+// serves the durable event stream, and every variant this switch handles still
+// exists in beta.9), so the pin is safe until that migration happens.
 
 import type { AttachedAgentEvent, FlueClient } from "@flue/sdk"
 

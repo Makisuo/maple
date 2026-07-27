@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { extractBearerToken, instanceIdFromAgentPath, verifyHs256 } from "./auth.ts"
+import { extractBearerToken, instanceIdFromAgentPath, verifyHs256, verifyRequest } from "./auth.ts"
+import type { ChatFlueEnv } from "./env.ts"
 
 const b64url = (s: string) => btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 
@@ -78,5 +79,27 @@ describe("instanceIdFromAgentPath", () => {
 	it("returns undefined for non-agent paths", () => {
 		expect(instanceIdFromAgentPath("/health")).toBeUndefined()
 		expect(instanceIdFromAgentPath("/agents/maple-chat")).toBeUndefined()
+	})
+})
+
+describe("tenant resolution", () => {
+	const clerkless = { MAPLE_AUTH_MODE: "self_hosted", MAPLE_ROOT_PASSWORD: "s3cret" } as ChatFlueEnv
+
+	// apps/api pins the tenant with MAPLE_ORG_ID_OVERRIDE and seeds an
+	// investigation's agent under that org. If this worker resolved the same token
+	// to the token's own org, it would 403 the conversation the API just created.
+	it("honours MAPLE_ORG_ID_OVERRIDE the way apps/api does", async () => {
+		const token = await mintHs256({ sub: "user_1", org_id: "org_from_token", exp: nowSec() + 600 }, "s3cret")
+		const request = new Request("https://chat.test/agents/maple-chat/x", {
+			headers: { authorization: `Bearer ${token}` },
+		})
+
+		expect(await verifyRequest(request, clerkless)).toEqual({
+			orgId: "org_from_token",
+			userId: "user_1",
+		})
+		expect(
+			await verifyRequest(request, { ...clerkless, MAPLE_ORG_ID_OVERRIDE: "org_pinned" }),
+		).toEqual({ orgId: "org_pinned", userId: "user_1" })
 	})
 })

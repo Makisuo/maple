@@ -15,7 +15,7 @@ import { PageLayout } from "@maple/ui/components/ui/page-layout"
 import { Button } from "@maple/ui/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { Kbd } from "@maple/ui/components/ui/kbd"
-import { ChatBubbleSparkleIcon, LayoutLeftIcon } from "@/components/icons"
+import { ChatBubbleSparkleIcon, LayoutLeftIcon, LayoutRightIcon } from "@/components/icons"
 import { openGlobalChat } from "@/components/chat/global-chat-sheet"
 import { ConnectButton } from "@/components/header/connect-button"
 import { QuotaBanner } from "@/components/billing/quota-banner"
@@ -142,6 +142,13 @@ function Breadcrumbs({ items, children }: { items: BreadcrumbEntry[]; children?:
 						<LayoutLeftIcon size={16} />
 					</Button>
 				</PageLayout.FilterSidebarTrigger>
+				{/* Same self-gating for the trailing context rail, which is inline above
+				    `lg` and a sheet below it. */}
+				<PageLayout.RightSidebarTrigger>
+					<Button variant="outline" size="icon-sm" aria-label="Open context">
+						<LayoutRightIcon size={16} />
+					</Button>
+				</PageLayout.RightSidebarTrigger>
 				{children}
 			</div>
 		</header>
@@ -205,9 +212,18 @@ function Scroll({ children }: { children: React.ReactNode }) {
 	return <PageLayout.ScrollArea>{children}</PageLayout.ScrollArea>
 }
 
-/** Right-hand panel (e.g. the AI chat dock). Hidden below `lg`. */
-function RightPanel({ children }: { children: React.ReactNode }) {
-	return <PageLayout.RightSidebar>{children}</PageLayout.RightSidebar>
+/**
+ * `Scroll`'s counterpart for a page whose content owns its own scrolling — the
+ * investigation transcript, for instance. Fills the remaining height and scrolls
+ * nothing, so the inner pane never needs a `calc()` height guess.
+ */
+function Fill({ children }: { children: React.ReactNode }) {
+	return <PageLayout.Fill>{children}</PageLayout.Fill>
+}
+
+/** Trailing context rail. Inline above `lg`, a sheet behind a header trigger below it. */
+function RightPanel({ children, title }: { children: React.ReactNode; title?: string }) {
+	return <PageLayout.RightSidebar title={title}>{children}</PageLayout.RightSidebar>
 }
 
 export const DashboardLayout = {
@@ -219,6 +235,7 @@ export const DashboardLayout = {
 	Sticky,
 	Header,
 	Scroll,
+	Fill,
 	RightPanel,
 	/** Escape hatch for a page whose title is more than a string (a badge, a service dot). */
 	Title: PageLayout.Title,

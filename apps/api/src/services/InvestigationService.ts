@@ -20,6 +20,8 @@ import {
 	type UserId,
 } from "@maple/domain/http"
 import { ErrorIssueEventId, ErrorIssueId, InvestigationId } from "@maple/domain/primitives"
+import { wrapChatContext } from "@maple/domain/chat-preamble"
+import { CHAT_FLUE_ORIGIN } from "@/lib/chat-flue-origin"
 import { aiTriageSettings, errorIssueEvents, investigations, type InvestigationRow } from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm"
@@ -241,6 +243,17 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						.limit(1),
 				).pipe(Effect.map((rows) => rows[0]))
 
+			/**
+			 * A row still claiming to be investigating long after its autonomous pass
+			 * should have submitted a diagnosis. Checked before sweeping so a read
+			 * doesn't issue an UPDATE that would match nothing — the investigation
+			 * detail page polls every 3s, which otherwise turns every read into a write.
+			 */
+			const isStale = (row: InvestigationRow, nowMs: number): boolean =>
+				row.status === "investigating" &&
+				row.startedAt !== null &&
+				row.startedAt.getTime() < nowMs - staleBeforeMs
+
 			const failStaleInvestigations = Effect.fnUntraced(function* (orgId: OrgId, nowMs: number) {
 				yield* dbExecute((db) =>
 					db
@@ -385,16 +398,22 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				}
 
 				const instanceId = `${orgId}:inv-${doc.id}`
-				const message = [
-					"Begin the autonomous investigation now.",
-					"Use the preserved subject snapshot below as the source context, gather evidence with tools, and call submit_diagnosis exactly once.",
-					JSON.stringify({ subject: doc.subject, snapshot: doc.snapshot }),
-				].join("\n\n")
+				// Fenced in full: this prompt is machine-written, and the transcript now
+				// replays user turns to everyone who opens the investigation. Unfenced it
+				// renders as a wall of JSON attributed to whoever started the thread.
+				const message = wrapChatContext(
+					[
+						"Begin the autonomous investigation now.",
+						"Use the preserved subject snapshot below as the source context, gather evidence with tools, and call submit_diagnosis exactly once.",
+						JSON.stringify({ subject: doc.subject, snapshot: doc.snapshot }),
+					].join("\n\n"),
+					"",
+				)
 				const response = yield* Effect.tryPromise({
 					try: (signal) =>
 						agent.fetch(
 							new Request(
-								`https://chat-flue.internal/agents/maple-chat/${encodeURIComponent(instanceId)}`,
+								`${CHAT_FLUE_ORIGIN}/agents/maple-chat/${encodeURIComponent(instanceId)}`,
 								{
 									method: "POST",
 									headers: {
@@ -470,7 +489,6 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				"InvestigationService.listInvestigations",
 			)(function* (orgId, opts) {
 				yield* Effect.annotateCurrentSpan({ orgId })
-				yield* failStaleInvestigations(orgId, yield* Clock.currentTimeMillis)
 				const conditions = [
 					eq(investigations.orgId, orgId),
 					opts.issueId ? eq(investigations.issueId, opts.issueId) : undefined,
@@ -478,7 +496,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					opts.incidentId ? eq(investigations.incidentId, opts.incidentId) : undefined,
 					opts.status ? eq(investigations.status, opts.status) : undefined,
 				].filter((c): c is NonNullable<typeof c> => c !== undefined)
-				const rows = yield* dbExecute((db) =>
+				const selectPage = dbExecute((db) =>
 					db
 						.select()
 						.from(investigations)
@@ -487,6 +505,14 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						.limit(opts.limit ?? 50)
 						.offset(opts.offset ?? 0),
 				)
+				let rows = yield* selectPage
+				const nowMs = yield* Clock.currentTimeMillis
+				// Sweep only when this page actually contains a timed-out run, then
+				// re-read so the caller sees the corrected status.
+				if (rows.some((row) => isStale(row, nowMs))) {
+					yield* failStaleInvestigations(orgId, nowMs)
+					rows = yield* selectPage
+				}
 				return new InvestigationsListResponse({
 					investigations: yield* Effect.forEach(rows, rowToDocument),
 				})
@@ -496,14 +522,18 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				"InvestigationService.getInvestigation",
 			)(function* (orgId, id) {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
-				yield* failStaleInvestigations(orgId, yield* Clock.currentTimeMillis)
 				const row = yield* loadRow(orgId, id)
 				if (!row) {
 					return yield* Effect.fail(
 						new InvestigationNotFoundError({ message: `No such investigation: '${id}'` }),
 					)
 				}
-				return yield* rowToDocument(row)
+				const nowMs = yield* Clock.currentTimeMillis
+				if (!isStale(row, nowMs)) return yield* rowToDocument(row)
+				// This run timed out: settle it, then report the corrected status.
+				yield* failStaleInvestigations(orgId, nowMs)
+				const settled = yield* loadRow(orgId, id)
+				return yield* rowToDocument(settled ?? row)
 			})
 
 			const createInvestigation: InvestigationServiceShape["createInvestigation"] = Effect.fn(

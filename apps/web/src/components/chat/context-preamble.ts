@@ -1,3 +1,4 @@
+import { stripChatContext, wrapChatContext } from "@maple/domain/chat-preamble"
 import type { InvestigationContext, InvestigationKind } from "./investigation-context"
 import type { WidgetFixContext } from "./widget-fix-context"
 import type { AutoContext, PageContextPayload } from "./auto-contexts"
@@ -25,21 +26,11 @@ export interface ChatContext {
 	pageContext?: PageContextPayload
 }
 
-const CONTEXT_OPEN = "<!--maple:context-->"
-const CONTEXT_CLOSE = "<!--/maple:context-->"
-
 /** Prepend a context block to a user message, fenced by strip-able sentinels. */
-export const wrapContextPreamble = (block: string, userText: string): string =>
-	`${CONTEXT_OPEN}\n${block}\n${CONTEXT_CLOSE}\n\n${userText}`
+export const wrapContextPreamble = wrapChatContext
 
 /** Remove a leading context block (if present) so the user's bubble stays clean. */
-export const stripContextPreamble = (text: string): string => {
-	const start = text.indexOf(CONTEXT_OPEN)
-	if (start !== 0) return text
-	const end = text.indexOf(CONTEXT_CLOSE)
-	if (end === -1) return text
-	return text.slice(end + CONTEXT_CLOSE.length).replace(/^\s+/, "")
-}
+export const stripContextPreamble = stripChatContext
 
 /** Build the context block for a conversation, or "" when there's nothing to attach. */
 export const buildContextPreamble = (ctx: ChatContext): string => {

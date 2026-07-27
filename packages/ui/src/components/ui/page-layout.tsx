@@ -27,6 +27,11 @@ interface PageLayoutContextValue {
 	 */
 	hasFilterSidebar: boolean
 	setHasFilterSidebar: (present: boolean) => void
+	/** Mirrors the filter sidebar's story on the other edge. See {@link RightSidebar}. */
+	rightSheetOpen: boolean
+	setRightSheetOpen: (open: boolean) => void
+	hasRightSidebar: boolean
+	setHasRightSidebar: (present: boolean) => void
 }
 
 const PageLayoutContext = React.createContext<PageLayoutContextValue | null>(null)
@@ -45,6 +50,8 @@ function Root({ children, className }: { children: React.ReactNode; className?: 
 	const [isScrolled, setIsScrolled] = React.useState(false)
 	const [filterSheetOpen, setFilterSheetOpen] = React.useState(false)
 	const [hasFilterSidebar, setHasFilterSidebar] = React.useState(false)
+	const [rightSheetOpen, setRightSheetOpen] = React.useState(false)
+	const [hasRightSidebar, setHasRightSidebar] = React.useState(false)
 	const filterSidebarCollapsed = useMediaQuery("max-lg")
 
 	const ctx = React.useMemo(
@@ -56,8 +63,19 @@ function Root({ children, className }: { children: React.ReactNode; className?: 
 			filterSidebarCollapsed,
 			hasFilterSidebar,
 			setHasFilterSidebar,
+			rightSheetOpen,
+			setRightSheetOpen,
+			hasRightSidebar,
+			setHasRightSidebar,
 		}),
-		[isScrolled, filterSheetOpen, filterSidebarCollapsed, hasFilterSidebar],
+		[
+			isScrolled,
+			filterSheetOpen,
+			filterSidebarCollapsed,
+			hasFilterSidebar,
+			rightSheetOpen,
+			hasRightSidebar,
+		],
 	)
 
 	return (
@@ -279,12 +297,81 @@ function ScrollArea({ children, className }: { children: React.ReactNode; classN
  * RightSidebar
  * -------------------------------------------------------------------------------------------------*/
 
-function RightSidebar({ children, className }: { children: React.ReactNode; className?: string }) {
+/**
+ * The alternative to `ScrollArea`: a region that fills the remaining height and
+ * scrolls nothing itself. Use it for a pane with its own scroller — a chat
+ * transcript, a virtualized table — where an outer `overflow-auto` would produce
+ * a second scrollbar and force the inner pane onto a hardcoded height.
+ */
+function Fill({ children, className }: { children: React.ReactNode; className?: string }) {
 	return (
-		<aside data-slot="page-right-sidebar" className={cn("hidden lg:block", className)}>
+		<div data-slot="page-fill" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
+			{children}
+		</div>
+	)
+}
+
+/**
+ * Context/detail rail on the trailing edge. Below `lg` there is no room for it
+ * beside the content, so — exactly like `FilterSidebar` — it becomes a sheet
+ * behind `RightSidebarTrigger` rather than disappearing.
+ */
+function RightSidebar({
+	children,
+	className,
+	title = "Details",
+	width = "w-72",
+}: {
+	children: React.ReactNode
+	className?: string
+	/** Accessible name for the sheet at narrow widths. */
+	title?: string
+	width?: string
+}) {
+	const { filterSidebarCollapsed, rightSheetOpen, setRightSheetOpen, setHasRightSidebar } = usePageLayout()
+
+	// Announce presence to the trigger in the page header, which can't see this as
+	// a child. Layout effect so a frame never paints with the trigger missing.
+	React.useLayoutEffect(() => {
+		setHasRightSidebar(true)
+		return () => setHasRightSidebar(false)
+	}, [setHasRightSidebar])
+
+	if (filterSidebarCollapsed) {
+		return (
+			<Sheet open={rightSheetOpen} onOpenChange={setRightSheetOpen}>
+				<SheetContent side="right" className="w-80 overflow-y-auto p-4">
+					<SheetHeader className="sr-only">
+						<SheetTitle>{title}</SheetTitle>
+						<SheetDescription>Context for this page.</SheetDescription>
+					</SheetHeader>
+					{children}
+				</SheetContent>
+			</Sheet>
+		)
+	}
+
+	return (
+		<aside
+			data-slot="page-right-sidebar"
+			className={cn("hidden shrink-0 overflow-y-auto border-l lg:block", width, className)}
+		>
 			{children}
 		</aside>
 	)
+}
+
+/**
+ * Opens the context sheet. Mirrors `FilterSidebarTrigger`: renders nothing unless
+ * the rail has collapsed *and* a `RightSidebar` is mounted, so callers can drop it
+ * in unconditionally.
+ */
+function RightSidebarTrigger({ children }: { children: React.ReactElement<{ onClick?: () => void }> }) {
+	const { filterSidebarCollapsed, hasRightSidebar, setRightSheetOpen } = usePageLayout()
+
+	if (!filterSidebarCollapsed || !hasRightSidebar) return null
+
+	return React.cloneElement(children, { onClick: () => setRightSheetOpen(true) })
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -324,7 +411,9 @@ export const PageLayout = {
 	FilterSidebarTrigger,
 	Content,
 	ScrollArea,
+	Fill,
 	RightSidebar,
+	RightSidebarTrigger,
 }
 
 export { usePageLayout }
