@@ -28,14 +28,12 @@ import {
 import { mergeExactThroughput, type CustomChartTimeSeriesResponse } from "@/api/warehouse/custom-charts"
 import type { ServiceDetailTimeSeriesPoint, ServicesFacetsResponse } from "@/api/warehouse/services"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
 const dashboardSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
 	environment: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/")({
@@ -421,86 +419,101 @@ function DashboardContent({
 	)
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Overview" }]}
-			title="Dashboard"
-			description="Observability overview for your services."
-			headerActions={
-				<div className="flex items-center gap-2">
-					<Select
-						items={environmentItems}
-						value={selectedEnvironment}
-						onValueChange={handleEnvironmentChange}
-					>
-						<SelectTrigger size="sm">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{environmentItems.map((item) => (
-								<SelectItem key={item.value} value={item.value}>
-									{item.label}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-					<TimeRangeHeaderControls
-						startTime={search.startTime ?? effectiveStartTime}
-						endTime={search.endTime ?? effectiveEndTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : defaultPreset)}
-						defaultPreset={defaultPreset}
-						onTimeChange={handleTimeChange}
-					/>
-				</div>
-			}
-		>
-			{isClerkAuthEnabled && (
-				<>
-					<FirstActionHint />
-					<SetupChecklist />
-				</>
-			)}
-			{/* Facets drive the environment dropdown and the default preset; when
-			    they fail the charts below still load (unfiltered), so surface the
-			    failure instead of silently offering an empty environment list. */}
-			{Result.builder(facetsResult)
-				.onError((error) => (
-					<ErrorState
-						variant="inline"
-						error={error}
-						title="Failed to load environments"
-						onRetry={onRetryFacets}
-					/>
-				))
-				.render()}
-			{/* Persist the facets-derived defaults once facets resolve, so the next
-			    cold load can fetch optimistically. Gated on `facetsReady` and keyed
-			    by the derived hint so it remounts (re-persists) only when the value
-			    actually changes — no bare effect, no per-render writes. */}
-			{facetsReady && (
-				<FacetsHintPersister
-					key={`${derivedDefaultEnvironment ?? "__all__"}:${defaultPreset}`}
-					orgKey={orgKey}
-					environment={derivedDefaultEnvironment}
-					preset={defaultPreset}
-				/>
-			)}
-			<ServiceHealthOverview
-				startTime={effectiveStartTime}
-				endTime={effectiveEndTime}
-				timePreset={search.timePreset ?? defaultPreset}
-				environments={environmentFilter}
-				canFetch={canFetch}
-			/>
-			<ServiceUsageCards startTime={effectiveStartTime} endTime={effectiveEndTime} />
-			<MetricsGrid items={metrics} className="mt-4" waiting={!!isWaiting} syncId="home-overview" />
-			<ServiceHealthList
-				startTime={effectiveStartTime}
-				endTime={effectiveEndTime}
-				timePreset={search.timePreset ?? defaultPreset}
-				environments={environmentFilter}
-				canFetch={canFetch}
-			/>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Overview" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Dashboard"
+							description="Observability overview for your services."
+						>
+							<div className="flex items-center gap-2">
+								<Select
+									items={environmentItems}
+									value={selectedEnvironment}
+									onValueChange={handleEnvironmentChange}
+								>
+									<SelectTrigger size="sm">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{environmentItems.map((item) => (
+											<SelectItem key={item.value} value={item.value}>
+												{item.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+								<TimeRangeHeaderControls
+									startTime={search.startTime ?? effectiveStartTime}
+									endTime={search.endTime ?? effectiveEndTime}
+									presetValue={
+										search.timePreset ?? (search.startTime ? undefined : defaultPreset)
+									}
+									defaultPreset={defaultPreset}
+									onTimeChange={handleTimeChange}
+								/>
+							</div>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						{isClerkAuthEnabled && (
+							<>
+								<FirstActionHint />
+								<SetupChecklist />
+							</>
+						)}
+						{/* Facets drive the environment dropdown and the default preset; when
+						    they fail the charts below still load (unfiltered), so surface the
+						    failure instead of silently offering an empty environment list. */}
+						{Result.builder(facetsResult)
+							.onError((error) => (
+								<ErrorState
+									variant="inline"
+									error={error}
+									title="Failed to load environments"
+									onRetry={onRetryFacets}
+								/>
+							))
+							.render()}
+						{/* Persist the facets-derived defaults once facets resolve, so the next
+						    cold load can fetch optimistically. Gated on `facetsReady` and keyed
+						    by the derived hint so it remounts (re-persists) only when the value
+						    actually changes — no bare effect, no per-render writes. */}
+						{facetsReady && (
+							<FacetsHintPersister
+								key={`${derivedDefaultEnvironment ?? "__all__"}:${defaultPreset}`}
+								orgKey={orgKey}
+								environment={derivedDefaultEnvironment}
+								preset={defaultPreset}
+							/>
+						)}
+						<ServiceHealthOverview
+							startTime={effectiveStartTime}
+							endTime={effectiveEndTime}
+							timePreset={search.timePreset ?? defaultPreset}
+							environments={environmentFilter}
+							canFetch={canFetch}
+						/>
+						<ServiceUsageCards startTime={effectiveStartTime} endTime={effectiveEndTime} />
+						<MetricsGrid
+							items={metrics}
+							className="mt-4"
+							waiting={!!isWaiting}
+							syncId="home-overview"
+						/>
+						<ServiceHealthList
+							startTime={effectiveStartTime}
+							endTime={effectiveEndTime}
+							timePreset={search.timePreset ?? defaultPreset}
+							environments={environmentFilter}
+							canFetch={canFetch}
+						/>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

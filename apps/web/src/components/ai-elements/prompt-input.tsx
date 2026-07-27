@@ -11,7 +11,7 @@ import {
 } from "@maple/ui/components/ui/input-group"
 import { Spinner } from "@maple/ui/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import { CornerDownLeftIcon, XmarkIcon } from "@/components/icons"
+import { CornerDownLeftIcon, SquareIcon, XmarkIcon } from "@/components/icons"
 import { useCallback, useState } from "react"
 
 /**
@@ -106,25 +106,32 @@ export const PromptInputFooter = ({ className, ...props }: PromptInputFooterProp
 
 export type PromptInputSubmitProps = ComponentProps<typeof InputGroupButton> & {
 	status?: ChatStatus
+	/** Cancels the running turn. Turns the button into a stop control while generating. */
+	onStop?: () => void
 }
 
 /**
- * Send button. It never becomes a stop button: `@flue/react` exposes `sendMessage` and
- * nothing else, so an in-flight turn can't be cancelled and offering the control would
- * be a dead affordance.
+ * Send button, which becomes a stop button while a turn is running. An
+ * investigation pass can spend a minute across a dozen tool calls, so being able
+ * to call it off is the difference between a chat you can steer and one you wait
+ * out. Without `onStop` it stays a spinner — the caller has nothing to cancel.
  */
 export const PromptInputSubmit = ({
 	className,
 	variant = "default",
 	size = "icon-sm",
 	status,
+	onStop,
 	children,
 	...props
 }: PromptInputSubmitProps) => {
 	const isGenerating = status === "submitted" || status === "streaming"
+	const canStop = isGenerating && onStop !== undefined
 
 	let Icon = <CornerDownLeftIcon className="size-4" />
-	if (isGenerating) {
+	if (canStop) {
+		Icon = <SquareIcon className="size-3.5" />
+	} else if (isGenerating) {
 		Icon = <Spinner />
 	} else if (status === "error") {
 		Icon = <XmarkIcon className="size-4" />
@@ -132,11 +139,12 @@ export const PromptInputSubmit = ({
 
 	return (
 		<InputGroupButton
-			aria-label={isGenerating ? "Sending" : "Submit"}
+			aria-label={canStop ? "Stop generating" : isGenerating ? "Sending" : "Submit"}
 			className={cn(className)}
 			size={size}
-			type="submit"
+			type={canStop ? "button" : "submit"}
 			variant={variant}
+			onClick={canStop ? onStop : undefined}
 			{...props}
 		>
 			{children ?? Icon}

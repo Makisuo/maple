@@ -95,6 +95,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/error_issues/service_counts",
 			"GET /v2/error_issues/{id}",
 			"GET /v2/ingest_keys",
+			"GET /v2/instrumentation/audit",
 			"GET /v2/instrumentation/recommendations",
 			"GET /v2/integrations/slack",
 			"GET /v2/integrations/slack/channels",

@@ -34,10 +34,10 @@ import {
 	cloudflareZoneBreakdownResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
-import { formatNumber } from "@/lib/format"
+import { formatNumber } from "@maple/ui/format"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
-import { ColumnHead, TableShell, useTableSort } from "../primitives/data-table"
-import { formatBytes, formatPercent } from "../format"
+import { ColumnHead, DataTable, useTableSort } from "../primitives/data-table"
+import { formatBytes, formatPercent } from "@maple/ui/format"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
 import {
 	CACHE_STATUS_COLORS,
@@ -354,22 +354,20 @@ function BreakdownTable({
 	)
 
 	return (
-		<TableShell
+		<DataTable.Root
 			ariaLabel={`${dimension.column} breakdown`}
 			waiting={waiting}
-			isEmpty={sorted.length === 0}
-			emptyMessage={emptyMessage}
 			maxHeight={TABLE_MAX_HEIGHT}
 			stickySurfaceClass="bg-card"
-			header={
-				<>
-					{head(dimension.column, "key", "flex-1 min-w-[220px]")}
-					{head("Requests", "requests", "w-[110px]")}
-					{head("Error rate", "errorRate", "w-[90px]")}
-					{head("Bandwidth", "bytes", "w-[90px]", "hidden md:flex")}
-				</>
-			}
 		>
+			<DataTable.Head>
+				{head(dimension.column, "key", "flex-1 min-w-[220px]")}
+				{head("Requests", "requests", "w-[110px]")}
+				{head("Error rate", "errorRate", "w-[90px]")}
+				{head("Bandwidth", "bytes", "w-[90px]", "hidden md:flex")}
+			</DataTable.Head>
+			{sorted.length === 0 && <DataTable.Empty>{emptyMessage}</DataTable.Empty>}
+
 			{sorted.map((row) => {
 				const selected = selectedValues.includes(row.key)
 				return (
@@ -418,7 +416,7 @@ function BreakdownTable({
 					</div>
 				)
 			})}
-		</TableShell>
+		</DataTable.Root>
 	)
 }
 

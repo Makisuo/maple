@@ -264,36 +264,55 @@ Loads `../../.env.local` via `bun --env-file`.
 
 ### 5. Chat agent (`apps/chat-flue`)
 
-Optional — Flue-based chat + triage on Workers AI (Cloudflare) or Node.
-
-**Cloudflare target** (package default):
+Required for `/chat` and `/investigations/*` — Flue-based chat + triage on Workers AI.
 
 ```bash
-cd apps/chat-flue
-cp .dev.vars.example .dev.vars   # set INTERNAL_SERVICE_TOKEN to match API
-bun run dev
+bun --filter=@maple/chat-flue dev:app   # or just `bun dev` from the repo root
 ```
 
-**Node target** (matches local `development.mprocs.yaml`):
+`.dev.vars` is **generated**, not copied: `dev:app` runs
+`scripts/sync-chat-flue-dev-vars.ts`, which projects `INTERNAL_SERVICE_TOKEN`, the auth
+mode and the Clerk keys out of the repo-root `.env.local`. They must match `apps/api` and
+`apps/web` or `/agents/*` rejects every browser request with a bare `401`. Local-only
+overrides go below the marker in `.dev.vars` and survive regeneration.
+
+Cloudflare target needs a Cloudflare account with Workers AI (`wrangler login`). Confirm
+the model id in `src/agents/maple-chat.ts` is still in the catalog — `bunx wrangler ai
+models list`; a retired id returns `410`. Override with `MAPLE_CHAT_MODEL`.
+
+**Both workers must be running.** `apps/api` reaches chat-flue over the `CHAT_FLUE`
+service binding and chat-flue calls back over `MAPLE_API_RPC`; the two resolve through
+wrangler's local dev registry, which needs `maple-api` and `maple-chat-flue` to be
+registered at the same time:
 
 ```bash
-cd apps/chat-flue
-bun flue dev --target node --env ../../.env.local
+ls ~/Library/Preferences/.wrangler/registry/   # expect maple-api and maple-chat-flue
 ```
 
-| Variable                                              | Required | Notes                                                                 |
-| ----------------------------------------------------- | -------- | --------------------------------------------------------------------- |
-| `INTERNAL_SERVICE_TOKEN`                              | yes      | Must match API; sent as `Bearer maple_svc_<token>` to MCP             |
-| `MAPLE_API_URL`                                       | yes      | `http://localhost:3472` (wrangler `vars` / env)                       |
-| `MAPLE_CHAT_MODEL`                                    | optional | Workers AI id (`cloudflare/@cf/...`) or OpenRouter (`openrouter/...`) |
-| `MAPLE_AUTH_MODE` / `MAPLE_ROOT_PASSWORD` / `CLERK_*` | yes      | Auth middleware on `/agents/*`                                        |
-| `MAPLE_INGEST_KEY`                                    | optional | Self-telemetry export                                                 |
-| `MAPLE_ENDPOINT`                                      | optional | OTLP base URL, default production ingest                              |
+Start order doesn't matter, but kill stale `wrangler dev` processes first — two of them
+write the same registry entry and the last writer wins.
 
-Cloudflare target needs a Cloudflare account with Workers AI. Node target with an
-`openrouter/*` model requires `OPENROUTER_API_KEY` in `.env.local`.
+When something goes wrong, the `investigations.error` column names it:
 
-Point the web app at the agent with `VITE_FLUE_CHAT_URL` (or legacy `VITE_CHAT_AGENT_URL`).
+| `error` value                             | Cause                                                          |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| `start_failed: agent returned HTTP 503`   | `maple-chat-flue` is not in the dev registry                   |
+| `agent_unavailable: …`                    | `apps/api` isn't running under wrangler (no `CHAT_FLUE`)       |
+| `start_rejected: agent returned HTTP 401` | `INTERNAL_SERVICE_TOKEN` mismatch                              |
+| `start_rejected: agent returned HTTP 403` | Vite rejected the request's `Host` — see `chat-flue-origin.ts` |
+
+> **`MAPLE_ORG_ID_OVERRIDE` breaks the investigation chat.** It pins every API request to
+> one org, but the browser addresses the chat agent as `<clerk org>:<tab>`. With the
+> override set to anything other than your Clerk organization's id, the page watches an
+> agent instance the API never seeded, and the transcript stays empty forever. Unset it,
+> or set it to your Clerk org id, when working on chat.
+
+The **Node target** (`flue dev --target node`) has neither the `AI` binding nor
+`MAPLE_API_RPC`, so tools and `submit_diagnosis` cannot work — it is not usable for
+investigations.
+
+Under portless the web app finds the agent automatically (`https://chat-flue.localhost`).
+On raw ports, set `VITE_FLUE_CHAT_URL=http://localhost:3583`.
 
 ### All-in-one alternatives
 

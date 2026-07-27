@@ -56,7 +56,7 @@ describe("Maple API Worker RPC", () => {
 			},
 		})
 		const tool = buildSubmitDiagnosisTool(env, "org_1", "00000000-0000-4000-8000-000000000001")
-		const result = JSON.parse(await tool.execute(report))
+		const result = await tool.run({ input: report, signal: undefined })
 
 		expect(calls).toEqual([
 			{

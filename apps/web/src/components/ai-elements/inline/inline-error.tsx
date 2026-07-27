@@ -1,4 +1,4 @@
-import { formatNumber } from "@/lib/format"
+import { formatNumber } from "@maple/ui/format"
 import type { InlineErrorData } from "./types"
 
 export function InlineError({ data }: { data: InlineErrorData }) {

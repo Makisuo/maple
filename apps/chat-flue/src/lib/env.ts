@@ -39,4 +39,11 @@ export interface ChatFlueEnv {
 	CLERK_JWT_KEY?: string
 	/** Shared HMAC secret for self-hosted HS256 session tokens. */
 	MAPLE_ROOT_PASSWORD?: string
+	/**
+	 * Pins every session to one tenant, overriding the org in the token. Must
+	 * match `apps/api`, which applies the same override — the three tiers have to
+	 * agree on the org or the chat's per-instance authorization rejects its own
+	 * conversations. Local development only.
+	 */
+	MAPLE_ORG_ID_OVERRIDE?: string
 }

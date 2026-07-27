@@ -37,14 +37,12 @@ import {
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
 const cloudflareSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/infra/cloudflare/")({
@@ -82,40 +80,50 @@ function CloudflarePage() {
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
-			<DashboardLayout
-				breadcrumbs={[{ label: "Infrastructure", href: "/infra" }, { label: "Cloudflare" }]}
-				headerActions={
-					<TimeRangeHeaderControls
-						startTime={search.startTime ?? startTime}
-						endTime={search.endTime ?? endTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-						onTimeChange={handleTimeChange}
-					/>
-				}
-			>
-				<div className="space-y-6">
-					<PageHero
-						title="Cloudflare"
-						description="Edge analytics from the Cloudflare integration — per-zone HTTP traffic, cache performance, and Workers invocations."
-					/>
-					{Result.builder(statusResult)
-						.onInitial(() => (
-							<div className="space-y-4">
-								<Skeleton className="h-28 w-full" />
-								<Skeleton className="h-64 w-full" />
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Infrastructure", href: "/infra" }, { label: "Cloudflare" }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header>
+								<TimeRangeHeaderControls
+									startTime={search.startTime ?? startTime}
+									endTime={search.endTime ?? endTime}
+									presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+									onTimeChange={handleTimeChange}
+								/>
+							</DashboardLayout.Header>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-6">
+								<PageHero
+									title="Cloudflare"
+									description="Edge analytics from the Cloudflare integration — per-zone HTTP traffic, cache performance, and Workers invocations."
+								/>
+								{Result.builder(statusResult)
+									.onInitial(() => (
+										<div className="space-y-4">
+											<Skeleton className="h-28 w-full" />
+											<Skeleton className="h-64 w-full" />
+										</div>
+									))
+									.onError((err) => <QueryErrorState error={err} />)
+									.onSuccess((status) => {
+										if (!status.connected)
+											return <CloudflareNotConnected variant="not-connected" />
+										if (!status.analyticsCapable) {
+											return <CloudflareNotConnected variant="needs-permissions" />
+										}
+										return <CloudflareData startTime={startTime} endTime={endTime} />
+									})
+									.render()}
 							</div>
-						))
-						.onError((err) => <QueryErrorState error={err} />)
-						.onSuccess((status) => {
-							if (!status.connected) return <CloudflareNotConnected variant="not-connected" />
-							if (!status.analyticsCapable) {
-								return <CloudflareNotConnected variant="needs-permissions" />
-							}
-							return <CloudflareData startTime={startTime} endTime={endTime} />
-						})
-						.render()}
-				</div>
-			</DashboardLayout>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
 }

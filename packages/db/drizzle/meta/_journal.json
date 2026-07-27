@@ -159,15 +159,22 @@
 		{
 			"idx": 22,
 			"version": "7",
-			"when": 1785150155026,
-			"tag": "0022_stormy_gorgon",
+			"when": 1785149950000,
+			"tag": "0022_electric_publication_prune",
 			"breakpoints": true
 		},
 		{
 			"idx": 23,
 			"version": "7",
+			"when": 1785150155026,
+			"tag": "0023_stormy_gorgon",
+			"breakpoints": true
+		},
+		{
+			"idx": 24,
+			"version": "7",
 			"when": 1785170340989,
-			"tag": "0023_living_midnight",
+			"tag": "0024_living_midnight",
 			"breakpoints": true
 		}
 	]

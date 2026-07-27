@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import { cn } from "@maple/ui/utils"
-import { formatDuration } from "@/lib/format"
+import { formatDuration } from "@maple/ui/format"
 import type { InlineTraceData } from "./types"
 
 export function InlineTrace({ data }: { data: InlineTraceData }) {

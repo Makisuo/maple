@@ -49,40 +49,80 @@ function ReplayDetailPage() {
 
 	return Result.builder(detailResult)
 		.onInitial(() => (
-			<DashboardLayout breadcrumbs={breadcrumbs} title="Loading session…">
-				<ReplayDetailSkeleton />
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={breadcrumbs} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Loading session…" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<ReplayDetailSkeleton />
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		))
 		.onError((error) => (
-			<DashboardLayout breadcrumbs={breadcrumbs} title="Error">
-				<QueryErrorState error={error} titleOverride="Failed to load session replay" />
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={breadcrumbs} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Error" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<QueryErrorState error={error} titleOverride="Failed to load session replay" />
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		))
 		.onSuccess((detail) => {
 			const session = detail.data
 			if (!session) {
 				return (
-					<DashboardLayout
-						breadcrumbs={breadcrumbs}
-						title="Session not found"
-						description="It may have expired or not been ingested yet."
-					>
-						<div className="rounded-xl border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
-							No metadata for session <span className="font-mono">{sessionId}</span>.
-						</div>
-					</DashboardLayout>
+					<DashboardLayout.Root>
+						<DashboardLayout.Breadcrumbs items={breadcrumbs} />
+						<DashboardLayout.Body>
+							<DashboardLayout.Content>
+								<DashboardLayout.Sticky>
+									<DashboardLayout.Header
+										title="Session not found"
+										description="It may have expired or not been ingested yet."
+									/>
+								</DashboardLayout.Sticky>
+								<DashboardLayout.Scroll>
+									<div className="rounded-xl border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
+										No metadata for session <span className="font-mono">{sessionId}</span>
+										.
+									</div>
+								</DashboardLayout.Scroll>
+							</DashboardLayout.Content>
+						</DashboardLayout.Body>
+					</DashboardLayout.Root>
 				)
 			}
 
 			return (
-				<DashboardLayout breadcrumbs={breadcrumbs} title="Session Replay">
-					<ReplayStudio
-						sessionId={sessionId}
-						session={session}
-						traceIds={session.traceIds}
-						window={window}
-					/>
-				</DashboardLayout>
+				<DashboardLayout.Root>
+					<DashboardLayout.Breadcrumbs items={breadcrumbs} />
+					<DashboardLayout.Body>
+						<DashboardLayout.Content>
+							<DashboardLayout.Sticky>
+								<DashboardLayout.Header title="Session Replay" />
+							</DashboardLayout.Sticky>
+							<DashboardLayout.Scroll>
+								<ReplayStudio
+									sessionId={sessionId}
+									session={session}
+									traceIds={session.traceIds}
+									window={window}
+								/>
+							</DashboardLayout.Scroll>
+						</DashboardLayout.Content>
+					</DashboardLayout.Body>
+				</DashboardLayout.Root>
 			)
 		})
 		.render()

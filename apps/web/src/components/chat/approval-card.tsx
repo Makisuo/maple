@@ -7,23 +7,8 @@ import {
 	CircleWarningIcon,
 	CircleXmarkIcon,
 } from "@/components/icons"
+import { toolLabel } from "@/components/ai-elements/tool-metadata"
 import { ApprovalSummary, safeStringify } from "./approval-renderers"
-
-const TOOL_LABELS: Record<string, string> = {
-	create_dashboard: "Create dashboard",
-	update_dashboard: "Update dashboard",
-	add_dashboard_widget: "Add dashboard widget",
-	update_dashboard_widget: "Update dashboard widget",
-	remove_dashboard_widget: "Remove dashboard widget",
-	reorder_dashboard_widgets: "Reorder dashboard widgets",
-	create_alert_rule: "Create alert rule",
-	transition_error_issue: "Transition error issue",
-	claim_error_issue: "Claim error issue",
-	release_error_issue: "Release error issue",
-	comment_on_error_issue: "Comment on error issue",
-	propose_fix: "Propose fix",
-	update_error_notification_policy: "Update error notification policy",
-}
 
 interface ApprovalCardProps {
 	toolName: string
@@ -37,7 +22,7 @@ interface ApprovalCardProps {
 export function ApprovalCard({ toolName, input, resolved, onApprove, onDeny }: ApprovalCardProps) {
 	const [busy, setBusy] = useState<"approve" | "deny" | null>(null)
 	const [showRaw, setShowRaw] = useState(false)
-	const label = TOOL_LABELS[toolName] ?? toolName.replace(/_/g, " ")
+	const label = toolLabel(toolName)
 
 	const handle = (action: "approve" | "deny") => async () => {
 		setBusy(action)
@@ -50,7 +35,7 @@ export function ApprovalCard({ toolName, input, resolved, onApprove, onDeny }: A
 	}
 
 	return (
-		<div className="my-2 overflow-hidden rounded-lg border border-warning/40 bg-warning/5 text-xs">
+		<div className="my-2 overflow-hidden rounded-xl border border-warning/40 bg-warning/5 text-xs">
 			<div className="flex items-center gap-2 px-3 py-2">
 				<CircleWarningIcon className="size-3.5 shrink-0 text-warning" />
 				<span className="font-medium">Approval required: {label}</span>

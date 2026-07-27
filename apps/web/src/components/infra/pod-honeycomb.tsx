@@ -1,7 +1,9 @@
 import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
 
-import { deriveHostStatus, formatPercent, formatRelative, severityLevel } from "./format"
+import { deriveHostStatus, severityLevel } from "./format"
+import { formatPercent } from "@maple/ui/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import {
 	HoneycombSection,
 	type HoneycombCell,
@@ -50,7 +52,7 @@ function toCell(pod: PodRow, referenceTime?: string): HoneycombCell {
 				</div>
 				<div className="border-t pt-1 text-[10px] text-muted-foreground">
 					{pod.namespace ? `ns ${pod.namespace}` : "no namespace"}
-					{pod.nodeName ? ` · node ${pod.nodeName}` : ""} · {formatRelative(pod.lastSeen)}
+					{pod.nodeName ? ` · node ${pod.nodeName}` : ""} · {formatRelativeTime(pod.lastSeen)}
 				</div>
 			</>
 		),

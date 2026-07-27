@@ -111,171 +111,183 @@ export function WidgetLab() {
 	const [mode, setMode] = useState<WidgetMode>("view")
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Widget Lab" }]}
-			title="Widget Lab"
-			description="Every dashboard widget × every notable data scenario. Use this page to polish layout, typography, thresholds, and error states without touching live data."
-			headerActions={
-				<ToggleGroup
-					value={[mode]}
-					onValueChange={(values) => {
-						const next = values[0]
-						if (next === "view" || next === "edit") setMode(next)
-					}}
-					variant="outline"
-					size="sm"
-				>
-					<ToggleGroupItem value="view">View</ToggleGroupItem>
-					<ToggleGroupItem value="edit">Edit</ToggleGroupItem>
-				</ToggleGroup>
-			}
-		>
-			<div className="flex flex-col gap-8 pb-12">
-				<nav className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center gap-1 border-b bg-background/80 px-4 py-2 backdrop-blur">
-					{NAV_ITEMS.map((item) => (
-						<a
-							key={item.id}
-							href={`#${item.id}`}
-							className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Widget Lab" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Widget Lab"
+							description="Every dashboard widget × every notable data scenario. Use this page to polish layout, typography, thresholds, and error states without touching live data."
 						>
-							{item.label}
-						</a>
-					))}
-				</nav>
+							<ToggleGroup
+								value={[mode]}
+								onValueChange={(values) => {
+									const next = values[0]
+									if (next === "view" || next === "edit") setMode(next)
+								}}
+								variant="outline"
+								size="sm"
+							>
+								<ToggleGroupItem value="view">View</ToggleGroupItem>
+								<ToggleGroupItem value="edit">Edit</ToggleGroupItem>
+							</ToggleGroup>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="flex flex-col gap-8 pb-12">
+							<nav className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center gap-1 border-b bg-background/80 px-4 py-2 backdrop-blur">
+								{NAV_ITEMS.map((item) => (
+									<a
+										key={item.id}
+										href={`#${item.id}`}
+										className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+									>
+										{item.label}
+									</a>
+								))}
+							</nav>
 
-				<Section
-					id="stat"
-					title="Stat"
-					description="Single aggregated value. Polish: threshold colors, prefix/suffix, long titles, edge values."
-					minColWidth={240}
-				>
-					{statScenarios.map((s, i) => (
-						<StatScenarioCard key={`stat-${i}`} scenario={s} mode={mode} />
-					))}
-					{statSparklineScenarios.map((s, i) => (
-						<StatSparklineScenarioCard key={`stat-spark-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
+							<Section
+								id="stat"
+								title="Stat"
+								description="Single aggregated value. Polish: threshold colors, prefix/suffix, long titles, edge values."
+								minColWidth={240}
+							>
+								{statScenarios.map((s, i) => (
+									<StatScenarioCard key={`stat-${i}`} scenario={s} mode={mode} />
+								))}
+								{statSparklineScenarios.map((s, i) => (
+									<StatSparklineScenarioCard
+										key={`stat-spark-${i}`}
+										scenario={s}
+										mode={mode}
+									/>
+								))}
+							</Section>
 
-				<Section
-					id="gauge"
-					title="Gauge"
-					description="Single scalar on a radial arc. Polish: threshold arc coloring, tick marks, min/max range, edge values."
-				>
-					{gaugeScenarios.map((s, i) => (
-						<GaugeScenarioCard key={`gauge-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
+							<Section
+								id="gauge"
+								title="Gauge"
+								description="Single scalar on a radial arc. Polish: threshold arc coloring, tick marks, min/max range, edge values."
+							>
+								{gaugeScenarios.map((s, i) => (
+									<GaugeScenarioCard key={`gauge-${i}`} scenario={s} mode={mode} />
+								))}
+							</Section>
 
-				<Section
-					id="sparkline"
-					title="Sparkline"
-					description="The stat-widget trend line, rendered standalone across timeseries shapes. Polish: stroke, gradient, threshold color."
-				>
-					{sparklineSamples.map((sample, i) => (
-						<ScenarioCell key={`spark-${i}`} label={sample.label}>
-							<div className="flex h-full flex-col justify-end rounded-lg border bg-card p-3">
-								<StatSparkline
-									data={sample.data}
-									color={sample.color}
-									className="h-12 w-full"
-								/>
-							</div>
-						</ScenarioCell>
-					))}
-				</Section>
+							<Section
+								id="sparkline"
+								title="Sparkline"
+								description="The stat-widget trend line, rendered standalone across timeseries shapes. Polish: stroke, gradient, threshold color."
+							>
+								{sparklineSamples.map((sample, i) => (
+									<ScenarioCell key={`spark-${i}`} label={sample.label}>
+										<div className="flex h-full flex-col justify-end rounded-lg border bg-card p-3">
+											<StatSparkline
+												data={sample.data}
+												color={sample.color}
+												className="h-12 w-full"
+											/>
+										</div>
+									</ScenarioCell>
+								))}
+							</Section>
 
-				<Section
-					id="chart"
-					title="Chart"
-					description="Every entry from the chart registry rendered with its bundled sample data, plus threshold overlays, the stats legend, and loading/error/empty states."
-				>
-					{chartScenarios.map((s, i) => (
-						<ChartScenarioCard key={`chart-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
+							<Section
+								id="chart"
+								title="Chart"
+								description="Every entry from the chart registry rendered with its bundled sample data, plus threshold overlays, the stats legend, and loading/error/empty states."
+							>
+								{chartScenarios.map((s, i) => (
+									<ChartScenarioCard key={`chart-${i}`} scenario={s} mode={mode} />
+								))}
+							</Section>
 
-				<Section
-					id="stress"
-					title="Stress / edge cases"
-					description="High-cardinality (10–50 series/slices), long series names, and null/zero data. Confirms distinct colors past series 5, scrollable legends that don't crush the plot, and pie/bar 'Other' bucketing."
-				>
-					{stressScenarios.map((s, i) => (
-						<ChartScenarioCard key={`stress-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
+							<Section
+								id="stress"
+								title="Stress / edge cases"
+								description="High-cardinality (10–50 series/slices), long series names, and null/zero data. Confirms distinct colors past series 5, scrollable legends that don't crush the plot, and pie/bar 'Other' bucketing."
+							>
+								{stressScenarios.map((s, i) => (
+									<ChartScenarioCard key={`stress-${i}`} scenario={s} mode={mode} />
+								))}
+							</Section>
 
-				<Section
-					id="table"
-					title="Table"
-					description="Tabular data with configurable columns, units, alignment, and cell thresholds."
-				>
-					{tableScenarios.map((s, i) => (
-						<TableScenarioCard key={`table-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
+							<Section
+								id="table"
+								title="Table"
+								description="Tabular data with configurable columns, units, alignment, and cell thresholds."
+							>
+								{tableScenarios.map((s, i) => (
+									<TableScenarioCard key={`table-${i}`} scenario={s} mode={mode} />
+								))}
+							</Section>
 
-				<Section
-					id="list"
-					title="List"
-					description="Traces and logs lists with linked traceId/spanName columns."
-				>
-					{listScenarios.map((s, i) => (
-						<ListScenarioCard key={`list-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
+							<Section
+								id="list"
+								title="List"
+								description="Traces and logs lists with linked traceId/spanName columns."
+							>
+								{listScenarios.map((s, i) => (
+									<ListScenarioCard key={`list-${i}`} scenario={s} mode={mode} />
+								))}
+							</Section>
 
-				<Section
-					id="pie"
-					title="Pie"
-					description="Categorical breakdown. Polish: legend placement, label overflow, donut + percent."
-				>
-					{pieScenarios.map((s, i) => (
-						<PieScenarioCard key={`pie-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
+							<Section
+								id="pie"
+								title="Pie"
+								description="Categorical breakdown. Polish: legend placement, label overflow, donut + percent."
+							>
+								{pieScenarios.map((s, i) => (
+									<PieScenarioCard key={`pie-${i}`} scenario={s} mode={mode} />
+								))}
+							</Section>
 
-				<Section
-					id="funnel"
-					title="Funnel"
-					description="Stage-by-stage drop-off as descending bars. Polish: % of first vs step conversion, long stage labels, single-stage and empty states."
-				>
-					{funnelScenarios.map((s, i) => (
-						<FunnelScenarioCard key={`funnel-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
+							<Section
+								id="funnel"
+								title="Funnel"
+								description="Stage-by-stage drop-off as descending bars. Polish: % of first vs step conversion, long stage labels, single-stage and empty states."
+							>
+								{funnelScenarios.map((s, i) => (
+									<FunnelScenarioCard key={`funnel-${i}`} scenario={s} mode={mode} />
+								))}
+							</Section>
 
-				<Section
-					id="histogram"
-					title="Histogram"
-					description="Bucketed value distribution. Polish: log Y scale, narrow buckets, bell vs long-tail shapes."
-				>
-					{histogramScenarios.map((s, i) => (
-						<HistogramScenarioCard key={`hist-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
+							<Section
+								id="histogram"
+								title="Histogram"
+								description="Bucketed value distribution. Polish: log Y scale, narrow buckets, bell vs long-tail shapes."
+							>
+								{histogramScenarios.map((s, i) => (
+									<HistogramScenarioCard key={`hist-${i}`} scenario={s} mode={mode} />
+								))}
+							</Section>
 
-				<Section
-					id="heatmap"
-					title="Heatmap"
-					description="2D density. Polish: all OKLCH color scales, dense vs sparse data, linear vs log."
-				>
-					{heatmapScenarios.map((s, i) => (
-						<HeatmapScenarioCard key={`heat-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
+							<Section
+								id="heatmap"
+								title="Heatmap"
+								description="2D density. Polish: all OKLCH color scales, dense vs sparse data, linear vs log."
+							>
+								{heatmapScenarios.map((s, i) => (
+									<HeatmapScenarioCard key={`heat-${i}`} scenario={s} mode={mode} />
+								))}
+							</Section>
 
-				<Section
-					id="markdown"
-					title="Markdown"
-					description="Static notes. Polish: heading/list rendering, inline code, sanitized links."
-				>
-					{markdownScenarios.map((s, i) => (
-						<MarkdownScenarioCard key={`md-${i}`} scenario={s} mode={mode} />
-					))}
-				</Section>
-			</div>
-		</DashboardLayout>
+							<Section
+								id="markdown"
+								title="Markdown"
+								description="Static notes. Polish: heading/list rendering, inline code, sanitized links."
+							>
+								{markdownScenarios.map((s, i) => (
+									<MarkdownScenarioCard key={`md-${i}`} scenario={s} mode={mode} />
+								))}
+							</Section>
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

@@ -1,3 +1,4 @@
+import { formatNumber } from "@maple/ui/format"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -5,13 +6,6 @@ import { MetricTypeBadge } from "./metric-type-badge"
 import type { MetricCatalogSummary } from "./metric-detail"
 import { getMetricAttributeKeysResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
-
-function formatCount(value: number): string {
-	if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`
-	if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-	if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
-	return String(value)
-}
 
 function formatSeen(value: string): string {
 	const date = new Date(normalizeTimestampInput(value))
@@ -60,7 +54,7 @@ export function MetricMetadataPanel({ summary, startTime, endTime }: MetricMetad
 			<dl className="space-y-2 text-xs">
 				<div className="flex items-center justify-between gap-2">
 					<dt className="text-muted-foreground">Datapoints in range</dt>
-					<dd className="font-mono">{formatCount(summary.dataPointCount)}</dd>
+					<dd className="font-mono">{formatNumber(summary.dataPointCount)}</dd>
 				</div>
 				<div className="flex items-center justify-between gap-2">
 					<dt className="text-muted-foreground">First seen</dt>
@@ -109,7 +103,7 @@ export function MetricMetadataPanel({ summary, startTime, endTime }: MetricMetad
 									>
 										<span className="truncate font-mono">{row.attributeKey}</span>
 										<span className="shrink-0 font-mono text-muted-foreground">
-											{formatCount(row.usageCount)}
+											{formatNumber(row.usageCount)}
 										</span>
 									</li>
 								))}

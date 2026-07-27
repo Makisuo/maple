@@ -3,17 +3,24 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Exit } from "effect"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import type { V2Investigation } from "@maple/domain/http/v2"
-import { Badge } from "@maple/ui/components/ui/badge"
+import type { IssueSeverity } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
+import { Card } from "@maple/ui/components/ui/card"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Input } from "@maple/ui/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import { toast } from "sonner"
 
 import { ErrorState } from "@/components/common/error-state"
-import { PulseIcon } from "@/components/icons"
+import { SeverityBadge } from "@/components/errors/severity-badge"
+import {
+	InvestigationStatusBadge,
+	investigationKindLabel,
+	investigationOriginLabel,
+} from "@/components/investigations/investigation-status"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
 type HubView = "active" | "history"
@@ -22,8 +29,10 @@ export const Route = createFileRoute("/investigations/")({
 	component: InvestigationsHub,
 })
 
-const statusLabel = (status: V2Investigation["status"]) =>
-	status === "investigating" ? "In progress" : status
+const PAGE_SIZE = 100
+
+const asIssueSeverity = (value: string | null | undefined): IssueSeverity | null =>
+	value === "critical" || value === "high" || value === "medium" || value === "low" ? value : null
 
 function InvestigationsHub() {
 	const navigate = useNavigate()
@@ -31,7 +40,7 @@ function InvestigationsHub() {
 	const [subject, setSubject] = useState("")
 	const [creating, setCreating] = useState(false)
 	const query = MapleApiV2AtomClient.query("investigations", "list", {
-		query: { limit: 100 },
+		query: { limit: PAGE_SIZE },
 		reactivityKeys: ["investigations"],
 	})
 	const result = useAtomValue(query)
@@ -40,6 +49,8 @@ function InvestigationsHub() {
 		mode: "promiseExit",
 	})
 
+	// The list endpoint filters by a single status, but each tab spans two, so the
+	// split happens here. That makes the counts page-local — see `hasMore`.
 	const investigations = useMemo(
 		() =>
 			Result.builder(result)
@@ -53,6 +64,9 @@ function InvestigationsHub() {
 				.orElse(() => []),
 		[result, view],
 	)
+	const hasMore = Result.builder(result)
+		.onSuccess((response) => response.has_more)
+		.orElse(() => false)
 
 	const handleCreate = async () => {
 		const title = subject.trim()
@@ -60,12 +74,7 @@ function InvestigationsHub() {
 		setCreating(true)
 		const created = await create({
 			payload: {
-				subject: {
-					type: "freeform",
-					title,
-					prompt: title,
-					context_refs: [],
-				},
+				subject: { type: "freeform", title, prompt: title, context_refs: [] },
 				snapshot: {
 					title,
 					scope: null,
@@ -82,90 +91,120 @@ function InvestigationsHub() {
 		setCreating(false)
 		if (Exit.isSuccess(created)) {
 			setSubject("")
-			void navigate({
-				to: "/investigations/$id",
-				params: { id: created.value.id },
-			})
+			void navigate({ to: "/investigations/$id", params: { id: created.value.id } })
 		} else {
 			toast.error("Investigation could not be started")
 		}
 	}
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Investigations" }]}
-			title="Investigations"
-			description="Durable evidence, diagnoses, approvals, and escalation outcomes."
-		>
-			<div className="space-y-4">
-				<form
-					className="flex items-center gap-2 border bg-card/20 p-3"
-					onSubmit={(event) => {
-						event.preventDefault()
-						void handleCreate()
-					}}
-				>
-					<PulseIcon className="size-4 shrink-0 text-muted-foreground" />
-					<Input
-						value={subject}
-						onChange={(event) => setSubject(event.target.value)}
-						placeholder="Investigate a service, symptom, or incident…"
-						aria-label="New investigation subject"
-						className="border-0 bg-transparent shadow-none focus-visible:ring-0"
-					/>
-					<Button size="sm" type="submit" disabled={creating || !subject.trim()}>
-						{creating ? "Starting…" : "New investigation"}
-					</Button>
-				</form>
-
-				<div className="flex items-center justify-between border-b">
-					<Tabs value={view} onValueChange={(value) => setView(value as HubView)}>
-						<TabsList variant="underline">
-							<TabsTrigger value="active">Active</TabsTrigger>
-							<TabsTrigger value="history">History</TabsTrigger>
-						</TabsList>
-					</Tabs>
-					<span className="pb-2 text-xs tabular-nums text-muted-foreground">
-						{investigations.length} {view}
-					</span>
-				</div>
-
-				{Result.builder(result)
-					.onInitial(() => <InvestigationTableSkeleton />)
-					.onError((error) => (
-						<ErrorState
-							error={error}
-							title="Investigations could not be loaded"
-							onRetry={refresh}
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Investigations" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Investigations"
+							description="Maple investigates an incident, records what it found, and keeps the thread open for follow-ups."
 						/>
-					))
-					.onSuccess(() =>
-						investigations.length === 0 ? (
-							<div className="border px-4 py-12 text-center">
-								<p className="text-sm font-medium text-foreground">
-									{view === "active"
-										? "No active investigations match this view"
-										: "No completed or failed investigations yet"}
-								</p>
-								<p className="mt-1 text-xs text-muted-foreground">
-									{view === "active"
-										? "Start one above or open an issue and choose Start investigation."
-										: "Resolved and failed investigations will remain available here."}
-								</p>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="space-y-6">
+							<Card className="gap-3 p-4">
+								<div className="space-y-1">
+									<h2 className="text-sm font-medium text-foreground">
+										Start an investigation
+									</h2>
+									<p className="text-xs text-muted-foreground">
+										Name a service, a symptom, or a question. Maple gathers the evidence
+										and reports back.
+									</p>
+								</div>
+								<form
+									className="flex flex-col gap-2 sm:flex-row"
+									onSubmit={(event) => {
+										event.preventDefault()
+										void handleCreate()
+									}}
+								>
+									<Input
+										value={subject}
+										onChange={(event) => setSubject(event.target.value)}
+										placeholder="Why is checkout p95 latency climbing?"
+										aria-label="What should Maple investigate?"
+										className="sm:flex-1"
+									/>
+									<Button type="submit" disabled={creating || !subject.trim()}>
+										{creating ? "Starting…" : "Investigate"}
+									</Button>
+								</form>
+							</Card>
+
+							<div className="space-y-3">
+								<div className="flex items-center justify-between border-b">
+									<Tabs value={view} onValueChange={(value) => setView(value as HubView)}>
+										<TabsList variant="underline">
+											<TabsTrigger value="active">Active</TabsTrigger>
+											<TabsTrigger value="history">History</TabsTrigger>
+										</TabsList>
+									</Tabs>
+									{investigations.length > 0 && (
+										<span className="pb-2 text-xs tabular-nums text-muted-foreground">
+											{/* Honest about the page: with more rows on the server, this
+											    is what's shown, not a total. */}
+											{hasMore
+												? `Showing ${investigations.length} of the ${PAGE_SIZE} most recent`
+												: `${investigations.length} shown`}
+										</span>
+									)}
+								</div>
+
+								{Result.builder(result)
+									.onInitial(() => <InvestigationTableSkeleton />)
+									.onError((error) => (
+										<ErrorState
+											error={error}
+											title="Investigations could not be loaded"
+											onRetry={refresh}
+										/>
+									))
+									.onSuccess(() =>
+										investigations.length === 0 ? (
+											<HubEmptyState view={view} />
+										) : (
+											<InvestigationTable investigations={investigations} />
+										),
+									)
+									.render()}
 							</div>
-						) : (
-							<InvestigationTable investigations={investigations} />
-						),
-					)
-					.render()}
-			</div>
-		</DashboardLayout>
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
+	)
+}
+
+function HubEmptyState({ view }: { view: HubView }) {
+	return (
+		<Empty>
+			<EmptyHeader>
+				<EmptyTitle>
+					{view === "active" ? "Nothing under investigation" : "No finished investigations yet"}
+				</EmptyTitle>
+				<EmptyDescription>
+					{view === "active"
+						? "Start one above, or open an issue and choose Start investigation. Maple also opens one automatically when an incident fires."
+						: "Investigations you resolve — and any that fail — stay here for reference."}
+				</EmptyDescription>
+			</EmptyHeader>
+		</Empty>
 	)
 }
 
 function InvestigationTable({ investigations }: { investigations: ReadonlyArray<V2Investigation> }) {
 	return (
-		<div className="overflow-x-auto border">
+		<div className="overflow-x-auto rounded-xl border">
 			<Table>
 				<TableHeader>
 					<TableRow>
@@ -190,26 +229,28 @@ function InvestigationTable({ investigations }: { investigations: ReadonlyArray<
 									{investigation.snapshot.title}
 								</Link>
 								{investigation.snapshot.scope ? (
-									<p className="mt-0.5 truncate text-xs text-muted-foreground">
+									<p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
 										{investigation.snapshot.scope}
 									</p>
 								) : null}
 							</TableCell>
-							<TableCell className="capitalize">
-								{investigation.subject.type === "freeform"
-									? "Freeform"
-									: investigation.subject.incident_kind}
-							</TableCell>
-							<TableCell className="capitalize">
-								{investigation.severity ?? investigation.snapshot.severity ?? "—"}
-							</TableCell>
-							<TableCell className="capitalize">{investigation.confidence ?? "—"}</TableCell>
+							<TableCell>{investigationKindLabel(investigation.subject)}</TableCell>
 							<TableCell>
-								<Badge variant="outline" className="capitalize">
-									{statusLabel(investigation.status)}
-								</Badge>
+								<SeverityBadge
+									severity={asIssueSeverity(
+										investigation.severity ?? investigation.snapshot.severity,
+									)}
+								/>
 							</TableCell>
-							<TableCell className="capitalize">{investigation.seeded_by}</TableCell>
+							<TableCell className="capitalize text-muted-foreground">
+								{investigation.confidence ?? "—"}
+							</TableCell>
+							<TableCell>
+								<InvestigationStatusBadge status={investigation.status} />
+							</TableCell>
+							<TableCell className="text-muted-foreground">
+								{investigationOriginLabel(investigation.seeded_by)}
+							</TableCell>
 							<TableCell className="text-right text-xs text-muted-foreground">
 								{formatRelativeTime(investigation.updated_at)}
 							</TableCell>
@@ -223,7 +264,7 @@ function InvestigationTable({ investigations }: { investigations: ReadonlyArray<
 
 function InvestigationTableSkeleton() {
 	return (
-		<div className="divide-y border" aria-label="Loading investigations">
+		<div className="divide-y rounded-xl border" aria-label="Loading investigations">
 			{Array.from({ length: 5 }, (_, index) => (
 				<div key={index} className="h-14 animate-pulse bg-muted/20" />
 			))}

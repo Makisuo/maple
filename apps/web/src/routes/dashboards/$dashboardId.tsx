@@ -144,33 +144,47 @@ function DashboardViewPage() {
 	if (!activeDashboard) {
 		if (isLoading) {
 			return (
-				<DashboardLayout
-					breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "..." }]}
-				>
-					<DashboardViewSkeleton />
-				</DashboardLayout>
+				<DashboardLayout.Root>
+					<DashboardLayout.Breadcrumbs
+						items={[{ label: "Dashboards", href: "/dashboards" }, { label: "..." }]}
+					/>
+					<DashboardLayout.Body>
+						<DashboardLayout.Content>
+							<DashboardLayout.Scroll>
+								<DashboardViewSkeleton />
+							</DashboardLayout.Scroll>
+						</DashboardLayout.Content>
+					</DashboardLayout.Body>
+				</DashboardLayout.Root>
 			)
 		}
 		return (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "Not found" }]}
-			>
-				<div className="flex flex-col items-center gap-3 py-24">
-					<p className="text-sm font-medium text-foreground">Dashboard not found</p>
-					<p className="text-xs text-muted-foreground">
-						No dashboard with id{" "}
-						<code className="break-all rounded bg-muted px-1.5 py-0.5 text-foreground">
-							{dashboardId}
-						</code>
-					</p>
-					<Link
-						to="/dashboards"
-						className="mt-2 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-					>
-						← Back to all dashboards
-					</Link>
-				</div>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Dashboards", href: "/dashboards" }, { label: "Not found" }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Scroll>
+							<div className="flex flex-col items-center gap-3 py-24">
+								<p className="text-sm font-medium text-foreground">Dashboard not found</p>
+								<p className="text-xs text-muted-foreground">
+									No dashboard with id{" "}
+									<code className="break-all rounded bg-muted px-1.5 py-0.5 text-foreground">
+										{dashboardId}
+									</code>
+								</p>
+								<Link
+									to="/dashboards"
+									className="mt-2 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+								>
+									← Back to all dashboards
+								</Link>
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 
@@ -201,92 +215,110 @@ function DashboardViewPage() {
 					}}
 				>
 					<DashboardRefreshBridge>
-						<DashboardLayout
-							breadcrumbs={[
-								{ label: "Dashboards", href: "/dashboards" },
-								{ label: activeDashboard.name },
-							]}
-							titleContent={
-								<InlineEditableTitle
-									value={activeDashboard.name}
-									readOnly={readOnly || isPreviewing}
-									onChange={(name) => updateDashboard(dashboardId, { name })}
-								/>
-							}
-							headerActions={
-								<DashboardToolbar
-									dashboard={activeDashboard}
-									onToggleEdit={handleToggleEdit}
-									onAddWidget={() => setChartPickerOpen(true)}
-									onOpenHistory={openHistory}
-								/>
-							}
-							rightSidebar={
-								historyPanelOpen ? (
-									<HistoryPanelMount
-										dashboardId={dashboardId}
-										onClose={() => {
-											setHistoryPanelOpen(false)
-											setPreviewed(null)
-										}}
-									/>
-								) : undefined
-							}
-						>
-							{persistenceError && (
-								<div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-									{persistenceError}. Dashboard editing is temporarily disabled.
-								</div>
-							)}
-
-							{isPreviewing && previewed ? (
-								<PreviewedCanvas
-									dashboardId={dashboardId}
-									preview={previewed}
-									onCancel={() => setPreviewed(null)}
-									onRestored={() => setPreviewed(null)}
-								/>
-							) : activeDashboard.widgets.length === 0 && mode === "view" ? (
-								<div className="flex flex-col items-center justify-center py-24 gap-4">
-									<div className="flex gap-2">
-										<div className="size-8 rounded bg-primary/15" />
-										<div className="size-8 rounded bg-primary/10" />
-										<div className="size-8 rounded bg-primary/15" />
-									</div>
-									<div className="flex flex-col items-center gap-1">
-										<p className="text-sm font-medium text-foreground">No widgets yet</p>
-										<p className="text-xs text-muted-foreground">
-											Add charts, stats, and tables to build your dashboard.
-										</p>
-									</div>
-									<button
-										type="button"
-										disabled={readOnly}
-										className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
-										onClick={() => {
-											navigate({
-												to: "/dashboards/$dashboardId",
-												params: { dashboardId },
-												search: (prev) => ({
-													...pickVariableParams(prev),
-													mode: "edit" as const,
-												}),
-											})
-											setChartPickerOpen(true)
-										}}
-									>
-										Add your first widget
-									</button>
-								</div>
-							) : (
-								<DashboardCanvas widgets={activeDashboard.widgets} />
-							)}
-
-							<WidgetPickerWithActions
-								open={readOnly || isPreviewing ? false : chartPickerOpen}
-								onOpenChange={readOnly || isPreviewing ? () => undefined : setChartPickerOpen}
+						<DashboardLayout.Root>
+							<DashboardLayout.Breadcrumbs
+								items={[
+									{ label: "Dashboards", href: "/dashboards" },
+									{ label: activeDashboard.name },
+								]}
 							/>
-						</DashboardLayout>
+							<DashboardLayout.Body>
+								<DashboardLayout.Content>
+									<DashboardLayout.Sticky>
+										<DashboardLayout.Header
+											titleContent={
+												<InlineEditableTitle
+													value={activeDashboard.name}
+													readOnly={readOnly || isPreviewing}
+													onChange={(name) =>
+														updateDashboard(dashboardId, { name })
+													}
+												/>
+											}
+										>
+											<DashboardToolbar
+												dashboard={activeDashboard}
+												onToggleEdit={handleToggleEdit}
+												onAddWidget={() => setChartPickerOpen(true)}
+												onOpenHistory={openHistory}
+											/>
+										</DashboardLayout.Header>
+									</DashboardLayout.Sticky>
+									<DashboardLayout.Scroll>
+										{persistenceError && (
+											<div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+												{persistenceError}. Dashboard editing is temporarily disabled.
+											</div>
+										)}
+
+										{isPreviewing && previewed ? (
+											<PreviewedCanvas
+												dashboardId={dashboardId}
+												preview={previewed}
+												onCancel={() => setPreviewed(null)}
+												onRestored={() => setPreviewed(null)}
+											/>
+										) : activeDashboard.widgets.length === 0 && mode === "view" ? (
+											<div className="flex flex-col items-center justify-center py-24 gap-4">
+												<div className="flex gap-2">
+													<div className="size-8 rounded bg-primary/15" />
+													<div className="size-8 rounded bg-primary/10" />
+													<div className="size-8 rounded bg-primary/15" />
+												</div>
+												<div className="flex flex-col items-center gap-1">
+													<p className="text-sm font-medium text-foreground">
+														No widgets yet
+													</p>
+													<p className="text-xs text-muted-foreground">
+														Add charts, stats, and tables to build your dashboard.
+													</p>
+												</div>
+												<button
+													type="button"
+													disabled={readOnly}
+													className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
+													onClick={() => {
+														navigate({
+															to: "/dashboards/$dashboardId",
+															params: { dashboardId },
+															search: (prev) => ({
+																...pickVariableParams(prev),
+																mode: "edit" as const,
+															}),
+														})
+														setChartPickerOpen(true)
+													}}
+												>
+													Add your first widget
+												</button>
+											</div>
+										) : (
+											<DashboardCanvas widgets={activeDashboard.widgets} />
+										)}
+
+										<WidgetPickerWithActions
+											open={readOnly || isPreviewing ? false : chartPickerOpen}
+											onOpenChange={
+												readOnly || isPreviewing
+													? () => undefined
+													: setChartPickerOpen
+											}
+										/>
+									</DashboardLayout.Scroll>
+								</DashboardLayout.Content>
+								<DashboardLayout.RightPanel>
+									{historyPanelOpen ? (
+										<HistoryPanelMount
+											dashboardId={dashboardId}
+											onClose={() => {
+												setHistoryPanelOpen(false)
+												setPreviewed(null)
+											}}
+										/>
+									) : undefined}
+								</DashboardLayout.RightPanel>
+							</DashboardLayout.Body>
+						</DashboardLayout.Root>
 					</DashboardRefreshBridge>
 				</DashboardActionsProvider>
 			</DashboardVariablesProvider>

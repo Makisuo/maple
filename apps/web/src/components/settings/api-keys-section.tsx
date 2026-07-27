@@ -1,3 +1,4 @@
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { useAtomSet } from "@/lib/effect-atom"
 import { useState, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
@@ -63,25 +64,6 @@ function formatDate(timestamp: string | null): string {
 	} catch {
 		return "Unknown"
 	}
-}
-
-function formatRelative(timestamp: string | null): string | null {
-	if (!timestamp) return null
-	const parsed = Date.parse(timestamp)
-	if (!Number.isFinite(parsed)) return null
-	const diff = Date.now() - parsed
-	const sec = Math.max(0, Math.floor(diff / 1000))
-	if (sec < 60) return "just now"
-	const min = Math.floor(sec / 60)
-	if (min < 60) return `${min}m ago`
-	const hr = Math.floor(min / 60)
-	if (hr < 24) return `${hr}h ago`
-	const days = Math.floor(hr / 24)
-	if (days < 30) return `${days}d ago`
-	const months = Math.floor(days / 30)
-	if (months < 12) return `${months}mo ago`
-	const years = Math.floor(months / 12)
-	return `${years}y ago`
 }
 
 export function ApiKeysSection() {
@@ -351,7 +333,7 @@ function ApiKeyRow({
 }) {
 	const isMcp = apiKey.kind === "mcp"
 	const Icon = isMcp ? SquareTerminalIcon : KeyIcon
-	const relativeLastUsed = formatRelative(apiKey.last_used_at)
+	const relativeLastUsed = apiKey.last_used_at ? formatRelativeTime(apiKey.last_used_at) : null
 	const expiresAt = apiKey.expires_at === null ? null : Date.parse(apiKey.expires_at)
 	const expiresInPast = expiresAt !== null && Number.isFinite(expiresAt) && expiresAt < Date.now()
 	const expiresSoon =

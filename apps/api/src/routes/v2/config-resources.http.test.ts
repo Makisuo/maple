@@ -25,6 +25,7 @@ import {
 	ApiV2RateLimiterAllowAllLayer,
 	Phase1ResourceStubsLayer,
 	SlackIntegrationServiceStubLayer,
+	SetupAuditServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
 
@@ -107,6 +108,7 @@ const makeHarness = () => {
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(Phase1ResourceStubsLayer),
+		Layer.provide(SetupAuditServiceStubLayer),
 		Layer.provide(TelemetryServiceStubsLayer),
 		// session_replays (in AllV2GroupLayersLive) needs the warehouse at the routes level.
 		Layer.provide(warehouseLive),

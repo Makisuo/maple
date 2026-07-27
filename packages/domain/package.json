@@ -13,6 +13,7 @@
 		"./primitives": "./src/primitives.ts",
 		"./query-engine": "./src/query-engine.ts",
 		"./recommendations": "./src/recommendations.ts",
+		"./setup-audit": "./src/setup-audit.ts",
 		"./sqlcommenter": "./src/sqlcommenter.ts",
 		"./tinybird-project-sync": "./src/tinybird/project-sync.ts",
 		"./warehouse-queries": "./src/warehouse-queries.ts",
@@ -22,7 +23,8 @@
 		"./clickhouse": "./src/clickhouse/index.ts",
 		"./where-clause": "./src/where-clause.ts",
 		"./http/observability": "./src/http/observability.ts",
-		"./http/warehouse-errors": "./src/http/warehouse-errors.ts"
+		"./http/warehouse-errors": "./src/http/warehouse-errors.ts",
+		"./chat-preamble": "./src/chat-preamble.ts"
 	},
 	"scripts": {
 		"test": "vitest run",

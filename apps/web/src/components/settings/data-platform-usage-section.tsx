@@ -1,3 +1,4 @@
+import { formatNumber, formatStorageBytes } from "@maple/ui/format"
 import type { ReactNode } from "react"
 import { Result } from "@/lib/effect-atom"
 import { ChartLineIcon, DatabaseIcon, FileIcon, GridSquareCirclePlusIcon } from "@/components/icons"
@@ -10,22 +11,6 @@ import type { ServiceUsageResponse } from "@/api/warehouse/service-usage"
 // "Total in the DB": sum every retained usage row for the org. Fixed bounds
 // (not a rolling window) keep the atom key stable and capture all stored data.
 const ALL_TIME = { startTime: "2000-01-01 00:00:00", endTime: "2099-12-31 23:59:59" }
-
-function formatNumber(num: number): string {
-	if (num >= 1_000_000_000_000) return `${(num / 1_000_000_000_000).toFixed(2)}T`
-	if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(2)}B`
-	if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
-	if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
-	return num.toLocaleString()
-}
-
-function formatBytes(bytes: number): string {
-	if (bytes >= 1_000_000_000_000) return `${(bytes / 1_000_000_000_000).toFixed(2)} TB`
-	if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(2)} GB`
-	if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(2)} MB`
-	if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(2)} KB`
-	return `${bytes} B`
-}
 
 type StatKey = "logs" | "traces" | "metrics" | "dataSize"
 
@@ -56,7 +41,7 @@ const STATS: ReadonlyArray<{
 		label: "Storage",
 		icon: DatabaseIcon,
 		badge: "bg-chart-1/10 text-chart-1",
-		format: formatBytes,
+		format: formatStorageBytes,
 	},
 ]
 

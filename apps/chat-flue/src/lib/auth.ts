@@ -151,15 +151,35 @@ export const verifyRequest = async (
 			.catch(() => undefined)
 		if (!state || !state.isAuthenticated) return undefined
 		const auth = state.toAuth()
-		if (!auth || !auth.userId || !auth.orgId) return undefined
-		return { orgId: auth.orgId, userId: auth.userId }
+		if (!auth || !auth.userId) return undefined
+		const orgId = resolveOrgId(env, auth.orgId ?? undefined)
+		if (!orgId) return undefined
+		return { orgId, userId: auth.userId }
 	}
 
 	const secret = env.MAPLE_ROOT_PASSWORD
 	if (!secret) return undefined
 	const payload = await verifyHs256(token, secret)
 	if (!payload) return undefined
-	return { orgId: payload.org_id, userId: payload.sub }
+	const orgId = resolveOrgId(env, payload.org_id)
+	if (!orgId) return undefined
+	return { orgId, userId: payload.sub }
+}
+
+/**
+ * The tenant a session belongs to, resolved the way `packages/auth` does it in
+ * apps/api: `MAPLE_ORG_ID_OVERRIDE` wins over the org in the token.
+ *
+ * All three tiers must agree on this or the chat silently breaks. apps/api seeds
+ * an investigation's agent as `"<resolvedOrg>:inv-<id>"`, and the browser now
+ * addresses it with the org apps/api reported. If this worker resolved the token
+ * differently, the per-instance authorization check below would reject the very
+ * conversation the API just created — a 403 that reads like a bug in the chat and
+ * is really a disagreement about who the caller is.
+ */
+const resolveOrgId = (env: ChatFlueEnv, tokenOrgId: string | undefined): string | undefined => {
+	const override = env.MAPLE_ORG_ID_OVERRIDE?.trim()
+	return override && override.length > 0 ? override : tokenOrgId
 }
 
 /**

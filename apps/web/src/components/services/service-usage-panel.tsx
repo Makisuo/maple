@@ -1,3 +1,4 @@
+import { formatNumber, formatStorageBytes } from "@maple/ui/format"
 import { useMemo } from "react"
 import { cn } from "@maple/ui/utils"
 import { Result } from "@/lib/effect-atom"
@@ -18,21 +19,6 @@ interface ServiceUsagePanelProps {
 	 * labels itself "all environments".
 	 */
 	envFilterActive?: boolean
-}
-
-function formatCount(num: number): string {
-	if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(2)}B`
-	if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
-	if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
-	return num.toLocaleString()
-}
-
-function formatBytes(bytes: number): string {
-	if (bytes >= 1_000_000_000_000) return `${(bytes / 1_000_000_000_000).toFixed(2)} TB`
-	if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(2)} GB`
-	if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(2)} MB`
-	if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)} KB`
-	return `${Math.round(bytes)} B`
 }
 
 /** Format a warehouse datetime back into the "YYYY-MM-DD HH:mm:ss" wire shape. */
@@ -113,10 +99,10 @@ export function ServiceUsagePanel({
 		label: string
 		format: (n: number) => string
 	}> = [
-		{ key: "logs", label: "Logs", format: formatCount },
-		{ key: "traces", label: "Spans", format: formatCount },
-		{ key: "metrics", label: "Metrics", format: formatCount },
-		{ key: "dataSize", label: "Stored", format: formatBytes },
+		{ key: "logs", label: "Logs", format: formatNumber },
+		{ key: "traces", label: "Spans", format: formatNumber },
+		{ key: "metrics", label: "Metrics", format: formatNumber },
+		{ key: "dataSize", label: "Stored", format: formatStorageBytes },
 	]
 
 	return (

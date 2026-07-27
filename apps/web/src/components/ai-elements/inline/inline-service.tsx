@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { cn } from "@maple/ui/utils"
 import { LatencyValue } from "@maple/ui/components/latency-value"
-import { formatErrorRate, formatNumber } from "@/lib/format"
+import { formatErrorRate, formatNumber } from "@maple/ui/format"
 import type { InlineServiceData } from "./types"
 
 export function InlineService({ data }: { data: InlineServiceData }) {

@@ -3,8 +3,15 @@
 // two can't drift. Warehouse-coupled helpers (partition windows) stay in the
 // web app: this package doesn't depend on @maple/query-engine.
 
-/** `1m 23s` / `45s`, or `—` for missing/zero durations. */
-export function formatDuration(ms: number | null): string {
+/**
+ * `1m 23s` / `45s`, or `—` for missing/zero durations.
+ *
+ * Named for the session it measures rather than `formatDuration`: this renders a
+ * wall-clock span in minutes and seconds, which is a different job from the
+ * μs→h ladder in `./format`. Sharing the name meant the two got imported
+ * interchangeably.
+ */
+export function formatSessionDuration(ms: number | null): string {
 	if (ms == null || ms <= 0) return "—"
 	const totalSeconds = Math.round(ms / 1000)
 	const minutes = Math.floor(totalSeconds / 60)
@@ -53,25 +60,6 @@ export function isMobileDevice(deviceType: string): boolean {
 	return d === "mobile" || d === "tablet" || d === "phone"
 }
 
-const RELATIVE_UNITS: ReadonlyArray<readonly [Intl.RelativeTimeFormatUnit, number]> = [
-	["year", 365 * 24 * 60 * 60 * 1000],
-	["month", 30 * 24 * 60 * 60 * 1000],
-	["day", 24 * 60 * 60 * 1000],
-	["hour", 60 * 60 * 1000],
-	["minute", 60 * 1000],
-	["second", 1000],
-]
-
-const relativeFmt = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
-
-/** `2h ago` / `just now` for an epoch-ms instant, relative to `nowMs` (defaults to Date.now()). */
-export function formatRelativeTime(epochMs: number, nowMs: number = Date.now()): string {
-	if (!Number.isFinite(epochMs)) return "—"
-	const deltaMs = epochMs - nowMs
-	const abs = Math.abs(deltaMs)
-	if (abs < 5_000) return "just now"
-	for (const [unit, ms] of RELATIVE_UNITS) {
-		if (abs >= ms) return relativeFmt.format(Math.round(deltaMs / ms), unit)
-	}
-	return "just now"
-}
+// Relative-time formatting lives in `./time-format` — import `formatRelativeFrom`
+// for an epoch-ms instant. The `Intl.RelativeTimeFormat` version that used to
+// live here rendered "2 hours ago" while the rest of the app rendered "2h ago".

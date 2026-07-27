@@ -5,7 +5,7 @@ import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refresha
 import { getServiceDependenciesBundleResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { toSingleDeploymentEnv } from "@/lib/services/environments"
 import { latencyToneClass } from "@maple/ui/lib/latency-tone"
-import { formatLatency } from "@/lib/format"
+import { formatLatency } from "@maple/ui/format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { DependencyTable, type DependencyRow } from "./dependency-table"
 import type { DependencyKind } from "./dependency-type-badge"

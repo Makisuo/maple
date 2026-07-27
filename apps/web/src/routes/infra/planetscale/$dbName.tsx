@@ -51,22 +51,20 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import type { PlanetScaleInfraTimeseriesRow } from "@/api/warehouse/planetscale-infra"
 import type { PlanetScaleBranchStat } from "@/api/warehouse/service-map"
 
 const planetscaleDbSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
 	/**
 	 * Scopes the charts and query insights. Absent means the resolved production
 	 * branch — deliberately not written into the URL on load, so a shared link
 	 * always shows what the sender saw.
 	 */
 	branch: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/infra/planetscale/$dbName")({
@@ -149,81 +147,98 @@ function PlanetScaleDatabasePage() {
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
-			<DashboardLayout
-				breadcrumbs={[
-					{ label: "Infrastructure", href: "/infra" },
-					{ label: "PlanetScale", href: "/infra/planetscale" },
-					{ label: dbName },
-				]}
-				headerActions={
-					<div className="flex items-center gap-2">
-						{/* The page's two scope controls sit together: which branch, which window. */}
-						<BranchScopeSelect
-							candidates={candidates}
-							selected={selectedBranch}
-							onSelect={selectBranch}
-						/>
-						<TimeRangeHeaderControls
-							startTime={search.startTime ?? startTime}
-							endTime={search.endTime ?? endTime}
-							presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-							onTimeChange={handleTimeChange}
-						/>
-					</div>
-				}
-			>
-				<div className="space-y-6">
-					<PageHero
-						title={dbName}
-						description="Branch-level health, live from PlanetScale."
-						meta={
-							database ? (
-								<>
-									<HeroChip>
-										{database.kind === "postgresql" ? "Postgres" : "MySQL / Vitess"}
-									</HeroChip>
-									{database.region ? <HeroChip>{database.region}</HeroChip> : null}
-									{database.plan ? <HeroChip>{database.plan}</HeroChip> : null}
-									<HeroChip>
-										{database.branches.length} branch
-										{database.branches.length === 1 ? "" : "es"}
-									</HeroChip>
-								</>
-							) : undefined
-						}
-					/>
-					{status !== null && !status.connected ? (
-						<PlanetScaleNotConnected />
-					) : (
-						<>
-							{status?.revokedAt != null ? <PlanetScaleRevokedNotice /> : null}
-							{status?.metricsAuth === "missing" ? <PlanetScaleMetricsNotice /> : null}
-							{resolution.kind === "unknown" ? (
-								<UnknownBranchNotice
-									name={resolution.name}
-									fallback={resolution.fallback}
-									onReset={() => selectBranch(undefined)}
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[
+						{ label: "Infrastructure", href: "/infra" },
+						{ label: "PlanetScale", href: "/infra/planetscale" },
+						{ label: dbName },
+					]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header>
+								<div className="flex items-center gap-2">
+									{/* The page's two scope controls sit together: which branch, which window. */}
+									<BranchScopeSelect
+										candidates={candidates}
+										selected={selectedBranch}
+										onSelect={selectBranch}
+									/>
+									<TimeRangeHeaderControls
+										startTime={search.startTime ?? startTime}
+										endTime={search.endTime ?? endTime}
+										presetValue={
+											search.timePreset ?? (search.startTime ? undefined : "12h")
+										}
+										onTimeChange={handleTimeChange}
+									/>
+								</div>
+							</DashboardLayout.Header>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-6">
+								<PageHero
+									title={dbName}
+									description="Branch-level health, live from PlanetScale."
+									meta={
+										database ? (
+											<>
+												<HeroChip>
+													{database.kind === "postgresql"
+														? "Postgres"
+														: "MySQL / Vitess"}
+												</HeroChip>
+												{database.region ? (
+													<HeroChip>{database.region}</HeroChip>
+												) : null}
+												{database.plan ? <HeroChip>{database.plan}</HeroChip> : null}
+												<HeroChip>
+													{database.branches.length} branch
+													{database.branches.length === 1 ? "" : "es"}
+												</HeroChip>
+											</>
+										) : undefined
+									}
 								/>
-							) : null}
-							{/* Keyed on the database: TanStack Router swaps the param without
+								{status !== null && !status.connected ? (
+									<PlanetScaleNotConnected />
+								) : (
+									<>
+										{status?.revokedAt != null ? <PlanetScaleRevokedNotice /> : null}
+										{status?.metricsAuth === "missing" ? (
+											<PlanetScaleMetricsNotice />
+										) : null}
+										{resolution.kind === "unknown" ? (
+											<UnknownBranchNotice
+												name={resolution.name}
+												fallback={resolution.fallback}
+												onReset={() => selectBranch(undefined)}
+											/>
+										) : null}
+										{/* Keyed on the database: TanStack Router swaps the param without
 							    remounting, and the retained-value hooks would otherwise render
 							    the previous database's numbers under this one's title. */}
-							<PlanetScaleDatabaseData
-								key={dbName}
-								database={dbName}
-								branch={selectedBranch?.name}
-								startTime={startTime}
-								endTime={endTime}
-								metricsPaused={status?.metricsAuth === "missing"}
-								candidates={candidates}
-								branchStatsResult={branchStatsResult}
-								selectedBranchName={selectedBranch?.name ?? null}
-								onSelectBranch={selectBranch}
-							/>
-						</>
-					)}
-				</div>
-			</DashboardLayout>
+										<PlanetScaleDatabaseData
+											key={dbName}
+											database={dbName}
+											branch={selectedBranch?.name}
+											startTime={startTime}
+											endTime={endTime}
+											metricsPaused={status?.metricsAuth === "missing"}
+											candidates={candidates}
+											branchStatsResult={branchStatsResult}
+											selectedBranchName={selectedBranch?.name ?? null}
+											onSelectBranch={selectBranch}
+										/>
+									</>
+								)}
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
 }

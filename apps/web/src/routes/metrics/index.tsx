@@ -3,7 +3,7 @@ import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MetricsBrowse, type MetricsBrowsePatch } from "@/components/metrics/metrics-browse"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
@@ -14,12 +14,10 @@ function asMetricType(value: string): (typeof METRIC_TYPE_VALUES)[number] | unde
 }
 
 const metricsSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
 	q: Schema.optional(Schema.String),
 	type: Schema.optional(Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])),
 	view: Schema.optional(Schema.Literals(["grid", "table"])),
+	...TimeRangeSearchFields,
 })
 
 export type MetricsSearchParams = Schema.Schema.Type<typeof metricsSearchSchema>
@@ -51,42 +49,50 @@ function MetricsPage() {
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "24h"}>
-			<DashboardLayout
-				breadcrumbs={[{ label: "Metrics" }]}
-				title="Metrics"
-				description="Explore and analyze OpenTelemetry metrics from your services."
-				headerActions={
-					<TimeRangeHeaderControls
-						startTime={search.startTime}
-						endTime={search.endTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
-						defaultPreset="24h"
-						onTimeChange={handleTimeChange}
-					/>
-				}
-			>
-				<MetricsBrowse
-					startTime={search.startTime}
-					endTime={search.endTime}
-					timePreset={search.timePreset}
-					q={search.q ?? ""}
-					type={search.type ?? null}
-					view={search.view ?? "grid"}
-					onPatch={handlePatch}
-					onOpenMetric={(metric) => {
-						navigate({
-							to: "/metrics/$metricName",
-							params: { metricName: metric.metricName },
-							search: {
-								startTime: search.startTime,
-								endTime: search.endTime,
-								timePreset: search.timePreset,
-								type: asMetricType(metric.metricType),
-							},
-						})
-					}}
-				/>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={[{ label: "Metrics" }]} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header
+								title="Metrics"
+								description="Explore and analyze OpenTelemetry metrics from your services."
+							>
+								<TimeRangeHeaderControls
+									startTime={search.startTime}
+									endTime={search.endTime}
+									presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
+									defaultPreset="24h"
+									onTimeChange={handleTimeChange}
+								/>
+							</DashboardLayout.Header>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<MetricsBrowse
+								startTime={search.startTime}
+								endTime={search.endTime}
+								timePreset={search.timePreset}
+								q={search.q ?? ""}
+								type={search.type ?? null}
+								view={search.view ?? "grid"}
+								onPatch={handlePatch}
+								onOpenMetric={(metric) => {
+									navigate({
+										to: "/metrics/$metricName",
+										params: { metricName: metric.metricName },
+										search: {
+											startTime: search.startTime,
+											endTime: search.endTime,
+											timePreset: search.timePreset,
+											type: asMetricType(metric.metricType),
+										},
+									})
+								}}
+							/>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
 }

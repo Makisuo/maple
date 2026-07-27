@@ -7,15 +7,8 @@ import type { ListPodsResponse } from "@maple/domain/http"
 
 import { HostStatusBadge } from "./status-badge"
 import { UsageBar } from "./usage-bar"
-import {
-	ColumnHead,
-	MetaChip,
-	ROW_LINK_CLASS,
-	TableShell,
-	TableSkeleton,
-	useTableSort,
-} from "./primitives/data-table"
-import { formatRelative } from "./format"
+import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS, useTableSort } from "./primitives/data-table"
+import { formatRelativeTime } from "@maple/ui/time-format"
 
 export type PodRow = ListPodsResponse["data"][number]
 
@@ -44,32 +37,27 @@ function workloadOf(pod: PodRow): { kind: string; name: string } | null {
 
 export function PodTableLoading() {
 	return (
-		<TableSkeleton
-			rows={6}
-			header={
-				<>
-					<ColumnHead label="Pod" width="flex-1 min-w-[280px]" />
-					<ColumnHead label="CPU req" align="right" width="w-[140px]" hidden="hidden md:flex" />
-					<ColumnHead label="CPU limit" align="right" width="w-[140px]" hidden="hidden md:flex" />
-					<ColumnHead label="Mem req" align="right" width="w-[140px]" hidden="hidden lg:flex" />
-					<ColumnHead label="Mem limit" align="right" width="w-[140px]" hidden="hidden lg:flex" />
-					<ColumnHead label="Last seen" align="right" width="w-[100px]" />
-				</>
-			}
-			renderRowCells={() => (
-				<>
-					<div className="min-w-[280px] flex-1">
-						<Skeleton className="h-4 w-48" />
-						<Skeleton className="mt-1.5 h-3 w-40" />
-					</div>
-					<Skeleton className="hidden h-3 w-[140px] md:block" />
-					<Skeleton className="hidden h-3 w-[140px] md:block" />
-					<Skeleton className="hidden h-3 w-[140px] lg:block" />
-					<Skeleton className="hidden h-3 w-[140px] lg:block" />
-					<Skeleton className="h-3 w-[100px]" />
-				</>
-			)}
-		/>
+		<DataTable.Root ariaLabel="Pods">
+			<DataTable.Head>
+				<ColumnHead label="Pod" width="flex-1 min-w-[280px]" />
+				<ColumnHead label="CPU req" align="right" width="w-[140px]" hidden="hidden md:flex" />
+				<ColumnHead label="CPU limit" align="right" width="w-[140px]" hidden="hidden md:flex" />
+				<ColumnHead label="Mem req" align="right" width="w-[140px]" hidden="hidden lg:flex" />
+				<ColumnHead label="Mem limit" align="right" width="w-[140px]" hidden="hidden lg:flex" />
+				<ColumnHead label="Last seen" align="right" width="w-[100px]" />
+			</DataTable.Head>
+			<DataTable.SkeletonRows count={6}>
+				<div className="min-w-[280px] flex-1">
+					<Skeleton className="h-4 w-48" />
+					<Skeleton className="mt-1.5 h-3 w-40" />
+				</div>
+				<Skeleton className="hidden h-3 w-[140px] md:block" />
+				<Skeleton className="hidden h-3 w-[140px] md:block" />
+				<Skeleton className="hidden h-3 w-[140px] lg:block" />
+				<Skeleton className="hidden h-3 w-[140px] lg:block" />
+				<Skeleton className="h-3 w-[100px]" />
+			</DataTable.SkeletonRows>
+		</DataTable.Root>
 	)
 }
 
@@ -80,73 +68,68 @@ export function PodTable({ pods, waiting, referenceTime }: PodTableProps) {
 	})
 
 	return (
-		<TableShell
-			ariaLabel="Pods"
-			waiting={waiting}
-			isEmpty={sorted.length === 0}
-			emptyMessage="No pods match your filter."
-			header={
-				<>
-					<ColumnHead<SortKey>
-						label="Pod"
-						sortKey="podName"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						width="flex-1 min-w-[280px]"
-					/>
-					<ColumnHead<SortKey>
-						label="CPU req"
-						sortKey="cpuRequestPct"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[140px]"
-						hidden="hidden md:flex"
-					/>
-					<ColumnHead<SortKey>
-						label="CPU limit"
-						sortKey="cpuLimitPct"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[140px]"
-						hidden="hidden md:flex"
-					/>
-					<ColumnHead<SortKey>
-						label="Mem req"
-						sortKey="memoryRequestPct"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[140px]"
-						hidden="hidden lg:flex"
-					/>
-					<ColumnHead<SortKey>
-						label="Mem limit"
-						sortKey="memoryLimitPct"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[140px]"
-						hidden="hidden lg:flex"
-					/>
-					<ColumnHead<SortKey>
-						label="Last seen"
-						sortKey="lastSeen"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[100px]"
-					/>
-				</>
-			}
-		>
+		<DataTable.Root ariaLabel="Pods" waiting={waiting}>
+			<DataTable.Head>
+				<ColumnHead<SortKey>
+					label="Pod"
+					sortKey="podName"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					width="flex-1 min-w-[280px]"
+				/>
+				<ColumnHead<SortKey>
+					label="CPU req"
+					sortKey="cpuRequestPct"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[140px]"
+					hidden="hidden md:flex"
+				/>
+				<ColumnHead<SortKey>
+					label="CPU limit"
+					sortKey="cpuLimitPct"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[140px]"
+					hidden="hidden md:flex"
+				/>
+				<ColumnHead<SortKey>
+					label="Mem req"
+					sortKey="memoryRequestPct"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[140px]"
+					hidden="hidden lg:flex"
+				/>
+				<ColumnHead<SortKey>
+					label="Mem limit"
+					sortKey="memoryLimitPct"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[140px]"
+					hidden="hidden lg:flex"
+				/>
+				<ColumnHead<SortKey>
+					label="Last seen"
+					sortKey="lastSeen"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[100px]"
+				/>
+			</DataTable.Head>
+			{sorted.length === 0 && <DataTable.Empty>No pods match your filter.</DataTable.Empty>}
+
 			{sorted.map((pod) => {
 				const workload = workloadOf(pod)
 				return (
@@ -211,7 +194,7 @@ export function PodTable({ pods, waiting, referenceTime }: PodTableProps) {
 									render={<span />}
 									className="cursor-default font-mono text-[11px] text-muted-foreground"
 								>
-									{formatRelative(pod.lastSeen)}
+									{formatRelativeTime(pod.lastSeen)}
 								</TooltipTrigger>
 								<TooltipContent>{pod.lastSeen}</TooltipContent>
 							</Tooltip>
@@ -219,6 +202,6 @@ export function PodTable({ pods, waiting, referenceTime }: PodTableProps) {
 					</Link>
 				)
 			})}
-		</TableShell>
+		</DataTable.Root>
 	)
 }

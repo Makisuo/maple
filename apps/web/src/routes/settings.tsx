@@ -14,7 +14,9 @@ import { NotificationsSection } from "@/components/settings/notifications-sectio
 import { AutomationSection } from "@/components/settings/automation-section"
 import { OrgClickHouseSettingsSection } from "@/components/settings/org-clickhouse-settings-section"
 import { OrganizationSection } from "@/components/settings/organization-section"
+import { SetupAuditSection } from "@/components/settings/setup-audit-section"
 import {
+	resolveActiveSettingsTab,
 	SettingsNav,
 	settingsTabLabels,
 	settingsTabValues,
@@ -55,9 +57,7 @@ function SettingsPage() {
 		return <Navigate to="/settings" search={{ tab: "automation" }} replace />
 	}
 
-	const activeTab: SettingsTab = (
-		visibleItems.some((i) => i.id === search.tab) ? search.tab : (visibleItems[0]?.id ?? "ingestion")
-	) as SettingsTab
+	const activeTab = resolveActiveSettingsTab(search.tab, visibleItems)
 
 	function handleTabSelect(tab: SettingsTab) {
 		navigate({ search: { tab } })
@@ -71,57 +71,89 @@ function SettingsPage() {
 
 	if (isLoading || waitingForGatedTab) {
 		return (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Settings" }]}
-				title="Settings"
-				description="Manage your workspace settings."
-			>
-				<div className="space-y-3">
-					<Skeleton className="h-8 w-56" />
-					<Skeleton className="h-40 w-full" />
-				</div>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={[{ label: "Settings" }]} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header
+								title="Settings"
+								description="Manage your workspace settings."
+							/>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-3">
+								<Skeleton className="h-8 w-56" />
+								<Skeleton className="h-40 w-full" />
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 
 	if (visibleItems.length === 0) {
 		return (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Settings" }]}
-				title="Settings"
-				description="Workspace settings."
-			>
-				<p className="text-muted-foreground text-sm">
-					No settings are available for the current account.
-				</p>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={[{ label: "Settings" }]} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Settings" description="Workspace settings." />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<p className="text-muted-foreground text-sm">
+								No settings are available for the current account.
+							</p>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Settings", href: "/settings" }, { label: settingsTabLabels[activeTab] }]}
-			title={settingsTabLabels[activeTab]}
-			filterSidebar={
-				<SettingsNav sections={visibleSections} active={activeTab} onSelectTab={handleTabSelect} />
-			}
-		>
-			{activeTab === "organization" && <OrganizationSection />}
-			{activeTab === "members" && <MembersSection />}
-			{activeTab === "ingestion" && <IngestionSection />}
-			{activeTab === "api-keys" && <ApiKeysSection />}
-			{activeTab === "developer" && (
-				<DeveloperSection onNavigateToApiKeys={() => handleTabSelect("api-keys")} />
-			)}
-			{activeTab === "mcp" && <McpSection />}
-			{activeTab === "notifications" && <NotificationsSection />}
-			{activeTab === "automation" && (
-				<AutomationSection isAdmin={isAdmin} hasEntitlement={canAccessAi} />
-			)}
-			{activeTab === "billing" && <BillingSection />}
-			{activeTab === "data-platform" && (
-				<OrgClickHouseSettingsSection isAdmin={isAdmin} hasEntitlement={canAccessDataPlatform} />
-			)}
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Settings", href: "/settings" }, { label: settingsTabLabels[activeTab] }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Filters>
+					<SettingsNav
+						sections={visibleSections}
+						active={activeTab}
+						onSelectTab={handleTabSelect}
+					/>
+				</DashboardLayout.Filters>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title={settingsTabLabels[activeTab]} />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						{activeTab === "organization" && <OrganizationSection />}
+						{activeTab === "members" && <MembersSection />}
+						{activeTab === "setup-audit" && <SetupAuditSection />}
+						{activeTab === "ingestion" && <IngestionSection />}
+						{activeTab === "api-keys" && <ApiKeysSection />}
+						{activeTab === "developer" && (
+							<DeveloperSection onNavigateToApiKeys={() => handleTabSelect("api-keys")} />
+						)}
+						{activeTab === "mcp" && <McpSection />}
+						{activeTab === "notifications" && <NotificationsSection />}
+						{activeTab === "automation" && (
+							<AutomationSection isAdmin={isAdmin} hasEntitlement={canAccessAi} />
+						)}
+						{activeTab === "billing" && <BillingSection />}
+						{activeTab === "data-platform" && (
+							<OrgClickHouseSettingsSection
+								isAdmin={isAdmin}
+								hasEntitlement={canAccessDataPlatform}
+							/>
+						)}
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

@@ -7,15 +7,8 @@ import { cn } from "@maple/ui/lib/utils"
 
 import type { PlanetScaleDatabaseSummary } from "@maple/domain/http"
 import type { PlanetScaleDatabaseStat } from "@/api/warehouse/service-map"
-import { formatNumber } from "@/lib/format"
-import {
-	ColumnHead,
-	MetaChip,
-	ROW_LINK_CLASS,
-	TableShell,
-	TableSkeleton,
-	useTableSort,
-} from "../primitives/data-table"
+import { formatNumber } from "@maple/ui/format"
+import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS, useTableSort } from "../primitives/data-table"
 import {
 	MISSING,
 	abnormalState,
@@ -125,23 +118,20 @@ const headerCells = (sort?: {
 
 export function PlanetScaleDatabaseTableLoading() {
 	return (
-		<TableSkeleton
-			rows={3}
-			header={headerCells()}
-			renderRowCells={() => (
-				<>
-					<div className="min-w-[220px] flex-1">
-						<Skeleton className="h-4 w-44" />
-					</div>
-					<Skeleton className="hidden h-3 w-[80px] md:block" />
-					<Skeleton className="h-3 w-[96px]" />
-					<Skeleton className="h-3 w-[88px]" />
-					<Skeleton className="hidden h-3 w-[104px] md:block" />
-					<Skeleton className="h-3 w-[80px]" />
-					<Skeleton className="h-3 w-[88px]" />
-				</>
-			)}
-		/>
+		<DataTable.Root ariaLabel="Databases">
+			<DataTable.Head>{headerCells()}</DataTable.Head>
+			<DataTable.SkeletonRows count={3}>
+				<div className="min-w-[220px] flex-1">
+					<Skeleton className="h-4 w-44" />
+				</div>
+				<Skeleton className="hidden h-3 w-[80px] md:block" />
+				<Skeleton className="h-3 w-[96px]" />
+				<Skeleton className="h-3 w-[88px]" />
+				<Skeleton className="hidden h-3 w-[104px] md:block" />
+				<Skeleton className="h-3 w-[80px]" />
+				<Skeleton className="h-3 w-[88px]" />
+			</DataTable.SkeletonRows>
+		</DataTable.Root>
 	)
 }
 
@@ -191,13 +181,10 @@ export function PlanetScaleDatabaseTable({
 	})
 
 	return (
-		<TableShell
-			ariaLabel="PlanetScale databases"
-			waiting={waiting}
-			isEmpty={sorted.length === 0}
-			emptyMessage={emptyMessage}
-			header={headerCells({ sortKey, sortDir, handleSort })}
-		>
+		<DataTable.Root ariaLabel="PlanetScale databases" waiting={waiting}>
+			<DataTable.Head>{headerCells({ sortKey, sortDir, handleSort })}</DataTable.Head>
+			{sorted.length === 0 && <DataTable.Empty>{emptyMessage}</DataTable.Empty>}
+
 			{sorted.map((row) => {
 				const state = abnormalState(row.state)
 				return (
@@ -266,6 +253,6 @@ export function PlanetScaleDatabaseTable({
 					</Link>
 				)
 			})}
-		</TableShell>
+		</DataTable.Root>
 	)
 }

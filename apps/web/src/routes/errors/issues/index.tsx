@@ -112,16 +112,27 @@ export const Route = createFileRoute("/errors/issues/")({
 /** The page chrome every phase renders: breadcrumbs + title + toolbar. */
 function IssuesPageFrame({ toolbar, children }: { toolbar: React.ReactNode; children: React.ReactNode }) {
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
-			title="Issues"
-			description="Errors grouped into triage, in-progress, and resolved work."
-		>
-			<div>
-				{toolbar}
-				{children}
-			</div>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Issues"
+							description="Errors grouped into triage, in-progress, and resolved work."
+						/>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div>
+							{toolbar}
+							{children}
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 
@@ -453,74 +464,89 @@ function IssuesPageBody({
 	const showGroupHeaders = activeFilter === "all"
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
-			title="Issues"
-			description="Errors grouped into triage, in-progress, and resolved work."
-		>
-			<div>
-				{toolbar(issues.length)}
-				{issues.length === 0 ? (
-					<div className="p-4">
-						<Empty>
-							<EmptyHeader>
-								<EmptyTitle>No issues</EmptyTitle>
-								<EmptyDescription>
-									No issues match the {FILTER_LABEL[activeFilter].toLowerCase()} workflow
-									and current severity/source filters.
-								</EmptyDescription>
-							</EmptyHeader>
-						</Empty>
-					</div>
-				) : (
-					<div>
-						{showGroupHeaders ? (
-							visibleGroups.map((state) => (
-								<IssueGroup
-									key={state}
-									state={state}
-									issues={grouped.get(state) ?? []}
-									mutations={mutations}
-									selectedIds={selectedIds}
-									focusedId={focusedId}
-									onSelectToggle={handleSelectToggle}
-									onFocus={handleFocus}
-								/>
-							))
-						) : (
-							<div role="list" className="divide-y divide-border/40">
-								{flatIssues.map((issue) => (
-									<div role="listitem" key={issue.id}>
-										<IssueRow
-											issue={issue}
-											mutations={mutations}
-											selected={selectedIds.has(issue.id)}
-											focused={focusedId === issue.id}
-											onSelectToggle={handleSelectToggle}
-											onFocus={handleFocus}
-										/>
-									</div>
-								))}
-							</div>
-						)}
-						{hasMore ? (
-							<div className="flex justify-center border-t border-border/60 p-3">
-								<Button
-									type="button"
-									variant="outline"
-									size="sm"
-									loading={loadingMore}
-									onClick={onLoadMore}
-								>
-									Load more
-								</Button>
-							</div>
-						) : null}
-					</div>
-				)}
-			</div>
-			<IssuesBulkBar selectedIds={selectedArray} mutations={mutations} onClear={clearSelection} />
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Issues"
+							description="Errors grouped into triage, in-progress, and resolved work."
+						/>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div>
+							{toolbar(issues.length)}
+							{issues.length === 0 ? (
+								<div className="p-4">
+									<Empty>
+										<EmptyHeader>
+											<EmptyTitle>No issues</EmptyTitle>
+											<EmptyDescription>
+												No issues match the {FILTER_LABEL[activeFilter].toLowerCase()}{" "}
+												workflow and current severity/source filters.
+											</EmptyDescription>
+										</EmptyHeader>
+									</Empty>
+								</div>
+							) : (
+								<div>
+									{showGroupHeaders ? (
+										visibleGroups.map((state) => (
+											<IssueGroup
+												key={state}
+												state={state}
+												issues={grouped.get(state) ?? []}
+												mutations={mutations}
+												selectedIds={selectedIds}
+												focusedId={focusedId}
+												onSelectToggle={handleSelectToggle}
+												onFocus={handleFocus}
+											/>
+										))
+									) : (
+										<div role="list" className="divide-y divide-border/40">
+											{flatIssues.map((issue) => (
+												<div role="listitem" key={issue.id}>
+													<IssueRow
+														issue={issue}
+														mutations={mutations}
+														selected={selectedIds.has(issue.id)}
+														focused={focusedId === issue.id}
+														onSelectToggle={handleSelectToggle}
+														onFocus={handleFocus}
+													/>
+												</div>
+											))}
+										</div>
+									)}
+									{hasMore ? (
+										<div className="flex justify-center border-t border-border/60 p-3">
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												loading={loadingMore}
+												onClick={onLoadMore}
+											>
+												Load more
+											</Button>
+										</div>
+									) : null}
+								</div>
+							)}
+						</div>
+						<IssuesBulkBar
+							selectedIds={selectedArray}
+							mutations={mutations}
+							onClear={clearSelection}
+						/>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

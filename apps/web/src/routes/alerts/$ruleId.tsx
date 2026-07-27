@@ -12,7 +12,7 @@ import { useAlertRuleChecks } from "@/hooks/use-alert-rule-checks"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { LONG_RANGE_PRESET_OPTIONS, presetLabel, formatTimeRangeDisplay } from "@/lib/time-utils"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { AlertRuleChart } from "@/components/alerts/alert-rule-chart"
@@ -87,9 +87,7 @@ const asAlertRuleId = Schema.decodeSync(AlertRuleId)
 
 const RuleDetailSearch = Schema.Struct({
 	tab: Schema.optional(Schema.String),
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/alerts/$ruleId")({
@@ -351,73 +349,100 @@ function RuleDetailContent() {
 
 	if (Result.isInitial(rulesResult)) {
 		return (
-			<DashboardLayout breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Loading..." }]}>
-				{/* Mirror the settled Overview rhythm so the first paint doesn't snap. */}
-				<div className="space-y-6">
-					<Skeleton className="h-14 w-full" />
-					<div className="space-y-2">
-						<Skeleton className="h-3.5 w-40" />
-						<Skeleton className="h-[300px] w-full" />
-					</div>
-					<Skeleton className="h-52 w-full" />
-					<Skeleton className="h-64 w-full" />
-				</div>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Alerts", href: "/alerts" }, { label: "Loading..." }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Scroll>
+							{/* Mirror the settled Overview rhythm so the first paint doesn't snap. */}
+							<div className="space-y-6">
+								<Skeleton className="h-14 w-full" />
+								<div className="space-y-2">
+									<Skeleton className="h-3.5 w-40" />
+									<Skeleton className="h-[300px] w-full" />
+								</div>
+								<Skeleton className="h-52 w-full" />
+								<Skeleton className="h-64 w-full" />
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 
 	if (Result.isFailure(rulesResult)) {
 		return (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Error" }]}
-				title="Failed to load alert rule"
-			>
-				<Empty className="py-12">
-					<EmptyHeader>
-						<EmptyMedia variant="icon">
-							<CircleWarningIcon size={18} />
-						</EmptyMedia>
-						<EmptyTitle>Failed to load alert rule</EmptyTitle>
-						<EmptyDescription>
-							{Result.builder(rulesResult)
-								.onError((error) => formatBackendError(error).description)
-								.orElse(() => undefined) ?? "Try refreshing or check API logs."}
-						</EmptyDescription>
-					</EmptyHeader>
-					<div className="flex items-center gap-2">
-						<Button variant="outline" size="sm" onClick={() => refreshRules()}>
-							Retry
-						</Button>
-						<Button variant="outline" size="sm" render={<Link to="/alerts" />}>
-							Back to rules
-						</Button>
-					</div>
-				</Empty>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Alerts", href: "/alerts" }, { label: "Error" }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Failed to load alert rule" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<Empty className="py-12">
+								<EmptyHeader>
+									<EmptyMedia variant="icon">
+										<CircleWarningIcon size={18} />
+									</EmptyMedia>
+									<EmptyTitle>Failed to load alert rule</EmptyTitle>
+									<EmptyDescription>
+										{Result.builder(rulesResult)
+											.onError((error) => formatBackendError(error).description)
+											.orElse(() => undefined) ?? "Try refreshing or check API logs."}
+									</EmptyDescription>
+								</EmptyHeader>
+								<div className="flex items-center gap-2">
+									<Button variant="outline" size="sm" onClick={() => refreshRules()}>
+										Retry
+									</Button>
+									<Button variant="outline" size="sm" render={<Link to="/alerts" />}>
+										Back to rules
+									</Button>
+								</div>
+							</Empty>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 
 	if (!rule) {
 		return (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Not Found" }]}
-				title="Rule not found"
-			>
-				<Empty className="py-12">
-					<EmptyHeader>
-						<EmptyMedia variant="icon">
-							<CircleWarningIcon size={18} />
-						</EmptyMedia>
-						<EmptyTitle>Rule not found</EmptyTitle>
-						<EmptyDescription>
-							This alert rule could not be found. It may have been deleted.
-						</EmptyDescription>
-					</EmptyHeader>
-					<Button variant="outline" size="sm" render={<Link to="/alerts" />}>
-						Back to rules
-					</Button>
-				</Empty>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Alerts", href: "/alerts" }, { label: "Not Found" }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Rule not found" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<Empty className="py-12">
+								<EmptyHeader>
+									<EmptyMedia variant="icon">
+										<CircleWarningIcon size={18} />
+									</EmptyMedia>
+									<EmptyTitle>Rule not found</EmptyTitle>
+									<EmptyDescription>
+										This alert rule could not be found. It may have been deleted.
+									</EmptyDescription>
+								</EmptyHeader>
+								<Button variant="outline" size="sm" render={<Link to="/alerts" />}>
+									Back to rules
+								</Button>
+							</Empty>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 
@@ -454,506 +479,557 @@ function RuleDetailContent() {
 	)
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: rule.name }]}
-			titleContent={
-				<div>
-					<div className="flex items-center gap-2 flex-wrap">
-						<h1 className="text-2xl font-semibold tracking-tight truncate">{rule.name}</h1>
-						<AlertSeverityBadge severity={rule.severity} />
-						{isFiring ? (
-							<AlertStatusBadge state="firing" />
-						) : rule.enabled ? (
-							<AlertStatusBadge state="ok" />
-						) : (
-							<AlertStatusBadge state="disabled" />
-						)}
-					</div>
-					<p className="text-muted-foreground mt-0.5">{subtitle}</p>
-				</div>
-			}
-			headerActions={
-				<div className="flex items-center gap-2">
-					<TimeRangeHeaderControls
-						startTime={search.startTime}
-						endTime={search.endTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
-						defaultPreset="24h"
-						presets={LONG_RANGE_PRESET_OPTIONS}
-						maxRangeSeconds={ONE_YEAR_SECONDS}
-						onTimeChange={(range) =>
-							navigate({ search: (prev) => applyTimeRangeSearch(prev, range) })
-						}
-					/>
-					<Button
-						variant="outline"
-						size="sm"
-						render={<Link to="/alerts/create" search={{ ruleId: rule.id }} />}
-					>
-						<PencilIcon size={14} />
-						Edit rule
-					</Button>
-				</div>
-			}
-			stickyContent={stickyContent}
-		>
-			{activeTab === "overview" && (
-				<div className="space-y-6">
-					<RuleDiagnosisPanel
-						rule={rule}
-						states={ruleStates}
-						checks={checks}
-						openIncidents={openRuleIncidents}
-						destinations={destinations}
-						deliveryEvents={ruleDeliveryEvents}
-						now={diagnosisNow}
-						onToggleEnabled={() => void handleToggleEnabled()}
-					/>
-					<div className="space-y-2">
-						<h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
-							{signalLabels[rule.signalType]}: {rangeLabel}
-						</h2>
-						<AlertRuleChart
-							preview={preview}
-							checks={chartChecks}
-							incidents={ruleIncidents}
-							threshold={rule.threshold}
-							thresholdUpper={rule.thresholdUpper}
-							comparator={rule.comparator}
-							signalType={rule.signalType}
-							window={timelineRange}
-							loading={
-								previewLoading ||
-								(rule.signalType === "raw_query" && Result.isInitial(checksResult))
-							}
-							error={previewError}
-						/>
-					</div>
-
-					{/* Reserve the slot while incidents sync so the card doesn't pop in
-					    and shove Configuration + Checks down once it resolves. */}
-					{Result.isInitial(incidentsResult) ? (
-						<Skeleton className="h-40 w-full" />
-					) : overviewIncident ? (
-						<div className="flex items-center justify-between gap-4 border border-border px-4 py-3">
-							<div className="min-w-0">
-								<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-									Investigation
-								</p>
-								<p className="truncate text-sm">
-									Review the latest incident in a durable evidence workspace.
-								</p>
-							</div>
-							<Button size="sm" onClick={() => void openInvestigation(overviewIncident)}>
-								<ChatBubbleSparkleIcon size={14} />
-								Open investigation
-							</Button>
-						</div>
-					) : null}
-
-					<div className="space-y-3">
-						<h2 className="text-lg font-semibold">Configuration</h2>
-						<Card>
-							<CardContent className="p-5">
-								<dl className="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-									{rule.notes && (
-										<div className="flex flex-col gap-1 sm:col-span-2">
-											<dt className="text-muted-foreground">Notes</dt>
-											<dd className="whitespace-pre-wrap text-foreground">
-												{rule.notes}
-											</dd>
-										</div>
-									)}
-									<ConfigRow label="Signal">
-										<span className="font-medium">{signalLabels[rule.signalType]}</span>
-									</ConfigRow>
-									<ConfigRow label="Scope">
-										<div className="flex flex-wrap gap-1 justify-end">
-											{rule.serviceNames?.length > 0 ? (
-												rule.serviceNames.map((s) => (
-													<Badge key={s} variant="outline" className="text-xs">
-														{s}
-													</Badge>
-												))
-											) : (
-												<span className="font-mono font-medium">
-													{rule.groupBy && rule.groupBy.length > 0
-														? `all (per ${rule.groupBy.join(" \u00b7 ")})`
-														: "all"}
-												</span>
-											)}
-										</div>
-									</ConfigRow>
-									{rule.excludeServiceNames?.length > 0 && (
-										<ConfigRow label="Excluded">
-											<div className="flex flex-wrap gap-1 justify-end">
-												{rule.excludeServiceNames.map((s) => (
-													<Badge
-														key={s}
-														variant="outline"
-														className="text-xs line-through"
-													>
-														{s}
-													</Badge>
-												))}
-											</div>
-										</ConfigRow>
-									)}
-									<ConfigRow label="Condition">
-										<span className="font-mono font-medium">
-											{comparatorLabels[rule.comparator]}{" "}
-											{formatSignalValue(rule.signalType, rule.threshold)} /{" "}
-											{rule.windowMinutes}min
-										</span>
-									</ConfigRow>
-									<ConfigRow label="Severity">
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Alerts", href: "/alerts" }, { label: rule.name }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							titleContent={
+								<div>
+									<div className="flex items-center gap-2 flex-wrap">
+										<DashboardLayout.Title>{rule.name}</DashboardLayout.Title>
 										<AlertSeverityBadge severity={rule.severity} />
-									</ConfigRow>
-									<ConfigRow label="Consecutive breaches">
-										<span className="font-medium tabular-nums">
-											{rule.consecutiveBreachesRequired}
-										</span>
-									</ConfigRow>
-									<ConfigRow label="Healthy to resolve">
-										<span className="font-medium tabular-nums">
-											{rule.consecutiveHealthyRequired}
-										</span>
-									</ConfigRow>
-									<ConfigRow label="Min samples">
-										<span className="font-medium tabular-nums">
-											{rule.minimumSampleCount}
-										</span>
-									</ConfigRow>
-									<ConfigRow label="Renotify interval">
-										<span className="font-medium">{rule.renotifyIntervalMinutes}min</span>
-									</ConfigRow>
-									{rule.signalType === "builder_query" && rule.queryBuilderDraft && (
-										<>
-											<ConfigRow label="Data source">
-												<span className="font-mono font-medium capitalize">
-													{rule.queryBuilderDraft.dataSource}
-												</span>
-											</ConfigRow>
-											<ConfigRow label="Aggregation">
-												<span className="font-mono font-medium">
-													{rule.queryBuilderDraft.aggregation}
-												</span>
-											</ConfigRow>
-											{rule.queryBuilderDraft.whereClause && (
-												<ConfigRow label="Where" wide>
-													<span className="font-mono font-medium text-right">
-														{rule.queryBuilderDraft.whereClause}
+										{isFiring ? (
+											<AlertStatusBadge state="firing" />
+										) : rule.enabled ? (
+											<AlertStatusBadge state="ok" />
+										) : (
+											<AlertStatusBadge state="disabled" />
+										)}
+									</div>
+									<p className="text-muted-foreground mt-0.5">{subtitle}</p>
+								</div>
+							}
+						>
+							<div className="flex items-center gap-2">
+								<TimeRangeHeaderControls
+									startTime={search.startTime}
+									endTime={search.endTime}
+									presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
+									defaultPreset="24h"
+									presets={LONG_RANGE_PRESET_OPTIONS}
+									maxRangeSeconds={ONE_YEAR_SECONDS}
+									onTimeChange={(range) =>
+										navigate({ search: (prev) => applyTimeRangeSearch(prev, range) })
+									}
+								/>
+								<Button
+									variant="outline"
+									size="sm"
+									render={<Link to="/alerts/create" search={{ ruleId: rule.id }} />}
+								>
+									<PencilIcon size={14} />
+									Edit rule
+								</Button>
+							</div>
+						</DashboardLayout.Header>
+						{stickyContent}
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						{activeTab === "overview" && (
+							<div className="space-y-6">
+								<RuleDiagnosisPanel
+									rule={rule}
+									states={ruleStates}
+									checks={checks}
+									openIncidents={openRuleIncidents}
+									destinations={destinations}
+									deliveryEvents={ruleDeliveryEvents}
+									now={diagnosisNow}
+									onToggleEnabled={() => void handleToggleEnabled()}
+								/>
+								<div className="space-y-2">
+									<h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+										{signalLabels[rule.signalType]}: {rangeLabel}
+									</h2>
+									<AlertRuleChart
+										preview={preview}
+										checks={chartChecks}
+										incidents={ruleIncidents}
+										threshold={rule.threshold}
+										thresholdUpper={rule.thresholdUpper}
+										comparator={rule.comparator}
+										signalType={rule.signalType}
+										window={timelineRange}
+										loading={
+											previewLoading ||
+											(rule.signalType === "raw_query" &&
+												Result.isInitial(checksResult))
+										}
+										error={previewError}
+									/>
+								</div>
+
+								{/* Reserve the slot while incidents sync so the card doesn't pop in
+								    and shove Configuration + Checks down once it resolves. */}
+								{Result.isInitial(incidentsResult) ? (
+									<Skeleton className="h-40 w-full" />
+								) : overviewIncident ? (
+									<div className="flex items-center justify-between gap-4 border border-border px-4 py-3">
+										<div className="min-w-0">
+											<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+												Investigation
+											</p>
+											<p className="truncate text-sm">
+												Review the latest incident in a durable evidence workspace.
+											</p>
+										</div>
+										<Button
+											size="sm"
+											onClick={() => void openInvestigation(overviewIncident)}
+										>
+											<ChatBubbleSparkleIcon size={14} />
+											Open investigation
+										</Button>
+									</div>
+								) : null}
+
+								<div className="space-y-3">
+									<h2 className="text-lg font-semibold">Configuration</h2>
+									<Card>
+										<CardContent className="p-5">
+											<dl className="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+												{rule.notes && (
+													<div className="flex flex-col gap-1 sm:col-span-2">
+														<dt className="text-muted-foreground">Notes</dt>
+														<dd className="whitespace-pre-wrap text-foreground">
+															{rule.notes}
+														</dd>
+													</div>
+												)}
+												<ConfigRow label="Signal">
+													<span className="font-medium">
+														{signalLabels[rule.signalType]}
 													</span>
 												</ConfigRow>
-											)}
-										</>
-									)}
-									{rule.signalType === "raw_query" && rule.rawQuerySql && (
-										<div className="flex flex-col gap-1.5 sm:col-span-2">
-											<dt className="text-muted-foreground">Raw SQL</dt>
-											<dd>
-												<pre className="overflow-x-auto whitespace-pre rounded-md border bg-muted/30 px-3 py-2.5 font-mono text-xs leading-relaxed">
-													<code>
-														{tokenizeSql(formatSql(rule.rawQuerySql)).map(
-															(token) => (
-																<span
-																	key={token.start}
-																	className={token.className}
+												<ConfigRow label="Scope">
+													<div className="flex flex-wrap gap-1 justify-end">
+														{rule.serviceNames?.length > 0 ? (
+															rule.serviceNames.map((s) => (
+																<Badge
+																	key={s}
+																	variant="outline"
+																	className="text-xs"
 																>
-																	{token.text}
-																</span>
-															),
+																	{s}
+																</Badge>
+															))
+														) : (
+															<span className="font-mono font-medium">
+																{rule.groupBy && rule.groupBy.length > 0
+																	? `all (per ${rule.groupBy.join(" \u00b7 ")})`
+																	: "all"}
+															</span>
 														)}
-													</code>
-												</pre>
-											</dd>
-										</div>
-									)}
-									<ConfigRow label="Destinations">
-										<span className="font-medium">
-											{rule.destinationIds.length} configured
-										</span>
-									</ConfigRow>
-									<ConfigRow label="Status">
-										<AlertStatusBadge
-											state={rule.enabled ? "ok" : "disabled"}
-											label={rule.enabled ? "Enabled" : "Disabled"}
-										/>
-									</ConfigRow>
-								</dl>
-							</CardContent>
-						</Card>
-					</div>
-
-					{Result.builder(checksResult)
-						.onError((error) => (
-							<div className="space-y-4">
-								<h2 className="text-lg font-semibold">Checks</h2>
-								<Empty className="py-12">
-									<EmptyHeader>
-										<EmptyMedia variant="icon">
-											<CircleWarningIcon size={18} />
-										</EmptyMedia>
-										<EmptyTitle>Failed to load checks</EmptyTitle>
-										<EmptyDescription>
-											{formatBackendError(error).description}
-										</EmptyDescription>
-									</EmptyHeader>
-									<Button variant="outline" size="sm" onClick={() => refreshChecks()}>
-										Retry
-									</Button>
-								</Empty>
-							</div>
-						))
-						.orElse(() => (
-							<ChecksPanel
-								key={`${since}|${until}|${checkStatusFilter}`}
-								rule={rule}
-								checks={checks}
-								summaryTotals={checksPage?.summary.totals}
-								nextCursor={checksPage?.nextCursor ?? null}
-								since={since}
-								until={until}
-								loading={Result.isInitial(checksResult)}
-								statusFilter={checkStatusFilter}
-								setStatusFilter={setCheckStatusFilter}
-							/>
-						))}
-				</div>
-			)}
-
-			{activeTab === "history" &&
-				Result.builder(incidentsResult)
-					.onInitial(() => (
-						<div className="space-y-4">
-							<Skeleton className="h-24 w-full" />
-							<Skeleton className="h-64 w-full" />
-						</div>
-					))
-					.onError((error) => (
-						<Empty className="py-12">
-							<EmptyHeader>
-								<EmptyMedia variant="icon">
-									<CircleWarningIcon size={18} />
-								</EmptyMedia>
-								<EmptyTitle>Failed to load incidents</EmptyTitle>
-								<EmptyDescription>{formatBackendError(error).description}</EmptyDescription>
-							</EmptyHeader>
-							<Button variant="outline" size="sm" onClick={() => refreshIncidents()}>
-								Retry
-							</Button>
-						</Empty>
-					))
-					.onSuccess(() => (
-						<div className="space-y-6">
-							<div className="flex items-center justify-between">
-								<div>
-									<h2 className="text-lg font-semibold">History</h2>
-									<p className="text-muted-foreground text-sm">
-										{stats.totalTriggered} total triggers
-									</p>
-								</div>
-								<AlertSegmentedSelect<"all" | "open" | "resolved">
-									options={[
-										{ value: "all", label: "All" },
-										{ value: "open", label: "Fired" },
-										{ value: "resolved", label: "Resolved" },
-									]}
-									value={stateFilter}
-									onChange={setStateFilter}
-									size="sm"
-									aria-label="Filter incidents"
-								/>
-							</div>
-
-							<AlertStatStrip
-								items={[
-									{ label: "Total triggered", value: stats.totalTriggered },
-									{ label: "Avg resolution", value: stats.avgResolution },
-								]}
-							/>
-
-							{stats.topContributors.length > 0 && (
-								<div className="space-y-2">
-									<h3 className="text-sm font-semibold">Top contributors</h3>
-									<Card>
-										<CardContent className="space-y-2 p-5">
-											{stats.topContributors.map(([groupKey, count]) => (
-												<div key={groupKey} className="flex items-center gap-2">
-													<Badge
-														variant="outline"
-														className="text-xs shrink-0 truncate max-w-[160px]"
-													>
-														{groupKey}
-													</Badge>
-													<div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-														<div
-															className={cn(
-																"h-full rounded-full",
-																count === maxContributorCount
-																	? "bg-destructive"
-																	: "bg-amber-500",
-															)}
-															style={{
-																width: `${(count / maxContributorCount) * 100}%`,
-															}}
-														/>
 													</div>
-													<span className="text-xs text-muted-foreground tabular-nums shrink-0">
-														{count}/{stats.totalTriggered}
+												</ConfigRow>
+												{rule.excludeServiceNames?.length > 0 && (
+													<ConfigRow label="Excluded">
+														<div className="flex flex-wrap gap-1 justify-end">
+															{rule.excludeServiceNames.map((s) => (
+																<Badge
+																	key={s}
+																	variant="outline"
+																	className="text-xs line-through"
+																>
+																	{s}
+																</Badge>
+															))}
+														</div>
+													</ConfigRow>
+												)}
+												<ConfigRow label="Condition">
+													<span className="font-mono font-medium">
+														{comparatorLabels[rule.comparator]}{" "}
+														{formatSignalValue(rule.signalType, rule.threshold)} /{" "}
+														{rule.windowMinutes}min
 													</span>
-												</div>
-											))}
+												</ConfigRow>
+												<ConfigRow label="Severity">
+													<AlertSeverityBadge severity={rule.severity} />
+												</ConfigRow>
+												<ConfigRow label="Consecutive breaches">
+													<span className="font-medium tabular-nums">
+														{rule.consecutiveBreachesRequired}
+													</span>
+												</ConfigRow>
+												<ConfigRow label="Healthy to resolve">
+													<span className="font-medium tabular-nums">
+														{rule.consecutiveHealthyRequired}
+													</span>
+												</ConfigRow>
+												<ConfigRow label="Min samples">
+													<span className="font-medium tabular-nums">
+														{rule.minimumSampleCount}
+													</span>
+												</ConfigRow>
+												<ConfigRow label="Renotify interval">
+													<span className="font-medium">
+														{rule.renotifyIntervalMinutes}min
+													</span>
+												</ConfigRow>
+												{rule.signalType === "builder_query" &&
+													rule.queryBuilderDraft && (
+														<>
+															<ConfigRow label="Data source">
+																<span className="font-mono font-medium capitalize">
+																	{rule.queryBuilderDraft.dataSource}
+																</span>
+															</ConfigRow>
+															<ConfigRow label="Aggregation">
+																<span className="font-mono font-medium">
+																	{rule.queryBuilderDraft.aggregation}
+																</span>
+															</ConfigRow>
+															{rule.queryBuilderDraft.whereClause && (
+																<ConfigRow label="Where" wide>
+																	<span className="font-mono font-medium text-right">
+																		{rule.queryBuilderDraft.whereClause}
+																	</span>
+																</ConfigRow>
+															)}
+														</>
+													)}
+												{rule.signalType === "raw_query" && rule.rawQuerySql && (
+													<div className="flex flex-col gap-1.5 sm:col-span-2">
+														<dt className="text-muted-foreground">Raw SQL</dt>
+														<dd>
+															<pre className="overflow-x-auto whitespace-pre rounded-md border bg-muted/30 px-3 py-2.5 font-mono text-xs leading-relaxed">
+																<code>
+																	{tokenizeSql(
+																		formatSql(rule.rawQuerySql),
+																	).map((token) => (
+																		<span
+																			key={token.start}
+																			className={token.className}
+																		>
+																			{token.text}
+																		</span>
+																	))}
+																</code>
+															</pre>
+														</dd>
+													</div>
+												)}
+												<ConfigRow label="Destinations">
+													<span className="font-medium">
+														{rule.destinationIds.length} configured
+													</span>
+												</ConfigRow>
+												<ConfigRow label="Status">
+													<AlertStatusBadge
+														state={rule.enabled ? "ok" : "disabled"}
+														label={rule.enabled ? "Enabled" : "Disabled"}
+													/>
+												</ConfigRow>
+											</dl>
 										</CardContent>
 									</Card>
 								</div>
-							)}
 
-							{filteredIncidents.length === 0 ? (
-								<Empty className="py-12">
-									<EmptyHeader>
-										<EmptyMedia variant="icon">
-											<CheckIcon size={18} />
-										</EmptyMedia>
-										<EmptyTitle>No incidents</EmptyTitle>
-										<EmptyDescription>
-											This rule hasn't triggered any incidents in the selected filter.
-										</EmptyDescription>
-									</EmptyHeader>
-								</Empty>
-							) : (
-								<Table>
-									<TableHeader>
-										<TableRow>
-											<TableHead className="w-[100px]">State</TableHead>
-											<TableHead className="w-[180px]">Group</TableHead>
-											<TableHead>Labels</TableHead>
-											<TableHead className="w-[180px]">Triggered at</TableHead>
-											<TableHead className="w-[110px]">Duration</TableHead>
-											<TableHead className="w-[70px]">Issue</TableHead>
-											<TableHead className="w-[50px]" />
-										</TableRow>
-									</TableHeader>
-									<TableBody>
-										{filteredIncidents.map((incident) => {
-											const isOpen = incident.status === "open"
-											return (
-												<TableRow key={incident.id}>
-													<TableCell>
-														<AlertStatusBadge
-															state={isOpen ? "firing" : "resolved"}
-														/>
-													</TableCell>
-													<TableCell>
-														<span className="font-mono text-muted-foreground">
-															{incident.groupKey ?? "all"}
-														</span>
-													</TableCell>
-													<TableCell>
-														<div className="flex flex-wrap gap-1">
-															<Badge
-																variant="secondary"
-																className="text-xs font-mono"
+								{Result.builder(checksResult)
+									.onError((error) => (
+										<div className="space-y-4">
+											<h2 className="text-lg font-semibold">Checks</h2>
+											<Empty className="py-12">
+												<EmptyHeader>
+													<EmptyMedia variant="icon">
+														<CircleWarningIcon size={18} />
+													</EmptyMedia>
+													<EmptyTitle>Failed to load checks</EmptyTitle>
+													<EmptyDescription>
+														{formatBackendError(error).description}
+													</EmptyDescription>
+												</EmptyHeader>
+												<Button
+													variant="outline"
+													size="sm"
+													onClick={() => refreshChecks()}
+												>
+													Retry
+												</Button>
+											</Empty>
+										</div>
+									))
+									.orElse(() => (
+										<ChecksPanel
+											key={`${since}|${until}|${checkStatusFilter}`}
+											rule={rule}
+											checks={checks}
+											summaryTotals={checksPage?.summary.totals}
+											nextCursor={checksPage?.nextCursor ?? null}
+											since={since}
+											until={until}
+											loading={Result.isInitial(checksResult)}
+											statusFilter={checkStatusFilter}
+											setStatusFilter={setCheckStatusFilter}
+										/>
+									))}
+							</div>
+						)}
+
+						{activeTab === "history" &&
+							Result.builder(incidentsResult)
+								.onInitial(() => (
+									<div className="space-y-4">
+										<Skeleton className="h-24 w-full" />
+										<Skeleton className="h-64 w-full" />
+									</div>
+								))
+								.onError((error) => (
+									<Empty className="py-12">
+										<EmptyHeader>
+											<EmptyMedia variant="icon">
+												<CircleWarningIcon size={18} />
+											</EmptyMedia>
+											<EmptyTitle>Failed to load incidents</EmptyTitle>
+											<EmptyDescription>
+												{formatBackendError(error).description}
+											</EmptyDescription>
+										</EmptyHeader>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => refreshIncidents()}
+										>
+											Retry
+										</Button>
+									</Empty>
+								))
+								.onSuccess(() => (
+									<div className="space-y-6">
+										<div className="flex items-center justify-between">
+											<div>
+												<h2 className="text-lg font-semibold">History</h2>
+												<p className="text-muted-foreground text-sm">
+													{stats.totalTriggered} total triggers
+												</p>
+											</div>
+											<AlertSegmentedSelect<"all" | "open" | "resolved">
+												options={[
+													{ value: "all", label: "All" },
+													{ value: "open", label: "Fired" },
+													{ value: "resolved", label: "Resolved" },
+												]}
+												value={stateFilter}
+												onChange={setStateFilter}
+												size="sm"
+												aria-label="Filter incidents"
+											/>
+										</div>
+
+										<AlertStatStrip
+											items={[
+												{ label: "Total triggered", value: stats.totalTriggered },
+												{ label: "Avg resolution", value: stats.avgResolution },
+											]}
+										/>
+
+										{stats.topContributors.length > 0 && (
+											<div className="space-y-2">
+												<h3 className="text-sm font-semibold">Top contributors</h3>
+												<Card>
+													<CardContent className="space-y-2 p-5">
+														{stats.topContributors.map(([groupKey, count]) => (
+															<div
+																key={groupKey}
+																className="flex items-center gap-2"
 															>
-																{rule.signalType.replace("_", " ")}:{" "}
-																{formatSignalValue(
-																	rule.signalType,
-																	incident.lastObservedValue,
-																)}
-															</Badge>
-															<Badge
-																variant="secondary"
-																className="text-xs font-mono"
-															>
-																threshold:{" "}
-																{formatSignalValue(
-																	rule.signalType,
-																	incident.threshold,
-																)}
-															</Badge>
-														</div>
-													</TableCell>
-													<TableCell className="text-xs">
-														{formatAlertDateTimeFull(incident.firstTriggeredAt)}
-													</TableCell>
-													<TableCell>
-														<span
-															className={cn(
-																"text-xs tabular-nums",
-																isOpen && "text-destructive font-medium",
-															)}
-														>
-															{formatAlertDuration(
-																incident.firstTriggeredAt,
-																incident.resolvedAt,
-															)}
-														</span>
-													</TableCell>
-													<TableCell>
-														{incident.errorIssueId != null ? (
-															<Link
-																to="/errors/issues/$issueId"
-																params={{
-																	issueId: incident.errorIssueId,
-																}}
-																className="text-xs text-primary underline-offset-4 hover:underline"
-															>
-																View
-															</Link>
-														) : (
-															<span className="text-xs text-muted-foreground/60">
-																—
-															</span>
-														)}
-													</TableCell>
-													<TableCell>
-														<div className="flex items-center justify-end gap-1">
-															<DropdownMenu>
-																<DropdownMenuTrigger
-																	render={
-																		<Button
-																			variant="ghost"
-																			size="icon-sm"
-																		/>
-																	}
+																<Badge
+																	variant="outline"
+																	className="text-xs shrink-0 truncate max-w-[160px]"
 																>
-																	<DotsVerticalIcon size={14} />
-																</DropdownMenuTrigger>
-																<DropdownMenuContent align="end">
-																	<DropdownMenuItem
-																		onClick={() =>
-																			void openInvestigation(incident)
-																		}
+																	{groupKey}
+																</Badge>
+																<div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+																	<div
+																		className={cn(
+																			"h-full rounded-full",
+																			count === maxContributorCount
+																				? "bg-destructive"
+																				: "bg-amber-500",
+																		)}
+																		style={{
+																			width: `${(count / maxContributorCount) * 100}%`,
+																		}}
+																	/>
+																</div>
+																<span className="text-xs text-muted-foreground tabular-nums shrink-0">
+																	{count}/{stats.totalTriggered}
+																</span>
+															</div>
+														))}
+													</CardContent>
+												</Card>
+											</div>
+										)}
+
+										{filteredIncidents.length === 0 ? (
+											<Empty className="py-12">
+												<EmptyHeader>
+													<EmptyMedia variant="icon">
+														<CheckIcon size={18} />
+													</EmptyMedia>
+													<EmptyTitle>No incidents</EmptyTitle>
+													<EmptyDescription>
+														This rule hasn't triggered any incidents in the
+														selected filter.
+													</EmptyDescription>
+												</EmptyHeader>
+											</Empty>
+										) : (
+											<Table>
+												<TableHeader>
+													<TableRow>
+														<TableHead className="w-[100px]">State</TableHead>
+														<TableHead className="w-[180px]">Group</TableHead>
+														<TableHead>Labels</TableHead>
+														<TableHead className="w-[180px]">
+															Triggered at
+														</TableHead>
+														<TableHead className="w-[110px]">Duration</TableHead>
+														<TableHead className="w-[70px]">Issue</TableHead>
+														<TableHead className="w-[50px]" />
+													</TableRow>
+												</TableHeader>
+												<TableBody>
+													{filteredIncidents.map((incident) => {
+														const isOpen = incident.status === "open"
+														return (
+															<TableRow key={incident.id}>
+																<TableCell>
+																	<AlertStatusBadge
+																		state={isOpen ? "firing" : "resolved"}
+																	/>
+																</TableCell>
+																<TableCell>
+																	<span className="font-mono text-muted-foreground">
+																		{incident.groupKey ?? "all"}
+																	</span>
+																</TableCell>
+																<TableCell>
+																	<div className="flex flex-wrap gap-1">
+																		<Badge
+																			variant="secondary"
+																			className="text-xs font-mono"
+																		>
+																			{rule.signalType.replace(
+																				"_",
+																				" ",
+																			)}
+																			:{" "}
+																			{formatSignalValue(
+																				rule.signalType,
+																				incident.lastObservedValue,
+																			)}
+																		</Badge>
+																		<Badge
+																			variant="secondary"
+																			className="text-xs font-mono"
+																		>
+																			threshold:{" "}
+																			{formatSignalValue(
+																				rule.signalType,
+																				incident.threshold,
+																			)}
+																		</Badge>
+																	</div>
+																</TableCell>
+																<TableCell className="text-xs">
+																	{formatAlertDateTimeFull(
+																		incident.firstTriggeredAt,
+																	)}
+																</TableCell>
+																<TableCell>
+																	<span
+																		className={cn(
+																			"text-xs tabular-nums",
+																			isOpen &&
+																				"text-destructive font-medium",
+																		)}
 																	>
-																		<ChatBubbleSparkleIcon size={14} />
-																		Open investigation
-																	</DropdownMenuItem>
-																	<DropdownMenuItem
-																		onClick={() =>
-																			navigate({
-																				to: "/alerts",
-																				search: {
-																					tab: "overview",
-																				},
-																			})
-																		}
-																	>
-																		View all incidents
-																	</DropdownMenuItem>
-																</DropdownMenuContent>
-															</DropdownMenu>
-														</div>
-													</TableCell>
-												</TableRow>
-											)
-										})}
-									</TableBody>
-								</Table>
-							)}
-						</div>
-					))
-					.render()}
-		</DashboardLayout>
+																		{formatAlertDuration(
+																			incident.firstTriggeredAt,
+																			incident.resolvedAt,
+																		)}
+																	</span>
+																</TableCell>
+																<TableCell>
+																	{incident.errorIssueId != null ? (
+																		<Link
+																			to="/errors/issues/$issueId"
+																			params={{
+																				issueId:
+																					incident.errorIssueId,
+																			}}
+																			className="text-xs text-primary underline-offset-4 hover:underline"
+																		>
+																			View
+																		</Link>
+																	) : (
+																		<span className="text-xs text-muted-foreground/60">
+																			—
+																		</span>
+																	)}
+																</TableCell>
+																<TableCell>
+																	<div className="flex items-center justify-end gap-1">
+																		<DropdownMenu>
+																			<DropdownMenuTrigger
+																				render={
+																					<Button
+																						variant="ghost"
+																						size="icon-sm"
+																					/>
+																				}
+																			>
+																				<DotsVerticalIcon size={14} />
+																			</DropdownMenuTrigger>
+																			<DropdownMenuContent align="end">
+																				<DropdownMenuItem
+																					onClick={() =>
+																						void openInvestigation(
+																							incident,
+																						)
+																					}
+																				>
+																					<ChatBubbleSparkleIcon
+																						size={14}
+																					/>
+																					Open investigation
+																				</DropdownMenuItem>
+																				<DropdownMenuItem
+																					onClick={() =>
+																						navigate({
+																							to: "/alerts",
+																							search: {
+																								tab: "overview",
+																							},
+																						})
+																					}
+																				>
+																					View all incidents
+																				</DropdownMenuItem>
+																			</DropdownMenuContent>
+																		</DropdownMenu>
+																	</div>
+																</TableCell>
+															</TableRow>
+														)
+													})}
+												</TableBody>
+											</Table>
+										)}
+									</div>
+								))
+								.render()}
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

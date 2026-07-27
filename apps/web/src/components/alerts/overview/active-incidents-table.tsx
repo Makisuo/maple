@@ -7,7 +7,7 @@ import { AlertSeverityBadge } from "@/components/alerts/alert-severity-badge"
 import { sortIncidents, TagChips, TagGroupHeaderRow } from "@/components/alerts/overview/shared"
 import { formatSignalValue } from "@/lib/alerts/form-utils"
 import { groupByTag as groupItemsByTag } from "@/lib/alerts/tag-grouping"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 

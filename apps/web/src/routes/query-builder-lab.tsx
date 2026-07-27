@@ -4,14 +4,12 @@ import { Schema } from "effect"
 import { QueryBuilderLab } from "@/components/query-builder/query-builder-lab"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
 const queryBuilderLabSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/query-builder-lab")({
@@ -55,21 +53,28 @@ function QueryBuilderLabContent() {
 	}
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Overview", href: "/" }, { label: "Query Builder Lab" }]}
-			title="Query Builder Lab"
-			description="MVP Query builder"
-			headerActions={
-				<TimeRangeHeaderControls
-					startTime={search.startTime}
-					endTime={search.endTime}
-					presetValue={search.timePreset ?? (search.startTime ? undefined : "1h")}
-					defaultPreset="1h"
-					onTimeChange={handleTimeChange}
-				/>
-			}
-		>
-			<QueryBuilderLab startTime={effectiveStartTime} endTime={effectiveEndTime} />
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Overview", href: "/" }, { label: "Query Builder Lab" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title="Query Builder Lab" description="MVP Query builder">
+							<TimeRangeHeaderControls
+								startTime={search.startTime}
+								endTime={search.endTime}
+								presetValue={search.timePreset ?? (search.startTime ? undefined : "1h")}
+								defaultPreset="1h"
+								onTimeChange={handleTimeChange}
+							/>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<QueryBuilderLab startTime={effectiveStartTime} endTime={effectiveEndTime} />
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

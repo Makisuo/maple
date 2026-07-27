@@ -1,3 +1,4 @@
+import { formatNumber, formatStorageBytes } from "@maple/ui/format"
 import { Result } from "@/lib/effect-atom"
 import { FileIcon, GridSquareCirclePlusIcon, ChartLineIcon, DatabaseIcon } from "@/components/icons"
 
@@ -7,29 +8,6 @@ import { getServiceUsageResultAtom } from "@/lib/services/atoms/warehouse-query-
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import type { ServiceUsageResponse, ServiceUsageTotals } from "@/api/warehouse/service-usage"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
-
-function formatNumber(num: number): string {
-	if (num >= 1_000_000) {
-		return `${(num / 1_000_000).toFixed(1)}M`
-	}
-	if (num >= 1_000) {
-		return `${(num / 1_000).toFixed(1)}K`
-	}
-	return num.toLocaleString()
-}
-
-function formatBytes(bytes: number): string {
-	if (bytes >= 1_000_000_000) {
-		return `${(bytes / 1_000_000_000).toFixed(2)} GB`
-	}
-	if (bytes >= 1_000_000) {
-		return `${(bytes / 1_000_000).toFixed(2)} MB`
-	}
-	if (bytes >= 1_000) {
-		return `${(bytes / 1_000).toFixed(2)} KB`
-	}
-	return `${bytes} B`
-}
 
 type CardKey = "logs" | "traces" | "metrics" | "dataSize"
 
@@ -42,7 +20,7 @@ const cardConfig: Array<{
 	{ title: "Total Logs", key: "logs", icon: FileIcon, format: formatNumber },
 	{ title: "Total Traces", key: "traces", icon: GridSquareCirclePlusIcon, format: formatNumber },
 	{ title: "Total Metrics", key: "metrics", icon: ChartLineIcon, format: formatNumber },
-	{ title: "Data Size", key: "dataSize", icon: DatabaseIcon, format: formatBytes },
+	{ title: "Data Size", key: "dataSize", icon: DatabaseIcon, format: formatStorageBytes },
 ]
 
 interface ServiceUsageCardsProps {

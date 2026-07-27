@@ -10,7 +10,7 @@ import { QueryErrorState } from "@/components/common/query-error-state"
 import { CloudflareIcon } from "@/components/icons"
 import { HeroChip, PageHero } from "@/components/infra/primitives/page-hero"
 import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
-import { formatBytes, formatPercent } from "@/components/infra/format"
+import { formatBytes, formatPercent } from "@maple/ui/format"
 import { CloudflareBreakdownPanel } from "@/components/infra/cloudflare/cloudflare-breakdown-panel"
 import { CloudflareEdgeShareBand } from "@/components/infra/cloudflare/cloudflare-edge-share-band"
 import { CloudflareFilterChips } from "@/components/infra/cloudflare/cloudflare-filter-chips"
@@ -38,18 +38,16 @@ import {
 	cloudflareZoneFacetsResultAtom,
 	cloudflareZonesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
-import { formatNumber } from "@/lib/format"
+import { formatNumber } from "@maple/ui/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
 const zoneDetailSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
 	...cloudflareFilterSearchFields,
+	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/infra/cloudflare/$zoneName")({
@@ -131,52 +129,61 @@ function ZoneDetailPage() {
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
-			<DashboardLayout
-				breadcrumbs={[
-					{ label: "Infrastructure", href: "/infra" },
-					{ label: "Cloudflare", href: "/infra/cloudflare" },
-					{ label: zoneName },
-				]}
-				filterSidebar={
-					<CloudflareFilterSidebarView
-						facetsResult={facetsResult}
-						filters={filters}
-						onFilterChange={onFilterChange}
-						onClearFilters={onClearFilters}
-					/>
-				}
-				headerActions={
-					<TimeRangeHeaderControls
-						startTime={search.startTime ?? startTime}
-						endTime={search.endTime ?? endTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-						onTimeChange={handleTimeChange}
-					/>
-				}
-			>
-				<div className="space-y-6">
-					<PageHero
-						title={zoneName}
-						description="How the edge answered this zone's traffic — status mix, cache behavior, and latency percentiles where your plan exposes them."
-						trailing={<HeroChip>zone</HeroChip>}
-						meta={
-							<CloudflareFilterChips
-								filters={filters}
-								onRemove={onRemoveChip}
-								onClear={onClearFilters}
-							/>
-						}
-					/>
-					<ZoneDetailContent
-						zoneName={zoneName}
-						serviceName={serviceName}
-						startTime={startTime}
-						endTime={endTime}
-						filters={filters}
-						onToggleFilter={onToggleFilter}
-					/>
-				</div>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[
+						{ label: "Infrastructure", href: "/infra" },
+						{ label: "Cloudflare", href: "/infra/cloudflare" },
+						{ label: zoneName },
+					]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Filters>
+						<CloudflareFilterSidebarView
+							facetsResult={facetsResult}
+							filters={filters}
+							onFilterChange={onFilterChange}
+							onClearFilters={onClearFilters}
+						/>
+					</DashboardLayout.Filters>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header>
+								<TimeRangeHeaderControls
+									startTime={search.startTime ?? startTime}
+									endTime={search.endTime ?? endTime}
+									presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+									onTimeChange={handleTimeChange}
+								/>
+							</DashboardLayout.Header>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-6">
+								<PageHero
+									title={zoneName}
+									description="How the edge answered this zone's traffic — status mix, cache behavior, and latency percentiles where your plan exposes them."
+									trailing={<HeroChip>zone</HeroChip>}
+									meta={
+										<CloudflareFilterChips
+											filters={filters}
+											onRemove={onRemoveChip}
+											onClear={onClearFilters}
+										/>
+									}
+								/>
+								<ZoneDetailContent
+									zoneName={zoneName}
+									serviceName={serviceName}
+									startTime={startTime}
+									endTime={endTime}
+									filters={filters}
+									onToggleFilter={onToggleFilter}
+								/>
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
 }

@@ -20,6 +20,18 @@ interface PageLayoutContextValue {
 	 * did, filters would render as a sheet with no way to open it.
 	 */
 	filterSidebarCollapsed: boolean
+	/**
+	 * Whether a `FilterSidebar` is actually mounted. The trigger lives in the page header and the
+	 * sidebar in the body, so the trigger cannot see it as a child — without this it would render a
+	 * button that opens a sheet that doesn't exist. Set by `FilterSidebar` on mount.
+	 */
+	hasFilterSidebar: boolean
+	setHasFilterSidebar: (present: boolean) => void
+	/** Mirrors the filter sidebar's story on the other edge. See {@link RightSidebar}. */
+	rightSheetOpen: boolean
+	setRightSheetOpen: (open: boolean) => void
+	hasRightSidebar: boolean
+	setHasRightSidebar: (present: boolean) => void
 }
 
 const PageLayoutContext = React.createContext<PageLayoutContextValue | null>(null)
@@ -37,6 +49,9 @@ function usePageLayout() {
 function Root({ children, className }: { children: React.ReactNode; className?: string }) {
 	const [isScrolled, setIsScrolled] = React.useState(false)
 	const [filterSheetOpen, setFilterSheetOpen] = React.useState(false)
+	const [hasFilterSidebar, setHasFilterSidebar] = React.useState(false)
+	const [rightSheetOpen, setRightSheetOpen] = React.useState(false)
+	const [hasRightSidebar, setHasRightSidebar] = React.useState(false)
 	const filterSidebarCollapsed = useMediaQuery("max-lg")
 
 	const ctx = React.useMemo(
@@ -46,8 +61,21 @@ function Root({ children, className }: { children: React.ReactNode; className?: 
 			filterSheetOpen,
 			setFilterSheetOpen,
 			filterSidebarCollapsed,
+			hasFilterSidebar,
+			setHasFilterSidebar,
+			rightSheetOpen,
+			setRightSheetOpen,
+			hasRightSidebar,
+			setHasRightSidebar,
 		}),
-		[isScrolled, filterSheetOpen, filterSidebarCollapsed],
+		[
+			isScrolled,
+			filterSheetOpen,
+			filterSidebarCollapsed,
+			hasFilterSidebar,
+			rightSheetOpen,
+			hasRightSidebar,
+		],
 	)
 
 	return (
@@ -62,6 +90,44 @@ function Root({ children, className }: { children: React.ReactNode; className?: 
 /* -------------------------------------------------------------------------------------------------
  * Header
  * -------------------------------------------------------------------------------------------------*/
+
+/**
+ * The page title. Exported so a route rendering custom header content (a title
+ * beside a badge, a breadcrumb-style compound name) still gets the one canonical
+ * `<h1>` instead of hand-rolling the class string — which is how six different
+ * page-title typographies accumulated.
+ */
+function Title({
+	children,
+	title,
+	className,
+}: {
+	children: React.ReactNode
+	/** `title` attribute for the native tooltip when the heading truncates. */
+	title?: string
+	className?: string
+}) {
+	return (
+		<h1
+			data-slot="page-title"
+			className={cn(
+				"font-display text-3xl font-semibold tracking-tight truncate leading-[1.1]",
+				className,
+			)}
+			title={title}
+		>
+			{children}
+		</h1>
+	)
+}
+
+function Description({ children, className }: { children: React.ReactNode; className?: string }) {
+	return (
+		<p data-slot="page-description" className={cn("text-muted-foreground", className)}>
+			{children}
+		</p>
+	)
+}
 
 interface HeaderProps {
 	children?: React.ReactNode
@@ -84,16 +150,11 @@ function Header({ children, title, titleContent, description, className }: Heade
 			)}
 		>
 			<div className="min-w-0 flex-1">
-				{titleContent ??
-					(title && (
-						<h1
-							className="font-display text-3xl font-semibold tracking-tight truncate leading-[1.1]"
-							title={title}
-						>
-							{title}
-						</h1>
-					))}
-				{description && <p className="text-muted-foreground">{description}</p>}
+				{/* `title`/`description` stay plain strings — that's data, and it's the
+				    30-site happy path. They render *through* `Title`/`Description` so
+				    there is exactly one implementation of each. */}
+				{titleContent ?? (title && <Title title={title}>{title}</Title>)}
+				{description && <Description>{description}</Description>}
 			</div>
 			{children}
 		</div>
@@ -163,7 +224,16 @@ function FilterSidebar({
 	className?: string
 	width?: string
 }) {
-	const { filterSidebarCollapsed, filterSheetOpen, setFilterSheetOpen } = usePageLayout()
+	const { filterSidebarCollapsed, filterSheetOpen, setFilterSheetOpen, setHasFilterSidebar } =
+		usePageLayout()
+
+	// Announce presence to the trigger, which sits in the page header and so can't see this as a
+	// child. A layout effect rather than a passive one: it lands before paint, so a filtered page
+	// never shows a frame with the trigger missing.
+	React.useLayoutEffect(() => {
+		setHasFilterSidebar(true)
+		return () => setHasFilterSidebar(false)
+	}, [setHasFilterSidebar])
 
 	if (filterSidebarCollapsed) {
 		return (
@@ -227,12 +297,81 @@ function ScrollArea({ children, className }: { children: React.ReactNode; classN
  * RightSidebar
  * -------------------------------------------------------------------------------------------------*/
 
-function RightSidebar({ children, className }: { children: React.ReactNode; className?: string }) {
+/**
+ * The alternative to `ScrollArea`: a region that fills the remaining height and
+ * scrolls nothing itself. Use it for a pane with its own scroller — a chat
+ * transcript, a virtualized table — where an outer `overflow-auto` would produce
+ * a second scrollbar and force the inner pane onto a hardcoded height.
+ */
+function Fill({ children, className }: { children: React.ReactNode; className?: string }) {
 	return (
-		<aside data-slot="page-right-sidebar" className={cn("hidden lg:block", className)}>
+		<div data-slot="page-fill" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
+			{children}
+		</div>
+	)
+}
+
+/**
+ * Context/detail rail on the trailing edge. Below `lg` there is no room for it
+ * beside the content, so — exactly like `FilterSidebar` — it becomes a sheet
+ * behind `RightSidebarTrigger` rather than disappearing.
+ */
+function RightSidebar({
+	children,
+	className,
+	title = "Details",
+	width = "w-72",
+}: {
+	children: React.ReactNode
+	className?: string
+	/** Accessible name for the sheet at narrow widths. */
+	title?: string
+	width?: string
+}) {
+	const { filterSidebarCollapsed, rightSheetOpen, setRightSheetOpen, setHasRightSidebar } = usePageLayout()
+
+	// Announce presence to the trigger in the page header, which can't see this as
+	// a child. Layout effect so a frame never paints with the trigger missing.
+	React.useLayoutEffect(() => {
+		setHasRightSidebar(true)
+		return () => setHasRightSidebar(false)
+	}, [setHasRightSidebar])
+
+	if (filterSidebarCollapsed) {
+		return (
+			<Sheet open={rightSheetOpen} onOpenChange={setRightSheetOpen}>
+				<SheetContent side="right" className="w-80 overflow-y-auto p-4">
+					<SheetHeader className="sr-only">
+						<SheetTitle>{title}</SheetTitle>
+						<SheetDescription>Context for this page.</SheetDescription>
+					</SheetHeader>
+					{children}
+				</SheetContent>
+			</Sheet>
+		)
+	}
+
+	return (
+		<aside
+			data-slot="page-right-sidebar"
+			className={cn("hidden shrink-0 overflow-y-auto border-l lg:block", width, className)}
+		>
 			{children}
 		</aside>
 	)
+}
+
+/**
+ * Opens the context sheet. Mirrors `FilterSidebarTrigger`: renders nothing unless
+ * the rail has collapsed *and* a `RightSidebar` is mounted, so callers can drop it
+ * in unconditionally.
+ */
+function RightSidebarTrigger({ children }: { children: React.ReactElement<{ onClick?: () => void }> }) {
+	const { filterSidebarCollapsed, hasRightSidebar, setRightSheetOpen } = usePageLayout()
+
+	if (!filterSidebarCollapsed || !hasRightSidebar) return null
+
+	return React.cloneElement(children, { onClick: () => setRightSheetOpen(true) })
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -243,11 +382,15 @@ function RightSidebar({ children, className }: { children: React.ReactNode; clas
  * Opens the filter sheet. `children` must be a single interactive element (a Button) — the click
  * handler is cloned onto it rather than wrapped around it, so the trigger stays one real button and
  * keeps its keyboard behaviour.
+ *
+ * Renders nothing unless the sidebar has collapsed to a sheet *and* a `FilterSidebar` is mounted to
+ * open. Callers can therefore drop this in unconditionally; a page with no filters gets no button
+ * rather than one that opens nothing.
  */
 function FilterSidebarTrigger({ children }: { children: React.ReactElement<{ onClick?: () => void }> }) {
-	const { filterSidebarCollapsed, setFilterSheetOpen } = usePageLayout()
+	const { filterSidebarCollapsed, hasFilterSidebar, setFilterSheetOpen } = usePageLayout()
 
-	if (!filterSidebarCollapsed) return null
+	if (!filterSidebarCollapsed || !hasFilterSidebar) return null
 
 	return React.cloneElement(children, { onClick: () => setFilterSheetOpen(true) })
 }
@@ -260,13 +403,17 @@ export const PageLayout = {
 	Root,
 	Header,
 	HeaderActions,
+	Title,
+	Description,
 	StickyArea,
 	Body,
 	FilterSidebar,
 	FilterSidebarTrigger,
 	Content,
 	ScrollArea,
+	Fill,
 	RightSidebar,
+	RightSidebarTrigger,
 }
 
 export { usePageLayout }

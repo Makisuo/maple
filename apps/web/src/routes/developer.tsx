@@ -20,26 +20,37 @@ function DeveloperPage() {
 	const navigate = useNavigate({ from: Route.fullPath })
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Developer" }]}
-			title="Developer"
-			description="Manage API keys and ingestion credentials."
-		>
-			<Tabs
-				value={search.tab ?? "ingestion"}
-				onValueChange={(tab) => navigate({ search: { tab: tab as "ingestion" | "api-keys" } })}
-			>
-				<TabsList variant="underline">
-					<TabsTrigger value="ingestion">Ingestion</TabsTrigger>
-					<TabsTrigger value="api-keys">API Keys</TabsTrigger>
-				</TabsList>
-				<TabsContent value="ingestion" className="pt-4">
-					<IngestionSection />
-				</TabsContent>
-				<TabsContent value="api-keys" className="pt-4">
-					<ApiKeysSection />
-				</TabsContent>
-			</Tabs>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Developer" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Developer"
+							description="Manage API keys and ingestion credentials."
+						/>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<Tabs
+							value={search.tab ?? "ingestion"}
+							onValueChange={(tab) =>
+								navigate({ search: { tab: tab as "ingestion" | "api-keys" } })
+							}
+						>
+							<TabsList variant="underline">
+								<TabsTrigger value="ingestion">Ingestion</TabsTrigger>
+								<TabsTrigger value="api-keys">API Keys</TabsTrigger>
+							</TabsList>
+							<TabsContent value="ingestion" className="pt-4">
+								<IngestionSection />
+							</TabsContent>
+							<TabsContent value="api-keys" className="pt-4">
+								<ApiKeysSection />
+							</TabsContent>
+						</Tabs>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

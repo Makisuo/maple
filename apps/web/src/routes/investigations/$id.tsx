@@ -1,9 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Exit, Schema } from "effect"
+import { Exit, Option, Schema } from "effect"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 
 import { decodeInvestigationRef } from "@/components/chat/investigation-context"
 import { InvestigationView } from "@/components/investigations/investigation-view"
+import { ErrorState } from "@/components/common/error-state"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
@@ -24,12 +25,32 @@ export const Route = createFileRoute("/investigations/$id")({
 	validateSearch: Schema.toStandardSchemaV1(SearchSchema),
 })
 
-const decodeInvestigationId = Schema.decodeUnknownSync(InvestigationId)
+const decodeInvestigationId = Schema.decodeUnknownOption(InvestigationId)
 
 function InvestigationPage() {
 	const { id: rawId } = Route.useParams()
 	const { r } = Route.useSearch()
-	const id = decodeInvestigationId(rawId)
+	// `InvestigationId` is a branded UUID. Decoding it with the throwing variant
+	// took down the whole route on any other shape — including the legacy encoded
+	// ids the `?r=` migration below exists to rescue, which made that path
+	// unreachable.
+	const decoded = decodeInvestigationId(rawId)
+	if (Option.isNone(decoded)) {
+		const legacyRef = r ? decodeInvestigationRef(r) : undefined
+		return legacyRef ? <LegacyInvestigationRedirect legacyId={rawId} /> : <NotFoundShell />
+	}
+	return <InvestigationDetail id={decoded.value} legacyRef={r} rawId={rawId} />
+}
+
+function InvestigationDetail({
+	id,
+	legacyRef,
+	rawId,
+}: {
+	id: InvestigationId
+	legacyRef: string | undefined
+	rawId: string
+}) {
 	const query = MapleApiV2AtomClient.query("investigations", "retrieve", {
 		params: { id },
 		reactivityKeys: ["investigations", `investigation:${id}`],
@@ -41,12 +62,53 @@ function InvestigationPage() {
 
 	return Result.builder(result)
 		.onInitial(() => <LoadingShell />)
-		.onError(() => {
-			const legacyRef = r ? decodeInvestigationRef(r) : undefined
-			return legacyRef ? <LegacyInvestigationRedirect legacyId={rawId} /> : <NotFoundShell />
+		.onError((error) => {
+			if (legacyRef && decodeInvestigationRef(legacyRef)) {
+				return <LegacyInvestigationRedirect legacyId={rawId} />
+			}
+			// Only a real "no such investigation" is a dead end. A dropped request or
+			// a restarting API is not, and telling someone their investigation is gone
+			// when it isn't sends them looking for a problem that doesn't exist.
+			return isNotFound(error) ? (
+				<NotFoundShell />
+			) : (
+				<LoadFailureShell error={error} onRetry={refresh} />
+			)
 		})
 		.onSuccess((investigation) => <InvestigationView investigation={investigation} onRefresh={refresh} />)
 		.render()
+}
+
+/** The v2 API answers a missing investigation with a tagged not-found error. */
+const isNotFound = (error: unknown): boolean =>
+	typeof error === "object" &&
+	error !== null &&
+	"_tag" in error &&
+	typeof error._tag === "string" &&
+	error._tag.toLowerCase().includes("notfound")
+
+function LoadFailureShell({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+	return (
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Investigations", href: "/investigations" }, { label: "Unavailable" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title="Investigation" />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<ErrorState
+							error={error}
+							title="This investigation could not be loaded"
+							onRetry={onRetry}
+						/>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
+	)
 }
 
 function LegacyInvestigationRedirect({ legacyId }: { legacyId: string }) {
@@ -112,55 +174,82 @@ function MutationFailureShell({
 	onRetry: () => void
 }) {
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Investigations", href: "/investigations" }, { label: "Error" }]}
-			title={title}
-		>
-			<Empty>
-				<EmptyHeader>
-					<EmptyTitle>{title}</EmptyTitle>
-					<EmptyDescription>{description}</EmptyDescription>
-				</EmptyHeader>
-				<Button variant="outline" size="sm" onClick={onRetry}>
-					Try again
-				</Button>
-			</Empty>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Investigations", href: "/investigations" }, { label: "Error" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title={title} />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<Empty>
+							<EmptyHeader>
+								<EmptyTitle>{title}</EmptyTitle>
+								<EmptyDescription>{description}</EmptyDescription>
+							</EmptyHeader>
+							<Button variant="outline" size="sm" onClick={onRetry}>
+								Try again
+							</Button>
+						</Empty>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 
 function LoadingShell({ label = "Loading investigation…" }: { label?: string }) {
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Investigations", href: "/investigations" }, { label: "…" }]}
-			title={label}
-		>
-			<div className="mx-auto w-full max-w-4xl space-y-4">
-				<Skeleton className="h-4 w-32" />
-				<Skeleton className="h-8 w-3/4" />
-				<Skeleton className="h-56 w-full" />
-			</div>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Investigations", href: "/investigations" }, { label: "…" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title={label} />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="mx-auto w-full max-w-4xl space-y-4">
+							<Skeleton className="h-4 w-32" />
+							<Skeleton className="h-8 w-3/4" />
+							<Skeleton className="h-56 w-full" />
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 
 function NotFoundShell() {
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Investigations", href: "/investigations" }, { label: "Missing" }]}
-			title="Investigation not found"
-		>
-			<Empty>
-				<EmptyHeader>
-					<EmptyTitle>This investigation is unavailable</EmptyTitle>
-					<EmptyDescription>
-						It may have been removed, or it belongs to a different organization.
-					</EmptyDescription>
-				</EmptyHeader>
-				<Button variant="outline" size="sm" render={<Link to="/investigations" />}>
-					View investigations
-				</Button>
-			</Empty>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Investigations", href: "/investigations" }, { label: "Missing" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title="Investigation not found" />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<Empty>
+							<EmptyHeader>
+								<EmptyTitle>This investigation is unavailable</EmptyTitle>
+								<EmptyDescription>
+									It may have been removed, or it belongs to a different organization.
+								</EmptyDescription>
+							</EmptyHeader>
+							<Button variant="outline" size="sm" render={<Link to="/investigations" />}>
+								View investigations
+							</Button>
+						</Empty>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

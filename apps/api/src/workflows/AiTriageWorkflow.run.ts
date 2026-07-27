@@ -17,6 +17,7 @@
  *                       step) and map its structured result
  *   3. persist        — run row + issue timeline + usage tracking
  */
+import { CHAT_FLUE_ORIGIN } from "@/lib/chat-flue-origin"
 import { createHash } from "node:crypto"
 import { createFlueClient } from "@flue/sdk"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
@@ -84,13 +85,13 @@ const invokeTriageWorkflow = async ({
 	if (!isChatFlueBinding(binding)) throw new Error("chat_flue_unavailable")
 
 	const client = createFlueClient({
-		baseUrl: "https://chat-flue.internal",
+		baseUrl: CHAT_FLUE_ORIGIN,
 		fetch: binding.fetch.bind(binding),
 		token: `maple_svc_${env.INTERNAL_SERVICE_TOKEN ?? ""}`,
 	})
 
 	const response = await client.workflows.invoke("triage", {
-		payload: { orgId, incidentKind, incidentId, context },
+		input: { orgId, incidentKind, incidentId, context },
 		wait: "result",
 	})
 

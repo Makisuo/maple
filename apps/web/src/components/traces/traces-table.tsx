@@ -1,3 +1,4 @@
+import { formatDuration } from "@maple/ui/format"
 import * as React from "react"
 import { Result } from "@/lib/effect-atom"
 import { Link, useNavigate } from "@tanstack/react-router"
@@ -11,7 +12,7 @@ import type { TracesSearchParams } from "@/routes/traces"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { formatTimestampInTimezone } from "@/lib/timezone-format"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { useInfiniteTraces, FETCH_THRESHOLD } from "@/hooks/use-infinite-traces"
 import { useListNavigation } from "@/hooks/use-list-navigation"
@@ -25,16 +26,6 @@ interface TracesTableViewProps {
 	fetchNextPage: () => void
 	waiting: boolean
 	onTraceClick: (traceId: string, startTime: string) => void
-}
-
-function formatDuration(ms: number): string {
-	if (ms < 1) {
-		return `${(ms * 1000).toFixed(0)}μs`
-	}
-	if (ms < 1000) {
-		return `${ms.toFixed(1)}ms`
-	}
-	return `${(ms / 1000).toFixed(2)}s`
 }
 
 function truncateId(id: string, length = 8): string {

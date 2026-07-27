@@ -1,4 +1,4 @@
-import { createAgent, type AgentRouteHandler, type McpServerConnection } from "@flue/runtime"
+import { defineAgent, type AgentRouteHandler, type McpServerConnection } from "@flue/runtime"
 import { applyApprovalGates } from "../lib/approval.ts"
 import { instanceIdFromAgentPath } from "../lib/auth.ts"
 import type { ChatFlueEnv } from "../lib/env.ts"
@@ -66,7 +66,7 @@ export const route: AgentRouteHandler = async (c, next) => {
 	})
 }
 
-export default createAgent<unknown, ChatFlueEnv>(async (ctx) => {
+export default defineAgent<ChatFlueEnv>(async (ctx) => {
 	const orgId = orgIdFromInstanceId(ctx.id)
 
 	// Mode is derived from the instance id's tab-id prefix (alert- / widget-fix- /

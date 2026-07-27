@@ -1,4 +1,5 @@
-import type { ToolDefinition } from "@flue/runtime"
+import { defineTool, type JsonValue, type ToolDefinition } from "@flue/runtime"
+import { toJsonValue } from "./json.ts"
 import { baseToolName } from "./mcp.ts"
 
 /**
@@ -41,43 +42,57 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
 ])
 
 /** Marker an approval-gated tool returns instead of mutating. */
-export interface ToolProposal {
+export type ToolProposal = {
 	status: "proposed"
 	tool: string
-	input: unknown
+	input: JsonValue
 }
 
 export const PROPOSAL_STATUS = "proposed" as const
 
-/** Parse a tool result string back into a {@link ToolProposal}, or `null`. */
-export const parseToolProposal = (result: string): ToolProposal | null => {
-	try {
-		const parsed = JSON.parse(result) as Partial<ToolProposal>
-		return parsed?.status === PROPOSAL_STATUS && typeof parsed.tool === "string"
-			? { status: PROPOSAL_STATUS, tool: parsed.tool, input: parsed.input }
-			: null
-	} catch {
-		return null
+/**
+ * Parse a tool result back into a {@link ToolProposal}, or `null`.
+ *
+ * Tool results are structured JSON, so the marker normally arrives as an object.
+ * The string arm covers results recorded by an older runtime, whose tools could
+ * only return strings — a live conversation must not lose its approval cards
+ * when the worker is upgraded underneath it.
+ */
+export const parseToolProposal = (result: unknown): ToolProposal | null => {
+	if (typeof result === "string") {
+		try {
+			return parseToolProposal(JSON.parse(result))
+		} catch {
+			return null
+		}
 	}
+	if (result === null || typeof result !== "object") return null
+	const marker: Record<string, unknown> = { ...result }
+	return marker.status === PROPOSAL_STATUS && typeof marker.tool === "string"
+		? { status: PROPOSAL_STATUS, tool: marker.tool, input: toJsonValue(marker.input) }
+		: null
 }
 
 /**
- * Swap the `execute` of every mutating tool for one that returns a proposal
- * marker (no side effect). Read-only tools pass through unchanged. The tool's
- * name, description, and parameter schema are preserved so the model calls it
- * exactly as it would the real tool.
+ * Swap `run` on every mutating tool for one that returns a proposal marker (no
+ * side effect). Read-only tools pass through unchanged. The tool's name and
+ * parameter schema are preserved so the model calls it exactly as it would the
+ * real tool.
  */
 export const applyApprovalGates = (tools: readonly ToolDefinition[]): ToolDefinition[] =>
 	tools.map((tool) => {
 		if (!MUTATING_TOOL_NAMES.has(baseToolName(tool.name))) return tool
-		return {
-			...tool,
+		return defineTool({
+			name: tool.name,
 			description: `${tool.description}\n\nThis is an approval-gated action: calling it proposes the change for the user to approve; it does NOT take effect until approved. Call it once with the intended arguments and stop.`,
-			execute: async (args) =>
-				JSON.stringify({
-					status: PROPOSAL_STATUS,
-					tool: baseToolName(tool.name),
-					input: args,
-				} satisfies ToolProposal),
-		}
+			input: tool.input,
+			// The real tool's output schema describes the mutation's result, which a
+			// proposal never produces — validating against it would reject the marker.
+			output: undefined,
+			run: (context): ToolProposal => ({
+				status: PROPOSAL_STATUS,
+				tool: baseToolName(tool.name),
+				input: toJsonValue("input" in context ? context.input : undefined),
+			}),
+		}) as ToolDefinition
 	})

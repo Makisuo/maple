@@ -65,38 +65,54 @@ function AlertIncidentPage() {
 
 	if (loading && !alertContext) {
 		return (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "…" }]}
-				title="Investigation"
-			>
-				<div className="mx-auto w-full max-w-3xl space-y-4">
-					<Skeleton className="h-4 w-32" />
-					<Skeleton className="h-8 w-3/4" />
-					<Skeleton className="h-3 w-full" />
-					<Skeleton className="h-3 w-2/3" />
-				</div>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={[{ label: "Alerts", href: "/alerts" }, { label: "…" }]} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Investigation" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="mx-auto w-full max-w-3xl space-y-4">
+								<Skeleton className="h-4 w-32" />
+								<Skeleton className="h-8 w-3/4" />
+								<Skeleton className="h-3 w-full" />
+								<Skeleton className="h-3 w-2/3" />
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 
 	if (!alertContext) {
 		return (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Not found" }]}
-				title="Investigation"
-			>
-				<Empty>
-					<EmptyHeader>
-						<EmptyTitle>Incident not found</EmptyTitle>
-						<EmptyDescription>
-							It may have been resolved and pruned, or the link is stale.
-						</EmptyDescription>
-					</EmptyHeader>
-					<Button variant="outline" size="sm" render={<Link to="/alerts" />}>
-						Back to alerts
-					</Button>
-				</Empty>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Alerts", href: "/alerts" }, { label: "Not found" }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Investigation" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<Empty>
+								<EmptyHeader>
+									<EmptyTitle>Incident not found</EmptyTitle>
+									<EmptyDescription>
+										It may have been resolved and pruned, or the link is stale.
+									</EmptyDescription>
+								</EmptyHeader>
+								<Button variant="outline" size="sm" render={<Link to="/alerts" />}>
+									Back to alerts
+								</Button>
+							</Empty>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 
@@ -159,34 +175,52 @@ function AlertInvestigationRedirect({
 	useMountEffect(openInvestigation)
 	if (failed) {
 		return (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Investigation" }]}
-				title="Could not open investigation"
-			>
-				<Empty>
-					<EmptyHeader>
-						<EmptyTitle>Investigation start failed</EmptyTitle>
-						<EmptyDescription>
-							The investigation could not be created. You can safely retry.
-						</EmptyDescription>
-					</EmptyHeader>
-					<Button variant="outline" size="sm" onClick={openInvestigation}>
-						Try again
-					</Button>
-				</Empty>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Alerts", href: "/alerts" }, { label: "Investigation" }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Could not open investigation" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<Empty>
+								<EmptyHeader>
+									<EmptyTitle>Investigation start failed</EmptyTitle>
+									<EmptyDescription>
+										The investigation could not be created. You can safely retry.
+									</EmptyDescription>
+								</EmptyHeader>
+								<Button variant="outline" size="sm" onClick={openInvestigation}>
+									Try again
+								</Button>
+							</Empty>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Investigation" }]}
-			title="Opening investigation…"
-		>
-			<div className="mx-auto w-full max-w-3xl space-y-4">
-				<Skeleton className="h-4 w-32" />
-				<Skeleton className="h-8 w-3/4" />
-				<Skeleton className="h-40 w-full" />
-			</div>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Alerts", href: "/alerts" }, { label: "Investigation" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title="Opening investigation…" />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="mx-auto w-full max-w-3xl space-y-4">
+							<Skeleton className="h-4 w-32" />
+							<Skeleton className="h-8 w-3/4" />
+							<Skeleton className="h-40 w-full" />
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

@@ -3,7 +3,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
-import { formatDuration, formatNumber } from "@/lib/format"
+import { formatDuration, formatNumber } from "@maple/ui/format"
 
 interface TableWidgetProps {
 	dataState: WidgetDataState

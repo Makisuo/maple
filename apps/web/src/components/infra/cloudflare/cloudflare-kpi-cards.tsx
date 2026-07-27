@@ -1,8 +1,8 @@
 import { useMemo } from "react"
 
 import type { CloudflareZoneRow, CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
-import { formatNumber } from "@/lib/format"
-import { formatBytes, formatPercent } from "../format"
+import { formatNumber } from "@maple/ui/format"
+import { formatBytes, formatPercent } from "@maple/ui/format"
 import { StatRail, StatRailItem, StatRailLoading } from "../primitives/stat-rail"
 
 interface CloudflareKpiCardsProps {

@@ -5,7 +5,7 @@ import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
 import { CheckIcon, CopyIcon, ServerIcon } from "@/components/icons"
 import type { HostDetailSummaryResponse } from "@maple/domain/http"
-import { formatRelative } from "./format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 
 interface HostMetadataPanelProps {
 	summary: HostDetailSummaryResponse["data"]
@@ -106,13 +106,13 @@ export function HostMetadataPanel({ summary }: HostMetadataPanelProps) {
 				<Section title="Lifecycle">
 					<Row
 						label="first seen"
-						value={formatRelative(summary.firstSeen)}
+						value={formatRelativeTime(summary.firstSeen)}
 						copyValue={summary.firstSeen}
 						tooltip={summary.firstSeen}
 					/>
 					<Row
 						label="last seen"
-						value={formatRelative(summary.lastSeen)}
+						value={formatRelativeTime(summary.lastSeen)}
 						copyValue={summary.lastSeen}
 						tooltip={summary.lastSeen}
 					/>

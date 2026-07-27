@@ -67,6 +67,44 @@ export {
 	type AttributeValuesOutput,
 } from "./queries/attribute-keys"
 
+// Queries — Setup audit
+export {
+	auditAttributeKeyInventoryQuery,
+	auditAttributeKeyInventoryRowSchema,
+	auditSpanShapeByServiceQuery,
+	auditSpanShapeRowSchema,
+	auditSamplingByServiceQuery,
+	auditSamplingRowSchema,
+	auditLogSeverityByServiceQuery,
+	auditLogSeverityRowSchema,
+	auditMetricLabelCardinalityQuery,
+	auditMetricLabelRowSchema,
+	auditPeerValueInventoryQuery,
+	auditPeerValueRowSchema,
+	auditDbEdgeIdentityQuery,
+	auditDbEdgeRowSchema,
+	auditLogCorrelationQuery,
+	auditLogCorrelationRowSchema,
+	auditOrphanSpansSQL,
+	auditOrphanSpanRowSchema,
+	auditRootlessTracesSQL,
+	auditRootlessTraceRowSchema,
+	auditTraceSampleModulus,
+	AUDIT_LOG_CORRELATION_MAX_HOURS,
+	AUDIT_PEER_KEYS,
+	type AuditAttributeKeyRow,
+	type AuditSpanShapeRow,
+	type AuditSamplingRow,
+	type AuditLogSeverityRow,
+	type AuditMetricLabelRow,
+	type AuditPeerValueRow,
+	type AuditDbEdgeRow,
+	type AuditLogCorrelationRow,
+	type AuditOrphanSpanRow,
+	type AuditRootlessTraceRow,
+	type AuditTraceWindowParams,
+} from "./queries/setup-audit"
+
 // Queries — Metrics
 export {
 	metricsTimeseriesQuery,

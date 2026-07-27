@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import type { FailedSend } from "@flue/react"
 import { Exit } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { toast } from "sonner"
@@ -31,6 +32,8 @@ import {
 	PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
+import { StatusMarker } from "@/components/ai-elements/status-marker"
+import { Button } from "@maple/ui/components/ui/button"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { AiTriageResult } from "@maple/domain/http"
 
@@ -49,8 +52,20 @@ interface ChatConversationProps {
 	mode?: "widget-fix" | "investigation"
 	investigationContext?: InvestigationContext
 	widgetFixContext?: WidgetFixContext
-	/** Read-only shared view: render the conversation with no composer. */
-	readOnly?: boolean
+	/** Render the conversation with no composer, and say why. */
+	readOnly?: false | "shared" | "resolved"
+	/**
+	 * The backend already seeded this conversation with its subject (an
+	 * investigation's autonomous pass sends the snapshot server-side), so the
+	 * client must not repeat it in a first-message preamble.
+	 */
+	subjectSeededByServer?: boolean
+	/**
+	 * Pin the subject above the thread. Off where the surrounding page already
+	 * states the subject — the investigation page's own header does, and repeating
+	 * it costs a screenful at the top of every thread.
+	 */
+	showAttachmentCard?: boolean
 	/** Preserved DB report for migrated/pruned conversations without a tool marker. */
 	fallbackDiagnosis?: AiTriageResult | null
 	/** Message to open the transcript on, from a `?m=` permalink. */
@@ -68,12 +83,18 @@ export function ChatConversation({
 	investigationContext,
 	widgetFixContext,
 	readOnly = false,
+	subjectSeededByServer = false,
+	showAttachmentCard = true,
 	fallbackDiagnosis = null,
 	focusMessageId,
 	permalinkFor,
 }: ChatConversationProps) {
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
-	useTypeAnywhereFocus(textareaRef, isActive && !readOnly)
+	const regionRef = useRef<HTMLDivElement>(null)
+	// Scoped to this conversation's own region: on a full page (an investigation)
+	// a window-wide listener swallows every global shortcut, so typing `?` for the
+	// shortcut sheet silently drops a question mark into the composer instead.
+	useTypeAnywhereFocus(textareaRef, isActive && !readOnly, regionRef)
 
 	const referrerPath = useMemo(() => readChatReferrer(), [tabId])
 	const derivedContexts = useMemo<AutoContext[]>(
@@ -96,8 +117,11 @@ export function ChatConversation({
 		})
 
 	// Per-conversation context, folded into the first message preamble by the
-	// adapter (Flue's `agents.send` carries only a message string).
-	const context = useMemo<ChatContext>(() => {
+	// adapter (Flue's `agents.send` carries only a message string). Skipped
+	// entirely when the backend seeded the conversation itself — repeating the
+	// subject would spend the model's window on context it already has.
+	const context = useMemo<ChatContext | undefined>(() => {
+		if (subjectSeededByServer) return undefined
 		const base: ChatContext = {}
 		if (mode === "investigation" && investigationContext) {
 			base.mode = "investigation"
@@ -116,9 +140,10 @@ export function ChatConversation({
 			base.pageContext = payload
 		}
 		return base
-	}, [mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
+	}, [subjectSeededByServer, mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
 
-	const { messages, status, isLoading, sendMessage } = useFlueChat({ tabId, context })
+	const { messages, status, isLoading, historyReady, failedSends, sendMessage, stop, canStop } =
+		useFlueChat({ tabId, context })
 	const diagnosisMessageId = useMemo(() => findDiagnosisMessageId(messages), [messages])
 
 	// Apply an approved proposal via Maple's authenticated API (propose-then-apply).
@@ -148,19 +173,6 @@ export function ChatConversation({
 		}
 	}
 
-	const [hasSettled, setHasSettled] = useState(false)
-	useEffect(() => {
-		setHasSettled(false)
-	}, [tabId])
-	useEffect(() => {
-		if (messages.length > 0) {
-			setHasSettled(true)
-			return
-		}
-		const t = setTimeout(() => setHasSettled(true), 600)
-		return () => clearTimeout(t)
-	}, [messages.length, tabId])
-
 	useEffect(() => {
 		onLoadingChange?.(tabId, isLoading)
 	}, [tabId, isLoading, onLoadingChange])
@@ -189,14 +201,16 @@ export function ChatConversation({
 	// the gate below decides when to fire, replacing the prior ref-latch +
 	// `eslint-disable` effect. Sending bumps `messages.length`, which unmounts it.
 	const shouldAutoSendWidgetFix =
-		!readOnly && isWidgetFixMode && isActive && hasSettled && !isLoading && messages.length === 0
+		!readOnly && isWidgetFixMode && isActive && historyReady && !isLoading && messages.length === 0
 
 	return (
-		<div className="flex h-full flex-col">
+		<div ref={regionRef} className="flex h-full min-h-0 flex-col">
 			{shouldAutoSendWidgetFix ? (
 				<WidgetFixAutoSendTrigger onFire={() => handleSend(widgetFixAutoPrompt)} />
 			) : null}
-			{isInvestigationMode && <InvestigationAttachmentCard ctx={investigationContext!} />}
+			{isInvestigationMode && showAttachmentCard && (
+				<InvestigationAttachmentCard ctx={investigationContext!} />
+			)}
 			{isWidgetFixMode && <WidgetFixAttachmentCard ctx={widgetFixContext!} />}
 			<ChatTranscript
 				messages={messages}
@@ -210,18 +224,20 @@ export function ChatConversation({
 				permalinkFor={permalinkFor}
 				readOnly={readOnly}
 				emptyState={
-					!hasSettled ? (
+					!historyReady ? (
 						<ConversationLoadingSkeleton />
-					) : readOnly ? (
+					) : readOnly === "shared" ? (
 						<EmptyNotice title="Shared conversation">
 							This shared conversation is unavailable or empty. It may have been deleted, or
 							belong to a different workspace than the one you're signed in to.
 						</EmptyNotice>
-					) : isInvestigationMode ? (
-						<EmptyNotice title="Ready to investigate">
-							The {investigationNoun(investigationContext!.kind)} above is attached to every
-							message in this thread. Start with a suggestion or ask your own question.
+					) : readOnly === "resolved" ? (
+						<EmptyNotice title="Resolved">
+							This investigation was resolved before anything was recorded. Reopen it to pick
+							the thread back up.
 						</EmptyNotice>
+					) : isInvestigationMode ? (
+						<InvestigationLead ctx={investigationContext!} />
 					) : isWidgetFixMode ? (
 						<EmptyNotice title="Diagnosing widget…">
 							Maple AI is reading the broken widget config and the validation error. It will
@@ -257,27 +273,76 @@ export function ChatConversation({
 					{!isWidgetFixMode && !isInvestigationMode && (
 						<PageContextChips contexts={activeContexts} onDismiss={dismissContext} />
 					)}
-					<PromptInput
-						onSubmit={({ text }) => handleSend(text)}
-						className="rounded-lg border shadow-sm"
-					>
+					{failedSends.length > 0 && (
+						<FailedSendNotice
+							failed={failedSends[failedSends.length - 1]!}
+							onRetry={handleSend}
+						/>
+					)}
+					<PromptInput onSubmit={({ text }) => handleSend(text)}>
 						<PromptInputTextarea
 							ref={textareaRef}
 							placeholder={
 								isInvestigationMode
-									? `Ask about this ${investigationNoun(investigationContext!.kind)}...`
+									? `Ask about this ${investigationNoun(investigationContext!.kind)}…`
 									: isWidgetFixMode
-										? "Ask about this widget..."
-										: "Ask about your system..."
+										? "Ask about this widget…"
+										: "Ask about your system…"
 							}
-							disabled={isLoading}
 						/>
 						<PromptInputFooter>
-							<PromptInputSubmit status={status} disabled={isLoading} />
+							<PromptInputSubmit
+								status={status}
+								onStop={canStop ? stop : undefined}
+								disabled={isLoading && !canStop}
+							/>
 						</PromptInputFooter>
 					</PromptInput>
 				</div>
 			)}
+		</div>
+	)
+}
+
+/**
+ * What an investigation thread says before it has any turns. The subject's own
+ * status is the whole answer, so this reads it directly rather than letting the
+ * page render a second banner that can disagree with the transcript.
+ */
+function InvestigationLead({ ctx }: { ctx: InvestigationContext }) {
+	if (ctx.status === "investigating") {
+		return <StatusMarker>Gathering evidence…</StatusMarker>
+	}
+	if (ctx.status === "failed") {
+		return (
+			<EmptyNotice title="Autonomous pass failed">
+				Maple couldn't complete the investigation. Retry it from the header, or ask a question to
+				continue by hand.
+			</EmptyNotice>
+		)
+	}
+	return (
+		<EmptyNotice title="Ready to investigate">
+			This {investigationNoun(ctx.kind)} is attached to every message in the thread. Start with a
+			suggestion or ask your own question.
+		</EmptyNotice>
+	)
+}
+
+/**
+ * A send that never reached the server. `@flue/react` keeps the optimistic
+ * message in the transcript rather than dropping it, so the only thing missing is
+ * a way to try again.
+ */
+function FailedSendNotice({ failed, onRetry }: { failed: FailedSend; onRetry: (text: string) => void }) {
+	return (
+		<div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
+			<span className="min-w-0 truncate text-destructive">
+				Message not sent — {failed.error.message}
+			</span>
+			<Button size="sm" variant="outline" onClick={() => onRetry(failed.message)}>
+				Try again
+			</Button>
 		</div>
 	)
 }

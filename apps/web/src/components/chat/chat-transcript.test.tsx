@@ -4,6 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ChatTranscript, findDiagnosisMessageId } from "./chat-transcript"
+import { wrapChatContext } from "@maple/domain/chat-preamble"
 import type { UIMessage } from "@/components/ai-elements/types"
 
 afterEach(() => {
@@ -57,7 +58,7 @@ const baseProps = {
 	onApprove: () => {},
 	onDeny: () => {},
 	fallbackDiagnosis: null,
-	readOnly: false,
+	readOnly: false as const,
 	emptyState: <p>Ask me anything</p>,
 }
 
@@ -138,11 +139,29 @@ describe("ChatTranscript", () => {
 	})
 
 	it("marks a read-only shared thread with a separator row", () => {
-		render(<ChatTranscript {...baseProps} readOnly messages={[message("m1", "assistant", "hi")]} />)
+		render(
+			<ChatTranscript {...baseProps} readOnly="shared" messages={[message("m1", "assistant", "hi")]} />,
+		)
 
 		const marker = document.querySelector('[data-slot="marker"]') as HTMLElement | null
 		expect(marker?.dataset.variant).toBe("separator")
-		expect(marker?.textContent).toContain("read-only")
+		expect(marker?.textContent).toContain("Shared conversation")
+	})
+
+	// A resolved investigation is read-only for a completely different reason than
+	// a teammate's shared link, and saying "shared" there is just wrong.
+	it("says a resolved investigation is resolved, not shared", () => {
+		render(
+			<ChatTranscript
+				{...baseProps}
+				readOnly="resolved"
+				messages={[message("m1", "assistant", "hi")]}
+			/>,
+		)
+
+		const marker = document.querySelector('[data-slot="marker"]') as HTMLElement | null
+		expect(marker?.textContent).toContain("Investigation resolved")
+		expect(marker?.textContent).not.toContain("Shared")
 	})
 
 	it("renders a preserved fallback diagnosis as its own row", () => {
@@ -163,5 +182,31 @@ describe("findDiagnosisMessageId", () => {
 
 	it("returns undefined for a thread with no report", () => {
 		expect(findDiagnosisMessageId([message("m1", "assistant", "all good")])).toBeUndefined()
+	})
+})
+
+describe("machine-written turns", () => {
+	const fenced = (id: string, block: string, said = "") =>
+		({
+			id,
+			role: "user",
+			parts: [{ type: "text", text: wrapChatContext(block, said) }],
+		}) as unknown as UIMessage
+
+	// `apps/api` opens an investigation by sending a JSON snapshot as a user turn.
+	// Now that user turns are durable it replays to every reader, and nobody typed it.
+	it("renders a fully machine-written turn as a marker, not a bubble", () => {
+		render(<ChatTranscript {...baseProps} messages={[fenced("m1", '{"subject":"…"}')]} />)
+
+		const marker = document.querySelector('[data-slot="marker"]') as HTMLElement | null
+		expect(marker?.textContent).toContain("Investigation started")
+		expect(document.querySelector('[data-slot="bubble"]')).toBeNull()
+	})
+
+	it("keeps the person's own words and drops only the fenced context", () => {
+		render(<ChatTranscript {...baseProps} messages={[fenced("m1", "subject: api", "Why is it slow?")]} />)
+
+		expect(screen.getByText("Why is it slow?")).toBeTruthy()
+		expect(screen.queryByText(/subject: api/)).toBeNull()
 	})
 })

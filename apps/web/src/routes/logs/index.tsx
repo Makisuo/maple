@@ -6,7 +6,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { LogsTable } from "@/components/logs/logs-table"
 import { LogsVolumeChart } from "@/components/logs/logs-volume-chart"
 import { LogsFilterSidebar } from "@/components/logs/logs-filter-sidebar"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
@@ -20,9 +20,7 @@ const logsSearchSchema = Schema.Struct({
 	// Attribute keys pinned as columns in the logs stream. Shareable via URL.
 	columns: OptionalStringArrayParam,
 	search: Schema.optional(Schema.String),
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export type LogsSearchParams = Schema.Schema.Type<typeof logsSearchSchema>
@@ -52,32 +50,38 @@ function LogsPage() {
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
-			<DashboardLayout
-				breadcrumbs={[{ label: "Logs" }]}
-				title="Logs"
-				filterSidebar={<LogsFilterSidebar />}
-				headerActions={
-					<TimeRangeHeaderControls
-						startTime={search.startTime}
-						endTime={search.endTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-						onTimeChange={handleTimeChange}
-					/>
-				}
-				stickyContent={
-					<LogsVolumeChart
-						filters={search}
-						onTimeRangeSelect={(range) =>
-							handleTimeChange(
-								{ startTime: range.startTime, endTime: range.endTime },
-								{ replace: true },
-							)
-						}
-					/>
-				}
-			>
-				<LogsTable filters={search} />
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={[{ label: "Logs" }]} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Filters>
+						<LogsFilterSidebar />
+					</DashboardLayout.Filters>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Logs">
+								<TimeRangeHeaderControls
+									startTime={search.startTime}
+									endTime={search.endTime}
+									presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+									onTimeChange={handleTimeChange}
+								/>
+							</DashboardLayout.Header>
+							<LogsVolumeChart
+								filters={search}
+								onTimeRangeSelect={(range) =>
+									handleTimeChange(
+										{ startTime: range.startTime, endTime: range.endTime },
+										{ replace: true },
+									)
+								}
+							/>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<LogsTable filters={search} />
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
 }

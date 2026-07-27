@@ -1,7 +1,7 @@
 import type { BaseComponentProps } from "@json-render/react"
 import { cn } from "@maple/ui/utils"
 import { LatencyValue } from "@maple/ui/components/latency-value"
-import { formatErrorRate, formatNumber } from "@/lib/format"
+import { formatErrorRate, formatNumber } from "@maple/ui/format"
 
 interface ServiceTableProps {
 	services: Array<{

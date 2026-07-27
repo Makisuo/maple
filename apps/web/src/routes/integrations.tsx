@@ -140,15 +140,29 @@ function IntegrationsPage() {
 
 	if (!integration) {
 		return (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Settings", href: "/settings" }, { label: "Integrations" }]}
-				title="Integrations"
-				description="Connect external data sources and services to Maple."
-				headerActions={<IntegrationsSummary />}
-				filterSidebar={settingsSidebar}
-			>
-				<IntegrationCatalog onSelect={(id) => navigate({ search: { integration: id } })} />
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Settings", href: "/settings" }, { label: "Integrations" }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Filters>{settingsSidebar}</DashboardLayout.Filters>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header
+								title="Integrations"
+								description="Connect external data sources and services to Maple."
+							>
+								<IntegrationsSummary />
+							</DashboardLayout.Header>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<IntegrationCatalog
+								onSelect={(id) => navigate({ search: { integration: id } })}
+							/>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		)
 	}
 
@@ -156,50 +170,62 @@ function IntegrationsPage() {
 
 	return (
 		<IntegrationConnectProvider integration={integration}>
-			<DashboardLayout
-				breadcrumbs={[
-					{ label: "Settings", href: "/settings" },
-					{ label: "Integrations", href: "/integrations" },
-					{ label: entry.name },
-				]}
-				titleContent={<IntegrationHeader integration={integration} />}
-				filterSidebar={settingsSidebar}
-			>
-				<div className="space-y-4">
-					{integration === "warpstream" && (
-						<Alert variant="info">
-							<CircleInfoIcon />
-							<AlertDescription>
-								WarpStream clusters are scraped as Prometheus targets — point a target at an
-								agent&apos;s <code className="font-mono text-xs">:8080/metrics</code> endpoint
-								or the hosted Prometheus endpoint with Basic auth.{" "}
-								<a
-									href="https://maple.dev/docs/integrations/warpstream"
-									target="_blank"
-									rel="noreferrer"
-									className="text-foreground underline underline-offset-2 hover:no-underline"
-								>
-									Setup guide
-								</a>
-							</AlertDescription>
-						</Alert>
-					)}
-					{integration === "cloudflare" ? (
-						<CloudflareAccountCard />
-					) : integration === "hazel" ? (
-						<HazelIntegrationCard />
-					) : integration === "github" ? (
-						<GithubIntegrationCard />
-					) : integration === "planetscale" ? (
-						<PlanetScaleIntegrationCard />
-					) : integration === "slack" ? (
-						<SlackIntegrationCard />
-					) : (
-						// prometheus + warpstream share the generic scrape-target flow
-						<ScrapeTargetsSection sourceFilter="prometheus" />
-					)}
-				</div>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[
+						{ label: "Settings", href: "/settings" },
+						{ label: "Integrations", href: "/integrations" },
+						{ label: entry.name },
+					]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Filters>{settingsSidebar}</DashboardLayout.Filters>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header
+								titleContent={<IntegrationHeader integration={integration} />}
+							/>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-4">
+								{integration === "warpstream" && (
+									<Alert variant="info">
+										<CircleInfoIcon />
+										<AlertDescription>
+											WarpStream clusters are scraped as Prometheus targets — point a
+											target at an agent&apos;s{" "}
+											<code className="font-mono text-xs">:8080/metrics</code> endpoint
+											or the hosted Prometheus endpoint with Basic auth.{" "}
+											<a
+												href="https://maple.dev/docs/integrations/warpstream"
+												target="_blank"
+												rel="noreferrer"
+												className="text-foreground underline underline-offset-2 hover:no-underline"
+											>
+												Setup guide
+											</a>
+										</AlertDescription>
+									</Alert>
+								)}
+								{integration === "cloudflare" ? (
+									<CloudflareAccountCard />
+								) : integration === "hazel" ? (
+									<HazelIntegrationCard />
+								) : integration === "github" ? (
+									<GithubIntegrationCard />
+								) : integration === "planetscale" ? (
+									<PlanetScaleIntegrationCard />
+								) : integration === "slack" ? (
+									<SlackIntegrationCard />
+								) : (
+									// prometheus + warpstream share the generic scrape-target flow
+									<ScrapeTargetsSection sourceFilter="prometheus" />
+								)}
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</IntegrationConnectProvider>
 	)
 }

@@ -35,14 +35,20 @@ import { SyncConfig } from "../config"
 // are immutable — changing either is a new shape name + full re-sync, so version
 // the name if it must ever change. When `columns` is set it MUST include the
 // table's primary-key column(s) (Electric requires the PK in the projection).
+//
+// Every table listed here MUST also be a member of `electric_publication_default`
+// (packages/db/drizzle/0009 + later publication migrations) — Electric runs with
+// ELECTRIC_MANUAL_TABLE_PUBLISHING=true and will not publish a table itself, so a
+// shape over an unpublished table never receives changes. The reverse also holds:
+// a published table with no shape here (and no client collection) is pure
+// replication cost, so drop it from the publication instead of leaving it. That
+// is why the errors vertical (error_issues / actors / open_error_incidents) and
+// scrape_target_checks are gone — see 0022_electric_publication_prune.
 const SHAPES = {
 	dashboards: { table: "dashboards" },
 	alert_rules: { table: "alert_rules" },
 	alert_rule_states: { table: "alert_rule_states" },
 	alert_incidents: { table: "alert_incidents" },
-	error_issues: { table: "error_issues", extraWhere: `"archived_at" IS NULL` },
-	actors: { table: "actors" },
-	open_error_incidents: { table: "error_incidents", extraWhere: `"status" = 'open'` },
 	// API key hashes and agent metadata are authentication material/internal
 	// configuration and must never reach the browser. The dashboard needs only
 	// the safe display fields below; `id` + `org_id` are required for identity
@@ -91,6 +97,9 @@ const SHAPES = {
 >
 
 export type ShapeName = keyof typeof SHAPES
+
+/** Every whitelisted shape, so tests can assert invariants across the whole set. */
+export const SHAPE_NAMES = Object.keys(SHAPES) as ReadonlyArray<ShapeName>
 
 export const isShapeName = (value: string | null): value is ShapeName =>
 	value !== null && Object.prototype.hasOwnProperty.call(SHAPES, value)

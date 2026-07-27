@@ -896,6 +896,29 @@ export interface GetInstrumentationRecommendationsData {
 	total: number
 }
 
+export interface SetupAuditCheckRow {
+	/** Stable check id, e.g. `CFG-ALERT-03`. */
+	id: string
+	category: string
+	title: string
+	severity: "critical" | "warn" | "info"
+	status: "pass" | "fail" | "skip"
+	detail: string | null
+	affected: ReadonlyArray<{ kind: string; name: string; note: string | null }>
+	affectedCount: number
+	fixHint: string
+}
+
+export interface AuditSetupData {
+	generatedAt: string
+	/** `no_data` means the org has never received telemetry, so no check ran. */
+	dataStatus: "ok" | "no_data"
+	telemetryChecksAvailable: boolean
+	summary: { critical: number; warn: number; info: number; pass: number; skip: number }
+	checks: ReadonlyArray<SetupAuditCheckRow>
+	openRecommendationCount: number
+}
+
 export interface RunSqlData {
 	/** The fully macro-expanded SQL that was executed (org filter + time bounds inlined). */
 	expandedSql: string
@@ -949,6 +972,7 @@ export type StructuredToolOutput =
 			tool: "get_instrumentation_recommendations"
 			data: GetInstrumentationRecommendationsData
 	  }
+	| { tool: "audit_setup"; data: AuditSetupData }
 	| { tool: "get_incident_timeline"; data: GetIncidentTimelineData }
 	| { tool: "inspect_chart_data"; data: InspectChartDataData }
 	| { tool: "list_error_issues"; data: ListErrorIssuesData }

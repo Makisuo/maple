@@ -35,7 +35,7 @@ import type { QueryEngineAlertReducer } from "@maple/query-engine"
 import { Cause, Exit, Option, Schema } from "effect"
 import { v2ErrorInfo } from "@/lib/error-messages"
 import { buildTimeseriesQuerySpec, createQueryDraft } from "@/lib/query-builder/model"
-import { formatErrorRate, formatLatency, formatNumber } from "@/lib/format"
+import { formatErrorRate, formatLatency, formatNumber } from "@maple/ui/format"
 
 const asHazelOrganizationId = Schema.decodeUnknownSync(HazelOrganizationId)
 const asHazelChannelId = Schema.decodeUnknownSync(HazelChannelId)

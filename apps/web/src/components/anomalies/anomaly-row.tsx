@@ -4,7 +4,7 @@ import { cn } from "@maple/ui/lib/utils"
 
 import { shortIssueId } from "@/components/errors/issue-id"
 import { LinkIcon } from "@/components/icons"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import {
 	deviation,
 	formatSignalValue,

@@ -32,16 +32,14 @@ import {
 } from "@/components/infra/planetscale/metrics"
 import { getServiceMapPlanetScaleResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { formatNumber } from "@/lib/format"
+import { formatNumber } from "@maple/ui/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
 const planetscaleSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/infra/planetscale/")({
@@ -79,45 +77,54 @@ function PlanetScalePage() {
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
-			<DashboardLayout
-				breadcrumbs={[{ label: "Infrastructure", href: "/infra" }, { label: "PlanetScale" }]}
-				headerActions={
-					<TimeRangeHeaderControls
-						startTime={search.startTime ?? startTime}
-						endTime={search.endTime ?? endTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-						onTimeChange={handleTimeChange}
-					/>
-				}
-			>
-				<div className="space-y-6">
-					<PageHero
-						title="PlanetScale"
-						description="Database health from your PlanetScale organization — connections, CPU, memory, storage, and replication lag for every branch."
-					/>
-					{Result.builder(statusResult)
-						.onInitial(() => (
-							<div className="space-y-4">
-								<StatRailLoading />
-								<PlanetScaleDatabaseTableLoading />
-							</div>
-						))
-						.onError((err) => <QueryErrorState error={err} />)
-						.onSuccess((status) => {
-							if (!status.connected) return <PlanetScaleNotConnected />
-							return (
-								<PlanetScaleData
-									startTime={startTime}
-									endTime={endTime}
-									metricsPaused={status.metricsAuth === "missing"}
-									revoked={status.revokedAt !== null}
-									lastInventoryError={status.lastInventoryError}
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Infrastructure", href: "/infra" }, { label: "PlanetScale" }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header>
+								<TimeRangeHeaderControls
+									startTime={search.startTime ?? startTime}
+									endTime={search.endTime ?? endTime}
+									presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+									onTimeChange={handleTimeChange}
 								/>
-							)
-						})
-						.render()}
-				</div>
-			</DashboardLayout>
+							</DashboardLayout.Header>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-6">
+								<PageHero
+									title="PlanetScale"
+									description="Database health from your PlanetScale organization — connections, CPU, memory, storage, and replication lag for every branch."
+								/>
+								{Result.builder(statusResult)
+									.onInitial(() => (
+										<div className="space-y-4">
+											<StatRailLoading />
+											<PlanetScaleDatabaseTableLoading />
+										</div>
+									))
+									.onError((err) => <QueryErrorState error={err} />)
+									.onSuccess((status) => {
+										if (!status.connected) return <PlanetScaleNotConnected />
+										return (
+											<PlanetScaleData
+												startTime={startTime}
+												endTime={endTime}
+												metricsPaused={status.metricsAuth === "missing"}
+												revoked={status.revokedAt !== null}
+												lastInventoryError={status.lastInventoryError}
+											/>
+										)
+									})
+									.render()}
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
 }

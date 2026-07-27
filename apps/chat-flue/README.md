@@ -1,134 +1,70 @@
 # @maple/chat-flue
 
-Maple chat reworked on the [Flue framework](https://flueframework.com), running
-on **Cloudflare Workers AI** and sourcing tools from Maple's existing MCP server.
+Maple's AI chat and headless triage, built on the [Flue framework](https://flueframework.com)
+and running on **Cloudflare Workers AI**. It backs three surfaces in the product:
 
-This is the **Phase 0 de-risking spike** — a minimal vertical slice that proves
-the architecture before the full rebuild. See the plan at
-`~/.claude/plans/pls-rework-our-chat-eager-octopus.md`.
+- `/chat` and the global chat sheet — general questions about your telemetry.
+- `/investigations/*` — a durable war room per incident. `apps/api` starts the first
+  autonomous turn; the browser joins the same agent instance and continues it.
+- The headless `triage` workflow, invoked by `apps/api` when an incident opens.
 
-## What's here
+## Layout
 
-| File                                | Role                                                                                                                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/agents/maple-chat.ts`          | The addressable chat agent. `export const route` exposes it at `POST/GET /agents/maple-chat/:id`; Workers AI model + API Worker RPC → Maple MCP tools (`mcp__maple__*`). |
-| `src/lib/env.ts`                    | Worker bindings/vars (`AI`, `MAPLE_API_RPC`, `INTERNAL_SERVICE_TOKEN`).                                                                                                  |
-| `src/lib/org.ts`                    | Recovers `orgId` from the `"<orgId>:<tabId>"` instance id.                                                                                                               |
-| `flue.config.ts` / `wrangler.jsonc` | Flue + Cloudflare build config (Workers AI `AI` binding, DO migrations).                                                                                                 |
+| File                                | Role                                                                                                                                                     |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/app.ts`                        | Hono app mounting `flue()`. Owns CORS, auth on `/agents/*`, the internal-token guard on `/workflows/*`, and the OpenTelemetry bridge.                    |
+| `src/agents/maple-chat.ts`          | The addressable chat agent, at `POST/GET /agents/maple-chat/:id`. Picks the model, loads Maple's tools, and adds `submit_diagnosis` in investigate mode. |
+| `src/lib/mcp.ts`                    | Adapts Maple's tool registry (over the `MAPLE_API_RPC` service binding) into Flue tools.                                                                 |
+| `src/lib/json-schema-to-valibot.ts` | Bridges the two schema languages: the registry describes tools in JSON Schema, `defineTool` requires Valibot.                                            |
+| `src/lib/approval.ts`               | Propose-then-apply. Mutating tools return a proposal instead of mutating; the web renders an approval card and applies via Maple's API.                  |
+| `src/lib/submit-diagnosis.ts`       | The structured-output channel for an investigation's diagnosis. Writes through to `apps/api`, which persists the report.                                 |
+| `src/workflows/triage.ts`           | The headless triage workflow. Owns only the LLM step; the incident lifecycle stays in `apps/api`.                                                        |
+| `src/lib/auth.ts`                   | Clerk or self-hosted HS256 verification, plus the check that the caller's org owns the addressed instance.                                               |
 
-> No `src/app.ts` yet — it's **optional**, and without it Flue serves the agent
-> via its generated app. Phase 1 adds `src/app.ts` (a Hono app mounting
-> `flue()`) for auth middleware on `/agents/*` and the `observe()` → OTel bridge.
+## How a turn works
 
-## How the model layer works
+An instance is addressed as `"<orgId>:<tabId>"`, and the tab prefix selects the mode
+(`inv-` → investigate, `alert-`, `widget-fix-`). The org is recovered from the instance id
+server-side and never trusted from the request body.
 
-Flue's model layer is `@earendil-works/pi-ai`. A model spec `cloudflare/<id>`
-resolves to the **binding-backed Workers AI provider** — the turn runs through
-the `AI` Durable-Object binding (`env.AI.run`), no HTTP token. The generated
-Cloudflare app registers this provider by default; AI Gateway options and a
-per-org model override (`MAPLE_CHAT_MODEL`) layer on top.
+Tools come from `apps/api`'s MCP registry over the `MAPLE_API_RPC` binding — the binding
+authenticates the Worker-to-Worker hop, and the org is passed explicitly and re-validated
+at the API boundary. Each tool returns `{ text, ui? }`: the report the model reasons over,
+and the structured payload the web renders as a table or chart.
 
-Default model: `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (strongest Workers AI
-function-calling model). **Validating tool-calling quality across Maple's full
-tool set is the main open risk.**
+Models resolve through `@earendil-works/pi-ai`. A `cloudflare/<id>` spec runs on the `AI`
+binding — keyless, billed as Workers AI. See `DEFAULT_MODEL` in `src/agents/maple-chat.ts`
+for the current default; `MAPLE_CHAT_MODEL` overrides it, and `MAPLE_TRIAGE_MODEL`
+overrides it for the triage workflow. The catalog churns, so check a new id against
+`bunx wrangler ai models list` — a retired id returns 410.
 
-## Run the spike (live proof — pending)
-
-> Requires installed deps, a running `apps/api` (MCP at `/mcp`), and a Cloudflare
-> account with Workers AI.
+## Run it
 
 ```bash
-# 1. Install (from repo root)
-bun install
-
-# 2. Secrets
-cp apps/chat-flue/.dev.vars.example apps/chat-flue/.dev.vars
-#   set INTERNAL_SERVICE_TOKEN to match apps/api
-
-# 3. Run the Flue dev server (Cloudflare target, port 3583)
-cd apps/chat-flue && bun run dev
-
-# 4. Drive the agent from the CLI
-bun run connect          # flue connect maple-chat local
+bun dev                                  # from the repo root: everything, via portless
+bun --filter=@maple/chat-flue dev:app    # just this worker
 ```
 
-### Phase 0 acceptance checklist
+`dev:app` regenerates `.dev.vars` from the repo-root `.env.local`
+(`scripts/sync-chat-flue-dev-vars.ts`) before starting, so the internal-service token and
+auth config always match `apps/api`. Local overrides go below the marker in `.dev.vars`.
 
-- [x] Flue packages resolve; Workers AI provider exists (`cloudflare/*` → `env.AI`).
-- [x] MCP auth contract confirmed (`Bearer maple_svc_<token>` + `x-org-id`).
-- [x] `bun run typecheck` passes against Flue's real types.
-- [x] `bun run build` (`flue build --target cloudflare`) discovers `maple-chat` and generates a valid worker (AI binding + `FlueMapleChatAgent`/`FlueRegistry` DOs).
-- [x] `flue dev` boots the worker on the Cloudflare target.
-- [x] A prompt runs end-to-end on **Workers AI** (`@cf/moonshotai/kimi-k2.6`): `POST /agents/maple-chat/<orgId>:<tab>?wait=result` → HTTP 200 with the model's reply (~1.5s). The binding path works; the legacy-parity kimi model is live.
-- [ ] A prompt calls `mcp__maple__search_traces` through the `MAPLE_API_RPC` service binding, with a running `apps/api` and a real org id.
-- [ ] A browser page streams the agent's events via `@flue/sdk` (`agents.send` + `agents.stream`).
-- [ ] Tool-calling quality across the full tool set is acceptable on the chosen model.
+**`apps/api` must be running too**, under wrangler: the two workers call each other over
+service bindings that resolve through wrangler's local dev registry. See CONTRIBUTING §5
+for the failure signatures.
 
-## Phase 1 progress
+```bash
+bun run test        # vitest
+bun run typecheck
+bun run build       # flue build --target cloudflare
+```
 
-- [x] **1a — Prompts + modes** (`src/lib/prompts.ts`, `src/lib/modes.ts`): ported
-      `SYSTEM_PROMPT` + `DASHBOARD_BUILDER_SYSTEM_PROMPT` and the alert /
-      widget-fix / page-context blocks. Mode is derived from the instance-id tab
-      prefix (`alert-`, `widget-fix-`, `dashboard-builder-`) via `modeFromInstanceId`;
-      `buildSystemPrompt` assembles the turn's instructions. 13 unit tests
-      (`src/lib/modes.test.ts`), `bun run test`.
-- [x] **1b — Approval** (`src/lib/approval.ts`): propose-then-apply. Mutating tools
-      keep their name + schema but their `execute` returns a `{status:"proposed"}`
-      marker (no side effect) via `applyApprovalGates` (wired into the chat agent);
-      the UI applies on approve. `parseToolProposal` reads the marker. 6 unit tests.
-- [x] **1c — Triage workflow** (`src/workflows/triage.ts`, `src/lib/{triage-prompt,triage-result,mcp}.ts`):
-      the agentic-investigation half of `AiTriageWorkflow` as a Flue workflow on
-      Workers AI. Read-only 18-tool MCP allowlist (shared `connectMapleMcp` helper,
-      also now used by the chat agent); structured `AiTriageResult` via Flue's native
-      `{ result }` (valibot mirror of `@maple/domain`) — replacing the `submit_triage`
-      tool. 8 unit tests. **Boundary:** `apps/api`'s `AiTriageService` keeps the D1
-      gate/persist lifecycle and invokes this workflow (`@flue/sdk`
-      `workflows.invoke("triage", …)`) for the LLM step — that rewiring is the
-      remaining `apps/api`-side follow-up.
-- [x] **1d — `app.ts` + auth** (`src/app.ts`, `src/lib/auth.ts`): Hono app mounting
-      `flue()`, with auth middleware on `/agents/*` (ported Clerk + self-hosted HS256
-      verification; token from header or `?token=`) that checks the caller's org owns
-      the addressed `"<orgId>:<tabId>"` instance. Plus an `observe()` bridge logging
-      agent/tool/run failures (full OTLP export is a follow-up). 12 auth unit tests
-      (`src/lib/auth.test.ts`). Needs deps `hono` + `@clerk/backend`.
+## Deploying
 
-> **Open integration point:** the rich per-conversation context payloads
-> (`alertContext`, `widgetFixContext`, `pageContext`) still need a delivery
-> channel — Flue's `agents.send` only carries `{ message }`. Options: a custom
-> `app.ts` route that carries context + dispatches, or a structured message
-> preamble. Decided in Phase 2 with the frontend. Until then the agent uses the
-> base prompt for the id-derived mode.
+Alchemy owns the deploy (`alchemy.run.ts`, wired into the root `alchemy.run.ts`). It runs
+`flue build` and uploads the prebuilt worker from `dist/maple_chat_flue/` with bindings it
+declares itself — the generated `wrangler.json` and `.dev.vars` are not read. The `deploy`
+script is a Flue-native fallback.
 
-## Phase 2 — frontend adapter (designed; ships with the cutover)
-
-`@flue/react` ships `useFlueAgent` whose message shape mirrors AI SDK v5
-`UIMessage` (text + `dynamic-tool` parts with
-`input-available`/`output-available`/`output-error` states), which the existing
-`chat-conversation.tsx` renderer already handles. So the adapter is a thin
-wrapper, not a rewrite:
-
-- `useFlueChat({ tabId })` wraps `useFlueAgent` and exposes the same
-  `{ messages, sendMessage, status, addToolApprovalResponse }` surface the UI
-  consumes — mapping status (`idle`/`connecting` → `ready`) and carrying
-  per-conversation context as a first-message preamble.
-
-It's been validated (typechecks against `apps/web` with `@flue/react` +
-`@flue/sdk`) but is **deliberately not included in this change** — nothing
-imports it until the cutover, and the repo enforces no dead code (knip). It
-lands in the cutover step below, where `chat-conversation.tsx` actually swaps to
-it.
-
-## Cutover (final, gated on a deployable Flue backend)
-
-Blocked locally only by `apps/api`'s `POST /mcp` hang; the code is ready.
-
-1. Re-point `chat-conversation.tsx`: `useAgentChat` → `useFlueChat`; build the
-   first-message context preamble from alert / widget-fix / page context.
-2. Approval: detect proposal tool results (`parseToolProposal`) and wire the
-   approval card's approve action to Maple's real mutation API.
-3. Env: point `VITE_FLUE_CHAT_URL` (and retire `VITE_CHAT_AGENT_URL`) at the
-   deployed Flue worker.
-4. `apps/api`: rewire `AiTriageService` to invoke the Flue `triage` workflow
-   (`@flue/sdk` `workflows.invoke`) for the LLM step.
-5. Delete `apps/chat-agent/`; decide on `OrgOpenRouterSettingsService` removal
-   (Workers AI drops per-org BYO keys + changes Autumn billing — needs sign-off).
+**Redeploy this worker before shipping a web change that alters the conversation format.**
+The browser and the worker have to agree on it.

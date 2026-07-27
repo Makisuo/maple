@@ -303,18 +303,38 @@ function IssueDetailPage() {
 
 	return Result.builder(detailResult)
 		.onInitial(() => (
-			<DashboardLayout breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]} title="Issue">
-				<div className="space-y-4">
-					<Skeleton className="h-24 w-full" />
-					<Skeleton className="h-20 w-full" />
-					<Skeleton className="h-40 w-full" />
-				</div>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={[...ISSUE_LOADING_BREADCRUMBS]} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Issue" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-4">
+								<Skeleton className="h-24 w-full" />
+								<Skeleton className="h-20 w-full" />
+								<Skeleton className="h-40 w-full" />
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		))
 		.onError((error) => (
-			<DashboardLayout breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]} title="Issue">
-				<ErrorState error={error} title="Failed to load issue" onRetry={refreshDetail} />
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={[...ISSUE_LOADING_BREADCRUMBS]} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Issue" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<ErrorState error={error} title="Failed to load issue" onRetry={refreshDetail} />
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		))
 		.onSuccess((v2Detail) => {
 			const detail = errorIssueDetailFromV2(v2Detail)
@@ -338,198 +358,222 @@ function IssueDetailPage() {
 					: ((incidents.find((incident) => incident.status === "open") ?? incidents[0])?.id ?? null)
 
 			return (
-				<DashboardLayout
-					breadcrumbs={[
-						{ label: "Errors", href: "/errors" },
-						{ label: "Issues", href: "/errors/issues" },
-						{ label: issue.exceptionType || "Unknown error" },
-					]}
-					title={issue.exceptionType || "Unknown error"}
-					description={issue.serviceName}
-					headerActions={
-						<div className="flex items-center gap-2">
-							<IssueKindBadge kind={issue.kind} />
-							<SeverityBadge severity={issue.severity} />
-							<WorkflowBadge state={issue.workflowState} />
-							{issue.hasOpenIncident ? (
-								<Badge variant="outline" className="bg-destructive/10 text-destructive">
-									Incident open
-								</Badge>
-							) : null}
-							<OpenAnomalyBadge issueId={issueId} />
-							{linkedInvestigation ? (
-								<Button
-									size="sm"
-									render={
-										<Link
-											to="/investigations/$id"
-											params={{ id: linkedInvestigation.id }}
-										/>
-									}
+				<DashboardLayout.Root>
+					<DashboardLayout.Breadcrumbs
+						items={[
+							{ label: "Errors", href: "/errors" },
+							{ label: "Issues", href: "/errors/issues" },
+							{ label: issue.exceptionType || "Unknown error" },
+						]}
+					/>
+					<DashboardLayout.Body>
+						<DashboardLayout.Content>
+							<DashboardLayout.Sticky>
+								<DashboardLayout.Header
+									title={issue.exceptionType || "Unknown error"}
+									description={issue.serviceName}
 								>
-									<PulseIcon className="size-3.5" />
-									Open investigation
-								</Button>
-							) : (
-								<Button
-									size="sm"
-									disabled={busy === "investigation"}
-									onClick={() =>
-										void startInvestigation({
-											title: issue.exceptionType || "Unknown error",
-											serviceName: issue.serviceName,
-											kind: issue.kind === "alert" ? "alert" : "error",
-											incidentId: latestIncidentId,
-											occurrences: issue.occurrenceCount,
-										})
-									}
-								>
-									<PulseIcon className="size-3.5" />
-									Start investigation
-								</Button>
-							)}
-							{issue.kind === "error" ? (
-								<DropdownMenu>
-									<DropdownMenuTrigger
-										render={
-											<Button
-												size="icon-sm"
+									<div className="flex items-center gap-2">
+										<IssueKindBadge kind={issue.kind} />
+										<SeverityBadge severity={issue.severity} />
+										<WorkflowBadge state={issue.workflowState} />
+										{issue.hasOpenIncident ? (
+											<Badge
 												variant="outline"
-												aria-label="More issue actions"
+												className="bg-destructive/10 text-destructive"
+											>
+												Incident open
+											</Badge>
+										) : null}
+										<OpenAnomalyBadge issueId={issueId} />
+										{linkedInvestigation ? (
+											<Button
+												size="sm"
+												render={
+													<Link
+														to="/investigations/$id"
+														params={{ id: linkedInvestigation.id }}
+													/>
+												}
+											>
+												<PulseIcon className="size-3.5" />
+												Open investigation
+											</Button>
+										) : (
+											<Button
+												size="sm"
+												disabled={busy === "investigation"}
+												onClick={() =>
+													void startInvestigation({
+														title: issue.exceptionType || "Unknown error",
+														serviceName: issue.serviceName,
+														kind: issue.kind === "alert" ? "alert" : "error",
+														incidentId: latestIncidentId,
+														occurrences: issue.occurrenceCount,
+													})
+												}
+											>
+												<PulseIcon className="size-3.5" />
+												Start investigation
+											</Button>
+										)}
+										{issue.kind === "error" ? (
+											<DropdownMenu>
+												<DropdownMenuTrigger
+													render={
+														<Button
+															size="icon-sm"
+															variant="outline"
+															aria-label="More issue actions"
+														/>
+													}
+												>
+													<DotsVerticalIcon className="size-4" />
+												</DropdownMenuTrigger>
+												<DropdownMenuContent align="end">
+													<DropdownMenuItem
+														onClick={() => {
+															void navigator.clipboard
+																.writeText(agentPromptFromIssue(issue))
+																.then(() =>
+																	toast.success("Agent prompt copied"),
+																)
+																.catch(() => toast.error("Copy failed"))
+														}}
+													>
+														<CopyIcon className="size-3.5" />
+														Copy agent prompt
+													</DropdownMenuItem>
+												</DropdownMenuContent>
+											</DropdownMenu>
+										) : null}
+									</div>
+								</DashboardLayout.Header>
+							</DashboardLayout.Sticky>
+							<DashboardLayout.Scroll>
+								<div className="space-y-8">
+									<section className="space-y-4">
+										{issue.exceptionMessage ? (
+											<p className="max-w-4xl text-sm leading-relaxed text-muted-foreground">
+												{issue.exceptionMessage}
+											</p>
+										) : null}
+										{issue.kind === "alert" ? (
+											<AlertSourceCard issue={issue} />
+										) : (
+											<IssueOccurrenceSparkline data={timeseries} />
+										)}
+										<LinkedInvestigationSummary
+											investigation={linkedInvestigation}
+											escalation={linkedEscalation}
+											onStart={() =>
+												void startInvestigation({
+													title: issue.exceptionType || "Unknown error",
+													serviceName: issue.serviceName,
+													kind: issue.kind === "alert" ? "alert" : "error",
+													incidentId: latestIncidentId,
+													occurrences: issue.occurrenceCount,
+												})
+											}
+											starting={busy === "investigation"}
+										/>
+									</section>
+
+									<section aria-labelledby="activity-heading">
+										<SectionHeader id="activity-heading" label="Activity" />
+										{Result.builder(eventsResult)
+											.onError((error) => (
+												<ErrorState
+													error={error}
+													title="Failed to load the activity timeline"
+													onRetry={refreshEvents}
+													variant="inline"
+												/>
+											))
+											.onSuccess((value) => (
+												<IssueTimeline
+													events={value.events}
+													escalations={escalationAttempts}
+												/>
+											))
+											.orElse(() => (
+												<Skeleton className="h-20 w-full" />
+											))}
+										<IssueCommentComposer
+											value={commentDraft}
+											onChange={setCommentDraft}
+											onSubmit={submitComment}
+											disabled={busy === "comment"}
+										/>
+									</section>
+
+									{issue.kind === "error" ? (
+										<section aria-labelledby="incidents-heading">
+											<SectionHeader id="incidents-heading" label="Incidents" />
+											<IssueIncidentsTable incidents={incidents} />
+										</section>
+									) : null}
+
+									<RelatedAnomaliesSection issueId={issueId} />
+
+									{issue.kind === "error" ? (
+										<section aria-labelledby="occurrences-heading">
+											<SectionHeader
+												id="occurrences-heading"
+												label="Latest occurrences"
 											/>
-										}
-									>
-										<DotsVerticalIcon className="size-4" />
-									</DropdownMenuTrigger>
-									<DropdownMenuContent align="end">
-										<DropdownMenuItem
-											onClick={() => {
-												void navigator.clipboard
-													.writeText(agentPromptFromIssue(issue))
-													.then(() => toast.success("Agent prompt copied"))
-													.catch(() => toast.error("Copy failed"))
-											}}
-										>
-											<CopyIcon className="size-3.5" />
-											Copy agent prompt
-										</DropdownMenuItem>
-									</DropdownMenuContent>
-								</DropdownMenu>
-							) : null}
-						</div>
-					}
-					rightSidebar={
-						<IssueSidebar
-							issue={issue}
-							totalInWindow={totalInWindow}
-							busy={busy}
-							onTransition={transitionTo}
-							onClaim={claim}
-							onHeartbeat={heartbeat}
-							onRelease={release}
-							onSetSeverity={changeSeverity}
-						/>
-					}
-				>
-					<div className="space-y-8">
-						<section className="space-y-4">
-							{issue.exceptionMessage ? (
-								<p className="max-w-4xl text-sm leading-relaxed text-muted-foreground">
-									{issue.exceptionMessage}
-								</p>
-							) : null}
-							{issue.kind === "alert" ? (
-								<AlertSourceCard issue={issue} />
-							) : (
-								<IssueOccurrenceSparkline data={timeseries} />
-							)}
-							<LinkedInvestigationSummary
-								investigation={linkedInvestigation}
-								escalation={linkedEscalation}
-								onStart={() =>
-									void startInvestigation({
-										title: issue.exceptionType || "Unknown error",
-										serviceName: issue.serviceName,
-										kind: issue.kind === "alert" ? "alert" : "error",
-										incidentId: latestIncidentId,
-										occurrences: issue.occurrenceCount,
-									})
-								}
-								starting={busy === "investigation"}
-							/>
-						</section>
-
-						<section aria-labelledby="activity-heading">
-							<SectionHeader id="activity-heading" label="Activity" />
-							{Result.builder(eventsResult)
-								.onError((error) => (
-									<ErrorState
-										error={error}
-										title="Failed to load the activity timeline"
-										onRetry={refreshEvents}
-										variant="inline"
-									/>
-								))
-								.onSuccess((value) => (
-									<IssueTimeline events={value.events} escalations={escalationAttempts} />
-								))
-								.orElse(() => (
-									<Skeleton className="h-20 w-full" />
-								))}
-							<IssueCommentComposer
-								value={commentDraft}
-								onChange={setCommentDraft}
-								onSubmit={submitComment}
-								disabled={busy === "comment"}
-							/>
-						</section>
-
-						{issue.kind === "error" ? (
-							<section aria-labelledby="incidents-heading">
-								<SectionHeader id="incidents-heading" label="Incidents" />
-								<IssueIncidentsTable incidents={incidents} />
-							</section>
-						) : null}
-
-						<RelatedAnomaliesSection issueId={issueId} />
-
-						{issue.kind === "error" ? (
-							<section aria-labelledby="occurrences-heading">
-								<SectionHeader id="occurrences-heading" label="Latest occurrences" />
-								<IssueOccurrencesTable traces={sampleTraces} />
-							</section>
-						) : null}
-					</div>
-					<AlertDialog
-						open={severityConfirmation !== null}
-						onOpenChange={(open) => {
-							if (!open) setSeverityConfirmation(null)
-						}}
-					>
-						<AlertDialogContent>
-							<AlertDialogHeader>
-								<AlertDialogTitle>Notify escalation destinations?</AlertDialogTitle>
-								<AlertDialogDescription>
-									Changing severity to {severityConfirmation?.severity} will notify{" "}
-									{severityConfirmation?.destinationNames.join(", ")}. Manual severity
-									changes represent explicit human intent and bypass AI confidence gates.
-								</AlertDialogDescription>
-							</AlertDialogHeader>
-							<AlertDialogFooter>
-								<AlertDialogCancel>Cancel</AlertDialogCancel>
-								<AlertDialogAction
-									onClick={() => {
-										const pending = severityConfirmation
-										setSeverityConfirmation(null)
-										if (pending) void applySeverity(pending.severity)
+											<IssueOccurrencesTable traces={sampleTraces} />
+										</section>
+									) : null}
+								</div>
+								<AlertDialog
+									open={severityConfirmation !== null}
+									onOpenChange={(open) => {
+										if (!open) setSeverityConfirmation(null)
 									}}
 								>
-									Change severity and notify
-								</AlertDialogAction>
-							</AlertDialogFooter>
-						</AlertDialogContent>
-					</AlertDialog>
-				</DashboardLayout>
+									<AlertDialogContent>
+										<AlertDialogHeader>
+											<AlertDialogTitle>
+												Notify escalation destinations?
+											</AlertDialogTitle>
+											<AlertDialogDescription>
+												Changing severity to {severityConfirmation?.severity} will
+												notify {severityConfirmation?.destinationNames.join(", ")}.
+												Manual severity changes represent explicit human intent and
+												bypass AI confidence gates.
+											</AlertDialogDescription>
+										</AlertDialogHeader>
+										<AlertDialogFooter>
+											<AlertDialogCancel>Cancel</AlertDialogCancel>
+											<AlertDialogAction
+												onClick={() => {
+													const pending = severityConfirmation
+													setSeverityConfirmation(null)
+													if (pending) void applySeverity(pending.severity)
+												}}
+											>
+												Change severity and notify
+											</AlertDialogAction>
+										</AlertDialogFooter>
+									</AlertDialogContent>
+								</AlertDialog>
+							</DashboardLayout.Scroll>
+						</DashboardLayout.Content>
+						<DashboardLayout.RightPanel>
+							<IssueSidebar
+								issue={issue}
+								totalInWindow={totalInWindow}
+								busy={busy}
+								onTransition={transitionTo}
+								onClaim={claim}
+								onHeartbeat={heartbeat}
+								onRelease={release}
+								onSetSeverity={changeSeverity}
+							/>
+						</DashboardLayout.RightPanel>
+					</DashboardLayout.Body>
+				</DashboardLayout.Root>
 			)
 		})
 		.render()

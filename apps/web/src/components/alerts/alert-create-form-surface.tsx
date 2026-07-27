@@ -145,86 +145,89 @@ export function AlertCreateFormSurface({
 	const showScope = ruleForm.signalType !== "builder_query" && ruleForm.signalType !== "raw_query"
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[
-				{ label: "Alerts", href: "/alerts" },
-				{ label: editingRule ? "Edit Rule" : "New Rule" },
-			]}
-			titleContent={
-				<div className="flex items-center gap-2">
-					<h1 className="font-display text-3xl font-semibold leading-[1.1] tracking-tight truncate">
-						{pageTitle}
-					</h1>
-				</div>
-			}
-		>
-			<div className="mx-auto w-full max-w-[1100px] space-y-4">
-				<WidgetPrefillNoticeBanner notices={prefillNotices} />
-				<RuleLiveChartHero
-					form={ruleForm}
-					preview={preview}
-					previewLoading={previewLoading}
-					previewError={previewError}
-					onTestRule={() => runTest(false)}
-					testing={previewingRule}
-					previewResult={previewResult}
-				/>
-				<div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-					<SignalAndThresholdSection
-						form={ruleForm}
-						onChange={setRuleForm}
-						autocompleteValues={autocompleteValues}
-					/>
-					<div className="space-y-4">
-						{showScope && (
-							<ScopeSection
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[
+					{ label: "Alerts", href: "/alerts" },
+					{ label: editingRule ? "Edit Rule" : "New Rule" },
+				]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title={pageTitle} />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="mx-auto w-full max-w-[1100px] space-y-4">
+							<WidgetPrefillNoticeBanner notices={prefillNotices} />
+							<RuleLiveChartHero
 								form={ruleForm}
-								onChange={setRuleForm}
-								serviceNameOptions={serviceNameOptions}
-								autocompleteValues={autocompleteValues}
+								preview={preview}
+								previewLoading={previewLoading}
+								previewError={previewError}
+								onTestRule={() => runTest(false)}
+								testing={previewingRule}
+								previewResult={previewResult}
 							/>
-						)}
-						<NotificationsSection
-							form={ruleForm}
-							onChange={setRuleForm}
-							destinations={destinations}
-							onSendTest={() => runTest(true)}
-							testing={sendingTestNotification}
-						/>
-						<DetailsSection
-							form={ruleForm}
-							onChange={setRuleForm}
-							suggestedName={suggestedName}
-							tagSuggestions={tagSuggestions}
-						/>
-					</div>
-				</div>
-			</div>
+							<div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+								<SignalAndThresholdSection
+									form={ruleForm}
+									onChange={setRuleForm}
+									autocompleteValues={autocompleteValues}
+								/>
+								<div className="space-y-4">
+									{showScope && (
+										<ScopeSection
+											form={ruleForm}
+											onChange={setRuleForm}
+											serviceNameOptions={serviceNameOptions}
+											autocompleteValues={autocompleteValues}
+										/>
+									)}
+									<NotificationsSection
+										form={ruleForm}
+										onChange={setRuleForm}
+										destinations={destinations}
+										onSendTest={() => runTest(true)}
+										testing={sendingTestNotification}
+									/>
+									<DetailsSection
+										form={ruleForm}
+										onChange={setRuleForm}
+										suggestedName={suggestedName}
+										tagSuggestions={tagSuggestions}
+									/>
+								</div>
+							</div>
+						</div>
 
-			<RuleActionBar
-				editing={!!editingRule}
-				saving={savingRule}
-				validationIssues={validationIssues}
-				onCancel={() => navigate({ to: "/alerts" })}
-				onSave={handleSave}
-				onShowTemplates={editingRule ? undefined : () => setTemplatesOpen(true)}
-				cancelSlot={
-					<Button type="button" variant="outline" render={<Link to="/alerts" />}>
-						Cancel
-					</Button>
-				}
-			/>
+						<RuleActionBar
+							editing={!!editingRule}
+							saving={savingRule}
+							validationIssues={validationIssues}
+							onCancel={() => navigate({ to: "/alerts" })}
+							onSave={handleSave}
+							onShowTemplates={editingRule ? undefined : () => setTemplatesOpen(true)}
+							cancelSlot={
+								<Button type="button" variant="outline" render={<Link to="/alerts" />}>
+									Cancel
+								</Button>
+							}
+						/>
 
-			<RuleTemplatesOverlay
-				open={templatesOpen}
-				onOpenChange={setTemplatesOpen}
-				onPick={(template) => {
-					setRuleForm((current) => applyTemplate(template, current))
-					setTemplatesOpen(false)
-				}}
-				onStartBlank={() => setTemplatesOpen(false)}
-			/>
-		</DashboardLayout>
+						<RuleTemplatesOverlay
+							open={templatesOpen}
+							onOpenChange={setTemplatesOpen}
+							onPick={(template) => {
+								setRuleForm((current) => applyTemplate(template, current))
+								setTemplatesOpen(false)
+							}}
+							onStartBlank={() => setTemplatesOpen(false)}
+						/>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

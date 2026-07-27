@@ -13,7 +13,7 @@ import {
 } from "@maple/ui/components/ui/dialog"
 import type { DashboardId } from "@maple/domain/http"
 import { ArrowPathIcon, HistoryIcon } from "@/components/icons"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { buildRestorePayload, useRestoreDashboardVersion } from "./use-dashboard-history"
 import type { PreviewedVersion } from "@/atoms/dashboard-history-atoms"
 import { useDashboardMutationSync } from "@/hooks/use-dashboard-store"
