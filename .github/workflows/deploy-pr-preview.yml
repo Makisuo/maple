@@ -25,6 +25,14 @@ jobs:
         # `pr-preview` environment must require manual approval in repo settings.
         # This blocks PR-controlled code (install scripts, build steps) from
         # accessing Infisical secrets until a maintainer reviews the diff.
+        #
+        # ⚠️ NOT CURRENTLY CONFIGURED, and adding it right now would break the
+        # scheduled orphan sweep: cleanup-preview-orphans.yml temporarily borrows
+        # this environment to satisfy the Infisical OIDC subject allowlist, and a
+        # cron run has no human to approve it — it would park in `waiting` until
+        # the deployment expires. Decouple that job first (allowlist the subject
+        # `repo:<org>/<repo>:ref:refs/heads/main` in Infisical and drop its
+        # `environment:` line), THEN add required reviewers here.
         # `url` surfaces the deployed web app as a clickable deployment on the PR
         # (empty on `closed`, when the deploy step is skipped).
         environment:
