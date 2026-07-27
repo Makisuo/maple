@@ -40,10 +40,13 @@ agent/
   channels/slack.ts   # multi-workspace Slack channel (webhookVerifier + per-team botToken)
   channels/eve.ts     # auth policy for the browser/API routes
   connections/maple.ts # Maple MCP connection (per-workspace API key auth + approval gate)
-  tools/get_time.ts   # sample tool proving the tool loop
   tools/render_chart.ts # renders a PNG chart in-process and posts it into the thread
+  tools/{bash,glob,grep,read_file,write_file,web_fetch,web_search}.ts
+                      # `disableTool()` sentinels — see Framework tools below
   lib/chart.ts        # pure SVG chart renderer + unicode-sparkline fallback
   lib/slack-upload.ts # Slack external-upload flow (files.getUploadURLExternal → complete)
+  lib/env.ts          # shared is-this-deployed predicate (route auth + token fallback)
+  lib/telemetry-log.ts # structured logging → OTel logs, JSON console fallback
 Dockerfile            # node:24-slim (+bun for installs), eve build, entrypoint
 docker-entrypoint.sh  # runs the Postgres-world migration, then `eve start`
 railway.json          # DOCKERFILE builder, /eve/v1/health healthcheck
@@ -79,8 +82,12 @@ Postgres to iterate on model + tools. To exercise the Postgres world locally: ru
 > its manifest. It must be set when `eve build` runs. Setting it only as a runtime variable leaves
 > you silently on the ephemeral on-disk world. The Dockerfile sets it before `bun run build`.
 
-Run the tests (bun's native runner; covers the signature verification, bot-token resolution, and
-the resolve cache in `agent/lib/maple.ts` — no network, fetch is stubbed):
+Run the tests (bun's native runner; no network — `agent/lib/fetch-stub.ts` swaps `globalThis.fetch`).
+They cover signature verification, per-team bot-token resolution and the resolve cache
+(`agent/lib/maple.ts`), thread follow-up promotion, the Slack upload flow, and three drift canaries
+that matter because **this app is outside CI**: the framework-tool lockdown
+(`framework-tools.test.ts`), the eve patch + version pin (`eve-patch.test.ts`), and
+`MUTATING_TOOL_NAMES` vs `apps/api/src/mcp/tools/mutating.ts` (`approval.test.ts`):
 
 ```bash
 bun test
@@ -193,19 +200,23 @@ variables in (d), since two of them embed the URL.
   - `MAPLE_INTERNAL_SERVICE_TOKEN` — the internal service token; the agent sends it as
     `Authorization: Bearer maple_svc_<token>` to the resolve endpoint. Runtime-only.
   - `SLACK_BOT_TOKEN` — **omit in multi-workspace production** (the bot token is resolved per team
-    from Maple). Set it only to run against a single workspace with no Maple mapping (dev).
+    from Maple). This is now enforced, not advisory: in a deployed environment the env token is
+    ignored and an unresolvable team errors, because the app is publicly installable and a shared
+    env token would sign one tenant's outbound calls with another tenant's credential. Set
+    `SLACK_ALLOW_ENV_BOT_TOKEN=true` alongside it only for a private single-workspace deployment.
   - `PORT=8080` — set it explicitly. Railway injects a `PORT` of its own that overrides the image's
     `ENV PORT`, so pinning it here is what makes the value deterministic rather than assigned.
   - `WORKFLOW_LOCAL_BASE_URL=http://localhost:8080` — the durable-run callback target. See the note
     below for why this is loopback and not the public host.
   - (`EVE_WORKFLOW_WORLD` is already baked into the image at build time — no need to set it.)
   - `ROUTE_AUTH_BASIC_PASSWORD` (+ optional `ROUTE_AUTH_BASIC_USER`, default `admin`) — locks the
-    non-Slack HTTP routes (session/stream) behind HTTP Basic. **Effectively required in
-    production**: route auth fails closed on Railway — if the password is unset at boot, the
-    service generates a random one-boot password and logs it once (`[route-auth]` in the deploy
-    logs) rather than serving those routes publicly. The Slack webhook and `/eve/v1/health` are
-    unaffected either way. (`railway.json` has no mechanism to declare required variables, so this
-    is enforced at boot instead.)
+    non-Slack HTTP routes (session/stream) behind HTTP Basic. **Required in production to use
+    those routes at all**: route auth fails closed on Railway — if the password is unset at boot,
+    the routes are locked behind a random secret that is generated per boot and deliberately never
+    logged, so they are unreachable until you set this. (Printing the generated password, the
+    original behavior, parks a working credential in Railway's log store for the life of the
+    process.) The Slack webhook and `/eve/v1/health` are unaffected either way. (`railway.json` has
+    no mechanism to declare required variables, so this is enforced at boot instead.)
 
 Deploy. The entrypoint applies the Postgres-world schema, then starts eve. Check
 `https://<your-service>.up.railway.app/eve/v1/health`.
@@ -262,7 +273,11 @@ Both should show a green **Verified ✓** next to the field once saved. Event Su
 `app_mention`, `message.im`, `message.channels`, and `message.groups` listed under *Subscribe to bot
 events* — the manifest from step 1 sets these, so they should already be there. The two channel
 message events power thread follow-ups: once the bot has been mentioned (or replied) in a thread,
-further replies in that thread reach it without a new `@mention`.
+further replies in that thread reach it without a new `@mention` — but only while the engagement is
+**recent**: within 30 minutes and within the last 15 messages of the thread (see
+`agent/lib/thread-follow-up.ts`). Past either bound, replies pass through untouched and the user
+@-mentions the bot again. Unbounded, one mention would turn every later reply by anyone into a full
+agent turn, forever.
 
 Changing a request URL does **not** require reinstalling the app; only changing *scopes* does. (If
 you did edit scopes, the sidebar shows a yellow reinstall banner — follow it, and note that
@@ -273,15 +288,37 @@ Finally, invite the bot to a channel — `/invite @eve-agent` — and `@mention`
 ## Verification
 
 - `curl https://<host>/eve/v1/health` → `{"ok":true,"status":"ready",...}`
-- `@mention` the bot → threaded reply with a typing indicator; ask "what time is it in Tokyo?" to
-  exercise the `get_time` tool.
+- `@mention` the bot → threaded reply with a typing indicator; ask "how are things looking?" to
+  exercise the Maple MCP tool loop.
 - A follow-up mention in the same thread resumes the same durable session.
+
+## Framework tools (the built-ins are locked down)
+
+eve enables ten framework tools by default (`bash`, `glob`, `grep`, `read_file`, `write_file`,
+`web_fetch`, `web_search`, `todo`, `ask_question`, `load_skill`), and **none of them go through
+`agent/lib/approval.ts`** — that policy only answers for `maple__*` names, so a framework tool runs
+with no approval prompt at all. This agent reads attacker-influenced text by design (log bodies,
+exception messages, span attributes from a customer's production traffic), so every enabled tool is
+one crafted log line away from being called. `web_fetch` was the sharp edge: as of eve 0.25.3 it has
+no SSRF protection whatsoever (no loopback / link-local / private-range blocklist, no redirect
+pinning) and runs in the **host** process, i.e. inside Railway's private network.
+
+All seven are disabled with a `disableTool()` sentinel per file under `agent/tools/`. Only
+`ask_question` (the HITL prompt Slack renders), `todo` (durable task list, no egress) and
+`load_skill` (how `agent/skills/*` reach the model) stay on.
+
+> The **filename is the identity.** eve derives the tool slug from the path and does no
+> kebab→snake normalization, so `agent/tools/web-fetch.ts` would disable *nothing* while looking
+> right, and `render-chart.ts` would register the authored tool as `render-chart` while
+> `instructions.md` tells the model to call `render_chart`. `agent/lib/framework-tools.test.ts`
+> reconstructs eve's own resolution (its real framework-tool list, its real slug rule, its real
+> `isDisabledToolSentinel`) and fails on both mistakes; `eve build` also writes the decision to
+> `.output/.eve/compile/compiled-agent-manifest.json` under `disabledFrameworkTools`.
 
 ## Parity with the web chat (chat-flue)
 
 This agent mirrors the Maple capabilities of `apps/chat-flue` (the Flue web chat) **without
-sharing code** — each capability is re-expressed in eve's native idiom (see
-`docs/slack-agent-chat-flue-parity.md` for the full matrix):
+sharing code** — each capability is re-expressed in eve's native idiom:
 
 - **Prompts:** `agent/instructions.md` is the Slack-adapted port of chat-flue's `SYSTEM_PROMPT`
   (tool prefix `maple__<tool>` instead of `mcp__maple__<tool>`; inline `<<maple:...>>` cards
@@ -299,12 +336,17 @@ sharing code** — each capability is re-expressed in eve's native idiom (see
   mutations outright. The mutating-tool set is mirrored, not imported — keep in sync with
   `apps/api/src/mcp/tools/mutating.ts` (source of truth) and `apps/chat-flue/src/lib/approval.ts`.
 - **Telemetry:** `agent/instrumentation.ts` exports AI SDK spans to Maple's ingest as service
-  `maple-slack-agent` when `MAPLE_INGEST_KEY` is set (no-op otherwise). Model inputs/outputs are
-  never recorded; Slack team/channel/thread/user land as `maple.slack.*` span attributes.
-  `agent/hooks/outcome-log.ts` logs turn outcomes + tool failures unconditionally (Railway logs).
-- **Deliberately not ported:** page context and widget-fix mode (web-only payloads), the
-  `submit_diagnosis` tool (the thread reply *is* the report), and the headless triage workflow
-  (apps/api invokes chat-flue for that).
+  `maple-slack-agent` when `MAPLE_INGEST_KEY` is set (no-op otherwise), with `service.version` +
+  `deployment.commit_sha` from Railway's `RAILWAY_GIT_COMMIT_SHA` so releases show up in the
+  commit-hover UI. Model inputs/outputs are never recorded; Slack team/channel/thread/user land as
+  `maple.slack.*` span attributes (omitted rather than empty-string when absent).
+  `agent/hooks/outcome-log.ts` logs turn outcomes + tool failures unconditionally, through
+  `lib/telemetry-log.ts` — OTLP `/v1/logs` when the ingest key is set (queryable and
+  trace-correlated, like chat-flue), a structured JSON line on stdout otherwise.
+- **Deliberately not ported:** page context and the widget-fix entry point (web-only payloads —
+  the surgical fix *rules* live in the dashboard-builder skill, with `get_dashboard` standing in
+  for the attached widget JSON), the `submit_diagnosis` tool (the thread reply *is* the report),
+  and the headless triage workflow (apps/api invokes chat-flue for that).
 - **Beyond parity — chart images:** the authored `render_chart` tool renders a time-series
   chart in-process (hand-rolled SVG → `@resvg/resvg-js`, no headless browser or external chart
   service) and posts it into the thread via Slack's external-upload flow with the per-team bot
@@ -317,9 +359,11 @@ Env vars added by this parity work (set on Railway; all runtime-only):
 | Var | Purpose |
 | --- | --- |
 | `MAPLE_APP_BASE_URL` | Web-app base for deep links in replies (default `https://app.maple.dev`) |
-| `MAPLE_INGEST_KEY` | Maple ingest key; enables the OTel export when set |
+| `MAPLE_INGEST_KEY` | Maple ingest key; enables the OTel span **and log** export when set |
 | `MAPLE_ENDPOINT` | Ingest gateway base (default `https://ingest.maple.dev`) |
 | `MAPLE_ENVIRONMENT` | Deployment env label on spans (falls back to `RAILWAY_ENVIRONMENT_NAME`) |
+| `MAPLE_COMMIT_SHA` / `MAPLE_SERVICE_VERSION` | Release attribution; both default to `RAILWAY_GIT_COMMIT_SHA` |
+| `SLACK_ALLOW_ENV_BOT_TOKEN` | Opt-in to the `SLACK_BOT_TOKEN` fallback in a deployed environment |
 
 Manual acceptance in a linked workspace: (a) "how are things looking?" routes through
 `system_health`; (b) "create an alert rule for checkout p95" produces a Slack approval card —
@@ -370,7 +414,11 @@ patch mirrors the resolver shape proposed in #222 and can be dropped when upstre
 `resolveBotToken(context?)` (`agent/lib/maple.ts`) resolves `context.teamId` via the resolve
 endpoint → else `SLACK_BOT_TOKEN` → throw. The env fallback serves single-workspace dev and the
 one path the patch does not cover — eve's inbound-attachment file fetch, constructed once at
-channel definition with no per-event context, which calls the credential with no argument.
+channel definition with no per-event context, which calls the credential with no argument. **It is
+gated on not-being-deployed** (`agent/lib/env.ts`, shared with the route-auth gate): anyone can
+install a publicly distributed Slack app, and an unlinked workspace's events must not borrow the
+one token in the environment, which belongs to a different tenant. `SLACK_ALLOW_ENV_BOT_TOKEN=true`
+re-enables it for a deliberately private single-workspace deployment.
 
 **MCP tools (per-workspace API key):** `agent/connections/maple.ts` connects to
 `{MAPLE_API_BASE_URL}/mcp` (streamable HTTP). Unlike `botToken`, the connection `auth` resolver
@@ -438,10 +486,17 @@ and **activate public distribution** so the app can be installed into any worksp
 - **Auth:** `agent/channels/eve.ts` fails closed in deployed environments (`RAILWAY_ENVIRONMENT_NAME`
   set, or `NODE_ENV=production`): the browser/API routes always require HTTP Basic there. With
   `ROUTE_AUTH_BASIC_PASSWORD` set that's your stable credential; without it, a random per-boot
-  password is generated and logged once at startup (`[route-auth]`), so the routes are never
-  public in production. Purely local runs without a password keep the old open-demo behavior.
-  The Slack webhook is always signature-verified independently, and `/eve/v1/health` is a separate
-  unauthenticated route (Railway's healthcheck is unaffected).
+  secret is generated and **never logged**, so the routes are simply unreachable in production
+  until you set one (`[route-auth]` says so at startup). Purely local runs without a password keep
+  the old open-demo behavior. The Slack webhook is always signature-verified independently, and
+  `/eve/v1/health` is a separate unauthenticated route (Railway's healthcheck is unaffected).
+- **eve is pinned exactly (`"eve": "0.25.3"`, no caret).** `patches/eve@0.25.3.patch` only applies
+  to that version, and it is what threads `{ teamId, … }` into the `botToken` credential. A
+  lockfile refresh onto 0.25.4 would drop the patch silently, the credential would go back to being
+  arg-less, and every workspace would fall through to the env fallback — failing *open* onto the
+  wrong credential. `agent/lib/eve-patch.test.ts` asserts both the pin and that the patched code
+  path is the one loaded (it calls the credential and checks the context arrives). Bump the
+  `dependencies` and `patchedDependencies` strings together, regenerate the patch, re-run the test.
 - Edge Cloudflare Workers isn't used because the only Cloudflare Durable-Objects workflow world is
   built against an older `@workflow` protocol than eve 0.25 requires. Revisit when a `5.0.0-beta`
   Cloudflare world ships.

@@ -2,10 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Sanity checks on the prompt + skill files ported from apps/chat-flue
-// (docs/slack-agent-chat-flue-parity.md): the files exist, carry routing
-// descriptions, use eve's `maple__` tool prefix, and left none of chat-flue's
-// web-only syntax behind.
+// Sanity checks on the prompt + skill files ported from apps/chat-flue: the
+// files exist, carry routing descriptions, use eve's `maple__` tool prefix,
+// and left none of chat-flue's web-only syntax behind.
 
 const agentDir = import.meta.dir;
 

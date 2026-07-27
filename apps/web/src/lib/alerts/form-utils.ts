@@ -491,7 +491,13 @@ export type DestinationFormState = {
 
 export const MAX_EMAIL_MEMBER_RECIPIENTS = 10
 
-export function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
+/**
+ * Defaults to `slack-bot` — the recommended flow, and the tile the dialog lists
+ * first (`DESTINATION_TYPES`); the legacy `slack` webhook trails it.
+ */
+export function defaultDestinationForm(
+	type: AlertDestinationType = "slack-bot",
+): DestinationFormState {
 	return {
 		type,
 		name: "",

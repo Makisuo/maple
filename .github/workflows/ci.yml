@@ -37,6 +37,29 @@ jobs:
               run: bun run check:bundle
               working-directory: apps/web
 
+    slack-agent:
+        name: Slack agent
+        runs-on: blacksmith-4vcpu-ubuntu-2404
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+            # apps/slack-agent is deliberately outside the bun workspace (it
+            # self-deploys to Railway, not Cloudflare), so the root install and
+            # the `bun turbo` job above never reach it — it needs its own.
+            - run: bun install --frozen-lockfile
+              working-directory: apps/slack-agent
+
+            - run: bun run typecheck
+              working-directory: apps/slack-agent
+
+            # Includes the approval-list drift canary: a mutating MCP tool added
+            # on the API side without mirroring it here would otherwise ship
+            # ungated to Slack.
+            - run: bun test
+              working-directory: apps/slack-agent
+
     clickhouse-schema-e2e:
         name: ClickHouse schema E2E (${{ matrix.clickhouse }})
         runs-on: blacksmith-4vcpu-ubuntu-2404

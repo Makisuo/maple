@@ -5,9 +5,8 @@ import type { ApprovalContext, ApprovalStatus } from "eve/tools";
  * approval before executing.
  *
  * Keep in sync with `apps/api/src/mcp/tools/mutating.ts` (the source of
- * truth) and `apps/chat-flue/src/lib/approval.ts`. Mirrored, not imported:
- * this app is outside the bun workspace, and the parity plan
- * (docs/slack-agent-chat-flue-parity.md) mandates mirror-not-share.
+ * truth) and `apps/chat-flue/src/lib/approval.ts`. Mirrored, not imported —
+ * this app is outside the bun workspace.
  */
 export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   // dashboards

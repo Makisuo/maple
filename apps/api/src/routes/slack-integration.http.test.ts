@@ -7,6 +7,7 @@ import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "../lib/te
 import { ApiKeysService } from "../services/ApiKeysService"
 import { OAuthStateRepository } from "../services/OAuthStateRepository"
 import { SlackIntegrationService } from "../services/SlackIntegrationService"
+import { slackSecretAad } from "../services/slack-bot-token"
 import { SlackInternalRouter } from "./slack-integration.http"
 
 const trackedDbs: TestDb[] = []
@@ -14,10 +15,11 @@ afterEach(() => cleanupTestDbs(trackedDbs))
 
 const ENCRYPTION_KEY = Buffer.alloc(32, 7)
 
-/** AES-256-GCM encrypt matching Crypto.ts's format (12-byte iv, base64 fields). */
-const encryptField = (plaintext: string, key: Buffer) => {
+/** AES-256-GCM encrypt matching Crypto.ts's format (12-byte iv, base64 fields, AAD). */
+const encryptField = (plaintext: string, key: Buffer, aad: Buffer) => {
 	const iv = randomBytes(12)
 	const cipher = createCipheriv("aes-256-gcm", key, iv)
+	cipher.setAAD(aad)
 	const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()])
 	return {
 		ciphertext: ciphertext.toString("base64"),
@@ -39,8 +41,17 @@ const insertWorkspace = async (
 		revoked?: boolean
 	},
 ) => {
-	const bot = encryptField(opts.botToken, ENCRYPTION_KEY)
-	const key = encryptField(opts.apiKey, ENCRYPTION_KEY)
+	// Secrets are AAD-bound to (orgId, teamId, column) — fixtures must match.
+	const bot = encryptField(
+		opts.botToken,
+		ENCRYPTION_KEY,
+		slackSecretAad(opts.orgId, opts.teamId, "bot_token"),
+	)
+	const key = encryptField(
+		opts.apiKey,
+		ENCRYPTION_KEY,
+		slackSecretAad(opts.orgId, opts.teamId, "api_key_secret"),
+	)
 	await executeSql(
 		testDb,
 		`INSERT INTO slack_workspaces (
@@ -96,11 +107,7 @@ const makeRouterLayer = (testDb: TestDb, tokens: { slack?: string; shared?: stri
 
 const TEAM_PATH = "/internal/slack/workspaces"
 
-const get = (
-	handler: (request: Request) => Promise<Response>,
-	teamId: string,
-	bearer?: string,
-) =>
+const get = (handler: (request: Request) => Promise<Response>, teamId: string, bearer?: string) =>
 	Effect.promise(() =>
 		handler(
 			new Request(`http://api.localhost${TEAM_PATH}/${teamId}`, {
@@ -162,7 +169,7 @@ describe("SlackInternalRouter", () => {
 		}).pipe(Effect.provide(testDb.layer))
 	})
 
-	it.effect("falls back to INTERNAL_SERVICE_TOKEN when the Slack-specific token is unset", () => {
+	it.effect("does NOT fall back to INTERNAL_SERVICE_TOKEN when the Slack-specific token is unset", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
 			yield* Effect.promise(() =>
@@ -179,8 +186,12 @@ describe("SlackInternalRouter", () => {
 				testDb,
 				{ shared: "shared-only-token" },
 				Effect.fnUntraced(function* (handler) {
-					const ok = yield* get(handler, "T0999", "Bearer maple_svc_shared-only-token")
-					assert.strictEqual(ok.status, 200)
+					// The shared token is handed to MCP-internal callers; holding it
+					// must not be enough to harvest an org's bot token + Maple key.
+					const shared = yield* get(handler, "T0999", "Bearer maple_svc_shared-only-token")
+					assert.strictEqual(shared.status, 401)
+					const text = yield* Effect.promise(() => shared.text())
+					assert.include(text, "not configured")
 				}),
 			)
 		}).pipe(Effect.provide(testDb.layer))
@@ -193,7 +204,11 @@ describe("SlackInternalRouter", () => {
 			{ slack: "slack-secret-token" },
 			Effect.fnUntraced(function* (handler) {
 				// Wrong token of the SAME length (timingSafeEqual path).
-				const wrong = yield* get(handler, "T0123", `Bearer maple_svc_${"x".repeat("slack-secret-token".length)}`)
+				const wrong = yield* get(
+					handler,
+					"T0123",
+					`Bearer maple_svc_${"x".repeat("slack-secret-token".length)}`,
+				)
 				assert.strictEqual(wrong.status, 401)
 
 				// Length mismatch must 401 cleanly, not throw out of timingSafeEqual.
@@ -212,6 +227,63 @@ describe("SlackInternalRouter", () => {
 			}),
 		)
 	})
+
+	it.effect("rejects a multi-byte bearer with 401 instead of throwing out of timingSafeEqual", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withHandler(
+			testDb,
+			{ slack: "slack-secret-token" },
+			Effect.fnUntraced(function* (handler) {
+				// Same number of UTF-16 code units as the expected token (18) but 19
+				// UTF-8 bytes — comparing lengths in code units would let this reach
+				// timingSafeEqual, which throws on unequal buffer lengths (→ 500).
+				const multiByte = "slack-secret-tokeñ"
+				assert.strictEqual(multiByte.length, "slack-secret-token".length)
+				assert.notStrictEqual(Buffer.byteLength(multiByte, "utf8"), multiByte.length)
+
+				const response = yield* get(handler, "T0123", `Bearer maple_svc_${multiByte}`)
+				assert.strictEqual(response.status, 401)
+			}),
+		)
+	})
+
+	it.effect(
+		"authenticates before validating the teamId, and answers a malformed escape identically either way",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			return withHandler(
+				testDb,
+				{ slack: "slack-secret-token" },
+				Effect.fnUntraced(function* (handler) {
+					// `%20` is a well-formed escape that decodes to a lone space, so it
+					// reaches the handler and fails the trimmed/non-empty check — but only
+					// for an authenticated caller. Anonymous gets 401, not the 400: auth
+					// runs before any path-param decoding.
+					const anonymousBlank = yield* get(handler, "%20")
+					assert.strictEqual(anonymousBlank.status, 401)
+					const authenticatedBlank = yield* get(
+						handler,
+						"%20",
+						"Bearer maple_svc_slack-secret-token",
+					)
+					assert.strictEqual(authenticatedBlank.status, 400)
+
+					// `%ZZ` is a malformed escape (`decodeURIComponent` throws `URIError`).
+					// The router rejects it during path matching, so the handler — and its
+					// Option.liftThrowable guard — is never reached; both callers get the
+					// same 404 and neither can tell the two apart.
+					const anonymousMalformed = yield* get(handler, "%ZZ")
+					assert.strictEqual(anonymousMalformed.status, 404)
+					const authenticatedMalformed = yield* get(
+						handler,
+						"%ZZ",
+						"Bearer maple_svc_slack-secret-token",
+					)
+					assert.strictEqual(authenticatedMalformed.status, 404)
+				}),
+			)
+		},
+	)
 
 	it.effect("rejects every request with 401 when no internal token is configured", () => {
 		const testDb = createTestDb(trackedDbs)

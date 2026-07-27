@@ -211,11 +211,19 @@ export const formatWindow = (minutes: number): string => {
 	return hours % 1 === 0 ? `${hours}h` : `${minutes}m`
 }
 
-export const severityEmoji = (severity: string): string =>
-	severity === "critical" ? "\u{1F534}" : "\u{1F7E0}"
+export const severityEmoji = (severity: AlertSeverity): string =>
+	Match.value(severity).pipe(
+		Match.when("critical", () => "\u{1F534}"),
+		Match.when("warning", () => "\u{1F7E0}"),
+		Match.exhaustive,
+	)
 
-export const formatSeverityLabel = (severity: string): string =>
-	severity.charAt(0).toUpperCase() + severity.slice(1)
+export const formatSeverityLabel = (severity: AlertSeverity): string =>
+	Match.value(severity).pipe(
+		Match.when("critical", () => "Critical"),
+		Match.when("warning", () => "Warning"),
+		Match.exhaustive,
+	)
 
 export const slackAttachmentColor = (eventType: string, severity: string): string => {
 	if (eventType === "resolve") return "#2eb67d"
@@ -267,8 +275,8 @@ const comparatorBreachPhrase = (context: ThresholdContext): string => {
 /*  Dispatch                                                                  */
 /* -------------------------------------------------------------------------- */
 
-const makeDeliveryError = (message: string, destinationType?: AlertDestinationType) =>
-	new AlertDeliveryError({ message, destinationType })
+const makeDeliveryError = (message: string, destinationType?: AlertDestinationType, cause?: unknown) =>
+	new AlertDeliveryError({ message, destinationType, ...(cause === undefined ? {} : { cause }) })
 
 /**
  * Slack Web API `chat.postMessage` response envelope. Slack returns HTTP 200
@@ -295,6 +303,7 @@ const runTimedFetch = <A>(
 			makeDeliveryError(
 				error instanceof Error ? error.message : `${label} delivery failed`,
 				destinationType,
+				error,
 			),
 	}).pipe(
 		Effect.timeoutOrElse({
@@ -495,9 +504,26 @@ export const buildTemplateContext = (
 	sentAt: context.sentAtMs != null ? new Date(context.sentAtMs).toISOString() : "",
 })
 
-/** Minimal Markdown → Slack mrkdwn transform: `**b**`→`*b*`, `[t](url)`→`<url|t>`. */
+/**
+ * Minimal Markdown → Slack mrkdwn transform: `**b**`→`*b*`, `[t](url)`→`<url|t>`.
+ *
+ * The body is a user-authored notification template, so it is escaped BEFORE the
+ * rewrites: every `<…>` the author typed becomes literal text, which neutralizes
+ * `<!channel>`/`<!here>`/`<!everyone>` broadcasts (the slack-bot destination holds
+ * `chat:write.public` and can post to any public channel) and hand-written
+ * deceptive links like `<https://evil.test|Open in Maple>`. Only the `<…>` this
+ * function builds itself reaches Slack as markup. Slack decodes `&amp;`/`&lt;`/
+ * `&gt;` for display, so legitimate text and `&`-bearing URLs survive intact.
+ */
 const markdownToSlackMrkdwn = (markdown: string): string =>
-	markdown.replace(/\*\*([^*]+)\*\*/g, "*$1*").replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>")
+	escapeSlackMrkdwn(markdown)
+		.replace(/\*\*([^*]+)\*\*/g, "*$1*")
+		.replace(
+			/\[([^\]]+)\]\(([^)]+)\)/g,
+			// `|` would otherwise end the link target and let the rest of the URL pose
+			// as the label.
+			(_match, text: string, url: string) => `<${url.replaceAll("|", "%7C")}|${text}>`,
+		)
 
 const truncate = (value: string, max: number): string =>
 	value.length > max ? `${value.slice(0, max - 1)}…` : value
@@ -717,35 +743,30 @@ export const dispatchDelivery = (
 									chatUrl,
 								)
 							: buildSlackBlocks(context, linkUrl, chatUrl)
-						const response = yield* runTimedFetch(
-							"slack-bot",
-							"Slack",
-							fetchFn,
-							timeoutMs,
-							() =>
-								fetchFn("https://slack.com/api/chat.postMessage", {
-									method: "POST",
-									headers: {
-										"content-type": "application/json; charset=utf-8",
-										authorization: `Bearer ${botToken}`,
-									},
-									body: JSON.stringify({
-										channel: config.channelId,
-										// Blocks ride inside a colored attachment so the message
-										// carries the severity color bar — same as the webhook
-										// destination (the bar has no Block Kit equivalent). No
-										// top-level `text`: alongside attachments Slack renders it
-										// as a duplicate line above the bar; `fallback` carries
-										// the notification-preview one-liner instead.
-										attachments: [
-											{
-												color: slackAttachmentColor(context.eventType, context.severity),
-												fallback: templated?.title ?? buildSlackFallbackText(context),
-												blocks,
-											},
-										],
-									}),
+						const response = yield* runTimedFetch("slack-bot", "Slack", fetchFn, timeoutMs, () =>
+							fetchFn("https://slack.com/api/chat.postMessage", {
+								method: "POST",
+								headers: {
+									"content-type": "application/json; charset=utf-8",
+									authorization: `Bearer ${botToken}`,
+								},
+								body: JSON.stringify({
+									channel: config.channelId,
+									// Blocks ride inside a colored attachment so the message
+									// carries the severity color bar — same as the webhook
+									// destination (the bar has no Block Kit equivalent). No
+									// top-level `text`: alongside attachments Slack renders it
+									// as a duplicate line above the bar; `fallback` carries
+									// the notification-preview one-liner instead.
+									attachments: [
+										{
+											color: slackAttachmentColor(context.eventType, context.severity),
+											fallback: templated?.title ?? buildSlackFallbackText(context),
+											blocks,
+										},
+									],
 								}),
+							}),
 						)
 						if (!response.ok) {
 							const detail = yield* readErrorBody(response)
@@ -761,8 +782,8 @@ export const dispatchDelivery = (
 						// source of truth.
 						const rawPayload = yield* Effect.tryPromise({
 							try: () => response.json(),
-							catch: () =>
-								makeDeliveryError("Slack returned a non-JSON response", "slack-bot"),
+							catch: (error) =>
+								makeDeliveryError("Slack returned a non-JSON response", "slack-bot", error),
 						})
 						const payload = yield* decodeSlackPostMessageResponse(rawPayload).pipe(
 							Effect.mapError((error) =>
@@ -774,6 +795,14 @@ export const dispatchDelivery = (
 						)
 						if (!payload.ok) {
 							const error = payload.error ?? "unknown_error"
+							// HTTP 200 + `ok:false` is the dominant operational failure here
+							// (`not_in_channel` after a rename/kick). NotificationDispatcher
+							// only records outcome "failed", so annotate the Slack error code
+							// on the span to make it aggregatable.
+							yield* Effect.annotateCurrentSpan({
+								"maple.delivery.destination_type": "slack-bot",
+								"maple.delivery.provider_error": error,
+							})
 							const message =
 								error === "not_in_channel" || error === "channel_not_found"
 									? `Slack rejected the message (${error}) — invite the Maple bot to the channel and try again`

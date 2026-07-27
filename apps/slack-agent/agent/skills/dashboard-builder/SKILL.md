@@ -187,6 +187,28 @@ number, percent, duration_ms, duration_us, duration_s, duration_ns, bytes, reque
 - Prefer one clean series over a noisy split. Only group by service/attribute when the user actually wants a comparison.
 - Briefly state what the data showed before proposing each widget.
 
+## Fixing an existing widget
+
+When the user reports a broken or wrong widget ("the p95 widget on the
+checkout dashboard is broken"), repair it surgically — do not rebuild it:
+
+1. Fetch the current state with get_dashboard (use list_dashboards first if
+   the dashboard is ambiguous) and locate the widget by the title or id the
+   user gave. Never guess a widget's current config.
+2. Treat the fetched widget JSON as the single source of truth. Diagnose what
+   is wrong from the user's description and the config; modify only what the
+   fix requires.
+3. Do NOT change `id`, `layout`, or `visualization` unless the fix explicitly
+   requires it. Preserve `display.title` and other display config that is not
+   implicated by the problem.
+4. If the fix touches the query (endpoint, params, transform), validate it
+   with test_widget_query first — the test-before-propose rule applies to
+   fixes too.
+5. Call update_dashboard_widget with `dashboard_id`, `widget_id`, and a
+   complete corrected `widget_json` (the full widget object as a JSON string),
+   not just the changed fields.
+6. After the user approves, briefly confirm what changed and why.
+
 ## Approvals
 
 add_dashboard_widget and the other dashboard mutations pause for a Slack

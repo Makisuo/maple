@@ -16,11 +16,14 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { toast } from "sonner"
 
 import { ErrorState } from "@/components/common/error-state"
-import { LoaderIcon, SlackIcon } from "@/components/icons"
+import { LoaderIcon, SlackIcon, SlackMonoIcon } from "@/components/icons"
+import { useIsOrgAdmin } from "@/hooks/use-is-org-admin"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import { formatAlertDateTime, getExitErrorMessage } from "@/lib/alerts/form-utils"
+import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
+import { formatRelativeTime } from "@/lib/format"
+import { getExitErrorMessage } from "@/lib/alerts/form-utils"
 import { IntegrationIconPlate, SLACK_ACCENT } from "./integration-catalog"
 import {
 	IntegrationEmpty,
@@ -31,6 +34,46 @@ import {
 	IntegrationEmptyHint,
 	IntegrationEmptyMedia,
 } from "./integration-empty-state"
+
+/** Absolute install time for the relative label's `title` tooltip. */
+const absoluteDateTime = (value: string): string =>
+	new Date(value).toLocaleString(undefined, {
+		month: "short",
+		day: "numeric",
+		year: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+	})
+
+/**
+ * Skeleton for the first status fetch. Models the not-installed resolution — the
+ * common first-run outcome — so the card doesn't jump several hundred pixels
+ * when status lands: three feature tiles above the dashed waiting-room card.
+ */
+function LoadingState() {
+	return (
+		<div className="flex flex-col gap-4">
+			<div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+				{[0, 1, 2].map((index) => (
+					<div
+						key={index}
+						className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card px-4 py-3.5"
+					>
+						<Skeleton className="h-3 w-20" />
+						<Skeleton className="h-4 w-32" />
+						<Skeleton className="h-3 w-full" />
+					</div>
+				))}
+			</div>
+			<div className="flex min-h-70 flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-input px-6 py-10">
+				<Skeleton className="size-14 rounded-xl" />
+				<Skeleton className="h-4 w-72 max-w-full" />
+				<Skeleton className="h-9 w-36 rounded-md" />
+				<Skeleton className="h-3 w-56 max-w-full" />
+			</div>
+		</div>
+	)
+}
 
 /**
  * First-class Slack connection card: install the Maple Slack app via OAuth (a
@@ -47,10 +90,15 @@ export function SlackIntegrationCard() {
 	const statusResult = useAtomValue(statusAtom)
 	const refreshStatus = useAtomRefresh(statusAtom)
 
+	// Same gate the API applies (and always true on self-hosted, which runs as a
+	// single root user).
+	const isAdmin = useIsOrgAdmin()
+	// `useIsOrgAdmin` reports false until the session lands, so the admin-only copy
+	// would briefly tell an admin they aren't one. The controls still stay disabled
+	// while unknown — only the explanation waits for a settled session.
 	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
-	const isAdmin = Result.builder(sessionResult)
-		.onSuccess((session) => session.roles.some((role) => role === "root" || role === "org:admin"))
-		.orElse(() => false)
+	const adminKnown = !isClerkAuthEnabled || !Result.isInitial(sessionResult)
+	const showNotAdmin = adminKnown && !isAdmin
 
 	const install = useAtomSet(MapleApiV2AtomClient.mutation("slackIntegration", "install"), {
 		mode: "promiseExit",
@@ -98,7 +146,7 @@ export function SlackIntegrationCard() {
 	}
 
 	if (isLoading) {
-		return <Skeleton className="h-32 w-full rounded-lg" />
+		return <LoadingState />
 	}
 	if (loadFailed) {
 		return (
@@ -114,7 +162,7 @@ export function SlackIntegrationCard() {
 
 	if (!isInstalled) {
 		return (
-			<IntegrationEmpty icon={SlackIcon} accent={SLACK_ACCENT}>
+			<IntegrationEmpty icon={SlackIcon} backerIcon={SlackMonoIcon} accent={SLACK_ACCENT}>
 				<IntegrationEmptyFeatures>
 					<IntegrationEmptyFeature
 						label="Ask Maple"
@@ -141,14 +189,16 @@ export function SlackIntegrationCard() {
 						{busy === "install" ? (
 							<LoaderIcon size={16} className="animate-spin" />
 						) : (
-							<SlackIcon size={16} />
+							// Monochrome inside the filled primary button, like every sibling
+							// CTA mark — the swap to the loader then reads as motion, not color.
+							<SlackIcon size={16} monochrome />
 						)}
 						Add to Slack
 					</Button>
 					<IntegrationEmptyFooter>
-						{isAdmin
-							? "You'll approve the install in your Slack workspace."
-							: "Only organization admins can install the Slack app."}
+						{showNotAdmin
+							? "Only organization admins can install the Slack app."
+							: "You'll approve the install in your Slack workspace."}
 					</IntegrationEmptyFooter>
 				</IntegrationEmptyCard>
 			</IntegrationEmpty>
@@ -183,23 +233,28 @@ export function SlackIntegrationCard() {
 								</div>
 							) : null}
 							{status?.installed_at ? (
-								<div>Installed {formatAlertDateTime(status.installed_at)}</div>
+								// Relative, like every other integrations surface; the absolute
+								// timestamp stays available on hover.
+								<div title={absoluteDateTime(status.installed_at)}>
+									Installed {formatRelativeTime(status.installed_at)}
+								</div>
 							) : null}
 						</div>
 					) : null}
 
 					<div className="flex flex-wrap gap-2">
+						{/* No spinner here: the confirm dialog stays open for the whole
+						    uninstall, so its own action button carries the busy state. */}
 						<Button
 							size="sm"
 							onClick={() => setConfirmOpen(true)}
 							disabled={!isAdmin || busy !== null}
 							variant="outline"
 						>
-							{busy === "uninstall" ? <LoaderIcon size={14} className="animate-spin" /> : null}
 							Disconnect
 						</Button>
 					</div>
-					{!isAdmin ? (
+					{showNotAdmin ? (
 						<p className="text-[11px] text-muted-foreground">
 							Only organization admins can disconnect the Slack app.
 						</p>

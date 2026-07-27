@@ -96,8 +96,12 @@ export async function purgeForeignClerkCookies(publishableKey: string): Promise<
 				document.cookie = `${name}=;path=/;domain=${domain};${expiry}`
 			}
 		}
-	} catch {
+	} catch (error) {
 		// Best-effort: a failed purge just means the pre-existing (broken)
-		// behavior — never block app boot on it.
+		// behavior — never block app boot on it. But a permanently-failing purge
+		// (e.g. `crypto.subtle` missing on an insecure origin) reproduces exactly
+		// the 403/redirect loop this guard exists to prevent, so leave a
+		// breadcrumb instead of failing silently.
+		console.warn("[clerk-cookie-guard] failed to purge foreign __client_uat cookies", error)
 	}
 }

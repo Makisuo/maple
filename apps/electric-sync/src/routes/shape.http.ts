@@ -228,9 +228,9 @@ export const buildUpstreamShapeUrl = (args: {
  * missing `ELECTRIC_URL`. Pure + exported so the coherence rule is unit-tested.
  */
 export const isElectricConfigCoherent = (creds: {
-	readonly sourceId: string | undefined
-	readonly secret: string | undefined
-}): boolean => (creds.sourceId === undefined) === (creds.secret === undefined)
+	readonly sourceId: Option.Option<unknown>
+	readonly secret: Option.Option<unknown>
+}): boolean => Option.isSome(creds.sourceId) === Option.isSome(creds.secret)
 
 const errorText = (message: string, status: number) =>
 	HttpServerResponse.text(message, {
@@ -249,24 +249,30 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 		const client = yield* HttpClient.HttpClient
 		const resolveTenant = makeResolveTenant(config)
 
+		// Electric Cloud needs `source_id` + `secret` together; a half-configured
+		// deploy would forward a doomed unauthenticated request (401 MISSING_SECRET).
+		// Detect it once at isolate startup and disable sync (503 below) rather than
+		// per-request, and log so the misconfiguration is discoverable in telemetry.
+		// Checked on the raw `Option`s — presence is the whole question, so nothing
+		// is flattened until a value is actually needed on the URL below.
+		const configCoherent = isElectricConfigCoherent({
+			sourceId: config.ELECTRIC_SOURCE_ID,
+			secret: config.ELECTRIC_SECRET,
+		})
+
 		const electricUrl = Option.getOrUndefined(config.ELECTRIC_URL)
 		const sourceId = Option.getOrUndefined(config.ELECTRIC_SOURCE_ID)
 		const secret = Option.match(config.ELECTRIC_SECRET, {
 			onNone: () => undefined,
 			onSome: Redacted.value,
 		})
-		// Electric Cloud needs `source_id` + `secret` together; a half-configured
-		// deploy would forward a doomed unauthenticated request (401 MISSING_SECRET).
-		// Detect it once at isolate startup and disable sync (503 below) rather than
-		// per-request, and log so the misconfiguration is discoverable in telemetry.
-		const configCoherent = isElectricConfigCoherent({ sourceId, secret })
 		if (electricUrl && !configCoherent) {
 			yield* Effect.logWarning(
 				"Electric sync disabled: incoherent Cloud credentials — set both ELECTRIC_SOURCE_ID and ELECTRIC_SECRET, or neither",
 			).pipe(
 				Effect.annotateLogs({
-					hasSourceId: sourceId !== undefined,
-					hasSecret: secret !== undefined,
+					hasSourceId: Option.isSome(config.ELECTRIC_SOURCE_ID),
+					hasSecret: Option.isSome(config.ELECTRIC_SECRET),
 				}),
 			)
 		}
@@ -280,7 +286,11 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 				if (!electricUrl || !configCoherent) {
 					yield* Effect.annotateCurrentSpan({
 						"http.response.status_code": 503,
-						"error.type": "ElectricConfigUnavailable",
+						// Two distinct causes share this branch: no `ELECTRIC_URL` at all
+						// (expected on self-hosted) versus a deploy that half-configured
+						// Cloud credentials (a misconfiguration to chase down). Same
+						// response, different error.type, so traces can tell them apart.
+						"error.type": electricUrl ? "ElectricConfigIncoherent" : "ElectricConfigUnavailable",
 					})
 					return yield* new ElectricSyncUnavailable({
 						response: errorText("Electric sync is not configured", 503),

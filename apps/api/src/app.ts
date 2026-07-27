@@ -375,10 +375,12 @@ export const ApiAuthLive = Layer.mergeAll(ApiAuthorizationLayer, ApiAuthorizatio
 // covers headers, not query parameters — so tracing these requests would retain
 // a live bearer credential in telemetry. There is no per-attribute lever, so the
 // auto server span is suppressed for them; each callback handler carries its own
-// span with safe attributes instead (see `integrations.*OAuthCallback`).
+// span with safe attributes instead (see `integrations.*OAuthCallback` and
+// `slack.oauthCallback`). The second alternative must stay in sync with
+// `SLACK_CALLBACK_PATH` — the Slack app install redirects there.
 // `/oauth/authorize` is deliberately NOT here: its query carries no bearer
 // credential, and `/oauth/token` + `/oauth/revoke` are POSTs (secrets in the body).
-const OAUTH_CALLBACK_PATH = /^\/api\/integrations\/[^/]+\/callback(?:\?|$)/
+const OAUTH_CALLBACK_PATH = /^(?:\/api\/integrations\/[^/]+\/callback|\/oauth\/slack\/callback)(?:\?|$)/
 
 // The OTLP tracer/logger is constructed once at worker module scope and
 // provided to the same runtime as the routes. This shared layer installs the

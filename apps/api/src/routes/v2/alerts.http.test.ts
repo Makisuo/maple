@@ -447,6 +447,97 @@ describe("v2 alerts over HTTP", () => {
 		await harness.dispose()
 	})
 
+	/**
+	 * `toCreateRequest` / `toUpdateRequest` in alert-destinations.http.ts translate
+	 * the snake_case v2 wire params into the internal camelCase destination configs.
+	 * The schemas on either side are covered elsewhere (openapi decode tests,
+	 * AlertsService merge semantics); these exercise the mapping itself end to end,
+	 * so a dropped or misspelled field surfaces as a wrong stored channel rather
+	 * than a silent no-op.
+	 */
+	it("maps slack-bot create params through to the stored channel", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+
+		const created = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "slack-bot",
+			name: "On-call Slack",
+			channel_id: "C0789CHAN",
+			channel_name: "incidents",
+		})
+		expect(created.status).toBe(200)
+		expect(created.body.type).toBe("slack-bot")
+		// `channel_name` → `channelName`, which AlertsService renders as the label.
+		expect(created.body.channel_label).toBe("#incidents")
+		expect(created.body.summary).toBe("#incidents")
+		// The channel id is config, not a secret, but it is never echoed back.
+		expect(JSON.stringify(created.body)).not.toContain("C0789CHAN")
+
+		// `channel_name` is optional on create; without it there is no label.
+		const minimal = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "slack-bot",
+			name: "Bare Slack",
+			channel_id: "C0790BARE",
+		})
+		expect(minimal.status).toBe(200)
+		expect(minimal.body.channel_label).toBeNull()
+		expect(minimal.body.summary).toBe("Slack channel")
+
+		await harness.dispose()
+	})
+
+	it("maps slack-bot update params and never clobbers the stored channel with a blank", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+
+		const created = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "slack-bot",
+			name: "On-call Slack",
+			channel_id: "C0789CHAN",
+			channel_name: "incidents",
+		})
+		expect(created.status).toBe(200)
+		const id: string = created.body.id
+
+		// A supplied channel_name maps through and re-derives the label.
+		const renamed = await harness.request("PATCH", `/v2/alerts/destinations/${id}`, key.secret, {
+			type: "slack-bot",
+			channel_name: "alerts",
+		})
+		expect(renamed.status).toBe(200)
+		expect(renamed.body.channel_label).toBe("#alerts")
+
+		// An omitted channel_name is DROPPED by the mapper (rather than sent as
+		// `channelName: undefined`), so AlertsService keeps the stored channel — a
+		// name-only edit must not wipe it.
+		const nameOnly = await harness.request("PATCH", `/v2/alerts/destinations/${id}`, key.secret, {
+			type: "slack-bot",
+			name: "Primary on-call Slack",
+		})
+		expect(nameOnly.status).toBe(200)
+		expect(nameOnly.body.name).toBe("Primary on-call Slack")
+		expect(nameOnly.body.channel_label).toBe("#alerts")
+
+		// An explicit blank never reaches the mapper: both fields are non-empty
+		// optional strings, so a blank is rejected at decode instead of silently
+		// wiping the stored channel.
+		for (const blank of [{ channel_name: "" }, { channel_id: "" }]) {
+			const rejected = await harness.request("PATCH", `/v2/alerts/destinations/${id}`, key.secret, {
+				type: "slack-bot",
+				...blank,
+			})
+			expect(rejected.status).toBe(400)
+			expect(rejected.body.error).toMatchObject({ type: "invalid_request_error" })
+		}
+
+		// …and the stored channel survived every rejected write.
+		const after = await harness.request("GET", `/v2/alerts/destinations/${id}`, key.secret)
+		expect(after.status).toBe(200)
+		expect(after.body.channel_label).toBe("#alerts")
+
+		await harness.dispose()
+	})
+
 	it("enforces the alerts scope family and rejects malformed ids", async () => {
 		const harness = makeHarness()
 		const readOnly = await harness.bootstrapKey(["alerts:read"])

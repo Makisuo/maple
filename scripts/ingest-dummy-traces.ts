@@ -45,7 +45,10 @@ const FAILURE = 1
 const SPAN_KIND_INTERNAL = 1
 const SPAN_KIND_SERVER = 2
 const SPAN_KIND_CLIENT = 3
-const STATUS_OK = 1
+// Successful spans are left UNSET (0), never OK: per the OTel spec, instrumentation
+// only ever sets Error, and Ok is reserved for an explicit application override — so
+// essentially no real Maple span arrives as Ok and fixture data must not either.
+const STATUS_UNSET = 0
 const STATUS_ERROR = 2
 const SEVERITY_INFO = 9
 const SEVERITY_WARN = 13
@@ -222,7 +225,9 @@ const generateForSha = (sha: string, at: number, opts: Options): GeneratedSha =>
 			startTimeUnixNano: nano(startMs),
 			endTimeUnixNano: nano(startMs + baseLatency),
 			attributes: rootAttrs,
-			status: isError ? { code: STATUS_ERROR, message: "internal server error" } : { code: STATUS_OK },
+			status: isError
+				? { code: STATUS_ERROR, message: "internal server error" }
+				: { code: STATUS_UNSET },
 		}
 
 		// Child spans, all parented to the root (flat tree — plenty for the UI).
@@ -279,7 +284,7 @@ const generateForSha = (sha: string, at: number, opts: Options): GeneratedSha =>
 				startTimeUnixNano: nano(childStart),
 				endTimeUnixNano: nano(childStart + childDur),
 				attributes: childAttrs,
-				status: childErrored ? { code: STATUS_ERROR } : { code: STATUS_OK },
+				status: childErrored ? { code: STATUS_ERROR } : { code: STATUS_UNSET },
 			})
 		}
 
@@ -329,6 +334,10 @@ const generateForSha = (sha: string, at: number, opts: Options): GeneratedSha =>
 
 const resourceAttrs = (opts: Options, sha: string): Record<string, unknown>[] => [
 	attr("service.name", opts.service),
+	// Dual-emitted like every real Maple producer: `deployment.environment.name` is
+	// the canonical OTel key, `deployment.environment` the legacy one the Tinybird
+	// MVs still pre-extract. Emitting only one would hide UI bugs against the other.
+	attr("deployment.environment.name", opts.env),
 	attr("deployment.environment", opts.env),
 	attr("deployment.commit_sha", sha),
 ]

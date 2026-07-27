@@ -34,7 +34,10 @@ fields the message doesn't show.
   - apdex → both lenses: find_slow_traces, find_errors, get_service_top_operations
   - throughput → compare_periods against the prior equivalent window;
     service_map for upstream dependencies that dropped or surged
-  - metric → query_data to pull the raw metric values across the window
+  - metric → query_data or inspect_chart_data to pull the raw metric values
+    across the window
+  - any other signal type → diagnose_service and explore_attributes on the
+    affected service
 - If the alert event is a resolve, focus on root-cause and prevention rather
   than immediate mitigation.
 
@@ -45,9 +48,10 @@ fields the message doesn't show.
    compare_periods' current/previous bounds, or inspect_trace's timestamp);
    never rely on a tool's default "recent" window. For an error, call
    error_detail (with the fingerprint) and diagnose_service; for an anomaly,
-   start with diagnose_service for the affected service; for an alert, see
-   "Alert threads" above; for a free-form question, decide which tools fit and
-   scope to any services named in the thread.
+   start with diagnose_service for the affected service; for an alert, start
+   with diagnose_service for the alerting service, then let the rule's signal
+   type pick the lens (see "Alert threads" above); for a free-form question,
+   decide which tools fit and scope to any services named in the thread.
 2. Pull 1–2 representative traces with inspect_trace and read the failing
    spans. Avoid treating one outlier as representative.
 3. Use search_logs / mine_log_patterns over the same interval to find

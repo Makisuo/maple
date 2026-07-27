@@ -22,7 +22,7 @@ import {
 	type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
 import { parseBase64Aes256GcmKey } from "../lib/Crypto"
-import { resolveSlackBotTokenForDispatch } from "./SlackIntegrationService"
+import { SlackBotTokenResolver } from "./slack-bot-token"
 import { Database } from "../lib/DatabaseLive"
 import { EmailService } from "../lib/EmailService"
 import { Env } from "../lib/Env"
@@ -94,11 +94,12 @@ export interface NotificationDestinationResult {
 const make: Effect.Effect<
 	NotificationDispatcherShape,
 	NotificationDispatchError,
-	Database | Env | EmailService
+	Database | Env | EmailService | SlackBotTokenResolver
 > = Effect.gen(function* () {
 	const database = yield* Database
 	const env = yield* Env
 	const email = yield* EmailService
+	const slackBotToken = yield* SlackBotTokenResolver
 
 	const encryptionKey = yield* parseBase64Aes256GcmKey(
 		Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
@@ -199,11 +200,7 @@ const make: Effect.Effect<
 			DELIVERY_TIMEOUT_MS,
 			request.linkUrl,
 			chatUrl,
-			{
-				sendEmail,
-				resolveSlackBotToken: (orgId) =>
-					resolveSlackBotTokenForDispatch(database, encryptionKey, orgId),
-			},
+			{ sendEmail, resolveSlackBotToken: slackBotToken.resolve },
 		).pipe(Effect.tapError(() => Effect.annotateCurrentSpan({ "maple.delivery.outcome": "failed" })))
 		yield* Effect.annotateCurrentSpan({
 			"maple.delivery.outcome": "delivered",
@@ -319,5 +316,8 @@ export class NotificationDispatcher extends Context.Service<
 	NotificationDispatcher,
 	NotificationDispatcherShape
 >()("@maple/api/services/NotificationDispatcher", { make }) {
-	static readonly layer = Layer.effect(this, this.make)
+	// The resolver is self-provided (it needs only Database + Env, which every
+	// caller already supplies) so wiring stays unchanged in app.ts and the
+	// alerting worker.
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SlackBotTokenResolver.layer))
 }

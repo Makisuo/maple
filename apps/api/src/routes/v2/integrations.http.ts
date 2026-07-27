@@ -15,11 +15,17 @@ import {
 	serviceUnavailable,
 	upstreamError,
 } from "@maple/domain/http/v2"
-import { Effect, Option } from "effect"
+import { Array as Arr, Effect, Option } from "effect"
 import { requireAdmin } from "../../lib/auth"
+import { Env } from "../../lib/Env"
 import type { SlackChannelSummary, SlackInstallStatus } from "../../services/SlackIntegrationService"
 import { SLACK_CALLBACK_PATH, SlackIntegrationService } from "../../services/SlackIntegrationService"
 
+/**
+ * Best-effort origin of the incoming request. `x-forwarded-*` is client-supplied
+ * on any path that does not strip it, so the result is NOT trusted on its own —
+ * every security-relevant use must gate it through {@link isTrustedCallbackOrigin}.
+ */
 export const resolveRequestOrigin = (req: HttpServerRequest.HttpServerRequest): string => {
 	const headers = req.headers as Record<string, string | undefined>
 	const forwardedHost = headers["x-forwarded-host"]
@@ -36,6 +42,52 @@ export const resolveRequestOrigin = (req: HttpServerRequest.HttpServerRequest): 
 	})
 }
 
+const hostnameOf = (url: string): string | null =>
+	Option.match(Option.liftThrowable(() => new URL(url))(), {
+		onNone: () => null,
+		onSome: (parsed) => parsed.hostname.toLowerCase(),
+	})
+
+/** `app.maple.dev` → `maple.dev`; a single-label host is its own parent. */
+const parentDomain = (hostname: string): string => {
+	const dot = hostname.indexOf(".")
+	return dot === -1 ? hostname : hostname.slice(dot + 1)
+}
+
+/**
+ * Whether an origin may be used as the Slack OAuth callback origin.
+ *
+ * The callback URL is embedded in the authorize URL *and* persisted as
+ * `oauth_auth_states.redirectUri`, then replayed as `redirect_uri` in the token
+ * exchange — so an attacker-chosen origin mints an authorize URL pointing at a
+ * host they control. `resolveRequestOrigin` reads `x-forwarded-host`, which any
+ * client can set, so it is only accepted when it belongs to the same host family
+ * as the trusted `MAPLE_APP_BASE_URL`:
+ *
+ *   - every deployed stage puts the web app and the API on sibling hosts under
+ *     one registrable domain (`app.maple.dev` / `api.maple.dev`, `staging` /
+ *     `api-staging`, `app-pr-<n>` / `api-pr-<n>`), and
+ *   - local dev puts them on sibling `*.localhost` hosts (portless proxy) or on
+ *     loopback ports.
+ *
+ * Anything else fails closed; Slack's registered-redirect allowlist is then a
+ * second line of defense rather than the only one.
+ */
+export const isTrustedCallbackOrigin = (origin: string, appBaseUrl: string): boolean => {
+	const host = hostnameOf(origin)
+	const appHost = hostnameOf(appBaseUrl)
+	if (host === null || appHost === null) return false
+	if (host === appHost) return true
+	// Local dev is one family: `*.localhost` (portless proxy) plus loopback IPs
+	// (`bun dev:app`, which serves web and api on different loopback ports).
+	const isLocal = (value: string) =>
+		value === "localhost" || value.endsWith(".localhost") || value.startsWith("127.") || value === "[::1]"
+	if (isLocal(host) || isLocal(appHost)) return isLocal(host) && isLocal(appHost)
+	const parent = parentDomain(host)
+	// Require a dot so a bare TLD (`evil.dev` vs `app.maple.dev`) never matches.
+	return parent.includes(".") && parent === parentDomain(appHost)
+}
+
 const toStatus = (status: SlackInstallStatus): V2SlackIntegrationStatus => ({
 	object: "slack_integration",
 	installed: status.installed,
@@ -47,7 +99,7 @@ const toStatus = (status: SlackInstallStatus): V2SlackIntegrationStatus => ({
 
 const toChannelList = (channels: ReadonlyArray<SlackChannelSummary>): V2SlackChannelList => ({
 	object: "slack_integration.channel_list",
-	channels: channels.map((channel) => ({
+	channels: Arr.map(channels, (channel) => ({
 		id: channel.id,
 		name: channel.name,
 		is_private: channel.isPrivate,
@@ -58,6 +110,7 @@ const toChannelList = (channels: ReadonlyArray<SlackChannelSummary>): V2SlackCha
 export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "slackIntegration", (handlers) =>
 	Effect.gen(function* () {
 		const slack = yield* SlackIntegrationService
+		const env = yield* Env
 
 		return handlers
 			.handle("status", () =>
@@ -88,18 +141,28 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 						),
 					)
 					const req = yield* HttpServerRequest.HttpServerRequest
-					const callbackUrl = `${resolveRequestOrigin(req)}${SLACK_CALLBACK_PATH}`
-					const result = yield* slack
-						.startInstall(tenant.orgId, tenant.userId, callbackUrl)
-						.pipe(
-							Effect.catchTags({
-								"@maple/http/errors/IntegrationsValidationError": (error) =>
-									Effect.fail(serviceUnavailable(error.message)),
-								"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-									Effect.fail(serviceUnavailable(error.message)),
-							}),
+					const origin = resolveRequestOrigin(req)
+					if (!isTrustedCallbackOrigin(origin, env.MAPLE_APP_BASE_URL)) {
+						yield* Effect.logError("Rejected Slack install: untrusted callback origin", {
+							origin,
+						})
+						return yield* Effect.fail(
+							serviceUnavailable("Slack installs are not available from this host"),
 						)
-					return { object: "slack_integration.install" as const, url: result.url } satisfies V2SlackInstallResponse
+					}
+					const callbackUrl = `${origin}${SLACK_CALLBACK_PATH}`
+					const result = yield* slack.startInstall(tenant.orgId, tenant.userId, callbackUrl).pipe(
+						Effect.catchTags({
+							"@maple/http/errors/IntegrationsValidationError": (error) =>
+								Effect.fail(serviceUnavailable(error.message)),
+							"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+								Effect.fail(serviceUnavailable(error.message)),
+						}),
+					)
+					return {
+						object: "slack_integration.install" as const,
+						url: result.url,
+					} satisfies V2SlackInstallResponse
 				}),
 			)
 			.handle("uninstall", () =>
@@ -132,6 +195,17 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 			.handle("channels", () =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					// Admin-gated like install/uninstall: the list leaks the workspace's
+					// channel inventory, including *private* channels the bot has been
+					// invited to, which is not something every org member should be able
+					// to enumerate. `status` deliberately stays ungated — the Slack
+					// integration card renders install state for everyone.
+					yield* requireAdmin(tenant.roles, () =>
+						permissionError(
+							"insufficient_permissions",
+							"Only org admins can list Slack channels",
+						),
+					)
 					const channels = yield* slack.listChannels(tenant.orgId).pipe(
 						Effect.catchTags({
 							"@maple/http/errors/IntegrationsNotConnectedError": (error) =>

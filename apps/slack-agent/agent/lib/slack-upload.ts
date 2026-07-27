@@ -10,6 +10,15 @@
 
 const SLACK_API = "https://slack.com/api";
 
+/**
+ * Every hop is bounded: a stalled Slack connection would otherwise hang the
+ * whole agent turn (and the Slack thread's typing indicator) indefinitely.
+ * The byte PUT gets the longer budget because it actually moves a payload;
+ * the two JSON calls are metadata round-trips.
+ */
+const SLACK_API_TIMEOUT_MS = 10_000;
+const UPLOAD_TIMEOUT_MS = 20_000;
+
 interface SlackApiResponse {
   ok: boolean;
   error?: string;
@@ -28,6 +37,7 @@ async function slackApi<T extends SlackApiResponse>(
       "content-type": contentType,
     },
     body,
+    signal: AbortSignal.timeout(SLACK_API_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`Slack ${method} failed: HTTP ${res.status}`);
@@ -44,18 +54,22 @@ export interface UploadedSlackFile {
   readonly permalink: string | null;
 }
 
-/**
- * Uploads a PNG and shares it into the given channel/thread. Throws on any
- * step failing — the caller degrades to a text sparkline.
- */
-export async function uploadPngToThread(options: {
+export interface UploadPngOptions {
   readonly botToken: string;
   readonly channelId: string;
   readonly threadTs?: string;
   readonly filename: string;
   readonly title: string;
   readonly png: Uint8Array;
-}): Promise<UploadedSlackFile> {
+}
+
+/**
+ * Uploads a PNG and shares it into the given channel/thread. Throws on any
+ * step failing — the caller degrades to a text sparkline.
+ */
+export async function uploadPngToThread(
+  options: UploadPngOptions,
+): Promise<UploadedSlackFile> {
   const { upload_url, file_id } = await slackApi<
     SlackApiResponse & { upload_url: string; file_id: string }
   >(
@@ -72,6 +86,7 @@ export async function uploadPngToThread(options: {
     method: "POST",
     headers: { "content-type": "image/png" },
     body: options.png as unknown as BodyInit,
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
   if (!uploadRes.ok) {
     throw new Error(`Slack file upload failed: HTTP ${uploadRes.status}`);

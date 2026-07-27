@@ -5,10 +5,13 @@ import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
 import { Env } from "../lib/Env"
+import { SlackIntegrationService } from "./SlackIntegrationService"
 import {
 	resolveSlackBotTokenForDispatch,
-	SlackIntegrationService,
-} from "./SlackIntegrationService"
+	slackSecretAad,
+	SlackBotTokenResolver,
+	type SlackSecretColumn,
+} from "./slack-bot-token"
 import { ApiKeysService } from "./ApiKeysService"
 import { OAuthStateRepository } from "./OAuthStateRepository"
 import { Database } from "../lib/DatabaseLive"
@@ -17,10 +20,11 @@ import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } 
 const ENCRYPTION_KEY = Buffer.alloc(32, 7)
 const ENCRYPTION_KEY_B64 = ENCRYPTION_KEY.toString("base64")
 
-/** AES-256-GCM encrypt matching Crypto.ts's format (12-byte iv, base64 fields). */
-const encryptField = (plaintext: string, key: Buffer) => {
+/** AES-256-GCM encrypt matching Crypto.ts's format (12-byte iv, base64 fields, AAD). */
+const encryptField = (plaintext: string, key: Buffer, aad: Buffer) => {
 	const iv = randomBytes(12)
 	const cipher = createCipheriv("aes-256-gcm", key, iv)
+	cipher.setAAD(aad)
 	const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()])
 	return {
 		ciphertext: ciphertext.toString("base64"),
@@ -41,9 +45,7 @@ const makeConfig = (slackConfigured = true) =>
 			MAPLE_INGEST_KEY_ENCRYPTION_KEY: ENCRYPTION_KEY_B64,
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
 			MAPLE_APP_BASE_URL: "https://web.localhost",
-			...(slackConfigured
-				? { SLACK_CLIENT_ID: "123.abc", SLACK_CLIENT_SECRET: "shhh" }
-				: {}),
+			...(slackConfigured ? { SLACK_CLIENT_ID: "123.abc", SLACK_CLIENT_SECRET: "shhh" } : {}),
 		}),
 	)
 
@@ -109,6 +111,42 @@ const slackOAuthFetch = (teamRef: { current: { id: string; name: string } }): ty
 
 const OAUTH_URL = "https://slack.com/api/oauth.v2.access"
 const CONVERSATIONS_URL = "https://slack.com/api/conversations.list"
+const REVOKE_URL = "https://slack.com/api/auth.revoke"
+
+/** A fetch that must never be called — any request fails the test loudly. */
+const neverFetch: typeof globalThis.fetch = ((input: RequestInfo | URL) =>
+	Promise.reject(new Error(`unexpected fetch: ${String(input)}`))) as typeof globalThis.fetch
+
+/**
+ * `oauth.v2.access` + `auth.revoke` in one stub: the install flow and the
+ * uninstall's best-effort upstream revoke both go through the same fetch.
+ * Records every revoke call so the bearer token can be asserted.
+ */
+const slackInstallAndRevokeFetch = (
+	teamRef: { current: { id: string; name: string } },
+	revokeCalls: Array<string | null>,
+	revokeResponse: () => Response | Promise<Response> = () => jsonResponse({ ok: true }),
+): typeof globalThis.fetch =>
+	((input: RequestInfo | URL, init?: RequestInit) => {
+		const url = String(input)
+		if (url.startsWith(OAUTH_URL)) {
+			return Promise.resolve(
+				jsonResponse({
+					ok: true,
+					access_token: `xoxb-${teamRef.current.id}`,
+					token_type: "bot",
+					scope: "chat:write",
+					bot_user_id: "U0BOT",
+					team: teamRef.current,
+				}),
+			)
+		}
+		if (url.startsWith(REVOKE_URL)) {
+			revokeCalls.push(new Headers(init?.headers).get("authorization"))
+			return Promise.resolve(revokeResponse())
+		}
+		return Promise.reject(new Error(`unexpected fetch: ${url}`))
+	}) as typeof globalThis.fetch
 
 /** A fetch stub scoped to one Slack endpoint; anything else rejects. */
 const slackApiFetch = (
@@ -138,13 +176,17 @@ const stateFromInstallUrl = (url: string): string => {
 const trackedDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(trackedDbs))
 
+const aadFor = (opts: { orgId: string; teamId: string }, column: SlackSecretColumn) =>
+	slackSecretAad(opts.orgId, opts.teamId, column)
+
 /** Insert an active, encrypted slack_workspaces row directly (bypasses OAuth). */
 const insertWorkspace = async (
 	testDb: TestDb,
 	opts: { id: string; orgId: string; teamId: string; teamName: string; botToken: string; apiKey: string },
 ) => {
-	const bot = encryptField(opts.botToken, ENCRYPTION_KEY)
-	const key = encryptField(opts.apiKey, ENCRYPTION_KEY)
+	// Secrets are AAD-bound to (orgId, teamId, column) — fixtures must match.
+	const bot = encryptField(opts.botToken, ENCRYPTION_KEY, aadFor(opts, "bot_token"))
+	const key = encryptField(opts.apiKey, ENCRYPTION_KEY, aadFor(opts, "api_key_secret"))
 	await executeSql(
 		testDb,
 		`INSERT INTO slack_workspaces (
@@ -288,29 +330,174 @@ describe("SlackIntegrationService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
-	it.effect("uninstall revokes the workspace so it reads as not-installed", () => {
+	it.effect(
+		"uninstall revokes the workspace so it reads as not-installed, and kills the token at Slack",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const revokeCalls: Array<string | null> = []
+			return Effect.gen(function* () {
+				yield* Effect.promise(() =>
+					insertWorkspace(testDb, {
+						id: "sw_2",
+						orgId: "org_b",
+						teamId: "T0999",
+						teamName: "Beta",
+						botToken: "xoxb-b",
+						apiKey: "maple_ak_b",
+					}),
+				)
+				const slack = yield* SlackIntegrationService
+				const result = yield* slack.uninstall(asOrgId("org_b"))
+				assert.strictEqual(result.uninstalled, true)
+
+				// Forgetting the token locally would leave a live `xoxb-` token on the
+				// workspace — auth.revoke is called with the decrypted bot token.
+				assert.deepStrictEqual(revokeCalls, ["Bearer xoxb-b"])
+
+				const status = yield* slack.getStatus(asOrgId("org_b"))
+				assert.strictEqual(status.installed, false)
+				// resolveForBot skips revoked rows too
+				const error = yield* Effect.flip(slack.resolveForBot("T0999"))
+				assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsNotConnectedError")
+
+				// Slack confirmed the revoke, so both secrets are dropped — a revoked row
+				// must not keep decryptable credentials.
+				const secrets = yield* Effect.promise(() =>
+					queryFirstRow<{
+						bot_token_ciphertext: string | null
+						bot_token_iv: string | null
+						bot_token_tag: string | null
+						api_key_secret_ciphertext: string | null
+					}>(
+						testDb,
+						"SELECT bot_token_ciphertext, bot_token_iv, bot_token_tag, api_key_secret_ciphertext FROM slack_workspaces WHERE team_id = 'T0999'",
+					),
+				)
+				assert.isNull(secrets?.bot_token_ciphertext)
+				assert.isNull(secrets?.bot_token_iv)
+				assert.isNull(secrets?.bot_token_tag)
+				assert.isNull(secrets?.api_key_secret_ciphertext)
+			}).pipe(
+				Effect.provide(
+					withFetch(
+						testDb,
+						slackInstallAndRevokeFetch({ current: { id: "T0999", name: "Beta" } }, revokeCalls),
+					),
+				),
+			)
+		},
+	)
+
+	it.effect(
+		"uninstall reports uninstalled:false (and touches no upstream) when nothing is installed",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			return Effect.gen(function* () {
+				const slack = yield* SlackIntegrationService
+				// No active row → the whole revoke/auth.revoke path is skipped, so
+				// `neverFetch` proves nothing was attempted upstream.
+				const result = yield* slack.uninstall(asOrgId("org_nothing"))
+				assert.strictEqual(result.uninstalled, false)
+			}).pipe(Effect.provide(withFetch(testDb, neverFetch)))
+		},
+	)
+
+	it.effect("uninstall still succeeds when Slack's auth.revoke fails", () => {
 		const testDb = createTestDb(trackedDbs)
+		const revokeCalls: Array<string | null> = []
 		return Effect.gen(function* () {
 			yield* Effect.promise(() =>
 				insertWorkspace(testDb, {
-					id: "sw_2",
-					orgId: "org_b",
-					teamId: "T0999",
-					teamName: "Beta",
-					botToken: "xoxb-b",
-					apiKey: "maple_ak_b",
+					id: "sw_rv",
+					orgId: "org_rv",
+					teamId: "T-RV",
+					teamName: "Revoked",
+					botToken: "xoxb-rv",
+					apiKey: "maple_ak_rv",
 				}),
 			)
 			const slack = yield* SlackIntegrationService
-			const result = yield* slack.uninstall(asOrgId("org_b"))
+			// Slack answers HTTP 200 with `{ ok: false }` on logical failures — an
+			// already-dead token is the common case, and it must not strand the
+			// workspace as installed.
+			const result = yield* slack.uninstall(asOrgId("org_rv"))
+			assert.strictEqual(result.uninstalled, true)
+			assert.deepStrictEqual(revokeCalls, ["Bearer xoxb-rv"])
+
+			const status = yield* slack.getStatus(asOrgId("org_rv"))
+			assert.strictEqual(status.installed, false)
+
+			// Slack did NOT confirm the revoke, so the bot token is kept — it is the
+			// only way to retry killing a token that may still be live upstream. The
+			// Maple key secret goes regardless (revocation only needs `apiKeyId`).
+			const secrets = yield* Effect.promise(() =>
+				queryFirstRow<{
+					bot_token_ciphertext: string | null
+					api_key_secret_ciphertext: string | null
+				}>(
+					testDb,
+					"SELECT bot_token_ciphertext, api_key_secret_ciphertext FROM slack_workspaces WHERE team_id = 'T-RV'",
+				),
+			)
+			assert.isString(secrets?.bot_token_ciphertext)
+			assert.isNull(secrets?.api_key_secret_ciphertext)
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackInstallAndRevokeFetch(
+						{ current: { id: "T-RV", name: "Revoked" } },
+						revokeCalls,
+						() => jsonResponse({ ok: false, error: "invalid_auth" }),
+					),
+				),
+			),
+		)
+	})
+
+	it.effect("uninstall revokes the API key minted for the bot", () => {
+		const testDb = createTestDb(trackedDbs)
+		const teamRef = { current: { id: "T-KEY", name: "KeyOrg" } }
+		const revokeCalls: Array<string | null> = []
+		return Effect.gen(function* () {
+			const slack = yield* SlackIntegrationService
+			const start = yield* slack.startInstall(asOrgId("org_key"), asUserId("user_key"), "https://cb")
+			yield* slack.completeInstall("code_k", stateFromInstallUrl(start.url))
+
+			const workspace = yield* Effect.promise(() =>
+				queryFirstRow<{ api_key_id: string }>(
+					testDb,
+					"SELECT api_key_id FROM slack_workspaces WHERE team_id = 'T-KEY'",
+				),
+			)
+			assert.isString(workspace?.api_key_id)
+			const beforeUninstall = yield* Effect.promise(() =>
+				queryFirstRow<{ revoked: boolean }>(testDb, "SELECT revoked FROM api_keys WHERE id = $1", [
+					workspace!.api_key_id,
+				]),
+			)
+			assert.strictEqual(beforeUninstall?.revoked, false)
+
+			const result = yield* slack.uninstall(asOrgId("org_key"))
 			assert.strictEqual(result.uninstalled, true)
 
-			const status = yield* slack.getStatus(asOrgId("org_b"))
-			assert.strictEqual(status.installed, false)
-			// resolveForBot skips revoked rows too
-			const error = yield* Effect.flip(slack.resolveForBot("T0999"))
-			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsNotConnectedError")
-		}).pipe(Effect.provide(makeLayer(testDb)))
+			// The bot's full-access key must not outlive the installation.
+			const afterUninstall = yield* Effect.promise(() =>
+				queryFirstRow<{ revoked: boolean }>(testDb, "SELECT revoked FROM api_keys WHERE id = $1", [
+					workspace!.api_key_id,
+				]),
+			)
+			assert.strictEqual(afterUninstall?.revoked, true)
+			assert.deepStrictEqual(revokeCalls, ["Bearer xoxb-T-KEY"])
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(
+					makeLayer(testDb),
+					testDb.layer,
+					Layer.succeed(FetchHttpClient.Fetch, slackInstallAndRevokeFetch(teamRef, revokeCalls)),
+				),
+			),
+		)
 	})
 
 	it.effect("resolveSlackBotTokenForDispatch decrypts the active workspace bot token", () => {
@@ -330,6 +517,109 @@ describe("SlackIntegrationService", () => {
 			const token = yield* resolveSlackBotTokenForDispatch(database, ENCRYPTION_KEY, "org_c")
 			assert.strictEqual(token, "xoxb-dispatch-token")
 		}).pipe(Effect.provide(databaseLayer(testDb)))
+	})
+
+	it.effect("SlackBotTokenResolver resolves the same token through the service", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_res",
+					orgId: "org_res",
+					teamId: "T-RES",
+					teamName: "Res",
+					botToken: "xoxb-resolver",
+					apiKey: "maple_ak_res",
+				}),
+			)
+			const resolver = yield* SlackBotTokenResolver
+			assert.strictEqual(yield* resolver.resolve("org_res"), "xoxb-resolver")
+		}).pipe(
+			Effect.provide(
+				SlackBotTokenResolver.layer.pipe(
+					Layer.provide(testDb.layer),
+					Layer.provide(Env.layer),
+					Layer.provide(makeConfig()),
+				),
+			),
+		)
+	})
+
+	it.effect("a bot-token ciphertext relocated onto another org's row does not decrypt", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_src",
+					orgId: "org_src",
+					teamId: "T-SRC",
+					teamName: "Src",
+					botToken: "xoxb-source",
+					apiKey: "maple_ak_src",
+				}),
+			)
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_dst",
+					orgId: "org_dst",
+					teamId: "T-DST",
+					teamName: "Dst",
+					botToken: "xoxb-dest",
+					apiKey: "maple_ak_dst",
+				}),
+			)
+			// An attacker with DB write access copies org_src's bot-token triple onto
+			// org_dst's row. The AAD binds it to (org_id, team_id, column), so the GCM
+			// tag check fails instead of handing org_dst a token it never installed.
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`UPDATE slack_workspaces dst SET
+						bot_token_ciphertext = src.bot_token_ciphertext,
+						bot_token_iv = src.bot_token_iv,
+						bot_token_tag = src.bot_token_tag
+					FROM slack_workspaces src
+					WHERE dst.id = 'sw_dst' AND src.id = 'sw_src'`,
+				),
+			)
+			const database = yield* Database
+			const error = yield* Effect.flip(
+				resolveSlackBotTokenForDispatch(database, ENCRYPTION_KEY, "org_dst"),
+			)
+			assert.include(error.message, "decrypt")
+		}).pipe(Effect.provide(databaseLayer(testDb)))
+	})
+
+	it.effect("the bot token and the Maple API key ciphertexts are not interchangeable", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_swap",
+					orgId: "org_swap",
+					teamId: "T-SWAP",
+					teamName: "Swap",
+					botToken: "xoxb-swap",
+					apiKey: "maple_ak_swap",
+				}),
+			)
+			// Same row, columns swapped — the AAD names the column, so neither side
+			// decrypts.
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`UPDATE slack_workspaces SET
+						bot_token_ciphertext = api_key_secret_ciphertext,
+						bot_token_iv = api_key_secret_iv,
+						bot_token_tag = api_key_secret_tag
+					WHERE id = 'sw_swap'`,
+				),
+			)
+			const slack = yield* SlackIntegrationService
+			const error = yield* Effect.flip(slack.resolveForBot("T-SWAP"))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsPersistenceError")
+			assert.include(error.message, "decrypt")
+		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
 	it.effect("resolveSlackBotTokenForDispatch fails when no active install exists", () => {
@@ -485,88 +775,113 @@ describe("SlackIntegrationService", () => {
 		}).pipe(Effect.provide(withFetch(testDb, slackOAuthFetch(teamRef))))
 	})
 
-	it.effect("completeInstall rejects a cross-org rebind that lands after the pre-check (transactional race)", () => {
-		const testDb = createTestDb(trackedDbs)
-		const teamRef = { current: { id: "T-race", name: "Race" } }
-		// Injected between the pre-check and the transaction (apiKeys.create is the
-		// only seam in between): a "concurrent" install binds T-race to org_victim.
-		let injected = false
-		const inject = async () => {
-			if (injected) return
-			injected = true
-			await insertWorkspace(testDb, {
-				id: "sw_victim",
-				orgId: "org_victim",
-				teamId: "T-race",
-				teamName: "Victim",
-				botToken: "xoxb-victim",
-				apiKey: "maple_ak_victim",
-			})
-		}
-		return Effect.gen(function* () {
-			// org_b already has an active workspace for a different team — the
-			// aborted transaction must roll back the revoke-others step for it.
-			yield* Effect.promise(() =>
-				insertWorkspace(testDb, {
-					id: "sw_b_old",
-					orgId: "org_b",
-					teamId: "T-old",
-					teamName: "Old",
-					botToken: "xoxb-old",
-					apiKey: "maple_ak_old",
-				}),
-			)
-			const slack = yield* SlackIntegrationService
-			const start = yield* slack.startInstall(asOrgId("org_b"), asUserId("user_b"), "https://cb")
-			const error = yield* Effect.flip(slack.completeInstall("code_r", stateFromInstallUrl(start.url)))
-			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsForbiddenError")
-			assert.isTrue(injected, "the conflicting row must have been injected mid-install")
+	it.effect(
+		"completeInstall rejects a cross-org rebind that lands after the pre-check (transactional race)",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const teamRef = { current: { id: "T-race", name: "Race" } }
+			// Injected between the pre-check and the transaction (apiKeys.create is the
+			// only seam in between): a "concurrent" install binds T-race to org_victim.
+			let injected = false
+			const inject = async () => {
+				if (injected) return
+				injected = true
+				await insertWorkspace(testDb, {
+					id: "sw_victim",
+					orgId: "org_victim",
+					teamId: "T-race",
+					teamName: "Victim",
+					botToken: "xoxb-victim",
+					apiKey: "maple_ak_victim",
+				})
+			}
+			return Effect.gen(function* () {
+				// org_b already has an active workspace for a different team — the
+				// aborted transaction must roll back the revoke-others step for it.
+				yield* Effect.promise(() =>
+					insertWorkspace(testDb, {
+						id: "sw_b_old",
+						orgId: "org_b",
+						teamId: "T-old",
+						teamName: "Old",
+						botToken: "xoxb-old",
+						apiKey: "maple_ak_old",
+					}),
+				)
+				const slack = yield* SlackIntegrationService
+				const start = yield* slack.startInstall(asOrgId("org_b"), asUserId("user_b"), "https://cb")
+				const error = yield* Effect.flip(
+					slack.completeInstall("code_r", stateFromInstallUrl(start.url)),
+				)
+				assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsForbiddenError")
+				assert.isTrue(injected, "the conflicting row must have been injected mid-install")
 
-			// The victim org's binding is unchanged.
-			const victim = yield* Effect.promise(() =>
-				queryFirstRow<{ org_id: string; revoked_at: string | null }>(
-					testDb,
-					"SELECT org_id, revoked_at FROM slack_workspaces WHERE team_id = 'T-race'",
+				// The victim org's binding is unchanged.
+				const victim = yield* Effect.promise(() =>
+					queryFirstRow<{ org_id: string; revoked_at: string | null }>(
+						testDb,
+						"SELECT org_id, revoked_at FROM slack_workspaces WHERE team_id = 'T-race'",
+					),
+				)
+				assert.strictEqual(victim?.org_id, "org_victim")
+				assert.isNull(victim?.revoked_at)
+
+				// org_b's prior workspace is still active — the in-transaction
+				// revocation rolled back with the aborted upsert.
+				const oldRow = yield* Effect.promise(() =>
+					queryFirstRow<{ revoked_at: string | null }>(
+						testDb,
+						"SELECT revoked_at FROM slack_workspaces WHERE team_id = 'T-old'",
+					),
+				)
+				assert.isNull(oldRow?.revoked_at)
+
+				// The key was minted before the transaction that then aborted; leaving it
+				// behind would hand org_b an active, unusable full-access key. (The only
+				// api_keys row for org_b is that mint — the workspace fixtures above
+				// reference key ids that were never created.)
+				const mintedKeys = yield* Effect.promise(() =>
+					queryFirstRow<{ n: number; revoked_n: number }>(
+						testDb,
+						"SELECT count(*)::int AS n, count(*) FILTER (WHERE revoked)::int AS revoked_n FROM api_keys WHERE org_id = 'org_b'",
+					),
+				)
+				assert.strictEqual(mintedKeys?.n, 1)
+				assert.strictEqual(mintedKeys?.revoked_n, 1)
+			}).pipe(
+				Effect.provide(
+					withFetch(testDb, slackOAuthFetch(teamRef), apiKeysWithInjectedCreate(inject)),
 				),
 			)
-			assert.strictEqual(victim?.org_id, "org_victim")
-			assert.isNull(victim?.revoked_at)
-
-			// org_b's prior workspace is still active — the in-transaction
-			// revocation rolled back with the aborted upsert.
-			const oldRow = yield* Effect.promise(() =>
-				queryFirstRow<{ revoked_at: string | null }>(
-					testDb,
-					"SELECT revoked_at FROM slack_workspaces WHERE team_id = 'T-old'",
-				),
-			)
-			assert.isNull(oldRow?.revoked_at)
-		}).pipe(Effect.provide(withFetch(testDb, slackOAuthFetch(teamRef), apiKeysWithInjectedCreate(inject))))
-	})
+		},
+	)
 
 	// --- exchangeCode failure paths (via completeInstall) ---------------------
 
-	it.effect("completeInstall surfaces Slack's ok:false as a validation error carrying Slack's error string", () => {
-		const testDb = createTestDb(trackedDbs)
-		return Effect.gen(function* () {
-			const slack = yield* SlackIntegrationService
-			const start = yield* slack.startInstall(asOrgId("org_a"), asUserId("user_a"), "https://cb")
-			const state = stateFromInstallUrl(start.url)
-			// Boundary check: at exactly the TTL the state is still valid, so the
-			// flow proceeds past expiry and into the (failing) code exchange.
-			yield* TestClock.adjust(SLACK_STATE_TTL_MS)
-			const error = yield* Effect.flip(slack.completeInstall("code_bad", state))
-			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
-			assert.include(error.message, "invalid_code")
-		}).pipe(
-			Effect.provide(
-				withFetch(
-					testDb,
-					slackApiFetch(OAUTH_URL, () => jsonResponse({ ok: false, error: "invalid_code" })),
+	it.effect(
+		"completeInstall surfaces Slack's ok:false as a validation error carrying Slack's error string",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			return Effect.gen(function* () {
+				const slack = yield* SlackIntegrationService
+				const start = yield* slack.startInstall(asOrgId("org_a"), asUserId("user_a"), "https://cb")
+				const state = stateFromInstallUrl(start.url)
+				// Boundary check: at exactly the TTL the state is still valid, so the
+				// flow proceeds past expiry and into the (failing) code exchange.
+				yield* TestClock.adjust(SLACK_STATE_TTL_MS)
+				const error = yield* Effect.flip(slack.completeInstall("code_bad", state))
+				assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
+				assert.include(error.message, "invalid_code")
+			}).pipe(
+				Effect.provide(
+					withFetch(
+						testDb,
+						slackApiFetch(OAUTH_URL, () => jsonResponse({ ok: false, error: "invalid_code" })),
+					),
 				),
-			),
-		)
-	})
+			)
+		},
+	)
 
 	it.effect("completeInstall maps a non-JSON OAuth response to an upstream error", () => {
 		const testDb = createTestDb(trackedDbs)
@@ -602,7 +917,10 @@ describe("SlackIntegrationService", () => {
 		}).pipe(
 			// `ok` must be a boolean — a JSON payload with the wrong shape fails decode.
 			Effect.provide(
-				withFetch(testDb, slackApiFetch(OAUTH_URL, () => jsonResponse({ ok: "yes", team: 42 }))),
+				withFetch(
+					testDb,
+					slackApiFetch(OAUTH_URL, () => jsonResponse({ ok: "yes", team: 42 })),
+				),
 			),
 		)
 	})
@@ -769,7 +1087,9 @@ describe("SlackIntegrationService", () => {
 			Effect.provide(
 				withFetch(
 					testDb,
-					slackApiFetch(CONVERSATIONS_URL, () => jsonResponse({ ok: false, error: "invalid_auth" })),
+					slackApiFetch(CONVERSATIONS_URL, () =>
+						jsonResponse({ ok: false, error: "invalid_auth" }),
+					),
 				),
 			),
 		)
@@ -829,7 +1149,9 @@ describe("SlackIntegrationService", () => {
 			Effect.provide(
 				withFetch(
 					testDb,
-					slackApiFetch(CONVERSATIONS_URL, () => jsonResponse({ ok: true, channels: [{ id: 42 }] })),
+					slackApiFetch(CONVERSATIONS_URL, () =>
+						jsonResponse({ ok: true, channels: [{ id: 42 }] }),
+					),
 				),
 			),
 		)

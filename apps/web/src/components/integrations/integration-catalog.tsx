@@ -36,7 +36,34 @@ export type IntegrationId =
 export const GITHUB_ACCENT = "#181717"
 export const HAZEL_ACCENT = "#F46F0F"
 export const CLOUDFLARE_ACCENT = "#F38020"
-export const SLACK_ACCENT = "#4A154B"
+
+/**
+ * Slack's deep aubergine — the brand's identity color, and the light-theme value.
+ * It is oklch(0.267), i.e. *darker* than the dark `--card` (oklch 0.224), so every
+ * accent consumer collapses on the dark canvas: the 16% plate wash below lands at
+ * 1.01:1 against the card, and the destination picker's 1.5px selected ring at
+ * 1.23:1. On light it is 14:1 against the card — keep it there.
+ */
+export const SLACK_ACCENT_ON_LIGHT = "#4A154B"
+/**
+ * Dark-canvas stand-in: the same aubergine hue lifted onto the dark canvas —
+ * oklch(0.58 0.16 330) against the brand's oklch(0.267 0.107 328), so it still
+ * reads as Slack purple rather than a new brand color. It takes the selected ring
+ * to 3.68:1 (over the 3:1 bar for non-text UI) and the wash to ΔL 0.042 in oklab,
+ * 6× the aubergine's 0.007 and two thirds of the GitHub neutral fallback's 0.065.
+ *
+ * Not the mark's sky blue (#36C5F0), tempting as its 8.5:1 ring is: `accent` also
+ * paints the destination dialog's save button, which hard-codes white label text —
+ * the blue drops that to 2.0:1, while this holds 4.65:1.
+ */
+export const SLACK_ACCENT_ON_DARK = "#AD51A7"
+/**
+ * `light-dark()` resolves against the `color-scheme` the theme hook pins on the
+ * root element, so one constant covers both canvases wherever a raw brand color
+ * is expected. Consumers must combine it with `color-mix()`, never hex-alpha
+ * concatenation.
+ */
+export const SLACK_ACCENT = `light-dark(${SLACK_ACCENT_ON_LIGHT}, ${SLACK_ACCENT_ON_DARK})`
 
 export interface CatalogEntry {
 	readonly id: IntegrationId
@@ -114,6 +141,9 @@ const CATALOG: ReadonlyArray<CatalogEntry> = [
 		description:
 			"Install the Maple Slack app — ask Maple questions in Slack and route alerts to channels.",
 		icon: SlackIcon,
+		// Theme-aware by construction (see SLACK_ACCENT). The `iconClassName` escape
+		// hatch GitHub uses can't help here: Slack's mark is multicolor, so tinting
+		// the glyph via className does nothing — the accent itself has to move.
 		accent: SLACK_ACCENT,
 		docsUrl: "https://maple.dev/docs/integrations/slack",
 	},

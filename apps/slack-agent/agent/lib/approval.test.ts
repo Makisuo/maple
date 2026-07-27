@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ApprovalContext } from "eve/tools";
 import {
   baseToolName,
@@ -129,7 +131,50 @@ describe("mapleToolApproval", () => {
 // Mirrors apps/api/src/mcp/tools/mutating.ts and
 // apps/chat-flue/src/lib/approval.ts. If this snapshot fails, either sync all
 // three copies deliberately or revert the accidental edit.
+
+/**
+ * The source of truth, read off disk. A literal snapshot only catches edits to
+ * THIS copy; the dangerous drift is the other direction — a new mutating tool
+ * added in apps/api that never reaches this set, which then executes in Slack
+ * with no approval card. Nothing else catches that: this app is outside the
+ * bun workspace (so it cannot import the set) and outside CI.
+ *
+ * Skipped when the monorepo isn't on disk — the Docker build context is
+ * apps/slack-agent only, so the file is genuinely absent in the container.
+ */
+const MUTATING_SOURCE_PATH = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "..",
+  "api",
+  "src",
+  "mcp",
+  "tools",
+  "mutating.ts",
+);
+
+function readSourceOfTruthNames(): string[] {
+  const source = readFileSync(MUTATING_SOURCE_PATH, "utf8");
+  const setBody = /new Set\(\[([\s\S]*?)\]\)/u.exec(source)?.[1];
+  if (!setBody) {
+    throw new Error(
+      `Could not find the MUTATING_TOOL_NAMES set literal in ${MUTATING_SOURCE_PATH}`,
+    );
+  }
+  return [...setBody.matchAll(/"([^"]+)"/gu)].map((match) => match[1]!);
+}
+
 describe("MUTATING_TOOL_NAMES", () => {
+  test.skipIf(!existsSync(MUTATING_SOURCE_PATH))(
+    "matches apps/api/src/mcp/tools/mutating.ts (the source of truth)",
+    () => {
+      const source = readSourceOfTruthNames();
+      expect(source.length).toBeGreaterThan(0);
+      expect([...MUTATING_TOOL_NAMES].sort()).toEqual(source.sort());
+    },
+  );
+
   test("matches the mirrored literal set", () => {
     expect([...MUTATING_TOOL_NAMES].sort()).toEqual(
       [

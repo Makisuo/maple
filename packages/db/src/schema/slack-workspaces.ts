@@ -10,7 +10,14 @@ import { index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-cor
 //
 // Unlike normal API keys — which are stored hash-only — the bot needs the raw
 // `maple_ak_…` secret at runtime, so we keep it encrypted (AES-256-GCM, same
-// column pattern as `alert_destinations`) alongside the key id.
+// column pattern as `alert_destinations`) alongside the key id. The ciphertexts
+// are bound to `(org_id, team_id, column)` via GCM additional authenticated data
+// (`slackSecretAad`), so a triple cannot be relocated to another row.
+//
+// `org_id` carries no foreign key: orgs live in Clerk, not Postgres, so no table
+// in this schema references them. Org deletion is handled by the explicit
+// `ORG_SCOPED_TABLES` purge list in `apps/api/src/services/OrganizationService.ts`
+// — this table must be listed there.
 // ---------------------------------------------------------------------------
 
 export const slackWorkspaces = pgTable(
@@ -23,17 +30,20 @@ export const slackWorkspaces = pgTable(
 		teamName: text("team_name"),
 		botUserId: text("bot_user_id"),
 		scope: text("scope"),
-		// Encrypted Slack bot token (`xoxb-…`).
-		botTokenCiphertext: text("bot_token_ciphertext").notNull(),
-		botTokenIv: text("bot_token_iv").notNull(),
-		botTokenTag: text("bot_token_tag").notNull(),
+		// Encrypted Slack bot token (`xoxb-…`). Nullable so uninstall can drop the
+		// ciphertext once Slack has confirmed the token is dead — a revoked row must
+		// not keep a decryptable secret around forever.
+		botTokenCiphertext: text("bot_token_ciphertext"),
+		botTokenIv: text("bot_token_iv"),
+		botTokenTag: text("bot_token_tag"),
 		// Minted Maple API key handed to the bot. `apiKeyId` references the
 		// `api_keys` row (for revocation); the encrypted columns hold the raw
-		// `maple_ak_…` secret so we can decrypt and forward it to the bot.
+		// `maple_ak_…` secret so we can decrypt and forward it to the bot. Nullable
+		// for the same reason as the bot token — revocation only needs `apiKeyId`.
 		apiKeyId: text("api_key_id"),
-		apiKeySecretCiphertext: text("api_key_secret_ciphertext").notNull(),
-		apiKeySecretIv: text("api_key_secret_iv").notNull(),
-		apiKeySecretTag: text("api_key_secret_tag").notNull(),
+		apiKeySecretCiphertext: text("api_key_secret_ciphertext"),
+		apiKeySecretIv: text("api_key_secret_iv"),
+		apiKeySecretTag: text("api_key_secret_tag"),
 		installedByUserId: text("installed_by_user_id"),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
@@ -42,11 +52,14 @@ export const slackWorkspaces = pgTable(
 		revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
 	},
 	(table) => [
+		// One row per Slack team, ever: a re-install upserts the existing row in
+		// place, so this table holds current state, not install history.
 		uniqueIndex("slack_workspaces_team_id_idx").on(table.teamId),
 		index("slack_workspaces_org_idx").on(table.orgId),
 		// Enforce at most one ACTIVE installation per org. Revoked rows are exempt so
-		// history (and re-installs) can coexist. Consumers select the single active
-		// row per org, so this invariant keeps that lookup unambiguous.
+		// an org can install a different team while the old row stays revoked.
+		// Consumers select the single active row per org, so this invariant keeps
+		// that lookup unambiguous.
 		uniqueIndex("slack_workspaces_active_org_idx")
 			.on(table.orgId)
 			.where(sql`${table.revokedAt} IS NULL`),

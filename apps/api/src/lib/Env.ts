@@ -47,9 +47,10 @@ export interface EnvShape {
 	readonly SLACK_CLIENT_ID: Option.Option<string>
 	readonly SLACK_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
 	/**
-	 * Optional dedicated bearer secret for the internal Slack-bot resolve
-	 * endpoint, so the Railway bot can hold a token distinct from the
-	 * MCP-internal `INTERNAL_SERVICE_TOKEN`. Falls back to that token when unset.
+	 * Dedicated bearer secret for the internal Slack-bot resolve endpoint, kept
+	 * distinct from the MCP-internal `INTERNAL_SERVICE_TOKEN` — there is no
+	 * fallback to it, since that token must not unlock every org's bot token.
+	 * The endpoint answers 401 while this is unset.
 	 */
 	readonly SLACK_INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly GITHUB_APP_ID: Option.Option<string>

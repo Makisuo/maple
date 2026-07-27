@@ -11,7 +11,7 @@ import {
 	V2AlertDestinationMutationResponse,
 	V2AlertDestinationUpdateParams,
 } from "./alert-destinations"
-import { V2SlackChannelList, V2SlackIntegrationStatus } from "./integrations"
+import { V2SlackChannel, V2SlackChannelList, V2SlackIntegrationStatus } from "./integrations"
 import { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "./anomalies"
 import { V2ApiKey, V2ApiKeyCreateParams, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
 import { V2Investigation } from "./investigations"
@@ -332,14 +332,93 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(decodedStatus.installed).toBe(true)
 		expect(decodedStatus.team_id).toBe("T0123ABCD")
 
-		// The channel list carries no authored example — freeze a wire-shape one here.
-		expect(schemas["SlackChannelList"], "SlackChannelList component present").toBeDefined()
-		const channelList = Schema.decodeUnknownSync(V2SlackChannelList)({
-			object: "slack_integration.channel_list",
-			channels: [{ id: "C0789CHAN", name: "incidents", is_private: false, is_member: true }],
-		})
-		expect(channelList.object).toBe("slack_integration.channel_list")
-		expect(channelList.channels[0]?.id).toBe("C0789CHAN")
+		const channel = schemas["SlackChannel"]
+		expect(channel, "SlackChannel component present").toBeDefined()
+		expect(channel.examples).toHaveLength(1)
+		const decodedChannel = Schema.decodeUnknownSync(V2SlackChannel)(channel.examples[0])
+		expect(decodedChannel.id).toBe("C0789CHAN")
+		expect(decodedChannel.is_private).toBe(false)
+
+		const list = schemas["SlackChannelList"]
+		expect(list, "SlackChannelList component present").toBeDefined()
+		expect(list.examples).toHaveLength(1)
+		const decodedList = Schema.decodeUnknownSync(V2SlackChannelList)(list.examples[0])
+		expect(decodedList.object).toBe("slack_integration.channel_list")
+		expect(decodedList.channels[0]?.id).toBe("C0789CHAN")
+	})
+
+	it("narrows the Slack operations to the errors their handlers can actually return", () => {
+		// Per-endpoint error lists replaced a shared `commonErrors` tuple: a wider
+		// list would document responses the API can never produce.
+		const declared = (method: string, path: string) =>
+			Object.keys(operation(method, path).responses).sort()
+
+		// 400/401/403/429/500 come from the middleware; 503 from the handlers.
+		expect(declared("get", "/v2/integrations/slack")).toEqual([
+			"200",
+			"400",
+			"401",
+			"403",
+			"429",
+			"500",
+			"503",
+		])
+		expect(declared("post", "/v2/integrations/slack/install")).toEqual([
+			"200",
+			"400",
+			"401",
+			"403",
+			"429",
+			"500",
+			"503",
+		])
+		expect(declared("delete", "/v2/integrations/slack")).toEqual([
+			"200",
+			"400",
+			"401",
+			"403",
+			"429",
+			"500",
+			"503",
+		])
+		// Only `channels` can 404 (not connected) or 502 (Slack rejected us).
+		expect(declared("get", "/v2/integrations/slack/channels")).toEqual([
+			"200",
+			"400",
+			"401",
+			"403",
+			"404",
+			"429",
+			"500",
+			"502",
+			"503",
+		])
+	})
+
+	it("marks the admin-gated Slack operations' 403 as handler-declared, not just middleware", () => {
+		// Every operation carries the middleware's 403 (insufficient scope), so the
+		// status-code set alone can't tell an admin-gated endpoint from an open one.
+		// An endpoint that *also* declares `V2PermissionError` renders its 403 as an
+		// `anyOf` of two PermissionError refs — that duplication is the tell.
+		const permissionSchema = (method: string, path: string) =>
+			operation(method, path).responses["403"].content["application/json"].schema
+		const isHandlerDeclared = (method: string, path: string) =>
+			Array.isArray(permissionSchema(method, path).anyOf)
+
+		// install / uninstall / channels all call `requireAdmin`: `channels`
+		// enumerates the workspace's channels, private ones included, so it is not
+		// something any org member may read.
+		expect(isHandlerDeclared("post", "/v2/integrations/slack/install")).toBe(true)
+		expect(isHandlerDeclared("delete", "/v2/integrations/slack")).toBe(true)
+		expect(isHandlerDeclared("get", "/v2/integrations/slack/channels")).toBe(true)
+		expect(operation("get", "/v2/integrations/slack/channels").description).toContain("org-admin")
+
+		// `status` stays UNGATED — the dashboard's Slack card renders install state
+		// for every member, so its 403 comes from the scope middleware alone.
+		expect(isHandlerDeclared("get", "/v2/integrations/slack")).toBe(false)
+		expect(permissionSchema("get", "/v2/integrations/slack").$ref).toBe(
+			"#/components/schemas/PermissionError",
+		)
 	})
 
 	it("decodes slack-bot destination create/update params and rejects a blank channel_id", () => {

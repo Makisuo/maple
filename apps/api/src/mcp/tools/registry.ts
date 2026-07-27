@@ -67,6 +67,22 @@ export interface MapleToolDefinition {
 	readonly handler: (params: unknown) => Effect.Effect<McpToolResult, McpToolError, any>
 }
 
+/**
+ * Effect emits exactly `{ anyOf: [{ type: "object" }, { type: "array" }] }` — no
+ * `type`, no `properties` — for an empty `Struct({})`. Matched structurally so
+ * the normalization below cannot swallow any other rootless schema.
+ */
+const isEmptyStructSchema = (base: Record<string, unknown>): boolean => {
+	if ("type" in base || "properties" in base) return false
+	const anyOf = base.anyOf
+	if (!Array.isArray(anyOf) || anyOf.length === 0) return false
+	return anyOf.every((member) => {
+		if (typeof member !== "object" || member === null) return false
+		const type = (member as { type?: unknown }).type
+		return Object.keys(member).length === 1 && (type === "object" || type === "array")
+	})
+}
+
 export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
 	const document = Schema.toJsonSchemaDocument(schema)
 	const base =
@@ -74,18 +90,27 @@ export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
 			? { ...document.schema, $defs: document.definitions }
 			: document.schema
 	// MCP requires the top-level inputSchema to be an object schema (`type: "object"`).
-	// Effect emits `{ anyOf: [{ type: "object" }, { type: "array" }] }` for an empty
-	// `Struct({})` (a no-parameter tool), which strict MCP clients reject — the Vercel
-	// AI SDK's `tools/list` Zod validator fails on `inputSchema.type` and drops EVERY
-	// tool from the connection. Normalize a no-property struct to an explicit empty
-	// object schema. `$ref` roots (hoisted schemas) already carry a valid object type.
-	if (base.type !== "object" && !("$ref" in base)) {
+	// An empty `Struct({})` (a no-parameter tool) comes out untyped, which strict MCP
+	// clients reject — the Vercel AI SDK's `tools/list` Zod validator fails on
+	// `inputSchema.type` and drops EVERY tool from the connection. Normalize just that
+	// case. `$ref` roots (hoisted schemas) already carry a valid object type.
+	const record = base as Record<string, unknown>
+	if (isEmptyStructSchema(record)) {
 		return {
 			type: "object",
 			properties: {},
 			additionalProperties: false,
-			...("$defs" in base ? { $defs: base.$defs } : {}),
+			...("$defs" in record ? { $defs: record.$defs } : {}),
 		}
+	}
+	// A genuinely non-object root (a top-level `Schema.Union`/`Schema.Literals`/array)
+	// has parameters that an empty object schema would erase, publishing the tool to
+	// every MCP client as if it took none. Fail at registration instead — this runs at
+	// module init, so it surfaces in tests and at worker boot rather than in the wire.
+	if (record.type !== "object" && !("$ref" in record)) {
+		throw new Error(
+			`MCP tool input schemas must have an object root; got ${JSON.stringify(record).slice(0, 200)}. Wrap the tool input in a Schema.Struct.`,
+		)
 	}
 	return base
 }

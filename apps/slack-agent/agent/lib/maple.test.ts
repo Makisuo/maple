@@ -16,11 +16,13 @@ process.env.MAPLE_API_BASE_URL = "https://maple-api.test";
 process.env.MAPLE_INTERNAL_SERVICE_TOKEN = "test-service-token";
 delete process.env.SLACK_BOT_TOKEN;
 
+import { installFetchStub } from "./fetch-stub.js";
 import {
   resetWorkspaceCacheForTests,
   resolveBotToken,
   resolveWorkspace,
   verifySlackV0Signature,
+  workspaceCacheSizeForTests,
 } from "./maple.js";
 
 // ── verifySlackV0Signature ──────────────────────────────────────────────────
@@ -130,28 +132,7 @@ const WORKSPACE_PAYLOAD = {
   mapleApiKey: "maple_ak_test",
 };
 
-interface FetchStub {
-  calls: { url: string; headers: Record<string, string> }[];
-  respond: (url: string) => Response | Promise<Response>;
-}
-
 const realFetch = globalThis.fetch;
-
-function installFetchStub(
-  respond: (url: string) => Response | Promise<Response>,
-): FetchStub {
-  const stub: FetchStub = { calls: [], respond };
-  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input instanceof Request ? input.url : input);
-    const headers: Record<string, string> = {};
-    new Headers(init?.headers).forEach((v, k) => {
-      headers[k] = v;
-    });
-    stub.calls.push({ url, headers });
-    return stub.respond(url);
-  }) as typeof fetch;
-  return stub;
-}
 
 describe("resolveWorkspace", () => {
   const T0 = new Date("2026-07-21T12:00:00Z");
@@ -272,6 +253,23 @@ describe("resolveWorkspace", () => {
     expect(b?.teamId).toBe("T2");
   });
 
+  // Each entry holds a decrypted bot token and a full-access Maple API key, so
+  // an expired entry has to leave memory — including for a workspace that
+  // uninstalled and will never be resolved again.
+  test("drops expired entries instead of retaining them per team forever", async () => {
+    installFetchStub((url) =>
+      Response.json({ ...WORKSPACE_PAYLOAD, teamId: url.split("/").at(-1) }),
+    );
+
+    await resolveWorkspace("T_GONE");
+    expect(workspaceCacheSizeForTests()).toBe(1);
+
+    // T_GONE never resolves again; another workspace's traffic sweeps it.
+    setSystemTime(new Date(T0.getTime() + 6 * 60_000));
+    await resolveWorkspace("T_OTHER");
+    expect(workspaceCacheSizeForTests()).toBe(1);
+  });
+
   test("rejects incomplete resolve payloads", async () => {
     installFetchStub(() => Response.json({ orgId: "org_1" }));
     await expect(resolveWorkspace("T1")).rejects.toThrow(/incomplete payload/);
@@ -284,11 +282,17 @@ describe("resolveBotToken", () => {
   beforeEach(() => {
     resetWorkspaceCacheForTests();
     delete process.env.SLACK_BOT_TOKEN;
+    delete process.env.RAILWAY_ENVIRONMENT_NAME;
+    delete process.env.SLACK_ALLOW_ENV_BOT_TOKEN;
+    process.env.NODE_ENV = "test";
   });
 
   afterEach(() => {
     globalThis.fetch = realFetch;
     delete process.env.SLACK_BOT_TOKEN;
+    delete process.env.RAILWAY_ENVIRONMENT_NAME;
+    delete process.env.SLACK_ALLOW_ENV_BOT_TOKEN;
+    process.env.NODE_ENV = "test";
   });
 
   test("resolves via the context teamId", async () => {
@@ -300,6 +304,15 @@ describe("resolveBotToken", () => {
     expect(stub.calls[0]?.url).toBe(
       "https://maple-api.test/internal/slack/workspaces/T_CTX",
     );
+  });
+
+  test("resolves per team even when SLACK_BOT_TOKEN is set", async () => {
+    installFetchStub(() =>
+      Response.json({ ...WORKSPACE_PAYLOAD, teamId: "T_CTX", botToken: "xoxb-ctx" }),
+    );
+
+    process.env.SLACK_BOT_TOKEN = "xoxb-env";
+    expect(await resolveBotToken({ teamId: "T_CTX" })).toBe("xoxb-ctx");
   });
 
   test("falls back to SLACK_BOT_TOKEN when called without context", async () => {
@@ -329,5 +342,51 @@ describe("resolveBotToken", () => {
     await expect(resolveBotToken({ teamId: "T_UNINSTALLED" })).rejects.toThrow(
       /not linked/,
     );
+  });
+
+  // ── the cross-workspace credential gate ───────────────────────────────────
+  // The Slack app is publicly distributed: any workspace can install it. In a
+  // deployed environment an unlinked team must NOT borrow whatever single
+  // token sits in the env — that is another tenant's credential.
+
+  test("refuses the env fallback for an unlinked team when deployed (Railway)", async () => {
+    installFetchStub(() => new Response(null, { status: 404 }));
+    process.env.RAILWAY_ENVIRONMENT_NAME = "production";
+    process.env.SLACK_BOT_TOKEN = "xoxb-other-workspace";
+
+    await expect(resolveBotToken({ teamId: "T_UNINSTALLED" })).rejects.toThrow(
+      /ignored in a deployed environment/,
+    );
+  });
+
+  test("refuses the env fallback for a context-less call when deployed (NODE_ENV)", async () => {
+    installFetchStub(() => Response.json(WORKSPACE_PAYLOAD));
+    process.env.NODE_ENV = "production";
+    process.env.SLACK_BOT_TOKEN = "xoxb-other-workspace";
+
+    await expect(resolveBotToken()).rejects.toThrow(
+      /ignored in a deployed environment/,
+    );
+  });
+
+  test("SLACK_ALLOW_ENV_BOT_TOKEN=true re-enables it for a private single-workspace install", async () => {
+    installFetchStub(() => new Response(null, { status: 404 }));
+    process.env.RAILWAY_ENVIRONMENT_NAME = "production";
+    process.env.SLACK_ALLOW_ENV_BOT_TOKEN = "true";
+    process.env.SLACK_BOT_TOKEN = "xoxb-single-workspace";
+
+    expect(await resolveBotToken({ teamId: "T_UNINSTALLED" })).toBe(
+      "xoxb-single-workspace",
+    );
+  });
+
+  test("a linked team is unaffected by the deployed gate", async () => {
+    installFetchStub(() =>
+      Response.json({ ...WORKSPACE_PAYLOAD, teamId: "T_CTX", botToken: "xoxb-ctx" }),
+    );
+    process.env.RAILWAY_ENVIRONMENT_NAME = "production";
+    process.env.SLACK_BOT_TOKEN = "xoxb-other-workspace";
+
+    expect(await resolveBotToken({ teamId: "T_CTX" })).toBe("xoxb-ctx");
   });
 });

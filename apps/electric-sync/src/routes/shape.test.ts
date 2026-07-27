@@ -1,6 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
+import { Context, Effect, Layer, Option, Redacted } from "effect"
+import { HttpClient, HttpRouter } from "effect/unstable/http"
+import { SyncConfig, type SyncConfigShape } from "../config"
 import {
 	buildUpstreamShapeUrl,
+	ElectricSyncRouter,
 	isElectricConfigCoherent,
 	isShapeName,
 	shapeResponseHeaders,
@@ -30,20 +34,132 @@ describe("isShapeName", () => {
 
 describe("isElectricConfigCoherent", () => {
 	it("accepts self-hosted (neither source id nor secret)", () => {
-		assert.isTrue(isElectricConfigCoherent({ sourceId: undefined, secret: undefined }))
+		assert.isTrue(isElectricConfigCoherent({ sourceId: Option.none(), secret: Option.none() }))
 	})
 
 	it("accepts Electric Cloud (both source id and secret)", () => {
-		assert.isTrue(isElectricConfigCoherent({ sourceId: "src_1", secret: "sh_secret" }))
+		assert.isTrue(
+			isElectricConfigCoherent({
+				sourceId: Option.some("src_1"),
+				secret: Option.some(Redacted.make("sh_secret")),
+			}),
+		)
 	})
 
 	it("rejects a source id without a secret (the skipped-per-PR-source case)", () => {
-		assert.isFalse(isElectricConfigCoherent({ sourceId: "src_1", secret: undefined }))
+		assert.isFalse(isElectricConfigCoherent({ sourceId: Option.some("src_1"), secret: Option.none() }))
 	})
 
 	it("rejects a secret without a source id", () => {
-		assert.isFalse(isElectricConfigCoherent({ sourceId: undefined, secret: "sh_secret" }))
+		assert.isFalse(
+			isElectricConfigCoherent({
+				sourceId: Option.none(),
+				secret: Option.some(Redacted.make("sh_secret")),
+			}),
+		)
 	})
+})
+
+/**
+ * The predicate above is pure; these assert the *wiring* — that an incoherent
+ * config actually reaches the router's 503 graceful-degrade branch instead of
+ * forwarding a doomed unauthenticated request to Electric Cloud.
+ *
+ * `HttpClient` is stubbed with a client that dies if it is ever called, so a
+ * regression that forwards upstream fails loudly rather than silently passing.
+ */
+const syncConfig = (overrides: Partial<SyncConfigShape>): SyncConfigShape => ({
+	ELECTRIC_URL: Option.some("http://electric:3000"),
+	ELECTRIC_SOURCE_ID: Option.none(),
+	ELECTRIC_SECRET: Option.none(),
+	MAPLE_AUTH_MODE: "self_hosted",
+	MAPLE_DEFAULT_ORG_ID: "default",
+	MAPLE_ORG_ID_OVERRIDE: Option.none(),
+	MAPLE_ROOT_PASSWORD: Option.some(Redacted.make("test-root-password")),
+	CLERK_SECRET_KEY: Option.none(),
+	CLERK_PUBLISHABLE_KEY: Option.none(),
+	CLERK_JWT_KEY: Option.none(),
+	...overrides,
+})
+
+/** Any upstream call is a bug on the paths under test. */
+const neverCalledHttpClient = Layer.succeed(
+	HttpClient.HttpClient,
+	HttpClient.make(() => Effect.die(new Error("Electric upstream must not be contacted"))),
+)
+
+const shapeRequest = Effect.fnUntraced(function* (config: SyncConfigShape, path: string) {
+	const routes = ElectricSyncRouter.pipe(
+		Layer.provide(Layer.succeed(SyncConfig, SyncConfig.of(config))),
+		Layer.provide(neverCalledHttpClient),
+	)
+	const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true })
+	const response = yield* Effect.promise(() =>
+		handler(new Request(`http://sync.maple.test${path}`), Context.empty() as never),
+	)
+	const body = yield* Effect.promise(() => response.text())
+	yield* Effect.promise(() => dispose())
+	return { status: response.status, body }
+})
+
+describe("ElectricSyncRouter config degradation", () => {
+	it.effect("503s when Cloud credentials are half-configured (source id, no secret)", () =>
+		Effect.gen(function* () {
+			const { status, body } = yield* shapeRequest(
+				syncConfig({ ELECTRIC_SOURCE_ID: Option.some("src_1") }),
+				"/api/sync/shape?shape=dashboards&offset=-1",
+			)
+			assert.strictEqual(status, 503)
+			assert.strictEqual(body, "Electric sync is not configured")
+		}),
+	)
+
+	it.effect("503s on the mirror case too (secret, no source id)", () =>
+		Effect.gen(function* () {
+			const { status } = yield* shapeRequest(
+				syncConfig({ ELECTRIC_SECRET: Option.some(Redacted.make("sh_secret")) }),
+				"/api/sync/shape?shape=dashboards&offset=-1",
+			)
+			assert.strictEqual(status, 503)
+		}),
+	)
+
+	it.effect("503s when ELECTRIC_URL is absent entirely (self-hosted without Electric)", () =>
+		Effect.gen(function* () {
+			const { status, body } = yield* shapeRequest(
+				syncConfig({ ELECTRIC_URL: Option.none() }),
+				"/api/sync/shape?shape=dashboards&offset=-1",
+			)
+			assert.strictEqual(status, 503)
+			assert.strictEqual(body, "Electric sync is not configured")
+		}),
+	)
+
+	it.effect("degrades before shape validation — an unknown shape still 503s, not 400", () =>
+		Effect.gen(function* () {
+			const { status } = yield* shapeRequest(
+				syncConfig({ ELECTRIC_SOURCE_ID: Option.some("src_1") }),
+				"/api/sync/shape?shape=users",
+			)
+			assert.strictEqual(status, 503)
+		}),
+	)
+
+	it.effect("a coherent config gets past the degrade branch (401 on the auth check)", () =>
+		Effect.gen(function* () {
+			// Both credentials present → sync is enabled, so the request proceeds to
+			// shape validation + tenant resolution and fails there (no bearer), which
+			// is what proves the 503 above came from the coherence check.
+			const { status } = yield* shapeRequest(
+				syncConfig({
+					ELECTRIC_SOURCE_ID: Option.some("src_1"),
+					ELECTRIC_SECRET: Option.some(Redacted.make("sh_secret")),
+				}),
+				"/api/sync/shape?shape=dashboards&offset=-1",
+			)
+			assert.strictEqual(status, 401)
+		}),
+	)
 })
 
 describe("buildUpstreamShapeUrl", () => {

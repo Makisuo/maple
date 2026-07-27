@@ -10,9 +10,10 @@ import {
 	ProviderLogo,
 	type DestinationProvider,
 } from "@/components/alerts/destination-provider"
-import { CircleInfoIcon, ExternalLinkIcon, HazelIcon, LoaderIcon } from "@/components/icons"
+import { ArrowRightIcon, CircleInfoIcon, HazelIcon, LoaderIcon } from "@/components/icons"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { v2ErrorInfo } from "@/lib/error-messages"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import type { HazelChannelsListResponse } from "@maple/domain/http"
@@ -398,7 +399,13 @@ function HazelOAuthFields({
 					size="sm"
 					onClick={handleConnect}
 					disabled={busy}
-					style={{ background: "#F46F0F", borderColor: "#F46F0F", color: "#fff" }}
+					// Same brand fill as the save button below, so it takes the same
+					// measured ink instead of a second copy of the hex + white.
+					style={{
+						background: PROVIDERS["hazel-oauth"].accent,
+						borderColor: PROVIDERS["hazel-oauth"].accent,
+						color: PROVIDERS["hazel-oauth"].accentOn,
+					}}
 				>
 					{busy ? <LoaderIcon size={14} className="animate-spin" /> : null}
 					Connect Hazel
@@ -576,13 +583,39 @@ function SlackBotFields({
 			})
 		: disabledResultAtom<V2SlackChannelList>()
 	const channelsResult = useAtomValue(channelsAtom)
-	const refreshChannels = useAtomRefresh(channelsAtom)
+	const refreshChannelsAtom = useAtomRefresh(channelsAtom)
+	// When the app isn't installed `channelsAtom` is the module-scope
+	// `disabledResultAtom` singleton shared by every disabled reader in the app —
+	// refreshing that would poke all of them. Only the real query is refreshable.
+	const refreshChannels = installed ? refreshChannelsAtom : () => {}
 
+	// Same previous-value fallback as `status`: this query re-runs on every Slack
+	// mutation (reactivity keys), and emptying the Combobox mid-selection would
+	// silently drop the channel the user is picking.
+	const previousChannels = Result.isFailure(channelsResult)
+		? Option.getOrNull(
+				Option.map(channelsResult.previousSuccess, (previous) => [...previous.value.channels]),
+			)
+		: null
 	const channels = Result.builder(channelsResult)
 		.onSuccess((c) => [...c.channels])
-		.orElse(() => [] as V2SlackChannelList["channels"][number][])
+		.orElse(() => previousChannels ?? ([] as V2SlackChannelList["channels"][number][]))
 	const channelsLoading = installed && channelsResult.waiting
-	const channelsFailed = Result.isFailure(channelsResult)
+
+	// `GET /v2/integrations/slack/channels` is admin-gated (`requireAdmin`), so a
+	// regular member gets a 403 that no amount of retrying will clear. The v2
+	// envelope ({ error: { type, code, message } }) survives into the Result's
+	// cause, and `v2ErrorInfo` unwraps it — branch on the closed `type` enum, never
+	// on the human-readable message.
+	const channelsPermissionDenied =
+		Result.isFailure(channelsResult) && v2ErrorInfo(channelsResult.cause)?.type === "permission_error"
+	// Requires no prior success, matching the `statusFailed` rule below: if we
+	// already have channels in hand (a role change mid-edit), keep the picker
+	// rather than yanking the user's selection away.
+	const channelsForbidden = channelsPermissionDenied && previousChannels === null
+	// A 403 is never worth a Retry button, with or without a stale list to fall
+	// back on. Everything else keeps the retryable error line.
+	const channelsFailed = Result.isFailure(channelsResult) && !channelsPermissionDenied
 
 	const statusPending = Result.isInitial(statusResult) && status === null
 	const statusFailed = Result.isFailure(statusResult) && status === null
@@ -626,8 +659,50 @@ function SlackBotFields({
 					}
 				>
 					Open Slack integration
-					<ExternalLinkIcon size={14} />
+					<ArrowRightIcon size={14} />
 				</Button>
+			</div>
+		)
+	}
+
+	// Non-admins can still *create* destinations — only the channel inventory is
+	// gated. Say so plainly instead of rendering an empty picker over a Retry that
+	// can never succeed, and name the two ways forward. Editing keeps its stored
+	// channel, so the rest of the form still saves; creating cannot complete here,
+	// which is what leaves the footer's Save disabled.
+	if (channelsForbidden) {
+		return (
+			<div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
+				{isEditing && form.slackChannelName.length > 0 ? (
+					<p className="truncate text-[11px] text-muted-foreground">
+						Currently{" "}
+						<span className="font-medium text-foreground">#{form.slackChannelName}</span>
+					</p>
+				) : null}
+				<p className="text-xs text-muted-foreground">
+					{isEditing
+						? "Listing this workspace's Slack channels is limited to org admins, so the channel can't be changed here. Your other edits still save — ask an admin to move this destination to another channel."
+						: "Listing this workspace's Slack channels is limited to org admins, so this destination can't be finished here. Ask an admin to create it, or use a Slack webhook destination — any member can set one up."}
+				</p>
+				{!isEditing ? (
+					<Button
+						type="button"
+						size="sm"
+						variant="outline"
+						onClick={() =>
+							onFormChange((current) => ({
+								...defaultDestinationForm("slack"),
+								// Carry over what isn't Slack-bot-specific so switching
+								// providers doesn't discard the user's typing.
+								name: current.name,
+								enabled: current.enabled,
+							}))
+						}
+					>
+						Use a Slack webhook instead
+						<ArrowRightIcon size={14} />
+					</Button>
+				) : null}
 			</div>
 		)
 	}
@@ -641,12 +716,26 @@ function SlackBotFields({
 	}
 
 	const selectedChannel = channels.find((c) => c.id === form.slackChannelId)
+	// Editing keeps the stored channel until a new one is picked — its id isn't
+	// returned, so the form field is empty by design. Render the stored value as a
+	// value (not as placeholder gray, which reads as "nothing configured").
+	const storedChannelName =
+		isEditing && form.slackChannelId.length === 0 && form.slackChannelName.length > 0
+			? form.slackChannelName
+			: null
 
 	return (
 		<div className="space-y-1.5">
-			<Label htmlFor="destination-slack-channel" className="text-xs">
-				Channel
-			</Label>
+			<div className="flex items-baseline justify-between gap-2">
+				<Label htmlFor="destination-slack-channel" className="text-xs">
+					Channel
+				</Label>
+				{storedChannelName ? (
+					<span className="truncate text-[11px] text-muted-foreground">
+						Currently <span className="font-medium text-foreground">#{storedChannelName}</span>
+					</span>
+				) : null}
+			</div>
 			<Combobox
 				value={form.slackChannelId || null}
 				itemToStringLabel={(value: string) => label(value)}
@@ -662,13 +751,9 @@ function SlackBotFields({
 			>
 				<ComboboxInput
 					id="destination-slack-channel"
-					placeholder={
-						channelsLoading
-							? "Loading channels…"
-							: isEditing && form.slackChannelName
-								? `#${form.slackChannelName}`
-								: "Search channels…"
-					}
+					// The stored channel is shown as a value above; the placeholder stays
+					// the actual prompt so the field never looks pre-filled.
+					placeholder={channelsLoading ? "Loading channels…" : "Search channels…"}
 					className="w-full"
 				/>
 				<ComboboxContent>
@@ -678,8 +763,10 @@ function SlackBotFields({
 							<ComboboxItem key={channel.id} value={channel.id}>
 								<span className="flex items-center gap-2">
 									<span className="truncate">#{channel.name}</span>
+									{/* One type size on the row; the tone carries the difference
+									    between a neutral attribute and a warning. */}
 									{channel.is_private ? (
-										<span className="text-[10px] text-muted-foreground">private</span>
+										<span className="text-[11px] text-muted-foreground">private</span>
 									) : null}
 									{!channel.is_member ? (
 										<span className="text-[11px] text-warning-foreground">
@@ -1072,9 +1159,11 @@ export function DestinationDialog({
 						onClick={onSave}
 						disabled={saving || !isFormReady(form, isEditing)}
 						style={{
+							// `accentOn` is the ink the provider has measured against its own
+							// accent — never assume a brand color is dark enough for white.
 							background: provider.accent,
 							borderColor: provider.accent,
-							color: "#fff",
+							color: provider.accentOn,
 						}}
 					>
 						{saving ? <LoaderIcon size={14} className="animate-spin" /> : null}

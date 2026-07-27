@@ -1,4 +1,5 @@
 import { resolveBotToken } from "./maple.js";
+import { createTtlCache } from "./ttl-cache.js";
 
 /**
  * Thread follow-up promotion: lets users keep talking to the bot in a thread
@@ -26,7 +27,8 @@ import { resolveBotToken } from "./maple.js";
  *     dispatch the same turn);
  *   - the bot is "engaged" in the thread: it has posted there, or someone
  *     mentioned it there (covers the follow-up racing ahead of the bot's
- *     first reply).
+ *     first reply) — and that engagement is still RECENT (see
+ *     `ENGAGEMENT_MAX_AGE_SECONDS` / `ENGAGEMENT_RECENT_MESSAGE_WINDOW`).
  *
  * Requires the Slack app to subscribe to `message.channels` (public) /
  * `message.groups` (private) bot events; the engagement check reuses the
@@ -40,6 +42,8 @@ export interface ThreadReplyMessage {
   readonly user?: string;
   readonly botId?: string;
   readonly text?: string;
+  /** Slack ts ("1700000000.000100"); required for the recency bound. */
+  readonly ts?: string;
 }
 
 /** Injectable dependencies so tests never touch the network. */
@@ -59,17 +63,46 @@ const defaultDeps: ThreadFollowUpDeps = {
 
 // Engagement is sticky once established (the bot's reply stays in the thread
 // forever), so positive entries can live long. Negative entries stay short so
-// a thread the bot joins moments later is picked up quickly.
+// a thread the bot joins moments later is picked up quickly. What the cache
+// stores is the *timestamp* of the engagement, not a boolean, so the recency
+// bound below is re-applied on every hit instead of being frozen for the TTL.
 const ENGAGED_TTL_MS = 5 * 60_000;
 const NOT_ENGAGED_TTL_MS = 20_000;
-const CACHE_PRUNE_THRESHOLD = 500;
+const CACHE_MAX_ENTRIES = 500;
+const CACHE_SWEEP_INTERVAL_MS = 60_000;
+
+/**
+ * Engagement expires. Without a bound, one @mention makes every later human
+ * reply in that thread — by anyone, forever — dispatch a full agent turn: a
+ * cost amplifier and a permanently open prompt-injection intake on a thread
+ * that has long since moved on to something else.
+ *
+ * Two bounds, both must hold, both measured against the incoming reply:
+ *   - 30 minutes since the mention / the bot's last message. A Slack thread
+ *     that goes half an hour without the bot saying anything is a different
+ *     conversation; re-@-mentioning it is one keystroke.
+ *   - the engagement must be within the last 15 messages of the thread, so a
+ *     fast-moving thread that ran away from the bot in under 30 minutes stops
+ *     too.
+ * Past either bound the reply passes through unpromoted and the user simply
+ * @-mentions the bot again.
+ */
+const ENGAGEMENT_MAX_AGE_SECONDS = 30 * 60;
+const ENGAGEMENT_RECENT_MESSAGE_WINDOW = 15;
+
+/** Slack's webhook budget is ~3s total; this call happens inside it. */
+const THREAD_REPLIES_TIMEOUT_MS = 2_000;
 
 interface EngagementCacheEntry {
-  readonly engaged: boolean;
+  /** Slack ts (epoch seconds) of the engaging message, or null if none. */
+  readonly engagedAtSeconds: number | null;
   readonly expiresAt: number;
 }
 
-const engagementCache = new Map<string, EngagementCacheEntry>();
+const engagementCache = createTtlCache<EngagementCacheEntry>({
+  maxEntries: CACHE_MAX_ENTRIES,
+  sweepIntervalMs: CACHE_SWEEP_INTERVAL_MS,
+});
 
 /** Test-only: clears the engagement cache so each test starts cold. */
 export function resetThreadEngagementCacheForTests(): void {
@@ -103,6 +136,8 @@ interface FollowUpCandidate {
   readonly channelId: string;
   readonly threadTs: string;
   readonly botUserId: string;
+  /** The incoming reply's own ts, in epoch seconds — the recency reference. */
+  readonly eventTsSeconds: number;
 }
 
 function parseFollowUpCandidate(rawBody: string): FollowUpCandidate | null {
@@ -150,12 +185,18 @@ function parseFollowUpCandidate(rawBody: string): FollowUpCandidate | null {
   const text = typeof event.text === "string" ? event.text : "";
   if (text.includes(`<@${botUserId}>`)) return null;
 
+  // Use the event's own clock rather than Date.now(): Slack retries deliver
+  // the same event minutes later, and the decision must not drift with them.
+  const eventTsSeconds = Number(ts);
+  if (!Number.isFinite(eventTsSeconds)) return null;
+
   return {
     envelope: parsed as FollowUpCandidate["envelope"],
     teamId: typeof parsed.team_id === "string" ? parsed.team_id : undefined,
     channelId,
     threadTs,
     botUserId,
+    eventTsSeconds,
   };
 }
 
@@ -178,9 +219,13 @@ async function isBotEngagedInThread(
   candidate: FollowUpCandidate,
   deps: ThreadFollowUpDeps,
 ): Promise<boolean> {
-  const cacheKey = `${candidate.channelId}:${candidate.threadTs}`;
+  // teamId is part of the key: the cache is process-global and this app serves
+  // every workspace that installed the Slack app. Slack channel ids are only
+  // unique per workspace, so a bare `channel:thread` key lets one tenant's
+  // engagement decide another tenant's dispatch.
+  const cacheKey = `${candidate.teamId ?? "-"}:${candidate.channelId}:${candidate.threadTs}`;
   const cached = engagementCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.engaged;
+  if (cached) return isEngagementRecent(cached.engagedAtSeconds, candidate);
 
   const botToken = await deps.resolveBotToken({ teamId: candidate.teamId });
   const replies = await deps.fetchThreadReplies({
@@ -189,43 +234,63 @@ async function isBotEngagedInThread(
     threadTs: candidate.threadTs,
   });
 
-  const mention = `<@${candidate.botUserId}>`;
-  const engaged = replies.some(
-    (message) =>
-      message.user === candidate.botUserId ||
-      (typeof message.text === "string" && message.text.includes(mention)),
-  );
+  const engagedAtSeconds = latestEngagementSeconds(replies, candidate);
 
-  if (engagementCache.size >= CACHE_PRUNE_THRESHOLD) pruneEngagementCache();
   engagementCache.set(cacheKey, {
-    engaged,
-    expiresAt: Date.now() + (engaged ? ENGAGED_TTL_MS : NOT_ENGAGED_TTL_MS),
+    engagedAtSeconds,
+    expiresAt:
+      Date.now() +
+      (engagedAtSeconds === null ? NOT_ENGAGED_TTL_MS : ENGAGED_TTL_MS),
   });
-  return engaged;
+  return isEngagementRecent(engagedAtSeconds, candidate);
 }
 
-function pruneEngagementCache(): void {
-  const now = Date.now();
-  for (const [key, entry] of engagementCache) {
-    if (entry.expiresAt <= now) engagementCache.delete(key);
+/**
+ * Timestamp of the most recent message that engages the bot — its own post or
+ * an @mention of it — provided it falls inside the trailing message window.
+ * Returns null when the thread has none.
+ */
+function latestEngagementSeconds(
+  replies: readonly ThreadReplyMessage[],
+  candidate: FollowUpCandidate,
+): number | null {
+  const mention = `<@${candidate.botUserId}>`;
+  // `conversations.replies` is oldest-first, so the trailing window is the tail.
+  const recent = replies.slice(-ENGAGEMENT_RECENT_MESSAGE_WINDOW);
+  let latest: number | null = null;
+  for (const message of recent) {
+    const engages =
+      message.user === candidate.botUserId ||
+      (typeof message.text === "string" && message.text.includes(mention));
+    if (!engages) continue;
+    // A message Slack did not timestamp cannot be aged, so it cannot be
+    // trusted to still be recent — skip it rather than assume "now".
+    const seconds = Number(message.ts);
+    if (!Number.isFinite(seconds)) continue;
+    if (latest === null || seconds > latest) latest = seconds;
   }
-  // Still over the threshold after dropping expired entries: evict oldest
-  // insertions so the map cannot grow without bound in a busy workspace.
-  if (engagementCache.size >= CACHE_PRUNE_THRESHOLD) {
-    const excess = engagementCache.size - CACHE_PRUNE_THRESHOLD + 1;
-    let dropped = 0;
-    for (const key of engagementCache.keys()) {
-      if (dropped >= excess) break;
-      engagementCache.delete(key);
-      dropped += 1;
-    }
-  }
+  return latest;
+}
+
+function isEngagementRecent(
+  engagedAtSeconds: number | null,
+  candidate: FollowUpCandidate,
+): boolean {
+  if (engagedAtSeconds === null) return false;
+  return (
+    candidate.eventTsSeconds - engagedAtSeconds <= ENGAGEMENT_MAX_AGE_SECONDS
+  );
 }
 
 /**
  * `conversations.replies` returns oldest-first, so the mention that started
  * the conversation and the bot's first reply land within the first page.
  * Slack rejects JSON for this method — form-encoded only.
+ *
+ * This runs INSIDE the webhook verifier, before eve returns its 200, so it
+ * spends Slack's ~3s delivery budget. The timeout keeps a slow Slack API from
+ * turning into a retry storm: on abort the caller (channels/slack.ts) logs and
+ * passes the event through unpromoted.
  */
 async function fetchThreadRepliesFromSlack(options: {
   readonly botToken: string;
@@ -243,6 +308,7 @@ async function fetchThreadRepliesFromSlack(options: {
       ts: options.threadTs,
       limit: "100",
     }),
+    signal: AbortSignal.timeout(THREAD_REPLIES_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`Slack conversations.replies failed: HTTP ${res.status}`);
@@ -261,6 +327,7 @@ async function fetchThreadRepliesFromSlack(options: {
     user: typeof message.user === "string" ? message.user : undefined,
     botId: typeof message.bot_id === "string" ? message.bot_id : undefined,
     text: typeof message.text === "string" ? message.text : undefined,
+    ts: typeof message.ts === "string" ? message.ts : undefined,
   }));
 }
 

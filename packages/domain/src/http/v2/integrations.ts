@@ -2,13 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { Timestamp } from "./envelopes"
-import {
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2PermissionError,
-	V2ServiceUnavailableError,
-	V2UpstreamError,
-} from "./errors"
+import { V2NotFoundError, V2PermissionError, V2ServiceUnavailableError, V2UpstreamError } from "./errors"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
@@ -137,10 +131,16 @@ export const V2SlackChannel = Schema.Struct({
 		examples: [false],
 	}),
 	is_member: Schema.Boolean.annotate({
-		description: "Whether the Maple bot is a member of the channel (required to post to private channels).",
+		description:
+			"Whether the Maple bot is a member of the channel (required to post to private channels).",
 		examples: [true],
 	}),
-}).annotate({ identifier: "SlackChannel", title: "Slack channel" })
+}).annotate({
+	identifier: "SlackChannel",
+	title: "Slack channel",
+	description: "A channel the installed Maple Slack bot can see.",
+	examples: [wireExample({ id: "C0789CHAN", name: "incidents", is_private: false, is_member: true })],
+})
 export type V2SlackChannel = Schema.Schema.Type<typeof V2SlackChannel>
 
 export const V2SlackChannelList = Schema.Struct({
@@ -153,17 +153,26 @@ export const V2SlackChannelList = Schema.Struct({
 }).annotate({
 	identifier: "SlackChannelList",
 	title: "Slack channel list",
-	description: "The channels visible to the installed Slack bot.",
+	description:
+		'The channels visible to the installed Slack bot. Note: unlike every other v2 collection this response is **not** the standard `{ object: "list", data, has_more, next_cursor }` envelope — Maple walks Slack\'s `conversations.list` cursors server-side and returns the whole bounded set in one response, so there is nothing to paginate and it stays a bespoke `{ object, channels }` shape.',
+	examples: [
+		wireExample({
+			object: "slack_integration.channel_list",
+			channels: [{ id: "C0789CHAN", name: "incidents", is_private: false, is_member: true }],
+		}),
+	],
 })
 export type V2SlackChannelList = Schema.Schema.Type<typeof V2SlackChannelList>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError, V2UpstreamError] as const
-
+// Declared per endpoint rather than from a shared `commonErrors` tuple: the
+// handlers in apps/api/src/routes/v2/integrations.http.ts each map a small,
+// fixed set of service failures, and a wider list would publish responses the
+// API can never return. 400/401/403/429/503 come from the middleware.
 export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegration")
 	.add(
 		HttpApiEndpoint.get("status", "/", {
 			success: V2SlackIntegrationStatus,
-			error: [...commonErrors],
+			error: [V2ServiceUnavailableError],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getSlackIntegration",
@@ -176,7 +185,7 @@ export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegra
 	.add(
 		HttpApiEndpoint.post("install", "/install", {
 			success: V2SlackInstallResponse,
-			error: [...commonErrors, V2PermissionError],
+			error: [V2ServiceUnavailableError, V2PermissionError],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "installSlackIntegration",
@@ -189,7 +198,7 @@ export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegra
 	.add(
 		HttpApiEndpoint.delete("uninstall", "/", {
 			success: V2SlackUninstallResponse,
-			error: [...commonErrors, V2PermissionError, V2NotFoundError],
+			error: [V2ServiceUnavailableError, V2PermissionError],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "uninstallSlackIntegration",
@@ -202,13 +211,13 @@ export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegra
 	.add(
 		HttpApiEndpoint.get("channels", "/channels", {
 			success: V2SlackChannelList,
-			error: [...commonErrors, V2NotFoundError],
+			error: [V2ServiceUnavailableError, V2NotFoundError, V2UpstreamError, V2PermissionError],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listSlackChannels",
 				summary: "List Slack channels",
 				description:
-					"Lists the channels the installed Maple bot can see. Requires the `integrations:read` scope.",
+					"Lists the channels the installed Maple bot can see — including private channels the bot has been invited to. Requires an org-admin role and the `integrations:read` scope.",
 			}),
 		),
 	)

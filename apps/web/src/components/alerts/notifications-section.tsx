@@ -27,7 +27,9 @@ interface NotificationsSectionProps {
 
 const TITLE_PLACEHOLDER = "{{ event.emoji }} {{ rule.name }} — {{ event.label }}"
 const BODY_PLACEHOLDER = [
-	"{{ signal.label }} is *{{ observed }}* ({{ comparator.label }} {{ threshold }}) over the last {{ window }}.",
+	// Only variables listed in ALERT_TEMPLATE_VARIABLES belong here — the
+	// placeholder doubles as the reference for what's available.
+	"{{ signal.label }} is *{{ value }}* ({{ comparator.label }} {{ threshold }}) over the last {{ window }}.",
 	"*Severity:* {{ severity }} · *Group:* {{ group }}",
 ].join("\n")
 

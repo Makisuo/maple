@@ -38,6 +38,19 @@ const baseContext: TemplateRenderContext = {
 	sentAtMs: Date.parse("2026-06-02T00:00:00.000Z"),
 }
 
+/**
+ * A range rule (`between`) — the only shape that populates `thresholdUpper`, and
+ * therefore the only one that renders the default body's `{{#if thresholdUpper}}`
+ * clause and the "inside the …–… range" breach phrase.
+ */
+const rangeContext: TemplateRenderContext = {
+	...baseContext,
+	ruleName: "Checkout error-rate band",
+	comparator: "between",
+	threshold: 0.01,
+	thresholdUpper: 0.05,
+}
+
 const LINK = "https://web.localhost/alerts"
 const CHAT = "https://web.localhost/chat?mode=alert"
 const DESTINATION_ID = Schema.decodeUnknownSync(AlertDestinationId)("7c6b5a49-3821-4e0f-9d8c-7b6a59483726")
@@ -102,6 +115,23 @@ describe("buildTemplateContext", () => {
 		assert.include(body.text, "Error Rate is *8%* (> 5%) over the last 5m.")
 		assert.include(body.text, "*Severity:* critical · *Group:* all")
 	})
+
+	describe("range comparators", () => {
+		const range = buildTemplateContext(rangeContext, LINK, CHAT)
+
+		it("formats both bounds and the range observed summary", () => {
+			assert.strictEqual(range["comparator.label"], "between")
+			assert.strictEqual(range.threshold, "1%")
+			assert.strictEqual(range.thresholdUpper, "5%")
+			assert.strictEqual(range["observed.summary"], "8% between 1% and 5%")
+		})
+
+		it("renders the default body's upper-bound clause", () => {
+			const body = renderTemplate(DEFAULT_BODY_TEMPLATE, range)
+			assert.deepStrictEqual(body.missing, [])
+			assert.include(body.text, "Error Rate is *8%* (between 1% and 5%) over the last 5m.")
+		})
+	})
 })
 
 describe("buildSlackBlocks (default format)", () => {
@@ -155,6 +185,19 @@ describe("buildSlackBlocks (default format)", () => {
 		assert.include(context.elements[0]!.text, "2026-06-02T00:00:00.000Z")
 	})
 
+	it("phrases a range breach as inside the band and carries both bounds", () => {
+		const section = buildSlackBlocks(rangeContext, LINK, CHAT)[1] as SectionBlock
+		assert.include(section.text.text, "*Error Rate* is *8%*")
+		assert.include(section.text.text, "inside the 1%–5% range")
+		// A resolve on the same rule reports the full band it is back within.
+		const resolved = buildSlackBlocks(
+			{ ...rangeContext, eventType: "resolve" },
+			LINK,
+			CHAT,
+		)[1] as SectionBlock
+		assert.include(resolved.text.text, "back within its threshold (between 1% and 5%)")
+	})
+
 	it("styles buttons per Slack guidance — no danger style on navigation links", () => {
 		const blocks = buildSlackBlocks(baseContext, LINK, CHAT)
 		const actions = blocks.find((b) => (b as { type: string }).type === "actions") as {
@@ -172,6 +215,11 @@ describe("buildSlackFallbackText", () => {
 		assert.include(text, "Errors &lt;prod&gt; &amp; staging")
 		assert.include(text, "Triggered")
 		assert.include(text, "Error Rate 8% > 5%")
+	})
+
+	it("spells out both bounds for a range rule", () => {
+		const text = buildSlackFallbackText(rangeContext)
+		assert.include(text, "Error Rate 8% between 1% and 5%")
 	})
 })
 
@@ -200,6 +248,49 @@ describe("buildSlackBlocksFromTemplate", () => {
 		const blocks = buildSlackBlocksFromTemplate(long, "body", baseContext, LINK, CHAT)
 		const header = blocks[0] as { text: { text: string } }
 		assert.isAtMost(header.text.text.length, 150)
+	})
+
+	// The body is author-controlled text rendered into a message the slack-bot
+	// destination can post to ANY public channel (`chat:write.public`), so every
+	// `<…>` the author typed must land as literal text.
+	describe("mrkdwn injection", () => {
+		const sectionText = (body: string): string =>
+			(buildSlackBlocksFromTemplate("T", body, baseContext, LINK, CHAT)[1] as {
+				text: { text: string }
+			}).text.text
+
+		it("neutralizes @channel broadcasts and hand-written deceptive links", () => {
+			const text = sectionText("<!channel> see <https://evil.test|Open in Maple>")
+			assert.strictEqual(
+				text,
+				"&lt;!channel&gt; see &lt;https://evil.test|Open in Maple&gt;",
+			)
+			// Nothing the author typed survives as markup.
+			assert.notInclude(text, "<!channel>")
+			assert.notInclude(text, "<https://evil.test")
+		})
+
+		it("neutralizes the other broadcast mentions too", () => {
+			for (const broadcast of ["<!here>", "<!everyone>"]) {
+				const text = sectionText(`heads up ${broadcast}`)
+				assert.notInclude(text, broadcast)
+				assert.include(text, "&lt;!")
+			}
+		})
+
+		it("percent-encodes a pipe in a markdown link target so the URL cannot pose as the label", () => {
+			assert.strictEqual(
+				sectionText("[t](https://x.test/a|b)"),
+				"<https://x.test/a%7Cb|t>",
+			)
+		})
+
+		it("still renders the links this module builds itself", () => {
+			assert.strictEqual(
+				sectionText("**bold** [Open](https://web.localhost/alerts?a=1&b=2)"),
+				"*bold* <https://web.localhost/alerts?a=1&amp;b=2|Open>",
+			)
+		})
 	})
 })
 

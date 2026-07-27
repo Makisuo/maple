@@ -1,6 +1,17 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+// Relative, not `#lib/env.js`: bun's test runner does not rewrite the package
+// `imports` map onto .ts sources, and this module is under test.
+import { isDeployedEnvironment } from "./env.js";
+import { createTtlCache } from "./ttl-cache.js";
 
 const MAPLE_API_BASE_URL_DEFAULT = "https://api.localhost";
+
+/**
+ * Hard ceiling on the resolve round-trip. Without it a stalled Maple API keeps
+ * a turn (and, via `resolveBotToken`, an inbound webhook) hanging forever, and
+ * the in-flight de-dupe map pins every caller for the same team behind it.
+ */
+const RESOLVE_TIMEOUT_MS = 5_000;
 
 /**
  * Base URL of the Maple API (e.g. https://api.maple.dev). No trailing slash.
@@ -53,7 +64,20 @@ interface CacheEntry {
 const POSITIVE_TTL_MS = 5 * 60_000; // 5 minutes
 const NEGATIVE_TTL_MS = 30_000; // 30 seconds
 
-const cache = new Map<string, CacheEntry>();
+/**
+ * Every cached entry holds a decrypted Slack bot token and a full-access Maple
+ * API key, so an expired one must be *dropped*, not merely not served — see
+ * `createTtlCache`. The entry count is naturally bounded by the number of
+ * workspaces that ever sent an event, which is exactly why a size threshold
+ * alone would never fire here: the sweep has to be time-driven.
+ */
+const WORKSPACE_CACHE_MAX_ENTRIES = 500;
+const WORKSPACE_CACHE_SWEEP_INTERVAL_MS = 60_000;
+
+const cache = createTtlCache<CacheEntry>({
+  maxEntries: WORKSPACE_CACHE_MAX_ENTRIES,
+  sweepIntervalMs: WORKSPACE_CACHE_SWEEP_INTERVAL_MS,
+});
 /** De-dupe concurrent resolves for the same team into one in-flight request. */
 const inFlight = new Map<string, Promise<MapleWorkspace | null>>();
 
@@ -64,6 +88,11 @@ const inFlight = new Map<string, Promise<MapleWorkspace | null>>();
 export function resetWorkspaceCacheForTests(): void {
   cache.clear();
   inFlight.clear();
+}
+
+/** Test-only: how many workspace entries are still retained in memory. */
+export function workspaceCacheSizeForTests(): number {
+  return cache.size;
 }
 
 /**
@@ -80,7 +109,7 @@ export async function resolveWorkspace(
   teamId: string,
 ): Promise<MapleWorkspace | null> {
   const cached = cache.get(teamId);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached) return cached.value;
 
   const existing = inFlight.get(teamId);
   if (existing) return existing;
@@ -106,6 +135,7 @@ async function fetchWorkspace(teamId: string): Promise<MapleWorkspace | null> {
   const url = `${mapleApiBaseUrl()}/internal/slack/workspaces/${encodeURIComponent(teamId)}`;
   const res = await fetch(url, {
     headers: { authorization: `Bearer maple_svc_${mapleServiceToken()}` },
+    signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS),
   });
 
   if (res.status === 404) return null;
@@ -146,10 +176,28 @@ export interface SlackTokenContext {
 }
 
 /**
+ * Whether the `SLACK_BOT_TOKEN` env fallback may be used.
+ *
+ * The Slack app is publicly distributed: ANY workspace can install it, and an
+ * unlinked workspace's events would otherwise resolve to whatever single token
+ * happens to sit in the environment — i.e. outbound calls signed with ANOTHER
+ * tenant's credential. So the fallback is confined to non-deployed
+ * environments (single-workspace local dev), with
+ * `SLACK_ALLOW_ENV_BOT_TOKEN=true` as an explicit, deliberate opt-in for the
+ * one legitimate deployed case: a private single-workspace install.
+ */
+function envBotTokenAllowed(): boolean {
+  if (process.env.SLACK_ALLOW_ENV_BOT_TOKEN === "true") return true;
+  return !isDeployedEnvironment();
+}
+
+/**
  * Resolves the Slack bot token for eve's `botToken` credential.
  *
  * Order: `context.teamId` via `resolveWorkspace` → `SLACK_BOT_TOKEN` env
- * (single-workspace dev / context-less paths) → throw.
+ * (single-workspace dev / context-less paths, gated by `envBotTokenAllowed`)
+ * → throw. Failing closed here is deliberate: a missing token drops one reply,
+ * whereas a cross-tenant token posts one workspace's data into another's.
  */
 export async function resolveBotToken(
   context?: SlackTokenContext,
@@ -160,7 +208,14 @@ export async function resolveBotToken(
     if (ws) return ws.botToken;
   }
   const envToken = process.env.SLACK_BOT_TOKEN;
-  if (envToken) return envToken;
+  if (envToken && envBotTokenAllowed()) return envToken;
+  if (envToken) {
+    throw new Error(
+      teamId
+        ? `Slack team ${teamId} is not linked to a Maple workspace. SLACK_BOT_TOKEN is set but ignored in a deployed environment — it belongs to a different workspace. Set SLACK_ALLOW_ENV_BOT_TOKEN=true only for a private single-workspace install.`
+        : `No current Slack team context. SLACK_BOT_TOKEN is set but ignored in a deployed environment — it belongs to a different workspace. Set SLACK_ALLOW_ENV_BOT_TOKEN=true only for a private single-workspace install.`,
+    );
+  }
   throw new Error(
     teamId
       ? `Slack team ${teamId} is not linked to a Maple workspace, and SLACK_BOT_TOKEN is not set.`

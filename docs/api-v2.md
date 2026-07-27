@@ -21,6 +21,8 @@ Integrations are the one family split across tiers, so the rule is explicit. **T
 
 That control surface is public v2 when a **public v2 resource depends on it**, and internal otherwise. Slack qualifies: `/v2/alerts/destinations` accepts `type: "slack-bot"` with a required `channel_id`, and the bot token never leaves the server, so `GET /v2/integrations/slack/channels` is the only way any caller — customer, agent, or the dashboard — can discover a valid id. Withholding it would ship a public destination type nobody outside the dashboard could construct. `status` and `uninstall` come along because splitting one provider across two tiers costs more than it buys; `install` is documented as browser-oriented since a headless caller cannot finish the redirect.
 
+Within that group the role requirement is not uniform. `install`, `uninstall`, and `channels` require the org-admin role; `status` does not, because the dashboard renders install state for every member. `channels` is gated because it lists private channels the bot has joined, which is workspace membership information rather than Maple state. The consequence is deliberate: a non-admin can still create a `slack-bot` destination through the API if they already know a `channel_id`, but they cannot enumerate ids to find one.
+
 Cloudflare, PlanetScale, GitHub, and Hazel stay on the v1 `integrations` group (`/api/integrations`) — they predate v2, nothing public depends on them, and per the rule above they get promoted individually if and when a v2 resource needs them. Scope families are derived mechanically from the first path segment under `/v2`, so every provider mounted at `/v2/integrations/<provider>` shares the `integrations:read` / `integrations:write` family.
 
 ## Conventions
@@ -150,7 +152,7 @@ Implemented in phases; the pilot (`api_keys`) ships first and proves every conve
 | `instrumentation/recommendations` ✅ | list + dismiss/reopen                                                                            | `recommendationIssues`                   |
 | `scrape_targets` ✅                  | CRUD + `probe` + `checks`                                                                        | `scrapeTargets`                          |
 | `attribute_mappings` ✅              | CRUD                                                                                             | `ingestAttributeMappings`                |
-| `integrations/slack` ✅              | status/install/uninstall + `channels` (channel ids for `slack-bot` destinations)                 | `SlackIntegrationService`                |
+| `integrations/slack` ✅              | status + admin-only install/uninstall/`channels` (channel ids for `slack-bot` destinations)      | `SlackIntegrationService`                |
 | `session_replays` ✅                 | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred) | `sessionReplays`                         |
 | `organization` 🟡                    | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred           | `organizations`, `orgClickHouseSettings` |
 | `traces` ✅                          | search/timeseries/breakdown + direct trace/span reads                                            | `queryEngine`, `observability`           |

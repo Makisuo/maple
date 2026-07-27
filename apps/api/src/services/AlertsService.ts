@@ -138,7 +138,7 @@ import {
 	type DestinationSecretConfig,
 	type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
-import { resolveSlackBotTokenForDispatch } from "./SlackIntegrationService"
+import { SlackBotTokenResolver } from "./slack-bot-token"
 import { dateToMs } from "../lib/time"
 
 interface NormalizedRule {
@@ -1203,6 +1203,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const hazelOAuth = yield* HazelOAuthService
 			const email = yield* EmailService
 			const orgMembers = yield* OrgMembersService
+			const slackBotToken = yield* SlackBotTokenResolver
 
 			const resolveEmailMembers = (
 				orgId: OrgId,
@@ -1837,11 +1838,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					deliveryTimeoutMs(),
 					context.linkUrl,
 					composeChatUrl(context),
-					{
-						sendEmail,
-						resolveSlackBotToken: (orgId) =>
-							resolveSlackBotTokenForDispatch(database, encryptionKey, orgId),
-					},
+					{ sendEmail, resolveSlackBotToken: slackBotToken.resolve },
 				)
 
 			const buildPayload = (context: DeliveryPayloadContext) => ({
@@ -4996,5 +4993,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 		}),
 	},
 ) {
-	static readonly layer = Layer.effect(this, this.make)
+	// The resolver is self-provided (it needs only Database + Env, which every
+	// caller already supplies) so wiring stays unchanged in app.ts and the
+	// alerting worker.
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SlackBotTokenResolver.layer))
 }

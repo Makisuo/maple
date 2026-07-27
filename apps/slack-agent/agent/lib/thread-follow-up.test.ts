@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import {
   promoteThreadFollowUp,
   resetThreadEngagementCacheForTests,
@@ -50,18 +50,32 @@ function makeDeps(replies: readonly ThreadReplyMessage[]): {
   };
 }
 
+// The default envelope's reply is at ts 1700000002.000200, so both of these
+// engagements are seconds old — comfortably inside the recency bound.
 const ENGAGED_THREAD: readonly ThreadReplyMessage[] = [
-  { user: "U456", text: `<@${BOT_USER_ID}> why is error rate up?` },
-  { user: BOT_USER_ID, text: "Here are the reasons why..." },
+  {
+    user: "U456",
+    text: `<@${BOT_USER_ID}> why is error rate up?`,
+    ts: "1700000000.000100",
+  },
+  {
+    user: BOT_USER_ID,
+    text: "Here are the reasons why...",
+    ts: "1700000001.000100",
+  },
 ];
 
 const UNRELATED_THREAD: readonly ThreadReplyMessage[] = [
-  { user: "U456", text: "lunch?" },
-  { user: "U789", text: "sure" },
+  { user: "U456", text: "lunch?", ts: "1700000000.000100" },
+  { user: "U789", text: "sure", ts: "1700000001.000100" },
 ];
 
 beforeEach(() => {
   resetThreadEngagementCacheForTests();
+});
+
+afterEach(() => {
+  setSystemTime(); // restore the real clock
 });
 
 // ── promotion ───────────────────────────────────────────────────────────────
@@ -85,7 +99,11 @@ describe("promoteThreadFollowUp", () => {
 
   test("promotes when the bot was mentioned in the thread but has not replied yet", async () => {
     const { deps } = makeDeps([
-      { user: "U456", text: `<@${BOT_USER_ID}> why is error rate up?` },
+      {
+        user: "U456",
+        text: `<@${BOT_USER_ID}> why is error rate up?`,
+        ts: "1700000000.000100",
+      },
     ]);
     expect(await promoteThreadFollowUp(envelope({}), deps)).not.toBeNull();
   });
@@ -96,10 +114,70 @@ describe("promoteThreadFollowUp", () => {
     expect(await promoteThreadFollowUp(body, deps)).not.toBeNull();
   });
 
+  test("group-DM (mpim) replies qualify too", async () => {
+    const { deps } = makeDeps(ENGAGED_THREAD);
+    const body = envelope({ event: { channel_type: "mpim" } });
+    expect(await promoteThreadFollowUp(body, deps)).not.toBeNull();
+  });
+
   test("file_share subtype replies qualify (mirrors eve's DM filter)", async () => {
     const { deps } = makeDeps(ENGAGED_THREAD);
     const body = envelope({ event: { subtype: "file_share" } });
     expect(await promoteThreadFollowUp(body, deps)).not.toBeNull();
+  });
+});
+
+// ── engagement recency bounds ───────────────────────────────────────────────
+
+// Engagement is not permanent: once anyone has mentioned the bot, an unbounded
+// rule would dispatch a full agent turn for every later human reply in that
+// thread forever — a cost amplifier and a standing prompt-injection intake.
+
+describe("engagement recency", () => {
+  test("a stale engagement (>30 min before the reply) does not promote", async () => {
+    const { deps } = makeDeps([
+      {
+        user: BOT_USER_ID,
+        text: "Here are the reasons why...",
+        ts: "1700000001.000100",
+      },
+    ]);
+    // 31 minutes after the bot's last message in the thread.
+    const body = envelope({ event: { ts: "1700001861.000200" } });
+    expect(await promoteThreadFollowUp(body, deps)).toBeNull();
+  });
+
+  test("an engagement just inside the 30-minute window still promotes", async () => {
+    const { deps } = makeDeps([
+      {
+        user: BOT_USER_ID,
+        text: "Here are the reasons why...",
+        ts: "1700000001.000100",
+      },
+    ]);
+    const body = envelope({ event: { ts: "1700001799.000200" } });
+    expect(await promoteThreadFollowUp(body, deps)).not.toBeNull();
+  });
+
+  test("an engagement pushed out of the trailing message window does not promote", async () => {
+    // Bot spoke first, then 20 human messages buried it — recent in time, but
+    // the conversation has demonstrably moved on.
+    const chatter: ThreadReplyMessage[] = Array.from({ length: 20 }, (_, i) => ({
+      user: "U456",
+      text: `chatter ${i}`,
+      ts: `17000000${String(10 + i).padStart(2, "0")}.000100`,
+    }));
+    const { deps } = makeDeps([
+      { user: BOT_USER_ID, text: "on it", ts: "1700000001.000100" },
+      ...chatter,
+    ]);
+    const body = envelope({ event: { ts: "1700000031.000200" } });
+    expect(await promoteThreadFollowUp(body, deps)).toBeNull();
+  });
+
+  test("a message with no ts cannot be aged, so it does not count as engagement", async () => {
+    const { deps } = makeDeps([{ user: BOT_USER_ID, text: "on it" }]);
+    expect(await promoteThreadFollowUp(envelope({}), deps)).toBeNull();
   });
 });
 
@@ -193,5 +271,51 @@ describe("engagement cache", () => {
     });
     await promoteThreadFollowUp(otherThread, deps);
     expect(calls()).toBe(2);
+  });
+
+  test("a second NON-engaged reply is served from the negative cache", async () => {
+    const { deps, calls } = makeDeps(UNRELATED_THREAD);
+    setSystemTime(new Date("2026-07-21T12:00:00Z"));
+
+    expect(await promoteThreadFollowUp(envelope({}), deps)).toBeNull();
+    expect(calls()).toBe(1);
+
+    // Still inside the 20s negative TTL: no second round-trip to Slack, which
+    // is what keeps a busy channel the bot was never in from costing an API
+    // call per message.
+    setSystemTime(new Date("2026-07-21T12:00:19Z"));
+    const second = envelope({ event: { ts: "1700000003.000300" } });
+    expect(await promoteThreadFollowUp(second, deps)).toBeNull();
+    expect(calls()).toBe(1);
+  });
+
+  test("the negative cache expires so a thread the bot just joined is picked up", async () => {
+    const { deps, calls } = makeDeps(UNRELATED_THREAD);
+    setSystemTime(new Date("2026-07-21T12:00:00Z"));
+    await promoteThreadFollowUp(envelope({}), deps);
+
+    setSystemTime(new Date("2026-07-21T12:00:21Z"));
+    await promoteThreadFollowUp(envelope({ event: { ts: "1700000004.000400" } }), deps);
+    expect(calls()).toBe(2);
+  });
+
+  test("the cache key includes the team: one workspace cannot answer for another", async () => {
+    // Slack channel ids are only unique per workspace, and this cache is
+    // process-global across every tenant that installed the app.
+    let call = 0;
+    const deps = {
+      resolveBotToken: async () => "xoxb-test",
+      fetchThreadReplies: async () => {
+        call += 1;
+        return call === 1 ? ENGAGED_THREAD : UNRELATED_THREAD;
+      },
+    };
+
+    expect(await promoteThreadFollowUp(envelope({}), deps)).not.toBeNull();
+    // Same channel + thread ids, different workspace: must be resolved on its
+    // own, and must not inherit the first team's engagement.
+    const otherTeam = envelope({ envelope: { team_id: "T999" } });
+    expect(await promoteThreadFollowUp(otherTeam, deps)).toBeNull();
+    expect(call).toBe(2);
   });
 });
