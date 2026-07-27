@@ -19,8 +19,9 @@ import { actors, errorIssues, errorIssueEvents, issueEscalations } from "@maple/
 import type { MapleDatabaseTransaction, MaplePgClient } from "@maple/db/client"
 import { and, eq, ne, isNull, or } from "drizzle-orm"
 import { Schema } from "effect"
+import { TRIAGE_AGENT_NAME } from "./system-actors"
 
-export const TRIAGE_AGENT_NAME = "maple-triage-agent"
+export { TRIAGE_AGENT_NAME } from "./system-actors"
 
 /**
  * Accepts either a top-level client or an open transaction so callers can run

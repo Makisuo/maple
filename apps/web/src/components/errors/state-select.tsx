@@ -1,15 +1,6 @@
 import type { WorkflowState } from "@maple/domain/http"
+import { WORKFLOW_TRANSITIONS as TRANSITIONS } from "@maple/domain/http"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
-
-const TRANSITIONS: Record<WorkflowState, ReadonlyArray<WorkflowState>> = {
-	triage: ["todo", "in_progress", "cancelled", "wontfix"],
-	todo: ["triage", "in_progress", "cancelled", "wontfix"],
-	in_progress: ["triage", "todo", "in_review", "cancelled", "wontfix"],
-	in_review: ["triage", "in_progress", "done", "cancelled", "wontfix"],
-	done: ["triage", "in_progress", "cancelled", "wontfix"],
-	cancelled: [],
-	wontfix: ["triage", "cancelled"],
-}
 
 const LABEL: Record<WorkflowState, string> = {
 	triage: "Triage",

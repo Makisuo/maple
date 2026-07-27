@@ -33,9 +33,16 @@ export interface CreateAlertingWorkerOptions {
 	domains: MapleDomains
 	/** Managed per-branch Hyperdrive from the api factory; undefined on ref stages (stg/prd). */
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
+	/**
+	 * The chat-flue worker that hosts the `maple-chat` investigation agent. The
+	 * error/anomaly/alert ticks all start investigations when an incident opens,
+	 * and `maybeEnqueueTriage` needs this binding to reach the agent — without it
+	 * every run is written straight to `failed` with `agent_unavailable`.
+	 */
+	chatFlue: { workerName: string }
 }
 
-export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOptions) =>
+export const createAlertingWorker = ({ stage, mapleDb, chatFlue }: CreateAlertingWorkerOptions) =>
 	Effect.gen(function* () {
 		const hyperdriveRefId = resolveHyperdriveRefId(stage)
 		// Cross-script binding to the AI triage Workflow hosted by the api worker —
@@ -136,6 +143,15 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 				bindings: [{ type: "hyperdrive", name: "MAPLE_DB", id: hyperdriveRefId }],
 			})
 		}
+
+		// The cron ticks are the only producers of autonomous investigations, so
+		// without this binding auto-triage is silently a no-op in production.
+		// Attached after construction for the same reason the api worker's is:
+		// chat-flue deploys first, and binding at construction would need the
+		// worker to exist before it does.
+		yield* worker.bind("CHAT_FLUE", {
+			bindings: [{ type: "service", name: "CHAT_FLUE", service: chatFlue.workerName }],
+		})
 
 		return worker
 	})

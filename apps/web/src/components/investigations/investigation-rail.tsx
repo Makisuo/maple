@@ -8,8 +8,8 @@ import { formatDuration, formatNumber } from "@maple/ui/format"
 import { formatRelativeTime, toEpochMs } from "@maple/ui/time-format"
 
 import { DetailRail } from "@/components/common/detail-rail"
-import { CONFIDENCE_TONE } from "@/components/chat/diagnosis-report-card"
 import { SEVERITY_LABEL, SEVERITY_TONE } from "@/components/errors/severity-badge"
+import { ConfidenceMeter } from "./confidence-meter"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { investigationOriginLabel } from "./investigation-status"
@@ -47,7 +47,13 @@ export function InvestigationRail({
 						{isResolved ? "Reopen" : "Retry"}
 					</Button>
 				) : (
-					<Button size="sm" variant="outline" className="w-full" onClick={onResolve} disabled={busy}>
+					<Button
+						size="sm"
+						variant="outline"
+						className="w-full"
+						onClick={onResolve}
+						disabled={busy}
+					>
 						Resolve
 					</Button>
 				)}
@@ -64,14 +70,7 @@ export function InvestigationRail({
 			{report ? (
 				<DetailRail.Group label="Diagnosis">
 					<DetailRail.Row label="Confidence">
-						<span
-							className={cn(
-								"text-sm font-medium capitalize",
-								CONFIDENCE_TONE[report.confidence] ?? "text-foreground",
-							)}
-						>
-							{report.confidence}
-						</span>
+						<ConfidenceMeter confidence={report.confidence} />
 					</DetailRail.Row>
 					<DetailRail.Row label="AI severity">
 						<span
@@ -354,9 +353,8 @@ function EscalatedRunSpine({
 			<RunSpine
 				investigation={investigation}
 				attempt={
-					response.attempts.find(
-						(candidate) => candidate.investigationId === investigation.id,
-					) ?? null
+					response.attempts.find((candidate) => candidate.investigationId === investigation.id) ??
+					null
 				}
 			/>
 		))

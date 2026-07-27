@@ -164,6 +164,36 @@ describe("ChatTranscript", () => {
 		expect(marker?.textContent).not.toContain("Shared")
 	})
 
+	// An agent loop emits one message per round-trip; six of them used to read as six
+	// identical `Used 2 tools` cards stacked down the page.
+	it("collapses a run of tool-only turns into a single tool group", () => {
+		const burst = (id: string): UIMessage =>
+			({
+				id,
+				role: "assistant",
+				parts: [0, 1].map((i) => ({
+					type: "tool-list_services",
+					toolCallId: `${id}-${i}`,
+					state: "output-available",
+					input: { service: "api" },
+					output: { ok: true },
+				})),
+			}) as unknown as UIMessage
+
+		render(
+			<ChatTranscript
+				{...baseProps}
+				messages={[burst("m1"), burst("m2"), burst("m3")]}
+				permalinkFor={(id) => `https://maple.test/chat?m=${id}`}
+			/>,
+		)
+
+		expect(screen.getByText("Used 6 tools")).toBeTruthy()
+		expect(items()).toHaveLength(1)
+		// Nothing to copy, so no invisible hover-action row reserving height either.
+		expect(document.querySelectorAll('[data-slot="message-footer"]')).toHaveLength(0)
+	})
+
 	it("renders a preserved fallback diagnosis as its own row", () => {
 		render(<ChatTranscript {...baseProps} messages={[]} fallbackDiagnosis={report as never} />)
 

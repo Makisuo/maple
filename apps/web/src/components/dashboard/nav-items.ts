@@ -6,6 +6,7 @@ import {
 	ComputerIcon,
 	FileIcon,
 	HouseIcon,
+	MagnifierCheckIcon,
 	NetworkNodesIcon,
 	PlanetScaleIcon,
 	PlayRotateClockwiseIcon,
@@ -92,7 +93,7 @@ export const investigateNavItems: NavItem[] = [
 	{
 		title: "Investigations",
 		href: "/investigations",
-		icon: PulseIcon,
+		icon: MagnifierCheckIcon,
 	},
 	{
 		title: "Errors",

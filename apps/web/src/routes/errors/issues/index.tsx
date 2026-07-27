@@ -8,7 +8,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useListNavigation } from "@/hooks/use-list-navigation"
 import { IssueGroup } from "@/components/errors/issue-group"
 import { IssuesBulkBar } from "@/components/errors/issues-bulk-bar"
-import { IssuesToolbar } from "@/components/errors/issues-toolbar"
+import { ListToolbar } from "@/components/common/list-toolbar"
 import { severityRank } from "@/components/errors/severity-badge"
 import { useIssueMutations } from "@/components/errors/use-issue-mutations"
 import { IssueRow, type SelectToggleEvent } from "@/components/errors/issue-row"
@@ -198,9 +198,11 @@ function IssuesPage() {
 	)
 
 	const toolbar = (totalCount?: number) => (
-		<IssuesToolbar
+		<ListToolbar
 			tabs={TOOLBAR_TABS}
 			active={activeFilter}
+			label="Filter issues"
+			countNoun={["issue", "issues"]}
 			totalCount={totalCount}
 			onChange={(value) => {
 				navigate({

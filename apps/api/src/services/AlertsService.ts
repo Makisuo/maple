@@ -104,6 +104,7 @@ import {
 import * as AlertingMetrics from "../lib/AlertingMetrics"
 import { INVESTIGATION_AGENT_BINDING } from "../lib/ai-triage-enqueue"
 import { upsertAlertIssue } from "../lib/issue-hub"
+import { probeLiveness } from "../lib/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import type { TenantContext } from "./AuthService"
 import {
@@ -181,6 +182,14 @@ interface EvaluatedRule {
 	readonly thresholdUpper: number | null
 	readonly comparator: AlertComparator
 	readonly reason: string
+	/**
+	 * The window returned nothing and `noDataBehavior: "zero"` synthesized the
+	 * value. Such a status is a statement about the absence of data, not about
+	 * the health of the system — a `gt` rule reads a total ingest outage as
+	 * `healthy` this way. Anything that acts on "healthy" destructively (i.e.
+	 * resolving an open incident) must prove telemetry is still flowing first.
+	 */
+	readonly derivedFromNoData: boolean
 }
 
 interface DispatchContext {
@@ -1559,6 +1568,40 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				authMode: "self_hosted",
 			})
 
+			/**
+			 * Services a rule's telemetry-liveness probe should cover. An empty list
+			 * means the rule is org-wide, and the probe falls back to the org pulse.
+			 */
+			const livenessServicesFor = (rule: NormalizedRule): ReadonlyArray<string> =>
+				rule.serviceNames.length > 0
+					? rule.serviceNames
+					: rule.serviceName != null
+						? [rule.serviceName]
+						: []
+
+			/**
+			 * Would resolving this incident be believing an absence rather than an
+			 * observation? Compares the window that looks recovered against the
+			 * equivalent window before the incident opened.
+			 */
+			const telemetryStillFlowing = Effect.fn("AlertsService.telemetryStillFlowing")(function* (
+				orgId: OrgId,
+				normalized: NormalizedRule,
+				incidentOpenedAtMs: number,
+				timestamp: number,
+			) {
+				const windowMs = Math.max(normalized.windowMinutes, 1) * 60_000
+				return yield* probeLiveness({
+					warehouse,
+					tenant: systemTenant(orgId),
+					serviceNames: livenessServicesFor(normalized),
+					windowStartMs: timestamp - windowMs,
+					windowEndMs: timestamp,
+					baselineStartMs: incidentOpenedAtMs - windowMs,
+					baselineEndMs: incidentOpenedAtMs,
+				})
+			})
+
 			// Collapse alert-domain semantic errors (validation/execution/timeout from
 			// the query engine layer) into AlertValidation/AlertDelivery, but let the
 			// Tinybird tagged errors (WarehouseQueryError + WarehouseQuotaExceededError)
@@ -1660,6 +1703,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							rule.signalType === "metric"
 								? "No metric data in the selected window"
 								: "No data in the selected window",
+						// Inert: `skipped` never resolves an incident, so this branch
+						// short-circuits before any status is derived from a synthesized value.
+						derivedFromNoData: false,
 					}
 				}
 
@@ -1672,6 +1718,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						thresholdUpper: rule.thresholdUpper,
 						comparator: rule.comparator,
 						reason: `Sample count ${sampleCount} is below minimum ${rule.minimumSampleCount}`,
+						derivedFromNoData: false,
 					}
 				}
 
@@ -1684,6 +1731,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						thresholdUpper: rule.thresholdUpper,
 						comparator: rule.comparator,
 						reason: "Alert evaluation did not return a scalar value",
+						derivedFromNoData: false,
 					}
 				}
 
@@ -1699,6 +1747,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					reason:
 						reasonOverride ??
 						`${rule.signalType} ${formatComparator(rule.comparator, rule.threshold, rule.thresholdUpper)}`,
+					// Only reachable with `noDataBehavior: "zero"` — the "skip" branch
+					// returned above. The comparison ran against a fabricated 0.
+					derivedFromNoData: !obs.hasData,
 				}
 			}
 
@@ -4099,6 +4150,43 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						openIncident != null &&
 						consecutiveHealthy >= normalized.consecutiveHealthyRequired
 					) {
+						// A "healthy" synthesized from an empty window is a statement
+						// about missing data, not about a recovered system: with
+						// `noDataBehavior: "zero"` a total ingest outage compares as 0 <
+						// threshold and would resolve every incident it touches, paging
+						// out a wave of false all-clears. Believe it only once telemetry
+						// is provably still arriving.
+						if (evaluation.derivedFromNoData) {
+							const liveness = yield* telemetryStillFlowing(
+								row.orgId,
+								normalized,
+								openIncident.firstTriggeredAt.getTime(),
+								timestamp,
+							)
+							if (!liveness.dataFlowing) {
+								yield* Effect.logWarning(
+									"Holding incident open: healthy evaluation came from missing telemetry",
+								).pipe(
+									Effect.annotateLogs({
+										orgId: row.orgId,
+										ruleId: row.id,
+										incidentId: openIncident.id,
+										groupKey,
+										livenessReason: liveness.reason,
+										observedCount: liveness.observedCount,
+										baselineCount: liveness.baselineCount,
+									}),
+								)
+								return {
+									transition: "none" as const,
+									incidentId: carriedIncidentId,
+									openedIncidentId: null,
+									consecutiveBreaches,
+									consecutiveHealthy,
+								}
+							}
+						}
+
 						const resolvedIncident = {
 							...openIncident,
 							status: "resolved" as const,
@@ -4315,6 +4403,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				thresholdUpper: normalized.thresholdUpper,
 				comparator: normalized.comparator,
 				reason,
+				// This "healthy" is fabricated for config-driven resolves (rule changed,
+				// group vanished), not derived from an empty query window. Callers that
+				// resolve on absence gate themselves — see resolveOrphanedGroupIncidents.
+				derivedFromNoData: false,
 			})
 
 			const resolveStaleIncidents = Effect.fn("AlertsService.resolveStaleIncidents")(function* (
@@ -4441,6 +4533,38 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					)
 
 					if (orphaned.length === 0) return
+
+					// A group leaves the result set either because the thing it described
+					// genuinely went away, or because the service stopped reporting — and
+					// this path closes the incident AND fires a resolve notification, so
+					// getting it wrong pages an all-clear in the middle of an ingest
+					// outage. Anchor the baseline at the oldest orphan: whatever traffic
+					// existed when these incidents opened should still be there.
+					const oldestOpenedAtMs = orphaned.reduce(
+						(oldest, incident) => Math.min(oldest, incident.firstTriggeredAt.getTime()),
+						Number.POSITIVE_INFINITY,
+					)
+					const liveness = yield* telemetryStillFlowing(
+						orgId,
+						normalized,
+						oldestOpenedAtMs,
+						timestamp,
+					)
+					if (!liveness.dataFlowing) {
+						yield* Effect.logWarning(
+							"Holding orphaned-group incidents open: telemetry gap, not a vanished group",
+						).pipe(
+							Effect.annotateLogs({
+								orgId,
+								ruleId,
+								orphanedCount: orphaned.length,
+								livenessReason: liveness.reason,
+								observedCount: liveness.observedCount,
+								baselineCount: liveness.baselineCount,
+							}),
+						)
+						return
+					}
 
 					const syntheticEvaluation = makeSyntheticResolveEvaluation(
 						normalized,

@@ -33,7 +33,7 @@ export function ToolGroup({
 	const running = runningCount > 0
 
 	return (
-		<div className="my-2 overflow-hidden rounded-lg border border-border/60 bg-muted/20 text-sm">
+		<div className="overflow-hidden rounded-lg border border-border/60 bg-muted/20 text-sm">
 			<button
 				type="button"
 				className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted/40"

@@ -15,7 +15,7 @@ import {
 	type AnomalyGroupKey,
 } from "@/components/anomalies/anomaly-group"
 import { AnomalyLiveIndicator } from "@/components/anomalies/anomaly-live-indicator"
-import { IssuesToolbar } from "@/components/errors/issues-toolbar"
+import { ListToolbar } from "@/components/common/list-toolbar"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -122,9 +122,10 @@ function AnomaliesPage() {
 		filters.envs !== undefined
 
 	const toolbar = (
-		<IssuesToolbar
+		<ListToolbar
 			tabs={TOOLBAR_TABS}
 			active={status}
+			label="Filter anomalies"
 			countNoun={["anomaly", "anomalies"]}
 			totalCount={Result.isSuccess(incidentsResult) ? filtered.length : undefined}
 			onChange={(value) =>

@@ -520,8 +520,16 @@ export {
 	type DbStatementSamplesOutput,
 } from "./queries/internal"
 
-// Queries — Local ingest pulse (drives the local-mode header heartbeat)
-export { localIngestPulseQuery, type LocalIngestPulseOutput } from "./queries/ingest"
+// Queries — Telemetry liveness (auto-resolve gating + local-mode header heartbeat)
+export {
+	orgTelemetryPulseQuery,
+	serviceLivenessQuery,
+	serviceLivenessRowSchema,
+	telemetryPulseRowSchema,
+	type ServiceLivenessOpts,
+	type ServiceLivenessOutput,
+	type TelemetryPulseOutput,
+} from "./queries/liveness"
 
 // Queries — Top Operations (per-service operation ranking by metric)
 export {

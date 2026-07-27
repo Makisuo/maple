@@ -305,7 +305,7 @@ export function ToolRow(props: ToolProps) {
 /** Standalone (non-grouped) tool call: one `ToolRow` in its own hairline shell. */
 export function Tool(props: ToolProps) {
 	return (
-		<div className="my-2 overflow-hidden rounded-lg border border-border/60 bg-muted/20">
+		<div className="overflow-hidden rounded-lg border border-border/60 bg-muted/20">
 			<ToolRow {...props} />
 		</div>
 	)

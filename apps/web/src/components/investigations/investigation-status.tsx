@@ -1,6 +1,10 @@
+import type { ComponentType } from "react"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { cn } from "@maple/ui/lib/utils"
+
+import { BellIcon, CircleQuestionIcon, CircleWarningIcon, PulseIcon, UserIcon } from "@/components/icons"
+import { investigationKindKey, type InvestigationKindKey } from "./investigation-display"
 
 type InvestigationStatus = V2Investigation["status"]
 
@@ -43,11 +47,49 @@ const ORIGIN: Record<V2Investigation["seeded_by"], string> = {
 export const investigationOriginLabel = (seededBy: V2Investigation["seeded_by"]): string => ORIGIN[seededBy]
 
 /** What is being investigated. `freeform` is a question, not a kind of incident. */
+const KIND_LABEL: Record<InvestigationKindKey, string> = {
+	alert: "Alert",
+	anomaly: "Anomaly",
+	error: "Error",
+	question: "Question",
+}
+
 export const investigationKindLabel = (subject: V2Investigation["subject"]): string =>
-	subject.type === "freeform"
-		? "Question"
-		: subject.incident_kind === "error"
-			? "Error"
-			: subject.incident_kind === "anomaly"
-				? "Anomaly"
-				: "Alert"
+	KIND_LABEL[investigationKindKey(subject)]
+
+const KIND_ICON: Record<InvestigationKindKey, ComponentType<{ className?: string }>> = {
+	alert: BellIcon,
+	anomaly: PulseIcon,
+	error: CircleWarningIcon,
+	question: CircleQuestionIcon,
+}
+
+/**
+ * Kind and origin, in the width one column used to take for each. Origin is
+ * only drawn when it is `user`: every automatic row printing the same word is
+ * not information, but a human having stepped in is. Both are spelled out in
+ * the label so the marker is never the only place they exist.
+ */
+export function InvestigationKindMarker({
+	subject,
+	seededBy,
+	className,
+}: {
+	subject: V2Investigation["subject"]
+	seededBy: V2Investigation["seeded_by"]
+	className?: string
+}) {
+	const kind = investigationKindKey(subject)
+	const Icon = KIND_ICON[kind]
+	const label = `${KIND_LABEL[kind]} · started ${seededBy === "user" ? "manually" : "automatically"}`
+	return (
+		<span
+			className={cn("flex shrink-0 items-center gap-1 text-muted-foreground", className)}
+			title={label}
+		>
+			<span className="sr-only">{label}</span>
+			<Icon className="size-3.5" />
+			{seededBy === "user" ? <UserIcon className="size-3" /> : null}
+		</span>
+	)
+}

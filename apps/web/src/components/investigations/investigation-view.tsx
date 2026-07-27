@@ -11,6 +11,7 @@ import type { InvestigationContext } from "@/components/chat/investigation-conte
 import { SeverityBadge } from "@/components/errors/severity-badge"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { investigationHeadline, investigationScope } from "./investigation-display"
 import { InvestigationRail } from "./investigation-rail"
 import { InvestigationStatusBadge, investigationKindLabel } from "./investigation-status"
 
@@ -41,10 +42,8 @@ const asIssueSeverity = (value: string | null | undefined): IssueSeverity | null
  * under a "Signal" label (the alert route client-side, `snapshotFor` in the API),
  * so matching on the label recovers it for either origin.
  */
-const factValue = (
-	facts: V2Investigation["snapshot"]["facts"],
-	label: string,
-): string | undefined => facts.find((fact) => fact.label.toLowerCase() === label)?.value
+const factValue = (facts: V2Investigation["snapshot"]["facts"], label: string): string | undefined =>
+	facts.find((fact) => fact.label.toLowerCase() === label)?.value
 
 const contextFromInvestigation = (investigation: V2Investigation): InvestigationContext => {
 	const subject = investigation.subject
@@ -144,7 +143,7 @@ export function InvestigationView({
 			<DashboardLayout.Breadcrumbs
 				items={[
 					{ label: "Investigations", href: "/investigations" },
-					{ label: breadcrumbLabel(investigation.snapshot.title) },
+					{ label: breadcrumbLabel(investigationHeadline(investigation)) },
 				]}
 			/>
 			<DashboardLayout.Body>
@@ -195,6 +194,10 @@ export function InvestigationView({
 function InvestigationHeading({ investigation }: { investigation: V2Investigation }) {
 	const { snapshot } = investigation
 	const severity = asIssueSeverity(investigation.severity ?? snapshot.severity)
+	// Same derivation as the list, or the two surfaces name the same
+	// investigation differently.
+	const headline = investigationHeadline(investigation)
+	const scope = investigationScope(investigation)
 
 	return (
 		<div className="min-w-0 space-y-2">
@@ -203,19 +206,19 @@ function InvestigationHeading({ investigation }: { investigation: V2Investigatio
 				<span aria-hidden>·</span>
 				<span>{investigationKindLabel(investigation.subject)}</span>
 			</div>
-			<DashboardLayout.Title title={snapshot.title}>{snapshot.title}</DashboardLayout.Title>
+			<DashboardLayout.Title title={headline}>{headline}</DashboardLayout.Title>
 			<div className="flex flex-wrap items-center gap-2">
 				<InvestigationStatusBadge status={investigation.status} />
 				{severity ? <SeverityBadge severity={severity} /> : null}
 				{/* `scope` is free text and a system-seeded investigation can carry a
 				    whole paragraph of it. One line, always — the full string is on the
 				    title, and the diagnosis card states the scope properly anyway. */}
-				{snapshot.scope ? (
+				{scope ? (
 					<span
-						title={snapshot.scope}
+						title={scope}
 						className="min-w-0 max-w-[28rem] truncate font-mono text-xs text-muted-foreground"
 					>
-						{snapshot.scope}
+						{scope}
 					</span>
 				) : null}
 			</div>

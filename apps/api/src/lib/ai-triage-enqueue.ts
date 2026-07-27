@@ -67,26 +67,32 @@ const contextString = (context: Record<string, unknown>, key: string): string | 
 }
 
 const snapshotFor = (input: MaybeEnqueueTriageInput): InstanceType<typeof InvestigationSubjectSnapshot> => {
+	const serviceName = contextString(input.context, "serviceName")
+	const kindWord = `${input.incidentKind[0]?.toUpperCase() ?? ""}${input.incidentKind.slice(1)}`
+	// The last resort is what the investigations list renders as a title, so it
+	// names the service when there is one — "Alert incident" says nothing the
+	// list's kind marker doesn't already say. (`reason` is deliberately not in
+	// this chain: it's an enum token like `first_seen`, not a sentence.)
 	const title =
 		contextString(input.context, "title") ??
 		contextString(input.context, "ruleName") ??
 		contextString(input.context, "exceptionMessage") ??
 		contextString(input.context, "signalType") ??
-		`${input.incidentKind[0]?.toUpperCase() ?? ""}${input.incidentKind.slice(1)} incident`
+		(serviceName ? `${kindWord} on ${serviceName}` : `${kindWord} incident`)
 	const severityValue = Schema.decodeUnknownOption(Schema.Literals(["critical", "high", "medium", "low"]))(
 		input.context.severity,
 	)
 	const severity: IssueSeverity | null = severityValue._tag === "Some" ? severityValue.value : null
 	const factKeys = [
 		["Incident", input.incidentId],
-		["Service", contextString(input.context, "serviceName")],
+		["Service", serviceName],
 		["Signal", contextString(input.context, "signalType")],
 		["Reason", contextString(input.context, "reason")],
 	] as const
 
 	return new InvestigationSubjectSnapshot({
 		title,
-		scope: contextString(input.context, "serviceName") ?? null,
+		scope: serviceName ?? null,
 		status: "open",
 		severity,
 		facts: factKeys.flatMap(([label, value]) =>

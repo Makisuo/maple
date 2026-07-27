@@ -35,7 +35,7 @@ export function ApprovalCard({ toolName, input, resolved, onApprove, onDeny }: A
 	}
 
 	return (
-		<div className="my-2 overflow-hidden rounded-xl border border-warning/40 bg-warning/5 text-xs">
+		<div className="overflow-hidden rounded-xl border border-warning/40 bg-warning/5 text-xs">
 			<div className="flex items-center gap-2 px-3 py-2">
 				<CircleWarningIcon className="size-3.5 shrink-0 text-warning" />
 				<span className="font-medium">Approval required: {label}</span>

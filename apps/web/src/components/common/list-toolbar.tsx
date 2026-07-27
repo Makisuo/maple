@@ -1,33 +1,39 @@
 import { cn } from "@maple/ui/lib/utils"
 
-interface IssuesToolbarTab<T extends string> {
+interface ListToolbarTab<T extends string> {
 	value: T
 	label: string
 	count?: number
 }
 
-export interface IssuesToolbarProps<T extends string> {
-	tabs: ReadonlyArray<IssuesToolbarTab<T>>
+export interface ListToolbarProps<T extends string> {
+	tabs: ReadonlyArray<ListToolbarTab<T>>
 	active: T
 	onChange: (value: T) => void
+	/** What the tabs filter, for the tablist's accessible name. */
+	label: string
 	totalCount?: number
-	/** Singular/plural noun for the count readout; defaults to issue/issues. */
+	/** Singular/plural noun for the count readout. */
 	countNoun?: readonly [string, string]
+	/** Replaces the computed count readout when the page can't state a total. */
+	countLabel?: React.ReactNode
 	/** Extra controls rendered right-aligned, before the count readout. */
 	trailing?: React.ReactNode
 }
 
-export function IssuesToolbar<T extends string>({
+export function ListToolbar<T extends string>({
 	tabs,
 	active,
 	onChange,
+	label,
 	totalCount,
-	countNoun = ["issue", "issues"],
+	countNoun = ["item", "items"],
+	countLabel,
 	trailing,
-}: IssuesToolbarProps<T>) {
+}: ListToolbarProps<T>) {
 	return (
 		<div className="flex items-center gap-2 border-b border-border/60 px-2 py-1.5">
-			<div role="tablist" aria-label="Filter issues" className="flex items-center gap-0.5">
+			<div role="tablist" aria-label={label} className="flex items-center gap-0.5">
 				{tabs.map((tab) => {
 					const isActive = active === tab.value
 					return (
@@ -61,7 +67,9 @@ export function IssuesToolbar<T extends string>({
 			</div>
 			<div className="ml-auto flex items-center gap-2">
 				{trailing}
-				{totalCount !== undefined ? (
+				{countLabel !== undefined ? (
+					<span className="text-xs text-muted-foreground tabular-nums">{countLabel}</span>
+				) : totalCount !== undefined ? (
 					<span className="text-xs text-muted-foreground tabular-nums">
 						{totalCount} {totalCount === 1 ? countNoun[0] : countNoun[1]}
 					</span>

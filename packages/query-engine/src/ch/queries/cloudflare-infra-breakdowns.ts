@@ -296,8 +296,8 @@ export function cloudflareZoneBreakdownCoverageSQL(dimension: CloudflareBreakdow
 export interface CloudflareZoneFacetsOutput {
 	readonly name: string
 	/**
-	 * Request weight. Arrives as a JSON string on BYO-ClickHouse; `compileUnion` has no rowSchema
-	 * hook, so the handler coerces with `Number(...)` — same as `podFacets`.
+	 * Request weight. Arrives as a JSON string on BYO-ClickHouse; this query is compiled without a
+	 * `rowSchema`, so the handler coerces with `Number(...)` — same as `podFacets`.
 	 */
 	readonly count: number
 	readonly facetType: string

@@ -35,6 +35,50 @@ export const WorkflowState = Schema.Literals([
 })
 export type WorkflowState = Schema.Schema.Type<typeof WorkflowState>
 
+/**
+ * The legal workflow-state moves. Rows are the "from" state, values the allowed
+ * "to" states.
+ *
+ * Single source of truth on purpose — this used to be copied into
+ * `ErrorsService`, the `transition_error_issue` tool description, and the web's
+ * `StateSelect`, where the three drifted independently and the tool description
+ * was the copy nobody remembered to update.
+ *
+ * `done` is reachable from every actionable state, not just `in_review`. The
+ * narrower rule made sense for code-review-shaped work but not for the issue
+ * hub at large: alert- and integration-kind issues are created in `triage` and
+ * nothing ever advances them through review, so requiring `in_review` first
+ * left them with no way to be retired at all — by a human or by auto-resolve.
+ *
+ * `cancelled` stays terminal, and `done → triage` stays legal so the errors
+ * tick's regression path can reopen a resolved issue when it recurs.
+ */
+export const WORKFLOW_TRANSITIONS: Record<WorkflowState, ReadonlyArray<WorkflowState>> = {
+	triage: ["todo", "in_progress", "done", "cancelled", "wontfix"],
+	todo: ["triage", "in_progress", "done", "cancelled", "wontfix"],
+	in_progress: ["triage", "todo", "in_review", "done", "cancelled", "wontfix"],
+	in_review: ["triage", "in_progress", "done", "cancelled", "wontfix"],
+	done: ["triage", "in_progress", "cancelled", "wontfix"],
+	cancelled: [],
+	wontfix: ["triage", "cancelled"],
+}
+
+/** States from which no further transition is possible. */
+export const TERMINAL_WORKFLOW_STATES: ReadonlySet<WorkflowState> = new Set<WorkflowState>([
+	"done",
+	"cancelled",
+])
+
+/**
+ * Renders the matrix as the prose an LLM tool description needs, so the
+ * description can never drift from the rules the server actually enforces.
+ */
+export const describeWorkflowTransitions = (): string =>
+	Object.entries(WORKFLOW_TRANSITIONS)
+		.filter(([, targets]) => targets.length > 0)
+		.map(([from, targets]) => `${from}→(${targets.join("|")})`)
+		.join("; ")
+
 export const ActorType = Schema.Literals(["user", "agent"]).annotate({
 	identifier: "@maple/ActorType",
 	title: "Actor Type",
