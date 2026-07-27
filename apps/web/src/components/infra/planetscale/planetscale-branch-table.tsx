@@ -4,23 +4,10 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
-import { formatNumber } from "@/lib/format"
-import {
-	ColumnHead,
-	MetaChip,
-	ROW_BUTTON_CLASS,
-	TableShell,
-	TableSkeleton,
-	useTableSort,
-} from "../primitives/data-table"
+import { formatNumber } from "@maple/ui/format"
+import { ColumnHead, DataTable, MetaChip, ROW_BUTTON_CLASS, useTableSort } from "../primitives/data-table"
 import type { BranchCandidate } from "./branch-selection"
-import {
-	MISSING,
-	formatLag,
-	formatStoragePercent,
-	lagClass,
-	utilizationClass,
-} from "./metrics"
+import { MISSING, formatLag, formatStoragePercent, lagClass, utilizationClass } from "./metrics"
 
 type SortKey =
 	| "branch"
@@ -121,23 +108,20 @@ const headerCells = (sort?: {
 
 export function PlanetScaleBranchTableLoading() {
 	return (
-		<TableSkeleton
-			rows={3}
-			header={headerCells()}
-			renderRowCells={() => (
-				<>
-					<div className="min-w-[200px] flex-1">
-						<Skeleton className="h-4 w-40" />
-					</div>
-					<Skeleton className="h-3 w-[96px]" />
-					<Skeleton className="hidden h-3 w-[72px] lg:block" />
-					<Skeleton className="h-3 w-[88px]" />
-					<Skeleton className="hidden h-3 w-[104px] md:block" />
-					<Skeleton className="h-3 w-[80px]" />
-					<Skeleton className="h-3 w-[88px]" />
-				</>
-			)}
-		/>
+		<DataTable.Root ariaLabel="Branches">
+			<DataTable.Head>{headerCells()}</DataTable.Head>
+			<DataTable.SkeletonRows count={3}>
+				<div className="min-w-[200px] flex-1">
+					<Skeleton className="h-4 w-40" />
+				</div>
+				<Skeleton className="h-3 w-[96px]" />
+				<Skeleton className="hidden h-3 w-[72px] lg:block" />
+				<Skeleton className="h-3 w-[88px]" />
+				<Skeleton className="hidden h-3 w-[104px] md:block" />
+				<Skeleton className="h-3 w-[80px]" />
+				<Skeleton className="h-3 w-[88px]" />
+			</DataTable.SkeletonRows>
+		</DataTable.Root>
 	)
 }
 
@@ -191,14 +175,10 @@ export function PlanetScaleBranchTable({
 	})
 
 	return (
-		<TableShell
-			ariaLabel="PlanetScale branches"
-			waiting={waiting}
-			isEmpty={sorted.length === 0}
-			emptyMessage={emptyMessage}
-			maxHeight={TABLE_MAX_HEIGHT}
-			header={headerCells({ sortKey, sortDir, handleSort })}
-		>
+		<DataTable.Root ariaLabel="PlanetScale branches" waiting={waiting} maxHeight={TABLE_MAX_HEIGHT}>
+			<DataTable.Head>{headerCells({ sortKey, sortDir, handleSort })}</DataTable.Head>
+			{sorted.length === 0 && <DataTable.Empty>{emptyMessage}</DataTable.Empty>}
+
 			{sorted.map((row) => {
 				const selected = row.branch === selectedBranch
 				return (
@@ -279,7 +259,7 @@ export function PlanetScaleBranchTable({
 					</button>
 				)
 			})}
-		</TableShell>
+		</DataTable.Root>
 	)
 }
 

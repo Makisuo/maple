@@ -63,27 +63,41 @@ function TemplatesPage() {
 	}
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "Templates" }]}
-			title="Dashboard Templates"
-			description="Pre-built dashboards for common services, databases, infrastructure, and messaging."
-			headerActions={
-				<Button variant="outline" size="sm" onClick={() => navigate({ to: "/dashboards" })}>
-					<ArrowLeftIcon size={14} data-icon="inline-start" />
-					Back to dashboards
-				</Button>
-			}
-		>
-			{failed && (
-				<div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-					Failed to load templates. Try refreshing the page.
-				</div>
-			)}
-			{!Result.isSuccess(listResult) && !failed ? (
-				<TemplateGridSkeleton />
-			) : (
-				<TemplatePicker templates={templates} submitting={submitting} onUse={handleUse} />
-			)}
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Dashboards", href: "/dashboards" }, { label: "Templates" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Dashboard Templates"
+							description="Pre-built dashboards for common services, databases, infrastructure, and messaging."
+						>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => navigate({ to: "/dashboards" })}
+							>
+								<ArrowLeftIcon size={14} data-icon="inline-start" />
+								Back to dashboards
+							</Button>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						{failed && (
+							<div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+								Failed to load templates. Try refreshing the page.
+							</div>
+						)}
+						{!Result.isSuccess(listResult) && !failed ? (
+							<TemplateGridSkeleton />
+						) : (
+							<TemplatePicker templates={templates} submitting={submitting} onUse={handleUse} />
+						)}
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

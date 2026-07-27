@@ -21,17 +21,27 @@ function ReplayPreviewPage() {
 	const breadcrumbs = [{ label: "Session Replays", href: "/replays" }, { label: "Preview" }]
 
 	return (
-		<DashboardLayout breadcrumbs={breadcrumbs} title="Session Replay (preview)">
-			<ReplayStudio
-				sessionId={session.sessionId}
-				session={session}
-				traceIds={[]}
-				preview={{
-					rrwebEvents: PREVIEW_RRWEB_EVENTS,
-					traceSummaries: PREVIEW_TRACE_SUMMARIES,
-					transcript: PREVIEW_TRANSCRIPT,
-				}}
-			/>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={breadcrumbs} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title="Session Replay (preview)" />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<ReplayStudio
+							sessionId={session.sessionId}
+							session={session}
+							traceIds={[]}
+							preview={{
+								rrwebEvents: PREVIEW_RRWEB_EVENTS,
+								traceSummaries: PREVIEW_TRACE_SUMMARIES,
+								transcript: PREVIEW_TRANSCRIPT,
+							}}
+						/>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

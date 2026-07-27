@@ -16,16 +16,16 @@ import {
 	type ChartConfig,
 } from "@maple/ui/components/ui/chart"
 import {
+	formatBucketLabel,
 	formatDuration,
 	formatNumber,
-	formatBucketLabel,
 	inferBucketSeconds,
 	inferRangeMs,
-} from "@/lib/format"
+} from "@maple/ui/format"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
@@ -40,12 +40,10 @@ import { formatAgentDebugPrompt } from "@/components/errors/agent-debug-prompt"
 import type { ErrorByType, ErrorDetailTrace, ErrorsTimeseriesItem } from "@/api/warehouse/errors"
 
 const errorDetailSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
 	services: OptionalStringArrayParam,
 	// Human-readable label carried from the list so the header isn't a raw hash.
 	label: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/errors/$errorType")({
@@ -420,29 +418,34 @@ function ErrorDetailContent() {
 		.render()
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[
-				{ label: "Errors", href: "/errors" },
-				{ label: truncateErrorType(displayLabel, 50) },
-			]}
-			title={displayLabel}
-			headerActions={
-				<TimeRangeHeaderControls
-					startTime={search.startTime}
-					endTime={search.endTime}
-					presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
-					defaultPreset="24h"
-					onTimeChange={handleTimeChange}
-				/>
-			}
-		>
-			<div className="space-y-6">
-				{statsSection}
-				{messageSection}
-				{chartSection}
-				{tracesSection}
-			</div>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Errors", href: "/errors" }, { label: truncateErrorType(displayLabel, 50) }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title={displayLabel}>
+							<TimeRangeHeaderControls
+								startTime={search.startTime}
+								endTime={search.endTime}
+								presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
+								defaultPreset="24h"
+								onTimeChange={handleTimeChange}
+							/>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="space-y-6">
+							{statsSection}
+							{messageSection}
+							{chartSection}
+							{tracesSection}
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

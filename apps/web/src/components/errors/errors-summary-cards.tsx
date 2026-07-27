@@ -1,3 +1,4 @@
+import { formatErrorRate, formatNumber } from "@maple/ui/format"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { CircleWarningIcon, CirclePercentageIcon, ServerIcon, PulseIcon } from "@/components/icons"
 import { ErrorState } from "@/components/common/error-state"
@@ -7,27 +8,6 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type GetErrorsSummaryInput } from "@/api/warehouse/errors"
 import { getErrorsSummaryResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
-
-function formatNumber(num: number): string {
-	if (num >= 1_000_000) {
-		return `${(num / 1_000_000).toFixed(1)}M`
-	}
-	if (num >= 1_000) {
-		return `${(num / 1_000).toFixed(1)}K`
-	}
-	return num.toLocaleString()
-}
-
-function formatPercentage(rate: number): string {
-	const pct = rate * 100
-	if (pct < 0.01) {
-		return "0%"
-	}
-	if (pct < 1) {
-		return `${pct.toFixed(2)}%`
-	}
-	return `${pct.toFixed(1)}%`
-}
 
 interface ErrorsSummaryCardsProps {
 	filters: GetErrorsSummaryInput
@@ -76,7 +56,7 @@ export function ErrorsSummaryCards({ filters }: ErrorsSummaryCardsProps) {
 				{
 					title: "Error Rate",
 					value: summary?.errorRate ?? 0,
-					format: formatPercentage,
+					format: formatErrorRate,
 					icon: CirclePercentageIcon,
 					description: "Errors / total spans",
 				},

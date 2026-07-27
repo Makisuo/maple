@@ -27,14 +27,26 @@ vi.mock("@tanstack/react-router", async () => {
 	}
 })
 
-vi.mock("@/components/layout/dashboard-layout", () => ({
-	DashboardLayout: ({ headerActions, children }: { headerActions?: ReactNode; children?: ReactNode }) => (
-		<div>
-			{headerActions}
-			{children}
-		</div>
-	),
-}))
+vi.mock("@/components/layout/dashboard-layout", () => {
+	// Pass-through shell: every region just renders its children, so a test can
+	// assert on header actions and page body without the sidebar/router chrome.
+	const passthrough = ({ children }: { children?: ReactNode }) => <div>{children}</div>
+	return {
+		DashboardLayout: {
+			Root: passthrough,
+			Breadcrumbs: () => null,
+			Body: passthrough,
+			Filters: passthrough,
+			Content: passthrough,
+			Sticky: passthrough,
+			Header: passthrough,
+			Scroll: passthrough,
+			RightPanel: passthrough,
+			Title: passthrough,
+			Description: passthrough,
+		},
+	}
+})
 
 vi.mock("@/components/traces/traces-table", () => ({
 	TracesTable: () => <div>traces-table</div>,

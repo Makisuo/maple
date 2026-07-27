@@ -112,55 +112,82 @@ function MutationFailureShell({
 	onRetry: () => void
 }) {
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Investigations", href: "/investigations" }, { label: "Error" }]}
-			title={title}
-		>
-			<Empty>
-				<EmptyHeader>
-					<EmptyTitle>{title}</EmptyTitle>
-					<EmptyDescription>{description}</EmptyDescription>
-				</EmptyHeader>
-				<Button variant="outline" size="sm" onClick={onRetry}>
-					Try again
-				</Button>
-			</Empty>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Investigations", href: "/investigations" }, { label: "Error" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title={title} />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<Empty>
+							<EmptyHeader>
+								<EmptyTitle>{title}</EmptyTitle>
+								<EmptyDescription>{description}</EmptyDescription>
+							</EmptyHeader>
+							<Button variant="outline" size="sm" onClick={onRetry}>
+								Try again
+							</Button>
+						</Empty>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 
 function LoadingShell({ label = "Loading investigation…" }: { label?: string }) {
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Investigations", href: "/investigations" }, { label: "…" }]}
-			title={label}
-		>
-			<div className="mx-auto w-full max-w-4xl space-y-4">
-				<Skeleton className="h-4 w-32" />
-				<Skeleton className="h-8 w-3/4" />
-				<Skeleton className="h-56 w-full" />
-			</div>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Investigations", href: "/investigations" }, { label: "…" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title={label} />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="mx-auto w-full max-w-4xl space-y-4">
+							<Skeleton className="h-4 w-32" />
+							<Skeleton className="h-8 w-3/4" />
+							<Skeleton className="h-56 w-full" />
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 
 function NotFoundShell() {
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Investigations", href: "/investigations" }, { label: "Missing" }]}
-			title="Investigation not found"
-		>
-			<Empty>
-				<EmptyHeader>
-					<EmptyTitle>This investigation is unavailable</EmptyTitle>
-					<EmptyDescription>
-						It may have been removed, or it belongs to a different organization.
-					</EmptyDescription>
-				</EmptyHeader>
-				<Button variant="outline" size="sm" render={<Link to="/investigations" />}>
-					View investigations
-				</Button>
-			</Empty>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Investigations", href: "/investigations" }, { label: "Missing" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title="Investigation not found" />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<Empty>
+							<EmptyHeader>
+								<EmptyTitle>This investigation is unavailable</EmptyTitle>
+								<EmptyDescription>
+									It may have been removed, or it belongs to a different organization.
+								</EmptyDescription>
+							</EmptyHeader>
+							<Button variant="outline" size="sm" render={<Link to="/investigations" />}>
+								View investigations
+							</Button>
+						</Empty>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

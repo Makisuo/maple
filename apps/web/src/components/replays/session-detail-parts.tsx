@@ -3,7 +3,8 @@ import { motion, useReducedMotion } from "motion/react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { GlobeIcon, ClockIcon, CopyIcon, CheckIcon } from "@/components/icons"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
-import { formatRelativeTime, gradientFor, hostFromUrl } from "./replay-format"
+import { formatRelativeFrom } from "@maple/ui/time-format"
+import { gradientFor, hostFromUrl } from "./replay-format"
 import { parseChTimestampMs } from "./replay-timeline"
 
 // Presentational building blocks for the session-replay detail page. Extracted
@@ -109,7 +110,7 @@ export function SessionIdentityHeader({
 								title={new Date(startedEpoch).toLocaleString()}
 							>
 								<ClockIcon className="size-3 shrink-0 opacity-70" />
-								{formatRelativeTime(startedEpoch)}
+								{formatRelativeFrom(startedEpoch)}
 							</span>
 						</>
 					)}

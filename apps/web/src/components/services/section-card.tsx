@@ -1,6 +1,5 @@
 import type { ReactNode } from "react"
 import { cn } from "@maple/ui/utils"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 interface SectionCardProps {
 	title: string
@@ -25,22 +24,4 @@ export function SectionCard({ title, action, children, className }: SectionCardP
 			<div className="min-h-0 flex-1">{children}</div>
 		</div>
 	)
-}
-
-/** Relative "how long ago" label shared by the Overview tab's secondary cards.
- * Tolerates ISO and warehouse ("YYYY-MM-DD HH:mm:ss", UTC) timestamps. */
-export function formatTimeAgo(iso: string): string {
-	const d = new Date(normalizeTimestampInput(iso))
-	if (Number.isNaN(d.getTime())) return iso
-	const diffMs = Date.now() - d.getTime()
-	if (diffMs < 60_000) return "now"
-	if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`
-	if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)}h ago`
-	if (diffMs < 7 * 86_400_000) return `${Math.floor(diffMs / 86_400_000)}d ago`
-	const sameYear = d.getFullYear() === new Date().getFullYear()
-	return d.toLocaleDateString(undefined, {
-		month: "short",
-		day: "numeric",
-		year: sameYear ? undefined : "numeric",
-	})
 }

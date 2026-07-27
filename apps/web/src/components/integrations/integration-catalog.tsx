@@ -13,7 +13,7 @@ import {
 	WarpStreamIcon,
 } from "@/components/icons"
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { scrapeTargetsListAtom } from "@/lib/services/atoms/scrape-target-atoms"

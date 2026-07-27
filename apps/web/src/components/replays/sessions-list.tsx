@@ -1,10 +1,10 @@
+import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/time-format"
 import { useCallback, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { GlobeIcon, ClockIcon, PulseIcon, CircleWarningIcon, EyeIcon } from "@/components/icons"
 import { browserIconFor, deviceIconFor } from "./session-icons"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
-import { formatDuration, gradientFor, hostFromUrl } from "./replay-format"
+import { formatSessionDuration, gradientFor, hostFromUrl } from "./replay-format"
 
 export interface SessionRow {
 	readonly sessionId: string
@@ -27,25 +27,8 @@ export interface SessionRow {
 	readonly recorded: string
 }
 
-function parseTs(startTime: string): number {
-	return Date.parse(normalizeTimestampInput(startTime))
-}
-
-function formatRelative(startTime: string): string {
-	const parsed = parseTs(startTime)
-	if (Number.isNaN(parsed)) return startTime
-	const s = Math.round((Date.now() - parsed) / 1000)
-	if (s < 60) return "just now"
-	const m = Math.floor(s / 60)
-	if (m < 60) return `${m}m ago`
-	const h = Math.floor(m / 60)
-	if (h < 24) return `${h}h ago`
-	const d = Math.floor(h / 24)
-	return d < 7 ? `${d}d ago` : new Date(parsed).toLocaleDateString()
-}
-
 function absoluteTs(startTime: string): string {
-	const parsed = parseTs(startTime)
+	const parsed = toEpochMs(startTime)
 	return Number.isNaN(parsed) ? startTime : new Date(parsed).toLocaleString()
 }
 
@@ -183,7 +166,7 @@ export function SessionsList({
 										<StatusDot active={isActive} />
 										<span className="hidden shrink-0 font-mono text-xs text-muted-foreground @2xl:inline">
 											{session.sessionId.slice(0, 8)} ·{" "}
-											{formatDuration(session.durationMs)}
+											{formatSessionDuration(session.durationMs)}
 										</span>
 										{/* On phones the right-hand columns are gone, so the timestamp
 								    anchors the top-right corner of the stacked row. */}
@@ -191,13 +174,13 @@ export function SessionsList({
 											className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground @2xl:hidden"
 											title={absoluteTs(session.startTime)}
 										>
-											{formatRelative(session.startTime)}
+											{formatRelativeTimeOrDate(session.startTime)}
 										</span>
 									</div>
 									<div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
 										<span className="shrink-0 font-mono @2xl:hidden">
 											{session.sessionId.slice(0, 8)} ·{" "}
-											{formatDuration(session.durationMs)}
+											{formatSessionDuration(session.durationMs)}
 										</span>
 										<span className="flex min-w-0 items-center gap-1.5">
 											<GlobeIcon className="size-3.5 shrink-0 opacity-60" />
@@ -260,7 +243,7 @@ export function SessionsList({
 										title={absoluteTs(session.startTime)}
 									>
 										<ClockIcon className="size-3.5 opacity-60" />
-										{formatRelative(session.startTime)}
+										{formatRelativeTimeOrDate(session.startTime)}
 									</span>
 									{/* Tap affordance: hover-revealed on desktop. Phones skip it —
 							    the whole card is the tap target and the stacked row needs

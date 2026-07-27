@@ -67,95 +67,137 @@ function TraceDetailPage() {
 
 	return Result.builder(result)
 		.onInitial(() => (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Traces", href: backToTracesHref }, { label: "Loading..." }]}
-				title="Loading trace..."
-				description="Loading trace details..."
-			>
-				<div className="space-y-4">
-					<div className="space-y-2">
-						<Skeleton className="h-8 w-32" />
-						<Skeleton className="h-1.5 w-full rounded-full" />
-						<div className="flex gap-4">
-							<Skeleton className="h-4 w-24" />
-							<Skeleton className="h-4 w-24" />
-							<Skeleton className="h-4 w-24" />
-						</div>
-					</div>
-					<div className="rounded-md border">
-						{Array.from({ length: 5 }).map((_, i) => (
-							<div key={i} className="flex items-center gap-2 border-b p-3">
-								<Skeleton className="size-4" />
-								<Skeleton className="h-4 w-20" />
-								<Skeleton className="h-4 w-16" />
-								<Skeleton className="h-4 flex-1" />
-								<Skeleton className="h-2 w-32" />
-								<Skeleton className="h-4 w-16" />
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Traces", href: backToTracesHref }, { label: "Loading..." }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header
+								title="Loading trace..."
+								description="Loading trace details..."
+							/>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-4">
+								<div className="space-y-2">
+									<Skeleton className="h-8 w-32" />
+									<Skeleton className="h-1.5 w-full rounded-full" />
+									<div className="flex gap-4">
+										<Skeleton className="h-4 w-24" />
+										<Skeleton className="h-4 w-24" />
+										<Skeleton className="h-4 w-24" />
+									</div>
+								</div>
+								<div className="rounded-md border">
+									{Array.from({ length: 5 }).map((_, i) => (
+										<div key={i} className="flex items-center gap-2 border-b p-3">
+											<Skeleton className="size-4" />
+											<Skeleton className="h-4 w-20" />
+											<Skeleton className="h-4 w-16" />
+											<Skeleton className="h-4 flex-1" />
+											<Skeleton className="h-2 w-32" />
+											<Skeleton className="h-4 w-16" />
+										</div>
+									))}
+								</div>
 							</div>
-						))}
-					</div>
-				</div>
-			</DashboardLayout>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		))
 		.onError((error) => (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Traces", href: backToTracesHref }, { label: "Error" }]}
-				title="Error"
-				description="Failed to load trace"
-			>
-				<QueryErrorState error={error} titleOverride="Failed to load trace details" />
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Traces", href: backToTracesHref }, { label: "Error" }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Error" description="Failed to load trace" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<QueryErrorState error={error} titleOverride="Failed to load trace details" />
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		))
 		.onSuccess((data) => {
 			if (data.spans.length === 0) {
 				return (
-					<DashboardLayout
-						breadcrumbs={[
-							{ label: "Traces", href: backToTracesHref },
-							{ label: traceId.slice(0, 8) },
-						]}
-						title="Trace not found"
-						description="This trace could not be found. It may have expired or not been ingested yet."
-					>
-						<div className="flex flex-col items-center justify-center rounded-md border border-dashed p-12 text-center">
-							<p className="mb-2 text-sm text-muted-foreground">Trace ID</p>
-							<TraceIdBadge traceId={traceId} />
-							<a
-								href={backToTracesHref}
-								className="mt-6 text-sm text-primary underline underline-offset-4 hover:text-primary/80"
-							>
-								Back to Traces
-							</a>
-						</div>
-					</DashboardLayout>
+					<DashboardLayout.Root>
+						<DashboardLayout.Breadcrumbs
+							items={[
+								{ label: "Traces", href: backToTracesHref },
+								{ label: traceId.slice(0, 8) },
+							]}
+						/>
+						<DashboardLayout.Body>
+							<DashboardLayout.Content>
+								<DashboardLayout.Sticky>
+									<DashboardLayout.Header
+										title="Trace not found"
+										description="This trace could not be found. It may have expired or not been ingested yet."
+									/>
+								</DashboardLayout.Sticky>
+								<DashboardLayout.Scroll>
+									<div className="flex flex-col items-center justify-center rounded-md border border-dashed p-12 text-center">
+										<p className="mb-2 text-sm text-muted-foreground">Trace ID</p>
+										<TraceIdBadge traceId={traceId} />
+										<a
+											href={backToTracesHref}
+											className="mt-6 text-sm text-primary underline underline-offset-4 hover:text-primary/80"
+										>
+											Back to Traces
+										</a>
+									</div>
+								</DashboardLayout.Scroll>
+							</DashboardLayout.Content>
+						</DashboardLayout.Body>
+					</DashboardLayout.Root>
 				)
 			}
 
 			if (data.rootSpans.length === 0) {
 				return (
-					<DashboardLayout
-						breadcrumbs={[
-							{ label: "Traces", href: backToTracesHref },
-							{ label: traceId.slice(0, 8) },
-						]}
-						title="Root span not found"
-						description={`Found ${data.spans.length} span${data.spans.length !== 1 ? "s" : ""}, but the root span is missing. The trace may be incomplete.`}
-					>
-						<div className="flex flex-col items-center justify-center rounded-md border border-dashed p-12 text-center">
-							<p className="mb-2 text-sm text-muted-foreground">Trace ID</p>
-							<TraceIdBadge traceId={traceId} />
-							<p className="mt-4 text-sm text-muted-foreground max-w-md">
-								This trace contains spans but the root span was not found. It may not have
-								been ingested yet or could have been dropped during sampling.
-							</p>
-							<a
-								href={backToTracesHref}
-								className="mt-6 text-sm text-primary underline underline-offset-4 hover:text-primary/80"
-							>
-								Back to Traces
-							</a>
-						</div>
-					</DashboardLayout>
+					<DashboardLayout.Root>
+						<DashboardLayout.Breadcrumbs
+							items={[
+								{ label: "Traces", href: backToTracesHref },
+								{ label: traceId.slice(0, 8) },
+							]}
+						/>
+						<DashboardLayout.Body>
+							<DashboardLayout.Content>
+								<DashboardLayout.Sticky>
+									<DashboardLayout.Header
+										title="Root span not found"
+										description={`Found ${data.spans.length} span${data.spans.length !== 1 ? "s" : ""}, but the root span is missing. The trace may be incomplete.`}
+									/>
+								</DashboardLayout.Sticky>
+								<DashboardLayout.Scroll>
+									<div className="flex flex-col items-center justify-center rounded-md border border-dashed p-12 text-center">
+										<p className="mb-2 text-sm text-muted-foreground">Trace ID</p>
+										<TraceIdBadge traceId={traceId} />
+										<p className="mt-4 text-sm text-muted-foreground max-w-md">
+											This trace contains spans but the root span was not found. It may
+											not have been ingested yet or could have been dropped during
+											sampling.
+										</p>
+										<a
+											href={backToTracesHref}
+											className="mt-6 text-sm text-primary underline underline-offset-4 hover:text-primary/80"
+										>
+											Back to Traces
+										</a>
+									</div>
+								</DashboardLayout.Scroll>
+							</DashboardLayout.Content>
+						</DashboardLayout.Body>
+					</DashboardLayout.Root>
 				)
 			}
 
@@ -248,93 +290,108 @@ function TraceDetailContent({
 	})
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Traces", href: backToTracesHref }, { label: traceId.slice(0, 8) }]}
-			title={rootHttpInfo ? undefined : (rootSpan?.spanName ?? "Unknown Trace")}
-			titleContent={
-				rootHttpInfo ? (
-					<h1 className="min-w-0">
-						<HttpSpanLabel
-							spanName={rootSpan.spanName}
-							spanAttributes={rootSpan.spanAttributes}
-							spanKind={rootSpan.spanKind}
-							className="gap-3 text-2xl font-bold tracking-tight"
-							textClassName="text-2xl font-bold tracking-tight"
-						/>
-					</h1>
-				) : undefined
-			}
-			headerActions={
-				<div className="flex items-center gap-2">
-					<TraceReplayLink traceId={traceId} />
-				</div>
-			}
-		>
-			<div className="flex flex-1 flex-col gap-y-3 min-h-0">
-				<TraceAnatomyStrip
-					spans={data.spans}
-					totalDurationMs={data.totalDurationMs}
-					traceId={traceId}
-					hasError={hasError}
-					httpStatusCode={rootHttpInfo?.statusCode}
-					deploymentEnv={deploymentEnv}
-					commitSha={commitSha}
-				/>
-
-				{isMobile ? (
-					// A 60/40 side-by-side split leaves each pane ~150px on a phone. Give the waterfall
-					// the full width and float the span detail over it instead.
-					<>
-						<div className="flex-1 min-h-0 rounded-md border overflow-hidden">
-							{traceViewTabs}
-						</div>
-						<Sheet
-							open={selectedSpan != null}
-							onOpenChange={(open) => {
-								if (!open) handleCloseSpanDetails()
-							}}
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Traces", href: backToTracesHref }, { label: traceId.slice(0, 8) }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title={rootHttpInfo ? undefined : (rootSpan?.spanName ?? "Unknown Trace")}
+							titleContent={
+								rootHttpInfo ? (
+									<DashboardLayout.Title className="min-w-0">
+										<HttpSpanLabel
+											spanName={rootSpan.spanName}
+											spanAttributes={rootSpan.spanAttributes}
+											spanKind={rootSpan.spanKind}
+											className="gap-3"
+										/>
+									</DashboardLayout.Title>
+								) : undefined
+							}
 						>
-							<SheetContent side="bottom" className="h-[80svh] p-0" showCloseButton={false}>
-								<SheetHeader className="sr-only">
-									<SheetTitle>Span details</SheetTitle>
-									<SheetDescription>Details for the selected span.</SheetDescription>
-								</SheetHeader>
-								{selectedSpan && (
-									<SpanDetailPanel
-										span={selectedSpan}
-										onClose={handleCloseSpanDetails}
-										traceStartTime={traceStartTime}
-										totalDurationMs={data.totalDurationMs}
-									/>
-								)}
-							</SheetContent>
-						</Sheet>
-					</>
-				) : (
-					<ResizablePanelGroup
-						orientation="horizontal"
-						className="flex-1 min-h-0 rounded-md border overflow-hidden"
-					>
-						<ResizablePanel defaultSize={selectedSpan ? 60 : 100} minSize={40}>
-							{traceViewTabs}
-						</ResizablePanel>
+							<div className="flex items-center gap-2">
+								<TraceReplayLink traceId={traceId} />
+							</div>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="flex flex-1 flex-col gap-y-3 min-h-0">
+							<TraceAnatomyStrip
+								spans={data.spans}
+								totalDurationMs={data.totalDurationMs}
+								traceId={traceId}
+								hasError={hasError}
+								httpStatusCode={rootHttpInfo?.statusCode}
+								deploymentEnv={deploymentEnv}
+								commitSha={commitSha}
+							/>
 
-						{selectedSpan && (
-							<>
-								<ResizableHandle withHandle />
-								<ResizablePanel defaultSize={40} minSize={25}>
-									<SpanDetailPanel
-										span={selectedSpan}
-										onClose={handleCloseSpanDetails}
-										traceStartTime={traceStartTime}
-										totalDurationMs={data.totalDurationMs}
-									/>
-								</ResizablePanel>
-							</>
-						)}
-					</ResizablePanelGroup>
-				)}
-			</div>
-		</DashboardLayout>
+							{isMobile ? (
+								// A 60/40 side-by-side split leaves each pane ~150px on a phone. Give the waterfall
+								// the full width and float the span detail over it instead.
+								<>
+									<div className="flex-1 min-h-0 rounded-md border overflow-hidden">
+										{traceViewTabs}
+									</div>
+									<Sheet
+										open={selectedSpan != null}
+										onOpenChange={(open) => {
+											if (!open) handleCloseSpanDetails()
+										}}
+									>
+										<SheetContent
+											side="bottom"
+											className="h-[80svh] p-0"
+											showCloseButton={false}
+										>
+											<SheetHeader className="sr-only">
+												<SheetTitle>Span details</SheetTitle>
+												<SheetDescription>
+													Details for the selected span.
+												</SheetDescription>
+											</SheetHeader>
+											{selectedSpan && (
+												<SpanDetailPanel
+													span={selectedSpan}
+													onClose={handleCloseSpanDetails}
+													traceStartTime={traceStartTime}
+													totalDurationMs={data.totalDurationMs}
+												/>
+											)}
+										</SheetContent>
+									</Sheet>
+								</>
+							) : (
+								<ResizablePanelGroup
+									orientation="horizontal"
+									className="flex-1 min-h-0 rounded-md border overflow-hidden"
+								>
+									<ResizablePanel defaultSize={selectedSpan ? 60 : 100} minSize={40}>
+										{traceViewTabs}
+									</ResizablePanel>
+
+									{selectedSpan && (
+										<>
+											<ResizableHandle withHandle />
+											<ResizablePanel defaultSize={40} minSize={25}>
+												<SpanDetailPanel
+													span={selectedSpan}
+													onClose={handleCloseSpanDetails}
+													traceStartTime={traceStartTime}
+													totalDurationMs={data.totalDurationMs}
+												/>
+											</ResizablePanel>
+										</>
+									)}
+								</ResizablePanelGroup>
+							)}
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

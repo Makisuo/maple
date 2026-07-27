@@ -7,8 +7,7 @@ import type { ActionKind } from "./replay-player-context"
 
 export {
 	formatClock,
-	formatDuration,
-	formatRelativeTime,
+	formatSessionDuration,
 	gradientFor,
 	hostFromUrl,
 	isMobileDevice,

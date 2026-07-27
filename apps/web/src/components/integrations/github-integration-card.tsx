@@ -35,6 +35,7 @@ import {
 	TrashIcon,
 } from "@/components/icons"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { GITHUB_ACCENT, IntegrationIconPlate } from "./integration-catalog"
 import { useIntegrationConnect, type IntegrationConnect } from "./integration-connect"
@@ -139,11 +140,7 @@ export function GithubIntegrationCard() {
 	// popupActive covers the connect popup plus the provider's post-close grace window.
 	const shouldPoll = connectFlow.popupActive || forcePoll || syncing
 
-	useEffect(() => {
-		if (!shouldPoll) return
-		const id = setInterval(() => refreshStatus(), POLL_INTERVAL_MS)
-		return () => clearInterval(id)
-	}, [shouldPoll, refreshStatus])
+	useIntervalRefresh(refreshStatus, { intervalMs: POLL_INTERVAL_MS, enabled: shouldPoll })
 
 	useEffect(() => {
 		if (!forcePoll) return

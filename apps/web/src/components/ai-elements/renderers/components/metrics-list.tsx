@@ -1,6 +1,6 @@
 import type { BaseComponentProps } from "@json-render/react"
 import { Badge } from "@maple/ui/components/ui/badge"
-import { formatNumber } from "@/lib/format"
+import { formatNumber } from "@maple/ui/format"
 
 interface MetricsListProps {
 	summary: Array<{

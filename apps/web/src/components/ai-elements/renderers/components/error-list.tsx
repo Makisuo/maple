@@ -1,5 +1,5 @@
+import { formatRelativeTime } from "@maple/ui/time-format"
 import type { BaseComponentProps } from "@json-render/react"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 interface ErrorListProps {
 	errors: Array<{
@@ -16,8 +16,7 @@ export function ErrorList({ props }: BaseComponentProps<ErrorListProps>) {
 	return (
 		<div className="max-h-[300px] space-y-1 overflow-y-auto">
 			{errors.map((err) => {
-				const lastSeen = new Date(normalizeTimestampInput(err.lastSeen))
-				const timeAgo = formatTimeAgo(lastSeen)
+				const timeAgo = formatRelativeTime(err.lastSeen)
 				return (
 					<div
 						key={err.errorType}
@@ -50,15 +49,4 @@ export function ErrorList({ props }: BaseComponentProps<ErrorListProps>) {
 			})}
 		</div>
 	)
-}
-
-function formatTimeAgo(date: Date): string {
-	const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
-	if (seconds < 60) return `${seconds}s ago`
-	const minutes = Math.floor(seconds / 60)
-	if (minutes < 60) return `${minutes}m ago`
-	const hours = Math.floor(minutes / 60)
-	if (hours < 24) return `${hours}h ago`
-	const days = Math.floor(hours / 24)
-	return `${days}d ago`
 }

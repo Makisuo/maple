@@ -21,7 +21,7 @@ import { WorkloadTable, WorkloadTableLoading } from "@/components/infra/workload
 import { WorkloadsFilterSidebarView, type WorkloadFilters } from "@/components/infra/k8s-filter-sidebar"
 import { listWorkloadsResultAtom, workloadFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import type { WorkloadKind } from "@/api/warehouse/infra"
@@ -35,9 +35,7 @@ const workloadsSearchSchema = Schema.Struct({
 	clusters: OptionalStringArrayParam,
 	environments: OptionalStringArrayParam,
 	computeTypes: OptionalStringArrayParam,
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export type WorkloadsSearchParams = Schema.Schema.Type<typeof workloadsSearchSchema>
@@ -134,161 +132,173 @@ function WorkloadsPageContent() {
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
-			<DashboardLayout
-				breadcrumbs={[
-					{ label: "Infrastructure", href: "/infra" },
-					{ label: "Kubernetes" },
-					{ label: "Workloads" },
-				]}
-				filterSidebar={
-					<WorkloadsFilterSidebarView
-						facetsResult={facetsResult}
-						filters={filters}
-						workloadLabel={KIND_LABEL[kind]}
-						onFilterChange={onFilterChange}
-						onClearFilters={onClearFilters}
-					/>
-				}
-				headerActions={
-					<TimeRangeHeaderControls
-						startTime={search.startTime ?? startTime}
-						endTime={search.endTime ?? endTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-						onTimeChange={handleTimeChange}
-					/>
-				}
-			>
-				<div className="space-y-6">
-					<PageHero
-						title="Workloads"
-						description="Aggregated pod metrics by deployment, statefulset, and daemonset."
-					/>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[
+						{ label: "Infrastructure", href: "/infra" },
+						{ label: "Kubernetes" },
+						{ label: "Workloads" },
+					]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Filters>
+						<WorkloadsFilterSidebarView
+							facetsResult={facetsResult}
+							filters={filters}
+							workloadLabel={KIND_LABEL[kind]}
+							onFilterChange={onFilterChange}
+							onClearFilters={onClearFilters}
+						/>
+					</DashboardLayout.Filters>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header>
+								<TimeRangeHeaderControls
+									startTime={search.startTime ?? startTime}
+									endTime={search.endTime ?? endTime}
+									presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+									onTimeChange={handleTimeChange}
+								/>
+							</DashboardLayout.Header>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-6">
+								<PageHero
+									title="Workloads"
+									description="Aggregated pod metrics by deployment, statefulset, and daemonset."
+								/>
 
-					<div className="flex items-center gap-1 rounded-md border bg-background p-0.5 self-start w-fit">
-						{(["deployment", "statefulset", "daemonset"] as const).map((k) => {
-							const active = kind === k
-							return (
-								<button
-									key={k}
-									type="button"
-									onClick={() =>
-										navigate({
-											search: (prev) => ({
-												...prev,
-												kind: k,
-												workloadNames: undefined,
-											}),
-										})
-									}
-									className={cn(
-										"rounded-sm px-2.5 py-1 text-[11px] font-medium transition-colors",
-										active
-											? "bg-foreground text-background"
-											: "text-muted-foreground hover:text-foreground",
-									)}
-								>
-									{KIND_LABEL[k]}
-								</button>
-							)
-						})}
-					</div>
-
-					{Result.builder(wlResult)
-						.onInitial(() => <WorkloadTableLoading />)
-						.onError((err) => <QueryErrorState error={err} />)
-						.onSuccess((response, result) => {
-							const wls = response.data
-							const hasStructuredFilter =
-								(filters.workloadNames?.length ?? 0) > 0 ||
-								(filters.namespaces?.length ?? 0) > 0 ||
-								(filters.clusters?.length ?? 0) > 0 ||
-								(filters.environments?.length ?? 0) > 0 ||
-								(filters.computeTypes?.length ?? 0) > 0
-
-							if (wls.length === 0 && !hasStructuredFilter) {
-								return (
-									<Empty className="py-16">
-										<EmptyHeader>
-											<EmptyMedia variant="icon">
-												<GridIcon size={16} />
-											</EmptyMedia>
-											<EmptyTitle>No workloads reporting yet</EmptyTitle>
-											<EmptyDescription>
-												Maple aggregates pod metrics by k8s.deployment.name,
-												k8s.statefulset.name, and k8s.daemonset.name. Install the Helm
-												chart so the k8sattributes processor can enrich pod metrics
-												with workload identity.
-											</EmptyDescription>
-										</EmptyHeader>
-									</Empty>
-								)
-							}
-
-							const q = searchText.trim().toLowerCase()
-							const filtered = q
-								? wls.filter((w) => w.workloadName.toLowerCase().includes(q))
-								: wls
-
-							return (
-								<div
-									className={`space-y-4 transition-opacity ${
-										result.waiting ? "opacity-60" : ""
-									}`}
-								>
-									<div className="flex flex-wrap items-center justify-between gap-3">
-										<InputGroup className="w-64">
-											<InputGroupAddon>
-												<MagnifierIcon />
-											</InputGroupAddon>
-											<InputGroupInput
-												size="sm"
-												placeholder="Search…"
-												value={searchText}
-												onChange={(e) => setSearchText(e.target.value)}
-											/>
-											{searchText && (
-												<InputGroupAddon align="inline-end">
-													<InputGroupButton
-														aria-label="Clear search"
-														onClick={() => setSearchText("")}
-													>
-														<XmarkIcon />
-													</InputGroupButton>
-												</InputGroupAddon>
-											)}
-										</InputGroup>
-										<span className="text-xs text-muted-foreground">
-											{filtered.length}{" "}
-											{filtered.length === 1 ? "workload" : "workloads"}
-										</span>
-									</div>
-									{q && filtered.length === 0 ? (
-										<Empty className="py-12">
-											<EmptyHeader>
-												<EmptyMedia variant="icon">
-													<MagnifierIcon size={16} />
-												</EmptyMedia>
-												<EmptyTitle>No workloads match “{searchText}”</EmptyTitle>
-												<EmptyDescription>
-													Try a different name, or clear the search to see all
-													workloads.
-												</EmptyDescription>
-											</EmptyHeader>
-										</Empty>
-									) : (
-										<WorkloadTable
-											workloads={filtered}
-											kind={kind}
-											waiting={result.waiting}
-											referenceTime={endTime}
-										/>
-									)}
+								<div className="flex items-center gap-1 rounded-md border bg-background p-0.5 self-start w-fit">
+									{(["deployment", "statefulset", "daemonset"] as const).map((k) => {
+										const active = kind === k
+										return (
+											<button
+												key={k}
+												type="button"
+												onClick={() =>
+													navigate({
+														search: (prev) => ({
+															...prev,
+															kind: k,
+															workloadNames: undefined,
+														}),
+													})
+												}
+												className={cn(
+													"rounded-sm px-2.5 py-1 text-[11px] font-medium transition-colors",
+													active
+														? "bg-foreground text-background"
+														: "text-muted-foreground hover:text-foreground",
+												)}
+											>
+												{KIND_LABEL[k]}
+											</button>
+										)
+									})}
 								</div>
-							)
-						})
-						.render()}
-				</div>
-			</DashboardLayout>
+
+								{Result.builder(wlResult)
+									.onInitial(() => <WorkloadTableLoading />)
+									.onError((err) => <QueryErrorState error={err} />)
+									.onSuccess((response, result) => {
+										const wls = response.data
+										const hasStructuredFilter =
+											(filters.workloadNames?.length ?? 0) > 0 ||
+											(filters.namespaces?.length ?? 0) > 0 ||
+											(filters.clusters?.length ?? 0) > 0 ||
+											(filters.environments?.length ?? 0) > 0 ||
+											(filters.computeTypes?.length ?? 0) > 0
+
+										if (wls.length === 0 && !hasStructuredFilter) {
+											return (
+												<Empty className="py-16">
+													<EmptyHeader>
+														<EmptyMedia variant="icon">
+															<GridIcon size={16} />
+														</EmptyMedia>
+														<EmptyTitle>No workloads reporting yet</EmptyTitle>
+														<EmptyDescription>
+															Maple aggregates pod metrics by
+															k8s.deployment.name, k8s.statefulset.name, and
+															k8s.daemonset.name. Install the Helm chart so the
+															k8sattributes processor can enrich pod metrics
+															with workload identity.
+														</EmptyDescription>
+													</EmptyHeader>
+												</Empty>
+											)
+										}
+
+										const q = searchText.trim().toLowerCase()
+										const filtered = q
+											? wls.filter((w) => w.workloadName.toLowerCase().includes(q))
+											: wls
+
+										return (
+											<div
+												className={`space-y-4 transition-opacity ${
+													result.waiting ? "opacity-60" : ""
+												}`}
+											>
+												<div className="flex flex-wrap items-center justify-between gap-3">
+													<InputGroup className="w-64">
+														<InputGroupAddon>
+															<MagnifierIcon />
+														</InputGroupAddon>
+														<InputGroupInput
+															size="sm"
+															placeholder="Search…"
+															value={searchText}
+															onChange={(e) => setSearchText(e.target.value)}
+														/>
+														{searchText && (
+															<InputGroupAddon align="inline-end">
+																<InputGroupButton
+																	aria-label="Clear search"
+																	onClick={() => setSearchText("")}
+																>
+																	<XmarkIcon />
+																</InputGroupButton>
+															</InputGroupAddon>
+														)}
+													</InputGroup>
+													<span className="text-xs text-muted-foreground">
+														{filtered.length}{" "}
+														{filtered.length === 1 ? "workload" : "workloads"}
+													</span>
+												</div>
+												{q && filtered.length === 0 ? (
+													<Empty className="py-12">
+														<EmptyHeader>
+															<EmptyMedia variant="icon">
+																<MagnifierIcon size={16} />
+															</EmptyMedia>
+															<EmptyTitle>
+																No workloads match “{searchText}”
+															</EmptyTitle>
+															<EmptyDescription>
+																Try a different name, or clear the search to
+																see all workloads.
+															</EmptyDescription>
+														</EmptyHeader>
+													</Empty>
+												) : (
+													<WorkloadTable
+														workloads={filtered}
+														kind={kind}
+														waiting={result.waiting}
+														referenceTime={endTime}
+													/>
+												)}
+											</div>
+										)
+									})
+									.render()}
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
 }

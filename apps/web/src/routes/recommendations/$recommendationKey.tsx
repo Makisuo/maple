@@ -12,7 +12,7 @@ import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
 } from "@/lib/services/atoms/ingestion-atoms"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -220,45 +220,54 @@ function DetailView({
 	const isLive = issue.status === "applied" || issue.status === "resolved"
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[
-				{ label: "Ingestion", href: INGESTION_HREF },
-				{ label: `Recommendation #${issue.number}` },
-			]}
-			titleContent={
-				<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-					<h1 className="font-display text-xl font-semibold tracking-tight sm:text-2xl">
-						{recSentence(issue)}
-					</h1>
-					<Badge variant={status.variant} size="lg">
-						{status.label}
-					</Badge>
-				</div>
-			}
-			description={`Opened ${formatRelativeTime(issue.opened_at)} · ${issue.usage_count.toLocaleString()} spans · 24h`}
-			rightSidebar={
-				<DetailSidebar
-					issue={issue}
-					busy={busy}
-					isApplyable={isApplyable}
-					isLive={isLive}
-					onApply={onApply}
-					onDismiss={onDismiss}
-					onReopen={onReopen}
-				/>
-			}
-		>
-			<div className="max-w-3xl space-y-6">
-				<Summary issue={issue} />
-				<ChangeBreakdown issue={issue} />
-				<CautionCallout issue={issue} isApplyable={isApplyable} />
-				{isApplyable && issue.canonical_key ? (
-					<MappingBlock issue={issue} isLive={isLive} />
-				) : (
-					<SdkFixBlock issue={issue} />
-				)}
-			</div>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[
+					{ label: "Ingestion", href: INGESTION_HREF },
+					{ label: `Recommendation #${issue.number}` },
+				]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							titleContent={
+								<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+									<DashboardLayout.Title>{recSentence(issue)}</DashboardLayout.Title>
+									<Badge variant={status.variant} size="lg">
+										{status.label}
+									</Badge>
+								</div>
+							}
+							description={`Opened ${formatRelativeTime(issue.opened_at)} · ${issue.usage_count.toLocaleString()} spans · 24h`}
+						/>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="max-w-3xl space-y-6">
+							<Summary issue={issue} />
+							<ChangeBreakdown issue={issue} />
+							<CautionCallout issue={issue} isApplyable={isApplyable} />
+							{isApplyable && issue.canonical_key ? (
+								<MappingBlock issue={issue} isLive={isLive} />
+							) : (
+								<SdkFixBlock issue={issue} />
+							)}
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+				<DashboardLayout.RightPanel>
+					<DetailSidebar
+						issue={issue}
+						busy={busy}
+						isApplyable={isApplyable}
+						isLive={isLive}
+						onApply={onApply}
+						onDismiss={onDismiss}
+						onReopen={onReopen}
+					/>
+				</DashboardLayout.RightPanel>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 
@@ -575,12 +584,19 @@ function DetailSidebar({
 
 function ShellLayout({ children }: { children: React.ReactNode }) {
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Ingestion", href: INGESTION_HREF }, { label: "Recommendation" }]}
-			title="Recommendation"
-		>
-			{children}
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Ingestion", href: INGESTION_HREF }, { label: "Recommendation" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title="Recommendation" />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>{children}</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

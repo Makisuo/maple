@@ -15,7 +15,7 @@ import {
 	serviceHealthRowKey,
 	useServiceHealthSummary,
 } from "@/components/services/use-service-health-summary"
-import { formatTimeAgo } from "@/components/services/section-card"
+import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -240,7 +240,7 @@ function deployMetaLine(text: string) {
 function ResolvedDeployLines({ sha, firstSeen, stateLine }: DeployLinesProps) {
 	const result = useAtomValue(commitQueryAtom(sha))
 	const shortSha = truncateCommitSha(sha)
-	const age = firstSeen !== "" ? formatTimeAgo(firstSeen) : ""
+	const age = firstSeen !== "" ? formatRelativeTimeOrDate(firstSeen) : ""
 	const message = Result.isSuccess(result) ? firstLine(result.value.message) : ""
 	return (
 		<>
@@ -256,7 +256,7 @@ function DeployLines({ sha, firstSeen, stateLine }: DeployLinesProps) {
 	if (isResolvableSha(sha)) {
 		return <ResolvedDeployLines sha={sha} firstSeen={firstSeen} stateLine={stateLine} />
 	}
-	const age = firstSeen !== "" ? formatTimeAgo(firstSeen) : ""
+	const age = firstSeen !== "" ? formatRelativeTimeOrDate(firstSeen) : ""
 	return (
 		<>
 			<CommitShaHoverCard sha={sha} className="min-w-0 max-w-full truncate text-xs text-foreground">
@@ -274,7 +274,7 @@ const DeployCell = React.memo(function DeployCell({ commits }: { commits: Commit
 	}
 	const stateLine = info.errorsSince ? (
 		<span className="truncate text-[10px] text-severity-error">
-			{info.firstSeen !== "" ? `${formatTimeAgo(info.firstSeen)} · ` : ""}errors ↑ since
+			{info.firstSeen !== "" ? `${formatRelativeTimeOrDate(info.firstSeen)} · ` : ""}errors ↑ since
 		</span>
 	) : info.rollout !== undefined ? (
 		<Tooltip>

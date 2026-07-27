@@ -1,14 +1,16 @@
+import { formatNumber } from "@maple/ui/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Fragment, useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { formatDistanceToNow, format } from "date-fns"
+import { format } from "date-fns"
 import { ArrowRightIcon, ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type GetErrorsByTypeInput, type ErrorByType } from "@/api/warehouse/errors"
-import { formatDuration } from "@/lib/format"
+import { formatDuration } from "@maple/ui/format"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import {
 	getErrorDetailTracesResultAtom,
@@ -16,20 +18,6 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
-
-function formatNumber(num: number): string {
-	if (num >= 1_000_000) {
-		return `${(num / 1_000_000).toFixed(1)}M`
-	}
-	if (num >= 1_000) {
-		return `${(num / 1_000).toFixed(1)}K`
-	}
-	return num.toLocaleString()
-}
-
-function formatTimeAgo(date: Date): string {
-	return formatDistanceToNow(date, { addSuffix: true })
-}
 
 function truncateErrorType(errorType: string, maxLength = 60): string {
 	if (errorType.length <= maxLength) return errorType
@@ -153,7 +141,9 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
 											<span className="text-xs">
 												{formatDuration(trace.durationMicros / 1000)}
 											</span>
-											<span className="text-xs">{formatTimeAgo(trace.startTime)}</span>
+											<span className="text-xs">
+												{formatRelativeTime(trace.startTime)}
+											</span>
 										</div>
 									</Link>
 								))}
@@ -308,7 +298,7 @@ export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
 														{errorRow.affectedServicesCount !== 1 ? "s" : ""}
 													</TableCell>
 													<TableCell className="hidden md:table-cell text-sm text-muted-foreground">
-														{formatTimeAgo(errorRow.lastSeen)}
+														{formatRelativeTime(errorRow.lastSeen)}
 													</TableCell>
 												</TableRow>
 												{isExpanded && (

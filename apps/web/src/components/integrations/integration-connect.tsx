@@ -99,6 +99,10 @@ function useOAuthPopupFlow({
 	const [popupOpen, setPopupOpen] = useState(false)
 	const [inCloseGrace, setInCloseGrace] = useState(false)
 
+	// Deliberately a raw interval, not `useIntervalRefresh`: this watches a cross-origin
+	// popup handle rather than refreshing an atom, and the hook's `document.hidden` skip
+	// would be actively wrong here — while the popup holds focus the opener can read as
+	// hidden, so the close would never be detected and the UI would hang in "connecting".
 	useEffect(() => {
 		if (!popupOpen) return
 		const id = setInterval(() => {

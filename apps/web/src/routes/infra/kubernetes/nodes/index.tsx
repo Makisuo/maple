@@ -22,7 +22,7 @@ import { NodeHoneycomb } from "@/components/infra/node-honeycomb"
 import { NodesFilterSidebarView, type NodeFilters } from "@/components/infra/k8s-filter-sidebar"
 import { listNodesResultAtom, nodeFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
@@ -30,9 +30,7 @@ const nodesSearchSchema = Schema.Struct({
 	nodeNames: OptionalStringArrayParam,
 	clusters: OptionalStringArrayParam,
 	environments: OptionalStringArrayParam,
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export type NodesSearchParams = Schema.Schema.Type<typeof nodesSearchSchema>
@@ -117,127 +115,140 @@ function NodesPageContent() {
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
-			<DashboardLayout
-				breadcrumbs={[
-					{ label: "Infrastructure", href: "/infra" },
-					{ label: "Kubernetes" },
-					{ label: "Nodes" },
-				]}
-				filterSidebar={
-					<NodesFilterSidebarView
-						facetsResult={facetsResult}
-						filters={filters}
-						onFilterChange={onFilterChange}
-						onClearFilters={onClearFilters}
-					/>
-				}
-				headerActions={
-					<TimeRangeHeaderControls
-						startTime={search.startTime ?? startTime}
-						endTime={search.endTime ?? endTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-						onTimeChange={handleTimeChange}
-					/>
-				}
-			>
-				<div className="space-y-6">
-					<PageHero
-						title="Nodes"
-						description="Kubelet-reported per-node CPU, memory, and lifecycle metrics."
-					/>
-					{Result.builder(nodesResult)
-						.onInitial(() => <NodeTableLoading />)
-						.onError((err) => <QueryErrorState error={err} />)
-						.onSuccess((response, result) => {
-							const nodes = response.data
-							const hasStructuredFilter =
-								(filters.nodeNames?.length ?? 0) > 0 ||
-								(filters.clusters?.length ?? 0) > 0 ||
-								(filters.environments?.length ?? 0) > 0
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[
+						{ label: "Infrastructure", href: "/infra" },
+						{ label: "Kubernetes" },
+						{ label: "Nodes" },
+					]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Filters>
+						<NodesFilterSidebarView
+							facetsResult={facetsResult}
+							filters={filters}
+							onFilterChange={onFilterChange}
+							onClearFilters={onClearFilters}
+						/>
+					</DashboardLayout.Filters>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header>
+								<TimeRangeHeaderControls
+									startTime={search.startTime ?? startTime}
+									endTime={search.endTime ?? endTime}
+									presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+									onTimeChange={handleTimeChange}
+								/>
+							</DashboardLayout.Header>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-6">
+								<PageHero
+									title="Nodes"
+									description="Kubelet-reported per-node CPU, memory, and lifecycle metrics."
+								/>
+								{Result.builder(nodesResult)
+									.onInitial(() => <NodeTableLoading />)
+									.onError((err) => <QueryErrorState error={err} />)
+									.onSuccess((response, result) => {
+										const nodes = response.data
+										const hasStructuredFilter =
+											(filters.nodeNames?.length ?? 0) > 0 ||
+											(filters.clusters?.length ?? 0) > 0 ||
+											(filters.environments?.length ?? 0) > 0
 
-							if (nodes.length === 0 && !hasStructuredFilter) {
-								return (
-									<Empty className="py-16">
-										<EmptyHeader>
-											<EmptyMedia variant="icon">
-												<ServerIcon size={16} />
-											</EmptyMedia>
-											<EmptyTitle>No nodes reporting yet</EmptyTitle>
-											<EmptyDescription>
-												Install the Maple Kubernetes Helm chart so the kubelet stats
-												receiver can start collecting per-node metrics.
-											</EmptyDescription>
-										</EmptyHeader>
-									</Empty>
-								)
-							}
+										if (nodes.length === 0 && !hasStructuredFilter) {
+											return (
+												<Empty className="py-16">
+													<EmptyHeader>
+														<EmptyMedia variant="icon">
+															<ServerIcon size={16} />
+														</EmptyMedia>
+														<EmptyTitle>No nodes reporting yet</EmptyTitle>
+														<EmptyDescription>
+															Install the Maple Kubernetes Helm chart so the
+															kubelet stats receiver can start collecting
+															per-node metrics.
+														</EmptyDescription>
+													</EmptyHeader>
+												</Empty>
+											)
+										}
 
-							const q = searchText.trim().toLowerCase()
-							const filtered = q
-								? nodes.filter((n) => n.nodeName.toLowerCase().includes(q))
-								: nodes
+										const q = searchText.trim().toLowerCase()
+										const filtered = q
+											? nodes.filter((n) => n.nodeName.toLowerCase().includes(q))
+											: nodes
 
-							return (
-								<div
-									className={`space-y-4 transition-opacity ${
-										result.waiting ? "opacity-60" : ""
-									}`}
-								>
-									{filtered.length >= 4 && (
-										<NodeHoneycomb nodes={filtered} referenceTime={endTime} />
-									)}
-									<div className="flex items-center justify-between gap-3">
-										<InputGroup className="w-64">
-											<InputGroupAddon>
-												<MagnifierIcon />
-											</InputGroupAddon>
-											<InputGroupInput
-												size="sm"
-												placeholder="Search nodes…"
-												value={searchText}
-												onChange={(e) => setSearchText(e.target.value)}
-											/>
-											{searchText && (
-												<InputGroupAddon align="inline-end">
-													<InputGroupButton
-														aria-label="Clear search"
-														onClick={() => setSearchText("")}
-													>
-														<XmarkIcon />
-													</InputGroupButton>
-												</InputGroupAddon>
-											)}
-										</InputGroup>
-										<span className="text-xs text-muted-foreground">
-											{filtered.length} {filtered.length === 1 ? "node" : "nodes"}
-										</span>
-									</div>
-									{q && filtered.length === 0 ? (
-										<Empty className="py-12">
-											<EmptyHeader>
-												<EmptyMedia variant="icon">
-													<MagnifierIcon size={16} />
-												</EmptyMedia>
-												<EmptyTitle>No nodes match “{searchText}”</EmptyTitle>
-												<EmptyDescription>
-													Try a different name, or clear the search to see all
-													nodes.
-												</EmptyDescription>
-											</EmptyHeader>
-										</Empty>
-									) : (
-										<NodeTable
-											nodes={filtered}
-											waiting={result.waiting}
-											referenceTime={endTime}
-										/>
-									)}
-								</div>
-							)
-						})
-						.render()}
-				</div>
-			</DashboardLayout>
+										return (
+											<div
+												className={`space-y-4 transition-opacity ${
+													result.waiting ? "opacity-60" : ""
+												}`}
+											>
+												{filtered.length >= 4 && (
+													<NodeHoneycomb nodes={filtered} referenceTime={endTime} />
+												)}
+												<div className="flex items-center justify-between gap-3">
+													<InputGroup className="w-64">
+														<InputGroupAddon>
+															<MagnifierIcon />
+														</InputGroupAddon>
+														<InputGroupInput
+															size="sm"
+															placeholder="Search nodes…"
+															value={searchText}
+															onChange={(e) => setSearchText(e.target.value)}
+														/>
+														{searchText && (
+															<InputGroupAddon align="inline-end">
+																<InputGroupButton
+																	aria-label="Clear search"
+																	onClick={() => setSearchText("")}
+																>
+																	<XmarkIcon />
+																</InputGroupButton>
+															</InputGroupAddon>
+														)}
+													</InputGroup>
+													<span className="text-xs text-muted-foreground">
+														{filtered.length}{" "}
+														{filtered.length === 1 ? "node" : "nodes"}
+													</span>
+												</div>
+												{q && filtered.length === 0 ? (
+													<Empty className="py-12">
+														<EmptyHeader>
+															<EmptyMedia variant="icon">
+																<MagnifierIcon size={16} />
+															</EmptyMedia>
+															<EmptyTitle>
+																No nodes match “{searchText}”
+															</EmptyTitle>
+															<EmptyDescription>
+																Try a different name, or clear the search to
+																see all nodes.
+															</EmptyDescription>
+														</EmptyHeader>
+													</Empty>
+												) : (
+													<NodeTable
+														nodes={filtered}
+														waiting={result.waiting}
+														referenceTime={endTime}
+													/>
+												)}
+											</div>
+										)
+									})
+									.render()}
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
 }

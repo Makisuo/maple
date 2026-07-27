@@ -38,15 +38,6 @@ function generateId() {
 	return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-function isExitLike(value: unknown): value is Exit.Exit<unknown, unknown> {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		"_tag" in value &&
-		((value as { _tag: unknown })._tag === "Success" || (value as { _tag: unknown })._tag === "Failure")
-	)
-}
-
 function messageFromError(error: unknown): string | null {
 	if (error instanceof Error && error.message.trim().length > 0) {
 		return error.message
@@ -95,7 +86,7 @@ function getErrorMessage(error: unknown): string {
 	const directMessage = messageFromErrorChain(error)
 	if (directMessage) return directMessage
 
-	if (isExitLike(error) && Exit.isFailure(error)) {
+	if (Exit.isExit(error) && Exit.isFailure(error)) {
 		const failure = Option.getOrUndefined(Cause.findErrorOption(error.cause))
 		const failureMessage = messageFromError(failure)
 		if (failureMessage) return failureMessage
@@ -531,7 +522,7 @@ export function useDashboardMutations() {
 			}
 			const concurrency =
 				error instanceof DashboardConcurrencyError ||
-				(isExitLike(error) && isConcurrencyConflict(error))
+				(Exit.isExit(error) && isConcurrencyConflict(error))
 			if (concurrency) {
 				setPersistenceError(
 					"Another editor saved changes to this dashboard. The latest version is loading — re-apply your edit if needed.",

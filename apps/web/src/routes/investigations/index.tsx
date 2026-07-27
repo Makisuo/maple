@@ -13,7 +13,7 @@ import { toast } from "sonner"
 import { ErrorState } from "@/components/common/error-state"
 import { PulseIcon } from "@/components/icons"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
 type HubView = "active" | "history"
@@ -92,74 +92,83 @@ function InvestigationsHub() {
 	}
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Investigations" }]}
-			title="Investigations"
-			description="Durable evidence, diagnoses, approvals, and escalation outcomes."
-		>
-			<div className="space-y-4">
-				<form
-					className="flex items-center gap-2 border bg-card/20 p-3"
-					onSubmit={(event) => {
-						event.preventDefault()
-						void handleCreate()
-					}}
-				>
-					<PulseIcon className="size-4 shrink-0 text-muted-foreground" />
-					<Input
-						value={subject}
-						onChange={(event) => setSubject(event.target.value)}
-						placeholder="Investigate a service, symptom, or incident…"
-						aria-label="New investigation subject"
-						className="border-0 bg-transparent shadow-none focus-visible:ring-0"
-					/>
-					<Button size="sm" type="submit" disabled={creating || !subject.trim()}>
-						{creating ? "Starting…" : "New investigation"}
-					</Button>
-				</form>
-
-				<div className="flex items-center justify-between border-b">
-					<Tabs value={view} onValueChange={(value) => setView(value as HubView)}>
-						<TabsList variant="underline">
-							<TabsTrigger value="active">Active</TabsTrigger>
-							<TabsTrigger value="history">History</TabsTrigger>
-						</TabsList>
-					</Tabs>
-					<span className="pb-2 text-xs tabular-nums text-muted-foreground">
-						{investigations.length} {view}
-					</span>
-				</div>
-
-				{Result.builder(result)
-					.onInitial(() => <InvestigationTableSkeleton />)
-					.onError((error) => (
-						<ErrorState
-							error={error}
-							title="Investigations could not be loaded"
-							onRetry={refresh}
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Investigations" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Investigations"
+							description="Durable evidence, diagnoses, approvals, and escalation outcomes."
 						/>
-					))
-					.onSuccess(() =>
-						investigations.length === 0 ? (
-							<div className="border px-4 py-12 text-center">
-								<p className="text-sm font-medium text-foreground">
-									{view === "active"
-										? "No active investigations match this view"
-										: "No completed or failed investigations yet"}
-								</p>
-								<p className="mt-1 text-xs text-muted-foreground">
-									{view === "active"
-										? "Start one above or open an issue and choose Start investigation."
-										: "Resolved and failed investigations will remain available here."}
-								</p>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="space-y-4">
+							<form
+								className="flex items-center gap-2 border bg-card/20 p-3"
+								onSubmit={(event) => {
+									event.preventDefault()
+									void handleCreate()
+								}}
+							>
+								<PulseIcon className="size-4 shrink-0 text-muted-foreground" />
+								<Input
+									value={subject}
+									onChange={(event) => setSubject(event.target.value)}
+									placeholder="Investigate a service, symptom, or incident…"
+									aria-label="New investigation subject"
+									className="border-0 bg-transparent shadow-none focus-visible:ring-0"
+								/>
+								<Button size="sm" type="submit" disabled={creating || !subject.trim()}>
+									{creating ? "Starting…" : "New investigation"}
+								</Button>
+							</form>
+
+							<div className="flex items-center justify-between border-b">
+								<Tabs value={view} onValueChange={(value) => setView(value as HubView)}>
+									<TabsList variant="underline">
+										<TabsTrigger value="active">Active</TabsTrigger>
+										<TabsTrigger value="history">History</TabsTrigger>
+									</TabsList>
+								</Tabs>
+								<span className="pb-2 text-xs tabular-nums text-muted-foreground">
+									{investigations.length} {view}
+								</span>
 							</div>
-						) : (
-							<InvestigationTable investigations={investigations} />
-						),
-					)
-					.render()}
-			</div>
-		</DashboardLayout>
+
+							{Result.builder(result)
+								.onInitial(() => <InvestigationTableSkeleton />)
+								.onError((error) => (
+									<ErrorState
+										error={error}
+										title="Investigations could not be loaded"
+										onRetry={refresh}
+									/>
+								))
+								.onSuccess(() =>
+									investigations.length === 0 ? (
+										<div className="border px-4 py-12 text-center">
+											<p className="text-sm font-medium text-foreground">
+												{view === "active"
+													? "No active investigations match this view"
+													: "No completed or failed investigations yet"}
+											</p>
+											<p className="mt-1 text-xs text-muted-foreground">
+												{view === "active"
+													? "Start one above or open an issue and choose Start investigation."
+													: "Resolved and failed investigations will remain available here."}
+											</p>
+										</div>
+									) : (
+										<InvestigationTable investigations={investigations} />
+									),
+								)
+								.render()}
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

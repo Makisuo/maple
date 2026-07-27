@@ -6,8 +6,9 @@ import { SeverityBadge } from "@/components/errors/severity-badge"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { buildServiceOpenIssuesQuery, errorIssueFromV2 } from "@/lib/services/error-issues"
-import { formatNumber } from "@/lib/format"
-import { formatTimeAgo, SectionCard } from "./section-card"
+import { formatNumber } from "@maple/ui/format"
+import { SectionCard } from "./section-card"
+import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
 
 interface ServiceErrorsPanelProps {
 	serviceName: string
@@ -69,7 +70,7 @@ function IssueLine({ issue }: { issue: ErrorIssueDocument }) {
 				{formatNumber(issue.occurrenceCount)}×
 			</span>
 			<span className="w-14 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground/70">
-				{formatTimeAgo(issue.lastSeenAt)}
+				{formatRelativeTimeOrDate(issue.lastSeenAt)}
 			</span>
 		</Link>
 	)

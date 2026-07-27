@@ -138,36 +138,45 @@ function AnomaliesPage() {
 		/>
 	)
 
-	const layoutProps = {
-		breadcrumbs: [{ label: "Anomalies" }],
-		title: "Anomalies",
-		description: PAGE_DESCRIPTION,
-		headerActions: (
-			<AnomalyLiveIndicator
-				live={live}
-				onToggle={(next) =>
-					navigate({
-						search: (prev) => ({
-							...prev,
-							live: next === (status === "open") ? undefined : next,
-						}),
-					})
-				}
-			/>
-		),
-		filterSidebar: (
-			<AnomaliesFilterSidebar
-				incidents={allIncidents}
-				filters={filters}
-				onChange={updateFilter}
-				onClear={clearFilters}
-			/>
-		),
-	}
+	// The three Result branches share one shell. With the compound layout that's a
+	// local component taking `children`, rather than a props object spread three ways.
+	const AnomaliesShell = ({ children }: { children: React.ReactNode }) => (
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Anomalies" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Filters>
+					<AnomaliesFilterSidebar
+						incidents={allIncidents}
+						filters={filters}
+						onChange={updateFilter}
+						onClear={clearFilters}
+					/>
+				</DashboardLayout.Filters>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title="Anomalies" description={PAGE_DESCRIPTION}>
+							<AnomalyLiveIndicator
+								live={live}
+								onToggle={(next) =>
+									navigate({
+										search: (prev) => ({
+											...prev,
+											live: next === (status === "open") ? undefined : next,
+										}),
+									})
+								}
+							/>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>{children}</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
+	)
 
 	return Result.builder(incidentsResult)
 		.onInitial(() => (
-			<DashboardLayout {...layoutProps}>
+			<AnomaliesShell>
 				<div>
 					{toolbar}
 					<div className="space-y-px p-2">
@@ -176,10 +185,10 @@ function AnomaliesPage() {
 						))}
 					</div>
 				</div>
-			</DashboardLayout>
+			</AnomaliesShell>
 		))
 		.onError((error) => (
-			<DashboardLayout {...layoutProps}>
+			<AnomaliesShell>
 				<div>
 					{toolbar}
 					<div className="p-4">
@@ -190,7 +199,7 @@ function AnomaliesPage() {
 						/>
 					</div>
 				</div>
-			</DashboardLayout>
+			</AnomaliesShell>
 		))
 		.onSuccess(() => (
 			<AnomaliesPageBody
@@ -199,7 +208,7 @@ function AnomaliesPage() {
 				hasActiveFilters={hasActiveFilters}
 				onClearFilters={clearFilters}
 				toolbar={toolbar}
-				layoutProps={layoutProps}
+				Shell={AnomaliesShell}
 			/>
 		))
 		.render()
@@ -211,14 +220,14 @@ function AnomaliesPageBody({
 	hasActiveFilters,
 	onClearFilters,
 	toolbar,
-	layoutProps,
+	Shell,
 }: {
 	incidents: ReadonlyArray<AnomalyIncidentDocument>
 	status: StatusTab
 	hasActiveFilters: boolean
 	onClearFilters: () => void
 	toolbar: React.ReactNode
-	layoutProps: Omit<React.ComponentProps<typeof DashboardLayout>, "children">
+	Shell: (props: { children: React.ReactNode }) => React.ReactElement
 }) {
 	const navigate = useNavigate({ from: Route.fullPath })
 
@@ -280,7 +289,7 @@ function AnomaliesPageBody({
 	})
 
 	return (
-		<DashboardLayout {...layoutProps}>
+		<Shell>
 			<div>
 				{toolbar}
 				{incidents.length === 0 ? (
@@ -321,7 +330,7 @@ function AnomaliesPageBody({
 					</div>
 				)}
 			</div>
-		</DashboardLayout>
+		</Shell>
 	)
 }
 

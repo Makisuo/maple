@@ -17,7 +17,8 @@ import { PageHero, HeroChip } from "@/components/infra/primitives/page-hero"
 import { StatRail, StatRailItem } from "@/components/infra/primitives/stat-rail"
 import { podDetailSummaryResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TIME_PRESETS, bucketSecondsFor } from "@/components/infra/constants"
-import { formatPercent, severityLevel } from "@/components/infra/format"
+import { severityLevel } from "@/components/infra/format"
+import { formatPercent } from "@maple/ui/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import type { PodInfraMetric } from "@/api/warehouse/infra"
 
@@ -102,100 +103,109 @@ function PodDetailContent() {
 	) : null
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[
-				{ label: "Infrastructure", href: "/infra" },
-				{ label: "Kubernetes" },
-				{ label: "Pods", href: "/infra/kubernetes/pods" },
-				{ label: podName },
-			]}
-			headerActions={toolbar}
-			rightSidebar={rightSidebar}
-		>
-			<div className="space-y-6">
-				<PageHero
-					title={<span className="font-mono">{podName}</span>}
-					description="Pod metrics from kubelet stats receiver."
-					meta={
-						<>
-							{namespace && <HeroChip>ns {namespace}</HeroChip>}
-							{summary?.nodeName && <HeroChip>node {summary.nodeName}</HeroChip>}
-							{summary?.qosClass && <HeroChip>qos {summary.qosClass}</HeroChip>}
-						</>
-					}
-				/>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[
+					{ label: "Infrastructure", href: "/infra" },
+					{ label: "Kubernetes" },
+					{ label: "Pods", href: "/infra/kubernetes/pods" },
+					{ label: podName },
+				]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header>{toolbar}</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="space-y-6">
+							<PageHero
+								title={<span className="font-mono">{podName}</span>}
+								description="Pod metrics from kubelet stats receiver."
+								meta={
+									<>
+										{namespace && <HeroChip>ns {namespace}</HeroChip>}
+										{summary?.nodeName && <HeroChip>node {summary.nodeName}</HeroChip>}
+										{summary?.qosClass && <HeroChip>qos {summary.qosClass}</HeroChip>}
+									</>
+								}
+							/>
 
-				{Result.isInitial(summaryResult) ? (
-					<Skeleton className="h-24 w-full rounded-md" />
-				) : Result.isFailure(summaryResult) ? (
-					<QueryErrorState
-						error={summaryResult.cause}
-						titleOverride="Failed to load pod metrics"
-						onRetry={refreshSummary}
-					/>
-				) : summary ? (
-					<StatRail>
-						<StatRailItem
-							eyebrow="CPU vs limit"
-							value={formatPercent(summary.cpuLimitPct)}
-							tone={severityLevel(summary.cpuLimitPct)}
-							compact
-						/>
-						<StatRailItem
-							eyebrow="CPU vs request"
-							value={formatPercent(summary.cpuRequestPct)}
-							compact
-						/>
-						<StatRailItem
-							eyebrow="Memory vs limit"
-							value={formatPercent(summary.memoryLimitPct)}
-							tone={severityLevel(summary.memoryLimitPct)}
-							compact
-						/>
-						<StatRailItem
-							eyebrow="Memory vs request"
-							value={formatPercent(summary.memoryRequestPct)}
-							compact
-						/>
-					</StatRail>
-				) : (
-					<div className="rounded-md border border-dashed px-4 py-12 text-center text-sm text-muted-foreground">
-						No metrics arrived for this pod in the selected window.
-					</div>
-				)}
+							{Result.isInitial(summaryResult) ? (
+								<Skeleton className="h-24 w-full rounded-md" />
+							) : Result.isFailure(summaryResult) ? (
+								<QueryErrorState
+									error={summaryResult.cause}
+									titleOverride="Failed to load pod metrics"
+									onRetry={refreshSummary}
+								/>
+							) : summary ? (
+								<StatRail>
+									<StatRailItem
+										eyebrow="CPU vs limit"
+										value={formatPercent(summary.cpuLimitPct)}
+										tone={severityLevel(summary.cpuLimitPct)}
+										compact
+									/>
+									<StatRailItem
+										eyebrow="CPU vs request"
+										value={formatPercent(summary.cpuRequestPct)}
+										compact
+									/>
+									<StatRailItem
+										eyebrow="Memory vs limit"
+										value={formatPercent(summary.memoryLimitPct)}
+										tone={severityLevel(summary.memoryLimitPct)}
+										compact
+									/>
+									<StatRailItem
+										eyebrow="Memory vs request"
+										value={formatPercent(summary.memoryRequestPct)}
+										compact
+									/>
+								</StatRail>
+							) : (
+								<div className="rounded-md border border-dashed px-4 py-12 text-center text-sm text-muted-foreground">
+									No metrics arrived for this pod in the selected window.
+								</div>
+							)}
 
-				<div className="space-y-3">
-					<div className="flex flex-wrap items-center gap-1 rounded-md border bg-background p-0.5 self-start w-fit">
-						{METRIC_TABS.map((tab) => {
-							const active = metric === tab.value
-							return (
-								<button
-									key={tab.value}
-									type="button"
-									onClick={() => setMetric(tab.value)}
-									className={cn(
-										"rounded-sm px-2.5 py-1 text-[11px] font-medium transition-colors",
-										active
-											? "bg-foreground text-background"
-											: "text-muted-foreground hover:text-foreground",
-									)}
-								>
-									{tab.label}
-								</button>
-							)
-						})}
-					</div>
-					<PodDetailChart
-						podName={podName}
-						namespace={namespace}
-						metric={metric}
-						startTime={startTime}
-						endTime={endTime}
-						bucketSeconds={bucketSeconds}
-					/>
-				</div>
-			</div>
-		</DashboardLayout>
+							<div className="space-y-3">
+								<div className="flex flex-wrap items-center gap-1 rounded-md border bg-background p-0.5 self-start w-fit">
+									{METRIC_TABS.map((tab) => {
+										const active = metric === tab.value
+										return (
+											<button
+												key={tab.value}
+												type="button"
+												onClick={() => setMetric(tab.value)}
+												className={cn(
+													"rounded-sm px-2.5 py-1 text-[11px] font-medium transition-colors",
+													active
+														? "bg-foreground text-background"
+														: "text-muted-foreground hover:text-foreground",
+												)}
+											>
+												{tab.label}
+											</button>
+										)
+									})}
+								</div>
+								<PodDetailChart
+									podName={podName}
+									namespace={namespace}
+									metric={metric}
+									startTime={startTime}
+									endTime={endTime}
+									bucketSeconds={bucketSeconds}
+								/>
+							</div>
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+				<DashboardLayout.RightPanel>{rightSidebar}</DashboardLayout.RightPanel>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

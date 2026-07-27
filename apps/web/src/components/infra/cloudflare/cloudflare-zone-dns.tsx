@@ -8,9 +8,9 @@ import { useMemo } from "react"
 import { Result } from "@/lib/effect-atom"
 import { cloudflareZoneDnsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
-import { formatNumber } from "@/lib/format"
-import { ColumnHead, TableShell } from "../primitives/data-table"
-import { formatPercent } from "../format"
+import { formatNumber } from "@maple/ui/format"
+import { ColumnHead, DataTable } from "../primitives/data-table"
+import { formatPercent } from "@maple/ui/format"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
 import { PanelScope } from "./panel-scope"
 import type { CloudflareFilters } from "./filters"
@@ -92,19 +92,14 @@ function DnsNamesTable({
 }) {
 	const rows = useMemo(() => [...names].sort((a, b) => b.queries - a.queries), [names])
 	return (
-		<TableShell
-			ariaLabel="Top DNS query names"
-			waiting={waiting}
-			isEmpty={rows.length === 0}
-			emptyMessage="No DNS queries in the selected window."
-			header={
-				<>
-					<ColumnHead label="Query name" width="flex-1 min-w-[220px]" />
-					<ColumnHead label="Queries" align="right" width="w-[100px]" />
-					<ColumnHead label="NXDOMAIN" align="right" width="w-[110px]" />
-				</>
-			}
-		>
+		<DataTable.Root ariaLabel="Top DNS query names" waiting={waiting}>
+			<DataTable.Head>
+				<ColumnHead label="Query name" width="flex-1 min-w-[220px]" />
+				<ColumnHead label="Queries" align="right" width="w-[100px]" />
+				<ColumnHead label="NXDOMAIN" align="right" width="w-[110px]" />
+			</DataTable.Head>
+			{rows.length === 0 && <DataTable.Empty>No DNS queries in the selected window.</DataTable.Empty>}
+
 			{rows.map((row) => (
 				<div key={row.queryName} className={ROW_CLASS}>
 					<div className="min-w-[220px] flex-1 truncate font-mono text-[13px] text-foreground">
@@ -118,6 +113,6 @@ function DnsNamesTable({
 					</div>
 				</div>
 			))}
-		</TableShell>
+		</DataTable.Root>
 	)
 }

@@ -23,7 +23,7 @@ import { SectionHeader } from "@/components/layout/section-header"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -72,34 +72,54 @@ function AnomalyDetailPage() {
 
 	return Result.builder(incidentResult)
 		.onInitial(() => (
-			<DashboardLayout breadcrumbs={[...ANOMALY_LOADING_BREADCRUMBS]} title="Anomaly">
-				<div className="space-y-4">
-					<Skeleton className="h-24 w-full" />
-					<Skeleton className="h-64 w-full" />
-					<Skeleton className="h-32 w-full" />
-				</div>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={[...ANOMALY_LOADING_BREADCRUMBS]} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Anomaly" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<div className="space-y-4">
+								<Skeleton className="h-24 w-full" />
+								<Skeleton className="h-64 w-full" />
+								<Skeleton className="h-32 w-full" />
+							</div>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		))
 		.onError((error) => (
-			<DashboardLayout breadcrumbs={[...ANOMALY_LOADING_BREADCRUMBS]} title="Anomaly">
-				<Empty>
-					<EmptyHeader>
-						<EmptyTitle>
-							{error._tag === "@maple/http/anomalies/AnomalyIncidentNotFoundError"
-								? "Anomaly not found"
-								: "Failed to load anomaly"}
-						</EmptyTitle>
-						<EmptyDescription>
-							{error._tag === "@maple/http/anomalies/AnomalyIncidentNotFoundError"
-								? "It may have been pruned, or the link is stale."
-								: (error.message ?? "Try refreshing or check API logs.")}
-						</EmptyDescription>
-					</EmptyHeader>
-					<Button variant="outline" size="sm" render={<Link to="/anomalies" />}>
-						Back to anomalies
-					</Button>
-				</Empty>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={[...ANOMALY_LOADING_BREADCRUMBS]} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header title="Anomaly" />
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<Empty>
+								<EmptyHeader>
+									<EmptyTitle>
+										{error._tag === "@maple/http/anomalies/AnomalyIncidentNotFoundError"
+											? "Anomaly not found"
+											: "Failed to load anomaly"}
+									</EmptyTitle>
+									<EmptyDescription>
+										{error._tag === "@maple/http/anomalies/AnomalyIncidentNotFoundError"
+											? "It may have been pruned, or the link is stale."
+											: (error.message ?? "Try refreshing or check API logs.")}
+									</EmptyDescription>
+								</EmptyHeader>
+								<Button variant="outline" size="sm" render={<Link to="/anomalies" />}>
+									Back to anomalies
+								</Button>
+							</Empty>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		))
 		.onSuccess((incident) => <AnomalyDetailBody incident={incident} incidentId={incidentId} />)
 		.render()
@@ -208,123 +228,141 @@ function AnomalyDetailBody({
 	}
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[
-				{ label: "Anomalies", href: "/anomalies" },
-				{ label: `${incident.serviceName} · ${SIGNAL_LABEL[incident.signalType]}` },
-			]}
-			title={`${SIGNAL_LABEL[incident.signalType]} · ${incident.serviceName}`}
-			description={incident.deploymentEnv || undefined}
-			headerActions={
-				<div className="flex items-center gap-2">
-					<Badge variant="outline" className={isStale ? SEVERITY_TONE.resolved.badge : tone.badge}>
-						{isOpen && !isStale ? (
-							<span className="flex items-center gap-1.5">
-								<span className="relative inline-flex size-1.5">
-									<span
-										className={cn(
-											"absolute inline-flex size-full animate-ping rounded-full opacity-60",
-											tone.accent,
-										)}
-									/>
-									<span
-										className={cn(
-											"relative inline-flex size-full rounded-full",
-											tone.accent,
-										)}
-									/>
-								</span>
-								{incident.severity}
-							</span>
-						) : isStale ? (
-							`Stale · last seen ${formatRelativeTime(incident.lastTriggeredAt)}`
-						) : incident.resolveReason !== null ? (
-							RESOLVE_REASON_LABEL[incident.resolveReason]
-						) : (
-							"Resolved"
-						)}
-					</Badge>
-					<Button size="sm" variant="outline" onClick={() => void investigate()} disabled={busy}>
-						<PulseIcon className="size-3.5" />
-						{busy ? "Opening…" : "Open investigation"}
-					</Button>
-					{isOpen ? (
-						<Button
-							size="sm"
-							variant="outline"
-							onClick={() => setResolveConfirmOpen(true)}
-							disabled={busy}
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[
+					{ label: "Anomalies", href: "/anomalies" },
+					{ label: `${incident.serviceName} · ${SIGNAL_LABEL[incident.signalType]}` },
+				]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title={`${SIGNAL_LABEL[incident.signalType]} · ${incident.serviceName}`}
+							description={incident.deploymentEnv || undefined}
 						>
-							Resolve
-						</Button>
-					) : null}
-				</div>
-			}
-			rightSidebar={
-				<AnomalySidebar
-					incident={incident}
-					busy={busy}
-					onResolve={() => setResolveConfirmOpen(true)}
-					onOpenLinkDialog={() => setLinkDialogOpen(true)}
-					onUnlink={unlink}
-				/>
-			}
-		>
-			<div className="space-y-8">
-				<section className="space-y-4">
-					<AnomalyHero incident={incident} />
-					{Result.builder(timeseriesResult)
-						.onInitial(() => <Skeleton className="h-64 w-full" />)
-						.onError(() => (
-							<div className="flex h-64 w-full items-center justify-center rounded-md border border-dashed border-border/50 text-xs text-muted-foreground">
-								Failed to load signal data.
+							<div className="flex items-center gap-2">
+								<Badge
+									variant="outline"
+									className={isStale ? SEVERITY_TONE.resolved.badge : tone.badge}
+								>
+									{isOpen && !isStale ? (
+										<span className="flex items-center gap-1.5">
+											<span className="relative inline-flex size-1.5">
+												<span
+													className={cn(
+														"absolute inline-flex size-full animate-ping rounded-full opacity-60",
+														tone.accent,
+													)}
+												/>
+												<span
+													className={cn(
+														"relative inline-flex size-full rounded-full",
+														tone.accent,
+													)}
+												/>
+											</span>
+											{incident.severity}
+										</span>
+									) : isStale ? (
+										`Stale · last seen ${formatRelativeTime(incident.lastTriggeredAt)}`
+									) : incident.resolveReason !== null ? (
+										RESOLVE_REASON_LABEL[incident.resolveReason]
+									) : (
+										"Resolved"
+									)}
+								</Badge>
+								<Button
+									size="sm"
+									variant="outline"
+									onClick={() => void investigate()}
+									disabled={busy}
+								>
+									<PulseIcon className="size-3.5" />
+									{busy ? "Opening…" : "Open investigation"}
+								</Button>
+								{isOpen ? (
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => setResolveConfirmOpen(true)}
+										disabled={busy}
+									>
+										Resolve
+									</Button>
+								) : null}
 							</div>
-						))
-						.onSuccess((timeseries) => (
-							<AnomalyTimeseriesChart incident={incident} timeseries={timeseries} />
-						))
-						.render()}
-				</section>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="space-y-8">
+							<section className="space-y-4">
+								<AnomalyHero incident={incident} />
+								{Result.builder(timeseriesResult)
+									.onInitial(() => <Skeleton className="h-64 w-full" />)
+									.onError(() => (
+										<div className="flex h-64 w-full items-center justify-center rounded-md border border-dashed border-border/50 text-xs text-muted-foreground">
+											Failed to load signal data.
+										</div>
+									))
+									.onSuccess((timeseries) => (
+										<AnomalyTimeseriesChart incident={incident} timeseries={timeseries} />
+									))
+									.render()}
+							</section>
 
-				<section aria-labelledby="linked-issue-heading">
-					<SectionHeader id="linked-issue-heading" label="Linked issue" />
-					<AnomalyLinkedIssueCard
+							<section aria-labelledby="linked-issue-heading">
+								<SectionHeader id="linked-issue-heading" label="Linked issue" />
+								<AnomalyLinkedIssueCard
+									incident={incident}
+									onOpenLinkDialog={() => setLinkDialogOpen(true)}
+									onUnlink={unlink}
+									busy={busy}
+								/>
+							</section>
+						</div>
+
+						<AnomalyLinkIssueDialog
+							incident={incident}
+							open={linkDialogOpen}
+							onOpenChange={setLinkDialogOpen}
+							onSelect={linkTo}
+						/>
+
+						<AlertDialog open={resolveConfirmOpen} onOpenChange={setResolveConfirmOpen}>
+							<AlertDialogContent>
+								<AlertDialogHeader>
+									<AlertDialogTitle>Resolve this anomaly?</AlertDialogTitle>
+									<AlertDialogDescription>
+										The incident is marked resolved manually
+										{incident.fingerprints.filter((f) => f.resolvedAt === null).length > 1
+											? ", including every error fingerprint grouped into it"
+											: ""}
+										. If the signal keeps deviating, the detector waits out a one-hour
+										cooldown before re-opening it.
+									</AlertDialogDescription>
+								</AlertDialogHeader>
+								<AlertDialogFooter>
+									<AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+									<AlertDialogAction onClick={resolve} disabled={busy}>
+										Resolve
+									</AlertDialogAction>
+								</AlertDialogFooter>
+							</AlertDialogContent>
+						</AlertDialog>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+				<DashboardLayout.RightPanel>
+					<AnomalySidebar
 						incident={incident}
+						busy={busy}
+						onResolve={() => setResolveConfirmOpen(true)}
 						onOpenLinkDialog={() => setLinkDialogOpen(true)}
 						onUnlink={unlink}
-						busy={busy}
 					/>
-				</section>
-			</div>
-
-			<AnomalyLinkIssueDialog
-				incident={incident}
-				open={linkDialogOpen}
-				onOpenChange={setLinkDialogOpen}
-				onSelect={linkTo}
-			/>
-
-			<AlertDialog open={resolveConfirmOpen} onOpenChange={setResolveConfirmOpen}>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>Resolve this anomaly?</AlertDialogTitle>
-						<AlertDialogDescription>
-							The incident is marked resolved manually
-							{incident.fingerprints.filter((f) => f.resolvedAt === null).length > 1
-								? ", including every error fingerprint grouped into it"
-								: ""}
-							. If the signal keeps deviating, the detector waits out a one-hour cooldown before
-							re-opening it.
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-						<AlertDialogAction onClick={resolve} disabled={busy}>
-							Resolve
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
-		</DashboardLayout>
+				</DashboardLayout.RightPanel>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

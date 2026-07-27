@@ -15,7 +15,7 @@ import { PageHero, HeroChip } from "@/components/infra/primitives/page-hero"
 import { StatRail, StatRailItem } from "@/components/infra/primitives/stat-rail"
 import { listPodsResultAtom, nodeDetailSummaryResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TIME_PRESETS, bucketSecondsFor } from "@/components/infra/constants"
-import { formatUptime } from "@/components/infra/format"
+import { formatUptime } from "@maple/ui/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import type { NodeInfraMetric } from "@/api/warehouse/infra"
 
@@ -91,98 +91,119 @@ function NodeDetailContent() {
 	) : null
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[
-				{ label: "Infrastructure", href: "/infra" },
-				{ label: "Kubernetes" },
-				{ label: "Nodes", href: "/infra/kubernetes/nodes" },
-				{ label: nodeName },
-			]}
-			headerActions={toolbar}
-			rightSidebar={rightSidebar}
-		>
-			<div className="space-y-6">
-				<PageHero
-					title={<span className="font-mono">{nodeName}</span>}
-					description="Node metrics from kubelet stats receiver."
-					meta={
-						summary ? (
-							<>
-								{summary.kubeletVersion && (
-									<HeroChip>kubelet {summary.kubeletVersion}</HeroChip>
-								)}
-								{summary.containerRuntime && (
-									<HeroChip>runtime {summary.containerRuntime}</HeroChip>
-								)}
-							</>
-						) : undefined
-					}
-				/>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[
+					{ label: "Infrastructure", href: "/infra" },
+					{ label: "Kubernetes" },
+					{ label: "Nodes", href: "/infra/kubernetes/nodes" },
+					{ label: nodeName },
+				]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header>{toolbar}</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="space-y-6">
+							<PageHero
+								title={<span className="font-mono">{nodeName}</span>}
+								description="Node metrics from kubelet stats receiver."
+								meta={
+									summary ? (
+										<>
+											{summary.kubeletVersion && (
+												<HeroChip>kubelet {summary.kubeletVersion}</HeroChip>
+											)}
+											{summary.containerRuntime && (
+												<HeroChip>runtime {summary.containerRuntime}</HeroChip>
+											)}
+										</>
+									) : undefined
+								}
+							/>
 
-				{summary ? (
-					<StatRail columns={3}>
-						<StatRailItem
-							eyebrow="CPU cores"
-							value={Number.isFinite(summary.cpuUsage) ? summary.cpuUsage.toFixed(2) : "—"}
-							compact
-						/>
-						<StatRailItem eyebrow="Uptime" value={formatUptime(summary.uptime)} compact />
-						<StatRailItem eyebrow="Kubelet" value={summary.kubeletVersion || "—"} compact />
-					</StatRail>
-				) : (
-					<div className="rounded-md border border-dashed px-4 py-12 text-center text-sm text-muted-foreground">
-						No metrics arrived for this node in the selected window.
-					</div>
-				)}
+							{summary ? (
+								<StatRail columns={3}>
+									<StatRailItem
+										eyebrow="CPU cores"
+										value={
+											Number.isFinite(summary.cpuUsage)
+												? summary.cpuUsage.toFixed(2)
+												: "—"
+										}
+										compact
+									/>
+									<StatRailItem
+										eyebrow="Uptime"
+										value={formatUptime(summary.uptime)}
+										compact
+									/>
+									<StatRailItem
+										eyebrow="Kubelet"
+										value={summary.kubeletVersion || "—"}
+										compact
+									/>
+								</StatRail>
+							) : (
+								<div className="rounded-md border border-dashed px-4 py-12 text-center text-sm text-muted-foreground">
+									No metrics arrived for this node in the selected window.
+								</div>
+							)}
 
-				<div className="space-y-3">
-					<div className="flex items-center gap-1 rounded-md border bg-background p-0.5 self-start w-fit">
-						{METRIC_TABS.map((tab) => {
-							const active = metric === tab.value
-							return (
-								<button
-									key={tab.value}
-									type="button"
-									onClick={() => setMetric(tab.value)}
-									className={cn(
-										"rounded-sm px-2.5 py-1 text-[11px] font-medium transition-colors",
-										active
-											? "bg-foreground text-background"
-											: "text-muted-foreground hover:text-foreground",
-									)}
-								>
-									{tab.label}
-								</button>
-							)
-						})}
-					</div>
-					<NodeDetailChart
-						nodeName={nodeName}
-						metric={metric}
-						startTime={startTime}
-						endTime={endTime}
-						bucketSeconds={bucketSeconds}
-					/>
-				</div>
+							<div className="space-y-3">
+								<div className="flex items-center gap-1 rounded-md border bg-background p-0.5 self-start w-fit">
+									{METRIC_TABS.map((tab) => {
+										const active = metric === tab.value
+										return (
+											<button
+												key={tab.value}
+												type="button"
+												onClick={() => setMetric(tab.value)}
+												className={cn(
+													"rounded-sm px-2.5 py-1 text-[11px] font-medium transition-colors",
+													active
+														? "bg-foreground text-background"
+														: "text-muted-foreground hover:text-foreground",
+												)}
+											>
+												{tab.label}
+											</button>
+										)
+									})}
+								</div>
+								<NodeDetailChart
+									nodeName={nodeName}
+									metric={metric}
+									startTime={startTime}
+									endTime={endTime}
+									bucketSeconds={bucketSeconds}
+								/>
+							</div>
 
-				<div className="space-y-3">
-					<h3 className="text-sm font-medium">Pods on this node</h3>
-					{Result.builder(podsResult)
-						.onSuccess((r) => {
-							const pods = r.data
-							if (pods.length === 0) {
-								return (
-									<div className="rounded-md border border-dashed px-4 py-12 text-center text-sm text-muted-foreground">
-										No pods reporting on this node in the selected window.
-									</div>
-								)
-							}
-							return <PodTable pods={pods} />
-						})
-						.orElse(() => null)}
-				</div>
-			</div>
-		</DashboardLayout>
+							<div className="space-y-3">
+								<h3 className="text-sm font-medium">Pods on this node</h3>
+								{Result.builder(podsResult)
+									.onSuccess((r) => {
+										const pods = r.data
+										if (pods.length === 0) {
+											return (
+												<div className="rounded-md border border-dashed px-4 py-12 text-center text-sm text-muted-foreground">
+													No pods reporting on this node in the selected window.
+												</div>
+											)
+										}
+										return <PodTable pods={pods} />
+									})
+									.orElse(() => null)}
+							</div>
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+				<DashboardLayout.RightPanel>{rightSidebar}</DashboardLayout.RightPanel>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 

@@ -12,12 +12,21 @@ export const Route = createFileRoute("/mcp")({
 // key-creation flow can't drift apart.
 function McpPage() {
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "MCP" }]}
-			title="MCP Server"
-			description="Connect your AI coding assistant to Maple's observability data via the Model Context Protocol."
-		>
-			<McpSection />
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "MCP" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="MCP Server"
+							description="Connect your AI coding assistant to Maple's observability data via the Model Context Protocol."
+						/>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<McpSection />
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

@@ -8,15 +8,8 @@ import type { WorkloadKind } from "@/api/warehouse/infra"
 
 import { HostStatusBadge } from "./status-badge"
 import { UsageBar } from "./usage-bar"
-import {
-	ColumnHead,
-	MetaChip,
-	ROW_LINK_CLASS,
-	TableShell,
-	TableSkeleton,
-	useTableSort,
-} from "./primitives/data-table"
-import { formatRelative } from "./format"
+import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS, useTableSort } from "./primitives/data-table"
+import { formatRelativeTime } from "@maple/ui/time-format"
 
 export type WorkloadRow = ListWorkloadsResponse["data"][number]
 
@@ -31,32 +24,27 @@ interface WorkloadTableProps {
 
 export function WorkloadTableLoading() {
 	return (
-		<TableSkeleton
-			rows={4}
-			header={
-				<>
-					<ColumnHead label="Workload" width="flex-1 min-w-[260px]" />
-					<ColumnHead label="Status" width="w-[88px]" />
-					<ColumnHead label="Pods" align="right" width="w-[60px]" />
-					<ColumnHead label="Avg CPU" align="right" width="w-[160px]" hidden="hidden md:flex" />
-					<ColumnHead label="Avg memory" align="right" width="w-[160px]" hidden="hidden lg:flex" />
-					<ColumnHead label="Last seen" align="right" width="w-[100px]" />
-				</>
-			}
-			renderRowCells={() => (
-				<>
-					<div className="min-w-[260px] flex-1">
-						<Skeleton className="h-4 w-48" />
-						<Skeleton className="mt-1.5 h-3 w-32" />
-					</div>
-					<Skeleton className="h-3 w-[88px]" />
-					<Skeleton className="h-3 w-[60px]" />
-					<Skeleton className="hidden h-3 w-[160px] md:block" />
-					<Skeleton className="hidden h-3 w-[160px] lg:block" />
-					<Skeleton className="h-3 w-[100px]" />
-				</>
-			)}
-		/>
+		<DataTable.Root ariaLabel="Workloads">
+			<DataTable.Head>
+				<ColumnHead label="Workload" width="flex-1 min-w-[260px]" />
+				<ColumnHead label="Status" width="w-[88px]" />
+				<ColumnHead label="Pods" align="right" width="w-[60px]" />
+				<ColumnHead label="Avg CPU" align="right" width="w-[160px]" hidden="hidden md:flex" />
+				<ColumnHead label="Avg memory" align="right" width="w-[160px]" hidden="hidden lg:flex" />
+				<ColumnHead label="Last seen" align="right" width="w-[100px]" />
+			</DataTable.Head>
+			<DataTable.SkeletonRows count={4}>
+				<div className="min-w-[260px] flex-1">
+					<Skeleton className="h-4 w-48" />
+					<Skeleton className="mt-1.5 h-3 w-32" />
+				</div>
+				<Skeleton className="h-3 w-[88px]" />
+				<Skeleton className="h-3 w-[60px]" />
+				<Skeleton className="hidden h-3 w-[160px] md:block" />
+				<Skeleton className="hidden h-3 w-[160px] lg:block" />
+				<Skeleton className="h-3 w-[100px]" />
+			</DataTable.SkeletonRows>
+		</DataTable.Root>
 	)
 }
 
@@ -67,63 +55,58 @@ export function WorkloadTable({ workloads, kind, waiting, referenceTime }: Workl
 	})
 
 	return (
-		<TableShell
-			ariaLabel="Workloads"
-			waiting={waiting}
-			isEmpty={sorted.length === 0}
-			emptyMessage="No workloads match your filter."
-			header={
-				<>
-					<ColumnHead<SortKey>
-						label="Workload"
-						sortKey="workloadName"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						width="flex-1 min-w-[260px]"
-					/>
-					<ColumnHead label="Status" width="w-[88px]" />
-					<ColumnHead<SortKey>
-						label="Pods"
-						sortKey="podCount"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[60px]"
-					/>
-					<ColumnHead<SortKey>
-						label="Avg CPU"
-						sortKey="avgCpuLimitPct"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[160px]"
-						hidden="hidden md:flex"
-					/>
-					<ColumnHead<SortKey>
-						label="Avg memory"
-						sortKey="avgMemoryLimitPct"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[160px]"
-						hidden="hidden lg:flex"
-					/>
-					<ColumnHead<SortKey>
-						label="Last seen"
-						sortKey="lastSeen"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[100px]"
-					/>
-				</>
-			}
-		>
+		<DataTable.Root ariaLabel="Workloads" waiting={waiting}>
+			<DataTable.Head>
+				<ColumnHead<SortKey>
+					label="Workload"
+					sortKey="workloadName"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					width="flex-1 min-w-[260px]"
+				/>
+				<ColumnHead label="Status" width="w-[88px]" />
+				<ColumnHead<SortKey>
+					label="Pods"
+					sortKey="podCount"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[60px]"
+				/>
+				<ColumnHead<SortKey>
+					label="Avg CPU"
+					sortKey="avgCpuLimitPct"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[160px]"
+					hidden="hidden md:flex"
+				/>
+				<ColumnHead<SortKey>
+					label="Avg memory"
+					sortKey="avgMemoryLimitPct"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[160px]"
+					hidden="hidden lg:flex"
+				/>
+				<ColumnHead<SortKey>
+					label="Last seen"
+					sortKey="lastSeen"
+					currentKey={sortKey}
+					dir={sortDir}
+					onSort={handleSort}
+					align="right"
+					width="w-[100px]"
+				/>
+			</DataTable.Head>
+			{sorted.length === 0 && <DataTable.Empty>No workloads match your filter.</DataTable.Empty>}
+
 			{sorted.map((wl) => (
 				<Link
 					key={`${wl.namespace}/${wl.workloadName}`}
@@ -160,13 +143,13 @@ export function WorkloadTable({ workloads, kind, waiting, referenceTime }: Workl
 								render={<span />}
 								className="cursor-default font-mono text-[11px] text-muted-foreground"
 							>
-								{formatRelative(wl.lastSeen)}
+								{formatRelativeTime(wl.lastSeen)}
 							</TooltipTrigger>
 							<TooltipContent>{wl.lastSeen}</TooltipContent>
 						</Tooltip>
 					</div>
 				</Link>
 			))}
-		</TableShell>
+		</DataTable.Root>
 	)
 }

@@ -12,7 +12,7 @@ import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useInfiniteReplays } from "@/hooks/use-infinite-replays"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { replaysFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import type { TimeRange } from "@/components/time-range-picker/types"
@@ -20,9 +20,6 @@ import { QueryErrorState } from "@/components/common/query-error-state"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
 const replaysSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
 	service: Schema.optional(Schema.String),
 	browser: Schema.optional(Schema.String),
 	country: Schema.optional(Schema.String),
@@ -37,6 +34,7 @@ const replaysSearchSchema = Schema.Struct({
 	activeMin: Schema.optional(Schema.Union([Schema.Number, NumberFromStringParam])),
 	activeMax: Schema.optional(Schema.Union([Schema.Number, NumberFromStringParam])),
 	q: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/replays/")({
@@ -109,8 +107,6 @@ function ReplaysPage() {
 	const sessions = allData
 	const errorSessions = Result.isSuccess(facetsResult) ? facetsResult.value.errorCount : 0
 
-	const titleContent = <h1 className="truncate text-2xl font-semibold tracking-tight">Session Replays</h1>
-
 	const headerActions = (
 		<TimeRangeHeaderControls
 			startTime={search.startTime ?? startTime}
@@ -134,43 +130,58 @@ function ReplaysPage() {
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "24h"}>
-			<DashboardLayout
-				breadcrumbs={[{ label: "Session Replays" }]}
-				titleContent={titleContent}
-				description="Watch what your users actually saw and did in the browser."
-				headerActions={headerActions}
-				filterSidebar={<ReplaysFilterSidebar facetsResult={facetsResult} />}
-				stickyContent={toolbar}
-			>
-				{search.userId && (
-					<ActiveUserFilter
-						userId={search.userId}
-						count={sessions.length}
-						onClear={() => handleUserFilter(undefined)}
-					/>
-				)}
-				{Result.builder(firstPageResult)
-					.onInitial(() => (
-						<div className="space-y-2">
-							{Array.from({ length: 6 }).map((_, i) => (
-								<Skeleton key={i} className="h-[68px] w-full rounded-xl" />
-							))}
-						</div>
-					))
-					.onError((error) => (
-						<QueryErrorState error={error} titleOverride="Failed to load session replays" />
-					))
-					.onSuccess(() => (
-						<SessionsList
-							sessions={allData}
-							hasMore={hasNextPage}
-							isCapped={isCapped}
-							loadingMore={isFetchingNextPage}
-							onReachEnd={fetchNextPage}
-						/>
-					))
-					.render()}
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs items={[{ label: "Session Replays" }]} />
+				<DashboardLayout.Body>
+					<DashboardLayout.Filters>
+						<ReplaysFilterSidebar facetsResult={facetsResult} />
+					</DashboardLayout.Filters>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header
+								title="Session Replays"
+								description="Watch what your users actually saw and did in the browser."
+							>
+								{headerActions}
+							</DashboardLayout.Header>
+							{toolbar}
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							{search.userId && (
+								<ActiveUserFilter
+									userId={search.userId}
+									count={sessions.length}
+									onClear={() => handleUserFilter(undefined)}
+								/>
+							)}
+							{Result.builder(firstPageResult)
+								.onInitial(() => (
+									<div className="space-y-2">
+										{Array.from({ length: 6 }).map((_, i) => (
+											<Skeleton key={i} className="h-[68px] w-full rounded-xl" />
+										))}
+									</div>
+								))
+								.onError((error) => (
+									<QueryErrorState
+										error={error}
+										titleOverride="Failed to load session replays"
+									/>
+								))
+								.onSuccess(() => (
+									<SessionsList
+										sessions={allData}
+										hasMore={hasNextPage}
+										isCapped={isCapped}
+										loadingMore={isFetchingNextPage}
+										onReachEnd={fetchNextPage}
+									/>
+								))
+								.render()}
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
 }

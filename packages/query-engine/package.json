@@ -5,6 +5,7 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./query-engine": "./src/query-engine.ts",
+		"./datetime": "./src/datetime.ts",
 		"./where-clause": "./src/where-clause.ts",
 		"./formula-results": "./src/formula-results.ts",
 		"./traces-shared": "./src/traces-shared.ts",

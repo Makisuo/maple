@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Exit, Option } from "effect"
 import { toast } from "sonner"
 import { formatBackendError } from "@/lib/error-messages"
+import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
@@ -119,12 +120,10 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 	const configured = settings?.configured === true
 	const isBusy = isSaving || isApplying || isRefreshingDiff || isDisabling
 
-	// Poll the background apply run while it's active.
-	useEffect(() => {
-		if (!runActive) return
-		const id = setInterval(() => refreshStatus(), 2000)
-		return () => clearInterval(id)
-	}, [runActive, refreshStatus])
+	// Poll the background apply run while it's active. Ticks pause while the tab is
+	// hidden, so the terminal-transition toast below fires on refocus rather than
+	// in the background — this is a foreground progress indicator.
+	useIntervalRefresh(refreshStatus, { intervalMs: 2_000, enabled: runActive })
 
 	// Toast + refresh the diff on terminal transitions (running → succeeded/failed).
 	const prevApplyStatusRef = useRef<string | null>(null)

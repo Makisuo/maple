@@ -7,7 +7,7 @@ import { ErrorsSummaryCards } from "@/components/errors/errors-summary-cards"
 import { ErrorsByTypeTable } from "@/components/errors/errors-by-type-table"
 import { ErrorsFilterSidebar } from "@/components/errors/errors-filter-sidebar"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
@@ -15,11 +15,9 @@ const errorsSearchSchema = Schema.Struct({
 	services: OptionalStringArrayParam,
 	deploymentEnvs: OptionalStringArrayParam,
 	errorTypes: OptionalStringArrayParam,
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
 	showSpam: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
 	rootOnly: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
+	...TimeRangeSearchFields,
 })
 
 export type ErrorsSearchParams = Schema.Schema.Type<typeof errorsSearchSchema>
@@ -72,27 +70,37 @@ function ErrorsContent() {
 	}
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[{ label: "Errors" }]}
-			title="Errors"
-			description="Monitor and analyze errors across your services."
-			filterSidebar={<ErrorsFilterSidebar />}
-			headerActions={
-				<TimeRangeHeaderControls
-					startTime={search.startTime}
-					endTime={search.endTime}
-					presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-					onTimeChange={handleTimeChange}
-				/>
-			}
-		>
-			<div className="space-y-6">
-				<ErrorsSummaryCards filters={apiFilters} />
-				<div>
-					<h2 className="text-lg font-semibold mb-4">Errors by Type</h2>
-					<ErrorsByTypeTable filters={apiFilters} />
-				</div>
-			</div>
-		</DashboardLayout>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Errors" }]} />
+			<DashboardLayout.Body>
+				<DashboardLayout.Filters>
+					<ErrorsFilterSidebar />
+				</DashboardLayout.Filters>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header
+							title="Errors"
+							description="Monitor and analyze errors across your services."
+						>
+							<TimeRangeHeaderControls
+								startTime={search.startTime}
+								endTime={search.endTime}
+								presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+								onTimeChange={handleTimeChange}
+							/>
+						</DashboardLayout.Header>
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<div className="space-y-6">
+							<ErrorsSummaryCards filters={apiFilters} />
+							<div>
+								<h2 className="text-lg font-semibold mb-4">Errors by Type</h2>
+								<ErrorsByTypeTable filters={apiFilters} />
+							</div>
+						</div>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }

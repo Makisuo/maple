@@ -4,22 +4,20 @@ import { Schema } from "effect"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MetricDetail } from "@/components/metrics/metric-detail"
 import type { MetricQueryPatch } from "@/components/metrics/metric-query-controls"
-import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { AutocompleteValuesProvider } from "@/hooks/use-autocomplete-values"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 
 const metricDetailSearchSchema = Schema.Struct({
-	startTime: Schema.optional(Schema.String),
-	endTime: Schema.optional(Schema.String),
-	timePreset: Schema.optional(Schema.String),
 	type: Schema.optional(Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])),
 	agg: Schema.optional(Schema.Literals(["avg", "sum", "min", "max", "count", "rate", "increase"])),
 	where: Schema.optional(Schema.String),
 	groupBy: Schema.optional(Schema.String),
 	step: Schema.optional(Schema.String),
 	bd: Schema.optional(Schema.String),
+	...TimeRangeSearchFields,
 })
 
 export type MetricDetailSearchParams = Schema.Schema.Type<typeof metricDetailSearchSchema>
@@ -73,37 +71,47 @@ function MetricDetailPage() {
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "24h"}>
-			<DashboardLayout
-				breadcrumbs={[{ label: "Metrics", href: backToMetricsHref }, { label: metricName }]}
-				title={metricName}
-				description="Explore this metric: filter, aggregate, and break it down by attributes."
-				headerActions={
-					<TimeRangeHeaderControls
-						startTime={search.startTime}
-						endTime={search.endTime}
-						presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
-						defaultPreset="24h"
-						onTimeChange={handleTimeChange}
-					/>
-				}
-			>
-				<AutocompleteValuesProvider startTime={startTime} endTime={endTime}>
-					<MetricDetail
-						metricName={metricName}
-						state={{
-							type: search.type,
-							agg: search.agg,
-							where: search.where,
-							groupBy: search.groupBy,
-							step: search.step,
-							bd: search.bd,
-						}}
-						startTime={startTime}
-						endTime={endTime}
-						onPatch={handlePatch}
-					/>
-				</AutocompleteValuesProvider>
-			</DashboardLayout>
+			<DashboardLayout.Root>
+				<DashboardLayout.Breadcrumbs
+					items={[{ label: "Metrics", href: backToMetricsHref }, { label: metricName }]}
+				/>
+				<DashboardLayout.Body>
+					<DashboardLayout.Content>
+						<DashboardLayout.Sticky>
+							<DashboardLayout.Header
+								title={metricName}
+								description="Explore this metric: filter, aggregate, and break it down by attributes."
+							>
+								<TimeRangeHeaderControls
+									startTime={search.startTime}
+									endTime={search.endTime}
+									presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
+									defaultPreset="24h"
+									onTimeChange={handleTimeChange}
+								/>
+							</DashboardLayout.Header>
+						</DashboardLayout.Sticky>
+						<DashboardLayout.Scroll>
+							<AutocompleteValuesProvider startTime={startTime} endTime={endTime}>
+								<MetricDetail
+									metricName={metricName}
+									state={{
+										type: search.type,
+										agg: search.agg,
+										where: search.where,
+										groupBy: search.groupBy,
+										step: search.step,
+										bd: search.bd,
+									}}
+									startTime={startTime}
+									endTime={endTime}
+									onPatch={handlePatch}
+								/>
+							</AutocompleteValuesProvider>
+						</DashboardLayout.Scroll>
+					</DashboardLayout.Content>
+				</DashboardLayout.Body>
+			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
 }

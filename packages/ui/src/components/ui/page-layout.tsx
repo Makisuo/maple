@@ -63,6 +63,44 @@ function Root({ children, className }: { children: React.ReactNode; className?: 
  * Header
  * -------------------------------------------------------------------------------------------------*/
 
+/**
+ * The page title. Exported so a route rendering custom header content (a title
+ * beside a badge, a breadcrumb-style compound name) still gets the one canonical
+ * `<h1>` instead of hand-rolling the class string — which is how six different
+ * page-title typographies accumulated.
+ */
+function Title({
+	children,
+	title,
+	className,
+}: {
+	children: React.ReactNode
+	/** `title` attribute for the native tooltip when the heading truncates. */
+	title?: string
+	className?: string
+}) {
+	return (
+		<h1
+			data-slot="page-title"
+			className={cn(
+				"font-display text-3xl font-semibold tracking-tight truncate leading-[1.1]",
+				className,
+			)}
+			title={title}
+		>
+			{children}
+		</h1>
+	)
+}
+
+function Description({ children, className }: { children: React.ReactNode; className?: string }) {
+	return (
+		<p data-slot="page-description" className={cn("text-muted-foreground", className)}>
+			{children}
+		</p>
+	)
+}
+
 interface HeaderProps {
 	children?: React.ReactNode
 	title?: string
@@ -84,16 +122,11 @@ function Header({ children, title, titleContent, description, className }: Heade
 			)}
 		>
 			<div className="min-w-0 flex-1">
-				{titleContent ??
-					(title && (
-						<h1
-							className="font-display text-3xl font-semibold tracking-tight truncate leading-[1.1]"
-							title={title}
-						>
-							{title}
-						</h1>
-					))}
-				{description && <p className="text-muted-foreground">{description}</p>}
+				{/* `title`/`description` stay plain strings — that's data, and it's the
+				    30-site happy path. They render *through* `Title`/`Description` so
+				    there is exactly one implementation of each. */}
+				{titleContent ?? (title && <Title title={title}>{title}</Title>)}
+				{description && <Description>{description}</Description>}
 			</div>
 			{children}
 		</div>
@@ -260,6 +293,8 @@ export const PageLayout = {
 	Root,
 	Header,
 	HeaderActions,
+	Title,
+	Description,
 	StickyArea,
 	Body,
 	FilterSidebar,

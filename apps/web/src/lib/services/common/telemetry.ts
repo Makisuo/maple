@@ -2,11 +2,7 @@ import { Effect } from "effect"
 import { runtime } from "./runtime"
 
 const requestUrl = (input: RequestInfo | URL): string =>
-	typeof input === "string"
-		? input
-		: input instanceof URL
-			? input.href
-			: input.url
+	typeof input === "string" ? input : input instanceof URL ? input.href : input.url
 
 export const tracedFetch = (
 	peerService: string,
@@ -23,9 +19,7 @@ export const tracedFetch = (
 			const span = yield* Effect.currentSpan
 			const headers = new Headers(
 				init?.headers ??
-					(typeof Request !== "undefined" && input instanceof Request
-						? input.headers
-						: undefined),
+					(typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined),
 			)
 			if (!headers.has("traceparent")) {
 				headers.set("traceparent", `00-${span.traceId}-${span.spanId}-01`)
@@ -34,10 +28,7 @@ export const tracedFetch = (
 				try: () => globalThis.fetch(input, { ...init, headers }),
 				catch: (cause) => cause,
 			})
-			yield* Effect.annotateCurrentSpan(
-				"http.response.status_code",
-				response.status,
-			)
+			yield* Effect.annotateCurrentSpan("http.response.status_code", response.status)
 			return response
 		}).pipe(
 			Effect.withSpan("http.client", {

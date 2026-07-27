@@ -129,8 +129,7 @@ export const activeFilterChips = (filters: CloudflareFilters): ReadonlyArray<Act
 	return chips
 }
 
-export const hasActiveFilters = (filters: CloudflareFilters): boolean =>
-	activeFilterChips(filters).length > 0
+export const hasActiveFilters = (filters: CloudflareFilters): boolean => activeFilterChips(filters).length > 0
 
 /** Toggle one value in a multi-select filter; returns undefined when the last value is removed. */
 export const toggleFilterValue = (

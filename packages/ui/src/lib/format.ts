@@ -1,5 +1,7 @@
 import { Match, pipe } from "effect"
 
+import { toEpochMs } from "./time-format"
+
 /**
  * Format a duration in milliseconds to a human-readable string.
  * - < 1ms: microseconds (μs)
@@ -26,14 +28,25 @@ export function formatDuration(ms: number): string {
 
 /**
  * Format a number with compact notation.
+ * - |n| >= 1T: displays as e.g. "1.2T"
+ * - |n| >= 1B: displays as e.g. "2.5B"
  * - |n| >= 1M: displays as e.g. "1.2M"
  * - |n| >= 1K: displays as e.g. "3.4K"
  * - 0 < |n| < 1: 3 significant digits (e.g. "0.08", "0.0267") — axis ticks for
  *   rates/ratios must not collapse to "0" or trail "0.026666…"
  * - otherwise: locale formatting
+ *
+ * Compacts negatives too (`-1500` → `"-1.5K"`), which matters for the delta
+ * columns on comparison tables.
  */
 export function formatNumber(num: number): string {
 	const abs = Math.abs(num)
+	if (abs >= 1_000_000_000_000) {
+		return `${(num / 1_000_000_000_000).toFixed(1)}T`
+	}
+	if (abs >= 1_000_000_000) {
+		return `${(num / 1_000_000_000).toFixed(1)}B`
+	}
 	if (abs >= 1_000_000) {
 		return `${(num / 1_000_000).toFixed(1)}M`
 	}
@@ -44,6 +57,82 @@ export function formatNumber(num: number): string {
 		return num.toLocaleString(undefined, { maximumSignificantDigits: 3 })
 	}
 	return num.toLocaleString()
+}
+
+// Two byte formatters, not one with a `base` option: the choice between them is
+// semantic, not cosmetic. Memory, disk and network sizes are binary; storage a
+// customer is billed for is quoted in decimal units, and quietly showing
+// "976.6 KB" where an invoice says "1.0 MB" is a support ticket.
+
+const BINARY_UNITS = ["B", "KB", "MB", "GB", "TB"] as const
+const DECIMAL_UNITS = ["B", "KB", "MB", "GB", "TB"] as const
+
+/** Binary (1024-based) byte size — memory, disk, page weight. */
+export function formatBytes(bytes: number): string {
+	if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
+	let value = bytes
+	let unit = 0
+	while (value >= 1024 && unit < BINARY_UNITS.length - 1) {
+		value /= 1024
+		unit += 1
+	}
+	return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)} ${BINARY_UNITS[unit]}`
+}
+
+/** Decimal (1000-based) byte size — warehouse storage and anything billed. */
+export function formatStorageBytes(bytes: number): string {
+	if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
+	let value = bytes
+	let unit = 0
+	while (value >= 1000 && unit < DECIMAL_UNITS.length - 1) {
+		value /= 1000
+		unit += 1
+	}
+	return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)} ${DECIMAL_UNITS[unit]}`
+}
+
+/** Binary (1024-based) throughput. */
+export function formatBytesPerSecond(bytes: number): string {
+	if (!Number.isFinite(bytes) || bytes === 0) return "0 B/s"
+	const units = ["B/s", "KB/s", "MB/s", "GB/s"]
+	let value = bytes
+	let unit = 0
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024
+		unit++
+	}
+	return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`
+}
+
+/**
+ * Format a 0–1 fraction as a utilization percentage. Distinct from
+ * `formatErrorRate`: this floors to "0%" below 0.05% and drops to whole numbers
+ * past 10%, which suits gauges and resource bars. Error rates want the opposite
+ * (a visible "<0.01%" so a rare failure never reads as zero).
+ */
+export function formatPercent(fraction: number): string {
+	if (!Number.isFinite(fraction)) return "—"
+	const pct = fraction * 100
+	if (pct < 0.05) return "0%"
+	if (pct < 10) return `${pct.toFixed(1)}%`
+	return `${pct.toFixed(0)}%`
+}
+
+/** Two-decimal load average. */
+export function formatLoad(load: number): string {
+	if (!Number.isFinite(load)) return "—"
+	return load.toFixed(2)
+}
+
+/** Coarse uptime: minutes, then hours, then `"3d 4h"`. */
+export function formatUptime(seconds: number): string {
+	if (!Number.isFinite(seconds) || seconds <= 0) return "—"
+	const m = Math.floor(seconds / 60)
+	if (m < 60) return `${m}m`
+	const h = Math.floor(m / 60)
+	if (h < 24) return `${h}h`
+	const d = Math.floor(h / 24)
+	return `${d}d ${h % 24}h`
 }
 
 /**
@@ -89,8 +178,8 @@ export function formatErrorRate(rate: number): string {
  */
 export function inferBucketSeconds(data: Array<{ bucket: string }>): number | undefined {
 	if (data.length < 2) return undefined
-	const t0 = new Date(data[0].bucket).getTime()
-	const t1 = new Date(data[1].bucket).getTime()
+	const t0 = toEpochMs(data[0].bucket)
+	const t1 = toEpochMs(data[1].bucket)
 	const diffMs = t1 - t0
 	if (diffMs <= 0 || Number.isNaN(diffMs)) return undefined
 	return diffMs / 1000
@@ -98,10 +187,14 @@ export function inferBucketSeconds(data: Array<{ bucket: string }>): number | un
 
 /**
  * Parse a bucket value to a millisecond timestamp.
+ *
+ * Goes through `toEpochMs` so tz-less warehouse buckets are read as UTC. Without
+ * it, `incomplete-buckets` compared a locally-parsed bucket against `Date.now()`
+ * and mis-placed the trailing dashed segment by the browser's UTC offset.
  */
 export function parseBucketMs(value: unknown): number | null {
 	if (typeof value !== "string") return null
-	const parsed = new Date(value).getTime()
+	const parsed = toEpochMs(value)
 	return Number.isNaN(parsed) ? null : parsed
 }
 
@@ -131,7 +224,9 @@ export function formatBucketLabel(
 ): string {
 	if (typeof value !== "string") return ""
 
-	const date = new Date(value)
+	// Normalize first: warehouse buckets carry no timezone marker, so parsing them
+	// raw shifted every chart's axis labels by the browser's UTC offset.
+	const date = new Date(toEpochMs(value))
 	if (Number.isNaN(date.getTime())) return value
 
 	const includeDate = context.rangeMs >= 24 * 60 * 60 * 1000 || (context.bucketSeconds ?? 0) >= 24 * 60 * 60
@@ -206,11 +301,9 @@ export const formatValueByUnit: (num: number, unit?: string) => string = (num, u
 		Match.when("duration_s", () => formatDuration(num * 1000)),
 		Match.when("duration_ns", () => formatDuration(num / 1_000_000)),
 		Match.when("requests_per_sec", () => `${formatNumber(num)}/s`),
-		Match.when("bytes", () => {
-			if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(1)} GB`
-			if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)} MB`
-			if (num >= 1_000) return `${(num / 1_000).toFixed(1)} KB`
-			return `${num} B`
-		}),
+		// Decimal, deliberately: widgets with a `bytes` unit live in saved user
+		// dashboards, and switching them to a 1024 base would silently rewrite
+		// every one of those readouts (1_000_000 → "976.6 KB" instead of "1.0 MB").
+		Match.when("bytes", () => formatStorageBytes(num)),
 		Match.orElse(() => formatNumber(num)),
 	)

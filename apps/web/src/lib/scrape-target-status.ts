@@ -1,5 +1,5 @@
 import type { V2ScrapeTarget, V2ScrapeTargetCheck } from "@maple/domain/http/v2"
-import { formatRelativeTime } from "./format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 
 export interface ScheduledScrapeStatus {
 	readonly label: string

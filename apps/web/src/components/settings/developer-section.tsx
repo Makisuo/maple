@@ -1,7 +1,5 @@
-import { useState } from "react"
-import { toast } from "sonner"
-
 import { Button } from "@maple/ui/components/ui/button"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { CheckIcon, CodeIcon, CopyIcon, KeyIcon } from "@/components/icons"
@@ -61,20 +59,9 @@ const curlExample = `curl ${apiBaseUrl}/v2/alerts/rules \\
   -H "Authorization: Bearer maple_ak_..."`
 
 function CopyButton({ text, label }: { text: string; label: string }) {
-	const [copied, setCopied] = useState(false)
+	const { copied, copy } = useCopyToClipboard(label)
 	return (
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			aria-label={label}
-			onClick={() => {
-				void navigator.clipboard.writeText(text).then(() => {
-					setCopied(true)
-					toast.success("Copied to clipboard")
-					setTimeout(() => setCopied(false), 1500)
-				})
-			}}
-		>
+		<Button variant="ghost" size="icon-sm" aria-label={label} onClick={() => copy(text)}>
 			{copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
 		</Button>
 	)

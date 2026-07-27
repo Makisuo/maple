@@ -1,3 +1,4 @@
+import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
 import { useState, useMemo } from "react"
 
 import {
@@ -33,7 +34,6 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Badge } from "@maple/ui/components/ui/badge"
 import type { Dashboard, DashboardWidget } from "@/components/dashboard-builder/types"
 import type { DashboardSortOption } from "@/atoms/dashboard-preferences-atoms"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 const SORT_LABELS: Record<DashboardSortOption, string> = {
 	updated: "Recently Updated",
@@ -41,20 +41,6 @@ const SORT_LABELS: Record<DashboardSortOption, string> = {
 	"name-asc": "Name A\u2013Z",
 	"name-desc": "Name Z\u2013A",
 	widgets: "Most Widgets",
-}
-
-function formatTimeAgo(dateStr: string): string {
-	const now = Date.now()
-	const then = new Date(normalizeTimestampInput(dateStr)).getTime()
-	const diffMs = now - then
-	const diffMins = Math.floor(diffMs / 60000)
-	if (diffMins < 1) return "Just now"
-	if (diffMins < 60) return `${diffMins}m ago`
-	const diffHours = Math.floor(diffMins / 60)
-	if (diffHours < 24) return `${diffHours}h ago`
-	const diffDays = Math.floor(diffHours / 24)
-	if (diffDays < 30) return `${diffDays}d ago`
-	return new Date(normalizeTimestampInput(dateStr)).toLocaleDateString()
 }
 
 function DashboardPreview({ widgets }: { widgets: DashboardWidget[] }) {
@@ -358,7 +344,7 @@ function DashboardCard({
 						{dashboard.widgets.length} widget
 						{dashboard.widgets.length !== 1 ? "s" : ""}
 					</span>
-					<span>Updated {formatTimeAgo(dashboard.updatedAt)}</span>
+					<span>Updated {formatRelativeTimeOrDate(dashboard.updatedAt)}</span>
 				</div>
 				{dashboard.tags && dashboard.tags.length > 0 && (
 					<div className="flex items-center gap-1 mt-0.5">

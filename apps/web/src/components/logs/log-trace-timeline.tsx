@@ -10,7 +10,8 @@ import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { computeTraceTimeWindow } from "@/lib/trace-time-window"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 
-function formatRelativeMs(ms: number): string {
+/** Span offset within the trace (`+123ms`) — not a relative-time label. */
+function formatTimelineOffset(ms: number): string {
 	if (ms < 1) return "+0ms"
 	if (ms < 1000) return `+${Math.round(ms)}ms`
 	if (ms < 10000) return `+${(ms / 1000).toFixed(1)}s`
@@ -152,7 +153,7 @@ export function LogTraceTimeline({ currentLog, onLogSelect }: LogTraceTimelinePr
 												}}
 											>
 												<span className="text-[10px] text-muted-foreground tabular-nums shrink-0 w-[52px] text-right">
-													{formatRelativeMs(relativeMs)}
+													{formatTimelineOffset(relativeMs)}
 												</span>
 												{log.serviceName !== currentLog.serviceName && (
 													<span className="flex max-w-[72px] shrink-0 items-center gap-1 truncate text-[10px] text-muted-foreground/60">

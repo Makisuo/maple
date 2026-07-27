@@ -1,7 +1,9 @@
 import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
 
-import { deriveHostStatus, formatRelative, formatUptime, type HostStatus } from "./format"
+import { deriveHostStatus, type HostStatus } from "./format"
+import { formatUptime } from "@maple/ui/format"
+import { formatRelativeTime } from "@maple/ui/time-format"
 import {
 	HoneycombSection,
 	type HoneycombCell,
@@ -47,7 +49,7 @@ function toCell(node: NodeRow, referenceTime?: string): HoneycombCell {
 				</div>
 				<div className="border-t pt-1 text-[10px] text-muted-foreground">
 					{status === "active" ? "Active" : status === "idle" ? "Idle" : "Down"} ·{" "}
-					{formatRelative(node.lastSeen)}
+					{formatRelativeTime(node.lastSeen)}
 				</div>
 			</>
 		),

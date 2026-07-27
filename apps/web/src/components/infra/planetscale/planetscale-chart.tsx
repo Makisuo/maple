@@ -11,9 +11,9 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
 import type { PlanetScaleInfraTimeseriesRow } from "@/api/warehouse/planetscale-infra"
-import { formatNumber } from "@/lib/format"
+import { formatNumber } from "@maple/ui/format"
 import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler } from "../chart-utils"
-import { formatPercent } from "../format"
+import { formatPercent } from "@maple/ui/format"
 import { CHART_HEIGHT, ChartCard, ChartCardMessage } from "../primitives/chart-card"
 import { formatLag, formatStoragePercent } from "./metrics"
 
@@ -105,7 +105,11 @@ export function PlanetScaleChart({
 				<ChartCardMessage>{emptyMessage ?? CHART_EMPTY_MESSAGE}</ChartCardMessage>
 			) : (
 				<ChartContainer config={config} className="w-full" style={{ height: CHART_HEIGHT }}>
-					<LineChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} syncId={syncId}>
+					<LineChart
+						data={data}
+						margin={{ top: 12, right: 12, left: 0, bottom: 4 }}
+						syncId={syncId}
+					>
 						<CartesianGrid
 							strokeDasharray={CHART_GRID_DASH}
 							stroke="var(--border)"

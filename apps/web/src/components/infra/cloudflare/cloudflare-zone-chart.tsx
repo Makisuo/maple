@@ -10,8 +10,8 @@ import {
 import { cn } from "@maple/ui/lib/utils"
 
 import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
-import { formatNumber } from "@/lib/format"
-import { formatBytes, formatPercent } from "../format"
+import { formatNumber } from "@maple/ui/format"
+import { formatBytes, formatPercent } from "@maple/ui/format"
 import {
 	CHART_EMPTY_MESSAGE,
 	CHART_GRID_DASH,

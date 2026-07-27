@@ -19,6 +19,7 @@ export type WidgetDataSourceLike = {
 	transform?: WidgetDataSource["transform"]
 }
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
 import { encodeKey } from "@/lib/cache-key"
 import { formatBackendError } from "@/lib/error-messages"
@@ -320,8 +321,14 @@ const fetchWidgetData = Effect.fnUntraced(
 	}),
 )
 
+// Built on the mounted `MapleApiAtomClient.runtime`, not bare `Atom.make`. A bare atom
+// runs with an empty context, so `CurrentMemoMap` is absent and the `Effect.provide` inside
+// each server function rebuilds the whole `mapleApiClientLayer` graph — client, HttpClient
+// with its retry/`peer.service` transforms, tracer, logger — on every fetch *and* every
+// retry. On an N-tile dashboard that was N+ full layer builds per load. The runtime also
+// puts the real tracer in scope, so logs and span annotations here no longer no-op.
 const widgetFetchFamily = Atom.family((key: string) =>
-	Atom.make(fetchWidgetData(key)).pipe(Atom.setIdleTTL(120_000)),
+	MapleApiAtomClient.runtime.atom(fetchWidgetData(key)).pipe(Atom.setIdleTTL(120_000)),
 )
 
 const widgetFetchAtom = (input: { endpoint: string; params: Record<string, unknown> }) =>
