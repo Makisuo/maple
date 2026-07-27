@@ -6,17 +6,6 @@
 import { VALUE_TONE } from "../severity-tokens"
 
 /**
- * Bucket width for the timeseries charts: aim for ~100 points, floored at the
- * poller's 5-minute granularity and rounded to whole 5-minute steps.
- */
-export function chartBucketSeconds(startTime: string, endTime: string): number {
-	const startMs = new Date(startTime.replace(" ", "T") + "Z").getTime()
-	const endMs = new Date(endTime.replace(" ", "T") + "Z").getTime()
-	const windowSeconds = Math.max((endMs - startMs) / 1000, 300)
-	return Math.max(300, Math.ceil(windowSeconds / 100 / 300) * 300)
-}
-
-/**
  * Shared 5% / 1% thresholds for tinting 5xx and Worker error rates — one
  * source for the tables and the detail stat rail.
  */

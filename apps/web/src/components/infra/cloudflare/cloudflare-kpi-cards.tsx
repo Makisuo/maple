@@ -2,9 +2,8 @@ import { useMemo } from "react"
 
 import type { CloudflareZoneRow, CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@/lib/format"
-import { formatPercent } from "../format"
+import { formatBytes, formatPercent } from "../format"
 import { StatRail, StatRailItem, StatRailLoading } from "../primitives/stat-rail"
-import { formatBytes } from "./format"
 
 interface CloudflareKpiCardsProps {
 	zones: ReadonlyArray<CloudflareZoneRow>

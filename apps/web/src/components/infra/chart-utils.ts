@@ -17,6 +17,17 @@ export const COLOR_PALETTE = [
 /** Recharts grid dash — one value across every infra chart. */
 export const CHART_GRID_DASH = "3 3"
 
+/**
+ * Bucket width for the timeseries charts: aim for ~100 points, floored at the
+ * poller's 5-minute granularity and rounded to whole 5-minute steps.
+ */
+export function chartBucketSeconds(startTime: string, endTime: string): number {
+	const startMs = new Date(startTime.replace(" ", "T") + "Z").getTime()
+	const endMs = new Date(endTime.replace(" ", "T") + "Z").getTime()
+	const windowSeconds = Math.max((endMs - startMs) / 1000, 300)
+	return Math.max(300, Math.ceil(windowSeconds / 100 / 300) * 300)
+}
+
 /** Every value unit an infra chart can carry. Drives unit-aware formatting. */
 export type ChartUnit = "percent" | "cores" | "seconds" | "load" | "bytes_per_second"
 

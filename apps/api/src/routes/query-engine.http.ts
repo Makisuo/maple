@@ -781,7 +781,14 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						: CH.compile(CH.planetscaleConnectionsSQL(), params, {
 								rowSchema: CH.planetscaleConnectionsRowSchema,
 							})
-					const [gaugeRows, connectionRows] = yield* Effect.all(
+					const storageCompiled = byBranch
+						? CH.compile(CH.planetscaleBranchStorageSQL(), params, {
+								rowSchema: CH.planetscaleBranchStorageRowSchema,
+							})
+						: CH.compile(CH.planetscaleStorageSQL(), params, {
+								rowSchema: CH.planetscaleStorageRowSchema,
+							})
+					const [gaugeRows, connectionRows, storageRows] = yield* Effect.all(
 						[
 							mapExecError(
 								warehouse.compiledQuery(tenant, gaugesCompiled, {
@@ -797,12 +804,20 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								}),
 								"planetscaleServiceConnections query failed",
 							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, storageCompiled, {
+									profile: "aggregation",
+									context: "planetscaleServiceStorage",
+								}),
+								"planetscaleServiceStorage query failed",
+							),
 						],
-						{ concurrency: 2 },
+						{ concurrency: 3 },
 					)
 					const keyOf = (row: { database: string; branch?: string }) =>
 						byBranch ? `${row.database} ${row.branch ?? ""}` : row.database
 					const connectionsByKey = new Map(connectionRows.map((row) => [keyOf(row), row]))
+					const storageByKey = new Map(storageRows.map((row) => [keyOf(row), row]))
 					const seen = new Set<string>()
 					type MergedStatsRow = {
 						readonly database: string
@@ -812,7 +827,22 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						readonly replicaLagMaxSeconds: number
 						readonly connectionsAvg: number
 						readonly connectionsMax: number
+						readonly storageUsedPercent: number
+						/** 0 = the volume gauges never reported; the client must not render 0% used. */
+						readonly storageSamples: number
 					}
+					const storageFor = (key: string) => {
+						const storage = storageByKey.get(key)
+						return {
+							storageUsedPercent: storage?.storageUsedPercent ?? 0,
+							storageSamples: storage?.storageSamples ?? 0,
+						}
+					}
+					// The storage rollup is per-database or per-branch depending on the
+					// request; only the latter carries a branch to forward.
+					const branchOf = (
+						row: { readonly database: string } | { readonly database: string; readonly branch: string },
+					): { readonly branch?: string } => ("branch" in row ? { branch: row.branch } : {})
 					const data: Array<MergedStatsRow> = gaugeRows.map((row) => {
 						const key = keyOf(row)
 						seen.add(key)
@@ -821,17 +851,39 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							...row,
 							connectionsAvg: connections?.connectionsAvg ?? 0,
 							connectionsMax: connections?.connectionsMax ?? 0,
+							...storageFor(key),
 						}
 					})
 					// Databases with connection samples but no utilization gauges still
 					// deserve a row (e.g. filtered scrape sets).
 					for (const row of connectionRows) {
-						if (seen.has(keyOf(row))) continue
+						const key = keyOf(row)
+						if (seen.has(key)) continue
+						seen.add(key)
 						data.push({
 							...row,
 							cpuMaxPercent: 0,
 							memMaxPercent: 0,
 							replicaLagMaxSeconds: 0,
+							...storageFor(key),
+						})
+					}
+					// …and so do volumes reporting with no gauges or connections at all —
+					// an idle branch still filling its disk is exactly what to surface.
+					for (const row of storageRows) {
+						const key = keyOf(row)
+						if (seen.has(key)) continue
+						seen.add(key)
+						data.push({
+							database: row.database,
+							...branchOf(row),
+							cpuMaxPercent: 0,
+							memMaxPercent: 0,
+							replicaLagMaxSeconds: 0,
+							connectionsAvg: 0,
+							connectionsMax: 0,
+							storageUsedPercent: row.storageUsedPercent,
+							storageSamples: row.storageSamples,
 						})
 					}
 					return new ServicePlanetScaleStatsResponse({ data })
@@ -840,17 +892,23 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("planetscaleInfraTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.planetscaleInfraTimeseriesSQL(),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds: Math.max(60, Math.floor(payload.bucketSeconds)),
-							database: payload.database,
-						},
-						{ rowSchema: CH.planetscaleInfraTimeseriesRowSchema },
-					)
+					const base = {
+						orgId: tenant.orgId,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+						bucketSeconds: Math.max(60, Math.floor(payload.bucketSeconds)),
+						database: payload.database,
+					}
+					const compiled =
+						payload.branch === undefined
+							? CH.compile(CH.planetscaleInfraTimeseriesSQL(), base, {
+									rowSchema: CH.planetscaleInfraTimeseriesRowSchema,
+								})
+							: CH.compile(
+									CH.planetscaleBranchInfraTimeseriesSQL(),
+									{ ...base, branch: payload.branch },
+									{ rowSchema: CH.planetscaleInfraTimeseriesRowSchema },
+								)
 					const rows = yield* mapExecError(
 						warehouse.compiledQuery(tenant, compiled, {
 							profile: "aggregation",

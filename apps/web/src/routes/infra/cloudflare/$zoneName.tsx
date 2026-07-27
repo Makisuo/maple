@@ -10,8 +10,7 @@ import { QueryErrorState } from "@/components/common/query-error-state"
 import { CloudflareIcon } from "@/components/icons"
 import { HeroChip, PageHero } from "@/components/infra/primitives/page-hero"
 import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
-import { formatPercent } from "@/components/infra/format"
-import { formatBytes } from "@/components/infra/cloudflare/format"
+import { formatBytes, formatPercent } from "@/components/infra/format"
 import { CloudflareBreakdownPanel } from "@/components/infra/cloudflare/cloudflare-breakdown-panel"
 import { CloudflareEdgeShareBand } from "@/components/infra/cloudflare/cloudflare-edge-share-band"
 import { CloudflareFilterChips } from "@/components/infra/cloudflare/cloudflare-filter-chips"
@@ -32,7 +31,8 @@ import {
 	type CloudflareFilterKey,
 	type CloudflareFilters,
 } from "@/components/infra/cloudflare/filters"
-import { chartBucketSeconds, errorRateTone } from "@/components/infra/cloudflare/constants"
+import { errorRateTone } from "@/components/infra/cloudflare/constants"
+import { chartBucketSeconds } from "@/components/infra/chart-utils"
 import {
 	cloudflareZoneDetailResultAtom,
 	cloudflareZoneFacetsResultAtom,

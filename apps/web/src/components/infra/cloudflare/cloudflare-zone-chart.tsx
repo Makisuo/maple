@@ -11,7 +11,7 @@ import { cn } from "@maple/ui/lib/utils"
 
 import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@/lib/format"
-import { formatPercent } from "../format"
+import { formatBytes, formatPercent } from "../format"
 import {
 	CHART_EMPTY_MESSAGE,
 	CHART_GRID_DASH,
@@ -20,7 +20,6 @@ import {
 	transformRows,
 } from "../chart-utils"
 import { OTHER_ZONES_COLOR, OTHER_ZONES_SERIES } from "./constants"
-import { formatBytes } from "./format"
 
 export type CloudflareZoneMetric = "requests" | "errorRate" | "cacheHitRate" | "bytes"
 

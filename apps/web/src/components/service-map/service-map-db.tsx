@@ -14,6 +14,7 @@ import {
 	PostgresIcon,
 	RedisIcon,
 } from "@/components/icons"
+import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
 
 type DbCategory = "database" | "cache" | "queue" | "search"
 
@@ -191,8 +192,7 @@ export function getDbNodeColor(system: string | undefined, namespace: string): s
 	return resolveDbNodePresentation(system, namespace).color
 }
 
-/** PlanetScale's mark is monochrome — a neutral tone that reads in both themes. */
-export const PLANETSCALE_COLOR = "oklch(0.62 0.02 270)"
+export { PLANETSCALE_COLOR }
 
 /**
  * Branded presentation for a DB node whose namespace matched the org's

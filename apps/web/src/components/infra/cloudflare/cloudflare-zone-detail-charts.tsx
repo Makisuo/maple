@@ -7,7 +7,6 @@ import {
 	ChartTooltipContent,
 	type ChartConfig,
 } from "@maple/ui/components/ui/chart"
-import { cn } from "@maple/ui/lib/utils"
 
 import type {
 	CloudflareZoneCacheBucket,
@@ -22,6 +21,7 @@ import {
 	makeBucketLabeler,
 	transformRows,
 } from "../chart-utils"
+import { CHART_HEIGHT, ChartCard } from "../primitives/chart-card"
 import {
 	BREAKDOWN_OTHER_KEY,
 	BREAKDOWN_OTHER_LABEL,
@@ -31,8 +31,6 @@ import {
 	STATUS_CLASS_COLORS,
 	STATUS_CLASS_ORDER,
 } from "./constants"
-
-const CHART_HEIGHT = 200
 
 /**
  * Series ceiling for a dimension with no fixed vocabulary. The API already folds the tail into
@@ -47,35 +45,6 @@ const MAX_LEGEND_CHIPS = 8
 
 /** The pooled-tail sentinel is a wire value, never a label. */
 const seriesLabel = (name: string) => (name === BREAKDOWN_OTHER_KEY ? BREAKDOWN_OTHER_LABEL : name)
-
-/** Card frame shared by every detail chart: title on the left, legend on the right. */
-export function ChartCard({
-	title,
-	legend,
-	scope,
-	children,
-	className,
-}: {
-	title: string
-	legend: ReactNode
-	/** Scope marker: what this panel is actually filtered to. See PanelScope. */
-	scope?: ReactNode
-	children: ReactNode
-	className?: string
-}) {
-	return (
-		<div className={cn("rounded-md border bg-card", className)}>
-			<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 pt-2.5">
-				<div className="flex flex-wrap items-center gap-2">
-					<span className="text-[11px] font-medium text-muted-foreground">{title}</span>
-					{scope}
-				</div>
-				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">{legend}</div>
-			</div>
-			{children}
-		</div>
-	)
-}
 
 export interface StackedBreakdownChartProps {
 	title: string

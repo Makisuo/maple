@@ -6,9 +6,8 @@ import { LatencyValue } from "@maple/ui/components/latency-value"
 import type { CloudflareZoneRow } from "@/api/warehouse/cloudflare-infra"
 import { formatLatency, formatNumber } from "@/lib/format"
 import { ColumnHead, ROW_LINK_CLASS, TableShell, TableSkeleton, useTableSort } from "../primitives/data-table"
-import { formatPercent } from "../format"
+import { formatBytes, formatPercent } from "../format"
 import { errorRateClass } from "./constants"
-import { formatBytes } from "./format"
 
 // Zone latency percentiles are plan-dependent (the poller only gets quantiles
 // on zones whose Cloudflare plan exposes them); 0 means "not available", not

@@ -5,9 +5,24 @@ import { cn } from "@maple/ui/lib/utils"
 import { LatencyValue } from "@maple/ui/components/latency-value"
 
 import { Result } from "@/lib/effect-atom"
-import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
+import { QueryErrorState } from "@/components/common/query-error-state"
 import { planetscaleQueryInsightsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatNumber, formatRelativeTime } from "@/lib/format"
+
+/** Bordered like the query rows, so an explanation keeps the section's rhythm. */
+function InsightsNotice({ children, className }: { children: React.ReactNode; className?: string }) {
+	return (
+		<div
+			className={cn(
+				"rounded-md border border-dashed border-border bg-card/50 px-3 py-4 text-center text-xs text-muted-foreground",
+				className,
+			)}
+		>
+			{children}
+		</div>
+	)
+}
 
 /** Warehouse "YYYY-MM-DD HH:mm:ss" → epoch ms (values are UTC). */
 const warehouseTimeToMs = (value: string): number => new Date(`${value.replace(" ", "T")}Z`).getTime()
@@ -45,27 +60,45 @@ export function PlanetScaleTopQueries({
 		}),
 		[database, branch, startTime, endTime, limit],
 	)
-	const result = useRefreshableAtomValue(planetscaleQueryInsightsResultAtom(input))
+	const result = useRetainedRefreshableResultValue(planetscaleQueryInsightsResultAtom(input))
 
 	if (Result.isInitial(result)) {
-		return <Skeleton className={cn("h-24 w-full", className)} />
+		// Row-shaped, so the section doesn't resize when the rows arrive.
+		return (
+			<div className={cn("space-y-1.5", className)}>
+				{[0, 1, 2].map((i) => (
+					<Skeleton key={i} className="h-[52px] w-full rounded-md" />
+				))}
+			</div>
+		)
 	}
 	if (Result.isFailure(result)) {
 		return (
-			<p className={cn("text-xs text-muted-foreground", className)}>
-				PlanetScale Query Insights are unavailable right now.
-			</p>
+			<QueryErrorState
+				error={result.cause}
+				titleOverride="PlanetScale Query Insights are unavailable"
+				className={cn(
+					"flex flex-col gap-1 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-3 text-xs",
+					className,
+				)}
+			/>
 		)
 	}
 	const response = result.value
+	// `unavailableReason` is PlanetScale explaining itself (plan limits, a branch
+	// with insights off) — not a transport failure, so it reads as information.
 	if (response.unavailableReason) {
-		return <p className={cn("text-xs text-muted-foreground", className)}>{response.unavailableReason}</p>
+		return <InsightsNotice className={className}>{response.unavailableReason}</InsightsNotice>
 	}
 	if (response.rows.length === 0) {
 		return (
-			<p className={cn("text-xs text-muted-foreground", className)}>
-				No queries recorded on {database}/{response.branch} in this window.
-			</p>
+			<InsightsNotice className={className}>
+				No queries recorded on{" "}
+				<span className="font-mono text-foreground/80">
+					{database}/{response.branch}
+				</span>{" "}
+				in this window.
+			</InsightsNotice>
 		)
 	}
 

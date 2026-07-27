@@ -12,6 +12,7 @@ import {
 	PrometheusIcon,
 	WarpStreamIcon,
 } from "@/components/icons"
+import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
 import { formatRelativeTime } from "@/lib/format"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -66,7 +67,7 @@ const CATALOG: ReadonlyArray<CatalogEntry> = [
 			"Authorize your organization with one click — Maple tracks every database branch automatically.",
 		icon: PlanetScaleIcon,
 		// PlanetScale's mark is monochrome — neutral wash that works in both themes.
-		accent: "#8B8B8B",
+		accent: PLANETSCALE_COLOR,
 		docsUrl: "https://maple.dev/docs/integrations/planetscale",
 	},
 	{

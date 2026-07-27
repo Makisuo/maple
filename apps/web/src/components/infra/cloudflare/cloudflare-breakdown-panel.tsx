@@ -37,7 +37,7 @@ import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refresha
 import { formatNumber } from "@/lib/format"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { ColumnHead, TableShell, useTableSort } from "../primitives/data-table"
-import { formatPercent } from "../format"
+import { formatBytes, formatPercent } from "../format"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
 import {
 	CACHE_STATUS_COLORS,
@@ -46,7 +46,6 @@ import {
 	STATUS_CLASS_COLORS,
 	STATUS_CLASS_ORDER,
 } from "./constants"
-import { formatBytes } from "./format"
 import { PanelScope } from "./panel-scope"
 import type { CloudflareFilterKey, CloudflareFilters } from "./filters"
 

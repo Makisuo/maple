@@ -96,6 +96,11 @@ import {
 import { resolveDbNodePresentation, resolvePlanetScaleDbPresentation } from "./service-map-db"
 import { PlanetScaleTopQueries } from "@/components/infra/planetscale/planetscale-top-queries"
 import {
+	formatStoragePercent,
+	lagClass,
+	utilizationClass,
+} from "@/components/infra/planetscale/metrics"
+import {
 	buildFlowElements,
 	CLOUDFLARE_COLOR,
 	computeNodePositions,
@@ -1027,16 +1032,14 @@ function PlanetScaleSection({
 							peak {formatRate(stats.connectionsMax)}
 						</span>
 					</div>
+					{/* Thresholds come from the shared PlanetScale metrics module, so a
+					    number tinted red here is tinted red on /infra/planetscale too. */}
 					<div className="space-y-0.5">
 						<span className="text-[10px] text-muted-foreground">CPU (max)</span>
 						<p
 							className={cn(
-								"text-xl font-semibold tabular-nums font-mono",
-								stats.cpuMaxPercent > 80
-									? "text-severity-error"
-									: stats.cpuMaxPercent > 60
-										? "text-severity-warn"
-										: "text-foreground",
+								"text-xl font-semibold tabular-nums font-mono text-foreground",
+								utilizationClass(stats.cpuMaxPercent),
 							)}
 						>
 							{stats.cpuMaxPercent.toFixed(0)}%
@@ -1044,20 +1047,35 @@ function PlanetScaleSection({
 					</div>
 					<div className="space-y-0.5">
 						<span className="text-[10px] text-muted-foreground">Memory (max)</span>
-						<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+						<p
+							className={cn(
+								"text-xl font-semibold tabular-nums font-mono text-foreground",
+								utilizationClass(stats.memMaxPercent),
+							)}
+						>
 							{stats.memMaxPercent.toFixed(0)}%
+						</p>
+					</div>
+					<div className="space-y-0.5">
+						<span className="text-[10px] text-muted-foreground">Storage (max)</span>
+						<p
+							className={cn(
+								"text-xl font-semibold tabular-nums font-mono text-foreground",
+								stats.storageUsedPercent !== null &&
+									utilizationClass(stats.storageUsedPercent),
+							)}
+						>
+							{stats.storageUsedPercent === null
+								? "—"
+								: formatStoragePercent(stats.storageUsedPercent)}
 						</p>
 					</div>
 					<div className="space-y-0.5">
 						<span className="text-[10px] text-muted-foreground">Replica Lag (max)</span>
 						<p
 							className={cn(
-								"text-xl font-semibold tabular-nums font-mono",
-								stats.replicaLagMaxSeconds > 10
-									? "text-severity-error"
-									: stats.replicaLagMaxSeconds > 1
-										? "text-severity-warn"
-										: "text-foreground",
+								"text-xl font-semibold tabular-nums font-mono text-foreground",
+								lagClass(stats.replicaLagMaxSeconds),
 							)}
 						>
 							{formatReplicationLag(stats.replicaLagMaxSeconds)}

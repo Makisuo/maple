@@ -10,8 +10,7 @@
 // the filters it applied, or a muted `zone-wide` explaining what it couldn't.
 // The API hands us `ignoredFilters` for exactly this.
 
-import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-
+import { ScopeChip } from "../primitives/scope-chip"
 import {
 	activeFilterChips,
 	filterKeysFromServer,
@@ -19,9 +18,6 @@ import {
 	type CloudflareFilterKey,
 	type CloudflareFilters,
 } from "./filters"
-
-const MARKER_CLASS =
-	"inline-flex items-center rounded-sm border border-border/70 bg-background/60 px-1.5 py-0.5 font-mono text-[10px]"
 
 const listNames = (keys: ReadonlyArray<CloudflareFilterKey>): string => {
 	const names = keys.map((key) => FILTER_SECTION_LABEL[key].toLowerCase())
@@ -46,20 +42,18 @@ export function PanelScope({
 	const ignored = filterKeysFromServer(ignoredFilters)
 	const honored = active.filter((chip) => !ignored.includes(chip.key))
 
+	const explanation = (
+		<>
+			{reason ? `${reason}. ` : ""}
+			{listNames(ignored)} {ignored.length === 1 ? "does" : "do"} not apply here.
+		</>
+	)
+
 	if (honored.length === 0) {
 		return (
-			<Tooltip>
-				<TooltipTrigger
-					render={<span />}
-					className={`${MARKER_CLASS} cursor-default text-muted-foreground/70`}
-				>
-					zone-wide
-				</TooltipTrigger>
-				<TooltipContent className="max-w-[32ch]">
-					{reason ? `${reason}. ` : ""}
-					{listNames(ignored)} {ignored.length === 1 ? "does" : "do"} not apply here.
-				</TooltipContent>
-			</Tooltip>
+			<ScopeChip tone="muted" explanation={explanation}>
+				zone-wide
+			</ScopeChip>
 		)
 	}
 
@@ -69,29 +63,15 @@ export function PanelScope({
 	return (
 		<span className="inline-flex items-center gap-1">
 			{shown.map((chip) => (
-				<span
-					key={`${chip.key}:${chip.value}`}
-					className={`${MARKER_CLASS} max-w-[20ch] truncate text-muted-foreground`}
-				>
+				<ScopeChip key={`${chip.key}:${chip.value}`} className="max-w-[20ch] truncate">
 					{chip.label}
-				</span>
+				</ScopeChip>
 			))}
-			{extra > 0 ? (
-				<span className={`${MARKER_CLASS} text-muted-foreground/70`}>+{extra}</span>
-			) : null}
+			{extra > 0 ? <ScopeChip tone="muted">+{extra}</ScopeChip> : null}
 			{ignored.length > 0 ? (
-				<Tooltip>
-					<TooltipTrigger
-						render={<span />}
-						className={`${MARKER_CLASS} cursor-default text-muted-foreground/70`}
-					>
-						partial
-					</TooltipTrigger>
-					<TooltipContent className="max-w-[32ch]">
-						{reason ? `${reason}. ` : ""}
-						{listNames(ignored)} {ignored.length === 1 ? "does" : "do"} not apply here.
-					</TooltipContent>
-				</Tooltip>
+				<ScopeChip tone="muted" explanation={explanation}>
+					partial
+				</ScopeChip>
 			) : null}
 		</span>
 	)

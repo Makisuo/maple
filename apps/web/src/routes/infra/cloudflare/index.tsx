@@ -27,7 +27,8 @@ import {
 	CloudflareZoneTableLoading,
 } from "@/components/infra/cloudflare/cloudflare-zone-table"
 import { COLOR_PALETTE } from "@/components/infra/chart-utils"
-import { OTHER_ZONES_COLOR, chartBucketSeconds } from "@/components/infra/cloudflare/constants"
+import { OTHER_ZONES_COLOR } from "@/components/infra/cloudflare/constants"
+import { chartBucketSeconds } from "@/components/infra/chart-utils"
 import {
 	cloudflareWorkersResultAtom,
 	cloudflareZonesResultAtom,

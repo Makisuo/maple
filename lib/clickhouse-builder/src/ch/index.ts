@@ -68,6 +68,7 @@ export {
 	sumIf,
 	avgIf,
 	maxIf,
+	minIf,
 	groupUniqArray,
 	argMaxMerge,
 	// String

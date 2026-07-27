@@ -16,6 +16,7 @@ export {
 	sumIf,
 	avgIf,
 	maxIf,
+	minIf,
 	groupUniqArray,
 	argMaxMerge,
 } from "./aggregate"

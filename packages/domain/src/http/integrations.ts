@@ -282,6 +282,15 @@ export class PlanetScaleIntegrationStatus extends Schema.Class<PlanetScaleIntegr
 	/** Epoch ms of the last successful inventory refresh; null before the first. */
 	lastInventoryAt: Schema.NullOr(Schema.Number),
 	lastInventoryError: Schema.NullOr(Schema.String),
+	/**
+	 * Epoch ms the OAuth grant was revoked, or null while it is live. Without
+	 * this the UI can only infer a revoked grant from whichever downstream call
+	 * happened to fail first, so the same cause surfaced as three different
+	 * error strings in three unrelated places.
+	 */
+	revokedAt: Schema.NullOr(Schema.Number),
+	/** Epoch ms the access token expires; refresh happens well before this. */
+	expiresAt: Schema.NullOr(Schema.Number),
 }) {}
 
 export class PlanetScaleStartConnectRequest extends Schema.Class<PlanetScaleStartConnectRequest>(

@@ -332,8 +332,8 @@ export class ServicePlanetScaleStatsResponse extends Schema.Class<ServicePlanetS
 	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
-// PlanetScale infrastructure page (/infra/planetscale): bucketed per-database
-// health timeseries from the scraped metrics.
+// PlanetScale infrastructure page (/infra/planetscale): bucketed health
+// timeseries from the scraped metrics, for a database or one of its branches.
 export class PlanetScaleInfraTimeseriesRequest extends Schema.Class<PlanetScaleInfraTimeseriesRequest>(
 	"PlanetScaleInfraTimeseriesRequest",
 )({
@@ -341,6 +341,13 @@ export class PlanetScaleInfraTimeseriesRequest extends Schema.Class<PlanetScaleI
 	endTime: TinybirdDateTime,
 	bucketSeconds: Schema.Number,
 	database: Schema.String,
+	/**
+	 * Narrows the series to one branch. Worth doing: a PlanetScale database is
+	 * routinely tens of branches (one per open PR), so the database-wide `max()`
+	 * reports whichever ephemeral branch spiked rather than the branch serving
+	 * traffic.
+	 */
+	branch: Schema.optionalKey(Schema.String),
 }) {}
 
 export class PlanetScaleInfraTimeseriesResponse extends Schema.Class<PlanetScaleInfraTimeseriesResponse>(

@@ -359,18 +359,25 @@ export {
 	planetscaleBranchConnectionsSQL,
 	planetscaleBranchGaugesSQL,
 	planetscaleBranchStatsRowSchema,
+	planetscaleBranchStorageRowSchema,
+	planetscaleBranchStorageSQL,
 	planetscaleConnectionsRowSchema,
 	planetscaleConnectionsSQL,
 	planetscaleDatabaseStatsRowSchema,
 	planetscaleGaugesSQL,
+	planetscaleStorageRowSchema,
+	planetscaleStorageSQL,
 	type PlanetScaleBranchConnectionsOutput,
 	type PlanetScaleBranchStatsOutput,
+	type PlanetScaleBranchStorageOutput,
 	type PlanetScaleConnectionsOutput,
 	type PlanetScaleDatabaseStatsOutput,
+	type PlanetScaleStorageOutput,
 } from "./queries/planetscale-map"
 
-// Queries — PlanetScale infrastructure page (per-database timeseries)
+// Queries — PlanetScale infrastructure page (per-database / per-branch timeseries)
 export {
+	planetscaleBranchInfraTimeseriesSQL,
 	planetscaleInfraTimeseriesRowSchema,
 	planetscaleInfraTimeseriesSQL,
 	type PlanetScaleInfraTimeseriesOutput,

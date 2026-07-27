@@ -9,9 +9,8 @@ import type { CloudflareDurableObjectRow, CloudflareQueueRow } from "@/api/wareh
 import { cloudflarePlatformResourcesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatNumber } from "@/lib/format"
 import { ColumnHead, TableShell, useTableSort } from "../primitives/data-table"
-import { formatPercent } from "../format"
+import { formatBytes, formatPercent } from "../format"
 import { errorRateClass } from "./constants"
-import { formatBytes } from "./format"
 
 const ROW_CLASS =
 	"flex items-center gap-4 border-b border-border/40 px-4 py-3 last:border-0 hover:bg-muted/40"

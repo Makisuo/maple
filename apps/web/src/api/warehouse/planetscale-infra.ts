@@ -15,10 +15,14 @@ export interface PlanetScaleInfraTimeseriesRow {
 	cpuMaxPercent: number
 	memMaxPercent: number
 	replicaLagMaxSeconds: number
+	/** Disk used (0–100), or null when the volume gauges didn't report this bucket. */
+	storageUsedPercent: number | null
 }
 
 const GetPlanetScaleInfraTimeseriesInputSchema = Schema.Struct({
 	database: Schema.String,
+	/** Omit for database-wide (every branch); set to narrow to one branch. */
+	branch: Schema.optional(Schema.String),
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
 	bucketSeconds: Schema.Number,
@@ -122,21 +126,26 @@ export const getPlanetScaleInfraTimeseries = Effect.fn("QueryEngine.getPlanetSca
 						endTime: input.endTime ?? fallback.endTime,
 						bucketSeconds: input.bucketSeconds,
 						database: input.database,
+						...(input.branch === undefined ? {} : { branch: input.branch }),
 					}),
 				})
 			}),
 		)
 
 		return {
-			buckets: result.data.map(
-				(row): PlanetScaleInfraTimeseriesRow => ({
+			buckets: result.data.map((row): PlanetScaleInfraTimeseriesRow => {
+				const samples = Number(row.storageSamples ?? 0)
+				return {
 					bucket: String(row.bucket ?? ""),
 					connectionsAvg: Number(row.connectionsAvg ?? 0),
 					cpuMaxPercent: Number(row.cpuMaxPercent ?? 0),
 					memMaxPercent: Number(row.memMaxPercent ?? 0),
 					replicaLagMaxSeconds: Number(row.replicaLagMaxSeconds ?? 0),
-				}),
-			),
+					// Buckets with no free-space sample get null, not 0% — a gap in the
+					// series must read as a gap, never as an empty disk.
+					storageUsedPercent: samples > 0 ? Number(row.storageUsedPercent ?? 0) : null,
+				}
+			}),
 		}
 	},
 )
