@@ -413,6 +413,14 @@ every outbound reply path (post, ephemeral, DM, typing, refresh, uploads, `slack
 resolves the token for the correct team explicitly, including inside durable workflow steps. The
 patch mirrors the resolver shape proposed in #222 and can be dropped when upstream ships it.
 
+The same patch file carries a second, Maple-specific hunk: `McpConnectionClient.executeTool`
+(`dist/src/runtime/connections/mcp-client.js`) strips tool-result content entries tagged
+`__maple_ui`. Maple's MCP server emits those structured payloads for the web chat's tables and
+charts (`createDualContent` in apps/api); chat-flue splits them off client-side
+(`splitToolResult`), and eve has no result-transform hook, so without the patch the model would
+receive the raw UI JSON duplicated next to the text report on every Maple tool call. Guarded by
+`agent/lib/eve-patch.test.ts` alongside the botToken canary.
+
 `resolveBotToken(context?)` (`agent/lib/maple.ts`) resolves `context.teamId` via the resolve
 endpoint → else `SLACK_BOT_TOKEN` → throw. The env fallback serves single-workspace dev and the
 one path the patch does not cover — eve's inbound-attachment file fetch, constructed once at
