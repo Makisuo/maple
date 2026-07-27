@@ -32,7 +32,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				}),
 			]),
 			display: { title: "Requests by Status Code", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "error-rate",
@@ -48,7 +48,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				}),
 			]),
 			display: { title: "Error Rate", ...CHART_DISPLAY_AREA },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "p50-latency",
@@ -64,7 +64,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				}),
 			]),
 			display: { title: "P50 Latency", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "p95-latency",
@@ -80,7 +80,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				}),
 			]),
 			display: { title: "P95 Latency", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "top-methods",
@@ -102,7 +102,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 					{ field: "value", header: "Requests", align: "right" },
 				],
 			},
-			layout: { x: 0, y: 8, w: 12, h: 5 },
+			layout: { x: 0, y: 12, w: 12, h: 5 },
 		},
 	]
 }

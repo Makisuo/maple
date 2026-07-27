@@ -3,7 +3,11 @@ import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
-import { DashboardTemplateParameterKey, PortableDashboardDocument } from "@maple/domain/http"
+import {
+	DashboardTemplateParameterKey,
+	PortableDashboardDocument,
+	defaultWidgetHeight,
+} from "@maple/domain/http"
 import { DASHBOARD_TEMPLATES, getTemplate } from "@/dashboard-templates"
 import { formatValidationSummary, inspectWidgetsAfterMutation } from "../lib/inspect-widget"
 import {
@@ -209,33 +213,33 @@ function simpleSpecToWidget(
 
 function computeAutoLayout(specs: SimpleWidgetSpec[]): Array<{ x: number; y: number; w: number; h: number }> {
 	const layouts: Array<{ x: number; y: number; w: number; h: number }> = []
+	// Stats are the only kind that shares a row, so its height is what advances
+	// `y` whenever an in-progress stat row is closed out.
+	const statHeight = defaultWidgetHeight("stat").h
 	let y = 0
 	let x = 0
 
 	for (const spec of specs) {
 		const viz = spec.visualization ?? "chart"
+		const { h } = defaultWidgetHeight(viz)
+
 		if (viz === "stat") {
 			if (x + 4 > 12) {
-				y += 2
+				y += statHeight
 				x = 0
 			}
-			layouts.push({ x, y, w: 4, h: 2 })
+			layouts.push({ x, y, w: 4, h })
 			x += 4
-		} else if (viz === "table" || viz === "list") {
-			if (x > 0) {
-				y += 2
-				x = 0
-			}
-			layouts.push({ x: 0, y, w: 12, h: 5 })
-			y += 5
-		} else {
-			if (x > 0) {
-				y += 2
-				x = 0
-			}
-			layouts.push({ x: 0, y, w: 12, h: 4 })
-			y += 4
+			continue
 		}
+
+		// Everything else is full-bleed, so close any open stat row first.
+		if (x > 0) {
+			y += statHeight
+			x = 0
+		}
+		layouts.push({ x: 0, y, w: 12, h })
+		y += h
 	}
 
 	return layouts

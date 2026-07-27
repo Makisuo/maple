@@ -325,7 +325,8 @@ export function WidgetQueryBuilderPage({
 					    Source toggle. Without this, SVG-rendered charts (notably the pie
 					    donut) hold internal state between data swaps and ghost-render
 					    the previous slices on top of the new ones. */}
-					<div className="h-[400px]">
+					{/* Matches a default chart tile on the canvas (h:6 → 6*60 + 5*12). */}
+					<div className="h-[420px]">
 						<WidgetPreview key={mode} widget={previewWidget} />
 					</div>
 				</div>

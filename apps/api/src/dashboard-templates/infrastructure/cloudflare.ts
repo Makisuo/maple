@@ -193,7 +193,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 				groupBy: ["attr.http.status_class"],
 			}),
 			display: { title: "Edge Requests by Status", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 2, w: 6, h: 4 },
+			layout: { x: 0, y: 2, w: 6, h: 6 },
 		},
 		{
 			id: "requests-by-cache-status",
@@ -208,21 +208,21 @@ function widgets(zoneName?: string): WidgetDef[] {
 				groupBy: ["attr.cache.status"],
 			}),
 			display: { title: "Requests by Cache Status", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 2, w: 6, h: 4 },
+			layout: { x: 6, y: 2, w: 6, h: 6 },
 		},
 		{
 			id: "cache-hit-rate",
 			visualization: "chart",
 			dataSource: requestsRatioDataSource({ ...CACHE_HIT_RATE, where }),
 			display: { title: "Cache Hit Rate", ...CHART_DISPLAY_LINE, unit: "percent" },
-			layout: { x: 0, y: 6, w: 6, h: 4 },
+			layout: { x: 0, y: 8, w: 6, h: 6 },
 		},
 		{
 			id: "error-rate",
 			visualization: "chart",
 			dataSource: requestsRatioDataSource({ ...ERROR_RATE, where }),
 			display: { title: "5xx Error Rate", ...CHART_DISPLAY_LINE, unit: "percent" },
-			layout: { x: 6, y: 6, w: 6, h: 4 },
+			layout: { x: 6, y: 8, w: 6, h: 6 },
 		},
 
 		// -- Latency -----------------------------------------------------------
@@ -238,7 +238,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 				groupBy: ["attr.quantile"],
 			}),
 			display: { title: "Edge TTFB (p50/p95/p99)", ...CHART_DISPLAY_LINE, unit: "ms" },
-			layout: { x: 0, y: 10, w: 6, h: 4 },
+			layout: { x: 0, y: 14, w: 6, h: 6 },
 		},
 		{
 			id: "origin-duration",
@@ -252,7 +252,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 				groupBy: ["attr.quantile"],
 			}),
 			display: { title: "Origin Response Duration (p50/p95/p99)", ...CHART_DISPLAY_LINE, unit: "ms" },
-			layout: { x: 6, y: 10, w: 6, h: 4 },
+			layout: { x: 6, y: 14, w: 6, h: 6 },
 		},
 
 		// -- Bandwidth & Workers ----------------------------------------------
@@ -269,7 +269,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 				groupBy: ["attr.cache.status"],
 			}),
 			display: { title: "Bytes Served by Cache Status", ...CHART_DISPLAY_AREA, unit: "bytes" },
-			layout: { x: 0, y: 14, w: 6, h: 4 },
+			layout: { x: 0, y: 20, w: 6, h: 6 },
 		},
 		{
 			id: "worker-requests",
@@ -283,7 +283,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 				groupBy: ["resource.service.name"],
 			}),
 			display: { title: "Worker Invocations by Script", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 14, w: 6, h: 4 },
+			layout: { x: 6, y: 20, w: 6, h: 6 },
 		},
 		{
 			id: "worker-errors",
@@ -297,7 +297,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 				groupBy: ["resource.service.name"],
 			}),
 			display: { title: "Worker Errors by Script", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 18, w: 6, h: 4 },
+			layout: { x: 0, y: 26, w: 6, h: 6 },
 		},
 		{
 			id: "worker-cpu",
@@ -311,7 +311,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 				groupBy: ["resource.service.name"],
 			}),
 			display: { title: "Worker CPU Time p99 by Script", ...CHART_DISPLAY_LINE, unit: "ms" },
-			layout: { x: 6, y: 18, w: 6, h: 4 },
+			layout: { x: 6, y: 26, w: 6, h: 6 },
 		},
 	]
 }

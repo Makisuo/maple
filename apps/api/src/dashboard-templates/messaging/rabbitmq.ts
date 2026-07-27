@@ -26,7 +26,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: queueGroup,
 			}),
 			display: { title: "Queue Depth", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "publish-rate",
@@ -42,7 +42,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: queueGroup,
 			}),
 			display: { title: "Publish Rate", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "deliver-rate",
@@ -58,7 +58,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: queueGroup,
 			}),
 			display: { title: "Deliver Rate", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "consumers",
@@ -72,7 +72,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: queueGroup,
 			}),
 			display: { title: "Consumer Count", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "unacked",
@@ -86,7 +86,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: queueGroup,
 			}),
 			display: { title: "Unacknowledged Messages", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 8, w: 12, h: 4 },
+			layout: { x: 0, y: 12, w: 12, h: 6 },
 		},
 	]
 }

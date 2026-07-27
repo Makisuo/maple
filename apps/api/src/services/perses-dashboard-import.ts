@@ -4,6 +4,7 @@ import {
 	DashboardWidgetSchema,
 	PortableDashboardDocument,
 	type RawSqlDisplayType,
+	defaultWidgetHeight,
 } from "@maple/domain/http"
 
 type UnknownRecord = Record<string, unknown>
@@ -196,11 +197,10 @@ function displayForPanel(args: {
 }
 
 function defaultLayoutForVisualization(visualization: string) {
-	if (visualization === "stat") return { w: 3, h: 4, minW: 2, minH: 2 }
-	if (visualization === "table" || visualization === "markdown") {
-		return { w: 6, h: 5, minW: 3, minH: 3 }
-	}
-	return { w: 6, h: 5, minW: 3, minH: 2 }
+	const { h, minH } = defaultWidgetHeight(visualization)
+	// Stats keep the taller hand-added height, matching the web store.
+	if (visualization === "stat") return { w: 3, h: 4, minW: 2, minH }
+	return { w: 6, h, minW: 3, minH }
 }
 
 function nextLayout(widgets: readonly DashboardWidget[], visualization: string) {

@@ -31,7 +31,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Event Loop Lag (Max)", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "heap-used",
@@ -45,7 +45,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Heap Used", ...CHART_DISPLAY_LINE, unit: "bytes" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "gc-count",
@@ -61,7 +61,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "GC Count / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "active-handles",
@@ -75,7 +75,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Active Handles", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 	]
 }

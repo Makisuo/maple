@@ -27,7 +27,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: ["attr.command"],
 			}),
 			display: { title: "Queries by Command", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "active-connections",
@@ -41,7 +41,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: ["attr.kind"],
 			}),
 			display: { title: "Threads", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "buffer-pool",
@@ -55,7 +55,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: ["attr.status"],
 			}),
 			display: { title: "Buffer Pool Usage", ...CHART_DISPLAY_LINE, unit: "bytes" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "slow-queries",
@@ -70,7 +70,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Slow Queries / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "table-locks",
@@ -86,7 +86,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: ["attr.kind"],
 			}),
 			display: { title: "Table Locks / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 8, w: 6, h: 4 },
+			layout: { x: 0, y: 12, w: 6, h: 6 },
 		},
 		{
 			id: "replica-lag",
@@ -99,7 +99,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Replica Lag", ...CHART_DISPLAY_LINE, unit: "duration_s" },
-			layout: { x: 6, y: 8, w: 6, h: 4 },
+			layout: { x: 6, y: 12, w: 6, h: 6 },
 		},
 	]
 }

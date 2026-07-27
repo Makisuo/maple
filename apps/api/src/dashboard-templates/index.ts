@@ -4,6 +4,7 @@ import { errorTrackingTemplate } from "./application/error-tracking"
 import { grpcServiceTemplate } from "./application/grpc-service"
 import { httpEndpointsTemplate } from "./application/http-endpoints"
 import { jvmRuntimeTemplate } from "./application/jvm-runtime"
+import { mapleIngestVolumeTemplate } from "./application/maple-ingest-volume"
 import { metricOverviewTemplate } from "./application/metric-overview"
 import { nodejsRuntimeTemplate } from "./application/nodejs-runtime"
 import { platformOverviewTemplate } from "./application/platform-overview"
@@ -50,6 +51,8 @@ export const DASHBOARD_TEMPLATES: ReadonlyArray<TemplateDefinition> = [
 	kafkaTemplate,
 	natsTemplate,
 	rabbitmqTemplate,
+	// Maple-internal — gated out of the customer gallery by `internal: true`.
+	mapleIngestVolumeTemplate,
 ]
 
 const TEMPLATE_BY_ID = new Map<string, TemplateDefinition>(DASHBOARD_TEMPLATES.map((t) => [t.id, t]))
@@ -96,8 +99,16 @@ const TEMPLATE_PREVIEWS = new Map<string, TemplatePreviewWidget[]>(
 	DASHBOARD_TEMPLATES.map((t) => [t.id, buildTemplatePreview(t)]),
 )
 
-export function listTemplateMetadata(): TemplateMetadata[] {
-	return DASHBOARD_TEMPLATES.map((t) => ({
+/**
+ * Templates visible to a caller. `internal` templates are excluded unless asked
+ * for — the default is the customer-facing set, so a new call site cannot leak
+ * them by omission.
+ */
+export function listTemplateMetadata(opts?: { includeInternal?: boolean }): TemplateMetadata[] {
+	const visible = opts?.includeInternal
+		? DASHBOARD_TEMPLATES
+		: DASHBOARD_TEMPLATES.filter((t) => !t.internal)
+	return visible.map((t) => ({
 		id: t.id,
 		name: t.name,
 		description: t.description,

@@ -1,4 +1,4 @@
-import { PortableDashboardDocument } from "@maple/domain/http"
+import { PortableDashboardDocument, defaultWidgetHeight } from "@maple/domain/http"
 import { Schema } from "effect"
 
 import type { Dashboard, DashboardWidget, WidgetLayout } from "@/components/dashboard-builder/types"
@@ -54,6 +54,7 @@ function findNextWidgetPosition(widgets: DashboardWidget[], width: number) {
 
 function normalizeWidgetLayouts(widgets: DashboardWidget[]): DashboardWidget[] {
 	return widgets.reduce<DashboardWidget[]>((normalized, widget) => {
+		const { h, minH } = defaultWidgetHeight(widget.visualization)
 		const defaultLayout = {
 			w:
 				widget.visualization === "stat"
@@ -61,9 +62,10 @@ function normalizeWidgetLayouts(widgets: DashboardWidget[]): DashboardWidget[] {
 					: widget.visualization === "table" || widget.visualization === "list"
 						? 6
 						: 4,
-			h: widget.visualization === "stat" ? 4 : 5,
+			// Stats keep the taller hand-added height, matching `addWidget`.
+			h: widget.visualization === "stat" ? 4 : h,
 			minW: widget.visualization === "stat" ? 2 : 3,
-			minH: widget.visualization === "table" || widget.visualization === "list" ? 3 : 2,
+			minH,
 		}
 
 		const layout = isWidgetLayout(widget.layout)

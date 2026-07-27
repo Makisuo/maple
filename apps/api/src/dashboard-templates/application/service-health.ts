@@ -81,7 +81,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				}),
 			]),
 			display: { title: "Throughput Over Time", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 2, w: 6, h: 4 },
+			layout: { x: 0, y: 2, w: 6, h: 6 },
 		},
 		{
 			id: "error-rate-chart",
@@ -97,7 +97,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				}),
 			]),
 			display: { title: "Error Rate Over Time", ...CHART_DISPLAY_AREA },
-			layout: { x: 6, y: 2, w: 6, h: 4 },
+			layout: { x: 6, y: 2, w: 6, h: 6 },
 		},
 		{
 			id: "latency-chart",
@@ -113,7 +113,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				}),
 			]),
 			display: { title: "P95 Latency Over Time", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
-			layout: { x: 0, y: 6, w: 12, h: 4 },
+			layout: { x: 0, y: 8, w: 12, h: 6 },
 		},
 	]
 }

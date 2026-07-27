@@ -28,7 +28,7 @@ function widgets(namespace?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Pod CPU Usage (cores)", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "pod-memory",
@@ -42,7 +42,7 @@ function widgets(namespace?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Pod Memory Usage", ...CHART_DISPLAY_LINE, unit: "bytes" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "container-restarts",
@@ -56,7 +56,7 @@ function widgets(namespace?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Container Restarts", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "network-io",
@@ -72,7 +72,7 @@ function widgets(namespace?: string): WidgetDef[] {
 				groupBy: ["attr.direction"],
 			}),
 			display: { title: "Pod Network I/O", ...CHART_DISPLAY_AREA, unit: "bytes" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 	]
 }

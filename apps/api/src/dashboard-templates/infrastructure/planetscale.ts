@@ -63,7 +63,7 @@ function widgets(database?: string): WidgetDef[] {
 				groupBy: ["attr.planetscale_database_name"],
 			}),
 			display: { title: "Active Connections (MySQL)", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "connections-postgres",
@@ -78,7 +78,7 @@ function widgets(database?: string): WidgetDef[] {
 				groupBy: ["attr.planetscale_database_name"],
 			}),
 			display: { title: "Active Connections (Postgres)", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		gaugeChart({
 			id: "cpu",
@@ -87,7 +87,7 @@ function widgets(database?: string): WidgetDef[] {
 			title: "Pod CPU Utilization (max)",
 			unit: "percent",
 			where,
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		}),
 		gaugeChart({
 			id: "memory",
@@ -96,7 +96,7 @@ function widgets(database?: string): WidgetDef[] {
 			title: "Pod Memory Utilization (max)",
 			unit: "percent",
 			where,
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		}),
 		gaugeChart({
 			id: "replica-lag-mysql",
@@ -105,7 +105,7 @@ function widgets(database?: string): WidgetDef[] {
 			title: "Replica Lag (MySQL)",
 			unit: "seconds",
 			where,
-			layout: { x: 0, y: 8, w: 6, h: 4 },
+			layout: { x: 0, y: 12, w: 6, h: 6 },
 		}),
 		gaugeChart({
 			id: "replica-lag-postgres",
@@ -114,7 +114,7 @@ function widgets(database?: string): WidgetDef[] {
 			title: "Replica Lag (Postgres)",
 			unit: "seconds",
 			where,
-			layout: { x: 6, y: 8, w: 6, h: 4 },
+			layout: { x: 6, y: 12, w: 6, h: 6 },
 		}),
 		{
 			id: "queries-by-branch",
@@ -129,7 +129,7 @@ function widgets(database?: string): WidgetDef[] {
 				groupBy: ["attr.planetscale_branch_name"],
 			}),
 			display: { title: "Connections by Branch", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 12, w: 6, h: 4 },
+			layout: { x: 0, y: 18, w: 6, h: 6 },
 		},
 		gaugeChart({
 			id: "storage-available",
@@ -139,7 +139,7 @@ function widgets(database?: string): WidgetDef[] {
 			unit: "bytes",
 			where,
 			aggregation: "min",
-			layout: { x: 6, y: 12, w: 6, h: 4 },
+			layout: { x: 6, y: 18, w: 6, h: 6 },
 		}),
 	]
 }

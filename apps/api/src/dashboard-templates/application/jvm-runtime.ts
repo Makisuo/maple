@@ -26,7 +26,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "JVM Heap Used", ...CHART_DISPLAY_LINE, unit: "bytes" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "heap-committed",
@@ -40,7 +40,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "JVM Heap Committed", ...CHART_DISPLAY_LINE, unit: "bytes" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			// The query-builder metrics source supports avg/sum/min/max/count/rate/
@@ -58,7 +58,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "GC Pause Time (Max)", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "thread-count",
@@ -72,7 +72,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Threads", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "classes-loaded",
@@ -92,7 +92,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 					{ field: "value", header: "Classes", align: "right" },
 				],
 			},
-			layout: { x: 0, y: 8, w: 12, h: 4 },
+			layout: { x: 0, y: 12, w: 12, h: 4 },
 		},
 	]
 }

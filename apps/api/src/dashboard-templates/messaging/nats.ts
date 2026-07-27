@@ -24,7 +24,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Active Connections", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "messages-in",
@@ -39,7 +39,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Messages In / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "messages-out",
@@ -54,7 +54,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Messages Out / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "slow-consumers",
@@ -67,7 +67,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Slow Consumers", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "subscriptions",
@@ -80,7 +80,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Subscriptions", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 8, w: 12, h: 4 },
+			layout: { x: 0, y: 12, w: 12, h: 6 },
 		},
 	]
 }

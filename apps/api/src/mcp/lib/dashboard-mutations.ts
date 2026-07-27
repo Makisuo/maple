@@ -8,6 +8,7 @@ import {
 	WidgetDataSourceSchema,
 	WidgetDisplayConfigSchema,
 	WidgetLayoutSchema,
+	defaultWidgetHeight,
 } from "@maple/domain/http"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
@@ -57,19 +58,24 @@ export const generateWidgetId = (): string => randomUUID()
 
 /**
  * Default grid size per visualization type. Mirrors the web store so
- * auto-placed widgets match what the "Add widget" UI would produce.
+ * auto-placed widgets match what the "Add widget" UI would produce; the height
+ * comes from `defaultWidgetHeight` so the two can't drift apart.
  */
 export const defaultSizeForVisualization = (visualization: string): { w: number; h: number } => {
+	const { h } = defaultWidgetHeight(visualization)
 	switch (visualization) {
+		// Deliberately taller than the `h: 2` stat tiles the templates use — a
+		// hand-added stat gets room for a sparkline. Reconciling the two is a
+		// separate change.
 		case "stat":
 			return { w: 3, h: 4 }
 		case "gauge":
-			return { w: 3, h: 5 }
+			return { w: 3, h }
 		case "table":
 		case "list":
-			return { w: 6, h: 5 }
+			return { w: 6, h }
 		default:
-			return { w: 4, h: 5 }
+			return { w: 4, h }
 	}
 }
 

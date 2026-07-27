@@ -315,6 +315,12 @@ function Fill({ children, className }: { children: React.ReactNode; className?: 
  * Context/detail rail on the trailing edge. Below `lg` there is no room for it
  * beside the content, so — exactly like `FilterSidebar` — it becomes a sheet
  * behind `RightSidebarTrigger` rather than disappearing.
+ *
+ * Callers routinely mount this unconditionally and vary the *content*
+ * (`{panelOpen ? <Panel /> : undefined}`), so an empty rail must take no width —
+ * otherwise a closed panel silently costs the page `width` px forever.
+ * `Children.toArray` drops null/undefined/booleans, which is exactly the
+ * "renders nothing" test we want.
  */
 function RightSidebar({
 	children,
@@ -329,13 +335,17 @@ function RightSidebar({
 	width?: string
 }) {
 	const { filterSidebarCollapsed, rightSheetOpen, setRightSheetOpen, setHasRightSidebar } = usePageLayout()
+	const hasContent = React.Children.toArray(children).length > 0
 
 	// Announce presence to the trigger in the page header, which can't see this as
 	// a child. Layout effect so a frame never paints with the trigger missing.
 	React.useLayoutEffect(() => {
+		if (!hasContent) return
 		setHasRightSidebar(true)
 		return () => setHasRightSidebar(false)
-	}, [setHasRightSidebar])
+	}, [hasContent, setHasRightSidebar])
+
+	if (!hasContent) return null
 
 	if (filterSidebarCollapsed) {
 		return (

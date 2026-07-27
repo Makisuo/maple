@@ -27,7 +27,7 @@ function widgets(clusterName?: string): WidgetDef[] {
 				groupBy: ["resource.k8s.node.name"],
 			}),
 			display: { title: "Node Ready Status", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "pod-count",
@@ -41,7 +41,7 @@ function widgets(clusterName?: string): WidgetDef[] {
 				groupBy: ["resource.k8s.namespace.name"],
 			}),
 			display: { title: "Pod Phase by Namespace", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "deployment-available",
@@ -55,7 +55,7 @@ function widgets(clusterName?: string): WidgetDef[] {
 				groupBy: ["resource.k8s.namespace.name"],
 			}),
 			display: { title: "Deployment Availability", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "pods-by-namespace",
@@ -69,7 +69,7 @@ function widgets(clusterName?: string): WidgetDef[] {
 				groupBy: ["resource.k8s.namespace.name"],
 			}),
 			display: { title: "Namespace Phase", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 	]
 }

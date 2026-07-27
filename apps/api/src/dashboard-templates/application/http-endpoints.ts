@@ -72,7 +72,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				}),
 			]),
 			display: { title: "Error Rate by Endpoint", ...CHART_DISPLAY_AREA },
-			layout: { x: 0, y: 5, w: 12, h: 4 },
+			layout: { x: 0, y: 5, w: 12, h: 6 },
 		},
 		{
 			id: "recent-traces",
@@ -89,7 +89,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				listDataSource: "traces",
 				listLimit: 10,
 			},
-			layout: { x: 0, y: 9, w: 12, h: 5 },
+			layout: { x: 0, y: 11, w: 12, h: 5 },
 		},
 	]
 }

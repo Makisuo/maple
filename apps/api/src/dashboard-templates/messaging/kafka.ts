@@ -27,7 +27,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: ["attr.topic"],
 			}),
 			display: { title: "Messages In by Topic", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "consumer-lag",
@@ -41,7 +41,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: ["attr.group"],
 			}),
 			display: { title: "Consumer Lag by Group", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "broker-count",
@@ -54,7 +54,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Active Brokers", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "partition-isr",
@@ -67,7 +67,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Under-Replicated Partitions", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "request-latency",
@@ -81,7 +81,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: ["attr.type"],
 			}),
 			display: { title: "Request Latency P99", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
-			layout: { x: 0, y: 8, w: 12, h: 4 },
+			layout: { x: 0, y: 12, w: 12, h: 6 },
 		},
 	]
 }

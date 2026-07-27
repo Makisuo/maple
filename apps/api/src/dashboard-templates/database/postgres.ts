@@ -26,7 +26,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Active Connections", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "commits-rollbacks",
@@ -42,7 +42,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Commits per sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "blocks-read",
@@ -58,7 +58,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Disk Blocks Read / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "db-size",
@@ -72,7 +72,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Database Size", ...CHART_DISPLAY_LINE, unit: "bytes" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "deadlocks",
@@ -88,7 +88,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Deadlocks / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 8, w: 6, h: 4 },
+			layout: { x: 0, y: 12, w: 6, h: 6 },
 		},
 		{
 			id: "replication-lag",
@@ -102,7 +102,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Replication Lag", ...CHART_DISPLAY_LINE, unit: "duration_s" },
-			layout: { x: 6, y: 8, w: 6, h: 4 },
+			layout: { x: 6, y: 12, w: 6, h: 6 },
 		},
 	]
 }

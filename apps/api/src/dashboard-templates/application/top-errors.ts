@@ -80,7 +80,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				}),
 			]),
 			display: { title: "Error Rate Over Time", ...CHART_DISPLAY_AREA },
-			layout: { x: 0, y: 7, w: 12, h: 4 },
+			layout: { x: 0, y: 7, w: 12, h: 6 },
 		},
 		{
 			id: "recent-error-traces",
@@ -99,7 +99,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				listWhereClause: "has_error = true",
 				listLimit: 10,
 			},
-			layout: { x: 0, y: 11, w: 12, h: 5 },
+			layout: { x: 0, y: 13, w: 12, h: 5 },
 		},
 	]
 }

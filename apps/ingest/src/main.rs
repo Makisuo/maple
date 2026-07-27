@@ -42,6 +42,7 @@ use maple_ingest::telemetry::{
     DatasourceNames, ExportDestination, MappingOperation, MappingSourceContext, PipelineError,
     SamplingPolicy, TelemetryPipeline, TelemetrySignal, TinybirdConfig,
 };
+use maple_ingest::usage_metrics::{billable_gb, usage_cardinality_view, UsageMetrics};
 use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
@@ -54,7 +55,7 @@ use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_sdk::logs::{BatchLogProcessor, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
 use opentelemetry_sdk::runtime::Tokio as OtelTokio;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_sdk::trace::{BatchConfigBuilder, SdkTracerProvider};
@@ -694,6 +695,11 @@ struct AppState {
     cloudflare_resolver: CloudflareConnectorResolver,
     autumn_tracker: Option<AutumnTracker>,
     autumn_entitlements: Option<AutumnEntitlements>,
+    /// Per-org ingest volume, on its own delta-temporality provider. Recorded
+    /// beside `autumn_tracker` from the same value so the warehouse is ground
+    /// truth for what the gateway metered. `None` when metric export is skipped
+    /// (local dev, or a loopback endpoint).
+    usage_metrics: Option<Arc<UsageMetrics>>,
     replay_session_budget: ReplaySessionBudget,
 }
 
@@ -1225,6 +1231,72 @@ fn init_metrics(
     Some(provider)
 }
 
+/// Wire up the per-org ingest volume pipeline. Deliberately a *second* meter
+/// provider rather than more instruments on the global one, for three reasons:
+///
+/// - Temporality is an exporter setting in opentelemetry 0.31, and these metrics
+///   need [`Temporality::Delta`] to be exact (see `usage_metrics` module docs).
+///   Flipping the shared exporter would silently change every operational metric.
+/// - It is never installed with `set_meter_provider`, so nothing can accidentally
+///   bind a cumulative operational instrument to the delta exporter.
+/// - A 60s interval halves the row count versus the operational provider's 30s,
+///   which under delta costs nothing but chart granularity below a minute.
+///
+/// Shares `service_instance_id` with `init_metrics` so both providers describe
+/// one process. Skipped under exactly the same conditions as `init_metrics`.
+fn init_usage_metrics(
+    forward_endpoint: &str,
+    bind_port: u16,
+    service_instance_id: &str,
+) -> Option<UsageMetrics> {
+    let deployment_env = resolve_deployment_env();
+    let internal_org_id =
+        std::env::var("MAPLE_INTERNAL_ORG_ID").unwrap_or_else(|_| "internal".to_string());
+
+    let forward_explicit = std::env::var("INGEST_FORWARD_OTLP_ENDPOINT").is_ok();
+    let skip_dev = deployment_env == "development" && !forward_explicit;
+    if skip_dev || endpoint_loopback_to_self(forward_endpoint, bind_port) {
+        return None;
+    }
+
+    let resource = build_resource(ResourceConfig {
+        service_name: "ingest",
+        service_namespace: "ingest",
+        service_version: env!("CARGO_PKG_VERSION"),
+        service_instance_id: service_instance_id.to_string(),
+        deployment_env,
+        internal_org_id,
+    });
+
+    let exporter = match MetricExporter::builder()
+        .with_http()
+        .with_endpoint(format!("{forward_endpoint}/v1/metrics"))
+        .with_protocol(Protocol::HttpBinary)
+        .with_temporality(Temporality::Delta)
+        .build()
+    {
+        Ok(exporter) => exporter,
+        Err(error) => {
+            eprintln!(
+                "Failed to build OTLP usage metric exporter: {error}; usage metrics disabled"
+            );
+            return None;
+        }
+    };
+
+    let reader = PeriodicReader::builder(exporter, OtelTokio)
+        .with_interval(Duration::from_secs(60))
+        .build();
+
+    let provider = SdkMeterProvider::builder()
+        .with_resource(resource)
+        .with_reader(reader)
+        .with_view(usage_cardinality_view)
+        .build();
+
+    Some(UsageMetrics::new(provider))
+}
+
 fn endpoint_loopback_to_self(forward_endpoint: &str, bind_port: u16) -> bool {
     let Ok(parsed) = url::Url::parse(forward_endpoint) else {
         return false;
@@ -1253,6 +1325,9 @@ async fn main() {
     let telemetry_providers =
         init_tracing(&config.forward_endpoint, config.port, &service_instance_id);
     let meter_provider = init_metrics(&config.forward_endpoint, config.port, &service_instance_id);
+    let usage_metrics =
+        init_usage_metrics(&config.forward_endpoint, config.port, &service_instance_id)
+            .map(Arc::new);
 
     let http_client = match Client::builder()
         .timeout(config.forward_timeout)
@@ -1397,6 +1472,7 @@ async fn main() {
         config: config.clone(),
         autumn_tracker,
         autumn_entitlements,
+        usage_metrics: usage_metrics.clone(),
         replay_session_budget: ReplaySessionBudget::new(config.replay_max_session_bytes),
     });
 
@@ -1493,6 +1569,13 @@ async fn main() {
         let _ = provider.shutdown();
     }
 
+    if let Some(usage) = usage_metrics {
+        // Load-bearing, unlike the cumulative provider above: a delta interval
+        // that is never collected is lost outright rather than folded into the
+        // next export, so skipping this silently under-reports billable volume.
+        usage.shutdown();
+    }
+
     if let Err(error) = serve_result {
         eprintln!("Ingest server failed: {error}");
         std::process::exit(1);
@@ -1576,6 +1659,10 @@ impl opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::Tra
         let result = async {
             let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
             let mut inner = request.into_inner();
+            // Sized before enrichment injects resource attributes, so this is
+            // the client's own payload size — the same basis as the HTTP path's
+            // `decoded_payload.len()`.
+            let decoded_bytes = inner.encoded_len();
             enrich_trace_request(&mut inner, &resolved);
             record_grpc_identity(&resolved);
             accept_grpc_decoded(
@@ -1583,6 +1670,7 @@ impl opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::Tra
                 Signal::Traces,
                 DecodedPayload::Traces(inner),
                 &resolved,
+                decoded_bytes,
             )
             .await?;
             Ok(tonic::Response::new(
@@ -1614,6 +1702,7 @@ impl opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsS
         let result = async {
             let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
             let mut inner = request.into_inner();
+            let decoded_bytes = inner.encoded_len();
             enrich_logs_request(&mut inner, &resolved);
             record_grpc_identity(&resolved);
             accept_grpc_decoded(
@@ -1621,6 +1710,7 @@ impl opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsS
                 Signal::Logs,
                 DecodedPayload::Logs(inner),
                 &resolved,
+                decoded_bytes,
             )
             .await?;
             Ok(tonic::Response::new(
@@ -1654,6 +1744,7 @@ impl opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server:
         let result = async {
             let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
             let mut inner = request.into_inner();
+            let decoded_bytes = inner.encoded_len();
             enrich_metrics_request(&mut inner, &resolved);
             record_grpc_identity(&resolved);
             accept_grpc_decoded(
@@ -1661,6 +1752,7 @@ impl opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server:
                 Signal::Metrics,
                 DecodedPayload::Metrics(inner),
                 &resolved,
+                decoded_bytes,
             )
             .await?;
             Ok(tonic::Response::new(
@@ -1681,11 +1773,13 @@ async fn accept_grpc_decoded(
     signal: Signal,
     decoded: DecodedPayload,
     resolved: &ResolvedIngestKey,
+    decoded_bytes: usize,
 ) -> Result<(), tonic::Status> {
     let _org_inflight_permit = state
         .org_inflight_limiter
         .try_acquire(&resolved.org_id)
         .ok_or_else(|| tonic::Status::resource_exhausted("Per-org ingest limit exceeded"))?;
+    let item_count = decoded.item_count();
     process_decoded_payload(
         state,
         signal,
@@ -1695,7 +1789,23 @@ async fn accept_grpc_decoded(
         resolved,
     )
     .await
-    .map(|_| ())
+    .map(|_| {
+        // gRPC volume is recorded but deliberately NOT metered to Autumn here:
+        // this path has never been billed, and switching that on is a
+        // customer-facing pricing change that needs its own review. Recording it
+        // makes the internal dashboard honest about total ingest, and the
+        // warehouse-vs-Autumn gap then quantifies exactly what is unbilled.
+        if resolved.org_id != SENTINEL_ORG_ID {
+            if let Some(usage) = &state.usage_metrics {
+                usage.record(
+                    &resolved.org_id,
+                    signal.path(),
+                    decoded_bytes as u64,
+                    item_count as u64,
+                );
+            }
+        }
+    })
     .map_err(|error| {
         if error.status == StatusCode::TOO_MANY_REQUESTS {
             tonic::Status::resource_exhausted(error.message)
@@ -2361,11 +2471,16 @@ async fn handle_signal(
             span_handle.record("http.response.status_code", status_code);
             span_handle.record("otel.status_code", "Ok");
             metrics::request_completed(signal.path(), "ok", "none", duration.as_secs_f64());
-            if let Some(tracker) = &state.autumn_tracker {
-                if org_id != SENTINEL_ORG_ID {
-                    let feature_id = signal.path();
-                    let value_gb = decoded_bytes as f64 / 1_000_000_000.0;
-                    tracker.track(&org_id, feature_id, value_gb);
+            // Usage and billing are emitted together, from one value, behind one
+            // guard — they must never drift. `signal.path()` is both the Autumn
+            // feature id and the metric's `signal` dimension.
+            if org_id != SENTINEL_ORG_ID {
+                let feature_id = signal.path();
+                if let Some(usage) = &state.usage_metrics {
+                    usage.record(&org_id, feature_id, decoded_bytes as u64, item_count as u64);
+                }
+                if let Some(tracker) = &state.autumn_tracker {
+                    tracker.track(&org_id, feature_id, billable_gb(decoded_bytes as u64));
                 }
             }
             info!(
@@ -2890,6 +3005,22 @@ async fn handle_cloudflare_logpush_inner(
                 .cloudflare_resolver
                 .record_success(&resolved.connector_id)
                 .await;
+
+            // Logpush already *checks* the `logs` entitlement above but has never
+            // reported usage against it, so this org consumes quota without ever
+            // metering. Record the volume here (same `decoded_payload.len()` basis
+            // as the OTLP path); switching on the Autumn `track` is a separate,
+            // customer-facing decision.
+            if resolved.org_id != SENTINEL_ORG_ID {
+                if let Some(usage) = &state.usage_metrics {
+                    usage.record(
+                        &resolved.org_id,
+                        Signal::Logs.path(),
+                        decoded_payload.len() as u64,
+                        item_count as u64,
+                    );
+                }
+            }
 
             Ok((response, item_count, resolved.org_id.clone(), false))
         }
@@ -5219,6 +5350,7 @@ mod tests {
             },
             autumn_tracker: None,
             autumn_entitlements: None,
+            usage_metrics: None,
             replay_session_budget: ReplaySessionBudget::new(1024 * 1024 * 1024),
         }
     }

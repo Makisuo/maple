@@ -77,7 +77,7 @@ function widgets(): WidgetDef[] {
 				}),
 			]),
 			display: { title: "Throughput by Service", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 7, w: 6, h: 4 },
+			layout: { x: 0, y: 7, w: 6, h: 6 },
 		},
 		{
 			id: "error-rate-by-service",
@@ -92,7 +92,7 @@ function widgets(): WidgetDef[] {
 				}),
 			]),
 			display: { title: "Error Rate by Service", ...CHART_DISPLAY_AREA },
-			layout: { x: 6, y: 7, w: 6, h: 4 },
+			layout: { x: 6, y: 7, w: 6, h: 6 },
 		},
 		{
 			id: "recent-error-traces",
@@ -107,7 +107,7 @@ function widgets(): WidgetDef[] {
 				listWhereClause: "has_error = true",
 				listLimit: 10,
 			},
-			layout: { x: 0, y: 11, w: 12, h: 5 },
+			layout: { x: 0, y: 13, w: 12, h: 5 },
 		},
 	]
 }

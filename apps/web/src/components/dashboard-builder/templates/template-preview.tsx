@@ -50,9 +50,13 @@ interface Box {
 }
 
 // Horizontal inset is fixed; vertical inset scales with box height so short
-// widget rows keep a usable drawing area for the series.
+// widget rows keep a usable drawing area for the series. The second clamp keeps
+// `box.h - padY * 2` positive on very tall dashboards — a 30-row template
+// squeezes stat tiles below 4px, and a negative inner height makes the glyphs
+// emit `<rect height="-…">`, which browsers reject outright.
 function glyphInsets(box: Box): { padX: number; padY: number } {
-	return { padX: 3.5, padY: Math.min(4, Math.max(1.5, box.h * 0.18)) }
+	const padY = Math.min(4, Math.max(1.5, box.h * 0.18))
+	return { padX: 3.5, padY: Math.min(padY, Math.max(0, (box.h - 1) / 2)) }
 }
 
 function seriesPoints(box: Box, values: number[]): Array<[number, number]> {

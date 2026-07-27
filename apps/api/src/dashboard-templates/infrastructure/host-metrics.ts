@@ -32,7 +32,7 @@ function widgets(hostName?: string): WidgetDef[] {
 				groupBy: ["attr.state"],
 			}),
 			display: { title: "CPU by State", ...CHART_DISPLAY_AREA, unit: "percent" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "memory",
@@ -46,7 +46,7 @@ function widgets(hostName?: string): WidgetDef[] {
 				groupBy: ["attr.state"],
 			}),
 			display: { title: "Memory by State", ...CHART_DISPLAY_AREA, unit: "bytes" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "disk-io",
@@ -62,7 +62,7 @@ function widgets(hostName?: string): WidgetDef[] {
 				groupBy: ["attr.direction"],
 			}),
 			display: { title: "Disk I/O", ...CHART_DISPLAY_AREA, unit: "bytes" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "network",
@@ -78,7 +78,7 @@ function widgets(hostName?: string): WidgetDef[] {
 				groupBy: ["attr.direction"],
 			}),
 			display: { title: "Network I/O", ...CHART_DISPLAY_AREA, unit: "bytes" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "load-average",
@@ -92,7 +92,7 @@ function widgets(hostName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Load Average (1m)", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 8, w: 6, h: 4 },
+			layout: { x: 0, y: 12, w: 6, h: 6 },
 		},
 		{
 			id: "filesystem",
@@ -106,7 +106,7 @@ function widgets(hostName?: string): WidgetDef[] {
 				groupBy: ["attr.mountpoint"],
 			}),
 			display: { title: "Filesystem Utilization", ...CHART_DISPLAY_LINE, unit: "percent" },
-			layout: { x: 6, y: 8, w: 6, h: 4 },
+			layout: { x: 6, y: 12, w: 6, h: 6 },
 		},
 	]
 }

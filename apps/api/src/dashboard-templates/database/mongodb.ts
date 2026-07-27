@@ -28,7 +28,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Operations by Type", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "active-connections",
@@ -41,7 +41,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Active Connections", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "document-ops",
@@ -57,7 +57,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Document Operations / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "cache-hits",
@@ -73,7 +73,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy: ["attr.type"],
 			}),
 			display: { title: "Cache Hits/Misses", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "replica-lag",
@@ -86,7 +86,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Replica Lag", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
-			layout: { x: 0, y: 8, w: 12, h: 4 },
+			layout: { x: 0, y: 12, w: 12, h: 6 },
 		},
 	]
 }

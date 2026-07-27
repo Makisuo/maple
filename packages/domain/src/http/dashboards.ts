@@ -213,6 +213,31 @@ export const WidgetLayoutSchema = Schema.Struct({
 	maxH: Schema.optional(Schema.Number),
 })
 
+/**
+ * Grid rows a widget occupies by default, and the smallest it may be resized to.
+ *
+ * The dashboard canvas is a 12-column grid with `rowHeight: 60` and a 12px
+ * gutter, so a tile's pixel height is `h * 60 + (h - 1) * 12` — charts at `h: 6`
+ * render 420px tall. Every place that auto-places a widget (the "Add widget"
+ * store, the MCP tools, the portable-dashboard importer, the Perses importer)
+ * reads its height from here so the numbers can't drift apart again. Widths stay
+ * with the caller: full-bleed `w: 12` from `create_dashboard` and `w: 4` from the
+ * web store are deliberate, per-context choices.
+ */
+export const defaultWidgetHeight = (visualization: string): { h: number; minH: number } => {
+	switch (visualization) {
+		case "stat":
+			return { h: 2, minH: 2 }
+		case "table":
+		case "list":
+		case "markdown":
+			return { h: 5, minH: 3 }
+		default:
+			// chart, gauge, pie, heatmap, … — a timeseries needs the vertical room.
+			return { h: 6, minH: 2 }
+	}
+}
+
 export const DashboardWidgetSchema = Schema.Struct({
 	id: Schema.String,
 	visualization: Schema.String,

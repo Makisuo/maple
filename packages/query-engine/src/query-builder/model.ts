@@ -73,9 +73,19 @@ export const AGGREGATIONS_BY_SOURCE: Record<
 	],
 }
 
+// `sum` belongs here alongside rate/increase because those two assume
+// *cumulative* temporality — they lower to `metricsTimeseriesRateQuery`, which
+// reconstructs increments with `lagInFrame` over per-replica accumulation
+// epochs. A delta-temporality counter already exports its increment per
+// interval, so the correct aggregation is a plain `sum(Value)` per bucket, and
+// running rate/increase over it would double-difference the data. The query
+// builder has no temporality dimension to branch on, so both are offered and
+// `rate` stays first to keep the default unchanged for the common cumulative
+// case.
 const METRICS_AGGREGATIONS_MONOTONIC_SUM = [
 	{ label: "rate", value: "rate" },
 	{ label: "increase", value: "increase" },
+	{ label: "sum", value: "sum" },
 ]
 
 const METRICS_AGGREGATIONS_GAUGE_LIKE = [
@@ -88,11 +98,14 @@ const METRICS_AGGREGATIONS_GAUGE_LIKE = [
 
 export function getMetricsAggregations(
 	metricType: QueryBuilderMetricType,
-	_isMonotonic?: boolean,
+	isMonotonic?: boolean,
 ): Array<{ label: string; value: string }> {
-	// Sum metrics are almost always monotonic counters in OpenTelemetry.
-	// Show rate/increase for all Sum metrics by default.
-	if (metricType === "sum") {
+	// A Sum metric explicitly flagged non-monotonic is an UpDownCounter — it can
+	// decrease, so rate/increase are meaningless for it and the gauge-like set is
+	// correct. `undefined` keeps the old assumption (Sum metrics in OpenTelemetry
+	// are overwhelmingly monotonic counters) so callers that don't know stay on
+	// rate/increase.
+	if (metricType === "sum" && isMonotonic !== false) {
 		return METRICS_AGGREGATIONS_MONOTONIC_SUM
 	}
 	return METRICS_AGGREGATIONS_GAUGE_LIKE

@@ -83,7 +83,7 @@ function widgets(opts: {
 				}),
 			]),
 			display: { title: `${opts.metricName} Over Time`, ...chartDisplayForMetric(agg) },
-			layout: { x: 0, y: 2, w: 12, h: 4 },
+			layout: { x: 0, y: 2, w: 12, h: 6 },
 		},
 		{
 			id: "metric-breakdown",
@@ -107,7 +107,7 @@ function widgets(opts: {
 					{ field: "value", header: agg.charAt(0).toUpperCase() + agg.slice(1) },
 				],
 			},
-			layout: { x: 0, y: 6, w: 12, h: 4 },
+			layout: { x: 0, y: 8, w: 12, h: 4 },
 		},
 	]
 }
