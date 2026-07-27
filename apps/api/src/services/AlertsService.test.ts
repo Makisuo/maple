@@ -1918,9 +1918,7 @@ describe("AlertsService", () => {
 				channelName: "incidents",
 			})
 		}).pipe(
-			Effect.provide(
-				makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
-			),
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
 		)
 	})
 

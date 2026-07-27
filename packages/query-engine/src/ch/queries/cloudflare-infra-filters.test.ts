@@ -73,9 +73,9 @@ describe("cloudflareFilterConditions", () => {
 
 describe("cloudflareIgnoredFilters", () => {
 	it("reports keys the caller asked for that this family cannot honor", () => {
-		expect(
-			cloudflareIgnoredFilters({ paths: ["/a"], hosts: ["h"] }, ["host", "cacheStatus"]),
-		).toEqual(["path"])
+		expect(cloudflareIgnoredFilters({ paths: ["/a"], hosts: ["h"] }, ["host", "cacheStatus"])).toEqual([
+			"path",
+		])
 	})
 
 	it("counts a bare pathContains as a requested path filter", () => {
@@ -95,8 +95,8 @@ describe("cloudflareIgnoredFilters", () => {
 			]),
 		).toEqual(["host", "country"])
 		// The status chart reads the main cube, which does carry hosts.
-		expect(cloudflareIgnoredFiltersFor({ hosts: ["h"], countries: ["DE"] }, [CF_METRIC.requests])).toEqual(
-			["country"],
-		)
+		expect(
+			cloudflareIgnoredFiltersFor({ hosts: ["h"], countries: ["DE"] }, [CF_METRIC.requests]),
+		).toEqual(["country"])
 	})
 })

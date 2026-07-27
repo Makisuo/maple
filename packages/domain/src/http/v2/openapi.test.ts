@@ -1,10 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
-import {
-	SlackBotAlertDestinationConfig,
-	UpdateSlackBotAlertDestinationConfig,
-} from "../alerts"
+import { SlackBotAlertDestinationConfig, UpdateSlackBotAlertDestinationConfig } from "../alerts"
 import { MapleApiV2 } from "./api"
 import {
 	V2AlertDestinationCreateParams,
@@ -475,7 +472,9 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(update.channelName).toBe("alerts")
 
 		// Same tightening as the v2 params: a blank channelId must fail decoding.
-		expect(() => Schema.decodeUnknownSync(UpdateSlackBotAlertDestinationConfig)({ channelId: "" })).toThrow()
+		expect(() =>
+			Schema.decodeUnknownSync(UpdateSlackBotAlertDestinationConfig)({ channelId: "" }),
+		).toThrow()
 		expect(() =>
 			Schema.decodeUnknownSync(SlackBotAlertDestinationConfig)({
 				type: "slack-bot",

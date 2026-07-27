@@ -55,15 +55,15 @@ writes: endpoint captures the Postgres txid on the mutating statement
 
 ### Shapes (server-pinned whitelist, `apps/electric-sync/src/routes/shape.http.ts`)
 
-| shape | table | extra WHERE (besides org scope) |
-|---|---|---|
-| `dashboards` | dashboards | — |
-| `alert_rules` | alert_rules | — |
-| `alert_rule_states` | alert_rule_states | — |
-| `alert_incidents` | alert_incidents | — |
-| `error_issues` | error_issues | `"archived_at" IS NULL` |
-| `actors` | actors | — |
-| `open_error_incidents` | error_incidents | `"status" = 'open'` |
+| shape                  | table             | extra WHERE (besides org scope) |
+| ---------------------- | ----------------- | ------------------------------- |
+| `dashboards`           | dashboards        | —                               |
+| `alert_rules`          | alert_rules       | —                               |
+| `alert_rule_states`    | alert_rule_states | —                               |
+| `alert_incidents`      | alert_incidents   | —                               |
+| `error_issues`         | error_issues      | `"archived_at" IS NULL`         |
+| `actors`               | actors            | —                               |
+| `open_error_incidents` | error_incidents   | `"status" = 'open'`             |
 
 Shape `where`/columns are **immutable** — changing a pinned predicate forces a
 full re-sync for every client. If you must change one, version the shape name
@@ -164,7 +164,7 @@ Postgres **source** per PR, mirroring the PlanetScale/Tinybird branch lifecycle.
 `ELECTRIC_PROJECT_ID`) the `pr-<n>` environment, reset its services, create a
 fresh `postgres` source pointed at the PR branch's `MAPLE_PG_ELECTRIC_URL`
 (direct 5432 through a dedicated `--with-replication` role — Electric requires
-the REPLICATION role *attribute*, which is never inherited; the main CI role
+the REPLICATION role _attribute_, which is never inherited; the main CI role
 stays non-replication because PlanetScale replication roles aren't grantable,
 which would break the in-place reset's role assumption), polled until active,
 and export

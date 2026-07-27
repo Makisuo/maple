@@ -133,12 +133,11 @@ export const planetscaleBranchStatsRowSchema: CompiledQueryRowSchema<PlanetScale
 		replicaLagMaxSeconds: CHNumber,
 	})
 
-export const planetscaleStorageRowSchema: CompiledQueryRowSchema<PlanetScaleStorageOutput> =
-	Schema.Struct({
-		database: Schema.String,
-		storageUsedPercent: CHNumber,
-		storageSamples: CHNumber,
-	})
+export const planetscaleStorageRowSchema: CompiledQueryRowSchema<PlanetScaleStorageOutput> = Schema.Struct({
+	database: Schema.String,
+	storageUsedPercent: CHNumber,
+	storageSamples: CHNumber,
+})
 
 export const planetscaleBranchStorageRowSchema: CompiledQueryRowSchema<PlanetScaleBranchStorageOutput> =
 	Schema.Struct({

@@ -151,7 +151,10 @@ describe("cloudflareZoneFacetsQuery", () => {
 	})
 
 	it("self-excludes each facet so a selection does not hide its siblings", () => {
-		const { sql } = compileUnion(cloudflareZoneFacetsQuery({ paths: ["/api"], hosts: ["a.example"] }), zoneParams)
+		const { sql } = compileUnion(
+			cloudflareZoneFacetsQuery({ paths: ["/api"], hosts: ["a.example"] }),
+			zoneParams,
+		)
 		const branches = sql.split("UNION ALL")
 		const pathBranch = branches.find((b) => b.includes("'path' AS facetType"))!
 		const countryBranch = branches.find((b) => b.includes("'country' AS facetType"))!
@@ -188,9 +191,7 @@ describe("row schemas coerce ClickHouse string-encoded aggregates", () => {
 		const compiled = compileCH(cloudflareZoneBreakdownTimeseriesSQL("path"), timeseriesParams, {
 			rowSchema: cloudflareZoneBreakdownTimeseriesRowSchema,
 		})
-		const [row] = decode(compiled, [
-			{ bucket: "2026-07-02T00:00:00.000Z", key: "/api", requests: "42" },
-		])
+		const [row] = decode(compiled, [{ bucket: "2026-07-02T00:00:00.000Z", key: "/api", requests: "42" }])
 		expect(row?.requests).toBe(42)
 	})
 

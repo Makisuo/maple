@@ -9,8 +9,7 @@ import { isTrustedCallbackOrigin, resolveRequestOrigin } from "./integrations.ht
 const fakeRequest = (
 	headers: Record<string, string | undefined>,
 	url = "/v2/integrations/slack/install",
-): HttpServerRequest.HttpServerRequest =>
-	({ headers, url }) as unknown as HttpServerRequest.HttpServerRequest
+): HttpServerRequest.HttpServerRequest => ({ headers, url }) as unknown as HttpServerRequest.HttpServerRequest
 
 /**
  * The resolver is UNTRUSTED by design: `x-forwarded-host` is client-supplied on
@@ -21,7 +20,11 @@ const fakeRequest = (
 describe("resolveRequestOrigin (untrusted — reflects client-controlled headers)", () => {
 	it("reflects x-forwarded-host and x-forwarded-proto when both are present", () => {
 		const origin = resolveRequestOrigin(
-			fakeRequest({ "x-forwarded-host": "api.maple.dev", "x-forwarded-proto": "https", host: "internal:8787" }),
+			fakeRequest({
+				"x-forwarded-host": "api.maple.dev",
+				"x-forwarded-proto": "https",
+				host: "internal:8787",
+			}),
 		)
 		assert.strictEqual(origin, "https://api.maple.dev")
 	})
@@ -47,8 +50,14 @@ describe("resolveRequestOrigin (untrusted — reflects client-controlled headers
 	})
 
 	it("defaults to http for localhost and 127.* hosts, preserving the port", () => {
-		assert.strictEqual(resolveRequestOrigin(fakeRequest({ host: "localhost:3472" })), "http://localhost:3472")
-		assert.strictEqual(resolveRequestOrigin(fakeRequest({ host: "127.0.0.1:3472" })), "http://127.0.0.1:3472")
+		assert.strictEqual(
+			resolveRequestOrigin(fakeRequest({ host: "localhost:3472" })),
+			"http://localhost:3472",
+		)
+		assert.strictEqual(
+			resolveRequestOrigin(fakeRequest({ host: "127.0.0.1:3472" })),
+			"http://127.0.0.1:3472",
+		)
 		assert.strictEqual(resolveRequestOrigin(fakeRequest({ host: "localhost" })), "http://localhost")
 	})
 
@@ -58,7 +67,9 @@ describe("resolveRequestOrigin (untrusted — reflects client-controlled headers
 	})
 
 	it("falls back to parsing an absolute request url when no host headers exist", () => {
-		const origin = resolveRequestOrigin(fakeRequest({}, "https://api.example.com:8443/v2/integrations/slack"))
+		const origin = resolveRequestOrigin(
+			fakeRequest({}, "https://api.example.com:8443/v2/integrations/slack"),
+		)
 		assert.strictEqual(origin, "https://api.example.com:8443")
 	})
 

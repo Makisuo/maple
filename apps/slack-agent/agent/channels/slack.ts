@@ -1,11 +1,7 @@
-import { slackChannel } from "eve/channels/slack";
-import type { SlackWebhookVerifier } from "eve/channels/slack";
-import {
-  resolveBotToken,
-  verifySlackV0Signature,
-  type SlackTokenContext,
-} from "#lib/maple.js";
-import { promoteThreadFollowUp } from "#lib/thread-follow-up.js";
+import { slackChannel } from "eve/channels/slack"
+import type { SlackWebhookVerifier } from "eve/channels/slack"
+import { resolveBotToken, verifySlackV0Signature, type SlackTokenContext } from "#lib/maple.js"
+import { promoteThreadFollowUp } from "#lib/thread-follow-up.js"
 
 /**
  * Multi-workspace, self-managed Slack app — no Vercel Connect.
@@ -24,47 +20,47 @@ import { promoteThreadFollowUp } from "#lib/thread-follow-up.js";
  */
 
 const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
-  const signingSecret = process.env.SLACK_SIGNING_SECRET;
-  if (!signingSecret) {
-    console.warn(
-      "[slack-webhook] Rejected inbound Slack webhook: SLACK_SIGNING_SECRET is not set, so no request can be verified.",
-    );
-    return false;
-  }
-  
-  if (!verifySlackV0Signature(body, request.headers, signingSecret)) {
-    console.warn(
-      "[slack-webhook] Rejected inbound Slack webhook: v0 signature verification failed (missing headers, stale timestamp, or signature mismatch — check that SLACK_SIGNING_SECRET matches the Slack app).",
-    );
-    return false;
-  }
+	const signingSecret = process.env.SLACK_SIGNING_SECRET
+	if (!signingSecret) {
+		console.warn(
+			"[slack-webhook] Rejected inbound Slack webhook: SLACK_SIGNING_SECRET is not set, so no request can be verified.",
+		)
+		return false
+	}
 
-  // eve parses whatever body we return, which is also our hook for thread
-  // follow-ups: eve only dispatches app_mention + DM events, so an un-mentioned
-  // reply in a thread the bot is engaged in gets its `event.type` promoted to
-  // "app_mention" here (see #lib/thread-follow-up.js). Everything else passes
-  // through verified-but-unchanged.
-  try {
-    const promoted = await promoteThreadFollowUp(body);
-    if (promoted !== null) return promoted;
-  } catch (error) {
-    console.warn(
-      "[slack-webhook] Thread follow-up promotion failed; passing the event through unchanged.",
-      error,
-    );
-  }
-  return body;
-};
+	if (!verifySlackV0Signature(body, request.headers, signingSecret)) {
+		console.warn(
+			"[slack-webhook] Rejected inbound Slack webhook: v0 signature verification failed (missing headers, stale timestamp, or signature mismatch — check that SLACK_SIGNING_SECRET matches the Slack app).",
+		)
+		return false
+	}
+
+	// eve parses whatever body we return, which is also our hook for thread
+	// follow-ups: eve only dispatches app_mention + DM events, so an un-mentioned
+	// reply in a thread the bot is engaged in gets its `event.type` promoted to
+	// "app_mention" here (see #lib/thread-follow-up.js). Everything else passes
+	// through verified-but-unchanged.
+	try {
+		const promoted = await promoteThreadFollowUp(body)
+		if (promoted !== null) return promoted
+	} catch (error) {
+		console.warn(
+			"[slack-webhook] Thread follow-up promotion failed; passing the event through unchanged.",
+			error,
+		)
+	}
+	return body
+}
 
 export default slackChannel({
-  credentials: {
-    webhookVerifier,
-    // Per-team bot token. Our patched eve passes the outbound call's
-    // { teamId, channelId, threadTs }; context-less paths fall back to
-    // SLACK_BOT_TOKEN.
-    botToken: async (context?: SlackTokenContext) => resolveBotToken(context),
-  },
-  // Repeated mentions in a thread only inject what's new since the agent's
-  // last reply, instead of re-reading the whole thread each time.
-  threadContext: { since: "last-agent-reply" }
-});
+	credentials: {
+		webhookVerifier,
+		// Per-team bot token. Our patched eve passes the outbound call's
+		// { teamId, channelId, threadTs }; context-less paths fall back to
+		// SLACK_BOT_TOKEN.
+		botToken: async (context?: SlackTokenContext) => resolveBotToken(context),
+	},
+	// Repeated mentions in a thread only inject what's new since the agent's
+	// last reply, instead of re-reading the whole thread each time.
+	threadContext: { since: "last-agent-reply" },
+})

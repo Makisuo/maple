@@ -74,7 +74,10 @@ const SLACK_ERROR_COPY = new Map<string, string>([
 		"This Slack workspace is already connected to a different Maple organization. Uninstall it there first.",
 		"That Slack workspace is already connected to a different Maple organization. Uninstall it there first.",
 	],
-	["Slack state expired — restart the install flow", "The Slack install link expired. Start the install again."],
+	[
+		"Slack state expired — restart the install flow",
+		"The Slack install link expired. Start the install again.",
+	],
 	[
 		"Slack state not recognized — restart the install flow",
 		"The Slack install link is no longer valid. Start the install again.",
@@ -109,8 +112,7 @@ function IntegrationsPage() {
 	// Surface the Slack OAuth callback result once, then strip the return params
 	// from the URL so a refresh doesn't re-toast. Narrowed here rather than in
 	// `validateSearch` — an unrecognised value is simply not a callback return.
-	const slackReturn =
-		search.slack === "connected" || search.slack === "error" ? search.slack : undefined
+	const slackReturn = search.slack === "connected" || search.slack === "error" ? search.slack : undefined
 	const slackMessage = search.slack_message
 	const slackTeam = search.slack_team
 	useEffect(() => {

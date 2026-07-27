@@ -14,13 +14,7 @@ import {
 	useTableSort,
 } from "../primitives/data-table"
 import type { BranchCandidate } from "./branch-selection"
-import {
-	MISSING,
-	formatLag,
-	formatStoragePercent,
-	lagClass,
-	utilizationClass,
-} from "./metrics"
+import { MISSING, formatLag, formatStoragePercent, lagClass, utilizationClass } from "./metrics"
 
 type SortKey =
 	| "branch"

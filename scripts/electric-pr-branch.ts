@@ -202,7 +202,10 @@ const isAlreadyExists = (result: CliResult): boolean =>
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 interface SqlClient {
-	(strings: TemplateStringsArray, ...values: ReadonlyArray<unknown>): Promise<Array<Record<string, unknown>>>
+	(
+		strings: TemplateStringsArray,
+		...values: ReadonlyArray<unknown>
+	): Promise<Array<Record<string, unknown>>>
 	unsafe: (query: string) => Promise<Array<Record<string, unknown>>>
 	end: () => Promise<void>
 }
@@ -303,7 +306,9 @@ const publishTablesToCloudPublications = async (mainUrl: string, electricUrl: st
 		)
 		for (const t of wanted.filter((t) => t.owner !== "postgres")) {
 			try {
-				await main.unsafe(`ALTER TABLE ${quoteIdent(t.schemaname)}.${quoteIdent(t.tablename)} OWNER TO postgres`)
+				await main.unsafe(
+					`ALTER TABLE ${quoteIdent(t.schemaname)}.${quoteIdent(t.tablename)} OWNER TO postgres`,
+				)
 				console.log(`→ Reassigned ${t.schemaname}.${t.tablename} owner ${t.owner} → postgres`)
 			} catch (error) {
 				fail(
@@ -531,7 +536,9 @@ const up = async (environmentName: string): Promise<void> => {
 		for (let attempt = 0; createdEnv.exitCode !== 0 && isAlreadyExists(createdEnv); attempt++) {
 			if (attempt >= CREATE_RETRY_ATTEMPTS) {
 				const fallbackName = `${environmentName}-r${process.env.GITHUB_RUN_ID?.trim() || Date.now()}`
-				console.log(`… name ${environmentName} is reserved by a deleted environment; using ${fallbackName}`)
+				console.log(
+					`… name ${environmentName} is reserved by a deleted environment; using ${fallbackName}`,
+				)
 				createdEnv = runElectric(
 					["environments", "create", "--project", projectId, "--name", fallbackName, "--json"],
 					{ secret: true },
@@ -687,7 +694,8 @@ const up = async (environmentName: string): Promise<void> => {
 			}
 			await sleep(ACTIVE_POLL_MS)
 			const polled = runElectric(["services", "get", sourceId, "--json"], { secret: true })
-			const status = polled.exitCode === 0 ? pick(parseJson(polled.stdout, "services get"), "status") : undefined
+			const status =
+				polled.exitCode === 0 ? pick(parseJson(polled.stdout, "services get"), "status") : undefined
 			if (status && status !== lastStatus) {
 				console.log(`… service ${sourceId} status: ${status}`)
 				lastStatus = status
@@ -809,7 +817,10 @@ const sweep = async (): Promise<void> => {
 	// The PR-state lookup is the sweep's only guard against deleting a LIVE
 	// preview; without a token everything resolves to "unknown" and the run
 	// green-no-ops forever. Fail loudly instead — this is the safety net.
-	if (!process.env.GITHUB_REPOSITORY?.trim() || !(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()) {
+	if (
+		!process.env.GITHUB_REPOSITORY?.trim() ||
+		!(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()
+	) {
 		fail("sweep requires GITHUB_REPOSITORY and GITHUB_TOKEN (or GH_TOKEN) to check PR state")
 	}
 	const listed = runElectric(["environments", "list", "--project", projectId, "--json"], { secret: true })

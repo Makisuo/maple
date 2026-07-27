@@ -17,7 +17,7 @@ The v1 API (`/api/...`) stays mounted while the dashboard migrates group-by-grou
 
 ### Integration endpoints: which tier
 
-Integrations are the one family split across tiers, so the rule is explicit. **The OAuth handshake itself is never an API group in either tier**: the provider redirects a *browser*, so the callback is a raw `HttpRouter` route in `apps/api/src/routes/` that ends in a 302 back to the web app (see `SlackCallbackRouter`). What lands in an API group is the surrounding control surface — status, begin-install, uninstall, and provider resource lookups.
+Integrations are the one family split across tiers, so the rule is explicit. **The OAuth handshake itself is never an API group in either tier**: the provider redirects a _browser_, so the callback is a raw `HttpRouter` route in `apps/api/src/routes/` that ends in a 302 back to the web app (see `SlackCallbackRouter`). What lands in an API group is the surrounding control surface — status, begin-install, uninstall, and provider resource lookups.
 
 That control surface is public v2 when a **public v2 resource depends on it**, and internal otherwise. Slack qualifies: `/v2/alerts/destinations` accepts `type: "slack-bot"` with a required `channel_id`, and the bot token never leaves the server, so `GET /v2/integrations/slack/channels` is the only way any caller — customer, agent, or the dashboard — can discover a valid id. Withholding it would ship a public destination type nobody outside the dashboard could construct. `status` and `uninstall` come along because splitting one provider across two tiers costs more than it buys; `install` is documented as browser-oriented since a headless caller cannot finish the redirect.
 

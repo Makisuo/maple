@@ -37,7 +37,5 @@ export function publishSessionSink(sessionId: string): void {
 
 /** Look up the published sink, if any page-level replay session is active. */
 export function readSessionSink(): MapleBrowserSessionSink | undefined {
-	return (globalThis as Record<string, unknown>)[SESSION_SINK_KEY] as
-		| MapleBrowserSessionSink
-		| undefined
+	return (globalThis as Record<string, unknown>)[SESSION_SINK_KEY] as MapleBrowserSessionSink | undefined
 }

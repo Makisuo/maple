@@ -61,8 +61,8 @@ export function PlanetScaleRevokedNotice() {
 			<CircleWarningIcon />
 			<AlertTitle>PlanetScale authorization revoked</AlertTitle>
 			<AlertDescription>
-				Maple can no longer read this organization, so databases, branches, and metrics are frozen
-				at their last known state. Reconnecting restores them.
+				Maple can no longer read this organization, so databases, branches, and metrics are frozen at
+				their last known state. Reconnecting restores them.
 			</AlertDescription>
 			<AlertAction>
 				<Button size="sm" render={<Link {...integrationLink} />}>

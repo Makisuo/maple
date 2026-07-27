@@ -1,13 +1,13 @@
-import { randomUUID } from "node:crypto";
-import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
-import { resourceFromAttributes } from "@opentelemetry/resources";
-import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
-import { NodeSDK } from "@opentelemetry/sdk-node";
-import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
-import { defineInstrumentation, isChannel } from "eve/instrumentation";
-import slackChannel from "#channels/slack.js";
-import { markAgentTelemetryActive } from "#lib/telemetry-log.js";
+import { randomUUID } from "node:crypto"
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http"
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
+import { resourceFromAttributes } from "@opentelemetry/resources"
+import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs"
+import { NodeSDK } from "@opentelemetry/sdk-node"
+import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions"
+import { defineInstrumentation, isChannel } from "eve/instrumentation"
+import slackChannel from "#channels/slack.js"
+import { markAgentTelemetryActive } from "#lib/telemetry-log.js"
 
 /**
  * OpenTelemetry export to Maple's own ingest gateway — the eve-native port of
@@ -23,19 +23,19 @@ import { markAgentTelemetryActive } from "#lib/telemetry-log.js";
  */
 
 /** Service name stamped on every slack-agent span. */
-export const SLACK_AGENT_SERVICE_NAME = "maple-slack-agent";
+export const SLACK_AGENT_SERVICE_NAME = "maple-slack-agent"
 
 /** Default Maple ingest gateway (overridable via MAPLE_ENDPOINT). */
-const DEFAULT_ENDPOINT = "https://ingest.maple.dev";
+const DEFAULT_ENDPOINT = "https://ingest.maple.dev"
 
 /** Bound on the shutdown flush so a wedged exporter cannot block the exit. */
-const SHUTDOWN_TIMEOUT_MS = 5_000;
+const SHUTDOWN_TIMEOUT_MS = 5_000
 
 /** Release attribution for one deployment (exported for tests). */
 export interface ResourceAttributeInput {
-  readonly environment?: string | undefined;
-  readonly serviceVersion?: string | undefined;
-  readonly commitSha?: string | undefined;
+	readonly environment?: string | undefined
+	readonly serviceVersion?: string | undefined
+	readonly commitSha?: string | undefined
 }
 
 /**
@@ -48,126 +48,115 @@ export interface ResourceAttributeInput {
  * release — Maple's own MV extracts CommitSha to power the commit-hover UI, so
  * omitting it makes this service the one that never shows a deploy marker.
  */
-export function buildResourceAttributes(
-  input: ResourceAttributeInput = {},
-): Record<string, string> {
-  const attributes: Record<string, string> = {
-    [ATTR_SERVICE_NAME]: SLACK_AGENT_SERVICE_NAME,
-    "service.namespace": "backend",
-    "service.instance.id": randomUUID(),
-    "service.version": input.serviceVersion?.trim() || "development",
-    "maple.sdk.type": "eve",
-    "vcs.repository.url.full": "https://github.com/Makisuo/maple",
-  };
-  if (input.commitSha?.trim()) {
-    attributes["deployment.commit_sha"] = input.commitSha.trim();
-  }
-  if (input.environment) {
-    attributes["deployment.environment"] = input.environment;
-    attributes["deployment.environment.name"] = input.environment;
-  }
-  return attributes;
+export function buildResourceAttributes(input: ResourceAttributeInput = {}): Record<string, string> {
+	const attributes: Record<string, string> = {
+		[ATTR_SERVICE_NAME]: SLACK_AGENT_SERVICE_NAME,
+		"service.namespace": "backend",
+		"service.instance.id": randomUUID(),
+		"service.version": input.serviceVersion?.trim() || "development",
+		"maple.sdk.type": "eve",
+		"vcs.repository.url.full": "https://github.com/Makisuo/maple",
+	}
+	if (input.commitSha?.trim()) {
+		attributes["deployment.commit_sha"] = input.commitSha.trim()
+	}
+	if (input.environment) {
+		attributes["deployment.environment"] = input.environment
+		attributes["deployment.environment.name"] = input.environment
+	}
+	return attributes
 }
 
 function setupTelemetry(): void {
-  const ingestKey = process.env.MAPLE_INGEST_KEY?.trim();
-  if (!ingestKey) return;
+	const ingestKey = process.env.MAPLE_INGEST_KEY?.trim()
+	if (!ingestKey) return
 
-  const endpoint = (
-    process.env.MAPLE_ENDPOINT?.trim() || DEFAULT_ENDPOINT
-  ).replace(/\/+$/u, "");
-  const environment =
-    process.env.MAPLE_ENVIRONMENT?.trim() ||
-    process.env.RAILWAY_ENVIRONMENT_NAME?.trim() ||
-    undefined;
-  // Railway injects RAILWAY_GIT_COMMIT_SHA on every build from a repo.
-  const commitSha =
-    process.env.MAPLE_COMMIT_SHA?.trim() ||
-    process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ||
-    undefined;
-  const serviceVersion =
-    process.env.MAPLE_SERVICE_VERSION?.trim() || commitSha?.slice(0, 7);
+	const endpoint = (process.env.MAPLE_ENDPOINT?.trim() || DEFAULT_ENDPOINT).replace(/\/+$/u, "")
+	const environment =
+		process.env.MAPLE_ENVIRONMENT?.trim() || process.env.RAILWAY_ENVIRONMENT_NAME?.trim() || undefined
+	// Railway injects RAILWAY_GIT_COMMIT_SHA on every build from a repo.
+	const commitSha =
+		process.env.MAPLE_COMMIT_SHA?.trim() || process.env.RAILWAY_GIT_COMMIT_SHA?.trim() || undefined
+	const serviceVersion = process.env.MAPLE_SERVICE_VERSION?.trim() || commitSha?.slice(0, 7)
 
-  const headers = { Authorization: `Bearer ${ingestKey}` };
-  const resource = resourceFromAttributes(
-    buildResourceAttributes({ environment, serviceVersion, commitSha }),
-  );
+	const headers = { Authorization: `Bearer ${ingestKey}` }
+	const resource = resourceFromAttributes(
+		buildResourceAttributes({ environment, serviceVersion, commitSha }),
+	)
 
-  const sdk = new NodeSDK({
-    resource,
-    traceExporter: new OTLPTraceExporter({
-      url: `${endpoint}/v1/traces`,
-      headers,
-    }),
-    // Logs, not just spans: agent/hooks/outcome-log.ts is the primary signal
-    // for the "agent did nothing" failure mode, and without a log pipeline it
-    // never leaves the container. NodeSDK builds the LoggerProvider from these
-    // processors with the same resource and registers it globally.
-    logRecordProcessors: [
-      new BatchLogRecordProcessor(
-        new OTLPLogExporter({ url: `${endpoint}/v1/logs`, headers }),
-      ),
-    ],
-  });
-  sdk.start();
-  markAgentTelemetryActive();
+	const sdk = new NodeSDK({
+		resource,
+		traceExporter: new OTLPTraceExporter({
+			url: `${endpoint}/v1/traces`,
+			headers,
+		}),
+		// Logs, not just spans: agent/hooks/outcome-log.ts is the primary signal
+		// for the "agent did nothing" failure mode, and without a log pipeline it
+		// never leaves the container. NodeSDK builds the LoggerProvider from these
+		// processors with the same resource and registers it globally.
+		logRecordProcessors: [
+			new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${endpoint}/v1/logs`, headers })),
+		],
+	})
+	sdk.start()
+	markAgentTelemetryActive()
 
-  // Flush spans AND logs on shutdown so the tail of a deploy isn't lost when
-  // Railway stops the container. Registering a SIGTERM listener overrides
-  // Node's default terminate-on-SIGTERM, so this handler now owns the exit:
-  // it must await the flush and then exit itself, or the container hangs until
-  // Railway escalates to SIGKILL — the exact loss this is meant to prevent.
-  let shuttingDown = false;
-  const handleSignal = (signal: "SIGTERM" | "SIGINT"): void => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    const exitCode = signal === "SIGINT" ? 130 : 143;
-    void Promise.race([
-      sdk.shutdown(),
-      new Promise((resolve) => {
-        const timer = setTimeout(resolve, SHUTDOWN_TIMEOUT_MS);
-        timer.unref?.();
-      }),
-    ])
-      .catch((error: unknown) => {
-        console.error("[slack-agent] OTel shutdown failed", error);
-      })
-      .finally(() => {
-        process.exit(exitCode);
-      });
-  };
-  process.once("SIGTERM", () => handleSignal("SIGTERM"));
-  process.once("SIGINT", () => handleSignal("SIGINT"));
+	// Flush spans AND logs on shutdown so the tail of a deploy isn't lost when
+	// Railway stops the container. Registering a SIGTERM listener overrides
+	// Node's default terminate-on-SIGTERM, so this handler now owns the exit:
+	// it must await the flush and then exit itself, or the container hangs until
+	// Railway escalates to SIGKILL — the exact loss this is meant to prevent.
+	let shuttingDown = false
+	const handleSignal = (signal: "SIGTERM" | "SIGINT"): void => {
+		if (shuttingDown) return
+		shuttingDown = true
+		const exitCode = signal === "SIGINT" ? 130 : 143
+		void Promise.race([
+			sdk.shutdown(),
+			new Promise((resolve) => {
+				const timer = setTimeout(resolve, SHUTDOWN_TIMEOUT_MS)
+				timer.unref?.()
+			}),
+		])
+			.catch((error: unknown) => {
+				console.error("[slack-agent] OTel shutdown failed", error)
+			})
+			.finally(() => {
+				process.exit(exitCode)
+			})
+	}
+	process.once("SIGTERM", () => handleSignal("SIGTERM"))
+	process.once("SIGINT", () => handleSignal("SIGINT"))
 }
 
 export default defineInstrumentation({
-  setup: () => setupTelemetry(),
-  // Customer telemetry content must not land in spans: no message history,
-  // no model outputs. Chat-flue's OTel observer omits content for the same
-  // reason.
-  recordInputs: false,
-  recordOutputs: false,
-  events: {
-    "step.started"(input) {
-      // Slack-only runtime context so per-workspace latency/failures are
-      // queryable — the analog of chat-flue's `chat.turn` span attributes.
-      if (!isChannel(input.channel, slackChannel)) return undefined;
-      const metadata = input.channel.metadata;
-      // Built conditionally: `?? ""` would write real empty-string attribute
-      // values into the warehouse, which are indistinguishable from a genuine
-      // empty id and break `IS NULL`-style filtering.
-      const runtimeContext: Record<string, string> = {};
-      if (metadata.teamId) runtimeContext["maple.slack.team_id"] = metadata.teamId;
-      if (metadata.channelId) {
-        runtimeContext["maple.slack.channel_id"] = metadata.channelId;
-      }
-      if (metadata.threadTs) {
-        runtimeContext["maple.slack.thread_ts"] = metadata.threadTs;
-      }
-      if (metadata.triggeringUserId) {
-        runtimeContext["maple.slack.user_id"] = metadata.triggeringUserId;
-      }
-      return { runtimeContext };
-    },
-  },
-});
+	setup: () => setupTelemetry(),
+	// Customer telemetry content must not land in spans: no message history,
+	// no model outputs. Chat-flue's OTel observer omits content for the same
+	// reason.
+	recordInputs: false,
+	recordOutputs: false,
+	events: {
+		"step.started"(input) {
+			// Slack-only runtime context so per-workspace latency/failures are
+			// queryable — the analog of chat-flue's `chat.turn` span attributes.
+			if (!isChannel(input.channel, slackChannel)) return undefined
+			const metadata = input.channel.metadata
+			// Built conditionally: `?? ""` would write real empty-string attribute
+			// values into the warehouse, which are indistinguishable from a genuine
+			// empty id and break `IS NULL`-style filtering.
+			const runtimeContext: Record<string, string> = {}
+			if (metadata.teamId) runtimeContext["maple.slack.team_id"] = metadata.teamId
+			if (metadata.channelId) {
+				runtimeContext["maple.slack.channel_id"] = metadata.channelId
+			}
+			if (metadata.threadTs) {
+				runtimeContext["maple.slack.thread_ts"] = metadata.threadTs
+			}
+			if (metadata.triggeringUserId) {
+				runtimeContext["maple.slack.user_id"] = metadata.triggeringUserId
+			}
+			return { runtimeContext }
+		},
+	},
+})

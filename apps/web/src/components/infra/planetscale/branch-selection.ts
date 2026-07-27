@@ -158,9 +158,7 @@ export function absenceReason(candidate: BranchCandidate): "excluded" | "no-data
  * traffic, then the idle tail alphabetically. On a database with thirty `pr-*`
  * branches this is the difference between a usable list and a wall of zeros.
  */
-export function orderBranches(
-	candidates: ReadonlyArray<BranchCandidate>,
-): ReadonlyArray<BranchCandidate> {
+export function orderBranches(candidates: ReadonlyArray<BranchCandidate>): ReadonlyArray<BranchCandidate> {
 	return [...candidates].sort((a, b) => {
 		if (a.production !== b.production) return a.production ? -1 : 1
 		const diff = connectionsOf(b) - connectionsOf(a)

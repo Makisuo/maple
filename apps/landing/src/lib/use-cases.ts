@@ -12,8 +12,8 @@
  * Every story here runs at least two real plates, so none falls back to the
  * inline layout (see `storyIsPinnable`).
  */
-import * as m from "../paraglide/messages";
-import type { UseCase } from "./page-registry";
+import * as m from "../paraglide/messages"
+import type { UseCase } from "./page-registry"
 
 export const useCases: UseCase[] = [
 	{
@@ -240,8 +240,8 @@ export const useCases: UseCase[] = [
 		relatedFeatures: ["service-catalog", "distributed-tracing"],
 		locales: ["en", "ja", "ko"],
 	},
-];
+]
 
-export const useCaseSlugs = useCases.map((useCase) => useCase.slug);
+export const useCaseSlugs = useCases.map((useCase) => useCase.slug)
 
-export const useCaseBySlug = (slug: string) => useCases.find((useCase) => useCase.slug === slug);
+export const useCaseBySlug = (slug: string) => useCases.find((useCase) => useCase.slug === slug)

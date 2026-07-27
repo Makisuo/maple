@@ -273,12 +273,9 @@ describe("v2 slack integration over HTTP", () => {
 
 		// A spoofed `x-forwarded-host` would otherwise mint an authorize URL whose
 		// redirect_uri points at a host the attacker controls.
-		const { status, body } = await harness.request(
-			"POST",
-			"/v2/integrations/slack/install",
-			key.secret,
-			{ forwardedHost: "public.example.com" },
-		)
+		const { status, body } = await harness.request("POST", "/v2/integrations/slack/install", key.secret, {
+			forwardedHost: "public.example.com",
+		})
 		expect(status).toBe(503)
 		expect(body.error).toMatchObject({ type: "api_error", code: "service_unavailable" })
 		expect(called).toBe(false)
@@ -288,7 +285,9 @@ describe("v2 slack integration over HTTP", () => {
 	it("maps install validation and persistence failures to 503", async () => {
 		const unconfigured = makeHarness({
 			startInstall: () =>
-				Effect.fail(new IntegrationsValidationError({ message: "Slack integration is not configured" })),
+				Effect.fail(
+					new IntegrationsValidationError({ message: "Slack integration is not configured" }),
+				),
 		})
 		const unconfiguredKey = await unconfigured.bootstrapAdminKey()
 		const validation = await unconfigured.request(
@@ -305,11 +304,7 @@ describe("v2 slack integration over HTTP", () => {
 				Effect.fail(new IntegrationsPersistenceError({ message: "oauth state insert failed" })),
 		})
 		const brokenKey = await broken.bootstrapAdminKey()
-		const persistence = await broken.request(
-			"POST",
-			"/v2/integrations/slack/install",
-			brokenKey.secret,
-		)
+		const persistence = await broken.request("POST", "/v2/integrations/slack/install", brokenKey.secret)
 		expect(persistence.status).toBe(503)
 		await broken.dispose()
 	})
@@ -356,7 +351,8 @@ describe("v2 slack integration over HTTP", () => {
 
 	it("maps an uninstall persistence failure to 503", async () => {
 		const harness = makeHarness({
-			uninstall: () => Effect.fail(new IntegrationsPersistenceError({ message: "revoke write failed" })),
+			uninstall: () =>
+				Effect.fail(new IntegrationsPersistenceError({ message: "revoke write failed" })),
 		})
 		const key = await harness.bootstrapAdminKey()
 
@@ -376,11 +372,7 @@ describe("v2 slack integration over HTTP", () => {
 		})
 		const key = await harness.bootstrapAdminKey()
 
-		const { status, body } = await harness.request(
-			"GET",
-			"/v2/integrations/slack/channels",
-			key.secret,
-		)
+		const { status, body } = await harness.request("GET", "/v2/integrations/slack/channels", key.secret)
 		expect(status).toBe(200)
 		// Deliberately NOT the standard `{ object: "list", data, … }` envelope.
 		expect(body).toEqual({
@@ -472,11 +464,7 @@ describe("v2 slack integration over HTTP", () => {
 				),
 		})
 		const upstreamKey = await upstream.bootstrapAdminKey()
-		const rejected = await upstream.request(
-			"GET",
-			"/v2/integrations/slack/channels",
-			upstreamKey.secret,
-		)
+		const rejected = await upstream.request("GET", "/v2/integrations/slack/channels", upstreamKey.secret)
 		expect(rejected.status).toBe(502)
 		expect(rejected.body.error).toMatchObject({ type: "api_error", code: "slack_upstream_error" })
 		await upstream.dispose()
@@ -513,11 +501,7 @@ describe("v2 slack integration over HTTP", () => {
 		const read = await harness.request("GET", "/v2/integrations/slack", readOnly.secret)
 		expect(read.status).toBe(200)
 
-		const write = await harness.request(
-			"POST",
-			"/v2/integrations/slack/install",
-			readOnly.secret,
-		)
+		const write = await harness.request("POST", "/v2/integrations/slack/install", readOnly.secret)
 		expect(write.status).toBe(403)
 		expect(write.body.error).toMatchObject({
 			type: "permission_error",

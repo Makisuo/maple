@@ -841,7 +841,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// The storage rollup is per-database or per-branch depending on the
 					// request; only the latter carries a branch to forward.
 					const branchOf = (
-						row: { readonly database: string } | { readonly database: string; readonly branch: string },
+						row:
+							| { readonly database: string }
+							| { readonly database: string; readonly branch: string },
 					): { readonly branch?: string } => ("branch" in row ? { branch: row.branch } : {})
 					const data: Array<MergedStatsRow> = gaugeRows.map((row) => {
 						const key = keyOf(row)
@@ -1155,7 +1157,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new CloudflareInfraZoneSecurityResponse({
 						buckets: bucketRows.map((row) => ({ ...row })),
 						top: topRows.map((row) => ({ ...row })),
-						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [CH.CF_METRIC.firewallEvents]),
+						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [
+							CH.CF_METRIC.firewallEvents,
+						]),
 					})
 				}),
 			)

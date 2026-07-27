@@ -3,10 +3,10 @@
 A Cloudflare Worker and the Maple resources that observe it, in one stack — via
 [`@maple-dev/alchemy`](../../lib/alchemy-maple) and [`@maple-dev/effect-sdk`](../../lib/effect-sdk).
 
-| | |
-| --- | --- |
-| [`src/Api.ts`](src/Api.ts) | The Worker: Alchemy's Effect-native style, instrumented with the Maple SDK |
-| [`alchemy.run.ts`](alchemy.run.ts) | A Slack destination, two alert rules, a dashboard, a scoped API key |
+|                                    |                                                                            |
+| ---------------------------------- | -------------------------------------------------------------------------- |
+| [`src/Api.ts`](src/Api.ts)         | The Worker: Alchemy's Effect-native style, instrumented with the Maple SDK |
+| [`alchemy.run.ts`](alchemy.run.ts) | A Slack destination, two alert rules, a dashboard, a scoped API key        |
 
 ## The seam
 

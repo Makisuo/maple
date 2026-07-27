@@ -23,88 +23,88 @@
  */
 
 export interface TtlCacheEntry {
-  /** Epoch ms after which the entry must no longer be served — or retained. */
-  readonly expiresAt: number;
+	/** Epoch ms after which the entry must no longer be served — or retained. */
+	readonly expiresAt: number
 }
 
 export interface TtlCache<V extends TtlCacheEntry> {
-  /** The live entry for `key`, or undefined when absent or expired. */
-  get(key: string): V | undefined;
-  set(key: string, entry: V): void;
-  /** Drops every entry and stops the background sweep. */
-  clear(): void;
-  /** Entry count including any not-yet-swept expired ones (tests/diagnostics). */
-  readonly size: number;
+	/** The live entry for `key`, or undefined when absent or expired. */
+	get(key: string): V | undefined
+	set(key: string, entry: V): void
+	/** Drops every entry and stops the background sweep. */
+	clear(): void
+	/** Entry count including any not-yet-swept expired ones (tests/diagnostics). */
+	readonly size: number
 }
 
 export function createTtlCache<V extends TtlCacheEntry>(options: {
-  /** Hard cap; reaching it evicts oldest insertions first. */
-  readonly maxEntries: number;
-  /** Minimum gap between full sweeps (also the background sweep period). */
-  readonly sweepIntervalMs: number;
+	/** Hard cap; reaching it evicts oldest insertions first. */
+	readonly maxEntries: number
+	/** Minimum gap between full sweeps (also the background sweep period). */
+	readonly sweepIntervalMs: number
 }): TtlCache<V> {
-  const entries = new Map<string, V>();
-  let nextSweepAt = 0;
-  let timer: ReturnType<typeof setInterval> | undefined;
+	const entries = new Map<string, V>()
+	let nextSweepAt = 0
+	let timer: ReturnType<typeof setInterval> | undefined
 
-  function sweep(now: number): void {
-    nextSweepAt = now + options.sweepIntervalMs;
-    for (const [key, entry] of entries) {
-      if (entry.expiresAt <= now) entries.delete(key);
-    }
-  }
+	function sweep(now: number): void {
+		nextSweepAt = now + options.sweepIntervalMs
+		for (const [key, entry] of entries) {
+			if (entry.expiresAt <= now) entries.delete(key)
+		}
+	}
 
-  function stopTimer(): void {
-    if (timer === undefined) return;
-    clearInterval(timer);
-    timer = undefined;
-  }
+	function stopTimer(): void {
+		if (timer === undefined) return
+		clearInterval(timer)
+		timer = undefined
+	}
 
-  function startTimer(): void {
-    if (timer !== undefined) return;
-    timer = setInterval(() => {
-      sweep(Date.now());
-      if (entries.size === 0) stopTimer();
-    }, options.sweepIntervalMs);
-    // Never keep the process alive for a cache sweep.
-    timer.unref?.();
-  }
+	function startTimer(): void {
+		if (timer !== undefined) return
+		timer = setInterval(() => {
+			sweep(Date.now())
+			if (entries.size === 0) stopTimer()
+		}, options.sweepIntervalMs)
+		// Never keep the process alive for a cache sweep.
+		timer.unref?.()
+	}
 
-  return {
-    get(key) {
-      const entry = entries.get(key);
-      if (entry === undefined) return undefined;
-      if (entry.expiresAt <= Date.now()) {
-        entries.delete(key);
-        return undefined;
-      }
-      return entry;
-    },
+	return {
+		get(key) {
+			const entry = entries.get(key)
+			if (entry === undefined) return undefined
+			if (entry.expiresAt <= Date.now()) {
+				entries.delete(key)
+				return undefined
+			}
+			return entry
+		},
 
-    set(key, entry) {
-      const now = Date.now();
-      if (now >= nextSweepAt || entries.size >= options.maxEntries) sweep(now);
-      // Still at the cap after dropping expired entries: evict oldest
-      // insertions so a workspace/thread explosion cannot grow the map without
-      // bound. Deleting `key` first keeps a refresh from evicting a stranger.
-      entries.delete(key);
-      while (entries.size >= options.maxEntries) {
-        const oldest = entries.keys().next();
-        if (oldest.done) break;
-        entries.delete(oldest.value);
-      }
-      entries.set(key, entry);
-      startTimer();
-    },
+		set(key, entry) {
+			const now = Date.now()
+			if (now >= nextSweepAt || entries.size >= options.maxEntries) sweep(now)
+			// Still at the cap after dropping expired entries: evict oldest
+			// insertions so a workspace/thread explosion cannot grow the map without
+			// bound. Deleting `key` first keeps a refresh from evicting a stranger.
+			entries.delete(key)
+			while (entries.size >= options.maxEntries) {
+				const oldest = entries.keys().next()
+				if (oldest.done) break
+				entries.delete(oldest.value)
+			}
+			entries.set(key, entry)
+			startTimer()
+		},
 
-    clear() {
-      entries.clear();
-      nextSweepAt = 0;
-      stopTimer();
-    },
+		clear() {
+			entries.clear()
+			nextSweepAt = 0
+			stopTimer()
+		},
 
-    get size() {
-      return entries.size;
-    },
-  };
+		get size() {
+			return entries.size
+		},
+	}
 }

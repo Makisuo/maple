@@ -8,17 +8,17 @@
  */
 
 export interface StubbedCall {
-  readonly url: string;
-  readonly method: string;
-  readonly headers: Record<string, string>;
-  readonly body: BodyInit | null | undefined;
+	readonly url: string
+	readonly method: string
+	readonly headers: Record<string, string>
+	readonly body: BodyInit | null | undefined
 }
 
 export interface FetchStub {
-  readonly calls: StubbedCall[];
-  respond: (url: string, call: StubbedCall) => Response | Promise<Response>;
-  /** Restores the real `fetch`. */
-  restore(): void;
+	readonly calls: StubbedCall[]
+	respond: (url: string, call: StubbedCall) => Response | Promise<Response>
+	/** Restores the real `fetch`. */
+	restore(): void
 }
 
 /**
@@ -26,34 +26,31 @@ export interface FetchStub {
  * `restore()` in `afterEach` (or restore the captured original yourself).
  */
 export function installFetchStub(
-  respond: (url: string, call: StubbedCall) => Response | Promise<Response>,
+	respond: (url: string, call: StubbedCall) => Response | Promise<Response>,
 ): FetchStub {
-  const realFetch = globalThis.fetch;
-  const calls: StubbedCall[] = [];
-  const stub: FetchStub = {
-    calls,
-    respond,
-    restore() {
-      globalThis.fetch = realFetch;
-    },
-  };
-  globalThis.fetch = (async (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ) => {
-    const url = String(input instanceof Request ? input.url : input);
-    const headers: Record<string, string> = {};
-    new Headers(init?.headers).forEach((value, key) => {
-      headers[key] = value;
-    });
-    const call: StubbedCall = {
-      url,
-      method: init?.method ?? "GET",
-      headers,
-      body: init?.body,
-    };
-    calls.push(call);
-    return stub.respond(url, call);
-  }) as typeof fetch;
-  return stub;
+	const realFetch = globalThis.fetch
+	const calls: StubbedCall[] = []
+	const stub: FetchStub = {
+		calls,
+		respond,
+		restore() {
+			globalThis.fetch = realFetch
+		},
+	}
+	globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+		const url = String(input instanceof Request ? input.url : input)
+		const headers: Record<string, string> = {}
+		new Headers(init?.headers).forEach((value, key) => {
+			headers[key] = value
+		})
+		const call: StubbedCall = {
+			url,
+			method: init?.method ?? "GET",
+			headers,
+			body: init?.body,
+		}
+		calls.push(call)
+		return stub.respond(url, call)
+	}) as typeof fetch
+	return stub
 }

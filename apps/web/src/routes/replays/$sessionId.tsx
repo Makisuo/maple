@@ -77,11 +77,11 @@ function ReplayDetailPage() {
 			return (
 				<DashboardLayout breadcrumbs={breadcrumbs} title="Session Replay">
 					<ReplayStudio
-							sessionId={sessionId}
-							session={session}
-							traceIds={session.traceIds}
-							window={window}
-						/>
+						sessionId={sessionId}
+						session={session}
+						traceIds={session.traceIds}
+						window={window}
+					/>
 				</DashboardLayout>
 			)
 		})

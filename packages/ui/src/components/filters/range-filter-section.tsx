@@ -257,7 +257,9 @@ export function RangeFilterSection({
 											<span
 												className={cn(
 													"ml-1 tabular-nums",
-													isActive ? "text-foreground/60" : "text-muted-foreground/70",
+													isActive
+														? "text-foreground/60"
+														: "text-muted-foreground/70",
 												)}
 											>
 												{preset.value}
@@ -354,15 +356,20 @@ function RangeHistogram({
 	}
 
 	// While dragging, preview the pending selection instead of the applied one.
-	const previewLo = dragStart !== undefined && hoverIndex !== undefined ? Math.min(dragStart, hoverIndex) : undefined
-	const previewHi = dragStart !== undefined && hoverIndex !== undefined ? Math.max(dragStart, hoverIndex) : undefined
+	const previewLo =
+		dragStart !== undefined && hoverIndex !== undefined ? Math.min(dragStart, hoverIndex) : undefined
+	const previewHi =
+		dragStart !== undefined && hoverIndex !== undefined ? Math.max(dragStart, hoverIndex) : undefined
 
 	const isSelected = (bucket: RangeBucket, index: number): boolean => {
 		if (previewLo !== undefined && previewHi !== undefined) {
 			return index >= previewLo && index <= previewHi
 		}
 		if (minValue === undefined && maxValue === undefined) return false
-		return (maxValue === undefined || bucket.from < maxValue) && (minValue === undefined || bucket.to > minValue)
+		return (
+			(maxValue === undefined || bucket.from < maxValue) &&
+			(minValue === undefined || bucket.to > minValue)
+		)
 	}
 
 	const hasSelection = minValue !== undefined || maxValue !== undefined || previewLo !== undefined

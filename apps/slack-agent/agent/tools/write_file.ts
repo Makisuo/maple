@@ -1,4 +1,4 @@
-import { disableTool } from "eve/tools";
+import { disableTool } from "eve/tools"
 
 /**
  * Writes sandbox files. The agent produces Slack replies, not artifacts.
@@ -8,4 +8,4 @@ import { disableTool } from "eve/tools";
  * reachable by injected text with no approval prompt. See that file for the
  * naming contract.
  */
-export default disableTool();
+export default disableTool()

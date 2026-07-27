@@ -1,4 +1,4 @@
-import { logs, SeverityNumber } from "@opentelemetry/api-logs";
+import { logs, SeverityNumber } from "@opentelemetry/api-logs"
 
 /**
  * Structured agent logging — the eve-native port of chat-flue's
@@ -21,63 +21,55 @@ import { logs, SeverityNumber } from "@opentelemetry/api-logs";
  */
 
 /** Logger name; matches the service name stamped on the resource. */
-const LOGGER_NAME = "maple-slack-agent";
+const LOGGER_NAME = "maple-slack-agent"
 
-let telemetryActive = false;
+let telemetryActive = false
 
 /** Called by agent/instrumentation.ts once the LoggerProvider is registered. */
 export function markAgentTelemetryActive(): void {
-  telemetryActive = true;
+	telemetryActive = true
 }
 
-export type LogSeverity = "info" | "warn" | "error";
+export type LogSeverity = "info" | "warn" | "error"
 
-export type LogAttributes = Readonly<
-  Record<string, string | number | boolean | undefined>
->;
+export type LogAttributes = Readonly<Record<string, string | number | boolean | undefined>>
 
 const SEVERITY_NUMBERS: Record<LogSeverity, SeverityNumber> = {
-  info: SeverityNumber.INFO,
-  warn: SeverityNumber.WARN,
-  error: SeverityNumber.ERROR,
-};
+	info: SeverityNumber.INFO,
+	warn: SeverityNumber.WARN,
+	error: SeverityNumber.ERROR,
+}
 
 /** Drops absent values so they never become empty-string attributes. */
-function definedAttributes(
-  attributes: LogAttributes,
-): Record<string, string | number | boolean> {
-  const out: Record<string, string | number | boolean> = {};
-  for (const [key, value] of Object.entries(attributes)) {
-    if (value !== undefined) out[key] = value;
-  }
-  return out;
+function definedAttributes(attributes: LogAttributes): Record<string, string | number | boolean> {
+	const out: Record<string, string | number | boolean> = {}
+	for (const [key, value] of Object.entries(attributes)) {
+		if (value !== undefined) out[key] = value
+	}
+	return out
 }
 
 /**
  * Emits one structured log record. Exported to Maple when telemetry is on,
  * printed as a single JSON line otherwise.
  */
-export function emitAgentLog(
-  severity: LogSeverity,
-  body: string,
-  attributes: LogAttributes = {},
-): void {
-  const defined = definedAttributes(attributes);
+export function emitAgentLog(severity: LogSeverity, body: string, attributes: LogAttributes = {}): void {
+	const defined = definedAttributes(attributes)
 
-  if (!telemetryActive) {
-    const line = JSON.stringify({ severity, body, ...defined });
-    if (severity === "error") console.error(line);
-    else if (severity === "warn") console.warn(line);
-    else console.log(line);
-    return;
-  }
+	if (!telemetryActive) {
+		const line = JSON.stringify({ severity, body, ...defined })
+		if (severity === "error") console.error(line)
+		else if (severity === "warn") console.warn(line)
+		else console.log(line)
+		return
+	}
 
-  logs.getLogger(LOGGER_NAME).emit({
-    severityNumber: SEVERITY_NUMBERS[severity],
-    severityText: severity.toUpperCase(),
-    body,
-    // Trace correlation is added by the SDK from the active context, so unlike
-    // chat-flue (Workers, manual span lookup) there is nothing to stitch here.
-    attributes: defined,
-  });
+	logs.getLogger(LOGGER_NAME).emit({
+		severityNumber: SEVERITY_NUMBERS[severity],
+		severityText: severity.toUpperCase(),
+		body,
+		// Trace correlation is added by the SDK from the active context, so unlike
+		// chat-flue (Workers, manual span lookup) there is nothing to stitch here.
+		attributes: defined,
+	})
 }

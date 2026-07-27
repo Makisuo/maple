@@ -11,8 +11,5 @@
  * still counts.
  */
 export function isDeployedEnvironment(): boolean {
-  return (
-    Boolean(process.env.RAILWAY_ENVIRONMENT_NAME) ||
-    process.env.NODE_ENV === "production"
-  );
+	return Boolean(process.env.RAILWAY_ENVIRONMENT_NAME) || process.env.NODE_ENV === "production"
 }

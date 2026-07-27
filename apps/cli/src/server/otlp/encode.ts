@@ -590,7 +590,9 @@ export function encodeTraces(req: unknown): EncodedBatch[] {
 					events_timestamp: events.map((event) => formatTimestampNano(event.timeUnixNano)),
 					events_name: events.map((event) => event.name ?? ""),
 					events_attributes: events.map((event) => attrMap(event.attributes)),
-					links_trace_id: links.map((link, i) => traceIdHex(link.traceId, `span.links[${i}].traceId`)),
+					links_trace_id: links.map((link, i) =>
+						traceIdHex(link.traceId, `span.links[${i}].traceId`),
+					),
 					links_span_id: links.map((link, i) => spanIdHex(link.spanId, `span.links[${i}].spanId`)),
 					links_trace_state: links.map((link) => link.traceState ?? ""),
 					links_attributes: links.map((link) => attrMap(link.attributes)),

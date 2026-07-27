@@ -120,11 +120,11 @@ export function ReplayEditorTimeline({
 					<ScrubSurface player={player} />
 				</div>
 				<TracesTrack
-						traceIds={traceIds}
-						seek={seek}
-						previewSummaries={previewSummaries}
-						window={window}
-					/>
+					traceIds={traceIds}
+					seek={seek}
+					previewSummaries={previewSummaries}
+					window={window}
+				/>
 				<Playhead player={player} />
 			</div>
 		</section>

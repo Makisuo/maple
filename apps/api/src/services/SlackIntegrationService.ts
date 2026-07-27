@@ -230,8 +230,7 @@ export class SlackIntegrationService extends Context.Service<
 			return decryptAes256Gcm(
 				{ ciphertext: encrypted.ciphertext, iv: encrypted.iv, tag: encrypted.tag },
 				encryptionKey,
-				() =>
-					new IntegrationsPersistenceError({ message: "Failed to decrypt stored Slack secret" }),
+				() => new IntegrationsPersistenceError({ message: "Failed to decrypt stored Slack secret" }),
 				slackSecretAad(row.orgId, row.teamId, column),
 			)
 		}

@@ -61,9 +61,7 @@ export interface StackedBreakdownChartProps {
  * Dimensions that pass an `order` (status class, cache status) have a small closed vocabulary and
  * are left alone — folding those would hide a status class the operator is looking for.
  */
-function foldTail(
-	rows: StackedBreakdownChartProps["rows"],
-): StackedBreakdownChartProps["rows"] {
+function foldTail(rows: StackedBreakdownChartProps["rows"]): StackedBreakdownChartProps["rows"] {
 	const totals = new Map<string, number>()
 	for (const row of rows) {
 		totals.set(row.attributeValue, (totals.get(row.attributeValue) ?? 0) + row.value)
@@ -104,9 +102,7 @@ export function StackedBreakdownChart({
 		// The pooled tail always sorts last — it is the leftovers, not a peer of the named series.
 		const rankOf = (name: string) =>
 			name === BREAKDOWN_OTHER_KEY ? Number.MAX_SAFE_INTEGER : (rank.get(name) ?? order.length)
-		const sorted = [...transformed.series].sort(
-			(a, b) => rankOf(a) - rankOf(b) || a.localeCompare(b),
-		)
+		const sorted = [...transformed.series].sort((a, b) => rankOf(a) - rankOf(b) || a.localeCompare(b))
 		return { data: transformed.data, series: sorted }
 	}, [rows, order])
 

@@ -255,16 +255,15 @@ describe("buildSlackBlocksFromTemplate", () => {
 	// `<…>` the author typed must land as literal text.
 	describe("mrkdwn injection", () => {
 		const sectionText = (body: string): string =>
-			(buildSlackBlocksFromTemplate("T", body, baseContext, LINK, CHAT)[1] as {
-				text: { text: string }
-			}).text.text
+			(
+				buildSlackBlocksFromTemplate("T", body, baseContext, LINK, CHAT)[1] as {
+					text: { text: string }
+				}
+			).text.text
 
 		it("neutralizes @channel broadcasts and hand-written deceptive links", () => {
 			const text = sectionText("<!channel> see <https://evil.test|Open in Maple>")
-			assert.strictEqual(
-				text,
-				"&lt;!channel&gt; see &lt;https://evil.test|Open in Maple&gt;",
-			)
+			assert.strictEqual(text, "&lt;!channel&gt; see &lt;https://evil.test|Open in Maple&gt;")
 			// Nothing the author typed survives as markup.
 			assert.notInclude(text, "<!channel>")
 			assert.notInclude(text, "<https://evil.test")
@@ -279,10 +278,7 @@ describe("buildSlackBlocksFromTemplate", () => {
 		})
 
 		it("percent-encodes a pipe in a markdown link target so the URL cannot pose as the label", () => {
-			assert.strictEqual(
-				sectionText("[t](https://x.test/a|b)"),
-				"<https://x.test/a%7Cb|t>",
-			)
+			assert.strictEqual(sectionText("[t](https://x.test/a|b)"), "<https://x.test/a%7Cb|t>")
 		})
 
 		it("still renders the links this module builds itself", () => {
@@ -380,7 +376,9 @@ describe("dispatchDelivery", () => {
 
 	const slackTokenDeps = (token = "xoxb-test-token"): DispatchDeps => ({
 		sendEmail: () =>
-			Effect.fail(new AlertDeliveryError({ message: "unexpected sendEmail", destinationType: "email" })),
+			Effect.fail(
+				new AlertDeliveryError({ message: "unexpected sendEmail", destinationType: "email" }),
+			),
 		resolveSlackBotToken: () => Effect.succeed(token),
 	})
 

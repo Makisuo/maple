@@ -407,9 +407,7 @@ function PlanetScaleDatabaseData({
 			<section className="space-y-2">
 				<div className="flex items-baseline justify-between gap-3">
 					<h2 className="text-sm font-medium text-foreground">Branches</h2>
-					<span className="font-mono text-[11px] text-muted-foreground">
-						{candidates.length}
-					</span>
+					<span className="font-mono text-[11px] text-muted-foreground">{candidates.length}</span>
 				</div>
 				{Result.isInitial(branchStatsResult) ? (
 					<PlanetScaleBranchTableLoading />
@@ -431,9 +429,7 @@ function PlanetScaleDatabaseData({
 			<section className="space-y-2">
 				<div className="flex items-baseline justify-between gap-3">
 					<h2 className="text-sm font-medium text-foreground">Top queries</h2>
-					<span className="text-[11px] text-muted-foreground">
-						PlanetScale Query Insights
-					</span>
+					<span className="text-[11px] text-muted-foreground">PlanetScale Query Insights</span>
 				</div>
 				<PlanetScaleTopQueries
 					database={database}

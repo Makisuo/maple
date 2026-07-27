@@ -105,7 +105,11 @@ export function PlanetScaleChart({
 				<ChartCardMessage>{emptyMessage ?? CHART_EMPTY_MESSAGE}</ChartCardMessage>
 			) : (
 				<ChartContainer config={config} className="w-full" style={{ height: CHART_HEIGHT }}>
-					<LineChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} syncId={syncId}>
+					<LineChart
+						data={data}
+						margin={{ top: 12, right: 12, left: 0, bottom: 4 }}
+						syncId={syncId}
+					>
 						<CartesianGrid
 							strokeDasharray={CHART_GRID_DASH}
 							stroke="var(--border)"

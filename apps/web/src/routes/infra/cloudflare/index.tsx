@@ -348,9 +348,7 @@ function ZonesSection({
 			<CloudflareZoneTable
 				zones={matches}
 				waiting={waiting}
-				emptyMessage={
-					query === "" ? undefined : `No zones match "${query}" in the selected window.`
-				}
+				emptyMessage={query === "" ? undefined : `No zones match "${query}" in the selected window.`}
 			/>
 		</section>
 	)

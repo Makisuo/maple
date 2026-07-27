@@ -86,7 +86,10 @@ export function ReplaysToolbar({
 			</InputGroup>
 
 			<div
-				className={cn("flex flex-wrap items-center gap-x-4 gap-y-1 text-sm transition-opacity", waiting && "opacity-60")}
+				className={cn(
+					"flex flex-wrap items-center gap-x-4 gap-y-1 text-sm transition-opacity",
+					waiting && "opacity-60",
+				)}
 			>
 				<Stat label="sessions" value={totalSessions} />
 				<span className="flex items-center gap-1.5 whitespace-nowrap">

@@ -334,10 +334,10 @@ function BreakdownTable({
 	/** Live rows are not page filters — Cloudflare ranked them, the warehouse has no slice for them. */
 	interactive: boolean
 }) {
-	const { sorted, sortKey, sortDir, handleSort } = useTableSort<CloudflareBreakdownTotal, SortKey>(
-		rows,
-		{ initialKey: "requests", stringKeys: ["key"] },
-	)
+	const { sorted, sortKey, sortDir, handleSort } = useTableSort<CloudflareBreakdownTotal, SortKey>(rows, {
+		initialKey: "requests",
+		stringKeys: ["key"],
+	})
 	const selectedValues = filters?.[dimension.filterKey] ?? []
 
 	const head = (label: string, key: SortKey, className: string, hidden?: string) => (
@@ -373,7 +373,11 @@ function BreakdownTable({
 			{sorted.map((row) => {
 				const selected = selectedValues.includes(row.key)
 				return (
-					<div key={row.key} className={ROW_CLASS} style={{ backgroundImage: shareTint(row.share) }}>
+					<div
+						key={row.key}
+						className={ROW_CLASS}
+						style={{ backgroundImage: shareTint(row.share) }}
+					>
 						<div className="min-w-[220px] flex-1 truncate">
 							{interactive && onToggleFilter ? (
 								<button
@@ -545,9 +549,7 @@ function Footer({
 }) {
 	if (total === 0 && onSearchLive === undefined) return null
 	const parts = [
-		shown === total
-			? `${total} ${dimension.noun}`
-			: `Showing ${shown} of ${total} ${dimension.noun}`,
+		shown === total ? `${total} ${dimension.noun}` : `Showing ${shown} of ${total} ${dimension.noun}`,
 		collectedFrom ? `collected from ${collectedFrom}` : null,
 	].filter((part): part is string => part !== null)
 

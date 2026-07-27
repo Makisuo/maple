@@ -4,13 +4,7 @@ import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 
-import {
-	Empty,
-	EmptyDescription,
-	EmptyHeader,
-	EmptyMedia,
-	EmptyTitle,
-} from "@maple/ui/components/ui/empty"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
@@ -30,7 +24,12 @@ import {
 	PlanetScaleRevokedNotice,
 	inventoryIsStale,
 } from "@/components/infra/planetscale/planetscale-absence"
-import { formatLag, formatStoragePercent, lagTone, utilizationTone } from "@/components/infra/planetscale/metrics"
+import {
+	formatLag,
+	formatStoragePercent,
+	lagTone,
+	utilizationTone,
+} from "@/components/infra/planetscale/metrics"
 import { getServiceMapPlanetScaleResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { formatNumber } from "@/lib/format"
@@ -150,10 +149,7 @@ function PlanetScaleData({
 	const stats = Result.builder(statsResult)
 		.onSuccess((r) => r.databases)
 		.orElse(() => NO_STATS)
-	const statsByName = useMemo(
-		() => new Map(stats.map((row) => [row.database.toLowerCase(), row])),
-		[stats],
-	)
+	const statsByName = useMemo(() => new Map(stats.map((row) => [row.database.toLowerCase(), row])), [stats])
 
 	const totals = useMemo(() => {
 		let connections = 0
@@ -167,7 +163,10 @@ function PlanetScaleData({
 				lagMax = row.replicaLagMaxSeconds
 				lagOwner = row.database
 			}
-			if (row.storageUsedPercent !== null && (storageMax === null || row.storageUsedPercent > storageMax)) {
+			if (
+				row.storageUsedPercent !== null &&
+				(storageMax === null || row.storageUsedPercent > storageMax)
+			) {
 				storageMax = row.storageUsedPercent
 				storageOwner = row.database
 			}
@@ -214,9 +213,7 @@ function PlanetScaleData({
 						<StatRailItem
 							compact
 							eyebrow="Worst storage"
-							value={
-								totals.storageMax === null ? "—" : formatStoragePercent(totals.storageMax)
-							}
+							value={totals.storageMax === null ? "—" : formatStoragePercent(totals.storageMax)}
 							tone={totals.storageMax === null ? "neutral" : utilizationTone(totals.storageMax)}
 							subline={
 								metricsPaused

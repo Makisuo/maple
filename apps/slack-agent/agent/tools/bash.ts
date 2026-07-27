@@ -1,4 +1,4 @@
-import { disableTool } from "eve/tools";
+import { disableTool } from "eve/tools"
 
 /**
  * eve ships `bash` on by default (see eve's REGISTERED_FRAMEWORK_TOOLS), and
@@ -17,4 +17,4 @@ import { disableTool } from "eve/tools";
  * framework tool, so a typo fails loudly rather than silently disabling
  * nothing. agent/lib/framework-tools.test.ts asserts the resolved set.
  */
-export default disableTool();
+export default disableTool()

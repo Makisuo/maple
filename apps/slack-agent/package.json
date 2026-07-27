@@ -1,50 +1,50 @@
 {
-  "name": "@maple/slack-agent",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "imports": {
-    "#*": "./agent/*",
-    "#evals/*": "./evals/*"
-  },
-  "scripts": {
-    "build": "eve build",
-    "dev": "eve dev",
-    "start": "eve start",
-    "db:setup": "node ./node_modules/@workflow/world-postgres/bin/setup.js",
-    "test": "bun test",
-    "typecheck": "tsc"
-  },
-  "dependencies": {
-    "@fontsource-variable/geist-mono": "^5.3.0",
-    "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/api-logs": "^0.205.0",
-    "@opentelemetry/exporter-logs-otlp-http": "^0.205.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.205.0",
-    "@opentelemetry/resources": "^2.0.0",
-    "@opentelemetry/sdk-logs": "^0.205.0",
-    "@opentelemetry/sdk-node": "^0.205.0",
-    "@opentelemetry/semantic-conventions": "^1.36.0",
-    "@resvg/resvg-js": "^2.6.2",
-    "@workflow/world-postgres": "5.0.0-beta.27",
-    "ai": "^7.0.26",
-    "eve": "0.25.3",
-    "just-bash": "^3.1.0",
-    "workers-ai-provider": "^3.3.1",
-    "zod": "4.4.3"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.3.14",
-    "@types/node": "24.x",
-    "typescript": "7.0.2"
-  },
-  "overrides": {
-    "ai": "^7.0.26"
-  },
-  "engines": {
-    "node": ">=24"
-  },
-  "patchedDependencies": {
-    "eve@0.25.3": "patches/eve@0.25.3.patch"
-  }
+	"name": "@maple/slack-agent",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"imports": {
+		"#*": "./agent/*",
+		"#evals/*": "./evals/*"
+	},
+	"scripts": {
+		"build": "eve build",
+		"dev": "eve dev",
+		"start": "eve start",
+		"db:setup": "node ./node_modules/@workflow/world-postgres/bin/setup.js",
+		"test": "bun test",
+		"typecheck": "tsc"
+	},
+	"dependencies": {
+		"@fontsource-variable/geist-mono": "^5.3.0",
+		"@opentelemetry/api": "^1.9.0",
+		"@opentelemetry/api-logs": "^0.205.0",
+		"@opentelemetry/exporter-logs-otlp-http": "^0.205.0",
+		"@opentelemetry/exporter-trace-otlp-http": "^0.205.0",
+		"@opentelemetry/resources": "^2.0.0",
+		"@opentelemetry/sdk-logs": "^0.205.0",
+		"@opentelemetry/sdk-node": "^0.205.0",
+		"@opentelemetry/semantic-conventions": "^1.36.0",
+		"@resvg/resvg-js": "^2.6.2",
+		"@workflow/world-postgres": "5.0.0-beta.27",
+		"ai": "^7.0.26",
+		"eve": "0.25.3",
+		"just-bash": "^3.1.0",
+		"workers-ai-provider": "^3.3.1",
+		"zod": "4.4.3"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.3.14",
+		"@types/node": "24.x",
+		"typescript": "7.0.2"
+	},
+	"overrides": {
+		"ai": "^7.0.26"
+	},
+	"engines": {
+		"node": ">=24"
+	},
+	"patchedDependencies": {
+		"eve@0.25.3": "patches/eve@0.25.3.patch"
+	}
 }

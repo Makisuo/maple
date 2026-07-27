@@ -1,4 +1,4 @@
-import { disableTool } from "eve/tools";
+import { disableTool } from "eve/tools"
 
 /**
  * Provider-run web search. The agent answers from the org's own telemetry via
@@ -8,4 +8,4 @@ import { disableTool } from "eve/tools";
  *
  * See agent/tools/bash.ts for the filename→tool-name contract.
  */
-export default disableTool();
+export default disableTool()

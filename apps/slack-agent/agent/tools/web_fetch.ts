@@ -1,4 +1,4 @@
-import { disableTool } from "eve/tools";
+import { disableTool } from "eve/tools"
 
 /**
  * THE one that mattered most. eve's `web_fetch` runs in the HOST process (not
@@ -15,4 +15,4 @@ import { disableTool } from "eve/tools";
  *
  * See agent/tools/bash.ts for the filename→tool-name contract.
  */
-export default disableTool();
+export default disableTool()

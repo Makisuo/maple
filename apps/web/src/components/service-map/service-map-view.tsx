@@ -95,11 +95,7 @@ import {
 } from "./service-map-particles"
 import { resolveDbNodePresentation, resolvePlanetScaleDbPresentation } from "./service-map-db"
 import { PlanetScaleTopQueries } from "@/components/infra/planetscale/planetscale-top-queries"
-import {
-	formatStoragePercent,
-	lagClass,
-	utilizationClass,
-} from "@/components/infra/planetscale/metrics"
+import { formatStoragePercent, lagClass, utilizationClass } from "@/components/infra/planetscale/metrics"
 import {
 	buildFlowElements,
 	CLOUDFLARE_COLOR,

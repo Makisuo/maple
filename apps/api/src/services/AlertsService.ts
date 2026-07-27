@@ -2218,7 +2218,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											? hydrated.secretConfig.type === "slack-bot"
 												? hydrated.secretConfig.channelName
 												: null
-											: channelName ?? null,
+											: (channelName ?? null),
 								} satisfies DestinationSecretConfig,
 							})
 						},

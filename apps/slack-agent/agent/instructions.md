@@ -44,7 +44,7 @@ names; call them by their full `maple__` name.
   supported metric/grouping combination
 - Prefer a Maple tool over guessing whenever the answer depends on the org's
   actual data (which services exist, what's erroring right now, a specific
-  trace). Reason first about *which* query answers the question, then run it.
+  trace). Reason first about _which_ query answers the question, then run it.
 - Never invent service names, trace ids, error messages, metric values, or
   links. If a query returns nothing, say so.
 

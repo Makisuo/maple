@@ -197,7 +197,9 @@ const makeFullStub = (
 		},
 		compiledQueryWithCapabilities: <Output>(
 			_tenant: unknown,
-			compile: (capabilities: ReturnType<typeof baselineWarehouseCapabilities>) => CompiledQuery<Output>,
+			compile: (
+				capabilities: ReturnType<typeof baselineWarehouseCapabilities>,
+			) => CompiledQuery<Output>,
 		) => {
 			counter.n += 1
 			return compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie)

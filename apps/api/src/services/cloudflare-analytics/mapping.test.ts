@@ -266,7 +266,7 @@ describe("mapHttpPathGroups", () => {
 
 	it("ranks across both selections so an error-only path folds to the same key", () => {
 		// /rare has no traffic row at all, but enough error weight to outrank the filler paths.
-		const filler = Array.from({ length: MAX_HTTP_PATHS, /* heaviest first */ }, (_, i) =>
+		const filler = Array.from({ length: MAX_HTTP_PATHS /* heaviest first */ }, (_, i) =>
 			group(`/p${i}`, 100 - i),
 		)
 		const { sumRows } = mapHttpPathGroups({

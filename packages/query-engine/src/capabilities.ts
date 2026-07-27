@@ -54,9 +54,7 @@ export interface WarehouseSettingMetadataRow {
 	readonly value: string | number
 }
 
-export const WarehouseVersionMetadataSchema = Schema.Array(
-	Schema.Struct({ version: Schema.String }),
-)
+export const WarehouseVersionMetadataSchema = Schema.Array(Schema.Struct({ version: Schema.String }))
 export const WarehouseIndexMetadataSchema = Schema.Array(
 	Schema.Struct({
 		table: Schema.String,

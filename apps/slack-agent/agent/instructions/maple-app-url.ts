@@ -1,5 +1,5 @@
-import { defineDynamic, defineInstructions } from "eve/instructions";
-import { mapleAppBaseUrl } from "#lib/maple.js";
+import { defineDynamic, defineInstructions } from "eve/instructions"
+import { mapleAppBaseUrl } from "#lib/maple.js"
 
 /**
  * Injects the Maple web-app base URL so the model can build absolute deep
@@ -9,12 +9,12 @@ import { mapleAppBaseUrl } from "#lib/maple.js";
  * the host and links could be relative.
  */
 export default defineDynamic({
-  events: {
-    "session.started": () =>
-      defineInstructions({
-        markdown:
-          `The Maple app base URL for deep links is ${mapleAppBaseUrl()} — ` +
-          "combine it with the detail routes listed under “Linking into Maple”.",
-      }),
-  },
-});
+	events: {
+		"session.started": () =>
+			defineInstructions({
+				markdown:
+					`The Maple app base URL for deep links is ${mapleAppBaseUrl()} — ` +
+					"combine it with the detail routes listed under “Linking into Maple”.",
+			}),
+	},
+})

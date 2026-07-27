@@ -1,10 +1,4 @@
-import {
-	context,
-	propagation,
-	SpanKind,
-	SpanStatusCode,
-	trace,
-} from "@opentelemetry/api"
+import { context, propagation, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api"
 import { logs, SeverityNumber } from "@opentelemetry/api-logs"
 import { W3CTraceContextPropagator } from "@opentelemetry/core"
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http"
@@ -25,8 +19,7 @@ export function setupMobileTelemetry(): void {
 	const ingestKey = process.env.EXPO_PUBLIC_MAPLE_INGEST_KEY?.trim()
 	if (!ingestKey) return
 
-	const endpoint =
-		process.env.EXPO_PUBLIC_MAPLE_ENDPOINT?.replace(/\/$/, "") ?? DEFAULT_ENDPOINT
+	const endpoint = process.env.EXPO_PUBLIC_MAPLE_ENDPOINT?.replace(/\/$/, "") ?? DEFAULT_ENDPOINT
 	const environment = __DEV__ ? "development" : "production"
 	const commitSha = process.env.EXPO_PUBLIC_COMMIT_SHA
 	const resource = resourceFromAttributes({
@@ -82,11 +75,7 @@ const emitRequestError = (message: string, attributes: Record<string, string | n
 	})
 }
 
-export async function tracedFetch(
-	url: string,
-	init: RequestInit,
-	peerService: string,
-): Promise<Response> {
+export async function tracedFetch(url: string, init: RequestInit, peerService: string): Promise<Response> {
 	const method = init.method ?? "GET"
 	return trace.getTracer(SERVICE_NAME).startActiveSpan(
 		"http.client",
@@ -116,14 +105,9 @@ export async function tracedFetch(
 				return response
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error)
-				span.setAttribute(
-					"error.type",
-					error instanceof Error ? error.name : "UnknownError",
-				)
+				span.setAttribute("error.type", error instanceof Error ? error.name : "UnknownError")
 				span.setStatus({ code: SpanStatusCode.ERROR, message })
-				span.recordException(
-					error instanceof Error ? error : { name: "UnknownError", message },
-				)
+				span.recordException(error instanceof Error ? error : { name: "UnknownError", message })
 				emitRequestError(message, {
 					"http.request.method": method,
 					"url.full": url,

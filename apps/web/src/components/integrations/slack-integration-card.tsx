@@ -267,9 +267,9 @@ export function SlackIntegrationCard() {
 					<AlertDialogHeader>
 						<AlertDialogTitle>Disconnect Slack</AlertDialogTitle>
 						<AlertDialogDescription>
-							This uninstalls the Maple Slack app and revokes the API key minted for the bot. Alert
-							rules using Slack (bot) destinations will stop delivering to Slack. You can reinstall
-							at any time.
+							This uninstalls the Maple Slack app and revokes the API key minted for the bot.
+							Alert rules using Slack (bot) destinations will stop delivering to Slack. You can
+							reinstall at any time.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

@@ -146,17 +146,9 @@ describe("ChatTranscript", () => {
 	})
 
 	it("renders a preserved fallback diagnosis as its own row", () => {
-		render(
-			<ChatTranscript
-				{...baseProps}
-				messages={[]}
-				fallbackDiagnosis={report as never}
-			/>,
-		)
+		render(<ChatTranscript {...baseProps} messages={[]} fallbackDiagnosis={report as never} />)
 
-		expect(items().map((el) => (el as HTMLElement).dataset.messageId)).toEqual([
-			"__fallback-diagnosis",
-		])
+		expect(items().map((el) => (el as HTMLElement).dataset.messageId)).toEqual(["__fallback-diagnosis"])
 	})
 })
 

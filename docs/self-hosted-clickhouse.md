@@ -112,11 +112,11 @@ On a clean install, migration 0001 creates **20 tables** (datasources) and **22 
 
 Every table is partitioned by date and carries a TTL, tiered by how raw the data is:
 
-| Retention | Tables |
-| --- | --- |
-| **30 days** | `traces`, `trace_detail_spans`, `logs`, `service_map_spans`, `service_map_children`, `service_overview_spans`, `trace_list_mv` |
-| **90 days** | `error_spans`, `error_events`, `error_events_by_time`, `metrics_*`, `attribute_*_hourly`, `metric_catalog` |
-| **365 days** | hourly rollups (`*_hourly`), `service_usage`, `alert_checks` |
+| Retention    | Tables                                                                                                                         |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| **30 days**  | `traces`, `trace_detail_spans`, `logs`, `service_map_spans`, `service_map_children`, `service_overview_spans`, `trace_list_mv` |
+| **90 days**  | `error_spans`, `error_events`, `error_events_by_time`, `metrics_*`, `attribute_*_hourly`, `metric_catalog`                     |
+| **365 days** | hourly rollups (`*_hourly`), `service_usage`, `alert_checks`                                                                   |
 
 Adjust by writing a follow-up migration if your retention requirements differ.
 

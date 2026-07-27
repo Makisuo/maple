@@ -154,8 +154,7 @@ function buildMapping(
 			selects.push(ORG_PLACEHOLDER)
 			continue
 		}
-		const isComputedIdentityPath =
-			jsonPath === `$.${column}` || jsonPath === `$.${column}[:]`
+		const isComputedIdentityPath = jsonPath === `$.${column}` || jsonPath === `$.${column}[:]`
 		if (jsonPath === null || (hasDefaultExpression && isComputedIdentityPath)) {
 			// No JSON path, or a computed DEFAULT column the gateway never emits.
 			// Omit it so ClickHouse/Tinybird computes the default expression.

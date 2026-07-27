@@ -234,8 +234,8 @@ function ZoneDetailContent({
 							</EmptyMedia>
 							<EmptyTitle>No traffic for this zone in the selected window</EmptyTitle>
 							<EmptyDescription>
-								Widen the time range, clear the filters, or check the zone list for where traffic
-								is landing.
+								Widen the time range, clear the filters, or check the zone list for where
+								traffic is landing.
 							</EmptyDescription>
 						</EmptyHeader>
 					</Empty>

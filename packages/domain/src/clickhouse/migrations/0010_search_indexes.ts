@@ -54,6 +54,5 @@ export const migration_0010_search_indexes = {
 
 		addBloom("traces", "idx_scope_attr_keys", "mapKeys(ScopeAttributes)"),
 		addBloom("traces", "idx_scope_attr_vals", "mapValues(ScopeAttributes)"),
-
 	],
 } as const

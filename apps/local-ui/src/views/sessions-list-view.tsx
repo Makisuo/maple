@@ -14,14 +14,23 @@ import type { SessionReplaysListOutput } from "@maple/query-engine/ch"
 import { useLocalSessions, useLocalSessionFacets } from "../hooks/use-local-sessions"
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE, formatRelativeTime } from "../lib/time"
-import { formatDuration as formatSessionDuration, gradientFor, hostFromUrl, isMobileDevice } from "@maple/ui/lib/replay-format"
+import {
+	formatDuration as formatSessionDuration,
+	gradientFor,
+	hostFromUrl,
+	isMobileDevice,
+} from "@maple/ui/lib/replay-format"
 import {
 	FilterSection,
 	SearchableFilterSection,
 	SingleCheckboxFilter,
 	type FilterOption,
 } from "@maple/ui/components/filters/filter-section"
-import { FilterSidebarBody, FilterSidebarFrame, FilterSidebarHeader } from "@maple/ui/components/filters/filter-sidebar"
+import {
+	FilterSidebarBody,
+	FilterSidebarFrame,
+	FilterSidebarHeader,
+} from "@maple/ui/components/filters/filter-sidebar"
 import { PageShell } from "../components/page-shell"
 import { Toolbar, ToolbarSearch, ToolbarStat, TimeRangeSelect, RefreshButton } from "../components/toolbar"
 import { EmptyState, ErrorState, ListSkeleton } from "../components/view-states"

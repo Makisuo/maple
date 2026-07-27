@@ -1,8 +1,8 @@
 {
 	"name": "@maple/browser-session",
 	"version": "0.1.0",
-	"description": "Shared Maple browser session core — the sessionStorage-backed session record, the global session sink contract, session metadata rows, and the rrweb replay engine used by @maple-dev/browser and @maple-dev/effect-sdk. Private: consumers bundle it into their dists. The root export is rrweb-free; the replay engine lives behind ./replay so consumers can code-split it.",
 	"private": true,
+	"description": "Shared Maple browser session core — the sessionStorage-backed session record, the global session sink contract, session metadata rows, and the rrweb replay engine used by @maple-dev/browser and @maple-dev/effect-sdk. Private: consumers bundle it into their dists. The root export is rrweb-free; the replay engine lives behind ./replay so consumers can code-split it.",
 	"type": "module",
 	"main": "./src/index.ts",
 	"exports": {

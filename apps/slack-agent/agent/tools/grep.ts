@@ -1,4 +1,4 @@
-import { disableTool } from "eve/tools";
+import { disableTool } from "eve/tools"
 
 /**
  * Filesystem content search over the sandbox; this agent has no files to search.
@@ -8,4 +8,4 @@ import { disableTool } from "eve/tools";
  * reachable by injected text with no approval prompt. See that file for the
  * naming contract.
  */
-export default disableTool();
+export default disableTool()

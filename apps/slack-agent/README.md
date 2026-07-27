@@ -11,14 +11,14 @@ observability tools. See [Multi-workspace architecture](#multi-workspace-archite
 
 ## Architecture
 
-| Concern | Choice | Why |
-| --- | --- | --- |
-| Framework | eve `0.25.x` (durable agent runtime, Nitro HTTP host) | filesystem-first agents |
-| Host | **Railway** container running `eve start` (long-running Node) | eve's supported self-host model; edge Workers is blocked today by a workflow-world protocol gap |
-| Model | **Cloudflare Workers AI** via REST (`workers-ai-provider`), `@cf/zai-org/glm-5.2` | `createWorkersAI({ accountId, apiKey })` → an AI-SDK model, no Workers runtime needed; streams structured tool calls, 256K window (see Notes) |
-| Durability | **`@workflow/world-postgres`** (`5.0.0-beta.27`) + Railway Postgres | protocol-compatible with eve's vendored `@workflow/*` 5.0.0-beta line |
-| Slack | **self-managed, multi-workspace** (`slackChannel()` + custom `webhookVerifier` + per-team `botToken`) | one public app across many workspaces; static signing secret verifies inbound, per-team bot token resolved from the Maple API — see [Multi-workspace architecture](#multi-workspace-architecture) |
-| Maple | **resolve endpoint** (`/internal/slack/workspaces/:teamId`) + **MCP** (`/mcp`) | per-team install lookup (TTL-cached) and observability tools scoped per org |
+| Concern    | Choice                                                                                                | Why                                                                                                                                                                                               |
+| ---------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework  | eve `0.25.x` (durable agent runtime, Nitro HTTP host)                                                 | filesystem-first agents                                                                                                                                                                           |
+| Host       | **Railway** container running `eve start` (long-running Node)                                         | eve's supported self-host model; edge Workers is blocked today by a workflow-world protocol gap                                                                                                   |
+| Model      | **Cloudflare Workers AI** via REST (`workers-ai-provider`), `@cf/zai-org/glm-5.2`                     | `createWorkersAI({ accountId, apiKey })` → an AI-SDK model, no Workers runtime needed; streams structured tool calls, 256K window (see Notes)                                                     |
+| Durability | **`@workflow/world-postgres`** (`5.0.0-beta.27`) + Railway Postgres                                   | protocol-compatible with eve's vendored `@workflow/*` 5.0.0-beta line                                                                                                                             |
+| Slack      | **self-managed, multi-workspace** (`slackChannel()` + custom `webhookVerifier` + per-team `botToken`) | one public app across many workspaces; static signing secret verifies inbound, per-team bot token resolved from the Maple API — see [Multi-workspace architecture](#multi-workspace-architecture) |
+| Maple      | **resolve endpoint** (`/internal/slack/workspaces/:teamId`) + **MCP** (`/mcp`)                        | per-team install lookup (TTL-cached) and observability tools scoped per org                                                                                                                       |
 
 Key routes (all served by the one container): `POST /eve/v1/session`, `GET /eve/v1/session/:id/stream`,
 `POST /eve/v1/slack` (Slack webhook), `GET /eve/v1/health`, and workflow callbacks under
@@ -60,7 +60,7 @@ railway.json          # DOCKERFILE builder, /eve/v1/health healthcheck
 > **Runtime: Node, package manager: bun.** eve runs on **Node ≥24** (it hard-fails below that), and
 > **cannot run on bun** — `eve dev`'s HMR server uses `crossws`' Node adapter, which throws
 > `[crossws] Using Node.js adapter in an incompatible environment` under bun. Production `.output`
-> *does* happen to run on bun, but we deliberately use Node in both places so local and container
+> _does_ happen to run on bun, but we deliberately use Node in both places so local and container
 > match. Bun is still the package manager (`bun install`, `bun.lock`), and `bun run <script>` is fine
 > — it honors the `#!/usr/bin/env node` shebang and hands off to Node.
 
@@ -110,50 +110,50 @@ step 3 comes back and fills them in:
 
 ```yaml
 display_information:
-  name: Maple
+    name: Maple
 features:
-  bot_user:
-    display_name: maple
-    always_online: true
+    bot_user:
+        display_name: maple
+        always_online: true
 oauth_config:
-  # OAuth completes at the MAPLE API (not this agent). Maple stores the per-team
-  # install (bot token + Maple API key) that this agent later resolves.
-  redirect_urls:
-    - https://<your-maple-api-host>/oauth/slack/callback
-  scopes:
-    bot:
-      - app_mentions:read   # receive @mentions
-      - chat:write          # post replies
-      - chat:write.public   # post in channels the bot isn't a member of
-      - channels:read       # resolve public channel metadata
-      - channels:history
-      - files:write         # upload rendered chart images (render_chart tool)
-      - groups:read         # resolve private channel metadata
-      - groups:history      # thread context + follow-ups in private channels
-      - im:history          # read DM history (message.im)
-      - im:read             # resolve DM conversation metadata
-      - im:write            # open/DM the user
-      - users:read          # attribute speakers
+    # OAuth completes at the MAPLE API (not this agent). Maple stores the per-team
+    # install (bot token + Maple API key) that this agent later resolves.
+    redirect_urls:
+        - https://<your-maple-api-host>/oauth/slack/callback
+    scopes:
+        bot:
+            - app_mentions:read # receive @mentions
+            - chat:write # post replies
+            - chat:write.public # post in channels the bot isn't a member of
+            - channels:read # resolve public channel metadata
+            - channels:history
+            - files:write # upload rendered chart images (render_chart tool)
+            - groups:read # resolve private channel metadata
+            - groups:history # thread context + follow-ups in private channels
+            - im:history # read DM history (message.im)
+            - im:read # resolve DM conversation metadata
+            - im:write # open/DM the user
+            - users:read # attribute speakers
 settings:
-  event_subscriptions:
-    request_url: https://<your-service>.up.railway.app/eve/v1/slack
-    bot_events:
-      - app_mention
-      - message.im
-      # Thread follow-ups without re-mentioning the bot: replies in threads the
-      # bot is engaged in are promoted to app_mention by the webhookVerifier
-      # (agent/lib/thread-follow-up.ts). Only channels the bot is a member of
-      # deliver these events.
-      - message.channels
-      - message.groups
-  interactivity:
-    is_enabled: true
-    request_url: https://<your-service>.up.railway.app/eve/v1/slack
-  socket_mode_enabled: false
-  # Enable public distribution so multiple workspaces can install the app.
-  # (Slack → Manage Distribution → Activate Public Distribution; requires the
-  # redirect URL above and passing Slack's "Remove Hard Coded Information" check.)
-  org_deploy_enabled: false
+    event_subscriptions:
+        request_url: https://<your-service>.up.railway.app/eve/v1/slack
+        bot_events:
+            - app_mention
+            - message.im
+            # Thread follow-ups without re-mentioning the bot: replies in threads the
+            # bot is engaged in are promoted to app_mention by the webhookVerifier
+            # (agent/lib/thread-follow-up.ts). Only channels the bot is a member of
+            # deliver these events.
+            - message.channels
+            - message.groups
+    interactivity:
+        is_enabled: true
+        request_url: https://<your-service>.up.railway.app/eve/v1/slack
+    socket_mode_enabled: false
+    # Enable public distribution so multiple workspaces can install the app.
+    # (Slack → Manage Distribution → Activate Public Distribution; requires the
+    # redirect URL above and passing Slack's "Remove Hard Coded Information" check.)
+    org_deploy_enabled: false
 ```
 
 Two request URLs point at **this agent** (Event Subscriptions + Interactivity → the Railway host);
@@ -166,10 +166,11 @@ Copy the **Signing Secret** (Basic Information) in all cases.
 
 **a. Create the service.** New service → deploy from this repo; set the service **Root Directory**
 to `apps/slack-agent` (so the Docker build context is this folder). `railway.json` handles builder
-+ healthcheck.
+
+- healthcheck.
 
 **b. Add Postgres and reference it.** `Cmd+K` (or right-click the canvas) → **Database** →
-**Add PostgreSQL**. This creates a *separate service* — its `DATABASE_URL` is **not** automatically
+**Add PostgreSQL**. This creates a _separate service_ — its `DATABASE_URL` is **not** automatically
 visible to the agent. On the agent service, add a variable reference:
 
 ```
@@ -190,43 +191,44 @@ every `<your-service>.up.railway.app` placeholder below refers to. Do this befor
 variables in (d), since two of them embed the URL.
 
 **d. Set service variables:**
-  - `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`
-  - `SLACK_SIGNING_SECRET` — per-app/static; HMAC-verifies every inbound webhook.
-  - `MAPLE_API_BASE_URL` — the Maple API base (e.g. `https://api.maple.dev`). **Also needed at build
-    time**: it forms the Maple MCP connection URL, which eve bakes into its manifest at build (like
-    `EVE_WORKFLOW_WORLD`). Railway exposes service variables as Docker build args (the Dockerfile
-    declares `ARG MAPLE_API_BASE_URL`), so setting it as a service variable covers both build and
-    runtime. If it is missing at build, the URL silently bakes to `https://api.localhost`.
-  - `MAPLE_INTERNAL_SERVICE_TOKEN` — the internal service token; the agent sends it as
-    `Authorization: Bearer maple_svc_<token>` to the resolve endpoint. Runtime-only.
-  - `SLACK_BOT_TOKEN` — **omit in multi-workspace production** (the bot token is resolved per team
-    from Maple). This is now enforced, not advisory: in a deployed environment the env token is
-    ignored and an unresolvable team errors, because the app is publicly installable and a shared
-    env token would sign one tenant's outbound calls with another tenant's credential. Set
-    `SLACK_ALLOW_ENV_BOT_TOKEN=true` alongside it only for a private single-workspace deployment.
-  - `PORT=8080` — set it explicitly. Railway injects a `PORT` of its own that overrides the image's
-    `ENV PORT`, so pinning it here is what makes the value deterministic rather than assigned.
-  - `WORKFLOW_LOCAL_BASE_URL=http://localhost:8080` — the durable-run callback target. See the note
-    below for why this is loopback and not the public host.
-  - (`EVE_WORKFLOW_WORLD` is already baked into the image at build time — no need to set it.)
-  - `ROUTE_AUTH_BASIC_PASSWORD` (+ optional `ROUTE_AUTH_BASIC_USER`, default `admin`) — locks the
-    non-Slack HTTP routes (session/stream) behind HTTP Basic. **Required in production to use
-    those routes at all**: route auth fails closed on Railway — if the password is unset at boot,
-    the routes are locked behind a random secret that is generated per boot and deliberately never
-    logged, so they are unreachable until you set this. (Printing the generated password, the
-    original behavior, parks a working credential in Railway's log store for the life of the
-    process.) The Slack webhook and `/eve/v1/health` are unaffected either way. (`railway.json` has
-    no mechanism to declare required variables, so this is enforced at boot instead.)
+
+- `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`
+- `SLACK_SIGNING_SECRET` — per-app/static; HMAC-verifies every inbound webhook.
+- `MAPLE_API_BASE_URL` — the Maple API base (e.g. `https://api.maple.dev`). **Also needed at build
+  time**: it forms the Maple MCP connection URL, which eve bakes into its manifest at build (like
+  `EVE_WORKFLOW_WORLD`). Railway exposes service variables as Docker build args (the Dockerfile
+  declares `ARG MAPLE_API_BASE_URL`), so setting it as a service variable covers both build and
+  runtime. If it is missing at build, the URL silently bakes to `https://api.localhost`.
+- `MAPLE_INTERNAL_SERVICE_TOKEN` — the internal service token; the agent sends it as
+  `Authorization: Bearer maple_svc_<token>` to the resolve endpoint. Runtime-only.
+- `SLACK_BOT_TOKEN` — **omit in multi-workspace production** (the bot token is resolved per team
+  from Maple). This is now enforced, not advisory: in a deployed environment the env token is
+  ignored and an unresolvable team errors, because the app is publicly installable and a shared
+  env token would sign one tenant's outbound calls with another tenant's credential. Set
+  `SLACK_ALLOW_ENV_BOT_TOKEN=true` alongside it only for a private single-workspace deployment.
+- `PORT=8080` — set it explicitly. Railway injects a `PORT` of its own that overrides the image's
+  `ENV PORT`, so pinning it here is what makes the value deterministic rather than assigned.
+- `WORKFLOW_LOCAL_BASE_URL=http://localhost:8080` — the durable-run callback target. See the note
+  below for why this is loopback and not the public host.
+- (`EVE_WORKFLOW_WORLD` is already baked into the image at build time — no need to set it.)
+- `ROUTE_AUTH_BASIC_PASSWORD` (+ optional `ROUTE_AUTH_BASIC_USER`, default `admin`) — locks the
+  non-Slack HTTP routes (session/stream) behind HTTP Basic. **Required in production to use
+  those routes at all**: route auth fails closed on Railway — if the password is unset at boot,
+  the routes are locked behind a random secret that is generated per boot and deliberately never
+  logged, so they are unreachable until you set this. (Printing the generated password, the
+  original behavior, parks a working credential in Railway's log store for the life of the
+  process.) The Slack webhook and `/eve/v1/health` are unaffected either way. (`railway.json` has
+  no mechanism to declare required variables, so this is enforced at boot instead.)
 
 Deploy. The entrypoint applies the Postgres-world schema, then starts eve. Check
 `https://<your-service>.up.railway.app/eve/v1/health`.
 
 > **`WORKFLOW_LOCAL_BASE_URL` should stay loopback.** `@workflow/world-postgres` runs its Graphile
-> Worker *in-process*: when a durable step comes off the queue, `executeMessageOverHttp` POSTs it to
+> Worker _in-process_: when a durable step comes off the queue, `executeMessageOverHttp` POSTs it to
 > `getExecutionBaseUrl()` — the service calling itself. Pointing it at the public
 > `up.railway.app` host sends every durable step out to Railway's edge and back for no reason —
 > billed egress plus a round-trip of latency. `<service>.railway.internal` avoids the egress but is
-> still a needless hop and requires binding to `::`. The public domain from step (c) is for *inbound*
+> still a needless hop and requires binding to `::`. The public domain from step (c) is for _inbound_
 > traffic (Slack, health checks); it is not part of the workflow callback path.
 >
 > Leaving the variable unset also works — `getExecutionBaseUrl` falls back to `http://localhost:${PORT}`,
@@ -251,7 +253,7 @@ The app you created in step 1 still has placeholder `request_url`s. Both must no
 `https://<your-service>.up.railway.app/eve/v1/slack` (the host from step 2c).
 
 > **The deployment has to be live before you paste the URL.** Slack verifies the endpoint
-> *synchronously* when you save: it POSTs a `url_verification` challenge and expects the echoed
+> _synchronously_ when you save: it POSTs a `url_verification` challenge and expects the echoed
 > `challenge` value back within ~3s. eve answers this automatically — but only if it's running.
 > Confirm `/eve/v1/health` returns `{"ok":true}` first, or the save will just fail with
 > "Your request URL didn't respond with the correct challenge value."
@@ -264,14 +266,14 @@ challenge against the new URL on save.
 
 **Or the individual pages** (same result, two screens):
 
-| Setting | Where | Field |
-| --- | --- | --- |
-| Events | Sidebar → **Features** → **Event Subscriptions** | **Request URL** (toggle *Enable Events* on first) |
-| Interactivity | Sidebar → **Features** → **Interactivity & Shortcuts** | **Request URL** (toggle on first) |
+| Setting       | Where                                                  | Field                                             |
+| ------------- | ------------------------------------------------------ | ------------------------------------------------- |
+| Events        | Sidebar → **Features** → **Event Subscriptions**       | **Request URL** (toggle _Enable Events_ on first) |
+| Interactivity | Sidebar → **Features** → **Interactivity & Shortcuts** | **Request URL** (toggle on first)                 |
 
 Both should show a green **Verified ✓** next to the field once saved. Event Subscriptions also needs
-`app_mention`, `message.im`, `message.channels`, and `message.groups` listed under *Subscribe to bot
-events* — the manifest from step 1 sets these, so they should already be there. The two channel
+`app_mention`, `message.im`, `message.channels`, and `message.groups` listed under _Subscribe to bot
+events_ — the manifest from step 1 sets these, so they should already be there. The two channel
 message events power thread follow-ups: once the bot has been mentioned (or replied) in a thread,
 further replies in that thread reach it without a new `@mention` — but only while the engagement is
 **recent**: within 30 minutes and within the last 15 messages of the thread (see
@@ -279,7 +281,7 @@ further replies in that thread reach it without a new `@mention` — but only wh
 @-mentions the bot again. Unbounded, one mention would turn every later reply by anyone into a full
 agent turn, forever.
 
-Changing a request URL does **not** require reinstalling the app; only changing *scopes* does. (If
+Changing a request URL does **not** require reinstalling the app; only changing _scopes_ does. (If
 you did edit scopes, the sidebar shows a yellow reinstall banner — follow it, and note that
 reinstalling issues a **new** `SLACK_BOT_TOKEN` that you must copy back into Railway.)
 
@@ -308,7 +310,7 @@ All seven are disabled with a `disableTool()` sentinel per file under `agent/too
 `load_skill` (how `agent/skills/*` reach the model) stay on.
 
 > The **filename is the identity.** eve derives the tool slug from the path and does no
-> kebab→snake normalization, so `agent/tools/web-fetch.ts` would disable *nothing* while looking
+> kebab→snake normalization, so `agent/tools/web-fetch.ts` would disable _nothing_ while looking
 > right, and `render-chart.ts` would register the authored tool as `render-chart` while
 > `instructions.md` tells the model to call `render_chart`. `agent/lib/framework-tools.test.ts`
 > reconstructs eve's own resolution (its real framework-tool list, its real slug rule, its real
@@ -344,8 +346,8 @@ sharing code** — each capability is re-expressed in eve's native idiom:
   `lib/telemetry-log.ts` — OTLP `/v1/logs` when the ingest key is set (queryable and
   trace-correlated, like chat-flue), a structured JSON line on stdout otherwise.
 - **Deliberately not ported:** page context and the widget-fix entry point (web-only payloads —
-  the surgical fix *rules* live in the dashboard-builder skill, with `get_dashboard` standing in
-  for the attached widget JSON), the `submit_diagnosis` tool (the thread reply *is* the report),
+  the surgical fix _rules_ live in the dashboard-builder skill, with `get_dashboard` standing in
+  for the attached widget JSON), the `submit_diagnosis` tool (the thread reply _is_ the report),
   and the headless triage workflow (apps/api invokes chat-flue for that).
 - **Beyond parity — chart images:** the authored `render_chart` tool renders a time-series
   chart in-process (hand-rolled SVG → `@resvg/resvg-js`, no headless browser or external chart
@@ -356,14 +358,14 @@ sharing code** — each capability is re-expressed in eve's native idiom:
 
 Env vars added by this parity work (set on Railway; all runtime-only):
 
-| Var | Purpose |
-| --- | --- |
-| `MAPLE_APP_BASE_URL` | Web-app base for deep links in replies (default `https://app.maple.dev`) |
-| `MAPLE_INGEST_KEY` | Maple ingest key; enables the OTel span **and log** export when set |
-| `MAPLE_ENDPOINT` | Ingest gateway base (default `https://ingest.maple.dev`) |
-| `MAPLE_ENVIRONMENT` | Deployment env label on spans (falls back to `RAILWAY_ENVIRONMENT_NAME`) |
-| `MAPLE_COMMIT_SHA` / `MAPLE_SERVICE_VERSION` | Release attribution; both default to `RAILWAY_GIT_COMMIT_SHA` |
-| `SLACK_ALLOW_ENV_BOT_TOKEN` | Opt-in to the `SLACK_BOT_TOKEN` fallback in a deployed environment |
+| Var                                          | Purpose                                                                  |
+| -------------------------------------------- | ------------------------------------------------------------------------ |
+| `MAPLE_APP_BASE_URL`                         | Web-app base for deep links in replies (default `https://app.maple.dev`) |
+| `MAPLE_INGEST_KEY`                           | Maple ingest key; enables the OTel span **and log** export when set      |
+| `MAPLE_ENDPOINT`                             | Ingest gateway base (default `https://ingest.maple.dev`)                 |
+| `MAPLE_ENVIRONMENT`                          | Deployment env label on spans (falls back to `RAILWAY_ENVIRONMENT_NAME`) |
+| `MAPLE_COMMIT_SHA` / `MAPLE_SERVICE_VERSION` | Release attribution; both default to `RAILWAY_GIT_COMMIT_SHA`            |
+| `SLACK_ALLOW_ENV_BOT_TOKEN`                  | Opt-in to the `SLACK_BOT_TOKEN` fallback in a deployed environment       |
 
 Manual acceptance in a linked workspace: (a) "how are things looking?" routes through
 `system_health`; (b) "create an alert rule for checkout p95" produces a Slack approval card —
@@ -379,7 +381,7 @@ post/`chat.update` paths resolve the right per-team token — they ride the
 
 One Slack app, distributed publicly, installed into many workspaces. Each Slack **team** is linked
 to one Maple **organization**. The install (bot token + Maple API key) is created and stored by the
-**Maple API** during OAuth; this agent only ever *resolves* it.
+**Maple API** during OAuth; this agent only ever _resolves_ it.
 
 **Resolve endpoint (fixed contract, owned by the Maple API):**
 
@@ -444,45 +446,46 @@ and **activate public distribution** so the app can be installed into any worksp
   parse tool calls only on non-streaming requests; streamed, they emit the model's raw tool-call
   JSON as ordinary text deltas, which the agent then posts into Slack verbatim:
 
-  ```
-  {"type": "function", "name": "ask_question", "parameters": {"prompt": "…", "allowFreeform": "true"}}
-  ```
+    ```
+    {"type": "function", "name": "ask_question", "parameters": {"prompt": "…", "allowFreeform": "true"}}
+    ```
 
-  `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (the previous default) has exactly this bug — it
-  returns a proper `tool_calls` array non-streaming, but streams the JSON as text. It also
-  stringifies non-string arguments (`"allowFreeform": "true"`) even in the structured form.
-  `@cf/zai-org/glm-5.2` (the current default) streams OpenAI-shaped incremental `delta.tool_calls`
-  chunks — name and id on the first, argument fragments keyed by `index` after — terminated by
-  `finish_reason: "tool_calls"`, which `workers-ai-provider` maps correctly. (The provider does have
-  a text-salvage path for leaked tool calls, but it only engages for a *forced* tool choice — eve
-  uses auto, so it never fires here.)
+    `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (the previous default) has exactly this bug — it
+    returns a proper `tool_calls` array non-streaming, but streams the JSON as text. It also
+    stringifies non-string arguments (`"allowFreeform": "true"`) even in the structured form.
+    `@cf/zai-org/glm-5.2` (the current default) streams OpenAI-shaped incremental `delta.tool_calls`
+    chunks — name and id on the first, argument fragments keyed by `index` after — terminated by
+    `finish_reason: "tool_calls"`, which `workers-ai-provider` maps correctly. (The provider does have
+    a text-salvage path for leaked tool calls, but it only engages for a _forced_ tool choice — eve
+    uses auto, so it never fires here.)
 
-  Both `@cf/zai-org/glm-5.2` and `@cf/openai/gpt-oss-120b` are verified good. Workers AI prices
-  them very differently, so the choice is a real trade-off:
+    Both `@cf/zai-org/glm-5.2` and `@cf/openai/gpt-oss-120b` are verified good. Workers AI prices
+    them very differently, so the choice is a real trade-off:
 
-  | Model | Context | $/M in | $/M out |
-  | --- | --- | --- | --- |
-  | `@cf/zai-org/glm-5.2` | 256K | 1.40 | 4.40 |
-  | `@cf/openai/gpt-oss-120b` | 128K | 0.35 | 0.75 |
-  | `@cf/zai-org/glm-4.7-flash` | 128K | 0.06 | 0.40 |
+    | Model                       | Context | $/M in | $/M out |
+    | --------------------------- | ------- | ------ | ------- |
+    | `@cf/zai-org/glm-5.2`       | 256K    | 1.40   | 4.40    |
+    | `@cf/openai/gpt-oss-120b`   | 128K    | 0.35   | 0.75    |
+    | `@cf/zai-org/glm-4.7-flash` | 128K    | 0.06   | 0.40    |
 
-  We're on GLM-5.2 for headroom as Maple domain tools land — reasoning over traces and spans is a
-  harder job than the generic tools here, and long Slack threads benefit from the 256K window. If
-  spend becomes the concern before the tools get hard, gpt-oss-120b handled the current toolset
-  identically at roughly a fifth the output cost.
+    We're on GLM-5.2 for headroom as Maple domain tools land — reasoning over traces and spans is a
+    harder job than the generic tools here, and long Slack threads benefit from the 256K window. If
+    spend becomes the concern before the tools get hard, gpt-oss-120b handled the current toolset
+    identically at roughly a fifth the output cost.
 
-  Before switching `WORKERS_AI_MODEL`, check the streaming shape directly:
+    Before switching `WORKERS_AI_MODEL`, check the streaming shape directly:
 
-  ```bash
-  curl "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/<model>" \
-    -H "authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'content-type: application/json' \
-    -d '{"stream":true,"messages":[{"role":"user","content":"what time is it in Tokyo?"}],
-         "tools":[{"type":"function","function":{"name":"get_time","description":"Get the time in a timezone.",
-         "parameters":{"type":"object","properties":{"timezone":{"type":"string"}},"required":["timezone"]}}}]}'
-  ```
+    ```bash
+    curl "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/<model>" \
+      -H "authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'content-type: application/json' \
+      -d '{"stream":true,"messages":[{"role":"user","content":"what time is it in Tokyo?"}],
+           "tools":[{"type":"function","function":{"name":"get_time","description":"Get the time in a timezone.",
+           "parameters":{"type":"object","properties":{"timezone":{"type":"string"}},"required":["timezone"]}}}]}'
+    ```
 
-  The SSE must carry `delta.tool_calls`, not a JSON blob inside `response`. Also set
-  `WORKERS_AI_CONTEXT_WINDOW` to the new model's window.
+    The SSE must carry `delta.tool_calls`, not a JSON blob inside `response`. Also set
+    `WORKERS_AI_CONTEXT_WINDOW` to the new model's window.
+
 - **Auth:** `agent/channels/eve.ts` fails closed in deployed environments (`RAILWAY_ENVIRONMENT_NAME`
   set, or `NODE_ENV=production`): the browser/API routes always require HTTP Basic there. With
   `ROUTE_AUTH_BASIC_PASSWORD` set that's your stable credential; without it, a random per-boot
@@ -493,7 +496,7 @@ and **activate public distribution** so the app can be installed into any worksp
 - **eve is pinned exactly (`"eve": "0.25.3"`, no caret).** `patches/eve@0.25.3.patch` only applies
   to that version, and it is what threads `{ teamId, … }` into the `botToken` credential. A
   lockfile refresh onto 0.25.4 would drop the patch silently, the credential would go back to being
-  arg-less, and every workspace would fall through to the env fallback — failing *open* onto the
+  arg-less, and every workspace would fall through to the env fallback — failing _open_ onto the
   wrong credential. `agent/lib/eve-patch.test.ts` asserts both the pin and that the patched code
   path is the one loaded (it calls the credential and checks the context arrives). Bump the
   `dependencies` and `patchedDependencies` strings together, regenerate the patch, re-run the test.

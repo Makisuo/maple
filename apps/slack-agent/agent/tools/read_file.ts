@@ -1,4 +1,4 @@
-import { disableTool } from "eve/tools";
+import { disableTool } from "eve/tools"
 
 /**
  * Reads sandbox files. The agent's data comes from Maple's MCP tools, never from disk, and a read tool is an exfiltration primitive the moment injected text points it at something.
@@ -8,4 +8,4 @@ import { disableTool } from "eve/tools";
  * reachable by injected text with no approval prompt. See that file for the
  * naming contract.
  */
-export default disableTool();
+export default disableTool()

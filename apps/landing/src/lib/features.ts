@@ -18,8 +18,8 @@
  * first three slugs and left four features with no inbound links at all. Each
  * slug below appears in at least two others' lists.
  */
-import * as m from "../paraglide/messages";
-import type { Feature } from "./page-registry";
+import * as m from "../paraglide/messages"
+import type { Feature } from "./page-registry"
 
 export const features: Feature[] = [
 	{
@@ -385,8 +385,8 @@ export const features: Feature[] = [
 		relatedUseCases: ["microservices-debugging"],
 		locales: ["en", "ja", "ko"],
 	},
-];
+]
 
-export const featureSlugs = features.map((feature) => feature.slug);
+export const featureSlugs = features.map((feature) => feature.slug)
 
-export const featureBySlug = (slug: string) => features.find((feature) => feature.slug === slug);
+export const featureBySlug = (slug: string) => features.find((feature) => feature.slug === slug)
