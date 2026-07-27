@@ -42,33 +42,9 @@ import {
  * the groups it does not exercise.
  */
 
-/**
- * Inert SlackIntegrationService — the slack integration group is registered on
- * MapleApiV2, so the full-API harnesses must satisfy it even when they don't
- * exercise it. Provided directly onto the group layer below so it leaks no
- * requirement into the harnesses.
- */
-const SlackIntegrationServiceStubLayer = Layer.succeed(
-	SlackIntegrationService,
-	SlackIntegrationService.of({
-		startInstall: () =>
-			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-		completeInstall: () =>
-			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-		getStatus: () =>
-			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-		uninstall: () =>
-			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-		listChannels: () =>
-			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-		resolveForBot: () =>
-			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-	}),
-)
-
 export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2ApiKeysLive,
-	HttpV2SlackIntegrationsLive.pipe(Layer.provide(SlackIntegrationServiceStubLayer)),
+	HttpV2SlackIntegrationsLive,
 	HttpV2DashboardsLive,
 	HttpV2AlertRulesLive,
 	HttpV2AlertDestinationsLive,
@@ -93,7 +69,7 @@ export const ApiV2RateLimiterAllowAllLayer = Layer.succeed(ApiV2RateLimiter, {
 	check: () => Effect.succeed("allowed" as const),
 })
 
-const die = () => Effect.die(new Error("AlertsService is not available in this test harness"))
+const die = () => Effect.die(new Error("This service is not available in this test harness"))
 
 /** Synchronous stub for non-Effect-returning service methods (e.g. `asExecutor`). */
 const dieSync = (): never => {
@@ -210,6 +186,19 @@ export const ConfigResourceServiceStubsLayer = Layer.mergeAll(
 	}),
 	Phase1ResourceStubsLayer,
 	WarehouseServiceStubLayer,
+)
+
+/** Inert SlackIntegrationService for harnesses that never touch the slack integration group. */
+export const SlackIntegrationServiceStubLayer = Layer.succeed(
+	SlackIntegrationService,
+	SlackIntegrationService.of({
+		startInstall: die,
+		completeInstall: die,
+		getStatus: die,
+		uninstall: die,
+		listChannels: die,
+		resolveForBot: die,
+	}),
 )
 
 /** Inert AlertsService for harnesses that never touch the alert groups. */

@@ -19,6 +19,7 @@ import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	SlackIntegrationServiceStubLayer,
 } from "./v2-test-support"
 
 const TRACE_ID = "7f3a4b5c6d7e8f901234567890abcdef"
@@ -232,6 +233,7 @@ const makeHarness = (
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(telemetryLive),
 		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(ConfigResourceServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),

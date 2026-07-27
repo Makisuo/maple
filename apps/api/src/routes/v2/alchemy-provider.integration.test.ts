@@ -38,6 +38,7 @@ import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
 
@@ -134,6 +135,7 @@ const makeHarness = () => {
 		Layer.provide(ConfigResourceServiceStubsLayer),
 		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
 		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
