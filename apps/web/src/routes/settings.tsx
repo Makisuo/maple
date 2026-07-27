@@ -14,6 +14,7 @@ import { NotificationsSection } from "@/components/settings/notifications-sectio
 import { AutomationSection } from "@/components/settings/automation-section"
 import { OrgClickHouseSettingsSection } from "@/components/settings/org-clickhouse-settings-section"
 import { OrganizationSection } from "@/components/settings/organization-section"
+import { SetupAuditSection } from "@/components/settings/setup-audit-section"
 import {
 	SettingsNav,
 	settingsTabLabels,
@@ -133,6 +134,7 @@ function SettingsPage() {
 					<DashboardLayout.Scroll>
 						{activeTab === "organization" && <OrganizationSection />}
 						{activeTab === "members" && <MembersSection />}
+						{activeTab === "setup-audit" && <SetupAuditSection />}
 						{activeTab === "ingestion" && <IngestionSection />}
 						{activeTab === "api-keys" && <ApiKeysSection />}
 						{activeTab === "developer" && (

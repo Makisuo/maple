@@ -9,6 +9,7 @@ import { useIsOrgAdmin } from "@/hooks/use-is-org-admin"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
 	BellIcon,
+	CircleCheckIcon,
 	CodeIcon,
 	CreditCardIcon,
 	DatabaseIcon,
@@ -26,6 +27,7 @@ import { cn } from "@maple/ui/utils"
 export const settingsTabValues = [
 	"organization",
 	"members",
+	"setup-audit",
 	"ingestion",
 	"api-keys",
 	"developer",
@@ -40,6 +42,7 @@ export type SettingsTab = (typeof settingsTabValues)[number]
 export const settingsTabLabels: Record<SettingsTab, string> = {
 	organization: "Organization",
 	members: "Members",
+	"setup-audit": "Setup Audit",
 	ingestion: "Ingestion",
 	"api-keys": "API Keys",
 	developer: "API Reference",
@@ -78,6 +81,9 @@ const navSections: SettingsNavSection[] = [
 		items: [
 			{ id: "organization", label: "Organization", icon: GearIcon },
 			{ id: "members", label: "Members", icon: UserIcon },
+			// Spans alerting, ingestion and integrations, so it sits at workspace level rather than
+			// under any one of them.
+			{ id: "setup-audit", label: "Setup Audit", icon: CircleCheckIcon },
 			{ id: "billing", label: "Billing", icon: CreditCardIcon },
 		],
 	},
