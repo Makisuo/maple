@@ -122,6 +122,7 @@ oauth_config:
       - channels:history
       - files:write         # upload rendered chart images (render_chart tool)
       - groups:read         # resolve private channel metadata
+      - groups:history      # thread context + follow-ups in private channels
       - im:history          # read DM history (message.im)
       - im:read             # resolve DM conversation metadata
       - im:write            # open/DM the user
@@ -132,6 +133,12 @@ settings:
     bot_events:
       - app_mention
       - message.im
+      # Thread follow-ups without re-mentioning the bot: replies in threads the
+      # bot is engaged in are promoted to app_mention by the webhookVerifier
+      # (agent/lib/thread-follow-up.ts). Only channels the bot is a member of
+      # deliver these events.
+      - message.channels
+      - message.groups
   interactivity:
     is_enabled: true
     request_url: https://<your-service>.up.railway.app/eve/v1/slack
@@ -252,8 +259,10 @@ challenge against the new URL on save.
 | Interactivity | Sidebar → **Features** → **Interactivity & Shortcuts** | **Request URL** (toggle on first) |
 
 Both should show a green **Verified ✓** next to the field once saved. Event Subscriptions also needs
-`app_mention` and `message.im` listed under *Subscribe to bot events* — the manifest from step 1 sets
-these, so they should already be there.
+`app_mention`, `message.im`, `message.channels`, and `message.groups` listed under *Subscribe to bot
+events* — the manifest from step 1 sets these, so they should already be there. The two channel
+message events power thread follow-ups: once the bot has been mentioned (or replied) in a thread,
+further replies in that thread reach it without a new `@mention`.
 
 Changing a request URL does **not** require reinstalling the app; only changing *scopes* does. (If
 you did edit scopes, the sidebar shows a yellow reinstall banner — follow it, and note that

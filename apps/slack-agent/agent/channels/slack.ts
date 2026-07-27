@@ -5,6 +5,7 @@ import {
   verifySlackV0Signature,
   type SlackTokenContext,
 } from "#lib/maple.js";
+import { promoteThreadFollowUp } from "#lib/thread-follow-up.js";
 
 /**
  * Multi-workspace, self-managed Slack app — no Vercel Connect.
@@ -38,7 +39,20 @@ const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
     return false;
   }
 
-  // Return the verified body so eve uses it downstream.
+  // eve parses whatever body we return, which is also our hook for thread
+  // follow-ups: eve only dispatches app_mention + DM events, so an un-mentioned
+  // reply in a thread the bot is engaged in gets its `event.type` promoted to
+  // "app_mention" here (see #lib/thread-follow-up.js). Everything else passes
+  // through verified-but-unchanged.
+  try {
+    const promoted = await promoteThreadFollowUp(body);
+    if (promoted !== null) return promoted;
+  } catch (error) {
+    console.warn(
+      "[slack-webhook] Thread follow-up promotion failed; passing the event through unchanged.",
+      error,
+    );
+  }
   return body;
 };
 
