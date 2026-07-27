@@ -122,8 +122,16 @@ export async function resolveWorkspace(teamId: string): Promise<MapleWorkspace |
 	return promise
 }
 
-/** Slack's webhook budget is ~3s total; this call happens inside it. */
-const NOTIFY_REVOCATION_TIMEOUT_MS = 2_000
+/**
+ * Fired without awaiting from the webhook handler (`void forwardUninstallEvent(...)`
+ * in `channels/slack.ts`), so — unlike `RESOLVE_TIMEOUT_MS` — this is NOT inside
+ * Slack's webhook ack budget; nothing downstream is waiting on it. Generous on
+ * purpose: a cold Cloudflare Worker isolate dialing a fresh Hyperdrive/Postgres
+ * connection (this endpoint does several sequential `database.execute` calls)
+ * can comfortably exceed a couple of seconds, and this was observed timing out
+ * in production at 2s.
+ */
+const NOTIFY_REVOCATION_TIMEOUT_MS = 10_000
 
 /**
  * Tells Maple's API that a Slack team's install is dead, so the bound org's
