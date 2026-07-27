@@ -82,6 +82,8 @@ const slackServiceLayer = (overrides: Partial<SlackIntegrationServiceShape>) =>
 			uninstall: die,
 			listChannels: die,
 			resolveForBot: die,
+			revokeByTeamId: die,
+			reconcileWorkspaces: die,
 			...overrides,
 		}),
 	)

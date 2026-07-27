@@ -18,9 +18,11 @@ import { SlackIntegrationService } from "./services/SlackIntegrationService"
 // Database + Env; its own `static readonly layer` already provides the
 // FetchHttpClient it needs to call Slack's `auth.test`.
 //
-// Backstop for SlackEventsRouter's app_uninstalled/tokens_revoked webhook:
-// catches deliveries Slack retried and gave up on, and installs that predate
-// the webhook.
+// Backstop for the Railway-hosted bot's app_uninstalled/tokens_revoked
+// detection (apps/slack-agent → POST /internal/slack/workspaces/:teamId/revoke,
+// see slack-integration.http.ts): catches a forward call the bot never made
+// (crash mid-processing, network blip to Maple) and installs that predate
+// this wiring.
 // ---------------------------------------------------------------------------
 
 const telemetry = MapleCloudflareSDK.make({

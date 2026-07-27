@@ -227,7 +227,6 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...optionalPlain("SLACK_CLIENT_ID"),
 				...optionalSecret("SLACK_CLIENT_SECRET"),
 				...optionalSecret("SLACK_INTERNAL_SERVICE_TOKEN"),
-				...optionalSecret("SLACK_SIGNING_SECRET"),
 				...optionalPlain("GITHUB_APP_ID"),
 				...optionalPlain("GITHUB_APP_SLUG"),
 				...optionalSecret("GITHUB_APP_PRIVATE_KEY"),

@@ -1397,6 +1397,53 @@ describe("SlackIntegrationService", () => {
 			)
 		})
 
+		it.effect("does not count a confirmed-dead workspace as revoked when the local revoke fails", () => {
+			const testDb = createTestDb(trackedDbs)
+			return Effect.gen(function* () {
+				yield* Effect.promise(() =>
+					insertWorkspace(testDb, {
+						id: "sw_rc_dbfail",
+						orgId: "org_rc_dbfail",
+						teamId: "T-DBFAIL",
+						teamName: "DbFail",
+						botToken: "xoxb-dbfail",
+						apiKey: "maple_ak_dbfail",
+					}),
+				)
+				// The probe confirms the token dead, but persisting the revoke blows up
+				// (trigger below) — the run must report it as NOT revoked so the next
+				// cron tick retries instead of the failure inflating the revoke metric.
+				yield* Effect.promise(() =>
+					executeSql(
+						testDb,
+						`CREATE FUNCTION slack_workspaces_block_update() RETURNS trigger AS $$
+						BEGIN RAISE EXCEPTION 'simulated persistence failure'; END $$ LANGUAGE plpgsql`,
+					),
+				)
+				yield* Effect.promise(() =>
+					executeSql(
+						testDb,
+						`CREATE TRIGGER slack_workspaces_block_update BEFORE UPDATE ON slack_workspaces
+						FOR EACH ROW EXECUTE FUNCTION slack_workspaces_block_update()`,
+					),
+				)
+				const slack = yield* SlackIntegrationService
+				const result = yield* slack.reconcileWorkspaces()
+				assert.strictEqual(result.probed, 1)
+				assert.strictEqual(result.revoked, 0)
+				// The row is still active — the failed revoke left it for the next run.
+				const status = yield* slack.getStatus(asOrgId("org_rc_dbfail"))
+				assert.strictEqual(status.installed, true)
+			}).pipe(
+				Effect.provide(
+					withFetch(
+						testDb,
+						slackAuthTestFetch({ "xoxb-dbfail": { ok: false, error: "token_revoked" } }),
+					),
+				),
+			)
+		})
+
 		it.effect("reports probed:0, revoked:0 when there are no active workspaces", () => {
 			const testDb = createTestDb(trackedDbs)
 			return Effect.gen(function* () {

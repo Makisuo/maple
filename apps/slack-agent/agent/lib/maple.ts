@@ -122,6 +122,47 @@ export async function resolveWorkspace(teamId: string): Promise<MapleWorkspace |
 	return promise
 }
 
+/** Slack's webhook budget is ~3s total; this call happens inside it. */
+const NOTIFY_REVOCATION_TIMEOUT_MS = 2_000
+
+/**
+ * Tells Maple's API that a Slack team's install is dead, so the bound org's
+ * `slack_workspaces` row and minted API key are revoked immediately instead of
+ * only via Maple's own reconciliation cron (a ~6h-late backstop). Called from
+ * the webhook handler (`agent/lib/uninstall-detection.ts`) when the inbound
+ * event is `app_uninstalled` or `tokens_revoked` — Slack allows only one
+ * Events API Request URL per app, and it is already pointed at this bot, not
+ * directly at Maple's API.
+ *
+ * Also evicts any cached `resolveWorkspace` entry for the team: otherwise a
+ * positive resolution could keep serving the now-dead bot token for up to
+ * `POSITIVE_TTL_MS` after Maple has already revoked it.
+ *
+ * Throws on transport/server errors (mirrors `fetchWorkspace`) — the caller
+ * (`agent/lib/uninstall-detection.ts`) catches and logs rather than failing
+ * the webhook ack on it. Maple's reconciliation cron is the backstop for a
+ * notify that never lands.
+ */
+export async function notifyMapleRevocation(
+	teamId: string,
+	reason: "app_uninstalled" | "tokens_revoked",
+): Promise<void> {
+	cache.delete(teamId)
+	const url = `${mapleApiBaseUrl()}/internal/slack/workspaces/${encodeURIComponent(teamId)}/revoke`
+	const res = await fetch(url, {
+		method: "POST",
+		headers: {
+			authorization: `Bearer maple_svc_${mapleServiceToken()}`,
+			"content-type": "application/json",
+		},
+		body: JSON.stringify({ reason }),
+		signal: AbortSignal.timeout(NOTIFY_REVOCATION_TIMEOUT_MS),
+	})
+	if (!res.ok) {
+		throw new Error(`Maple revoke notify failed for team ${teamId} (${reason}): HTTP ${res.status}`)
+	}
+}
+
 async function fetchWorkspace(teamId: string): Promise<MapleWorkspace | null> {
 	const url = `${mapleApiBaseUrl()}/internal/slack/workspaces/${encodeURIComponent(teamId)}`
 	const res = await fetch(url, {
@@ -135,14 +176,26 @@ async function fetchWorkspace(teamId: string): Promise<MapleWorkspace | null> {
 		throw new Error(`Maple workspace resolve failed for team ${teamId}: HTTP ${res.status}`)
 	}
 
-	const body = (await res.json()) as Partial<MapleWorkspace>
-	if (!body.botToken || !body.mapleApiKey || !body.orgId) {
+	const body = (await res.json()) as Partial<MapleWorkspace> | null
+	// Type checks, not just truthiness: a contract slip (nested object, number)
+	// would otherwise flow into `Bearer ${...}` headers as "[object Object]" and
+	// fail far from here. An incomplete payload must fail loudly at the boundary.
+	if (
+		body === null ||
+		typeof body !== "object" ||
+		typeof body.orgId !== "string" ||
+		body.orgId.length === 0 ||
+		typeof body.botToken !== "string" ||
+		body.botToken.length === 0 ||
+		typeof body.mapleApiKey !== "string" ||
+		body.mapleApiKey.length === 0
+	) {
 		throw new Error(`Maple workspace resolve for team ${teamId} returned an incomplete payload.`)
 	}
 	return {
 		orgId: body.orgId,
-		teamId: body.teamId ?? teamId,
-		teamName: body.teamName ?? null,
+		teamId: typeof body.teamId === "string" && body.teamId.length > 0 ? body.teamId : teamId,
+		teamName: typeof body.teamName === "string" ? body.teamName : null,
 		botToken: body.botToken,
 		mapleApiKey: body.mapleApiKey,
 	}

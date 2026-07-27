@@ -89,6 +89,27 @@ describe("createTtlCache", () => {
 		expect(cache.size).toBe(0)
 	})
 
+	test("delete() drops one entry immediately, ahead of its TTL", () => {
+		setSystemTime(T0)
+		const cache = createTtlCache<Entry>({ maxEntries: 10, sweepIntervalMs: 1_000 })
+		cache.set("a", { expiresAt: T0.getTime() + 60_000, value: "A" })
+		cache.set("b", { expiresAt: T0.getTime() + 60_000, value: "B" })
+
+		cache.delete("a")
+		expect(cache.get("a")).toBeUndefined()
+		expect(cache.get("b")?.value).toBe("B")
+		expect(cache.size).toBe(1)
+	})
+
+	test("delete() on a missing key is a no-op", () => {
+		setSystemTime(T0)
+		const cache = createTtlCache<Entry>({ maxEntries: 10, sweepIntervalMs: 1_000 })
+		cache.set("a", { expiresAt: T0.getTime() + 60_000, value: "A" })
+
+		cache.delete("nonexistent")
+		expect(cache.size).toBe(1)
+	})
+
 	test("clear() empties the cache", () => {
 		setSystemTime(T0)
 		const cache = createTtlCache<Entry>({ maxEntries: 10, sweepIntervalMs: 1_000 })

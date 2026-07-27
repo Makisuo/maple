@@ -53,7 +53,19 @@ export interface ThreadFollowUpDeps {
 		readonly botToken: string
 		readonly channelId: string
 		readonly threadTs: string
+		/**
+		 * Slack ts (epoch seconds) of the recency horizon: messages older than
+		 * this cannot count as engagement, so the fetch itself is bounded to them
+		 * and the trailing window is correct regardless of thread length.
+		 */
+		readonly oldest: string
+		/** Slack ts of the incoming reply — nothing after it can have engaged. */
+		readonly latest: string
+		/** Aborts when the promotion deadline expires. */
+		readonly signal: AbortSignal
 	}): Promise<readonly ThreadReplyMessage[]>
+	/** Test-only override of `PROMOTION_DEADLINE_MS`. */
+	readonly promotionDeadlineMs?: number
 }
 
 const defaultDeps: ThreadFollowUpDeps = {
@@ -90,8 +102,14 @@ const CACHE_SWEEP_INTERVAL_MS = 60_000
 const ENGAGEMENT_MAX_AGE_SECONDS = 30 * 60
 const ENGAGEMENT_RECENT_MESSAGE_WINDOW = 15
 
-/** Slack's webhook budget is ~3s total; this call happens inside it. */
-const THREAD_REPLIES_TIMEOUT_MS = 2_000
+/**
+ * Combined budget for the whole promotion side-trip on a cold cache: workspace
+ * resolve AND thread fetch together. Slack's webhook budget is ~3s total and
+ * this runs inside it, so the two calls cannot each get their own timeout
+ * (resolve alone is capped at 5s in maple.ts — already over budget). Past the
+ * deadline the event passes through unpromoted; the user can re-@-mention.
+ */
+const PROMOTION_DEADLINE_MS = 2_000
 
 interface EngagementCacheEntry {
 	/** Slack ts (epoch seconds) of the engaging message, or null if none. */
@@ -136,6 +154,8 @@ interface FollowUpCandidate {
 	readonly channelId: string
 	readonly threadTs: string
 	readonly botUserId: string
+	/** The incoming reply's own ts, verbatim — upper bound for the thread fetch. */
+	readonly eventTs: string
 	/** The incoming reply's own ts, in epoch seconds — the recency reference. */
 	readonly eventTsSeconds: number
 }
@@ -192,6 +212,7 @@ function parseFollowUpCandidate(rawBody: string): FollowUpCandidate | null {
 		channelId,
 		threadTs,
 		botUserId,
+		eventTs: ts,
 		eventTsSeconds,
 	}
 }
@@ -223,12 +244,35 @@ async function isBotEngagedInThread(
 	const cached = engagementCache.get(cacheKey)
 	if (cached) return isEngagementRecent(cached.engagedAtSeconds, candidate)
 
-	const botToken = await deps.resolveBotToken({ teamId: candidate.teamId })
-	const replies = await deps.fetchThreadReplies({
-		botToken,
-		channelId: candidate.channelId,
-		threadTs: candidate.threadTs,
-	})
+	// One deadline for BOTH network round-trips (see PROMOTION_DEADLINE_MS).
+	const deadline = AbortSignal.timeout(deps.promotionDeadlineMs ?? PROMOTION_DEADLINE_MS)
+	let botToken: string
+	let replies: readonly ThreadReplyMessage[]
+	try {
+		// The resolve itself is deliberately NOT aborted at the deadline: it is a
+		// shared, de-duped, cached promise (maple.ts), so letting it finish in the
+		// background warms the workspace cache for the thread's next reply — we
+		// merely stop waiting for it here.
+		botToken = await withDeadline(deps.resolveBotToken({ teamId: candidate.teamId }), deadline)
+		replies = await withDeadline(
+			deps.fetchThreadReplies({
+				botToken,
+				channelId: candidate.channelId,
+				threadTs: candidate.threadTs,
+				// Bound the fetch to the recency horizon so the trailing window is
+				// computed over the true tail even for threads longer than one page.
+				oldest: String(candidate.eventTsSeconds - ENGAGEMENT_MAX_AGE_SECONDS),
+				latest: candidate.eventTs,
+				signal: deadline,
+			}),
+			deadline,
+		)
+	} catch (error) {
+		// Deadline expiry is an expected cold-cache outcome, not a failure: fall
+		// through unpromoted (nothing cached — the next reply retries, warmer).
+		if (deadline.aborted) return false
+		throw error
+	}
 
 	const engagedAtSeconds = latestEngagementSeconds(replies, candidate)
 
@@ -237,6 +281,33 @@ async function isBotEngagedInThread(
 		expiresAt: Date.now() + (engagedAtSeconds === null ? NOT_ENGAGED_TTL_MS : ENGAGED_TTL_MS),
 	})
 	return isEngagementRecent(engagedAtSeconds, candidate)
+}
+
+/**
+ * Resolves/rejects with `promise`, but rejects as soon as `signal` aborts —
+ * even when the underlying work ignores the signal. The work itself is not
+ * cancelled; we just stop waiting for it.
+ */
+function withDeadline<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+	if (signal.aborted) return Promise.reject(abortReason(signal))
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(abortReason(signal))
+		signal.addEventListener("abort", onAbort, { once: true })
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort)
+				resolve(value)
+			},
+			(error: unknown) => {
+				signal.removeEventListener("abort", onAbort)
+				reject(error instanceof Error ? error : new Error(String(error)))
+			},
+		)
+	})
+}
+
+function abortReason(signal: AbortSignal): Error {
+	return signal.reason instanceof Error ? signal.reason : new Error("Promotion deadline expired.")
 }
 
 /**
@@ -272,19 +343,29 @@ function isEngagementRecent(engagedAtSeconds: number | null, candidate: FollowUp
 }
 
 /**
- * `conversations.replies` returns oldest-first, so the mention that started
- * the conversation and the bot's first reply land within the first page.
- * Slack rejects JSON for this method — form-encoded only.
+ * `conversations.replies` returns oldest-first and this fetches ONE page, so
+ * without bounds a thread past 100 replies would have its "trailing window"
+ * computed over the OLDEST page: fresh engagements invisible, stale ones
+ * passing the recency check. `oldest`/`latest` confine the page to the recency
+ * horizon ending at the incoming reply, which is the only slice the engagement
+ * logic can act on anyway. Slack rejects JSON for this method — form-encoded
+ * only.
  *
  * This runs INSIDE the webhook verifier, before eve returns its 200, so it
- * spends Slack's ~3s delivery budget. The timeout keeps a slow Slack API from
- * turning into a retry storm: on abort the caller (channels/slack.ts) logs and
- * passes the event through unpromoted.
+ * spends Slack's ~3s delivery budget. The caller's deadline signal keeps a
+ * slow Slack API from turning into a retry storm: on abort the event passes
+ * through unpromoted.
+ *
+ * Exported only for tests (the request-shape assertions); production reaches
+ * it through `defaultDeps`.
  */
-async function fetchThreadRepliesFromSlack(options: {
+export async function fetchThreadRepliesFromSlack(options: {
 	readonly botToken: string
 	readonly channelId: string
 	readonly threadTs: string
+	readonly oldest: string
+	readonly latest: string
+	readonly signal: AbortSignal
 }): Promise<readonly ThreadReplyMessage[]> {
 	const res = await fetch("https://slack.com/api/conversations.replies", {
 		method: "POST",
@@ -295,9 +376,14 @@ async function fetchThreadRepliesFromSlack(options: {
 		body: new URLSearchParams({
 			channel: options.channelId,
 			ts: options.threadTs,
+			oldest: options.oldest,
+			latest: options.latest,
+			// `latest` is the incoming reply's own ts; inclusive so it is not
+			// silently dropped from the window.
+			inclusive: "true",
 			limit: "100",
 		}),
-		signal: AbortSignal.timeout(THREAD_REPLIES_TIMEOUT_MS),
+		signal: options.signal,
 	})
 	if (!res.ok) {
 		throw new Error(`Slack conversations.replies failed: HTTP ${res.status}`)

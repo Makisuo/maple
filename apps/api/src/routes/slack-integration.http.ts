@@ -1,9 +1,13 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { Clock, Effect, Option, Redacted, Schema } from "effect"
-import { createHmac, timingSafeEqual } from "node:crypto"
-import { SlackBotResolutionResponseSchema, type IntegrationsPersistenceError } from "@maple/domain/http"
+import { Effect, Option, Redacted, Schema } from "effect"
+import { timingSafeEqual } from "node:crypto"
+import { SlackBotResolutionResponseSchema } from "@maple/domain/http"
 import { Env } from "../lib/Env"
-import { SlackIntegrationService, SLACK_CALLBACK_PATH } from "../services/SlackIntegrationService"
+import {
+	SlackIntegrationService,
+	SLACK_CALLBACK_PATH,
+	type SlackRevocationReason,
+} from "../services/SlackIntegrationService"
 
 const INTERNAL_SERVICE_PREFIX = "maple_svc_"
 
@@ -207,143 +211,84 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 			)
 		})
 
-		yield* router.add("GET", "/internal/slack/workspaces/:teamId", handle)
-	}),
-)
+		// ---------------------------------------------------------------------
+		// Revoke-by-team-id — the reverse direction of `uninstall`: a workspace
+		// admin removes the app (or revokes its tokens) from Slack's own "Manage
+		// Apps" UI instead of Maple's dashboard.
+		//
+		// Slack only allows ONE Events API Request URL per app, and it is already
+		// pointed at the Railway-hosted bot (apps/slack-agent), which owns Slack
+		// signature verification there (its own `SLACK_SIGNING_SECRET` /
+		// `webhookVerifier`). So this endpoint does NOT receive Slack traffic
+		// directly — the bot detects `app_uninstalled` / `tokens_revoked` in its
+		// webhook handler and calls this internal endpoint, authenticated the
+		// same way as the resolve endpoint above (dedicated bearer, no fallback
+		// to the shared `INTERNAL_SERVICE_TOKEN`).
+		//
+		// `SlackIntegrationService.reconcileWorkspaces` (driven by the API
+		// worker's cron) is the backstop for a call the bot never made — a crash
+		// mid-processing, a network blip to Maple, or an installation that
+		// predates this wiring.
+		// ---------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Slack Events API receiver — the reverse direction of `uninstall`: a
-// workspace admin removes the app (or revokes its tokens) from Slack's own
-// "Manage Apps" UI instead of Maple's dashboard. Subscribe this URL to the
-// app_uninstalled and tokens_revoked bot events on the Slack app's Event
-// Subscriptions page. `SlackIntegrationService.reconcileWorkspaces` (driven by
-// the API worker's cron) is the backstop for deliveries that never arrive.
-// ---------------------------------------------------------------------------
+		const decodeRevokeBody = Schema.decodeUnknownOption(
+			Schema.Struct({ reason: Schema.Literals(["app_uninstalled", "tokens_revoked"]) }),
+		)
 
-export const SLACK_EVENTS_PATH = "/api/integrations/slack/events"
-
-const SLACK_SIGNATURE_VERSION = "v0"
-/** Slack's own recommendation: reject requests whose timestamp has drifted this far (replay protection). */
-const SLACK_TIMESTAMP_TOLERANCE_SECONDS = 5 * 60
-
-/**
- * Verify `X-Slack-Signature` / `X-Slack-Request-Timestamp` against the raw
- * body: HMAC-SHA256 hex of `v0:{timestamp}:{rawBody}`, keyed by the app's
- * signing secret. https://api.slack.com/authentication/verifying-requests-from-slack
- */
-const isValidSlackSignature = (
-	rawBody: string,
-	timestampHeader: string | undefined,
-	signatureHeader: string | undefined,
-	signingSecret: string,
-	nowSeconds: number,
-): boolean => {
-	if (!timestampHeader || !signatureHeader) return false
-	const timestamp = Number(timestampHeader)
-	if (!Number.isFinite(timestamp)) return false
-	if (Math.abs(nowSeconds - timestamp) > SLACK_TIMESTAMP_TOLERANCE_SECONDS) return false
-	const expected = `${SLACK_SIGNATURE_VERSION}=${createHmac("sha256", signingSecret)
-		.update(`${SLACK_SIGNATURE_VERSION}:${timestampHeader}:${rawBody}`, "utf8")
-		.digest("hex")}`
-	const provided = Buffer.from(signatureHeader, "utf8")
-	const expectedBuf = Buffer.from(expected, "utf8")
-	return provided.length === expectedBuf.length && timingSafeEqual(provided, expectedBuf)
-}
-
-/**
- * Loose envelope for Slack's Events API POST body — only the fields this
- * handler acts on. Unlisted keys (token, api_app_id, event_id, event_time, …)
- * decode through untouched.
- */
-const SlackEventEnvelope = Schema.Struct({
-	type: Schema.String,
-	challenge: Schema.optionalKey(Schema.String),
-	team_id: Schema.optionalKey(Schema.String),
-	event: Schema.optionalKey(Schema.Struct({ type: Schema.String })),
-})
-const decodeSlackEventEnvelope = Schema.decodeUnknownOption(Schema.fromJsonString(SlackEventEnvelope))
-
-/** Narrows a raw Slack event `type` string to the two we act on, or `undefined`. */
-const asRevocationEventType = (eventType: string): "app_uninstalled" | "tokens_revoked" | undefined =>
-	eventType === "app_uninstalled" || eventType === "tokens_revoked" ? eventType : undefined
-
-export const SlackEventsRouter = HttpRouter.use((router) =>
-	Effect.gen(function* () {
-		const slack = yield* SlackIntegrationService
-		const env = yield* Env
-
-		const handle = Effect.fn("SlackEvents.receive")(function* (req: HttpServerRequest.HttpServerRequest) {
-			const signingSecret = Option.match(env.SLACK_SIGNING_SECRET, {
-				onNone: () => undefined,
-				onSome: Redacted.value,
-			})
-			if (!signingSecret) {
-				yield* Effect.logWarning("Slack event rejected: SLACK_SIGNING_SECRET is not configured")
-				return errorText("Slack events are not configured", 503)
+		const handleRevoke = Effect.fn("SlackInternal.revoke")(function* (
+			req: HttpServerRequest.HttpServerRequest,
+		) {
+			if (!internalToken) {
+				yield* logAccess(undefined, "unauthorized", 401)
+				return errorText("Slack internal service token is not configured", 401)
 			}
+			if (!isValidServiceBearer(req.headers.authorization, internalToken)) {
+				yield* logAccess(undefined, "unauthorized", 401)
+				return errorText("Unauthorized", 401)
+			}
+
+			const params = yield* HttpRouter.params
+			const teamIdOption = decodeTeamIdParam(
+				typeof params.teamId === "string"
+					? Option.getOrUndefined(decodeUriComponentOption(params.teamId))
+					: undefined,
+			)
+			if (Option.isNone(teamIdOption)) {
+				yield* logAccess(undefined, "invalid", 400)
+				return errorText("Missing teamId", 400)
+			}
+			const teamId = teamIdOption.value
 
 			const bodyOption = yield* req.text.pipe(Effect.option)
-			if (Option.isNone(bodyOption) || bodyOption.value.length === 0) {
-				return errorText("Missing request body", 400)
+			const reasonOption = Option.flatMap(bodyOption, (body) =>
+				Option.liftThrowable(() => JSON.parse(body))().pipe(Option.flatMap(decodeRevokeBody)),
+			)
+			if (Option.isNone(reasonOption)) {
+				yield* logAccess(teamId, "invalid", 400)
+				return errorText('Body must be JSON: { "reason": "app_uninstalled" | "tokens_revoked" }', 400)
 			}
-			const rawBody = bodyOption.value
-			const headers = req.headers as Record<string, string | undefined>
-			const nowMs = yield* Clock.currentTimeMillis
-			if (
-				!isValidSlackSignature(
-					rawBody,
-					headers["x-slack-request-timestamp"],
-					headers["x-slack-signature"],
-					signingSecret,
-					Math.floor(nowMs / 1000),
-				)
-			) {
-				yield* Effect.logWarning("Slack event rejected: signature verification failed")
-				return errorText("Invalid signature", 401)
-			}
+			const reason: SlackRevocationReason = reasonOption.value.reason
 
-			const envelopeOption = decodeSlackEventEnvelope(rawBody)
-			if (Option.isNone(envelopeOption)) {
-				return errorText("Malformed event payload", 400)
-			}
-			const envelope = envelopeOption.value
-
-			// Slack's one-time handshake when the Request URL is first saved/changed.
-			if (envelope.type === "url_verification") {
-				return envelope.challenge
-					? HttpServerResponse.text(envelope.challenge)
-					: errorText("Missing challenge", 400)
-			}
-
-			const revocationEventType =
-				envelope.type === "event_callback" && envelope.event
-					? asRevocationEventType(envelope.event.type)
-					: undefined
-			const teamId = envelope.team_id
-
-			const process: Effect.Effect<void, IntegrationsPersistenceError> =
-				revocationEventType && teamId
-					? slack.revokeByTeamId(teamId, revocationEventType).pipe(Effect.asVoid)
-					: Effect.void
-
-			return yield* process.pipe(
-				Effect.tapError((error) =>
-					Effect.logError("Slack event-driven revoke failed", {
-						teamId,
-						eventType: revocationEventType,
-						message: error.message,
-					}),
+			return yield* slack.revokeByTeamId(teamId, reason).pipe(
+				Effect.flatMap((result) =>
+					logAccess(teamId, result.revoked ? "found" : "not-found", 200).pipe(
+						Effect.andThen(HttpServerResponse.json({ revoked: result.revoked })),
+					),
 				),
-				// Slack retries a non-2xx delivery — surface a persistence failure as
-				// 500 so a transient DB blip gets retried instead of silently dropped.
-				// Every other outcome (including "nothing to do") acks with 200.
-				Effect.match({
-					onFailure: () => errorText("failed to process event", 500),
-					onSuccess: () => HttpServerResponse.text("ok"),
-				}),
+				Effect.catchTag("@maple/http/errors/IntegrationsPersistenceError", (error) =>
+					Effect.logError("Slack internal revoke failed", {
+						teamId,
+						reason,
+						message: error.message,
+					}).pipe(
+						Effect.andThen(logAccess(teamId, "unavailable", 503)),
+						Effect.as(errorText("Slack workspace revoke unavailable", 503)),
+					),
+				),
 			)
 		})
 
-		yield* router.add("POST", SLACK_EVENTS_PATH, handle)
+		yield* router.add("GET", "/internal/slack/workspaces/:teamId", handle)
+		yield* router.add("POST", "/internal/slack/workspaces/:teamId/revoke", handleRevoke)
 	}),
 )

@@ -92,9 +92,9 @@ const make: Effect.Effect<SlackBotTokenResolverShape, SlackBotTokenConfigError, 
 				new SlackBotTokenConfigError({ message: `MAPLE_INGEST_KEY_ENCRYPTION_KEY: ${message}` }),
 		)
 
-		return {
+		return SlackBotTokenResolver.of({
 			resolve: (orgId) => resolveSlackBotTokenForDispatch(database, encryptionKey, orgId),
-		}
+		})
 	},
 )
 

@@ -31,6 +31,8 @@ export interface TtlCache<V extends TtlCacheEntry> {
 	/** The live entry for `key`, or undefined when absent or expired. */
 	get(key: string): V | undefined
 	set(key: string, entry: V): void
+	/** Drops one entry immediately, ahead of its TTL (e.g. an external revoke). */
+	delete(key: string): void
 	/** Drops every entry and stops the background sweep. */
 	clear(): void
 	/** Entry count including any not-yet-swept expired ones (tests/diagnostics). */
@@ -95,6 +97,10 @@ export function createTtlCache<V extends TtlCacheEntry>(options: {
 			}
 			entries.set(key, entry)
 			startTimer()
+		},
+
+		delete(key) {
+			entries.delete(key)
 		},
 
 		clear() {

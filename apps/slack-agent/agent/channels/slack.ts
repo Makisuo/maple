@@ -2,6 +2,7 @@ import { slackChannel } from "eve/channels/slack"
 import type { SlackWebhookVerifier } from "eve/channels/slack"
 import { resolveBotToken, verifySlackV0Signature, type SlackTokenContext } from "#lib/maple.js"
 import { promoteThreadFollowUp } from "#lib/thread-follow-up.js"
+import { forwardUninstallEvent } from "#lib/uninstall-detection.js"
 
 /**
  * Multi-workspace, self-managed Slack app — no Vercel Connect.
@@ -34,6 +35,12 @@ const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
 		)
 		return false
 	}
+
+	// app_uninstalled / tokens_revoked: eve only dispatches app_mention + DM
+	// events downstream, so it would otherwise drop these as "unsupported".
+	// Fired without awaiting — it must never delay this webhook's ack, and it
+	// never throws (see forwardUninstallEvent).
+	void forwardUninstallEvent(body)
 
 	// eve parses whatever body we return, which is also our hook for thread
 	// follow-ups: eve only dispatches app_mention + DM events, so an un-mentioned

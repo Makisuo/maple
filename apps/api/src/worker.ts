@@ -353,9 +353,10 @@ const handleQueue = async (
 // Retention is hourly rather than 12-hourly because a busy target can write
 // ~75k check rows a day, so the 10k-row cap binds within a few hours.
 const SCRAPE_RETENTION_CRON = "0 * * * *"
-// Backstop for SlackEventsRouter's app_uninstalled/tokens_revoked webhook —
-// doesn't need to be tight, it only catches deliveries Slack gave up
-// retrying (or installs that predate the webhook).
+// Backstop for the Railway bot's app_uninstalled/tokens_revoked detection
+// (apps/slack-agent → POST /internal/slack/workspaces/:teamId/revoke) —
+// doesn't need to be tight, it only catches a forward call the bot never
+// made (crash, network blip) or installs that predate that wiring.
 const SLACK_RECONCILE_CRON = "0 */6 * * *"
 
 const handleScheduled = async (

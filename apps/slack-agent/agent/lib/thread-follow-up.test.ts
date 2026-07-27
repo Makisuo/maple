@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test"
+import { installFetchStub } from "./fetch-stub.js"
 import {
+	fetchThreadRepliesFromSlack,
 	promoteThreadFollowUp,
 	resetThreadEngagementCacheForTests,
 	type ThreadFollowUpDeps,
@@ -246,6 +248,89 @@ describe("pass-through", () => {
 		const { deps } = makeDeps(ENGAGED_THREAD)
 		const body = JSON.stringify({ type: "url_verification", challenge: "x" })
 		expect(await promoteThreadFollowUp(body, deps)).toBeNull()
+	})
+})
+
+// ── fetch bounds ────────────────────────────────────────────────────────────
+
+// `conversations.replies` returns the OLDEST page first. Without oldest/latest
+// bounds, a thread past 100 replies has its "trailing window" computed over the
+// oldest page: fresh engagements invisible, stale ones passing recency.
+
+describe("thread fetch bounds", () => {
+	test("the fetch is bounded to the recency horizon ending at the reply", async () => {
+		let received: Parameters<ThreadFollowUpDeps["fetchThreadReplies"]>[0] | undefined
+		const deps: ThreadFollowUpDeps = {
+			resolveBotToken: async () => "xoxb-test",
+			fetchThreadReplies: async (options) => {
+				received = options
+				return ENGAGED_THREAD
+			},
+		}
+		expect(await promoteThreadFollowUp(envelope({}), deps)).not.toBeNull()
+		// 30 minutes (ENGAGEMENT_MAX_AGE_SECONDS) before the incoming reply's ts.
+		expect(received?.oldest).toBe(String(Number("1700000002.000200") - 30 * 60))
+		expect(received?.latest).toBe("1700000002.000200")
+		expect(received?.signal).toBeInstanceOf(AbortSignal)
+	})
+
+	test("the Slack request itself carries oldest/latest/inclusive", async () => {
+		const stub = installFetchStub(() => Response.json({ ok: true, messages: [] }))
+		try {
+			await fetchThreadRepliesFromSlack({
+				botToken: "xoxb-test",
+				channelId: "C123",
+				threadTs: "1700000000.000100",
+				oldest: "1699998202.0002",
+				latest: "1700000002.000200",
+				signal: AbortSignal.timeout(1_000),
+			})
+			expect(stub.calls.length).toBe(1)
+			const params = new URLSearchParams(String(stub.calls[0]?.body))
+			expect(params.get("channel")).toBe("C123")
+			expect(params.get("ts")).toBe("1700000000.000100")
+			expect(params.get("oldest")).toBe("1699998202.0002")
+			expect(params.get("latest")).toBe("1700000002.000200")
+			expect(params.get("inclusive")).toBe("true")
+		} finally {
+			stub.restore()
+		}
+	})
+})
+
+// ── promotion deadline ──────────────────────────────────────────────────────
+
+// The whole promotion side-trip (workspace resolve + thread fetch) shares one
+// deadline inside Slack's ~3s webhook budget; expiry falls through unpromoted.
+
+describe("promotion deadline", () => {
+	test("a slow workspace resolve falls through unpromoted at the deadline", async () => {
+		let fetchCalls = 0
+		const deps: ThreadFollowUpDeps = {
+			resolveBotToken: () =>
+				new Promise((resolve) => setTimeout(() => resolve("xoxb-test"), 200)),
+			fetchThreadReplies: async () => {
+				fetchCalls += 1
+				return ENGAGED_THREAD
+			},
+			promotionDeadlineMs: 20,
+		}
+		expect(await promoteThreadFollowUp(envelope({}), deps)).toBeNull()
+		expect(fetchCalls).toBe(0)
+
+		// Expiry cached nothing: the thread's next reply retries and promotes.
+		const { deps: freshDeps } = makeDeps(ENGAGED_THREAD)
+		expect(await promoteThreadFollowUp(envelope({}), freshDeps)).not.toBeNull()
+	})
+
+	test("a slow thread fetch falls through unpromoted at the deadline", async () => {
+		const deps: ThreadFollowUpDeps = {
+			resolveBotToken: async () => "xoxb-test",
+			fetchThreadReplies: () =>
+				new Promise((resolve) => setTimeout(() => resolve(ENGAGED_THREAD), 200)),
+			promotionDeadlineMs: 20,
+		}
+		expect(await promoteThreadFollowUp(envelope({}), deps)).toBeNull()
 	})
 })
 

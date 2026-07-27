@@ -53,13 +53,6 @@ export interface EnvShape {
 	 * The endpoint answers 401 while this is unset.
 	 */
 	readonly SLACK_INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
-	/**
-	 * Slack app's "Signing Secret" (Basic Information → App Credentials), used to
-	 * verify inbound Events API deliveries to `POST /api/integrations/slack/events`
-	 * (`SlackEventsRouter`). Optional like the OAuth pair above — the endpoint
-	 * answers 503 while this is unset.
-	 */
-	readonly SLACK_SIGNING_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly GITHUB_APP_ID: Option.Option<string>
 	readonly GITHUB_APP_SLUG: Option.Option<string>
 	readonly GITHUB_APP_PRIVATE_KEY: Option.Option<Redacted.Redacted<string>>
@@ -145,7 +138,6 @@ const envConfig = Config.all({
 	SLACK_CLIENT_ID: optionalString("SLACK_CLIENT_ID"),
 	SLACK_CLIENT_SECRET: optionalRedacted("SLACK_CLIENT_SECRET"),
 	SLACK_INTERNAL_SERVICE_TOKEN: optionalRedacted("SLACK_INTERNAL_SERVICE_TOKEN"),
-	SLACK_SIGNING_SECRET: optionalRedacted("SLACK_SIGNING_SECRET"),
 	GITHUB_APP_ID: optionalString("GITHUB_APP_ID"),
 	GITHUB_APP_SLUG: optionalString("GITHUB_APP_SLUG"),
 	GITHUB_APP_PRIVATE_KEY: optionalRedacted("GITHUB_APP_PRIVATE_KEY"),

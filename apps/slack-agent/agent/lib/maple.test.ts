@@ -10,6 +10,7 @@ delete process.env.SLACK_BOT_TOKEN
 
 import { installFetchStub } from "./fetch-stub.js"
 import {
+	notifyMapleRevocation,
 	resetWorkspaceCacheForTests,
 	resolveBotToken,
 	resolveWorkspace,
@@ -238,6 +239,74 @@ describe("resolveWorkspace", () => {
 	test("rejects incomplete resolve payloads", async () => {
 		installFetchStub(() => Response.json({ orgId: "org_1" }))
 		await expect(resolveWorkspace("T1")).rejects.toThrow(/incomplete payload/)
+	})
+
+	// Truthiness alone would let a wrongly-typed field flow into
+	// `Bearer ${...}` headers as "[object Object]" and fail far from here.
+	test("rejects payloads whose fields are not strings", async () => {
+		installFetchStub(() =>
+			Response.json({
+				...WORKSPACE_PAYLOAD,
+				botToken: { ciphertext: "xoxb-wrapped" },
+			}),
+		)
+		await expect(resolveWorkspace("T1")).rejects.toThrow(/incomplete payload/)
+
+		resetWorkspaceCacheForTests()
+		installFetchStub(() => Response.json({ ...WORKSPACE_PAYLOAD, orgId: 42 }))
+		await expect(resolveWorkspace("T1")).rejects.toThrow(/incomplete payload/)
+	})
+
+	test("non-string teamName/teamId fall back instead of poisoning the entry", async () => {
+		installFetchStub(() => Response.json({ ...WORKSPACE_PAYLOAD, teamId: 7, teamName: { x: 1 } }))
+		expect(await resolveWorkspace("T1")).toEqual({ ...WORKSPACE_PAYLOAD, teamId: "T1", teamName: null })
+	})
+})
+
+// ── notifyMapleRevocation: forwards app_uninstalled/tokens_revoked ─────────
+
+describe("notifyMapleRevocation", () => {
+	beforeEach(() => {
+		resetWorkspaceCacheForTests()
+	})
+
+	afterEach(() => {
+		globalThis.fetch = realFetch
+	})
+
+	test("POSTs the reason to the revoke endpoint with the internal bearer", async () => {
+		const stub = installFetchStub(() => new Response(null, { status: 200 }))
+
+		await notifyMapleRevocation("T1", "app_uninstalled")
+
+		expect(stub.calls.length).toBe(1)
+		expect(stub.calls[0]?.method).toBe("POST")
+		expect(stub.calls[0]?.url).toBe("https://maple-api.test/internal/slack/workspaces/T1/revoke")
+		expect(stub.calls[0]?.headers.authorization).toBe("Bearer maple_svc_test-service-token")
+		expect(JSON.parse(String(stub.calls[0]?.body))).toEqual({ reason: "app_uninstalled" })
+	})
+
+	test("evicts the cached resolveWorkspace entry for the team", async () => {
+		const resolveStub = installFetchStub(() => Response.json(WORKSPACE_PAYLOAD))
+		await resolveWorkspace("T1")
+		expect(workspaceCacheSizeForTests()).toBe(1)
+		expect(resolveStub.calls.length).toBe(1)
+
+		resolveStub.respond = () => new Response(null, { status: 200 })
+		await notifyMapleRevocation("T1", "tokens_revoked")
+		expect(workspaceCacheSizeForTests()).toBe(0)
+
+		// A subsequent resolve is a cache miss — it refetches instead of serving
+		// the now-stale positive entry.
+		resolveStub.respond = (url) =>
+			url.endsWith("/revoke") ? new Response(null, { status: 200 }) : Response.json(WORKSPACE_PAYLOAD)
+		await resolveWorkspace("T1")
+		expect(resolveStub.calls.length).toBe(3)
+	})
+
+	test("throws on a non-ok response", async () => {
+		installFetchStub(() => new Response(null, { status: 503 }))
+		await expect(notifyMapleRevocation("T1", "app_uninstalled")).rejects.toThrow(/HTTP 503/)
 	})
 })
 

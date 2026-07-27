@@ -39,8 +39,10 @@ const inputSchema = z.object({
 		.describe("Unit of the values; drives axis and label formatting."),
 	// Not z.tuple(): tuples serialize to the draft-07 `items: [..]` array form,
 	// which Workers AI rejects as an invalid 2020-12 tool schema.
+	// .finite() because bare z.number() admits Infinity/-Infinity, which turn
+	// into NaN SVG coordinates downstream.
 	points: z
-		.array(z.array(z.number()).length(2))
+		.array(z.array(z.number().finite()).length(2))
 		.min(1)
 		.max(500)
 		.describe(
