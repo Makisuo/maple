@@ -3,8 +3,9 @@ import { Card } from "@maple/ui/components/ui/card"
 import type { AiTriageResult } from "@maple/domain/http"
 import { PulseIcon } from "@/components/icons"
 
-const CONFIDENCE_TONE: Record<string, string> = {
-	high: "text-severity-ok",
+/** Shared with the investigation rail so the card and the rail never disagree. */
+export const CONFIDENCE_TONE: Record<string, string> = {
+	high: "text-success",
 	medium: "text-severity-warn",
 	low: "text-muted-foreground",
 }

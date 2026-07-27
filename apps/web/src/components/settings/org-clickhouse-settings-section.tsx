@@ -436,7 +436,7 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 													{entry.status === "up_to_date" ? (
 														<CircleCheckIcon
 															size={14}
-															className="text-severity-ok shrink-0"
+															className="text-success shrink-0"
 														/>
 													) : entry.status === "missing" ? (
 														<CircleXmarkIcon

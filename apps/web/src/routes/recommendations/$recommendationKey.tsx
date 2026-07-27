@@ -38,6 +38,12 @@ import {
 	XmarkIcon,
 } from "@/components/icons"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { DetailRail } from "@/components/common/detail-rail"
+
+/** This rail runs a narrower label column than the shared default. */
+const Row = (props: Omit<React.ComponentProps<typeof DetailRail.Row>, "labelWidth">) => (
+	<DetailRail.Row labelWidth="64px" {...props} />
+)
 
 export const Route = createFileRoute("/recommendations/$recommendationKey")({
 	component: RecommendationDetailPage,
@@ -477,7 +483,7 @@ function DetailSidebar({
 
 	return (
 		<div className="flex h-full w-80 shrink-0 flex-col overflow-y-auto border-l bg-card/30">
-			<SidebarGroup label="Details">
+			<DetailRail.Group label="Details">
 				<Row label="Status">
 					<Badge variant={status.variant}>{status.label}</Badge>
 				</Row>
@@ -503,9 +509,9 @@ function DetailSidebar({
 						{issue.source_key}
 					</code>
 				</Row>
-			</SidebarGroup>
+			</DetailRail.Group>
 
-			<SidebarGroup label="How this resolves">
+			<DetailRail.Group label="How this resolves">
 				<ul className="flex flex-col gap-1.5 text-xs leading-relaxed text-muted-foreground">
 					{[
 						"the deprecated key stops appearing on your spans",
@@ -520,9 +526,9 @@ function DetailSidebar({
 						</li>
 					))}
 				</ul>
-			</SidebarGroup>
+			</DetailRail.Group>
 
-			<SidebarGroup label="Action">
+			<DetailRail.Group label="Action">
 				{isLive ? (
 					<div className="flex flex-col gap-3">
 						<p className="flex items-center gap-2 text-sm text-success">
@@ -573,7 +579,7 @@ function DetailSidebar({
 						</Button>
 					</div>
 				)}
-			</SidebarGroup>
+			</DetailRail.Group>
 		</div>
 	)
 }
@@ -667,22 +673,4 @@ function SectionHeader({ label }: { label: string }) {
 	)
 }
 
-function SidebarGroup({ label, children }: { label: string; children: React.ReactNode }) {
-	return (
-		<section className="flex flex-col gap-2 border-b border-border/40 p-4 last:border-b-0">
-			<h3 className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-				{label}
-			</h3>
-			<div className="flex flex-col gap-1">{children}</div>
-		</section>
-	)
-}
 
-function Row({ label, title, children }: { label: string; title?: string; children: React.ReactNode }) {
-	return (
-		<div title={title} className="grid min-h-8 grid-cols-[64px_1fr] items-center gap-x-3 py-0.5">
-			<span className="text-xs text-muted-foreground">{label}</span>
-			<div className="flex min-w-0 items-center justify-end">{children}</div>
-		</div>
-	)
-}

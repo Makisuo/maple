@@ -12,7 +12,7 @@ type InvestigationStatus = V2Investigation["status"]
  */
 const STATUS: Record<InvestigationStatus, { label: string; tone: string }> = {
 	investigating: { label: "In progress", tone: "bg-primary/10 text-primary" },
-	diagnosed: { label: "Diagnosed", tone: "bg-severity-ok/10 text-severity-ok" },
+	diagnosed: { label: "Diagnosed", tone: "bg-success/10 text-success" },
 	resolved: { label: "Resolved", tone: "bg-muted text-muted-foreground" },
 	failed: { label: "Failed", tone: "bg-destructive/10 text-destructive" },
 }
