@@ -53,15 +53,16 @@ describe("bundled migrations", () => {
 		"alert_rules",
 		"alert_rule_states",
 		"alert_incidents",
-		"error_issues",
-		"actors",
-		"error_incidents",
 		// Wave 1 (0011_electric_publication_wave1)
 		"alert_destinations",
-		"scrape_target_checks",
 		// API-key live reads (0014_electric_publication_api_keys)
 		"api_keys",
 	]
+
+	// Published by 0009/0011, then pruned by 0022 once their client collections were
+	// removed. Asserted explicitly so re-adding a table to the publication without a
+	// consumer (or a prune migration that silently no-ops) fails here.
+	const UNSYNCED_TABLES = ["error_issues", "actors", "error_incidents", "scrape_target_checks"]
 
 	it("apply cleanly and create the Electric publication with REPLICA IDENTITY FULL", async () => {
 		const pg = new PGlite()
@@ -83,6 +84,17 @@ describe("bundled migrations", () => {
 		)
 		for (const row of identities.rows) {
 			expect(row.relreplident, `${row.relname} replica identity`).toBe("f")
+		}
+
+		// 'd' = DEFAULT (primary key only). An unpublished table must not keep paying
+		// FULL's WAL cost — writing the whole old row on every UPDATE/DELETE.
+		const pruned = await pg.query<{ relname: string; relreplident: string }>(
+			`select relname, relreplident from pg_class where relname = any($1)`,
+			[UNSYNCED_TABLES],
+		)
+		expect(pruned.rows.map((r) => r.relname).sort()).toEqual([...UNSYNCED_TABLES].sort())
+		for (const row of pruned.rows) {
+			expect(row.relreplident, `${row.relname} replica identity`).toBe("d")
 		}
 	}, 30_000)
 })

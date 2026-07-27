@@ -45,6 +45,18 @@ export function boundsForRange(key: string | undefined): TimeBounds {
 	}
 }
 
+/** Compact relative-time label (`12s ago`, `4m ago`, `3h ago`, `2d ago`) from an epoch-ms instant. */
+export function formatRelativeMs(epochMs: number): string {
+	const deltaSec = Math.max(0, Math.round((Date.now() - epochMs) / 1000))
+	if (deltaSec < 60) return `${deltaSec}s ago`
+	const min = Math.round(deltaSec / 60)
+	if (min < 60) return `${min}m ago`
+	const hr = Math.round(min / 60)
+	if (hr < 24) return `${hr}h ago`
+	const day = Math.round(hr / 24)
+	return `${day}d ago`
+}
+
 /**
  * Parse a chDB UTC datetime string (`'YYYY-MM-DD HH:MM:SS'`, no timezone
  * marker) to epoch-ms. Returns `null` for empty/invalid input or the zero date
@@ -57,7 +69,12 @@ export function parseClickHouseDateTime(chDateTime: string | null | undefined): 
 	return ms
 }
 
-// Relative-time formatting is shared: `formatRelativeFrom` for an epoch-ms
-// instant, `formatRelativeTime` for a chDB DateTime string (it normalizes the
-// tz-less shape itself). Re-exported so local views keep one import path.
-export { formatRelativeFrom, formatRelativeTime } from "@maple/ui/time-format"
+/**
+ * Compact relative-time label from a ClickHouse DateTime string. chDB emits UTC
+ * second-precision strings without a timezone marker, so we append `Z` before
+ * parsing.
+ */
+export function formatRelativeTime(chDateTime: string | null | undefined): string {
+	const ms = parseClickHouseDateTime(chDateTime)
+	return ms === null ? "—" : formatRelativeMs(ms)
+}

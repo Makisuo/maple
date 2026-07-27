@@ -23,7 +23,7 @@ import {
 } from "../hooks/use-local-session-detail"
 import { formatRelativeTime } from "../lib/time"
 import {
-	formatSessionDuration,
+	formatDuration as formatSessionDuration,
 	gradientFor,
 	hostFromUrl,
 	isMobileDevice,

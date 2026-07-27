@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
-import { formatBucketTick, stubBuckets, totalCount } from "./live-logs-volume-data"
-import { formatNumber } from "@maple/ui/format"
+import { formatBucketTick, formatNumber, stubBuckets, totalCount } from "./live-logs-volume-data"
 
 const SEVERITY_COLORS = {
 	INFO: "var(--severity-info)",

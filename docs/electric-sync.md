@@ -55,19 +55,26 @@ writes: endpoint captures the Postgres txid on the mutating statement
 
 ### Shapes (server-pinned whitelist, `apps/electric-sync/src/routes/shape.http.ts`)
 
-| shape | table | extra WHERE (besides org scope) |
+| shape | table | pinned columns / extra WHERE (besides org scope) |
 |---|---|---|
 | `dashboards` | dashboards | — |
 | `alert_rules` | alert_rules | — |
 | `alert_rule_states` | alert_rule_states | — |
 | `alert_incidents` | alert_incidents | — |
-| `error_issues` | error_issues | `"archived_at" IS NULL` |
-| `actors` | actors | — |
-| `open_error_incidents` | error_incidents | `"status" = 'open'` |
+| `alert_destinations` | alert_destinations | columns: drops the encrypted `secret_*` |
+| `api_keys` | api_keys | columns: drops `key_hash` / `metadata_json` |
 
 Shape `where`/columns are **immutable** — changing a pinned predicate forces a
 full re-sync for every client. If you must change one, version the shape name
-(e.g. `error_issues.v2`) so old clients keep working during a deploy overlap.
+(e.g. `dashboards.v2`) so old clients keep working during a deploy overlap.
+
+The whitelist and `electric_publication_default` must stay in step **both ways**:
+a shape over an unpublished table never receives changes (Electric runs with
+`ELECTRIC_MANUAL_TABLE_PUBLISHING=true` and will not publish one itself), and a
+published table with no shape is pure replication cost. `error_issues`, `actors`,
+`error_incidents` and `scrape_target_checks` were published for verticals that
+have since moved back to the typed `/v2` endpoints, and were pruned from both by
+`0022_electric_publication_prune`.
 
 ## Local development
 
@@ -114,17 +121,20 @@ docker exec maple-postgres-1 psql -U maple -d maple -c "SELECT pubname FROM pg_p
 If `electric_publication_default` is absent, apply the publication + `REPLICA IDENTITY
 FULL` directly (this is the body of `0009`; drizzle won't re-run it for you):
 
+Note this is the **current** membership (0009 + 0011 + 0014 minus the tables 0022
+pruned), not the literal body of `0009` — recreating it from 0009 alone would
+re-publish the four dead tables.
+
 ```bash
 docker exec -i maple-postgres-1 psql -U maple -d maple <<'SQL'
-ALTER TABLE "dashboards"        REPLICA IDENTITY FULL;
-ALTER TABLE "alert_rules"       REPLICA IDENTITY FULL;
-ALTER TABLE "alert_rule_states" REPLICA IDENTITY FULL;
-ALTER TABLE "alert_incidents"   REPLICA IDENTITY FULL;
-ALTER TABLE "error_issues"      REPLICA IDENTITY FULL;
-ALTER TABLE "actors"            REPLICA IDENTITY FULL;
-ALTER TABLE "error_incidents"   REPLICA IDENTITY FULL;
+ALTER TABLE "dashboards"         REPLICA IDENTITY FULL;
+ALTER TABLE "alert_rules"        REPLICA IDENTITY FULL;
+ALTER TABLE "alert_rule_states"  REPLICA IDENTITY FULL;
+ALTER TABLE "alert_incidents"    REPLICA IDENTITY FULL;
+ALTER TABLE "alert_destinations" REPLICA IDENTITY FULL;
+ALTER TABLE "api_keys"           REPLICA IDENTITY FULL;
 CREATE PUBLICATION electric_publication_default FOR TABLE
-  "dashboards","alert_rules","alert_rule_states","alert_incidents","error_issues","actors","error_incidents";
+  "dashboards","alert_rules","alert_rule_states","alert_incidents","alert_destinations","api_keys";
 SQL
 ```
 
@@ -189,16 +199,28 @@ green (and the worker 503s) until the token lands in Infisical.
 
 ## Adding a synced table later
 
-1. New guarded Drizzle migration: `ALTER PUBLICATION electric_publication_default ADD TABLE "<t>";`
-   plus `ALTER TABLE "<t>" REPLICA IDENTITY FULL;` (wrap in the same
-   `DO $$ … EXCEPTION … END $$` guard as `0009` so PGlite tests don't abort).
+1. New Drizzle migration: `ALTER PUBLICATION electric_publication_default ADD TABLE "<t>";`
+   plus `ALTER TABLE "<t>" REPLICA IDENTITY FULL;`. Prefer an explicit
+   `pg_publication_tables` existence check for idempotency (as in `0022`) over
+   `0009`'s `DO $$ … EXCEPTION WHEN OTHERS … END $$` guard — that guard swallows
+   real failures while drizzle still records the migration as applied.
 2. Add the shape to the whitelist in `apps/electric-sync/src/routes/shape.http.ts`.
 3. Add a collection under `apps/web/src/lib/collections/` via
    `createEffectCollection` (model on `dashboards.ts` for a write vertical, or
-   `alerts.ts`/`errors.ts` for a read-only one — an identity `Schema.Struct` row
-   schema that mirrors the table columns, plus a `timestamptz` parser normalizing
-   to ISO), register it in `org-collections.ts` (constructor + `cleanup()`), and
-   point the consumer read at the collection.
+   `alerts.ts` for a read-only one — an identity `Schema.Struct` row schema that
+   mirrors the table columns, plus a `timestamptz` parser normalizing to ISO),
+   register it in `org-collections.ts` (constructor + `cleanup()`), and point the
+   consumer read at the collection.
+4. Update `SYNCED_TABLES` in `packages/db/src/migrations.test.ts`.
+
+## Removing a synced table
+
+Reverse order, and do all of it — a half-removal is what left four dead tables on
+the slot. Drop the consumer + collection, drop the shape from the whitelist, then
+a migration that drops the table from the publication **and** resets
+`REPLICA IDENTITY DEFAULT` (FULL costs full-old-row WAL on every UPDATE/DELETE
+whether or not the table is published). Move the table from `SYNCED_TABLES` to
+`UNSYNCED_TABLES` in `migrations.test.ts`. See `0022_electric_publication_prune`.
 
 ## Status / remaining work
 
@@ -217,28 +239,31 @@ green (and the worker 503s) until the token lands in Infisical.
   refactored onto `createEffectCollection` + the `useDashboardStore` collection
   path, with writes migrated to `/v2/dashboards` and reconciled by returned txid;
   proven against a live Electric 1.6.2 instance locally.
-- **Alerts + error-issue read consumers (Phase 6):** `collections/alerts.ts` +
-  `collections/errors.ts` (read-only collections; client-side live-query joins
-  `alert_rules ⟕ alert_rule_states` and `error_issues ⟕ actors ⟕ open_error_incidents`);
-  `useAlertRulesList` / `useAlertIncidentsList` / `useErrorIssuesList` hooks read
-  from the collections (writes stay on the typed endpoints — the shape stream
+- **Alerts read consumers (Phase 6):** `collections/alerts.ts` (read-only
+  collections; client-side live-query join `alert_rules ⟕ alert_rule_states`);
+  `useAlertRulesList` / `useAlertIncidentsList` / `useAlertDestinationsList` hooks
+  read from the collections (writes stay on the typed endpoints — the shape stream
   delivers results). The row→document mappers mirror the server's
-  `rowToRuleDocument`/`rowToIssue`/`rowToActor` and are unit-tested
-  (`collections/alerts.test.ts`, `collections/errors.test.ts`).
+  `rowToRuleDocument`/`rowToDestinationDocument` and are unit-tested
+  (`collections/alerts.test.ts`). The parallel **errors** vertical
+  (`collections/errors.ts`, `error_issues ⟕ actors ⟕ open_error_incidents`) was
+  built and then reverted to the typed `/v2` reads; its tables were pruned from
+  the publication by `0022`.
+- **API keys:** `collections/api-keys.ts` behind a column-restricted shape.
 - **Self-heal:** a `collection:schema-error` listener in `org-collections.ts`
   recreates the org's collections (generation bump) so a post-deploy shape-schema
   drift re-fetches instead of getting stuck.
 
 **Remaining (follow-ups)**
 
-- **Live smoke of alerts + errors:** the mappers/joins/timestamps typecheck and
-  unit-test green, but the end-to-end sync for these two verticals still needs the
-  docker-Electric smoke (verify each list streams in scoped to the org and
-  updates live after a write) — same validation dashboards already passed.
-- **txid on the transition-composed error mutations** (`transitionIssue`,
-  `claimIssue`, `releaseIssue`): these compose `applyTransition` (multiple
-  `error_issues` writes), so they currently return no `txid` and clients drop
-  optimistic state on the next synced update instead of on the exact txn.
-- **Row-volume check** before enabling error-issue/alert-incident sync: confirm
-  per-org non-archived `error_issues` and `alert_incidents` counts are bounded; if
-  not, add an archival tick or keep terminal-state tabs on paged effect-atom reads.
+- **Live smoke of alerts:** the mappers/joins/timestamps typecheck and unit-test
+  green, but the end-to-end sync for this vertical still needs the docker-Electric
+  smoke (verify each list streams in scoped to the org and updates live after a
+  write) — same validation dashboards already passed.
+- **Row-volume check** before enabling any further list sync: confirm the per-org
+  row counts are bounded; if not, add an archival tick or keep terminal-state tabs
+  on paged effect-atom reads.
+- **`alert_rules` write churn:** the scheduler's claim-lock CAS writes
+  `alert_rules.last_scheduled_at` every minute per enabled rule, churning that
+  shape. The fix is write-side (move the claim lock off the synced table) — a
+  column-subset shape is not the answer.

@@ -10,7 +10,7 @@ import {
 } from "@maple/ui/components/toolbar"
 import { TIME_RANGES } from "../lib/time"
 
-export { Toolbar, ToolbarSearch, ToolbarStat, ToolbarStats } from "@maple/ui/components/toolbar"
+export { Toolbar, ToolbarSearch, ToolbarStat } from "@maple/ui/components/toolbar"
 
 /**
  * Manual reload for the active view. Every local hook keys off `["local", …]`,

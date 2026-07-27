@@ -53,6 +53,12 @@ export function totalCount(buckets: LogBucket[]): number {
 	return buckets.reduce((sum, b) => sum + b.INFO + b.DEBUG + b.WARN + b.ERROR, 0)
 }
 
+export function formatNumber(num: number): string {
+	if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
+	if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
+	return num.toLocaleString()
+}
+
 export function formatBucketTick(value: string): string {
 	const d = new Date(value)
 	if (Number.isNaN(d.getTime())) return value

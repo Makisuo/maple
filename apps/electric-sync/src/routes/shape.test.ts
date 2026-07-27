@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { buildUpstreamShapeUrl, isShapeName, shapeResponseHeaders } from "./shape.http"
+import { buildUpstreamShapeUrl, isShapeName, SHAPE_NAMES, shapeResponseHeaders } from "./shape.http"
 
 const parse = (raw: string) => {
 	const url = new URL(raw)
@@ -10,9 +10,13 @@ describe("isShapeName", () => {
 	it("accepts whitelisted shapes and rejects everything else", () => {
 		assert.isTrue(isShapeName("dashboards"))
 		assert.isTrue(isShapeName("alert_rules"))
-		assert.isTrue(isShapeName("error_issues"))
-		assert.isTrue(isShapeName("open_error_incidents"))
+		assert.isTrue(isShapeName("alert_destinations"))
 		assert.isTrue(isShapeName("api_keys"))
+		// Pruned from both the whitelist and the publication (0022) once their
+		// client collections were removed — they must not resolve as shapes.
+		assert.isFalse(isShapeName("error_issues"))
+		assert.isFalse(isShapeName("actors"))
+		assert.isFalse(isShapeName("open_error_incidents"))
 		assert.isFalse(isShapeName("scrape_target_checks"))
 		assert.isFalse(isShapeName("users"))
 		assert.isFalse(isShapeName("dashboards; drop table"))
@@ -38,12 +42,15 @@ describe("buildUpstreamShapeUrl", () => {
 		assert.strictEqual(params.get("params[1]"), "org_123")
 	})
 
-	it("appends the shape's extra WHERE with the org scope", () => {
-		const issues = parse(buildUpstreamShapeUrl({ ...base, shape: "error_issues" })).params
-		assert.strictEqual(issues.get("where"), `"org_id" = $1 AND "archived_at" IS NULL`)
-
-		const incidents = parse(buildUpstreamShapeUrl({ ...base, shape: "open_error_incidents" })).params
-		assert.strictEqual(incidents.get("where"), `"org_id" = $1 AND "status" = 'open'`)
+	it("org-scopes every whitelisted shape via the positional param", () => {
+		// The tenant boundary, asserted across the whole whitelist rather than one
+		// shape: a new entry can never ship without `"org_id" = $1` leading its WHERE
+		// (a shape's own `extraWhere` may only narrow it further, never replace it).
+		for (const shape of SHAPE_NAMES) {
+			const params = parse(buildUpstreamShapeUrl({ ...base, shape })).params
+			assert.match(params.get("where") ?? "", /^"org_id" = \$1(?: AND |$)/, shape)
+			assert.strictEqual(params.get("params[1]"), "org_123", shape)
+		}
 	})
 
 	it("forwards only the reserved cursor params from the client", () => {
