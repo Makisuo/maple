@@ -18,7 +18,14 @@ import {
 	FilterSidebarHeader,
 } from "@maple/ui/components/filters/filter-sidebar"
 import { PageShell } from "../components/page-shell"
-import { Toolbar, ToolbarSearch, ToolbarStat, TimeRangeSelect, RefreshButton } from "../components/toolbar"
+import {
+	Toolbar,
+	ToolbarSearch,
+	ToolbarStat,
+	ToolbarStats,
+	TimeRangeSelect,
+	RefreshButton,
+} from "../components/toolbar"
 import { EmptyState, ErrorState, ListSkeleton } from "../components/view-states"
 
 const ROW_HEIGHT = 36
@@ -92,22 +99,18 @@ export function LogsView() {
 	)
 
 	const toolbar = (
-		<Toolbar
-			search={
-				<ToolbarSearch
-					query={search ?? ""}
-					onSearch={(value) => setParams({ q: value ?? null })}
-					placeholder="Search log bodies…"
-				/>
-			}
-			stats={
-				<>
-					<ToolbarStat value={rows.length} label={hasNextPage ? "logs+" : "logs"} />
-					<RefreshButton />
-					<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
-				</>
-			}
-		/>
+		<Toolbar>
+			<ToolbarSearch
+				query={search ?? ""}
+				onSearch={(value) => setParams({ q: value ?? null })}
+				placeholder="Search log bodies…"
+			/>
+			<ToolbarStats>
+				<ToolbarStat value={rows.length} label={hasNextPage ? "logs+" : "logs"} />
+				<RefreshButton />
+				<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
+			</ToolbarStats>
+		</Toolbar>
 	)
 
 	return (

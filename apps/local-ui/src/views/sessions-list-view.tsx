@@ -14,12 +14,7 @@ import type { SessionReplaysListOutput } from "@maple/query-engine/ch"
 import { useLocalSessions, useLocalSessionFacets } from "../hooks/use-local-sessions"
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE, formatRelativeTime } from "../lib/time"
-import {
-	formatDuration as formatSessionDuration,
-	gradientFor,
-	hostFromUrl,
-	isMobileDevice,
-} from "@maple/ui/lib/replay-format"
+import { formatSessionDuration, gradientFor, hostFromUrl, isMobileDevice } from "@maple/ui/lib/replay-format"
 import {
 	FilterSection,
 	SearchableFilterSection,
@@ -32,7 +27,14 @@ import {
 	FilterSidebarHeader,
 } from "@maple/ui/components/filters/filter-sidebar"
 import { PageShell } from "../components/page-shell"
-import { Toolbar, ToolbarSearch, ToolbarStat, TimeRangeSelect, RefreshButton } from "../components/toolbar"
+import {
+	Toolbar,
+	ToolbarSearch,
+	ToolbarStat,
+	ToolbarStats,
+	TimeRangeSelect,
+	RefreshButton,
+} from "../components/toolbar"
 import { EmptyState, ErrorState, ListSkeleton } from "../components/view-states"
 
 interface SessionsListViewProps {
@@ -101,28 +103,24 @@ export function SessionsListView({ onSelectSession }: SessionsListViewProps) {
 	)
 
 	const toolbar = (
-		<Toolbar
-			search={
-				<ToolbarSearch
-					query={search ?? ""}
-					onSearch={(value) => setParams({ q: value ?? null })}
-					placeholder="Search by URL…"
+		<Toolbar>
+			<ToolbarSearch
+				query={search ?? ""}
+				onSearch={(value) => setParams({ q: value ?? null })}
+				placeholder="Search by URL…"
+			/>
+			<ToolbarStats>
+				<ToolbarStat value={sessions.length} label={hasNextPage ? "sessions+" : "sessions"} />
+				<ToolbarStat
+					value={sessions.filter((s) => s.status === "active").length}
+					label="active"
+					dot
 				/>
-			}
-			stats={
-				<>
-					<ToolbarStat value={sessions.length} label={hasNextPage ? "sessions+" : "sessions"} />
-					<ToolbarStat
-						value={sessions.filter((s) => s.status === "active").length}
-						label="active"
-						dot
-					/>
-					<ToolbarStat value={facetData?.errorCount ?? 0} label="with errors" danger />
-					<RefreshButton />
-					<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
-				</>
-			}
-		/>
+				<ToolbarStat value={facetData?.errorCount ?? 0} label="with errors" danger />
+				<RefreshButton />
+				<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
+			</ToolbarStats>
+		</Toolbar>
 	)
 
 	return (

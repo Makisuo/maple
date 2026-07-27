@@ -23,7 +23,14 @@ import {
 } from "@maple/ui/components/filters/filter-sidebar"
 import { PageShell } from "../components/page-shell"
 import { parseAttributes } from "@maple/ui/lib/span-tree"
-import { Toolbar, ToolbarSearch, ToolbarStat, TimeRangeSelect, RefreshButton } from "../components/toolbar"
+import {
+	Toolbar,
+	ToolbarSearch,
+	ToolbarStat,
+	ToolbarStats,
+	TimeRangeSelect,
+	RefreshButton,
+} from "../components/toolbar"
 import { EmptyState, ErrorState, ListSkeleton } from "../components/view-states"
 
 interface TraceListViewProps {
@@ -153,22 +160,18 @@ export function TraceListView({ onSelectTrace }: TraceListViewProps) {
 	)
 
 	const toolbar = (
-		<Toolbar
-			search={
-				<ToolbarSearch
-					query={search ?? ""}
-					onSearch={(value) => setParams({ q: value ?? null })}
-					placeholder="Filter by span name…"
-				/>
-			}
-			stats={
-				<>
-					<ToolbarStat value={rows.length} label={hasNextPage ? "traces+" : "traces"} />
-					<RefreshButton />
-					<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
-				</>
-			}
-		/>
+		<Toolbar>
+			<ToolbarSearch
+				query={search ?? ""}
+				onSearch={(value) => setParams({ q: value ?? null })}
+				placeholder="Filter by span name…"
+			/>
+			<ToolbarStats>
+				<ToolbarStat value={rows.length} label={hasNextPage ? "traces+" : "traces"} />
+				<RefreshButton />
+				<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
+			</ToolbarStats>
+		</Toolbar>
 	)
 
 	return (
