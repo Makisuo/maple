@@ -1,12 +1,8 @@
 import { useMemo, useState } from "react"
-import { Link } from "@tanstack/react-router"
 import { Exit } from "effect"
-import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { useAtomSet } from "@/lib/effect-atom"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import type { IssueSeverity } from "@maple/domain/http"
-import { Button } from "@maple/ui/components/ui/button"
-import { Card } from "@maple/ui/components/ui/card"
-import { Separator } from "@maple/ui/components/ui/separator"
 import { toast } from "sonner"
 
 import { ChatConversation } from "@/components/chat/chat-conversation"
@@ -14,14 +10,9 @@ import { FlueClientProvider } from "@/components/chat/flue-client-provider"
 import type { InvestigationContext } from "@/components/chat/investigation-context"
 import { SeverityBadge } from "@/components/errors/severity-badge"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { formatRelativeTime } from "@maple/ui/time-format"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import {
-	InvestigationStatusBadge,
-	investigationKindLabel,
-	investigationOriginLabel,
-} from "./investigation-status"
+import { InvestigationRail } from "./investigation-rail"
+import { InvestigationStatusBadge, investigationKindLabel } from "./investigation-status"
 
 const factKey = (label: string) =>
 	label
@@ -29,19 +20,46 @@ const factKey = (label: string) =>
 		.replace(/[^a-z0-9]+/g, "_")
 		.replace(/^_|_$/g, "")
 
+/**
+ * An investigation's title is whatever named its subject — for an error that's
+ * the exception message, which can be a line of JSON. `BreadcrumbList` wraps by
+ * design, so an unclamped title spills the trail out of the fixed `h-16` bar.
+ * Clamping loses nothing: the full title is the `<h1>` directly beneath it.
+ */
+const breadcrumbLabel = (title: string): string => {
+	const line = title.split("\n")[0]!.trim()
+	return line.length > 64 ? `${line.slice(0, 63).trimEnd()}…` : line
+}
+
 /** Only the four canonical severities render as a badge; anything else is unset. */
 const asIssueSeverity = (value: string | null | undefined): IssueSeverity | null =>
 	value === "critical" || value === "high" || value === "medium" || value === "low" ? value : null
 
+/**
+ * Read a snapshot fact by label. The snapshot is the only place the signal type
+ * survives — it isn't a column on the investigation — and both writers emit it
+ * under a "Signal" label (the alert route client-side, `snapshotFor` in the API),
+ * so matching on the label recovers it for either origin.
+ */
+const factValue = (
+	facts: V2Investigation["snapshot"]["facts"],
+	label: string,
+): string | undefined => facts.find((fact) => fact.label.toLowerCase() === label)?.value
+
 const contextFromInvestigation = (investigation: V2Investigation): InvestigationContext => {
 	const subject = investigation.subject
 	const kind = subject.type === "freeform" ? "freeform" : subject.incident_kind
+	// Without this the signal is always unknown, every alert falls through to
+	// `investigationSuggestions`' generic branch, and its per-signal prompts are
+	// dead code on the one page that should use them.
+	const signalType = factValue(investigation.snapshot.facts, "signal")
 	return {
 		kind,
 		id: subject.type === "freeform" ? investigation.id : subject.incident_id,
 		title: investigation.snapshot.title,
 		severity: investigation.severity ?? investigation.snapshot.severity ?? "unclassified",
 		status: investigation.status,
+		...(signalType ? { signalType } : {}),
 		...(investigation.snapshot.scope ? { scope: investigation.snapshot.scope } : {}),
 		facts: investigation.snapshot.facts.map((fact) => ({
 			key: factKey(fact.label),
@@ -70,8 +88,9 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
 /**
  * One investigation, as a workspace rather than a document: the header states the
  * subject, the transcript owns the rest of the viewport and its own scrolling, and
- * the rail carries only what the transcript doesn't — provenance, references and
- * escalation. Nothing appears twice.
+ * the rail carries everything the transcript doesn't — the run's history, what it
+ * cost, what it points at, and the actions that change its state. Nothing appears
+ * twice.
  */
 export function InvestigationView({
 	investigation,
@@ -125,25 +144,17 @@ export function InvestigationView({
 			<DashboardLayout.Breadcrumbs
 				items={[
 					{ label: "Investigations", href: "/investigations" },
-					{ label: investigation.snapshot.title },
+					{ label: breadcrumbLabel(investigation.snapshot.title) },
 				]}
 			/>
 			<DashboardLayout.Body>
 				<DashboardLayout.Content>
+					{/* No actions here: Resolve/Reopen/Retry live in the rail, beneath the
+					    run history they act on. The header states the subject and nothing else. */}
 					<DashboardLayout.Sticky>
 						<DashboardLayout.Header
 							titleContent={<InvestigationHeading investigation={investigation} />}
-						>
-							{isResolved || investigation.status === "failed" ? (
-								<Button size="sm" onClick={handleRestart} disabled={busy}>
-									{isResolved ? "Reopen" : "Retry"}
-								</Button>
-							) : (
-								<Button size="sm" variant="outline" onClick={handleResolve} disabled={busy}>
-									Resolve
-								</Button>
-							)}
-						</DashboardLayout.Header>
+						/>
 					</DashboardLayout.Sticky>
 					{/* `Fill`, not `Scroll`: the transcript scrolls itself. Nesting it in a
 					    scrolling page is what previously needed a `calc(100dvh - 12rem)`
@@ -163,8 +174,13 @@ export function InvestigationView({
 						</FlueClientProvider>
 					</DashboardLayout.Fill>
 				</DashboardLayout.Content>
-				<DashboardLayout.RightPanel title="Investigation context">
-					<ContextRail investigation={investigation} />
+				<DashboardLayout.RightPanel title="Investigation context" width="w-80">
+					<InvestigationRail
+						investigation={investigation}
+						busy={busy}
+						onResolve={handleResolve}
+						onRestart={handleRestart}
+					/>
 				</DashboardLayout.RightPanel>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
@@ -191,8 +207,16 @@ function InvestigationHeading({ investigation }: { investigation: V2Investigatio
 			<div className="flex flex-wrap items-center gap-2">
 				<InvestigationStatusBadge status={investigation.status} />
 				{severity ? <SeverityBadge severity={severity} /> : null}
+				{/* `scope` is free text and a system-seeded investigation can carry a
+				    whole paragraph of it. One line, always — the full string is on the
+				    title, and the diagnosis card states the scope properly anyway. */}
 				{snapshot.scope ? (
-					<span className="font-mono text-xs text-muted-foreground">{snapshot.scope}</span>
+					<span
+						title={snapshot.scope}
+						className="min-w-0 max-w-[28rem] truncate font-mono text-xs text-muted-foreground"
+					>
+						{snapshot.scope}
+					</span>
 				) : null}
 			</div>
 			{snapshot.facts.length > 0 ? (
@@ -200,148 +224,17 @@ function InvestigationHeading({ investigation }: { investigation: V2Investigatio
 					{snapshot.facts.map((fact) => (
 						<span key={`${fact.label}:${fact.value}`}>
 							{fact.label}{" "}
-							<span className="font-mono font-medium text-foreground">{fact.value}</span>
+							{/* `inline-block`, or `truncate`'s overflow rules do nothing here. */}
+							<span
+								title={fact.value}
+								className="inline-block max-w-[16rem] truncate align-bottom font-mono font-medium text-foreground"
+							>
+								{fact.value}
+							</span>
 						</span>
 					))}
 				</p>
 			) : null}
 		</div>
 	)
-}
-
-/**
- * What the transcript doesn't say: where this investigation came from, which model
- * produced it, what it links to, and whether an escalation went out.
- */
-function ContextRail({ investigation }: { investigation: V2Investigation }) {
-	const { snapshot } = investigation
-	return (
-		<div className="space-y-4 p-4">
-			<Card className="gap-0 p-4 text-xs">
-				<dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3 gap-y-2">
-					<dt className="text-muted-foreground">Origin</dt>
-					<dd className="text-foreground">{investigationOriginLabel(investigation.seeded_by)}</dd>
-					<dt className="text-muted-foreground">Updated</dt>
-					<dd className="text-foreground">{formatRelativeTime(investigation.updated_at)}</dd>
-					{investigation.confidence ? (
-						<>
-							<dt className="text-muted-foreground">Confidence</dt>
-							<dd className="capitalize text-foreground">{investigation.confidence}</dd>
-						</>
-					) : null}
-					{investigation.model ? (
-						<>
-							<dt className="text-muted-foreground">Model</dt>
-							<dd className="break-all font-mono text-[11px] text-foreground">
-								{investigation.model}
-							</dd>
-						</>
-					) : null}
-				</dl>
-				{snapshot.references.length > 0 ? (
-					<>
-						<Separator className="my-3" />
-						<div className="space-y-1.5">
-							{snapshot.references.map((reference) => (
-								<ReferenceLink
-									key={reference.url}
-									label={reference.label}
-									url={reference.url}
-								/>
-							))}
-						</div>
-					</>
-				) : null}
-			</Card>
-			<EscalationAudit investigation={investigation} />
-		</div>
-	)
-}
-
-/**
- * Snapshot references are app-relative paths written by the API, so they route
- * through the SPA. An absolute URL leaves the app and gets a plain anchor.
- */
-function ReferenceLink({ label, url }: { label: string; url: string }) {
-	if (!url.startsWith("/")) {
-		return (
-			<a
-				href={url}
-				rel="noreferrer"
-				className="block truncate text-primary hover:underline"
-				target="_blank"
-			>
-				{label}
-			</a>
-		)
-	}
-	return (
-		<Link to={url} className="block truncate text-primary hover:underline">
-			{label}
-		</Link>
-	)
-}
-
-function EscalationAudit({ investigation }: { investigation: V2Investigation }) {
-	const issueId = investigation.subject.type === "incident" ? investigation.subject.issue_id : null
-	if (!issueId) return null
-	return <IssueEscalationAudit investigation={investigation} issueId={issueId} />
-}
-
-function IssueEscalationAudit({
-	investigation,
-	issueId,
-}: {
-	investigation: V2Investigation
-	issueId: NonNullable<Extract<V2Investigation["subject"], { type: "incident" }>["issue_id"]>
-}) {
-	const result = useAtomValue(
-		MapleApiAtomClient.query("errors", "listIssueEscalations", {
-			params: { issueId },
-			reactivityKeys: [`errorIssue:${issueId}:escalations`],
-		}),
-	)
-	return Result.builder(result)
-		.onSuccess((response) => {
-			const attempt = response.attempts.find(
-				(candidate) => candidate.investigationId === investigation.id,
-			)
-			if (!attempt) return null
-			return (
-				<Card className="gap-2 p-4 text-xs">
-					<div className="flex items-center justify-between">
-						<span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-							Escalation
-						</span>
-						<span className="capitalize text-muted-foreground">{attempt.status}</span>
-					</div>
-					<ul className="space-y-1">
-						{attempt.deliveries.map((delivery) => (
-							<li
-								key={delivery.destinationId}
-								className="flex items-center justify-between gap-2"
-							>
-								<span className="min-w-0 truncate text-foreground">
-									{delivery.destinationName ?? delivery.destinationId}
-								</span>
-								<span
-									className={
-										delivery.status === "delivered"
-											? "text-severity-ok"
-											: "text-destructive"
-									}
-								>
-									{delivery.status}
-								</span>
-							</li>
-						))}
-					</ul>
-					<p className="text-muted-foreground">
-						{attempt.attempts} attempt{attempt.attempts === 1 ? "" : "s"}
-						{attempt.skipReason ? ` · ${attempt.skipReason.replaceAll("_", " ")}` : ""}
-					</p>
-				</Card>
-			)
-		})
-		.orElse(() => null)
 }

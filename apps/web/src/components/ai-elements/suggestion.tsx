@@ -19,6 +19,18 @@ export type SuggestionProps = Omit<ComponentProps<typeof Button>, "onClick"> & {
 	onClick?: (suggestion: string) => void
 }
 
+/**
+ * A one-line pill. Deliberately not a wrapping one: this previously set
+ * `h-auto … whitespace-normal`, and `twMerge` does resolve `h-auto` against the
+ * `h-8` in `buttonVariants({size:"sm"})` — but that variant also carries
+ * `sm:h-7`, which is a *different* modifier group and survives the merge. Above
+ * 640px the pill stayed locked at 1.75rem while its text wrapped freely, so long
+ * suggestions spilled over the border and collided with the row below.
+ *
+ * So the height belongs to the size variant and the text truncates instead. The
+ * cap is a backstop — a suggestion long enough to reach it is a generator bug
+ * (see `investigationSuggestions`), not something to design around.
+ */
 export const Suggestion = ({
 	suggestion,
 	onClick,
@@ -34,17 +46,15 @@ export const Suggestion = ({
 
 	return (
 		<Button
-			className={cn(
-				"h-auto min-h-7 max-w-full cursor-pointer whitespace-normal rounded-full px-4 py-1.5 text-left",
-				className,
-			)}
+			className={cn("max-w-[min(100%,24rem)] cursor-pointer rounded-full px-3.5", className)}
 			onClick={handleClick}
 			size={size}
+			title={children ? undefined : suggestion}
 			type="button"
 			variant={variant}
 			{...props}
 		>
-			{children || suggestion}
+			<span className="min-w-0 truncate">{children || suggestion}</span>
 		</Button>
 	)
 }

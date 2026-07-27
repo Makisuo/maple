@@ -132,10 +132,58 @@ const KIND_NOUN: Record<InvestigationKind, string> = {
 
 export const investigationNoun = (kind: InvestigationKind): string => KIND_NOUN[kind]
 
+/**
+ * A scope short enough to sit inside a chip. `scope` is free text: an alert group
+ * key is a handful of characters, but a system-seeded investigation can carry a
+ * whole sentence the model wrote, and `Slowest traces in ${scope}` then renders a
+ * paragraph as a button. Cut at the first clause boundary — the head of such a
+ * sentence is reliably the subject ("subscriptions-api public endpoints (GET …)"
+ * → "subscriptions-api") — then hard-cap whatever survives.
+ */
+const CHIP_SCOPE_MAX = 32
+
+export const chipScope = (raw: string): string => {
+	const head = raw.split(/[(\n,;—]/)[0]!.trim()
+	const text = head.length > 0 ? head : raw.trim()
+	if (text.length <= CHIP_SCOPE_MAX) return text
+	// A clause this long isn't a scope, it's a sentence — and the subject of that
+	// sentence is its first word ("subscriptions-api public endpoints …" →
+	// "subscriptions-api"). Prefer that whole word over a mid-word ellipsis.
+	const first = text.split(/\s+/)[0]!
+	return first.length > CHIP_SCOPE_MAX ? `${first.slice(0, CHIP_SCOPE_MAX - 1).trimEnd()}…` : first
+}
+
+const CHIP_PHRASE_MAX = 36
+
+/**
+ * The same problem as {@link chipScope} for a different field. An error
+ * investigation's title is the exception message, which is routinely a sentence
+ * and sometimes a blob of JSON, and `Sample stack traces for ${title}` inherits
+ * whatever it is. Unlike a scope there is no subject word to lift out — the
+ * front of a message *is* the identifying part — so this truncates instead.
+ */
+export const chipPhrase = (raw: string): string => {
+	const text = raw.split("\n")[0]!.trim()
+	return text.length > CHIP_PHRASE_MAX ? `${text.slice(0, CHIP_PHRASE_MAX - 1).trimEnd()}…` : text
+}
+
 /** Starter prompts tuned to the kind + signal + scope of the investigation. */
 export const investigationSuggestions = (ctx: InvestigationContext): string[] => {
-	const scope = ctx.scope ?? ctx.refs?.serviceName ?? "the affected service"
+	const rawScope = ctx.scope ?? ctx.refs?.serviceName
+	const scope = rawScope ? chipScope(rawScope) : "the affected service"
 	const windowM = ctx.windowMinutes ?? 15
+
+	// A diagnosis is already on screen, so "Diagnose X" is the one thing left to
+	// ask. Push on the report instead: the useful next move against an AI
+	// conclusion is corroborating or breaking it.
+	if (ctx.aiSuspectedCause) {
+		return [
+			"What would confirm this?",
+			"What else could explain it?",
+			"Show the supporting traces",
+			"What should we do first?",
+		]
+	}
 
 	if (ctx.kind === "freeform") {
 		return [
@@ -147,9 +195,10 @@ export const investigationSuggestions = (ctx: InvestigationContext): string[] =>
 	}
 
 	if (ctx.kind === "error") {
+		const error = chipPhrase(ctx.title)
 		return [
-			`Sample stack traces for ${ctx.title}`,
-			`When did ${ctx.title} start?`,
+			`Sample stack traces for ${error}`,
+			`When did ${error} start?`,
 			`Which release introduced this?`,
 			`Group these errors by endpoint`,
 		]

@@ -222,8 +222,21 @@ function Fill({ children }: { children: React.ReactNode }) {
 }
 
 /** Trailing context rail. Inline above `lg`, a sheet behind a header trigger below it. */
-function RightPanel({ children, title }: { children: React.ReactNode; title?: string }) {
-	return <PageLayout.RightSidebar title={title}>{children}</PageLayout.RightSidebar>
+function RightPanel({
+	children,
+	title,
+	/** Widen past the `w-72` default where the rail carries the page's substance. */
+	width,
+}: {
+	children: React.ReactNode
+	title?: string
+	width?: string
+}) {
+	return (
+		<PageLayout.RightSidebar title={title} width={width}>
+			{children}
+		</PageLayout.RightSidebar>
+	)
 }
 
 export const DashboardLayout = {
