@@ -2,7 +2,13 @@ import type { AlertDestinationRow } from "@maple/db"
 import { Effect, Schema } from "effect"
 import { decryptAes256Gcm } from "../lib/Crypto"
 
-const DestinationPublicConfigSchema = Schema.Struct({
+/**
+ * `alert_destinations.config_json` is a jsonb column, so the driver hands back
+ * an already-parsed object — decode it directly. (The secret config below is a
+ * genuine JSON *string*, produced by decrypting `secret_ciphertext`, so it
+ * still goes through `fromJsonString`.)
+ */
+export const DestinationPublicConfigSchema = Schema.Struct({
 	summary: Schema.String,
 	channelLabel: Schema.NullOr(Schema.String),
 	hazelOrganizationId: Schema.optionalKey(Schema.String),
@@ -65,7 +71,6 @@ export type DestinationSecretConfig = Schema.Schema.Type<typeof DestinationSecre
 
 export type EnrichedDestinationSecretConfig = DestinationSecretConfig
 
-export const PublicConfigFromJson = Schema.fromJsonString(DestinationPublicConfigSchema)
 export const SecretConfigFromJson = Schema.fromJsonString(DestinationSecretConfigSchema)
 
 export interface HydratedDestination {
@@ -77,7 +82,7 @@ const parsePublicConfig = <E>(
 	row: AlertDestinationRow,
 	onError: () => E,
 ): Effect.Effect<DestinationPublicConfig, E> =>
-	Schema.decodeUnknownEffect(PublicConfigFromJson)(row.configJson).pipe(Effect.mapError(onError))
+	Schema.decodeUnknownEffect(DestinationPublicConfigSchema)(row.configJson).pipe(Effect.mapError(onError))
 
 const parseSecretConfig = <E>(json: string, onError: () => E): Effect.Effect<DestinationSecretConfig, E> =>
 	Schema.decodeUnknownEffect(SecretConfigFromJson)(json).pipe(Effect.mapError(onError))

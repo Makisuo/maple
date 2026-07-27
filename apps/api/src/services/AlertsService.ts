@@ -132,7 +132,7 @@ import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { validateExternalUrl } from "../lib/url-validator"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import {
-	PublicConfigFromJson,
+	DestinationPublicConfigSchema,
 	SecretConfigFromJson,
 	type DestinationPublicConfig,
 	type DestinationSecretConfig,
@@ -543,7 +543,7 @@ const decryptSecret = (
 const parsePublicConfig = (
 	row: AlertDestinationRow,
 ): Effect.Effect<DestinationPublicConfig, AlertValidationError> =>
-	Schema.decodeUnknownEffect(PublicConfigFromJson)(JSON.stringify(row.configJson)).pipe(
+	Schema.decodeUnknownEffect(DestinationPublicConfigSchema)(row.configJson).pipe(
 		Effect.mapError((cause) => makeValidationError("Stored destination config is invalid", [], cause)),
 	)
 
@@ -641,13 +641,10 @@ const buildSecretConfig = (
 	)
 
 const safeParsePublicConfig = (row: AlertDestinationRow): DestinationPublicConfig =>
-	Option.getOrElse(
-		Schema.decodeUnknownOption(PublicConfigFromJson)(JSON.stringify(row.configJson)),
-		() => ({
-			summary: "Invalid destination config",
-			channelLabel: null,
-		}),
-	)
+	Option.getOrElse(Schema.decodeUnknownOption(DestinationPublicConfigSchema)(row.configJson), () => ({
+		summary: "Invalid destination config",
+		channelLabel: null,
+	}))
 
 const safeParseStringArray = (value: unknown): ReadonlyArray<string> =>
 	Option.getOrElse(Schema.decodeUnknownOption(StringArraySchema)(value), () => [] as ReadonlyArray<string>)
