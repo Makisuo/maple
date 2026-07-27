@@ -14,7 +14,14 @@ import { useLocalServiceCatalog, type ServiceCatalogEntry } from "../hooks/use-l
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE } from "../lib/time"
 import { PageShell } from "../components/page-shell"
-import { RefreshButton, TimeRangeSelect, Toolbar, ToolbarSearch, ToolbarStat } from "../components/toolbar"
+import {
+	RefreshButton,
+	TimeRangeSelect,
+	Toolbar,
+	ToolbarSearch,
+	ToolbarStat,
+	ToolbarStats,
+} from "../components/toolbar"
 import { EmptyState, ErrorState, ListSkeleton } from "../components/view-states"
 
 interface ServicesListViewProps {
@@ -56,27 +63,19 @@ export function ServicesListView({ onSelectService }: ServicesListViewProps) {
 	)
 
 	const toolbar = (
-		<Toolbar
-			search={
-				<ToolbarSearch
-					query={search ?? ""}
-					onSearch={(value) => setParams({ q: value ?? null })}
-					placeholder="Filter by service name…"
-				/>
-			}
-			stats={
-				<>
-					<ToolbarStat value={entries.length} label="services" />
-					<ToolbarStat
-						value={Math.round(catalog.data?.totalErrorCount ?? 0)}
-						label="errors"
-						danger
-					/>
-					<RefreshButton />
-					<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
-				</>
-			}
-		/>
+		<Toolbar>
+			<ToolbarSearch
+				query={search ?? ""}
+				onSearch={(value) => setParams({ q: value ?? null })}
+				placeholder="Filter by service name…"
+			/>
+			<ToolbarStats>
+				<ToolbarStat value={entries.length} label="services" />
+				<ToolbarStat value={Math.round(catalog.data?.totalErrorCount ?? 0)} label="errors" danger />
+				<RefreshButton />
+				<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
+			</ToolbarStats>
+		</Toolbar>
 	)
 
 	return (
