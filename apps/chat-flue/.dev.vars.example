@@ -1,10 +1,17 @@
-# Copy to `.dev.vars` for `flue dev`. Do not commit `.dev.vars`.
-
-# Shared secret for Maple internal-service auth. Must match apps/api's
-# INTERNAL_SERVICE_TOKEN — authenticates API → Flue private workflow routes.
-INTERNAL_SERVICE_TOKEN="dev-internal-service-token"
-
-# Optional Workers AI model override (provider id `cloudflare` + @cf model id).
-# Default is cloudflare/@cf/moonshotai/kimi-k2.6 (validated). Confirm any swap
-# against the live Workers AI catalog — deprecated ids return 410.
-# MAPLE_CHAT_MODEL="cloudflare/@cf/moonshotai/kimi-k2.6"
+# `.dev.vars` is GENERATED — do not copy this file over it.
+#
+# `bun dev:app` (and `bun dev` via portless) runs
+# scripts/sync-chat-flue-dev-vars.ts, which projects the Worker vars this app
+# reads out of the repo-root `.env.local`. That keeps one source of truth for
+# INTERNAL_SERVICE_TOKEN, the auth mode and the Clerk keys — they must match
+# apps/api and apps/web, or `/agents/*` rejects every browser request with a 401.
+#
+# Anything BELOW the marker in `.dev.vars` survives regeneration. Use it for
+# local-only overrides, e.g. pinning a Workers AI model while the default in
+# src/agents/maple-chat.ts is being validated:
+#
+#   # --- local overrides below this line are preserved ---
+#   MAPLE_CHAT_MODEL="cloudflare/@cf/moonshotai/kimi-k2.6"
+#
+# The Workers AI catalog churns and a retired id returns 410 — check against
+# `bunx wrangler ai models list` before pinning one.

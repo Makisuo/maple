@@ -335,7 +335,7 @@ function SharedChatView({
 								<ChatConversation
 									tabId={tabId}
 									isActive
-									readOnly
+									readOnly="shared"
 									focusMessageId={focusMessageId}
 									permalinkFor={(messageId) =>
 										shareUrl({ id: tabId, title: title ?? "" }, messageId)

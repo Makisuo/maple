@@ -100,62 +100,96 @@ function toolSummary(input: unknown): string | undefined {
 	return undefined
 }
 
-function extractStructuredData(output: unknown): StructuredToolOutput | null {
-	if (output == null || typeof output !== "object") return null
-	if (!("content" in (output as Record<string, unknown>))) return null
-	const content = (output as { content: unknown[] }).content
-	if (!Array.isArray(content)) return null
+const isStructured = (value: unknown): value is StructuredToolOutput =>
+	value != null && typeof value === "object" && STRUCTURED_MARKER in value
 
-	for (const item of content) {
-		if (typeof item !== "object" || item == null) continue
-		if (!("type" in item) || (item as { type: string }).type !== "text") continue
-		if (!("text" in item)) continue
-		const text = (item as { text: string }).text
-		try {
-			const parsed = JSON.parse(text)
-			if (parsed && parsed[STRUCTURED_MARKER]) {
-				return parsed as StructuredToolOutput
-			}
-		} catch {
-			// Not JSON, skip
+/**
+ * Recover the rich payload a Maple tool renders as a table, chart or tree.
+ *
+ * Tool results arrive as `{ text, ui? }` — `apps/chat-flue`'s MCP adapter splits
+ * the report text from the `__maple_ui` payload. The legacy shapes below are the
+ * two the runtime produced before tool results could be structured JSON: a raw
+ * MCP `{ content: [...] }` object, and a string with the UI JSON concatenated
+ * onto the report. Both still exist in conversations recorded earlier, and a
+ * replayed thread should keep rendering the way it did when it was live.
+ */
+export function extractStructuredData(output: unknown): StructuredToolOutput | null {
+	if (output == null) return null
+
+	if (typeof output === "object" && "ui" in (output as Record<string, unknown>)) {
+		const ui = (output as { ui: unknown }).ui
+		return isStructured(ui) ? ui : null
+	}
+
+	if (typeof output === "string") return parseStructuredFromText(output)
+
+	if (typeof output === "object" && "content" in (output as Record<string, unknown>)) {
+		const content = (output as { content: unknown[] }).content
+		if (!Array.isArray(content)) return null
+		for (const item of content) {
+			const text = textOf(item)
+			if (text === null) continue
+			const parsed = parseStructuredFromText(text)
+			if (parsed) return parsed
 		}
 	}
 	return null
 }
 
-function extractOutputText(output: unknown): string | null {
+const textOf = (item: unknown): string | null =>
+	typeof item === "object" &&
+	item != null &&
+	"type" in item &&
+	(item as { type: string }).type === "text" &&
+	"text" in item
+		? (item as { text: string }).text
+		: null
+
+/** A JSON blob carrying the UI marker, possibly one paragraph of a joined string. */
+function parseStructuredFromText(text: string): StructuredToolOutput | null {
+	for (const chunk of text.split("\n\n")) {
+		const trimmed = chunk.trim()
+		if (!trimmed.startsWith("{")) continue
+		try {
+			const parsed: unknown = JSON.parse(trimmed)
+			if (isStructured(parsed)) return parsed
+		} catch {
+			// Not JSON — ordinary report text.
+		}
+	}
+	return null
+}
+
+export function extractOutputText(output: unknown): string | null {
 	if (output == null) return null
 
-	// MCP format: { content: [{ type: "text", text: "..." }] }
+	if (typeof output === "object" && "text" in (output as Record<string, unknown>)) {
+		const text = (output as { text: unknown }).text
+		if (typeof text === "string") return text
+	}
+
+	if (typeof output === "string") return stripStructuredChunks(output)
+
+	// Legacy MCP shape: { content: [{ type: "text", text: "..." }] }
 	if (typeof output === "object" && "content" in (output as Record<string, unknown>)) {
 		const content = (output as { content: unknown[] }).content
 		if (Array.isArray(content)) {
 			return content
-				.filter(
-					(c): c is { type: "text"; text: string } =>
-						typeof c === "object" &&
-						c != null &&
-						"type" in c &&
-						(c as { type: string }).type === "text" &&
-						"text" in c,
-				)
-				.filter((c) => {
-					try {
-						const parsed = JSON.parse(c.text)
-						return !(parsed && parsed[STRUCTURED_MARKER])
-					} catch {
-						return true
-					}
-				})
-				.map((c) => c.text)
+				.map(textOf)
+				.filter((text): text is string => text !== null && parseStructuredFromText(text) === null)
 				.join("\n")
 		}
 	}
 
-	if (typeof output === "string") return output
-
 	return JSON.stringify(output, null, 2)
 }
+
+/** Drop the UI payload from a legacy joined string so it isn't shown as raw JSON. */
+const stripStructuredChunks = (text: string): string =>
+	text
+		.split("\n\n")
+		.filter((chunk) => parseStructuredFromText(chunk) === null)
+		.join("\n\n")
 
 // ---------------------------------------------------------------------------
 // Component

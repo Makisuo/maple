@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "@flue/runtime"
+import { defineTool, type ToolDefinition } from "@flue/runtime"
 import type { ChatFlueEnv } from "./env.ts"
 import { AiTriageResultSchema, type AiTriageResult } from "./triage-result.ts"
 import { mapleApiRpc } from "./api-rpc.ts"
@@ -6,7 +6,7 @@ import { mapleApiRpc } from "./api-rpc.ts"
 /** Marker the `submit_diagnosis` tool returns; the web renders it as the report card. */
 export const DIAGNOSIS_STATUS = "diagnosis" as const
 
-export interface DiagnosisMarker {
+export type DiagnosisMarker = {
 	status: typeof DIAGNOSIS_STATUS
 	report: AiTriageResult
 }
@@ -28,13 +28,15 @@ export const buildSubmitDiagnosisTool = (
 	env: ChatFlueEnv,
 	orgId: string,
 	investigationId: string,
-): ToolDefinition<typeof AiTriageResultSchema> => ({
-	name: "submit_diagnosis",
-	description:
-		"Record your structured diagnosis for THIS investigation. Call it exactly once, after you have gathered evidence, with your final assessment (summary, suspectedCause, severityAssessment, affectedScope, evidence, suggestedActions, confidence). It persists the report and renders it for the user. After calling it, stop unless the user asks a follow-up question.",
-	parameters: AiTriageResultSchema,
-	execute: async (report) => {
-		await mapleApiRpc(env).submitDiagnosis({ orgId, investigationId, report })
-		return JSON.stringify({ status: DIAGNOSIS_STATUS, report } satisfies DiagnosisMarker)
-	},
-})
+): ToolDefinition =>
+	defineTool({
+		name: "submit_diagnosis",
+		description:
+			"Record your structured diagnosis for THIS investigation. Call it exactly once, after you have gathered evidence, with your final assessment (summary, suspectedCause, severityAssessment, affectedScope, evidence, suggestedActions, confidence). It persists the report and renders it for the user. After calling it, stop unless the user asks a follow-up question.",
+		input: AiTriageResultSchema,
+		output: undefined,
+		run: async ({ input }): Promise<DiagnosisMarker> => {
+			await mapleApiRpc(env).submitDiagnosis({ orgId, investigationId, report: input })
+			return { status: DIAGNOSIS_STATUS, report: input }
+		},
+	}) as ToolDefinition

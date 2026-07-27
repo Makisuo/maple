@@ -1,18 +1,26 @@
-import { useOrganization } from "@clerk/clerk-react"
-import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
-
-function useClerkOrganizationId() {
-	const { organization } = useOrganization()
-	return organization?.id ?? null
-}
-
-function useLocalOrganizationId() {
-	return "default"
-}
+import { Result, useAtomValue } from "@/lib/effect-atom"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
 /**
- * The auth mode is fixed for the lifetime of the bundle, so choose the hook
- * implementation once at module initialization. Each implementation then has
- * an invariant hook order of its own.
+ * The organization the **API** resolved this session to, or `null` while that is
+ * still loading.
+ *
+ * This deliberately does not read Clerk's active organization. The server is the
+ * authority on which tenant a session belongs to, and the two do not always
+ * agree: `packages/auth` resolves `MAPLE_ORG_ID_OVERRIDE ?? auth.orgId`, and in
+ * self-hosted mode the org comes from the session token rather than a constant.
+ * A client-side guess that disagrees fails silently and totally — the chat
+ * addresses its agent as `"<orgId>:<tabId>"`, so a wrong org opens a conversation
+ * nobody else can see, and an investigation's thread stays empty forever with no
+ * error raised anywhere.
+ *
+ * `GET /api/auth/session` returns the resolved tenant, and other hooks already
+ * read this same atom, so this costs no extra request.
  */
-export const useMapleOrganizationId = isClerkAuthEnabled ? useClerkOrganizationId : useLocalOrganizationId
+export function useMapleOrganizationId(): string | null {
+	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
+
+	return Result.builder(sessionResult)
+		.onSuccess((session) => session.orgId as string)
+		.orElse(() => null)
+}

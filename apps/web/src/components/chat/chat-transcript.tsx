@@ -25,6 +25,7 @@ import { DiagnosisReportCard } from "./diagnosis-report-card"
 import { MessageActions } from "./message-actions"
 import { parseDiagnosisMarker } from "./diagnosis-marker"
 import { parseToolProposal } from "./tool-proposal"
+import { stripContextPreamble } from "./context-preamble"
 import type { UIMessage } from "@/components/ai-elements/types"
 import type { AiTriageResult } from "@maple/domain/http"
 
@@ -149,7 +150,9 @@ function renderMessageParts({
 		const part = message.parts[i]!
 		if (part.type === "text") {
 			flushTools()
-			nodes.push(<RichText key={`text-${i}`}>{part.text}</RichText>)
+			// Context the model needs but the reader doesn't — see `wrapChatContext`.
+			const text = stripContextPreamble(part.text)
+			if (text) nodes.push(<RichText key={`text-${i}`}>{text}</RichText>)
 			continue
 		}
 		if (!isToolPart(part)) continue
@@ -205,8 +208,27 @@ export interface ChatTranscriptProps {
 	diagnosisMessageId?: string
 	focusMessageId?: string
 	permalinkFor?: (messageId: string) => string
-	readOnly: boolean
+	/** Why the thread can't be replied to — the marker says which. */
+	readOnly: false | "shared" | "resolved"
 	emptyState: ReactNode
+}
+
+/**
+ * A user turn with nothing left after the context fence is stripped — the prompt
+ * `apps/api` sends to open an investigation. Nobody typed it, so it shouldn't
+ * appear as though someone did.
+ */
+const isMachineTurn = (message: UIMessage): boolean =>
+	message.role === "user" &&
+	message.parts.length > 0 &&
+	message.parts.every(
+		(part) => part.type === "text" && stripContextPreamble(part.text).length === 0,
+	)
+
+/** Leading marker for a thread that can't be continued. */
+const READ_ONLY_LABEL: Record<"shared" | "resolved", string> = {
+	shared: "Shared conversation · read-only",
+	resolved: "Investigation resolved · read-only",
 }
 
 /**
@@ -245,9 +267,9 @@ export function ChatTranscript({
 				<MessageScrollerViewport>
 					<MessageScrollerContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6">
 						{readOnly ? (
-							<MessageScrollerItem messageId="__shared" className={TRANSCRIPT_ITEM}>
+							<MessageScrollerItem messageId="__read-only" className={TRANSCRIPT_ITEM}>
 								<Marker variant="separator">
-									<MarkerContent>Shared conversation · read-only</MarkerContent>
+									<MarkerContent>{READ_ONLY_LABEL[readOnly]}</MarkerContent>
 								</Marker>
 							</MessageScrollerItem>
 						) : null}
@@ -258,6 +280,19 @@ export function ChatTranscript({
 						) : null}
 						{messages.map((message, messageIndex) => {
 							const isUser = message.role === "user"
+							if (isUser && isMachineTurn(message)) {
+								return (
+									<MessageScrollerItem
+										key={message.id}
+										messageId={message.id}
+										className={TRANSCRIPT_ITEM}
+									>
+										<Marker variant="separator">
+											<MarkerContent>Investigation started</MarkerContent>
+										</Marker>
+									</MessageScrollerItem>
+								)
+							}
 							const permalink = permalinkFor?.(message.id)
 							return (
 								<MessageScrollerItem

@@ -1,5 +1,5 @@
-import { createOpenTelemetryObserver } from "@flue/opentelemetry"
-import { observe } from "@flue/runtime"
+import { createOpenTelemetryInstrumentation } from "@flue/opentelemetry"
+import { instrument, observe } from "@flue/runtime"
 import { flue } from "@flue/runtime/routing"
 import { SpanKind } from "@opentelemetry/api"
 import { Hono } from "hono"
@@ -70,15 +70,15 @@ observe((event) => {
 })
 
 if (telemetry) {
-	// Flue events → OpenTelemetry spans. Content (prompts, model I/O, tool
-	// args/results, detailed errors) is omitted by default — intentional for an
-	// AI chat; a redacted `exportContent` hook is a future opt-in.
-	observe(
-		createOpenTelemetryObserver({
+	// Flue observations → OpenTelemetry GenAI spans. Content (prompts, model I/O,
+	// tool args/results, detailed errors) is disabled by default — intentional for
+	// an AI chat; a redacting `content` policy is a future opt-in.
+	instrument(
+		createOpenTelemetryInstrumentation({
 			tracer: telemetry.getTracer(CHAT_FLUE_SERVICE_NAME),
 			// Nest chat spans under the caller's (web/mobile) distributed trace
 			// when it propagates `traceparent`; standalone otherwise.
-			resolveRootContext: (_event, ctx) => rootContextFromRequest(ctx.req),
+			resolveRootContext: (_observation, ctx) => rootContextFromRequest(ctx.req),
 		}),
 	)
 

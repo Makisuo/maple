@@ -1,3 +1,4 @@
+import { CHAT_FLUE_ORIGIN } from "./chat-flue-origin"
 import { randomUUID } from "node:crypto"
 import {
 	type AiTriageIncidentKind,
@@ -307,7 +308,7 @@ export const maybeEnqueueTriage: (
 				try: (signal) =>
 					agentBinding.fetch(
 						new Request(
-							`https://chat-flue.internal/agents/maple-chat/${encodeURIComponent(instanceId)}`,
+							`${CHAT_FLUE_ORIGIN}/agents/maple-chat/${encodeURIComponent(instanceId)}`,
 							{
 								method: "POST",
 								headers: {

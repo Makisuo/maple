@@ -1,9 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Exit, Schema } from "effect"
+import { Exit, Option, Schema } from "effect"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 
 import { decodeInvestigationRef } from "@/components/chat/investigation-context"
 import { InvestigationView } from "@/components/investigations/investigation-view"
+import { ErrorState } from "@/components/common/error-state"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
@@ -24,12 +25,32 @@ export const Route = createFileRoute("/investigations/$id")({
 	validateSearch: Schema.toStandardSchemaV1(SearchSchema),
 })
 
-const decodeInvestigationId = Schema.decodeUnknownSync(InvestigationId)
+const decodeInvestigationId = Schema.decodeUnknownOption(InvestigationId)
 
 function InvestigationPage() {
 	const { id: rawId } = Route.useParams()
 	const { r } = Route.useSearch()
-	const id = decodeInvestigationId(rawId)
+	// `InvestigationId` is a branded UUID. Decoding it with the throwing variant
+	// took down the whole route on any other shape — including the legacy encoded
+	// ids the `?r=` migration below exists to rescue, which made that path
+	// unreachable.
+	const decoded = decodeInvestigationId(rawId)
+	if (Option.isNone(decoded)) {
+		const legacyRef = r ? decodeInvestigationRef(r) : undefined
+		return legacyRef ? <LegacyInvestigationRedirect legacyId={rawId} /> : <NotFoundShell />
+	}
+	return <InvestigationDetail id={decoded.value} legacyRef={r} rawId={rawId} />
+}
+
+function InvestigationDetail({
+	id,
+	legacyRef,
+	rawId,
+}: {
+	id: InvestigationId
+	legacyRef: string | undefined
+	rawId: string
+}) {
 	const query = MapleApiV2AtomClient.query("investigations", "retrieve", {
 		params: { id },
 		reactivityKeys: ["investigations", `investigation:${id}`],
@@ -41,12 +62,53 @@ function InvestigationPage() {
 
 	return Result.builder(result)
 		.onInitial(() => <LoadingShell />)
-		.onError(() => {
-			const legacyRef = r ? decodeInvestigationRef(r) : undefined
-			return legacyRef ? <LegacyInvestigationRedirect legacyId={rawId} /> : <NotFoundShell />
+		.onError((error) => {
+			if (legacyRef && decodeInvestigationRef(legacyRef)) {
+				return <LegacyInvestigationRedirect legacyId={rawId} />
+			}
+			// Only a real "no such investigation" is a dead end. A dropped request or
+			// a restarting API is not, and telling someone their investigation is gone
+			// when it isn't sends them looking for a problem that doesn't exist.
+			return isNotFound(error) ? (
+				<NotFoundShell />
+			) : (
+				<LoadFailureShell error={error} onRetry={refresh} />
+			)
 		})
 		.onSuccess((investigation) => <InvestigationView investigation={investigation} onRefresh={refresh} />)
 		.render()
+}
+
+/** The v2 API answers a missing investigation with a tagged not-found error. */
+const isNotFound = (error: unknown): boolean =>
+	typeof error === "object" &&
+	error !== null &&
+	"_tag" in error &&
+	typeof error._tag === "string" &&
+	error._tag.toLowerCase().includes("notfound")
+
+function LoadFailureShell({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+	return (
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Investigations", href: "/investigations" }, { label: "Unavailable" }]}
+			/>
+			<DashboardLayout.Body>
+				<DashboardLayout.Content>
+					<DashboardLayout.Sticky>
+						<DashboardLayout.Header title="Investigation" />
+					</DashboardLayout.Sticky>
+					<DashboardLayout.Scroll>
+						<ErrorState
+							error={error}
+							title="This investigation could not be loaded"
+							onRetry={onRetry}
+						/>
+					</DashboardLayout.Scroll>
+				</DashboardLayout.Content>
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
+	)
 }
 
 function LegacyInvestigationRedirect({ legacyId }: { legacyId: string }) {
