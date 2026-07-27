@@ -24,6 +24,7 @@ import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	Phase1ResourceStubsLayer,
+	SetupAuditServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
 
@@ -105,6 +106,7 @@ const makeHarness = () => {
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(Phase1ResourceStubsLayer),
+		Layer.provide(SetupAuditServiceStubLayer),
 		Layer.provide(TelemetryServiceStubsLayer),
 		// session_replays (in AllV2GroupLayersLive) needs the warehouse at the routes level.
 		Layer.provide(warehouseLive),

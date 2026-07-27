@@ -13,6 +13,7 @@ import { V2OrganizationApiGroup } from "./organization"
 import { V2InstrumentationRecommendationsApiGroup } from "./recommendations"
 import { V2ScrapeTargetsApiGroup } from "./scrape-targets"
 import { V2SessionReplaysApiGroup } from "./session-replays"
+import { V2InstrumentationAuditApiGroup } from "./setup-audit"
 import {
 	V2LogsApiGroup,
 	V2MetricsApiGroup,
@@ -69,6 +70,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2AttributeMappingsApiGroup)
 	.add(V2ScrapeTargetsApiGroup)
 	.add(V2InstrumentationRecommendationsApiGroup)
+	.add(V2InstrumentationAuditApiGroup)
 	.add(V2InvestigationsApiGroup)
 	.add(V2AnomaliesApiGroup)
 	.add(V2OrganizationApiGroup)

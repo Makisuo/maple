@@ -8,6 +8,7 @@ import { OrganizationService } from "../../services/OrganizationService"
 import { OrgIngestKeysService } from "../../services/OrgIngestKeysService"
 import { RecommendationIssueService } from "../../services/RecommendationIssueService"
 import { ScrapeTargetsService } from "../../services/ScrapeTargetsService"
+import { SetupAuditService } from "../../services/SetupAuditService"
 import { ApiV2RateLimiter } from "../../services/ApiV2RateLimiter"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
 import { QueryEngineService } from "../../services/QueryEngineService"
@@ -25,6 +26,7 @@ import { HttpV2OrganizationLive } from "./organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "./recommendations.http"
 import { HttpV2ScrapeTargetsLive } from "./scrape-targets.http"
 import { HttpV2SessionReplaysLive } from "./session-replays.http"
+import { HttpV2InstrumentationAuditLive } from "./setup-audit.http"
 import {
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
@@ -51,6 +53,7 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2AttributeMappingsLive,
 	HttpV2ScrapeTargetsLive,
 	HttpV2InstrumentationRecommendationsLive,
+	HttpV2InstrumentationAuditLive,
 	HttpV2InvestigationsLive,
 	HttpV2AnomaliesLive,
 	HttpV2OrganizationLive,
@@ -156,6 +159,13 @@ export const TelemetryServiceStubsLayer = Layer.mergeAll(
 	}),
 )
 
+/**
+ * Inert SetupAuditService. Exported on its own (rather than only inside the config-resource bundle)
+ * so harnesses that build the real config services — and would be shadowed by that bundle — can still
+ * satisfy the `instrumentationAudit` group.
+ */
+export const SetupAuditServiceStubLayer = Layer.succeed(SetupAuditService, { run: die })
+
 /** Inert config-resource services for harnesses that never touch those groups. */
 export const ConfigResourceServiceStubsLayer = Layer.mergeAll(
 	Layer.succeed(IngestAttributeMappingService, {
@@ -175,6 +185,7 @@ export const ConfigResourceServiceStubsLayer = Layer.mergeAll(
 		dismiss: die,
 		reopen: die,
 	}),
+	SetupAuditServiceStubLayer,
 	Layer.succeed(ScrapeTargetsService, {
 		list: die,
 		get: die,

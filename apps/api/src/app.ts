@@ -22,6 +22,7 @@ import { HttpV2AnomaliesLive } from "./routes/v2/anomalies.http"
 import { HttpV2InvestigationsLive } from "./routes/v2/investigations.http"
 import { HttpV2OrganizationLive } from "./routes/v2/organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "./routes/v2/recommendations.http"
+import { HttpV2InstrumentationAuditLive } from "./routes/v2/setup-audit.http"
 import { HttpV2ScrapeTargetsLive } from "./routes/v2/scrape-targets.http"
 import { HttpV2SessionReplaysLive } from "./routes/v2/session-replays.http"
 import {
@@ -87,6 +88,7 @@ import { TinybirdOrgTokenService } from "./services/TinybirdOrgTokenService"
 import { OrganizationService } from "./services/OrganizationService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { RecommendationIssueService } from "./services/RecommendationIssueService"
+import { SetupAuditService } from "./services/SetupAuditService"
 import { PlanetScaleConnectionService } from "./services/PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./services/PlanetScaleDiscoveryService"
 import { PlanetScaleWebhookQueue } from "./services/planetscale/PlanetScaleWebhookQueue"
@@ -222,6 +224,8 @@ const RecommendationIssueServiceLive = RecommendationIssueService.layer.pipe(
 	Layer.provideMerge(WarehouseQueryServiceLive),
 )
 
+const SetupAuditServiceLive = SetupAuditService.layer.pipe(Layer.provideMerge(WarehouseQueryServiceLive))
+
 // WorkerEnvironment is intentionally NOT wired here (unlike the alerting worker):
 // AnomalyDetectionService reads it via Effect.serviceOption, so it degrades
 // gracefully when absent and is provided at worker scope where needed.
@@ -271,6 +275,7 @@ export const MainLive = Layer.mergeAll(
 	InvestigationServiceLive,
 	ErrorsServiceLive,
 	RecommendationIssueServiceLive,
+	SetupAuditServiceLive,
 	DigestServiceLive,
 	DemoServiceLive,
 	VcsServicesLive,
@@ -318,6 +323,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2AttributeMappingsLive,
 			HttpV2ScrapeTargetsLive,
 			HttpV2InstrumentationRecommendationsLive,
+			HttpV2InstrumentationAuditLive,
 			HttpV2InvestigationsLive,
 			HttpV2AnomaliesLive,
 			HttpV2OrganizationLive,

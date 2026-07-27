@@ -140,6 +140,7 @@ Implemented in phases; the pilot (`api_keys`) ships first and proves every conve
 | `investigations` ✅                  | list/retrieve/create/status                                                                      | `investigations`                         |
 | `anomalies` ✅                       | incidents list/retrieve/timeseries/resolve/link-issue + `PATCH` settings                         | `anomalies`                              |
 | `instrumentation/recommendations` ✅ | list + dismiss/reopen                                                                            | `recommendationIssues`                   |
+| `instrumentation/audit` ✅           | retrieve (singleton report, recomputed per request)                                              | `SetupAuditService`                      |
 | `scrape_targets` ✅                  | CRUD + `probe` + `checks`                                                                        | `scrapeTargets`                          |
 | `attribute_mappings` ✅              | CRUD                                                                                             | `ingestAttributeMappings`                |
 | `session_replays` ✅                 | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred) | `sessionReplays`                         |

@@ -14,7 +14,9 @@ import { NotificationsSection } from "@/components/settings/notifications-sectio
 import { AutomationSection } from "@/components/settings/automation-section"
 import { OrgClickHouseSettingsSection } from "@/components/settings/org-clickhouse-settings-section"
 import { OrganizationSection } from "@/components/settings/organization-section"
+import { SetupAuditSection } from "@/components/settings/setup-audit-section"
 import {
+	resolveActiveSettingsTab,
 	SettingsNav,
 	settingsTabLabels,
 	settingsTabValues,
@@ -55,9 +57,7 @@ function SettingsPage() {
 		return <Navigate to="/settings" search={{ tab: "automation" }} replace />
 	}
 
-	const activeTab: SettingsTab = (
-		visibleItems.some((i) => i.id === search.tab) ? search.tab : (visibleItems[0]?.id ?? "ingestion")
-	) as SettingsTab
+	const activeTab = resolveActiveSettingsTab(search.tab, visibleItems)
 
 	function handleTabSelect(tab: SettingsTab) {
 		navigate({ search: { tab } })
@@ -133,6 +133,7 @@ function SettingsPage() {
 					<DashboardLayout.Scroll>
 						{activeTab === "organization" && <OrganizationSection />}
 						{activeTab === "members" && <MembersSection />}
+						{activeTab === "setup-audit" && <SetupAuditSection />}
 						{activeTab === "ingestion" && <IngestionSection />}
 						{activeTab === "api-keys" && <ApiKeysSection />}
 						{activeTab === "developer" && (
