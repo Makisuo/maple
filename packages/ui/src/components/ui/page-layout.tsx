@@ -20,6 +20,13 @@ interface PageLayoutContextValue {
 	 * did, filters would render as a sheet with no way to open it.
 	 */
 	filterSidebarCollapsed: boolean
+	/**
+	 * Whether a `FilterSidebar` is actually mounted. The trigger lives in the page header and the
+	 * sidebar in the body, so the trigger cannot see it as a child — without this it would render a
+	 * button that opens a sheet that doesn't exist. Set by `FilterSidebar` on mount.
+	 */
+	hasFilterSidebar: boolean
+	setHasFilterSidebar: (present: boolean) => void
 }
 
 const PageLayoutContext = React.createContext<PageLayoutContextValue | null>(null)
@@ -37,6 +44,7 @@ function usePageLayout() {
 function Root({ children, className }: { children: React.ReactNode; className?: string }) {
 	const [isScrolled, setIsScrolled] = React.useState(false)
 	const [filterSheetOpen, setFilterSheetOpen] = React.useState(false)
+	const [hasFilterSidebar, setHasFilterSidebar] = React.useState(false)
 	const filterSidebarCollapsed = useMediaQuery("max-lg")
 
 	const ctx = React.useMemo(
@@ -46,8 +54,10 @@ function Root({ children, className }: { children: React.ReactNode; className?: 
 			filterSheetOpen,
 			setFilterSheetOpen,
 			filterSidebarCollapsed,
+			hasFilterSidebar,
+			setHasFilterSidebar,
 		}),
-		[isScrolled, filterSheetOpen, filterSidebarCollapsed],
+		[isScrolled, filterSheetOpen, filterSidebarCollapsed, hasFilterSidebar],
 	)
 
 	return (
@@ -196,7 +206,16 @@ function FilterSidebar({
 	className?: string
 	width?: string
 }) {
-	const { filterSidebarCollapsed, filterSheetOpen, setFilterSheetOpen } = usePageLayout()
+	const { filterSidebarCollapsed, filterSheetOpen, setFilterSheetOpen, setHasFilterSidebar } =
+		usePageLayout()
+
+	// Announce presence to the trigger, which sits in the page header and so can't see this as a
+	// child. A layout effect rather than a passive one: it lands before paint, so a filtered page
+	// never shows a frame with the trigger missing.
+	React.useLayoutEffect(() => {
+		setHasFilterSidebar(true)
+		return () => setHasFilterSidebar(false)
+	}, [setHasFilterSidebar])
 
 	if (filterSidebarCollapsed) {
 		return (
@@ -276,11 +295,15 @@ function RightSidebar({ children, className }: { children: React.ReactNode; clas
  * Opens the filter sheet. `children` must be a single interactive element (a Button) — the click
  * handler is cloned onto it rather than wrapped around it, so the trigger stays one real button and
  * keeps its keyboard behaviour.
+ *
+ * Renders nothing unless the sidebar has collapsed to a sheet *and* a `FilterSidebar` is mounted to
+ * open. Callers can therefore drop this in unconditionally; a page with no filters gets no button
+ * rather than one that opens nothing.
  */
 function FilterSidebarTrigger({ children }: { children: React.ReactElement<{ onClick?: () => void }> }) {
-	const { filterSidebarCollapsed, setFilterSheetOpen } = usePageLayout()
+	const { filterSidebarCollapsed, hasFilterSidebar, setFilterSheetOpen } = usePageLayout()
 
-	if (!filterSidebarCollapsed) return null
+	if (!filterSidebarCollapsed || !hasFilterSidebar) return null
 
 	return React.cloneElement(children, { onClick: () => setFilterSheetOpen(true) })
 }

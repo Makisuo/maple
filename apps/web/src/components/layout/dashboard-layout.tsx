@@ -134,8 +134,9 @@ function Breadcrumbs({ items, children }: { items: BreadcrumbEntry[]; children?:
 					</TooltipContent>
 				</Tooltip>
 				<ConnectButton />
-				{/* Renders only when the sidebar has collapsed to a sheet, and only when a
-				    `Filters` region exists to open — `PageLayout` owns both conditions. */}
+				{/* Self-gating: renders only when the sidebar has collapsed to a sheet *and* a
+				    `Filters` region is mounted to open. Both conditions live in `PageLayout`'s
+				    context, so a page that composes no `Filters` gets no button here. */}
 				<PageLayout.FilterSidebarTrigger>
 					<Button variant="outline" size="icon-sm" aria-label="Open filters">
 						<LayoutLeftIcon size={16} />
