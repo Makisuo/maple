@@ -39,12 +39,18 @@ concurrency:
 jobs:
     sweep:
         runs-on: blacksmith-4vcpu-ubuntu-2404
-        # Deliberately NOT in the `pr-preview` environment: its required manual
-        # approval exists to keep PR-controlled code away from secrets, but this
-        # job only ever runs trusted code from main — and approval would stall
-        # every scheduled run. If the Infisical machine identity's OIDC subject
-        # is scoped to the pr-preview environment, add a subject for
-        # `repo:<org>/<repo>:ref:refs/heads/main` in Infisical.
+        # MUST declare an environment, or Infisical rejects the OIDC token with
+        # 403 "Access denied: OIDC subject not allowed". GitHub derives the token's
+        # `sub` from the job: `repo:<org>/<repo>:environment:<name>` when an
+        # environment is set, `repo:<org>/<repo>:ref:refs/heads/main` otherwise.
+        # The machine identity only allowlists the `environment:` form (which is
+        # why deploy-prd/stg/pr-preview authenticate and an environment-less job
+        # cannot), so running bare silently broke every scheduled sweep.
+        # `pr-preview` is the right one to borrow: same `dev` Infisical env slug
+        # as deploy-pr-preview, and these are the very resources being swept.
+        # It carries no required reviewers and no deployment branch policy, so
+        # scheduled runs are not gated on approval.
+        environment: pr-preview
         env:
             INFISICAL_ENV_SLUG: dev
         steps:
