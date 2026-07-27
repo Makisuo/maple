@@ -39,26 +39,30 @@ concurrency:
 jobs:
     sweep:
         runs-on: blacksmith-4vcpu-ubuntu-2404
-        # Deliberately NO `environment:`. GitHub derives the Infisical OIDC
-        # token's `sub` claim from the job shape:
+        # ⚠️ STOPGAP. This job borrows `pr-preview` purely to shape its Infisical
+        # OIDC subject — it deploys nothing and reads no environment secrets.
+        #
+        # GitHub derives the token's `sub` claim from the job shape:
         #     with `environment: <name>` -> repo:<org>/<repo>:environment:<name>
         #     without                    -> repo:<org>/<repo>:ref:refs/heads/<branch>
-        # Scheduled runs always execute the default branch, so this job's subject
-        # is `repo:<org>/<repo>:ref:refs/heads/main`. That subject MUST stay
-        # allowlisted on the Infisical machine identity — without it the secrets
-        # step fails with 403 "Access denied: OIDC subject not allowed", and since
-        # it is the first step, EVERY sweep below is skipped: the safety net stops
-        # running while orphaned PS-DEV branches keep billing.
+        # Only the environment form is allowlisted on the machine identity, so an
+        # environment-less job fails the secrets step with 403 "Access denied:
+        # OIDC subject not allowed" — and because that step is FIRST, every sweep
+        # below is skipped while orphaned PS-DEV branches keep billing.
         #
-        # Don't "fix" a 403 here by borrowing an environment. `pr-preview` must
-        # stay approval-gated (see deploy-pr-preview.yml) to keep PR-controlled
-        # code away from these secrets, and an approval gate on an unattended cron
-        # run stalls it until the deployment expires — silently recreating the
-        # breakage this workflow exists to prevent. Fix the allowlist instead.
+        # ⚠️ This creates a CONFLICT with deploy-pr-preview.yml, which requires
+        # `pr-preview` to be approval-gated so PR-controlled code can't reach
+        # these secrets unreviewed. This job requires the opposite: no required
+        # reviewers. A cron run has no human to approve it, so a gate parks it in
+        # `waiting` until the deployment expires — silently restoring the exact
+        # breakage this workflow exists to prevent. Both cannot hold at once.
         #
-        # Testing: `workflow_dispatch` from a non-default branch yields
-        # `...:ref:refs/heads/<that-branch>`, which is NOT allowlisted. Dispatch
-        # from main.
+        # PROPER FIX (needs Infisical dashboard access): allowlist the subject
+        # `repo:<org>/<repo>:ref:refs/heads/main`, then delete the `environment:`
+        # line below. The job then needs no environment at all and `pr-preview`
+        # is free to regain its gate. Until then, do not add required reviewers
+        # to `pr-preview`.
+        environment: pr-preview # STOPGAP — remove once the ref subject is allowlisted
         env:
             INFISICAL_ENV_SLUG: dev
         steps:
