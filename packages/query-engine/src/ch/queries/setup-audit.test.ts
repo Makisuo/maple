@@ -67,9 +67,7 @@ describe("auditSpanShapeByServiceQuery", () => {
 		expect(sql).toContain("sumIf(WeightedCount, DeploymentEnv = '')")
 		expect(sql).toContain("uniq(SpanName)")
 		expect(sql).toContain("StatusCode NOT IN ('Ok', 'Error', 'Unset', '')")
-		expect(sql).toContain(
-			"SpanKind NOT IN ('Server', 'Client', 'Producer', 'Consumer', 'Internal', '')",
-		)
+		expect(sql).toContain("SpanKind NOT IN ('Server', 'Client', 'Producer', 'Consumer', 'Internal', '')")
 	})
 
 	it("snaps both window bounds to the hour so partial windows still match the rollup", () => {
@@ -218,9 +216,7 @@ describe("row schemas decode both ClickHouse and Tinybird numeric encodings", ()
 		strings: Record<string, unknown>,
 		numbers: Record<string, number>,
 	) => {
-		const quoted = Object.fromEntries(
-			Object.entries(numbers).map(([key, value]) => [key, String(value)]),
-		)
+		const quoted = Object.fromEntries(Object.entries(numbers).map(([key, value]) => [key, String(value)]))
 		expect(decode({ ...strings, ...quoted })).toEqual(decode({ ...strings, ...numbers }))
 	}
 

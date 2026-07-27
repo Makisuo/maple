@@ -62,8 +62,7 @@ const primaryType = (node: JsonSchema): string | undefined => {
 	return undefined
 }
 
-const isNullable = (node: JsonSchema): boolean =>
-	Array.isArray(node.type) && node.type.includes("null")
+const isNullable = (node: JsonSchema): boolean => Array.isArray(node.type) && node.type.includes("null")
 
 const convertNode = (node: JsonSchema, defs: Defs, depth: number): v.GenericSchema => {
 	// Cheap cycle guard: Effect can emit mutually-referencing `$defs`, and a tool
@@ -124,7 +123,9 @@ const convertObject = (node: JsonSchema, defs: Defs, depth: number): v.GenericSc
 	}
 
 	const required = new Set(
-		Array.isArray(node.required) ? node.required.filter((key): key is string => typeof key === "string") : [],
+		Array.isArray(node.required)
+			? node.required.filter((key): key is string => typeof key === "string")
+			: [],
 	)
 	const entries: Record<string, v.GenericSchema> = {}
 	for (const [key, raw] of Object.entries(properties)) {
@@ -166,5 +167,4 @@ export const jsonSchemaToValibot = (
 /** Narrows a converted node to the record-shaped schema `defineTool` accepts. */
 const isRecordSchema = (
 	schema: v.GenericSchema,
-): schema is v.GenericSchema<Record<string, unknown>, Record<string, unknown>> =>
-	schema.type === "object"
+): schema is v.GenericSchema<Record<string, unknown>, Record<string, unknown>> => schema.type === "object"

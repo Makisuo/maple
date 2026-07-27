@@ -318,8 +318,7 @@ export const emitCreateTable = (datasource: ResourceContent, options?: EmitterOp
 
 	const innerLines = [
 		...parsed.columns.map(
-			(col, i) =>
-				`${col}${i < parsed.columns.length - 1 || parsed.indexes.length > 0 ? "," : ""}`,
+			(col, i) => `${col}${i < parsed.columns.length - 1 || parsed.indexes.length > 0 ? "," : ""}`,
 		),
 		...parsed.indexes.map(
 			(idx, i) => `${buildIndexClause(idx)}${i < parsed.indexes.length - 1 ? "," : ""}`,

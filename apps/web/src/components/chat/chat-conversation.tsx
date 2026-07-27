@@ -37,7 +37,6 @@ import { Button } from "@maple/ui/components/ui/button"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { AiTriageResult } from "@maple/domain/http"
 
-
 const DEFAULT_SUGGESTIONS = [
 	"What's the overall system health?",
 	"Show me the slowest traces",
@@ -338,7 +337,9 @@ function InvestigationLead({ ctx }: { ctx: InvestigationContext }) {
 function FailedSendNotice({ failed, onRetry }: { failed: FailedSend; onRetry: (text: string) => void }) {
 	return (
 		<div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
-			<span className="min-w-0 truncate text-destructive">Message not sent — {failed.error.message}</span>
+			<span className="min-w-0 truncate text-destructive">
+				Message not sent — {failed.error.message}
+			</span>
 			<Button size="sm" variant="outline" onClick={() => onRetry(failed.message)}>
 				Try again
 			</Button>

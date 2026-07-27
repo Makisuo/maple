@@ -294,12 +294,12 @@ write the same registry entry and the last writer wins.
 
 When something goes wrong, the `investigations.error` column names it:
 
-| `error` value                              | Cause                                                       |
-| ------------------------------------------ | ----------------------------------------------------------- |
-| `start_failed: agent returned HTTP 503`    | `maple-chat-flue` is not in the dev registry                |
-| `agent_unavailable: …`                     | `apps/api` isn't running under wrangler (no `CHAT_FLUE`)    |
-| `start_rejected: agent returned HTTP 401`  | `INTERNAL_SERVICE_TOKEN` mismatch                           |
-| `start_rejected: agent returned HTTP 403`  | Vite rejected the request's `Host` — see `chat-flue-origin.ts` |
+| `error` value                             | Cause                                                          |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| `start_failed: agent returned HTTP 503`   | `maple-chat-flue` is not in the dev registry                   |
+| `agent_unavailable: …`                    | `apps/api` isn't running under wrangler (no `CHAT_FLUE`)       |
+| `start_rejected: agent returned HTTP 401` | `INTERNAL_SERVICE_TOKEN` mismatch                              |
+| `start_rejected: agent returned HTTP 403` | Vite rejected the request's `Host` — see `chat-flue-origin.ts` |
 
 > **`MAPLE_ORG_ID_OVERRIDE` breaks the investigation chat.** It pins every API request to
 > one org, but the browser addresses the chat agent as `<clerk org>:<tab>`. With the

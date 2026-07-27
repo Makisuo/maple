@@ -13,7 +13,10 @@ describe("splitToolResult", () => {
 			splitToolResult({
 				content: [
 					{ type: "text", text: "## Services\n2 services" },
-					{ type: "text", text: JSON.stringify({ __maple_ui: true, kind: "service_table", rows: [] }) },
+					{
+						type: "text",
+						text: JSON.stringify({ __maple_ui: true, kind: "service_table", rows: [] }),
+					},
 				],
 			}),
 		).toEqual({
@@ -32,7 +35,14 @@ describe("splitToolResult", () => {
 	})
 
 	it("joins multiple report entries and never returns an empty report", () => {
-		expect(splitToolResult({ content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] })).toEqual({
+		expect(
+			splitToolResult({
+				content: [
+					{ type: "text", text: "a" },
+					{ type: "text", text: "b" },
+				],
+			}),
+		).toEqual({
 			text: "a\n\nb",
 		})
 		expect(splitToolResult({ content: [] }).text).toBe("(MCP tool returned no content)")
@@ -49,6 +59,8 @@ describe("baseToolName", () => {
 describe("filterMcpTools", () => {
 	it("filters on the unprefixed name", () => {
 		const tools = [{ name: "mcp__maple__list_services" }, { name: "mcp__maple__create_dashboard" }]
-		expect(filterMcpTools(tools, new Set(["list_services"]))).toEqual([{ name: "mcp__maple__list_services" }])
+		expect(filterMcpTools(tools, new Set(["list_services"]))).toEqual([
+			{ name: "mcp__maple__list_services" },
+		])
 	})
 })

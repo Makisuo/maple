@@ -83,9 +83,7 @@ export function resolveActiveSettingsTab(
 ): SettingsTab {
 	const requested = visibleItems.find((item) => item.id === requestedTab)?.id
 	if (requested !== undefined) return requested
-	const preferred = DEFAULT_SETTINGS_TAB_ORDER.find((tab) =>
-		visibleItems.some((item) => item.id === tab),
-	)
+	const preferred = DEFAULT_SETTINGS_TAB_ORDER.find((tab) => visibleItems.some((item) => item.id === tab))
 	return preferred ?? visibleItems[0]?.id ?? "ingestion"
 }
 

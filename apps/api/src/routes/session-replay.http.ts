@@ -97,7 +97,8 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 					// facets, with the quantile in `count` — read them back by label.
 					const stat = (name: string) =>
 						Number(
-							rows.find((row) => row.facetType === "durationStat" && row.name === name)?.count ?? 0,
+							rows.find((row) => row.facetType === "durationStat" && row.name === name)
+								?.count ?? 0,
 						)
 					return new ReplaysFacetsResponse({
 						services: pick("service"),

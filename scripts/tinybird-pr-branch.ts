@@ -259,7 +259,10 @@ const sweep = async (): Promise<void> => {
 	// The PR-state lookup is the sweep's only guard against deleting a LIVE
 	// preview; without a token every branch resolves to "unknown" and the run
 	// green-no-ops forever. Fail loudly instead — this is the safety net.
-	if (!process.env.GITHUB_REPOSITORY?.trim() || !(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()) {
+	if (
+		!process.env.GITHUB_REPOSITORY?.trim() ||
+		!(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()
+	) {
 		fail("sweep requires GITHUB_REPOSITORY and GITHUB_TOKEN (or GH_TOKEN) to check PR state")
 	}
 	const parent = { host: requireEnv("TINYBIRD_HOST"), token: requireEnv("TINYBIRD_TOKEN") }
@@ -275,7 +278,9 @@ const sweep = async (): Promise<void> => {
 			]),
 		).values(),
 	]
-	console.log(`Found ${candidates.length} pr_* branch(es): ${candidates.map((c) => c.name).join(", ") || "—"}`)
+	console.log(
+		`Found ${candidates.length} pr_* branch(es): ${candidates.map((c) => c.name).join(", ") || "—"}`,
+	)
 
 	const failures: string[] = []
 	for (const candidate of candidates) {

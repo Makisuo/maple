@@ -112,9 +112,7 @@ const healthyWarehouse: WarehouseAuditInputs = {
 				sampleTraceIds: [],
 			},
 		],
-		rootless: [
-			{ entryService: "api", traceCount: 800, rootlessCount: 3, sampledRootlessCount: 0 },
-		],
+		rootless: [{ entryService: "api", traceCount: 800, rootlessCount: 3, sampledRootlessCount: 0 }],
 	},
 }
 
@@ -296,7 +294,12 @@ describe("runSetupAudit — baseline", () => {
 		const sentences = failing.filter((row) => row.status === "fail" && row.detail !== null)
 		const fired = new Set(sentences.map((row) => row.id))
 		console.log("FIRED:", [...fired].sort().join(","))
-		console.log("SILENT:", SETUP_AUDIT_CHECKS.map((c)=>c.id).filter((id)=>!fired.has(id)).join(","))
+		console.log(
+			"SILENT:",
+			SETUP_AUDIT_CHECKS.map((c) => c.id)
+				.filter((id) => !fired.has(id))
+				.join(","),
+		)
 
 		const singularVerbAfterPluralNoun =
 			/\b\d+ [a-z][a-z .\-_*`]*s (is|has|emits|sends|receives|appears|uses|starts|logs|arrives|duplicates|marks)\b/
@@ -341,16 +344,18 @@ describe("runSetupAudit — baseline", () => {
 		expect(report.summary.critical).toBe(2)
 		expect(report.summary.info).toBe(1)
 		expect(report.summary.warn).toBeGreaterThanOrEqual(1)
-		expect(report.summary.critical + report.summary.warn + report.summary.info + report.summary.pass).toBe(
-			SETUP_AUDIT_CHECKS.length,
-		)
+		expect(
+			report.summary.critical + report.summary.warn + report.summary.info + report.summary.pass,
+		).toBe(SETUP_AUDIT_CHECKS.length)
 	})
 })
 
 describe("CFG-ALERT-01 — a notification path exists", () => {
 	it("fails when no destination is enabled", () => {
 		const report = runSetupAudit(
-			inputs({ alertDestinations: [{ id: "dest-1", name: "#alerts", enabled: false, lastTestError: null }] }),
+			inputs({
+				alertDestinations: [{ id: "dest-1", name: "#alerts", enabled: false, lastTestError: null }],
+			}),
 		)
 		expect(check(report, "CFG-ALERT-01").status).toBe("fail")
 	})
@@ -420,7 +425,9 @@ describe("CFG-ALERT-03 — rules route somewhere", () => {
 
 	it("fails a rule whose only destination is disabled", () => {
 		const report = runSetupAudit(
-			inputs({ alertDestinations: [{ id: "dest-1", name: "#alerts", enabled: false, lastTestError: null }] }),
+			inputs({
+				alertDestinations: [{ id: "dest-1", name: "#alerts", enabled: false, lastTestError: null }],
+			}),
 		)
 		expect(check(report, "CFG-ALERT-03").status).toBe("fail")
 	})
@@ -496,7 +503,9 @@ describe("CFG-ALERT-04 — destinations delivered on last test", () => {
 describe("CFG-ALERT-05 — rules are evaluating", () => {
 	it("reports an evaluation error from the rule state", () => {
 		const report = runSetupAudit(
-			inputs({ alertRuleStates: [{ ruleId: "rule-1", lastEvaluatedAt: NOW, lastError: "query timed out" }] }),
+			inputs({
+				alertRuleStates: [{ ruleId: "rule-1", lastEvaluatedAt: NOW, lastError: "query timed out" }],
+			}),
 		)
 		const result = check(report, "CFG-ALERT-05")
 		expect(result.status).toBe("fail")
@@ -551,7 +560,9 @@ describe("CFG-NOTIF-01 — error notifications reach someone", () => {
 	})
 
 	it("fails when enabled with no destinations", () => {
-		const report = runSetupAudit(inputs({ errorNotificationPolicy: { enabled: true, destinationIds: [] } }))
+		const report = runSetupAudit(
+			inputs({ errorNotificationPolicy: { enabled: true, destinationIds: [] } }),
+		)
 		expect(check(report, "CFG-NOTIF-01").detail).toContain("no destination is selected")
 	})
 
@@ -572,9 +583,9 @@ describe("CFG-NOTIF-01 — error notifications reach someone", () => {
 
 describe("CFG-ANOM-01 — anomaly detection", () => {
 	it("fires only on an explicit opt-out", () => {
-		expect(check(runSetupAudit(inputs({ anomalyDetector: { enabled: false } })), "CFG-ANOM-01").status).toBe(
-			"fail",
-		)
+		expect(
+			check(runSetupAudit(inputs({ anomalyDetector: { enabled: false } })), "CFG-ANOM-01").status,
+		).toBe("fail")
 		expect(check(runSetupAudit(inputs({ anomalyDetector: null })), "CFG-ANOM-01").status).toBe("pass")
 	})
 })
@@ -668,10 +679,7 @@ describe("CFG-MAP-01 / CFG-MAP-02 — mapping liveness", () => {
 		const report = runSetupAudit(
 			inputsWith(
 				warehouse({
-					attributeKeys: [
-						spanKey("http.status_code", 9),
-						spanKey("http.response.status_code", 9),
-					],
+					attributeKeys: [spanKey("http.status_code", 9), spanKey("http.response.status_code", 9)],
 				}),
 				{ attributeMappings: [mapping] },
 			),
@@ -790,7 +798,12 @@ describe("integration checks", () => {
 		const report = runSetupAudit(
 			inputs({
 				vcsRepositories: [
-					{ id: "repo-1", fullName: "acme/api", syncStatus: "error", lastSyncError: "401 from GitHub" },
+					{
+						id: "repo-1",
+						fullName: "acme/api",
+						syncStatus: "error",
+						lastSyncError: "401 from GitHub",
+					},
 				],
 			}),
 		)
@@ -800,7 +813,9 @@ describe("integration checks", () => {
 	it("CFG-SCRAPE-01 ignores disabled targets", () => {
 		const report = runSetupAudit(
 			inputs({
-				scrapeTargets: [{ id: "target-1", name: "old", enabled: false, lastScrapeError: "connection refused" }],
+				scrapeTargets: [
+					{ id: "target-1", name: "old", enabled: false, lastScrapeError: "connection refused" },
+				],
 			}),
 		)
 		expect(check(report, "CFG-SCRAPE-01").status).toBe("pass")
@@ -810,7 +825,12 @@ describe("integration checks", () => {
 		const report = runSetupAudit(
 			inputs({
 				scrapeTargets: [
-					{ id: "target-1", name: "api metrics", enabled: true, lastScrapeError: "connection refused" },
+					{
+						id: "target-1",
+						name: "api metrics",
+						enabled: true,
+						lastScrapeError: "connection refused",
+					},
 				],
 			}),
 		)
@@ -840,7 +860,9 @@ const telemetry = (overrides: Partial<WarehouseAuditInputs>) =>
 describe("RES-01 — service.name is set", () => {
 	it("flags the SDK's default identity", () => {
 		const report = telemetry({
-			serviceUsage: [{ serviceName: "unknown_service:node", logCount: 0, traceCount: 40, metricCount: 0 }],
+			serviceUsage: [
+				{ serviceName: "unknown_service:node", logCount: 0, traceCount: 40, metricCount: 0 },
+			],
 		})
 		const result = check(report, "RES-01")
 		expect(result.status).toBe("fail")
@@ -911,7 +933,13 @@ describe("LOG-01 — traced services also log", () => {
 
 describe("LOG-02 — logs carry trace context", () => {
 	const broken = [
-		{ serviceName: "api", logCount: 500, uncorrelatedCount: 500, errorLogCount: 20, uncorrelatedErrorCount: 20 },
+		{
+			serviceName: "api",
+			logCount: 500,
+			uncorrelatedCount: 500,
+			errorLogCount: 20,
+			uncorrelatedErrorCount: 20,
+		},
 	]
 
 	it("flags a traced service whose logs have no trace_id", () => {
@@ -925,7 +953,13 @@ describe("LOG-02 — logs carry trace context", () => {
 	it("ignores a service below the volume floor, where a rate means nothing", () => {
 		const report = telemetry({
 			logCorrelation: [
-				{ serviceName: "api", logCount: 5, uncorrelatedCount: 5, errorLogCount: 0, uncorrelatedErrorCount: 0 },
+				{
+					serviceName: "api",
+					logCount: 5,
+					uncorrelatedCount: 5,
+					errorLogCount: 0,
+					uncorrelatedErrorCount: 0,
+				},
 			],
 		})
 		expect(check(report, "LOG-02").status).toBe("pass")
@@ -942,7 +976,13 @@ describe("LOG-02 — logs carry trace context", () => {
 	it("tolerates a minority of uncorrelated logs", () => {
 		const report = telemetry({
 			logCorrelation: [
-				{ serviceName: "api", logCount: 500, uncorrelatedCount: 100, errorLogCount: 0, uncorrelatedErrorCount: 0 },
+				{
+					serviceName: "api",
+					logCount: 500,
+					uncorrelatedCount: 100,
+					errorLogCount: 0,
+					uncorrelatedErrorCount: 0,
+				},
 			],
 		})
 		expect(check(report, "LOG-02").status).toBe("pass")
@@ -1117,7 +1157,11 @@ describe("STAT-01 — status and kind casing", () => {
 	it("names the offending literals", () => {
 		const report = telemetry({
 			spanShape: [
-				{ ...healthyWarehouse.spanShape[0]!, badStatusCodes: ["ERROR"], badSpanKinds: ["SPAN_KIND_SERVER"] },
+				{
+					...healthyWarehouse.spanShape[0]!,
+					badStatusCodes: ["ERROR"],
+					badSpanKinds: ["SPAN_KIND_SERVER"],
+				},
 			],
 		})
 		const result = check(report, "STAT-01")
@@ -1173,7 +1217,12 @@ describe("MAP-02 — database identity", () => {
 	it("flags edges whose namespace is mostly empty", () => {
 		const report = telemetry({
 			dbEdges: [
-				{ serviceName: "api", dbSystem: "postgresql", callCount: 100, unknownNamespaceCallCount: 100 },
+				{
+					serviceName: "api",
+					dbSystem: "postgresql",
+					callCount: 100,
+					unknownNamespaceCallCount: 100,
+				},
 			],
 		})
 		const result = check(report, "MAP-02")
@@ -1255,7 +1304,12 @@ describe("trace completeness", () => {
 			const report = traces({
 				rootless: [
 					{ entryService: "api", traceCount: 800, rootlessCount: 3, sampledRootlessCount: 0 },
-					{ entryService: "checkout", traceCount: 800, rootlessCount: 400, sampledRootlessCount: 0 },
+					{
+						entryService: "checkout",
+						traceCount: 800,
+						rootlessCount: 400,
+						sampledRootlessCount: 0,
+					},
 				],
 			})
 			const result = check(report, "TRC-02")
@@ -1268,7 +1322,12 @@ describe("trace completeness", () => {
 			const report = traces({
 				rootless: [
 					{ entryService: "api", traceCount: 800, rootlessCount: 800, sampledRootlessCount: 0 },
-					{ entryService: "checkout", traceCount: 800, rootlessCount: 796, sampledRootlessCount: 0 },
+					{
+						entryService: "checkout",
+						traceCount: 800,
+						rootlessCount: 796,
+						sampledRootlessCount: 0,
+					},
 				],
 			})
 			const result = check(report, "TRC-02")

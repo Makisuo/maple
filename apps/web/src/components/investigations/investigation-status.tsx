@@ -40,8 +40,7 @@ const ORIGIN: Record<V2Investigation["seeded_by"], string> = {
 	system: "Automatic",
 }
 
-export const investigationOriginLabel = (seededBy: V2Investigation["seeded_by"]): string =>
-	ORIGIN[seededBy]
+export const investigationOriginLabel = (seededBy: V2Investigation["seeded_by"]): string => ORIGIN[seededBy]
 
 /** What is being investigated. `freeform` is a question, not a kind of incident. */
 export const investigationKindLabel = (subject: V2Investigation["subject"]): string =>

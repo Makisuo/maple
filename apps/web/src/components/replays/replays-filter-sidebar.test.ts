@@ -39,7 +39,7 @@ describe("toDurationBuckets", () => {
 			{ name: "1000", count: 2 },
 			{ name: "2000", count: 3 },
 		])
-		expect(buckets.map((b) => b.from)).toEqual([...buckets.map((b) => b.from)].sort((a, b) => a - b))
+		expect(buckets.map((b) => b.from)).toEqual(buckets.map((b) => b.from).sort((a, b) => a - b))
 	})
 
 	it("each bucket's ceiling is the next bucket's floor", () => {

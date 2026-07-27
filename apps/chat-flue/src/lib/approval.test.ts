@@ -60,9 +60,9 @@ describe("applyApprovalGates", () => {
 
 describe("parseToolProposal", () => {
 	it("reads the structured marker a gated tool returns", () => {
-		expect(parseToolProposal({ status: PROPOSAL_STATUS, tool: "create_dashboard", input: { a: 1 } })).toEqual(
-			{ status: PROPOSAL_STATUS, tool: "create_dashboard", input: { a: 1 } },
-		)
+		expect(
+			parseToolProposal({ status: PROPOSAL_STATUS, tool: "create_dashboard", input: { a: 1 } }),
+		).toEqual({ status: PROPOSAL_STATUS, tool: "create_dashboard", input: { a: 1 } })
 	})
 
 	it("still reads a marker recorded as a string by an older runtime", () => {

@@ -57,8 +57,7 @@ function InvestigationsHub() {
 				.onSuccess((response) =>
 					response.data.filter((investigation) =>
 						view === "active"
-							? investigation.status === "investigating" ||
-								investigation.status === "diagnosed"
+							? investigation.status === "investigating" || investigation.status === "diagnosed"
 							: investigation.status === "resolved" || investigation.status === "failed",
 					),
 				)

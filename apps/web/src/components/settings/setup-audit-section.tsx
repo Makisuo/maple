@@ -79,15 +79,7 @@ const CATEGORY_ORDER: ReadonlyArray<Category> = [
 	"data_platform",
 ]
 
-function SummaryPill({
-	count,
-	label,
-	className,
-}: {
-	count: number
-	label: string
-	className: string
-}) {
+function SummaryPill({ count, label, className }: { count: number; label: string; className: string }) {
 	return (
 		<span className={cn("font-mono text-[11px] leading-3.5", count === 0 && "text-muted-foreground")}>
 			<span className={cn("font-medium", count > 0 && className)}>{count}</span> {label}
@@ -105,10 +97,7 @@ function CheckRow({ check }: { check: V2SetupAuditCheck }) {
 		<div className="flex items-start gap-3 border-t px-4 py-3">
 			<Icon
 				size={16}
-				className={cn(
-					"mt-0.5 shrink-0",
-					isFinding ? severity.className : "text-muted-foreground/60",
-				)}
+				className={cn("mt-0.5 shrink-0", isFinding ? severity.className : "text-muted-foreground/60")}
 			/>
 			<div className="flex min-w-0 flex-col gap-1.5">
 				<div className="flex flex-wrap items-center gap-2">

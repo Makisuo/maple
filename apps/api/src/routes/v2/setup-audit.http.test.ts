@@ -236,9 +236,11 @@ describe("GET /v2/instrumentation/audit", () => {
 			const summary = response.body.summary
 			const total = summary.critical + summary.warn + summary.info + summary.pass + summary.skip
 			expect(total).toBe(response.body.checks.length)
-			expect(response.body.checks.every((check: { object: string }) => check.object === "setup_audit_check")).toBe(
-				true,
-			)
+			expect(
+				response.body.checks.every(
+					(check: { object: string }) => check.object === "setup_audit_check",
+				),
+			).toBe(true)
 
 			// A brand-new org with no destinations is the canonical broken-alerting case.
 			const routing = response.body.checks.find((check: { id: string }) => check.id === "CFG-ALERT-01")
@@ -317,9 +319,7 @@ describe("GET /v2/instrumentation/audit", () => {
 						totalExpHistogramMetricCount: "0",
 					},
 				],
-				attribute_keys_hourly: [
-					{ scope: "span", attributeKey: "user.password", usageCount: "12" },
-				],
+				attribute_keys_hourly: [{ scope: "span", attributeKey: "user.password", usageCount: "12" }],
 				traces_aggregates_hourly: [
 					{
 						serviceName: "unknown_service:node",
@@ -378,7 +378,9 @@ describe("GET /v2/instrumentation/audit", () => {
 			expect(response.body.telemetry_checks_available).toBe(false)
 			expect(response.body.summary.skip).toBeGreaterThan(0)
 
-			const skipped = response.body.checks.filter((check: { status: string }) => check.status === "skip")
+			const skipped = response.body.checks.filter(
+				(check: { status: string }) => check.status === "skip",
+			)
 			expect(skipped.map((check: { id: string }) => check.id)).toContain("CFG-MAP-01")
 			expect(skipped.map((check: { id: string }) => check.id)).toContain("RES-01")
 			// Nothing telemetry-backed is reported as a pass or a failure when there is no telemetry.

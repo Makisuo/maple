@@ -293,7 +293,9 @@ export function TraceVisualization() {
 					<span className="text-[9px] border border-border px-1.5 py-0.5 text-muted-foreground">
 						203ms
 					</span>
-					<span className="text-[9px] px-1.5 py-0.5 bg-[color:var(--severity-info)]/10 text-[color:var(--severity-info)]">Ok</span>
+					<span className="text-[9px] px-1.5 py-0.5 bg-[color:var(--severity-info)]/10 text-[color:var(--severity-info)]">
+						Ok
+					</span>
 				</div>
 			</div>
 

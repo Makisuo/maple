@@ -139,7 +139,9 @@ describe("ChatTranscript", () => {
 	})
 
 	it("marks a read-only shared thread with a separator row", () => {
-		render(<ChatTranscript {...baseProps} readOnly="shared" messages={[message("m1", "assistant", "hi")]} />)
+		render(
+			<ChatTranscript {...baseProps} readOnly="shared" messages={[message("m1", "assistant", "hi")]} />,
+		)
 
 		const marker = document.querySelector('[data-slot="marker"]') as HTMLElement | null
 		expect(marker?.dataset.variant).toBe("separator")
@@ -150,7 +152,11 @@ describe("ChatTranscript", () => {
 	// a teammate's shared link, and saying "shared" there is just wrong.
 	it("says a resolved investigation is resolved, not shared", () => {
 		render(
-			<ChatTranscript {...baseProps} readOnly="resolved" messages={[message("m1", "assistant", "hi")]} />,
+			<ChatTranscript
+				{...baseProps}
+				readOnly="resolved"
+				messages={[message("m1", "assistant", "hi")]}
+			/>,
 		)
 
 		const marker = document.querySelector('[data-slot="marker"]') as HTMLElement | null
@@ -159,17 +165,9 @@ describe("ChatTranscript", () => {
 	})
 
 	it("renders a preserved fallback diagnosis as its own row", () => {
-		render(
-			<ChatTranscript
-				{...baseProps}
-				messages={[]}
-				fallbackDiagnosis={report as never}
-			/>,
-		)
+		render(<ChatTranscript {...baseProps} messages={[]} fallbackDiagnosis={report as never} />)
 
-		expect(items().map((el) => (el as HTMLElement).dataset.messageId)).toEqual([
-			"__fallback-diagnosis",
-		])
+		expect(items().map((el) => (el as HTMLElement).dataset.messageId)).toEqual(["__fallback-diagnosis"])
 	})
 })
 

@@ -46,9 +46,11 @@ To add a query: define it in `packages/query-engine/src/ch/queries/*.ts` with
 
 ```typescript
 const compiled = CH.compile(CH.myQuery({ limit: 50 }), { orgId, startTime, endTime })
-const rows = yield* warehouse
-	.sqlQuery(tenant, compiled.sql, { profile: "list", context: "myQuery" })
-	.pipe(Effect.mapError(mapTinybirdError))
+const rows =
+	yield *
+	warehouse
+		.sqlQuery(tenant, compiled.sql, { profile: "list", context: "myQuery" })
+		.pipe(Effect.mapError(mapTinybirdError))
 const typedRows = compiled.castRows(rows)
 ```
 
@@ -89,10 +91,10 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
 - **UI:** shadcn/Base UI + Tailwind 4 (`npx shadcn@latest add <component>`), Recharts, Nucleo icons.
   Find an icon in the local Nucleo DB, then port it into `apps/web/src/components/icons/` by copying
   an existing component (currentColor, camelCase attrs) and exporting it from `index.ts`:
-  ```bash
-  sqlite3 "~/Library/Application Support/Nucleo/icons/data.sqlite3" \
-    "SELECT id, name, set_id FROM icons WHERE klass='outline' AND grid=24 AND name LIKE '%search%';"
-  ```
+    ```bash
+    sqlite3 "~/Library/Application Support/Nucleo/icons/data.sqlite3" \
+      "SELECT id, name, set_id FROM icons WHERE klass='outline' AND grid=24 AND name LIKE '%search%';"
+    ```
 
 ## Self-observability (trace loop prevention)
 

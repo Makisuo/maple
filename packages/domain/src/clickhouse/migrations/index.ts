@@ -79,8 +79,7 @@ export const latestMigrationVersion: number = migrations.reduce(
  */
 export const clickHouseSchemaVersion: string = String(
 	migrations.reduce(
-		(max, migration) =>
-			migration.requiredForIngest === false ? max : Math.max(max, migration.version),
+		(max, migration) => (migration.requiredForIngest === false ? max : Math.max(max, migration.version)),
 		0,
 	),
 )

@@ -63,11 +63,13 @@ export const HttpV2InstrumentationAuditLive = HttpApiBuilder.group(
 					const tenant = yield* CurrentTenant.Context
 					// Only a configuration read failure reaches here — a warehouse outage degrades to
 					// skipped checks inside the service rather than failing the request.
-					const report = yield* service.run(tenant).pipe(
-						Effect.catchTag("@maple/api/services/SetupAuditError", () =>
-							Effect.fail(dependencyUnavailable("setup_audit_unavailable")),
-						),
-					)
+					const report = yield* service
+						.run(tenant)
+						.pipe(
+							Effect.catchTag("@maple/api/services/SetupAuditError", () =>
+								Effect.fail(dependencyUnavailable("setup_audit_unavailable")),
+							),
+						)
 					return toV2SetupAudit(report)
 				}),
 			)

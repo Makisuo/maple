@@ -92,7 +92,7 @@ const cfRequest = async (
 		headers: {
 			Authorization: `Bearer ${token}`,
 			"Content-Type": "application/json",
-			...(init?.headers ?? {}),
+			...init?.headers,
 		},
 	})
 	const body = (await response.json().catch(() => ({}))) as {
@@ -111,7 +111,10 @@ const cfRequest = async (
 const main = async (): Promise<void> => {
 	// Same guard as the sibling sweeps: without the PR-state gate every config
 	// resolves to "unknown" and the run green-no-ops forever.
-	if (!process.env.GITHUB_REPOSITORY?.trim() || !(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()) {
+	if (
+		!process.env.GITHUB_REPOSITORY?.trim() ||
+		!(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()
+	) {
 		fail("sweep requires GITHUB_REPOSITORY and GITHUB_TOKEN (or GH_TOKEN) to check PR state")
 	}
 	const token = requireEnv("CLOUDFLARE_API_TOKEN")

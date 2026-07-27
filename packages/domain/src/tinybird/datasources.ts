@@ -43,10 +43,9 @@ export const logs = defineDatasource("logs", {
 			t.array(t.string()).defaultExpr(attributeItemsExpr("ResourceAttributes")),
 			{ jsonPath: "$.ResourceAttributeItems[:]" },
 		),
-		ScopeAttributeItems: column(
-			t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")),
-			{ jsonPath: "$.ScopeAttributeItems[:]" },
-		),
+		ScopeAttributeItems: column(t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")), {
+			jsonPath: "$.ScopeAttributeItems[:]",
+		}),
 		LogAttributeItems: column(t.array(t.string()).defaultExpr(attributeItemsExpr("LogAttributes")), {
 			jsonPath: "$.LogAttributeItems[:]",
 		}),
@@ -238,10 +237,9 @@ export const traces = defineDatasource("traces", {
 			t.array(t.string()).defaultExpr(attributeItemsExpr("ResourceAttributes")),
 			{ jsonPath: "$.ResourceAttributeItems[:]" },
 		),
-		ScopeAttributeItems: column(
-			t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")),
-			{ jsonPath: "$.ScopeAttributeItems[:]" },
-		),
+		ScopeAttributeItems: column(t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")), {
+			jsonPath: "$.ScopeAttributeItems[:]",
+		}),
 		SpanAttributeItems: column(t.array(t.string()).defaultExpr(attributeItemsExpr("SpanAttributes")), {
 			jsonPath: "$.SpanAttributeItems[:]",
 		}),

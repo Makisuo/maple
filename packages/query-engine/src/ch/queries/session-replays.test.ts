@@ -336,7 +336,9 @@ describe("sessionReplaysFacetsQuery duration distribution", () => {
 	// to survive, or the whole sidebar 502s.
 	it("casts percentiles to the union's integer count type, nan-safe", () => {
 		const { sql } = compileUnion(sessionReplaysFacetsQuery({}), { ...baseParams, ...WINDOW })
-		expect(sql).toContain("toUInt64(ifNotFinite(round(quantile(0.5)(assumeNotNull(DurationMs))), 0)) AS count")
+		expect(sql).toContain(
+			"toUInt64(ifNotFinite(round(quantile(0.5)(assumeNotNull(DurationMs))), 0)) AS count",
+		)
 		expect(sql).toContain(
 			"toUInt64(ifNotFinite(round(quantile(0.95)(assumeNotNull(DurationMs))), 0)) AS count",
 		)

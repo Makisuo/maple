@@ -13,10 +13,7 @@ import { cn } from "../lib/utils"
 export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
 	return (
 		<div
-			className={cn(
-				"flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3",
-				className,
-			)}
+			className={cn("flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3", className)}
 		>
 			{children}
 		</div>

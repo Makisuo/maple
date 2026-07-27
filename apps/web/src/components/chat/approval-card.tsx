@@ -10,7 +10,6 @@ import {
 import { toolLabel } from "@/components/ai-elements/tool-metadata"
 import { ApprovalSummary, safeStringify } from "./approval-renderers"
 
-
 interface ApprovalCardProps {
 	toolName: string
 	input: unknown

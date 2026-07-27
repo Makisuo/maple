@@ -321,8 +321,7 @@ const plural = (count: number, singular: string, pluralForm = `${singular}s`) =>
  * Subject-verb agreement for finding sentences, which always lead with a count. Without it every
  * multi-item finding reads as "3 services emits …".
  */
-const conj = (count: number, singular: string, pluralForm: string) =>
-	count === 1 ? singular : pluralForm
+const conj = (count: number, singular: string, pluralForm: string) => (count === 1 ? singular : pluralForm)
 
 const formatAgo = (ms: number): string => {
 	const minutes = Math.floor(ms / 60_000)
@@ -388,7 +387,8 @@ const alertingChecks: ReadonlyArray<AuditCheck> = [
 		category: "alerting",
 		title: "At least one alert rule is defined",
 		severity: "warn",
-		fixHint: "Create a rule in Alerts → Rules, starting with error rate or p95 latency on your busiest service.",
+		fixHint:
+			"Create a rule in Alerts → Rules, starting with error rate or p95 latency on your busiest service.",
 		evaluate: ({ config }) => {
 			if (config.alertRules.some((rule) => rule.enabled)) return PASS
 			// A missing settings row means the detector is on — see the schema comment on
@@ -408,14 +408,19 @@ const alertingChecks: ReadonlyArray<AuditCheck> = [
 		severity: "critical",
 		fixHint: "Open each rule and pick at least one enabled destination under Notifications.",
 		evaluate: ({ config }) => {
-			const deliverable = new Set(
-				config.alertDestinations.filter((d) => d.enabled).map((d) => d.id),
-			)
+			const deliverable = new Set(config.alertDestinations.filter((d) => d.enabled).map((d) => d.id))
 			const broken = config.alertRules
 				.filter((rule) => rule.enabled)
 				.flatMap((rule) => {
 					if (rule.destinationIds.length === 0) {
-						return [{ kind: "alert_rule" as const, id: rule.id, name: rule.name, note: "no destinations selected" }]
+						return [
+							{
+								kind: "alert_rule" as const,
+								id: rule.id,
+								name: rule.name,
+								note: "no destinations selected",
+							},
+						]
 					}
 					if (rule.destinationIds.some((id) => deliverable.has(id))) return []
 					return [
@@ -440,7 +445,8 @@ const alertingChecks: ReadonlyArray<AuditCheck> = [
 		category: "alerting",
 		title: "Notification destinations delivered successfully on their last test",
 		severity: "warn",
-		fixHint: "Re-test the destination in Alerts → Destinations; a stale webhook URL or revoked token is the usual cause.",
+		fixHint:
+			"Re-test the destination in Alerts → Destinations; a stale webhook URL or revoked token is the usual cause.",
 		evaluate: ({ config }) => {
 			const failing = config.alertDestinations
 				.filter((destination) => destination.enabled && destination.lastTestError !== null)
@@ -460,7 +466,8 @@ const alertingChecks: ReadonlyArray<AuditCheck> = [
 		category: "alerting",
 		title: "Enabled alert rules are actually being evaluated",
 		severity: "warn",
-		fixHint: "Check the rule's query and filters; a rule that never evaluates cannot fire regardless of its threshold.",
+		fixHint:
+			"Check the rule's query and filters; a rule that never evaluates cannot fire regardless of its threshold.",
 		evaluate: ({ config, now }) => {
 			const statesByRule = new Map<string, AuditAlertRuleState[]>()
 			for (const state of config.alertRuleStates) {
@@ -486,7 +493,14 @@ const alertingChecks: ReadonlyArray<AuditCheck> = [
 					}
 					if (rule.lastScheduledAt === null) {
 						return now - rule.createdAt > RULE_NEVER_SCHEDULED_GRACE_MS
-							? [{ kind: "alert_rule" as const, id: rule.id, name: rule.name, note: "never evaluated" }]
+							? [
+									{
+										kind: "alert_rule" as const,
+										id: rule.id,
+										name: rule.name,
+										note: "never evaluated",
+									},
+								]
 							: []
 					}
 					// The scheduler re-claims each rule every tick under a 30s lock, so a claim this old
@@ -526,7 +540,9 @@ const notificationChecks: ReadonlyArray<AuditCheck> = [
 			// which still routes nowhere, so the second arm below catches it.
 			const policy = config.errorNotificationPolicy ?? { enabled: true, destinationIds: [] }
 			if (!policy.enabled) {
-				return fail("Error notifications are turned off — new and regressed errors will surface in the dashboard only.")
+				return fail(
+					"Error notifications are turned off — new and regressed errors will surface in the dashboard only.",
+				)
 			}
 			const deliverable = new Set(config.alertDestinations.filter((d) => d.enabled).map((d) => d.id))
 			if (policy.destinationIds.some((id) => deliverable.has(id))) return PASS
@@ -542,11 +558,14 @@ const notificationChecks: ReadonlyArray<AuditCheck> = [
 		category: "notifications",
 		title: "Anomaly detection is enabled",
 		severity: "info",
-		fixHint: "Settings → Automation: re-enable anomaly detection to get baseline-relative alerts without authoring rules.",
+		fixHint:
+			"Settings → Automation: re-enable anomaly detection to get baseline-relative alerts without authoring rules.",
 		evaluate: ({ config }) =>
 			// Only an explicit opt-out counts; a missing row means the zero-config default (enabled).
 			config.anomalyDetector !== null && !config.anomalyDetector.enabled
-				? fail("Anomaly detection is explicitly disabled — Maple will not flag sudden shifts in latency, throughput or error volume.")
+				? fail(
+						"Anomaly detection is explicitly disabled — Maple will not flag sudden shifts in latency, throughput or error volume.",
+					)
 				: PASS,
 	},
 	{
@@ -554,11 +573,14 @@ const notificationChecks: ReadonlyArray<AuditCheck> = [
 		category: "notifications",
 		title: "At least one dashboard exists",
 		severity: "info",
-		fixHint: "Create a dashboard, or ask the Maple MCP to build one from your busiest service's operations.",
+		fixHint:
+			"Create a dashboard, or ask the Maple MCP to build one from your busiest service's operations.",
 		evaluate: ({ config }) =>
 			config.dashboardCount > 0
 				? PASS
-				: fail("No dashboards yet. Service views cover a lot, but a dashboard is how you put your own metrics side by side."),
+				: fail(
+						"No dashboards yet. Service views cover a lot, but a dashboard is how you put your own metrics side by side.",
+					),
 	},
 ]
 
@@ -568,7 +590,8 @@ const ingestionChecks: ReadonlyArray<AuditCheck> = [
 		category: "ingestion",
 		title: "Trace sampling is understood",
 		severity: "info",
-		fixHint: "Span counts and throughput are scaled estimates while sampling is on. Nothing to fix if this is intentional.",
+		fixHint:
+			"Span counts and throughput are scaled estimates while sampling is on. Nothing to fix if this is intentional.",
 		evaluate: ({ config }) => {
 			const policy = config.samplingPolicy
 			if (policy === null || policy.traceSampleRatio >= 1) return PASS
@@ -586,7 +609,8 @@ const ingestionChecks: ReadonlyArray<AuditCheck> = [
 		category: "attributes",
 		title: "No open instrumentation recommendations",
 		severity: "warn",
-		fixHint: "Settings → Ingestion → Recommended mappings: apply the renames or dismiss the ones you don't plan to act on.",
+		fixHint:
+			"Settings → Ingestion → Recommended mappings: apply the renames or dismiss the ones you don't plan to act on.",
 		evaluate: ({ config }) =>
 			config.openRecommendationCount === 0
 				? PASS
@@ -600,14 +624,17 @@ const ingestionChecks: ReadonlyArray<AuditCheck> = [
 		title: "Every attribute mapping still matches live telemetry",
 		severity: "warn",
 		needsWarehouse: true,
-		fixHint: "Delete the mapping, or fix its source key — it is dead configuration that will mislead the next reader.",
+		fixHint:
+			"Delete the mapping, or fix its source key — it is dead configuration that will mislead the next reader.",
 		evaluate: ({ config, warehouse }) => {
 			if (!warehouse) return PASS
 			const present = spanKeySet(warehouse)
 			const dead = config.attributeMappings
 				.filter(
 					(mapping) =>
-						mapping.enabled && mapping.sourceContext === "span" && !present.has(mapping.sourceKey),
+						mapping.enabled &&
+						mapping.sourceContext === "span" &&
+						!present.has(mapping.sourceKey),
 				)
 				.map((mapping) => ({
 					kind: "attribute_mapping" as const,
@@ -629,7 +656,8 @@ const ingestionChecks: ReadonlyArray<AuditCheck> = [
 		title: "No attribute mapping is a silent no-op",
 		severity: "warn",
 		needsWarehouse: true,
-		fixHint: "Stop emitting the source key at the SDK — the mapping cannot merge two keys, so it will never run.",
+		fixHint:
+			"Stop emitting the source key at the SDK — the mapping cannot merge two keys, so it will never run.",
 		evaluate: ({ config, warehouse }) => {
 			if (!warehouse) return PASS
 			const present = spanKeySet(warehouse)
@@ -659,7 +687,8 @@ const platformChecks: ReadonlyArray<AuditCheck> = [
 		category: "data_platform",
 		title: "Bring-your-own ClickHouse is reachable",
 		severity: "critical",
-		fixHint: "Settings → Data Platform: re-test the connection. Credentials, network policy and cluster health are the usual causes.",
+		fixHint:
+			"Settings → Data Platform: re-test the connection. Credentials, network policy and cluster health are the usual causes.",
 		evaluate: ({ config }) => {
 			const clickhouse = config.clickhouse
 			if (clickhouse === null || clickhouse.syncStatus !== "error") return PASS
@@ -673,7 +702,8 @@ const platformChecks: ReadonlyArray<AuditCheck> = [
 		category: "data_platform",
 		title: "Bring-your-own ClickHouse schema is up to date",
 		severity: "warn",
-		fixHint: "Settings → Data Platform → Apply schema. Newer Maple features query tables the older schema doesn't have.",
+		fixHint:
+			"Settings → Data Platform → Apply schema. Newer Maple features query tables the older schema doesn't have.",
 		evaluate: ({ config }) => {
 			const clickhouse = config.clickhouse
 			if (clickhouse === null) return PASS
@@ -700,7 +730,8 @@ const integrationChecks: ReadonlyArray<AuditCheck> = [
 		category: "integrations",
 		title: "No integration connection has been revoked",
 		severity: "warn",
-		fixHint: "Reconnect the integration — a revoked grant makes its poller skip silently, with no other surface.",
+		fixHint:
+			"Reconnect the integration — a revoked grant makes its poller skip silently, with no other surface.",
 		evaluate: ({ config }) => {
 			const revoked = config.integrations
 				.filter((integration) => integration.revokedAt !== null)
@@ -722,10 +753,13 @@ const integrationChecks: ReadonlyArray<AuditCheck> = [
 		category: "integrations",
 		title: "Cloudflare analytics collection is succeeding",
 		severity: "warn",
-		fixHint: "Check the Cloudflare integration's permissions — an expired token or a dataset the plan doesn't include is the usual cause.",
+		fixHint:
+			"Check the Cloudflare integration's permissions — an expired token or a dataset the plan doesn't include is the usual cause.",
 		evaluate: ({ config }) => {
 			const failing = config.cloudflareAnalytics
-				.filter((state) => state.lastErrorAt !== null && state.lastErrorAt > (state.lastSuccessAt ?? 0))
+				.filter(
+					(state) => state.lastErrorAt !== null && state.lastErrorAt > (state.lastSuccessAt ?? 0),
+				)
 				.map((state) => ({
 					kind: "integration" as const,
 					name: state.zoneName ? `${state.dataset} · ${state.zoneName}` : state.dataset,
@@ -744,7 +778,8 @@ const integrationChecks: ReadonlyArray<AuditCheck> = [
 		category: "integrations",
 		title: "Source repositories are syncing",
 		severity: "warn",
-		fixHint: "Re-check the repository's installation in Settings → Integrations; commit linking and release markers depend on it.",
+		fixHint:
+			"Re-check the repository's installation in Settings → Integrations; commit linking and release markers depend on it.",
 		evaluate: ({ config }) => {
 			const failing = config.vcsRepositories
 				.filter((repository) => repository.syncStatus === "error")
@@ -779,7 +814,10 @@ const integrationChecks: ReadonlyArray<AuditCheck> = [
 				}))
 			return failing.length === 0
 				? PASS
-				: fail(`${plural(failing.length, "scrape target")} failed ${conj(failing.length, "its", "their")} last scrape.`, failing)
+				: fail(
+						`${plural(failing.length, "scrape target")} failed ${conj(failing.length, "its", "their")} last scrape.`,
+						failing,
+					)
 		},
 	},
 ]
@@ -1219,9 +1257,7 @@ const serviceMapChecks: ReadonlyArray<AuditCheck> = [
 		evaluate: ({ warehouse }) => {
 			if (!warehouse) return PASS
 			const offenders = warehouse.spanShape
-				.filter(
-					(service) => service.badStatusCodes.length > 0 || service.badSpanKinds.length > 0,
-				)
+				.filter((service) => service.badStatusCodes.length > 0 || service.badSpanKinds.length > 0)
 				.map((service) => ({
 					kind: "service" as const,
 					name: service.serviceName,

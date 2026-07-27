@@ -10,16 +10,16 @@ and running on **Cloudflare Workers AI**. It backs three surfaces in the product
 
 ## Layout
 
-| File                          | Role                                                                                                                                                        |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/app.ts`                  | Hono app mounting `flue()`. Owns CORS, auth on `/agents/*`, the internal-token guard on `/workflows/*`, and the OpenTelemetry bridge.                        |
-| `src/agents/maple-chat.ts`    | The addressable chat agent, at `POST/GET /agents/maple-chat/:id`. Picks the model, loads Maple's tools, and adds `submit_diagnosis` in investigate mode.     |
-| `src/lib/mcp.ts`              | Adapts Maple's tool registry (over the `MAPLE_API_RPC` service binding) into Flue tools.                                                                     |
-| `src/lib/json-schema-to-valibot.ts` | Bridges the two schema languages: the registry describes tools in JSON Schema, `defineTool` requires Valibot.                                          |
-| `src/lib/approval.ts`         | Propose-then-apply. Mutating tools return a proposal instead of mutating; the web renders an approval card and applies via Maple's API.                      |
-| `src/lib/submit-diagnosis.ts` | The structured-output channel for an investigation's diagnosis. Writes through to `apps/api`, which persists the report.                                     |
-| `src/workflows/triage.ts`     | The headless triage workflow. Owns only the LLM step; the incident lifecycle stays in `apps/api`.                                                            |
-| `src/lib/auth.ts`             | Clerk or self-hosted HS256 verification, plus the check that the caller's org owns the addressed instance.                                                   |
+| File                                | Role                                                                                                                                                     |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/app.ts`                        | Hono app mounting `flue()`. Owns CORS, auth on `/agents/*`, the internal-token guard on `/workflows/*`, and the OpenTelemetry bridge.                    |
+| `src/agents/maple-chat.ts`          | The addressable chat agent, at `POST/GET /agents/maple-chat/:id`. Picks the model, loads Maple's tools, and adds `submit_diagnosis` in investigate mode. |
+| `src/lib/mcp.ts`                    | Adapts Maple's tool registry (over the `MAPLE_API_RPC` service binding) into Flue tools.                                                                 |
+| `src/lib/json-schema-to-valibot.ts` | Bridges the two schema languages: the registry describes tools in JSON Schema, `defineTool` requires Valibot.                                            |
+| `src/lib/approval.ts`               | Propose-then-apply. Mutating tools return a proposal instead of mutating; the web renders an approval card and applies via Maple's API.                  |
+| `src/lib/submit-diagnosis.ts`       | The structured-output channel for an investigation's diagnosis. Writes through to `apps/api`, which persists the report.                                 |
+| `src/workflows/triage.ts`           | The headless triage workflow. Owns only the LLM step; the incident lifecycle stays in `apps/api`.                                                        |
+| `src/lib/auth.ts`                   | Clerk or self-hosted HS256 verification, plus the check that the caller's org owns the addressed instance.                                               |
 
 ## How a turn works
 

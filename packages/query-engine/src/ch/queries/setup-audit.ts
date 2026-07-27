@@ -452,8 +452,7 @@ export function auditLogCorrelationQuery() {
  * Without it a high-volume org builds a multi-gigabyte hash table on the parent side. Pick N from the
  * org's own span volume rather than a fixed value: {@link auditTraceSampleModulus}.
  */
-const modulusFilter = (modulus: number) =>
-	modulus > 1 ? `AND cityHash64(TraceId) % ${modulus} = 0` : ""
+const modulusFilter = (modulus: number) => (modulus > 1 ? `AND cityHash64(TraceId) % ${modulus} = 0` : "")
 
 /** Clamps a caller-supplied modulus into a sane power-of-two-ish range. */
 const normalizeModulus = (modulus: number | undefined) =>
@@ -579,9 +578,7 @@ export const auditRootlessTraceRowSchema: CompiledQueryRowSchema<AuditRootlessTr
  * `traceparent` without exporting spans — shows up as a near-total, uniform rootless rate, and the
  * caller collapses it into one finding rather than one per service.
  */
-export function auditRootlessTracesSQL(
-	params: AuditTraceWindowParams,
-): CompiledQuery<AuditRootlessTraceRow> {
+export function auditRootlessTracesSQL(params: AuditTraceWindowParams): CompiledQuery<AuditRootlessTraceRow> {
 	const esc = escapeClickHouseString
 	const org = esc(params.orgId)
 	const sampled = modulusFilter(normalizeModulus(params.traceSampleModulus))

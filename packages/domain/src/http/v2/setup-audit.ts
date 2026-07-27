@@ -117,7 +117,8 @@ export const V2SetupAudit = Schema.Struct({
 		examples: ["setup_audit"],
 	}),
 	generated_at: Timestamp.annotate({
-		description: "When the report was computed. Audits are recomputed per request, never cached as objects.",
+		description:
+			"When the report was computed. Audits are recomputed per request, never cached as objects.",
 	}),
 	data_status: Schema.Literals(["ok", "no_data"]).annotate({
 		description:

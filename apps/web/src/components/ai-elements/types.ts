@@ -9,10 +9,7 @@
  * `ChatStatus`/`FileUIPart`/`SourceDocumentUIPart` were previously imported from
  * `ai`; they're declared here so the UI doesn't pull in the (removed) Vercel AI SDK.
  */
-export type {
-	FlueConversationMessage as UIMessage,
-	FlueConversationPart as UIMessagePart,
-} from "@flue/react"
+export type { FlueConversationMessage as UIMessage, FlueConversationPart as UIMessagePart } from "@flue/react"
 
 /** Composer status. Flue's `idle`/`connecting` map to `ready` for the submit button. */
 export type ChatStatus = "submitted" | "streaming" | "ready" | "error"

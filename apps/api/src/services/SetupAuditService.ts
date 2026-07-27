@@ -95,9 +95,7 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 		 * never needs secrets, payloads, or full rows, and keeping the projections narrow is what makes
 		 * running ~15 selects per request cheap.
 		 */
-		const fetchConfigInputs = Effect.fn("SetupAuditService.fetchConfigInputs")(function* (
-			orgId: OrgId,
-		) {
+		const fetchConfigInputs = Effect.fn("SetupAuditService.fetchConfigInputs")(function* (orgId: OrgId) {
 			const rows = yield* runDb(
 				"config",
 				database.execute(async (db) => {

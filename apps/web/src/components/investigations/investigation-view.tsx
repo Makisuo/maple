@@ -53,7 +53,9 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
 				? {
 						incidentId: subject.incident_id,
 						...(subject.issue_id ? { issueId: subject.issue_id } : {}),
-						...(investigation.snapshot.scope ? { serviceName: investigation.snapshot.scope } : {}),
+						...(investigation.snapshot.scope
+							? { serviceName: investigation.snapshot.scope }
+							: {}),
 					}
 				: undefined,
 		...(investigation.report
@@ -241,7 +243,11 @@ function ContextRail({ investigation }: { investigation: V2Investigation }) {
 						<Separator className="my-3" />
 						<div className="space-y-1.5">
 							{snapshot.references.map((reference) => (
-								<ReferenceLink key={reference.url} label={reference.label} url={reference.url} />
+								<ReferenceLink
+									key={reference.url}
+									label={reference.label}
+									url={reference.url}
+								/>
 							))}
 						</div>
 					</>
@@ -311,7 +317,10 @@ function IssueEscalationAudit({
 					</div>
 					<ul className="space-y-1">
 						{attempt.deliveries.map((delivery) => (
-							<li key={delivery.destinationId} className="flex items-center justify-between gap-2">
+							<li
+								key={delivery.destinationId}
+								className="flex items-center justify-between gap-2"
+							>
 								<span className="min-w-0 truncate text-foreground">
 									{delivery.destinationName ?? delivery.destinationId}
 								</span>

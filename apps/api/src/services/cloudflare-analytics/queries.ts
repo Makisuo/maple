@@ -598,12 +598,7 @@ const TOP_TRAFFIC_FILTERS = [
 	],
 	["clientRequestHTTPHost_in", "hosts", "[string!]", (f: TopTrafficFilter) => nonEmpty(f.hosts)],
 	["clientCountryName_in", "countries", "[string!]", (f: TopTrafficFilter) => nonEmpty(f.countries)],
-	[
-		"clientRequestHTTPMethodName_in",
-		"methods",
-		"[string!]",
-		(f: TopTrafficFilter) => nonEmpty(f.methods),
-	],
+	["clientRequestHTTPMethodName_in", "methods", "[string!]", (f: TopTrafficFilter) => nonEmpty(f.methods)],
 	["cacheStatus_in", "cacheStatuses", "[string!]", (f: TopTrafficFilter) => nonEmpty(f.cacheStatuses)],
 ] as const
 

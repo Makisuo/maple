@@ -1051,7 +1051,14 @@ describe("CloudflareAnalyticsService", () => {
 
 			const zoneDocs = graphqlQueries.filter((q) => q.includes("MapleCfZoneAnalytics"))
 			assert.strictEqual(zoneDocs.length, 1)
-			for (const alias of ["groups:", "latency:", "paths:", "pathErrors:", "countryAgg:", "clientAgg:"]) {
+			for (const alias of [
+				"groups:",
+				"latency:",
+				"paths:",
+				"pathErrors:",
+				"countryAgg:",
+				"clientAgg:",
+			]) {
 				assert.include(zoneDocs[0]!, alias)
 			}
 		}).pipe(Effect.provide(makeLayer(testDb, captured, { graphqlQueries })))

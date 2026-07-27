@@ -36,11 +36,7 @@ import {
 	type WarehouseQuerySettings,
 } from "../profiles"
 import { computeBucketSeconds } from "../datetime"
-import {
-	attributeIndexMode,
-	logBodySearchMode,
-	type WarehouseCapabilities,
-} from "../capabilities"
+import { attributeIndexMode, logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeExecuteRawSql } from "./raw-sql"
 import { decodeEvalSeries, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
 

@@ -221,9 +221,7 @@ export interface ChatTranscriptProps {
 const isMachineTurn = (message: UIMessage): boolean =>
 	message.role === "user" &&
 	message.parts.length > 0 &&
-	message.parts.every(
-		(part) => part.type === "text" && stripContextPreamble(part.text).length === 0,
-	)
+	message.parts.every((part) => part.type === "text" && stripContextPreamble(part.text).length === 0)
 
 /** Leading marker for a thread that can't be continued. */
 const READ_ONLY_LABEL: Record<"shared" | "resolved", string> = {

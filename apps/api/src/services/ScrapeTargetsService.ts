@@ -405,10 +405,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 	{
 		make: Effect.gen(function* () {
 			const database = yield* Database
-			const scrapeTargetRowMemo = new Map<
-				string,
-				{ row: ScrapeTargetRow | null; expiresAt: number }
-			>()
+			const scrapeTargetRowMemo = new Map<string, { row: ScrapeTargetRow | null; expiresAt: number }>()
 			/** Drop the memoized row so the next proxied scrape re-reads it from Postgres. */
 			const invalidateScrapeTargetRow = (targetId: ScrapeTargetId): void => {
 				scrapeTargetRowMemo.delete(targetId)

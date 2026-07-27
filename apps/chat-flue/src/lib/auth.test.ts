@@ -89,7 +89,10 @@ describe("tenant resolution", () => {
 	// investigation's agent under that org. If this worker resolved the same token
 	// to the token's own org, it would 403 the conversation the API just created.
 	it("honours MAPLE_ORG_ID_OVERRIDE the way apps/api does", async () => {
-		const token = await mintHs256({ sub: "user_1", org_id: "org_from_token", exp: nowSec() + 600 }, "s3cret")
+		const token = await mintHs256(
+			{ sub: "user_1", org_id: "org_from_token", exp: nowSec() + 600 },
+			"s3cret",
+		)
 		const request = new Request("https://chat.test/agents/maple-chat/x", {
 			headers: { authorization: `Bearer ${token}` },
 		})
@@ -98,8 +101,9 @@ describe("tenant resolution", () => {
 			orgId: "org_from_token",
 			userId: "user_1",
 		})
-		expect(
-			await verifyRequest(request, { ...clerkless, MAPLE_ORG_ID_OVERRIDE: "org_pinned" }),
-		).toEqual({ orgId: "org_pinned", userId: "user_1" })
+		expect(await verifyRequest(request, { ...clerkless, MAPLE_ORG_ID_OVERRIDE: "org_pinned" })).toEqual({
+			orgId: "org_pinned",
+			userId: "user_1",
+		})
 	})
 })

@@ -179,7 +179,8 @@ export const verifyRequest = async (
  */
 const resolveOrgId = (env: ChatFlueEnv, tokenOrgId: string | undefined): string | undefined => {
 	const override = env.MAPLE_ORG_ID_OVERRIDE?.trim()
-	return override && override.length > 0 ? override : tokenOrgId}
+	return override && override.length > 0 ? override : tokenOrgId
+}
 
 /**
  * Extract the agent instance id from a `/agents/<name>/<id>` request path.

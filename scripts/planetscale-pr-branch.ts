@@ -146,7 +146,10 @@ const readSettings = async (connectionUrl: string): Promise<Map<string, string>>
 	const bunSpecifier = "bun"
 	const { SQL } = (await import(bunSpecifier)) as {
 		SQL: new (url: string) => {
-			(strings: TemplateStringsArray, ...values: ReadonlyArray<unknown>): Promise<Array<Record<string, unknown>>>
+			(
+				strings: TemplateStringsArray,
+				...values: ReadonlyArray<unknown>
+			): Promise<Array<Record<string, unknown>>>
 			end: () => Promise<void>
 		}
 	}
@@ -393,7 +396,10 @@ const sweepOrphanBranches = async (database: string): Promise<void> => {
 	// preview; without a token every branch resolves to "unknown" and the run
 	// green-no-ops forever — the exact failure class this safety net exists to
 	// catch. Fail loudly instead.
-	if (!process.env.GITHUB_REPOSITORY?.trim() || !(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()) {
+	if (
+		!process.env.GITHUB_REPOSITORY?.trim() ||
+		!(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()
+	) {
 		fail("sweep requires GITHUB_REPOSITORY and GITHUB_TOKEN (or GH_TOKEN) to check PR state")
 	}
 	const list = runPscale(["branch", "list", database, "--format", "json"], { secret: true })
@@ -410,7 +416,9 @@ const sweepOrphanBranches = async (database: string): Promise<void> => {
 		.map((branch) => branch.name ?? "")
 		.map((name) => ({ name, match: /^pr-(\d+)$/.exec(name) }))
 		.filter((entry): entry is { name: string; match: RegExpExecArray } => entry.match !== null)
-	console.log(`Found ${candidates.length} pr-* branch(es): ${candidates.map((c) => c.name).join(", ") || "—"}`)
+	console.log(
+		`Found ${candidates.length} pr-* branch(es): ${candidates.map((c) => c.name).join(", ") || "—"}`,
+	)
 
 	const failures: string[] = []
 	for (const { name, match } of candidates) {
@@ -520,10 +528,12 @@ const main = async () => {
 			// recreate.
 			const electric = createCredential(database, branchName, { replication: true, suffix: "-repl" })
 			if (resetBranchInPlace(credential.url, electric.url)) {
-				maskAndExport(
-					{ MAPLE_PG_URL: credential.url, MAPLE_PG_ELECTRIC_URL: electric.url },
-					[credential.password, electric.password, credential.url, electric.url],
-				)
+				maskAndExport({ MAPLE_PG_URL: credential.url, MAPLE_PG_ELECTRIC_URL: electric.url }, [
+					credential.password,
+					electric.password,
+					credential.url,
+					electric.url,
+				])
 				return
 			}
 			// Fallback: the old slow-but-certain path. Deleting the branch revokes
@@ -551,10 +561,12 @@ const main = async () => {
 		// connecting role; the main role must stay non-replication to keep the
 		// in-place reset's role assumption working).
 		const electric = createCredential(database, branchName, { replication: true, suffix: "-repl" })
-		maskAndExport(
-			{ MAPLE_PG_URL: credential.url, MAPLE_PG_ELECTRIC_URL: electric.url },
-			[credential.password, electric.password, credential.url, electric.url],
-		)
+		maskAndExport({ MAPLE_PG_URL: credential.url, MAPLE_PG_ELECTRIC_URL: electric.url }, [
+			credential.password,
+			electric.password,
+			credential.url,
+			electric.url,
+		])
 		return
 	}
 

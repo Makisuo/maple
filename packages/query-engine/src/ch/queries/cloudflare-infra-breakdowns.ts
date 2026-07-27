@@ -140,9 +140,7 @@ const measures = ($: CloudflareMetricsAccessor, spec: BreakdownSpec) => ({
 		: spec.errorsFromStatusClass
 			? CH.sumIf(
 					$.Value,
-					$.MetricName
-						.eq(spec.requestsMetric)
-						.and($.Attributes.get(CF_ATTR.statusClass).eq("5xx")),
+					$.MetricName.eq(spec.requestsMetric).and($.Attributes.get(CF_ATTR.statusClass).eq("5xx")),
 				)
 			: CH.lit(0),
 	bytes: spec.bytesMetric ? CH.sumIf($.Value, $.MetricName.eq(spec.bytesMetric)) : CH.lit(0),

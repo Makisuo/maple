@@ -78,9 +78,11 @@ describe("mcp tool filtering", () => {
 		}
 		const connection = await connectMapleMcp(env, "org_1")
 		expect(connection.tools.map((tool) => tool.name)).toEqual(["mcp__maple__search_traces"])
-		expect(await connection.tools[0]!.run({ input: { service: "checkout" }, signal: undefined })).toEqual({
-			text: "ok",
-		})
+		expect(await connection.tools[0]!.run({ input: { service: "checkout" }, signal: undefined })).toEqual(
+			{
+				text: "ok",
+			},
+		)
 		expect(calls).toEqual([
 			{
 				orgId: "org_1",
