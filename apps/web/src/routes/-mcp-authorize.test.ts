@@ -30,10 +30,12 @@ describe("MCP OAuth approval helpers", () => {
 			clientName: "Claude",
 			status: "pending",
 		})
-		expect(fetchSpy).toHaveBeenCalledWith(
-			expect.stringContaining("/api/auth/mcp/oauth/authorization/mcp_auth_request"),
-			expect.objectContaining({ headers: { authorization: "Bearer browser-session" } }),
-		)
+		// The request goes through tracedFetch, which normalizes the plain header
+		// object into Headers (and adds traceparent), so read the header back out.
+		expect(fetchSpy).toHaveBeenCalledTimes(1)
+		const [input, init] = fetchSpy.mock.calls[0]!
+		expect(String(input)).toContain("/api/auth/mcp/oauth/authorization/mcp_auth_request")
+		expect(new Headers(init?.headers).get("authorization")).toBe("Bearer browser-session")
 	})
 
 	it("returns the client redirect after approval", async () => {

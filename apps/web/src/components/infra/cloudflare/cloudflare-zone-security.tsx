@@ -4,11 +4,14 @@
 
 import { useMemo } from "react"
 
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
 import { cloudflareZoneSecurityResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { formatNumber } from "@/lib/format"
 import { ColumnHead, TableShell } from "../primitives/data-table"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
+import { PanelScope } from "./panel-scope"
+import type { CloudflareFilters } from "./filters"
 
 // Actions carry severity: outright blocks render hot, challenges in the warn
 // ramp, pass-through actions (skip/log/allow) stay muted.
@@ -44,16 +47,22 @@ export function CloudflareZoneSecuritySection({
 	startTime,
 	endTime,
 	bucketSeconds,
+	filters,
 	syncId,
 }: {
 	serviceName: string
 	startTime: string
 	endTime: string
 	bucketSeconds: number
+	filters: CloudflareFilters
 	syncId?: string
 }) {
-	const result = useAtomValue(
-		cloudflareZoneSecurityResultAtom({ data: { serviceName, startTime, endTime, bucketSeconds } }),
+	// Retained: this section hides itself on an empty result, so a bare read made it disappear and
+	// reappear on every filter toggle, shifting everything below it.
+	const result = useRetainedRefreshableResultValue(
+		cloudflareZoneSecurityResultAtom({
+			data: { serviceName, startTime, endTime, bucketSeconds, ...filters },
+		}),
 	)
 
 	return Result.builder(result)
@@ -72,6 +81,13 @@ export function CloudflareZoneSecuritySection({
 						colors={ACTION_COLORS}
 						order={ACTION_ORDER}
 						syncId={syncId}
+						scope={
+							<PanelScope
+								filters={filters}
+								ignoredFilters={data.ignoredFilters}
+								reason="Firewall events carry their own dimensions"
+							/>
+						}
 					/>
 					<SecurityTopTable top={data.top} waiting={r.waiting} />
 				</div>
@@ -112,7 +128,9 @@ function SecurityTopTable({
 					<div className="hidden w-[130px] truncate font-mono text-[12px] text-foreground/80 md:block">
 						{row.source}
 					</div>
-					<div className="w-[130px] truncate font-mono text-[12px] text-foreground/80">{row.action}</div>
+					<div className="w-[130px] truncate font-mono text-[12px] text-foreground/80">
+						{row.action}
+					</div>
 					<div className="hidden w-[180px] truncate font-mono text-[12px] text-foreground/80 lg:block">
 						{row.host}
 					</div>

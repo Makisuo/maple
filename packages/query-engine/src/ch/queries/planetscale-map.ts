@@ -44,6 +44,17 @@ export const REPLICA_LAG_METRIC_NAMES = [
 	"planetscale_postgres_replica_lag_seconds", // Postgres
 ] as const
 
+/** Volume capacity in bytes (gauge) — the denominator for storage pressure. */
+export const STORAGE_CAPACITY_METRIC_NAMES = ["planetscale_volume_capacity_bytes"] as const
+
+/** Free volume space in bytes (gauge). PlanetScale reports free, not used. */
+export const STORAGE_AVAILABLE_METRIC_NAMES = ["planetscale_volume_available_bytes"] as const
+
+export const STORAGE_METRIC_NAMES = [
+	...STORAGE_CAPACITY_METRIC_NAMES,
+	...STORAGE_AVAILABLE_METRIC_NAMES,
+] as const
+
 export const GAUGE_METRIC_NAMES = [
 	...CPU_METRIC_NAMES,
 	...MEMORY_METRIC_NAMES,
@@ -62,6 +73,35 @@ export interface PlanetScaleDatabaseStatsOutput {
 
 export interface PlanetScaleBranchStatsOutput extends PlanetScaleDatabaseStatsOutput {
 	readonly branch: string
+}
+
+export interface PlanetScaleStorageOutput {
+	readonly database: string
+	/**
+	 * Worst branch's used percentage (0–100) over the window. Computed per branch
+	 * and then maxed — NOT from the database's max capacity over its min free
+	 * space, which would pair two different branches' numbers and invent a
+	 * percentage neither of them ever had.
+	 */
+	readonly storageUsedPercent: number
+	/**
+	 * Free-space samples behind the number. Capacity is scraped slightly more
+	 * often than free space, so zero samples means "we never saw free space",
+	 * not "the volume is full" — the caller must not render 100% off a missing
+	 * series.
+	 */
+	readonly storageSamples: number
+}
+
+export interface PlanetScaleBranchStorageOutput {
+	readonly database: string
+	readonly branch: string
+	readonly storageUsedPercent: number
+	/** Volume size in bytes — the largest seen in the window (branches can resize). */
+	readonly storageCapacityBytes: number
+	/** Least free space seen in the window: the high-water mark of storage pressure. */
+	readonly storageAvailableBytes: number
+	readonly storageSamples: number
 }
 
 export interface PlanetScaleConnectionsOutput {
@@ -91,6 +131,23 @@ export const planetscaleBranchStatsRowSchema: CompiledQueryRowSchema<PlanetScale
 		cpuMaxPercent: CHNumber,
 		memMaxPercent: CHNumber,
 		replicaLagMaxSeconds: CHNumber,
+	})
+
+export const planetscaleStorageRowSchema: CompiledQueryRowSchema<PlanetScaleStorageOutput> =
+	Schema.Struct({
+		database: Schema.String,
+		storageUsedPercent: CHNumber,
+		storageSamples: CHNumber,
+	})
+
+export const planetscaleBranchStorageRowSchema: CompiledQueryRowSchema<PlanetScaleBranchStorageOutput> =
+	Schema.Struct({
+		database: Schema.String,
+		branch: Schema.String,
+		storageUsedPercent: CHNumber,
+		storageCapacityBytes: CHNumber,
+		storageAvailableBytes: CHNumber,
+		storageSamples: CHNumber,
 	})
 
 export const planetscaleConnectionsRowSchema: CompiledQueryRowSchema<PlanetScaleConnectionsOutput> =
@@ -166,6 +223,119 @@ export function planetscaleBranchGaugesSQL() {
 			$.TimeUnix.lte(param.dateTime("endTime")),
 		])
 		.groupBy("database", "branch")
+		.limit(500)
+		.format("JSON")
+}
+
+/**
+ * Used percentage from a per-branch capacity/free pair, guarded twice: a zero
+ * capacity would divide by zero, and zero free-space samples means the series
+ * was absent for that branch — reading that as "no bytes free" would paint an
+ * unmonitored branch as a full disk. Both cases yield 0, paired with the
+ * `storageSamples` count so the caller can tell 0%-used from not-measured.
+ */
+const usedPercentExpr = ($: {
+	capacityBytes: CH.Expr<number>
+	availableBytes: CH.Expr<number>
+	samples: CH.Expr<number>
+}) =>
+	CH.if_(
+		$.capacityBytes.gt(0).and($.samples.gt(0)),
+		// `100 - available / capacity * 100`, deliberately phrased as free-space
+		// subtracted from the whole. The builder's arithmetic helpers do not
+		// parenthesize, so the equivalent `(capacity - available) / capacity * 100`
+		// would compile to `capacity - available / capacity * 100` and silently
+		// compute something else entirely. This ordering is correct under plain
+		// SQL precedence: `*` and `/` bind before `-`.
+		CH.lit(100).sub($.availableBytes.div($.capacityBytes).mul(100)),
+		CH.lit(0),
+	)
+
+/**
+ * Storage rollup over the volume gauges, one row per database.
+ *
+ * PlanetScale reports capacity and *free* bytes, never used bytes, so the used
+ * percentage is derived by the caller from `capacity - available`. The worst
+ * moment in the window is what matters for a disk, hence max capacity against
+ * min free space. `storageSamples` lets the caller tell "no free-space series"
+ * apart from "genuinely zero free space" — the two gauges are scraped at
+ * slightly different rates, so a missing series is a real possibility.
+ */
+export function planetscaleStorageSQL() {
+	const perBranch = from(MetricsGauge)
+		.select(($) => ({
+			database: CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			),
+			branch: CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_branch_name"), ""),
+				$.Attributes.get("planetscale_branch"),
+			),
+			capacityBytes: CH.maxIf($.Value, $.MetricName.in_(...STORAGE_CAPACITY_METRIC_NAMES)),
+			availableBytes: CH.minIf($.Value, $.MetricName.in_(...STORAGE_AVAILABLE_METRIC_NAMES)),
+			samples: CH.countIf($.MetricName.in_(...STORAGE_AVAILABLE_METRIC_NAMES)),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.MetricName.in_(...STORAGE_METRIC_NAMES),
+			CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			).neq(""),
+			$.TimeUnix.gte(param.dateTime("startTime")),
+			$.TimeUnix.lte(param.dateTime("endTime")),
+		])
+		.groupBy("database", "branch")
+
+	return fromQuery(perBranch, "vol")
+		.select(($) => ({
+			database: $.database,
+			storageUsedPercent: CH.max_(usedPercentExpr($)),
+			storageSamples: CH.sum($.samples),
+		}))
+		.groupBy("database")
+		.limit(500)
+		.format("JSON")
+}
+
+/** Per-branch variant of {@link planetscaleStorageSQL}, scoped to one database. */
+export function planetscaleBranchStorageSQL() {
+	const perBranch = from(MetricsGauge)
+		.select(($) => ({
+			database: CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			),
+			branch: CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_branch_name"), ""),
+				$.Attributes.get("planetscale_branch"),
+			),
+			capacityBytes: CH.maxIf($.Value, $.MetricName.in_(...STORAGE_CAPACITY_METRIC_NAMES)),
+			availableBytes: CH.minIf($.Value, $.MetricName.in_(...STORAGE_AVAILABLE_METRIC_NAMES)),
+			samples: CH.countIf($.MetricName.in_(...STORAGE_AVAILABLE_METRIC_NAMES)),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.MetricName.in_(...STORAGE_METRIC_NAMES),
+			CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			).eq(param.string("database")),
+			$.TimeUnix.gte(param.dateTime("startTime")),
+			$.TimeUnix.lte(param.dateTime("endTime")),
+		])
+		.groupBy("database", "branch")
+
+	return fromQuery(perBranch, "vol")
+		.select(($) => ({
+			database: $.database,
+			branch: $.branch,
+			storageUsedPercent: usedPercentExpr($),
+			storageCapacityBytes: $.capacityBytes,
+			storageAvailableBytes: $.availableBytes,
+			storageSamples: $.samples,
+		}))
 		.limit(500)
 		.format("JSON")
 }

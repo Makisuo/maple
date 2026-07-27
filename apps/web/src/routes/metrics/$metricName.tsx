@@ -74,10 +74,7 @@ function MetricDetailPage() {
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "24h"}>
 			<DashboardLayout
-				breadcrumbs={[
-					{ label: "Metrics", href: backToMetricsHref },
-					{ label: metricName },
-				]}
+				breadcrumbs={[{ label: "Metrics", href: backToMetricsHref }, { label: metricName }]}
 				title={metricName}
 				description="Explore this metric: filter, aggregate, and break it down by attributes."
 				headerActions={

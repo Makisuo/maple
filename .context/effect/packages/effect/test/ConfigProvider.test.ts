@@ -98,6 +98,17 @@ describe("ConfigProvider", () => {
     await assertSuccess(provider, ["PORT"], ConfigProvider.makeValue("fallback"))
   })
 
+  it("orElse falls back when the primary env value is empty", async () => {
+    const primary = ConfigProvider.fromEnv({
+      env: {
+        "KEY": ""
+      }
+    })
+    const fallback = ConfigProvider.fromUnknown({ KEY: "fallback" })
+    const provider = primary.pipe(ConfigProvider.orElse(fallback))
+    await assertSuccess(provider, ["KEY"], ConfigProvider.makeValue("fallback"))
+  })
+
   it("constantCase", async () => {
     const provider = ConfigProvider.constantCase(ConfigProvider.fromEnv({
       env: {
@@ -190,6 +201,56 @@ describe("ConfigProvider", () => {
       const env = { A: "value1" }
       const provider = ConfigProvider.fromEnv({ env })
       await assertSuccess(provider, ["missing"], undefined)
+    })
+
+    it("treats empty string values as missing while preserving structure by default", async () => {
+      const env = { A: "", B: "value1" }
+      const provider = ConfigProvider.fromEnv({ env })
+
+      await assertSuccess(provider, [], ConfigProvider.makeRecord(new Set(["A", "B"])))
+      await assertSuccess(provider, ["A"], undefined)
+      await assertSuccess(provider, ["B"], ConfigProvider.makeValue("value1"))
+    })
+
+    it("preserves empty strings when requested", async () => {
+      const env = { A: "" }
+      const provider = ConfigProvider.fromEnv({ env, preserveEmptyStrings: true })
+
+      await assertSuccess(provider, [], ConfigProvider.makeRecord(new Set(["A"])))
+      await assertSuccess(provider, ["A"], ConfigProvider.makeValue(""))
+    })
+
+    it("treats empty co-located record values as missing and preserves children", async () => {
+      const env = { A: "", A_B: "value1" }
+      const provider = ConfigProvider.fromEnv({ env })
+
+      await assertSuccess(provider, ["A"], ConfigProvider.makeRecord(new Set(["B"])))
+      await assertSuccess(provider, ["A", "B"], ConfigProvider.makeValue("value1"))
+    })
+
+    it("preserves empty co-located record values when requested", async () => {
+      const env = { A: "", A_B: "value1" }
+      const provider = ConfigProvider.fromEnv({ env, preserveEmptyStrings: true })
+
+      await assertSuccess(provider, ["A"], ConfigProvider.makeRecord(new Set(["B"]), ""))
+      await assertSuccess(provider, ["A", "B"], ConfigProvider.makeValue("value1"))
+    })
+
+    it("treats empty co-located array values as missing and preserves children", async () => {
+      const env = { A: "", A_0: "value1" }
+      const provider = ConfigProvider.fromEnv({ env })
+
+      await assertSuccess(provider, ["A"], ConfigProvider.makeArray(1))
+      await assertSuccess(provider, ["A", 0], ConfigProvider.makeValue("value1"))
+    })
+
+    it("preserves empty array children structurally while treating their values as missing", async () => {
+      const env = { A_0: "", A_1: "value1" }
+      const provider = ConfigProvider.fromEnv({ env })
+
+      await assertSuccess(provider, ["A"], ConfigProvider.makeArray(2))
+      await assertSuccess(provider, ["A", 0], undefined)
+      await assertSuccess(provider, ["A", 1], ConfigProvider.makeValue("value1"))
     })
 
     it("direct lookup of a key containing underscores", async () => {
@@ -428,6 +489,38 @@ describe("ConfigProvider", () => {
       await assertSuccess(provider, ["array", 2, 0], ConfigProvider.makeValue("value6"))
     })
 
+    it("treats empty string leaves as missing by default", async () => {
+      const provider = ConfigProvider.fromUnknown({
+        a: "",
+        b: "value1",
+        record: {
+          key: ""
+        },
+        array: [""]
+      })
+
+      await assertSuccess(provider, [], ConfigProvider.makeRecord(new Set(["a", "b", "record", "array"])))
+      await assertSuccess(provider, ["a"], undefined)
+      await assertSuccess(provider, ["b"], ConfigProvider.makeValue("value1"))
+      await assertSuccess(provider, ["record"], ConfigProvider.makeRecord(new Set(["key"])))
+      await assertSuccess(provider, ["record", "key"], undefined)
+      await assertSuccess(provider, ["array"], ConfigProvider.makeArray(1))
+      await assertSuccess(provider, ["array", 0], undefined)
+    })
+
+    it("preserves empty string leaves when requested", async () => {
+      const provider = ConfigProvider.fromUnknown(
+        {
+          a: "",
+          array: [""]
+        },
+        { preserveEmptyStrings: true }
+      )
+
+      await assertSuccess(provider, ["a"], ConfigProvider.makeValue(""))
+      await assertSuccess(provider, ["array", 0], ConfigProvider.makeValue(""))
+    })
+
     it("Object detection", async () => {
       await assertSuccess(provider, ["record"], ConfigProvider.makeRecord(new Set(["key1", "key2"])))
       await assertSuccess(provider, ["record", "key2"], ConfigProvider.makeRecord(new Set(["key3"])))
@@ -504,6 +597,27 @@ OBJECT_key2=value2
       await assertSuccess(provider, ["OBJECT"], ConfigProvider.makeRecord(new Set(["key1", "key2"])))
       await assertSuccess(provider, ["OBJECT", "key1"], ConfigProvider.makeValue("value1"))
       await assertSuccess(provider, ["OBJECT", "key2"], ConfigProvider.makeValue("value2"))
+    })
+
+    it("treats empty string values as missing while preserving structure by default", async () => {
+      const provider = ConfigProvider.fromDotEnvContents(`
+A=
+B=value1
+`)
+      await assertSuccess(provider, [], ConfigProvider.makeRecord(new Set(["A", "B"])))
+      await assertSuccess(provider, ["A"], undefined)
+      await assertSuccess(provider, ["B"], ConfigProvider.makeValue("value1"))
+    })
+
+    it("preserves empty strings when requested", async () => {
+      const provider = ConfigProvider.fromDotEnvContents(
+        `
+A=
+`,
+        { preserveEmptyStrings: true }
+      )
+      await assertSuccess(provider, [], ConfigProvider.makeRecord(new Set(["A"])))
+      await assertSuccess(provider, ["A"], ConfigProvider.makeValue(""))
     })
 
     it("a node may be both leaf and object", async () => {
@@ -595,6 +709,45 @@ A=1`)
       await assertSuccess(provider, ["CUSTOM_PATH"], ConfigProvider.makeValue("custom.env"))
       await assertSuccess(provider, ["A"], ConfigProvider.makeValue("1"))
     })
+
+    it("should support `expandVariables` option", async () => {
+      const provider = await Effect.runPromise(
+        ConfigProvider.fromDotEnv({ expandVariables: true }).pipe(
+          Effect.provide(FileSystem.layerNoop({
+            readFileString: () =>
+              Effect.succeed(`PASSWORD=value
+DB_PASS=$PASSWORD`)
+          }))
+        )
+      )
+
+      await assertSuccess(provider, ["DB_PASS"], ConfigProvider.makeValue("value"))
+    })
+
+    it("should treat empty string values as missing while preserving structure by default", async () => {
+      const provider = await Effect.runPromise(
+        ConfigProvider.fromDotEnv().pipe(
+          Effect.provide(FileSystem.layerNoop({
+            readFileString: () => Effect.succeed("A=")
+          }))
+        )
+      )
+
+      await assertSuccess(provider, [], ConfigProvider.makeRecord(new Set(["A"])))
+      await assertSuccess(provider, ["A"], undefined)
+    })
+
+    it("should support `preserveEmptyStrings` option", async () => {
+      const provider = await Effect.runPromise(
+        ConfigProvider.fromDotEnv({ preserveEmptyStrings: true }).pipe(
+          Effect.provide(FileSystem.layerNoop({
+            readFileString: () => Effect.succeed("A=")
+          }))
+        )
+      )
+
+      await assertSuccess(provider, ["A"], ConfigProvider.makeValue(""))
+    })
   })
 
   describe("fromDir", () => {
@@ -682,6 +835,104 @@ A=1`)
         )
       )
       await assertSuccess(provider, ["fallback"], ConfigProvider.makeValue("value"))
+    })
+
+    it("treats empty files as missing by default", async () => {
+      const Fs = FileSystem.layerNoop({
+        readFileString(path) {
+          return path === "/empty"
+            ? Effect.succeed("")
+            : Effect.fail(
+              PlatformError.systemError({
+                module: "FileSystem",
+                _tag: "NotFound",
+                method: "readFileString"
+              })
+            )
+        },
+        readDirectory(path) {
+          return path === "/"
+            ? Effect.succeed(["empty"])
+            : Effect.fail(
+              PlatformError.systemError({
+                module: "FileSystem",
+                _tag: "NotFound",
+                method: "readDirectory"
+              })
+            )
+        }
+      })
+      const provider = await Effect.runPromise(
+        ConfigProvider.fromDir({ rootPath: "/" }).pipe(Effect.provide(Layer.mergeAll(Fs, Path.layer)))
+      )
+
+      await assertSuccess(provider, [], ConfigProvider.makeRecord(new Set(["empty"])))
+      await assertSuccess(provider, ["empty"], undefined)
+    })
+
+    it("preserves empty files when requested", async () => {
+      const Fs = FileSystem.layerNoop({
+        readFileString(path) {
+          return path === "/empty"
+            ? Effect.succeed("\n")
+            : Effect.fail(
+              PlatformError.systemError({
+                module: "FileSystem",
+                _tag: "NotFound",
+                method: "readFileString"
+              })
+            )
+        },
+        readDirectory() {
+          return Effect.fail(
+            PlatformError.systemError({
+              module: "FileSystem",
+              _tag: "NotFound",
+              method: "readDirectory"
+            })
+          )
+        }
+      })
+      const provider = await Effect.runPromise(
+        ConfigProvider.fromDir({ rootPath: "/", preserveEmptyStrings: true }).pipe(
+          Effect.provide(Layer.mergeAll(Fs, Path.layer))
+        )
+      )
+
+      await assertSuccess(provider, ["empty"], ConfigProvider.makeValue(""))
+    })
+
+    it("orElse falls back when fromDir file is empty", async () => {
+      const Fs = FileSystem.layerNoop({
+        readFileString(path) {
+          return path === "/empty"
+            ? Effect.succeed("")
+            : Effect.fail(
+              PlatformError.systemError({
+                module: "FileSystem",
+                _tag: "NotFound",
+                method: "readFileString"
+              })
+            )
+        },
+        readDirectory() {
+          return Effect.fail(
+            PlatformError.systemError({
+              module: "FileSystem",
+              _tag: "NotFound",
+              method: "readDirectory"
+            })
+          )
+        }
+      })
+      const provider = await Effect.runPromise(
+        ConfigProvider.fromDir({ rootPath: "/" }).pipe(
+          Effect.map((dir) => dir.pipe(ConfigProvider.orElse(ConfigProvider.fromUnknown({ empty: "fallback" })))),
+          Effect.provide(Layer.mergeAll(Fs, Path.layer))
+        )
+      )
+
+      await assertSuccess(provider, ["empty"], ConfigProvider.makeValue("fallback"))
     })
 
     it("reads directory entries as a record", async () => {

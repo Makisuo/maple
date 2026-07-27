@@ -30,17 +30,20 @@ describe("serviceOperationsSummaryQuery", () => {
 		expect(timeseries.sql).not.toContain("service_operations_minutely")
 	})
 
-	it("combines raw edge fragments with complete rollup minutes", () => {
+	it("combines raw edges, minutely boundary hours, and complete hourly interiors", () => {
 		const q = serviceOperationsSummaryQuery({ serviceName: "api" })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM traces")
 		expect(sql).toContain("UNION ALL")
 		expect(sql).toContain("FROM service_operations_minutely")
+		expect(sql).toContain("FROM service_operations_hourly")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("ServiceName = 'api'")
 		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
 		expect(sql).toContain("Minute >= if(toDateTime('2024-01-01 00:00:00')")
 		expect(sql).toContain("Minute < toStartOfMinute(toDateTime('2024-01-02 00:00:00'))")
+		expect(sql).toContain("Hour >= if(toDateTime('2024-01-01 00:00:00')")
+		expect(sql).toContain("Hour < toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
 		expect(sql).toContain("ORDER BY estimatedSpanCount DESC")
 		expect(sql).toContain("LIMIT 25")
 		expect(sql).toContain("FORMAT JSON")
@@ -134,6 +137,20 @@ describe("serviceOperationsTimeseriesQuery", () => {
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("GROUP BY bucket, spanName")
 		expect(sql).toContain("ORDER BY bucket ASC")
+	})
+
+	it("uses the annual hourly rollup for hour-sized buckets", () => {
+		const q = serviceOperationsTimeseriesQuery({
+			serviceName: "api",
+			spanNames: ["GET /users"],
+			bucketSeconds: 3600,
+		})
+		const { sql } = compileCH(q, { ...baseParams, bucketSeconds: 3600 })
+		expect(sql).toContain("FROM service_operations_hourly")
+		expect(sql).toContain("FROM service_operations_minutely")
+		expect(sql).toContain("FROM traces")
+		expect(sql).toContain("UNION ALL")
+		expect(sql).toContain("Hour >= if(toDateTime('2024-01-01 00:00:00')")
 	})
 
 	it("matches rollup rows directly on normalized SpanName", () => {

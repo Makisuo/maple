@@ -46,9 +46,11 @@ const TARGET_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const GAUGE_BODY = "# TYPE up gauge\nup 1\n"
 
 /** Build a proxy response, defaulting the rate-limit hint absent. */
-const proxyResponse = (
-	fields: { status: number; body: string; retryAfterSeconds?: number | null },
-): ScrapeProxyResponse => ({
+const proxyResponse = (fields: {
+	status: number
+	body: string
+	retryAfterSeconds?: number | null
+}): ScrapeProxyResponse => ({
 	status: fields.status,
 	body: fields.body,
 	retryAfterSeconds: fields.retryAfterSeconds ?? null,
@@ -313,10 +315,7 @@ describe("ScrapeScheduler", () => {
 				harness.subCalls.filter((c) => c.subTargetKey === "branch-2").length,
 				branch2AfterRemoval,
 			)
-			assert.isAbove(
-				harness.subCalls.filter((c) => c.subTargetKey === "branch-1").length,
-				branch1,
-			)
+			assert.isAbove(harness.subCalls.filter((c) => c.subTargetKey === "branch-1").length, branch1)
 		}),
 	)
 
@@ -625,9 +624,18 @@ describe("nextScrapeDelayMs", () => {
 	})
 
 	it("escalates exponentially while rate-limited", () => {
-		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 0 }), 10_000)
-		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 1 }), 20_000)
-		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 3 }), 80_000)
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 0 }),
+			10_000,
+		)
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 1 }),
+			20_000,
+		)
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 3 }),
+			80_000,
+		)
 	})
 
 	it("escalates exponentially on a rejected credential (401/403) too", () => {

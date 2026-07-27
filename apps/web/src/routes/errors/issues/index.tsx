@@ -11,7 +11,7 @@ import { IssuesBulkBar } from "@/components/errors/issues-bulk-bar"
 import { IssuesToolbar } from "@/components/errors/issues-toolbar"
 import { severityRank } from "@/components/errors/severity-badge"
 import { useIssueMutations } from "@/components/errors/use-issue-mutations"
-import type { SelectToggleEvent } from "@/components/errors/issue-row"
+import { IssueRow, type SelectToggleEvent } from "@/components/errors/issue-row"
 import {
 	clearedSelection,
 	type IssueSelectionMsg,
@@ -450,6 +450,7 @@ function IssuesPageBody({
 		},
 		[setFocusedId],
 	)
+	const showGroupHeaders = activeFilter === "all"
 
 	return (
 		<DashboardLayout
@@ -465,27 +466,43 @@ function IssuesPageBody({
 							<EmptyHeader>
 								<EmptyTitle>No issues</EmptyTitle>
 								<EmptyDescription>
-									{activeFilter === "triage"
-										? "No issues in triage. Nice."
-										: `No issues in state "${FILTER_LABEL[activeFilter]}".`}
+									No issues match the {FILTER_LABEL[activeFilter].toLowerCase()} workflow
+									and current severity/source filters.
 								</EmptyDescription>
 							</EmptyHeader>
 						</Empty>
 					</div>
 				) : (
 					<div>
-						{visibleGroups.map((state) => (
-							<IssueGroup
-								key={state}
-								state={state}
-								issues={grouped.get(state) ?? []}
-								mutations={mutations}
-								selectedIds={selectedIds}
-								focusedId={focusedId}
-								onSelectToggle={handleSelectToggle}
-								onFocus={handleFocus}
-							/>
-						))}
+						{showGroupHeaders ? (
+							visibleGroups.map((state) => (
+								<IssueGroup
+									key={state}
+									state={state}
+									issues={grouped.get(state) ?? []}
+									mutations={mutations}
+									selectedIds={selectedIds}
+									focusedId={focusedId}
+									onSelectToggle={handleSelectToggle}
+									onFocus={handleFocus}
+								/>
+							))
+						) : (
+							<div role="list" className="divide-y divide-border/40">
+								{flatIssues.map((issue) => (
+									<div role="listitem" key={issue.id}>
+										<IssueRow
+											issue={issue}
+											mutations={mutations}
+											selected={selectedIds.has(issue.id)}
+											focused={focusedId === issue.id}
+											onSelectToggle={handleSelectToggle}
+											onFocus={handleFocus}
+										/>
+									</div>
+								))}
+							</div>
+						)}
 						{hasMore ? (
 							<div className="flex justify-center border-t border-border/60 p-3">
 								<Button

@@ -303,6 +303,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 			orgId: OrgId,
 			connection: PlanetScaleConnectionRow | null,
 		) {
+			const grant = yield* psOAuth.grantStatus(orgId)
 			if (connection === null) {
 				// A stored grant with no org binding is the pending-picker state.
 				const pendingOrgSelection = yield* psOAuth.hasConnection(orgId)
@@ -316,6 +317,8 @@ export class PlanetScaleConnectionService extends Context.Service<
 					scrapeTarget: null,
 					lastInventoryAt: null,
 					lastInventoryError: null,
+					revokedAt: grant.revokedAt,
+					expiresAt: grant.expiresAt,
 				})
 			}
 			const target = yield* selectManagedTarget(connection)
@@ -353,6 +356,8 @@ export class PlanetScaleConnectionService extends Context.Service<
 					: null,
 				lastInventoryAt: connection.lastInventoryAt?.getTime() ?? null,
 				lastInventoryError: connection.lastInventoryError,
+				revokedAt: grant.revokedAt,
+				expiresAt: grant.expiresAt,
 			})
 		})
 

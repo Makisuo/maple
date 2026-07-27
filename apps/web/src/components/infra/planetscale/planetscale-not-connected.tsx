@@ -27,7 +27,10 @@ export function PlanetScaleNotConnected() {
 				</EmptyDescription>
 			</EmptyHeader>
 			<EmptyContent>
-				<Button size="sm" render={<Link to="/integrations" search={{ integration: "planetscale" }} />}>
+				<Button
+					size="sm"
+					render={<Link to="/integrations" search={{ integration: "planetscale" }} />}
+				>
 					Connect PlanetScale
 				</Button>
 			</EmptyContent>

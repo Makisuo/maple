@@ -9,6 +9,9 @@ import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { LONG_RANGE_PRESET_OPTIONS } from "@/lib/time-utils"
+
+const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
 
 const servicesSearchSchema = Schema.Struct({
 	environments: OptionalStringArrayParam,
@@ -61,6 +64,8 @@ function ServicesPage() {
 						startTime={search.startTime ?? effectiveStartTime}
 						endTime={search.endTime ?? effectiveEndTime}
 						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+						presets={LONG_RANGE_PRESET_OPTIONS}
+						maxRangeSeconds={ONE_YEAR_SECONDS}
 						onTimeChange={handleTimeChange}
 					/>
 				}

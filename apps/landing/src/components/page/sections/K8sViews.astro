@@ -1,0 +1,259 @@
+---
+/**
+ * Kubernetes · pods, nodes and workloads.
+ *
+ * Moved out of the old kubernetes-monitoring page, and the `.k8s-mini-table`
+ * styles moved with it — Astro scopes `<style>` per component, so leaving them
+ * behind would have silently unstyled all three tables.
+ *
+ * The three cards now share hairline edges on a `gap-px` / `bg-border` plate
+ * rather than floating as separate bordered boxes, matching PlatformSheet.
+ *
+ * Rows are modelled on real captures from /infra/kubernetes/{pods,nodes,workloads}.
+ */
+import * as m from "../../../paraglide/messages";
+
+const podRows = [
+	{ pod: "otel-gateway-5988fb47f7-qr2cw", ns: "observability", cpuReq: "147%", cpuLimit: "37%", memLimit: "30%", warn: true },
+	{ pod: "prd-artifacts-api-6688755484-ztp7v", ns: "default", cpuReq: "0%", cpuLimit: "52%", memLimit: "10%", warn: false },
+	{ pod: "prd-warpstream-5bb84bbbd7-4nmc6", ns: "warpstream", cpuReq: "42%", cpuLimit: "42%", memLimit: "35%", warn: false },
+	{ pod: "prd-enrichment-api-7697f64866-ht8qm", ns: "default", cpuReq: "0%", cpuLimit: "34%", memLimit: "21%", warn: false },
+];
+
+const nodeRows = [
+	{ name: "i-0ef7f77feb3e0a3eb", cpu: "3.00", seen: "14s ago" },
+	{ name: "i-0293a9e7e2bac82a4", cpu: "2.65", seen: "30s ago" },
+	{ name: "i-0a8c19f2d4e7b15c1", cpu: "1.84", seen: "22s ago" },
+];
+
+const workloadRows = [
+	{ name: "api-gateway", ns: "default", pods: 3, cpu: 47, warn: false },
+	{ name: "order-service", ns: "default", pods: 4, cpu: 71, warn: false },
+	{ name: "payment-svc", ns: "default", pods: 2, cpu: 86, warn: true },
+	{ name: "inventory-svc", ns: "default", pods: 3, cpu: 34, warn: false },
+];
+---
+
+<section class="bg-bg-deep">
+	<div class="shell py-16 md:py-24">
+		<div class="mb-10 max-w-2xl md:mb-14">
+			<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">
+				{m.page_k8s_views_eyebrow()}
+			</p>
+			<h2
+				class="mt-4 font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+			>
+				{m.page_k8s_views_title()}
+			</h2>
+			<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">
+				{m.page_k8s_views_lede()}
+			</p>
+		</div>
+
+		<div class="grid gap-px overflow-hidden rounded-xl border border-border bg-border lg:grid-cols-3">
+			<!-- Pods -->
+			<div class="flex min-w-0 flex-col bg-bg">
+				<div class="flex items-center justify-between border-b border-border px-4 py-2.5">
+					<span class="font-mono text-[10px] text-fg-muted">{m.page_k8s_views_pods_route()}</span>
+					<span class="op-key">200 pods</span>
+				</div>
+				<div class="border-b border-border px-4 py-3">
+					<h3 class="text-sm font-medium text-fg">{m.page_k8s_views_pods_caption()}</h3>
+					<p class="mt-1 text-[11.5px] leading-relaxed text-fg-muted">{m.page_k8s_views_pods_lede()}</p>
+				</div>
+				<table class="k8s-mini-table w-full">
+					<thead>
+						<tr>
+							<th>Pod</th>
+							<th>CPU req</th>
+							<th>CPU lim</th>
+							<th>Mem lim</th>
+						</tr>
+					</thead>
+					<tbody>
+						{
+							podRows.map((p) => (
+								<tr class={p.warn ? "is-warn" : ""}>
+									<td class="cell-name">
+										<span class="cell-name__pod">
+											{p.pod.length > 22 ? `${p.pod.slice(0, 22)}…` : p.pod}
+										</span>
+										<span class="cell-name__sub">ns {p.ns}</span>
+									</td>
+									<td class="cell-num">{p.cpuReq}</td>
+									<td class="cell-num">{p.cpuLimit}</td>
+									<td class="cell-num">{p.memLimit}</td>
+								</tr>
+							))
+						}
+					</tbody>
+				</table>
+			</div>
+
+			<!-- Nodes -->
+			<div class="flex min-w-0 flex-col bg-bg">
+				<div class="flex items-center justify-between border-b border-border px-4 py-2.5">
+					<span class="font-mono text-[10px] text-fg-muted">{m.page_k8s_views_nodes_route()}</span>
+					<span class="op-key">3 nodes</span>
+				</div>
+				<div class="border-b border-border px-4 py-3">
+					<h3 class="text-sm font-medium text-fg">{m.page_k8s_views_nodes_caption()}</h3>
+					<p class="mt-1 text-[11.5px] leading-relaxed text-fg-muted">{m.page_k8s_views_nodes_lede()}</p>
+				</div>
+				<table class="k8s-mini-table w-full">
+					<thead>
+						<tr>
+							<th>Node</th>
+							<th>Status</th>
+							<th>CPU</th>
+							<th>Last seen</th>
+						</tr>
+					</thead>
+					<tbody>
+						{
+							nodeRows.map((n) => (
+								<tr>
+									<td class="cell-name">
+										<span class="cell-name__pod">{n.name}</span>
+									</td>
+									<td>
+										<span class="status-dot" />
+										<span class="status-text">{m.page_k8s_correlation_pod_status()}</span>
+									</td>
+									<td class="cell-num">{n.cpu}</td>
+									<td class="cell-num cell-muted">{n.seen}</td>
+								</tr>
+							))
+						}
+						<tr class="row-empty"><td colspan="4">&nbsp;</td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<!-- Workloads -->
+			<div class="flex min-w-0 flex-col bg-bg">
+				<div class="flex items-center justify-between border-b border-border px-4 py-2.5">
+					<span class="font-mono text-[10px] text-fg-muted">{m.page_k8s_views_workloads_route()}</span>
+					<span class="op-key">21 workloads</span>
+				</div>
+				<div class="border-b border-border px-4 py-3">
+					<h3 class="text-sm font-medium text-fg">{m.page_k8s_views_workloads_caption()}</h3>
+					<p class="mt-1 text-[11.5px] leading-relaxed text-fg-muted">
+						{m.page_k8s_views_workloads_lede()}
+					</p>
+				</div>
+				<table class="k8s-mini-table w-full">
+					<thead>
+						<tr>
+							<th>Workload</th>
+							<th>Pods</th>
+							<th>Avg CPU</th>
+							<th>NS</th>
+						</tr>
+					</thead>
+					<tbody>
+						{
+							workloadRows.map((w) => (
+								<tr class={w.warn ? "is-warn" : ""}>
+									<td class="cell-name">
+										<span class="cell-name__pod">{w.name}</span>
+									</td>
+									<td class="cell-num">{w.pods}</td>
+									<td class="cell-num">{w.cpu}%</td>
+									<td class="cell-num cell-muted">{w.ns}</td>
+								</tr>
+							))
+						}
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
+</section>
+
+<style>
+	/* Scoped to this component. These styles moved here with the markup — Astro
+	   scopes `<style>` per component, so leaving them on the old page would have
+	   unstyled all three tables silently. */
+	.k8s-mini-table {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		border-collapse: collapse;
+	}
+	.k8s-mini-table thead th {
+		text-align: left;
+		font-weight: 500;
+		font-size: 9.5px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
+		padding: 8px 12px;
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+		background: color-mix(in oklab, var(--bg-deep) 45%, transparent);
+		white-space: nowrap;
+	}
+	.k8s-mini-table tbody tr {
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 40%, transparent);
+		transition: background 200ms cubic-bezier(0.22, 1, 0.36, 1);
+	}
+	.k8s-mini-table tbody tr:last-child {
+		border-bottom: none;
+	}
+	.k8s-mini-table tbody tr:hover {
+		background: var(--bg-elevated);
+	}
+	.k8s-mini-table tbody tr.is-warn .cell-name__pod {
+		color: var(--severity-warn);
+	}
+	.k8s-mini-table tbody tr.is-warn .cell-num {
+		color: var(--severity-warn);
+	}
+	.k8s-mini-table tbody tr.row-empty {
+		height: 31px;
+	}
+	.k8s-mini-table tbody tr.row-empty td {
+		border-bottom: none;
+	}
+	.k8s-mini-table td {
+		padding: 8px 12px;
+		vertical-align: middle;
+		white-space: nowrap;
+	}
+	.cell-name {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		min-width: 0;
+	}
+	.cell-name__pod {
+		color: var(--foreground);
+		font-weight: 500;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.cell-name__sub {
+		color: color-mix(in oklab, var(--muted-foreground) 70%, transparent);
+		font-size: 10px;
+	}
+	.cell-num {
+		font-variant-numeric: tabular-nums;
+		color: color-mix(in oklab, var(--foreground) 88%, transparent);
+		text-align: right;
+	}
+	.cell-muted {
+		color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+	}
+	.status-dot {
+		display: inline-block;
+		width: 5px;
+		height: 5px;
+		border-radius: 999px;
+		background: var(--primary);
+		margin-right: 5px;
+		vertical-align: middle;
+	}
+	.status-text {
+		font-size: 10.5px;
+		color: color-mix(in oklab, var(--foreground) 85%, transparent);
+	}
+</style>

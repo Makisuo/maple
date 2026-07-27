@@ -3,6 +3,17 @@ export {
 	type WarehouseExecutorError,
 	type WarehouseExecutorShape,
 } from "./WarehouseExecutor"
+export {
+	attributeIndexMode,
+	baselineWarehouseCapabilities,
+	hasWarehouseFeature,
+	logBodySearchMode,
+	type AttributeIndexMode,
+	type LogBodySearchMode,
+	type WarehouseCapabilities,
+	type WarehouseIndexCapability,
+	type WarehouseSearchFeature,
+} from "../capabilities"
 export type { SqlQueryOptions } from "../profiles"
 export type * from "./types"
 export { toSpanResult, toLogEntry, toErrorSummary } from "./row-mappers"

@@ -336,7 +336,7 @@ export interface Service {
    */
   readonly generateObject: <
     ObjectEncoded extends Record<string, any>,
-    ObjectSchema extends Schema.Codec<unknown, ObjectEncoded, unknown, unknown>,
+    ObjectSchema extends Schema.Encoder<ObjectEncoded, unknown>,
     Options extends NoExcessProperties<LanguageModel.GenerateObjectOptions<any, ObjectSchema>, Options>
   >(
     options: Options & LanguageModel.GenerateObjectOptions<LanguageModel.ExtractTools<Options>, ObjectSchema>

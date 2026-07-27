@@ -16,6 +16,7 @@ export {
 	sumIf,
 	avgIf,
 	maxIf,
+	minIf,
 	groupUniqArray,
 	argMaxMerge,
 } from "./aggregate"
@@ -30,6 +31,8 @@ export {
 	replaceOne,
 	extract_,
 	concat,
+	hasToken,
+	hasAllTokens,
 } from "./string"
 
 export {
@@ -58,7 +61,7 @@ export {
 
 export { if_, multiIf, coalesce, nullIf } from "./conditional"
 
-export { arrayOf, arrayStringConcat, arrayFilter, arrayJoin } from "./array"
+export { arrayOf, arrayStringConcat, arrayFilter, arrayJoin, has } from "./array"
 
 export { mapContains, mapGet, mapKeys, mapValues, mapLiteral } from "./map"
 

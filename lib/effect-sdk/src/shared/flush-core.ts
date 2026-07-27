@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 import { Redacted } from "effect"
 import type { LogBuffer, LogRecord } from "./flushable-logger.js"
+import type { MetricBuffer } from "./flushable-metrics.js"
 import type { OtlpSpan, SpanBuffer } from "./flushable-tracer.js"
 
 /** Disable a signal for this long after a failed POST so a broken collector isn't hammered. */
@@ -35,6 +36,7 @@ export interface ResourceInput {
 export interface Resolved {
 	readonly tracesUrl: string
 	readonly logsUrl: string
+	readonly metricsUrl: string
 	readonly resource: OtlpResourceLike
 	readonly scope: { readonly name: string }
 	readonly headers: Record<string, string>
@@ -69,6 +71,7 @@ export const buildResolved = (
 	opts: {
 		readonly tracesPath?: string | undefined
 		readonly logsPath?: string | undefined
+		readonly metricsPath?: string | undefined
 		readonly userAgent: string
 	},
 ): Resolved => {
@@ -78,6 +81,7 @@ export const buildResolved = (
 	const baseUrl = base.endsWith("/") ? base.slice(0, -1) : base
 	const tracesUrl = `${baseUrl}${opts.tracesPath ?? "/v1/traces"}`
 	const logsUrl = `${baseUrl}${opts.logsPath ?? "/v1/logs"}`
+	const metricsUrl = `${baseUrl}${opts.metricsPath ?? "/v1/metrics"}`
 	const headers: Record<string, string> = {
 		"content-type": "application/json",
 		"user-agent": opts.userAgent,
@@ -86,6 +90,7 @@ export const buildResolved = (
 	return {
 		tracesUrl,
 		logsUrl,
+		metricsUrl,
 		resource: makeOtlpResource(r.resource),
 		scope: { name: r.resource.serviceName },
 		headers,
@@ -192,17 +197,31 @@ export const runFlush = async (args: {
 	readonly resolved: Resolved
 	readonly spans: SpanBuffer
 	readonly logs: LogBuffer
+	readonly metrics: MetricBuffer
 	readonly tracesState: SignalState
 	readonly logsState: SignalState
+	readonly metricsState: SignalState
 	readonly transport: FlushTransport
 	readonly logPrefix: string
 	readonly onNoOp: () => void
 }): Promise<void> => {
-	const { resolved: r, spans, logs, tracesState, logsState, transport, logPrefix, onNoOp } = args
+	const {
+		resolved: r,
+		spans,
+		logs,
+		metrics,
+		tracesState,
+		logsState,
+		metricsState,
+		transport,
+		logPrefix,
+		onNoOp,
+	} = args
 
 	if (r.noOp) {
 		spans.drain()
 		logs.drain()
+		metrics.drain()
 		onNoOp()
 		return
 	}
@@ -228,6 +247,16 @@ export const runFlush = async (args: {
 			transport,
 			logPrefix,
 		}),
+		flushSignal({
+			url: r.metricsUrl,
+			headers: r.headers,
+			buffer: metrics,
+			body: (items) => makeMetricsBody(items, r),
+			state: metricsState,
+			signal: "metrics",
+			transport,
+			logPrefix,
+		}),
 	])
 }
 
@@ -238,3 +267,130 @@ const makeTracesBody = (spans: ReadonlyArray<OtlpSpan>, r: Resolved) => ({
 const makeLogsBody = (logs: ReadonlyArray<LogRecord>, r: Resolved) => ({
 	resourceLogs: [{ resource: r.resource, scopeLogs: [{ scope: r.scope, logRecords: logs }] }],
 })
+
+type MetricSnapshot = ReturnType<MetricBuffer["drain"]>[number]
+
+const metricAttributes = (
+	attributes: Readonly<Record<string, string>> | undefined,
+	extra?: readonly [string, string],
+) => [
+	...Object.entries(attributes ?? {}).map(([key, value]) => ({
+		key,
+		value: anyValue(value),
+	})),
+	...(extra ? [{ key: extra[0], value: anyValue(extra[1]) }] : []),
+]
+
+const makeMetricsBody = (snapshots: ReadonlyArray<MetricSnapshot>, r: Resolved) => {
+	const timestamp = (BigInt(Date.now()) * 1_000_000n).toString()
+	const metrics: Array<Record<string, unknown>> = []
+
+	for (const snapshot of snapshots) {
+		const base = {
+			name: snapshot.id,
+			...(snapshot.description ? { description: snapshot.description } : {}),
+		}
+		switch (snapshot.type) {
+			case "Counter":
+				metrics.push({
+					...base,
+					sum: {
+						aggregationTemporality: 2,
+						isMonotonic: snapshot.state.incremental,
+						dataPoints: [
+							{
+								attributes: metricAttributes(snapshot.attributes),
+								timeUnixNano: timestamp,
+								asDouble: Number(snapshot.state.count),
+							},
+						],
+					},
+				})
+				break
+			case "Gauge":
+				metrics.push({
+					...base,
+					gauge: {
+						dataPoints: [
+							{
+								attributes: metricAttributes(snapshot.attributes),
+								timeUnixNano: timestamp,
+								asDouble: Number(snapshot.state.value),
+							},
+						],
+					},
+				})
+				break
+			case "Frequency":
+				metrics.push({
+					...base,
+					sum: {
+						aggregationTemporality: 2,
+						isMonotonic: true,
+						dataPoints: [...snapshot.state.occurrences].map(([value, count]) => ({
+							attributes: metricAttributes(snapshot.attributes, ["value", value]),
+							timeUnixNano: timestamp,
+							asDouble: count,
+						})),
+					},
+				})
+				break
+			case "Histogram": {
+				let previous = 0
+				const finiteBuckets = snapshot.state.buckets.filter(([bound]) => Number.isFinite(bound))
+				const bucketCounts = finiteBuckets.map(([, cumulative]) => {
+					const count = cumulative - previous
+					previous = cumulative
+					return String(count)
+				})
+				bucketCounts.push(String(snapshot.state.count - previous))
+				metrics.push({
+					...base,
+					histogram: {
+						aggregationTemporality: 2,
+						dataPoints: [
+							{
+								attributes: metricAttributes(snapshot.attributes),
+								timeUnixNano: timestamp,
+								count: String(snapshot.state.count),
+								sum: snapshot.state.sum,
+								min: snapshot.state.min,
+								max: snapshot.state.max,
+								explicitBounds: finiteBuckets.map(([bound]) => bound),
+								bucketCounts,
+							},
+						],
+					},
+				})
+				break
+			}
+			case "Summary":
+				metrics.push({
+					...base,
+					summary: {
+						dataPoints: [
+							{
+								attributes: metricAttributes(snapshot.attributes),
+								timeUnixNano: timestamp,
+								count: String(snapshot.state.count),
+								sum: snapshot.state.sum,
+								quantileValues: snapshot.state.quantiles.flatMap(([quantile, value]) =>
+									value === undefined ? [] : [{ quantile, value }],
+								),
+							},
+						],
+					},
+				})
+				break
+		}
+	}
+
+	return {
+		resourceMetrics: [
+			{
+				resource: r.resource,
+				scopeMetrics: [{ scope: r.scope, metrics }],
+			},
+		],
+	}
+}

@@ -18,7 +18,10 @@ export const HttpAlertsLive = HttpApiBuilder.group(MapleApi, "alerts", (handlers
 			.handle("createDestination", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, userId: tenant.userId })
+					yield* Effect.annotateCurrentSpan({
+						orgId: tenant.orgId,
+						"tenant.userId": tenant.userId,
+					})
 					return yield* alerts.createDestination(tenant.orgId, tenant.userId, tenant.roles, payload)
 				}).pipe(Effect.withSpan("alerts.createDestination")),
 			)
@@ -75,7 +78,10 @@ export const HttpAlertsLive = HttpApiBuilder.group(MapleApi, "alerts", (handlers
 			.handle("createRule", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, userId: tenant.userId })
+					yield* Effect.annotateCurrentSpan({
+						orgId: tenant.orgId,
+						"tenant.userId": tenant.userId,
+					})
 					return yield* alerts.createRule(tenant.orgId, tenant.userId, tenant.roles, payload)
 				}).pipe(Effect.withSpan("alerts.createRule")),
 			)
@@ -106,7 +112,10 @@ export const HttpAlertsLive = HttpApiBuilder.group(MapleApi, "alerts", (handlers
 			.handle("testRule", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, userId: tenant.userId })
+					yield* Effect.annotateCurrentSpan({
+						orgId: tenant.orgId,
+						"tenant.userId": tenant.userId,
+					})
 					return yield* alerts.testRule(
 						tenant.orgId,
 						tenant.userId,

@@ -7,11 +7,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { cn } from "@maple/ui/utils"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import {
-	billingCustomerAtom,
-	billingPlansAtom,
-	billingUsageAtom,
-} from "@/lib/services/atoms/billing-atoms"
+import { billingCustomerAtom, billingPlansAtom, billingUsageAtom } from "@/lib/services/atoms/billing-atoms"
 import { useBillingActions } from "@/hooks/use-billing-actions"
 import { getLegacyPlanInfo, getTrialStatus, type TrialStatus } from "@/lib/billing/plan-gating"
 import { getPlanLimits, type PlanLimits } from "@/lib/billing/plans"

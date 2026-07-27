@@ -60,8 +60,7 @@ const baseConfigValues = {
 const testConfig = (extra?: Record<string, unknown>) =>
 	ConfigProvider.layer(ConfigProvider.fromUnknown({ ...baseConfigValues, ...extra }))
 
-export const testEnv = (extra?: Record<string, unknown>) =>
-	Env.layer.pipe(Layer.provide(testConfig(extra)))
+export const testEnv = (extra?: Record<string, unknown>) => Env.layer.pipe(Layer.provide(testConfig(extra)))
 
 // VcsRepository over an in-memory PGlite TestDb + Env.
 export const testRepoLayer = (testDb: TestDb, extra?: Record<string, unknown>) =>

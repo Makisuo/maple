@@ -9,6 +9,7 @@ import {
 	type ServiceEdgeData,
 	type ServiceNodeData,
 } from "./service-map-utils"
+import { logClientWarning } from "@/lib/services/common/telemetry"
 
 // ELK runs inside a dedicated web worker (elk-api + elk-worker) so laying out a
 // large graph never blocks the main thread. The worker is a singleton reused
@@ -41,7 +42,7 @@ function getElk(): Promise<ELK> {
 	if (workerBroken) return getMainThreadElk()
 	if (!workerElk) {
 		workerElk = createWorkerElk().catch((error) => {
-			console.warn("Service map: ELK worker unavailable, using main-thread layout", error)
+			logClientWarning("service_map.elk_worker_unavailable", error)
 			workerBroken = true
 			return getMainThreadElk()
 		})
@@ -192,7 +193,7 @@ export async function layoutServiceMapWithElk(
 		// A failure on the worker path (e.g. the worker chunk 404s at runtime)
 		// demotes to the main-thread build and retries once.
 		if (workerBroken) throw error
-		console.warn("Service map: ELK worker layout failed, retrying on main thread", error)
+		logClientWarning("service_map.elk_worker_layout_failed", error)
 		workerBroken = true
 		const elk = await getMainThreadElk()
 		result = await elk.layout(graph)

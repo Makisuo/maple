@@ -639,7 +639,7 @@ const recur: (
  * @category schemas
  * @since 4.0.0
  */
-export function schema<T, E>(codec: Schema.Codec<T, E>, path?: string | ConfigProvider.Path): Config<T> {
+export function schema<T>(codec: Schema.ConstraintCodec<T, unknown>, path?: string | ConfigProvider.Path): Config<T> {
   const codecStringTree = Schema.toCodecStringTree(codec)
   const decodeUnknownEffect = SchemaParser.decodeUnknownEffect(codecStringTree)
   const codecStringTreeEncoded = SchemaAST.toEncoded(codecStringTree.ast)

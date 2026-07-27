@@ -1,0 +1,92 @@
+---
+/**
+ * 07 · Agents — the MCP transcript.
+ *
+ * Restores the section the homepage rebuild dropped. `IncidentStory` step 04
+ * and `PlatformSheet` cell 05 both show the MCP *setup* screen; neither shows
+ * an agent actually working, which is the only thing that makes the claim
+ * land. This section is that proof.
+ *
+ * Both columns stretch to the row height and pin content to both edges: the
+ * prose sits at the top, the three rules are pushed down by `mt-auto`, and the
+ * transcript takes `h-full` so its footer bar lands on the same baseline as
+ * the last rule. A short copy column floating beside a tall terminal was the
+ * whole problem with the first pass.
+ *
+ * The rules deliberately are NOT a tool list. Every observability MCP server
+ * ships a long list of tools, so a count proves nothing; what a competitor's
+ * list doesn't imply is that this one reads your source, writes back, and
+ * needs no plugin.
+ *
+ * The endpoint rides the transcript's status bar rather than sitting in a box
+ * in this column. That is not decoration: the box overshot the terminal's
+ * natural height by ~90px, and `h-full` turned the overshoot into a visible
+ * hole inside the frame. Moving it balances the two columns instead.
+ *
+ * KubernetesSection directly above is also copy-left / media-right on `bg-bg`,
+ * which is why this one runs a wider media track and carries no <pre>.
+ *
+ * Surface is `bg-bg`, not `bg-bg-deep`: `.live-frame` is itself `--bg-deep`,
+ * so a deep floor would flatten the transcript into the page.
+ */
+import { getRelativeLocaleUrl } from "astro:i18n";
+import * as m from "../../paraglide/messages";
+import LiveMcpTranscript from "../live/LiveMcpTranscript.astro";
+
+const locale = Astro.currentLocale ?? "en";
+const featurePath = getRelativeLocaleUrl(locale, "/features/ai-mcp-integration");
+
+/** The live server. Clients differ on how you register it; they all take a URL. */
+const MCP_ENDPOINT = "https://api.maple.dev/mcp";
+
+// What actually separates this from every other observability MCP server.
+// A tool count is table stakes — every server has a long list — so the slot
+// carries the three things a competitor's list doesn't imply.
+const points = [
+	{ title: m.mcp_point_1_title(), body: m.mcp_point_1_body() },
+	{ title: m.mcp_point_2_title(), body: m.mcp_point_2_body() },
+	{ title: m.mcp_point_3_title(), body: m.mcp_point_3_body() },
+];
+---
+
+<section id="agents" class="border-t border-border bg-bg">
+	<div class="shell py-16 md:py-32">
+		<div class="grid gap-12 lg:grid-cols-[0.78fr_1.22fr] lg:gap-20">
+			<!-- min-w-0: a grid item defaults to `min-width: auto`, so the mono
+			     index would otherwise push the track wider than the viewport. -->
+			<div class="flex min-w-0 flex-col">
+				<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.mcp_eyebrow()}</p>
+
+				<h2
+					class="mt-4 max-w-[18ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+				>
+					{m.mcp_title()}
+				</h2>
+				<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted">{m.mcp_lede()}</p>
+
+				<!-- mt-auto is what makes the column span the row: prose at the
+				     top edge, these rules at the bottom, slack in the middle. -->
+				<dl class="mt-auto pt-8">
+					{
+						points.map((point) => (
+							<div class="border-t border-border py-4">
+								<dt class="text-[13px] font-medium text-fg">{point.title}</dt>
+								<dd class="mt-1.5 max-w-[52ch] text-[13px] leading-relaxed text-fg-muted">
+									{point.body}
+								</dd>
+							</div>
+						))
+					}
+				</dl>
+
+				<div class="mt-7 text-[13px]">
+					<a href={featurePath} class="text-fg transition-colors hover:text-primary">
+						{m.nav_ai_mcp()}
+					</a>
+				</div>
+			</div>
+
+			<LiveMcpTranscript class="h-full" endpoint={MCP_ENDPOINT} />
+		</div>
+	</div>
+</section>

@@ -67,7 +67,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
 			const metrics = metricsResult.data
 			const summary = summaryResult.data
 
-			yield* Effect.annotateCurrentSpan("resultCount", metrics.length)
+			yield* Effect.annotateCurrentSpan("result.rowCount", metrics.length)
 
 			const lines: string[] = [
 				`## Available Metrics`,

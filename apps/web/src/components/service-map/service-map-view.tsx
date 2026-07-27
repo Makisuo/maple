@@ -21,10 +21,12 @@ import { serviceMapLayoutAtomFamily, upsertSnapshot } from "@/atoms/service-map-
 import { serviceMapViewPrefsAtomFamily } from "@/atoms/service-map-view-prefs-atoms"
 import { Link } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
+import { logClientError } from "@/lib/services/common/telemetry"
 import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts"
 
 import { cn } from "@maple/ui/utils"
 import { getServiceColor, getValueHue } from "@maple/ui/colors"
+import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import {
 	ChartContainer,
 	ChartTooltip,
@@ -93,6 +95,11 @@ import {
 } from "./service-map-particles"
 import { resolveDbNodePresentation, resolvePlanetScaleDbPresentation } from "./service-map-db"
 import { PlanetScaleTopQueries } from "@/components/infra/planetscale/planetscale-top-queries"
+import {
+	formatStoragePercent,
+	lagClass,
+	utilizationClass,
+} from "@/components/infra/planetscale/metrics"
 import {
 	buildFlowElements,
 	CLOUDFLARE_COLOR,
@@ -326,7 +333,12 @@ function ServiceDetailPanel({
 									</div>
 									<div className="space-y-0.5">
 										<span className="text-[10px] text-muted-foreground">Avg Latency</span>
-										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+										<p
+											className={cn(
+												"text-xl font-semibold tabular-nums font-mono",
+												latencyToneClass(avgLatencyMs, "avg"),
+											)}
+										>
 											{formatLatency(avgLatencyMs)}
 										</p>
 									</div>
@@ -335,9 +347,12 @@ function ServiceDetailPanel({
 										<p
 											className={cn(
 												"text-xl font-semibold tabular-nums font-mono",
+												// A p95 far above this service's own avg is a tail
+												// problem worth flagging even when the absolute
+												// magnitude is fine, so it outranks the ramp.
 												p95LatencyMs > avgLatencyMs * 3
 													? "text-severity-warn"
-													: "text-foreground",
+													: latencyToneClass(p95LatencyMs, "p95"),
 											)}
 										>
 											{formatLatency(p95LatencyMs)}
@@ -387,7 +402,12 @@ function ServiceDetailPanel({
 										</div>
 										<div className="space-y-0.5">
 											<span className="text-[10px] text-muted-foreground">CPU p99</span>
-											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+											<p
+												className={cn(
+													"text-xl font-semibold tabular-nums font-mono",
+													latencyToneClass(cloudflare.cpuP99Ms ?? 0, "cpu"),
+												)}
+											>
 												{formatLatency(cloudflare.cpuP99Ms ?? 0)}
 											</p>
 										</div>
@@ -395,7 +415,12 @@ function ServiceDetailPanel({
 											<span className="text-[10px] text-muted-foreground">
 												Duration p99
 											</span>
-											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+											<p
+												className={cn(
+													"text-xl font-semibold tabular-nums font-mono",
+													latencyToneClass(cloudflare.latencyP99Ms, "p99"),
+												)}
+											>
 												{formatLatency(cloudflare.latencyP99Ms)}
 											</p>
 										</div>
@@ -1007,16 +1032,14 @@ function PlanetScaleSection({
 							peak {formatRate(stats.connectionsMax)}
 						</span>
 					</div>
+					{/* Thresholds come from the shared PlanetScale metrics module, so a
+					    number tinted red here is tinted red on /infra/planetscale too. */}
 					<div className="space-y-0.5">
 						<span className="text-[10px] text-muted-foreground">CPU (max)</span>
 						<p
 							className={cn(
-								"text-xl font-semibold tabular-nums font-mono",
-								stats.cpuMaxPercent > 80
-									? "text-severity-error"
-									: stats.cpuMaxPercent > 60
-										? "text-severity-warn"
-										: "text-foreground",
+								"text-xl font-semibold tabular-nums font-mono text-foreground",
+								utilizationClass(stats.cpuMaxPercent),
 							)}
 						>
 							{stats.cpuMaxPercent.toFixed(0)}%
@@ -1024,20 +1047,35 @@ function PlanetScaleSection({
 					</div>
 					<div className="space-y-0.5">
 						<span className="text-[10px] text-muted-foreground">Memory (max)</span>
-						<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+						<p
+							className={cn(
+								"text-xl font-semibold tabular-nums font-mono text-foreground",
+								utilizationClass(stats.memMaxPercent),
+							)}
+						>
 							{stats.memMaxPercent.toFixed(0)}%
+						</p>
+					</div>
+					<div className="space-y-0.5">
+						<span className="text-[10px] text-muted-foreground">Storage (max)</span>
+						<p
+							className={cn(
+								"text-xl font-semibold tabular-nums font-mono text-foreground",
+								stats.storageUsedPercent !== null &&
+									utilizationClass(stats.storageUsedPercent),
+							)}
+						>
+							{stats.storageUsedPercent === null
+								? "—"
+								: formatStoragePercent(stats.storageUsedPercent)}
 						</p>
 					</div>
 					<div className="space-y-0.5">
 						<span className="text-[10px] text-muted-foreground">Replica Lag (max)</span>
 						<p
 							className={cn(
-								"text-xl font-semibold tabular-nums font-mono",
-								stats.replicaLagMaxSeconds > 10
-									? "text-severity-error"
-									: stats.replicaLagMaxSeconds > 1
-										? "text-severity-warn"
-										: "text-foreground",
+								"text-xl font-semibold tabular-nums font-mono text-foreground",
+								lagClass(stats.replicaLagMaxSeconds),
 							)}
 						>
 							{formatReplicationLag(stats.replicaLagMaxSeconds)}
@@ -1349,7 +1387,12 @@ function DatabaseDetailPanel({
 							</div>
 							<div className="space-y-0.5">
 								<span className="text-[10px] text-muted-foreground">P50 Latency</span>
-								<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+								<p
+									className={cn(
+										"text-xl font-semibold tabular-nums font-mono",
+										latencyToneClass(metricP50LatencyMs, "p50"),
+									)}
+								>
 									{formatLatency(metricP50LatencyMs)}
 								</p>
 							</div>
@@ -1358,9 +1401,11 @@ function DatabaseDetailPanel({
 								<p
 									className={cn(
 										"text-xl font-semibold tabular-nums font-mono",
+										// A p95 far above this node's own p50 is a tail problem
+										// worth flagging even at a fine absolute magnitude.
 										metricP95LatencyMs > metricP50LatencyMs * 3
 											? "text-severity-warn"
-											: "text-foreground",
+											: latencyToneClass(metricP95LatencyMs, "p95"),
 									)}
 								>
 									{formatLatency(metricP95LatencyMs)}
@@ -1368,7 +1413,12 @@ function DatabaseDetailPanel({
 							</div>
 							<div className="space-y-0.5">
 								<span className="text-[10px] text-muted-foreground">Avg Latency</span>
-								<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+								<p
+									className={cn(
+										"text-xl font-semibold tabular-nums font-mono",
+										latencyToneClass(metricAvgLatencyMs, "avg"),
+									)}
+								>
 									{formatLatency(metricAvgLatencyMs)}
 								</p>
 							</div>
@@ -1444,10 +1494,20 @@ function DatabaseDetailPanel({
 												{formatCompactCount(query.estimatedQueryCount)} calls
 											</span>
 											<span className="font-mono tabular-nums">
-												p50 {formatLatency(query.p50DurationMs)}
+												p50{" "}
+												<span
+													className={latencyToneClass(query.p50DurationMs, "p50")}
+												>
+													{formatLatency(query.p50DurationMs)}
+												</span>
 											</span>
 											<span className="font-mono tabular-nums">
-												p95 {formatLatency(query.p95DurationMs)}
+												p95{" "}
+												<span
+													className={latencyToneClass(query.p95DurationMs, "p95")}
+												>
+													{formatLatency(query.p95DurationMs)}
+												</span>
 											</span>
 											<span className="truncate">
 												{query.serviceCount > 1
@@ -1659,7 +1719,7 @@ function useElkLayout(request: LayoutRequest): {
 				if (!cancelled) setState({ key: request.key, layout, hasEverSettled: true })
 			})
 			.catch((error) => {
-				console.error("Service map ELK layout failed", error)
+				logClientError("service_map.elk_layout_failed", error)
 				if (!cancelled) setState({ key: request.key, layout: null, hasEverSettled: true })
 			})
 		return () => {

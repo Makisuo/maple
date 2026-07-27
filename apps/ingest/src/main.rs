@@ -32,7 +32,11 @@ use flate2::Compression;
 use hmac::{Hmac, Mac};
 use maple_ingest::clickhouse_insert_mappings::SCHEMA_VERSION as CLICKHOUSE_SCHEMA_VERSION;
 use maple_ingest::metrics;
-use maple_ingest::otel::{build_resource, forward_client_span, ResourceConfig};
+use maple_ingest::otel::{
+    accept_internal_span, auth_internal_span, build_resource, decode_internal_span,
+    entitlement_internal_span, forward_client_span, grpc_server_span, parse_internal_span,
+    record_stage_error, resolve_config_internal_span, ResourceConfig,
+};
 use maple_ingest::telemetry::{
     AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget, ClickHouseTargetProvider,
     DatasourceNames, ExportDestination, MappingOperation, MappingSourceContext, PipelineError,
@@ -40,13 +44,15 @@ use maple_ingest::telemetry::{
 };
 use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry_otlp::{MetricExporter, Protocol, SpanExporter, WithExportConfig};
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_otlp::{LogExporter, MetricExporter, Protocol, SpanExporter, WithExportConfig};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, InstrumentationScope, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use opentelemetry_proto::tonic::resource::v1::Resource;
+use opentelemetry_sdk::logs::{BatchLogProcessor, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::runtime::Tokio as OtelTokio;
@@ -157,15 +163,11 @@ enum KeyStoreBackend {
     // No-DB local backend: every well-formed ingest key resolves to a single
     // override org. Selected for single-tenant local dev so contributors don't
     // need database credentials to boot the service.
-    Static {
-        org_id: String,
-    },
+    Static { org_id: String },
     // PlanetScale Postgres backend used in multi-tenant / production deploys.
     // `url` is the standard pg connection string (PSBouncer port 6432, sslmode
     // require); the API service writes ingest-key rows to the same database.
-    Postgres {
-        url: String,
-    },
+    Postgres { url: String },
 }
 
 impl AppConfig {
@@ -377,10 +379,17 @@ impl AppConfig {
             60,
         )?;
 
+        // Routing (self-managed + ClickHouse-readiness flags) is re-read per
+        // ingest request on a cache miss. A 1s TTL made that ~11 QPS against
+        // org_clickhouse_settings — 961k statements a day, a quarter of ALL
+        // traffic on the application database — to observe a value that changes
+        // when an operator finishes a schema apply. 30s matches the sampling and
+        // attribute-mapping caches; the only cost is that an org flipping to
+        // ClickHouse-ready keeps routing to Tinybird for up to another 30s.
         let org_routing_cache_ttl_secs = parse_u64(
             "INGEST_ORG_ROUTING_CACHE_TTL_SECS",
             std::env::var("INGEST_ORG_ROUTING_CACHE_TTL_SECS").ok(),
-            1,
+            30,
         )?;
 
         // 1 GiB of decompressed rrweb per session. Sized as an absurdity guard,
@@ -480,9 +489,7 @@ fn resolve_key_store_backend() -> Result<KeyStoreBackend, String> {
         return Err("MAPLE_PG_URL is required for the postgres key store backend".to_string());
     }
 
-    Ok(KeyStoreBackend::Postgres {
-        url,
-    })
+    Ok(KeyStoreBackend::Postgres { url })
 }
 
 struct IngestKeyResolver {
@@ -937,6 +944,56 @@ fn otel_status_for_rejection(status: u16) -> &'static str {
     }
 }
 
+/// gRPC counterpart of `otel_status_for_rejection`, applying the same rule: a
+/// caller-caused rejection leaves the SERVER span `Ok`, only a server-side
+/// failure is `Error`. `accept_grpc_decoded` maps the pipeline's 429 to
+/// `ResourceExhausted` and everything else to `Unavailable`, so the split here
+/// mirrors the 4xx/5xx split on the HTTP path.
+fn grpc_otel_status_for_rejection(code: tonic::Code) -> &'static str {
+    match code {
+        tonic::Code::Unauthenticated
+        | tonic::Code::PermissionDenied
+        | tonic::Code::ResourceExhausted
+        | tonic::Code::InvalidArgument
+        | tonic::Code::NotFound
+        | tonic::Code::FailedPrecondition
+        | tonic::Code::OutOfRange
+        | tonic::Code::Cancelled => "Ok",
+        _ => "Error",
+    }
+}
+
+/// Fully-qualified `rpc.service` names, per the OTel semantic conventions.
+const GRPC_TRACE_SERVICE: &str = "opentelemetry.proto.collector.trace.v1.TraceService";
+const GRPC_LOGS_SERVICE: &str = "opentelemetry.proto.collector.logs.v1.LogsService";
+const GRPC_METRICS_SERVICE: &str = "opentelemetry.proto.collector.metrics.v1.MetricsService";
+
+/// Record the resolved caller on the current gRPC server span, mirroring what
+/// `handle_signal_inner` records on the HTTP one.
+fn record_grpc_identity(resolved: &ResolvedIngestKey) {
+    let span = Span::current();
+    span.record("maple.org_id", resolved.org_id.as_str());
+    span.record("maple.ingest.key_type", resolved.key_type.as_str());
+}
+
+/// Fill in the deferred outcome fields on a gRPC server span. Generic over the
+/// response body so the three OTLP services share one implementation.
+fn record_grpc_outcome<T>(span: &Span, result: &Result<tonic::Response<T>, tonic::Status>) {
+    match result {
+        Ok(_) => {
+            span.record("rpc.grpc.status_code", tonic::Code::Ok as i32);
+            span.record("otel.status_code", "Ok");
+        }
+        Err(status) => {
+            let code = status.code();
+            span.record("rpc.grpc.status_code", code as i32);
+            span.record("error.type", code.description());
+            span.record("otel.status_description", status.message());
+            span.record("otel.status_code", grpc_otel_status_for_rejection(code));
+        }
+    }
+}
+
 /// Map a telemetry pipeline rejection to the client-facing HTTP error.
 ///
 /// Transient queue conditions (`Throttled` = per-org byte cap, `Backpressure` =
@@ -975,11 +1032,16 @@ fn resolve_deployment_env() -> String {
         .unwrap_or_else(|_| "development".to_string())
 }
 
+struct TelemetryProviders {
+    tracer: SdkTracerProvider,
+    logger: SdkLoggerProvider,
+}
+
 fn init_tracing(
     forward_endpoint: &str,
     bind_port: u16,
     service_instance_id: &str,
-) -> Option<SdkTracerProvider> {
+) -> Option<TelemetryProviders> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "maple_ingest=info,tower_http=info".into());
 
@@ -1035,10 +1097,34 @@ fn init_tracing(
             return None;
         }
     };
+    let log_exporter = match LogExporter::builder()
+        .with_http()
+        .with_endpoint(format!("{forward_endpoint}/v1/logs"))
+        .with_protocol(Protocol::HttpBinary)
+        .build()
+    {
+        Ok(exporter) => exporter,
+        Err(error) => {
+            eprintln!(
+                "Failed to build OTLP log exporter: {error}; falling back to stdout-only tracing"
+            );
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(fmt_layer)
+                .init();
+            return None;
+        }
+    };
 
+    // Sized for the per-request child spans (ingest.authenticate / .decode /
+    // .parse / .accept / .encode_rows / .wal_commit): a request emits ~7 spans,
+    // not 1. At 2048 the queue held only a few seconds of that volume, so a
+    // brief export stall silently dropped spans — parents and children alike.
+    // Head volume is controlled by OTEL_TRACES_SAMPLER / _ARG, which the SDK
+    // reads via TracerProviderBuilder's derived Default.
     let batch_config = BatchConfigBuilder::default()
-        .with_max_queue_size(2048)
-        .with_max_export_batch_size(512)
+        .with_max_queue_size(8192)
+        .with_max_export_batch_size(1024)
         .with_scheduled_delay(Duration::from_secs(5))
         .build();
 
@@ -1047,22 +1133,40 @@ fn init_tracing(
         .build();
 
     let provider = SdkTracerProvider::builder()
-        .with_resource(resource)
+        .with_resource(resource.clone())
         .with_span_processor(processor)
+        .build();
+    let log_processor = BatchLogProcessor::builder(log_exporter)
+        .with_batch_config(
+            opentelemetry_sdk::logs::BatchConfigBuilder::default()
+                .with_max_queue_size(2048)
+                .with_max_export_batch_size(512)
+                .with_scheduled_delay(Duration::from_secs(5))
+                .build(),
+        )
+        .build();
+    let logger_provider = SdkLoggerProvider::builder()
+        .with_resource(resource)
+        .with_log_processor(log_processor)
         .build();
 
     let tracer = provider.tracer("maple-ingest");
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    let log_layer = OpenTelemetryTracingBridge::new(&logger_provider);
 
     tracing_subscriber::registry()
         .with(env_filter)
         .with(fmt_layer)
+        .with(log_layer)
         .with(otel_layer)
         .init();
 
     opentelemetry::global::set_tracer_provider(provider.clone());
 
-    Some(provider)
+    Some(TelemetryProviders {
+        tracer: provider,
+        logger: logger_provider,
+    })
 }
 
 /// Wire up OTLP metric export, mirroring `init_tracing`. The gateway's own
@@ -1146,7 +1250,8 @@ async fn main() {
     // One UUID per process, shared by the trace and metric resources so both
     // signals attribute to the same `service.instance.id`.
     let service_instance_id = uuid::Uuid::new_v4().to_string();
-    let tracer_provider = init_tracing(&config.forward_endpoint, config.port, &service_instance_id);
+    let telemetry_providers =
+        init_tracing(&config.forward_endpoint, config.port, &service_instance_id);
     let meter_provider = init_metrics(&config.forward_endpoint, config.port, &service_instance_id);
 
     let http_client = match Client::builder()
@@ -1376,10 +1481,11 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await;
 
-    if let Some(provider) = tracer_provider {
+    if let Some(providers) = telemetry_providers {
         // Flush buffered spans on graceful exit. Errors here are non-fatal —
         // the process is shutting down anyway.
-        let _ = provider.shutdown();
+        let _ = providers.tracer.shutdown();
+        let _ = providers.logger.shutdown();
     }
 
     if let Some(provider) = meter_provider {
@@ -1465,21 +1571,30 @@ impl opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::Tra
         >,
         tonic::Status,
     > {
-        let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
-        let mut inner = request.into_inner();
-        enrich_trace_request(&mut inner, &resolved);
-        accept_grpc_decoded(
-            &self.state,
-            Signal::Traces,
-            DecodedPayload::Traces(inner),
-            &resolved,
-        )
-        .await?;
-        Ok(tonic::Response::new(
-            opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse {
-                partial_success: None,
-            },
-        ))
+        let span = grpc_server_span(GRPC_TRACE_SERVICE, "traces");
+        let span_handle = span.clone();
+        let result = async {
+            let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
+            let mut inner = request.into_inner();
+            enrich_trace_request(&mut inner, &resolved);
+            record_grpc_identity(&resolved);
+            accept_grpc_decoded(
+                &self.state,
+                Signal::Traces,
+                DecodedPayload::Traces(inner),
+                &resolved,
+            )
+            .await?;
+            Ok(tonic::Response::new(
+                opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse {
+                    partial_success: None,
+                },
+            ))
+        }
+        .instrument(span)
+        .await;
+        record_grpc_outcome(&span_handle, &result);
+        result
     }
 }
 
@@ -1494,21 +1609,30 @@ impl opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsS
         tonic::Response<opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceResponse>,
         tonic::Status,
     > {
-        let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
-        let mut inner = request.into_inner();
-        enrich_logs_request(&mut inner, &resolved);
-        accept_grpc_decoded(
-            &self.state,
-            Signal::Logs,
-            DecodedPayload::Logs(inner),
-            &resolved,
-        )
-        .await?;
-        Ok(tonic::Response::new(
-            opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceResponse {
-                partial_success: None,
-            },
-        ))
+        let span = grpc_server_span(GRPC_LOGS_SERVICE, "logs");
+        let span_handle = span.clone();
+        let result = async {
+            let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
+            let mut inner = request.into_inner();
+            enrich_logs_request(&mut inner, &resolved);
+            record_grpc_identity(&resolved);
+            accept_grpc_decoded(
+                &self.state,
+                Signal::Logs,
+                DecodedPayload::Logs(inner),
+                &resolved,
+            )
+            .await?;
+            Ok(tonic::Response::new(
+                opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceResponse {
+                    partial_success: None,
+                },
+            ))
+        }
+        .instrument(span)
+        .await;
+        record_grpc_outcome(&span_handle, &result);
+        result
     }
 }
 
@@ -1525,21 +1649,30 @@ impl opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server:
         >,
         tonic::Status,
     > {
-        let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
-        let mut inner = request.into_inner();
-        enrich_metrics_request(&mut inner, &resolved);
-        accept_grpc_decoded(
-            &self.state,
-            Signal::Metrics,
-            DecodedPayload::Metrics(inner),
-            &resolved,
-        )
-        .await?;
-        Ok(tonic::Response::new(
-            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse {
-                partial_success: None,
-            },
-        ))
+        let span = grpc_server_span(GRPC_METRICS_SERVICE, "metrics");
+        let span_handle = span.clone();
+        let result = async {
+            let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
+            let mut inner = request.into_inner();
+            enrich_metrics_request(&mut inner, &resolved);
+            record_grpc_identity(&resolved);
+            accept_grpc_decoded(
+                &self.state,
+                Signal::Metrics,
+                DecodedPayload::Metrics(inner),
+                &resolved,
+            )
+            .await?;
+            Ok(tonic::Response::new(
+                opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse {
+                    partial_success: None,
+                },
+            ))
+        }
+        .instrument(span)
+        .await;
+        record_grpc_outcome(&span_handle, &result);
+        result
     }
 }
 
@@ -2362,12 +2495,20 @@ async fn handle_signal_inner(
     }
 
     let key_resolve_start = Instant::now();
+    // Own span so a cache miss that falls through to PSBouncer is attributable
+    // per-request, not just visible in the key_resolution_duration histogram.
+    // `postgres.query` (see `postgres_client_span`) nests under this on a miss.
+    let auth_span = auth_internal_span();
+    let auth_span_handle = auth_span.clone();
     let resolved_key = state
         .resolver
         .resolve_ingest_key(&ingest_key)
+        .instrument(auth_span)
         .await
         .map_err(|error| {
             error!(error = %error, "Ingest key resolution failed");
+            // The resolver being down is our fault (503), unlike a bad key.
+            record_stage_error(&auth_span_handle, "auth_unavailable", &error, true);
             (
                 ApiError::service_unavailable("Ingest authentication unavailable"),
                 "auth",
@@ -2375,9 +2516,19 @@ async fn handle_signal_inner(
         })?
         .ok_or_else(|| {
             warn!("Unknown ingest key");
+            record_stage_error(&auth_span_handle, "auth", "Unknown ingest key", false);
             (ApiError::unauthorized("Invalid ingest key"), "auth")
         })?;
     metrics::key_resolution_duration(key_resolve_start.elapsed().as_secs_f64());
+    auth_span_handle.record("maple.ingest.key_type", resolved_key.key_type.as_str());
+    // Truncated HMAC, not the key itself — enough to find the row in Postgres.
+    auth_span_handle.record("maple.ingest.key_id", resolved_key.key_id.as_str());
+    auth_span_handle.record("maple.org_id", resolved_key.org_id.as_str());
+    auth_span_handle.record("maple.ingest.self_managed", resolved_key.self_managed);
+    auth_span_handle.record(
+        "maple.ingest.clickhouse_ready",
+        resolved_key.clickhouse_ready,
+    );
 
     Span::current().record("maple.org_id", &resolved_key.org_id.as_str());
     Span::current().record("maple.ingest.key_type", resolved_key.key_type.as_str());
@@ -2398,10 +2549,16 @@ async fn handle_signal_inner(
     // AUTUMN_ENFORCE_LIMITS=true and AUTUMN_SECRET_KEY is set.
     if let Some(entitlements) = &state.autumn_entitlements {
         let feature_id = signal.path();
-        if !entitlements
+        // Parent for the existing `autumn.check` client span, so a cache miss
+        // that blocks on Autumn is visible even when the HTTP call itself is fast.
+        let entitlement_span = entitlement_internal_span(feature_id);
+        let entitlement_span_handle = entitlement_span.clone();
+        let allowed = entitlements
             .is_allowed(&resolved_key.org_id, feature_id)
-            .await
-        {
+            .instrument(entitlement_span)
+            .await;
+        entitlement_span_handle.record("maple.billing.allowed", allowed);
+        if !allowed {
             warn!(
                 org_id = %resolved_key.org_id,
                 feature_id,
@@ -2469,12 +2626,21 @@ async fn handle_signal_inner(
     metrics::request_body_bytes(signal.path(), body.len() as u64);
 
     // --- Decode ---
-    let decoded_payload = decode_payload(&body, content_encoding.as_deref()).map_err(|e| {
-        warn!(body_bytes = body.len(), "Failed to decode payload");
-        (e, "decode")
-    })?;
-
     let encoding_label = content_encoding.as_deref().unwrap_or("identity");
+    // Synchronous, so the span is entered rather than instrumented. Scoped so the
+    // span closes on the decompress itself and not on the rest of the handler.
+    let decoded_payload = {
+        let decode_span = decode_internal_span(encoding_label, body.len());
+        let _guard = decode_span.enter();
+        let decoded_payload = decode_payload(&body, content_encoding.as_deref()).map_err(|e| {
+            warn!(body_bytes = body.len(), "Failed to decode payload");
+            record_stage_error(&decode_span, "decode", &e.message, false);
+            (e, "decode")
+        })?;
+        decode_span.record("maple.ingest.decoded_bytes", decoded_payload.len());
+        decoded_payload
+    };
+
     Span::current().record("maple.ingest.decoded_bytes", decoded_payload.len());
     debug!(
         decoded_bytes = decoded_payload.len(),
@@ -2484,20 +2650,29 @@ async fn handle_signal_inner(
     metrics::decoded_body_bytes(signal.path(), decoded_payload.len() as u64);
 
     // --- Enrich ---
-    let decoded =
-        decode_and_enrich_payload(signal, payload_format, &decoded_payload, &resolved_key)
-            .map_err(|e| {
-                warn!(
-                    format = payload_format.label(),
-                    signal = signal.path(),
-                    org_id = resolved_key.org_id.as_str(),
-                    key_type = resolved_key.key_type.as_str(),
-                    decoded_bytes = decoded_payload.len(),
-                    reason = %e.message,
-                    "Invalid OTLP payload"
-                );
-                (e, "enrich")
-            })?;
+    let decoded = {
+        let parse_span = parse_internal_span(payload_format.label(), signal.path());
+        let _guard = parse_span.enter();
+        let decoded =
+            decode_and_enrich_payload(signal, payload_format, &decoded_payload, &resolved_key)
+                .map_err(|e| {
+                    warn!(
+                        format = payload_format.label(),
+                        signal = signal.path(),
+                        org_id = resolved_key.org_id.as_str(),
+                        key_type = resolved_key.key_type.as_str(),
+                        decoded_bytes = decoded_payload.len(),
+                        reason = %e.message,
+                        "Invalid OTLP payload"
+                    );
+                    // The reason previously only reached the log; on the span it
+                    // is what tells you *why* a customer's SDK is being rejected.
+                    record_stage_error(&parse_span, "enrich", &e.message, false);
+                    (e, "enrich")
+                })?;
+        parse_span.record("maple.ingest.item_count", decoded.item_count());
+        decoded
+    };
     let item_count = decoded.item_count();
 
     Span::current().record("maple.ingest.item_count", item_count);
@@ -3378,7 +3553,9 @@ async fn process_decoded_payload(
     Span::current().record("maple.ingest.destination", destination.as_str());
 
     if uses_native_pipeline_for(state.config.write_mode, destination) {
-        accept_native_decoded_payload(state, signal, decoded, resolved_key, destination).await?;
+        accept_native_decoded_payload(state, signal, decoded, resolved_key, destination)
+            .instrument(accept_internal_span(signal.path(), destination.as_str()))
+            .await?;
         if destination == ExportDestination::ClickHouse {
             return Ok(StatusCode::OK.into_response());
         }
@@ -3418,14 +3595,29 @@ async fn accept_native_decoded_payload(
     let native_start = Instant::now();
     let stats = match decoded {
         DecodedPayload::Traces(request) => {
-            let policy = state
-                .sampling_resolver
-                .resolve_policy(&resolved_key.org_id)
-                .await;
-            let attribute_mappings = state
-                .attribute_mapping_resolver
-                .resolve_mappings(&resolved_key.org_id)
-                .await;
+            // Both lookups are 30s-TTL cached; the span exists so a TTL miss that
+            // stalls on PSBouncer is attributable instead of vanishing into
+            // native_accept_duration.
+            let config_span = resolve_config_internal_span();
+            let config_span_handle = config_span.clone();
+            let (policy, attribute_mappings) = async {
+                let policy = state
+                    .sampling_resolver
+                    .resolve_policy(&resolved_key.org_id)
+                    .await;
+                let attribute_mappings = state
+                    .attribute_mapping_resolver
+                    .resolve_mappings(&resolved_key.org_id)
+                    .await;
+                (policy, attribute_mappings)
+            }
+            .instrument(config_span)
+            .await;
+            config_span_handle.record("maple.ingest.sampling_ratio", policy.trace_sample_ratio);
+            config_span_handle.record(
+                "maple.ingest.attribute_mapping_count",
+                attribute_mappings.len(),
+            );
             pipeline
                 .accept_traces_to(
                     &resolved_key.org_id,
@@ -3454,6 +3646,12 @@ async fn accept_native_decoded_payload(
             signal = signal.path(),
             org_id = %resolved_key.org_id,
             "Native telemetry pipeline rejected payload"
+        );
+        record_stage_error(
+            &Span::current(),
+            error.kind(),
+            &error.to_string(),
+            error.is_server_fault(),
         );
         api_error
     })?;
@@ -3507,10 +3705,14 @@ impl OrgRoutingResolver {
 
 impl IngestKeyResolver {
     async fn resolve_ingest_key(&self, raw_key: &str) -> Result<Option<ResolvedIngestKey>, String> {
+        // Recorded on `ingest.authenticate` when this runs under the HTTP path;
+        // a no-op elsewhere (the field is only declared on that span).
         if let Some(identity) = self.cache.get(raw_key).await {
+            Span::current().record("maple.ingest.cache_hit", true);
             let routing = self.routing.resolve_org_routing(&identity.org_id).await?;
             return Ok(Some(identity.into_resolved(routing)));
         }
+        Span::current().record("maple.ingest.cache_hit", false);
 
         let key_type = infer_ingest_key_type(raw_key);
         let Some(key_type) = key_type else {
@@ -3527,7 +3729,7 @@ impl IngestKeyResolver {
         // LEFT JOIN against org_clickhouse_settings so the initial routing state
         // is resolved in the same roundtrip as org_id. Warm auth-cache hits keep
         // the key identity cached while the separate org-routing cache refreshes
-        // ClickHouse readiness on its shorter TTL.
+        // ClickHouse readiness on its own TTL.
         let Some(row) = self.store.fetch_ingest_key(&key_hash, hash_column).await? else {
             return Ok(None);
         };
@@ -3759,6 +3961,16 @@ struct PostgresKeyStore {
     pool: deadpool_postgres::Pool,
 }
 
+fn postgres_client_span(operation: &'static str) -> Span {
+    tracing::info_span!(
+        "postgres.query",
+        otel.kind = "client",
+        "db.system.name" = "postgresql",
+        "db.operation.name" = operation,
+        "peer.service" = "planetscale-postgres",
+    )
+}
+
 impl PostgresKeyStore {
     fn new(url: &str) -> Result<Self, String> {
         let pg_config = url
@@ -3811,6 +4023,7 @@ impl PostgresKeyStore {
                  WHERE k.private_key_hash = $1 LIMIT 1",
                 &[&"__ingest_probe_no_match__"],
             )
+            .instrument(postgres_client_span("probe"))
             .await
             .map(|_| ())
             .map_err(|error| format!("postgres probe query failed: {error}"))
@@ -3838,6 +4051,7 @@ impl KeyStore for PostgresKeyStore {
         let client = self.client().await?;
         let rows = client
             .query(&sql, &[&revision, &key_hash])
+            .instrument(postgres_client_span("fetch_ingest_key"))
             .await
             .map_err(|error| format!("postgres fetch_ingest_key failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -3867,6 +4081,7 @@ impl KeyStore for PostgresKeyStore {
                  WHERE c.id = $2 AND c.secret_hash = $3 AND c.enabled = true LIMIT 1",
                 &[&revision, &connector_id, &secret_hash],
             )
+            .instrument(postgres_client_span("fetch_connector"))
             .await
             .map_err(|error| format!("postgres fetch_connector failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -3893,6 +4108,7 @@ impl KeyStore for PostgresKeyStore {
                  FROM org_ingest_sampling_policies WHERE org_id = $1 LIMIT 1",
                 &[&org_id],
             )
+            .instrument(postgres_client_span("fetch_sampling_policy"))
             .await
             .map_err(|error| format!("postgres fetch_sampling_policy failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -3917,6 +4133,7 @@ impl KeyStore for PostgresKeyStore {
                  FROM org_ingest_attribute_mappings WHERE org_id = $1 AND enabled = true",
                 &[&org_id],
             )
+            .instrument(postgres_client_span("fetch_attribute_mappings"))
             .await
             .map_err(|error| format!("postgres fetch_attribute_mappings failed: {error}"))?;
         Ok(rows
@@ -3944,6 +4161,7 @@ impl KeyStore for PostgresKeyStore {
                  WHERE org_id = $1 AND sync_status = 'connected' AND schema_version = $2 LIMIT 1",
                 &[&org_id, &revision],
             )
+            .instrument(postgres_client_span("fetch_clickhouse_target"))
             .await
             .map_err(|error| format!("postgres fetch_clickhouse_target failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -3970,6 +4188,7 @@ impl KeyStore for PostgresKeyStore {
                  FROM org_clickhouse_settings WHERE org_id = $2 LIMIT 1",
                 &[&revision, &org_id],
             )
+            .instrument(postgres_client_span("fetch_org_routing"))
             .await
             .map_err(|error| format!("postgres fetch_org_routing failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -3996,6 +4215,7 @@ impl KeyStore for PostgresKeyStore {
                  WHERE id = $2",
                 &[&now_ms, &connector_id],
             )
+            .instrument(postgres_client_span("record_connector_success"))
             .await
             .map(|_| ())
             .map_err(|error| format!("postgres record_connector_success failed: {error}"))
@@ -4015,6 +4235,7 @@ impl KeyStore for PostgresKeyStore {
                  WHERE id = $3",
                 &[&error, &now_ms, &connector_id],
             )
+            .instrument(postgres_client_span("record_connector_failure"))
             .await
             .map(|_| ())
             .map_err(|err| format!("postgres record_connector_failure failed: {err}"))
@@ -4189,7 +4410,10 @@ async fn build_key_store(config: &AppConfig) -> Result<Arc<dyn KeyStore>, String
             }))
         }
         KeyStoreBackend::Postgres { url } => {
-            info!(backend = "planetscale-postgres", "Key store backend selected");
+            info!(
+                backend = "planetscale-postgres",
+                "Key store backend selected"
+            );
             let store = PostgresKeyStore::new(url)?;
             store
                 .probe()
@@ -4334,7 +4558,10 @@ mod tests {
             "payload_too_large"
         );
         assert_eq!(ApiError::too_many_requests("x").error_kind(), "throttle");
-        assert_eq!(ApiError::service_unavailable("x").error_kind(), "unavailable");
+        assert_eq!(
+            ApiError::service_unavailable("x").error_kind(),
+            "unavailable"
+        );
         assert_eq!(
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "x").error_kind(),
             "error"
@@ -5271,6 +5498,206 @@ mod tests {
         assert_eq!(store.routing_fetches.load(Ordering::Relaxed), 1);
     }
 
+    /// Records `(thread, span name, parent span name)` for every span opened
+    /// while it is installed, so a test can assert the shape of the trace rather
+    /// than just that individual spans exist.
+    ///
+    /// Installed as the *global* default rather than a thread-local one: callsite
+    /// interest is cached process-wide, so with a thread-local subscriber a
+    /// sibling test reaching a span macro first caches `Interest::never` and the
+    /// span silently never gets created for us. `set_global_default` rebuilds
+    /// that cache. The cost is that concurrently-running tests land in the same
+    /// capture, which is why every record is tagged with its thread.
+    /// One opened span: the thread that opened it, its name, and its parent's
+    /// name (`None` for a root).
+    type CapturedSpan = (std::thread::ThreadId, String, Option<String>);
+
+    #[derive(Clone, Default)]
+    struct SpanTreeCapture {
+        spans: Arc<std::sync::Mutex<Vec<CapturedSpan>>>,
+    }
+
+    static SPAN_TREE_CAPTURE: std::sync::OnceLock<SpanTreeCapture> = std::sync::OnceLock::new();
+
+    /// Install the capture globally, once per test process.
+    fn install_span_capture() -> &'static SpanTreeCapture {
+        SPAN_TREE_CAPTURE.get_or_init(|| {
+            let capture = SpanTreeCapture::default();
+            tracing::subscriber::set_global_default(
+                tracing_subscriber::registry().with(capture.clone()),
+            )
+            .expect("no other test may install a global subscriber");
+            capture
+        })
+    }
+
+    impl SpanTreeCapture {
+        /// Scoped to the calling thread. `#[tokio::test]` uses a current-thread
+        /// runtime, so the handler and the export worker it spawns both run here,
+        /// while other tests' spans are filtered out.
+        fn parent_of(&self, name: &str) -> Option<Option<String>> {
+            let this_thread = std::thread::current().id();
+            self.spans
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(thread, span, _)| *thread == this_thread && span == name)
+                .map(|(_, _, parent)| parent.clone())
+        }
+
+        fn assert_child_of(&self, child: &str, parent: &str) {
+            let observed = self
+                .parent_of(child)
+                .unwrap_or_else(|| panic!("span `{child}` was never created"));
+            assert_eq!(
+                observed.as_deref(),
+                Some(parent),
+                "span `{child}` should be a child of `{parent}`"
+            );
+        }
+    }
+
+    impl<S> tracing_subscriber::Layer<S> for SpanTreeCapture
+    where
+        S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    {
+        fn on_new_span(
+            &self,
+            _attrs: &tracing::span::Attributes<'_>,
+            id: &tracing::Id,
+            ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let Some(span) = ctx.span(id) else {
+                return;
+            };
+            let parent = span.parent().map(|parent| parent.name().to_string());
+            self.spans.lock().unwrap().push((
+                std::thread::current().id(),
+                span.name().to_string(),
+                parent,
+            ));
+        }
+    }
+
+    /// The whole point of the child spans: a single slow request must show *which*
+    /// stage was slow. Without this the trace collapses to one server span and the
+    /// per-stage histograms are the only signal, which cannot attribute an
+    /// individual request.
+    /// `PipelineError::is_server_fault` decides the span status and
+    /// `api_error_from_pipeline` decides the HTTP status. They encode the same
+    /// judgement in two places, so a new variant that gets one right and the
+    /// other wrong would mislabel error dashboards.
+    #[test]
+    fn pipeline_error_fault_split_matches_http_status() {
+        for error in [
+            PipelineError::Backpressure("lane full"),
+            PipelineError::Throttled("org cap"),
+            PipelineError::QueueUnavailable("wal io".to_string()),
+            PipelineError::Encode("bad row".to_string()),
+        ] {
+            let status = api_error_from_pipeline(&error).status.as_u16();
+            assert_eq!(
+                error.is_server_fault(),
+                status >= 500,
+                "{} maps to HTTP {status} but reports is_server_fault()={}",
+                error.kind(),
+                error.is_server_fault()
+            );
+            assert_eq!(
+                otel_status_for_rejection(status),
+                if error.is_server_fault() {
+                    "Error"
+                } else {
+                    "Ok"
+                },
+                "span status for {} disagrees with the HTTP rule",
+                error.kind()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn native_request_emits_a_span_per_pipeline_stage() {
+        let (ch_tx, mut ch_rx) = tokio::sync::mpsc::unbounded_channel();
+        let ch_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let ch_addr = ch_listener.local_addr().unwrap();
+        let ch_app = Router::new()
+            .route("/", post(fake_clickhouse_import))
+            .with_state(ch_tx);
+        tokio::spawn(async move {
+            axum::serve(ch_listener, ch_app).await.unwrap();
+        });
+
+        let queue_dir = unique_main_test_dir("span-tree");
+        let store = Arc::new(FakeKeyStore::default());
+        let raw_key = "maple_sk_test_span_tree";
+        store.insert_private(
+            raw_key,
+            KeyRow {
+                org_id: "org_span_tree".to_string(),
+                self_managed: true,
+                clickhouse_ready: true,
+            },
+        );
+        store.insert_clickhouse_target(
+            "org_span_tree",
+            ClickHouseTargetRow {
+                ch_url: format!("http://{ch_addr}"),
+                ch_user: "ingest".to_string(),
+                ch_password_ciphertext: None,
+                ch_password_iv: None,
+                ch_password_tag: None,
+                ch_database: "maple".to_string(),
+                schema_version: CLICKHOUSE_SCHEMA_VERSION.to_string(),
+            },
+        );
+        let state = test_app_state(
+            Arc::clone(&store),
+            queue_dir.clone(),
+            "http://127.0.0.1:1".to_string(),
+            Duration::from_millis(5),
+        )
+        .await;
+
+        let capture = install_span_capture();
+
+        // Stands in for the `ingest` server span that handle_signal creates.
+        let server_span = tracing::info_span!("ingest");
+        let (response, item_count, _, _) = handle_signal_inner(
+            &state,
+            &test_headers(raw_key),
+            Bytes::from(test_log_request("span tree").encode_to_vec()),
+            Signal::Logs,
+        )
+        .instrument(server_span)
+        .await
+        .expect("request should be accepted through the native ClickHouse path");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(item_count, 1);
+
+        capture.assert_child_of("ingest.authenticate", "ingest");
+        capture.assert_child_of("ingest.decode", "ingest");
+        capture.assert_child_of("ingest.parse", "ingest");
+        capture.assert_child_of("ingest.accept", "ingest");
+        capture.assert_child_of("ingest.encode_rows", "ingest.accept");
+        capture.assert_child_of("ingest.wal_commit", "ingest.accept");
+
+        // The export lane drains asynchronously, so its batch is deliberately a
+        // root: one batch aggregates frames from many requests and cannot be
+        // parented under any single one.
+        tokio::time::timeout(Duration::from_secs(2), ch_rx.recv())
+            .await
+            .expect("ready org should write to ClickHouse")
+            .expect("ClickHouse channel should stay open");
+        assert_eq!(
+            capture.parent_of("ingest.export_batch"),
+            Some(None),
+            "export batches must stay root spans and link back instead"
+        );
+    }
+
     #[tokio::test]
     async fn forward_mode_switches_ready_org_to_clickhouse_without_forwarding_again() {
         let (ch_tx, mut ch_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -5541,5 +5968,4 @@ mod tests {
             .expect("resolve should succeed");
         assert!(resolved.is_none());
     }
-
 }

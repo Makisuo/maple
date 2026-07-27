@@ -3,14 +3,7 @@ import { ArrowLeftIcon } from "@maple/ui/components/icons"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@maple/ui/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { QueryBuilderLineChart } from "@maple/ui/components/charts/line/query-builder-line-chart"
 import { MetricTypeBadge } from "@maple/ui/components/metrics/metric-type-badge"
 import { formatNumber } from "@maple/ui/format"

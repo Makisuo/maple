@@ -13,13 +13,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Textarea } from "@maple/ui/components/ui/textarea"
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@maple/ui/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Schema } from "effect"
 import { DashboardVariableName } from "@maple/domain/http"
 import { ArrowDownIcon, ArrowUpIcon, PencilIcon, PlusIcon, TrashIcon } from "@/components/icons"
@@ -87,11 +81,7 @@ function withType(variable: DashboardVariable, type: DashboardVariable["type"]):
 
 // Per-draft validation, computed live so problems surface inline on the row
 // being edited instead of only when Save is pressed.
-function draftError(
-	draft: DashboardVariable,
-	index: number,
-	drafts: DashboardVariable[],
-): string | null {
+function draftError(draft: DashboardVariable, index: number, drafts: DashboardVariable[]): string | null {
 	if (draft.name === "") {
 		return "Name is required."
 	}
@@ -197,16 +187,16 @@ function VariablesEditor({
 			<DialogHeader>
 				<DialogTitle>Dashboard variables</DialogTitle>
 				<DialogDescription>
-					Reference variables as <code className="text-[11px]">$name</code> in widget filters and raw
-					SQL. Selectors appear in the dashboard toolbar.
+					Reference variables as <code className="text-[11px]">$name</code> in widget filters and
+					raw SQL. Selectors appear in the dashboard toolbar.
 				</DialogDescription>
 			</DialogHeader>
 			<DialogPanel className="flex flex-col gap-3">
 				{startedEmpty && (
 					<div className="rounded-md border border-dashed border-border px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">
 						<p>
-							A variable adds a selector to the toolbar; widgets that reference it re-query
-							when the selection changes.
+							A variable adds a selector to the toolbar; widgets that reference it re-query when
+							the selection changes.
 						</p>
 						<ul className="mt-1.5 flex flex-col gap-0.5">
 							<li>
@@ -331,9 +321,8 @@ function VariableForm({
 					) : (
 						variable.name !== "" && (
 							<span className="text-[11px] text-muted-foreground">
-								Reference it as{" "}
-								<code className="text-foreground">${variable.name}</code> in widget
-								filters and SQL.
+								Reference it as <code className="text-foreground">${variable.name}</code> in
+								widget filters and SQL.
 							</span>
 						)
 					)}
@@ -347,9 +336,7 @@ function VariableForm({
 						onChange={(event) => {
 							const { label: _label, ...rest } = variable
 							onChange(
-								event.target.value === ""
-									? rest
-									: { ...rest, label: event.target.value },
+								event.target.value === "" ? rest : { ...rest, label: event.target.value },
 							)
 						}}
 					/>

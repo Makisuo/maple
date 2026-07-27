@@ -206,41 +206,41 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 			{/* Layer 4: Label — offset vertically based on edge direction to reduce
 			    overlap. Hidden entirely on dimmed edges so the focus reads clean. */}
 			{dimmed ? null : (
-			<foreignObject
-				x={labelX - 40}
-				y={labelY + (targetY > sourceY ? -16 : 4) - 12}
-				width={80}
-				height={24}
-				className="overflow-visible pointer-events-none"
-			>
-				<div
-					className="flex items-center justify-center"
-					title={
-						hasSampling
-							? "Based on traced requests — actual rate may be higher with sampling enabled"
-							: undefined
-					}
+				<foreignObject
+					x={labelX - 40}
+					y={labelY + (targetY > sourceY ? -16 : 4) - 12}
+					width={80}
+					height={24}
+					className="overflow-visible pointer-events-none"
 				>
-					<span className="rounded bg-card/90 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-mono font-medium text-muted-foreground border border-border/50 whitespace-nowrap tabular-nums">
-						{hasSampling ? "~" : ""}
-						{formatCallCount(hasSampling ? estimatedCallCount : callCount)}
-						{errorRate > 0 && (
-							<span
-								className={
-									errorRate > 0.05
-										? " text-severity-error"
-										: errorRate > 0.01
-											? " text-severity-warn"
-											: ""
-								}
-							>
-								{" "}
-								{(errorRate * 100).toFixed(1)}%
-							</span>
-						)}
-					</span>
-				</div>
-			</foreignObject>
+					<div
+						className="flex items-center justify-center"
+						title={
+							hasSampling
+								? "Based on traced requests — actual rate may be higher with sampling enabled"
+								: undefined
+						}
+					>
+						<span className="rounded bg-card/90 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-mono font-medium text-muted-foreground border border-border/50 whitespace-nowrap tabular-nums">
+							{hasSampling ? "~" : ""}
+							{formatCallCount(hasSampling ? estimatedCallCount : callCount)}
+							{errorRate > 0 && (
+								<span
+									className={
+										errorRate > 0.05
+											? " text-severity-error"
+											: errorRate > 0.01
+												? " text-severity-warn"
+												: ""
+									}
+								>
+									{" "}
+									{(errorRate * 100).toFixed(1)}%
+								</span>
+							)}
+						</span>
+					</div>
+				</foreignObject>
 			)}
 		</>
 	)

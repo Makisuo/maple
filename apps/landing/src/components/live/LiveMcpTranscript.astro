@@ -7,10 +7,25 @@
  *
  * Loops every ~28s. Skipped entirely under prefers-reduced-motion (the
  * SSR'd content is the static fallback).
+ *
+ * The frame is a flex column so a caller can pass `class="h-full"` and have
+ * the body absorb the slack — the footer bar stays welded to the bottom edge
+ * instead of floating mid-cell. Keep that slack near zero: a visible gap inside
+ * the terminal reads as broken whichever end it opens at, so the caller's job
+ * is to match the column heights, not to park a hole somewhere polite.
+ *
+ * `endpoint` puts the server URL on the status bar, where a real client shows
+ * its connection, instead of costing the prose column a whole box.
  */
+interface Props {
+	class?: string;
+	endpoint?: string;
+}
+
+const { class: className = "", endpoint } = Astro.props;
 ---
 
-<div class="live-frame">
+<div class={`live-frame flex flex-col ${className}`}>
 	<div class="live-frame__head">
 		<span>mcp · agent session</span>
 		<span class="live-frame__live">
@@ -18,15 +33,15 @@
 			LIVE
 		</span>
 	</div>
-	<div class="p-4 text-[12.5px] leading-[1.55]" data-mcp-root>
+	<div class="flex-1 p-4 text-[12.5px] leading-[1.55]" data-mcp-root>
 		<!-- segment 0: opening agent prompt (typed) -->
 		<div class="mcp-line" data-segment="0">
 			<span class="text-fg-muted">&gt; ask maple</span>
 		</div>
-		<div class="mcp-line text-fg" data-segment="0" data-typed="list services that errored in the last 15m">list services that errored in the last 15m</div>
+		<div class="mcp-line text-fg" data-segment="0" data-type="prompt">list services that errored in the last 15m</div>
 
 		<!-- segment 1: first tool call + result -->
-		<div class="mcp-line mt-3" data-segment="1">
+		<div class="mcp-line mt-3" data-segment="1" data-type="call">
 			<span class="text-primary">→ list_services</span>
 			<span class="text-fg-muted">{`{ window: "15m", filter: "errors > 0" }`}</span>
 		</div>
@@ -42,10 +57,10 @@
 		</div>
 
 		<!-- segment 2: agent narrows -->
-		<div class="mcp-line mt-3 text-fg-muted" data-segment="2">&gt; investigate payments</div>
+		<div class="mcp-line mt-3 text-fg-muted" data-segment="2" data-type="prompt">&gt; investigate payments</div>
 
 		<!-- segment 3: find_errors call -->
-		<div class="mcp-line mt-3" data-segment="3">
+		<div class="mcp-line mt-3" data-segment="3" data-type="call">
 			<span class="text-primary">→ find_errors</span>
 			<span class="text-fg-muted">{`{ service: "payments", window: "15m" }`}</span>
 		</div>
@@ -53,7 +68,7 @@
 		<div class="mcp-line mt-1 text-fg" data-segment="3">stripe.charge declined&nbsp;&nbsp;·&nbsp;&nbsp;142 events&nbsp;&nbsp;·&nbsp;&nbsp;98 users</div>
 
 		<!-- segment 4: error_detail call -->
-		<div class="mcp-line mt-3" data-segment="4">
+		<div class="mcp-line mt-3" data-segment="4" data-type="call">
 			<span class="text-primary">→ error_detail</span>
 			<span class="text-fg-muted">{`{ issue_id: "iss_8a91" }`}</span>
 		</div>
@@ -61,7 +76,7 @@
 		<div class="mcp-line mt-1 text-fg-muted" data-segment="4">sample trace: <span class="text-primary">trace_9f3c</span> · order 8421</div>
 
 		<!-- segment 5: propose_fix call -->
-		<div class="mcp-line mt-3" data-segment="5">
+		<div class="mcp-line mt-3" data-segment="5" data-type="call">
 			<span class="text-primary">→ propose_fix</span>
 			<span class="text-fg-muted">{`{ issue: "iss_8a91", fix: "scope idempotency_key by user_id" }`}</span>
 		</div>
@@ -73,8 +88,8 @@
 		</div>
 	</div>
 	<div class="px-3.5 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted flex justify-between">
-		<span>5 tool calls · 4.2s</span>
-		<span>open mcp protocol</span>
+		<span>4 tool calls · 4.2s</span>
+		<span class="truncate normal-case tracking-normal">{endpoint ?? "open mcp protocol"}</span>
 	</div>
 </div>
 

@@ -9,6 +9,7 @@ import { useMountEffect } from "@/hooks/use-mount-effect"
 import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 import { getMapleAuthHeaders } from "@/lib/services/common/auth-headers"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
+import { tracedFetch } from "@/lib/services/common/telemetry"
 
 const McpAuthorizeSearch = Schema.Struct({
 	request_id: Schema.optional(Schema.String),
@@ -41,7 +42,7 @@ const errorMessage = async (response: Response, fallback: string) => {
 
 const authRequest = async (path: string, init?: RequestInit) => {
 	const headers = await getMapleAuthHeaders()
-	return window.fetch(`${apiBaseUrl}${path}`, {
+	return tracedFetch("maple-api", `${apiBaseUrl}${path}`, {
 		...init,
 		headers: { ...headers, ...init?.headers },
 	})

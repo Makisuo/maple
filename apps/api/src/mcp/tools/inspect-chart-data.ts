@@ -298,7 +298,9 @@ export function registerInspectChartDataTool(server: McpToolRegistrar) {
 								id: widget.id,
 								visualization: widget.visualization,
 								display: {
-									...(widget.display.title !== undefined && { title: widget.display.title }),
+									...(widget.display.title !== undefined && {
+										title: widget.display.title,
+									}),
 								},
 							},
 							dashboard.name,

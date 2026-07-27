@@ -7,10 +7,8 @@ import { ActorAvatar } from "./actor-chip"
 import { IssueContextMenu } from "./issue-context-menu"
 import { IssueKindBadge } from "./kind-badge"
 import { SeverityBadge } from "./severity-badge"
-import { WorkflowStatePopover } from "./workflow-state-popover"
+import { WorkflowBadge } from "./workflow-badge"
 import type { IssueMutations } from "./use-issue-mutations"
-import { clampPriority, shortIssueId } from "./issue-id"
-import { PriorityBarsIcon, WorkflowRingIcon } from "@/components/icons"
 import { formatNumber } from "@/lib/format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { ServiceDot } from "@maple/ui/components/service-dot"
@@ -49,9 +47,7 @@ export interface IssueRowProps {
 }
 
 export function IssueRow({ issue, mutations, selected, focused, onSelectToggle, onFocus }: IssueRowProps) {
-	const priority = clampPriority(issue.priority)
 	const holderOrAssignee = issue.leaseHolder ?? issue.assignedActor
-	const id = shortIssueId(issue.id)
 	const href = `/errors/issues/${issue.id}`
 
 	return (
@@ -67,7 +63,7 @@ export function IssueRow({ issue, mutations, selected, focused, onSelectToggle, 
 				data-selected={selected || undefined}
 				onMouseEnter={() => onFocus(issue.id)}
 				className={cn(
-					"group/row relative flex h-9 items-center gap-2 pr-3 pl-2 text-sm",
+					"group/row relative flex h-10 items-center gap-2 pr-3 pl-2 text-sm",
 					"hover:bg-muted/50",
 					"data-focused:bg-muted/40",
 					"data-selected:bg-primary/10 data-selected:hover:bg-primary/15",
@@ -99,19 +95,11 @@ export function IssueRow({ issue, mutations, selected, focused, onSelectToggle, 
 					}}
 				>
 					<Checkbox
-						aria-label={`Select issue ${id}`}
+						aria-label={`Select issue ${issue.exceptionType || issue.id}`}
 						checked={selected}
 						tabIndex={-1}
 						onClick={(e) => e.preventDefault()}
 					/>
-				</span>
-
-				<span
-					className="relative z-10 flex w-4 shrink-0 items-center justify-center text-muted-foreground"
-					onClick={(e) => e.stopPropagation()}
-					title={`Priority: ${priority === 0 ? "None" : priority === 1 ? "Urgent" : priority === 2 ? "High" : priority === 3 ? "Medium" : "Low"}`}
-				>
-					<PriorityBarsIcon level={priority} size={14} />
 				</span>
 
 				<span
@@ -124,67 +112,41 @@ export function IssueRow({ issue, mutations, selected, focused, onSelectToggle, 
 					/>
 				</span>
 
-				<span className="relative z-10 w-[72px] shrink-0 truncate font-mono text-xs tabular-nums text-muted-foreground">
-					{id}
-				</span>
-
-				<span
-					className="relative z-10 flex w-4 shrink-0 items-center justify-center"
-					onClick={(e) => e.stopPropagation()}
-				>
-					<WorkflowStatePopover
-						current={issue.workflowState}
-						onSelect={(next) => mutations.transitionTo(issue.id, next)}
-					>
-						<WorkflowRingIcon state={issue.workflowState} size={14} />
-					</WorkflowStatePopover>
+				<span className="relative z-10 w-[58px] shrink-0" title={`Source: ${issue.kind}`}>
+					<IssueKindBadge kind={issue.kind} className="h-5 px-1.5 text-[10px]" />
 				</span>
 
 				<span className="relative z-0 min-w-0 flex-1 truncate text-foreground">
-					{issue.exceptionType || "Unknown error"}
+					{issue.exceptionType || "Unknown issue"}
 					{issue.exceptionMessage ? (
 						<span className="ml-2 text-muted-foreground">{issue.exceptionMessage}</span>
 					) : null}
 				</span>
 
-				{issue.kind !== "error" ? (
-					<span className="relative z-10 shrink-0">
-						<IssueKindBadge kind={issue.kind} className="h-5 px-1.5 text-[11px]" />
-					</span>
-				) : null}
-
-				{issue.hasOpenIncident ? (
-					<span
-						className={cn(
-							"relative z-10 inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-destructive/30 bg-destructive/10 px-1.5",
-							"text-[11px] font-medium text-destructive",
-						)}
-						title="Incident open"
-					>
-						<span className="relative inline-flex size-1.5">
-							<span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive opacity-60" />
-							<span className="relative inline-flex size-full rounded-full bg-destructive" />
-						</span>
-						incident
-					</span>
-				) : null}
-
 				<span
-					className={cn(
-						"relative z-10 hidden h-5 shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-background px-2",
-						"text-[11px] text-muted-foreground md:inline-flex",
-					)}
+					className="relative z-10 hidden w-[120px] shrink-0 items-center gap-1.5 text-xs text-muted-foreground md:flex"
 					title={issue.serviceName}
 				>
 					<ServiceDot serviceName={issue.serviceName} className="size-1.5" />
-					<span className="max-w-[120px] truncate">{issue.serviceName}</span>
+					<span className="truncate">{issue.serviceName}</span>
+				</span>
+
+				<span className="relative z-10 hidden w-[84px] shrink-0 lg:block">
+					{issue.hasOpenIncident ? (
+						<span className="inline-flex items-center gap-1 text-[11px] font-medium text-destructive">
+							<span className="size-1.5 rounded-full bg-destructive" />
+							Open incident
+						</span>
+					) : (
+						<WorkflowBadge state={issue.workflowState} />
+					)}
 				</span>
 
 				<span
 					className="relative z-10 hidden shrink-0 text-right text-xs tabular-nums text-muted-foreground md:inline-block md:w-[88px]"
-					title={`${issue.occurrenceCount.toLocaleString()} events`}
+					title={`${issue.occurrenceCount.toLocaleString()} occurrences`}
 				>
-					{formatNumber(issue.occurrenceCount)} events
+					{formatNumber(issue.occurrenceCount)}
 				</span>
 
 				<span className="relative z-10 shrink-0">

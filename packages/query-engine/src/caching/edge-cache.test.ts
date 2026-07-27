@@ -15,6 +15,7 @@ const makeJsonRoundtripBackend = (): EdgeCacheBackend & {
 	const store = new Map<string, string>()
 	const composite = (bucket: string, hash: string) => `${bucket}:${hash}`
 	return {
+		name: "memory",
 		store,
 		get: async (bucket, hash) => {
 			const raw = store.get(composite(bucket, hash))
@@ -37,6 +38,7 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 	it.live("fails open to computation when a backend read exceeds its deadline", () => {
 		let computeCalls = 0
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => await new Promise<never>(() => {}),
 			put: async () => {},
 			delete: async () => {},
@@ -57,10 +59,11 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(200))
 	})
 
-	it.live("shares the complete slow read-or-compute operation across concurrent callers", () => {
+	it.live("keeps slow read-or-compute work independent across concurrent callers", () => {
 		let getCalls = 0
 		let computeCalls = 0
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => {
 				getCalls += 1
 				return await new Promise<never>(() => {})
@@ -81,8 +84,10 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 				{ concurrency: "unbounded" },
 			)
 
-			assert.strictEqual(getCalls, 1)
-			assert.strictEqual(computeCalls, 1)
+			// The service is Worker-isolate scoped. Sharing either operation here
+			// would let one Cloudflare request await I/O owned by another request.
+			assert.strictEqual(getCalls, 2)
+			assert.strictEqual(computeCalls, 2)
 			assert.deepStrictEqual(
 				results.map(({ value }) => value),
 				["computed", "computed"],
@@ -114,6 +119,7 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 	it.effect("derives the TTL from the computed value when ttlSeconds is a function", () => {
 		const puts: number[] = []
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => undefined, // force a miss → always computes → always writes
 			put: async (_bucket, _hash, _value, ttlSeconds) => {
 				puts.push(ttlSeconds)
@@ -142,6 +148,7 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 describe("EdgeCacheService.rawGet", () => {
 	it.live("reports hit, miss, and timeout outcomes without collapsing them", () => {
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async (bucket) => {
 				if (bucket === "hit") return { value: 42 }
 				if (bucket === "slow") return await new Promise<never>(() => {})
@@ -168,6 +175,7 @@ describe("EdgeCacheService.rawGet", () => {
 
 	it.live("treats a backend read timeout as a cache miss", () => {
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => await new Promise<never>(() => {}),
 			put: async () => {},
 			delete: async () => {},
@@ -182,6 +190,7 @@ describe("EdgeCacheService.rawGet", () => {
 
 	it.effect("retains EdgeCacheIOError for backend failures", () => {
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => {
 				throw new Error("kv unavailable")
 			},
@@ -235,6 +244,7 @@ describe("EdgeCacheService.invalidate", () => {
 
 	it.effect("swallows backend delete failures (best-effort)", () => {
 		const failing: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => undefined,
 			put: async () => {},
 			delete: async () => {
@@ -354,22 +364,26 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 		}).pipe(Effect.provide(makeLayer(backend)))
 	})
 
-	it.effect("dedupes concurrent callers; both receive a class instance", () => {
+	it.live("keeps concurrent schema-backed computations request-local", () => {
 		const backend = makeJsonRoundtripBackend()
 		let computeCalls = 0
 
 		return Effect.gen(function* () {
 			const cache = yield* EdgeCacheService
-			const compute = Effect.sync(() => {
-				computeCalls += 1
-				return new QueryEngineExecuteResponse({
-					result: {
-						kind: "timeseries" as const,
-						source: "traces" as const,
-						data: [{ bucket: "2026-04-23T22:00:00.000Z", series: { x: 5 } }],
-					},
-				})
-			})
+			const compute = Effect.sleep("5 millis").pipe(
+				Effect.andThen(
+					Effect.sync(() => {
+						computeCalls += 1
+						return new QueryEngineExecuteResponse({
+							result: {
+								kind: "timeseries" as const,
+								source: "traces" as const,
+								data: [{ bucket: "2026-04-23T22:00:00.000Z", series: { x: 5 } }],
+							},
+						})
+					}),
+				),
+			)
 			const opts = {
 				bucket: "qe",
 				key: "k-concurrent",
@@ -381,10 +395,7 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 				{ concurrency: "unbounded" },
 			)
 
-			// Compute should run at most once thanks to in-flight dedup. Both
-			// results must be live class instances (the dedup path returns the
-			// pre-encode value without going through decode).
-			assert.strictEqual(computeCalls, 1)
+			assert.strictEqual(computeCalls, 2)
 			assert.instanceOf(a.value, QueryEngineExecuteResponse)
 			assert.instanceOf(b.value, QueryEngineExecuteResponse)
 		}).pipe(Effect.provide(makeLayer(backend)))

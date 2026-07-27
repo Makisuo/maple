@@ -15,7 +15,9 @@ const makeStub = (
 		calls.push(`${method} ${path}`)
 		const handler = routes[`${method} ${path}`]
 		if (handler === undefined) {
-			return Effect.fail<MapleError>(new MapleNotFoundError({ status: 404, message: `no route: ${method} ${path}` }))
+			return Effect.fail<MapleError>(
+				new MapleNotFoundError({ status: 404, message: `no route: ${method} ${path}` }),
+			)
 		}
 		return handler(body)
 	}
@@ -49,10 +51,7 @@ const wireDashboard = {
 	updated_at: "2026-07-01T12:00:00.000Z",
 }
 
-const runWithProvider = <A>(
-	api: MapleApiShape,
-	program: Effect.Effect<A, unknown, any>,
-): Promise<A> =>
+const runWithProvider = <A>(api: MapleApiShape, program: Effect.Effect<A, unknown, any>): Promise<A> =>
 	Effect.runPromise(
 		program.pipe(
 			Effect.provide(DashboardProvider().pipe(Layer.provide(Layer.succeed(MapleApi, api)))),
@@ -71,6 +70,7 @@ describe("DashboardProvider", () => {
 				const provider = yield* Dashboard.Provider
 				return yield* provider.reconcile({
 					id: "service-health",
+					fqn: "test/service-health",
 					instanceId: "i-1",
 					news: { name: "Service health" },
 					olds: undefined,
@@ -94,6 +94,7 @@ describe("DashboardProvider", () => {
 				const provider = yield* Dashboard.Provider
 				return yield* provider.reconcile({
 					id: "service-health",
+					fqn: "test/service-health",
 					instanceId: "i-1",
 					news: { name: "Service health" },
 					olds: { name: "Service health" },
@@ -118,6 +119,7 @@ describe("DashboardProvider", () => {
 				const provider = yield* Dashboard.Provider
 				return yield* provider.reconcile({
 					id: "service-health",
+					fqn: "test/service-health",
 					instanceId: "i-1",
 					news: { name: "Renamed", tags: ["golden"] },
 					olds: { name: "Service health" },
@@ -141,6 +143,7 @@ describe("DashboardProvider", () => {
 				const provider = yield* Dashboard.Provider
 				return yield* provider.reconcile({
 					id: "service-health",
+					fqn: "test/service-health",
 					instanceId: "i-1",
 					news: { name: "Service health" },
 					olds: { name: "Service health" },
@@ -161,6 +164,7 @@ describe("DashboardProvider", () => {
 				const provider = yield* Dashboard.Provider
 				yield* provider.delete({
 					id: "service-health",
+					fqn: "test/service-health",
 					instanceId: "i-1",
 					olds: { name: "Service health" },
 					output: { dashboardId: "dash_gone", name: "Service health" },
@@ -192,6 +196,7 @@ describe("ApiKeyProvider", () => {
 				const provider = yield* ApiKey.Provider
 				return yield* provider.reconcile({
 					id: "ci",
+					fqn: "test/ci",
 					instanceId: "i-1",
 					news: { name: "ci" },
 					olds: undefined,
@@ -215,6 +220,7 @@ describe("ApiKeyProvider", () => {
 				const provider = yield* ApiKey.Provider
 				return yield* provider.reconcile({
 					id: "ci",
+					fqn: "test/ci",
 					instanceId: "i-1",
 					news: { name: "ci" },
 					olds: { name: "ci" },
@@ -240,6 +246,7 @@ describe("ApiKeyProvider", () => {
 				const provider = yield* ApiKey.Provider
 				return yield* provider.reconcile({
 					id: "ci",
+					fqn: "test/ci",
 					instanceId: "i-1",
 					news: { name: "ci", rotate: 2 },
 					olds: { name: "ci", rotate: 1 },
@@ -261,7 +268,8 @@ describe("ApiKeyProvider", () => {
 	it("recreates when the key was revoked out-of-band", async () => {
 		const stub = makeStub({
 			"GET /v2/api_keys/key_abc": () => Effect.succeed({ ...wireApiKey, revoked: true }),
-			"POST /v2/api_keys": () => Effect.succeed({ ...wireApiKey, id: "key_new", secret: "maple_ak_secret2" }),
+			"POST /v2/api_keys": () =>
+				Effect.succeed({ ...wireApiKey, id: "key_new", secret: "maple_ak_secret2" }),
 		})
 		const attributes = await runWithProvider(
 			stub.api,
@@ -269,6 +277,7 @@ describe("ApiKeyProvider", () => {
 				const provider = yield* ApiKey.Provider
 				return yield* provider.reconcile({
 					id: "ci",
+					fqn: "test/ci",
 					instanceId: "i-1",
 					news: { name: "ci" },
 					olds: { name: "ci" },

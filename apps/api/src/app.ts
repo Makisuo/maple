@@ -1,7 +1,7 @@
 import { MapleApi } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
 import { Layer } from "effect"
-import { HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/http"
+import { Headers, HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { McpLive } from "./mcp/app"
 import { HttpBillingLive, HttpBillingPublicLive } from "./routes/billing.http"
@@ -368,14 +368,42 @@ export const ApiAuthLive = Layer.mergeAll(ApiAuthorizationLayer, ApiAuthorizatio
 	Layer.provideMerge(Env.layer),
 )
 
+// OAuth callbacks whose query string carries a provider-issued authorization
+// `code` (exchangeable for an access token) plus the single-use connect `state`.
+// `HttpMiddleware.tracer` stamps `url.full` and `url.query` verbatim on the
+// server span — it redacts URL userinfo only, and `Headers.CurrentRedactedNames`
+// covers headers, not query parameters — so tracing these requests would retain
+// a live bearer credential in telemetry. There is no per-attribute lever, so the
+// auto server span is suppressed for them; each callback handler carries its own
+// span with safe attributes instead (see `integrations.*OAuthCallback`).
+// `/oauth/authorize` is deliberately NOT here: its query carries no bearer
+// credential, and `/oauth/token` + `/oauth/revoke` are POSTs (secrets in the body).
+const OAUTH_CALLBACK_PATH = /^\/api\/integrations\/[^/]+\/callback(?:\?|$)/
+
 // The OTLP tracer/logger is constructed once at worker module scope and
-// provided to the same runtime as the routes. This shared layer only installs
-// the `TracerDisabledWhen` filter, which is a ServiceMap.Reference read by
-// HttpMiddleware regardless of which Tracer is active.
-export const ApiObservabilityLive = Layer.succeed(
-	HttpMiddleware.TracerDisabledWhen,
-	(request: { url: string; method: string }) =>
-		request.url === "/health" ||
-		request.method === "OPTIONS" ||
-		/\.(png|ico|jpg|jpeg|gif|css|js|svg|webp|woff2?)(\?.*)?$/i.test(request.url),
+// provided to the same runtime as the routes. This shared layer installs the
+// `TracerDisabledWhen` filter and the header-redaction list — both
+// ServiceMap.References read by HttpMiddleware regardless of which Tracer is
+// active.
+export const ApiObservabilityLive = Layer.mergeAll(
+	Layer.succeed(
+		HttpMiddleware.TracerDisabledWhen,
+		(request: { url: string; method: string }) =>
+			request.url === "/health" ||
+			request.method === "OPTIONS" ||
+			OAUTH_CALLBACK_PATH.test(request.url) ||
+			/\.(png|ico|jpg|jpeg|gif|css|js|svg|webp|woff2?)(\?.*)?$/i.test(request.url),
+	),
+	// Every request header lands on the server span as `http.request.header.<name>`.
+	// Effect's defaults cover the usual credential headers; the provider webhook
+	// signatures are ours to add (a GitHub webhook HMAC is replayable alongside its
+	// body, and there is no reason to retain it).
+	Layer.succeed(Headers.CurrentRedactedNames, [
+		"authorization",
+		"cookie",
+		"set-cookie",
+		"x-api-key",
+		"x-hub-signature",
+		"x-hub-signature-256",
+	]),
 )

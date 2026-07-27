@@ -15,13 +15,15 @@ interface Props {
     description: string;
     headings: Array<{ depth: number; slug: string; text: string }>;
     currentSlug: string;
+    image?: string;
 }
 
-const { title, description, headings, currentSlug } = Astro.props;
+const { title, description, headings, currentSlug, image = "/og-docs.png" } = Astro.props;
 const stars = await getGitHubStars();
 
 const pageTitle = currentSlug ? `${title} — Maple Docs` : "Maple Docs";
 const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
+const absoluteImage = image.startsWith("http") ? image : new URL(image, Astro.site).toString();
 ---
 
 <!doctype html>
@@ -36,8 +38,17 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
         <meta name="robots" content="index,follow" />
         <link rel="canonical" href={canonicalUrl} />
         <meta property="og:type" content="article" />
+        <meta property="og:site_name" content="Maple" />
+        <meta property="og:locale" content="en_US" />
         <meta property="og:title" content={pageTitle} />
         <meta property="og:description" content={description} />
+        <meta property="og:image" content={absoluteImage} />
+        <meta property="og:url" content={canonicalUrl} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:site" content="@maple_dev" />
+        <meta name="twitter:title" content={pageTitle} />
+        <meta name="twitter:description" content={description} />
+        <meta name="twitter:image" content={absoluteImage} />
         <meta name="generator" content={Astro.generator} />
         <title>{pageTitle}</title>
     </head>

@@ -260,7 +260,10 @@ export class AiTriageService extends Context.Service<AiTriageService, AiTriageSe
 									.select()
 									.from(alertIncidents)
 									.where(
-										and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.id, incidentId)),
+										and(
+											eq(alertIncidents.orgId, orgId),
+											eq(alertIncidents.id, incidentId),
+										),
 									)
 									.limit(1),
 							)

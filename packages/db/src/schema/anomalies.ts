@@ -65,7 +65,8 @@ export const anomalyDetectorStates = pgTable(
 	},
 	(table) => [
 		primaryKey({ columns: [table.orgId, table.detectorKey] }),
-		index("anomaly_detector_states_org_idx").on(table.orgId),
+		// No standalone org_id index: the primary key already leads with org_id,
+		// so one was pure write amplification on ~130k upserts a day.
 		index("anomaly_detector_states_open_incident_idx").on(table.orgId, table.openIncidentId),
 		index("anomaly_detector_states_evaluated_idx").on(table.lastEvaluatedAt),
 	],

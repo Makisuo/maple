@@ -73,11 +73,7 @@ export function MetricGraduationActions({ draft }: MetricGraduationActionsProps)
 				{copied ? "Copied" : "Copy link"}
 			</Button>
 
-			<AddToDashboardDialog
-				open={dialogOpen}
-				onOpenChange={setDialogOpen}
-				draft={draft}
-			/>
+			<AddToDashboardDialog open={dialogOpen} onOpenChange={setDialogOpen} draft={draft} />
 		</div>
 	)
 }
@@ -135,15 +131,13 @@ function AddToDashboardDialog({
 				<DialogHeader>
 					<DialogTitle>Add to dashboard</DialogTitle>
 					<DialogDescription>
-						Adds the current query for{" "}
-						<span className="font-mono">{draft.metricName}</span> as a chart widget.
+						Adds the current query for <span className="font-mono">{draft.metricName}</span> as a
+						chart widget.
 					</DialogDescription>
 				</DialogHeader>
 
 				{readOnly ? (
-					<p className="text-sm text-muted-foreground">
-						Dashboards are read-only for your role.
-					</p>
+					<p className="text-sm text-muted-foreground">Dashboards are read-only for your role.</p>
 				) : (
 					<div className="space-y-4">
 						{dashboards.length > 0 && (

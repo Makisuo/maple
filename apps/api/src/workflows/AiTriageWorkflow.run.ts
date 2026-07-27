@@ -378,6 +378,7 @@ async function runAiTriageWithDb(
 						attributes: {
 							"gen_ai.operation.name": "chat",
 							"gen_ai.provider.name": "cloudflare.workers_ai",
+							"peer.service": "maple-chat-flue",
 							orgId,
 						},
 					}),

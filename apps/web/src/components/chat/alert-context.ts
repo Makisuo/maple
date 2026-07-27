@@ -1,6 +1,6 @@
 import type { AiTriageResult, AlertIncidentDocument, AlertRuleDocument } from "@maple/domain/http"
 import { Option, Schema } from "effect"
-import { fromBase64Url, toBase64Url } from "@/lib/base64url"
+import { fromBase64Url } from "@/lib/base64url"
 
 const AlertContextSchema = Schema.Struct({
 	ruleId: Schema.String,
@@ -49,9 +49,6 @@ export const toAlertContext = (
 	...(result?.summary ? { aiSummary: result.summary } : {}),
 	...(result?.suspectedCause ? { aiSuspectedCause: result.suspectedCause } : {}),
 })
-
-export const encodeAlertContextToSearchParam = (ctx: AlertContext): string =>
-	toBase64Url(JSON.stringify(ctx))
 
 export const decodeAlertContextFromSearchParam = (raw: string): AlertContext | undefined => {
 	try {

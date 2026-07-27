@@ -52,6 +52,15 @@ describe("ClickHouse DDL emitter", () => {
 		expect(ddl).toContain("INDEX idx_resource_attr_vals mapValues(ResourceAttributes)")
 	})
 
+	it("keeps generated DDL portable while text indexes are reconciled separately", async () => {
+		const manifest = await buildTinybirdProjectManifest()
+		const logs = manifest.datasources.find((ds) => ds.name === "logs")
+
+		const portable = emitCreateTable(logs!)
+		expect(portable).toContain("INDEX idx_lower_body lower(Body) TYPE tokenbf_v1")
+		expect(portable).not.toContain("TYPE text(")
+	})
+
 	it("does not include FORWARD_QUERY blocks (Tinybird-only)", async () => {
 		const manifest = await buildTinybirdProjectManifest()
 		const traces = manifest.datasources.find((ds) => ds.name === "traces")
@@ -82,6 +91,9 @@ describe("ClickHouse DDL emitter", () => {
 		expect(orgId?.jsonPath).toBe("$.resource_attributes.maple_org_id")
 		const body = spec.find((c) => c.column === "Body")
 		expect(body?.jsonPath).toBe("$.body")
+		const resourceItems = spec.find((c) => c.column === "ResourceAttributeItems")
+		expect(resourceItems?.jsonPath).toBe("$.ResourceAttributeItems[:]")
+		expect(resourceItems?.hasDefaultExpression).toBe(true)
 
 		// Datasources populated only by MVs (e.g. service_usage) have no JSONPaths.
 		const serviceUsage = manifest.datasources.find((ds) => ds.name === "service_usage")

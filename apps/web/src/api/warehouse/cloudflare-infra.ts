@@ -11,8 +11,10 @@ import { Effect, Schema } from "effect"
 import {
 	CloudflareInfraPlatformResourcesRequest,
 	CloudflareInfraWorkersRequest,
+	CloudflareInfraZoneBreakdownRequest,
 	CloudflareInfraZoneDetailRequest,
 	CloudflareInfraZoneDnsRequest,
+	CloudflareInfraZoneFacetsRequest,
 	CloudflareInfraZoneHostsRequest,
 	CloudflareInfraZonesRequest,
 	CloudflareInfraZoneSecurityRequest,
@@ -78,15 +80,70 @@ export interface CloudflareWorkerRow {
 	durationP99Ms: number
 }
 
+/**
+ * Zone dimension filters, shared by every Cloudflare warehouse call. `Schema.optional` (not
+ * `optionalKey`) because these arrive from router search params, where `undefined` is a real value.
+ */
+const CloudflareFilterInputFields = {
+	hosts: Schema.optional(Schema.Array(Schema.String)),
+	cacheStatuses: Schema.optional(Schema.Array(Schema.String)),
+	statusClasses: Schema.optional(Schema.Array(Schema.String)),
+	paths: Schema.optional(Schema.Array(Schema.String)),
+	pathContains: Schema.optional(Schema.String),
+	countries: Schema.optional(Schema.Array(Schema.String)),
+	methods: Schema.optional(Schema.Array(Schema.String)),
+	protocols: Schema.optional(Schema.Array(Schema.String)),
+	deviceTypes: Schema.optional(Schema.Array(Schema.String)),
+	firewallActions: Schema.optional(Schema.Array(Schema.String)),
+	firewallSources: Schema.optional(Schema.Array(Schema.String)),
+	firewallRuleIds: Schema.optional(Schema.Array(Schema.String)),
+	dnsQueryNames: Schema.optional(Schema.Array(Schema.String)),
+	dnsResponseCodes: Schema.optional(Schema.Array(Schema.String)),
+}
+
+interface CloudflareFilterInput {
+	readonly hosts?: ReadonlyArray<string> | undefined
+	readonly cacheStatuses?: ReadonlyArray<string> | undefined
+	readonly statusClasses?: ReadonlyArray<string> | undefined
+	readonly paths?: ReadonlyArray<string> | undefined
+	readonly pathContains?: string | undefined
+	readonly countries?: ReadonlyArray<string> | undefined
+	readonly methods?: ReadonlyArray<string> | undefined
+	readonly protocols?: ReadonlyArray<string> | undefined
+	readonly deviceTypes?: ReadonlyArray<string> | undefined
+	readonly firewallActions?: ReadonlyArray<string> | undefined
+	readonly firewallSources?: ReadonlyArray<string> | undefined
+	readonly firewallRuleIds?: ReadonlyArray<string> | undefined
+	readonly dnsQueryNames?: ReadonlyArray<string> | undefined
+	readonly dnsResponseCodes?: ReadonlyArray<string> | undefined
+}
+
+/** Drop empty/absent filters so they never reach the payload (the request schema is optionalKey). */
+const cloudflareFilterPayload = (input: CloudflareFilterInput) => {
+	const out: Record<string, ReadonlyArray<string> | string> = {}
+	for (const [key, value] of Object.entries(input) as ReadonlyArray<
+		[string, ReadonlyArray<string> | string | undefined]
+	>) {
+		if (value === undefined) continue
+		if (Array.isArray(value) ? value.length > 0 : value !== "") out[key] = value
+	}
+	return out
+}
+
+/** Filter keys the responding panel could not apply — drives the zone-wide scope markers. */
+export type CloudflareIgnoredFilters = ReadonlyArray<string>
+
 const TimeRangeInputSchema = Schema.Struct({
 	startTime: WarehouseDateTimeString,
 	endTime: WarehouseDateTimeString,
+	...CloudflareFilterInputFields,
 })
 
 const TimeseriesInputSchema = Schema.Struct({
 	startTime: WarehouseDateTimeString,
 	endTime: WarehouseDateTimeString,
 	bucketSeconds: Schema.Number,
+	...CloudflareFilterInputFields,
 })
 
 export type CloudflareInfraTimeRangeInput = (typeof TimeRangeInputSchema)["Encoded"]
@@ -105,6 +162,7 @@ export const getCloudflareZones = Effect.fn("QueryEngine.getCloudflareZones")(fu
 				payload: new CloudflareInfraZonesRequest({
 					startTime: input.startTime,
 					endTime: input.endTime,
+					...cloudflareFilterPayload(input),
 				}),
 			})
 		}),
@@ -133,41 +191,46 @@ export const getCloudflareZones = Effect.fn("QueryEngine.getCloudflareZones")(fu
 				originP99Ms: Number(row.originP99Ms ?? 0),
 			}
 		}),
+		ignoredFilters: result.ignoredFilters,
 	}
 })
 
-export const getCloudflareZoneTimeseries = Effect.fn("QueryEngine.getCloudflareZoneTimeseries")(
-	function* ({ data }: { data: CloudflareInfraTimeseriesInput }) {
-		const input = yield* decodeInput(TimeseriesInputSchema, data, "getCloudflareZoneTimeseries")
-		const result = yield* runWarehouseQuery("cloudflareInfraZoneTimeseries", () =>
-			Effect.gen(function* () {
-				const client = yield* MapleApiAtomClient
-				return yield* client.queryEngine.cloudflareInfraZoneTimeseries({
-					payload: new CloudflareInfraZoneTimeseriesRequest({
-						startTime: input.startTime,
-						endTime: input.endTime,
-						bucketSeconds: input.bucketSeconds,
-					}),
-				})
-			}),
-		)
-		return {
-			buckets: result.data.map((row): CloudflareZoneTimeseriesRow => {
-				const serviceName = String(row.serviceName ?? "")
-				return {
-					serviceName,
-					zoneName: stripPrefix(serviceName, ZONE_SERVICE_PREFIX),
-					bucket: String(row.bucket ?? ""),
-					requests: Number(row.requests ?? 0),
-					errors5xx: Number(row.errors5xx ?? 0),
-					cacheHits: Number(row.cacheHits ?? 0),
-					bytes: Number(row.bytes ?? 0),
-					visits: Number(row.visits ?? 0),
-				}
-			}),
-		}
-	},
-)
+export const getCloudflareZoneTimeseries = Effect.fn("QueryEngine.getCloudflareZoneTimeseries")(function* ({
+	data,
+}: {
+	data: CloudflareInfraTimeseriesInput
+}) {
+	const input = yield* decodeInput(TimeseriesInputSchema, data, "getCloudflareZoneTimeseries")
+	const result = yield* runWarehouseQuery("cloudflareInfraZoneTimeseries", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.cloudflareInfraZoneTimeseries({
+				payload: new CloudflareInfraZoneTimeseriesRequest({
+					startTime: input.startTime,
+					endTime: input.endTime,
+					bucketSeconds: input.bucketSeconds,
+					...cloudflareFilterPayload(input),
+				}),
+			})
+		}),
+	)
+	return {
+		buckets: result.data.map((row): CloudflareZoneTimeseriesRow => {
+			const serviceName = String(row.serviceName ?? "")
+			return {
+				serviceName,
+				zoneName: stripPrefix(serviceName, ZONE_SERVICE_PREFIX),
+				bucket: String(row.bucket ?? ""),
+				requests: Number(row.requests ?? 0),
+				errors5xx: Number(row.errors5xx ?? 0),
+				cacheHits: Number(row.cacheHits ?? 0),
+				bytes: Number(row.bytes ?? 0),
+				visits: Number(row.visits ?? 0),
+			}
+		}),
+		ignoredFilters: result.ignoredFilters,
+	}
+})
 
 export interface CloudflareZoneStatusBucket {
 	bucket: string
@@ -198,6 +261,7 @@ const ZoneDetailInputSchema = Schema.Struct({
 	startTime: WarehouseDateTimeString,
 	endTime: WarehouseDateTimeString,
 	bucketSeconds: Schema.Number,
+	...CloudflareFilterInputFields,
 })
 
 export type CloudflareZoneDetailInput = (typeof ZoneDetailInputSchema)["Encoded"]
@@ -217,6 +281,7 @@ export const getCloudflareZoneDetail = Effect.fn("QueryEngine.getCloudflareZoneD
 					startTime: input.startTime,
 					endTime: input.endTime,
 					bucketSeconds: input.bucketSeconds,
+					...cloudflareFilterPayload(input),
 				}),
 			})
 		}),
@@ -247,6 +312,9 @@ export const getCloudflareZoneDetail = Effect.fn("QueryEngine.getCloudflareZoneD
 				originP99Ms: Number(row.originP99Ms ?? 0),
 			}),
 		),
+		ignoredFilters: result.ignoredFilters,
+		/** Always every active dimension filter — latency gauges carry only `quantile`. */
+		latencyIgnoredFilters: result.latencyIgnoredFilters,
 	}
 })
 
@@ -326,6 +394,7 @@ export const getCloudflareZoneHosts = Effect.fn("QueryEngine.getCloudflareZoneHo
 					startTime: input.startTime,
 					endTime: input.endTime,
 					bucketSeconds: input.bucketSeconds,
+					...cloudflareFilterPayload(input),
 				}),
 			})
 		}),
@@ -352,6 +421,7 @@ export const getCloudflareZoneHosts = Effect.fn("QueryEngine.getCloudflareZoneHo
 				requests: Number(row.requests ?? 0),
 			}),
 		),
+		ignoredFilters: result.ignoredFilters,
 	}
 })
 
@@ -385,6 +455,7 @@ export const getCloudflareZoneSecurity = Effect.fn("QueryEngine.getCloudflareZon
 					startTime: input.startTime,
 					endTime: input.endTime,
 					bucketSeconds: input.bucketSeconds,
+					...cloudflareFilterPayload(input),
 				}),
 			})
 		}),
@@ -406,6 +477,7 @@ export const getCloudflareZoneSecurity = Effect.fn("QueryEngine.getCloudflareZon
 				events: Number(row.events ?? 0),
 			}),
 		),
+		ignoredFilters: result.ignoredFilters,
 	}
 })
 
@@ -437,6 +509,7 @@ export const getCloudflareZoneDns = Effect.fn("QueryEngine.getCloudflareZoneDns"
 					startTime: input.startTime,
 					endTime: input.endTime,
 					bucketSeconds: input.bucketSeconds,
+					...cloudflareFilterPayload(input),
 				}),
 			})
 		}),
@@ -456,6 +529,7 @@ export const getCloudflareZoneDns = Effect.fn("QueryEngine.getCloudflareZoneDns"
 				nxdomain: Number(row.nxdomain ?? 0),
 			}),
 		),
+		ignoredFilters: result.ignoredFilters,
 	}
 })
 
@@ -481,46 +555,196 @@ export interface CloudflareDurableObjectRow {
 
 const QUEUE_SERVICE_PREFIX = "cloudflare-queue/"
 
-export const getCloudflarePlatformResources = Effect.fn(
-	"QueryEngine.getCloudflarePlatformResources",
-)(function* ({ data }: { data: CloudflareInfraTimeRangeInput }) {
-	const input = yield* decodeInput(TimeRangeInputSchema, data, "getCloudflarePlatformResources")
-	const result = yield* runWarehouseQuery("cloudflareInfraPlatformResources", () =>
+export const getCloudflarePlatformResources = Effect.fn("QueryEngine.getCloudflarePlatformResources")(
+	function* ({ data }: { data: CloudflareInfraTimeRangeInput }) {
+		const input = yield* decodeInput(TimeRangeInputSchema, data, "getCloudflarePlatformResources")
+		const result = yield* runWarehouseQuery("cloudflareInfraPlatformResources", () =>
+			Effect.gen(function* () {
+				const client = yield* MapleApiAtomClient
+				return yield* client.queryEngine.cloudflareInfraPlatformResources({
+					payload: new CloudflareInfraPlatformResourcesRequest({
+						startTime: input.startTime,
+						endTime: input.endTime,
+					}),
+				})
+			}),
+		)
+		return {
+			queues: result.queues.map((row): CloudflareQueueRow => {
+				const serviceName = String(row.serviceName ?? "")
+				return {
+					serviceName,
+					queueName: stripPrefix(serviceName, QUEUE_SERVICE_PREFIX),
+					backlogMessages: Number(row.backlogMessages ?? 0),
+					backlogMessagesMax: Number(row.backlogMessagesMax ?? 0),
+					backlogBytes: Number(row.backlogBytes ?? 0),
+					consumerConcurrency: Number(row.consumerConcurrency ?? 0),
+				}
+			}),
+			durableObjects: result.durableObjects.map((row): CloudflareDurableObjectRow => {
+				const serviceName = String(row.serviceName ?? "")
+				const requests = Number(row.requests ?? 0)
+				const errors = Number(row.errors ?? 0)
+				return {
+					serviceName,
+					scriptName: stripPrefix(serviceName, WORKER_SERVICE_PREFIX),
+					requests,
+					errors,
+					errorRate: ratio(errors, requests),
+				}
+			}),
+		}
+	},
+)
+
+// ---------------------------------------------------------------------------
+// Generic zone breakdown + filter facets
+// ---------------------------------------------------------------------------
+
+export const CLOUDFLARE_BREAKDOWN_DIMENSIONS = [
+	"path",
+	"host",
+	"country",
+	"method",
+	"protocol",
+	"deviceType",
+	"cacheStatus",
+	"statusClass",
+] as const
+
+export type CloudflareBreakdownDimension = (typeof CLOUDFLARE_BREAKDOWN_DIMENSIONS)[number]
+
+const BreakdownInputSchema = Schema.Struct({
+	serviceName: Schema.String,
+	dimension: Schema.Literals(CLOUDFLARE_BREAKDOWN_DIMENSIONS),
+	startTime: WarehouseDateTimeString,
+	endTime: WarehouseDateTimeString,
+	bucketSeconds: Schema.Number,
+	limit: Schema.optional(Schema.Number),
+	...CloudflareFilterInputFields,
+})
+
+export type CloudflareBreakdownInput = (typeof BreakdownInputSchema)["Encoded"]
+
+export interface CloudflareBreakdownTotal {
+	key: string
+	requests: number
+	errors5xx: number
+	/** 5xx error ratio, 0–1. */
+	errorRate: number
+	bytes: number
+	/** Share of the returned keys' traffic, 0–1 — the inline bar in the table. */
+	share: number
+}
+
+export interface CloudflareBreakdownBucket {
+	/** Bucket start, ISO-8601 UTC. */
+	bucket: string
+	key: string
+	requests: number
+}
+
+/**
+ * Ranked totals + a stacked timeseries for one dimension of one zone, plus the two facts the UI
+ * needs to be honest about what it is showing: how much traffic the returned keys actually cover,
+ * and when collection for this dimension started.
+ */
+export interface CloudflareZoneBreakdown {
+	totals: ReadonlyArray<CloudflareBreakdownTotal>
+	buckets: ReadonlyArray<CloudflareBreakdownBucket>
+	/** Requests in the window that no returned key accounts for. */
+	unattributed: number
+	/** Share of zone traffic the returned keys cover, 0–1. */
+	coverage: number
+	/**
+	 * When this dimension's data starts inside the window. Later than the window start means
+	 * collection began mid-window; null means the dimension has no rows here at all, which for a
+	 * historical window reads "not collected", not "no traffic".
+	 */
+	coverageStart: string | null
+	/** Filter keys this breakdown could not apply. */
+	ignoredFilters: ReadonlyArray<string>
+}
+
+export const getCloudflareZoneBreakdown = Effect.fn("QueryEngine.getCloudflareZoneBreakdown")(
+	function* ({ data }: { data: CloudflareBreakdownInput }) {
+		const input = yield* decodeInput(BreakdownInputSchema, data, "getCloudflareZoneBreakdown")
+		const result = yield* runWarehouseQuery("cloudflareInfraZoneBreakdown", () =>
+			Effect.gen(function* () {
+				const client = yield* MapleApiAtomClient
+				return yield* client.queryEngine.cloudflareInfraZoneBreakdown({
+					payload: new CloudflareInfraZoneBreakdownRequest({
+						serviceName: input.serviceName,
+						dimension: input.dimension,
+						startTime: input.startTime,
+						endTime: input.endTime,
+						bucketSeconds: input.bucketSeconds,
+						...(input.limit === undefined ? {} : { limit: input.limit }),
+						...cloudflareFilterPayload(input),
+					}),
+				})
+			}),
+		)
+		const rows = result.totals.map((row) => ({
+			key: String(row.key ?? ""),
+			requests: Number(row.requests ?? 0),
+			errors5xx: Number(row.errors5xx ?? 0),
+			bytes: Number(row.bytes ?? 0),
+		}))
+		const attributed = rows.reduce((sum, row) => sum + row.requests, 0)
+		const breakdown: CloudflareZoneBreakdown = {
+			totals: rows.map(
+				(row): CloudflareBreakdownTotal => ({
+					...row,
+					errorRate: ratio(row.errors5xx, row.requests),
+					share: ratio(row.requests, attributed),
+				}),
+			),
+			buckets: result.buckets.map(
+				(row): CloudflareBreakdownBucket => ({
+					bucket: String(row.bucket ?? ""),
+					key: String(row.key ?? ""),
+					requests: Number(row.requests ?? 0),
+				}),
+			),
+			unattributed: result.unattributed,
+			coverage: ratio(attributed, attributed + result.unattributed),
+			coverageStart: result.coverageStart,
+			ignoredFilters: result.ignoredFilters,
+		}
+		return breakdown
+	},
+)
+
+const ZoneFacetsInputSchema = Schema.Struct({
+	serviceName: Schema.String,
+	startTime: WarehouseDateTimeString,
+	endTime: WarehouseDateTimeString,
+	...CloudflareFilterInputFields,
+})
+
+export type CloudflareZoneFacetsInput = (typeof ZoneFacetsInputSchema)["Encoded"]
+
+/** Filter-sidebar options for one zone, ranked by traffic. Each facet lists all of its own values. */
+export const getCloudflareZoneFacets = Effect.fn("QueryEngine.getCloudflareZoneFacets")(function* ({
+	data,
+}: {
+	data: CloudflareZoneFacetsInput
+}) {
+	const input = yield* decodeInput(ZoneFacetsInputSchema, data, "getCloudflareZoneFacets")
+	return yield* runWarehouseQuery("cloudflareInfraZoneFacets", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleApiAtomClient
-			return yield* client.queryEngine.cloudflareInfraPlatformResources({
-				payload: new CloudflareInfraPlatformResourcesRequest({
+			return yield* client.queryEngine.cloudflareInfraZoneFacets({
+				payload: new CloudflareInfraZoneFacetsRequest({
+					serviceName: input.serviceName,
 					startTime: input.startTime,
 					endTime: input.endTime,
+					...cloudflareFilterPayload(input),
 				}),
 			})
 		}),
 	)
-	return {
-		queues: result.queues.map((row): CloudflareQueueRow => {
-			const serviceName = String(row.serviceName ?? "")
-			return {
-				serviceName,
-				queueName: stripPrefix(serviceName, QUEUE_SERVICE_PREFIX),
-				backlogMessages: Number(row.backlogMessages ?? 0),
-				backlogMessagesMax: Number(row.backlogMessagesMax ?? 0),
-				backlogBytes: Number(row.backlogBytes ?? 0),
-				consumerConcurrency: Number(row.consumerConcurrency ?? 0),
-			}
-		}),
-		durableObjects: result.durableObjects.map((row): CloudflareDurableObjectRow => {
-			const serviceName = String(row.serviceName ?? "")
-			const requests = Number(row.requests ?? 0)
-			const errors = Number(row.errors ?? 0)
-			return {
-				serviceName,
-				scriptName: stripPrefix(serviceName, WORKER_SERVICE_PREFIX),
-				requests,
-				errors,
-				errorRate: ratio(errors, requests),
-			}
-		}),
-	}
 })
 
 const TopTrafficInputSchema = Schema.Struct({
@@ -530,6 +754,12 @@ const TopTrafficInputSchema = Schema.Struct({
 	startTime: Schema.Number,
 	endTime: Schema.Number,
 	limit: Schema.optional(Schema.Number),
+	/** Server-side substring match, applied by Cloudflare before ranking. */
+	contains: Schema.optional(Schema.String),
+	hosts: Schema.optional(Schema.Array(Schema.String)),
+	countries: Schema.optional(Schema.Array(Schema.String)),
+	methods: Schema.optional(Schema.Array(Schema.String)),
+	cacheStatuses: Schema.optional(Schema.Array(Schema.String)),
 })
 
 export type CloudflareTopTrafficInput = (typeof TopTrafficInputSchema)["Encoded"]
@@ -545,8 +775,9 @@ export interface CloudflareTopTrafficEntry {
 
 /**
  * Live top hosts/paths straight from Cloudflare's GraphQL API (proxied +
- * briefly edge-cached by our API) — path cardinality is never stored as
- * metrics, so this is the only path-level view.
+ * edge-cached by our API). The warehouse carries a per-window top-N fold of
+ * paths; this reaches the long tail that fold drops, filtered server-side
+ * before ranking. No history — Cloudflare ranks the window as a whole.
  */
 export const getCloudflareTopTraffic = Effect.fn("Integrations.getCloudflareTopTraffic")(function* ({
 	data,
@@ -564,6 +795,13 @@ export const getCloudflareTopTraffic = Effect.fn("Integrations.getCloudflareTopT
 					startTime: input.startTime,
 					endTime: input.endTime,
 					...(input.limit === undefined ? {} : { limit: input.limit }),
+					...cloudflareFilterPayload({
+						hosts: input.hosts,
+						countries: input.countries,
+						methods: input.methods,
+						cacheStatuses: input.cacheStatuses,
+					}),
+					...(input.contains ? { contains: input.contains } : {}),
 				}),
 			})
 		}),
@@ -581,4 +819,3 @@ export const getCloudflareTopTraffic = Effect.fn("Integrations.getCloudflareTopT
 		),
 	}
 })
-

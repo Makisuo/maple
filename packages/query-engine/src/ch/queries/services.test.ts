@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import { compileCH, compileUnion } from "@maple-dev/clickhouse-builder"
 import {
 	serviceOverviewQuery,
+	serviceOverviewRowSchema,
 	serviceCatalogQuery,
 	serviceHealthSnapshotQuery,
 	serviceHealthSnapshotRowSchema,
@@ -10,6 +11,7 @@ import {
 	serviceReleasesTimelineQuery,
 	serviceEnvironmentsQuery,
 	serviceApdexTimeseriesQuery,
+	serviceApdexTimeseriesRowSchema,
 	serviceUsageQuery,
 	serviceUsageWithPreviousQuery,
 	servicesFacetsQuery,
@@ -34,10 +36,13 @@ describe("serviceCatalogQuery", () => {
 			baseParams,
 		)
 		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).toContain("FROM service_overview_hourly")
+		expect(sql).toContain("UNION ALL")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
-		expect(sql).toContain("DeploymentEnv = 'production'")
-		expect(sql).toContain("ServiceNamespace = 'checkout'")
+		expect(sql).toContain("Hour >= if(toDateTime('2024-01-01 00:00:00')")
+		expect(sql).toContain("DeploymentEnv IN ('production')")
+		expect(sql).toContain("ServiceNamespace IN ('checkout')")
 		expect(sql).toContain("GROUP BY serviceName")
 		expect(sql).toContain("LIMIT 21")
 		expect(sql).toContain("OFFSET 20")
@@ -100,30 +105,32 @@ describe("serviceOverviewQuery", () => {
 		const q = serviceOverviewQuery({})
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM service_overview_spans")
-		expect(sql).toContain("ServiceName AS serviceName")
-		expect(sql).toContain("ServiceNamespace AS serviceNamespace")
-		expect(sql).toContain("DeploymentEnv AS environment")
-		expect(sql).toContain("CommitSha AS commitSha")
-		expect(sql).toContain("count() AS throughput")
-		expect(sql).toContain("countIf(StatusCode = 'Error') AS errorCount")
-		expect(sql).toContain("sumIf(SampleRate, StatusCode = 'Error') AS estimatedErrorCount")
-		expect(sql).toContain("quantile(0.5)(Duration) / 1000000 AS p50LatencyMs")
-		expect(sql).toContain("quantile(0.95)(Duration) / 1000000 AS p95LatencyMs")
-		expect(sql).toContain("quantile(0.99)(Duration) / 1000000 AS p99LatencyMs")
-		expect(sql).toContain("min(Timestamp) AS firstSeen")
+		expect(sql).toContain("bServiceName AS serviceName")
+		expect(sql).toContain("bServiceNamespace AS serviceNamespace")
+		expect(sql).toContain("bEnvironment AS environment")
+		expect(sql).toContain("bCommitSha AS commitSha")
+		expect(sql).toContain("FROM service_overview_hourly")
+		expect(sql).toContain("UNION ALL")
+		expect(sql).toContain("sum(bSpanCount) AS throughput")
+		expect(sql).toContain("sum(bErrorCount) AS errorCount")
+		expect(sql).toContain("sum(bEstimatedErrorCount) AS estimatedErrorCount")
+		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles)")
+		expect(sql).toContain("min(bFirstSeen) AS firstSeen")
 		expect(sql).toContain("GROUP BY serviceName, serviceNamespace, environment, commitSha")
 		expect(sql).toContain("ORDER BY throughput DESC")
 		expect(sql).toContain("LIMIT 100")
 		expect(sql).toContain("FORMAT JSON")
 	})
 
-	it("emits per-row weighted estimated span count via sum(SampleRate)", () => {
+	it("merges sampling-corrected counts from raw edges and hourly interiors", () => {
 		const q = serviceOverviewQuery({})
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("estimatedSpanCount")
 		expect(sql).toContain("sum(SampleRate)")
 		expect(sql).toContain("estimatedErrorCount")
 		expect(sql).toContain("sumIf(SampleRate, StatusCode = 'Error')")
+		expect(sql).toContain("sum(EstimatedSpanCount)")
+		expect(sql).toContain("sum(bEstimatedSpanCount)")
 		// The old `anyIf(threshold)` approach must be gone — it was the bug.
 		expect(sql).not.toContain("dominantThreshold")
 		expect(sql).not.toContain("anyIf")
@@ -140,6 +147,33 @@ describe("serviceOverviewQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("CommitSha IN ('abc123', 'def456')")
 	})
+
+	it("coerces BYO ClickHouse string-encoded annual aggregates", () => {
+		const compiled = compileCH(serviceOverviewQuery({}), baseParams, {
+			rowSchema: serviceOverviewRowSchema,
+		})
+		const [decoded] = Effect.runSync(
+			compiled.decodeRows([
+				{
+					serviceName: "api",
+					serviceNamespace: "checkout",
+					environment: "production",
+					commitSha: "abc123",
+					throughput: "100",
+					errorCount: "2",
+					estimatedErrorCount: "4",
+					spanCount: "100",
+					p50LatencyMs: "12.5",
+					p95LatencyMs: "42",
+					p99LatencyMs: "80",
+					estimatedSpanCount: "200",
+					firstSeen: "2024-01-01 00:00:00",
+				},
+			]),
+		)
+		expect(decoded.estimatedSpanCount).toBe(200)
+		expect(decoded.p95LatencyMs).toBe(42)
+	})
 })
 
 // ---------------------------------------------------------------------------
@@ -151,10 +185,13 @@ describe("serviceHealthBaselineQuery", () => {
 		const q = serviceHealthBaselineQuery({})
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).toContain("FROM service_overview_hourly")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
-		expect(sql).toContain("quantile(0.95)(Duration) / 1000000 AS baselineP95LatencyMs")
-		expect(sql).toContain("count() AS baselineSpanCount")
+		expect(sql).toContain(
+			"arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS baselineP95LatencyMs",
+		)
+		expect(sql).toContain("sum(bSpanCount) AS baselineSpanCount")
 		// Baseline must NOT split by commit — health compares service+env totals.
 		expect(sql).toContain("GROUP BY serviceName, serviceNamespace, environment")
 		expect(sql).not.toContain("commitSha")
@@ -179,11 +216,12 @@ describe("serviceReleasesTimelineQuery", () => {
 		const q = serviceReleasesTimelineQuery({ serviceName: "api" })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).toContain("FROM service_overview_hourly")
 		expect(sql).toContain("ServiceName = 'api'")
 		expect(sql).toContain("CommitSha != ''")
 		expect(sql).toContain("CommitSha AS commitSha")
-		expect(sql).toContain("count() AS count")
-		expect(sql).toContain("countIf(StatusCode = 'Error') AS errorCount")
+		expect(sql).toContain("sum(bSpanCount) AS count")
+		expect(sql).toContain("sum(bErrorCount) AS errorCount")
 		expect(sql).toContain("GROUP BY bucket, commitSha")
 		expect(sql).toContain("ORDER BY bucket ASC")
 		expect(sql).toContain("LIMIT 1000")
@@ -199,7 +237,8 @@ describe("serviceEnvironmentsQuery", () => {
 		const q = serviceEnvironmentsQuery({ serviceName: "api" })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM service_overview_spans")
-		expect(sql).toContain("DeploymentEnv AS environment")
+		expect(sql).toContain("FROM service_overview_hourly")
+		expect(sql).toContain("bEnvironment AS environment")
 		// Scoped to the org + this one service (replaces an all-services scan)…
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("ServiceName = 'api'")
@@ -207,7 +246,7 @@ describe("serviceEnvironmentsQuery", () => {
 		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
 		expect(sql).toContain("Timestamp <= '2024-01-02 00:00:00'")
 		// Empty env rows are excluded (matches the old switcher's truthy filter).
-		expect(sql).toContain("DeploymentEnv != ''")
+		expect(sql).toContain("bEnvironment != ''")
 		expect(sql).toContain("GROUP BY environment")
 		expect(sql).toContain("FORMAT JSON")
 	})
@@ -221,23 +260,21 @@ describe("serviceApdexTimeseriesQuery", () => {
 	it("compiles apdex timeseries with default threshold", () => {
 		const q = serviceApdexTimeseriesQuery({ serviceName: "api" })
 		const { sql } = compileCH(q, baseParams)
-		// Routes through the service_overview_spans MV (pre-filtered to
-		// entry-point spans at write time) — ~20-100x cheaper than raw traces.
+		// Exact raw partial hours surround complete hourly aggregate buckets.
 		expect(sql).toContain("FROM service_overview_spans")
-		expect(sql).not.toContain("FROM traces")
+		expect(sql).toContain("FROM service_overview_hourly")
+		expect(sql).toContain("UNION ALL")
 		expect(sql).toContain("ServiceName = 'api'")
-		expect(sql).toContain("count() AS totalCount")
-		expect(sql).toContain("Duration / 1000000 < 500")
+		expect(sql).toContain("sum(bSpanCount) AS totalCount")
+		expect(sql).toContain("Duration < 500000000")
 		expect(sql).toContain("AS satisfiedCount")
 		expect(sql).toContain("AS toleratingCount")
 		expect(sql).toContain("AS apdexScore")
 		// Errored spans count as frustrated: the satisfied/tolerating buckets are
 		// gated on the non-error predicate, so a fast 5xx never inflates apdex.
-		expect(sql).toContain(
-			"countIf((NOT (StatusCode = 'Error') AND Duration / 1000000 < 500)) AS satisfiedCount",
-		)
+		expect(sql).toContain("StatusCode != 'Error'")
 		// totalCount still counts every span (errors included), so they drag the score down.
-		expect(sql).toContain("count() AS totalCount")
+		expect(sql).toContain("sum(bSpanCount) AS totalCount")
 		expect(sql).toContain("GROUP BY bucket")
 		expect(sql).toContain("ORDER BY bucket ASC")
 		// The MV pre-filters at write time — the runtime root-only predicate is
@@ -264,10 +301,30 @@ describe("serviceApdexTimeseriesQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		// The Apdex SELECT must contain the split-term form: each countIf is
 		// divided by count() before being summed, instead of summed first.
-		expect(sql).toContain(") / count() + countIf(")
-		expect(sql).toContain(") * 0.5 / count()")
+		expect(sql).toContain(
+			"sum(bApdexSatisfiedCount) / sum(bSpanCount) + sum(bApdexToleratingCount) * 0.5 / sum(bSpanCount)",
+		)
 		// And it must NOT contain the buggy summed-then-divided form.
-		expect(sql).not.toMatch(/countIf\([^)]*\) \+ countIf/)
+		expect(sql).not.toMatch(/sum\(bApdexSatisfiedCount\) \+ sum\(bApdexToleratingCount\)/)
+	})
+
+	it("coerces BYO ClickHouse string-encoded Apdex aggregates", () => {
+		const compiled = compileCH(serviceApdexTimeseriesQuery({ serviceName: "api" }), baseParams, {
+			rowSchema: serviceApdexTimeseriesRowSchema,
+		})
+		const [decoded] = Effect.runSync(
+			compiled.decodeRows([
+				{
+					bucket: "2024-01-01 00:00:00",
+					totalCount: "100",
+					satisfiedCount: "80",
+					toleratingCount: "10",
+					apdexScore: "0.85",
+				},
+			]),
+		)
+		expect(decoded.totalCount).toBe(100)
+		expect(decoded.apdexScore).toBe(0.85)
 	})
 })
 
@@ -350,15 +407,17 @@ describe("servicesFacetsQuery", () => {
 		const q = servicesFacetsQuery()
 		const { sql } = compileUnion(q, baseParams)
 		const unionCount = (sql.match(/UNION ALL/g) || []).length
-		expect(unionCount).toBe(3) // 4 branches → 3 UNION ALL separators
+		expect(unionCount).toBe(7) // 4 facet branches, each with a raw/hourly window union
 		expect(sql).toContain("'environment' AS facetType")
 		expect(sql).toContain("'namespace' AS facetType")
 		expect(sql).toContain("'commit_sha' AS facetType")
 		expect(sql).toContain("'service' AS facetType")
-		expect(sql).toContain("DeploymentEnv != ''")
-		expect(sql).toContain("ServiceNamespace != ''")
-		expect(sql).toContain("CommitSha != ''")
-		expect(sql).toContain("ServiceName != ''")
+		expect(sql).toContain("bEnvironment != ''")
+		expect(sql).toContain("bServiceNamespace != ''")
+		expect(sql).toContain("bCommitSha != ''")
+		expect(sql).toContain("bServiceName != ''")
 		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).toContain("FROM service_overview_hourly")
+		expect(sql).toContain("UNION ALL")
 	})
 })

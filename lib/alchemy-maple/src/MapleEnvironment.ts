@@ -37,9 +37,7 @@ export const fromEnv = () =>
 		MapleEnvironment,
 		Effect.gen(function* () {
 			const apiKey = yield* Config.redacted("MAPLE_API_KEY")
-			const baseUrl = yield* Config.string("MAPLE_API_URL").pipe(
-				Config.withDefault(DEFAULT_BASE_URL),
-			)
+			const baseUrl = yield* Config.string("MAPLE_API_URL").pipe(Config.withDefault(DEFAULT_BASE_URL))
 			return { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey }
 		}).pipe(Effect.orDie),
 	)

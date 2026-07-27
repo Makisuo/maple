@@ -15,6 +15,9 @@ import * as m from "../paraglide/messages"
 import { broadcastSignedIn } from "./auth-signal"
 import { ClerkProvider } from "./ClerkProvider"
 import { formatStars } from "../lib/github-stars"
+import { features } from "../lib/features"
+import { featurePath, useCasePath } from "../lib/page-registry"
+import { useCases } from "../lib/use-cases"
 import { GithubStarButton, Octocat } from "./GithubStarButton"
 
 const PUBLISHABLE_KEY = import.meta.env.PUBLIC_CLERK_PUBLISHABLE_KEY
@@ -88,66 +91,21 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 	const ctaCollapsed = useHeaderCtaCollapsed()
 	const l = (path: string) => (locale === "en" ? path : `/${locale}${path}`)
 
-	const featureLinks: MenuLink[] = [
-		{
-			href: l("/features/distributed-tracing"),
-			label: () => m.nav_distributed_tracing(),
-			desc: () => m.nav_desc_distributed_tracing(),
-		},
-		{
-			href: l("/features/browser-sessions"),
-			label: () => m.nav_browser_sessions(),
-			desc: () => m.nav_desc_browser_sessions(),
-		},
-		{
-			href: l("/features/metrics-dashboards"),
-			label: () => m.nav_metrics_dashboards(),
-			desc: () => m.nav_desc_metrics_dashboards(),
-		},
-		{
-			href: l("/features/log-management"),
-			label: () => m.nav_log_management(),
-			desc: () => m.nav_desc_log_management(),
-		},
-		{
-			href: l("/features/service-catalog"),
-			label: () => m.nav_service_catalog(),
-			desc: () => m.nav_desc_service_catalog(),
-		},
-		{
-			href: l("/features/error-tracking"),
-			label: () => m.nav_error_tracking(),
-			desc: () => m.nav_desc_error_tracking(),
-		},
-		{
-			href: l("/features/ai-mcp-integration"),
-			label: () => m.nav_ai_mcp(),
-			desc: () => m.nav_desc_ai_mcp(),
-		},
-		{
-			href: l("/features/kubernetes-monitoring"),
-			label: () => m.nav_kubernetes(),
-			desc: () => m.nav_desc_kubernetes(),
-		},
-	]
+	// Derived from the registries rather than hand-listed, so adding a feature
+	// can't leave the nav pointing at seven of eight. `navLabel`/`navDesc` are
+	// stored uncalled for the same reason MenuLink holds thunks — Paraglide
+	// resolves the locale per call, at render.
+	const featureLinks: MenuLink[] = features.map((feature) => ({
+		href: featurePath(locale, feature.slug),
+		label: feature.navLabel,
+		desc: feature.navDesc,
+	}))
 
-	const useCaseLinks: MenuLink[] = [
-		{
-			href: l("/use-cases/ecommerce-observability"),
-			label: () => m.nav_ecommerce(),
-			desc: () => m.nav_desc_ecommerce(),
-		},
-		{
-			href: l("/use-cases/microservices-debugging"),
-			label: () => m.nav_microservices(),
-			desc: () => m.nav_desc_microservices(),
-		},
-		{
-			href: l("/use-cases/api-performance"),
-			label: () => m.nav_api_performance(),
-			desc: () => m.nav_desc_api_performance(),
-		},
-	]
+	const useCaseLinks: MenuLink[] = useCases.map((useCase) => ({
+		href: useCasePath(locale, useCase.slug),
+		label: useCase.navLabel,
+		desc: useCase.navDesc,
+	}))
 
 	const integrationLinks: MenuLink[] = [
 		{ href: l("/integrations/nextjs"), label: () => m.nav_nextjs(), desc: () => m.nav_desc_nextjs() },
@@ -174,20 +132,24 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 	]
 
 	return (
-		<div className="flex items-center justify-between h-full w-full">
-			{/* Left group: Logo + Navigation */}
-			<div className="flex items-center gap-1">
-				<a href={l("/")} className="flex items-center gap-3 mr-2">
+		<div className="relative flex items-center justify-between h-full w-full">
+			{/* Logo. The nav list is absolutely centred rather than laid out
+			    between the two groups, so the centring survives the asymmetric
+			    right-hand group (star pill + Log in + CTA). */}
+			<div className="flex items-center">
+				<a href={l("/")} className="flex items-center gap-3">
 					<div className="w-7 h-7 bg-primary flex items-center justify-center">
 						<span className="text-primary-foreground text-sm font-bold">M</span>
 					</div>
 					<span className="text-fg font-medium text-sm">Maple</span>
 				</a>
+			</div>
 
-				<NavigationMenu className="hidden sm:flex">
+			<div className="absolute left-1/2 hidden -translate-x-1/2 lg:block">
+				<NavigationMenu className="flex">
 					<NavigationMenuList>
 						<NavigationMenuItem>
-							<NavigationMenuTrigger className="h-8 bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg data-popup-open:text-fg">
+							<NavigationMenuTrigger className="h-9 bg-transparent hover:bg-muted/20 text-[13px] text-fg-muted hover:text-fg data-popup-open:text-fg">
 								{m.nav_product()}
 							</NavigationMenuTrigger>
 							<NavigationMenuContent className="p-0">
@@ -259,7 +221,7 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 						<NavigationMenuItem>
 							<a
 								href={l("/pricing")}
-								className="inline-flex h-8 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-[13px] font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
 							>
 								{m.nav_pricing()}
 							</a>
@@ -268,27 +230,43 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 						<NavigationMenuItem>
 							<a
 								href={l("/local")}
-								className="inline-flex h-8 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-[13px] font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
 							>
-								Local
+								{m.nav_local()}
 							</a>
 						</NavigationMenuItem>
 
 						<NavigationMenuItem>
 							<a
 								href="/docs"
-								className="inline-flex h-8 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-[13px] font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
 							>
-								Docs
+								{m.nav_docs()}
+							</a>
+						</NavigationMenuItem>
+
+						<NavigationMenuItem>
+							<a
+								href="/blog"
+								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-[13px] font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+							>
+								{m.nav_blog()}
 							</a>
 						</NavigationMenuItem>
 					</NavigationMenuList>
 				</NavigationMenu>
 			</div>
 
-			{/* Right group: GitHub + CTA + Mobile menu */}
-			<div className="flex items-center gap-3 sm:gap-6">
+			{/* Right group: GitHub + Log in + CTA + Mobile menu */}
+			<div className="flex items-center gap-3 sm:gap-4">
 				<GithubStarButton stars={stars} className="hidden sm:inline-flex" />
+
+				<a
+					href="https://app.maple.dev"
+					className="hidden text-[13px] font-medium text-fg-muted transition-colors hover:text-fg md:inline-flex"
+				>
+					{m.nav_login()}
+				</a>
 
 				<a
 					href="https://app.maple.dev"
@@ -305,8 +283,10 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 					<CTAButton />
 				</a>
 
+				{/* The centred nav list only fits from lg, so the sheet has to
+				    cover everything below it — not just below sm. */}
 				<button
-					className="sm:hidden p-1.5 text-fg-muted hover:text-fg transition-colors"
+					className="lg:hidden p-1.5 text-fg-muted hover:text-fg transition-colors"
 					onClick={() => setMenuOpen(true)}
 					aria-label="Open menu"
 				>
@@ -372,14 +352,14 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 								onClick={() => setMenuOpen(false)}
 								className="text-xs text-fg hover:text-fg transition-colors py-2 font-medium"
 							>
-								Local
+								{m.nav_local()}
 							</a>
 							<a
 								href="/docs"
 								onClick={() => setMenuOpen(false)}
 								className="text-xs text-fg hover:text-fg transition-colors py-2 font-medium"
 							>
-								Docs
+								{m.nav_docs()}
 							</a>
 						</div>
 
@@ -396,10 +376,7 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 								</span>
 								{stars != null && <span className="tabular-nums">{formatStars(stars)}</span>}
 							</a>
-							<a
-								href="https://app.maple.dev"
-								className={buttonVariants({ size: "sm" })}
-							>
+							<a href="https://app.maple.dev" className={buttonVariants({ size: "sm" })}>
 								<CTAButton />
 							</a>
 						</div>

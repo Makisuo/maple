@@ -26,6 +26,12 @@ import {
 	InvestigationDocument,
 	InvestigationIncidentSubject,
 	InvestigationNotFoundError,
+	InvestigationQuotaError,
+	InvestigationRejectedError,
+	InvestigationSnapshotFact,
+	InvestigationSnapshotReference,
+	InvestigationSubjectSnapshot,
+	InvestigationUnavailableError,
 	InvestigationsListResponse,
 	InvestigationId,
 	IsoDateTimeString,
@@ -104,6 +110,21 @@ const investigationFixture = new InvestigationDocument({
 		type: "incident",
 		incidentKind: "error",
 		incidentId: ERROR_INCIDENT_UUID,
+	}),
+	snapshot: new InvestigationSubjectSnapshot({
+		title: "Checkout failures",
+		scope: "payments",
+		status: "open",
+		severity: "high",
+		facts: [new InvestigationSnapshotFact({ label: "Service", value: "payments" })],
+		references: [
+			new InvestigationSnapshotReference({
+				label: "Issue",
+				url: `/errors/issues/${ISS_UUID}`,
+			}),
+		],
+		incidentStartedAt: decodeIso("2026-07-15T09:10:00.000Z"),
+		incidentEndedAt: null,
 	}),
 	report: new AiTriageResult({
 		summary: "Checkout failures increased after a deploy.",
@@ -304,9 +325,12 @@ const testConfig = () =>
 const ORG = Schema.decodeUnknownSync(OrgId)("org_phase1_e2e")
 const USER = Schema.decodeUnknownSync(UserId)("user_phase1_e2e")
 
+type InvestigationStartMode = "success" | "quota" | "unavailable" | "rejected" | "restart_not_found"
+
 const makeHarness = (
 	warehouseService: WarehouseQueryServiceShape = warehouseStub,
 	failIssueReads = false,
+	investigationStartMode: InvestigationStartMode = "success",
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
@@ -316,6 +340,35 @@ const makeHarness = (
 	let lastIssueListCall: { readonly orgId: string; readonly options: Record<string, unknown> } | null = null
 	let lastIssueDetailCall: { readonly orgId: string; readonly options: Record<string, unknown> } | null =
 		null
+	const startInvestigation = () => {
+		switch (investigationStartMode) {
+			case "quota":
+				return Effect.fail(
+					new InvestigationQuotaError({
+						message: "Daily quota reached",
+						limit: 20,
+						retryableAt: decodeIso("2026-07-16T00:00:00.000Z"),
+					}),
+				)
+			case "unavailable":
+				return Effect.fail(
+					new InvestigationUnavailableError({
+						message: "Agent unavailable",
+						reason: "agent_unavailable",
+						retryable: true,
+					}),
+				)
+			case "rejected":
+				return Effect.fail(
+					new InvestigationRejectedError({
+						message: "Agent rejected the request",
+						status: 401,
+					}),
+				)
+			default:
+				return Effect.succeed(investigationFixture)
+		}
+	}
 	const functionalStubs = Layer.mergeAll(
 		Layer.succeed(InvestigationService, {
 			listInvestigations: (_org, options) => {
@@ -335,6 +388,15 @@ const makeHarness = (
 								new InvestigationNotFoundError({ message: `No such investigation: '${id}'` }),
 							),
 			createInvestigation: () => Effect.succeed(investigationFixture),
+			createAndStartInvestigation: startInvestigation,
+			restartInvestigation: () =>
+				investigationStartMode === "restart_not_found"
+					? Effect.fail(
+							new InvestigationNotFoundError({
+								message: "No such investigation",
+							}),
+						)
+					: startInvestigation(),
 			updateStatus: () => Effect.succeed(investigationFixture),
 			submitDiagnosis: die,
 		}),
@@ -408,6 +470,9 @@ const makeHarness = (
 			upsertNotificationPolicy: die,
 			getEscalationPolicy: die,
 			upsertEscalationPolicy: die,
+			evaluateEscalationPolicy: die,
+			listIssueEscalations: die,
+			listRecentEscalations: die,
 			runTick: die,
 		}),
 		Layer.succeed(OrganizationService, {
@@ -596,6 +661,16 @@ describe("v2 investigations over HTTP", () => {
 			incident_id: ERROR_INCIDENT_ID,
 			issue_id: null,
 		})
+		expect(list.body.data[0].snapshot).toEqual({
+			title: "Checkout failures",
+			scope: "payments",
+			status: "open",
+			severity: "high",
+			facts: [{ label: "Service", value: "payments" }],
+			references: [{ label: "Issue", url: `/errors/issues/${ISS_UUID}` }],
+			incident_started_at: "2026-07-15T09:10:00.000Z",
+			incident_ended_at: null,
+		})
 		expect(list.body.data[0].report).toEqual({
 			summary: "Checkout failures increased after a deploy.",
 			suspected_cause: "A database connection pool regression.",
@@ -688,6 +763,68 @@ describe("v2 investigations over HTTP", () => {
 		expect(updated.status).toBe(200)
 		expect(updated.body.object).toBe("investigation")
 		await harness.dispose()
+	})
+
+	it("restarts an investigation and maps a missing restart target", async () => {
+		const successHarness = makeHarness()
+		const successKey = await successHarness.bootstrapKey()
+		const restarted = await successHarness.request("POST", `/v2/investigations/${INV_ID}/restart`, {
+			token: successKey.secret,
+		})
+		expect(restarted.status).toBe(200)
+		expect(restarted.body.id).toBe(INV_ID)
+		await successHarness.dispose()
+
+		const missingHarness = makeHarness(warehouseStub, false, "restart_not_found")
+		const missingKey = await missingHarness.bootstrapKey()
+		const missing = await missingHarness.request("POST", `/v2/investigations/${MISSING_INV_ID}/restart`, {
+			token: missingKey.secret,
+		})
+		expect(missing.status).toBe(404)
+		expect(missing.body.error.code).toBe("investigation_not_found")
+		await missingHarness.dispose()
+	})
+
+	it("preserves quota reset time and distinguishes unavailable from rejected starts", async () => {
+		const createBody = {
+			subject: {
+				type: "freeform",
+				title: "quota test",
+				prompt: "investigate",
+				context_refs: [],
+			},
+		}
+
+		const quotaHarness = makeHarness(warehouseStub, false, "quota")
+		const quotaKey = await quotaHarness.bootstrapKey()
+		const quota = await quotaHarness.request("POST", "/v2/investigations", {
+			token: quotaKey.secret,
+			body: createBody,
+		})
+		expect(quota.status).toBe(429)
+		expect(quota.body.error.code).toBe("investigation_daily_quota")
+		expect(quota.body.error.message).toContain("2026-07-16T00:00:00.000Z")
+		await quotaHarness.dispose()
+
+		const unavailableHarness = makeHarness(warehouseStub, false, "unavailable")
+		const unavailableKey = await unavailableHarness.bootstrapKey()
+		const unavailable = await unavailableHarness.request("POST", "/v2/investigations", {
+			token: unavailableKey.secret,
+			body: createBody,
+		})
+		expect(unavailable.status).toBe(503)
+		expect(unavailable.body.error.code).toBe("investigation_agent_unavailable")
+		await unavailableHarness.dispose()
+
+		const rejectedHarness = makeHarness(warehouseStub, false, "rejected")
+		const rejectedKey = await rejectedHarness.bootstrapKey()
+		const rejected = await rejectedHarness.request("POST", "/v2/investigations", {
+			token: rejectedKey.secret,
+			body: createBody,
+		})
+		expect(rejected.status).toBe(502)
+		expect(rejected.body.error.code).toBe("investigation_start_rejected")
+		await rejectedHarness.dispose()
 	})
 })
 

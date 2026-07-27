@@ -108,7 +108,11 @@ export function registerRunSqlTool(server: McpToolRegistrar) {
 						rendered.map((row) => columns.map((col) => cellToString(row[col]))),
 					),
 				)
-				if (truncated) lines.push(``, `… +${rowCount - rendered.length} more rows (refine with LIMIT or filters)`)
+				if (truncated)
+					lines.push(
+						``,
+						`… +${rowCount - rendered.length} more rows (refine with LIMIT or filters)`,
+					)
 			}
 
 			return {

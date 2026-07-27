@@ -167,11 +167,42 @@ function deriveMeta(events: unknown[]): DerivedMeta {
 	return { recordedWidth, recordedHeight, startTime, actionMarkers, inactiveIntervals }
 }
 
-type ReplayLoadStatus = "loading" | "error" | "empty" | "ready"
+/**
+ * `empty` and `unrecorded` are both "nothing to play", but they mean opposite
+ * things to the viewer: `empty` is a recording that exists and is still
+ * arriving (or is too short to play), `unrecorded` is a session that never had
+ * one — replay was off or unsampled for that app. Showing a player for the
+ * latter is a dead end, so the surface renders a plain explanation instead.
+ */
+type ReplayLoadStatus = "loading" | "error" | "empty" | "unrecorded" | "ready"
+
+/**
+ * Split "nothing to play" into its two causes, given the session's marker, its
+ * chunk count, and whether it is still open.
+ *
+ * The SDK's `maple.session.recorded` marker is authoritative when present.
+ * Without it (sessions written before the SDK stamped it), only a *closed*
+ * session that never wrote a chunk can be called unrecorded — an open one may
+ * still be uploading, and calling that "not recorded" would be wrong for the
+ * whole time a live session is being watched.
+ */
+export function classifyUnplayable(input: {
+	readonly recorded: boolean | undefined
+	readonly chunkCount: number
+	readonly sessionActive: boolean
+}): "empty" | "unrecorded" {
+	if (input.recorded === false) return "unrecorded"
+	if (input.recorded === undefined && input.chunkCount === 0 && !input.sessionActive) {
+		return "unrecorded"
+	}
+	return "empty"
+}
 
 export interface ReplayPlayerContextValue {
 	status: ReplayLoadStatus
 	error: unknown
+	/** Session still open — an `empty` status then means "chunks still arriving". */
+	sessionActive: boolean
 	/** Fullscreen target (the surface figure). */
 	figureRef: React.RefObject<HTMLElement | null>
 	surfaceRef: React.RefObject<HTMLDivElement | null>
@@ -213,6 +244,22 @@ export function useReplayPlayer(): ReplayPlayerContextValue {
 
 const EMPTY_EVENTS: unknown[] = []
 
+/**
+ * Read the engine's playhead, treating "not started yet" as 0.
+ *
+ * rrweb builds its player context with `baselineTime: 0`, and
+ * `getCurrentTime()` is `timer.timeOffset + (baselineTime - events[0].timestamp)`
+ * — so until the engine has been driven by a `play()` / `pause(offset)` (the only
+ * things that assign `baselineTime`), it reports `-events[0].timestamp`: a
+ * negative epoch, ~55 years. Feeding that back into `play()` re-bases the whole
+ * stream decades into the future and nothing ever casts, which is what left the
+ * player frozen at 0:00 until the first scrub re-based it for us.
+ */
+function engineTimeMs(replayer: Replayer | null): number {
+	const ms = replayer?.getCurrentTime() ?? 0
+	return Number.isFinite(ms) && ms > 0 ? ms : 0
+}
+
 export function errorMessage(error: unknown): string {
 	if (typeof error === "object" && error !== null && "message" in error) {
 		const message = (error as { message: unknown }).message
@@ -226,6 +273,8 @@ export function ReplayPlayerProvider({
 	children,
 	previewEvents,
 	window,
+	recorded,
+	sessionActive = false,
 }: {
 	sessionId: string
 	children: React.ReactNode
@@ -237,6 +286,14 @@ export function ReplayPlayerProvider({
 	previewEvents?: ReadonlyArray<unknown>
 	/** Partition-pruning window; must match the route prefetch key (see $sessionId.tsx). */
 	window?: ReplayPartitionWindow
+	/**
+	 * The session's `maple.session.recorded` marker. `undefined` for sessions
+	 * written before the SDK stamped it — the status derivation then infers from
+	 * `sessionActive` + chunk count instead.
+	 */
+	recorded?: boolean
+	/** Whether the session is still open (`status === "active"`), i.e. chunks may still arrive. */
+	sessionActive?: boolean
 }) {
 	// Chunks carry their rrweb events inline (read straight from ClickHouse); parse
 	// + concatenate them in order. Memoized on the (referentially stable) result so
@@ -250,21 +307,37 @@ export function ReplayPlayerProvider({
 	}>(() => {
 		if (previewEvents) {
 			const decoded = normalizeEvents(previewEvents)
-			return decoded.length >= 2
-				? { status: "ready" as const, error: null, events: decoded }
-				: { status: "empty" as const, error: null, events: EMPTY_EVENTS }
+			if (decoded.length >= 2) return { status: "ready" as const, error: null, events: decoded }
+			// Same classification as the warehouse path below, so the preview route
+			// can exercise every unplayable state rather than always claiming `empty`.
+			return {
+				status: classifyUnplayable({
+					recorded,
+					chunkCount: previewEvents.length,
+					sessionActive,
+				}),
+				error: null,
+				events: EMPTY_EVENTS,
+			}
 		}
 		return Result.builder(eventsResult)
 			.onInitial(() => ({ status: "loading" as const, error: null, events: EMPTY_EVENTS }))
 			.onError((e) => ({ status: "error" as const, error: e, events: EMPTY_EVENTS }))
 			.onSuccess((result) => {
-				const decoded = decodeChunks(result.chunks as ReadonlyArray<ReplayChunk>)
-				return decoded.length >= 2
-					? { status: "ready" as const, error: null, events: decoded }
-					: { status: "empty" as const, error: null, events: EMPTY_EVENTS }
+				const chunks = result.chunks as ReadonlyArray<ReplayChunk>
+				const decoded = decodeChunks(chunks)
+				if (decoded.length >= 2) {
+					return { status: "ready" as const, error: null, events: decoded }
+				}
+				// Nothing playable — say which kind of nothing.
+				return {
+					status: classifyUnplayable({ recorded, chunkCount: chunks.length, sessionActive }),
+					error: null,
+					events: EMPTY_EVENTS,
+				}
 			})
 			.orElse(() => ({ status: "loading" as const, error: null, events: EMPTY_EVENTS }))
-	}, [eventsResult, previewEvents])
+	}, [eventsResult, previewEvents, recorded, sessionActive])
 
 	const figureRef = React.useRef<HTMLElement | null>(null)
 	const surfaceRef = React.useRef<HTMLDivElement | null>(null)
@@ -425,7 +498,7 @@ export function ReplayPlayerProvider({
 					setCurrentMs(gap.end)
 				} else if (!gap) {
 					lastJumpedEnd = -1
-					setCurrentMs(Math.min(cur, totalMs))
+					setCurrentMs(Math.min(Math.max(0, cur), totalMs))
 				}
 			}
 			raf = requestAnimationFrame(tick)
@@ -446,7 +519,7 @@ export function ReplayPlayerProvider({
 			replayer.pause()
 			setIsPlaying(false)
 		} else {
-			const engineCurrentMs = replayer.getCurrentTime()
+			const engineCurrentMs = engineTimeMs(replayer)
 			const from = engineCurrentMs >= totalMs ? 0 : engineCurrentMs
 			replayer.play(from)
 			setIsPlaying(true)
@@ -494,7 +567,7 @@ export function ReplayPlayerProvider({
 
 	const seekRelativeDisplay = React.useCallback(
 		(deltaMs: number) => {
-			const currentRealMs = replayerRef.current?.getCurrentTime() ?? 0
+			const currentRealMs = engineTimeMs(replayerRef.current)
 			seekDisplay(timeline.toDisplay(currentRealMs) + deltaMs)
 		},
 		[seekDisplay, timeline],
@@ -520,6 +593,7 @@ export function ReplayPlayerProvider({
 		() => ({
 			status,
 			error,
+			sessionActive,
 			figureRef,
 			surfaceRef,
 			mountRef,
@@ -545,6 +619,7 @@ export function ReplayPlayerProvider({
 		[
 			status,
 			error,
+			sessionActive,
 			isPlaying,
 			finished,
 			displayCurrentMs,

@@ -86,7 +86,9 @@ export function RulesOverviewTable({
 				</TableCell>
 				<TableCell className="min-w-0">
 					<div className="flex items-center gap-2">
-						<span className={cn("font-medium truncate", !rule.enabled && "text-muted-foreground")}>
+						<span
+							className={cn("font-medium truncate", !rule.enabled && "text-muted-foreground")}
+						>
 							{rule.name}
 						</span>
 						<SignalBadge signalType={rule.signalType} />

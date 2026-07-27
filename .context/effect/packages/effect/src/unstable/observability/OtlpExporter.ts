@@ -25,7 +25,7 @@ import type { HttpBody } from "../http/HttpBody.ts"
 
 const policy = Schedule.forever.pipe(
   Schedule.passthrough,
-  Schedule.addDelay((error) => {
+  Schedule.addDelay(({ output: error }) => {
     if (
       HttpClientError.isHttpClientError(error)
       && error.reason._tag === "StatusCodeError"

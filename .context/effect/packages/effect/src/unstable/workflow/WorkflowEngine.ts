@@ -552,9 +552,10 @@ export const makeUnsafe = (options: Encoded): WorkflowEngine["Service"] =>
       )
   })
 
-const defaultRetrySchedule = Schedule.exponential(200, 1.5).pipe(
-  Schedule.either(Schedule.spaced(30000))
-)
+const defaultRetrySchedule = Schedule.min([
+  Schedule.exponential(200, 1.5),
+  Schedule.spaced(30000)
+])
 
 /**
  * Layer that provides an in-memory `WorkflowEngine`.

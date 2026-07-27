@@ -1,0 +1,124 @@
+---
+/**
+ * UseCasePage — the single template behind all three `/use-cases/*` routes, in
+ * all three locales.
+ *
+ * A use case is a path, not a place, so it inherits the homepage's pinned-pane
+ * device. What differentiates it: the frame head carries a clock the homepage's
+ * doesn't, the constant is a different kind of object (an SLO, an order, a
+ * release rather than a trace id), and the story ends in a number.
+ *
+ * The spine, and its tonal cadence:
+ *
+ *   00  PageHero            bg-bg       dot-grid veil       (page top)
+ *   01  ScrollStory         bg-bg       border-t            tone flat → hairline
+ *   02  OutcomeBand         bg-bg-deep  no border           the full stop
+ *   03  CapabilityLedger    bg-bg       border-t            why the path was short
+ *   04  CrossLinks          bg-bg-deep  no border
+ *   05  PageCta             amber                           the one peak
+ *
+ * CapabilityLedger runs on bg-bg here rather than its default deep, because
+ * OutcomeBand above it already holds the deep floor — two deep sections in a
+ * row would flatten the cadence into a checkerboard.
+ */
+import * as m from "../../paraglide/messages";
+import { featureBySlug } from "../../lib/features";
+import { featurePath, storyIsPinnable, useCasePath } from "../../lib/page-registry";
+import { useCaseBySlug } from "../../lib/use-cases";
+import Layout from "../../layouts/Layout.astro";
+import Footer from "../Footer.astro";
+import Nav from "../Nav.astro";
+import SeoHead from "../SeoHead.astro";
+import CapabilityLedger from "./CapabilityLedger.astro";
+import CrossLinks from "./CrossLinks.astro";
+import OutcomeBand from "./OutcomeBand.astro";
+import PageCta from "./PageCta.astro";
+import PageHero from "./PageHero.astro";
+import ScrollStory from "./ScrollStory.astro";
+
+interface Props {
+	slug: string;
+}
+
+const { slug } = Astro.props;
+const useCase = useCaseBySlug(slug);
+if (!useCase) throw new Error(`UseCasePage: unknown use-case slug "${slug}"`);
+
+const locale = Astro.currentLocale ?? "en";
+
+const title = useCase.seoTitle();
+const description = useCase.seoDescription();
+
+const steps = useCase.steps.map((step) => ({
+	surface: step.surface,
+	route: step.route,
+	elapsed: step.elapsed,
+	title: step.title(),
+	body: step.body(),
+	shot: step.plate.alt,
+	src: step.plate.src,
+}));
+
+const crossLinks = [
+	...useCase.related.flatMap((related) => {
+		const entry = useCaseBySlug(related);
+		return entry ? [{ href: useCasePath(locale, entry.slug), name: entry.navLabel(), desc: entry.navDesc() }] : [];
+	}),
+	...useCase.relatedFeatures.flatMap((related) => {
+		const entry = featureBySlug(related);
+		return entry ? [{ href: featurePath(locale, entry.slug), name: entry.navLabel(), desc: entry.navDesc() }] : [];
+	}),
+];
+---
+
+<Layout title={title} description={description} ogType="article" alternates={useCase.locales}>
+	<SeoHead title={title} description={description} />
+	<Nav />
+
+	<PageHero
+		eyebrow={m.breadcrumb_use_cases()}
+		title={useCase.heroTitle()}
+		lede={useCase.heroLede()}
+		signal={useCase.signal}
+		breadcrumb={[
+			{ label: m.breadcrumb_home(), href: "/" },
+			{ label: m.breadcrumb_use_cases() },
+			{ label: useCase.navLabel() },
+		]}
+	/>
+
+	<ScrollStory
+		class="border-t border-border"
+		constant={useCase.constant}
+		constantLabel={useCase.constantLabel}
+		steps={steps}
+		aspect={useCase.storyAspect}
+		inlineOnly={!storyIsPinnable(useCase.steps)}
+		eyebrow={m.page_story_eyebrow()}
+		title={useCase.storyTitle()}
+		lede={useCase.storyLede()}
+	/>
+
+	<OutcomeBand
+		label={m.page_outcome_label()}
+		line={useCase.outcomeLine()}
+		metrics={useCase.outcomeMetrics.map((metric) => ({ value: metric.value, label: metric.label() }))}
+	/>
+
+	<CapabilityLedger
+		tone="base"
+		class="border-t border-border"
+		eyebrow={m.page_cap_eyebrow()}
+		title={useCase.capTitle()}
+		items={useCase.capabilities.map((capability) => ({
+			op: capability.op,
+			title: capability.title(),
+			body: capability.body(),
+		}))}
+	/>
+
+	<CrossLinks eyebrow={m.page_cross_eyebrow()} title={m.page_cross_usecases_title()} links={crossLinks} />
+
+	<PageCta title={m.page_cta_title()} lede={m.page_cta_lede()} />
+	<Footer />
+</Layout>

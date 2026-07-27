@@ -23,7 +23,7 @@
 // 401 whenever an ingest key is set. `keepalive` carries the header AND lets
 // the request outlive the unloading document (for small bodies).
 //
-// Known limitation: traces + logs only (no metrics, unlike `Otlp.layerJson`).
+// Traces, logs, and Effect metric snapshots are flushed together.
 // ---------------------------------------------------------------------------
 
 import { Layer, Redacted } from "effect"
@@ -37,6 +37,7 @@ import {
 	type SignalState,
 } from "../shared/flush-core.js"
 import { type LogBuffer, makeLogBuffer } from "../shared/flushable-logger.js"
+import { makeMetricBuffer } from "../shared/flushable-metrics.js"
 import { makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
 import { withSessionLink } from "./session-link.js"
 import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
@@ -44,8 +45,12 @@ import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
 /** Default auto-flush cadence (ms), matching `Otlp.layerJson`'s 5s export interval. */
 const DEFAULT_AUTO_FLUSH_MS = 5_000
 
+const browserInstanceId =
+	globalThis.crypto?.randomUUID?.() ??
+	`browser-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+
 export interface MapleClientFlushableConfig {
-	/** Service name reported in traces and logs. */
+	/** Service name reported in traces, logs, and metrics. */
 	readonly serviceName: string
 	/** Maple ingest endpoint URL. */
 	readonly endpoint: string
@@ -73,6 +78,8 @@ export interface MapleClientFlushableConfig {
 	readonly tracesPath?: string | undefined
 	/** OTLP logs path appended to `endpoint`. Default `/v1/logs`. */
 	readonly logsPath?: string | undefined
+	/** OTLP metrics path appended to `endpoint`. Default `/v1/metrics`. */
+	readonly metricsPath?: string | undefined
 	/**
 	 * Background auto-flush cadence in milliseconds. Default `5000`. Set to `0`
 	 * or `false` to disable and flush purely on demand (note: the in-memory
@@ -128,7 +135,10 @@ const keepaliveTransport: FlushTransport = {
 }
 
 const buildBrowserAttributes = (config: MapleClientFlushableConfig): Record<string, unknown> => {
-	const attributes: Record<string, unknown> = { "maple.sdk.type": "client" }
+	const attributes: Record<string, unknown> = {
+		"maple.sdk.type": "client",
+		"service.instance.id": browserInstanceId,
+	}
 	const g = globalThis as Record<string, any>
 	if (typeof g["navigator"] !== "undefined") {
 		const nav = g["navigator"]
@@ -178,8 +188,9 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 		anticipatedErrorIdentifiers: anticipatedIdentifiers,
 	})
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
+	const metrics = makeMetricBuffer()
 	// `withSessionLink` overrides only the Tracer reference, keeping the logger.
-	const layer = withSessionLink(Layer.mergeAll(spans.tracerLayer, logs.loggerLayer))
+	const layer = withSessionLink(Layer.mergeAll(spans.tracerLayer, logs.loggerLayer, metrics.layer))
 
 	// Config is fully programmatic in the browser — resolve eagerly. No
 	// `process.env`, no server `resolveResource` (keeps this out of the client
@@ -196,11 +207,13 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 	const resolved: Resolved = buildResolved(resource, {
 		tracesPath: config.tracesPath,
 		logsPath: config.logsPath,
+		metricsPath: config.metricsPath,
 		userAgent: "maple-effect-sdk-client/0.0.0",
 	})
 
 	const tracesState: SignalState = { disabledUntil: 0 }
 	const logsState: SignalState = { disabledUntil: 0 }
+	const metricsState: SignalState = { disabledUntil: 0 }
 	let noOpLogged = false
 
 	const flush = makeSerializedFlush(async (): Promise<void> => {
@@ -208,8 +221,10 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 			resolved,
 			spans,
 			logs,
+			metrics,
 			tracesState,
 			logsState,
+			metricsState,
 			transport: keepaliveTransport,
 			logPrefix: "[MapleClientSDK]",
 			onNoOp: () => {

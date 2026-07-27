@@ -297,7 +297,7 @@ describe("where clause autocomplete", () => {
 	})
 
 	it("suggests dashboard variables first in value position", () => {
-		const expression = 'service.name = '
+		const expression = "service.name = "
 		const result = getWhereClauseAutocomplete({
 			expression,
 			cursor: expression.length,
@@ -315,7 +315,7 @@ describe("where clause autocomplete", () => {
 	})
 
 	it("matches variables when typing $", () => {
-		const expression = 'service.name = $en'
+		const expression = "service.name = $en"
 		const result = getWhereClauseAutocomplete({
 			expression,
 			cursor: expression.length,
@@ -328,7 +328,7 @@ describe("where clause autocomplete", () => {
 	})
 
 	it("suggests no variables when none are defined", () => {
-		const expression = 'service.name = '
+		const expression = "service.name = "
 		const result = getWhereClauseAutocomplete({
 			expression,
 			cursor: expression.length,

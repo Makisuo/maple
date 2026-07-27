@@ -64,8 +64,8 @@ const makeItProxy = <Methods extends object>(
       if (property in overrides) {
         return Reflect.get(overrides, property)
       }
-      const value = Reflect.get(target, property, receiver)
-      return typeof value === "function" ? value.bind(target) : value
+      // do not bind: binding would strip vitest's static helpers (e.g. `describe.each`)
+      return Reflect.get(target, property, receiver)
     }
   })
 
@@ -148,10 +148,7 @@ const makeTester = <R>(
     const arbs = fc.record(
       Object.keys(arbitraries).reduce(function(result, key) {
         const arb: any = arbitraries[key]
-        if (Schema.isSchema(arb)) {
-          result[key] = Schema.toArbitrary(arb)
-        }
-        result[key] = arb
+        result[key] = Schema.isSchema(arb) ? Schema.toArbitrary(arb) : arb
         return result
       }, {} as Record<string, fc.Arbitrary<any>>)
     )

@@ -2,7 +2,7 @@ import { describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import { strict as assert } from "node:assert"
 import { OrgId, UserId } from "@maple/domain"
-import type { QueryEngineEvaluateRequest } from "@maple/query-engine"
+import { baselineWarehouseCapabilities, type QueryEngineEvaluateRequest } from "@maple/query-engine"
 import type { CompiledQuery } from "@maple/query-engine/ch"
 import { makeQueryEngineEvaluate, makeQueryEngineEvaluateSeries } from "@maple/query-engine/runtime"
 import { QueryEngineService } from "./QueryEngineService"
@@ -72,6 +72,8 @@ const evalStub = (rows: ReadonlyArray<Record<string, unknown>>) =>
 		sqlQuery: () => Effect.succeed(rows as never),
 		rawSqlQuery: () => Effect.die(new Error("rawSqlQuery is not used by evaluate cache tests")),
 		compiledQuery: (_tenant, compiled) => compiled.decodeRows(rows).pipe(Effect.orDie),
+		compiledQueryWithCapabilities: (_tenant, compile) =>
+			compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie),
 	}) satisfies Parameters<typeof makeQueryEngineEvaluate>[0]
 
 describe("makeQueryEngineEvaluate (shared bucket-encoding core)", () => {
@@ -192,6 +194,13 @@ const makeFullStub = (
 		compiledQuery: <Output>(_tenant: unknown, compiled: CompiledQuery<Output>) => {
 			counter.n += 1
 			return compiled.decodeRows(rows).pipe(Effect.orDie)
+		},
+		compiledQueryWithCapabilities: <Output>(
+			_tenant: unknown,
+			compile: (capabilities: ReturnType<typeof baselineWarehouseCapabilities>) => CompiledQuery<Output>,
+		) => {
+			counter.n += 1
+			return compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie)
 		},
 		compiledQueryFirst: <Output>(_tenant: unknown, compiled: CompiledQuery<Output>) => {
 			counter.n += 1

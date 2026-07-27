@@ -1,0 +1,114 @@
+---
+/**
+ * SurfacePanel — the feature page's signature section.
+ *
+ * A feature page stands in one place and enumerates, where the homepage
+ * travels. So the device is the product's own attribute panel, promoted to
+ * page scale: you select one thing, and a narrow mono column lists its keys
+ * and values. Two sibling `.live-frame`s, not a frame inside a frame —
+ * DESIGN.md forbids nested cards, and LiveTrace already pairs a waterfall with
+ * an inspector exactly this way.
+ *
+ * The head carries a route and one real constant from the shot, and neither
+ * swaps: nothing is travelling. That is the whole difference from the
+ * homepage's story frame, where the constant holds while everything else
+ * changes.
+ *
+ * The plate track is the wide one on purpose. At `.shell` width a 2560px
+ * capture renders at 1.98× and has no headroom left on a 2× display; at the
+ * ~860px this track gives it, every asset in the library clears 2× with margin.
+ *
+ * The `facts` keys are the top of the page's operator gutter — the same mono
+ * column CapabilityLedger continues below. Keys and values are literal product
+ * strings and never go through Paraglide.
+ */
+import MediaFrame from "../home/MediaFrame.astro";
+
+interface Props {
+	/** Shown in the frame head, e.g. "/traces". Literal. */
+	route: string;
+	/** The one real constant from the shot, e.g. "trace 4f9ac21e…". Literal. */
+	constant: string;
+	/** Alt text once filled; the placeholder's label while `src` is unset. */
+	shot: string;
+	src?: string;
+	/** Placeholder-only: what to capture. */
+	caption?: string;
+	/**
+	 * The capture's *intrinsic* size. MediaFrame renders `w-full h-auto` and
+	 * never crops, so passing the real numbers means a plate whose aspect
+	 * differs from its neighbours (hero-services is 1.40:1, not 1.94:1) simply
+	 * renders taller rather than getting a different crop than the homepage's.
+	 */
+	width?: number;
+	height?: number;
+	facts: { key: string; value: string }[];
+	eyebrow: string;
+	title: string;
+	lede: string;
+	class?: string;
+}
+
+const {
+	route,
+	constant,
+	shot,
+	src,
+	caption,
+	width = 1280,
+	height = 660,
+	facts,
+	eyebrow,
+	title,
+	lede,
+	class: className = "",
+} = Astro.props;
+---
+
+<section class={`bg-bg ${className}`}>
+	<div class="shell py-16 md:py-32">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{eyebrow}</p>
+		<h2
+			class="mt-4 max-w-[20ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px] lg:text-[54px]"
+		>
+			{title}
+		</h2>
+		<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">{lede}</p>
+
+		<!--
+			The panel takes the LEFT track so its key column starts on the shell's
+			left edge — the same 20rem gutter CapabilityLedger uses below, which is
+			what makes the mono keys read as one rail running down the page. Copy
+			left / media right is also the homepage's own two-column skeleton
+			(KubernetesSection, AgentSection).
+
+			DOM order is plate-first so mobile leads with the screenshot; `lg:order-*`
+			swaps them once there are two tracks.
+		-->
+		<div class="mt-12 grid gap-6 md:mt-16 lg:grid-cols-[20rem_1fr] lg:gap-8">
+			<!-- min-w-0: a grid item defaults to `min-width: auto`, so a wide plate
+			     would push the track past the viewport instead of scaling into it. -->
+			<div class="min-w-0 lg:order-2">
+				<MediaFrame label={shot} caption={caption} src={src} width={width} height={height} />
+			</div>
+
+			<!-- The panel. Its own frame, beside the plate rather than inside it. -->
+			<div class="live-frame flex min-w-0 flex-col lg:order-1">
+				<div class="live-frame__head">
+					<span>{route}</span>
+					<span class="text-fg normal-case tracking-normal">{constant}</span>
+				</div>
+				<dl class="grid grid-cols-[auto_1fr] content-start gap-x-4 gap-y-3 p-4 md:p-5">
+					{
+						facts.map((fact) => (
+							<>
+								<dt class="op-key pt-px leading-relaxed">{fact.key}</dt>
+								<dd class="min-w-0 break-words text-[12px] leading-relaxed text-fg">{fact.value}</dd>
+							</>
+						))
+					}
+				</dl>
+			</div>
+		</div>
+	</div>
+</section>

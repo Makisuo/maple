@@ -72,7 +72,18 @@ export interface NotificationDispatcherShape {
 		orgId: OrgId,
 		destinationIds: ReadonlyArray<AlertDestinationId>,
 		context: NotificationRequest,
-	) => Effect.Effect<{ readonly delivered: number; readonly failed: number }>
+	) => Effect.Effect<{
+		readonly delivered: number
+		readonly failed: number
+		readonly destinations: ReadonlyArray<NotificationDestinationResult>
+	}>
+}
+
+export interface NotificationDestinationResult {
+	readonly destinationId: AlertDestinationId
+	readonly destinationName: string | null
+	readonly status: "delivered" | "failed" | "disabled" | "missing"
+	readonly error: string | null
 }
 
 /*
@@ -207,7 +218,7 @@ const make: Effect.Effect<
 			destinationIds: ReadonlyArray<AlertDestinationId>,
 			context: NotificationRequest,
 		) {
-			if (destinationIds.length === 0) return { delivered: 0, failed: 0 }
+			if (destinationIds.length === 0) return { delivered: 0, failed: 0, destinations: [] }
 
 			const rows = yield* database
 				.execute((db) =>
@@ -232,13 +243,36 @@ const make: Effect.Effect<
 					),
 				)
 
-			const enabled = rows.filter((row) => row.enabled)
-
+			const rowsById = new Map(rows.map((row) => [row.id, row]))
 			const results = yield* Effect.forEach(
-				enabled,
-				(row: AlertDestinationRow) =>
-					dispatchOne(row, context).pipe(
-						Effect.map(() => "delivered" as const),
+				destinationIds,
+				(destinationId) => {
+					const row = rowsById.get(destinationId)
+					if (!row) {
+						return Effect.succeed<NotificationDestinationResult>({
+							destinationId,
+							destinationName: null,
+							status: "missing",
+							error: "destination_missing",
+						})
+					}
+					if (!row.enabled) {
+						return Effect.succeed<NotificationDestinationResult>({
+							destinationId,
+							destinationName: row.name,
+							status: "disabled",
+							error: "destination_disabled",
+						})
+					}
+					return dispatchOne(row, context).pipe(
+						Effect.map(
+							(): NotificationDestinationResult => ({
+								destinationId: row.id,
+								destinationName: row.name,
+								status: "delivered",
+								error: null,
+							}),
+						),
 						Effect.tapError((error) =>
 							Effect.logError("NotificationDispatcher: delivery failed").pipe(
 								Effect.annotateLogs({
@@ -250,17 +284,30 @@ const make: Effect.Effect<
 							),
 						),
 						Effect.catchTags({
-							"@maple/api/services/NotificationDispatchError": () =>
-								Effect.succeed("failed" as const),
-							"@maple/http/errors/AlertDeliveryError": () => Effect.succeed("failed" as const),
+							"@maple/api/services/NotificationDispatchError": (error) =>
+								Effect.succeed<NotificationDestinationResult>({
+									destinationId: row.id,
+									destinationName: row.name,
+									status: "failed",
+									error: error.message,
+								}),
+							"@maple/http/errors/AlertDeliveryError": (error) =>
+								Effect.succeed<NotificationDestinationResult>({
+									destinationId: row.id,
+									destinationName: row.name,
+									status: "failed",
+									error: error.message,
+								}),
 						}),
-					),
+					)
+				},
 				{ concurrency: NOTIFICATION_DELIVERY_CONCURRENCY },
 			)
 
 			return {
-				delivered: results.filter((r) => r === "delivered").length,
-				failed: results.filter((r) => r === "failed").length,
+				delivered: results.filter((result) => result.status === "delivered").length,
+				failed: results.filter((result) => result.status === "failed").length,
+				destinations: results,
 			}
 		},
 	)

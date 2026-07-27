@@ -17,8 +17,7 @@ export interface ScrapeErrorDiagnosis {
 }
 
 /** Strip the `[branch:<x>] ` prefix the API adds to PlanetScale rollup errors. */
-const stripBranchPrefix = (message: string): string =>
-	message.replace(/^\[branch:[^\]]*\]\s*/, "")
+const stripBranchPrefix = (message: string): string => message.replace(/^\[branch:[^\]]*\]\s*/, "")
 
 const httpStatusOf = (message: string): number | null => {
 	const match = message.match(/HTTP (\d{3})/)

@@ -7,6 +7,11 @@ import {
 	InvestigationDocument,
 	InvestigationNotFoundError,
 	InvestigationPersistenceError,
+	InvestigationQuotaError,
+	InvestigationRejectedError,
+	InvestigationSnapshotFact,
+	InvestigationSubjectSnapshot,
+	InvestigationUnavailableError,
 	InvestigationsListResponse,
 	type InvestigationStatus,
 	InvestigationSubject,
@@ -15,16 +20,18 @@ import {
 	type UserId,
 } from "@maple/domain/http"
 import { ErrorIssueEventId, ErrorIssueId, InvestigationId } from "@maple/domain/primitives"
-import { errorIssueEvents, investigations, type InvestigationRow } from "@maple/db"
+import { aiTriageSettings, errorIssueEvents, investigations, type InvestigationRow } from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { and, desc, eq } from "drizzle-orm"
-import { Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm"
+import { Cause, Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "../lib/autumn-tracker"
 import { applyTriageSeverity } from "../lib/issue-severity"
 import { Database, DatabaseError, type DatabaseClient } from "../lib/DatabaseLive"
+import { Env } from "../lib/Env"
 
 const decodeIdSync = Schema.decodeUnknownSync(InvestigationId)
 const decodeSubjectSync = Schema.decodeUnknownSync(InvestigationSubject)
+const decodeSnapshotOption = Schema.decodeUnknownOption(InvestigationSubjectSnapshot)
 const decodeResultOption = Schema.decodeUnknownOption(AiTriageResult)
 const decodeIsoSync = Schema.decodeUnknownSync(InvestigationDocument.fields.createdAt)
 const decodeIssueId = Schema.decodeUnknownSync(ErrorIssueId)
@@ -76,6 +83,11 @@ export interface ListInvestigationsOptions {
 	readonly offset?: number
 }
 
+export interface StartInvestigationOptions {
+	/** Automatic incident-open starts respect the per-org enabled flag. */
+	readonly automatic: boolean
+}
+
 export interface InvestigationServiceShape {
 	readonly listInvestigations: (
 		orgId: OrgId,
@@ -90,6 +102,29 @@ export interface InvestigationServiceShape {
 		userId: UserId | null,
 		request: InvestigationCreateRequest,
 	) => Effect.Effect<InvestigationDocument, InvestigationPersistenceError>
+	readonly createAndStartInvestigation: (
+		orgId: OrgId,
+		userId: UserId | null,
+		request: InvestigationCreateRequest,
+		options: StartInvestigationOptions,
+	) => Effect.Effect<
+		InvestigationDocument,
+		| InvestigationPersistenceError
+		| InvestigationQuotaError
+		| InvestigationRejectedError
+		| InvestigationUnavailableError
+	>
+	readonly restartInvestigation: (
+		orgId: OrgId,
+		id: InvestigationId,
+	) => Effect.Effect<
+		InvestigationDocument,
+		| InvestigationPersistenceError
+		| InvestigationNotFoundError
+		| InvestigationQuotaError
+		| InvestigationRejectedError
+		| InvestigationUnavailableError
+	>
 	readonly updateStatus: (
 		orgId: OrgId,
 		id: InvestigationId,
@@ -107,12 +142,37 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 	{
 		make: Effect.gen(function* () {
 			const database = yield* Database
+			const env = yield* Env
 			const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
 
 			const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 				database.execute(fn).pipe(Effect.mapError(makePersistenceError))
 
 			const iso = (date: Date) => decodeIsoSync(date.toISOString())
+			const staleBeforeMs = 15 * 60 * 1000
+
+			const fallbackSnapshot = (subject: InvestigationSubject) =>
+				new InvestigationSubjectSnapshot({
+					title:
+						subject.type === "freeform"
+							? subject.title
+							: `${subject.incidentKind[0]?.toUpperCase() ?? ""}${subject.incidentKind.slice(1)} incident`,
+					scope: null,
+					status: "open",
+					severity: null,
+					facts:
+						subject.type === "incident"
+							? [
+									new InvestigationSnapshotFact({
+										label: "Incident",
+										value: subject.incidentId,
+									}),
+								]
+							: [],
+					references: [],
+					incidentStartedAt: null,
+					incidentEndedAt: null,
+				})
 
 			const parseReport = Effect.fnUntraced(function* (raw: unknown, investigationId: string) {
 				if (raw == null) return null
@@ -130,10 +190,16 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			})
 
 			const rowToDocument = Effect.fnUntraced(function* (row: InvestigationRow) {
+				const subject = decodeSubjectSync(row.subjectJson)
+				const storedSnapshot = decodeSnapshotOption(row.snapshotJson)
 				return new InvestigationDocument({
 					id: decodeIdSync(row.id),
 					status: row.status,
-					subject: decodeSubjectSync(row.subjectJson),
+					subject,
+					snapshot: Option.match(storedSnapshot, {
+						onNone: () => fallbackSnapshot(subject),
+						onSome: (snapshot) => snapshot,
+					}),
 					report: yield* parseReport(row.reportJson, row.id),
 					model: row.model ?? null,
 					severity: row.severity ?? null,
@@ -175,10 +241,236 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						.limit(1),
 				).pipe(Effect.map((rows) => rows[0]))
 
+			const failStaleInvestigations = Effect.fnUntraced(function* (orgId: OrgId, nowMs: number) {
+				yield* dbExecute((db) =>
+					db
+						.update(investigations)
+						.set({
+							status: "failed",
+							error: "diagnosis_timeout: no diagnosis was submitted within 15 minutes; retry",
+							updatedAt: new Date(nowMs),
+						})
+						.where(
+							and(
+								eq(investigations.orgId, orgId),
+								eq(investigations.status, "investigating"),
+								lt(investigations.startedAt, new Date(nowMs - staleBeforeMs)),
+							),
+						),
+				).pipe(Effect.asVoid)
+			})
+
+			const startOfUtcDay = (nowMs: number) => {
+				const date = new Date(nowMs)
+				return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+			}
+
+			const ensureStartAllowed = Effect.fnUntraced(function* (
+				orgId: OrgId,
+				automatic: boolean,
+				nowMs: number,
+			) {
+				const settingsRows = yield* dbExecute((db) =>
+					db.select().from(aiTriageSettings).where(eq(aiTriageSettings.orgId, orgId)).limit(1),
+				)
+				const settings = settingsRows[0]
+				if (automatic && (settings === undefined || !settings.enabled)) {
+					return yield* Effect.fail(
+						new InvestigationUnavailableError({
+							message: "Automatic investigations are disabled for this organization.",
+							reason: "automation_disabled",
+							retryable: false,
+						}),
+					)
+				}
+
+				const dailyLimit = settings?.maxRunsPerDay ?? 20
+				const usageRows = yield* dbExecute((db) =>
+					db
+						.select({
+							count: sql<number>`coalesce(sum(${investigations.autonomousTurns}), 0)::int`,
+						})
+						.from(investigations)
+						.where(
+							and(
+								eq(investigations.orgId, orgId),
+								gte(investigations.createdAt, new Date(startOfUtcDay(nowMs))),
+							),
+						),
+				)
+				if ((usageRows[0]?.count ?? 0) >= dailyLimit) {
+					const retryableAtMs = startOfUtcDay(nowMs) + 24 * 60 * 60 * 1000
+					yield* Effect.annotateCurrentSpan({
+						"maple.investigation.start_result": "quota_skipped",
+						"maple.investigation.daily_limit": dailyLimit,
+					})
+					return yield* Effect.fail(
+						new InvestigationQuotaError({
+							message: `Daily investigation budget of ${dailyLimit} has been reached.`,
+							limit: dailyLimit,
+							retryableAt: decodeIsoSync(new Date(retryableAtMs).toISOString()),
+						}),
+					)
+				}
+			})
+
+			const agentBinding = () => {
+				const raw = Option.getOrUndefined(workerEnv) as
+					| {
+							readonly CHAT_FLUE?: unknown
+					  }
+					| undefined
+				const binding = raw?.CHAT_FLUE
+				if (
+					typeof binding !== "object" ||
+					binding === null ||
+					typeof (binding as { fetch?: unknown }).fetch !== "function"
+				) {
+					return undefined
+				}
+				return { fetch: (binding as { fetch: typeof fetch }).fetch.bind(binding) }
+			}
+
+			const markStartFailed = Effect.fnUntraced(function* (
+				orgId: OrgId,
+				id: InvestigationId,
+				reason: string,
+				nowMs: number,
+			) {
+				yield* dbExecute((db) =>
+					db
+						.update(investigations)
+						.set({ status: "failed", error: reason, updatedAt: new Date(nowMs) })
+						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, id))),
+				).pipe(Effect.asVoid)
+			})
+
+			const sendAutonomousTurn = Effect.fnUntraced(function* (
+				orgId: OrgId,
+				doc: InvestigationDocument,
+				nowMs: number,
+			) {
+				const agent = agentBinding()
+				if (!agent) {
+					yield* markStartFailed(
+						orgId,
+						doc.id,
+						"agent_unavailable: the investigation agent is not configured; retry",
+						nowMs,
+					)
+					return yield* Effect.fail(
+						new InvestigationUnavailableError({
+							message: "The investigation agent is temporarily unavailable.",
+							reason: "agent_unavailable",
+							retryable: true,
+						}),
+					)
+				}
+
+				const token = Option.getOrUndefined(env.INTERNAL_SERVICE_TOKEN)
+				if (token === undefined) {
+					yield* markStartFailed(
+						orgId,
+						doc.id,
+						"agent_unavailable: the internal service token is not configured",
+						nowMs,
+					)
+					return yield* Effect.fail(
+						new InvestigationUnavailableError({
+							message: "The investigation agent is not configured.",
+							reason: "agent_unavailable",
+							retryable: false,
+						}),
+					)
+				}
+
+				const instanceId = `${orgId}:inv-${doc.id}`
+				const message = [
+					"Begin the autonomous investigation now.",
+					"Use the preserved subject snapshot below as the source context, gather evidence with tools, and call submit_diagnosis exactly once.",
+					JSON.stringify({ subject: doc.subject, snapshot: doc.snapshot }),
+				].join("\n\n")
+				const response = yield* Effect.tryPromise({
+					try: (signal) =>
+						agent.fetch(
+							new Request(
+								`https://chat-flue.internal/agents/maple-chat/${encodeURIComponent(instanceId)}`,
+								{
+									method: "POST",
+									headers: {
+										authorization: `Bearer maple_svc_${Redacted.value(token)}`,
+										"content-type": "application/json",
+									},
+									body: JSON.stringify({ message }),
+									signal,
+								},
+							),
+						),
+					catch: (cause) =>
+						new InvestigationUnavailableError({
+							message:
+								cause instanceof Error ? cause.message : "Unable to start investigation.",
+							reason: "start_failed",
+							retryable: true,
+						}),
+				}).pipe(
+					Effect.timeoutOrElse({
+						duration: Duration.seconds(15),
+						orElse: () =>
+							Effect.fail(
+								new InvestigationUnavailableError({
+									message: "The investigation agent timed out after 15 seconds.",
+									reason: "start_failed",
+									retryable: true,
+								}),
+							),
+					}),
+					Effect.tapError(() =>
+						markStartFailed(
+							orgId,
+							doc.id,
+							"start_failed: the investigation agent could not be reached; retry",
+							nowMs,
+						),
+					),
+				)
+				if (!response.ok) {
+					const retryable = response.status === 429 || response.status >= 500
+					yield* markStartFailed(
+						orgId,
+						doc.id,
+						retryable
+							? `start_failed: agent returned HTTP ${response.status}; retry`
+							: `start_rejected: agent returned HTTP ${response.status}`,
+						nowMs,
+					)
+					if (!retryable) {
+						return yield* Effect.fail(
+							new InvestigationRejectedError({
+								message: `The investigation agent rejected the start request (${response.status}).`,
+								status: response.status,
+							}),
+						)
+					}
+					return yield* Effect.fail(
+						new InvestigationUnavailableError({
+							message: `The investigation agent rejected the start request (${response.status}).`,
+							reason: "start_failed",
+							retryable: true,
+						}),
+					)
+				}
+				yield* Effect.annotateCurrentSpan({
+					"maple.investigation.start_result": "started",
+					"maple.investigation.id": doc.id,
+				})
+			})
+
 			const listInvestigations: InvestigationServiceShape["listInvestigations"] = Effect.fn(
 				"InvestigationService.listInvestigations",
 			)(function* (orgId, opts) {
-				yield* Effect.annotateCurrentSpan({ "maple.org_id": orgId })
+				yield* Effect.annotateCurrentSpan({ orgId })
+				yield* failStaleInvestigations(orgId, yield* Clock.currentTimeMillis)
 				const conditions = [
 					eq(investigations.orgId, orgId),
 					opts.issueId ? eq(investigations.issueId, opts.issueId) : undefined,
@@ -203,7 +495,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			const getInvestigation: InvestigationServiceShape["getInvestigation"] = Effect.fn(
 				"InvestigationService.getInvestigation",
 			)(function* (orgId, id) {
-				yield* Effect.annotateCurrentSpan({ "maple.org_id": orgId, "maple.investigation.id": id })
+				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
+				yield* failStaleInvestigations(orgId, yield* Clock.currentTimeMillis)
 				const row = yield* loadRow(orgId, id)
 				if (!row) {
 					return yield* Effect.fail(
@@ -217,7 +510,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				"InvestigationService.createInvestigation",
 			)(function* (orgId, userId, request) {
 				yield* Effect.annotateCurrentSpan({
-					"maple.org_id": orgId,
+					orgId,
 					"maple.investigation.subject_type": request.subject.type,
 				})
 				const nowMs = yield* Clock.currentTimeMillis
@@ -254,6 +547,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 							status: "investigating",
 							seededBy: userId ? "user" : "system",
 							subjectJson: subject,
+							snapshotJson: request.snapshot ?? fallbackSnapshot(subject),
 							...incidentColumns,
 							createdBy: userId,
 							createdAt: new Date(nowMs),
@@ -286,11 +580,97 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				return yield* rowToDocument(row)
 			})
 
+			const createAndStartInvestigation: InvestigationServiceShape["createAndStartInvestigation"] =
+				Effect.fn("InvestigationService.createAndStartInvestigation")(
+					function* (orgId, userId, request, options) {
+						yield* Effect.annotateCurrentSpan({
+							orgId,
+							"maple.investigation.subject_type": request.subject.type,
+							"maple.investigation.creation_source": options.automatic ? "automatic" : "manual",
+						})
+						const nowMs = yield* Clock.currentTimeMillis
+						yield* failStaleInvestigations(orgId, nowMs)
+						if (request.subject.type === "incident") {
+							const existing = yield* loadIncidentRow(
+								orgId,
+								request.subject.incidentKind,
+								request.subject.incidentId,
+							)
+							if (
+								existing &&
+								(existing.status !== "investigating" || existing.startedAt !== null)
+							) {
+								return yield* rowToDocument(existing)
+							}
+						}
+						yield* ensureStartAllowed(orgId, options.automatic, nowMs)
+						const doc = yield* createInvestigation(orgId, userId, request)
+						const claimed = yield* dbExecute((db) =>
+							db
+								.update(investigations)
+								.set({
+									startedAt: new Date(nowMs),
+									autonomousTurns: sql`${investigations.autonomousTurns} + 1`,
+									updatedAt: new Date(nowMs),
+								})
+								.where(
+									and(
+										eq(investigations.orgId, orgId),
+										eq(investigations.id, doc.id),
+										eq(investigations.status, "investigating"),
+										isNull(investigations.startedAt),
+									),
+								)
+								.returning({ id: investigations.id }),
+						)
+						if (claimed.length === 0) return doc
+						yield* sendAutonomousTurn(orgId, doc, nowMs)
+						return yield* getInvestigation(orgId, doc.id).pipe(
+							Effect.catchTag("@maple/http/investigations/InvestigationNotFoundError", () =>
+								Effect.fail(
+									new InvestigationPersistenceError({
+										message: "Investigation row disappeared after autonomous start",
+									}),
+								),
+							),
+						)
+					},
+				)
+
+			const restartInvestigation: InvestigationServiceShape["restartInvestigation"] = Effect.fn(
+				"InvestigationService.restartInvestigation",
+			)(function* (orgId, id) {
+				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
+				const nowMs = yield* Clock.currentTimeMillis
+				yield* ensureStartAllowed(orgId, false, nowMs)
+				const existing = yield* getInvestigation(orgId, id)
+				yield* dbExecute((db) =>
+					db
+						.update(investigations)
+						.set({
+							status: "investigating",
+							error: null,
+							startedAt: new Date(nowMs),
+							autonomousTurns: sql`${investigations.autonomousTurns} + 1`,
+							updatedAt: new Date(nowMs),
+						})
+						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, id))),
+				)
+				const restarting = new InvestigationDocument({
+					...existing,
+					status: "investigating",
+					error: null,
+					updatedAt: decodeIsoSync(new Date(nowMs).toISOString()),
+				})
+				yield* sendAutonomousTurn(orgId, restarting, nowMs)
+				return yield* getInvestigation(orgId, id)
+			})
+
 			const updateStatus: InvestigationServiceShape["updateStatus"] = Effect.fn(
 				"InvestigationService.updateStatus",
 			)(function* (orgId, id, status) {
 				yield* Effect.annotateCurrentSpan({
-					"maple.org_id": orgId,
+					orgId,
 					"maple.investigation.id": id,
 					"maple.investigation.status": status,
 				})
@@ -326,7 +706,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			const submitDiagnosis: InvestigationServiceShape["submitDiagnosis"] = Effect.fn(
 				"InvestigationService.submitDiagnosis",
 			)(function* (orgId, id, request) {
-				yield* Effect.annotateCurrentSpan({ "maple.org_id": orgId, "maple.investigation.id": id })
+				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
 				const nowMs = yield* Clock.currentTimeMillis
 				const row = yield* loadRow(orgId, id)
 				if (!row) {
@@ -370,6 +750,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								orgId,
 								issueId: decodedIssueId,
 								runId: id,
+								investigationId: id,
 								severity: result.severityAssessment,
 								confidence,
 								timestamp: nowMs,
@@ -428,6 +809,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				listInvestigations,
 				getInvestigation,
 				createInvestigation,
+				createAndStartInvestigation,
+				restartInvestigation,
 				updateStatus,
 				submitDiagnosis,
 			} satisfies InvestigationServiceShape

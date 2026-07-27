@@ -101,6 +101,18 @@ describe("toEquivalence", () => {
     assertFalse(equivalence(["a", 1, "b", 2], ["a", 1, "b", 3]))
   })
 
+  it("TupleWithRest with multiple post-rest elements", () => {
+    const schema = Schema.TupleWithRest(Schema.Tuple([Schema.String]), [
+      Schema.String,
+      Schema.Number,
+      Schema.Boolean,
+      Schema.String
+    ])
+    const equivalence = Schema.toEquivalence(schema)
+    assertTrue(equivalence(["head", "tail", 1, true, "last"], ["head", "tail", 1, true, "last"]))
+    assertFalse(equivalence(["head", "tail", 1, true, "A"], ["head", "tail", 1, true, "B"]))
+  })
+
   describe("Struct", () => {
     it("should fail on non-record inputs", () => {
       const schema = Schema.Struct({ a: Schema.String })

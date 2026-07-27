@@ -20,7 +20,7 @@ import {
 	type UpdateScrapeTargetRequest,
 } from "@maple/domain/http"
 import { scrapeTargetChecks, scrapeTargets, type ScrapeTargetCheckRow } from "@maple/db"
-import { and, desc, eq, gte, inArray, lt, lte } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, lte } from "drizzle-orm"
 import { Cause, Clock, Context, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "../lib/Crypto"
 import { Database } from "../lib/DatabaseLive"
@@ -38,6 +38,17 @@ import { PlanetScaleDiscoveryService, planetScaleDiscoveryUrl } from "./PlanetSc
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
+
+/**
+ * Accumulated row state for one target across a batch of scrape results — the
+ * value a sequence of per-result UPDATEs would have converged on. `lastScrapeAt`
+ * is absent when the batch held no success, leaving the stored value untouched.
+ */
+interface ScrapeTargetOutcome {
+	lastScrapeAt?: Date
+	lastScrapeError?: string | null
+	updatedAt: Date
+}
 
 interface ScrapeTargetProxyResponse {
 	readonly status: number
@@ -143,10 +154,29 @@ export interface ScrapeTargetsServiceShape {
 	>
 }
 
-/** Check-history retention: 24h sliding window… */
-const CHECK_RETENTION_MS = 24 * 60 * 60 * 1000
-/** …with a per-target row cap as backstop against very short intervals. */
-const CHECK_MAX_ROWS_PER_TARGET = 10_000
+// In-isolate row cache for the internal scrape proxy. Every proxied scrape used
+// to re-read the target row from Postgres: production traces showed ~95k of
+// these per day for FOUR distinct rows (one PlanetScale target fans out to 30
+// branch sub-targets, each scraped on its own interval), and the lookup alone
+// was 74ms of the route's 130ms average — more than the upstream fetch it
+// exists to perform. Workers reuse an isolate across requests, so a
+// module-scoped memo serves the steady state with zero network.
+//
+// Deliberately NOT the shared edge cache: `Database.execute` p50 is 16ms while
+// an edge read is bounded at 250ms, so a second tier would not reliably pay for
+// itself here, and the row carries credential ciphertext + Date columns that
+// would need a bespoke JSON projection to survive it.
+//
+// Staleness is bounded by the same TTL `OrgClickHouseSettingsService` accepts
+// for its config memo. Mutations clear the entry in the writing isolate; other
+// isolates fall off within the TTL. A disabled or deleted target cannot keep
+// being scraped for that long regardless — the scraper reconciles its target
+// list every 60s (apps/scraper ScrapeScheduler) and simply stops asking.
+// The Map itself is built per service instance (not at module scope) so it is
+// scoped to the layer that owns the connection it caches — module scope would
+// share one memo across every database in a process, which is exactly wrong for
+// tests that build a fresh PGlite per case.
+const SCRAPE_TARGET_ROW_MEMO_TTL_MS = 300_000
 
 const toPersistenceError = (error: unknown) =>
 	new ScrapeTargetPersistenceError({
@@ -375,6 +405,14 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 	{
 		make: Effect.gen(function* () {
 			const database = yield* Database
+			const scrapeTargetRowMemo = new Map<
+				string,
+				{ row: ScrapeTargetRow | null; expiresAt: number }
+			>()
+			/** Drop the memoized row so the next proxied scrape re-reads it from Postgres. */
+			const invalidateScrapeTargetRow = (targetId: ScrapeTargetId): void => {
+				scrapeTargetRowMemo.delete(targetId)
+			}
 			const env = yield* Env
 			const discovery = yield* PlanetScaleDiscoveryService
 			const psOAuth = yield* PlanetScaleOAuthService
@@ -416,13 +454,29 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 
 			const selectByIdForInternalScrape = Effect.fn("ScrapeTargetsService.selectByIdForInternalScrape")(
 				function* (targetId: ScrapeTargetId) {
+					const nowMs = yield* Clock.currentTimeMillis
+					const memoized = scrapeTargetRowMemo.get(targetId)
+					if (memoized !== undefined && memoized.expiresAt > nowMs) {
+						yield* Effect.annotateCurrentSpan("scrapeTarget.rowMemoHit", true)
+						return Option.fromNullishOr(memoized.row)
+					}
+					yield* Effect.annotateCurrentSpan("scrapeTarget.rowMemoHit", false)
+
 					const rows = yield* database
 						.execute((db) =>
 							db.select().from(scrapeTargets).where(eq(scrapeTargets.id, targetId)).limit(1),
 						)
 						.pipe(Effect.mapError(toPersistenceError))
 
-					return Option.fromNullishOr(rows[0])
+					// Misses are memoized too: a target deleted while the scraper still
+					// holds it in its 60s reconcile window would otherwise re-read
+					// Postgres on every scrape just to be told it's gone again.
+					const row = rows[0] ?? null
+					scrapeTargetRowMemo.set(targetId, {
+						row,
+						expiresAt: nowMs + SCRAPE_TARGET_ROW_MEMO_TTL_MS,
+					})
+					return Option.fromNullishOr(row)
 				},
 			)
 
@@ -780,6 +834,9 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				// Org or credential changes must take effect on the next scrape, not
 				// after the discovery TTL elapses.
 				if (isPlanetScale) yield* discovery.invalidate(targetId)
+				// Same reasoning for the proxy's row memo: a rotated credential or a
+				// flipped `enabled` must not be masked by a warm entry in this isolate.
+				invalidateScrapeTargetRow(targetId)
 
 				return rowToResponse(row.value)
 			})
@@ -809,6 +866,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				}
 
 				yield* discovery.invalidate(targetId)
+				invalidateScrapeTargetRow(targetId)
 
 				return new ScrapeTargetDeleteResponse({
 					id: decodeTargetIdSync(deleted.value.id),
@@ -914,60 +972,6 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				)
 			})
 
-			const pruneChecks = Effect.fn("ScrapeTargetsService.pruneChecks")(function* (
-				targetIds: ReadonlyArray<ScrapeTargetId>,
-			) {
-				const now = yield* Clock.currentTimeMillis
-				const cutoff = now - CHECK_RETENTION_MS
-				yield* database
-					.execute((db) =>
-						db
-							.delete(scrapeTargetChecks)
-							.where(
-								and(
-									inArray(scrapeTargetChecks.targetId, [...targetIds]),
-									lt(scrapeTargetChecks.checkedAt, new Date(cutoff)),
-								),
-							),
-					)
-					.pipe(Effect.mapError(toPersistenceError))
-
-				// Cap backstop for misconfigured/very short intervals: drop everything
-				// older than the Nth-newest row per target.
-				yield* Effect.forEach(
-					targetIds,
-					(targetId) =>
-						Effect.gen(function* () {
-							const capBoundary = yield* database
-								.execute((db) =>
-									db
-										.select({ checkedAt: scrapeTargetChecks.checkedAt })
-										.from(scrapeTargetChecks)
-										.where(eq(scrapeTargetChecks.targetId, targetId))
-										.orderBy(desc(scrapeTargetChecks.checkedAt))
-										.limit(1)
-										.offset(CHECK_MAX_ROWS_PER_TARGET - 1),
-								)
-								.pipe(Effect.mapError(toPersistenceError))
-							const boundary = capBoundary[0]
-							if (boundary === undefined) return
-							yield* database
-								.execute((db) =>
-									db
-										.delete(scrapeTargetChecks)
-										.where(
-											and(
-												eq(scrapeTargetChecks.targetId, targetId),
-												lt(scrapeTargetChecks.checkedAt, boundary.checkedAt),
-											),
-										),
-								)
-								.pipe(Effect.mapError(toPersistenceError))
-						}),
-					{ discard: true },
-				)
-			})
-
 			const recordScrapeResults = Effect.fn("ScrapeTargetsService.recordScrapeResults")(function* (
 				results: ReadonlyArray<{
 					readonly targetId: ScrapeTargetId
@@ -980,97 +984,82 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				}>,
 				options?: { readonly recordChecks?: boolean },
 			) {
-				const resultsByTarget = new Map<ScrapeTargetId, typeof results>()
+				if (results.length === 0) return
+
+				// Fold each target's results into the single row state that applying
+				// them in order would have left behind. The previous implementation
+				// issued one UPDATE per result, but each overwrote the previous one, so
+				// only this accumulated value was ever durable — ~95k writes a day to
+				// persist ~8k outcomes.
+				const outcomeByTarget = new Map<ScrapeTargetId, ScrapeTargetOutcome>()
 				for (const result of results) {
-					const targetResults = resultsByTarget.get(result.targetId)
-					if (targetResults === undefined) {
-						resultsByTarget.set(result.targetId, [result])
+					// Rollup for discovered sub-targets: any branch success advances
+					// lastScrapeAt; any branch failure surfaces (branch-prefixed) as
+					// lastScrapeError. Per-branch health stays visible in check history
+					// via the per-branch `instance`.
+					const error =
+						result.error !== null && result.subTargetKey
+							? `[branch:${result.subTargetKey}] ${result.error}`
+							: result.error
+					const scrapedAt = new Date(result.scrapedAt)
+					const outcome = outcomeByTarget.get(result.targetId) ?? { updatedAt: scrapedAt }
+					if (error === null) {
+						outcome.lastScrapeAt = scrapedAt
+						outcome.lastScrapeError = null
 					} else {
-						resultsByTarget.set(result.targetId, [...targetResults, result])
+						// Failure keeps lastScrapeAt at the last good scrape so data gaps
+						// stay visible alongside the error.
+						outcome.lastScrapeError = error
 					}
+					outcome.updatedAt = scrapedAt
+					outcomeByTarget.set(result.targetId, outcome)
 				}
 
-				yield* Effect.forEach(
-					resultsByTarget.values(),
-					(targetResults) =>
-						Effect.forEach(
-							targetResults,
-							(result) => {
-								// Rollup for discovered sub-targets: any branch success advances
-								// lastScrapeAt; any branch failure surfaces (branch-prefixed) as
-								// lastScrapeError. Per-branch health stays visible in check history
-								// via the per-branch `instance`.
-								const error =
-									result.error !== null && result.subTargetKey
-										? `[branch:${result.subTargetKey}] ${result.error}`
-										: result.error
-								return database
-									.execute((db) =>
-										db
-											.update(scrapeTargets)
-											.set(
-												error === null
-													? {
-															lastScrapeAt: new Date(result.scrapedAt),
-															lastScrapeError: null,
-															updatedAt: new Date(result.scrapedAt),
-														}
-													: // Failure keeps lastScrapeAt at the last good scrape so data
-														// gaps stay visible alongside the error.
-														{
-															lastScrapeError: error,
-															updatedAt: new Date(result.scrapedAt),
-														},
-											)
-											.where(eq(scrapeTargets.id, result.targetId)),
-									)
-									.pipe(Effect.mapError(toPersistenceError))
-							},
-							{ discard: true },
-						),
-					{ concurrency: 8, discard: true },
-				)
+				const recordChecks = options?.recordChecks !== false
 
-				if (options?.recordChecks === false || results.length === 0) return
+				// One `execute` — one Postgres connection — for the whole report. A
+				// transaction is deliberately not used: these are independent per-target
+				// writes that were never atomic before (they ran on separate
+				// connections), and wrapping them would add lock scope for no benefit.
+				yield* database
+					.execute(async (db) => {
+						for (const [targetId, outcome] of outcomeByTarget) {
+							await db.update(scrapeTargets).set(outcome).where(eq(scrapeTargets.id, targetId))
+						}
 
-				// Durable check history: one row per scheduled scrape attempt.
-				// Resolve orgIds in one pass; results for deleted targets are skipped
-				// (the FK would reject them anyway).
-				const targetIds = [...new Set(results.map((result) => result.targetId))]
-				const targetRows = yield* database
-					.execute((db) =>
-						db
+						if (!recordChecks) return
+
+						// Durable check history: one row per scheduled scrape attempt.
+						// Resolve orgIds on the same connection; results for deleted
+						// targets are skipped (the FK would reject them anyway).
+						const targetRows = await db
 							.select({ id: scrapeTargets.id, orgId: scrapeTargets.orgId })
 							.from(scrapeTargets)
-							.where(inArray(scrapeTargets.id, targetIds)),
-					)
+							.where(inArray(scrapeTargets.id, [...outcomeByTarget.keys()]))
+						const orgIdByTarget = new Map(targetRows.map((row) => [row.id, row.orgId]))
+
+						const checkRows = results.flatMap((result) => {
+							const orgId = orgIdByTarget.get(result.targetId)
+							if (orgId === undefined) return []
+							return [
+								{
+									targetId: result.targetId,
+									orgId,
+									subTargetKey: result.subTargetKey ?? "",
+									checkedAt: new Date(result.scrapedAt),
+									error: result.error,
+									durationMs: result.durationMs ?? null,
+									samplesScraped: result.samplesScraped ?? null,
+									samplesPostRelabel: result.samplesPostMetricRelabeling ?? null,
+								},
+							]
+						})
+
+						if (checkRows.length > 0) {
+							await db.insert(scrapeTargetChecks).values(checkRows)
+						}
+					})
 					.pipe(Effect.mapError(toPersistenceError))
-				const orgIdByTarget = new Map(targetRows.map((row) => [row.id, row.orgId]))
-
-				const checkRows = results.flatMap((result) => {
-					const orgId = orgIdByTarget.get(result.targetId)
-					if (orgId === undefined) return []
-					return [
-						{
-							targetId: result.targetId,
-							orgId,
-							subTargetKey: result.subTargetKey ?? "",
-							checkedAt: new Date(result.scrapedAt),
-							error: result.error,
-							durationMs: result.durationMs ?? null,
-							samplesScraped: result.samplesScraped ?? null,
-							samplesPostRelabel: result.samplesPostMetricRelabeling ?? null,
-						},
-					]
-				})
-
-				if (checkRows.length > 0) {
-					yield* database
-						.execute((db) => db.insert(scrapeTargetChecks).values(checkRows))
-						.pipe(Effect.mapError(toPersistenceError))
-				}
-
-				yield* pruneChecks([...new Set(checkRows.map((row) => row.targetId))])
 			})
 
 			const listChecks = Effect.fn("ScrapeTargetsService.listChecks")(function* (

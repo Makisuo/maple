@@ -9,7 +9,7 @@ SDKs enable automatically — you get, with **no extra configuration**:
   in the waterfall like any other span, and its detail panel renders a database
   summary block (system, namespace, table, operation, rows returned, server)
   derived from the `db.*` attributes.
-- **A cross-service Queries surface.** Every distinct query *shape* (the query
+- **A cross-service Queries surface.** Every distinct query _shape_ (the query
   with literals normalized to `?`) is aggregated across services with call
   volume, error rate, and p50/p95/p99 latency, so you can find your slowest and
   busiest queries and drill straight to sample traces.
@@ -19,26 +19,26 @@ and more — because it reads only the vendor-neutral semantic conventions.
 
 ## Attributes Maple reads
 
-| Attribute | Used for |
-| --- | --- |
-| `db.system.name` (legacy `db.system`) | Identifies the database; drives the summary block and per-system grouping. |
-| `db.query.text` (legacy `db.statement`) | The query; normalized into a low-cardinality **shape** for grouping. |
-| `db.query.summary` | Preferred human label for a query shape (e.g. `SELECT users`). |
-| `db.operation.name`, `db.collection.name`, `db.namespace` | Compose a label when `db.query.summary` is absent. |
-| `db.query.fingerprint` (legacy `db.statement.fingerprint`) | Explicit grouping key when the instrumentation provides one. |
-| `db.response.returned_rows` | Rows returned, shown in the span summary. |
-| `db.operation.batch.size` | Batch size (only present for batches). |
-| `server.address` / `server.port` | The database endpoint. |
-| `error.type`, `db.response.status_code` | Failure outcome. |
+| Attribute                                                  | Used for                                                                   |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `db.system.name` (legacy `db.system`)                      | Identifies the database; drives the summary block and per-system grouping. |
+| `db.query.text` (legacy `db.statement`)                    | The query; normalized into a low-cardinality **shape** for grouping.       |
+| `db.query.summary`                                         | Preferred human label for a query shape (e.g. `SELECT users`).             |
+| `db.operation.name`, `db.collection.name`, `db.namespace`  | Compose a label when `db.query.summary` is absent.                         |
+| `db.query.fingerprint` (legacy `db.statement.fingerprint`) | Explicit grouping key when the instrumentation provides one.               |
+| `db.response.returned_rows`                                | Rows returned, shown in the span summary.                                  |
+| `db.operation.batch.size`                                  | Batch size (only present for batches).                                     |
+| `server.address` / `server.port`                           | The database endpoint.                                                     |
+| `error.type`, `db.response.status_code`                    | Failure outcome.                                                           |
 
-Query text is grouped by *shape*: literals are stripped to `?` and `IN (...)`
+Query text is grouped by _shape_: literals are stripped to `?` and `IN (...)`
 lists are collapsed, so `WHERE id = 1` and `WHERE id = 2` are the same shape.
 Prefer emitting parameterized `db.query.text` (the OTel spec says parameterized
 text should **not** be sanitized) so shapes stay clean.
 
 ## Correlating server-side query logs with traces (SQLCommenter)
 
-The client span above captures the query *as the caller sees it* — duration and
+The client span above captures the query _as the caller sees it_ — duration and
 the query text — but it cannot see server-side detail such as memory used or
 rows/bytes scanned. To bridge that gap, tag your queries with **SQLCommenter**,
 the OpenTelemetry-standard way to propagate trace context into the database by

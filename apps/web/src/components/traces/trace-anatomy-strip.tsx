@@ -1,9 +1,6 @@
 import * as React from "react"
 
-import {
-	ServiceSpectrumBar,
-	computeServiceShares,
-} from "@maple/ui/components/traces/service-spectrum-bar"
+import { ServiceSpectrumBar, computeServiceShares } from "@maple/ui/components/traces/service-spectrum-bar"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 import { formatDuration } from "@/lib/format"
 import { cn } from "@maple/ui/utils"

@@ -1,13 +1,13 @@
 import { Link } from "@tanstack/react-router"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { LatencyValue } from "@maple/ui/components/latency-value"
 
 import type { CloudflareZoneRow } from "@/api/warehouse/cloudflare-infra"
 import { formatLatency, formatNumber } from "@/lib/format"
 import { ColumnHead, ROW_LINK_CLASS, TableShell, TableSkeleton, useTableSort } from "../primitives/data-table"
-import { formatPercent } from "../format"
+import { formatBytes, formatPercent } from "../format"
 import { errorRateClass } from "./constants"
-import { formatBytes } from "./format"
 
 // Zone latency percentiles are plan-dependent (the poller only gets quantiles
 // on zones whose Cloudflare plan exposes them); 0 means "not available", not
@@ -25,9 +25,15 @@ type SortKey =
 	| "ttfbP99Ms"
 	| "originP99Ms"
 
+// The server caps the list at 500 zones, so the row area scrolls rather than pushing every section
+// below it off the page. Roughly nine rows before the scroll starts.
+const TABLE_MAX_HEIGHT = 460
+
 interface CloudflareZoneTableProps {
 	zones: ReadonlyArray<CloudflareZoneRow>
 	waiting?: boolean
+	/** Overrides the "no traffic" empty when the list is empty because of a filter, not the window. */
+	emptyMessage?: string
 }
 
 export function CloudflareZoneTableLoading() {
@@ -60,7 +66,7 @@ export function CloudflareZoneTableLoading() {
 	)
 }
 
-export function CloudflareZoneTable({ zones, waiting }: CloudflareZoneTableProps) {
+export function CloudflareZoneTable({ zones, waiting, emptyMessage }: CloudflareZoneTableProps) {
 	const { sorted, sortKey, sortDir, handleSort } = useTableSort<CloudflareZoneRow, SortKey>(zones, {
 		initialKey: "requests",
 		stringKeys: ["zoneName"],
@@ -81,7 +87,8 @@ export function CloudflareZoneTable({ zones, waiting }: CloudflareZoneTableProps
 			ariaLabel="Cloudflare zones"
 			waiting={waiting}
 			isEmpty={sorted.length === 0}
-			emptyMessage="No zone traffic in the selected window."
+			emptyMessage={emptyMessage ?? "No zone traffic in the selected window."}
+			maxHeight={TABLE_MAX_HEIGHT}
 			header={
 				<>
 					<ColumnHead<SortKey>
@@ -193,12 +200,29 @@ export function CloudflareZoneTable({ zones, waiting }: CloudflareZoneTableProps
 					<div className="hidden w-[90px] text-right font-mono text-[12px] tabular-nums text-foreground/80 lg:block">
 						{formatNumber(zone.visits)}
 					</div>
-					<div className="hidden w-[90px] text-right font-mono text-[12px] tabular-nums text-foreground/80 lg:block">
-						{formatOptionalLatency(zone.ttfbP50Ms)}
+					<div className="hidden w-[90px] text-right text-[12px] lg:block">
+						<LatencyValue
+							ms={zone.ttfbP50Ms}
+							scale="p50"
+							format={formatOptionalLatency}
+							className="text-[12px]"
+						/>
 					</div>
-					{numCell(formatOptionalLatency(zone.ttfbP99Ms))}
-					<div className="hidden w-[90px] text-right font-mono text-[12px] tabular-nums text-foreground/80 lg:block">
-						{formatOptionalLatency(zone.originP99Ms)}
+					<div className="w-[90px] text-right text-[12px]">
+						<LatencyValue
+							ms={zone.ttfbP99Ms}
+							scale="p99"
+							format={formatOptionalLatency}
+							className="text-[12px]"
+						/>
+					</div>
+					<div className="hidden w-[90px] text-right text-[12px] lg:block">
+						<LatencyValue
+							ms={zone.originP99Ms}
+							scale="p99"
+							format={formatOptionalLatency}
+							className="text-[12px]"
+						/>
 					</div>
 				</Link>
 			))}

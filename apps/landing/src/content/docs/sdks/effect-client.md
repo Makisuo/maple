@@ -59,12 +59,12 @@ const TracerLive = Maple.layer({
 })
 ```
 
-| Option                 | Default | Description                                                                       |
-| ---------------------- | ------- | --------------------------------------------------------------------------------- |
-| `replay.enabled`       | `true`  | Record rrweb session replays.                                                     |
-| `replay.sampleRate`    | `1`     | Fraction of sessions to record, 0–1.                                              |
-| `replay.maskAllInputs` | `true`  | Mask all `<input>` values in the recording.                                       |
-| `replay.maskAllText`   | `false` | Mask all text in the recording.                                                   |
+| Option                 | Default | Description                                                                        |
+| ---------------------- | ------- | ---------------------------------------------------------------------------------- |
+| `replay.enabled`       | `true`  | Record rrweb session replays.                                                      |
+| `replay.sampleRate`    | `1`     | Fraction of sessions to record, 0–1.                                               |
+| `replay.maskAllInputs` | `true`  | Mask all `<input>` values in the recording.                                        |
+| `replay.maskAllText`   | `false` | Mask all text in the recording.                                                    |
 | `emitSessionMeta`      | `true`  | Post session metadata rows so unrecorded sessions still appear in the Sessions UI. |
 
 How it behaves:
@@ -96,7 +96,7 @@ The browser exposes whatever key you ship in your bundle. **Never put a private/
 
 ## Bundle Size
 
-The `/client` entry point tree-shakes out the Node-only resource detector and platform-attribute helpers, so your base bundle only ships the OTLP JSON exporter and Effect's tracer/logger primitives (~13 kB). The replay engine — rrweb included — sits behind a dynamic import in a code-split chunk (~360 kB) that is only fetched when replay is enabled *and* the session is sampled; apps that set `replay: { enabled: false }` never download it. The peer dependency on `effect` is unavoidable — if your app already uses Effect on the client, the SDK adds only the OTel layer code on top.
+The `/client` entry point tree-shakes out the Node-only resource detector and platform-attribute helpers, so your base bundle only ships the OTLP JSON exporter and Effect's tracer/logger primitives (~13 kB). The replay engine — rrweb included — sits behind a dynamic import in a code-split chunk (~360 kB) that is only fetched when replay is enabled _and_ the session is sampled; apps that set `replay: { enabled: false }` never download it. The peer dependency on `effect` is unavoidable — if your app already uses Effect on the client, the SDK adds only the OTel layer code on top.
 
 ## Configuration Reference
 

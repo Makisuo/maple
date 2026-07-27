@@ -125,7 +125,7 @@ export class VcsSourceService extends Context.Service<VcsSourceService, VcsSourc
 			})
 
 			const listRepositories = Effect.fn("VcsSourceService.listRepositories")(function* (orgId: OrgId) {
-				yield* Effect.annotateCurrentSpan({ "maple.org_id": orgId })
+				yield* Effect.annotateCurrentSpan({ orgId })
 				const entries = yield* repositoriesFor(yield* activeInstallations(orgId))
 				return entries
 					.map(({ repository }) => ({
@@ -143,7 +143,7 @@ export class VcsSourceService extends Context.Service<VcsSourceService, VcsSourc
 			const searchCode: VcsSourceServiceShape["searchCode"] = Effect.fn("VcsSourceService.searchCode")(
 				function* (orgId, repositoryName, query, opts) {
 					yield* Effect.annotateCurrentSpan({
-						"maple.org_id": orgId,
+						orgId,
 						"vcs.repository.full_name": repositoryName,
 						"vcs.source.query_length": query.length,
 					})
@@ -167,7 +167,7 @@ export class VcsSourceService extends Context.Service<VcsSourceService, VcsSourc
 			const readFile: VcsSourceServiceShape["readFile"] = Effect.fn("VcsSourceService.readFile")(
 				function* (orgId, repositoryName, path, requestedRef) {
 					yield* Effect.annotateCurrentSpan({
-						"maple.org_id": orgId,
+						orgId,
 						"vcs.repository.full_name": repositoryName,
 						"vcs.source.path": path,
 					})

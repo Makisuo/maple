@@ -111,7 +111,7 @@ export const nav_distributed_tracing = () => `분산 트레이싱`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_browser_sessions = () => `Browser Sessions`
+export const nav_browser_sessions = () => `브라우저 세션`
 
 
 /**
@@ -479,7 +479,7 @@ export const hero_title_accent = () => `AI 네이티브.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const hero_subtitle = () => `OpenTelemetry로 받는 트레이스, 로그, 메트릭을 ClickHouse에 저장. 수십억 행을 1초 미만으로 쿼리 — 또는 AI 에이전트에게 맡기세요.`
+export const hero_subtitle = () => `OpenTelemetry로 받는 트레이스, 로그, 메트릭. ClickHouse 기반으로 수십억 행을 1초 미만으로 쿼리 — 또는 AI 에이전트에게 맡기세요.`
 
 
 /**
@@ -503,7 +503,15 @@ export const ingest_stats_label = () => `수집된 트레이스 / 월`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_eyebrow = () => `01 · Sovereignty`
+export const stat_github = () => `GitHub`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_eyebrow = () => `04 · 주권`
 
 
 /**
@@ -671,7 +679,7 @@ export const map_lede = () => `Live request flow across your services. Hot servi
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const mcp_eyebrow = () => `05 · Agents`
+export const mcp_eyebrow = () => `07 · Agents`
 
 
 /**
@@ -688,6 +696,54 @@ export const mcp_title = () => `Your AI agent reads it too.`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const mcp_lede = () => `Maple은 퍼스트클래스 MCP 서버를 내장합니다. 호환 에이전트는 서비스 목록 조회, 트레이스 검색, 에러 탐지, 수정 제안을 할 수 있습니다. 오른쪽 트랜스크립트는 에이전트가 실행하는 도구 호출 과정을 그대로 보여줍니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_title = () => `트레이스만이 아니라 코드까지 읽습니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_body = () => `스팬 뒤에 있는 소스 파일까지 가져오므로, 제안되는 수정이 실제 코드를 가리킵니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_title = () => `쓰기도 합니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_body = () => `이슈 담당, 심각도 설정, 수정 첨부까지. 읽기 전용 대시보드가 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_title = () => `OAuth, 플러그인 불필요`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_body = () => `MCP 클라이언트를 엔드포인트로 향하게 하고 로그인하면 끝. 개방형 프로토콜이라 설치할 것이 없습니다.`
 
 
 /**
@@ -719,7 +775,7 @@ export const sessions_lede = () => `Session replay with every click, route, cons
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const k8s_eyebrow = () => `07 · Kubernetes`
+export const k8s_eyebrow = () => `06 · Kubernetes`
 
 
 /**
@@ -727,7 +783,7 @@ export const k8s_eyebrow = () => `07 · Kubernetes`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const k8s_title = () => `The pod underneath the slow span.`
+export const k8s_title = () => `느린 스팬 아래에 있는 파드.`
 
 
 /**
@@ -735,7 +791,7 @@ export const k8s_title = () => `The pod underneath the slow span.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const k8s_lede = () => `Drop a Helm chart on your cluster. Kubelet, host, and kube-state metrics start flowing in. Every span your apps emit arrives carrying pod, node, and namespace, so a slow request lands you on the exact replica that served it.`
+export const k8s_lede = () => `클러스터에 Helm 차트를 올리기만 하면 됩니다. kubelet·호스트·kube-state 메트릭이 OTLP로 흘러들고, OpenTelemetry Operator가 모든 스팬에 파드와 노드 식별자를 새깁니다.`
 
 
 /**
@@ -847,7 +903,7 @@ export const k8s_summary_cluster_mem = () => `Cluster MEM`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_eyebrow = () => `07 · The bill`
+export const bill_eyebrow = () => `08 · The bill`
 
 
 /**
@@ -1095,87 +1151,7 @@ export const bill_link_vs_dash0 = () => `Full vs Dash0`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_eyebrow = () => `08 · Start`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_title = () => `Pick your SDK. First trace in five minutes.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_lede = () => `Drop a snippet into your app, paste your key, run. Six SDKs covered out of the box; any OTel-compatible runtime works.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const start_endpoint_label = () => `Endpoint`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_key_label = () => `Key`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_key_hint = () => `generated per project in your dashboard`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_install_label = () => `Install`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_instrument_label = () => `Instrument`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_copy = () => `Copy`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_copied = () => `Copied`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_footnote = () => `Java, Rust, .NET, Ruby — anything that speaks OTLP works. The custom tab shows the env-var-only setup.`
 
 
 /**
@@ -1191,7 +1167,7 @@ export const cta_bookend_title = () => `Run it yourself.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_lede = () => `14일 무료 체험(카드 등록 필요, 종료 전까지 과금 없음). 셀프 호스팅 지원. 대시보드에는 방금 본 것과 동일한 라이브 워터폴이 포함됩니다.`
+export const cta_bookend_lede = () => `14일 무료 체험. 카드 등록이 필요하지만 기간이 끝날 때까지 청구되지 않습니다. 셀프 호스팅도 지원하며, \`maple start\` 는 계정조차 필요 없습니다.`
 
 
 /**
@@ -1199,7 +1175,7 @@ export const cta_bookend_lede = () => `14일 무료 체험(카드 등록 필요,
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_primary = () => `Start free trial`
+export const cta_bookend_primary = () => `무료 체험 시작`
 
 
 /**
@@ -2575,14 +2551,6 @@ export const footer_terms = () => `이용약관`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_14day_retention = () => `14일 보존`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_30day_retention = () => `30일 보존`
 
 
@@ -2639,63 +2607,7 @@ export const pricing_ai_triage = () => `AI 오류 분류`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_email_support = () => `이메일 지원`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_private_channel = () => `전용 채널 지원`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_no_usage_charges = () => `시트·호스트 요금 없음`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_data_included = () => `포함된 데이터`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_platform_features = () => `플랫폼 기능`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_free_forever = () => `평가판 포함`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_for_small = () => `개인 및 소규모 프로젝트용`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_for_growing = () => `성장하는 팀용`
 
 
 /**
@@ -2704,14 +2616,6 @@ export const pricing_for_growing = () => `성장하는 팀용`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_trial_badge = (params) => `${params.duration}일 무료 체험`
-
-
-/**
- * @param {{ duration: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_trial_notice = (params) => `${params.duration}일간 과금되지 않습니다 · 신용카드 필요`
 
 
 /**
@@ -2727,14 +2631,6 @@ export const pricing_enterprise = () => `엔터프라이즈`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_custom = () => `맞춤형`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_enterprise_price = () => `$2,000부터`
 
 
@@ -2743,47 +2639,7 @@ export const pricing_enterprise_price = () => `$2,000부터`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_enterprise_desc = () => `대규모 팀을 위한 맞춤형 요금. 전담 지원과 맞춤형 보존 기간 포함.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_talk_to_founder = () => `창업자와 상담`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_custom_retention = () => `맞춤형 보존 기간`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_otel_data_help = () => `OTel 데이터 개선 직접 지원`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_priority_support = () => `우선 지원`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_subscribe = () => `구독`
 
 
 /**
@@ -2816,6 +2672,86 @@ export const pricing_metrics = () => `메트릭`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_start_trial = (params) => `${params.duration}일 무료 체험 시작`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_everything_included = () => `모든 기능이 포함됩니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_host = () => `호스트당`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_seat = () => `좌석당`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_query = () => `쿼리당`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_included_monthly = () => `매월 포함`
+
+
+/**
+ * @param {{ rate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_rate_gb = (params) => `초과분 ${params.rate} / GB`
+
+
+/**
+ * @param {{ rate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_rate_session = (params) => `초과분 ${params.rate} / 세션`
+
+
+/**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_trial_reassure = (params) => `${params.duration}일 무료 · 언제든 취소 · 시작 시 카드 필요`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_enterprise_rail = () => `대용량, 맞춤 보존 기간, 우선 지원.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_estimate_link = () => `청구액 추정 →`
 
 
 /**
@@ -4095,7 +4031,7 @@ export const page_k8s_correlation_arrow_caption = () => `admission 단계에서 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_k8s_correlation_pod_status = () => `Active`
+export const page_k8s_correlation_pod_status = () => `활성`
 
 
 /**
@@ -4767,4 +4703,2244 @@ export const language_ko = () => `한국어`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const stat_github = () => `GitHub`
+export const faq_home_what_q = () => `Maple은 무엇인가요?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_what_a = () => `Maple은 트레이스, 로그, 메트릭을 위한 옵저버빌리티 플랫폼입니다. OpenTelemetry를 기반으로 하고 ClickHouse를 백엔드로 사용합니다. 분산 시스템의 텔레메트리를 실시간으로 수집하고 시각화하고 조회할 수 있으며, MCP를 통해 AI 에이전트에게 맡길 수도 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_oss_q = () => `Maple은 오픈소스인가요?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_oss_a = () => `Maple의 소스는 GitHub에 Functional Source License(FSL-1.1)로 공개되어 있습니다. 모든 코드를 읽고, 포크하고, 직접 호스팅할 수 있습니다. 각 릴리스는 공개 2년 후 Apache 2.0이 됩니다. 데이터와 계측은 모두 여러분의 것이며, 직접 운영하거나 호스팅 버전을 사용할 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_otel_q = () => `Maple은 OpenTelemetry 네이티브인가요?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_otel_a = () => `네. Maple은 벤더 중립적인 개방형 표준인 OpenTelemetry 위에 구축되었습니다. 독자 에이전트도 락인도 없습니다. 이미 OpenTelemetry 데이터를 내보내고 있다면, 코드를 다시 계측하지 않고 Maple로 보내기만 하면 됩니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_price_q = () => `Maple의 가격은 어떻게 되나요?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_price_a = () => `Startup 플랜은 월 39달러이며 로그, 트레이스, 메트릭이 각각 100GB씩 포함됩니다. 이후에는 GB당 0.30달러 정액입니다. 호스트당 또는 좌석당 비용은 없습니다. Enterprise 플랜은 맞춤 용량과 보존 기간을 제공합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_agents_q = () => `Maple은 AI 에이전트와 함께 동작하나요?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_agents_a = () => `네. Maple은 일급 MCP(Model Context Protocol) 서버를 제공합니다. 호환되는 AI 에이전트는 서비스 목록 조회, 트레이스 검색, 오류 탐색, 수정 제안을 텔레메트리에 직접 수행할 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_announce_badge = () => `신규`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_announce_text = () => `Maple Local — 플랫폼 전체가 하나의 바이너리로.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_announce_cta = () => `자세히 보기 →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const stat_per_gb = () => `GB당 · 모든 시그널`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const stat_license = () => `→ 2년 후 Apache 2.0`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_eyebrow = () => `01 · 시그널`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_trace_title = () => `트레이스를 읽으세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_trace_sub = () => `모든 요청은 속성이 그대로 남은 스팬 트리입니다. 행 위에 커서를 올리면 무엇이 담겼는지 보입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_logs_title = () => `로그를 검색하세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_logs_sub = () => `OTLP에서 바로 오는 구조화 로그. 심각도, 서비스, 메시지, 소요 시간 — 몇 초 만에 검색됩니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_session_title = () => `세션을 재생하세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_session_sub = () => `클릭, 라우트 이동, 콘솔 출력, 실패한 요청까지. 리플레이와 스팬은 하나의 세션 ID를 공유합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_eyebrow = () => `02 · 인시던트`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_title = () => `새벽 3시의 알림에서 원인이 된 한 줄까지.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_lede = () => `네 개의 화면을 하나의 트레이스 ID가 관통합니다. 이어 붙일 일도, 두 번째 도구도, 열어둔 걸 잊은 탭도 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_1_title = () => `알림은 맥락과 함께 도착합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_1_body = () => `api-gateway의 오류율이 5%를 넘었습니다. 알림에는 서비스, 넘어선 임계값, 샘플 트레이스가 담깁니다. 숫자 하나 던지고 끝나지 않습니다. Slack, Discord, PagerDuty 또는 임의의 웹훅으로 보낼 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_2_title = () => `트레이스는 실패한 스팬에서 열립니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_2_body = () => `실패한 요청은 모든 속성이 남아 있는 스팬 트리입니다. 트리 아래쪽에 Stripe 재시도 세 건이 각각 정확히 1.75초에 타임아웃되어 붉게 놓여 있습니다. 샘플링 누락도, 이상치를 가리는 집계도 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_3_title = () => `로그는 이미 연결되어 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_3_body = () => `실패한 스팬에서 같은 트레이스 ID의 로그로 바로 이동합니다. 재시도 소진, 커넥션 풀 20/20 — 확인이 거기 있습니다. 다른 제품에서 다시 검색할 필요가 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_4_title = () => `아니면 세 단계 전부를 에이전트에게 맡기세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_4_body = () => `Maple은 일급 MCP 서버를 제공합니다. Claude, Cursor 또는 임의의 MCP 클라이언트를 연결하면 서비스를 나열하고, 트레이스를 검색하고, 오류를 찾고, 소스를 읽고, 수정을 제안합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_eyebrow = () => `03 · 플랫폼`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_title = () => `따로 사야 했을 나머지 전부.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_lede = () => `메트릭, 서비스 맵, 오류 그룹화, 알림, 그리고 MCP 서버. 플랫폼 하나, 계측 하나, 청구서 하나.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_metrics_name = () => `메트릭과 대시보드`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_metrics_desc = () => `요청 수, 오류율, 지연 백분위. 위젯을 직접 배치하거나 에이전트에게 구성을 제안받으세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_map_desc = () => `서비스 사이의 요청 흐름을 실시간으로. 사후 분석에서야 재구성했을 연쇄가 처음부터 눈앞에 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_errors_name = () => `오류 추적`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_errors_desc = () => `모든 서비스에 걸쳐 유형별로 묶인 오류. 추이, 영향받은 서비스, 샘플 트레이스가 함께 붙습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_alerts_desc = () => `일곱 가지 시그널 유형에 심각도, 인시던트 추적, 자동 해제까지. Slack, Discord, PagerDuty 또는 임의의 웹훅으로.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_mcp_name = () => `AI와 MCP`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_mcp_desc = () => `MCP 호환 클라이언트라면 서비스 나열, 트레이스 검색, 소스 조회, 수정 제안까지 가능합니다. 개방형 프로토콜이며 플러그인이 필요 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_name = () => `클라우드 연결`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_desc = () => `Kubernetes는 Helm 차트로. PlanetScale, Cloudflare 등은 OAuth 한 번으로 연결됩니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_4_label = () => `당신의 경계`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_4_body = () => `직접 운영하고 확장하는 ClickHouse를 대상으로, Maple을 자체 인프라에서 실행하세요. 텔레메트리가 네트워크 밖으로 나갈 이유가 없습니다. 보존 기간과 데이터 소재는 고정된 SaaS 정책이 아니라 여러분이 정합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_eyebrow = () => `05 · 로컬`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_title = () => `플랫폼 전체가 하나의 바이너리로.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_body = () => `Bun으로 컴파일된 단일 maple 실행 파일 — OTLP 수집, 내장 ClickHouse, 쿼리 API, 대시보드까지 127.0.0.1에서 동작합니다. 계정도, 클라우드도, 속도 제한도 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_install_alt = () => `또는`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_link_docs = () => `문서 읽기 →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_eyebrow = () => `09 · 요금`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_title = () => `직접 값을 매긴다면 이렇게.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_lede = () => `호스트당 비용 없음. 좌석당 비용 없음. 요금 페이지와 청구서에 같은 숫자가 적힙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_login = () => `로그인`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_docs = () => `문서`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_local = () => `로컬`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_blog = () => `블로그`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_learn = () => `알아보기`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_what_is_observability = () => `옵저버빌리티란?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_best_tools = () => `오픈소스 대표 도구`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_overview = () => `개요`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_traces = () => `트레이스`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_map = () => `서비스 맵`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shots_aria = () => `제품 스크린샷`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_overview_line = () => `모든 서비스를 한눈에.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_traces_line = () => `요청 하나를 끝까지 추적하세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_map_line = () => `서비스 간 트래픽을 확인하세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_panel_eyebrow = () => `화면`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cap_eyebrow = () => `할 수 있는 일`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_artifact_eyebrow = () => `움직임`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_story_eyebrow = () => `경로`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_outcome_label = () => `결과`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cross_eyebrow = () => `다음은`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cross_features_title = () => `이 데이터를 공유하는 화면`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cross_usecases_title = () => `같은 데이터, 다른 작업`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cta_title = () => `OTLP를 Maple로 보내세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_cta_lede = () => `엔드포인트 하나, 키 하나. 트레이스·로그·메트릭·세션이 첫 요청부터 같은 트레이스 ID로 모입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_seo_title = () => `분산 트레이싱 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_seo_desc = () => `트레이스 하나를 열면 시간이 어디서 사라졌는지 읽을 수 있습니다. 같은 스팬을 워터폴·플레임그래프·서비스 플로우로 보여주고, SDK가 보낸 모든 속성을 그대로 유지합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_hero_title = () => `시간이 어디서 사라졌는지 읽습니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_hero_lede = () => `트레이스는 요청 하나를 처음부터 끝까지 펼쳐 놓은 것입니다. Maple은 SDK가 보낸 모든 스팬을 속성·부모 스팬·정확한 밀리초 오프셋과 함께 보관합니다. 느린 요청은 더 이상 추측이 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_panel_title = () => `요청 하나, 스팬 18개, 화면 하나`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_panel_lede = () => `스팬을 선택하면 실행한 SQL, 반환한 상태, 동작한 파드까지 전체 속성이 워터폴 옆에 열립니다. 요약되어 사라지는 정보는 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_title = () => `같은 스팬을 읽는 네 가지 방법`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_1_title = () => `워터폴`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_1_body = () => `스팬은 부모 기준으로 중첩되고, 막대는 트레이스 자체의 소요 시간에 맞춰 조정됩니다. 480ms 자식을 가진 1.24초 요청은 숫자를 읽기 전에 형태로 보입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_2_title = () => `플레임그래프`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_2_body = () => `같은 스팬을 시간이 아니라 깊이로 쌓습니다. 한 단계에 db.query 스팬 50개가 나란히 있으면 N+1이며, 목록이 아니라 벽으로 보입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_3_title = () => `서비스 플로우`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_3_body = () => `트레이스를 거쳐 간 서비스와 그 사이의 호출로 압축합니다. 어느 줄인지가 아니라 어느 경계인지가 문제일 때 씁니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_4_title = () => `속성`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_4_body = () => `SDK가 보낸 모든 키를 보낸 그대로 저장합니다. db.statement, http.status_code, exception.type, 직접 정의한 커스텀 키까지 모두 조회 가능하며 단순 표시용이 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_5_title = () => `로그로 이동`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_cap_5_body = () => `스팬과 로그는 같은 트레이스 ID를 갖기 때문에, 어떤 스팬에서든 그 스팬이 실행되는 동안 기록된 로그 줄을 열 수 있습니다. 두 도구를 오가며 타임스탬프를 계산할 일이 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_artifact_title = () => `실제 트레이스 위의 실제 플레임그래프`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_tracing_artifact_lede = () => `제품이 실제로 렌더링하는 컴포넌트를 샘플 트레이스로 실행한 것입니다. 스팬 위에 커서를 올리면 서비스·소요 시간·전체 대비 비율을 읽을 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_seo_title = () => `브라우저 세션 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_seo_desc = () => `사용자가 실제로 겪은 세션을 재생하고, 그 안의 어느 순간이든 뒤에 있는 트레이스를 열 수 있습니다. 리플레이·콘솔·네트워크·스팬이 하나의 세션 ID를 공유합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_hero_title = () => `실제 동작을 보고, 트레이스를 엽니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_hero_lede = () => `리플레이는 사용자가 무엇을 했는지 보여주고, 그 아래 트레이스는 왜 실패했는지 보여줍니다. 둘은 같은 세션 ID를 갖기 때문에 오가는 데 클릭 한 번이면 되고, 상황을 다시 짜맞출 필요가 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_panel_title = () => `녹화와 증거를 나란히`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_panel_lede = () => `뷰포트는 렌더링된 그대로 재생되고, 콘솔 줄·네트워크 요청·발생한 예외가 그것을 유발한 클릭과 같은 타임라인에 놓입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_title = () => `녹화에 담기는 것`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_1_title = () => `모든 이벤트를 순서대로`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_1_body = () => `내비게이션·클릭·입력·콘솔 줄·네트워크 호출·에러가 하나의 정렬된 스트림에 놓입니다. 각 행에는 그 시점에 유효했던 트레이스 ID가 기록됩니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_2_title = () => `픽셀 단위로 정확한 리플레이`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_2_body = () => `화면이 아니라 DOM을 기록합니다. 스크롤 위치, 호버 상태, 입력 도중의 값까지 사용자가 남긴 그대로, 어떤 창 크기에서도 재생됩니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_3_title = () => `특정 순간에서 스팬으로`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_3_body = () => `실패한 클릭에서 일시정지하고 그때 발생한 요청을 엽니다. 리플레이와 워터폴은 하나의 세션 ID에 대한 두 가지 뷰이지, 타임스탬프로 이어 붙인 별개 제품이 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_4_title = () => `콘솔과 네트워크를 인라인으로`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_4_body = () => `요청은 메서드·상태·소요 시간과 함께 기록됩니다. POST /checkout의 500은 별도 탭이 아니라 응답이 돌아온 그 초에 스트림에 나타납니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_5_title = () => `전송 전에 마스킹`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_cap_5_body = () => `입력란과 텍스트 노드는 무엇이든 전송되기 전에 브라우저에서 마스킹됩니다. 샘플링 비율과 가림 규칙은 설정 항목이지 지원 요청 사항이 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_artifact_title = () => `재생 중인 세션`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_sessions_artifact_lede = () => `커서가 '지금 결제'로 이동하고, 클릭이 일어나고, 그 옆에서 이벤트 스트림이 채워집니다. 각 항목에는 자신이 속한 트레이스 ID가 붙어 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_seo_title = () => `로그 관리 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_seo_desc = () => `모든 서비스의 구조화 로그를 검색하고, 심각도와 리소스 속성으로 걸러내고, 특정 줄을 만들어 낸 트레이스를 열 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_hero_title = () => `로그를 검색하고, 트레이스를 유지합니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_hero_lede = () => `로그는 리소스 속성과 트레이스 ID를 그대로 유지한 채 구조화된 상태로 도착합니다. 따라서 검색 결과는 막다른 길이 아니며, 어느 줄에서든 그것을 기록한 요청을 열 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_panel_title = () => `심각도·서비스·속성을 하나의 필터 레일에`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_panel_lede = () => `패싯은 실제로 범위 안에 있는 행에서 계산되므로, 각 심각도 옆의 건수는 지금 보게 될 건수 그 자체이지 오래된 요약이 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_title = () => `로그 한 줄에 물어볼 수 있는 것`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_1_title = () => `본문과 속성을 검색`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_1_body = () => `리소스 속성과 로그 속성은 덩어리가 아니라 컬럼입니다. service.name, deployment.environment, 직접 정의한 키를 메시지 본문과 같은 방식으로 걸러낼 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_2_title = () => `의미로서의 심각도`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_2_body = () => `OTel의 여섯 단계 심각도는 각자 고유한 색과 패싯을 가집니다. WARN과 ERROR는 클릭 한 번 거리에 있고, 어느 쪽도 텍스트 일치 속에 묻히지 않습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_3_title = () => `줄 뒤의 트레이스를 열기`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_3_body = () => `트레이스 ID를 가진 줄에서는 해당 요청을 열 수 있으며, 그 줄이 기록된 시점에 실행 중이던 스팬 위치로 이동합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_4_title = () => `상세보다 먼저 볼륨`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_4_body = () => `결과 위 히스토그램은 심각도별로 쌓여 있어서, 14시 20분의 ERROR 급증은 한 줄도 읽기 전에 눈에 들어옵니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_5_title = () => `OTel 정의 그대로 전송`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_cap_5_body = () => `로그는 트레이스·메트릭과 같은 OTLP로 들어옵니다. 로그 전송 에이전트도, 따로 유지할 두 번째 파이프라인도, 별도로 신경 쓸 보관 기간도 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_artifact_title = () => `흐르고 있는 스트림`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_logs_artifact_lede = () => `줄은 기록되는 대로 도착하며, 각각 서비스와 심각도 태그가 붙습니다. 이것은 테일 보기이며, 검색이 반환하는 것과 같은 행입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_seo_title = () => `메트릭 및 대시보드 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_seo_desc = () => `서비스가 내보내는 모든 메트릭을 둘러보고, 트레이스 목록과 같은 웨어하우스 위에 대시보드를 만듭니다. 차트와 트레이스가 어긋날 일이 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_hero_title = () => `트레이스와 같은 데이터를 읽는 차트`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_hero_lede = () => `모든 위젯은 트레이스 목록과 같은 웨어하우스에 질의합니다. 대시보드가 p99를 380ms로 표시하면, 그 수치 뒤의 트레이스는 클릭 한 번 거리에 있고 값도 일치합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_panel_title = () => `모든 메트릭을 타입과 카디널리티와 함께`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_panel_lede = () => `익스플로러는 템플릿이 기대하는 것이 아니라 서비스가 실제로 내보내는 것을 나열합니다. 카디널리티는 메트릭별로 표시되는데, 질의 비용을 결정하는 수치가 바로 이것이기 때문입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_title = () => `보드를 구성하기`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_1_title = () => `시계열`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_1_body = () => `p50, p95, p99를 하나의 축에 그리며 각각 백분위 전용 색을 씁니다. 지연 차트는 백분위 토큰을 사용하므로 p99는 제품 어디서나 같은 붉은 주황색입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_2_title = () => `스탯과 임계값`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_2_body = () => `단일 스칼라 값과 그것이 밑돌아야 할 선을 함께 보여줍니다. Apdex와 목표치, 에러율과 허용 예산. 비교는 위젯의 일부이지 옆에 붙인 메모가 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_3_title = () => `변수`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_3_body = () => `$service나 $env를 한 번 선언하면 보드의 모든 위젯이 그 선택자를 따릅니다. 대시보드 열두 개가 조금씩 어긋나는 대신, 하나로 서비스 열두 개를 담습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_4_title = () => `속성 자동 완성`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_4_body = () => `그룹화 후보는 해당 메트릭이 실제로 가진 속성에서 제시됩니다. 아무것도 내보내지 않는 키로 그룹화하는 차트는 만들 수 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_5_title = () => `차트에서 트레이스로`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_cap_5_body = () => `지연 차트에서 구간을 선택하면 그 안의 트레이스를 열 수 있습니다. 차트는 스팬의 그림이 아니라 스팬으로 가는 인덱스입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_artifact_title = () => `심각도별 로그 볼륨`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_metrics_artifact_lede = () => `5분 단위 60개 버킷을 레벨별로 쌓았습니다. warn 무리와 그 뒤의 error 튐은 스탯 타일이라면 평탄하게 뭉개 버렸을 형태입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_seo_title = () => `서비스 카탈로그 및 맵 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_seo_desc = () => `각 서비스의 지연 백분위·에러율·처리량과, 누가 누구를 호출하는지 보여주는 라이브 맵. 둘 다 설정 파일이 아니라 스팬에서 만들어집니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_hero_title = () => `맵은 스팬으로부터 스스로 그려집니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_hero_lede = () => `선언해야 할 토폴로지가 없습니다. Maple은 이미 보내고 있는 트레이스에서 부모-자식 관계를 읽어내므로, 새 서비스는 처음 호출되는 순간 맵에 나타납니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_panel_title = () => `서비스 열두 개, 표 하나`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_panel_lede = () => `선택한 기간에 대해 서비스별 지연 백분위·에러율·처리량을 보여줍니다. p99로 정렬하면 손이 필요한 행이 맨 위에 옵니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_title = () => `이웃을 읽는 법`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_1_title = () => `간선은 실제 호출입니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_1_body = () => `두 노드를 잇는 선은 모두 실제로 발생한 부모-자식 스팬 쌍이며, 각자 고유한 요청률과 에러율을 가집니다. 맵 위에 선언된 것은 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_2_title = () => `데이터베이스와 캐시까지`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_2_body = () => `클라이언트 스팬도 노드가 되므로 Postgres, Redis, 각종 서드파티 API가 자체 서비스와 같은 지연 컬럼을 갖고 맵에 함께 놓입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_3_title = () => `1홉, 2홉`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_3_body = () => `노드를 포커스하면 맵이 그 노드가 통신하는 대상만으로 좁혀집니다. 40개 서비스 규모가, 지금 던지는 질문에 관계있는 6개로 줄어듭니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_4_title = () => `정체성으로 색 구분`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_4_body = () => `각 서비스는 열여섯 색 중 하나를 가지며, 맵·워터폴·차트 어디서나 그 색을 유지합니다. 색은 어느 서비스인지를 뜻하며, 얼마나 건강한지를 뜻하지 않습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_5_title = () => `같은 축 위의 배포`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_cap_5_body = () => `서비스 상세 화면은 릴리스를 지연 지표 위에 표시하므로, 계단식 변화가 감이 아니라 그것을 들여온 버전과 맞아떨어집니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_artifact_title = () => `흐르는 트래픽`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_catalog_artifact_lede = () => `각 노드는 요청률·에러율·평균 지연을 함께 보여줍니다. 간선을 따라 흐르는 것은 그 간선의 트래픽이지 장식이 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_seo_title = () => `에러 트래킹 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_seo_desc = () => `예외를 타입과 정규화된 메시지로 이슈로 묶고, 각각을 예외를 던진 스팬과 그것을 들여온 릴리스에 연결합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_hero_title = () => `이벤트 142개, 이슈 하나`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_hero_lede = () => `예외는 발생 횟수가 아니라 무엇인지를 기준으로 묶입니다. 각 이슈는 최초 발생, 최신 발생, 그리고 그 모두를 던진 스팬을 보관합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_panel_title = () => `묶이고, 집계되고, 여전히 추적 가능`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_panel_lede = () => `목록은 이벤트가 아니라 이슈입니다. 각 행은 타입, 영향받는 서비스, 기간 내 건수, 마지막 발생 시각을 담고 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_title = () => `이슈에서 수정까지`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_1_title = () => `그룹화`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_1_body = () => `payment-svc에서 나오는 ConnectionTimeout은 이벤트 142개가 아니라 이슈 하나입니다. 지문은 exception.type과, ID·타임스탬프·호스트명을 정규화해 걷어낸 메시지로 만들어집니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_2_title = () => `예외를 던진 스팬`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_2_body = () => `에러는 스팬 위의 이벤트이므로, 어느 이슈에서든 그것이 속한 트레이스를 열 수 있습니다. 당시 유효했던 인자·쿼리·상태 코드가 그대로 남아 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_3_title = () => `신규, 또는 재발`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_3_body = () => `이슈는 최초 발생과 마지막 발생을 함께 갖고 있어, 회귀는 첫 등장과 다르게 읽힙니다. 해결된 이슈가 다시 발생하면 새로 만들어지지 않고 다시 열립니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_4_title = () => `담당자가 있는 상태`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_4_body = () => `이슈를 맡고, 심각도를 지정하고, 메모를 남깁니다. 상태와 코멘트는 이슈와 함께 남으므로, 다음 온콜 담당자는 당신이 이미 배제한 가능성을 읽을 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_5_title = () => `깨어나기 전에 분류`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_errors_cap_5_body = () => `탐지기가 5분마다 실행되어 이슈 자체의 발생률과 확산 범위에서 심각도를 정합니다. 수동 지정 심각도는 항상 탐지기보다 우선하고, 탐지기는 AI보다 우선합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_seo_title = () => `AI 및 MCP 연동 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_seo_desc = () => `Maple은 MCP 서버를 내장하고 있습니다. Claude Code를 비롯한 어떤 MCP 클라이언트든 트레이스·로그·메트릭을 읽고, 당신과 같은 도구로 인시던트를 처리할 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_hero_title = () => `에이전트에게 당신과 같은 도구를 줍니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_hero_lede = () => `MCP 서버는 find_slow_traces, diagnose_service, search_logs 같은 제품 자체의 질의를 열린 프로토콜로 노출합니다. 기본값은 읽기 전용이며, 하나의 조직으로 범위가 제한됩니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_panel_title = () => `엔드포인트 하나, 모든 MCP 클라이언트`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_panel_lede = () => `Claude Code나 MCP를 지원하는 어떤 클라이언트든 이 페이지의 엔드포인트로 향하게 하면 됩니다. 도구는 대시보드가 실행하는 것과 같은 질의를 같은 웨어하우스에 대해 실행합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_title = () => `에이전트가 실제로 할 수 있는 일`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_1_title = () => `서비스에 대해 묻기`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_1_body = () => `diagnose_service는 지정한 기간의 service.version별 p99, 에러율, 처리량을 읽고, 모델이 들여다봐야 할 차트 이미지가 아니라 무엇이 바뀌었는지를 반환합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_2_title = () => `그 뒤의 트레이스를 가져오기`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_2_body = () => `find_slow_traces와 inspect_trace는 실제 속성을 가진 실제 스팬을 반환합니다. 에이전트가 읽는 것은 db.statement 자체이지 그 요약이 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_3_title = () => `실행된 소스를 읽기`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_3_body = () => `저장소를 연결하면 search_source_code와 read_source_file을 통해 에이전트가 스택 프레임에서 해당 함수까지 갈 수 있습니다. 제안이 추측이 아니라 특정 줄을 근거로 삼습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_4_title = () => `허용할 때만 쓰기`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_4_body = () => `이슈 인수, 심각도 설정, 알림 규칙 생성은 각각 별개의 쓰기 도구입니다. 기본 태세는 읽기 전용이고, 변경에는 승인이 필요합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_5_title = () => `하나의 조직으로 범위 제한`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_cap_5_body = () => `모든 도구 호출은 키에 연결된 조직 기준으로 질의 자체에서 걸러집니다. 에이전트가 테넌트 경계를 넘어 읽을 수는 없습니다. 실행하는 질의가 그것을 표현할 수 없기 때문입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_artifact_title = () => `인시던트를 처리하는 에이전트`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_mcp_artifact_lede = () => `list_services에서 propose_fix까지 다섯 번의 도구 호출. 모든 단계가 직접 실행할 수도 있었던 질의이며, 그래서 답을 검증할 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_k8s_cap_title = () => `클러스터와 애플리케이션을 하나의 파이프라인으로`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_seo_title = () => `API 성능 모니터링 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_seo_desc = () => `SLO 위반을 그것을 일으킨 릴리스까지 추적합니다. checkout의 p99를 알림에서 대시보드로, 그리고 120ms를 380ms로 만든 커밋까지 따라갑니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_hero_title = () => `p99가 움직였습니다. 어느 릴리스가 움직였는지 찾습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_hero_lede = () => `SLO는 위반이 무언가를 가리킬 때에만 쓸모가 있습니다. 여기서는 임계값 초과에서 원인이 된 커밋까지, 같은 시간 범위를 유지한 채 세 화면으로 이동합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_story_title = () => `임계값에서 커밋까지, 3분`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_story_lede = () => `하나의 SLO가 전체 경로를 꿰뚫습니다. checkout의 p99가 200ms 이하일 것. 아래의 모든 화면은 그것이 더 이상 성립하지 않게 된 구간으로 좁혀져 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_1_title = () => `알림은 증상이 아니라 위반을 알립니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_1_body = () => `규칙이 SLO를 기준으로 작성되어 있어서, 알림에는 임계값·관측값·평가 구간이 함께 담깁니다. 200ms 대비 380ms가 세 구간 연속으로 이어졌습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_2_title = () => `대시보드에서 엔드포인트 하나로 좁힙니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_2_body = () => `p50은 움직이지 않았고 p99만 움직였습니다. 이 형태는 서비스 전체의 둔화가 아니라 특정 경로의 느린 꼬리를 뜻하며, 경로별 분해가 그것을 지목합니다. POST /checkout.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_3_title = () => `두 릴리스를 나란히 비교`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_step_3_body = () => `같은 엔드포인트를 service.version으로 나누면 계단식 변화의 주인이 드러납니다. abc123에서 p99가 120ms, def456에서 380ms. def456 아래 트레이스는 db.query 스팬을 50개 갖고 있고, 이전 것은 3개였습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_outcome_line = () => `T+9:20에 def456을 되돌렸습니다. 다음 평가 구간에서 p99가 임계값 아래로 돌아왔습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_metric_1_label = () => `알림에서 원인까지`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_metric_2_label = () => `p99, 전후`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_metric_3_label = () => `요청당 DB 스팬 수`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_title = () => `경로를 짧게 만든 것`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_1_title = () => `알림이 자신의 SLO를 알고 있습니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_1_body = () => `규칙은 백분위와 임계값을 기준으로 작성되므로, 발생한 알림에는 이미 비교 결과가 담겨 있습니다. 얼마나 벗어났는지 알기 위해 따로 찾아볼 것이 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_2_title = () => `버전은 속성이므로 필터가 됩니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_2_body = () => `service.version은 SDK가 보내는 모든 스팬에 실려 있습니다. 두 릴리스를 비교하는 일은 GROUP BY이지, 스프레드시트로 내보내는 작업이 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_3_title = () => `백분위는 자신의 트레이스를 갖고 있습니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_api_cap_3_body = () => `p99는 지금도 남아 있는 스팬에서 계산됩니다. 차트에서 급등 구간을 선택하면 그 안의 요청이 열리므로, 수치와 증거가 서로 다른 산출물이 되는 일이 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_seo_title = () => `이커머스 옵저버빌리티 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_seo_desc = () => `플래시 세일 중 결제 실패를 알림에서 Stripe 타임아웃과 그 뒤의 재시도 소진 로그까지 추적합니다. 주문 ID 하나로 끝까지.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_hero_title = () => `결제가 실패하고 있습니다. 어느 주문이, 왜.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_hero_lede = () => `세일 중에 중요한 것은 에러율이 아닙니다. 어떤 고객이 장바구니를 잃었고 무엇이 그것을 막았는지가 문제입니다. 주문 ID 하나가 세 화면 모두에서 답을 실어 나릅니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_story_title = () => `주문 하나를, 알림에서 타임아웃까지`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_story_lede = () => `order_8421은 실제로 실패한 주문입니다. 아래의 모든 화면이 이 주문으로 좁혀져 있어서, 두 도구 사이에서 타임스탬프를 맞춰볼 일이 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_1_title = () => `알림은 checkout 경로에서만 발생합니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_1_body = () => `사이트 나머지는 버티는 동안 POST /checkout의 에러율만 임계값을 넘습니다. 이 범위 자체가 첫 번째 사실입니다. 세일 트래픽이 아니라 결제 경로의 문제입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_2_title = () => `트레이스는 Stripe에서 멈춥니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_2_body = () => `실패한 주문 하나를 열면 워터폴은 분명합니다. 재시도 세 번이 맨 아래에 빨갛게 놓여 있고, 각각 정확히 1.75초에 타임아웃됩니다. 제공자 쪽이 아니라 클라이언트 자신의 마감 시간입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_3_title = () => `로그는 풀이 비어 있었다고 말합니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_step_3_body = () => `그 스팬들이 실행되는 동안 기록된 줄은 같은 트레이스 ID를 갖습니다. 재시도 예산 소진, 이어서 커넥션 풀 한도 도달. 타임아웃은 Stripe가 느려서가 아니라 연결을 기다린 증상이었습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_outcome_line = () => `풀을 늘리고 재시도 예산을 두 번으로 줄였습니다. checkout 에러율은 한 평가 구간 안에 기준선으로 돌아왔습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_metric_1_label = () => `알림에서 근본 원인까지`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_metric_2_label = () => `실패 주문당 재시도 횟수`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_metric_3_label = () => `매번 같은 타임아웃 값`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_title = () => `주문 ID가 끝까지 이어진 이유`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_1_title = () => `비즈니스 ID도 그저 속성입니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_1_body = () => `스팬에 order.id를 한 번 설정하면 트레이스 목록, 에러 이슈, 로그 검색 등 스팬이 있는 모든 곳에서 걸러낼 수 있습니다. 따로 유지할 인덱스가 없습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_2_title = () => `외부 호출도 스팬입니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_2_body = () => `Stripe 호출은 자체 소요 시간과 상태를 가진 클라이언트 스팬입니다. 서드파티 타임아웃은 자사 에러율에서 추론하는 것이 아니라 실제로 측정됩니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_3_title = () => `로그는 결합되는 것이지 두 번 검색하는 것이 아닙니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_ecom_cap_3_body = () => `스팬 뒤의 로그 줄에는 같은 분으로 손수 좁힌 텍스트 검색이 아니라 스팬에서 바로 도달합니다. 보통 가장 많은 시간을 잡아먹는 단계가 바로 이것입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_seo_title = () => `마이크로서비스 디버깅 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_seo_desc = () => `배포한 기억도 없는데 지연이 두 배가 됐습니다. 릴리스 하나를 서비스 맵·트레이스·로그를 따라 두 홉 떨어진 곳에서 말라붙은 커넥션 풀까지 추적합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_hero_title = () => `아무도 배포하지 않았습니다. 그런데도 지연이 두 배가 됐습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_hero_lede = () => `분산 시스템에서 느려진 서비스가 곧 고장 난 서비스인 경우는 드뭅니다. 맵은 어느 간선이 먼저 나빠졌는지 보여주고, 트레이스는 대기가 어디까지 번졌는지 보여줍니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_story_title = () => `증상에서 원인까지 두 홉`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_story_lede = () => `payment-svc@1.4.2는 증상이 나타나기 네 시간 전에 배포된 릴리스입니다. 이것이 전체 경로를 꿰뚫습니다. 맵·트레이스·로그가 모두 여기에 맞춰 좁혀져 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_1_title = () => `맵은 느린 서비스가 아니라 느린 간선을 보여줍니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_1_body = () => `호출된 것은 api-gateway지만 그 자체 스팬에는 문제가 없습니다. 나빠진 간선은 두 홉 안쪽, payment-svc에서 user-db로, 평균이 12ms에서 210ms로 올랐습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_2_title = () => `트레이스는 작업이 아니라 대기를 보여줍니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_2_body = () => `느린 요청을 열면 대부분이 db 스팬입니다. 쿼리 자체는 4ms인데 스팬은 210ms입니다. 그 차이는 쿼리가 실행되기도 전에 흘러간 시간입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_3_title = () => `로그가 릴리스를 지목합니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_step_3_body = () => `그 스팬의 로그 줄에는 pool wait 206ms, 세 번째 시도에 획득이라고 적혀 있습니다. service.version으로 거르면 1.4.2부터 시작되며, 이 릴리스는 풀을 늘리지 않은 채 동시성만 올렸습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_outcome_line = () => `새 동시성에 맞춰 풀 크기를 늘렸습니다. 간선의 p95 지연은 롤백 없이 14ms로 돌아왔습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_metric_1_label = () => `호출 지점에서의 홉 수`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_metric_2_label = () => `간선 지연, 전후`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_metric_3_label = () => `가 스팬 내 대기 시간`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_title = () => `연쇄를 읽어낼 수 있었던 이유`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_1_title = () => `간선은 자체 지연을 가집니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_1_body = () => `맵은 호출자-피호출자 쌍별로 따로 측정합니다. 특정 호출자에게만 나빠진 의존성은 서비스 전체 평균이 아니라 하나의 간선으로 드러납니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_2_title = () => `db 스팬은 대기와 작업의 합입니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_2_body = () => `클라이언트 스팬이 실행뿐 아니라 연결 획득까지 감싸기 때문에, 풀 고갈은 하나의 숫자 안에 숨지 않고 스팬 소요 시간과 쿼리 소요 시간의 차이로 드러납니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_3_title = () => `배포하지 않았다는 것도 배포입니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const uc_micro_cap_3_body = () => `모든 스팬에 service.version이 붙어 있으면 질문이 '누가 배포했는가'에서 '이 스팬은 어느 버전의 것인가'로 바뀝니다. 네 시간 전 릴리스도 4분 전 것만큼 쉽게 찾을 수 있습니다.`

@@ -11,7 +11,12 @@ import { GithubProvider } from "./services/vcs/vendor/github/GithubProvider"
 import { VcsProviderRegistry } from "./services/vcs/VcsProviderRegistry"
 import { VcsRepository } from "./services/vcs/VcsRepository"
 import { VcsScheduledSyncService } from "./services/vcs/VcsScheduledSyncService"
-import { clampQueueDelaySeconds, VcsSyncQueue } from "./services/vcs/VcsSyncQueue"
+import {
+	clampQueueDelaySeconds,
+	MESSAGING_DESTINATION,
+	MESSAGING_SYSTEM,
+	VcsSyncQueue,
+} from "./services/vcs/VcsSyncQueue"
 import { VcsSyncService } from "./services/vcs/VcsSyncService"
 
 // ---------------------------------------------------------------------------
@@ -65,6 +70,20 @@ export const buildVcsScheduledLayer = (_env: Record<string, unknown>) => {
 	)
 
 	return VcsScheduledSyncServiceLive.pipe(
+		Layer.provideMerge(telemetry.layer),
+		Layer.provideMerge(ConfigLive),
+	)
+}
+
+// Scrape-check retention's cron layer — the lightest of the three: the job talks
+// only to Postgres, so it deliberately skips the scrape-targets service and its
+// PlanetScale discovery/OAuth dependencies.
+export const buildScrapeRetentionLayer = (_env: Record<string, unknown>) => {
+	const ConfigLive = WorkerConfigProviderLayer
+	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
+
+	return DatabaseLive.pipe(
+		Layer.provideMerge(WorkerEnvironment.layer),
 		Layer.provideMerge(telemetry.layer),
 		Layer.provideMerge(ConfigLive),
 	)
@@ -175,13 +194,25 @@ export const processBatch = (batch: MessageBatch<unknown>) =>
 							}).pipe(Effect.flatMap(() => Effect.sync(() => message.ack()))),
 					}),
 					Effect.withSpan("VcsSyncQueue.processMessage", {
-						attributes: { "messaging.message.delivery_attempt": message.attempts },
+						kind: "consumer",
+						attributes: {
+							"messaging.system": MESSAGING_SYSTEM,
+							"messaging.destination.name": MESSAGING_DESTINATION,
+							"messaging.operation.name": "process",
+							"messaging.message.delivery_attempt": message.attempts,
+						},
 					}),
 				),
 			{ discard: true },
 		)
 	}).pipe(
 		Effect.withSpan("VcsSyncQueue.processBatch", {
-			attributes: { "messaging.batch.message_count": batch.messages.length },
+			kind: "consumer",
+			attributes: {
+				"messaging.system": MESSAGING_SYSTEM,
+				"messaging.destination.name": MESSAGING_DESTINATION,
+				"messaging.operation.name": "receive",
+				"messaging.batch.message_count": batch.messages.length,
+			},
 		}),
 	)

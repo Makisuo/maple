@@ -160,6 +160,16 @@ export interface PlanetScaleOAuthServiceShape {
 	readonly hasConnection: (orgId: OrgId) => Effect.Effect<boolean, IntegrationsPersistenceError>
 	/** Who authorized the stored grant (null when not connected). */
 	readonly connectedByUserId: (orgId: OrgId) => Effect.Effect<string | null, IntegrationsPersistenceError>
+	/**
+	 * Grant lifecycle timestamps (epoch ms), so the UI can name a revoked grant
+	 * directly instead of inferring it from whichever downstream call failed.
+	 */
+	readonly grantStatus: (
+		orgId: OrgId,
+	) => Effect.Effect<
+		{ readonly revokedAt: number | null; readonly expiresAt: number | null },
+		IntegrationsPersistenceError
+	>
 	/** Drop the stored grant. PlanetScale documents no revoke endpoint. */
 	readonly disconnect: (
 		orgId: OrgId,
@@ -509,6 +519,15 @@ export class PlanetScaleOAuthService extends Context.Service<
 			return row?.connectedByUserId ?? null
 		})
 
+		const grantStatus = Effect.fn("PlanetScaleOAuthService.grantStatus")(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan({ orgId })
+			const row = yield* oauth.loadConnection(orgId)
+			return {
+				revokedAt: row?.revokedAt?.getTime() ?? null,
+				expiresAt: row?.expiresAt?.getTime() ?? null,
+			}
+		})
+
 		const disconnect = Effect.fn("PlanetScaleOAuthService.disconnect")(function* (orgId: OrgId) {
 			yield* Effect.annotateCurrentSpan({ orgId })
 			return yield* oauth.deleteConnection(orgId)
@@ -521,6 +540,7 @@ export class PlanetScaleOAuthService extends Context.Service<
 			listOrganizations,
 			hasConnection,
 			connectedByUserId,
+			grantStatus,
 			disconnect,
 		} satisfies PlanetScaleOAuthServiceShape
 	}),

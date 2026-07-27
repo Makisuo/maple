@@ -67,8 +67,10 @@ import {
 	getCloudflarePlatformResources,
 	getCloudflareTopTraffic,
 	getCloudflareWorkers,
+	getCloudflareZoneBreakdown,
 	getCloudflareZoneDetail,
 	getCloudflareZoneDns,
+	getCloudflareZoneFacets,
 	getCloudflareZoneHosts,
 	getCloudflareZones,
 	getCloudflareZoneSecurity,
@@ -413,6 +415,14 @@ export const cloudflareZoneDnsResultAtom = makeQueryAtomFamily(getCloudflareZone
 })
 
 export const cloudflarePlatformResourcesResultAtom = makeQueryAtomFamily(getCloudflarePlatformResources, {
+	staleTime: 30_000,
+})
+
+export const cloudflareZoneBreakdownResultAtom = makeQueryAtomFamily(getCloudflareZoneBreakdown, {
+	staleTime: 30_000,
+})
+
+export const cloudflareZoneFacetsResultAtom = makeQueryAtomFamily(getCloudflareZoneFacets, {
 	staleTime: 30_000,
 })
 

@@ -2,9 +2,8 @@ import { useMemo } from "react"
 
 import type { CloudflareZoneRow, CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@/lib/format"
-import { formatPercent } from "../format"
+import { formatBytes, formatPercent } from "../format"
 import { StatRail, StatRailItem, StatRailLoading } from "../primitives/stat-rail"
-import { formatBytes } from "./format"
 
 interface CloudflareKpiCardsProps {
 	zones: ReadonlyArray<CloudflareZoneRow>
@@ -36,7 +35,10 @@ export function CloudflareKpiCards({ zones, buckets }: CloudflareKpiCardsProps) 
 
 	const sparks = useMemo(() => {
 		if (!buckets?.length) return undefined
-		const byBucket = new Map<string, { requests: number; errors5xx: number; cacheHits: number; bytes: number }>()
+		const byBucket = new Map<
+			string,
+			{ requests: number; errors5xx: number; cacheHits: number; bytes: number }
+		>()
 		for (const row of buckets) {
 			const agg = byBucket.get(row.bucket) ?? { requests: 0, errors5xx: 0, cacheHits: 0, bytes: 0 }
 			agg.requests += row.requests

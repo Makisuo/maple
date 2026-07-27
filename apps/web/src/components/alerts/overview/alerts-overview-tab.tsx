@@ -238,7 +238,8 @@ const AlertsOverviewContent = memo(function AlertsOverviewContent({
 
 	const [triggeredWindow, setTriggeredWindow] = useState<"24h" | "7d" | "30d">("24h")
 	const triggeredInWindow = useMemo(() => {
-		const windowMs = triggeredWindow === "24h" ? DAY_MS : triggeredWindow === "7d" ? 7 * DAY_MS : 30 * DAY_MS
+		const windowMs =
+			triggeredWindow === "24h" ? DAY_MS : triggeredWindow === "7d" ? 7 * DAY_MS : 30 * DAY_MS
 		const cutoff = Date.now() - windowMs
 		return incidents.filter((i) => {
 			if (!i.firstTriggeredAt) return false
@@ -264,7 +265,11 @@ const AlertsOverviewContent = memo(function AlertsOverviewContent({
 
 	return (
 		<div className="space-y-6">
-			<AlertsHealthSummary counts={healthCounts} active={statusFilter} onActiveChange={setStatusFilter} />
+			<AlertsHealthSummary
+				counts={healthCounts}
+				active={statusFilter}
+				onActiveChange={setStatusFilter}
+			/>
 
 			{visibleIncidents.length > 0 && (statusFilter == null || statusFilter === "firing") && (
 				<ActiveIncidentsTable
@@ -287,7 +292,10 @@ const AlertsOverviewContent = memo(function AlertsOverviewContent({
 						/>
 						{searchQuery && (
 							<InputGroupAddon align="inline-end">
-								<InputGroupButton aria-label="Clear search" onClick={() => setSearchQuery("")}>
+								<InputGroupButton
+									aria-label="Clear search"
+									onClick={() => setSearchQuery("")}
+								>
 									<XmarkIcon />
 								</InputGroupButton>
 							</InputGroupAddon>

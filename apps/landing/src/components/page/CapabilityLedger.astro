@@ -1,0 +1,69 @@
+---
+/**
+ * CapabilityLedger — what replaces the six-blurb card grid.
+ *
+ * DESIGN.md bans repeated card+icon+title+blurb tiles by name, so this is a
+ * ledger rather than a grid: hairline-ruled rows, no cards, no icons, no
+ * per-row radius or background. Same construction as the homepage's
+ * KubernetesSection and AgentSection `<dl>`s, promoted to full width.
+ *
+ * The left column is the operator gutter — the same mono key column
+ * SurfacePanel opens with, continued down the page. Each row's `op` is the
+ * literal thing you'd type, click or read in the product: a route, an
+ * attribute key, a function call, a keystroke. That is the column's whole
+ * job, and it's why there are two columns and not three: a third "result"
+ * column tempts the writer to park the number outside the sentence, where it
+ * stops being evidence.
+ *
+ * Hover lifts one tonal step, per the Tonal-Depth Rule. No shadow, ever.
+ */
+interface Props {
+	eyebrow: string;
+	title: string;
+	items: { op: string; title: string; body: string }[];
+	/**
+	 * Which floor this sits on. Feature pages take the deep default; use-case
+	 * pages pass "base" because OutcomeBand above already holds the deep floor,
+	 * and two deep sections in a row flatten the cadence into a checkerboard.
+	 */
+	tone?: "deep" | "base";
+	class?: string;
+}
+
+const { eyebrow, title, items, tone = "deep", class: className = "" } = Astro.props;
+const surface = tone === "deep" ? "bg-bg-deep" : "bg-bg";
+---
+
+<section class={`${surface} ${className}`}>
+	<div class="shell py-16 md:py-32">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{eyebrow}</p>
+		<h2
+			class="mt-4 max-w-[20ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+		>
+			{title}
+		</h2>
+
+		<!-- The 20rem gutter matches SurfacePanel's left track, so the op column
+		     and the panel's fact keys sit on one continuous rail down the page. -->
+		<dl class="mt-10 md:mt-14">
+			{
+				items.map((item) => (
+					<div class="grid gap-x-8 gap-y-2 border-t border-border py-5 transition-colors hover:bg-bg-elevated lg:grid-cols-[20rem_1fr] lg:py-6">
+						{/* min-w-0 so a long attribute key wraps inside the gutter
+						    instead of widening the track. */}
+						<span class="op-key min-w-0 break-words pt-1 leading-relaxed lg:normal-case lg:tracking-[0.08em]">
+							{item.op}
+						</span>
+						<div class="min-w-0">
+							<dt class="font-display text-base leading-snug tracking-[-0.01em] text-fg md:text-lg">
+								{item.title}
+							</dt>
+							<dd class="mt-2 max-w-[64ch] text-[13px] leading-relaxed text-fg-muted">{item.body}</dd>
+						</div>
+					</div>
+				))
+			}
+			<div class="border-t border-border" aria-hidden="true"></div>
+		</dl>
+	</div>
+</section>

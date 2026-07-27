@@ -151,7 +151,9 @@ function ErrorTypeCard({
 				<CircleWarningIcon className="size-4 shrink-0 text-destructive" />
 				<span className="min-w-0 flex-1">
 					<span className="flex items-baseline gap-2">
-						<span className="truncate text-sm font-medium">{row.errorLabel || "Unknown Error"}</span>
+						<span className="truncate text-sm font-medium">
+							{row.errorLabel || "Unknown Error"}
+						</span>
 						<span className="shrink-0 text-xs text-muted-foreground">
 							{row.affectedServicesCount === 1
 								? "1 service"
@@ -173,7 +175,10 @@ function ErrorTypeCard({
 					</span>
 				</span>
 				<ChevronDownIcon
-					className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-180")}
+					className={cn(
+						"size-4 shrink-0 text-muted-foreground transition-transform",
+						expanded && "rotate-180",
+					)}
 				/>
 			</button>
 
@@ -203,9 +208,7 @@ function ErrorTypeCard({
 										<span className="min-w-0 flex-1 truncate font-mono">
 											{trace.rootSpanName || trace.traceId}
 										</span>
-										<span className="shrink-0 tabular-nums">
-											{trace.spanCount} spans
-										</span>
+										<span className="shrink-0 tabular-nums">{trace.spanCount} spans</span>
 										<span className="shrink-0 tabular-nums">
 											{formatDuration(trace.durationMicros / 1000)}
 										</span>

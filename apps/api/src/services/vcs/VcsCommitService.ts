@@ -160,9 +160,7 @@ export class VcsCommitService extends Context.Service<VcsCommitService, VcsCommi
 						const provider = yield* registry
 							.resolve(installation.provider)
 							.pipe(
-								Effect.mapError(
-									(e) => new IntegrationsUpstreamError({ message: e.message }),
-								),
+								Effect.mapError((e) => new IntegrationsUpstreamError({ message: e.message })),
 							)
 						const repos = yield* asPersistence(
 							repo.listRepositoriesByInstallation(installation.id, "active"),

@@ -4,7 +4,11 @@ import { ReplaySurface, ReplayTransport } from "@/components/replays/replay-play
 import { ReplayPlayerProvider } from "@/components/replays/replay-player-context"
 import { ReplayEditorTimeline, type SessionTraceSummary } from "@/components/replays/replay-editor-timeline"
 import { SessionEventsPanel, type EventRow } from "@/components/replays/session-events-panel"
-import { formatDuration, type ReplayPartitionWindow } from "@/components/replays/replay-format"
+import {
+	formatDuration,
+	recordedMarker,
+	type ReplayPartitionWindow,
+} from "@/components/replays/replay-format"
 import { CopyButton, Reveal, SessionIdentityHeader } from "@/components/replays/session-detail-parts"
 
 // ---------------------------------------------------------------------------
@@ -44,6 +48,9 @@ interface ReplayStudioSession {
 	readonly country?: string | null
 	readonly serviceName?: string | null
 	readonly status?: string
+	/** JSON-encoded `session_replays.ResourceAttributes`; carries the SDK's
+	 *  `maple.session.recorded` marker. Omitted on the preview fixture. */
+	readonly resourceAttributes?: string | null
 }
 
 /** Placeholder-data bundle for the preview route — bypasses every warehouse fetch. */
@@ -91,7 +98,13 @@ export function ReplayStudio({
 				</div>
 			</Reveal>
 
-			<ReplayPlayerProvider sessionId={sessionId} previewEvents={preview?.rrwebEvents} window={window}>
+			<ReplayPlayerProvider
+				sessionId={sessionId}
+				previewEvents={preview?.rrwebEvents}
+				window={window}
+				recorded={recordedMarker(session.resourceAttributes)}
+				sessionActive={isActive}
+			>
 				{/* Browser chrome + video next to the event stream. The transport is
 				    detached (rendered below) so the events panel matches the height of
 				    the video block exactly — no dead space. */}
@@ -118,10 +131,10 @@ export function ReplayStudio({
 				{/* Trace timeline — full width below. */}
 				<Reveal delay={0.08}>
 					<ReplayEditorTimeline
-							traceIds={traceIds}
-							previewSummaries={preview?.traceSummaries}
-							window={window}
-						/>
+						traceIds={traceIds}
+						previewSummaries={preview?.traceSummaries}
+						window={window}
+					/>
 				</Reveal>
 			</ReplayPlayerProvider>
 		</div>

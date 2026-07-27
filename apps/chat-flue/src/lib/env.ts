@@ -14,6 +14,10 @@ export interface ChatFlueEnv {
 	MAPLE_TRIAGE_MODEL?: string
 	/** Deployment environment label, surfaced on telemetry. */
 	MAPLE_ENVIRONMENT?: string
+	/** Application version emitted as `service.version`. */
+	MAPLE_SERVICE_VERSION?: string
+	/** Source revision emitted as `deployment.commit_sha`. */
+	COMMIT_SHA?: string
 
 	// --- Telemetry (OpenTelemetry → Maple ingest) ---
 	/**

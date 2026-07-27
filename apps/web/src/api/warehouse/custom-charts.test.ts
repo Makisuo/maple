@@ -57,24 +57,26 @@ describe("getServiceDetailThroughputRefinement", () => {
 		)
 	})
 
-	it.effect("queries the SpanMetrics `calls` counter as a per-bucket increase when sampling is active", () =>
-		Effect.gen(function* () {
-			yield* getServiceDetailThroughputRefinement({
-				data: {
-					serviceName: "sampled-svc",
-					startTime: "2026-02-01 00:00:00",
-					endTime: "2026-02-01 01:00:00",
-					samplingActive: true,
-				},
-			})
+	it.effect(
+		"queries the SpanMetrics `calls` counter as a per-bucket increase when sampling is active",
+		() =>
+			Effect.gen(function* () {
+				yield* getServiceDetailThroughputRefinement({
+					data: {
+						serviceName: "sampled-svc",
+						startTime: "2026-02-01 00:00:00",
+						endTime: "2026-02-01 01:00:00",
+						samplingActive: true,
+					},
+				})
 
-			const calls = spanMetricsCallsOf()
-			assert.strictEqual(calls.length, 1)
-			const request = calls[0][1]
-			assert.strictEqual(request.query.metric, "increase")
-			// Both known spellings are matched in a single IN(...) — no listMetrics preflight.
-			assert.deepStrictEqual(request.query.filters.metricNames, ["span.metrics.calls", "calls"])
-		}),
+				const calls = spanMetricsCallsOf()
+				assert.strictEqual(calls.length, 1)
+				const request = calls[0][1]
+				assert.strictEqual(request.query.metric, "increase")
+				// Both known spellings are matched in a single IN(...) — no listMetrics preflight.
+				assert.deepStrictEqual(request.query.filters.metricNames, ["span.metrics.calls", "calls"])
+			}),
 	)
 
 	it.effect("skips the slow query entirely when sampling is not active", () =>
@@ -136,7 +138,10 @@ describe("mergeExactThroughput", () => {
 	})
 
 	it("leaves buckets without an exact value (or with 0) untouched", () => {
-		const points = [point("2026-02-01T00:00:00.000Z", 100, 100), point("2026-02-01T00:01:00.000Z", 50, 50)]
+		const points = [
+			point("2026-02-01T00:00:00.000Z", 100, 100),
+			point("2026-02-01T00:01:00.000Z", 50, 50),
+		]
 		const merged = mergeExactThroughput(points, new Map([["2026-02-01T00:01:00.000Z", 0]]))
 		expect(merged[0].throughput).toBe(100)
 		expect(merged[1].throughput).toBe(50)

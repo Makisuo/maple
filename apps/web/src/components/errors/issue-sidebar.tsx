@@ -15,7 +15,7 @@ import { SEVERITY_LABEL, SEVERITY_ORDER, SEVERITY_SOURCE_LABEL, SEVERITY_TONE } 
 import { StateSelect } from "./state-select"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 
-type Busy = "state" | "claim" | "release" | "heartbeat" | "comment" | "severity" | null
+type Busy = "state" | "claim" | "release" | "heartbeat" | "comment" | "severity" | "investigation" | null
 
 const SEVERITY_NONE = "none" as const
 

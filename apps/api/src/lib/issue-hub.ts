@@ -9,7 +9,7 @@ import {
 } from "@maple/domain/primitives"
 import { actors, alertIncidents, errorIssues, errorIssueEvents, type ErrorIssueRow } from "@maple/db"
 import { and, eq, sql } from "drizzle-orm"
-import { Cause, Clock, Effect, Schema } from "effect"
+import { Cause, Clock, Effect, Option, Redacted, Schema } from "effect"
 import { Database } from "./DatabaseLive"
 import { maybeEnqueueTriage } from "./ai-triage-enqueue"
 
@@ -53,8 +53,9 @@ export interface UpsertAlertIssueInput {
 	readonly incidentId: AlertIncidentId
 	readonly serviceName: string
 	readonly timestamp: number
-	/** Raw AI_TRIAGE_WORKFLOW binding off the worker env (may be undefined). */
-	readonly workflowBinding: unknown
+	/** Raw CHAT_FLUE service binding off the worker env (may be undefined). */
+	readonly agentBinding: unknown
+	readonly internalServiceToken: Option.Option<Redacted.Redacted<string>>
 }
 
 export interface UpsertAlertIssueResult {
@@ -296,7 +297,8 @@ export const upsertAlertIssue: (
 				firstTriggeredAt: new Date(input.timestamp).toISOString(),
 				issueId,
 			},
-			workflowBinding: input.workflowBinding,
+			agentBinding: input.agentBinding,
+			internalServiceToken: input.internalServiceToken,
 		})
 
 		return { issueId, action }

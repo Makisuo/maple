@@ -17,14 +17,19 @@ interface ServiceErrorsPanelProps {
 	environments?: string[]
 }
 
-function PanelFrame({ children }: { children: React.ReactNode }) {
+function PanelFrame({ children, detailLimited }: { children: React.ReactNode; detailLimited?: boolean }) {
 	return (
 		<SectionCard
 			title="Open issues"
 			action={
-				<Link to="/errors/issues" className="text-xs text-primary hover:underline">
-					View all →
-				</Link>
+				<div className="flex items-center gap-3">
+					{detailLimited && (
+						<span className="text-[11px] text-muted-foreground">Latest 90 days</span>
+					)}
+					<Link to="/errors/issues" className="text-xs text-primary hover:underline">
+						View all →
+					</Link>
+				</div>
 			}
 		>
 			{children}
@@ -70,9 +75,15 @@ function IssueLine({ issue }: { issue: ErrorIssueDocument }) {
 	)
 }
 
-function PanelReady({ issues }: { issues: ReadonlyArray<ErrorIssueDocument> }) {
+function PanelReady({
+	issues,
+	detailLimited,
+}: {
+	issues: ReadonlyArray<ErrorIssueDocument>
+	detailLimited: boolean
+}) {
 	return (
-		<PanelFrame>
+		<PanelFrame detailLimited={detailLimited}>
 			{issues.length === 0 ? (
 				<PanelMessage>No open issues for this service.</PanelMessage>
 			) : (
@@ -96,14 +107,18 @@ export function ServiceErrorsPanel({
 	// single-select semantics); the page window rides along so the filter means
 	// "issues seen in this environment in this window".
 	const environment = environments?.length === 1 ? environments[0] : undefined
+	const detailLimited =
+		Date.parse(effectiveEndTime) - Date.parse(effectiveStartTime) > 90 * 24 * 60 * 60 * 1000
+	const detailStartTime = detailLimited
+		? new Date(Date.parse(effectiveEndTime) - 90 * 24 * 60 * 60 * 1000).toISOString()
+		: effectiveStartTime
 	const result = useAtomValue(
 		MapleApiV2AtomClient.query("errorIssues", "list", {
-			query: buildServiceOpenIssuesQuery(
-				serviceName,
-				environment === undefined
-					? undefined
-					: { environment, startTime: effectiveStartTime, endTime: effectiveEndTime },
-			),
+			query: buildServiceOpenIssuesQuery(serviceName, {
+				environment,
+				startTime: detailStartTime,
+				endTime: effectiveEndTime,
+			}),
 			reactivityKeys: ["errorIssues"],
 		}),
 	)
@@ -115,5 +130,5 @@ export function ServiceErrorsPanel({
 			</PanelFrame>
 		)
 	}
-	return <PanelReady issues={result.value.data.map(errorIssueFromV2)} />
+	return <PanelReady issues={result.value.data.map(errorIssueFromV2)} detailLimited={detailLimited} />
 }

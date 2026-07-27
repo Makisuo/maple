@@ -183,7 +183,10 @@ export function MetricsTable({ search, metricType, onOpenMetric, startTime, endT
 									<TableCell className="hidden md:table-cell">
 										{metric.serviceName ? (
 											<Badge variant="outline" className="font-mono text-[10px]">
-												<ServiceDot serviceName={metric.serviceName} className="size-1.5" />
+												<ServiceDot
+													serviceName={metric.serviceName}
+													className="size-1.5"
+												/>
 												{metric.serviceName}
 											</Badge>
 										) : (

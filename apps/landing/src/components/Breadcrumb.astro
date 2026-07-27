@@ -8,14 +8,21 @@ interface BreadcrumbItem {
 
 interface Props {
     items: BreadcrumbItem[];
+    /** Container classes. Pages on the `.shell` grid pass "shell pt-4" so the
+     *  trail lines up with the nav above it instead of sitting 72px narrower. */
+    class?: string;
 }
 
-const { items } = Astro.props;
+const { items, class: className = "mx-auto max-w-6xl px-6 pt-4" } = Astro.props;
 const locale = Astro.currentLocale ?? "en";
 const l = (path: string) => getRelativeLocaleUrl(locale, path);
 
 const siteUrl = Astro.site?.toString().replace(/\/$/, '') ?? 'https://maple.dev';
-const currentUrl = `${siteUrl}${Astro.url.pathname}`;
+// Astro.url.pathname reports the *English* path on a fallback-rewritten locale
+// route, so the leaf of a /ja or /ko trail would otherwise point at the English
+// URL. Rebuild it from the locale instead.
+const pathWithoutLocale = Astro.url.pathname.replace(/^\/(ja|ko)(\/|$)/, '/').replace(/\/+/g, '/');
+const currentUrl = `${siteUrl}${l(pathWithoutLocale)}`;
 
 const jsonLd = {
     "@context": "https://schema.org",
@@ -29,7 +36,7 @@ const jsonLd = {
 };
 ---
 
-<nav aria-label="Breadcrumb" class="mx-auto max-w-6xl px-6 pt-4">
+<nav aria-label="Breadcrumb" class={className}>
     <ol class="flex items-center gap-1.5 text-[11px]">
         {items.map((item, index) => (
             <li class="flex items-center gap-1.5">

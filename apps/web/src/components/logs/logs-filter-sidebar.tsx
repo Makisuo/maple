@@ -6,7 +6,7 @@ import { XmarkIcon, MagnifierIcon } from "@/components/icons"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { FilterSection, SearchableFilterSection, serviceColorMap } from "@/components/filters/filter-section"
 import { Route } from "@/routes/logs"
-import { Separator } from "@maple/ui/components/ui/separator"
+import { FILTER_SECTION_LABEL } from "@maple/ui/components/filters/filter-styles"
 import { Kbd } from "@maple/ui/components/ui/kbd"
 import {
 	InputGroup,
@@ -107,9 +107,7 @@ export function LogsFilterSidebar() {
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<div className="pb-3">
-							<span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-								Search
-							</span>
+							<span className={`${FILTER_SECTION_LABEL} text-muted-foreground`}>Search</span>
 							<InputGroup className="mt-2">
 								<InputGroupAddon>
 									<MagnifierIcon />
@@ -138,54 +136,36 @@ export function LogsFilterSidebar() {
 								)}
 							</InputGroup>
 						</div>
-						<Separator className="my-2" />
 
-						{(facets.severities?.length ?? 0) > 0 && (
-							<>
-								<FilterSection
-									title="Severity"
-									options={facets.severities}
-									selected={search.severities ?? []}
-									onChange={(val) => updateFilter("severities", val)}
-									colorMap={SEVERITY_COLORS}
-								/>
-								<Separator className="my-2" />
-							</>
-						)}
+						<FilterSection
+							title="Severity"
+							options={facets.severities ?? []}
+							selected={search.severities ?? []}
+							onChange={(val) => updateFilter("severities", val)}
+							colorMap={SEVERITY_COLORS}
+						/>
 
-						{(facets.deploymentEnvs?.length ?? 0) > 0 && (
-							<>
-								<FilterSection
-									title="Environment"
-									options={facets.deploymentEnvs}
-									selected={search.deploymentEnvs ?? []}
-									onChange={(val) => updateFilter("deploymentEnvs", val)}
-								/>
-								<Separator className="my-2" />
-							</>
-						)}
+						<FilterSection
+							title="Environment"
+							options={facets.deploymentEnvs ?? []}
+							selected={search.deploymentEnvs ?? []}
+							onChange={(val) => updateFilter("deploymentEnvs", val)}
+						/>
 
-						{(facets.namespaces?.length ?? 0) > 0 && (
-							<>
-								<SearchableFilterSection
-									title="Namespace"
-									options={facets.namespaces}
-									selected={search.namespaces ?? []}
-									onChange={(val) => updateFilter("namespaces", val)}
-								/>
-								<Separator className="my-2" />
-							</>
-						)}
+						<SearchableFilterSection
+							title="Namespace"
+							options={facets.namespaces ?? []}
+							selected={search.namespaces ?? []}
+							onChange={(val) => updateFilter("namespaces", val)}
+						/>
 
-						{(facets.services?.length ?? 0) > 0 && (
-							<SearchableFilterSection
-								title="Service"
-								options={facets.services}
-								selected={search.services ?? []}
-								onChange={(val) => updateFilter("services", val)}
-								colorMap={serviceColorMap(facets.services)}
-							/>
-						)}
+						<SearchableFilterSection
+							title="Service"
+							options={facets.services ?? []}
+							selected={search.services ?? []}
+							onChange={(val) => updateFilter("services", val)}
+							colorMap={serviceColorMap(facets.services ?? [])}
+						/>
 
 						{!hasFacets && (
 							<p className="text-sm text-muted-foreground py-4">

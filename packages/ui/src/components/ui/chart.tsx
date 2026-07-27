@@ -154,10 +154,7 @@ function ChartContainer({
 
 	// Stable identity so ChartContext consumers (tooltip/legend contents) don't
 	// rerender just because the container did.
-	const chartContextValue = React.useMemo(
-		() => ({ config, containerRef, chartId }),
-		[config, chartId],
-	)
+	const chartContextValue = React.useMemo(() => ({ config, containerRef, chartId }), [config, chartId])
 
 	return (
 		<ChartContext.Provider value={chartContextValue}>

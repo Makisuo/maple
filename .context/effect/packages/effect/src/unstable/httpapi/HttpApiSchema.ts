@@ -287,6 +287,14 @@ export type StreamSseMode = "events" | "data"
  * constructed from `data`, handlers and clients expose raw data values while
  * the server and client still use an SSE event schema internally.
  *
+ * **Gotchas**
+ *
+ * The client treats `effect/httpapi/stream/failure` as a stream failure only
+ * when its decoded `data` is a `Cause`. If an event schema accepts that name
+ * dynamically but decodes `data` to another value, the client emits it as an
+ * application event. Endpoint construction rejects event schemas that declare
+ * the reserved name statically.
+ *
  * @category models
  * @since 4.0.0
  */
@@ -325,7 +333,7 @@ export interface StreamSse<
  * @since 4.0.0
  */
 export interface SseEventFromData<Data extends Schema.Constraint> extends
-  Schema.Codec<
+  Schema.ConstraintCodec<
     {
       readonly id: string | undefined
       readonly event: string

@@ -22,6 +22,8 @@ const ChatSearch = Schema.Struct({
 	shared: Schema.optional(Schema.String),
 	/** Title to show for a shared conversation (the viewer doesn't have it locally). */
 	title: Schema.optional(Schema.String),
+	/** Message permalink: open the transcript scrolled to this message. */
+	m: Schema.optional(Schema.String),
 })
 
 export const Route = createFileRoute("/chat")({
@@ -30,7 +32,7 @@ export const Route = createFileRoute("/chat")({
 })
 
 function ChatRoute() {
-	const { tab, mode, alert, widget, shared, title } = Route.useSearch()
+	const { tab, mode, alert, widget, shared, title, m } = Route.useSearch()
 	const investigationContext: InvestigationContext | undefined = (() => {
 		if (mode !== "alert" || !alert) return undefined
 		const decoded = decodeAlertContextFromSearchParam(alert)
@@ -46,6 +48,7 @@ function ChatRoute() {
 			widgetFixContext={widgetFixContext}
 			sharedTabId={shared}
 			sharedTitle={title}
+			focusMessageId={m}
 		/>
 	)
 }

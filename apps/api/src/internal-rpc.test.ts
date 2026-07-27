@@ -26,6 +26,8 @@ const unusedInvestigationService: InvestigationServiceShape = {
 	listInvestigations: () => Effect.die("unused"),
 	getInvestigation: () => Effect.die("unused"),
 	createInvestigation: () => Effect.die("unused"),
+	createAndStartInvestigation: () => Effect.die("unused"),
+	restartInvestigation: () => Effect.die("unused"),
 	updateStatus: () => Effect.die("unused"),
 	submitDiagnosis: () => Effect.die("unused"),
 }

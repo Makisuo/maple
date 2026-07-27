@@ -49,9 +49,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 		// without breaking the app (the boundary only fires on real render errors).
 		if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("__crash")) {
 			return (
-				<CrashScreen
-					error={new TypeError("Cannot read properties of undefined (reading 'spans')")}
-				/>
+				<CrashScreen error={new TypeError("Cannot read properties of undefined (reading 'spans')")} />
 			)
 		}
 		return this.props.children

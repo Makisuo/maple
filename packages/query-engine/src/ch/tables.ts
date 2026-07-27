@@ -37,6 +37,9 @@ export const Traces = table("traces", {
 	LinksAttributes: T.array(T.map(T.string, T.string)),
 	SampleRate: T.float64,
 	IsEntryPoint: T.uint8,
+	ResourceAttributeItems: T.array(T.string),
+	ScopeAttributeItems: T.array(T.string),
+	SpanAttributeItems: T.array(T.string),
 })
 
 export const TraceDetailSpans = table("trace_detail_spans", {
@@ -94,6 +97,9 @@ export const Logs = table("logs", {
 	ScopeVersion: T.string,
 	ScopeAttributes: T.map(T.string, T.string),
 	LogAttributes: T.map(T.string, T.string),
+	ResourceAttributeItems: T.array(T.string),
+	ScopeAttributeItems: T.array(T.string),
+	LogAttributeItems: T.array(T.string),
 })
 
 export const ServiceOverviewSpans = table("service_overview_spans", {
@@ -107,6 +113,24 @@ export const ServiceOverviewSpans = table("service_overview_spans", {
 	ServiceNamespace: T.string,
 	CommitSha: T.string,
 	SampleRate: T.float64,
+})
+
+export const ServiceOverviewHourly = table("service_overview_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	ServiceName: T.string,
+	DeploymentEnv: T.string,
+	ServiceNamespace: T.string,
+	CommitSha: T.string,
+	SpanCount: T.uint64,
+	EstimatedSpanCount: T.float64,
+	ErrorCount: T.uint64,
+	EstimatedErrorCount: T.float64,
+	DurationSum: T.float64,
+	DurationQuantiles: T.string,
+	FirstSeen: T.dateTime,
+	ApdexSatisfiedCount: T.uint64,
+	ApdexToleratingCount: T.uint64,
 })
 
 export const ErrorSpans = table("error_spans", {
@@ -416,6 +440,20 @@ export const ServicePlatformsHourly = table("service_platforms_hourly", {
 	MapleSdkType: T.string,
 	ProcessRuntimeName: T.string,
 	SpanCount: T.uint64,
+})
+
+export const ServiceOperationsHourly = table("service_operations_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	ServiceName: T.string,
+	DeploymentEnv: T.string,
+	SpanName: T.string,
+	SpanCount: T.uint64,
+	EstimatedSpanCount: T.float64,
+	ErrorCount: T.uint64,
+	EstimatedErrorCount: T.float64,
+	DurationSum: T.float64,
+	DurationQuantiles: T.string,
 })
 
 export const AlertChecks = table("alert_checks", {

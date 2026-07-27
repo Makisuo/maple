@@ -2104,7 +2104,7 @@ export const refreshOnWindowFocus: <A extends Atom<any>>(self: A) => WithoutSeri
  * @category KeyValueStore
  * @since 4.0.0
  */
-export const kvs = <S extends Schema.Codec<any, any>, const Mode extends "sync" | "async" = never>(options: {
+export const kvs = <S extends Schema.ConstraintCodec<any, any>, const Mode extends "sync" | "async" = never>(options: {
   readonly runtime: AtomRuntime<KeyValueStore.KeyValueStore, any>
   readonly key: string
   readonly schema: S
@@ -2150,7 +2150,7 @@ export const kvs = <S extends Schema.Codec<any, any>, const Mode extends "sync" 
       },
     (ctx, value: S["Type"]) => {
       ctx.set(setAtom, value as any)
-      ctx.setSelf(value)
+      ctx.setSelf(options.mode === "async" ? AsyncResult.success(value) : value)
     }
   ) as any
 }
@@ -2169,9 +2169,12 @@ export const kvs = <S extends Schema.Codec<any, any>, const Mode extends "sync" 
  * @category search params
  * @since 4.0.0
  */
-export const searchParam = <S extends Schema.Codec<any, string> = never>(name: string, options?: {
-  readonly schema?: S | undefined
-}): Writable<[S] extends [never] ? string : Option.Option<S["Type"]>> => {
+export const searchParam = <S extends Schema.ConstraintCodec<any, string> = never>(
+  name: string,
+  options?: {
+    readonly schema?: S | undefined
+  }
+): Writable<[S] extends [never] ? string : Option.Option<S["Type"]>> => {
   const decode = options?.schema && Schema.decodeExit(options.schema)
   const encode = options?.schema && Schema.encodeExit(options.schema)
   return writable(
@@ -2437,17 +2440,17 @@ export const isSerializable = (self: Atom<any>): self is Atom<any> & Serializabl
  * @since 4.0.0
  */
 export const serializable: {
-  <R extends Atom<any>, S extends Schema.Codec<Type<R>, any>>(options: {
+  <R extends Atom<any>, S extends Schema.ConstraintCodec<Type<R>, any>>(options: {
     readonly key: string
     readonly schema: S
   }): (self: R) => R & Serializable<S>
-  <R extends Atom<any>, S extends Schema.Codec<Type<R>, any>>(self: R, options: {
+  <R extends Atom<any>, S extends Schema.ConstraintCodec<Type<R>, any>>(self: R, options: {
     readonly key: string
     readonly schema: S
   }): R & Serializable<S>
 } = dual(2, <R extends Atom<any>, A, I>(self: R, options: {
   readonly key: string
-  readonly schema: Schema.Codec<A, I>
+  readonly schema: Schema.ConstraintCodec<A, I>
 }): R & Serializable<any> => {
   const codecJson = Schema.toCodecJson(options.schema)
   return Object.assign(Object.create(Object.getPrototypeOf(self)), {

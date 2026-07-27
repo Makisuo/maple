@@ -240,6 +240,8 @@ For reusable codecs you can pass directly to `Config.schema`:
 
 ## ConfigProvider Sources
 
+The concrete built-in source providers `fromEnv`, `fromDotEnvContents`, `fromDotEnv`, `fromUnknown`, and `fromDir` treat literal empty strings as missing values by default when they are loaded as values. Container discovery still reflects the source structure, so a key or file can appear in a `Record` or `Array` node and then load as missing. Pass `{ preserveEmptyStrings: true }` to preserve empty strings as explicit values.
+
 ### `ConfigProvider.fromEnv` — Environment Variables (Default)
 
 This is the default provider. Path segments are joined with `_` for lookup.
@@ -358,7 +360,7 @@ const program = Effect.gen(function*() {
 
 Requires `Path` and `FileSystem` in the Effect context.
 
-Missing files and directories return `undefined`, so fallback providers can handle the path. Other file-system failures are reported as `SourceError`.
+Missing files and directories return `undefined`, so fallback providers can handle the path. Empty files also return `undefined` by default after trimming their contents, while directory listings still report the file names present on disk; pass `{ preserveEmptyStrings: true }` to preserve them as `Value("")`. Other file-system failures are reported as `SourceError`.
 
 ### `ConfigProvider.make` — Custom Sources
 

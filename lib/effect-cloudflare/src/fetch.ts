@@ -56,11 +56,7 @@ const doFetch = (
 	fetcher: runtime.Fetcher,
 	request: HttpClientRequest.HttpClientRequest,
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.RequestError> => {
-	const urlResult = Url.make(
-		request.url,
-		request.urlParams,
-		request.hash.pipe(Option.getOrUndefined),
-	)
+	const urlResult = Url.make(request.url, request.urlParams, request.hash.pipe(Option.getOrUndefined))
 	if (Result.isFailure(urlResult)) {
 		return Effect.fail(
 			new HttpClientError.InvalidUrlError({

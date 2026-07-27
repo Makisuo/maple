@@ -30,6 +30,7 @@ const baseRow = {
 	clickCount: 0,
 	errorCount: 0,
 	traceCount: 0,
+	recorded: "true",
 }
 
 describe("SessionReplayListItem.userId", () => {

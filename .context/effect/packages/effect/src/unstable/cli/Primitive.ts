@@ -105,9 +105,9 @@ const makePrimitive = <A>(
     parse
   })
 
-const makeSchemaPrimitive = <T, E>(
+const makeSchemaPrimitive = <T>(
   tag: string,
-  schema: Schema.Codec<T, E, Environment, Environment>
+  schema: Schema.ConstraintDecoder<T, Environment>
 ): Primitive<T> => {
   const toCodecStringTree = Schema.toCodecStringTree(schema)
   const decode = Schema.decodeUnknownEffect(toCodecStringTree)
@@ -304,7 +304,7 @@ export const choice = <A>(
     if (choiceMap.has(value)) {
       return Effect.succeed(choiceMap.get(value)!)
     }
-    return Effect.fail(`Expected ${validChoices}, got ${format(value)}`)
+    return Effect.fail(validChoices)
   })
   return Object.assign(primitive, { choiceKeys: choices.map(([key]) => key) })
 }

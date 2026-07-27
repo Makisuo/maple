@@ -40,14 +40,10 @@ describe("parseSqlCommenterTraceparent", () => {
 	it("rejects a malformed traceparent (wrong lengths / all-zero ids)", () => {
 		expect(parseSqlCommenterTraceparent("SELECT 1 /*traceparent='00-tooshort-abc-01'*/")).toBeNull()
 		expect(
-			parseSqlCommenterTraceparent(
-				`SELECT 1 /*traceparent='00-${"0".repeat(32)}-${SPAN_ID}-01'*/`,
-			),
+			parseSqlCommenterTraceparent(`SELECT 1 /*traceparent='00-${"0".repeat(32)}-${SPAN_ID}-01'*/`),
 		).toBeNull()
 		expect(
-			parseSqlCommenterTraceparent(
-				`SELECT 1 /*traceparent='00-${TRACE_ID}-${"0".repeat(16)}-01'*/`,
-			),
+			parseSqlCommenterTraceparent(`SELECT 1 /*traceparent='00-${TRACE_ID}-${"0".repeat(16)}-01'*/`),
 		).toBeNull()
 	})
 })

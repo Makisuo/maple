@@ -31,6 +31,11 @@ export type WarehouseQuerySettings = {
 	 * backend (Tinybird SDK or its ClickHouse-compatible gateway).
 	 */
 	maxBlockSize?: number
+	/**
+	 * Enables ClickHouse's text index query functions. Added only after the
+	 * executor verifies that the live server exposes this setting.
+	 */
+	enableFullTextIndex?: number
 }
 
 /**
@@ -104,6 +109,7 @@ const settingToCh: Record<keyof WarehouseQuerySettings, string> = {
 	maxMemoryUsage: "max_memory_usage",
 	maxThreads: "max_threads",
 	maxBlockSize: "max_block_size",
+	enableFullTextIndex: "enable_full_text_index",
 }
 
 /**
@@ -113,7 +119,10 @@ const settingToCh: Record<keyof WarehouseQuerySettings, string> = {
  * them only for a genuine per-org BYO ClickHouse, so the same call site works
  * against both backends.
  */
-const TINYBIRD_RESTRICTED_SETTINGS: ReadonlyArray<keyof WarehouseQuerySettings> = ["maxBlockSize"]
+const TINYBIRD_RESTRICTED_SETTINGS: ReadonlyArray<keyof WarehouseQuerySettings> = [
+	"maxBlockSize",
+	"enableFullTextIndex",
+]
 
 export const stripTinybirdRestrictedSettings = (
 	settings: WarehouseQuerySettings | undefined,

@@ -7,12 +7,7 @@ import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
 import { eq } from "drizzle-orm"
 import { Schema } from "effect"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
-import {
-	applyTriageSeverity,
-	escalationReasonFor,
-	severityRank,
-	TRIAGE_AGENT_NAME,
-} from "./issue-severity"
+import { applyTriageSeverity, escalationReasonFor, severityRank, TRIAGE_AGENT_NAME } from "./issue-severity"
 
 const createdDbs: TestDb[] = []
 

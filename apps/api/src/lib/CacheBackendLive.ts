@@ -18,6 +18,7 @@ const SYNTHETIC_HOST = "https://maple-api.internal"
 const buildCacheUrl = (bucket: string, hash: string): string => `${SYNTHETIC_HOST}/cache/${bucket}/${hash}`
 
 const makeWorkersBackend = (cache: Cache): EdgeCacheBackend => ({
+	name: "workers-cache",
 	get: async (bucket, hash) => {
 		const response = await cache.match(buildCacheUrl(bucket, hash))
 		if (!response) return undefined
@@ -44,7 +45,18 @@ const makeWorkersBackend = (cache: Cache): EdgeCacheBackend => ({
 
 export const CacheBackendLive = Layer.effect(
 	CacheBackend,
-	Effect.map(WorkersCache, (cache) =>
-		CacheBackend.of(cache ? makeWorkersBackend(cache) : makeMemoryBackend()),
-	),
+	Effect.gen(function* () {
+		const cache = yield* WorkersCache
+		if (!cache) {
+			// The fallback is per-isolate, so nothing is shared across requests that
+			// land elsewhere. Silent selection made this indistinguishable from a
+			// working edge cache; log it once per isolate and tag every span via
+			// `cache.backend`.
+			yield* Effect.logWarning(
+				"Workers cache unavailable — edge cache falling back to per-isolate memory",
+			)
+			return CacheBackend.of(makeMemoryBackend())
+		}
+		return CacheBackend.of(makeWorkersBackend(cache))
+	}),
 ).pipe(Layer.provide(WorkersCache.layer))

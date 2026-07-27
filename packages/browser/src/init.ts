@@ -5,12 +5,7 @@ import {
 	startReplaySession,
 	type ReplaySessionHandle,
 } from "@maple/browser-session/replay"
-import {
-	type MapleBrowserConfig,
-	type ResolvedConfig,
-	normalizeUserId,
-	resolveConfig,
-} from "./config"
+import { type MapleBrowserConfig, type ResolvedConfig, normalizeUserId, resolveConfig } from "./config"
 import { setupTracing } from "./tracing"
 
 export interface MapleBrowserHandle {

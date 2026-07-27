@@ -7,6 +7,7 @@ exemplars, resets). It exists to support spec-compliance checks and a best-pract
 below is sourced from the fetched spec pages, not from memory.
 
 > Source pages fetched for this document:
+>
 > - API: https://opentelemetry.io/docs/specs/otel/metrics/api/
 > - SDK: https://opentelemetry.io/docs/specs/otel/metrics/sdk/
 > - Data model: https://opentelemetry.io/docs/specs/otel/metrics/data-model/
@@ -42,17 +43,17 @@ metrics export described in the root `CLAUDE.md`). The parts of this spec that m
 
 ## 1. Metrics API
 
-**Stability: Stable**, except where individually marked *(Development)* below (the `Bind` operation and
+**Stability: Stable**, except where individually marked _(Development)_ below (the `Bind` operation and
 the `Attributes` advisory parameter).
 Source: https://opentelemetry.io/docs/specs/otel/metrics/api/
 
 ### 1.1 Core architecture
 
-| Concept | Role | Source anchor |
-|---|---|---|
+| Concept         | Role                                                                                                                                              | Source anchor    |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
 | `MeterProvider` | Entry point; owns config (exporters, readers, views). "The API SHOULD provide a way to set/register and access a global default `MeterProvider`." | `#meterprovider` |
-| `Meter` | Created from a `MeterProvider`; "Responsible for creating `Instruments`." Meter MUST NOT hold configuration — that's the MeterProvider's job. | `#meter` |
-| `Instrument` | Identified by `name`, `kind`, `unit`, `description` (plus language-level value-type distinction, e.g. integer vs floating point) | `#instrument` |
+| `Meter`         | Created from a `MeterProvider`; "Responsible for creating `Instruments`." Meter MUST NOT hold configuration — that's the MeterProvider's job.     | `#meter`         |
+| `Instrument`    | Identified by `name`, `kind`, `unit`, `description` (plus language-level value-type distinction, e.g. integer vs floating point)                  | `#instrument`    |
 
 `Meter` creation parameters (`Get a Meter`):
 
@@ -70,12 +71,12 @@ than with Meter" (normative MUST) — i.e., no free-standing instrument construc
 
 #### Synchronous instruments
 
-| Instrument | Semantics | Monotonic? | Recording op | Valid values |
-|---|---|---|---|---|
-| **Counter** | Non-negative increments | Yes (non-decreasing) | `Add(value, attributes)` | Non-negative; API "SHOULD be documented" as non-negative but "SHOULD NOT validate" |
-| **UpDownCounter** | Increments and decrements | No | `Add(value, attributes)` (accepts negative) | Any; used "when the absolute values are not pre-calculated, or fetching the 'current value' requires extra effort" |
-| **Histogram** | Arbitrary, statistically-meaningful values | N/A | `Record(value, attributes)` | Non-negative (documented, not validated); advisory `ExplicitBucketBoundaries: double[]` *(Stable)* |
-| **Gauge** | Non-additive value(s), recorded via subscription to change events | N/A | `Record(value, attributes)` | Absolute current value at time of recording |
+| Instrument        | Semantics                                                         | Monotonic?           | Recording op                                | Valid values                                                                                                       |
+| ----------------- | ----------------------------------------------------------------- | -------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Counter**       | Non-negative increments                                           | Yes (non-decreasing) | `Add(value, attributes)`                    | Non-negative; API "SHOULD be documented" as non-negative but "SHOULD NOT validate"                                 |
+| **UpDownCounter** | Increments and decrements                                         | No                   | `Add(value, attributes)` (accepts negative) | Any; used "when the absolute values are not pre-calculated, or fetching the 'current value' requires extra effort" |
+| **Histogram**     | Arbitrary, statistically-meaningful values                        | N/A                  | `Record(value, attributes)`                 | Non-negative (documented, not validated); advisory `ExplicitBucketBoundaries: double[]` _(Stable)_                 |
+| **Gauge**         | Non-additive value(s), recorded via subscription to change events | N/A                  | `Record(value, attributes)`                 | Absolute current value at time of recording                                                                        |
 
 Source: https://opentelemetry.io/docs/specs/otel/metrics/api/#counter ,
 `#updowncounter`, `#histogram`, `#gauge`
@@ -85,13 +86,14 @@ Source: https://opentelemetry.io/docs/specs/otel/metrics/api/#counter ,
 All use **callback functions**, registered at creation or afterward, "called only when the Meter is
 being observed."
 
-| Instrument | Semantics | Monotonic? | Value reported |
-|---|---|---|---|
-| **Asynchronous Counter** | Monotonically increasing | Yes | Absolute (not delta) — SDK derives rate from successive differences |
-| **Asynchronous UpDownCounter** | Additive, can increase or decrease | No | Absolute — SDK calculates deltas |
-| **Asynchronous Gauge** | Non-additive | N/A | Absolute, from an accessor/poll (contrast with sync Gauge's subscription model) |
+| Instrument                     | Semantics                          | Monotonic? | Value reported                                                                  |
+| ------------------------------ | ---------------------------------- | ---------- | ------------------------------------------------------------------------------- |
+| **Asynchronous Counter**       | Monotonically increasing           | Yes        | Absolute (not delta) — SDK derives rate from successive differences             |
+| **Asynchronous UpDownCounter** | Additive, can increase or decrease | No         | Absolute — SDK calculates deltas                                                |
+| **Asynchronous Gauge**         | Non-additive                       | N/A        | Absolute, from an accessor/poll (contrast with sync Gauge's subscription model) |
 
 Callback normative requirements:
+
 - "Callback functions SHOULD be reentrant safe"
 - "SHOULD NOT take an indefinite amount of time"
 - "SHOULD NOT make duplicate observations across all registered callbacks"
@@ -122,11 +124,13 @@ instrument-name = ALPHA 0*254 ("_" / "." / "-" / "/" / ALPHA / DIGIT)
 - "The API SHOULD NOT validate the `name`; that is left to implementations."
 
 **Unit** — Source: `#instrument-unit`
+
 - Case-sensitive ASCII string, opaque
 - **Max length: 63 characters** (chosen to allow fixed-size array storage)
 - "The API SHOULD NOT validate the `unit`"
 
 **Description** — Source: `#instrument-description`
+
 - Must support BMP (Unicode Plane 0); minimum guaranteed support **1023 characters**
 - Opaque string
 
@@ -136,7 +140,7 @@ instrument-name = ALPHA 0*254 ("_" / "." / "-" / "/" / ALPHA / DIGIT)
   language-level value-type distinction).
 - **Distinct instruments**: differ in at least one identifying parameter.
 - The Metrics **API spec itself does not define behavior for duplicate/conflicting registration** — that
-  is left to the SDK. (See Data Model §3.6 below for the *data-model*-level normative handling of
+  is left to the SDK. (See Data Model §3.6 below for the _data-model_-level normative handling of
   conflicting `Metric` identities once they reach OTLP.)
 - **Concurrency**: `MeterProvider`, `Meter`, and `Instrument` — "All methods MUST be documented that
   implementations need to be safe for concurrent use by default."
@@ -166,37 +170,37 @@ instrumentation code.
 
 **Instrument selection criteria** (all optional; user picks any subset):
 
-| Criterion | Matching |
-|---|---|
-| `name` | Exact match or wildcard (`*` = any sequence, `?` = single char) |
-| `type` | Instrument kind |
-| `unit` | Exact unit value |
-| `meter_name`, `meter_version`, `meter_schema_url` | Meter identity metadata |
+| Criterion                                         | Matching                                                        |
+| ------------------------------------------------- | --------------------------------------------------------------- |
+| `name`                                            | Exact match or wildcard (`*` = any sequence, `?` = single char) |
+| `type`                                            | Instrument kind                                                 |
+| `unit`                                            | Exact unit value                                                |
+| `meter_name`, `meter_version`, `meter_schema_url` | Meter identity metadata                                         |
 
 **Stream configuration** applied to matched instruments:
 
-| Parameter | Effect |
-|---|---|
-| `name` | Override output stream name (not re-validated against instrument-name syntax) |
-| `description` | Override description |
-| `attribute_keys` | Allow-list/exclude-list of attribute keys; View takes precedence over the instrument's `Attributes` advisory parameter |
-| `aggregation` | Override the default aggregation (see §2.2) |
-| `exemplar_reservoir` | Custom exemplar sampling strategy |
-| `aggregation_cardinality_limit` | Max data points emitted per collection cycle for this stream |
+| Parameter                       | Effect                                                                                                                 |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `name`                          | Override output stream name (not re-validated against instrument-name syntax)                                          |
+| `description`                   | Override description                                                                                                   |
+| `attribute_keys`                | Allow-list/exclude-list of attribute keys; View takes precedence over the instrument's `Attributes` advisory parameter |
+| `aggregation`                   | Override the default aggregation (see §2.2)                                                                            |
+| `exemplar_reservoir`            | Custom exemplar sampling strategy                                                                                      |
+| `aggregation_cardinality_limit` | Max data points emitted per collection cycle for this stream                                                           |
 
 Source: https://opentelemetry.io/docs/specs/otel/metrics/sdk/#instrument-selection-criteria ,
 `#stream-configuration`
 
 ### 2.2 Aggregations — default per instrument
 
-| Instrument | Default aggregation |
-|---|---|
-| Counter, Asynchronous Counter | Sum |
-| UpDownCounter, Asynchronous UpDownCounter | Sum |
-| Gauge, Asynchronous Gauge | Last Value |
-| Histogram | Explicit Bucket Histogram (honoring the `ExplicitBucketBoundaries` advisory if given) |
+| Instrument                                | Default aggregation                                                                   |
+| ----------------------------------------- | ------------------------------------------------------------------------------------- |
+| Counter, Asynchronous Counter             | Sum                                                                                   |
+| UpDownCounter, Asynchronous UpDownCounter | Sum                                                                                   |
+| Gauge, Asynchronous Gauge                 | Last Value                                                                            |
+| Histogram                                 | Explicit Bucket Histogram (honoring the `ExplicitBucketBoundaries` advisory if given) |
 
-**Explicit Bucket Histogram** *(Stable)* default boundaries:
+**Explicit Bucket Histogram** _(Stable)_ default boundaries:
 
 ```
 [0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000]
@@ -204,7 +208,7 @@ Source: https://opentelemetry.io/docs/specs/otel/metrics/sdk/#instrument-selecti
 
 `RecordMinMax` defaults to `true`.
 
-**Base2 Exponential Histogram** *(Recommended default config when this aggregation is selected)*:
+**Base2 Exponential Histogram** _(Recommended default config when this aggregation is selected)_:
 `MaxSize = 160` buckets, `MaxScale = 20`, `RecordMinMax = true`.
 
 **Drop aggregation**: discards all measurements for the instrument (emits nothing).
@@ -214,10 +218,11 @@ raw spec `specification/metrics/sdk.md` (boundary list + MaxSize/MaxScale defaul
 
 ### 2.3 MetricReader / MetricExporter
 
-**Periodic Exporting MetricReader** *(Stable)*:
+**Periodic Exporting MetricReader** _(Stable)_:
+
 - Collects at a configurable interval — default **60,000 ms**
 - Export timeout — default **30,000 ms**
-- *(Development)* `maxExportBatchSize` splits large batches while preserving order across collections
+- _(Development)_ `maxExportBatchSize` splits large batches while preserving order across collections
 
 **Collect operation**: triggers async-instrument callbacks, invokes `Produce` on registered
 `MetricProducer`s, and ensures the configured aggregation temporality is applied (performing
@@ -228,24 +233,24 @@ Source: https://opentelemetry.io/docs/specs/otel/metrics/sdk/#metricreader-opera
 
 ### 2.4 Exemplars (SDK side)
 
-**ExemplarFilter** *(Stable)*:
+**ExemplarFilter** _(Stable)_:
 
-| Filter | Behavior |
-|---|---|
+| Filter                 | Behavior                                                |
+| ---------------------- | ------------------------------------------------------- |
 | `TraceBased` (default) | Eligible only if recorded within a sampled span context |
-| `AlwaysOn` | All measurements eligible |
-| `AlwaysOff` | No measurements eligible |
+| `AlwaysOn`             | All measurements eligible                               |
+| `AlwaysOff`            | No measurements eligible                                |
 
-**ExemplarReservoir** *(Stable)* — one per timeseries; `Offer(value, attributes, context, timestamp)`;
+**ExemplarReservoir** _(Stable)_ — one per timeseries; `Offer(value, attributes, context, timestamp)`;
 `Collect()` returns accumulated exemplars respecting the stream's aggregation temporality.
 
 Default reservoir selection:
 
-| Aggregation | Default reservoir |
-|---|---|
-| Explicit bucket histogram (>1 bucket) | `AlignedHistogramBucketExemplarReservoir` |
-| Exponential histogram | `SimpleFixedSizeExemplarReservoir` (size = `min(20, max_buckets)`) |
-| Everything else | `SimpleFixedSizeExemplarReservoir` |
+| Aggregation                           | Default reservoir                                                  |
+| ------------------------------------- | ------------------------------------------------------------------ |
+| Explicit bucket histogram (>1 bucket) | `AlignedHistogramBucketExemplarReservoir`                          |
+| Exponential histogram                 | `SimpleFixedSizeExemplarReservoir` (size = `min(20, max_buckets)`) |
+| Everything else                       | `SimpleFixedSizeExemplarReservoir`                                 |
 
 Source: https://opentelemetry.io/docs/specs/otel/metrics/sdk/#exemplar
 
@@ -275,10 +280,10 @@ top — the specific cardinality-limits subsection content quoted above is Stabl
 
 ### 2.6 MeterProvider / MeterConfigurator (Development)
 
-*(Development)* `MeterConfigurator`: a function computing `MeterConfig` from an `InstrumentationScope`,
+_(Development)_ `MeterConfigurator`: a function computing `MeterConfig` from an `InstrumentationScope`,
 returning either a configuration or a signal to use defaults; SDKs may provide helpers for common
 patterns (e.g., select meters by name, disable specific meters).
-*(Development)* `MeterConfig`: `enabled: boolean` (default `true`); disabled meters behave as no-ops.
+_(Development)_ `MeterConfig`: `enabled: boolean` (default `true`); disabled meters behave as no-ops.
 
 Source: https://opentelemetry.io/docs/specs/otel/metrics/sdk/#meterprovider
 
@@ -293,13 +298,13 @@ Source: https://opentelemetry.io/docs/specs/otel/metrics/data-model/
 
 ### 3.1 Point kinds
 
-| Point kind | Temporality? | Key fields | Status |
-|---|---|---|---|
-| **Sum** | delta or cumulative | attributes, `(start, end]` window, `monotonic: bool`, exemplars, flags | Stable |
-| **Gauge** | n/a (no aggregation temporality) | attributes, sampled value, `time_unix_nano`, optional `start_time_unix_nano`, exemplars, flags | Stable |
-| **Histogram** | delta or cumulative | attributes, window, `count`, `sum`, optional `min`/`max`, explicit bucket boundaries + per-bucket counts, exemplars, flags | Stable |
-| **ExponentialHistogram** | delta or cumulative | same as Histogram but exponential bucket structure (`scale`, `zero_count`, `zero_threshold`, positive/negative bucket index ranges) | Stable |
-| **Summary (legacy)** | n/a | attributes, `time_unix_nano`, `count`, `sum`, strictly-increasing quantile set `[0.0, 1.0]` | Stable, but "not recommended for new applications" — points "cannot always be merged in a meaningful way" |
+| Point kind               | Temporality?                     | Key fields                                                                                                                          | Status                                                                                                    |
+| ------------------------ | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **Sum**                  | delta or cumulative              | attributes, `(start, end]` window, `monotonic: bool`, exemplars, flags                                                              | Stable                                                                                                    |
+| **Gauge**                | n/a (no aggregation temporality) | attributes, sampled value, `time_unix_nano`, optional `start_time_unix_nano`, exemplars, flags                                      | Stable                                                                                                    |
+| **Histogram**            | delta or cumulative              | attributes, window, `count`, `sum`, optional `min`/`max`, explicit bucket boundaries + per-bucket counts, exemplars, flags          | Stable                                                                                                    |
+| **ExponentialHistogram** | delta or cumulative              | same as Histogram but exponential bucket structure (`scale`, `zero_count`, `zero_threshold`, positive/negative bucket index ranges) | Stable                                                                                                    |
+| **Summary (legacy)**     | n/a                              | attributes, `time_unix_nano`, `count`, `sum`, strictly-increasing quantile set `[0.0, 1.0]`                                         | Stable, but "not recommended for new applications" — points "cannot always be merged in a meaningful way" |
 
 **Sum monotonicity note**: "Delta monotonic: reader SHOULD expect non-negative values" / "Cumulative
 monotonic: reader SHOULD expect values that are not less than the previous value."
@@ -316,12 +321,12 @@ Source: https://opentelemetry.io/docs/specs/otel/metrics/data-model/#sums , `#ga
 
 ### 3.2 Temporality — delta vs cumulative
 
-| | Delta | Cumulative |
-|---|---|---|
-| Start timestamp behavior | "successive data points **advance** the starting timestamp" — `(T0,T1], (T1,T2], (T2,T3]` | "successive data points **repeat** the starting timestamp" — `(T0,T1], (T0,T2], (T0,T3]` |
-| Typical origin | Statsd-style metrics; "enables sampling and supports shifting the cost of cardinality outside of the process" | Prometheus-style; "naturally simpler ... in terms of cost of adding reliability. When collection fails intermittently, gaps ... are naturally averaged" |
-| Sender-side memory cost | Lower (no need to remember all-time totals) | Higher — sender must retain "all previous measurements, an 'up-front' memory cost proportional to cardinality" |
-| Validity rule | intervals must be contiguous — no gaps/overlaps in a well-formed stream | repeats the same start; validity tracked via reset detection (§3.3) |
+|                          | Delta                                                                                                         | Cumulative                                                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Start timestamp behavior | "successive data points **advance** the starting timestamp" — `(T0,T1], (T1,T2], (T2,T3]`                     | "successive data points **repeat** the starting timestamp" — `(T0,T1], (T0,T2], (T0,T3]`                                                                |
+| Typical origin           | Statsd-style metrics; "enables sampling and supports shifting the cost of cardinality outside of the process" | Prometheus-style; "naturally simpler ... in terms of cost of adding reliability. When collection fails intermittently, gaps ... are naturally averaged" |
+| Sender-side memory cost  | Lower (no need to remember all-time totals)                                                                   | Higher — sender must retain "all previous measurements, an 'up-front' memory cost proportional to cardinality"                                          |
+| Validity rule            | intervals must be contiguous — no gaps/overlaps in a well-formed stream                                       | repeats the same start; validity tracked via reset detection (§3.3)                                                                                     |
 
 Source: https://opentelemetry.io/docs/specs/otel/metrics/data-model/#temporality
 
@@ -331,19 +336,19 @@ Source: https://opentelemetry.io/docs/specs/otel/metrics/data-model/#temporality
 
 ### 3.3 `start_time_unix_nano`, resets, and gaps
 
-*(Status: Development for this subsection's mechanics.)*
+_(Status: Development for this subsection's mechanics.)_
 Source: https://opentelemetry.io/docs/specs/otel/metrics/data-model/#resets-and-gaps
 
 > "When the `StartTimeUnixNano` field is present, it allows the consumer to observe when there are gaps
 > and overlapping writers in a stream. Correctly used, the consumer can observe both transient and
 > ongoing violations of the single-writer principle as well as reset events."
 
-| Case | Condition | Meaning |
-|---|---|---|
-| **True reset (known start)** | `StartTimeUnixNano < TimeUnixNano` | "a new unbroken sequence of observations begins with a 'true' reset at a known start time. The zero value is implicit, it is not necessary to record the starting point." |
-| **Reset, unknown start** | `StartTimeUnixNano == TimeUnixNano` | "a new unbroken sequence of observations begins with a reset at an unknown start time. The initial observed value is recorded ... These points have zero duration." |
-| **Subsequent point, delta** | — | `StartTimeUnixNano` of each point matches the `TimeUnixNano` of the *preceding* point |
-| **Subsequent point, cumulative/other** | — | `StartTimeUnixNano` of each point matches the `StartTimeUnixNano` of the *initial* observation in the sequence |
+| Case                                   | Condition                           | Meaning                                                                                                                                                                   |
+| -------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **True reset (known start)**           | `StartTimeUnixNano < TimeUnixNano`  | "a new unbroken sequence of observations begins with a 'true' reset at a known start time. The zero value is implicit, it is not necessary to record the starting point." |
+| **Reset, unknown start**               | `StartTimeUnixNano == TimeUnixNano` | "a new unbroken sequence of observations begins with a reset at an unknown start time. The initial observed value is recorded ... These points have zero duration."       |
+| **Subsequent point, delta**            | —                                   | `StartTimeUnixNano` of each point matches the `TimeUnixNano` of the _preceding_ point                                                                                     |
+| **Subsequent point, cumulative/other** | —                                   | `StartTimeUnixNano` of each point matches the `StartTimeUnixNano` of the _initial_ observation in the sequence                                                            |
 
 **Gap definition**: "A metric stream has a gap, where it is implicitly undefined, anywhere there is a
 range of time such that no point covers that range with its `StartTimeUnixNano` and `TimeUnixNano`
@@ -355,15 +360,16 @@ fields."
 
 Fields:
 
-| Field | Description |
-|---|---|
-| `trace_id` (optional) | Trace associated with the recording |
-| `span_id` (optional) | Span associated with the recording |
-| `time_unix_nano` | Time of the observation |
-| `value` | The recorded value |
+| Field                 | Description                                                                                                                                                           |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trace_id` (optional) | Trace associated with the recording                                                                                                                                   |
+| `span_id` (optional)  | Span associated with the recording                                                                                                                                    |
+| `time_unix_nano`      | Time of the observation                                                                                                                                               |
+| `value`               | The recorded value                                                                                                                                                    |
 | `filtered_attributes` | Attributes present on the measurement but filtered out of the point's own attribute set — "provide additional insight into the Context when the observation was made" |
 
 Value participation in the parent point:
+
 - **Histogram**: exemplar's value "already participates in `bucket_counts`, `count` and `sum`"
 - **Sum**: exemplar's value "is already included in the overall sum"
 - **Gauge**: exemplar's value "was seen at some point within the gauge interval for the same source"
@@ -373,6 +379,7 @@ Value participation in the parent point:
 **Status: Stable.** Source: https://opentelemetry.io/docs/specs/otel/metrics/data-model/#data-point-flags
 
 **`NoRecordedValue`** flag (default `false`):
+
 > "this data point reflects explicitly missing data in a series. It serves as an indicator that a
 > previously present timeseries was removed and that this timeseries SHOULD NOT be returned in queries
 > after such an indicator was received."
@@ -399,14 +406,14 @@ ignored."
   errors are sometimes fixable via Views.
 
 **Conflicting `Metric` identity** for the same `name` + `Resource` + `Scope` — producer recommendations
-*(Stable)*, source: `#opentelemetry-protocol-data-model-producer-recommendations`:
+_(Stable)_, source: `#opentelemetry-protocol-data-model-producer-recommendations`:
 
-| Conflict | Producer recommendation |
-|---|---|
-| Non-identifying field differs (e.g. `description`) | "producer SHOULD choose the longer string" |
-| `unit` mismatch (e.g. `ms` vs `s`) | MAY convert units to avoid a semantic error; otherwise SHOULD inform the user of a semantic error |
-| `AggregationTemporality` conflict | MAY convert via Cumulative→Delta or Delta→Cumulative transform; otherwise SHOULD inform the user of a semantic error |
-| Other identifying-property conflict | SHOULD inform the user of a semantic error and pass through the conflicting data |
+| Conflict                                           | Producer recommendation                                                                                              |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Non-identifying field differs (e.g. `description`) | "producer SHOULD choose the longer string"                                                                           |
+| `unit` mismatch (e.g. `ms` vs `s`)                 | MAY convert units to avoid a semantic error; otherwise SHOULD inform the user of a semantic error                    |
+| `AggregationTemporality` conflict                  | MAY convert via Cumulative→Delta or Delta→Cumulative transform; otherwise SHOULD inform the user of a semantic error |
+| Other identifying-property conflict                | SHOULD inform the user of a semantic error and pass through the conflicting data                                     |
 
 "Consumers MAY reject OpenTelemetry Metrics data containing semantic errors (i.e., more than one
 `Metric` identity for a given `name`, `Resource`, and `Scope`)." — **relevant to Maple as an ingest
@@ -414,7 +421,7 @@ consumer**: we are within spec to reject/flag such payloads rather than silently
 
 ### 3.7 Overlap & out-of-order handling
 
-*(Status: Development for this subsection.)*
+_(Status: Development for this subsection.)_
 Source: https://opentelemetry.io/docs/specs/otel/metrics/data-model/#overlap
 
 - "When more than one process writes the same metric data stream, OTLP data points may appear to
@@ -429,6 +436,7 @@ Source: https://opentelemetry.io/docs/specs/otel/metrics/data-model/#overlap
 
 **Delta-to-cumulative conversion algorithm** (out-of-order / restart detection), source:
 `#sums-detecting-alignment-issues`:
+
 - "if the current point precedes the start time, then drop this point. Note: there are algorithms which
   can deal with late arriving points."
 - "if the next point does NOT align with the expected next-time window, then reset the counter following
@@ -479,28 +487,29 @@ Source: https://opentelemetry.io/docs/specs/otel/metrics/data-model/#exponential
 
 ### 5.1 Instrument → default aggregation → point kind produced
 
-| Instrument | Sync/Async | Monotonic | Default aggregation | Point kind on wire |
-|---|---|---|---|---|
-| Counter | Sync | Yes | Sum | Sum (`monotonic=true`) |
-| UpDownCounter | Sync | No | Sum | Sum (`monotonic=false`) |
-| Histogram | Sync | n/a | Explicit Bucket Histogram | Histogram |
-| Gauge | Sync | n/a | Last Value | Gauge |
-| Asynchronous Counter | Async | Yes | Sum | Sum (`monotonic=true`) |
-| Asynchronous UpDownCounter | Async | No | Sum | Sum (`monotonic=false`) |
-| Asynchronous Gauge | Async | n/a | Last Value | Gauge |
+| Instrument                 | Sync/Async | Monotonic | Default aggregation       | Point kind on wire      |
+| -------------------------- | ---------- | --------- | ------------------------- | ----------------------- |
+| Counter                    | Sync       | Yes       | Sum                       | Sum (`monotonic=true`)  |
+| UpDownCounter              | Sync       | No        | Sum                       | Sum (`monotonic=false`) |
+| Histogram                  | Sync       | n/a       | Explicit Bucket Histogram | Histogram               |
+| Gauge                      | Sync       | n/a       | Last Value                | Gauge                   |
+| Asynchronous Counter       | Async      | Yes       | Sum                       | Sum (`monotonic=true`)  |
+| Asynchronous UpDownCounter | Async      | No        | Sum                       | Sum (`monotonic=false`) |
+| Asynchronous Gauge         | Async      | n/a       | Last Value                | Gauge                   |
 
 ### 5.2 Temporality preference matrix (`OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`)
 
 **Status: Stable.** Default: `cumulative`.
 Source: https://opentelemetry.io/docs/specs/otel/metrics/sdk_exporters/otlp/
 
-| Preference value | Counter (sync) | Async Counter | Histogram | UpDownCounter (sync) | Async UpDownCounter |
-|---|---|---|---|---|---|
-| `cumulative` (default) | Cumulative | Cumulative | Cumulative | Cumulative | Cumulative |
-| `delta` | Delta | Delta | Delta | Cumulative | Cumulative |
-| `lowmemory` | Delta | Cumulative | Delta | Cumulative | Cumulative |
+| Preference value       | Counter (sync) | Async Counter | Histogram  | UpDownCounter (sync) | Async UpDownCounter |
+| ---------------------- | -------------- | ------------- | ---------- | -------------------- | ------------------- |
+| `cumulative` (default) | Cumulative     | Cumulative    | Cumulative | Cumulative           | Cumulative          |
+| `delta`                | Delta          | Delta         | Delta      | Cumulative           | Cumulative          |
+| `lowmemory`            | Delta          | Cumulative    | Delta      | Cumulative           | Cumulative          |
 
 Notes verbatim:
+
 - `delta`: "Choose Delta aggregation temporality for Counter, Asynchronous Counter and Histogram
   instrument kinds, choose Cumulative aggregation for UpDownCounter and Asynchronous UpDownCounter
   instrument kinds."
@@ -512,14 +521,14 @@ Notes verbatim:
 
 ### 5.3 Environment variables (Metrics)
 
-| Variable | Default | Values | Scope | Status |
-|---|---|---|---|---|
-| `OTEL_METRICS_EXPORTER` | `otlp` | `otlp`, `prometheus`, `console`, `logging` (deprecated), `none`, `otlp/stdout` (dev) | General SDK config | Stable (mixed per value) |
-| `OTEL_METRIC_EXPORT_INTERVAL` | `60000` (ms) | duration | Periodic Exporting MetricReader | Stable |
-| `OTEL_METRIC_EXPORT_TIMEOUT` | `30000` (ms) | duration | Periodic Exporting MetricReader | Stable |
-| `OTEL_METRICS_EXEMPLAR_FILTER` | `trace_based` | `always_on`, `always_off`, `trace_based` | Exemplar filter | Stable |
-| `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE` | `cumulative` | `cumulative`, `delta`, `lowmemory` (case-insensitive) | OTLP metrics exporter | Stable |
-| `OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION` | `explicit_bucket_histogram` | `explicit_bucket_histogram`, `base2_exponential_bucket_histogram` (case-insensitive) | OTLP metrics exporter | Stable |
+| Variable                                                   | Default                     | Values                                                                               | Scope                           | Status                   |
+| ---------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------ | ------------------------------- | ------------------------ |
+| `OTEL_METRICS_EXPORTER`                                    | `otlp`                      | `otlp`, `prometheus`, `console`, `logging` (deprecated), `none`, `otlp/stdout` (dev) | General SDK config              | Stable (mixed per value) |
+| `OTEL_METRIC_EXPORT_INTERVAL`                              | `60000` (ms)                | duration                                                                             | Periodic Exporting MetricReader | Stable                   |
+| `OTEL_METRIC_EXPORT_TIMEOUT`                               | `30000` (ms)                | duration                                                                             | Periodic Exporting MetricReader | Stable                   |
+| `OTEL_METRICS_EXEMPLAR_FILTER`                             | `trace_based`               | `always_on`, `always_off`, `trace_based`                                             | Exemplar filter                 | Stable                   |
+| `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`        | `cumulative`                | `cumulative`, `delta`, `lowmemory` (case-insensitive)                                | OTLP metrics exporter           | Stable                   |
+| `OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION` | `explicit_bucket_histogram` | `explicit_bucket_histogram`, `base2_exponential_bucket_histogram` (case-insensitive) | OTLP metrics exporter           | Stable                   |
 
 No dedicated global env var for the cardinality-limit default (2000) was found on the fetched general
 SDK env-vars page; the limit is a spec-defined constant applied via View/Reader config precedence (see
@@ -532,13 +541,13 @@ https://opentelemetry.io/docs/specs/otel/metrics/sdk_exporters/otlp/
 
 ### 5.4 Point kind × temporality applicability
 
-| Point kind | Delta valid? | Cumulative valid? | Notes |
-|---|---|---|---|
-| Sum | Yes | Yes | `monotonic` flag independent of temporality |
-| Gauge | n/a | n/a | No aggregation temporality field at all — last-sample semantics only |
-| Histogram | Yes | Yes | `min`/`max` "more useful for Delta temporality, since ... Cumulative min and max will stabilize as more events are recorded" |
-| ExponentialHistogram | Yes | Yes | Same temporality semantics as Histogram |
-| Summary (legacy) | n/a | n/a | No temporality field; compatibility-only point kind |
+| Point kind           | Delta valid? | Cumulative valid? | Notes                                                                                                                        |
+| -------------------- | ------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Sum                  | Yes          | Yes               | `monotonic` flag independent of temporality                                                                                  |
+| Gauge                | n/a          | n/a               | No aggregation temporality field at all — last-sample semantics only                                                         |
+| Histogram            | Yes          | Yes               | `min`/`max` "more useful for Delta temporality, since ... Cumulative min and max will stabilize as more events are recorded" |
+| ExponentialHistogram | Yes          | Yes               | Same temporality semantics as Histogram                                                                                      |
+| Summary (legacy)     | n/a          | n/a               | No temporality field; compatibility-only point kind                                                                          |
 
 ---
 
@@ -551,9 +560,9 @@ https://opentelemetry.io/docs/specs/otel/metrics/sdk_exporters/otlp/
 - OTLP metrics exporter config: https://opentelemetry.io/docs/specs/otel/metrics/sdk_exporters/otlp/
 - General SDK environment variables: https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/
 - Canonical spec repo (source of truth for raw markdown): https://github.com/open-telemetry/opentelemetry-specification/tree/main/specification/metrics
-  - `data-model.md` (point kinds, temporality, resets/gaps, exemplars, flags, single-writer, overlap)
-  - `sdk.md` (Views, Aggregation, MetricReader, cardinality limits, exemplar filter/reservoir)
-  - `api.md` (instrument definitions, naming rules)
+    - `data-model.md` (point kinds, temporality, resets/gaps, exemplars, flags, single-writer, overlap)
+    - `sdk.md` (Views, Aggregation, MetricReader, cardinality limits, exemplar filter/reservoir)
+    - `api.md` (instrument definitions, naming rules)
 - Prometheus staleness marker (referenced by the `NoRecordedValue` flag): https://prometheus.io/docs/prometheus/latest/querying/basics/#staleness
 - OTEP 0113 (Exemplars design): https://github.com/open-telemetry/opentelemetry-specification/tree/main/oteps/metrics/0113-exemplars.md
 - OTEP 0049 (Metric LabelSet): https://github.com/open-telemetry/opentelemetry-specification/tree/main/oteps/metrics/0049-metric-label-set.md

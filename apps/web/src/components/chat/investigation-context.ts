@@ -1,10 +1,10 @@
 import { Option, Schema } from "effect"
-import { fromBase64Url, toBase64Url } from "@/lib/base64url"
+import { fromBase64Url } from "@/lib/base64url"
 import { narrowAlertSignal } from "@/components/ai-triage/breach"
 import { signalLabel, type AlertContext } from "./alert-context"
 
 /** The three things Maple can investigate. Kind is carried by the attached resource, not the URL. */
-const InvestigationKindSchema = Schema.Literals(["alert", "anomaly", "error"])
+const InvestigationKindSchema = Schema.Literals(["alert", "anomaly", "error", "freeform"])
 export type InvestigationKind = typeof InvestigationKindSchema.Type
 
 /** A single labelled fact — shown on the attachment card and folded into the chat preamble. */
@@ -69,9 +69,6 @@ const InvestigationRefWireSchema = Schema.Struct({
 })
 const decodeRefWire = Schema.decodeUnknownOption(InvestigationRefWireSchema)
 
-export const encodeInvestigationRef = (ref: InvestigationRef): string =>
-	toBase64Url(JSON.stringify({ k: ref.kind, id: ref.id, ...(ref.issueId ? { i: ref.issueId } : {}) }))
-
 export const decodeInvestigationRef = (raw: string): InvestigationRef | undefined => {
 	try {
 		return Option.match(decodeRefWire(JSON.parse(fromBase64Url(raw))), {
@@ -98,7 +95,9 @@ const capitalize = (s: string): string => (s.length === 0 ? s : `${s[0]!.toUpper
 /** Map a legacy alert chat context onto the generic investigation shape (back-compat shim). */
 export const alertContextToInvestigation = (alert: AlertContext): InvestigationContext => {
 	const { breach } = narrowAlertSignal(alert)
-	const observed = breach ? `${breach.observed} vs ${breach.threshold}` : `${alert.value ?? "n/a"} vs ${alert.threshold}`
+	const observed = breach
+		? `${breach.observed} vs ${breach.threshold}`
+		: `${alert.value ?? "n/a"} vs ${alert.threshold}`
 	return {
 		kind: "alert",
 		id: alert.incidentId ?? alert.ruleId,
@@ -128,6 +127,7 @@ const KIND_NOUN: Record<InvestigationKind, string> = {
 	alert: "alert",
 	anomaly: "anomaly",
 	error: "error",
+	freeform: "question",
 }
 
 export const investigationNoun = (kind: InvestigationKind): string => KIND_NOUN[kind]
@@ -136,6 +136,15 @@ export const investigationNoun = (kind: InvestigationKind): string => KIND_NOUN[
 export const investigationSuggestions = (ctx: InvestigationContext): string[] => {
 	const scope = ctx.scope ?? ctx.refs?.serviceName ?? "the affected service"
 	const windowM = ctx.windowMinutes ?? 15
+
+	if (ctx.kind === "freeform") {
+		return [
+			"Summarize the strongest evidence",
+			"What data is still missing?",
+			"Show the most relevant traces",
+			"What should we do next?",
+		]
+	}
 
 	if (ctx.kind === "error") {
 		return [

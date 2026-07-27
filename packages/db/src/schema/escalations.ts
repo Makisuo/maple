@@ -1,5 +1,5 @@
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
-import type { ErrorIssueId, OrgId } from "@maple/domain/primitives"
+import type { ErrorIssueId, InvestigationId, IssueEscalationId, OrgId } from "@maple/domain/primitives"
 import type { IssueSeverity } from "@maple/domain/http"
 
 /**
@@ -29,16 +29,18 @@ export type IssueEscalationPolicyRow = typeof issueEscalationPolicies.$inferSele
 export const issueEscalations = pgTable(
 	"issue_escalations",
 	{
-		id: text("id").notNull().primaryKey(),
+		id: text("id").$type<IssueEscalationId>().notNull().primaryKey(),
 		orgId: text("org_id").$type<OrgId>().notNull(),
 		issueId: text("issue_id").$type<ErrorIssueId>().notNull(),
 		severity: text("severity").$type<IssueSeverity>().notNull(),
 		source: text("source").$type<"ai" | "manual">().notNull(),
 		reason: text("reason").$type<"severity_set" | "severity_escalated">().notNull(),
 		runId: text("run_id"),
+		investigationId: text("investigation_id").$type<InvestigationId>(),
 		// Triage snapshot captured at enqueue (summary, suspectedCause, …) so the
 		// dispatch payload survives later runs overwriting the run row.
 		payloadJson: jsonb("payload_json").$type<unknown>().notNull().default({}),
+		deliveryResultsJson: jsonb("delivery_results_json").$type<unknown>().notNull().default([]),
 		status: text("status").$type<"queued" | "sent" | "skipped" | "failed">().notNull().default("queued"),
 		attempts: integer("attempts").notNull().default(0),
 		dedupeKey: text("dedupe_key").notNull(),

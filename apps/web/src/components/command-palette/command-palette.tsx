@@ -68,12 +68,7 @@ const FUSE_OPTIONS: IFuseOptions<PaletteEntry> = {
 	threshold: 0.35,
 }
 
-const GROUP_ORDER: ReadonlyArray<PaletteEntry["group"]> = [
-	"Navigation",
-	"Services",
-	"Dashboards",
-	"Actions",
-]
+const GROUP_ORDER: ReadonlyArray<PaletteEntry["group"]> = ["Navigation", "Services", "Dashboards", "Actions"]
 
 function groupEntries(entries: PaletteEntry[]): [PaletteEntry["group"], PaletteEntry[]][] {
 	const groups = new Map<PaletteEntry["group"], PaletteEntry[]>()
@@ -125,9 +120,7 @@ function PaletteContent({
 	const { dashboards } = useDashboardsRead()
 	const { favorites } = useDashboardPreferences()
 	const infraEnabled = useInfraEnabled()
-	const servicesFacetResult = useAtomValue(
-		getTracesFacetValuesResultAtom({ data: { facet: "service" } }),
-	)
+	const servicesFacetResult = useAtomValue(getTracesFacetValuesResultAtom({ data: { facet: "service" } }))
 	const serviceNames = Result.builder(servicesFacetResult)
 		.onSuccess((r) => r.data.map((item) => item.name))
 		.orElse(() => [])

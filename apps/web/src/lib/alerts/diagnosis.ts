@@ -12,14 +12,7 @@ import { staleThresholdMs } from "@/lib/alerts/rule-status"
 export type DiagnosisStageStatus = "pass" | "fail" | "warn" | "unknown"
 
 export interface DiagnosisStage {
-	readonly id:
-		| "enabled"
-		| "evaluated"
-		| "query"
-		| "data"
-		| "threshold"
-		| "incident"
-		| "notification"
+	readonly id: "enabled" | "evaluated" | "query" | "data" | "threshold" | "incident" | "notification"
 	readonly label: string
 	readonly status: DiagnosisStageStatus
 	/** One human sentence — the header verdict uses the first failing stage's summary. */
@@ -86,7 +79,13 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisStage[] {
 	/* 1 — Enabled */
 	stages.push(
 		rule.enabled
-			? { id: "enabled", label: "Rule enabled", status: "pass", summary: "Rule is enabled", evidence: [] }
+			? {
+					id: "enabled",
+					label: "Rule enabled",
+					status: "pass",
+					summary: "Rule is enabled",
+					evidence: [],
+				}
 			: {
 					id: "enabled",
 					label: "Rule enabled",
@@ -141,7 +140,9 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisStage[] {
 			summary: "The rule's query is failing",
 			evidence: [
 				errorMessage,
-				...(errorChecks[0]?.errorCategory != null ? [`Category: ${errorChecks[0].errorCategory}`] : []),
+				...(errorChecks[0]?.errorCategory != null
+					? [`Category: ${errorChecks[0].errorCategory}`]
+					: []),
 				...(evaluatedAt != null ? [`Last attempt ${relative(now, evaluatedAt)}`] : []),
 			],
 			action: { label: "Edit rule", kind: "edit" },
@@ -192,7 +193,8 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisStage[] {
 		})
 	} else {
 		const latestSkipped =
-			latestState?.last_status === "skipped" || (latestState == null && latestCheck?.status === "skipped")
+			latestState?.last_status === "skipped" ||
+			(latestState == null && latestCheck?.status === "skipped")
 		stages.push({
 			id: "data",
 			label: "Data found",
@@ -245,7 +247,9 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisStage[] {
 			label: "Threshold compared",
 			status: "pass",
 			summary: `Within threshold — last value ${formatSignalValue(rule.signalType, lastValue)}`,
-			evidence: [`Fires when the value is ${thresholdText} for ${rule.consecutiveBreachesRequired} consecutive checks`],
+			evidence: [
+				`Fires when the value is ${thresholdText} for ${rule.consecutiveBreachesRequired} consecutive checks`,
+			],
 		})
 	}
 

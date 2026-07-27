@@ -296,7 +296,9 @@ export function AttributeMappingsSection() {
 							<div className="flex items-center gap-3 px-4 py-1.5">
 								<div className={cn(COL_HEADER, "w-44 shrink-0")}>Name</div>
 								<div className={cn(COL_HEADER, "flex-1")}>Rule</div>
-								<div className={cn(COL_HEADER, "hidden w-24 shrink-0 md:block")}>Operation</div>
+								<div className={cn(COL_HEADER, "hidden w-24 shrink-0 md:block")}>
+									Operation
+								</div>
 								<div className={cn(COL_HEADER, "hidden w-20 shrink-0 md:block")}>Context</div>
 								<div className="w-28 shrink-0" />
 							</div>
@@ -311,10 +313,7 @@ export function AttributeMappingsSection() {
 											!mapping.enabled && "opacity-55",
 										)}
 									>
-										<span
-											className="w-44 shrink-0 truncate text-sm"
-											title={mapping.name}
-										>
+										<span className="w-44 shrink-0 truncate text-sm" title={mapping.name}>
 											{mapping.name}
 										</span>
 

@@ -3,6 +3,7 @@ import { compileCH } from "@maple-dev/clickhouse-builder"
 import {
 	slowTracesQuery,
 	spanSearchQuery,
+	traceListQuery,
 	traceSummariesQuery,
 	tracesListQuery,
 	tracesRootListQuery,
@@ -267,6 +268,145 @@ describe("tracesRootListQuery", () => {
 		// `StatusCode = 'Error'` shows up in the WHERE of both stages (errorsOnly)
 		// plus once in the outer SELECT's `hasError` expression — 3 total.
 		expect(sql.match(/StatusCode = 'Error'/g)).toHaveLength(3)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// traceListQuery
+// ---------------------------------------------------------------------------
+
+/**
+ * Body of the `TraceId IN (SELECT traceId FROM (…))` page subquery. Scans for
+ * the balanced closing paren — the cursor predicate nests its own parens, so a
+ * non-greedy regex stops short.
+ */
+function pageSubquery(sql: string): string {
+	const marker = "TraceId IN (SELECT traceId FROM ("
+	const start = sql.indexOf(marker)
+	expect(start).toBeGreaterThan(-1)
+
+	let depth = 1
+	for (let i = start + marker.length; i < sql.length; i++) {
+		if (sql[i] === "(") depth++
+		else if (sql[i] === ")" && --depth === 0) return sql.slice(start + marker.length, i)
+	}
+	throw new Error("unbalanced page subquery")
+}
+
+describe("traceListQuery", () => {
+	it("returns one aggregated row per trace, keyed on TraceId", () => {
+		const { sql } = compileCH(traceListQuery({}), baseParams)
+
+		expect(sql).toContain("FROM trace_detail_spans")
+		expect(sql).toContain("TraceId AS traceId")
+		expect(sql).toContain("GROUP BY traceId")
+		expect(sql).toContain("count() AS spanCount")
+		expect(sql).toContain("AS services")
+		expect(sql).toContain("ORDER BY startTime DESC, traceId DESC")
+		expect(sql).toContain("LIMIT 25")
+		expect(sql).toContain("FORMAT JSON")
+	})
+
+	it("pages over true roots only, so a multi-service trace yields a single row", () => {
+		const inner = pageSubquery(compileCH(traceListQuery({}), baseParams).sql)
+
+		expect(inner).toContain("ParentSpanId = ''")
+		// NOT the entry-point predicate tracesRootListQuery uses — that matches
+		// one span per service and would re-introduce duplicate rows per trace.
+		expect(inner).not.toContain("SpanKind IN ('Server', 'Consumer')")
+	})
+
+	it("reads only TraceId + Timestamp in the paging stage", () => {
+		const inner = pageSubquery(compileCH(traceListQuery({}), baseParams).sql)
+
+		expect(inner).toContain("TraceId AS traceId")
+		expect(inner).toContain("Timestamp AS ts")
+		expect(inner).not.toContain("toJSONString")
+		expect(inner).toContain("ORDER BY ts DESC, traceId DESC")
+	})
+
+	it("measures the whole trace's wall clock, not the root span's Duration", () => {
+		const { sql } = compileCH(traceListQuery({}), baseParams)
+
+		expect(sql).toContain(
+			"intDiv(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) - min(toUnixTimestamp64Nano(Timestamp)), 1000) AS durationMicros",
+		)
+	})
+
+	it("picks root-span fields with a root-first tuple ordering", () => {
+		const { sql } = compileCH(traceListQuery({}), baseParams)
+
+		expect(sql).toContain("argMin(SpanName, (if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanName")
+		expect(sql).toContain("AS rootSpanKind")
+		expect(sql).toContain("AS rootSpanStatusCode")
+		expect(sql).toContain("AS rootSpanAttributes")
+		// hasError stays root-scoped — same population the errorsOnly filter and
+		// the sidebar's trace_list_mv error count describe.
+		expect(sql).toContain(
+			"if(argMin(StatusCode, (if(ParentSpanId = '', 0, 1), Timestamp)) = 'Error', 1, 0) AS hasError",
+		)
+	})
+
+	it("projects the URL/host keys into rootSpanAttributes for client-span labels", () => {
+		const { sql } = compileCH(traceListQuery({}), baseParams)
+
+		expect(sql).toContain("'url.full'")
+		expect(sql).toContain("'server.address'")
+		expect(sql).toContain("'url.path'")
+	})
+
+	it("lists the root service first, then the rest sorted", () => {
+		const { sql } = compileCH(traceListQuery({}), baseParams)
+
+		expect(sql).toContain(
+			"arrayDistinct(arrayPushFront(arraySort(groupUniqArray(ServiceName)), argMin(ServiceName, (if(ParentSpanId = '', 0, 1), Timestamp)))) AS services",
+		)
+	})
+
+	it("breaks cursor ties on TraceId so same-timestamp traces are not skipped", () => {
+		const inner = pageSubquery(
+			compileCH(
+				traceListQuery({ cursor: { timestamp: "2024-01-01 12:00:00", traceId: "trace123" } }),
+				baseParams,
+			).sql,
+		)
+
+		expect(inner).toContain(
+			"(Timestamp < '2024-01-01 12:00:00' OR (Timestamp = '2024-01-01 12:00:00' AND TraceId < 'trace123'))",
+		)
+	})
+
+	it("applies limit and offset to the paging stage only", () => {
+		const { sql } = compileCH(traceListQuery({ limit: 50, offset: 20 }), baseParams)
+		const inner = pageSubquery(sql)
+
+		expect(inner).toContain("LIMIT 50")
+		expect(inner).toContain("OFFSET 20")
+		// The outer aggregate re-caps at `limit` but must never re-apply the
+		// offset — that would skip the first 20 traces of the page.
+		expect(sql.slice(sql.indexOf("GROUP BY traceId"))).not.toContain("OFFSET")
+	})
+
+	it("filters traces in the paging stage, and never re-filters the aggregate", () => {
+		const { sql } = compileCH(
+			traceListQuery({ serviceName: "api", errorsOnly: true, minDurationMs: 250 }),
+			baseParams,
+		)
+		const inner = pageSubquery(sql)
+
+		expect(inner).toContain("ServiceName = 'api'")
+		expect(inner).toContain("StatusCode = 'Error'")
+		expect(inner).toContain("Duration >= 250000000")
+		expect(inner).toContain("Timestamp >= '2024-01-01 00:00:00'")
+		expect(inner).toContain("Timestamp <= '2024-01-02 00:00:00'")
+
+		// The aggregate is scoped by OrgId + TraceId alone: re-applying the span
+		// filters there would drop the very children spanCount has to count, and
+		// a time bound would clip children that outlive the window.
+		const outer = sql.slice(sql.indexOf("FROM trace_detail_spans")).replace(inner, "")
+		expect(outer).toContain("OrgId = 'org_1'")
+		expect(outer).not.toContain("ServiceName = 'api'")
+		expect(outer).not.toContain("Timestamp >=")
 	})
 })
 

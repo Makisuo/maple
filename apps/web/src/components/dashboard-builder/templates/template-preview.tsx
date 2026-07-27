@@ -61,10 +61,7 @@ function seriesPoints(box: Box, values: number[]): Array<[number, number]> {
 	const innerW = box.w - padX * 2
 	const y0 = box.y + padY
 	const innerH = box.h - padY * 2
-	return values.map((v, i) => [
-		x0 + (innerW * i) / (values.length - 1),
-		y0 + innerH * (1 - v),
-	])
+	return values.map((v, i) => [x0 + (innerW * i) / (values.length - 1), y0 + innerH * (1 - v)])
 }
 
 // Quadratic smoothing through segment midpoints — monotone-ish curve without a
@@ -250,15 +247,10 @@ interface TemplatePreviewProps {
 }
 
 export function TemplatePreview({ templateId, preview, className }: TemplatePreviewProps) {
-	const rows = useMemo(
-		() => Math.max(1, ...preview.map((w) => w.y + w.h)),
-		[preview],
-	)
+	const rows = useMemo(() => Math.max(1, ...preview.map((w) => w.y + w.h)), [preview])
 
 	const label =
-		preview.length === 0
-			? "Empty dashboard layout"
-			: `Dashboard layout with ${preview.length} widgets`
+		preview.length === 0 ? "Empty dashboard layout" : `Dashboard layout with ${preview.length} widgets`
 
 	return (
 		<svg
@@ -280,7 +272,10 @@ export function TemplatePreview({ templateId, preview, className }: TemplatePrev
 					}
 					const seed = `${templateId}:${widget.title}:${index}`
 					return (
-						<g key={index} className="opacity-90 transition-opacity duration-150 group-hover:opacity-100">
+						<g
+							key={index}
+							className="opacity-90 transition-opacity duration-150 group-hover:opacity-100"
+						>
 							<title>{widget.title}</title>
 							<rect
 								x={box.x}

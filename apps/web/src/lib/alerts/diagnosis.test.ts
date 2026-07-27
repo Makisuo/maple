@@ -80,8 +80,7 @@ const diagnose = (overrides: Partial<DiagnosisInput> = {}) =>
 		...overrides,
 	})
 
-const stage = (stages: ReturnType<typeof buildDiagnosis>, id: string) =>
-	stages.find((s) => s.id === id)!
+const stage = (stages: ReturnType<typeof buildDiagnosis>, id: string) => stages.find((s) => s.id === id)!
 
 describe("buildDiagnosis", () => {
 	it("passes all stages for a healthy delivering rule", () => {

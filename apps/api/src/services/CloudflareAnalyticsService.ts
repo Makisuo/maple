@@ -82,7 +82,9 @@ import {
 	mapDnsGroups,
 	mapDurableObjectsGroups,
 	mapFirewallGroups,
+	mapHttpDimensionGroups,
 	mapHttpGroups,
+	mapHttpPathGroups,
 	mapQueueBacklogGroups,
 	mapQueueConsumersGroups,
 	mapWorkersGroups,
@@ -96,6 +98,8 @@ import {
 	decodeDnsZoneNode,
 	decodeDurableObjectsAccountNode,
 	decodeFirewallZoneNode,
+	decodeHttpDimensionsZoneNode,
+	decodeHttpPathsZoneNode,
 	decodeHttpZoneNode,
 	decodeQueueBacklogAccountNode,
 	decodeQueueConsumersAccountNode,
@@ -110,6 +114,10 @@ import {
 	FIREWALL_DATASET,
 	firewallSelection,
 	HTTP_DATASET,
+	HTTP_DIMENSIONS_DATASET,
+	HTTP_PATHS_DATASET,
+	httpDimensionsSelection,
+	httpPathsSelection,
 	httpSelection,
 	MAX_ZONES_PER_QUERY,
 	QUEUE_BACKLOG_DATASET,
@@ -245,6 +253,18 @@ const decodeError = (dataset: string) =>
 		message: `Cloudflare GraphQL ${dataset} analytics response had an unexpected shape`,
 	})
 
+/**
+ * Zone HTTP settings are the same node for every `httpRequestsAdaptiveGroups`-backed dataset, so
+ * the path/dimension datasets ride the existing `settingsQuery` unchanged.
+ */
+const httpZoneSettingsNode = (
+	decoded: SettingsResponseShape,
+	row: CloudflareAnalyticsStateRow,
+): DatasetSettingsShape | null | undefined => {
+	const zone = (decoded.viewer.zones ?? []).find((entry) => entry.zoneTag === row.zoneId)
+	return zone === undefined ? undefined : (zone.settings?.httpRequestsAdaptiveGroups ?? null)
+}
+
 const httpDataset: DatasetDef = {
 	id: HTTP_DATASET,
 	scope: "zone",
@@ -265,10 +285,63 @@ const httpDataset: DatasetDef = {
 				}),
 			),
 		),
-	settingsNode: (decoded, row) => {
-		const zone = (decoded.viewer.zones ?? []).find((entry) => entry.zoneTag === row.zoneId)
-		return zone === undefined ? undefined : (zone.settings?.httpRequestsAdaptiveGroups ?? null)
-	},
+	settingsNode: httpZoneSettingsNode,
+}
+
+/**
+ * Paths get their own DatasetDef rather than two more aliases on {@link httpDataset} because
+ * `partForError` attributes GraphQL errors to a dataset *by alias*: a plan that gates
+ * `clientRequestPath` would otherwise disable requests, bytes, visits and latency along with it.
+ * Its own entry costs one state row per zone and isolates that failure.
+ *
+ * The empty `availableFieldsNeedle` keeps `quantilesAvailable` true, so this dataset batches into
+ * the same zone document as `http_requests` — zero extra GraphQL calls in steady state.
+ */
+const httpPathsDataset: DatasetDef = {
+	id: HTTP_PATHS_DATASET,
+	scope: "zone",
+	quantileNeedles: [],
+	availableFieldsNeedle: "",
+	aliases: ["paths", "pathErrors"],
+	selection: httpPathsSelection,
+	mapNode: (node, target) =>
+		decodeHttpPathsZoneNode(node).pipe(
+			Effect.mapError(() => decodeError("HTTP paths")),
+			Effect.map((decoded) =>
+				mapHttpPathGroups({
+					orgId: target.orgId,
+					zoneId: target.row.zoneId,
+					zoneName: target.row.zoneName ?? target.row.zoneId,
+					groups: decoded.paths ?? [],
+					errors: decoded.pathErrors ?? [],
+				}),
+			),
+		),
+	settingsNode: httpZoneSettingsNode,
+}
+
+/** Country + client (method/protocol/device) breakdowns; same isolation argument as paths. */
+const httpDimensionsDataset: DatasetDef = {
+	id: HTTP_DIMENSIONS_DATASET,
+	scope: "zone",
+	quantileNeedles: [],
+	availableFieldsNeedle: "",
+	aliases: ["countryAgg", "clientAgg"],
+	selection: httpDimensionsSelection,
+	mapNode: (node, target) =>
+		decodeHttpDimensionsZoneNode(node).pipe(
+			Effect.mapError(() => decodeError("HTTP dimensions")),
+			Effect.map((decoded) =>
+				mapHttpDimensionGroups({
+					orgId: target.orgId,
+					zoneId: target.row.zoneId,
+					zoneName: target.row.zoneName ?? target.row.zoneId,
+					countries: decoded.countryAgg ?? [],
+					clients: decoded.clientAgg ?? [],
+				}),
+			),
+		),
+	settingsNode: httpZoneSettingsNode,
 }
 
 const workersDataset: DatasetDef = {
@@ -413,6 +486,8 @@ const durableObjectsDataset: DatasetDef = {
 
 const DATASETS: ReadonlyArray<DatasetDef> = [
 	httpDataset,
+	httpPathsDataset,
+	httpDimensionsDataset,
 	firewallDataset,
 	dnsDataset,
 	workersDataset,
@@ -1319,7 +1394,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 				const request = HttpClientRequest.post(ingestMetricsUrl, {
 					headers: { authorization: `Bearer ${ingestKey}`, "content-type": "application/json" },
 				}).pipe(HttpClientRequest.bodyJsonUnsafe(payload))
-				const response = yield* client.execute(request)
+				const response = yield* client
+					.execute(request)
+					.pipe(Effect.annotateSpans("peer.service", "ingest"))
 				if (response.status >= 300) {
 					const body = yield* response.text.pipe(Effect.orElseSucceed(() => ""))
 					return yield* Effect.fail(
@@ -1566,85 +1643,85 @@ export class CloudflareAnalyticsService extends Context.Service<
 		 * config disappeared upstream — mirrors the PlanetScale inventory reconcile so identity
 		 * is kept if a config re-appears.
 		 */
-		const reconcileHyperdriveConfigs = Effect.fn(
-			"CloudflareAnalyticsService.reconcileHyperdriveConfigs",
-		)(function* (orgId: OrgId, configs: ReadonlyArray<CloudflareHyperdriveConfig>, now: number) {
-			yield* Effect.annotateCurrentSpan({
-				orgId,
-				"maple.cloudflare.hyperdrive_config_count": configs.length,
-			})
-			const existingRows = yield* dbExecute((db) =>
-				db
-					.select()
-					.from(cloudflareHyperdriveConfigs)
-					.where(eq(cloudflareHyperdriveConfigs.orgId, orgId)),
-			)
-			const existingByConfigId = new Map(existingRows.map((row) => [row.configId, row]))
-			const upstreamIds = new Set(configs.map((config) => config.id))
+		const reconcileHyperdriveConfigs = Effect.fn("CloudflareAnalyticsService.reconcileHyperdriveConfigs")(
+			function* (orgId: OrgId, configs: ReadonlyArray<CloudflareHyperdriveConfig>, now: number) {
+				yield* Effect.annotateCurrentSpan({
+					orgId,
+					"maple.cloudflare.hyperdrive_config_count": configs.length,
+				})
+				const existingRows = yield* dbExecute((db) =>
+					db
+						.select()
+						.from(cloudflareHyperdriveConfigs)
+						.where(eq(cloudflareHyperdriveConfigs.orgId, orgId)),
+				)
+				const existingByConfigId = new Map(existingRows.map((row) => [row.configId, row]))
+				const upstreamIds = new Set(configs.map((config) => config.id))
 
-			yield* Effect.forEach(
-				configs,
-				(config) => {
-					const values = {
-						name: config.name,
-						originHost: config.origin.host,
-						originPort: config.origin.port,
-						originScheme: config.origin.scheme,
-						originDatabase: config.origin.database,
-						originUser: config.origin.user,
-						deletedAt: null,
-						updatedAt: new Date(now),
-					}
-					const existing = existingByConfigId.get(config.id)
-					return existing !== undefined
-						? dbExecute((db) =>
-								db
-									.update(cloudflareHyperdriveConfigs)
-									.set(values)
-									.where(eq(cloudflareHyperdriveConfigs.id, existing.id)),
-							)
-						: dbExecute((db) =>
-								db.insert(cloudflareHyperdriveConfigs).values({
-									id: randomUUID(),
-									orgId,
-									configId: config.id,
-									createdAt: new Date(now),
-									...values,
-								}),
-							)
-				},
-				{ concurrency: 4, discard: true },
-			)
+				yield* Effect.forEach(
+					configs,
+					(config) => {
+						const values = {
+							name: config.name,
+							originHost: config.origin.host,
+							originPort: config.origin.port,
+							originScheme: config.origin.scheme,
+							originDatabase: config.origin.database,
+							originUser: config.origin.user,
+							deletedAt: null,
+							updatedAt: new Date(now),
+						}
+						const existing = existingByConfigId.get(config.id)
+						return existing !== undefined
+							? dbExecute((db) =>
+									db
+										.update(cloudflareHyperdriveConfigs)
+										.set(values)
+										.where(eq(cloudflareHyperdriveConfigs.id, existing.id)),
+								)
+							: dbExecute((db) =>
+									db.insert(cloudflareHyperdriveConfigs).values({
+										id: randomUUID(),
+										orgId,
+										configId: config.id,
+										createdAt: new Date(now),
+										...values,
+									}),
+								)
+					},
+					{ concurrency: 4, discard: true },
+				)
 
-			yield* Effect.forEach(
-				existingRows.filter((row) => !upstreamIds.has(row.configId) && row.deletedAt === null),
-				(row) =>
-					dbExecute((db) =>
-						db
-							.update(cloudflareHyperdriveConfigs)
-							.set({ deletedAt: new Date(now), updatedAt: new Date(now) })
-							.where(eq(cloudflareHyperdriveConfigs.id, row.id)),
-					),
-				{ concurrency: 4, discard: true },
-			)
-		})
-
-		const listHyperdriveConfigsForOrg = Effect.fn(
-			"CloudflareAnalyticsService.listHyperdriveConfigs",
-		)(function* (orgId: OrgId) {
-			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			return yield* dbExecute((db) =>
-				db
-					.select()
-					.from(cloudflareHyperdriveConfigs)
-					.where(
-						and(
-							eq(cloudflareHyperdriveConfigs.orgId, orgId),
-							isNull(cloudflareHyperdriveConfigs.deletedAt),
+				yield* Effect.forEach(
+					existingRows.filter((row) => !upstreamIds.has(row.configId) && row.deletedAt === null),
+					(row) =>
+						dbExecute((db) =>
+							db
+								.update(cloudflareHyperdriveConfigs)
+								.set({ deletedAt: new Date(now), updatedAt: new Date(now) })
+								.where(eq(cloudflareHyperdriveConfigs.id, row.id)),
 						),
-					),
-			)
-		})
+					{ concurrency: 4, discard: true },
+				)
+			},
+		)
+
+		const listHyperdriveConfigsForOrg = Effect.fn("CloudflareAnalyticsService.listHyperdriveConfigs")(
+			function* (orgId: OrgId) {
+				yield* Effect.annotateCurrentSpan("orgId", orgId)
+				return yield* dbExecute((db) =>
+					db
+						.select()
+						.from(cloudflareHyperdriveConfigs)
+						.where(
+							and(
+								eq(cloudflareHyperdriveConfigs.orgId, orgId),
+								isNull(cloudflareHyperdriveConfigs.deletedAt),
+							),
+						),
+				)
+			},
+		)
 
 		// ------------------------------------------------------------------
 		// Per-org poll
@@ -1930,7 +2007,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 					.from(oauthConnections)
 					// Revoked grants fail identically every tick until the org reconnects
 					// (which clears revokedAt) — skip them instead of re-erroring forever.
-					.where(and(eq(oauthConnections.provider, "cloudflare"), isNull(oauthConnections.revokedAt))),
+					.where(
+						and(eq(oauthConnections.provider, "cloudflare"), isNull(oauthConnections.revokedAt)),
+					),
 			)
 			// Orgs whose grant lacks the analytics scopes can't be polled — the status endpoint
 			// already surfaces that (analyticsCapable: false), so skipping them here avoids
@@ -2286,7 +2365,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 				db
 					.update(oauthConnections)
 					.set({ revokedAt: null })
-					.where(and(eq(oauthConnections.orgId, orgId), eq(oauthConnections.provider, "cloudflare"))),
+					.where(
+						and(eq(oauthConnections.orgId, orgId), eq(oauthConnections.provider, "cloudflare")),
+					),
 			)
 		})
 

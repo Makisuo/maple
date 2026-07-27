@@ -124,7 +124,7 @@ export interface Service {
    */
   readonly generateObject: <
     ObjectEncoded extends Record<string, any>,
-    StructuredOutputSchema extends Schema.Codec<unknown, ObjectEncoded, unknown, unknown>,
+    StructuredOutputSchema extends Schema.Encoder<ObjectEncoded, unknown>,
     Options extends NoExcessProperties<
       GenerateObjectOptions<any, StructuredOutputSchema>,
       Options
@@ -835,7 +835,7 @@ export const make: (params: {
 
   const generateObject = <
     ObjectEncoded extends Record<string, any>,
-    StructuredOutputSchema extends Schema.Codec<unknown, ObjectEncoded, unknown, unknown>,
+    StructuredOutputSchema extends Schema.Encoder<ObjectEncoded, unknown>,
     Options extends NoExcessProperties<
       GenerateObjectOptions<any, StructuredOutputSchema>,
       Options
@@ -1691,7 +1691,7 @@ export const generateText: {
  */
 export const generateObject = <
   ObjectEncoded extends Record<string, any>,
-  StructuredOutputSchema extends Schema.Codec<unknown, ObjectEncoded, unknown, unknown>,
+  StructuredOutputSchema extends Schema.Encoder<ObjectEncoded, unknown>,
   Options extends NoExcessProperties<
     GenerateObjectOptions<any, StructuredOutputSchema>,
     Options

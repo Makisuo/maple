@@ -54,6 +54,7 @@ const writeTempTsconfig = (suiteName, subjectName, sourcePath) => {
       declaration: false,
       declarationMap: false,
       sourceMap: false,
+      plugins: [],
       rootDir: effectDir,
       incremental: false,
       composite: false,
@@ -63,13 +64,19 @@ const writeTempTsconfig = (suiteName, subjectName, sourcePath) => {
   return tsconfigPath
 }
 
-const readInstantiations = (output, label) => {
-  const match = output.match(/^Instantiations:\s+(\d+)$/m)
+const readMetric = (output, label, metric) => {
+  const match = output.match(new RegExp(`^${metric}:\\s+(\\d+)$`, "m"))
   if (!match) {
-    throw new Error(`Could not read Instantiations from compiler output for ${label}`)
+    throw new Error(`Could not read ${metric} from compiler output for ${label}`)
   }
   return Number(match[1])
 }
+
+const readDiagnostics = (output, label) => ({
+  instantiations: readMetric(output, label, "Instantiations"),
+  types: readMetric(output, label, "Types"),
+  symbols: readMetric(output, label, "Symbols")
+})
 
 const measure = (suiteName, subjectName, sourcePath) => {
   const tsconfigPath = writeTempTsconfig(suiteName, subjectName, sourcePath)
@@ -85,21 +92,28 @@ const measure = (suiteName, subjectName, sourcePath) => {
     process.stderr.write(output)
     throw new Error(`Compiler failed for ${suiteName}/${subjectName}`)
   }
-  return readInstantiations(output, `${suiteName}/${subjectName}`)
+  return readDiagnostics(output, `${suiteName}/${subjectName}`)
 }
+
+const subtractDiagnostics = (total, baseline) => ({
+  instantiations: total.instantiations - baseline.instantiations,
+  types: total.types - baseline.types,
+  symbols: total.symbols - baseline.symbols
+})
 
 const formatNumber = (n) => n.toLocaleString("en-US")
 
 const printTable = (rows) => {
   const table = [
-    ["suite", "fixture", "baseline", "total", "delta", "maxDelta", "status"],
+    ["suite", "fixture", "instDelta", "instMax", "typesDelta", "typesMax", "symbolsDelta", "status"],
     ...rows.map((row) => [
       row.suite,
       row.fixture,
-      formatNumber(row.baseline),
-      formatNumber(row.total),
-      formatNumber(row.delta),
-      row.maxDelta === undefined ? "-" : formatNumber(row.maxDelta),
+      formatNumber(row.delta.instantiations),
+      row.maxInstantiationsDelta === undefined ? "-" : formatNumber(row.maxInstantiationsDelta),
+      formatNumber(row.delta.types),
+      row.maxTypesDelta === undefined ? "-" : formatNumber(row.maxTypesDelta),
+      formatNumber(row.delta.symbols),
       row.status
     ])
   ]
@@ -143,31 +157,49 @@ for (const suite of config.suites) {
     matchedTarget = true
     const fixturePath = toAbsolute(fixture.file)
     const total = measure(suite.name, fixture.name, fixturePath)
-    const delta = total - baseline
+    const delta = subtractDiagnostics(total, baseline)
     const threshold = thresholds[fixture.name]
-    const maxDelta = typeof threshold?.maxDelta === "number" ? threshold.maxDelta : undefined
+    const maxInstantiationsDelta = typeof threshold?.maxInstantiationsDelta === "number"
+      ? threshold.maxInstantiationsDelta
+      : undefined
+    const maxTypesDelta = typeof threshold?.maxTypesDelta === "number" ? threshold.maxTypesDelta : undefined
     let status
 
     if (update) {
-      thresholds[fixture.name] = { maxDelta: delta }
+      thresholds[fixture.name] = {
+        maxInstantiationsDelta: delta.instantiations,
+        maxTypesDelta: delta.types
+      }
       status = "updated"
-    } else if (maxDelta === undefined) {
-      status = "missing"
-      failed = true
-    } else if (delta <= maxDelta) {
-      status = "ok"
     } else {
-      status = "fail"
-      failed = true
+      const missing = [
+        maxInstantiationsDelta === undefined ? "instantiations" : undefined,
+        maxTypesDelta === undefined ? "types" : undefined
+      ].filter((metric) => metric !== undefined)
+      const exceeded = [
+        maxInstantiationsDelta !== undefined && delta.instantiations > maxInstantiationsDelta
+          ? "instantiations"
+          : undefined,
+        maxTypesDelta !== undefined && delta.types > maxTypesDelta ? "types" : undefined
+      ].filter((metric) => metric !== undefined)
+
+      if (missing.length > 0) {
+        status = `missing:${missing.join(",")}`
+        failed = true
+      } else if (exceeded.length > 0) {
+        status = `fail:${exceeded.join(",")}`
+        failed = true
+      } else {
+        status = "ok"
+      }
     }
 
     rows.push({
       suite: suite.name,
       fixture: fixture.name,
-      baseline,
-      total,
       delta,
-      maxDelta: update ? delta : maxDelta,
+      maxInstantiationsDelta: update ? delta.instantiations : maxInstantiationsDelta,
+      maxTypesDelta: update ? delta.types : maxTypesDelta,
       status
     })
   }

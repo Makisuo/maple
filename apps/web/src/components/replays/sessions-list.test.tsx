@@ -22,6 +22,7 @@ const session: SessionRow = {
 	clickCount: 1,
 	errorCount: 0,
 	traceCount: 1,
+	recorded: "true",
 }
 
 class MockIntersectionObserver {
@@ -65,5 +66,42 @@ describe("SessionsList pagination observer", () => {
 
 		view.unmount()
 		expect(second.disconnect).toHaveBeenCalledOnce()
+	})
+})
+
+// The list is virtualized against a scroll ancestor that jsdom gives zero
+// height, so the real `useVirtualizer` yields no rows and nothing renders.
+// Stub it to emit one row per session — that keeps the assertions on the
+// component's actual row markup rather than an extracted helper.
+vi.mock("@tanstack/react-virtual", () => ({
+	useVirtualizer: ({ count }: { count: number }) => ({
+		getVirtualItems: () =>
+			Array.from({ length: count }, (_, index) => ({ index, key: index, start: index * 78 })),
+		getTotalSize: () => count * 78,
+		measureElement: () => {},
+		options: { scrollMargin: 0 },
+	}),
+}))
+
+describe("SessionsList recording badge", () => {
+	afterEach(cleanup)
+
+	it("flags a session the SDK marked as unrecorded", () => {
+		const view = render(<SessionsList sessions={[{ ...session, recorded: "false" }]} />)
+		// Rendered twice — the row carries a narrow-column badge strip and a wide
+		// one, with CSS container queries picking which is visible.
+		expect(view.getAllByText("No recording")).toHaveLength(2)
+	})
+
+	it("stays silent for a recorded session", () => {
+		const view = render(<SessionsList sessions={[session]} />)
+		expect(view.queryAllByText("No recording")).toHaveLength(0)
+	})
+
+	// Sessions written before the SDK stamped the marker read `""`. That is
+	// "unknown", not "not recorded" — badging them would be a guess.
+	it("stays silent when the marker is absent", () => {
+		const view = render(<SessionsList sessions={[{ ...session, recorded: "" }]} />)
+		expect(view.queryAllByText("No recording")).toHaveLength(0)
 	})
 })

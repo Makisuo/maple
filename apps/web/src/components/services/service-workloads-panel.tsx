@@ -98,7 +98,10 @@ export function ServiceWorkloadsPanel({
 										<span className="w-7 text-[10px] uppercase tracking-wider text-muted-foreground/60">
 											cpu
 										</span>
-										<UsageBar fraction={workload.avgCpuLimitUtilization} className="flex-1" />
+										<UsageBar
+											fraction={workload.avgCpuLimitUtilization}
+											className="flex-1"
+										/>
 									</div>
 								)}
 								{workload.avgMemoryLimitUtilization != null && (
@@ -106,7 +109,10 @@ export function ServiceWorkloadsPanel({
 										<span className="w-7 text-[10px] uppercase tracking-wider text-muted-foreground/60">
 											mem
 										</span>
-										<UsageBar fraction={workload.avgMemoryLimitUtilization} className="flex-1" />
+										<UsageBar
+											fraction={workload.avgMemoryLimitUtilization}
+											className="flex-1"
+										/>
 									</div>
 								)}
 							</div>

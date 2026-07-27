@@ -110,7 +110,19 @@ On a clean install, migration 0001 creates **20 tables** (datasources) and **22 
 - **MV-populated tables**: `service_usage`, `service_map_spans`, `service_map_children`, `service_map_edges_hourly`, `service_overview_spans`, `error_spans`, `error_events`, `trace_list_mv`, `trace_detail_spans`, `attribute_keys_hourly`, `attribute_values_hourly`, `traces_aggregates_hourly`, `logs_aggregates_hourly`
 - **Materialized views**: 22 MVs that fan out from the direct-ingest tables to populate the MV-populated tables
 
-Every table is partitioned by date and carries a 90-day TTL (365 days on metrics) — adjust by writing a follow-up migration if your retention requirements differ.
+Every table is partitioned by date and carries a TTL, tiered by how raw the data is:
+
+| Retention | Tables |
+| --- | --- |
+| **30 days** | `traces`, `trace_detail_spans`, `logs`, `service_map_spans`, `service_map_children`, `service_overview_spans`, `trace_list_mv` |
+| **90 days** | `error_spans`, `error_events`, `error_events_by_time`, `metrics_*`, `attribute_*_hourly`, `metric_catalog` |
+| **365 days** | hourly rollups (`*_hourly`), `service_usage`, `alert_checks` |
+
+Adjust by writing a follow-up migration if your retention requirements differ.
+
+> **Changing a TTL requires an `ALTER`, not just a datasource edit.** Migration 0001 re-exports the generated snapshot, and every statement in it is `CREATE TABLE IF NOT EXISTS` — so on a cluster whose tables already exist, re-running it is a no-op and the old TTL survives. Editing `datasources.ts` alone therefore changes **new installs only**. Ship a paired `ALTER TABLE … MODIFY TTL` delta (see `0011_align_raw_telemetry_retention.ts`) or existing clusters silently keep the previous retention. This exact gap let a production cluster accumulate 3× its intended trace volume until the disk filled.
+>
+> When lowering a TTL, set `ttl_only_drop_parts = 1` **first**. These tables partition on the same expression their TTL keys off, so expired parts are always wholly expired — the setting turns eviction into a whole-partition drop instead of a multi-TiB part rewrite.
 
 ## Ingest options
 
@@ -118,13 +130,13 @@ The maintained standalone path is **Option A: Maple's prebuilt OTel Collector im
 
 ### Maple ingest gateway direct ClickHouse path
 
-For orgs whose `org_clickhouse_settings` row has `sync_status = 'connected'` and `schema_version` equal to the bundled `clickHouseSchemaVersion` (the latest ClickHouse **migration version** — emitted into the gateway as `SCHEMA_VERSION` by `scripts/generate-clickhouse-insert-mappings.ts`), the Rust ingest gateway routes accepted native-ingest frames directly to that org's ClickHouse HTTP endpoint. Non-ready orgs continue using the managed Tinybird path. Readiness keys on the migration version — **not** the Tinybird-coupled `clickHouseProjectRevision` — so a Tinybird-only schema change can't un-ready a BYO-ClickHouse org whose ClickHouse DDL is unchanged.
+For orgs whose `org_clickhouse_settings` row has `sync_status = 'connected'` and `schema_version` equal to the bundled `clickHouseSchemaVersion` (the latest **ingest-required** ClickHouse migration version — emitted into the gateway as `SCHEMA_VERSION` by `scripts/generate-clickhouse-insert-mappings.ts`), the Rust ingest gateway routes accepted native-ingest frames directly to that org's ClickHouse HTTP endpoint. Non-ready orgs continue using the managed Tinybird path. Performance-only migrations set `requiredForIngest: false`, so an index rollout cannot un-ready an otherwise compatible org. Readiness also does **not** use the Tinybird-coupled `clickHouseProjectRevision`, so Tinybird-only changes cannot alter BYO-ClickHouse routing.
 
 D1-backed ingest deployments must set `MAPLE_INGEST_KEY_ENCRYPTION_KEY` before rolling out this mode; the gateway exits at startup without it because ClickHouse passwords are encrypted at rest with the same AES-256-GCM key format as private ingest keys.
 
 Operational caveats:
 
-- **Readiness keys on the migration version, which only the API marks.** The `schema_version` stored in D1 is written to `clickHouseSchemaVersion` **only** by the API's `applySchema` workflow (or by `schemaDiff` self-heal, below). A credential re-save _preserves_ the prior value, and the standalone `clickhouse-cli` writes `_maple_schema_migrations` **on your CH server but never touches D1**. So an org whose ClickHouse schema was applied entirely via the CLI stays `schema_version`-stale and the gateway keeps routing to Tinybird, even though the cluster is fully migrated. Symptom: the dashboard (which reads CH whenever a settings row exists) shows collector-written data, but data sent through the public ingestor is invisible because it landed in Tinybird. (Before the migration-version cutover, a Tinybird-only change also tripped this; keying on the migration version removes that class of false-stale.)
+- **Readiness keys on the latest ingest-required migration, which only the API marks.** The `schema_version` stored in D1 is written to `clickHouseSchemaVersion` **only** by the API's `applySchema` workflow (or by `schemaDiff` self-heal, below). A credential re-save _preserves_ the prior value, and the standalone `clickhouse-cli` writes `_maple_schema_migrations` **on your CH server but never touches D1**. So an org whose ClickHouse schema was applied entirely via the CLI stays `schema_version`-stale and the gateway keeps routing to Tinybird, even though the cluster is fully migrated. Symptom: the dashboard (which reads CH whenever a settings row exists) shows collector-written data, but data sent through the public ingestor is invisible because it landed in Tinybird.
 - **Self-heal:** calling `schemaDiff` (e.g. opening `Settings → BYO Backend → ClickHouse`, or `POST /orgClickHouseSettings/schemaDiff`) re-stamps `schema_version` to `clickHouseSchemaVersion` whenever the live schema is fully in sync (every diff entry `up_to_date`). This is the supported way to mark a CLI-applied org ready without forcing an Apply that has nothing to migrate. The read path also annotates a `clickhouse.schemaDrift` span attribute (`OrgClickHouseSettingsService.resolveRuntimeConfig`) — alert on it to catch stale orgs.
 - ClickHouse-routed frames never fall back to Tinybird. After the configured export retry budget is exhausted, the batch is dropped, the WAL cursor advances, and `ingest_clickhouse_export_dropped_total` records the datasource and final drop reason. Alert on any non-zero increase in that counter.
 - Password-authenticated ClickHouse endpoints must use `https://`; the gateway drops passworded `http://` targets before attaching `X-ClickHouse-Key`.

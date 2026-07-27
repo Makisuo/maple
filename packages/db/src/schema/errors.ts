@@ -1,4 +1,15 @@
-import { boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
+import {
+	boolean,
+	index,
+	integer,
+	jsonb,
+	pgTable,
+	primaryKey,
+	text,
+	timestamp,
+	uniqueIndex,
+} from "drizzle-orm/pg-core"
 import type {
 	ActorId,
 	ErrorIncidentId,
@@ -96,6 +107,15 @@ export const errorIssues = pgTable(
 		index("error_issues_org_last_seen_idx").on(table.orgId, table.lastSeenAt),
 		index("error_issues_org_assignee_idx").on(table.orgId, table.assignedActorId),
 		index("error_issues_lease_expiry_idx").on(table.leaseExpiresAt),
+		// The hourly archived-issue purge filters (org_id, archived_at IS NOT NULL,
+		// archived_at < cutoff). With no index on archived_at the planner fell back
+		// to error_issues_org_assignee_idx and heap-checked the org's whole
+		// partition — 1,862 rows read per call to return zero, at a 31% buffer-cache
+		// hit ratio, which was 35% of ALL database time. Partial, so the index holds
+		// only the handful of archived rows.
+		index("error_issues_org_archived_idx")
+			.on(table.orgId, table.archivedAt)
+			.where(sql`${table.archivedAt} is not null`),
 	],
 )
 
@@ -141,10 +161,9 @@ export const errorIssueStates = pgTable(
 		openIncidentId: text("open_incident_id").$type<ErrorIncidentId>(),
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 	},
-	(table) => [
-		primaryKey({ columns: [table.orgId, table.issueId] }),
-		index("error_issue_states_org_idx").on(table.orgId),
-	],
+	// No standalone org_id index: the primary key already leads with org_id, so
+	// one was pure write amplification on a table taking ~63k updates a day.
+	(table) => [primaryKey({ columns: [table.orgId, table.issueId] })],
 )
 
 /**

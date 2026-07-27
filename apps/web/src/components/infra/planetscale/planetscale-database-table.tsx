@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -15,28 +16,14 @@ import {
 	TableSkeleton,
 	useTableSort,
 } from "../primitives/data-table"
-
-export const formatLag = (seconds: number) =>
-	seconds >= 1 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds * 1000)}ms`
-
-export function utilizationClass(percent: number): string | undefined {
-	if (percent > 80) return "text-severity-error"
-	if (percent > 60) return "text-severity-warn"
-	return undefined
-}
-
-export function lagClass(seconds: number): string | undefined {
-	if (seconds > 10) return "text-severity-error"
-	if (seconds > 1) return "text-severity-warn"
-	return undefined
-}
-
-/** States that indicate the database isn't serving normally — worth a badge. */
-export function abnormalState(state: string | null): string | null {
-	if (state === null) return null
-	const normalized = state.toLowerCase()
-	return normalized === "ready" || normalized === "active" ? null : normalized
-}
+import {
+	MISSING,
+	abnormalState,
+	formatLag,
+	formatStoragePercent,
+	lagClass,
+	utilizationClass,
+} from "./metrics"
 
 type SortKey =
 	| "name"
@@ -44,6 +31,7 @@ type SortKey =
 	| "connectionsAvg"
 	| "cpuMaxPercent"
 	| "memMaxPercent"
+	| "storageUsedPercent"
 	| "replicaLagMaxSeconds"
 
 interface DatabaseRow {
@@ -58,11 +46,9 @@ interface DatabaseRow {
 	connectionsAvg: number
 	cpuMaxPercent: number
 	memMaxPercent: number
+	storageUsedPercent: number
 	replicaLagMaxSeconds: number
 }
-
-// Databases with no metrics in the window sort below every real value.
-const MISSING = Number.NEGATIVE_INFINITY
 
 const headerCells = (sort?: {
 	sortKey: SortKey
@@ -117,6 +103,15 @@ const headerCells = (sort?: {
 			hidden="hidden md:flex"
 		/>
 		<ColumnHead<SortKey>
+			label="Storage"
+			sortKey={sort ? "storageUsedPercent" : undefined}
+			currentKey={sort?.sortKey}
+			dir={sort?.sortDir}
+			onSort={sort?.handleSort}
+			align="right"
+			width="w-[80px]"
+		/>
+		<ColumnHead<SortKey>
 			label="Replica lag"
 			sortKey={sort ? "replicaLagMaxSeconds" : undefined}
 			currentKey={sort?.sortKey}
@@ -142,6 +137,7 @@ export function PlanetScaleDatabaseTableLoading() {
 					<Skeleton className="h-3 w-[96px]" />
 					<Skeleton className="h-3 w-[88px]" />
 					<Skeleton className="hidden h-3 w-[104px] md:block" />
+					<Skeleton className="h-3 w-[80px]" />
 					<Skeleton className="h-3 w-[88px]" />
 				</>
 			)}
@@ -158,28 +154,36 @@ export function PlanetScaleDatabaseTable({
 	databases,
 	statsByName,
 	waiting,
+	emptyMessage = "No databases in the inventory.",
 }: {
 	databases: ReadonlyArray<PlanetScaleDatabaseSummary>
 	statsByName: ReadonlyMap<string, PlanetScaleDatabaseStat>
 	waiting?: boolean
+	/** Overridden when the dashes have a cause worth naming (metrics paused, say). */
+	emptyMessage?: string
 }) {
-	const rows: DatabaseRow[] = databases.map((db) => {
-		const stats = statsByName.get(db.name.toLowerCase())
-		return {
-			id: db.id,
-			name: db.name,
-			kind: db.kind,
-			region: db.region,
-			plan: db.plan,
-			state: db.state,
-			branchCount: db.branches.length,
-			hasStats: stats !== undefined,
-			connectionsAvg: stats?.connectionsAvg ?? MISSING,
-			cpuMaxPercent: stats?.cpuMaxPercent ?? MISSING,
-			memMaxPercent: stats?.memMaxPercent ?? MISSING,
-			replicaLagMaxSeconds: stats?.replicaLagMaxSeconds ?? MISSING,
-		}
-	})
+	const rows = useMemo<ReadonlyArray<DatabaseRow>>(
+		() =>
+			databases.map((db) => {
+				const stats = statsByName.get(db.name.toLowerCase())
+				return {
+					id: db.id,
+					name: db.name,
+					kind: db.kind,
+					region: db.region,
+					plan: db.plan,
+					state: db.state,
+					branchCount: db.branches.length,
+					hasStats: stats !== undefined,
+					connectionsAvg: stats?.connectionsAvg ?? MISSING,
+					cpuMaxPercent: stats?.cpuMaxPercent ?? MISSING,
+					memMaxPercent: stats?.memMaxPercent ?? MISSING,
+					storageUsedPercent: stats?.storageUsedPercent ?? MISSING,
+					replicaLagMaxSeconds: stats?.replicaLagMaxSeconds ?? MISSING,
+				}
+			}),
+		[databases, statsByName],
+	)
 
 	const { sorted, sortKey, sortDir, handleSort } = useTableSort<DatabaseRow, SortKey>(rows, {
 		initialKey: "connectionsAvg",
@@ -191,7 +195,7 @@ export function PlanetScaleDatabaseTable({
 			ariaLabel="PlanetScale databases"
 			waiting={waiting}
 			isEmpty={sorted.length === 0}
-			emptyMessage="No databases in the inventory."
+			emptyMessage={emptyMessage}
 			header={headerCells({ sortKey, sortDir, handleSort })}
 		>
 			{sorted.map((row) => {
@@ -239,6 +243,17 @@ export function PlanetScaleDatabaseTable({
 							)}
 						>
 							{row.hasStats ? `${row.memMaxPercent.toFixed(0)}%` : "—"}
+						</div>
+						<div
+							className={cn(
+								"w-[80px] text-right font-mono text-[12px] tabular-nums text-foreground/80",
+								row.storageUsedPercent !== MISSING &&
+									utilizationClass(row.storageUsedPercent),
+							)}
+						>
+							{row.storageUsedPercent === MISSING
+								? "—"
+								: formatStoragePercent(row.storageUsedPercent)}
 						</div>
 						<div
 							className={cn(

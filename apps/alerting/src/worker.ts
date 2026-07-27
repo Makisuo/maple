@@ -276,6 +276,9 @@ const serviceMapRollupTick = Effect.gen(function* () {
 			orgsProcessed: result.orgsProcessed,
 			hoursRolledUp: result.hoursRolledUp,
 			edgesWritten: result.edgesWritten,
+			resolutionsWritten: result.resolutionsWritten,
+			resolutionHoursChecked: result.resolutionHoursChecked,
+			emptyResolutionHours: result.emptyResolutionHours,
 			orgFailures: result.orgFailures,
 		}),
 	)

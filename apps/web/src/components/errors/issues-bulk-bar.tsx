@@ -1,7 +1,16 @@
-import type { ErrorIssueId, WorkflowState } from "@maple/domain/http"
-import { cn } from "@maple/ui/lib/utils"
+import type { ErrorIssueId, IssueSeverity, WorkflowState } from "@maple/domain/http"
+import type { ReactNode } from "react"
+import { Button } from "@maple/ui/components/ui/button"
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@maple/ui/components/ui/dropdown-menu"
 
-import { WORKFLOW_LABEL, WorkflowRingIcon } from "@/components/icons/workflow-ring"
+import { WORKFLOW_LABEL } from "@/components/icons/workflow-ring"
 import { XmarkIcon } from "@/components/icons"
 import type { IssueMutations } from "./use-issue-mutations"
 
@@ -14,6 +23,7 @@ const STATE_ORDER: ReadonlyArray<WorkflowState> = [
 	"cancelled",
 	"wontfix",
 ]
+const SEVERITIES: ReadonlyArray<IssueSeverity> = ["critical", "high", "medium", "low"]
 
 export function IssuesBulkBar({
 	selectedIds,
@@ -30,41 +40,72 @@ export function IssuesBulkBar({
 		<div
 			role="region"
 			aria-label="Bulk actions"
-			className={cn(
-				"pointer-events-auto fixed bottom-4 left-1/2 z-40 -translate-x-1/2",
-				"flex items-center gap-1 rounded-xl border border-border/80 bg-popover/95 p-1 pr-2 pl-2 shadow-lg backdrop-blur",
-			)}
+			className="pointer-events-auto fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 border bg-popover p-1"
 		>
-			<span className="pr-2 pl-1 text-xs font-medium text-foreground tabular-nums">
+			<span className="px-2 text-xs font-medium tabular-nums text-foreground">
 				{selectedIds.length} selected
 			</span>
-			<span className="mx-1 h-4 w-px bg-border" aria-hidden />
-			<div className="flex items-center gap-0.5">
+			<Button
+				size="sm"
+				variant="ghost"
+				onClick={() => {
+					void mutations.claimMany(selectedIds)
+					onClear()
+				}}
+			>
+				Claim
+			</Button>
+			<BulkMenu label="Severity">
+				<DropdownMenuLabel>Set severity</DropdownMenuLabel>
+				<DropdownMenuSeparator />
+				{SEVERITIES.map((severity) => (
+					<DropdownMenuItem
+						key={severity}
+						className="capitalize"
+						onClick={() => {
+							void mutations.setSeverityMany(selectedIds, severity)
+							onClear()
+						}}
+					>
+						{severity}
+					</DropdownMenuItem>
+				))}
+				<DropdownMenuItem
+					onClick={() => {
+						void mutations.setSeverityMany(selectedIds, null)
+						onClear()
+					}}
+				>
+					Clear severity
+				</DropdownMenuItem>
+			</BulkMenu>
+			<BulkMenu label="Move to">
+				<DropdownMenuLabel>Move to state</DropdownMenuLabel>
+				<DropdownMenuSeparator />
 				{STATE_ORDER.map((state) => (
-					<button
+					<DropdownMenuItem
 						key={state}
-						type="button"
 						onClick={() => {
 							void mutations.transitionMany(selectedIds, state)
 							onClear()
 						}}
-						className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-						title={`Move to ${WORKFLOW_LABEL[state]}`}
 					>
-						<WorkflowRingIcon state={state} size={12} />
-						<span className="hidden lg:inline">{WORKFLOW_LABEL[state]}</span>
-					</button>
+						{WORKFLOW_LABEL[state]}
+					</DropdownMenuItem>
 				))}
-			</div>
-			<span className="mx-1 h-4 w-px bg-border" aria-hidden />
-			<button
-				type="button"
-				onClick={onClear}
-				aria-label="Clear selection"
-				className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-			>
+			</BulkMenu>
+			<Button size="icon-sm" variant="ghost" onClick={onClear} aria-label="Clear selection">
 				<XmarkIcon size={14} />
-			</button>
+			</Button>
 		</div>
+	)
+}
+
+function BulkMenu({ label, children }: { label: string; children: ReactNode }) {
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>{label}</DropdownMenuTrigger>
+			<DropdownMenuContent align="center">{children}</DropdownMenuContent>
+		</DropdownMenu>
 	)
 }

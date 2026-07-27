@@ -14,6 +14,7 @@
 import * as DateTime from "./DateTime.ts"
 import * as Effect from "./Effect.ts"
 import * as Encoding from "./Encoding.ts"
+import * as InternalRecord from "./internal/record.ts"
 import * as Option from "./Option.ts"
 import * as Pipeable from "./Pipeable.ts"
 import * as Predicate from "./Predicate.ts"
@@ -1703,6 +1704,20 @@ function bracketPathToTokens(bracketPath: string): Array<string | number> {
     .map((part) => (INDEX_REGEXP.test(part) ? globalThis.Number(part) : part))
 }
 
+function getOrCreateContainer(
+  self: any,
+  key: PropertyKey,
+  shouldBeArray: boolean
+): any {
+  const current = Object.hasOwn(self, key) ? self[key] : undefined
+  if (current !== undefined) {
+    return current
+  }
+  const container = shouldBeArray ? [] : {}
+  InternalRecord.set(self, key, container)
+  return container
+}
+
 /**
  * Builds a nested tree object from a list of bracket-path entries.
  *
@@ -1765,33 +1780,24 @@ export function makeTreeRecord<A>(
           const next = tokens[i + 1]
           const shouldBeArray = typeof next === "number" || next === ""
           const index = cur.length
-
-          if (cur[index] === undefined) {
-            cur[index] = shouldBeArray ? [] : {}
-          }
-
-          cur = cur[index]
+          cur = getOrCreateContainer(cur, index, shouldBeArray)
         }
       } else if (isLast) {
         // If we're setting a value at a path that already exists
         // convert it to an array to support multiple values for the same key
-        if (Array.isArray(cur[token])) {
+        const hasOwn = Object.hasOwn(cur, token)
+        if (hasOwn && Array.isArray(cur[token])) {
           cur[token].push(value)
-        } else if (Object.prototype.hasOwnProperty.call(cur, token)) {
-          cur[token] = [cur[token], value]
+        } else if (hasOwn) {
+          InternalRecord.set(cur, token, [cur[token], value])
         } else {
-          cur[token] = value
+          InternalRecord.set(cur, token, value)
         }
       } else {
         const next = tokens[i + 1]
         // if next is a number OR "" (from []), we are building an array
         const shouldBeArray = typeof next === "number" || next === ""
-
-        if (cur[token] === undefined) {
-          cur[token] = shouldBeArray ? [] : {}
-        }
-
-        cur = cur[token]
+        cur = getOrCreateContainer(cur, token, shouldBeArray)
       }
     })
   })

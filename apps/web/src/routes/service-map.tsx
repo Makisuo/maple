@@ -14,11 +14,13 @@ import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { QueryErrorState } from "@/components/common/query-error-state"
+import { LONG_RANGE_PRESET_OPTIONS } from "@/lib/time-utils"
 
 // `__all__` is the sentinel for the "All Environments" option. Storing it in the
 // URL (rather than clearing the param) keeps an explicit all-environments choice
 // sticky, distinct from "no choice → default to production".
 const ALL_ENVIRONMENTS = "__all__"
+const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
 
 const serviceMapSearchSchema = Schema.Struct({
 	startTime: Schema.optional(Schema.String),
@@ -157,6 +159,8 @@ function ServiceMapContent() {
 						startTime={search.startTime}
 						endTime={search.endTime}
 						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+						presets={LONG_RANGE_PRESET_OPTIONS}
+						maxRangeSeconds={ONE_YEAR_SECONDS}
 						onTimeChange={handleTimeChange}
 					/>
 				</div>

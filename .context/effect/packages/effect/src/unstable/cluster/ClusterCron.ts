@@ -147,9 +147,10 @@ export const make = <E, R>(options: {
   return Layer.merge(InitialRun, EntityLayer)
 }
 
-const retryPolicy = Schedule.exponential(200, 1.5).pipe(
-  Schedule.either(Schedule.spaced("1 minute"))
-)
+const retryPolicy = Schedule.min([
+  Schedule.exponential(200, 1.5),
+  Schedule.spaced("1 minute")
+])
 
 class CronPayload extends Schema.Class<CronPayload>("effect/cluster/ClusterCron/CronPayload")({
   dateTime: Schema.DateTimeUtc

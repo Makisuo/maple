@@ -7,6 +7,7 @@ import type { ManagedRuntime, Schema } from "effect"
 import { mapleRuntime } from "@/lib/registry"
 import { electricSyncBaseUrl } from "@/lib/services/common/electric-sync-url"
 import { getMapleAuthHeaders } from "@/lib/services/common/auth-headers"
+import { tracedFetch } from "@/lib/services/common/telemetry"
 
 /**
  * URL of the standalone `apps/electric-sync` ElectricSQL shape proxy. Every
@@ -31,7 +32,7 @@ export const mapleShapeFetch: typeof globalThis.fetch = async (input, init) => {
 	for (const [name, value] of Object.entries(authHeaders)) {
 		if (!headers.has(name)) headers.set(name, value)
 	}
-	return globalThis.fetch(input, { ...init, headers })
+	return tracedFetch("electric-sync", input, { ...init, headers })
 }
 
 /**

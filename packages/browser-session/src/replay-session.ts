@@ -29,6 +29,13 @@ export interface ReplaySessionHandle {
 	readonly shutdown: () => Promise<void>
 }
 
+/** Session tallies, read off the recorder/capture when an `ended` row is posted. */
+interface SessionCounts {
+	readonly clickCount: number
+	readonly pageViews: number
+	readonly errorCount: number
+}
+
 /**
  * Start recording the current browser session. Publishes the session sink,
  * posts an `active` metadata row, and installs visibility handlers:
@@ -58,7 +65,7 @@ export function startReplaySession(options: ReplaySessionOptions): ReplaySession
 	let events: EventCapture | undefined
 	let stopped = false
 
-	const postMeta = (status: "active" | "ended", clickCount: number | null, keepalive = false) =>
+	const postMeta = (status: "active" | "ended", counts: SessionCounts | null, keepalive = false) =>
 		postSessionMeta(
 			engineConfig,
 			buildSessionMetaRow({
@@ -70,8 +77,12 @@ export function startReplaySession(options: ReplaySessionOptions): ReplaySession
 				userId: options.getUserId?.(),
 				environment: options.environment,
 				serviceVersion: options.serviceVersion,
-				clickCount: clickCount ?? 0,
+				clickCount: counts?.clickCount ?? 0,
+				pageViews: counts?.pageViews ?? 0,
+				errorCount: counts?.errorCount ?? 0,
 				traceIds: status === "ended" ? getObservedTraceIds() : undefined,
+				// This path *is* the recorder — every row it posts has rrweb chunks.
+				recorded: true,
 			}),
 			keepalive,
 		)
@@ -91,7 +102,15 @@ export function startReplaySession(options: ReplaySessionOptions): ReplaySession
 		if (!recorder || !events) return
 		void recorder.flush(true)
 		void events.flush(true)
-		void postMeta("ended", recorder.getClickCount(), true)
+		void postMeta(
+			"ended",
+			{
+				clickCount: recorder.getClickCount(),
+				pageViews: events.getPageViews(),
+				errorCount: events.getErrorCount(),
+			},
+			true,
+		)
 		// flush() snapshots its buffer synchronously before awaiting, so stopping
 		// immediately after is safe and clears the rrweb subscription + timer.
 		recorder.stop()

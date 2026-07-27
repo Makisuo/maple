@@ -18,7 +18,13 @@ import {
 	InputGroupInput,
 } from "@maple/ui/components/ui/input-group"
 import { Label } from "@maple/ui/components/ui/label"
-import { Separator } from "@maple/ui/components/ui/separator"
+import { FILTER_SECTION_LABEL } from "@maple/ui/components/filters/filter-styles"
+import {
+	RangeFilterSection,
+	formatSeconds,
+	type RangeBucket,
+	type RangePreset,
+} from "@maple/ui/components/filters/range-filter-section"
 import {
 	FilterSidebarBody,
 	FilterSidebarError,
@@ -38,7 +44,88 @@ interface ReplaysFacets {
 	readonly countries: ReadonlyArray<ReplaysFacetItem>
 	readonly devices: ReadonlyArray<ReplaysFacetItem>
 	readonly errorCount: number
+	/** Session-length distribution: `name` is the bucket floor in ms. */
+	readonly durationBuckets: ReadonlyArray<ReplaysFacetItem>
+	readonly durationP50: number
+	readonly durationP95: number
 }
+
+/** Share of sessions the axis must cover before the rest is folded into a single
+ *  overflow bar. Real data has abandoned tabs measured in days; on a log axis one
+ *  of those stretches the range past 500h and squashes every genuine session into
+ *  the first few pixels. */
+const AXIS_COVERAGE = 0.99
+
+// The warehouse buckets session length into half-octaves from 1s and returns only
+// the non-empty ones (see sessionReplaysFacetsQuery). Rebuild the full run, in
+// seconds, so the histogram's axis stays continuous instead of collapsing gaps
+// into neighbouring bars.
+export function toDurationBuckets(raw: ReadonlyArray<ReplaysFacetItem>): RangeBucket[] {
+	const counts = new Map<number, number>()
+	for (const item of raw) {
+		const floorMs = Number(item.name)
+		if (!Number.isFinite(floorMs) || floorMs <= 0) continue
+		counts.set(Math.round(Math.log2(floorMs / 1000) * 2), item.count)
+	}
+	if (counts.size === 0) return []
+
+	const octaves = [...counts.keys()]
+	const buckets: RangeBucket[] = []
+	for (let k = Math.min(...octaves); k <= Math.max(...octaves); k++) {
+		const from = 2 ** (k / 2)
+		buckets.push({ from, to: from * Math.SQRT2, count: counts.get(k) ?? 0 })
+	}
+
+	// Keep the outliers visible as one unbounded bar at the right edge rather than
+	// dropping them — they're real sessions, and folding them into the last kept
+	// bucket would misreport it as a spike.
+	const total = buckets.reduce((sum, b) => sum + b.count, 0)
+	if (total === 0) return buckets
+	let covered = 0
+	for (const [index, bucket] of buckets.entries()) {
+		covered += bucket.count
+		if (covered < total * AXIS_COVERAGE) continue
+		const tail = buckets.slice(index + 1)
+		const tailCount = tail.reduce((sum, b) => sum + b.count, 0)
+		if (tailCount === 0) return buckets.slice(0, index + 1)
+		return [
+			...buckets.slice(0, index + 1),
+			{ from: tail[0]!.from, to: Number.POSITIVE_INFINITY, count: tailCount, unbounded: true },
+		]
+	}
+	return buckets
+}
+
+// "Bounced" is the one shortcut that names an intent rather than a threshold;
+// the percentiles are this audience's own vocabulary and carry their resolved
+// value. Percentiles under a second make a degenerate preset — skip them.
+function sessionLengthPresets(p50Ms: number, p95Ms: number): RangePreset[] {
+	const presets: RangePreset[] = [{ key: "bounced", label: "Bounced", value: "<10s", max: 10 }]
+	for (const [key, label, ms] of [
+		["p50", "> p50", p50Ms],
+		["p95", "> p95", p95Ms],
+	] as const) {
+		const seconds = roundThreshold(ms / 1000)
+		if (seconds >= 1) presets.push({ key, label, value: formatSeconds(seconds), min: seconds })
+	}
+	return presets
+}
+
+/** A percentile lands on values like 2647s, which reads as "44m 7s" — precision
+ *  no one asked for on a shortcut. Round to the nearest minute above a minute;
+ *  the seconds it drops can't change which sessions you care about. */
+function roundThreshold(seconds: number): number {
+	if (seconds < 60) return Math.round(seconds)
+	return Math.round(seconds / 60) * 60
+}
+
+// Active time has no distribution behind it — computing one means scanning
+// session_events for every session in the window, which the list path is built
+// to avoid. Static thresholds, named for what they mean.
+const ACTIVE_TIME_PRESETS: RangePreset[] = [
+	{ key: "idle", label: "Idle", value: "<5s", max: 5 },
+	{ key: "engaged", label: "Engaged", value: ">30s", min: 30 },
+]
 
 // The facet branches exclude their own dimension server-side, so a selected
 // value can vanish from its own option list. Re-inject it (count 0) so it stays
@@ -131,8 +218,6 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 					<FilterSidebarBody>
 						<UserIdFilter value={search.userId} onApply={setUserId} />
 
-						<Separator className="my-2" />
-
 						<SingleCheckboxFilter
 							title="Has errors"
 							checked={search.hasErrors === true}
@@ -140,75 +225,55 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 							count={facets.errorCount}
 						/>
 
-						<Separator className="my-2" />
-
-						<RangeFilter
-							title="Session time"
-							hint="Total length, in seconds"
-							min={search.durationMin}
-							max={search.durationMax}
-							onApply={setDurationRange}
+						<RangeFilterSection
+							title="Session length"
+							unit="s"
+							minValue={search.durationMin}
+							maxValue={search.durationMax}
+							onRangeChange={setDurationRange}
+							histogram={toDurationBuckets(facets.durationBuckets)}
+							presets={sessionLengthPresets(facets.durationP50, facets.durationP95)}
 						/>
 
-						<Separator className="my-2" />
-
-						<RangeFilter
+						<RangeFilterSection
 							title="Active time"
-							hint="Engaged (non-idle) time, in seconds"
-							min={search.activeMin}
-							max={search.activeMax}
-							onApply={setActiveRange}
+							hint="Excludes idle gaps"
+							unit="s"
+							minValue={search.activeMin}
+							maxValue={search.activeMax}
+							onRangeChange={setActiveRange}
+							presets={ACTIVE_TIME_PRESETS}
 						/>
 
-						{services.length > 0 && (
-							<>
-								<Separator className="my-2" />
-								<SearchableFilterSection
-									title="Service"
-									options={services}
-									selected={search.service ? [search.service] : []}
-									onChange={(vals) => setSingle("service", vals)}
-								/>
-							</>
-						)}
+						<SearchableFilterSection
+							title="Service"
+							options={services}
+							selected={search.service ? [search.service] : []}
+							onChange={(vals) => setSingle("service", vals)}
+						/>
 
-						{browsers.length > 0 && (
-							<>
-								<Separator className="my-2" />
-								<SearchableFilterSection
-									title="Browser"
-									options={browsers}
-									selected={search.browser ? [search.browser] : []}
-									onChange={(vals) => setSingle("browser", vals)}
-									getOptionIcon={browserIconFor}
-								/>
-							</>
-						)}
+						<SearchableFilterSection
+							title="Browser"
+							options={browsers}
+							selected={search.browser ? [search.browser] : []}
+							onChange={(vals) => setSingle("browser", vals)}
+							getOptionIcon={browserIconFor}
+						/>
 
-						{devices.length > 0 && (
-							<>
-								<Separator className="my-2" />
-								<FilterSection
-									title="Device"
-									options={devices}
-									selected={search.deviceType ? [search.deviceType] : []}
-									onChange={(vals) => setSingle("deviceType", vals)}
-									getOptionIcon={deviceIconFor}
-								/>
-							</>
-						)}
+						<FilterSection
+							title="Device"
+							options={devices}
+							selected={search.deviceType ? [search.deviceType] : []}
+							onChange={(vals) => setSingle("deviceType", vals)}
+							getOptionIcon={deviceIconFor}
+						/>
 
-						{countries.length > 0 && (
-							<>
-								<Separator className="my-2" />
-								<SearchableFilterSection
-									title="Country"
-									options={countries}
-									selected={search.country ? [search.country] : []}
-									onChange={(vals) => setSingle("country", vals)}
-								/>
-							</>
-						)}
+						<SearchableFilterSection
+							title="Country"
+							options={countries}
+							selected={search.country ? [search.country] : []}
+							onChange={(vals) => setSingle("country", vals)}
+						/>
 
 						{!hasFacets && (
 							<p className="py-4 text-sm text-muted-foreground">
@@ -254,7 +319,7 @@ function UserIdFilter({ value, onApply }: UserIdFilterProps) {
 		>
 			<Label
 				htmlFor="replays-user-filter"
-				className="mb-2 block text-sm font-medium text-muted-foreground"
+				className={`mb-2 block ${FILTER_SECTION_LABEL} text-muted-foreground`}
 			>
 				User
 			</Label>
@@ -277,80 +342,6 @@ function UserIdFilter({ value, onApply }: UserIdFilterProps) {
 					</InputGroupAddon>
 				)}
 			</InputGroup>
-		</form>
-	)
-}
-
-// A min/max numeric range (seconds). Like UserIdFilter, it commits on submit (so
-// partial typing doesn't refetch per keystroke) and syncs back when the applied
-// value changes elsewhere (Clear all). Blank bound = unbounded on that side.
-interface RangeFilterProps {
-	title: string
-	hint: string
-	min: number | undefined
-	max: number | undefined
-	onApply: (min: number | undefined, max: number | undefined) => void
-}
-
-function RangeFilter({ title, hint, min, max, onApply }: RangeFilterProps) {
-	const [minText, setMinText] = useState(min != null ? String(min) : "")
-	const [maxText, setMaxText] = useState(max != null ? String(max) : "")
-
-	useEffect(() => {
-		setMinText(min != null ? String(min) : "")
-	}, [min])
-	useEffect(() => {
-		setMaxText(max != null ? String(max) : "")
-	}, [max])
-
-	// Parse a non-negative number, or undefined for blank/invalid (= unbounded).
-	const parse = (raw: string): number | undefined => {
-		const trimmed = raw.trim()
-		if (trimmed === "") return undefined
-		const n = Number(trimmed)
-		return Number.isFinite(n) && n >= 0 ? n : undefined
-	}
-
-	return (
-		<form
-			className="py-2"
-			onSubmit={(e) => {
-				e.preventDefault()
-				onApply(parse(minText), parse(maxText))
-			}}
-		>
-			<Label className="mb-1 block text-sm font-medium text-muted-foreground">{title}</Label>
-			<p className="mb-2 text-xs text-muted-foreground/70">{hint}</p>
-			<div className="flex items-center gap-2">
-				<InputGroup>
-					<InputGroupInput
-						size="sm"
-						inputMode="numeric"
-						value={minText}
-						onChange={(e) => setMinText(e.target.value)}
-						placeholder="Min"
-						aria-label={`${title} minimum (seconds)`}
-					/>
-					<InputGroupAddon align="inline-end">s</InputGroupAddon>
-				</InputGroup>
-				<span className="text-muted-foreground">–</span>
-				<InputGroup>
-					<InputGroupInput
-						size="sm"
-						inputMode="numeric"
-						value={maxText}
-						onChange={(e) => setMaxText(e.target.value)}
-						placeholder="Max"
-						aria-label={`${title} maximum (seconds)`}
-					/>
-					<InputGroupAddon align="inline-end">s</InputGroupAddon>
-				</InputGroup>
-			</div>
-			{/* Submit is keyboard-driven (Enter); a hidden submit keeps the form
-			    submittable without a visible button cluttering the sidebar. */}
-			<button type="submit" className="sr-only">
-				Apply {title}
-			</button>
 		</form>
 	)
 }

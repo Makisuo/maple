@@ -47,12 +47,10 @@ export const causeHasWarehouseConfigClassError = <E>(cause: Cause.Cause<E>): boo
 
 /** Best-effort check — a cache failure never blocks the tick, it just disables the skip. */
 export const isOrgWarehouseQuarantined = (edgeCache: EdgeCache, orgId: string) =>
-	edgeCache
-		.rawGet<number>(QUARANTINE_BUCKET, orgId)
-		.pipe(
-			Effect.map(Option.isSome),
-			Effect.orElseSucceed(() => false),
-		)
+	edgeCache.rawGet<number>(QUARANTINE_BUCKET, orgId).pipe(
+		Effect.map(Option.isSome),
+		Effect.orElseSucceed(() => false),
+	)
 
 /** Park the org for `QUARANTINE_TTL_S`. Best-effort; failures are ignored. */
 export const quarantineOrgWarehouse = (edgeCache: EdgeCache, orgId: string, nowMs: number) =>

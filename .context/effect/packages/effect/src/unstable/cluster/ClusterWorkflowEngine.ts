@@ -133,6 +133,7 @@ export const make = Effect.gen(function*() {
       if (!entity) {
         return yield* Effect.die(`Workflow ${workflowName} not registered`)
       }
+      yield* RcMap.invalidate(clientsPartial, workflowName)
       return yield* entity.client
     }),
     idleTimeToLive: "5 minutes"
@@ -625,9 +626,10 @@ export const make = Effect.gen(function*() {
   return engine
 })
 
-const retryPolicy = Schedule.exponential(200, 1.5).pipe(
-  Schedule.either(Schedule.spaced("1 minute"))
-)
+const retryPolicy = Schedule.min([
+  Schedule.exponential(200, 1.5),
+  Schedule.spaced("1 minute")
+])
 
 const ensureSuccess = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(

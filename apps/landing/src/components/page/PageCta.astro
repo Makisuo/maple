@@ -1,0 +1,48 @@
+---
+/**
+ * PageCta — the closing amber band, and the page's one amber event.
+ *
+ * Same construction as the homepage's FinalCta. `position: relative` on the
+ * section is mandatory: `.drenched-amber::before` is an absolutely positioned
+ * scan-grain layer with `mix-blend-mode: multiply`, and without a positioned
+ * ancestor it escapes to the viewport and tints the whole document.
+ *
+ * The old BottomCTA carried the banned 60px line grid, `font-bold` and
+ * `max-w-6xl`; it stays in the tree for the pages still using it.
+ */
+import * as m from "../../paraglide/messages";
+
+interface Props {
+	title: string;
+	lede: string;
+}
+
+const { title, lede } = Astro.props;
+---
+
+<section class="relative overflow-hidden drenched-amber">
+	<div class="relative shell py-24 text-center md:py-32">
+		<h2
+			class="mx-auto max-w-[24ch] font-display text-4xl font-medium leading-[1.04] tracking-[-0.02em] sm:text-5xl"
+		>
+			{title}
+		</h2>
+		<p class="mx-auto mt-5 max-w-[52ch] text-base leading-relaxed opacity-85">{lede}</p>
+		<div class="mt-10 flex flex-wrap items-center justify-center gap-3">
+			<a
+				href="https://app.maple.dev"
+				class="inline-flex h-11 items-center justify-center rounded-lg bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
+			>
+				{m.cta_bookend_primary()}
+			</a>
+			<a
+				href="https://github.com/Makisuo/maple"
+				target="_blank"
+				rel="noopener noreferrer"
+				class="inline-flex h-11 items-center justify-center rounded-lg border border-current/40 px-5 text-sm font-medium transition-colors hover:bg-current/10"
+			>
+				{m.cta_github()}
+			</a>
+		</div>
+	</div>
+</section>

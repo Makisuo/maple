@@ -1,0 +1,36 @@
+---
+/**
+ * Kubernetes · the cluster console.
+ *
+ * Moved out of the old kubernetes-monitoring page. Three things went in the
+ * move, all of them things the homepage rebuild had already removed elsewhere:
+ * the 56px hex-grid backdrop (a second page texture — the hero owns the one
+ * texture a page gets), the `box-shadow: 0 0 160px 32px` amber glow (the system
+ * has no shadow tokens at all), and the `rounded-full` pill eyebrow.
+ *
+ * Sits on `bg-bg`: LiveK8sWorkloads is a `.live-frame`, which is itself
+ * `--bg-deep`, so a deep floor would dissolve it.
+ */
+import * as m from "../../../paraglide/messages";
+import LiveK8sWorkloads from "../../live/LiveK8sWorkloads.astro";
+---
+
+<section class="border-t border-border bg-bg">
+	<div class="shell py-16 md:py-24">
+		<div class="mb-10 max-w-2xl md:mb-14">
+			<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">
+				{m.page_k8s_console_eyebrow()}
+			</p>
+			<h2
+				class="mt-4 font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+			>
+				{m.page_k8s_console_title()}
+			</h2>
+			<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">
+				{m.page_k8s_console_lede()}
+			</p>
+		</div>
+
+		<LiveK8sWorkloads variant="console" />
+	</div>
+</section>

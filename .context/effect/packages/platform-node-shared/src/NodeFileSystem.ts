@@ -101,6 +101,21 @@ const chown = (() => {
   return (path: string, uid: number, gid: number) => nodeChown(path, uid, gid)
 })()
 
+// == glob
+
+const glob = ((): FileSystem.FileSystem["glob"] => {
+  const nodeGlob = effectify(
+    NFS.glob,
+    handleErrnoException("FileSystem", "glob"),
+    handleBadArgument("glob")
+  )
+  return (pattern: string, options) =>
+    nodeGlob(pattern, {
+      cwd: options?.root,
+      exclude: options?.exclude
+    })
+})()
+
 // == link
 
 const link = (() => {
@@ -619,6 +634,7 @@ const makeFileSystem = Effect.map(Effect.serviceOption(FileSystem.WatchBackend),
     chown,
     copy,
     copyFile,
+    glob,
     link,
     makeDirectory,
     makeTempDirectory,

@@ -318,7 +318,8 @@ export const emitCreateTable = (datasource: ResourceContent, options?: EmitterOp
 
 	const innerLines = [
 		...parsed.columns.map(
-			(col, i) => `${col}${i < parsed.columns.length - 1 || parsed.indexes.length > 0 ? "," : ""}`,
+			(col, i) =>
+				`${col}${i < parsed.columns.length - 1 || parsed.indexes.length > 0 ? "," : ""}`,
 		),
 		...parsed.indexes.map(
 			(idx, i) => `${buildIndexClause(idx)}${i < parsed.indexes.length - 1 ? "," : ""}`,
@@ -371,7 +372,12 @@ export const emitCreateMaterializedView = (pipe: ResourceContent, options?: Emit
  */
 export const emitJsonPathSpec = (
 	datasource: ResourceContent,
-): ReadonlyArray<{ readonly column: string; readonly type: string; readonly jsonPath: string | null }> => {
+): ReadonlyArray<{
+	readonly column: string
+	readonly type: string
+	readonly jsonPath: string | null
+	readonly hasDefaultExpression: boolean
+}> => {
 	const parsed = parseDatasource(datasource.content)
 	const original = datasource.content.split("\n")
 
@@ -393,6 +399,7 @@ export const emitJsonPathSpec = (
 			column: name,
 			type,
 			jsonPath: colJsonPath.get(name) ?? null,
+			hasDefaultExpression: /\s+DEFAULT\s+/i.test(col),
 		}
 	})
 }

@@ -28,6 +28,7 @@ export {
 	tracesBreakdownQuery,
 	tracesListQuery,
 	tracesRootListQuery,
+	traceListQuery,
 	traceSummariesQuery,
 	slowTracesQuery,
 	spanSearchQuery,
@@ -35,10 +36,12 @@ export {
 	type TracesBreakdownOpts,
 	type TracesListOpts,
 	type TracesRootListOpts,
+	type TraceListOpts,
 	type TracesTimeseriesOutput,
 	type TracesBreakdownOutput,
 	type TracesListOutput,
 	type TracesRootListOutput,
+	type TraceListOutput,
 	type TraceSummariesOpts,
 	type TraceSummaryOutput,
 	type SlowTracesOpts,
@@ -144,13 +147,16 @@ export {
 // Queries — Services
 export {
 	serviceOverviewQuery,
+	serviceOverviewRowSchema,
 	serviceCatalogQuery,
 	serviceHealthSnapshotQuery,
 	serviceHealthSnapshotRowSchema,
 	serviceHealthBaselineQuery,
 	serviceReleasesTimelineQuery,
+	serviceReleasesTimelineRowSchema,
 	serviceEnvironmentsQuery,
 	serviceApdexTimeseriesQuery,
+	serviceApdexTimeseriesRowSchema,
 	serviceUsageQuery,
 	serviceUsageWithPreviousQuery,
 	servicesFacetsQuery,
@@ -315,8 +321,14 @@ export {
 // Queries — Alert Checks (historical rule evaluations)
 export {
 	listRuleChecksQuery,
+	alertCheckGroupTotalsQuery,
+	alertChecksSummaryQuery,
 	type ListRuleChecksOpts,
 	type ListRuleChecksOutput,
+	type AlertCheckGroupTotalsOpts,
+	type AlertCheckGroupTotalsOutput,
+	type AlertChecksSummaryOpts,
+	type AlertChecksSummaryOutput,
 } from "./queries/alert-checks"
 
 // Queries — Cloudflare integration usage (integrations-page ingest proof)
@@ -347,18 +359,25 @@ export {
 	planetscaleBranchConnectionsSQL,
 	planetscaleBranchGaugesSQL,
 	planetscaleBranchStatsRowSchema,
+	planetscaleBranchStorageRowSchema,
+	planetscaleBranchStorageSQL,
 	planetscaleConnectionsRowSchema,
 	planetscaleConnectionsSQL,
 	planetscaleDatabaseStatsRowSchema,
 	planetscaleGaugesSQL,
+	planetscaleStorageRowSchema,
+	planetscaleStorageSQL,
 	type PlanetScaleBranchConnectionsOutput,
 	type PlanetScaleBranchStatsOutput,
+	type PlanetScaleBranchStorageOutput,
 	type PlanetScaleConnectionsOutput,
 	type PlanetScaleDatabaseStatsOutput,
+	type PlanetScaleStorageOutput,
 } from "./queries/planetscale-map"
 
-// Queries — PlanetScale infrastructure page (per-database timeseries)
+// Queries — PlanetScale infrastructure page (per-database / per-branch timeseries)
 export {
+	planetscaleBranchInfraTimeseriesSQL,
 	planetscaleInfraTimeseriesRowSchema,
 	planetscaleInfraTimeseriesSQL,
 	type PlanetScaleInfraTimeseriesOutput,
@@ -422,6 +441,39 @@ export {
 	type CloudflareQueueGaugesOutput,
 	type CloudflareDurableObjectCountersOutput,
 } from "./queries/cloudflare-infra-extended"
+
+// Queries — Cloudflare zone filters (which dimensions each metric family actually carries)
+export {
+	CF_ATTR,
+	CF_FILTERABLE,
+	CF_METRIC,
+	cloudflareFilterConditions,
+	cloudflareHostAttr,
+	cloudflareIgnoredFilters,
+	cloudflareIgnoredFiltersFor,
+	type CfFilterKey,
+	type CloudflareFilterOpts,
+} from "./queries/cloudflare-infra-filters"
+
+// Queries — Cloudflare zone breakdowns (generic per-dimension totals/timeseries) + filter facets
+export {
+	CLOUDFLARE_BREAKDOWN_DIMENSIONS,
+	CLOUDFLARE_BREAKDOWN_OTHER_KEY,
+	CLOUDFLARE_BREAKDOWN_SERIES_LIMIT,
+	cloudflareBreakdownMetrics,
+	cloudflareZoneBreakdownCoverageRowSchema,
+	cloudflareZoneBreakdownCoverageSQL,
+	cloudflareZoneBreakdownTimeseriesRowSchema,
+	cloudflareZoneBreakdownTimeseriesSQL,
+	cloudflareZoneBreakdownTotalsRowSchema,
+	cloudflareZoneBreakdownTotalsSQL,
+	cloudflareZoneFacetsQuery,
+	type CloudflareBreakdownDimension,
+	type CloudflareZoneBreakdownCoverageOutput,
+	type CloudflareZoneBreakdownTimeseriesOutput,
+	type CloudflareZoneBreakdownTotalsOutput,
+	type CloudflareZoneFacetsOutput,
+} from "./queries/cloudflare-infra-breakdowns"
 
 // Queries — Internal observability (Maple's own self-instrumentation)
 export {

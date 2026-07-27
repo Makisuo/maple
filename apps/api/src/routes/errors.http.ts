@@ -256,5 +256,29 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 					return yield* errors.upsertEscalationPolicy(tenant.orgId, tenant.userId, payload)
 				}).pipe(Effect.withSpan("HttpErrors.upsertEscalationPolicy")),
 			)
+			.handle("evaluateEscalationPolicy", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+					return yield* errors.evaluateEscalationPolicy(tenant.orgId, payload)
+				}).pipe(Effect.withSpan("HttpErrors.evaluateEscalationPolicy")),
+			)
+			.handle("listIssueEscalations", ({ params }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					yield* Effect.annotateCurrentSpan({
+						orgId: tenant.orgId,
+						"maple.issue.id": params.issueId,
+					})
+					return yield* errors.listIssueEscalations(tenant.orgId, params.issueId)
+				}).pipe(Effect.withSpan("HttpErrors.listIssueEscalations")),
+			)
+			.handle("listRecentEscalations", ({ query }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+					return yield* errors.listRecentEscalations(tenant.orgId, query.limit)
+				}).pipe(Effect.withSpan("HttpErrors.listRecentEscalations")),
+			)
 	}),
 )

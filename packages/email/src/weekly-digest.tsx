@@ -355,7 +355,10 @@ function TrendSparkline({
 					<tbody>
 						<tr>
 							{series.map((d, i) => {
-								const reqH = d.requests > 0 ? Math.max(2, Math.round((d.requests / maxReq) * MAX_BAR)) : 0
+								const reqH =
+									d.requests > 0
+										? Math.max(2, Math.round((d.requests / maxReq) * MAX_BAR))
+										: 0
 								let errH = d.requests > 0 ? Math.round((d.errors / d.requests) * reqH) : 0
 								if (d.errors > 0) errH = Math.max(2, errH)
 								errH = Math.min(errH, reqH)
@@ -400,7 +403,9 @@ function TrendSparkline({
 						<tr>
 							{series.map((d, i) => (
 								<td key={i} style={{ textAlign: "center", paddingTop: "6px" }}>
-									<Text className="m-0 font-mono text-[9px] text-maple-fg-dim">{d.label}</Text>
+									<Text className="m-0 font-mono text-[9px] text-maple-fg-dim">
+										{d.label}
+									</Text>
 								</td>
 							))}
 						</tr>
@@ -499,7 +504,8 @@ export function WeeklyDigest(props: WeeklyDigestProps) {
 																borderRadius: "8px",
 																textAlign: "center",
 																verticalAlign: "middle",
-																fontFamily: "system-ui, -apple-system, sans-serif",
+																fontFamily:
+																	"system-ui, -apple-system, sans-serif",
 																fontSize: "18px",
 																fontWeight: 700,
 																color: "#ffffff",
@@ -517,7 +523,8 @@ export function WeeklyDigest(props: WeeklyDigestProps) {
 												{truncate(orgName, 32)}
 											</Text>
 											<Text className="m-0 mt-0.5 font-mono text-xs text-maple-fg-muted">
-												Weekly digest &middot; {dateRange.start} &ndash; {dateRange.end}
+												Weekly digest &middot; {dateRange.start} &ndash;{" "}
+												{dateRange.end}
 											</Text>
 										</td>
 									</tr>
@@ -602,7 +609,9 @@ export function WeeklyDigest(props: WeeklyDigestProps) {
 										<tbody>
 											{services.map((service, idx) => {
 												const border =
-													idx < services.length - 1 ? "border-b border-maple-border-subtle" : ""
+													idx < services.length - 1
+														? "border-b border-maple-border-subtle"
+														: ""
 												return (
 													<tr key={service.name}>
 														<td className={`px-3 py-2.5 ${border}`}>
@@ -612,7 +621,9 @@ export function WeeklyDigest(props: WeeklyDigestProps) {
 															>
 																<span
 																	style={{
-																		color: statusDotColor(service.errorRate),
+																		color: statusDotColor(
+																			service.errorRate,
+																		),
 																		fontSize: "9px",
 																		marginRight: "6px",
 																	}}
@@ -622,7 +633,9 @@ export function WeeklyDigest(props: WeeklyDigestProps) {
 																{truncate(service.name, 24)}
 															</Link>
 														</td>
-														<td className={`px-3 py-2.5 text-right align-middle ${border}`}>
+														<td
+															className={`px-3 py-2.5 text-right align-middle ${border}`}
+														>
 															<Text className="m-0 font-mono text-[13px] text-maple-fg-muted">
 																{fmtNum(service.requests)}
 															</Text>
@@ -632,9 +645,12 @@ export function WeeklyDigest(props: WeeklyDigestProps) {
 																		className="m-0 font-mono text-[10px] leading-tight"
 																		style={{
 																			color:
-																				Math.abs(service.requestsDelta) < 0.05
+																				Math.abs(
+																					service.requestsDelta,
+																				) < 0.05
 																					? C.fgDim
-																					: service.requestsDelta > 0
+																					: service.requestsDelta >
+																						  0
 																						? C.green
 																						: C.red,
 																		}}
@@ -644,14 +660,18 @@ export function WeeklyDigest(props: WeeklyDigestProps) {
 																	</Text>
 																)}
 														</td>
-														<td className={`px-3 py-2.5 text-right align-middle ${border}`}>
+														<td
+															className={`px-3 py-2.5 text-right align-middle ${border}`}
+														>
 															<Text
 																className={`m-0 font-mono text-[13px] ${errRateColor(service.errorRate)}`}
 															>
 																{fmtErrRate(service.errorRate)}
 															</Text>
 														</td>
-														<td className={`px-3 py-2.5 text-right align-middle ${border}`}>
+														<td
+															className={`px-3 py-2.5 text-right align-middle ${border}`}
+														>
 															<Text className="m-0 font-mono text-[13px] text-maple-fg-muted">
 																{fmtLatency(service.p95Ms)}
 															</Text>
@@ -707,7 +727,8 @@ export function WeeklyDigest(props: WeeklyDigestProps) {
 																	<span
 																		style={{
 																			display: "inline-block",
-																			backgroundColor: "rgba(232,93,74,0.16)",
+																			backgroundColor:
+																				"rgba(232,93,74,0.16)",
 																			color: C.red,
 																			borderRadius: "4px",
 																			padding: "1px 5px",
@@ -723,12 +744,16 @@ export function WeeklyDigest(props: WeeklyDigestProps) {
 																)}
 																{truncate(error.message, 64)}
 															</Text>
-															{error.affectedServices != null && error.affectedServices > 0 && (
-																<Text className="m-0 mt-0.5 font-mono text-[10px] leading-tight text-maple-fg-dim">
-																	{error.affectedServices} service
-																	{error.affectedServices === 1 ? "" : "s"} affected
-																</Text>
-															)}
+															{error.affectedServices != null &&
+																error.affectedServices > 0 && (
+																	<Text className="m-0 mt-0.5 font-mono text-[10px] leading-tight text-maple-fg-dim">
+																		{error.affectedServices} service
+																		{error.affectedServices === 1
+																			? ""
+																			: "s"}{" "}
+																		affected
+																	</Text>
+																)}
 														</td>
 														<td className="w-[56px] text-right align-top">
 															<Text className="m-0 font-mono text-[13px] font-medium text-maple-red">
@@ -757,7 +782,11 @@ export function WeeklyDigest(props: WeeklyDigestProps) {
 												["Logs", fmtNum(ingestion.logs), null],
 												["Traces", fmtNum(ingestion.traces), null],
 												["Metrics", fmtNum(ingestion.metrics), null],
-												["Total", fmtBytes(ingestion.totalBytes), summary.dataVolume.delta],
+												[
+													"Total",
+													fmtBytes(ingestion.totalBytes),
+													summary.dataVolume.delta,
+												],
 											] as const
 										).map(([label, val, delta]) => (
 											<td key={label} className="w-1/4 p-1">

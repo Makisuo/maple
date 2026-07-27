@@ -1,6 +1,6 @@
-import type * as Effect from "effect/Effect";
+import type * as Effect from "effect/Effect"
 
-const TypeId = Symbol.for("@maple/unitflow/reducer/Command");
+const TypeId = Symbol.for("@maple/unitflow/reducer/Command")
 
 /**
  * A declarative one-shot side effect returned from a reducer's `update`: an
@@ -16,20 +16,20 @@ const TypeId = Symbol.for("@maple/unitflow/reducer/Command");
  * `Effect.match`/`Effect.catch*` before wrapping it as a command.
  */
 export interface Command<out Msg, out R = never> {
-  readonly [TypeId]: typeof TypeId;
-  /** A label for the Story harness and devtools timeline — not an identity key. */
-  readonly name: string;
-  readonly execute: Effect.Effect<Msg, never, R>;
+	readonly [TypeId]: typeof TypeId
+	/** A label for the Story harness and devtools timeline — not an identity key. */
+	readonly name: string
+	readonly execute: Effect.Effect<Msg, never, R>
 }
 
 export const isCommand = (value: unknown): value is Command<unknown, unknown> =>
-  typeof value === "object" && value !== null && TypeId in value;
+	typeof value === "object" && value !== null && TypeId in value
 
 /** Wrap an effect that already produces the follow-up message. */
 export const make = <Msg, R = never>(
-  name: string,
-  execute: Effect.Effect<Msg, never, R>,
-): Command<Msg, R> => ({ [TypeId]: TypeId, name, execute });
+	name: string,
+	execute: Effect.Effect<Msg, never, R>,
+): Command<Msg, R> => ({ [TypeId]: TypeId, name, execute })
 
 /**
  * A reusable command constructor from a payload — foldkit's
@@ -37,9 +37,9 @@ export const make = <Msg, R = never>(
  * function builds a named command for each payload.
  */
 export const define =
-  <P, Msg, R = never>(name: string, run: (payload: P) => Effect.Effect<Msg, never, R>) =>
-  (payload: P): Command<Msg, R> =>
-    make(name, run(payload));
+	<P, Msg, R = never>(name: string, run: (payload: P) => Effect.Effect<Msg, never, R>) =>
+	(payload: P): Command<Msg, R> =>
+		make(name, run(payload))
 
 /** The empty command list — the common `update` return for a pure transition. */
-export const none: ReadonlyArray<Command<never>> = [];
+export const none: ReadonlyArray<Command<never>> = []

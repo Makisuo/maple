@@ -23,8 +23,21 @@ export interface SessionMetaRowInput {
 	readonly serviceVersion?: string | undefined
 	/** Only meaningful on `ended` rows; defaults to 0. */
 	readonly clickCount?: number | undefined
+	/** Navigations observed. Only meaningful on `ended` rows; defaults to 0. */
+	readonly pageViews?: number | undefined
+	/**
+	 * Errors observed. Only meaningful on `ended` rows; defaults to 0. Drives the
+	 * Sessions UI "has errors" filter, which tests `ErrorCount > 0`.
+	 */
+	readonly errorCount?: number | undefined
 	/** Trace ids observed during the session — attached to `ended` rows. */
 	readonly traceIds?: ReadonlyArray<string> | undefined
+	/**
+	 * Whether an rrweb recording accompanies this session. `false` when replay is
+	 * off or unsampled, so the UI can label the session "Not recorded" instead of
+	 * rendering a player with nothing to play.
+	 */
+	readonly recorded: boolean
 }
 
 /**
@@ -51,6 +64,10 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, 
 		device_type: ua.deviceType,
 		service_name: input.serviceName,
 		resource_attributes: {
+			// Does this session have a replay to play back? Read by the Sessions UI
+			// to distinguish a metadata-only session from one still uploading chunks.
+			// `maple.*` vendor namespace, per the telemetry conventions.
+			"maple.session.recorded": input.recorded ? "true" : "false",
 			...(input.environment
 				? {
 						// Dual-emit: legacy key (pre-extracted by Tinybird MVs) + canonical.
@@ -65,6 +82,8 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, 
 		row.end_time = formatCHDateTime(now)
 		row.duration_ms = Math.max(0, now.getTime() - input.startedAt.getTime())
 		row.click_count = input.clickCount ?? 0
+		row.page_views = input.pageViews ?? 0
+		row.error_count = input.errorCount ?? 0
 		row.trace_ids = input.traceIds ? Array.from(input.traceIds) : []
 	}
 	return row

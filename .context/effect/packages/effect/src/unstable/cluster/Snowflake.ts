@@ -53,8 +53,8 @@ export type Snowflake = Brand.Branded<bigint, TypeId>
  * @category constructors
  * @since 4.0.0
  */
-export const Snowflake = (input: string | bigint): Snowflake =>
-  typeof input === "string" ? BigInt(input) as Snowflake : input as Snowflake
+export const Snowflake = (input: string | number | bigint): Snowflake =>
+  typeof input === "bigint" ? input as Snowflake : BigInt(input) as Snowflake
 
 /**
  * Namespace containing support types for snowflake parts and generators.

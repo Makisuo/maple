@@ -35,9 +35,7 @@ export function PlanetScaleMetricsHealth({
 					: "healthy"
 
 	const updatedAgo =
-		target.lastScrapeAt !== null
-			? formatRelativeTime(new Date(target.lastScrapeAt).toISOString())
-			: null
+		target.lastScrapeAt !== null ? formatRelativeTime(new Date(target.lastScrapeAt).toISOString()) : null
 
 	return (
 		<div className="border-t border-border/60 p-4">

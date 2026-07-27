@@ -7,7 +7,7 @@ function assertUnsupportedSchema(schema: Schema.Constraint, message: string) {
   throws(() => Schema.toArbitrary(schema), message)
 }
 
-function verifyGeneration<S extends Schema.Codec<unknown, unknown, never, unknown>>(schema: S, numRuns?: number) {
+function verifyGeneration<S extends Schema.ConstraintCodec<unknown, unknown>>(schema: S, numRuns?: number) {
   const asserts = new TestSchema.Asserts(schema)
   if (numRuns === undefined) {
     asserts.arbitrary().verifyGeneration()

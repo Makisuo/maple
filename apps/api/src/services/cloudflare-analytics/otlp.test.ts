@@ -11,7 +11,11 @@ const baseGauge = (over: Partial<MetricGaugeRow>): MetricGaugeRow => ({
 	metric_attributes: { quantile: "0.95" },
 	service_name: "cloudflare/example.com",
 	resource_schema_url: "",
-	resource_attributes: { "service.name": "cloudflare/example.com", maple_org_id: "org_cf", "cloud.provider": "cloudflare" },
+	resource_attributes: {
+		"service.name": "cloudflare/example.com",
+		maple_org_id: "org_cf",
+		"cloud.provider": "cloudflare",
+	},
 	scope_schema_url: "",
 	scope_name: "@maple/cloudflare-analytics",
 	scope_version: "",
@@ -79,7 +83,10 @@ describe("metricRowsToOtlp", () => {
 	})
 
 	it("converts the DateTime64 literal to a unix-nanosecond string", () => {
-		const payload = metricRowsToOtlp([], [baseGauge({ timestamp: "2026-07-02 11:35:00.000", start_timestamp: "2026-07-02 11:30:00.000" })])
+		const payload = metricRowsToOtlp(
+			[],
+			[baseGauge({ timestamp: "2026-07-02 11:35:00.000", start_timestamp: "2026-07-02 11:30:00.000" })],
+		)
 		const dp = payload.resourceMetrics[0]!.scopeMetrics[0]!.metrics[0]!.gauge!.dataPoints[0]!
 		assert.strictEqual(dp.timeUnixNano, `${Date.parse("2026-07-02T11:35:00.000Z")}000000`)
 		assert.strictEqual(dp.startTimeUnixNano, `${Date.parse("2026-07-02T11:30:00.000Z")}000000`)
@@ -93,7 +100,10 @@ describe("metricRowsToOtlp", () => {
 				// A different service → its own resource.
 				baseSum({
 					service_name: "cloudflare-worker/my-worker",
-					resource_attributes: { "service.name": "cloudflare-worker/my-worker", "cloud.provider": "cloudflare" },
+					resource_attributes: {
+						"service.name": "cloudflare-worker/my-worker",
+						"cloud.provider": "cloudflare",
+					},
 					metric_name: "cloudflare.worker.requests",
 					value: 42,
 				}),

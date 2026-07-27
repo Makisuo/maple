@@ -69,7 +69,12 @@ describe("org quarantine", () => {
 			assert.isFalse(transient)
 			assert.isFalse(yield* isOrgWarehouseQuarantined(edgeCache, "org_a"))
 
-			const config = yield* quarantineOnConfigClassCause(edgeCache, "org_a", Cause.fail(authError), 1_000)
+			const config = yield* quarantineOnConfigClassCause(
+				edgeCache,
+				"org_a",
+				Cause.fail(authError),
+				1_000,
+			)
 			assert.isTrue(config)
 			assert.isTrue(yield* isOrgWarehouseQuarantined(edgeCache, "org_a"))
 		}),

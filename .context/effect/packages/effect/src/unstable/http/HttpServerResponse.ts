@@ -313,8 +313,8 @@ export const json = (
  * @category constructors
  * @since 4.0.0
  */
-export const schemaJson = <A, I, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaJson = <A, RE>(
+  schema: Schema.ConstraintCodec<A, unknown, unknown, RE>,
   options?: ParseOptions | undefined
 ) => {
   const encode = Body.jsonSchema(schema, options)

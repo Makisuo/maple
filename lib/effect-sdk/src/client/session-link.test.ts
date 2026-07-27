@@ -113,7 +113,10 @@ describe("withSessionLink — user.id span stamping", () => {
 		const telemetry = make(baseConfig)
 
 		await Effect.runPromise(
-			Effect.succeed(undefined).pipe(Effect.withSpan("null-cleared-op"), Effect.provide(telemetry.layer)),
+			Effect.succeed(undefined).pipe(
+				Effect.withSpan("null-cleared-op"),
+				Effect.provide(telemetry.layer),
+			),
 		)
 		await telemetry.flush()
 

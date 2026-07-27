@@ -68,6 +68,7 @@ export {
 	sumIf,
 	avgIf,
 	maxIf,
+	minIf,
 	groupUniqArray,
 	argMaxMerge,
 	// String
@@ -76,9 +77,12 @@ export {
 	position_ as position,
 	left_ as left,
 	length_ as length,
+	lower_,
 	replaceOne,
 	extract_ as extract,
 	concat,
+	hasToken,
+	hasAllTokens,
 	// Numeric
 	round_,
 	intDiv,
@@ -108,6 +112,7 @@ export {
 	arrayStringConcat,
 	arrayFilter,
 	arrayJoin,
+	has,
 	// Map
 	mapContains,
 	mapGet,

@@ -59,7 +59,20 @@ export type AlertDestination = Resource<
  * })
  * ```
  */
-export const AlertDestination = Resource<AlertDestination>("Maple.AlertDestination")
+const AlertDestinationResource = Resource<AlertDestination>("Maple.AlertDestination")
+
+/**
+ * Alchemy types resource props as `InputProps<Props>` — a mapped type, which
+ * collapses a discriminated union to the keys its members share. That erases
+ * every channel-specific field (`webhook_url`, `integration_key`, `url`,
+ * `member_user_ids`), making the resource uncallable. Restore the union on the
+ * call signature; props are forwarded untouched, and `alertDestinationProps`
+ * keeps the round-trip honest in the type test.
+ */
+type AlertDestinationConstructor = Omit<typeof AlertDestinationResource, never> &
+	((id: string, props: AlertDestinationProps) => Effect.Effect<AlertDestination, never, Providers>)
+
+export const AlertDestination = AlertDestinationResource as AlertDestinationConstructor
 
 const WireDestination = Schema.Struct({
 	id: Schema.String,
@@ -106,7 +119,10 @@ const desiredBody = (props: AlertDestinationProps): Record<string, unknown> => {
  * Observable drift only — secrets are write-only, so the server can never
  * disagree with them; they change via prop changes (caught in `diff`).
  */
-const drifted = (props: AlertDestinationProps, observed: Schema.Schema.Type<typeof WireDestination>): boolean =>
+const drifted = (
+	props: AlertDestinationProps,
+	observed: Schema.Schema.Type<typeof WireDestination>,
+): boolean =>
 	props.name !== observed.name ||
 	(props.enabled ?? true) !== observed.enabled ||
 	(props.type === "slack" &&
@@ -130,7 +146,10 @@ export const AlertDestinationProvider = () =>
 				diff: Effect.fn(function* ({ news, olds, output }) {
 					if (!isResolved(news)) return undefined
 					// `type` is immutable server-side — changing it replaces the destination.
-					if ((output?.type ?? olds?.type) !== undefined && news.type !== (output?.type ?? olds?.type)) {
+					if (
+						(output?.type ?? olds?.type) !== undefined &&
+						news.type !== (output?.type ?? olds?.type)
+					) {
 						return { action: "replace" } as const
 					}
 					if (olds !== undefined && !deepEqual(olds, news, { stripNullish: true })) {

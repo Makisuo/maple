@@ -40,33 +40,31 @@ interface ResolvedCloudflareOAuthConfig {
 	readonly scopes: string
 }
 
-const resolveConfig = Effect.fn("CloudflareOAuthService.resolveConfig")(
-	function* (env: EnvShape) {
-		// Only the client id is mandatory. Cloudflare public clients (any-user SaaS) authenticate the
-		// token exchange with PKCE alone and carry no secret; confidential clients add one via env.
-		const clientId = yield* Option.match(env.CLOUDFLARE_OAUTH_CLIENT_ID, {
-			onNone: () =>
-				Effect.fail(
-					new IntegrationsValidationError({
-						message: "CLOUDFLARE_OAUTH_CLIENT_ID is required to use the Cloudflare integration",
-					}),
-				),
-			onSome: (value) => Effect.succeed(value),
-		})
+const resolveConfig = Effect.fn("CloudflareOAuthService.resolveConfig")(function* (env: EnvShape) {
+	// Only the client id is mandatory. Cloudflare public clients (any-user SaaS) authenticate the
+	// token exchange with PKCE alone and carry no secret; confidential clients add one via env.
+	const clientId = yield* Option.match(env.CLOUDFLARE_OAUTH_CLIENT_ID, {
+		onNone: () =>
+			Effect.fail(
+				new IntegrationsValidationError({
+					message: "CLOUDFLARE_OAUTH_CLIENT_ID is required to use the Cloudflare integration",
+				}),
+			),
+		onSome: (value) => Effect.succeed(value),
+	})
 
-		return {
-			clientId,
-			clientSecret: Option.match(env.CLOUDFLARE_OAUTH_CLIENT_SECRET, {
-				onNone: () => null,
-				onSome: (value) => value,
-			}),
-			authorizeUrl: env.CLOUDFLARE_OAUTH_AUTHORIZE_URL,
-			tokenUrl: env.CLOUDFLARE_OAUTH_TOKEN_URL,
-			revokeUrl: env.CLOUDFLARE_OAUTH_REVOKE_URL,
-			scopes: env.CLOUDFLARE_OAUTH_SCOPES,
-		}
-	},
-)
+	return {
+		clientId,
+		clientSecret: Option.match(env.CLOUDFLARE_OAUTH_CLIENT_SECRET, {
+			onNone: () => null,
+			onSome: (value) => value,
+		}),
+		authorizeUrl: env.CLOUDFLARE_OAUTH_AUTHORIZE_URL,
+		tokenUrl: env.CLOUDFLARE_OAUTH_TOKEN_URL,
+		revokeUrl: env.CLOUDFLARE_OAUTH_REVOKE_URL,
+		scopes: env.CLOUDFLARE_OAUTH_SCOPES,
+	}
+})
 
 interface CloudflareAccessToken {
 	readonly accessToken: string
@@ -208,12 +206,9 @@ export class CloudflareOAuthService extends Context.Service<
 				)
 			}
 
-			const tokenResponse = yield* oauth.exchangeAuthorizationCode(
-				config,
-				code,
-				stateRow.redirectUri,
-				{ code_verifier: stateRow.codeVerifier },
-			)
+			const tokenResponse = yield* oauth.exchangeAuthorizationCode(config, code, stateRow.redirectUri, {
+				code_verifier: stateRow.codeVerifier,
+			})
 
 			// Resolve — and require exactly one — Cloudflare account. A token that spans multiple
 			// accounts is ambiguous for org→account scoping, so we refuse it (Superlog's rule).

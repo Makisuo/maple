@@ -1,137 +1,288 @@
+import { useMemo } from "react"
+
 import { Badge } from "@maple/ui/components/ui/badge"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
-import type { PlanetScaleBranchStat } from "@/api/warehouse/service-map"
 import { formatNumber } from "@/lib/format"
-import { ColumnHead, TableShell, useTableSort } from "../primitives/data-table"
-import { formatLag, lagClass, utilizationClass } from "./planetscale-database-table"
+import {
+	ColumnHead,
+	MetaChip,
+	ROW_BUTTON_CLASS,
+	TableShell,
+	TableSkeleton,
+	useTableSort,
+} from "../primitives/data-table"
+import type { BranchCandidate } from "./branch-selection"
+import {
+	MISSING,
+	formatLag,
+	formatStoragePercent,
+	lagClass,
+	utilizationClass,
+} from "./metrics"
 
-type SortKey = "branch" | "connectionsAvg" | "cpuMaxPercent" | "memMaxPercent" | "replicaLagMaxSeconds"
+type SortKey =
+	| "branch"
+	| "connectionsAvg"
+	| "connectionsMax"
+	| "cpuMaxPercent"
+	| "memMaxPercent"
+	| "storageUsedPercent"
+	| "replicaLagMaxSeconds"
+
+interface BranchRow {
+	branch: string
+	production: boolean
+	ready: boolean
+	excluded: boolean
+	unknownToInventory: boolean
+	hasStats: boolean
+	connectionsAvg: number
+	connectionsMax: number
+	cpuMaxPercent: number
+	memMaxPercent: number
+	storageUsedPercent: number
+	replicaLagMaxSeconds: number
+}
+
+const headerCells = (sort?: {
+	sortKey: SortKey
+	sortDir: "asc" | "desc"
+	handleSort: (k: SortKey) => void
+}) => (
+	<>
+		<ColumnHead<SortKey>
+			label="Branch"
+			sortKey={sort ? "branch" : undefined}
+			currentKey={sort?.sortKey}
+			dir={sort?.sortDir}
+			onSort={sort?.handleSort}
+			width="flex-1 min-w-[200px]"
+		/>
+		<ColumnHead<SortKey>
+			label="Connections"
+			sortKey={sort ? "connectionsAvg" : undefined}
+			currentKey={sort?.sortKey}
+			dir={sort?.sortDir}
+			onSort={sort?.handleSort}
+			align="right"
+			width="w-[96px]"
+		/>
+		<ColumnHead<SortKey>
+			label="Peak"
+			sortKey={sort ? "connectionsMax" : undefined}
+			currentKey={sort?.sortKey}
+			dir={sort?.sortDir}
+			onSort={sort?.handleSort}
+			align="right"
+			width="w-[72px]"
+			hidden="hidden lg:flex"
+		/>
+		<ColumnHead<SortKey>
+			label="CPU (max)"
+			sortKey={sort ? "cpuMaxPercent" : undefined}
+			currentKey={sort?.sortKey}
+			dir={sort?.sortDir}
+			onSort={sort?.handleSort}
+			align="right"
+			width="w-[88px]"
+		/>
+		<ColumnHead<SortKey>
+			label="Memory (max)"
+			sortKey={sort ? "memMaxPercent" : undefined}
+			currentKey={sort?.sortKey}
+			dir={sort?.sortDir}
+			onSort={sort?.handleSort}
+			align="right"
+			width="w-[104px]"
+			hidden="hidden md:flex"
+		/>
+		<ColumnHead<SortKey>
+			label="Storage"
+			sortKey={sort ? "storageUsedPercent" : undefined}
+			currentKey={sort?.sortKey}
+			dir={sort?.sortDir}
+			onSort={sort?.handleSort}
+			align="right"
+			width="w-[80px]"
+		/>
+		<ColumnHead<SortKey>
+			label="Replica lag"
+			sortKey={sort ? "replicaLagMaxSeconds" : undefined}
+			currentKey={sort?.sortKey}
+			dir={sort?.sortDir}
+			onSort={sort?.handleSort}
+			align="right"
+			width="w-[88px]"
+		/>
+	</>
+)
+
+export function PlanetScaleBranchTableLoading() {
+	return (
+		<TableSkeleton
+			rows={3}
+			header={headerCells()}
+			renderRowCells={() => (
+				<>
+					<div className="min-w-[200px] flex-1">
+						<Skeleton className="h-4 w-40" />
+					</div>
+					<Skeleton className="h-3 w-[96px]" />
+					<Skeleton className="hidden h-3 w-[72px] lg:block" />
+					<Skeleton className="h-3 w-[88px]" />
+					<Skeleton className="hidden h-3 w-[104px] md:block" />
+					<Skeleton className="h-3 w-[80px]" />
+					<Skeleton className="h-3 w-[88px]" />
+				</>
+			)}
+		/>
+	)
+}
 
 /**
- * Per-branch health for one database. Branch flags (production/ready) come from
- * the polled inventory; the metric columns from the window's rollups.
+ * Per-branch health for one database. Rows come from the inventory UNION the
+ * rollups, so a branch excluded from scraping or asleep still appears with
+ * dashes and a reason — dropping it would leave no way to tell "no such branch"
+ * from "no data for that branch".
+ *
+ * Rows select rather than navigate: picking one re-scopes the charts and query
+ * insights above, which is the only thing a branch drill-in could show anyway.
  */
 export function PlanetScaleBranchTable({
-	branches,
-	branchInfoByName,
+	candidates,
+	selectedBranch,
+	onSelectBranch,
 	waiting,
+	emptyMessage = "No branches in this database.",
 }: {
-	branches: ReadonlyArray<PlanetScaleBranchStat>
-	branchInfoByName: ReadonlyMap<string, { production: boolean; ready: boolean }>
+	candidates: ReadonlyArray<BranchCandidate>
+	selectedBranch: string | null
+	onSelectBranch: (branch: string) => void
 	waiting?: boolean
+	emptyMessage?: string
 }) {
-	const { sorted, sortKey, sortDir, handleSort } = useTableSort<PlanetScaleBranchStat, SortKey>(
-		branches,
-		{ initialKey: "connectionsAvg", stringKeys: ["branch"] },
+	const rows = useMemo<ReadonlyArray<BranchRow>>(
+		() =>
+			candidates.map((candidate) => ({
+				branch: candidate.name,
+				production: candidate.production,
+				ready: candidate.ready,
+				excluded: candidate.excluded,
+				unknownToInventory: candidate.unknownToInventory,
+				hasStats: candidate.stat !== null,
+				connectionsAvg: candidate.stat?.connectionsAvg ?? MISSING,
+				connectionsMax: candidate.stat?.connectionsMax ?? MISSING,
+				cpuMaxPercent: candidate.stat?.cpuMaxPercent ?? MISSING,
+				memMaxPercent: candidate.stat?.memMaxPercent ?? MISSING,
+				storageUsedPercent: candidate.stat?.storageUsedPercent ?? MISSING,
+				replicaLagMaxSeconds: candidate.stat?.replicaLagMaxSeconds ?? MISSING,
+			})),
+		[candidates],
 	)
+
+	const { sorted, sortKey, sortDir, handleSort } = useTableSort<BranchRow, SortKey>(rows, {
+		initialKey: "connectionsAvg",
+		stringKeys: ["branch"],
+		// Production is categorically different from an ephemeral PR branch: it
+		// stays on top no matter which column is sorted.
+		pinned: (row) => row.production,
+	})
 
 	return (
 		<TableShell
 			ariaLabel="PlanetScale branches"
 			waiting={waiting}
 			isEmpty={sorted.length === 0}
-			emptyMessage="No branch metrics in the selected window."
-			header={
-				<>
-					<ColumnHead<SortKey>
-						label="Branch"
-						sortKey="branch"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						width="flex-1 min-w-[200px]"
-					/>
-					<ColumnHead<SortKey>
-						label="Connections"
-						sortKey="connectionsAvg"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[96px]"
-					/>
-					<ColumnHead<SortKey>
-						label="CPU (max)"
-						sortKey="cpuMaxPercent"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[88px]"
-					/>
-					<ColumnHead<SortKey>
-						label="Memory (max)"
-						sortKey="memMaxPercent"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[104px]"
-						hidden="hidden md:flex"
-					/>
-					<ColumnHead<SortKey>
-						label="Replica lag"
-						sortKey="replicaLagMaxSeconds"
-						currentKey={sortKey}
-						dir={sortDir}
-						onSort={handleSort}
-						align="right"
-						width="w-[88px]"
-					/>
-				</>
-			}
+			emptyMessage={emptyMessage}
+			maxHeight={TABLE_MAX_HEIGHT}
+			header={headerCells({ sortKey, sortDir, handleSort })}
 		>
 			{sorted.map((row) => {
-				const info = branchInfoByName.get(row.branch)
+				const selected = row.branch === selectedBranch
 				return (
-					<div
+					<button
 						key={row.branch}
-						className="flex items-center gap-4 border-b border-border/40 px-4 py-3 last:border-0"
+						type="button"
+						aria-pressed={selected}
+						title={`Scope this page to ${row.branch}`}
+						onClick={() => onSelectBranch(row.branch)}
+						className={cn(ROW_BUTTON_CLASS, "relative", selected && "bg-muted/40")}
 					>
+						{selected ? (
+							<span aria-hidden className="absolute inset-y-0 left-0 w-[2px] bg-primary" />
+						) : null}
 						<div className="flex min-w-[200px] flex-1 items-center gap-2 overflow-hidden">
-							<span className="truncate font-mono text-[13px] text-foreground">{row.branch}</span>
-							{info?.production ? (
+							<span
+								className={cn(
+									"truncate font-mono text-[13px] transition-colors",
+									selected ? "text-foreground" : "text-foreground/90",
+								)}
+							>
+								{row.branch}
+							</span>
+							{row.production ? (
 								<Badge variant="outline" className="shrink-0">
 									production
 								</Badge>
 							) : null}
-							{info !== undefined && !info.ready ? (
+							{!row.ready ? (
 								<Badge variant="warning" className="shrink-0">
 									provisioning
 								</Badge>
 							) : null}
+							{row.excluded ? <MetaChip>excluded</MetaChip> : null}
+							{row.unknownToInventory ? <MetaChip>not in inventory</MetaChip> : null}
 						</div>
 						<div className="w-[96px] text-right font-mono text-[12px] tabular-nums text-foreground/80">
-							{formatNumber(row.connectionsAvg)}
+							{row.hasStats ? formatNumber(row.connectionsAvg) : "—"}
+						</div>
+						<div className="hidden w-[72px] text-right font-mono text-[12px] tabular-nums text-muted-foreground lg:block">
+							{row.hasStats ? formatNumber(row.connectionsMax) : "—"}
 						</div>
 						<div
 							className={cn(
 								"w-[88px] text-right font-mono text-[12px] tabular-nums text-foreground/80",
-								utilizationClass(row.cpuMaxPercent),
+								row.hasStats && utilizationClass(row.cpuMaxPercent),
 							)}
 						>
-							{row.cpuMaxPercent.toFixed(0)}%
+							{row.hasStats ? `${row.cpuMaxPercent.toFixed(0)}%` : "—"}
 						</div>
 						<div
 							className={cn(
 								"hidden w-[104px] text-right font-mono text-[12px] tabular-nums text-foreground/80 md:block",
-								utilizationClass(row.memMaxPercent),
+								row.hasStats && utilizationClass(row.memMaxPercent),
 							)}
 						>
-							{row.memMaxPercent.toFixed(0)}%
+							{row.hasStats ? `${row.memMaxPercent.toFixed(0)}%` : "—"}
+						</div>
+						<div
+							className={cn(
+								"w-[80px] text-right font-mono text-[12px] tabular-nums text-foreground/80",
+								row.storageUsedPercent !== MISSING &&
+									utilizationClass(row.storageUsedPercent),
+							)}
+						>
+							{row.storageUsedPercent === MISSING
+								? "—"
+								: formatStoragePercent(row.storageUsedPercent)}
 						</div>
 						<div
 							className={cn(
 								"w-[88px] text-right font-mono text-[12px] tabular-nums text-foreground/80",
-								lagClass(row.replicaLagMaxSeconds),
+								row.hasStats && lagClass(row.replicaLagMaxSeconds),
 							)}
 						>
-							{formatLag(row.replicaLagMaxSeconds)}
+							{row.hasStats ? formatLag(row.replicaLagMaxSeconds) : "—"}
 						</div>
-					</div>
+					</button>
 				)
 			})}
 		</TableShell>
 	)
 }
+
+// A PlanetScale database routinely carries one branch per open PR. Cap the list
+// so the page below it stays reachable.
+const TABLE_MAX_HEIGHT = 420

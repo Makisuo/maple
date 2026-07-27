@@ -18,8 +18,11 @@ import type {
 	DnsGroupShape,
 	DurableObjectsGroupShape,
 	FirewallGroupShape,
+	HttpClientGroupShape,
+	HttpCountryGroupShape,
 	HttpGroupShape,
 	HttpLatencyGroupShape,
+	HttpPathGroupShape,
 	QueueBacklogGroupShape,
 	QueueConsumersGroupShape,
 	WorkersGroupShape,
@@ -34,6 +37,18 @@ export const METRIC_HTTP_BYTES = "cloudflare.http.bytes"
 export const METRIC_HTTP_VISITS = "cloudflare.http.visits"
 export const METRIC_HTTP_EDGE_TTFB = "cloudflare.http.edge.ttfb"
 export const METRIC_HTTP_ORIGIN_DURATION = "cloudflare.http.origin.duration"
+/**
+ * Single-dimension breakdown families. Each carries exactly ONE dimension (plus, for `by_client`,
+ * three mutually bounded ones) rather than widening the main `cloudflare.http.requests` cube —
+ * see `httpPathsSelection` for why. Consequence for consumers: these are slices, not a cube, so
+ * "top paths in Germany" is not answerable by joining them.
+ */
+export const METRIC_HTTP_REQUESTS_BY_PATH = "cloudflare.http.requests.by_path"
+export const METRIC_HTTP_ERRORS_BY_PATH = "cloudflare.http.errors.by_path"
+export const METRIC_HTTP_BYTES_BY_PATH = "cloudflare.http.bytes.by_path"
+export const METRIC_HTTP_REQUESTS_BY_COUNTRY = "cloudflare.http.requests.by_country"
+export const METRIC_HTTP_BYTES_BY_COUNTRY = "cloudflare.http.bytes.by_country"
+export const METRIC_HTTP_REQUESTS_BY_CLIENT = "cloudflare.http.requests.by_client"
 export const METRIC_WORKER_REQUESTS = "cloudflare.worker.requests"
 export const METRIC_WORKER_ERRORS = "cloudflare.worker.errors"
 export const METRIC_WORKER_CPU_TIME = "cloudflare.worker.cpu_time"
@@ -117,6 +132,13 @@ export const abrCount = (count: number, sampleInterval: number | null | undefine
 export const MAX_HTTP_HOSTS = 20
 export const MAX_FIREWALL_RULES = 20
 export const MAX_DNS_QUERY_NAMES = 20
+/**
+ * Higher than the host cap because path is *the* drill-down dimension, and because it matches the
+ * live top-traffic proxy's hard max — so the stored list and the live list agree at the boundary.
+ */
+export const MAX_HTTP_PATHS = 50
+/** Countries are naturally bounded (~250); the cap is a safety net, not a design constraint. */
+export const MAX_COUNTRIES = 50
 export const OTHER_BUCKET = "other"
 
 /** Top-N keys by weight; ties break lexicographically so folding is deterministic across runs. */
@@ -155,10 +177,7 @@ export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows =
 	const hostWeights = new Map<string, number>()
 	for (const group of input.groups) {
 		const host = group.dimensions.clientRequestHTTPHost ?? "unknown"
-		hostWeights.set(
-			host,
-			(hostWeights.get(host) ?? 0) + abrCount(group.count, group.avg?.sampleInterval),
-		)
+		hostWeights.set(host, (hostWeights.get(host) ?? 0) + abrCount(group.count, group.avg?.sampleInterval))
 	}
 	const topHosts = topNKeys(hostWeights, MAX_HTTP_HOSTS)
 
@@ -168,7 +187,7 @@ export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows =
 		const attributes: Attrs = {
 			"cache.status": group.dimensions.cacheStatus ?? "unknown",
 			"http.status_class": statusClass(group.dimensions.edgeResponseStatus),
-			"http.host": topHosts.has(host) ? host : OTHER_BUCKET,
+			"server.address": topHosts.has(host) ? host : OTHER_BUCKET,
 		}
 		const counters: ReadonlyArray<readonly [string, string, string, number]> = [
 			[
@@ -183,7 +202,16 @@ export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows =
 		for (const [metricName, description, unit, value] of counters) {
 			if (value <= 0) continue
 			sumRows.push(
-				sumRow({ bucket, metricName, description, unit, attributes, serviceName, resourceAttributes, value }),
+				sumRow({
+					bucket,
+					metricName,
+					description,
+					unit,
+					attributes,
+					serviceName,
+					resourceAttributes,
+					value,
+				}),
 			)
 		}
 	}
@@ -238,12 +266,188 @@ export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows =
 }
 
 /** Weight-rank an unbounded dimension across a window and fold the tail into {@link OTHER_BUCKET}. */
-const foldTail = (
-	weights: ReadonlyMap<string, number>,
-	n: number,
-): ((key: string) => string) => {
+const foldTail = (weights: ReadonlyMap<string, number>, n: number): ((key: string) => string) => {
 	const top = topNKeys(weights, n)
 	return (key) => (top.has(key) ? key : OTHER_BUCKET)
+}
+
+/** Cap stored path length so one pathological URL can't bloat the attribute map. */
+const MAX_PATH_LEN = 200
+
+/**
+ * Cloudflare documents `clientRequestPath` as path-only, but strip a query string defensively —
+ * one leaked `?token=` would blow the top-N fold apart and store a credential as a metric label.
+ */
+export const normalizePath = (raw: string | null | undefined): string => {
+	if (raw == null || raw === "") return "unknown"
+	const query = raw.indexOf("?")
+	const path = query === -1 ? raw : raw.slice(0, query)
+	if (path === "") return "unknown"
+	return path.length > MAX_PATH_LEN ? `${path.slice(0, MAX_PATH_LEN)}…` : path
+}
+
+/** `"HTTP/1.1"` → `"1.1"`: semconv's `network.protocol.version` is the bare version. */
+export const normalizeProtocol = (raw: string | null | undefined): string => {
+	if (raw == null || raw === "") return "unknown"
+	return raw.toUpperCase().startsWith("HTTP/") ? raw.slice(5) : raw
+}
+
+export interface MapHttpPathGroupsInput {
+	readonly orgId: string
+	readonly zoneId: string
+	readonly zoneName: string
+	readonly groups: ReadonlyArray<HttpPathGroupShape>
+	readonly errors: ReadonlyArray<HttpPathGroupShape>
+}
+
+export const mapHttpPathGroups = (input: MapHttpPathGroupsInput): CloudflareMetricRows => {
+	const serviceName = `cloudflare/${input.zoneName}`
+	const resourceAttributes = httpResourceAttrs(input.orgId, input.zoneId, input.zoneName)
+	const sumRows: MetricSumRow[] = []
+
+	// Rank across BOTH selections so a path that only surfaces in the 5xx slice folds to the same
+	// key in every metric — otherwise its error count would land on "other" while its request
+	// count kept its own name, and the two would stop reconciling.
+	const weights = new Map<string, number>()
+	for (const group of [...input.groups, ...input.errors]) {
+		const path = normalizePath(group.dimensions.clientRequestPath)
+		weights.set(path, (weights.get(path) ?? 0) + abrCount(group.count, group.avg?.sampleInterval))
+	}
+	const foldPath = foldTail(weights, MAX_HTTP_PATHS)
+
+	const push = (
+		group: HttpPathGroupShape,
+		metricName: string,
+		description: string,
+		unit: string,
+		value: number,
+	) => {
+		if (value <= 0) return
+		sumRows.push(
+			sumRow({
+				bucket: group.dimensions.datetimeFiveMinutes,
+				metricName,
+				description,
+				unit,
+				attributes: { "url.path": foldPath(normalizePath(group.dimensions.clientRequestPath)) },
+				serviceName,
+				resourceAttributes,
+				value,
+			}),
+		)
+	}
+
+	for (const group of input.groups) {
+		push(
+			group,
+			METRIC_HTTP_REQUESTS_BY_PATH,
+			"Edge HTTP requests by request path (top-N, ABR-adjusted estimate)",
+			"{requests}",
+			abrCount(group.count, group.avg?.sampleInterval),
+		)
+		push(
+			group,
+			METRIC_HTTP_BYTES_BY_PATH,
+			"Edge response bytes by request path (top-N)",
+			"By",
+			group.sum?.edgeResponseBytes ?? 0,
+		)
+	}
+	for (const group of input.errors) {
+		push(
+			group,
+			METRIC_HTTP_ERRORS_BY_PATH,
+			"Edge 5xx responses by request path (top-N, ABR-adjusted estimate)",
+			"{requests}",
+			abrCount(group.count, group.avg?.sampleInterval),
+		)
+	}
+
+	return { sumRows, gaugeRows: [] }
+}
+
+export interface MapHttpDimensionGroupsInput {
+	readonly orgId: string
+	readonly zoneId: string
+	readonly zoneName: string
+	readonly countries: ReadonlyArray<HttpCountryGroupShape>
+	readonly clients: ReadonlyArray<HttpClientGroupShape>
+}
+
+export const mapHttpDimensionGroups = (input: MapHttpDimensionGroupsInput): CloudflareMetricRows => {
+	const serviceName = `cloudflare/${input.zoneName}`
+	const resourceAttributes = httpResourceAttrs(input.orgId, input.zoneId, input.zoneName)
+	const sumRows: MetricSumRow[] = []
+
+	const countryWeights = new Map<string, number>()
+	for (const group of input.countries) {
+		// `clientCountryName` is misleadingly named — it returns an ISO-3166 alpha-2 code.
+		const country = group.dimensions.clientCountryName ?? "unknown"
+		countryWeights.set(
+			country,
+			(countryWeights.get(country) ?? 0) + abrCount(group.count, group.avg?.sampleInterval),
+		)
+	}
+	const foldCountry = foldTail(countryWeights, MAX_COUNTRIES)
+
+	for (const group of input.countries) {
+		const attributes: Attrs = {
+			"geo.country_iso_code": foldCountry(group.dimensions.clientCountryName ?? "unknown"),
+		}
+		const counters: ReadonlyArray<readonly [string, string, string, number]> = [
+			[
+				METRIC_HTTP_REQUESTS_BY_COUNTRY,
+				"Edge HTTP requests by client country (ABR-adjusted estimate)",
+				"{requests}",
+				abrCount(group.count, group.avg?.sampleInterval),
+			],
+			[
+				METRIC_HTTP_BYTES_BY_COUNTRY,
+				"Edge response bytes by client country",
+				"By",
+				group.sum?.edgeResponseBytes ?? 0,
+			],
+		]
+		for (const [metricName, description, unit, value] of counters) {
+			if (value <= 0) continue
+			sumRows.push(
+				sumRow({
+					bucket: group.dimensions.datetimeFiveMinutes,
+					metricName,
+					description,
+					unit,
+					attributes,
+					serviceName,
+					resourceAttributes,
+					value,
+				}),
+			)
+		}
+	}
+
+	// Method, protocol and device are all naturally bounded, so they share one series with no fold.
+	for (const group of input.clients) {
+		const value = abrCount(group.count, group.avg?.sampleInterval)
+		if (value <= 0) continue
+		sumRows.push(
+			sumRow({
+				bucket: group.dimensions.datetimeFiveMinutes,
+				metricName: METRIC_HTTP_REQUESTS_BY_CLIENT,
+				description: "Edge HTTP requests by method, protocol and device (ABR-adjusted estimate)",
+				unit: "{requests}",
+				attributes: {
+					"http.request.method": group.dimensions.clientRequestHTTPMethodName ?? "unknown",
+					"network.protocol.version": normalizeProtocol(group.dimensions.clientRequestHTTPProtocol),
+					"cloudflare.device.type": group.dimensions.clientDeviceType ?? "unknown",
+				},
+				serviceName,
+				resourceAttributes,
+				value,
+			}),
+		)
+	}
+
+	return { sumRows, gaugeRows: [] }
 }
 
 export interface MapFirewallGroupsInput {
@@ -284,7 +488,7 @@ export const mapFirewallGroups = (input: MapFirewallGroupsInput): CloudflareMetr
 					"firewall.action": group.dimensions.action ?? "unknown",
 					"firewall.source": group.dimensions.source ?? "unknown",
 					"firewall.rule_id": foldRule(group.dimensions.ruleId ?? "unknown"),
-					"http.host": foldHost(group.dimensions.clientRequestHTTPHost ?? "unknown"),
+					"server.address": foldHost(group.dimensions.clientRequestHTTPHost ?? "unknown"),
 				},
 				serviceName,
 				resourceAttributes,
@@ -313,10 +517,7 @@ export const mapDnsGroups = (input: MapDnsGroupsInput): CloudflareMetricRows => 
 	const nameWeights = new Map<string, number>()
 	for (const group of input.groups) {
 		const name = group.dimensions.queryName ?? "unknown"
-		nameWeights.set(
-			name,
-			(nameWeights.get(name) ?? 0) + abrCount(group.count, group.avg?.sampleInterval),
-		)
+		nameWeights.set(name, (nameWeights.get(name) ?? 0) + abrCount(group.count, group.avg?.sampleInterval))
 	}
 	const foldName = foldTail(nameWeights, MAX_DNS_QUERY_NAMES)
 
@@ -399,9 +600,7 @@ export interface MapQueueConsumersGroupsInput {
 	readonly groups: ReadonlyArray<QueueConsumersGroupShape>
 }
 
-export const mapQueueConsumersGroups = (
-	input: MapQueueConsumersGroupsInput,
-): CloudflareMetricRows => {
+export const mapQueueConsumersGroups = (input: MapQueueConsumersGroupsInput): CloudflareMetricRows => {
 	const gaugeRows: MetricGaugeRow[] = []
 	for (const group of input.groups) {
 		const concurrency = group.avg?.concurrency
@@ -431,9 +630,7 @@ export interface MapDurableObjectsGroupsInput {
 	readonly liveScripts?: ReadonlySet<string> | null
 }
 
-export const mapDurableObjectsGroups = (
-	input: MapDurableObjectsGroupsInput,
-): CloudflareMetricRows => {
+export const mapDurableObjectsGroups = (input: MapDurableObjectsGroupsInput): CloudflareMetricRows => {
 	const sumRows: MetricSumRow[] = []
 	const gaugeRows: MetricGaugeRow[] = []
 	for (const group of input.groups) {
@@ -456,7 +653,16 @@ export const mapDurableObjectsGroups = (
 		for (const [metricName, description, unit, value] of counters) {
 			if (value <= 0) continue
 			sumRows.push(
-				sumRow({ bucket, metricName, description, unit, attributes: {}, serviceName, resourceAttributes, value }),
+				sumRow({
+					bucket,
+					metricName,
+					description,
+					unit,
+					attributes: {},
+					serviceName,
+					resourceAttributes,
+					value,
+				}),
 			)
 		}
 
@@ -523,7 +729,16 @@ export const mapWorkersGroups = (input: MapWorkersGroupsInput): CloudflareMetric
 		for (const [metricName, description, unit, value] of counters) {
 			if (value <= 0) continue
 			sumRows.push(
-				sumRow({ bucket, metricName, description, unit, attributes, serviceName, resourceAttributes, value }),
+				sumRow({
+					bucket,
+					metricName,
+					description,
+					unit,
+					attributes,
+					serviceName,
+					resourceAttributes,
+					value,
+				}),
 			)
 		}
 
@@ -533,8 +748,18 @@ export const mapWorkersGroups = (input: MapWorkersGroupsInput): CloudflareMetric
 		const gauges: ReadonlyArray<readonly [string, string, string, number | null | undefined]> = [
 			[METRIC_WORKER_CPU_TIME, "Worker CPU time", "0.5", scale(quantiles.cpuTimeP50, 1 / 1000)],
 			[METRIC_WORKER_CPU_TIME, "Worker CPU time", "0.99", scale(quantiles.cpuTimeP99, 1 / 1000)],
-			[METRIC_WORKER_DURATION, "Worker duration (wall time billed)", "0.5", scale(quantiles.durationP50, 1000)],
-			[METRIC_WORKER_DURATION, "Worker duration (wall time billed)", "0.99", scale(quantiles.durationP99, 1000)],
+			[
+				METRIC_WORKER_DURATION,
+				"Worker duration (wall time billed)",
+				"0.5",
+				scale(quantiles.durationP50, 1000),
+			],
+			[
+				METRIC_WORKER_DURATION,
+				"Worker duration (wall time billed)",
+				"0.99",
+				scale(quantiles.durationP99, 1000),
+			],
 		]
 		for (const [metricName, description, quantile, value] of gauges) {
 			if (value == null) continue

@@ -490,38 +490,38 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 					job.externalRepoId,
 				)
 				if (Option.isNone(repositoryOpt)) {
-						yield* Effect.annotateCurrentSpan({
-							"vcs.repository.outcome": "dropped",
-							"vcs.repository.reason": "unknown_repository",
-						})
-						yield* Effect.logInfo("[VCS] Dropping VCS job for unknown repository").pipe(
-							Effect.annotateLogs({
-								provider: job.provider,
-								externalRepoId: job.externalRepoId,
-								kind: job.kind,
-							}),
-						)
-						return Option.none<VcsRepo>()
-					}
-					if (repositoryOpt.value.status === "removed") {
-						yield* Effect.annotateCurrentSpan({
-							"vcs.repository.id": repositoryOpt.value.id,
-							"vcs.repository.skipped": true,
-							"vcs.repository.outcome": "skipped",
-							"vcs.repository.reason": "repository_removed",
-						})
-						yield* Effect.logInfo("[VCS] Skipping VCS job: repository removed").pipe(
-							Effect.annotateLogs({
-								provider: job.provider,
-								externalRepoId: job.externalRepoId,
-								kind: job.kind,
-							}),
-						)
-						return Option.none<VcsRepo>()
-					}
-					yield* Effect.annotateCurrentSpan({ "vcs.repository.id": repositoryOpt.value.id })
-					return repositoryOpt
-				})
+					yield* Effect.annotateCurrentSpan({
+						"vcs.repository.outcome": "dropped",
+						"vcs.repository.reason": "unknown_repository",
+					})
+					yield* Effect.logInfo("[VCS] Dropping VCS job for unknown repository").pipe(
+						Effect.annotateLogs({
+							provider: job.provider,
+							externalRepoId: job.externalRepoId,
+							kind: job.kind,
+						}),
+					)
+					return Option.none<VcsRepo>()
+				}
+				if (repositoryOpt.value.status === "removed") {
+					yield* Effect.annotateCurrentSpan({
+						"vcs.repository.id": repositoryOpt.value.id,
+						"vcs.repository.skipped": true,
+						"vcs.repository.outcome": "skipped",
+						"vcs.repository.reason": "repository_removed",
+					})
+					yield* Effect.logInfo("[VCS] Skipping VCS job: repository removed").pipe(
+						Effect.annotateLogs({
+							provider: job.provider,
+							externalRepoId: job.externalRepoId,
+							kind: job.kind,
+						}),
+					)
+					return Option.none<VcsRepo>()
+				}
+				yield* Effect.annotateCurrentSpan({ "vcs.repository.id": repositoryOpt.value.id })
+				return repositoryOpt
+			})
 
 			// ---- One handler per job kind ----------------------------------------
 			// Each owns its own decision-making (the gate, repo resolution, and any
@@ -867,7 +867,12 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 						}),
 					)
 				}).pipe(
-					Effect.catchCause((cause) =>
+					// Annotate + log inside the span, then let the cause through `withSpan` so
+					// the span exits Error and this failure reaches error analytics. Swallowing
+					// it before the span (the obvious shape) leaves a terminal write failure
+					// visible only as a log line. The catch sits OUTSIDE the span so the effect
+					// stays total for the consumer, which calls this as its very last step.
+					Effect.tapCause((cause) =>
 						Effect.annotateCurrentSpan({
 							"vcs.exhausted.outcome": "failed",
 							"vcs.exhausted.reason": "record_failed",
@@ -880,6 +885,7 @@ export class VcsSyncService extends Context.Service<VcsSyncService, VcsSyncServi
 						),
 					),
 					Effect.withSpan("VcsSyncService.recordExhaustedFailure"),
+					Effect.catchCause(() => Effect.void),
 				)
 
 			return { processMessage, recordExhaustedFailure } satisfies VcsSyncServiceShape

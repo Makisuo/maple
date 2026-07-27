@@ -5,12 +5,15 @@
 
 import { useMemo } from "react"
 
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
 import { cloudflareZoneDnsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { formatNumber } from "@/lib/format"
 import { ColumnHead, TableShell } from "../primitives/data-table"
 import { formatPercent } from "../format"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
+import { PanelScope } from "./panel-scope"
+import type { CloudflareFilters } from "./filters"
 
 // NOERROR is healthy; NXDOMAIN is the interesting signal (typo storms,
 // subdomain scanning); server-side failures render hot.
@@ -32,16 +35,21 @@ export function CloudflareZoneDnsSection({
 	startTime,
 	endTime,
 	bucketSeconds,
+	filters,
 	syncId,
 }: {
 	serviceName: string
 	startTime: string
 	endTime: string
 	bucketSeconds: number
+	filters: CloudflareFilters
 	syncId?: string
 }) {
-	const result = useAtomValue(
-		cloudflareZoneDnsResultAtom({ data: { serviceName, startTime, endTime, bucketSeconds } }),
+	// Retained for the same reason as the security section: an empty result hides the whole panel.
+	const result = useRetainedRefreshableResultValue(
+		cloudflareZoneDnsResultAtom({
+			data: { serviceName, startTime, endTime, bucketSeconds, ...filters },
+		}),
 	)
 
 	return Result.builder(result)
@@ -60,6 +68,13 @@ export function CloudflareZoneDnsSection({
 						colors={RESPONSE_CODE_COLORS}
 						order={RESPONSE_CODE_ORDER}
 						syncId={syncId}
+						scope={
+							<PanelScope
+								filters={filters}
+								ignoredFilters={data.ignoredFilters}
+								reason="DNS analytics is a separate dataset with its own dimensions"
+							/>
+						}
 					/>
 					<DnsNamesTable names={data.names} waiting={r.waiting} />
 				</div>

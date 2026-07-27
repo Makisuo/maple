@@ -125,9 +125,7 @@ describe("cloudflareWorkerLatencySQL", () => {
 	it("reads only the quantiles the poller emits for Workers (0.5 / 0.99)", () => {
 		const { sql } = compileCH(cloudflareWorkerLatencySQL(), baseParams)
 		expect(sql).toContain("FROM metrics_gauge")
-		expect(sql).toContain(
-			"MetricName IN ('cloudflare.worker.duration', 'cloudflare.worker.cpu_time')",
-		)
+		expect(sql).toContain("MetricName IN ('cloudflare.worker.duration', 'cloudflare.worker.cpu_time')")
 		expect(sql).toContain("quantile'] = '0.5'")
 		expect(sql).toContain("quantile'] = '0.99'")
 		expect(sql).not.toContain("'0.95'")

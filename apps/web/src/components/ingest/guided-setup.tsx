@@ -65,11 +65,7 @@ export function GuidedSetup({ apiKey, showCredentials = false }: GuidedSetupProp
 	return (
 		<div className="space-y-4">
 			<FrameworkPicker selected={framework} onSelect={setFramework} />
-			<ConnectInstructions
-				framework={framework}
-				apiKey={apiKey}
-				showCredentials={showCredentials}
-			/>
+			<ConnectInstructions framework={framework} apiKey={apiKey} showCredentials={showCredentials} />
 		</div>
 	)
 }
@@ -172,10 +168,16 @@ export function ConnectInstructions({
 				</TabsContent>
 
 				<TabsContent value="instrument" className={cn("overflow-auto mt-0", contentPadding)}>
-					<CodeBlock code={interpolate(snippet.instrument)} language={snippet.label.toLowerCase()} />
+					<CodeBlock
+						code={interpolate(snippet.instrument)}
+						language={snippet.label.toLowerCase()}
+					/>
 				</TabsContent>
 
-				<TabsContent value="claude-code" className={cn("overflow-auto mt-0 space-y-2", contentPadding)}>
+				<TabsContent
+					value="claude-code"
+					className={cn("overflow-auto mt-0 space-y-2", contentPadding)}
+				>
 					<p className="text-xs text-muted-foreground">
 						Run this prompt in Claude Code (or Codex / Cursor with the skill installed). The{" "}
 						<code className="rounded bg-muted px-1">maple-onboard</code> skill walks every service

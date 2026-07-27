@@ -289,7 +289,10 @@ export interface CloudflareService {
 	cpuP99Ms?: number
 }
 
-function transformCloudflareService(row: Record<string, unknown>, durationSeconds: number): CloudflareService {
+function transformCloudflareService(
+	row: Record<string, unknown>,
+	durationSeconds: number,
+): CloudflareService {
 	const serviceName = String(row.serviceName ?? "")
 	const displayName = serviceName.startsWith(WORKER_SERVICE_PREFIX)
 		? serviceName.slice(WORKER_SERVICE_PREFIX.length)
@@ -354,6 +357,12 @@ export interface PlanetScaleDatabaseStat {
 	cpuMaxPercent: number
 	memMaxPercent: number
 	replicaLagMaxSeconds: number
+	/**
+	 * Worst branch's disk usage (0–100), or null when the volume gauges reported
+	 * nothing in the window. Null rather than 0 on purpose: an unmonitored volume
+	 * and an empty one are different facts, and only one of them is reassuring.
+	 */
+	storageUsedPercent: number | null
 }
 
 export interface PlanetScaleBranchStat extends PlanetScaleDatabaseStat {
@@ -361,6 +370,9 @@ export interface PlanetScaleBranchStat extends PlanetScaleDatabaseStat {
 }
 
 function transformPlanetScaleStat(row: Record<string, unknown>): PlanetScaleDatabaseStat {
+	// The server pairs the percentage with its sample count so a missing series
+	// can't masquerade as a healthy 0% — see planetscaleStorageSQL.
+	const storageSamples = Number(row.storageSamples ?? 0)
 	return {
 		database: String(row.database ?? ""),
 		connectionsAvg: Number(row.connectionsAvg ?? 0),
@@ -368,6 +380,7 @@ function transformPlanetScaleStat(row: Record<string, unknown>): PlanetScaleData
 		cpuMaxPercent: Number(row.cpuMaxPercent ?? 0),
 		memMaxPercent: Number(row.memMaxPercent ?? 0),
 		replicaLagMaxSeconds: Number(row.replicaLagMaxSeconds ?? 0),
+		storageUsedPercent: storageSamples > 0 ? Number(row.storageUsedPercent ?? 0) : null,
 	}
 }
 

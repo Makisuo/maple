@@ -49,7 +49,7 @@ export const submitDiagnosisRpc = (input: unknown) =>
 	Effect.gen(function* () {
 		const request = yield* decodeSubmitDiagnosis(input)
 		yield* Effect.annotateCurrentSpan({
-			"maple.org_id": request.orgId,
+			orgId: request.orgId,
 			"maple.investigation.id": request.investigationId,
 		})
 		const investigations = yield* InvestigationService

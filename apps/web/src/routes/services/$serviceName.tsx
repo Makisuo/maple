@@ -34,11 +34,13 @@ import { ServiceUsagePanel } from "@/components/services/service-usage-panel"
 import { ServiceWorkloadsPanel } from "@/components/services/service-workloads-panel"
 import { OptionalStringArrayParam } from "@/lib/search-params"
 import { ServiceDot } from "@maple/ui/components/service-dot"
+import { LONG_RANGE_PRESET_OPTIONS } from "@/lib/time-utils"
 
 // A stable empty releases array for the non-success render branches. Minting a
 // fresh `[]` in the `.orElse` below would give `useCommitMarkers`' `useMemo` a new
 // dependency identity every render, busting the marker cache.
 const EMPTY_RELEASES: ReadonlyArray<ReleasePoint> = []
+const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
 
 const ServiceDetailTab = Schema.Literals(["overview", "operations", "dependencies"])
 type ServiceDetailTabValue = Schema.Schema.Type<typeof ServiceDetailTab>
@@ -236,6 +238,8 @@ function ServiceDetailContent() {
 							startTime={search.startTime}
 							endTime={search.endTime}
 							presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+							presets={LONG_RANGE_PRESET_OPTIONS}
+							maxRangeSeconds={ONE_YEAR_SECONDS}
 							onTimeChange={handleTimeChange}
 						/>
 						<Button

@@ -6,7 +6,9 @@ import {
 	ErrorIncidentId,
 	ErrorIssueEventId,
 	ErrorIssueId,
+	InvestigationId,
 	IsoDateTimeString,
+	IssueEscalationId,
 	PostgresTransactionId,
 	SpanId,
 	TraceId,
@@ -452,6 +454,66 @@ export class ErrorPersistenceError extends Schema.TaggedErrorClass<ErrorPersiste
 	{ httpApiStatus: 503 },
 ) {}
 
+export const EscalationSkipReason = Schema.Literals([
+	"policy_disabled",
+	"no_destinations_for_severity",
+	"below_min_confidence",
+	"no_enabled_destinations",
+	"issue_missing",
+]).annotate({
+	identifier: "@maple/EscalationSkipReason",
+	title: "Escalation Skip Reason",
+})
+export type EscalationSkipReason = Schema.Schema.Type<typeof EscalationSkipReason>
+
+export class EscalationPolicyEvaluationRequest extends Schema.Class<EscalationPolicyEvaluationRequest>(
+	"EscalationPolicyEvaluationRequest",
+)({
+	severity: IssueSeverity,
+	source: Schema.Literals(["ai", "manual"]),
+	confidence: Schema.optionalKey(EscalationConfidence),
+}) {}
+
+export class EscalationPolicyEvaluationDocument extends Schema.Class<EscalationPolicyEvaluationDocument>(
+	"EscalationPolicyEvaluationDocument",
+)({
+	outcome: Schema.Literals(["route", "skip"]),
+	destinationIds: Schema.Array(AlertDestinationId),
+	skipReason: Schema.NullOr(EscalationSkipReason),
+}) {}
+
+export class EscalationDestinationOutcome extends Schema.Class<EscalationDestinationOutcome>(
+	"EscalationDestinationOutcome",
+)({
+	destinationId: AlertDestinationId,
+	destinationName: Schema.NullOr(Schema.String),
+	status: Schema.Literals(["delivered", "failed", "disabled", "missing"]),
+	error: Schema.NullOr(Schema.String),
+}) {}
+
+export class IssueEscalationAttemptDocument extends Schema.Class<IssueEscalationAttemptDocument>(
+	"IssueEscalationAttemptDocument",
+)({
+	id: IssueEscalationId,
+	issueId: ErrorIssueId,
+	investigationId: Schema.NullOr(InvestigationId),
+	severity: IssueSeverity,
+	source: Schema.Literals(["ai", "manual"]),
+	reason: Schema.Literals(["severity_set", "severity_escalated"]),
+	status: Schema.Literals(["queued", "sent", "skipped", "failed"]),
+	attempts: Schema.Number,
+	skipReason: Schema.NullOr(EscalationSkipReason),
+	deliveries: Schema.Array(EscalationDestinationOutcome),
+	createdAt: IsoDateTimeString,
+	processedAt: Schema.NullOr(IsoDateTimeString),
+}) {}
+
+export class IssueEscalationAttemptsResponse extends Schema.Class<IssueEscalationAttemptsResponse>(
+	"IssueEscalationAttemptsResponse",
+)({
+	attempts: Schema.Array(IssueEscalationAttemptDocument),
+}) {}
+
 export class ErrorValidationError extends Schema.TaggedErrorClass<ErrorValidationError>()(
 	"@maple/http/errors/ErrorValidationError",
 	{
@@ -674,6 +736,34 @@ export class ErrorsApiGroup extends HttpApiGroup.make("errors")
 			payload: IssueEscalationPolicyUpsertRequest,
 			success: IssueEscalationPolicyDocument,
 			error: [ErrorForbiddenError, ErrorPersistenceError, ErrorValidationError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("evaluateEscalationPolicy", "/escalation-policy/evaluate", {
+			payload: EscalationPolicyEvaluationRequest,
+			success: EscalationPolicyEvaluationDocument,
+			error: ErrorPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("listIssueEscalations", "/issues/:issueId/escalations", {
+			params: { issueId: ErrorIssueId },
+			success: IssueEscalationAttemptsResponse,
+			error: ErrorPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("listRecentEscalations", "/escalations/recent", {
+			query: {
+				limit: Schema.optional(
+					Schema.NumberFromString.check(
+						Schema.isInt(),
+						Schema.isBetween({ minimum: 1, maximum: 100 }),
+					),
+				),
+			},
+			success: IssueEscalationAttemptsResponse,
+			error: ErrorPersistenceError,
 		}),
 	)
 	.prefix("/api/errors")

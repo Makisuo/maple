@@ -42,16 +42,10 @@ import * as InternalUtilities from "./internal/utilities.ts"
 /**
  * Known Anthropic Claude model identifiers exposed by the generated Anthropic schema.
  *
- * **Details**
- *
- * The Anthropic language model constructors accept `Model` values and custom
- * string model ids, so this type is best used for autocomplete and type checking
- * of known Claude ids.
- *
  * @category models
  * @since 4.0.0
  */
-export type Model = typeof Generated.Model.Type
+export type Model = (typeof Generated.Model)["members"][1]["Encoded"]
 
 // =============================================================================
 // Configuration
@@ -1624,12 +1618,15 @@ const makeResponse = Effect.fnUntraced(
               }
               : undefined
 
-            const params = yield* transformToolCallParams(options.tools, part.name, part.input)
+            // Map the provider wire name (e.g. "memory") back to the tool's
+            // custom name (e.g. "AnthropicMemory") that the toolkit is keyed by
+            const toolName = toolNameMapper.getCustomName(part.name)
+            const params = yield* transformToolCallParams(options.tools, toolName, part.input)
 
             parts.push({
               type: "tool-call",
               id: part.id,
-              name: part.name,
+              name: toolName,
               params,
               ...(Predicate.isNotUndefined(callerInfo)
                 ? { metadata: { anthropic: { caller: callerInfo } } }
@@ -2042,10 +2039,15 @@ const makeStreamResponse = Effect.fnUntraced(
                     }
                     : undefined
 
+                  // Map the provider wire name (e.g. "memory") back to the
+                  // tool's custom name (e.g. "AnthropicMemory") that the toolkit
+                  // is keyed by
+                  const toolName = toolNameMapper.getCustomName(part.name)
+
                   parts.push({
                     type: "tool-params-start",
                     id: part.id,
-                    name: part.name
+                    name: toolName
                   })
 
                   parts.push({
@@ -2059,12 +2061,12 @@ const makeStreamResponse = Effect.fnUntraced(
                     id: part.id
                   })
 
-                  const params = yield* transformToolCallParams(options.tools, part.name, part.input)
+                  const params = yield* transformToolCallParams(options.tools, toolName, part.input)
 
                   parts.push({
                     type: "tool-call",
                     id: part.id,
-                    name: part.name,
+                    name: toolName,
                     params,
                     ...(Predicate.isNotUndefined(callerInfo)
                       ? { metadata: { anthropic: { caller: callerInfo } } }
@@ -2212,10 +2214,15 @@ const makeStreamResponse = Effect.fnUntraced(
 
                 const hasParams = Object.keys(part.input).length > 0
                 const initialParams = hasParams ? JSON.stringify(part.input) : ""
+                // Map the provider wire name (e.g. "memory") back to the tool's
+                // custom name (e.g. "AnthropicMemory") that the toolkit is keyed
+                // by. The mapped name flows to the finalized tool-call via
+                // `contentBlock.name` on `content_block_stop`.
+                const toolName = toolNameMapper.getCustomName(part.name)
                 contentBlocks.set(event.index, {
                   type: "tool-call",
                   id: part.id,
-                  name: part.name,
+                  name: toolName,
                   params: initialParams,
                   firstDelta: initialParams.length > 0,
                   ...(Predicate.isNotUndefined(caller) ? { caller } : undefined)
@@ -2224,7 +2231,7 @@ const makeStreamResponse = Effect.fnUntraced(
                 parts.push({
                   type: "tool-params-start",
                   id: part.id,
-                  name: part.name
+                  name: toolName
                 })
 
                 break

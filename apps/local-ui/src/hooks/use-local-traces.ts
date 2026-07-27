@@ -7,19 +7,22 @@ import { boundsForRange } from "../lib/time"
 const PAGE_SIZE = 25
 
 export interface TraceFilters {
-	/** Exact service name match. */
+	/**
+	 * Exact root service name match — the trace's entry service, which is what
+	 * the trace_list_mv-backed Service facet lists.
+	 */
 	service?: string
 	/** Substring match on the root span name (toolbar search). */
 	search?: string
 	/**
 	 * Exact root span name (sidebar facet). Wins over `search` — the engine
 	 * accepts a single spanName, and the facet pick is the more specific intent.
-	 * Note the trace_list_mv facet derives HTTP span names ("GET /route") while
-	 * the list query matches raw SpanName, so a derived pick can return zero
-	 * rows for HTTP spans — same behavior as the web app.
+	 * The facet serves trace_list_mv's derived HTTP span names ("GET /route")
+	 * while `traces` stores the raw name ("http.server GET"); the query matches
+	 * either spelling, so a facet pick selects rows.
 	 */
 	span?: string
-	/** Restrict to traces whose root span errored. */
+	/** When true, restrict to traces whose root span errored. `false` is not a filter. */
 	errorsOnly?: boolean
 	/** Exact `http.method` span attribute on the root span. */
 	method?: string
@@ -37,14 +40,21 @@ export interface TraceFilters {
 	range?: string
 }
 
+/** Keyset cursor — root span timestamp plus TraceId, which breaks timestamp ties. */
+interface TraceCursor {
+	timestamp: string
+	traceId: string
+}
+
 /**
- * Infinite list of root traces, newest first. Uses keyset (cursor) pagination
- * on the root span `Timestamp` — the cursor is the last row's `startTime`.
+ * Infinite list of traces, newest first — one row per TraceId, carrying the
+ * trace's real span count and every service it touched. Uses keyset (cursor)
+ * pagination on the root span `Timestamp` + `TraceId`.
  */
 export function useLocalTraces(filters: TraceFilters) {
 	return useInfiniteQuery({
 		queryKey: ["local", "traces", filters],
-		initialPageParam: undefined as string | undefined,
+		initialPageParam: undefined as TraceCursor | undefined,
 		queryFn: async ({ pageParam }) => {
 			const { startTime, endTime } = boundsForRange(filters.range)
 			// HTTP method/status have no first-class list opts — the web app
@@ -59,13 +69,16 @@ export function useLocalTraces(filters: TraceFilters) {
 					: []),
 			]
 			const compiled = CH.compile(
-				CH.tracesRootListQuery({
+				CH.traceListQuery({
 					limit: PAGE_SIZE,
 					cursor: pageParam,
 					serviceName: filters.service,
 					spanName: filters.span ?? filters.search,
 					matchModes: !filters.span && filters.search ? { spanName: "contains" } : undefined,
-					errorsOnly: filters.errorsOnly,
+					// `errorsOnly` is tri-state in the engine: `false` means "only
+					// non-errored", which would silently hide every errored trace
+					// while the checkbox reads as off. Same coercion as the facets hook.
+					errorsOnly: filters.errorsOnly || undefined,
 					environments: filters.env ? [filters.env] : undefined,
 					namespaces: filters.ns ? [filters.ns] : undefined,
 					minDurationMs: filters.minDurationMs,
@@ -76,7 +89,10 @@ export function useLocalTraces(filters: TraceFilters) {
 			)
 			return executeLocalCompiledQuery(compiled)
 		},
-		getNextPageParam: (lastPage) =>
-			lastPage.length === PAGE_SIZE ? lastPage[lastPage.length - 1]?.startTime : undefined,
+		getNextPageParam: (lastPage) => {
+			if (lastPage.length < PAGE_SIZE) return undefined
+			const last = lastPage[lastPage.length - 1]
+			return last ? { timestamp: last.startTime, traceId: last.traceId } : undefined
+		},
 	})
 }

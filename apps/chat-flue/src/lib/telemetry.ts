@@ -1,7 +1,10 @@
 import { type Context, context, propagation, trace } from "@opentelemetry/api"
+import { logs, SeverityNumber } from "@opentelemetry/api-logs"
 import { W3CTraceContextPropagator } from "@opentelemetry/core"
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { resourceFromAttributes } from "@opentelemetry/resources"
+import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs"
 import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-base"
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions"
 
@@ -18,6 +21,54 @@ export interface TelemetryConfig {
 	endpoint?: string
 	/** Deployment environment label (`development` / `production` / …). */
 	environment?: string
+	/** Deployed application version. */
+	serviceVersion?: string
+	/** Source revision deployed to the worker. */
+	commitSha?: string
+}
+
+export interface ChatFlueTelemetry {
+	readonly getTracer: BasicTracerProvider["getTracer"]
+	readonly forceFlush: () => Promise<void>
+}
+
+let telemetryActive = false
+
+type LogAttributes = Readonly<Record<string, string | number | boolean>>
+
+export function emitTelemetryLog(
+	severity: "info" | "warn" | "error",
+	body: string,
+	attributes: LogAttributes = {},
+): void {
+	if (!telemetryActive) {
+		const fallback =
+			severity === "error" ? console.error : severity === "warn" ? console.warn : console.info
+		fallback(body, attributes)
+		return
+	}
+
+	const activeSpan = trace.getActiveSpan()
+	const spanContext = activeSpan?.spanContext()
+	logs.getLogger(CHAT_FLUE_SERVICE_NAME).emit({
+		severityNumber:
+			severity === "error"
+				? SeverityNumber.ERROR
+				: severity === "warn"
+					? SeverityNumber.WARN
+					: SeverityNumber.INFO,
+		severityText: severity.toUpperCase(),
+		body,
+		attributes: {
+			...attributes,
+			...(spanContext
+				? {
+						"trace.id": spanContext.traceId,
+						"span.id": spanContext.spanId,
+					}
+				: {}),
+		},
+	})
 }
 
 /**
@@ -40,7 +91,7 @@ export interface TelemetryConfig {
  * worker AND the chat-agent / triage-workflow Durable Objects — so this same
  * setup instruments the DO isolates where the model/tool/run events fire.
  */
-export function setupTelemetry(config: TelemetryConfig): BasicTracerProvider | undefined {
+export function setupTelemetry(config: TelemetryConfig): ChatFlueTelemetry | undefined {
 	const ingestKey = config.ingestKey?.trim()
 	if (!ingestKey) return undefined
 
@@ -50,8 +101,12 @@ export function setupTelemetry(config: TelemetryConfig): BasicTracerProvider | u
 		[ATTR_SERVICE_NAME]: CHAT_FLUE_SERVICE_NAME,
 		"service.namespace": "backend",
 		"service.instance.id": crypto.randomUUID(),
+		"service.version": config.serviceVersion?.trim() || "development",
 		"maple.sdk.type": "flue",
 		"vcs.repository.url.full": "https://github.com/Makisuo/maple",
+	}
+	if (config.commitSha?.trim()) {
+		attributes["deployment.commit_sha"] = config.commitSha.trim()
 	}
 	if (config.environment) {
 		// Dual-emit: Tinybird MVs pre-extract the legacy `deployment.environment`;
@@ -70,15 +125,32 @@ export function setupTelemetry(config: TelemetryConfig): BasicTracerProvider | u
 		resource: resourceFromAttributes(attributes),
 		spanProcessors: [new BatchSpanProcessor(exporter)],
 	})
+	const logProvider = new LoggerProvider({
+		resource: resourceFromAttributes(attributes),
+		processors: [
+			new BatchLogRecordProcessor(
+				new OTLPLogExporter({
+					url: `${endpoint}/v1/logs`,
+					headers: { Authorization: `Bearer ${ingestKey}` },
+				}),
+			),
+		],
+	})
 
 	// The Worker `BasicTracerProvider` has no `.register()` helper, so wire the
 	// `@opentelemetry/api` globals explicitly: the tracer provider so any
 	// `@opentelemetry/api` consumer resolves to it, and the W3C propagator so
 	// `rootContextFromRequest` can extract inbound trace context.
 	trace.setGlobalTracerProvider(provider)
+	logs.setGlobalLoggerProvider(logProvider)
 	propagation.setGlobalPropagator(new W3CTraceContextPropagator())
+	telemetryActive = true
 
-	return provider
+	return {
+		getTracer: provider.getTracer.bind(provider),
+		forceFlush: () =>
+			Promise.all([provider.forceFlush(), logProvider.forceFlush()]).then(() => undefined),
+	}
 }
 
 /**

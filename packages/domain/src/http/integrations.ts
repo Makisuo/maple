@@ -152,22 +152,22 @@ export class CloudflareServiceUsage extends Schema.Class<CloudflareServiceUsage>
 }) {}
 
 /** Warehouse-derived Cloudflare ingest usage for the org, fixed at the last 24h hourly. */
-export class CloudflareUsageResponse extends Schema.Class<CloudflareUsageResponse>(
-	"CloudflareUsageResponse",
-)({
-	windowStart: Schema.Number,
-	windowEnd: Schema.Number,
-	bucketSeconds: Schema.Number,
-	totalRequests: Schema.Number,
-	/**
-	 * Total requests in the previous window `[windowStart − 24h, windowStart)` — backs the
-	 * "vs previous 24h" delta. optionalKey only for deploy-window compat; always sent.
-	 */
-	previousTotalRequests: Schema.optionalKey(Schema.Number),
-	/** Org-wide mitigated firewall events (block/challenge) in the current window. Always sent. */
-	firewallBlockedEvents: Schema.optionalKey(Schema.Number),
-	services: Schema.Array(CloudflareServiceUsage),
-}) {}
+export class CloudflareUsageResponse extends Schema.Class<CloudflareUsageResponse>("CloudflareUsageResponse")(
+	{
+		windowStart: Schema.Number,
+		windowEnd: Schema.Number,
+		bucketSeconds: Schema.Number,
+		totalRequests: Schema.Number,
+		/**
+		 * Total requests in the previous window `[windowStart − 24h, windowStart)` — backs the
+		 * "vs previous 24h" delta. optionalKey only for deploy-window compat; always sent.
+		 */
+		previousTotalRequests: Schema.optionalKey(Schema.Number),
+		/** Org-wide mitigated firewall events (block/challenge) in the current window. Always sent. */
+		firewallBlockedEvents: Schema.optionalKey(Schema.Number),
+		services: Schema.Array(CloudflareServiceUsage),
+	},
+) {}
 
 /**
  * Live top-hosts/top-paths lookup for one zone, proxied straight to Cloudflare's GraphQL
@@ -184,18 +184,27 @@ export class CloudflareTopTrafficRequest extends Schema.Class<CloudflareTopTraff
 	endTime: Schema.Number,
 	/** Top-N size; defaults to 15, capped at 50. */
 	limit: Schema.optionalKey(Schema.Number),
+	/**
+	 * Server-side substring match, applied by Cloudflare before ranking. This is what makes the
+	 * live lookup worth having: it reaches keys the stored per-window top-N never kept.
+	 */
+	contains: Schema.optionalKey(Schema.String),
+	hosts: Schema.optionalKey(Schema.Array(Schema.String)),
+	countries: Schema.optionalKey(Schema.Array(Schema.String)),
+	methods: Schema.optionalKey(Schema.Array(Schema.String)),
+	cacheStatuses: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
-export class CloudflareTopTrafficRow extends Schema.Class<CloudflareTopTrafficRow>(
-	"CloudflareTopTrafficRow",
-)({
-	/** Hostname or path, depending on the requested dimension. */
-	key: Schema.String,
-	/** ABR-adjusted request estimate. */
-	requests: Schema.Number,
-	bytes: Schema.Number,
-	errors5xx: Schema.Number,
-}) {}
+export class CloudflareTopTrafficRow extends Schema.Class<CloudflareTopTrafficRow>("CloudflareTopTrafficRow")(
+	{
+		/** Hostname or path, depending on the requested dimension. */
+		key: Schema.String,
+		/** ABR-adjusted request estimate. */
+		requests: Schema.Number,
+		bytes: Schema.Number,
+		errors5xx: Schema.Number,
+	},
+) {}
 
 export class CloudflareTopTrafficResponse extends Schema.Class<CloudflareTopTrafficResponse>(
 	"CloudflareTopTrafficResponse",
@@ -273,6 +282,15 @@ export class PlanetScaleIntegrationStatus extends Schema.Class<PlanetScaleIntegr
 	/** Epoch ms of the last successful inventory refresh; null before the first. */
 	lastInventoryAt: Schema.NullOr(Schema.Number),
 	lastInventoryError: Schema.NullOr(Schema.String),
+	/**
+	 * Epoch ms the OAuth grant was revoked, or null while it is live. Without
+	 * this the UI can only infer a revoked grant from whichever downstream call
+	 * happened to fail first, so the same cause surfaced as three different
+	 * error strings in three unrelated places.
+	 */
+	revokedAt: Schema.NullOr(Schema.Number),
+	/** Epoch ms the access token expires; refresh happens well before this. */
+	expiresAt: Schema.NullOr(Schema.Number),
 }) {}
 
 export class PlanetScaleStartConnectRequest extends Schema.Class<PlanetScaleStartConnectRequest>(

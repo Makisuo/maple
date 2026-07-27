@@ -1,0 +1,73 @@
+---
+/**
+ * 02 · Incident — the pinned-pane walkthrough. The page's centrepiece.
+ *
+ * One narrative carries alert → trace → logs → agent, so the page doesn't need
+ * four separate sections for them. The mechanism now lives in
+ * `components/page/ScrollStory.astro`, which the use-case pages also run; what
+ * stays here is the material, because that is what makes this instance the
+ * homepage's argument rather than a page template.
+ *
+ * The device is the lede made literal: the frame head holds a trace id that
+ * never changes while the route beside it and the plate beneath it both do.
+ * Steps are marked by the surface they open — `alert`, `trace`, `logs`,
+ * `agent` — not by ordinals; the eyebrow already numbers this section 02, and
+ * a second `01–04` under it numbers nothing the reader needs. No clock here:
+ * the homepage's claim is that the identifier holds, not that it was fast.
+ */
+import * as m from "../../paraglide/messages";
+import ScrollStory from "../page/ScrollStory.astro";
+
+/**
+ * The one constant. Not a message key for the same reason AgentSection's tool
+ * names aren't: it's the product's own data, and a translated trace id would
+ * be a lie about what the screenshots show.
+ */
+const TRACE_ID = "4f9ac21e…8b7d40f2";
+
+const steps = [
+	{
+		surface: "alert",
+		route: "/alerts",
+		title: m.incident_step_1_title(),
+		body: m.incident_step_1_body(),
+		shot: "An alert rule with its threshold, evaluation window and firing history",
+		src: "/screenshots/flow-01-alert.webp",
+	},
+	{
+		surface: "trace",
+		route: "/traces",
+		title: m.incident_step_2_title(),
+		body: m.incident_step_2_body(),
+		shot: "A span selected in the waterfall with its full attribute set open alongside",
+		src: "/screenshots/flow-02-trace.webp",
+	},
+	{
+		surface: "logs",
+		route: "/logs",
+		title: m.incident_step_3_title(),
+		body: m.incident_step_3_body(),
+		shot: "A log detail with linked trace and span IDs, correlated events and full resource attributes",
+		src: "/screenshots/flow-03-logs.webp",
+	},
+	{
+		surface: "agent",
+		route: "/mcp",
+		title: m.incident_step_4_title(),
+		body: m.incident_step_4_body(),
+		shot: "An MCP client walking the same incident — five tool calls from list_services to propose_fix, ending in a patch",
+		src: "/screenshots/flow-04-agent.webp",
+	},
+];
+---
+
+<ScrollStory
+	id="how-it-works"
+	class="border-t border-border"
+	constant={TRACE_ID}
+	constantLabel="trace"
+	steps={steps}
+	eyebrow={m.incident_eyebrow()}
+	title={m.incident_title()}
+	lede={m.incident_lede()}
+/>

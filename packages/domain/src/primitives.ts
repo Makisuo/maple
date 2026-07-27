@@ -110,6 +110,9 @@ export type AlertDeliveryEventId = Schema.Schema.Type<typeof AlertDeliveryEventI
 export const ErrorIssueId = MapleUuidId("@maple/ErrorIssueId", "Error Issue ID")
 export type ErrorIssueId = Schema.Schema.Type<typeof ErrorIssueId>
 
+export const IssueEscalationId = MapleUuidId("@maple/IssueEscalationId", "Issue Escalation ID")
+export type IssueEscalationId = Schema.Schema.Type<typeof IssueEscalationId>
+
 export const ErrorIncidentId = MapleUuidId("@maple/ErrorIncidentId", "Error Incident ID")
 export type ErrorIncidentId = Schema.Schema.Type<typeof ErrorIncidentId>
 

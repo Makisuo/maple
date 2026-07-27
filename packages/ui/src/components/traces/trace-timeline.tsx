@@ -100,10 +100,7 @@ export function TraceTimeline() {
 	const viewportRef = React.useRef(state.viewport)
 	viewportRef.current = state.viewport
 	const viewportAnimRef = React.useRef(0)
-	const cancelViewportAnimation = React.useCallback(
-		() => cancelAnimationFrame(viewportAnimRef.current),
-		[],
-	)
+	const cancelViewportAnimation = React.useCallback(() => cancelAnimationFrame(viewportAnimRef.current), [])
 	const animateViewportTo = React.useCallback(
 		(target: ViewportState, durationMs = 160) => {
 			cancelAnimationFrame(viewportAnimRef.current)
@@ -228,11 +225,7 @@ export function TraceTimeline() {
 			const n = matchRowIndices.length
 			if (n === 0) return
 			const next =
-				matchCursor === 0
-					? direction === 1
-						? 1
-						: n
-					: ((matchCursor - 1 + direction + n) % n) + 1
+				matchCursor === 0 ? (direction === 1 ? 1 : n) : ((matchCursor - 1 + direction + n) % n) + 1
 			setMatchCursor(next)
 			dispatch({ type: "SET_FOCUSED_INDEX", index: matchRowIndices[next - 1] })
 		},

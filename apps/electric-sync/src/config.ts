@@ -1,9 +1,5 @@
 import type { AuthEnv } from "@maple/auth"
-import {
-	optionalRedacted,
-	optionalString,
-	stringWithDefault,
-} from "@maple/effect-cloudflare/config-helpers"
+import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effect-cloudflare/config-helpers"
 import { Config, Context, Effect, Layer, Option, Redacted } from "effect"
 
 /**

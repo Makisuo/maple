@@ -147,4 +147,60 @@ describe("Command errors", () => {
       assert.strictEqual(output, "")
     })
   })
+
+  describe("InvalidValue", () => {
+    it("labels a bare expected description", () => {
+      const error = new CliError.InvalidValue({
+        option: "size",
+        value: "bogus",
+        expected: `"small" | "medium" | "large"`,
+        kind: "flag"
+      })
+
+      assert.strictEqual(
+        error.message,
+        `Invalid value for flag --size: "bogus". Expected: "small" | "medium" | "large"`
+      )
+    })
+
+    it("does not double the prefix for an Expected sentence", () => {
+      const error = new CliError.InvalidValue({
+        option: "count",
+        value: "3.14",
+        expected: "Expected an integer, got 3.14",
+        kind: "argument"
+      })
+
+      assert.strictEqual(
+        error.message,
+        `Invalid value for argument <count>: "3.14". Expected an integer, got 3.14`
+      )
+
+      const labeled = new CliError.InvalidValue({
+        option: "count",
+        value: "x",
+        expected: "Expected: an integer",
+        kind: "flag"
+      })
+
+      assert.strictEqual(
+        labeled.message,
+        `Invalid value for flag --count: "x". Expected: an integer`
+      )
+    })
+
+    it("does not double the prefix for a missing flag value", () => {
+      const error = new CliError.InvalidValue({
+        option: "count",
+        value: "",
+        expected: `Expected a string representing a finite number, got ""`,
+        kind: "flag"
+      })
+
+      assert.strictEqual(
+        error.message,
+        `Missing value for flag --count. Expected a string representing a finite number, got ""`
+      )
+    })
+  })
 })

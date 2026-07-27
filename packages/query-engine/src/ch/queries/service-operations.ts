@@ -21,7 +21,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromUnion, unionAll, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import { httpDisplaySpanName } from "../../traces-shared"
 import { CHNumber } from "../schema"
-import { ServiceOperationsMinutely, Traces } from "../tables"
+import { ServiceOperationsHourly, ServiceOperationsMinutely, Traces } from "../tables"
 import { tracesBaseWhereConditions } from "./query-helpers"
 
 export interface ServiceOperationsSummaryOpts {
@@ -67,11 +67,22 @@ const START_MINUTE = `toStartOfMinute(${START_DT})`
 const END_MINUTE = `toStartOfMinute(${END_DT})`
 const FIRST_FULL_MINUTE = `if(${START_DT} = ${START_MINUTE}, ${START_MINUTE}, ${START_MINUTE} + INTERVAL 1 MINUTE)`
 const RAW_EDGE_CONDITION = `(Timestamp < ${FIRST_FULL_MINUTE} OR Timestamp >= ${END_MINUTE})`
+const START_HOUR = `toStartOfHour(${START_DT})`
+const END_HOUR = `toStartOfHour(${END_DT})`
+const FIRST_FULL_HOUR = `if(${START_DT} = ${START_HOUR}, ${START_HOUR}, ${START_HOUR} + INTERVAL 1 HOUR)`
+const MINUTELY_EDGE_CONDITION = `(Minute < ${FIRST_FULL_HOUR} OR Minute >= ${END_HOUR})`
 const RAW_DURATION_STATE = "quantilesTDigestState(0.5, 0.95)(Duration)"
 const ROLLUP_DURATION_STATE = "quantilesTDigestMergeState(0.5, 0.95)(DurationQuantiles)"
 
 function rollupEnvironmentCondition(
 	$: ColumnAccessor<typeof ServiceOperationsMinutely.columns>,
+	environments: readonly string[] | undefined,
+) {
+	return environments?.length ? CH.inList($.DeploymentEnv, environments) : undefined
+}
+
+function hourlyEnvironmentCondition(
+	$: ColumnAccessor<typeof ServiceOperationsHourly.columns>,
 	environments: readonly string[] | undefined,
 ) {
 	return environments?.length ? CH.inList($.DeploymentEnv, environments) : undefined
@@ -135,7 +146,7 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 		])
 		.groupBy("bSpanName")
 
-	const rollupInterior = from(ServiceOperationsMinutely)
+	const minutelyEdges = from(ServiceOperationsMinutely)
 		.select(($) => ({
 			bSpanName: $.SpanName,
 			bSpanCount: CH.sum($.SpanCount),
@@ -151,10 +162,30 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 			rollupEnvironmentCondition($, opts.environments),
 			$.Minute.gte(CH.rawExpr<string>(FIRST_FULL_MINUTE)),
 			$.Minute.lt(CH.rawExpr<string>(END_MINUTE)),
+			CH.rawCond(MINUTELY_EDGE_CONDITION),
 		])
 		.groupBy("bSpanName")
 
-	return fromUnion(unionAll(rawEdges, rollupInterior), "operation_minutes")
+	const hourlyInterior = from(ServiceOperationsHourly)
+		.select(($) => ({
+			bSpanName: $.SpanName,
+			bSpanCount: CH.sum($.SpanCount),
+			bEstimatedSpanCount: CH.sum($.EstimatedSpanCount),
+			bErrorCount: CH.sum($.ErrorCount),
+			bEstimatedErrorCount: CH.sum($.EstimatedErrorCount),
+			bDurationSum: CH.sum($.DurationSum),
+			bDurationQuantiles: CH.rawExpr<string>(ROLLUP_DURATION_STATE),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.ServiceName.eq(opts.serviceName),
+			hourlyEnvironmentCondition($, opts.environments),
+			$.Hour.gte(CH.rawExpr<string>(FIRST_FULL_HOUR)),
+			$.Hour.lt(CH.rawExpr<string>(END_HOUR)),
+		])
+		.groupBy("bSpanName")
+
+	return fromUnion(unionAll(rawEdges, minutelyEdges, hourlyInterior), "operation_windows")
 		.select(($) => {
 			const spanCount = CH.sum($.bSpanCount)
 			const estimatedSpanCount = CH.sum($.bEstimatedSpanCount)
@@ -189,6 +220,7 @@ export interface ServiceOperationsTimeseriesOpts {
 	serviceName: string
 	spanNames: readonly string[]
 	environments?: readonly string[]
+	bucketSeconds?: number
 }
 
 export interface ServiceOperationsTimeseriesOutput {
@@ -247,7 +279,7 @@ export function serviceOperationsTimeseriesQuery(opts: ServiceOperationsTimeseri
 		])
 		.groupBy("bucket", "spanName")
 
-	const rollupInterior = from(ServiceOperationsMinutely)
+	const minutelyInterior = from(ServiceOperationsMinutely)
 		.select(($) => ({
 			bucket: CH.toStartOfInterval($.Minute, param.int("bucketSeconds")),
 			spanName: $.SpanName,
@@ -259,11 +291,35 @@ export function serviceOperationsTimeseriesQuery(opts: ServiceOperationsTimeseri
 			rollupEnvironmentCondition($, opts.environments),
 			$.Minute.gte(CH.rawExpr<string>(FIRST_FULL_MINUTE)),
 			$.Minute.lt(CH.rawExpr<string>(END_MINUTE)),
+			opts.bucketSeconds != null && opts.bucketSeconds >= 3600
+				? CH.rawCond(MINUTELY_EDGE_CONDITION)
+				: undefined,
 			CH.inList($.SpanName, opts.spanNames),
 		])
 		.groupBy("bucket", "spanName")
 
-	return fromUnion(unionAll(rawEdges, rollupInterior), "operation_buckets")
+	const hourlyInterior = from(ServiceOperationsHourly)
+		.select(($) => ({
+			bucket: CH.toStartOfInterval($.Hour, param.int("bucketSeconds")),
+			spanName: $.SpanName,
+			count: CH.sum($.EstimatedSpanCount),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.ServiceName.eq(opts.serviceName),
+			hourlyEnvironmentCondition($, opts.environments),
+			$.Hour.gte(CH.rawExpr<string>(FIRST_FULL_HOUR)),
+			$.Hour.lt(CH.rawExpr<string>(END_HOUR)),
+			CH.inList($.SpanName, opts.spanNames),
+		])
+		.groupBy("bucket", "spanName")
+
+	const combined =
+		opts.bucketSeconds != null && opts.bucketSeconds >= 3600
+			? unionAll(rawEdges, minutelyInterior, hourlyInterior)
+			: unionAll(rawEdges, minutelyInterior)
+
+	return fromUnion(combined, "operation_buckets")
 		.select(($) => ({
 			bucket: $.bucket,
 			spanName: $.spanName,

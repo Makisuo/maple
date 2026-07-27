@@ -197,85 +197,91 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 				? edgeCache.invalidate({ bucket: CUSTOMER_CACHE_BUCKET, key: orgId })
 				: Effect.void
 
-		return handlers
-			.handle("getCustomer", () =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const { result, hit } = yield* readCustomerCached(
-						edgeCache,
-						tenant.orgId,
-						callAutumn("getOrCreateCustomer", {}, tenant.orgId),
-					)
-					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, "cache.hit": hit })
-					const response = yield* ensureOk(result)
-					return yield* decodeUpstream(BillingCustomer, response)
-				}),
-			)
-			.handle("getUsage", ({ query }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const result = yield* callAutumn(
-						"aggregateEvents",
-						{ featureId: query.featureId, range: query.range },
-						tenant.orgId,
-					)
-					const response = yield* ensureOk(result)
-					return yield* decodeUpstream(BillingUsage, response)
-				}),
-			)
-			// Invoices ride along on getOrCreateCustomer via `expand`, but through a
-			// dedicated endpoint (not the cached hot-path customer read): the customer
-			// atom is fetched on every page and edge-cached 5 min, while the invoice
-			// list is a settings-only read where an "open" invoice must show promptly.
-			.handle("listInvoices", () =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const result = yield* callAutumn(
-						"getOrCreateCustomer",
-						{ expand: ["invoices"] },
-						tenant.orgId,
-					)
-					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-					const response = yield* ensureOk(result)
-					return yield* decodeInvoices(response)
-				}),
-			)
-			.handle("attach", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const customerData = yield* resolveCustomerData(auth, tenant)
-					const result = yield* callAutumn(
-						"attach",
-						{ planId: payload.planId },
-						tenant.orgId,
-						customerData,
-					)
-					const response = yield* ensureOk(result)
-					yield* invalidateCustomer(tenant.orgId, result)
-					return yield* decodeUpstream(AttachResult, response)
-				}),
-			)
-			.handle("previewAttach", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const result = yield* callAutumn("previewAttach", { planId: payload.planId }, tenant.orgId)
-					const response = yield* ensureOk(result)
-					return yield* decodeUpstream(PreviewAttachResult, response)
-				}),
-			)
-			.handle("openCustomerPortal", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const result = yield* callAutumn(
-						"openCustomerPortal",
-						{ returnUrl: payload.returnUrl },
-						tenant.orgId,
-					)
-					const response = yield* ensureOk(result)
-					yield* invalidateCustomer(tenant.orgId, result)
-					return yield* decodeUpstream(CustomerPortalResult, response)
-				}),
-			)
+		return (
+			handlers
+				.handle("getCustomer", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const { result, hit } = yield* readCustomerCached(
+							edgeCache,
+							tenant.orgId,
+							callAutumn("getOrCreateCustomer", {}, tenant.orgId),
+						)
+						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, "cache.hit": hit })
+						const response = yield* ensureOk(result)
+						return yield* decodeUpstream(BillingCustomer, response)
+					}),
+				)
+				.handle("getUsage", ({ query }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const result = yield* callAutumn(
+							"aggregateEvents",
+							{ featureId: query.featureId, range: query.range },
+							tenant.orgId,
+						)
+						const response = yield* ensureOk(result)
+						return yield* decodeUpstream(BillingUsage, response)
+					}),
+				)
+				// Invoices ride along on getOrCreateCustomer via `expand`, but through a
+				// dedicated endpoint (not the cached hot-path customer read): the customer
+				// atom is fetched on every page and edge-cached 5 min, while the invoice
+				// list is a settings-only read where an "open" invoice must show promptly.
+				.handle("listInvoices", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const result = yield* callAutumn(
+							"getOrCreateCustomer",
+							{ expand: ["invoices"] },
+							tenant.orgId,
+						)
+						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+						const response = yield* ensureOk(result)
+						return yield* decodeInvoices(response)
+					}),
+				)
+				.handle("attach", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const customerData = yield* resolveCustomerData(auth, tenant)
+						const result = yield* callAutumn(
+							"attach",
+							{ planId: payload.planId },
+							tenant.orgId,
+							customerData,
+						)
+						const response = yield* ensureOk(result)
+						yield* invalidateCustomer(tenant.orgId, result)
+						return yield* decodeUpstream(AttachResult, response)
+					}),
+				)
+				.handle("previewAttach", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const result = yield* callAutumn(
+							"previewAttach",
+							{ planId: payload.planId },
+							tenant.orgId,
+						)
+						const response = yield* ensureOk(result)
+						return yield* decodeUpstream(PreviewAttachResult, response)
+					}),
+				)
+				.handle("openCustomerPortal", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const result = yield* callAutumn(
+							"openCustomerPortal",
+							{ returnUrl: payload.returnUrl },
+							tenant.orgId,
+						)
+						const response = yield* ensureOk(result)
+						yield* invalidateCustomer(tenant.orgId, result)
+						return yield* decodeUpstream(CustomerPortalResult, response)
+					}),
+				)
+		)
 	}),
 )
 
@@ -295,9 +301,7 @@ export const HttpBillingPublicLive = HttpApiBuilder.group(MapleApi, "billingPubl
 				// still serves the catalog, while authed callers get per-customer
 				// `customerEligibility` (autumn marks listPlans' customerId optional).
 				const req = yield* HttpServerRequest.HttpServerRequest
-				const tenant = yield* Effect.option(
-					auth.resolveTenant(req.headers as Record<string, string>),
-				)
+				const tenant = yield* Effect.option(auth.resolveTenant(req.headers as Record<string, string>))
 				const customerId = Option.getOrUndefined(tenant)?.orgId
 				const result = yield* callAutumn("listPlans", {}, customerId)
 				const response = yield* ensureOk(result)

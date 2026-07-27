@@ -360,6 +360,15 @@ describe("v2 telemetry reads over HTTP", () => {
 		expect(serviceMap.status).toBe(200)
 		expect(serviceMap.body.edges[0]).toMatchObject({ source_service: "api", target_service: "payments" })
 
+		const annualWindow = "start_time=2025-07-16T12%3A00%3A00.000Z&end_time=2026-07-15T12%3A00%3A00.000Z"
+		const annualServices = await harness.request("GET", `/v2/services?${annualWindow}`, key.secret)
+		expect(annualServices.status, JSON.stringify(annualServices.body)).toBe(200)
+		expect((await harness.request("GET", `/v2/service_map?${annualWindow}`, key.secret)).status).toBe(200)
+
+		const tooWide = "start_time=2025-07-14T12%3A00%3A00.000Z&end_time=2026-07-15T12%3A00%3A00.000Z"
+		expect((await harness.request("GET", `/v2/services?${tooWide}`, key.secret)).status).toBe(400)
+		expect((await harness.request("GET", `/v2/service_map?${tooWide}`, key.secret)).status).toBe(400)
+
 		await harness.dispose()
 	})
 

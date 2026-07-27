@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type {
-	BillingBalance,
-	BillingCustomer,
-	BillingSubscription,
-	CatalogPlan,
-} from "@maple/domain/http"
+import type { BillingBalance, BillingCustomer, BillingSubscription, CatalogPlan } from "@maple/domain/http"
 import {
 	getFeatureQuotas,
 	getLegacyPlanInfo,

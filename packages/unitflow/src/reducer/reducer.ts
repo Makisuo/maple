@@ -1,15 +1,15 @@
-import * as Cause from "effect/Cause";
-import * as Effect from "effect/Effect";
-import * as Event from "../core/event.js";
-import { ownerScope, Registry } from "../core/registry.js";
-import * as Store from "../core/store.js";
-import type { Command } from "./command.js";
+import * as Cause from "effect/Cause"
+import * as Effect from "effect/Effect"
+import * as Event from "../core/event.js"
+import { ownerScope, Registry } from "../core/registry.js"
+import * as Store from "../core/store.js"
+import type { Command } from "./command.js"
 
 /** What one `update` step returns: the next state and the commands to run. */
-export type Transition<State, Msg, R = never> = readonly [State, ReadonlyArray<Command<Msg, R>>];
+export type Transition<State, Msg, R = never> = readonly [State, ReadonlyArray<Command<Msg, R>>]
 
 /** The pure transition function — the whole of a reducer model's behavior. */
-export type Update<State, Msg, R = never> = (state: State, msg: Msg) => Transition<State, Msg, R>;
+export type Update<State, Msg, R = never> = (state: State, msg: Msg) => Transition<State, Msg, R>
 
 /**
  * A reducer unit: the full `state` store and `dispatch` event a model
@@ -17,15 +17,15 @@ export type Update<State, Msg, R = never> = (state: State, msg: Msg) => Transiti
  * read-only source; `dispatch` in `inputs`/`ui` narrows to a write-only sink.
  */
 export interface Reducer<State, Msg> {
-  readonly state: Store.Store<State>;
-  readonly dispatch: Event.Event<Msg>;
+	readonly state: Store.Store<State>
+	readonly dispatch: Event.Event<Msg>
 }
 
 export interface MakeOptions<State, Msg, R> {
-  readonly initial: State;
-  readonly update: Update<State, Msg, R>;
-  /** Names the `state` store and `dispatch` event for the devtools / logs. */
-  readonly name?: string;
+	readonly initial: State
+	readonly update: Update<State, Msg, R>
+	/** Names the `state` store and `dispatch` event for the devtools / logs. */
+	readonly name?: string
 }
 
 /**
@@ -43,49 +43,49 @@ export interface MakeOptions<State, Msg, R> {
  * models `Store.combine` already serves well.
  */
 export const make = <State, Msg, R = never>(
-  options: MakeOptions<State, Msg, R>,
+	options: MakeOptions<State, Msg, R>,
 ): Effect.Effect<Reducer<State, Msg>, never, R | Registry> =>
-  Effect.gen(function* () {
-    const state = Store.make(
-      options.initial,
-      options.name === undefined ? undefined : { name: options.name },
-    );
-    const dispatch = Event.make<Msg>(
-      options.name === undefined ? undefined : { name: `${options.name}.dispatch` },
-    );
+	Effect.gen(function* () {
+		const state = Store.make(
+			options.initial,
+			options.name === undefined ? undefined : { name: options.name },
+		)
+		const dispatch = Event.make<Msg>(
+			options.name === undefined ? undefined : { name: `${options.name}.dispatch` },
+		)
 
-    // Commands are forked into the owner scope (the model instance's scope
-    // inside a `make`, the registry scope otherwise) so a long-running command
-    // never blocks the next dispatch. `startImmediately` runs a synchronous
-    // command to completion in place, so its follow-up `dispatch` is counted
-    // in the current settle window — the same reason unitflow's own concurrent
-    // handlers fork this way.
-    const scope = yield* ownerScope;
-    const runCommand = (command: Command<Msg, R>): Effect.Effect<void, never, R | Registry> =>
-      Effect.asVoid(
-        Effect.forkIn(
-          Effect.flatMap(command.execute, (message) => Event.emit(dispatch, message)).pipe(
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.void
-                : Effect.logError("Unitflow reducer command terminated unexpectedly", cause),
-            ),
-          ),
-          scope,
-          { startImmediately: true },
-        ),
-      );
+		// Commands are forked into the owner scope (the model instance's scope
+		// inside a `make`, the registry scope otherwise) so a long-running command
+		// never blocks the next dispatch. `startImmediately` runs a synchronous
+		// command to completion in place, so its follow-up `dispatch` is counted
+		// in the current settle window — the same reason unitflow's own concurrent
+		// handlers fork this way.
+		const scope = yield* ownerScope
+		const runCommand = (command: Command<Msg, R>): Effect.Effect<void, never, R | Registry> =>
+			Effect.asVoid(
+				Effect.forkIn(
+					Effect.flatMap(command.execute, (message) => Event.emit(dispatch, message)).pipe(
+						Effect.catchCause((cause) =>
+							Cause.hasInterruptsOnly(cause)
+								? Effect.void
+								: Effect.logError("Unitflow reducer command terminated unexpectedly", cause),
+						),
+					),
+					scope,
+					{ startImmediately: true },
+				),
+			)
 
-    yield* dispatch.pipe(
-      Event.handler((message: Msg) =>
-        Effect.gen(function* () {
-          const current = yield* Store.get(state);
-          const [next, commands] = options.update(current, message);
-          yield* Store.set(state, next);
-          yield* Effect.forEach(commands, runCommand, { discard: true });
-        }),
-      ),
-    );
+		yield* dispatch.pipe(
+			Event.handler((message: Msg) =>
+				Effect.gen(function* () {
+					const current = yield* Store.get(state)
+					const [next, commands] = options.update(current, message)
+					yield* Store.set(state, next)
+					yield* Effect.forEach(commands, runCommand, { discard: true })
+				}),
+			),
+		)
 
-    return { state, dispatch };
-  });
+		return { state, dispatch }
+	})

@@ -15,6 +15,7 @@ import { Logs, LogsAggregatesHourly } from "../tables"
 import { finalizeTimeseries } from "./series-cap"
 import type { AttributeFilter } from "../../query-engine"
 import { buildAttrFilterCondition } from "../../traces-shared"
+import type { AttributeIndexMode, LogBodySearchMode } from "../../capabilities"
 
 // ---------------------------------------------------------------------------
 // Shared options
@@ -35,15 +36,56 @@ interface LogsQueryOpts {
 		deploymentEnv?: "contains"
 		serviceNamespace?: "contains"
 	}
+	attributeIndexMode?: AttributeIndexMode
+	bodySearchMode?: LogBodySearchMode
 }
 
 function logAttributeConditions(opts: LogsQueryOpts): CH.Condition[] {
 	return [
-		...(opts.attributeFilters ?? []).map((filter) => buildAttrFilterCondition(filter, "LogAttributes")),
+		...(opts.attributeFilters ?? []).map((filter) =>
+			buildAttrFilterCondition(filter, "LogAttributes", opts.attributeIndexMode),
+		),
 		...(opts.resourceAttributeFilters ?? []).map((filter) =>
-			buildAttrFilterCondition(filter, "ResourceAttributes"),
+			buildAttrFilterCondition(filter, "ResourceAttributes", opts.attributeIndexMode),
 		),
 	]
+}
+
+/**
+ * Adds an index-readable necessary condition ahead of the exact historical
+ * `ILIKE` predicate. The confirmation predicate preserves substring semantics;
+ * single-token searches stay scan-only because token indexes cannot safely
+ * accelerate partial-word matches without introducing false negatives.
+ */
+function logBodySearchCondition(body: CH.Expr<string>, opts: LogsQueryOpts): CH.Condition | undefined {
+	const search = opts.search
+	if (!search) return undefined
+
+	const exact = body.ilike(`%${search}%`)
+	if ((opts.bodySearchMode ?? "scan") === "scan") return exact
+
+	// Matches ClickHouse HasTokenImpl: split on ASCII punctuation/whitespace,
+	// while keeping non-ASCII letters intact.
+	const tokens = search
+		.toLowerCase()
+		.split(/[ -/:-@[-`{-~\t\n\r]+/)
+		.filter((token) => token.length > 0)
+	if (tokens.length < 2) return exact
+
+	const normalizedBody = CH.lower_(body)
+	if (opts.bodySearchMode === "text") {
+		// Keep headroom below ClickHouse's 64-token limit (HyperDX uses 50).
+		const batches: CH.Condition[] = []
+		for (let offset = 0; offset < tokens.length; offset += 50) {
+			batches.push(CH.hasAllTokens(normalizedBody, tokens.slice(offset, offset + 50).join(" ")))
+		}
+		return batches.reduce((condition, next) => condition.and(next)).and(exact)
+	}
+
+	return tokens
+		.map((token) => CH.hasToken(normalizedBody, token))
+		.reduce((condition, next) => condition.and(next))
+		.and(exact)
 }
 
 /** Stable identity for log records that do not carry a native OTel record ID. */
@@ -261,7 +303,7 @@ export function logsTimeseriesQuery(opts: LogsTimeseriesOpts): CHQuery<ColumnDef
 			opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 			CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
-			CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
+			logBodySearchCondition($.Body, opts),
 			environmentCondition($, opts),
 			namespaceCondition($, opts),
 			...logAttributeConditions(opts),
@@ -333,7 +375,7 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 				opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 				CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 				CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
-				CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
+				logBodySearchCondition($.Body, opts),
 				environmentCondition($, opts),
 				namespaceCondition($, opts),
 				...logAttributeConditions(opts),
@@ -359,7 +401,7 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 			opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 			CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
-			CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
+			logBodySearchCondition($.Body, opts),
 			environmentCondition($, opts),
 			namespaceCondition($, opts),
 			...logAttributeConditions(opts),
@@ -416,7 +458,7 @@ export function logsCountQuery(opts: LogsQueryOpts): CHQuery<ColumnDefs, LogsCou
 				opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 				CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 				CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
-				CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
+				logBodySearchCondition($.Body, opts),
 				environmentCondition($, opts),
 				namespaceCondition($, opts),
 				...logAttributeConditions(opts),
@@ -541,7 +583,7 @@ export function logsListQuery(opts: LogsListOpts) {
 					),
 				)
 			: undefined,
-		CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
+		logBodySearchCondition($.Body, opts),
 		environmentCondition($, opts),
 		namespaceCondition($, opts),
 		...logAttributeConditions(opts),

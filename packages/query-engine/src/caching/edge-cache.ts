@@ -1,4 +1,4 @@
-import { Clock, Config, Context, Deferred, Effect, Layer, Option, Schema } from "effect"
+import { Clock, Config, Context, Effect, Layer, Option, Schema } from "effect"
 import { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 
 export { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
@@ -37,10 +37,6 @@ export interface EdgeCacheGetOrComputeOptions<A = unknown, I = unknown> {
 export interface EdgeCacheResult<A> {
 	readonly value: A
 	readonly hit: boolean
-}
-
-interface DeferredAwaiter<A = unknown, E = unknown> {
-	readonly await: Effect.Effect<A, E>
 }
 
 export interface EdgeCacheInvalidateOptions {
@@ -122,42 +118,28 @@ export const makeEdgeCacheService = (
 			if (timer !== undefined) clearTimeout(timer)
 		})
 	}
-	// Heterogeneous in-flight map keyed by bucket+hash; each entry stores a
-	// pre-typed awaiter Effect so callers never need to cast Deferred<any, any>.
-	const inFlight = new Map<string, DeferredAwaiter<any, any>>()
-
 	const getOrCompute = Effect.fn("EdgeCacheService.getOrCompute")(function* <A, E, R, I = unknown>(
 		options: EdgeCacheGetOrComputeOptions<A, I>,
 		compute: Effect.Effect<A, E, R>,
 	) {
 		const hash = yield* Effect.promise(() => sha256Hex(options.key))
-		const composite = `${options.bucket}:${hash}`
 		yield* Effect.annotateCurrentSpan({
 			"cache.bucket": options.bucket,
+			"cache.backend": backend.name,
 			"cache.hit": false,
+			"cache.outcome": "pending",
 			"cache.read_ms": 0,
 			"cache.read_status": "pending",
 			"cache.read_timed_out": false,
 		})
 
-		const existing = inFlight.get(composite)
-		if (existing) {
-			const value = (yield* existing.await) as A
-			yield* Effect.annotateCurrentSpan({
-				"cache.hit": true,
-				"cache.dedup.waited": true,
-				"cache.read_status": "deduplicated",
-			})
-			return { value, hit: true }
-		}
-
-		const deferred = yield* Deferred.make<A, E>()
-		const awaiter = {
-			await: Deferred.await(deferred),
-		}
-		inFlight.set(composite, awaiter)
-
-		const writeAndPublish = Effect.fnUntraced(function* (value: A) {
+		// Do not share an in-flight Effect, Deferred, or Promise here. This
+		// service lives for the Worker isolate, while Cloudflare I/O objects are
+		// owned by the request that created them. A follower request awaiting a
+		// leader's effect can fail with "Cannot perform I/O on behalf of a
+		// different request". Independent cold misses are safe; later calls still
+		// converge through the cache backend.
+		const writeValue = Effect.fnUntraced(function* (value: A) {
 			const stored: unknown = options.schema
 				? yield* Schema.encodeUnknownEffect(options.schema)(value).pipe(Effect.orDie)
 				: value
@@ -180,7 +162,6 @@ export const makeEdgeCacheService = (
 				),
 				Effect.ignore,
 			)
-			yield* Deferred.succeed(deferred, value)
 		})
 
 		const body = Effect.gen(function* () {
@@ -225,32 +206,23 @@ export const makeEdgeCacheService = (
 						Effect.option,
 					)
 					if (Option.isSome(decoded)) {
-						yield* Deferred.succeed(deferred, decoded.value)
-						yield* Effect.annotateCurrentSpan("cache.hit", true)
+						yield* Effect.annotateCurrentSpan({ "cache.hit": true, "cache.outcome": "hit" })
 						return { value: decoded.value, hit: true }
 					}
 					// Fall through to recompute on decode failure (poisoned/stale entry).
 					yield* Effect.annotateCurrentSpan("cache.read_status", "decode_miss")
 				} else {
 					const value = read.value as A
-					yield* Deferred.succeed(deferred, value)
-					yield* Effect.annotateCurrentSpan("cache.hit", true)
+					yield* Effect.annotateCurrentSpan({ "cache.hit": true, "cache.outcome": "hit" })
 					return { value, hit: true }
 				}
 			}
 
 			const value = yield* compute
-			yield* writeAndPublish(value)
+			yield* writeValue(value)
+			yield* Effect.annotateCurrentSpan("cache.outcome", "miss")
 			return { value, hit: false }
-		}).pipe(
-			Effect.tapError((error) => Deferred.fail(deferred, error)),
-			Effect.onInterrupt(() => Deferred.interrupt(deferred)),
-			Effect.ensuring(
-				Effect.sync(() => {
-					if (inFlight.get(composite) === awaiter) inFlight.delete(composite)
-				}),
-			),
-		)
+		})
 
 		return yield* body
 	})
@@ -259,14 +231,6 @@ export const makeEdgeCacheService = (
 		options: EdgeCacheInvalidateOptions,
 	) {
 		const hash = yield* Effect.promise(() => sha256Hex(options.key))
-		// Drop any in-flight single-flight awaiter so NEW callers don't join an
-		// in-progress compute and get handed the value we're evicting. This does
-		// NOT stop a compute already past its get/inFlight check: its backend.put
-		// can still land after the backend.delete below and re-publish the evicted
-		// value, stale until the TTL (the next read then recomputes). Acceptable as
-		// best-effort display/gating state; closing the window fully would need an
-		// invalidation epoch, which is overkill for a 5-min-TTL hot-path cache.
-		inFlight.delete(`${options.bucket}:${hash}`)
 		yield* Effect.tryPromise({
 			try: () => backend.delete(options.bucket, hash),
 			catch: (error) => error,

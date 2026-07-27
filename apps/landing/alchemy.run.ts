@@ -13,9 +13,16 @@ import {
 export interface CreateLandingWorkerOptions {
 	stage: MapleStage
 	domains: MapleDomains
+	logsDestination?: Cloudflare.Workers.ObservabilityDestination
+	tracesDestination?: Cloudflare.Workers.ObservabilityDestination
 }
 
-export const createLandingWorker = ({ stage, domains }: CreateLandingWorkerOptions) =>
+export const createLandingWorker = ({
+	stage,
+	domains,
+	logsDestination,
+	tracesDestination,
+}: CreateLandingWorkerOptions) =>
 	Effect.gen(function* () {
 		// Astro static build (memoized on the app's source files, skipped on destroy).
 		const build = yield* Command.Build("landing-build", {
@@ -31,6 +38,18 @@ export const createLandingWorker = ({ stage, domains }: CreateLandingWorkerOptio
 			assets: { directory: build.outdir, hash: Output.map(build.hash, (h) => h.output ?? "") },
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
+			observability: {
+				enabled: true,
+				logs: {
+					enabled: true,
+					invocationLogs: true,
+					destinations: [logsDestination?.slug ?? "maple"],
+				},
+				traces: {
+					enabled: true,
+					destinations: [tracesDestination?.slug ?? "maple"],
+				},
+			},
 			url: true,
 			domain: domains.landing,
 		})

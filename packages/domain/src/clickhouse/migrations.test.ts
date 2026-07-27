@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./migrations"
 
 describe("clickHouseSchemaVersion", () => {
-	it("is the latest migration version as a string", () => {
+	it("is the latest ingest-required migration version as a string", () => {
 		const max = migrations.reduce((acc, m) => Math.max(acc, m.version), 0)
+		const ingestRequiredMax = migrations.reduce(
+			(acc, migration) =>
+				migration.requiredForIngest === false ? acc : Math.max(acc, migration.version),
+			0,
+		)
 		expect(latestMigrationVersion).toBe(max)
-		expect(clickHouseSchemaVersion).toBe(String(max))
+		expect(clickHouseSchemaVersion).toBe(String(ingestRequiredMax))
+		expect(Number(clickHouseSchemaVersion)).toBeLessThanOrEqual(latestMigrationVersion)
 	})
 
 	it("is decoupled from the Tinybird-coupled project revision (not a 64-char hash)", () => {

@@ -1,0 +1,24 @@
+---
+/**
+ * The log-volume artifact — a stacked severity histogram over 60 five-minute
+ * buckets, on the shared `--severity-*` tokens.
+ *
+ * Thin Astro wrapper for the same reason as TraceExplorer: a `client:*`
+ * directive needs a static import at the call site, which a component resolved
+ * from the artifact map does not have.
+ */
+import LiveLogsVolumeChart from "../../live/LiveLogsVolumeChart";
+---
+
+<div class="live-frame">
+	<div class="live-frame__head">
+		<span>/logs</span>
+		<span class="live-frame__live">
+			<span class="live-frame__live-dot"></span>
+			live
+		</span>
+	</div>
+	<div class="p-4">
+		<LiveLogsVolumeChart client:visible />
+	</div>
+</div>

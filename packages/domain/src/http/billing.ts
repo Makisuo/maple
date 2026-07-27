@@ -20,12 +20,12 @@ export class BillingBalance extends Schema.Class<BillingBalance>("BillingBalance
 	overageAllowed: Schema.optionalKey(Schema.Boolean),
 }) {}
 
-export class BillingSubscriptionPlan extends Schema.Class<BillingSubscriptionPlan>(
-	"BillingSubscriptionPlan",
-)({
-	name: Schema.optionalKey(Schema.NullOr(Schema.String)),
-	archived: Schema.optionalKey(Schema.Boolean),
-}) {}
+export class BillingSubscriptionPlan extends Schema.Class<BillingSubscriptionPlan>("BillingSubscriptionPlan")(
+	{
+		name: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		archived: Schema.optionalKey(Schema.Boolean),
+	},
+) {}
 
 export class BillingSubscription extends Schema.Class<BillingSubscription>("BillingSubscription")({
 	planId: Schema.String,
@@ -75,9 +75,7 @@ export class CatalogPlanPrice extends Schema.Class<CatalogPlanPrice>("CatalogPla
 	interval: Schema.optionalKey(Schema.NullOr(Schema.String)),
 }) {}
 
-export class CatalogPlanEligibility extends Schema.Class<CatalogPlanEligibility>(
-	"CatalogPlanEligibility",
-)({
+export class CatalogPlanEligibility extends Schema.Class<CatalogPlanEligibility>("CatalogPlanEligibility")({
 	status: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	attachAction: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	trialAvailable: Schema.optionalKey(Schema.Boolean),
@@ -120,11 +118,11 @@ export class BillingInvoice extends Schema.Class<BillingInvoice>("BillingInvoice
 	hostedInvoiceUrl: Schema.optionalKey(Schema.NullOr(Schema.String)),
 }) {}
 
-export class BillingInvoicesResponse extends Schema.Class<BillingInvoicesResponse>(
-	"BillingInvoicesResponse",
-)({
-	invoices: Schema.Array(BillingInvoice),
-}) {}
+export class BillingInvoicesResponse extends Schema.Class<BillingInvoicesResponse>("BillingInvoicesResponse")(
+	{
+		invoices: Schema.Array(BillingInvoice),
+	},
+) {}
 
 // ---- Usage (aggregateEvents) ----
 

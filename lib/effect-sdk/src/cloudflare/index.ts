@@ -41,12 +41,13 @@ import {
 	type SignalState,
 } from "../shared/flush-core.js"
 import { type LogBuffer, makeLogBuffer } from "../shared/flushable-logger.js"
+import { makeMetricBuffer } from "../shared/flushable-metrics.js"
 import { makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
 import { resolveResourceFromEnv } from "../server/resource.js"
 
 export interface Config {
 	/**
-	 * Service name reported in traces and logs. Defaults to `env.OTEL_SERVICE_NAME`,
+	 * Service name reported in traces, logs, and metrics. Defaults to `env.OTEL_SERVICE_NAME`,
 	 * then `"unknown"`.
 	 */
 	readonly serviceName?: string | undefined
@@ -97,6 +98,8 @@ export interface Config {
 	readonly tracesPath?: string | undefined
 	/** OTLP logs path appended to `endpoint`. Default `/v1/logs`. */
 	readonly logsPath?: string | undefined
+	/** OTLP metrics path appended to `endpoint`. Default `/v1/metrics`. */
+	readonly metricsPath?: string | undefined
 }
 
 export interface Telemetry {
@@ -126,6 +129,7 @@ const resolveOnce = (env: Record<string, unknown>, config: Config): Resolved => 
 	return buildResolved(r, {
 		tracesPath: config.tracesPath,
 		logsPath: config.logsPath,
+		metricsPath: config.metricsPath,
 		userAgent: "maple-effect-sdk-cloudflare/0.0.0",
 	})
 }
@@ -147,13 +151,15 @@ export const make = (config: Config = {}): Telemetry => {
 		anticipatedErrorIdentifiers: anticipatedIdentifiers,
 	})
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
+	const metrics = makeMetricBuffer()
 
 	let resolved: Resolved | undefined = undefined
 	let noOpLogged = false
 	const tracesState: SignalState = { disabledUntil: 0 }
 	const logsState: SignalState = { disabledUntil: 0 }
+	const metricsState: SignalState = { disabledUntil: 0 }
 
-	const layer = Layer.mergeAll(spans.tracerLayer, logs.loggerLayer)
+	const layer = Layer.mergeAll(spans.tracerLayer, logs.loggerLayer, metrics.layer)
 
 	const flush = makeSerializedFlush(async (env: Record<string, unknown>): Promise<void> => {
 		if (resolved === undefined) {
@@ -164,8 +170,10 @@ export const make = (config: Config = {}): Telemetry => {
 			resolved,
 			spans,
 			logs,
+			metrics,
 			tracesState,
 			logsState,
+			metricsState,
 			transport: fetchTransport,
 			logPrefix: "[MapleCloudflareSDK]",
 			onNoOp: () => {

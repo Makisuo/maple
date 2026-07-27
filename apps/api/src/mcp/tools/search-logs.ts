@@ -67,10 +67,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 				Effect.mapError(toMcpQueryError("search_logs")),
 			)
 
-			yield* Effect.annotateCurrentSpan({
-				resultCount: result.logs.length,
-				"result.count": result.logs.length,
-			})
+			yield* Effect.annotateCurrentSpan("result.rowCount", result.logs.length)
 
 			if (result.logs.length === 0) {
 				return { content: [{ type: "text", text: `No logs found matching filters (${st} — ${et})` }] }

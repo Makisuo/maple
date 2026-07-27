@@ -102,12 +102,13 @@ export function useLocalServiceOperationsTimeseries(
 		placeholderData: keepPreviousData,
 		queryFn: async (): Promise<ReadonlyArray<OperationSeriesPoint>> => {
 			const { startTime, endTime } = boundsForRange(range)
+			const bucketSeconds = bucketSecondsForRange(range)
 			const rows = await executeLocalCompiledQuery(
-				CH.compile(CH.serviceOperationsTimeseriesQuery({ serviceName, spanNames }), {
+				CH.compile(CH.serviceOperationsTimeseriesQuery({ serviceName, spanNames, bucketSeconds }), {
 					orgId: LOCAL_ORG_ID,
 					startTime,
 					endTime,
-					bucketSeconds: bucketSecondsForRange(range),
+					bucketSeconds,
 				}),
 			)
 			return rows.map((r) => ({ bucket: r.bucket, spanName: r.spanName, count: Number(r.count) }))

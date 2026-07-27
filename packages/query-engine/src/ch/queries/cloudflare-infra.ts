@@ -16,14 +16,15 @@
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import {
-	from,
-	param,
-	type ColumnAccessor,
-	type CompiledQueryRowSchema,
-} from "@maple-dev/clickhouse-builder"
+import { from, param, type ColumnAccessor, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { CHNumber } from "../schema"
 import { MetricsGauge, MetricsSum } from "../tables"
+import {
+	CF_FILTERABLE,
+	CF_METRIC,
+	cloudflareFilterConditions,
+	type CloudflareFilterOpts,
+} from "./cloudflare-infra-filters"
 
 const ISO_Z_FORMAT = "%Y-%m-%dT%H:%i:%S.%fZ"
 
@@ -157,8 +158,15 @@ const zoneCounterColumns = ($: ColumnAccessor<typeof MetricsSum.columns>) => ({
 	visits: CH.sumIf($.Value, $.MetricName.eq("cloudflare.http.visits")),
 })
 
+/**
+ * Filters applicable to the main HTTP cube (`host`, `cacheStatus`, `statusClass`). All three
+ * counter metrics share the same attribute set, so one row of {@link CF_FILTERABLE} covers them.
+ */
+const httpCubeFilters = ($: ColumnAccessor<typeof MetricsSum.columns>, opts: CloudflareFilterOpts) =>
+	cloudflareFilterConditions($, opts, CF_FILTERABLE[CF_METRIC.requests] ?? [])
+
 /** Counter rollup over `metrics_sum`, one row per zone pseudo-service. */
-export function cloudflareZoneCountersSQL() {
+export function cloudflareZoneCountersSQL(opts: CloudflareFilterOpts = {}) {
 	return from(MetricsSum)
 		.select(($) => ({
 			serviceName: $.ServiceName,
@@ -169,6 +177,7 @@ export function cloudflareZoneCountersSQL() {
 			$.MetricName.in_(...ZONE_COUNTER_METRIC_NAMES),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
+			...httpCubeFilters($, opts),
 		])
 		.groupBy("serviceName")
 		.orderBy(["requests", "desc"])
@@ -181,6 +190,10 @@ export function cloudflareZoneCountersSQL() {
  * Percentiles are pre-computed gauges (one row per `quantile`); averaging them
  * across 5-min buckets is approximate but matches the Cloudflare dashboard
  * template's own treatment and is fine for a zone-level KPI.
+ *
+ * Deliberately takes no filters: these rows carry only `quantile`, because
+ * per-(host, status) percentiles cannot be honestly re-aggregated. Callers
+ * report this back as `ignoredFilters` so the panel can label itself zone-wide.
  */
 export function cloudflareZoneLatencySQL() {
 	const quantileAvg =
@@ -208,7 +221,7 @@ export function cloudflareZoneLatencySQL() {
 }
 
 /** Bucketed counter timeseries over `metrics_sum`, one row per zone × bucket. */
-export function cloudflareZoneTimeseriesSQL() {
+export function cloudflareZoneTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 	return from(MetricsSum)
 		.select(($) => ({
 			serviceName: $.ServiceName,
@@ -223,6 +236,7 @@ export function cloudflareZoneTimeseriesSQL() {
 			$.MetricName.in_(...ZONE_COUNTER_METRIC_NAMES),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
+			...httpCubeFilters($, opts),
 		])
 		.groupBy("serviceName", "bucket")
 		.orderBy(["serviceName", "asc"], ["bucket", "asc"])
@@ -291,7 +305,7 @@ export const cloudflareZoneLatencyTimeseriesRowSchema: CompiledQueryRowSchema<Cl
 	})
 
 /** Bucketed request counts by HTTP status class for one zone pseudo-service. */
-export function cloudflareZoneStatusTimeseriesSQL() {
+export function cloudflareZoneStatusTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 	return from(MetricsSum)
 		.select(($) => ({
 			bucket: CH.formatDateTime(
@@ -307,6 +321,7 @@ export function cloudflareZoneStatusTimeseriesSQL() {
 			$.MetricName.eq("cloudflare.http.requests"),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
+			...httpCubeFilters($, opts),
 		])
 		.groupBy("bucket", "statusClass")
 		.orderBy(["bucket", "asc"], ["statusClass", "asc"])
@@ -314,7 +329,7 @@ export function cloudflareZoneStatusTimeseriesSQL() {
 }
 
 /** Bucketed request counts by raw Cloudflare cache status for one zone pseudo-service. */
-export function cloudflareZoneCacheTimeseriesSQL() {
+export function cloudflareZoneCacheTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 	return from(MetricsSum)
 		.select(($) => ({
 			bucket: CH.formatDateTime(
@@ -330,6 +345,7 @@ export function cloudflareZoneCacheTimeseriesSQL() {
 			$.MetricName.eq("cloudflare.http.requests"),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
+			...httpCubeFilters($, opts),
 		])
 		.groupBy("bucket", "cacheStatus")
 		.orderBy(["bucket", "asc"], ["cacheStatus", "asc"])
@@ -339,7 +355,8 @@ export function cloudflareZoneCacheTimeseriesSQL() {
 /**
  * Bucketed latency percentiles for one zone pseudo-service. Plan-dependent:
  * zones without quantiles return zero rows, and the detail page hides the
- * latency panel entirely.
+ * latency panel entirely. Unfiltered for the same reason as
+ * {@link cloudflareZoneLatencySQL}.
  */
 export function cloudflareZoneLatencyTimeseriesSQL() {
 	const quantileAvg =

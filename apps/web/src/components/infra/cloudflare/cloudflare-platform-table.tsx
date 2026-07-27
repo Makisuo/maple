@@ -3,14 +3,14 @@
 // counters on their implementing Worker). The whole section hides itself for
 // accounts without either dataset — most orgs never see it.
 
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import type { CloudflareDurableObjectRow, CloudflareQueueRow } from "@/api/warehouse/cloudflare-infra"
 import { cloudflarePlatformResourcesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatNumber } from "@/lib/format"
 import { ColumnHead, TableShell, useTableSort } from "../primitives/data-table"
-import { formatPercent } from "../format"
+import { formatBytes, formatPercent } from "../format"
 import { errorRateClass } from "./constants"
-import { formatBytes } from "./format"
 
 const ROW_CLASS =
 	"flex items-center gap-4 border-b border-border/40 px-4 py-3 last:border-0 hover:bg-muted/40"
@@ -66,7 +66,12 @@ function QueueTable({ queues, waiting }: { queues: ReadonlyArray<CloudflareQueue
 						align="right"
 						width="w-[110px]"
 					/>
-					<ColumnHead label="Backlog size" align="right" width="w-[110px]" hidden="hidden md:flex" />
+					<ColumnHead
+						label="Backlog size"
+						align="right"
+						width="w-[110px]"
+						hidden="hidden md:flex"
+					/>
 					<ColumnHead<QueueSortKey>
 						label="Consumers"
 						sortKey="consumerConcurrency"
@@ -161,14 +166,12 @@ function DurableObjectTable({
 	)
 }
 
-export function CloudflarePlatformSection({
-	startTime,
-	endTime,
-}: {
-	startTime: string
-	endTime: string
-}) {
-	const result = useAtomValue(cloudflarePlatformResourcesResultAtom({ data: { startTime, endTime } }))
+export function CloudflarePlatformSection({ startTime, endTime }: { startTime: string; endTime: string }) {
+	// Retained: this section hides itself on an empty result, so a bare read made it vanish and
+	// return on every page refresh.
+	const result = useRetainedRefreshableResultValue(
+		cloudflarePlatformResourcesResultAtom({ data: { startTime, endTime } }),
+	)
 
 	return Result.builder(result)
 		.onSuccess((data, r) => {

@@ -332,6 +332,26 @@ describe("tracesTimeseriesQuery", () => {
 		expect(sql).not.toContain("ParentSpanId")
 	})
 
+	it("routes annual all-metric service charts through raw partial hours and hourly interiors", () => {
+		const q = tracesTimeseriesQuery({
+			metric: "count",
+			needsSampling: true,
+			allMetrics: true,
+			rootOnly: true,
+			bucketSeconds: 3600,
+			serviceName: "api",
+			environments: ["production"],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).toContain("FROM service_overview_hourly")
+		expect(sql).toContain("UNION ALL")
+		expect(sql).toContain("Timestamp < if(toDateTime('2024-01-01 00:00:00')")
+		expect(sql).toContain("Hour < toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
+		expect(sql).toContain("sum(bEstimatedSpanCount) AS estimatedSpanCount")
+		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles)")
+	})
+
 	it("routes default (no filters) to service_overview_spans_mv", () => {
 		const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false })
 		const { sql } = compileCH(q, baseParams)

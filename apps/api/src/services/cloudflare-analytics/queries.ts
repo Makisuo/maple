@@ -9,6 +9,8 @@
 import { Schema } from "effect"
 
 export const HTTP_DATASET = "http_requests"
+export const HTTP_PATHS_DATASET = "http_paths"
+export const HTTP_DIMENSIONS_DATASET = "http_dimensions"
 export const WORKERS_DATASET = "workers_invocations"
 export const FIREWALL_DATASET = "firewall_events"
 export const DNS_DATASET = "dns_queries"
@@ -239,6 +241,123 @@ const HttpZoneNode = Schema.Struct({
 export const decodeHttpZoneNode = Schema.decodeUnknownEffect(HttpZoneNode)
 
 // ---------------------------------------------------------------------------
+// HTTP path breakdown (zone-scoped httpRequestsAdaptiveGroups, own dataset)
+// ---------------------------------------------------------------------------
+
+/**
+ * Request paths for one zone, as their own selection pair rather than extra dimensions on
+ * `httpSelection`'s `groups`. Two reasons, both load-bearing:
+ * - `GROUP_LIMIT` is per selection. The main cube (bucket × cacheStatus × status × host) already
+ *   runs 1-3k groups; multiplying it by path would truncate the whole HTTP cube, not just paths.
+ * - Errors get a twin selection instead of an `edgeResponseStatus` dimension, mirroring
+ *   {@link topTrafficQuery}: dimensioning by status would cost 12 × 50 × ~15 groups, and the
+ *   5xx slice is the only status split this panel needs.
+ *
+ * Path cardinality is unbounded, so the mapping layer folds everything past `MAX_HTTP_PATHS` into
+ * "other" — `orderBy count_DESC` keeps any GROUP_LIMIT truncation at the noise floor.
+ */
+export const httpPathsSelection = (_options: { readonly withQuantiles: boolean }): string =>
+	`      paths: httpRequestsAdaptiveGroups(
+        limit: ${GROUP_LIMIT}
+        filter: { datetime_geq: $start, datetime_lt: $end, requestSource: "eyeball" }
+        orderBy: [count_DESC]
+      ) {
+        count
+        avg { sampleInterval }
+        sum { edgeResponseBytes }
+        dimensions { datetimeFiveMinutes clientRequestPath }
+      }
+      pathErrors: httpRequestsAdaptiveGroups(
+        limit: ${GROUP_LIMIT}
+        filter: { datetime_geq: $start, datetime_lt: $end, requestSource: "eyeball", edgeResponseStatus_geq: 500 }
+        orderBy: [count_DESC]
+      ) {
+        count
+        avg { sampleInterval }
+        dimensions { datetimeFiveMinutes clientRequestPath }
+      }`
+
+const HttpPathGroup = Schema.Struct({
+	count: Schema.Number,
+	avg: nullable(Schema.Struct({ sampleInterval: nullableNumber })),
+	sum: nullable(Schema.Struct({ edgeResponseBytes: nullableNumber })),
+	dimensions: Schema.Struct({
+		datetimeFiveMinutes: Schema.String,
+		clientRequestPath: nullableString,
+	}),
+})
+export type HttpPathGroupShape = typeof HttpPathGroup.Type
+
+const HttpPathsZoneNode = Schema.Struct({
+	paths: nullable(Schema.Array(HttpPathGroup)),
+	pathErrors: nullable(Schema.Array(HttpPathGroup)),
+})
+
+export const decodeHttpPathsZoneNode = Schema.decodeUnknownEffect(HttpPathsZoneNode)
+
+// ---------------------------------------------------------------------------
+// HTTP client/geo breakdown (zone-scoped httpRequestsAdaptiveGroups, own dataset)
+// ---------------------------------------------------------------------------
+
+/**
+ * Two more single-purpose selections over the same dataset:
+ * - `countryAgg`: one bounded, high-value dimension on its own (~250 values). Kept separate from
+ *   `clientAgg` because country × method × protocol × device would be ~30k combinations.
+ * - `clientAgg`: three *bounded* dimensions together (~8 × 3 × 5), which makes them mutually
+ *   filterable ("HTTP/1.1 POSTs from mobile") for roughly the cost of one.
+ */
+export const httpDimensionsSelection = (_options: { readonly withQuantiles: boolean }): string =>
+	`      countryAgg: httpRequestsAdaptiveGroups(
+        limit: ${GROUP_LIMIT}
+        filter: { datetime_geq: $start, datetime_lt: $end, requestSource: "eyeball" }
+        orderBy: [count_DESC]
+      ) {
+        count
+        avg { sampleInterval }
+        sum { edgeResponseBytes }
+        dimensions { datetimeFiveMinutes clientCountryName }
+      }
+      clientAgg: httpRequestsAdaptiveGroups(
+        limit: ${GROUP_LIMIT}
+        filter: { datetime_geq: $start, datetime_lt: $end, requestSource: "eyeball" }
+        orderBy: [count_DESC]
+      ) {
+        count
+        avg { sampleInterval }
+        dimensions { datetimeFiveMinutes clientRequestHTTPMethodName clientRequestHTTPProtocol clientDeviceType }
+      }`
+
+const HttpCountryGroup = Schema.Struct({
+	count: Schema.Number,
+	avg: nullable(Schema.Struct({ sampleInterval: nullableNumber })),
+	sum: nullable(Schema.Struct({ edgeResponseBytes: nullableNumber })),
+	dimensions: Schema.Struct({
+		datetimeFiveMinutes: Schema.String,
+		clientCountryName: nullableString,
+	}),
+})
+export type HttpCountryGroupShape = typeof HttpCountryGroup.Type
+
+const HttpClientGroup = Schema.Struct({
+	count: Schema.Number,
+	avg: nullable(Schema.Struct({ sampleInterval: nullableNumber })),
+	dimensions: Schema.Struct({
+		datetimeFiveMinutes: Schema.String,
+		clientRequestHTTPMethodName: nullableString,
+		clientRequestHTTPProtocol: nullableString,
+		clientDeviceType: nullableString,
+	}),
+})
+export type HttpClientGroupShape = typeof HttpClientGroup.Type
+
+const HttpDimensionsZoneNode = Schema.Struct({
+	countryAgg: nullable(Schema.Array(HttpCountryGroup)),
+	clientAgg: nullable(Schema.Array(HttpClientGroup)),
+})
+
+export const decodeHttpDimensionsZoneNode = Schema.decodeUnknownEffect(HttpDimensionsZoneNode)
+
+// ---------------------------------------------------------------------------
 // Firewall/WAF events (zone-scoped firewallEventsAdaptiveGroups)
 // ---------------------------------------------------------------------------
 
@@ -354,7 +473,9 @@ const QueueConsumersGroup = Schema.Struct({
 })
 export type QueueConsumersGroupShape = typeof QueueConsumersGroup.Type
 
-const QueueConsumersAccountNode = Schema.Struct({ queueConsumers: nullable(Schema.Array(QueueConsumersGroup)) })
+const QueueConsumersAccountNode = Schema.Struct({
+	queueConsumers: nullable(Schema.Array(QueueConsumersGroup)),
+})
 export const decodeQueueConsumersAccountNode = Schema.decodeUnknownEffect(QueueConsumersAccountNode)
 
 // ---------------------------------------------------------------------------
@@ -386,7 +507,9 @@ const DurableObjectsGroup = Schema.Struct({
 })
 export type DurableObjectsGroupShape = typeof DurableObjectsGroup.Type
 
-const DurableObjectsAccountNode = Schema.Struct({ durableObjects: nullable(Schema.Array(DurableObjectsGroup)) })
+const DurableObjectsAccountNode = Schema.Struct({
+	durableObjects: nullable(Schema.Array(DurableObjectsGroup)),
+})
 export const decodeDurableObjectsAccountNode = Schema.decodeUnknownEffect(DurableObjectsAccountNode)
 
 // ---------------------------------------------------------------------------
@@ -451,18 +574,71 @@ export const decodeWorkersAccountNode = Schema.decodeUnknownEffect(WorkersAccoun
  * argument takes a literal, and keeping the document variable-free apart from the window
  * makes the two selections symmetric.
  */
+export interface TopTrafficFilter {
+	/** Substring match on the request path — the long-tail search the stored top-N can't answer. */
+	readonly contains?: string
+	readonly hosts?: ReadonlyArray<string>
+	readonly countries?: ReadonlyArray<string>
+	readonly methods?: ReadonlyArray<string>
+	readonly cacheStatuses?: ReadonlyArray<string>
+}
+
+/**
+ * Closed allowlist: `[graphql filter key, variable name, variable type, reader]`.
+ *
+ * Filter *keys* are ours and are rendered into the document text; user *values* only ever travel
+ * as GraphQL variables. Nothing from the request reaches the document string.
+ */
+const TOP_TRAFFIC_FILTERS = [
+	[
+		"clientRequestPath_like",
+		"pathLike",
+		"string",
+		(f: TopTrafficFilter) => (f.contains ? `%${f.contains}%` : undefined),
+	],
+	["clientRequestHTTPHost_in", "hosts", "[string!]", (f: TopTrafficFilter) => nonEmpty(f.hosts)],
+	["clientCountryName_in", "countries", "[string!]", (f: TopTrafficFilter) => nonEmpty(f.countries)],
+	[
+		"clientRequestHTTPMethodName_in",
+		"methods",
+		"[string!]",
+		(f: TopTrafficFilter) => nonEmpty(f.methods),
+	],
+	["cacheStatus_in", "cacheStatuses", "[string!]", (f: TopTrafficFilter) => nonEmpty(f.cacheStatuses)],
+] as const
+
+const nonEmpty = (values: ReadonlyArray<string> | undefined): ReadonlyArray<string> | undefined =>
+	values !== undefined && values.length > 0 ? values : undefined
+
+/** Variables for the filters actually present — Cloudflare rejects explicit nulls inconsistently. */
+export const topTrafficFilterVariables = (
+	filter: TopTrafficFilter,
+): Record<string, string | ReadonlyArray<string>> => {
+	const out: Record<string, string | ReadonlyArray<string>> = {}
+	for (const [, variable, , read] of TOP_TRAFFIC_FILTERS) {
+		const value = read(filter)
+		if (value !== undefined) out[variable] = value
+	}
+	return out
+}
+
 export const topTrafficQuery = (options: {
 	readonly dimension: "host" | "path"
 	readonly limit: number
+	readonly filter?: TopTrafficFilter
 }): string => {
 	const dimension = options.dimension === "host" ? "clientRequestHTTPHost" : "clientRequestPath"
 	const limit = Math.floor(options.limit)
-	return `query MapleCfTopTraffic($zoneTags: [string!], $start: Time!, $end: Time!) {
+	const filter = options.filter ?? {}
+	const active = TOP_TRAFFIC_FILTERS.filter(([, , , read]) => read(filter) !== undefined)
+	const varDecls = active.map(([, variable, type]) => `, $${variable}: ${type}`).join("")
+	const predicates = active.map(([key, variable]) => `, ${key}: $${variable}`).join("")
+	return `query MapleCfTopTraffic($zoneTags: [string!], $start: Time!, $end: Time!${varDecls}) {
   viewer {
     zones(filter: { zoneTag_in: $zoneTags }) {
       top: httpRequestsAdaptiveGroups(
         limit: ${limit}
-        filter: { datetime_geq: $start, datetime_lt: $end, requestSource: "eyeball" }
+        filter: { datetime_geq: $start, datetime_lt: $end, requestSource: "eyeball"${predicates} }
         orderBy: [count_DESC]
       ) {
         count
@@ -472,7 +648,7 @@ export const topTrafficQuery = (options: {
       }
       errors: httpRequestsAdaptiveGroups(
         limit: ${limit}
-        filter: { datetime_geq: $start, datetime_lt: $end, requestSource: "eyeball", edgeResponseStatus_geq: 500 }
+        filter: { datetime_geq: $start, datetime_lt: $end, requestSource: "eyeball", edgeResponseStatus_geq: 500${predicates} }
         orderBy: [count_DESC]
       ) {
         count

@@ -16,18 +16,44 @@ import type {
 	V2AlertRuleUpdateParams,
 	V2InvalidRequestError,
 } from "@maple/domain/http/v2"
-import {
-	MapleApiV2,
-	invalidRequest,
-	paginateArray,
-	paginateOffsetQuery,
-	resourceNotFound,
-} from "@maple/domain/http/v2"
-import { Effect, Schema } from "effect"
+import { MapleApiV2, invalidRequest, paginateArray, resourceNotFound, timestamp } from "@maple/domain/http/v2"
+import { Effect, Encoding, Result, Schema } from "effect"
 import { AlertsService } from "../../services/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
 
 const decodeIsoDateTime = Schema.decodeUnknownSync(IsoDateTimeString)
+
+const encodeChecksCursor = (check: AlertCheckDocument): string =>
+	`chk_${Encoding.encodeBase64Url(JSON.stringify([check.timestamp, check.groupKey]))}`
+
+const decodeChecksCursor = (value: string | undefined) => {
+	if (value === undefined) return Effect.succeed<readonly [string, string] | undefined>(undefined)
+	if (!value.startsWith("chk_")) {
+		return Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+	}
+	const decoded = Encoding.decodeBase64UrlString(value.slice(4))
+	if (Result.isFailure(decoded)) {
+		return Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+	}
+	try {
+		const parts = JSON.parse(decoded.success) as unknown
+		if (
+			!Array.isArray(parts) ||
+			parts.length !== 2 ||
+			typeof parts[0] !== "string" ||
+			typeof parts[1] !== "string" ||
+			!Number.isFinite(Date.parse(parts[0]))
+		) {
+			throw new Error("invalid")
+		}
+		return Effect.succeed([parts[0], parts[1]] as const)
+	} catch {
+		return Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+	}
+}
+
+const summaryTimestamp = (value: string) =>
+	timestamp(new Date(value.includes("T") ? value : `${value.replace(" ", "T")}Z`).toISOString())
 
 const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 	id: doc.id,
@@ -185,9 +211,9 @@ const mergeUpsertRequest = (
 					? doc.signalType === "builder_query"
 						? doc.queryBuilderDraft
 						: null
-				: patch.query_builder_draft === null
-					? null
-					: yield* decodeDraft(patch.query_builder_draft)
+					: patch.query_builder_draft === null
+						? null
+						: yield* decodeDraft(patch.query_builder_draft)
 		const rawQuerySql =
 			signalType !== "raw_query"
 				? null
@@ -368,21 +394,58 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("checks", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
-						alerts
-							.listRuleChecks(tenant.orgId, params.id, {
-								...(query.group_key !== undefined ? { groupKey: query.group_key } : {}),
-								...(query.since !== undefined ? { since: query.since } : {}),
-								...(query.until !== undefined ? { until: query.until } : {}),
-								limit,
-								offset,
-							})
-							.pipe(
-								mapAlertError("rule_checks_list"),
-								Effect.map((response) => response.checks.map(toV2Check)),
-							),
-					)
-					return { object: "list" as const, ...page }
+					const cursor = yield* decodeChecksCursor(query.cursor)
+					const limit = query.limit ?? 20
+					const response = yield* alerts
+						.listRuleChecks(tenant.orgId, params.id, {
+							...(query.group_key !== undefined ? { groupKey: query.group_key } : {}),
+							...(query.status !== undefined ? { status: query.status } : {}),
+							...(query.since !== undefined ? { since: query.since } : {}),
+							...(query.until !== undefined ? { until: query.until } : {}),
+							...(cursor !== undefined
+								? { beforeTimestamp: cursor[0], beforeGroupKey: cursor[1] }
+								: {}),
+							limit: limit + 1,
+						})
+						.pipe(mapAlertError("rule_checks_list"))
+					const hasMore = response.checks.length > limit
+					const checks = hasMore ? response.checks.slice(0, limit) : response.checks
+					const last = checks.at(-1)
+					return {
+						object: "list" as const,
+						data: checks.map(toV2Check),
+						has_more: hasMore,
+						next_cursor: hasMore && last !== undefined ? encodeChecksCursor(last) : null,
+					}
+				}),
+			)
+			.handle("checksSummary", ({ params, query }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const summary = yield* alerts
+						.summarizeRuleChecks(tenant.orgId, params.id, {
+							since: query.since,
+							until: query.until,
+						})
+						.pipe(mapAlertError("rule_checks_list"))
+					return {
+						object: "alert_check.summary" as const,
+						bucket_seconds: summary.bucketSeconds,
+						top_group_keys: summary.topGroupKeys,
+						totals: summary.totals,
+						points: summary.points.map((point) => ({
+							bucket: summaryTimestamp(point.bucket),
+							group_key: point.groupKey,
+							total_count: point.totalCount,
+							breached_count: point.breachedCount,
+							healthy_count: point.healthyCount,
+							skipped_count: point.skippedCount,
+							error_count: point.errorCount,
+							transition_count: point.transitionCount,
+							observed_value: point.observedValue,
+							threshold: point.threshold,
+						})),
+					}
 				}),
 			)
 	}),

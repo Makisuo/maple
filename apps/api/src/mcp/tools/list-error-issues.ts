@@ -108,7 +108,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 					),
 				)
 
-			yield* Effect.annotateCurrentSpan("resultCount", result.issues.length)
+			yield* Effect.annotateCurrentSpan("result.rowCount", result.issues.length)
 
 			const issues = result.issues
 

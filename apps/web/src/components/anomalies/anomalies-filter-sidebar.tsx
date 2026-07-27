@@ -1,12 +1,6 @@
 import { useMemo } from "react"
 import type { AnomalyIncidentDocument, AnomalySignalType } from "@maple/domain/http"
-import { Checkbox } from "@maple/ui/components/ui/checkbox"
-import { Label } from "@maple/ui/components/ui/label"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@maple/ui/components/ui/collapsible"
-import { Separator } from "@maple/ui/components/ui/separator"
-import { cn } from "@maple/ui/utils"
 
-import { ChevronDownIcon } from "@/components/icons"
 import { FilterSection, serviceColorMap } from "@/components/filters/filter-section"
 import {
 	FilterSidebarBody,
@@ -22,55 +16,7 @@ export interface AnomalyFilters {
 	envs?: ReadonlyArray<string>
 }
 
-/** Fixed-vocabulary section where the URL value differs from the display label. */
-function LabeledFilterSection<T extends string>({
-	title,
-	options,
-	selected,
-	onChange,
-}: {
-	title: string
-	options: ReadonlyArray<{ value: T; label: string; count: number }>
-	selected: ReadonlyArray<T>
-	onChange: (selected: ReadonlyArray<T>) => void
-}) {
-	const toggle = (value: T) => {
-		onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value])
-	}
-	if (options.length === 0) return null
-	return (
-		<Collapsible defaultOpen>
-			<CollapsibleTrigger className="group flex w-full items-center justify-between py-2 text-sm font-medium hover:text-foreground text-muted-foreground transition-colors">
-				<span>{title}</span>
-				<ChevronDownIcon
-					className={cn("size-4 transition-transform group-data-[panel-open]:rotate-180")}
-				/>
-			</CollapsibleTrigger>
-			<CollapsibleContent className="pb-3">
-				<div className="space-y-2">
-					{options.map((option) => (
-						<div key={option.value} className="flex items-center gap-2">
-							<Checkbox
-								id={`${title}-${option.value}`}
-								checked={selected.includes(option.value)}
-								onCheckedChange={() => toggle(option.value)}
-							/>
-							<Label
-								htmlFor={`${title}-${option.value}`}
-								className="flex-1 min-w-0 flex items-center gap-1.5 cursor-pointer text-xs text-foreground font-normal"
-							>
-								<span className="truncate">{option.label}</span>
-							</Label>
-							<span className="text-xs text-muted-foreground tabular-nums">
-								{option.count.toLocaleString()}
-							</span>
-						</div>
-					))}
-				</div>
-			</CollapsibleContent>
-		</Collapsible>
-	)
-}
+const SEVERITY_LABEL = { critical: "Critical", warning: "Warning" } as const
 
 export function AnomaliesFilterSidebar({
 	incidents,
@@ -98,9 +44,19 @@ export function AnomaliesFilterSidebar({
 			}
 		}
 		const byCount = <K,>(map: Map<K, number>) => [...map.entries()].sort((a, b) => b[1] - a[1])
+		// Severity and signal are fixed vocabularies whose URL value differs from its display
+		// label, so each carries a value→label lookup derived from its own (typed) entries.
+		const severityEntries = byCount(severity)
+		const signalEntries = byCount(signals)
 		return {
-			severity: byCount(severity),
-			signals: byCount(signals),
+			severityEntries,
+			signalEntries,
+			severity: severityEntries.map(([name, count]) => ({ name, count })),
+			severityLabels: Object.fromEntries(
+				severityEntries.map(([value]) => [value, SEVERITY_LABEL[value]]),
+			),
+			signals: signalEntries.map(([name, count]) => ({ name, count })),
+			signalLabels: Object.fromEntries(signalEntries.map(([value]) => [value, SIGNAL_LABEL[value]])),
 			services: byCount(services).map(([name, count]) => ({ name, count })),
 			envs: byCount(envs).map(([name, count]) => ({ name, count })),
 		}
@@ -116,48 +72,48 @@ export function AnomaliesFilterSidebar({
 		<FilterSidebarFrame>
 			<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClear} />
 			<FilterSidebarBody>
-				<LabeledFilterSection
+				<FilterSection
 					title="Severity"
-					options={facets.severity.map(([value, count]) => ({
-						value,
-						label: value === "critical" ? "Critical" : "Warning",
-						count,
-					}))}
+					options={facets.severity}
+					getOptionLabel={(name) => facets.severityLabels[name] ?? name}
 					selected={filters.severity ?? []}
-					onChange={(val) => onChange("severity", val.length === 0 ? undefined : val)}
+					// Narrow back to the union by filtering the already-typed entries — no cast.
+					onChange={(vals) =>
+						onChange(
+							"severity",
+							vals.length === 0
+								? undefined
+								: facets.severityEntries.filter(([v]) => vals.includes(v)).map(([v]) => v),
+						)
+					}
 				/>
-				{facets.severity.length > 0 && <Separator className="my-2" />}
-				<LabeledFilterSection
+				<FilterSection
 					title="Signal"
-					options={facets.signals.map(([value, count]) => ({
-						value,
-						label: SIGNAL_LABEL[value],
-						count,
-					}))}
+					options={facets.signals}
+					getOptionLabel={(name) => facets.signalLabels[name] ?? name}
 					selected={filters.signals ?? []}
-					onChange={(val) => onChange("signals", val.length === 0 ? undefined : val)}
+					onChange={(vals) =>
+						onChange(
+							"signals",
+							vals.length === 0
+								? undefined
+								: facets.signalEntries.filter(([v]) => vals.includes(v)).map(([v]) => v),
+						)
+					}
 				/>
-				{facets.signals.length > 0 && <Separator className="my-2" />}
-				{facets.services.length > 0 && (
-					<>
-						<FilterSection
-							title="Service"
-							options={facets.services}
-							selected={[...(filters.services ?? [])]}
-							onChange={(val) => onChange("services", val.length === 0 ? undefined : val)}
-							colorMap={serviceColorMap(facets.services)}
-						/>
-						<Separator className="my-2" />
-					</>
-				)}
-				{facets.envs.length > 0 && (
-					<FilterSection
-						title="Environment"
-						options={facets.envs}
-						selected={[...(filters.envs ?? [])]}
-						onChange={(val) => onChange("envs", val.length === 0 ? undefined : val)}
-					/>
-				)}
+				<FilterSection
+					title="Service"
+					options={facets.services}
+					selected={filters.services ?? []}
+					onChange={(val) => onChange("services", val.length === 0 ? undefined : val)}
+					colorMap={serviceColorMap(facets.services)}
+				/>
+				<FilterSection
+					title="Environment"
+					options={facets.envs}
+					selected={filters.envs ?? []}
+					onChange={(val) => onChange("envs", val.length === 0 ? undefined : val)}
+				/>
 				{incidents.length === 0 && (
 					<p className="text-sm text-muted-foreground py-4">No anomalies in this view</p>
 				)}

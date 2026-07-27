@@ -54,33 +54,38 @@ export const orgIdOf = (key: string): string => key.slice(0, key.lastIndexOf(":"
  * collections and the old subscriptions drain (`cleanupCollectionWhenIdle`
  * tears the superseded shape streams down once subscriberCount hits 0).
  */
-export const makeOrgCollectionsKey: Effect.Effect<Store.Store<string>, never, Registry> = Effect.gen(function* () {
-	const currentKey = () => `${getActiveOrgId() ?? "pending"}:${getCollectionsGeneration()}`
-	const store = Store.make(currentKey())
-	yield* Registry.run(
-		Stream.callback<string>((queue) =>
-			Effect.acquireRelease(
-				Effect.sync(() => {
-					const push = () => Queue.offerUnsafe(queue, currentKey())
-					const unsubscribes = [subscribeActiveOrgId(push), subscribeCollectionsGeneration(push)]
-					push()
-					return unsubscribes
-				}),
-				(unsubscribes) =>
+export const makeOrgCollectionsKey: Effect.Effect<Store.Store<string>, never, Registry> = Effect.gen(
+	function* () {
+		const currentKey = () => `${getActiveOrgId() ?? "pending"}:${getCollectionsGeneration()}`
+		const store = Store.make(currentKey())
+		yield* Registry.run(
+			Stream.callback<string>((queue) =>
+				Effect.acquireRelease(
 					Effect.sync(() => {
-						for (const unsubscribe of unsubscribes) unsubscribe()
+						const push = () => Queue.offerUnsafe(queue, currentKey())
+						const unsubscribes = [
+							subscribeActiveOrgId(push),
+							subscribeCollectionsGeneration(push),
+						]
+						push()
+						return unsubscribes
 					}),
+					(unsubscribes) =>
+						Effect.sync(() => {
+							for (const unsubscribe of unsubscribes) unsubscribe()
+						}),
+				),
+			).pipe(
+				// The acquire re-offers the current key to close the subscribe race, and
+				// Store.set does not dedupe — dropping unchanged keys here keeps that
+				// re-offer (and any same-key publish) from reloading dependent queries.
+				Stream.mapEffect((key) =>
+					Effect.gen(function* () {
+						if ((yield* Store.get(store)) !== key) yield* Store.set(store, key)
+					}),
+				),
 			),
-		).pipe(
-			// The acquire re-offers the current key to close the subscribe race, and
-			// Store.set does not dedupe — dropping unchanged keys here keeps that
-			// re-offer (and any same-key publish) from reloading dependent queries.
-			Stream.mapEffect((key) =>
-				Effect.gen(function* () {
-					if ((yield* Store.get(store)) !== key) yield* Store.set(store, key)
-				}),
-			),
-		),
-	)
-	return store
-})
+		)
+		return store
+	},
+)

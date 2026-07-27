@@ -111,14 +111,40 @@ describe("sessionReplaysListQuery userId filter", () => {
 	})
 })
 
+// The list marks metadata-only sessions ("No recording") from the SDK's
+// `maple.session.recorded` resource attribute. It must survive every branch —
+// the fast path and all three subquery-wrapping ones — or the badge silently
+// disappears whenever a filter is applied.
+describe("sessionReplaysListQuery recording marker", () => {
+	const MARKER = "ResourceAttributes['maple.session.recorded']"
+
+	it("projects the marker on the unfiltered fast path", () => {
+		const { sql } = compileCH(sessionReplaysListQuery({}), { ...baseParams, ...WINDOW })
+		expect(sql).toContain(`argMax(${MARKER}, Version) AS recorded`)
+		// Read out of the row's own resource map — never a join that would undo
+		// this query's partition pruning.
+		expect(sql).not.toContain("session_replay_events")
+	})
+
+	it("carries the marker through the duration, active-time, and event branches", () => {
+		for (const opts of [{ durationMinMs: 1_000 }, { activeTimeMinMs: 1_000 }, { eventType: "error" }]) {
+			const { sql } = compileCH(sessionReplaysListQuery(opts), { ...baseParams, ...WINDOW })
+			expect(sql, JSON.stringify(opts)).toContain(`argMax(${MARKER}, Version) AS recorded`)
+			expect(sql, JSON.stringify(opts)).toContain("recorded")
+		}
+	})
+})
+
 describe("sessionReplaysFacetsQuery userId filter", () => {
 	it("narrows every facet branch by the exact UserId", () => {
 		const q = sessionReplaysFacetsQuery({ userId: "user_123" })
 		const { sql } = compileUnion(q, { ...baseParams, ...WINDOW })
-		// Branches: service / browser / country / device / error count — userId is
-		// applied to all of them (never excluded, unlike each branch's own dimension).
+		// Branches: service / browser / country / device / error count / duration
+		// histogram / p50 / p95 — userId is applied to all of them (never excluded,
+		// unlike each branch's own dimension), so the distribution reflects the
+		// selected user rather than the whole org.
 		const occurrences = sql.split("UserId = 'user_123'").length - 1
-		expect(occurrences).toBe(5)
+		expect(occurrences).toBe(8)
 	})
 
 	it("omits the UserId predicate when absent", () => {
@@ -275,5 +301,72 @@ describe("sessionReplaysListQuery event refinement", () => {
 		expect(sql).not.toContain("JOIN")
 		expect(sql).not.toContain("session_events")
 		expect(sql).not.toContain("matchCount")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Session-length distribution + percentiles (facets union)
+//
+// Drives the sidebar's histogram and its "> p50" / "> p95" preset chips. These
+// ride the facets union's existing {name, count, facetType} shape rather than a
+// separate query, so they inherit its filters and its single round-trip.
+// ---------------------------------------------------------------------------
+
+describe("sessionReplaysFacetsQuery duration distribution", () => {
+	it("buckets session length into half-octaves from 1s", () => {
+		const { sql } = compileUnion(sessionReplaysFacetsQuery({}), { ...baseParams, ...WINDOW })
+		expect(sql).toContain(
+			"toString(toUInt64(round(pow(2, floor(log2(greatest(DurationMs, 1000) / 1000) * 2) / 2) * 1000))) AS name",
+		)
+		expect(sql).toContain("'durationBucket' AS facetType")
+		// uniq, not count: un-merged duplicate Version=2 rows must not inflate a bucket.
+		expect(sql).toContain("uniq(SessionId) AS count")
+	})
+
+	it("emits p50 and p95 over the same population as the buckets", () => {
+		const { sql } = compileUnion(sessionReplaysFacetsQuery({}), { ...baseParams, ...WINDOW })
+		expect(sql).toContain("quantile(0.5)(assumeNotNull(DurationMs))")
+		expect(sql).toContain("quantile(0.95)(assumeNotNull(DurationMs))")
+		expect(sql.match(/'durationStat' AS facetType/g)).toHaveLength(2)
+	})
+
+	// ClickHouse rejects a UNION ALL that mixes quantile()'s Float64 with the
+	// other branches' uniq() UInt64 ("no supertype for types Float64, UInt64"),
+	// and casting quantile()'s nan over an empty window throws. Both guards have
+	// to survive, or the whole sidebar 502s.
+	it("casts percentiles to the union's integer count type, nan-safe", () => {
+		const { sql } = compileUnion(sessionReplaysFacetsQuery({}), { ...baseParams, ...WINDOW })
+		expect(sql).toContain("toUInt64(ifNotFinite(round(quantile(0.5)(assumeNotNull(DurationMs))), 0)) AS count")
+		expect(sql).toContain(
+			"toUInt64(ifNotFinite(round(quantile(0.95)(assumeNotNull(DurationMs))), 0)) AS count",
+		)
+	})
+
+	it("restricts every duration branch to completed sessions", () => {
+		const { sql } = compileUnion(sessionReplaysFacetsQuery({}), { ...baseParams, ...WINDOW })
+		// Only the Version=2 row carries a DurationMs, so this is one row per
+		// finished session — no GROUP BY SessionId needed, and in-progress
+		// sessions (NULL duration) drop out as they do on the list.
+		expect(sql.match(/DurationMs > 0/g)).toHaveLength(3)
+	})
+
+	it("narrows the distribution by the other facet filters", () => {
+		const { sql } = compileUnion(sessionReplaysFacetsQuery({ browser: "Chrome" }), {
+			...baseParams,
+			...WINDOW,
+		})
+		const durationBranches = sql
+			.split("UNION ALL")
+			.filter((branch) => branch.includes("duration") && branch.includes("facetType"))
+		expect(durationBranches).toHaveLength(3)
+		for (const branch of durationBranches) {
+			expect(branch).toContain("BrowserName = 'Chrome'")
+			expect(branch).toContain("OrgId = 'org_1'")
+		}
+	})
+
+	it("never reads session_events — active time has no distribution branch", () => {
+		const { sql } = compileUnion(sessionReplaysFacetsQuery({}), { ...baseParams, ...WINDOW })
+		expect(sql).not.toContain("session_events")
 	})
 })

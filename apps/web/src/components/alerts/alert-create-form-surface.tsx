@@ -209,11 +209,7 @@ export function AlertCreateFormSurface({
 				onSave={handleSave}
 				onShowTemplates={editingRule ? undefined : () => setTemplatesOpen(true)}
 				cancelSlot={
-					<Button
-						type="button"
-						variant="outline"
-						render={<Link to="/alerts" />}
-					>
+					<Button type="button" variant="outline" render={<Link to="/alerts" />}>
 						Cancel
 					</Button>
 				}

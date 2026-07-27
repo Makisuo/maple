@@ -4,7 +4,7 @@ This page is a compliance reference for the OpenTelemetry **Resource** model (wh
 
 ## Relevance to Maple
 
-- Maple is primarily a **consumer/backend** of OTel data (Rust `ingest` gateway → collector → ClickHouse/Tinybird → web dashboard), plus we **self-instrument** our own services (`apps/ingest`, the API, etc.) — so we need to both parse resources correctly from arbitrary SDKs *and* emit spec-correct resources ourselves.
+- Maple is primarily a **consumer/backend** of OTel data (Rust `ingest` gateway → collector → ClickHouse/Tinybird → web dashboard), plus we **self-instrument** our own services (`apps/ingest`, the API, etc.) — so we need to both parse resources correctly from arbitrary SDKs _and_ emit spec-correct resources ourselves.
 - **Dashboards key off `service.name` + `deployment.environment.name`.** The legacy `deployment.environment` attribute is deprecated (replaced by `deployment.environment.name`); our ingest gateway dual-emits both today because downstream Tinybird materialized views (`service_overview_spans_mv` et al.) still pre-extract the legacy key — see `CLAUDE.md`. This doc's deprecation citation below is the spec basis for eventually dropping the legacy emission once those MVs coalesce both.
 - Our ingest gateway stamps a **vendor-namespaced** `maple_org_id` (and `maple.*` span attributes) — this is intentionally outside semconv (no `maple.*` resource semantic convention exists upstream), so it must never collide with a real OTel resource attribute name.
 - We do not currently consume declarative/file configuration or the Entities data model, but both are tracked here because they affect how upstream SDKs will emit resources in the near future (Entities) and how our own self-instrumentation could be configured (file config).
@@ -13,12 +13,12 @@ This page is a compliance reference for the OpenTelemetry **Resource** model (wh
 
 ## 1. Resource: definition, immutability, merge rules
 
-**Stability: Stable** (the Resource SDK spec is stable except where individual parts are marked otherwise — resource *detector names* are explicitly called out as Development).
+**Stability: Stable** (the Resource SDK spec is stable except where individual parts are marked otherwise — resource _detector names_ are explicitly called out as Development).
 Source: https://opentelemetry.io/docs/specs/otel/resource/sdk/
 
 - **Definition:** a Resource is "an immutable representation of the observed entity for which telemetry is being produced, expressed as Attributes." Once created, a Resource cannot be modified.
 - **Creation:** SDKs expose a `Create(attributes, schema_url)` factory. `schema_url` is optional and records the Schema URL associated with the emitted attributes.
-- **Merge rule — critical for compliance checks:** when merging an *old* resource with an *updating* resource, "the value of the updating resource MUST be picked (even if the updated value is empty)." I.e., **the updating side always wins**, including overwriting a populated attribute with an empty one. Merge is not "fill in only missing keys."
+- **Merge rule — critical for compliance checks:** when merging an _old_ resource with an _updating_ resource, "the value of the updating resource MUST be picked (even if the updated value is empty)." I.e., **the updating side always wins**, including overwriting a populated attribute with an empty one. Merge is not "fill in only missing keys."
 - **Schema URL on merge:** combining two resources that carry **different, non-empty** schema URLs is a merging error — schema URLs must match (or one/both must be empty) for a clean merge.
 - **`OTEL_RESOURCE_ATTRIBUTES`:** "The SDK MUST extract information from the `OTEL_RESOURCE_ATTRIBUTES` environment variable and merge this, as the secondary resource, with any resource information provided by the user." Format is `key1=value1,key2=value2`, percent-encoded for special characters — i.e. user-supplied/programmatic resource attributes win over the env var per the merge rule above (env var is the "old"/secondary side).
 - **`OTEL_SERVICE_NAME`:** the `service` resource detector populates `service.name` from this env var; per the SDK environment variable spec (below), `OTEL_SERVICE_NAME` takes precedence over any `service.name` key set via `OTEL_RESOURCE_ATTRIBUTES`.
@@ -44,12 +44,12 @@ This model is the forward-looking replacement for "resource = flat attribute bag
 **Stability: Stable** for all four attributes below.
 Source: https://opentelemetry.io/docs/specs/semconv/registry/attributes/service/
 
-| Attribute | Requirement | Notes |
-|---|---|---|
-| `service.name` | Recommended | "MUST be the same for all instances of horizontally scaled services." Falls back to `unknown_service:<process-executable-name>` if unset (see §1). Configurable via `OTEL_SERVICE_NAME` (SDK env var spec) or provided as a default by the SDK (Resource SDK spec). |
-| `service.namespace` | Optional | Logical grouping for a set of services; service names are expected to be unique **within** the same namespace. "Zero-length namespace string is assumed equal to unspecified namespace." |
-| `service.version` | Optional | Version string of the service; format is undefined (examples: `2.0.0`, `a01dbef8a`). |
-| `service.instance.id` | Optional | "MUST be unique for each instance of the same `service.namespace`, `service.name` pair." Recommendation: generate a random **UUID v1 or v4** (RFC 4122), or derive a **UUID v5** from a stable namespace UUID (`4d63009a-8d0f-11ee-aad7-4c796ed8e320`) when a stable seed exists. Treat data like pod names, used as input to instance IDs, as potentially confidential. |
+| Attribute             | Requirement | Notes                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `service.name`        | Recommended | "MUST be the same for all instances of horizontally scaled services." Falls back to `unknown_service:<process-executable-name>` if unset (see §1). Configurable via `OTEL_SERVICE_NAME` (SDK env var spec) or provided as a default by the SDK (Resource SDK spec).                                                                                                      |
+| `service.namespace`   | Optional    | Logical grouping for a set of services; service names are expected to be unique **within** the same namespace. "Zero-length namespace string is assumed equal to unspecified namespace."                                                                                                                                                                                 |
+| `service.version`     | Optional    | Version string of the service; format is undefined (examples: `2.0.0`, `a01dbef8a`).                                                                                                                                                                                                                                                                                     |
+| `service.instance.id` | Optional    | "MUST be unique for each instance of the same `service.namespace`, `service.name` pair." Recommendation: generate a random **UUID v1 or v4** (RFC 4122), or derive a **UUID v5** from a stable namespace UUID (`4d63009a-8d0f-11ee-aad7-4c796ed8e320`) when a stable seed exists. Treat data like pod names, used as input to instance IDs, as potentially confidential. |
 
 ### 3.2 `deployment.environment.name` (and the legacy `deployment.environment` rename)
 
@@ -65,13 +65,13 @@ Source: https://opentelemetry.io/docs/specs/semconv/resource/deployment-environm
 **Stability: Stable** (both groups).
 Source: https://opentelemetry.io/docs/specs/semconv/resource/
 
-| Attribute | Requirement | Notes |
-|---|---|---|
-| `telemetry.sdk.name` | Required (by SDKs) | "The OpenTelemetry SDK MUST set the `telemetry.sdk.name` attribute to `opentelemetry`." A non-OTel SDK claiming these attributes MUST instead use its own fully-qualified class/module name. |
-| `telemetry.sdk.language` | Required | e.g. `cpp`, `dotnet`, `go`, `java`, `nodejs`, `python`, `rust`, `webjs`. |
-| `telemetry.sdk.version` | Required | SDK version string, e.g. `1.2.3`. |
-| `telemetry.distro.name` | Recommended | Name of the auto-instrumentation agent/distro, if used. |
-| `telemetry.distro.version` | Recommended | Distro version string. |
+| Attribute                  | Requirement        | Notes                                                                                                                                                                                        |
+| -------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `telemetry.sdk.name`       | Required (by SDKs) | "The OpenTelemetry SDK MUST set the `telemetry.sdk.name` attribute to `opentelemetry`." A non-OTel SDK claiming these attributes MUST instead use its own fully-qualified class/module name. |
+| `telemetry.sdk.language`   | Required           | e.g. `cpp`, `dotnet`, `go`, `java`, `nodejs`, `python`, `rust`, `webjs`.                                                                                                                     |
+| `telemetry.sdk.version`    | Required           | SDK version string, e.g. `1.2.3`.                                                                                                                                                            |
+| `telemetry.distro.name`    | Recommended        | Name of the auto-instrumentation agent/distro, if used.                                                                                                                                      |
+| `telemetry.distro.version` | Recommended        | Distro version string.                                                                                                                                                                       |
 
 ### 3.4 `host.*`, `k8s.*`, `cloud.*` — summary level
 
@@ -83,7 +83,7 @@ Full definitions: https://opentelemetry.io/docs/specs/semconv/resource/ (index; 
 
 **`cloud.*`** — Source: https://opentelemetry.io/docs/specs/semconv/registry/attributes/cloud/ — all currently **Development**: `cloud.provider` (well-known values incl. `aws`/`azure`/`gcp`/`alibaba_cloud`, must use a well-known value when applicable), `cloud.platform` (e.g. `aws_lambda`, `gcp_cloud_run`), `cloud.region`, `cloud.account.id`, `cloud.availability_zone`, `cloud.resource_id` (provider-specific full identifier — ARN, etc.).
 
-## 4. Common attribute spec (applies to resource *and* span/log/metric attributes)
+## 4. Common attribute spec (applies to resource _and_ span/log/metric attributes)
 
 **Stability: Stable** (except where individually marked otherwise).
 Source: https://opentelemetry.io/docs/specs/otel/common/
@@ -93,10 +93,10 @@ Source: https://opentelemetry.io/docs/specs/otel/common/
 - **Empty values are meaningful:** empty strings, zero numbers, and empty arrays must be preserved through processors/exporters — they are not treated as "unset."
 - **Null handling (exact wording):** "While `null` is a valid attribute value, its use within homogeneous arrays SHOULD generally be avoided unless language constraints make this impossible." If nulls do occur, "they MUST be preserved as-is (i.e., passed on to processors / exporters as `null`)" — nulls must not be silently dropped or coerced.
 - **Attribute limits** (defaults, enforced by SDKs):
-  - `AttributeCountLimit` — default **128** (max attributes per record).
-  - `AttributeValueLengthLimit` — default **Infinity/no limit** (max length of string/byte-array values).
-  - The count limit "applies only to top-level attributes, not to nested key-value pairs within maps."
-  - **Resource attributes and metric attributes are explicitly exempt** from these SDK-enforced limits (relevant: don't assume `OTEL_ATTRIBUTE_COUNT_LIMIT` truncates a resource — it doesn't, per this spec section, though exporters/backends may impose their own caps).
+    - `AttributeCountLimit` — default **128** (max attributes per record).
+    - `AttributeValueLengthLimit` — default **Infinity/no limit** (max length of string/byte-array values).
+    - The count limit "applies only to top-level attributes, not to nested key-value pairs within maps."
+    - **Resource attributes and metric attributes are explicitly exempt** from these SDK-enforced limits (relevant: don't assume `OTEL_ATTRIBUTE_COUNT_LIMIT` truncates a resource — it doesn't, per this spec section, though exporters/backends may impose their own caps).
 
 ## 5. SDK environment-variable spec (consolidated table)
 
@@ -105,67 +105,67 @@ Source: https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-v
 
 ### General SDK
 
-| Variable | Default | Notes |
-|---|---|---|
-| `OTEL_SDK_DISABLED` | `false` | Disables the SDK (all signals become no-ops) when `true`. |
-| `OTEL_LOG_LEVEL` | `info` | Controls the SDK's own internal diagnostic logging. |
-| `OTEL_RESOURCE_ATTRIBUTES` | *(unset)* | `key1=value1,key2=value2`, percent-encoded; merged as the "secondary"/old resource (user-supplied wins per merge rule). |
-| `OTEL_SERVICE_NAME` | *(unset)* | Sets `service.name`; takes precedence over a `service.name` set via `OTEL_RESOURCE_ATTRIBUTES`. |
-| `OTEL_PROPAGATORS` | `tracecontext,baggage` | Comma-separated, deduplicated propagator list. |
+| Variable                   | Default                | Notes                                                                                                                   |
+| -------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `OTEL_SDK_DISABLED`        | `false`                | Disables the SDK (all signals become no-ops) when `true`.                                                               |
+| `OTEL_LOG_LEVEL`           | `info`                 | Controls the SDK's own internal diagnostic logging.                                                                     |
+| `OTEL_RESOURCE_ATTRIBUTES` | _(unset)_              | `key1=value1,key2=value2`, percent-encoded; merged as the "secondary"/old resource (user-supplied wins per merge rule). |
+| `OTEL_SERVICE_NAME`        | _(unset)_              | Sets `service.name`; takes precedence over a `service.name` set via `OTEL_RESOURCE_ATTRIBUTES`.                         |
+| `OTEL_PROPAGATORS`         | `tracecontext,baggage` | Comma-separated, deduplicated propagator list.                                                                          |
 
 ### Exporter selection
 
-| Variable | Default |
-|---|---|
-| `OTEL_TRACES_EXPORTER` | `otlp` |
-| `OTEL_METRICS_EXPORTER` | `otlp` |
-| `OTEL_LOGS_EXPORTER` | `otlp` |
+| Variable                | Default |
+| ----------------------- | ------- |
+| `OTEL_TRACES_EXPORTER`  | `otlp`  |
+| `OTEL_METRICS_EXPORTER` | `otlp`  |
+| `OTEL_LOGS_EXPORTER`    | `otlp`  |
 
 ### Sampling
 
-| Variable | Default | Notes |
-|---|---|---|
-| `OTEL_TRACES_SAMPLER` | `parentbased_always_on` | e.g. `parentbased_traceidratio`, `always_on`, `always_off`, `traceidratio`. |
-| `OTEL_TRACES_SAMPLER_ARG` | *(unset)* | Argument shape depends on the chosen sampler (e.g. a ratio `0.1` for `traceidratio`/`parentbased_traceidratio` — used at high QPS by `apps/ingest`, per `CLAUDE.md`). |
+| Variable                  | Default                 | Notes                                                                                                                                                                 |
+| ------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OTEL_TRACES_SAMPLER`     | `parentbased_always_on` | e.g. `parentbased_traceidratio`, `always_on`, `always_off`, `traceidratio`.                                                                                           |
+| `OTEL_TRACES_SAMPLER_ARG` | _(unset)_               | Argument shape depends on the chosen sampler (e.g. a ratio `0.1` for `traceidratio`/`parentbased_traceidratio` — used at high QPS by `apps/ingest`, per `CLAUDE.md`). |
 
 ### Batch Span Processor (BSP)
 
-| Variable | Default |
-|---|---|
-| `OTEL_BSP_SCHEDULE_DELAY` | 5000 ms |
-| `OTEL_BSP_EXPORT_TIMEOUT` | 30000 ms |
-| `OTEL_BSP_MAX_QUEUE_SIZE` | 2048 |
-| `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` | 512 |
+| Variable                         | Default  |
+| -------------------------------- | -------- |
+| `OTEL_BSP_SCHEDULE_DELAY`        | 5000 ms  |
+| `OTEL_BSP_EXPORT_TIMEOUT`        | 30000 ms |
+| `OTEL_BSP_MAX_QUEUE_SIZE`        | 2048     |
+| `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` | 512      |
 
 ### Batch LogRecord Processor (BLRP)
 
-| Variable | Default |
-|---|---|
-| `OTEL_BLRP_SCHEDULE_DELAY` | 1000 ms |
-| `OTEL_BLRP_EXPORT_TIMEOUT` | 30000 ms |
-| `OTEL_BLRP_MAX_QUEUE_SIZE` | 2048 |
-| `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` | 512 |
+| Variable                          | Default  |
+| --------------------------------- | -------- |
+| `OTEL_BLRP_SCHEDULE_DELAY`        | 1000 ms  |
+| `OTEL_BLRP_EXPORT_TIMEOUT`        | 30000 ms |
+| `OTEL_BLRP_MAX_QUEUE_SIZE`        | 2048     |
+| `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` | 512      |
 
 ### Periodic Metric Reader
 
-| Variable | Default |
-|---|---|
+| Variable                      | Default  |
+| ----------------------------- | -------- |
 | `OTEL_METRIC_EXPORT_INTERVAL` | 60000 ms |
-| `OTEL_METRIC_EXPORT_TIMEOUT` | 30000 ms |
+| `OTEL_METRIC_EXPORT_TIMEOUT`  | 30000 ms |
 
 ### Attribute / span / log-record limits
 
-| Variable | Default | Scope |
-|---|---|---|
-| `OTEL_ATTRIBUTE_COUNT_LIMIT` | 128 | General fallback attribute count limit |
-| `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` | no limit | General fallback value length limit |
-| `OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT` | 128 | Per-span override of the general count limit |
-| `OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT` | no limit | Per-span override of the general length limit |
-| `OTEL_SPAN_EVENT_COUNT_LIMIT` | 128 | Max span events |
-| `OTEL_SPAN_LINK_COUNT_LIMIT` | 128 | Max span links |
-| `OTEL_EVENT_ATTRIBUTE_COUNT_LIMIT` | 128 | Max attributes per span event |
-| `OTEL_LINK_ATTRIBUTE_COUNT_LIMIT` | 128 | Max attributes per span link |
-| `OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT` | 128 | Per-log-record override of the general count limit |
+| Variable                                      | Default  | Scope                                               |
+| --------------------------------------------- | -------- | --------------------------------------------------- |
+| `OTEL_ATTRIBUTE_COUNT_LIMIT`                  | 128      | General fallback attribute count limit              |
+| `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`           | no limit | General fallback value length limit                 |
+| `OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT`             | 128      | Per-span override of the general count limit        |
+| `OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT`      | no limit | Per-span override of the general length limit       |
+| `OTEL_SPAN_EVENT_COUNT_LIMIT`                 | 128      | Max span events                                     |
+| `OTEL_SPAN_LINK_COUNT_LIMIT`                  | 128      | Max span links                                      |
+| `OTEL_EVENT_ATTRIBUTE_COUNT_LIMIT`            | 128      | Max attributes per span event                       |
+| `OTEL_LINK_ATTRIBUTE_COUNT_LIMIT`             | 128      | Max attributes per span link                        |
+| `OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT`        | 128      | Per-log-record override of the general count limit  |
 | `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT` | no limit | Per-log-record override of the general length limit |
 
 Recall from §4: resource attributes and metric attributes are exempt from all count/length limits above.
@@ -174,17 +174,17 @@ Recall from §4: resource attributes and metric attributes are exempt from all c
 
 Base variable applies to all signals unless a signal-specific variant overrides it. Signal-specific endpoint variables are used **as-is** (no path suffix appended); the base endpoint variable gets `/v1/traces`, `/v1/metrics`, or `/v1/logs` appended automatically per signal.
 
-| Variable (base; suffix each with `_TRACES_`/`_METRICS_`/`_LOGS_` for per-signal override) | Default |
-|---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` (HTTP) / `http://localhost:4317` (gRPC) |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` |
-| `OTEL_EXPORTER_OTLP_HEADERS` | *(unset)*; W3C Baggage-style `key=value` pairs |
-| `OTEL_EXPORTER_OTLP_COMPRESSION` | *(unset)*; `none` or `gzip` |
-| `OTEL_EXPORTER_OTLP_TIMEOUT` | 10 s |
-| `OTEL_EXPORTER_OTLP_INSECURE` | `false` (gRPC only) |
-| `OTEL_EXPORTER_OTLP_CERTIFICATE` | *(unset)* — trusted server cert for TLS verification |
-| `OTEL_EXPORTER_OTLP_CLIENT_KEY` | *(unset)* — client private key (PEM), mTLS |
-| `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE` | *(unset)* — client cert/chain (PEM), mTLS |
+| Variable (base; suffix each with `_TRACES_`/`_METRICS_`/`_LOGS_` for per-signal override) | Default                                                         |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`                                                             | `http://localhost:4318` (HTTP) / `http://localhost:4317` (gRPC) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`                                                             | `http/protobuf`                                                 |
+| `OTEL_EXPORTER_OTLP_HEADERS`                                                              | _(unset)_; W3C Baggage-style `key=value` pairs                  |
+| `OTEL_EXPORTER_OTLP_COMPRESSION`                                                          | _(unset)_; `none` or `gzip`                                     |
+| `OTEL_EXPORTER_OTLP_TIMEOUT`                                                              | 10 s                                                            |
+| `OTEL_EXPORTER_OTLP_INSECURE`                                                             | `false` (gRPC only)                                             |
+| `OTEL_EXPORTER_OTLP_CERTIFICATE`                                                          | _(unset)_ — trusted server cert for TLS verification            |
+| `OTEL_EXPORTER_OTLP_CLIENT_KEY`                                                           | _(unset)_ — client private key (PEM), mTLS                      |
+| `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`                                                   | _(unset)_ — client cert/chain (PEM), mTLS                       |
 
 Note: "SDKs SHOULD default endpoint variables to use `http` scheme unless they have good reasons to choose `https` scheme."
 
@@ -207,11 +207,11 @@ Sources: https://opentelemetry.io/docs/specs/otel/entities/ , https://openteleme
 
 - **Purpose:** a common data model for "entities" — objects of interest associated with produced telemetry (e.g. a `service`, `host`, `k8s.pod`, `k8s.cluster`) — so multiple distinct-but-related components can be represented within the same signal's resource, each with its own identity and metadata, rather than flattening everything into one undifferentiated attribute bag.
 - **Data model fields:**
-  - `type` — required, immutable string category (e.g. `"service"`, `"host"`).
-  - `id` — a map of identifying attributes; "must contain at least one attribute" and should be the minimal attribute set sufficient to uniquely identify the entity.
-  - `description` — a map of descriptive, non-identifying attributes that may change over time and may be empty.
+    - `type` — required, immutable string category (e.g. `"service"`, `"host"`).
+    - `id` — a map of identifying attributes; "must contain at least one attribute" and should be the minimal attribute set sufficient to uniquely identify the entity.
+    - `description` — a map of descriptive, non-identifying attributes that may change over time and may be empty.
 - **Relationship to Resource:** entities are attached in the resource section of a signal and reference the same shared attribute pool defined by Resource — this preserves backward compatibility with existing Resource-attribute consumers while avoiding duplicating identifying data across multiple entities on the same signal.
-- **Instantiation models:** *pull-based* (an entity discovers itself from the current runtime/environment — analogous to today's resource detectors) and *push-based* (entity info supplied externally, typically via environment variables or declarative configuration).
+- **Instantiation models:** _pull-based_ (an entity discovers itself from the current runtime/environment — analogous to today's resource detectors) and _push-based_ (entity info supplied externally, typically via environment variables or declarative configuration).
 - **Practical takeaway for Maple:** this is not yet something ClickHouse/Tinybird ingestion needs to model explicitly (Development stability, not yet emitted by mainstream SDKs by default), but the ingest gateway's resource-attribute parsing should not assume the Resource model stays a flat attribute-only bag forever — the `entities` field on the Resource data model (§2) is the forward path.
 
 ---

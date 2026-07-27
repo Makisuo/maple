@@ -38,7 +38,8 @@ const featureUnit = (featureId: string): string => (featureId === "browser_sessi
 
 // Sub-cent rates (e.g. $0.003/session) would round to "$0.00" through the
 // 2-decimal currency formatter, so render those raw.
-const formatRate = (rate: number): string => (rate > 0 && rate < 0.01 ? `$${rate}` : formatCurrency(rate, "usd"))
+const formatRate = (rate: number): string =>
+	rate > 0 && rate < 0.01 ? `$${rate}` : formatCurrency(rate, "usd")
 
 const formatQuantity = (featureId: string, value: number): string =>
 	featureId === "browser_sessions" ? `${formatCount(value)} sessions` : formatUsage(value)

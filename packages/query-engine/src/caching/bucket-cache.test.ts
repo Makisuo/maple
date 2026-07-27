@@ -400,6 +400,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 		const reads: string[] = []
 		const writes: Array<{ key: string; value: unknown }> = []
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async (_bucket, key) => {
 				reads.push(key)
 				return undefined
@@ -446,6 +447,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 		let writes = 0
 		let computes = 0
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => await new Promise<never>(() => {}),
 			put: async () => {
 				writes++
@@ -506,8 +508,8 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 	})
 
 	// Uses a real wall-clock sleep to keep both fibers in-flight simultaneously,
-	// so it runs under it.live rather than the default TestClock.
-	it.live("dedupes concurrent identical requests through the in-flight map", () => {
+	// modeling independent requests against the Worker-isolate-scoped service.
+	it.live("keeps concurrent identical requests request-local", () => {
 		const request = {
 			orgId,
 			query: { source: "traces", kind: "timeseries" },
@@ -533,7 +535,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 				{ concurrency: "unbounded" },
 			)
 
-			assert.strictEqual(computeCalls, 1) // second caller dedup'd
+			assert.strictEqual(computeCalls, 2)
 			assert.strictEqual(a.points.length, 3)
 			assert.strictEqual(b.points.length, 3)
 		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))

@@ -1,12 +1,30 @@
 ---
+/**
+ * The offer.
+ *
+ * Not a plan grid. `apps/api/autumn.config.ts` sells exactly one self-serve
+ * plan, so a card-per-tier layout manufactured a choice that doesn't exist and
+ * spent two 881px columns restating the same feature list. This is one priced
+ * offer: an amber claim plate on the left, the meter that backs it on the right.
+ *
+ * The chapter above (BillComparison) is a full-shell table of everyone else's
+ * prices. This answers with yours, so it deliberately steps *in* to max-w-5xl —
+ * the width change is what says the argument ended and the offer begins. It
+ * borrows that section's one signature, the amber-tinted "this is the answer"
+ * column, and spends no other accent: the button is the only other amber thing
+ * on the surface.
+ *
+ * Enterprise is a one-line rail below the card, not a peer. It keeps its
+ * "From $2,000" anchor — that number is what makes $39 read as nothing — but a
+ * "call us" card given equal weight costs self-serve conversion.
+ */
 import { Autumn } from "autumn-js"
 import * as m from "../paraglide/messages";
 
 const HIDDEN_FEATURE_IDS = new Set<string>(["ai_input_tokens", "ai_output_tokens"])
 
-// Capitalized, localized labels for the metered data rows, keyed by Autumn
-// featureId (Autumn returns lowercase names like "logs"). Drives the row text;
-// the icon is matched on featureId in the template.
+// Capitalized, localized labels for the metered rows, keyed by Autumn featureId
+// (Autumn returns lowercase names like "logs").
 const DATA_FEATURE_LABELS: Record<string, string> = {
     logs: m.pricing_logs(),
     traces: m.pricing_traces(),
@@ -14,290 +32,346 @@ const DATA_FEATURE_LABELS: Record<string, string> = {
     browser_sessions: m.nav_browser_sessions(),
 }
 
-// Canonical row order so the plan card matches the Enterprise card (Autumn can
-// return items in any order).
+// Canonical row order — Autumn can return items in any order.
 const DATA_FEATURE_ORDER = ["logs", "traces", "metrics", "browser_sessions"]
 const dataFeatureRank = (id: string | undefined) => {
     const i = id ? DATA_FEATURE_ORDER.indexOf(id) : -1
     return i === -1 ? DATA_FEATURE_ORDER.length : i
 }
 
-// Full platform feature list per plan, rendered inside each card. The list is
-// the perceived-value signal on a pricing page — each card should visibly carry
-// everything it includes. Differentiators (retention, support) lead the list so
-// the plan-to-plan difference is scannable at the top.
-const PLAN_FEATURES: Record<string, string[]> = {
-    starter: [
-        m.pricing_14day_retention(),
-        m.pricing_email_support(),
-        m.pricing_unlimited_dashboards(),
-        m.pricing_advanced_alerting(),
-        m.pricing_mcp_server(),
-        m.pricing_ai_chat(),
-        m.pricing_ai_triage(),
-        m.pricing_full_api(),
-    ],
-    startup: [
-        m.pricing_30day_retention(),
-        m.pricing_private_channel(),
-        m.pricing_unlimited_dashboards(),
-        m.pricing_advanced_alerting(),
-        m.pricing_mcp_server(),
-        m.pricing_ai_chat(),
-        m.pricing_ai_triage(),
-        m.pricing_full_api(),
-    ],
+// Everything the plan carries, as one run. With a single plan there is nothing
+// to compare against, so this is a "and all of this too" line rather than a
+// checklist — a checklist implies some rows might have been withheld.
+const PLATFORM_FEATURES: string[] = [
+    m.pricing_30day_retention(),
+    m.pricing_private_channel(),
+    m.pricing_unlimited_dashboards(),
+    m.pricing_advanced_alerting(),
+    m.pricing_mcp_server(),
+    m.pricing_ai_chat(),
+    m.pricing_ai_triage(),
+    m.pricing_full_api(),
+]
+
+// browser_sessions is metered per session; every other signal is per GB.
+type Unit = "gb" | "count"
+
+interface Allotment {
+    featureId: string
+    label: string
+    unit: Unit
+    included: number
+    /** Price per unit once `included` is used up. */
+    rate?: number
 }
 
-interface PlanCard {
+interface Offer {
     name: string
-    slug: string
     price: number
-    priceLabel?: string
     interval?: string
-    isFree: boolean
     hasTrial: boolean
     trialDuration?: number
-    subtitle: string
-    dataFeatures: { featureId?: string; label: string; value: string; detail?: string }[]
-    platformFeatures: string[]
+    allotments: Allotment[]
     ctaLabel: string
-    ctaHref: string
-    ctaStyle: "outline" | "accent"
 }
 
-let plans: PlanCard[] = []
+const unitFor = (featureId: string): Unit => (featureId === "browser_sessions" ? "count" : "gb")
+
+let offer: Offer | null = null
 
 try {
     const autumn = new Autumn({ secretKey: import.meta.env.AUTUMN_SECRET_KEY })
     const result = await autumn.plans.list()
+    const products = (result.list ?? []).filter((p) => !p.addOn)
 
-    if (result.list) {
-        const products = result.list
-            .filter((p) => !p.addOn)
-            .sort((a, b) => {
-                if (a.autoEnable && !b.autoEnable) return -1
-                if (!a.autoEnable && b.autoEnable) return 1
-                const priceA = a.price?.amount ?? 0
-                const priceB = b.price?.amount ?? 0
-                return priceA - priceB
-            })
+    if (products.length > 1) {
+        // The layout renders one offer. A second tier must fail loudly at build
+        // time rather than silently vanishing off the pricing page.
+        console.warn(
+            `[PricingTable] Autumn returned ${products.length} non-add-on plans (${products
+                .map((p) => p.id)
+                .join(", ")}); only the first is rendered. Update this component for multiple tiers.`,
+        )
+    }
 
-        plans = products.map((product) => {
-            const isFree = product.autoEnable
-            const slug = isFree ? "starter" : product.id?.toLowerCase() ?? product.name?.toLowerCase() ?? "startup"
-            const price = isFree ? 0 : (product.price?.amount ?? 0)
-            const interval = product.price?.interval
+    const product = products[0]
 
-            const dataFeatures = product.items
+    if (product) {
+        offer = {
+            name: product.name,
+            price: product.price?.amount ?? 0,
+            interval: product.price?.interval ? `/${product.price.interval}` : undefined,
+            hasTrial: !!product.freeTrial,
+            trialDuration: product.freeTrial?.durationLength,
+            allotments: product.items
                 .filter((item) => item.featureId && !HIDDEN_FEATURE_IDS.has(item.featureId))
-                .map((item) => ({
-                    featureId: item.featureId,
-                    label:
-                        (item.featureId ? DATA_FEATURE_LABELS[item.featureId] : undefined) ??
-                        item.feature?.name ??
-                        item.featureId ??
-                        "",
-                    // browser_sessions is metered by count, not bytes — everything else is GB.
-                    value: item.unlimited
-                        ? "Unlimited"
-                        : item.featureId === "browser_sessions"
-                          ? `${Number(item.included ?? 0).toLocaleString()} sessions`
-                          : `${Number(item.included ?? 0)} GB`,
-                    detail: item.price?.display?.secondaryText
-                        ? item.price.display.secondaryText.replace(/\bper\s+(?:[\d,]+\s+)?(?:logs?|traces?|metrics?)\b/i, "per GB")
-                        : item.price?.amount != null
-                          ? item.featureId === "browser_sessions"
-                            ? `then $${item.price.amount} per 1,000 sessions`
-                            : `then $${item.price.amount} per GB`
-                          : undefined,
-                }))
-                .sort((a, b) => dataFeatureRank(a.featureId) - dataFeatureRank(b.featureId))
-
-            const platformFeatures = PLAN_FEATURES[slug] ?? PLAN_FEATURES["startup"] ?? []
-
-            return {
-                name: product.name,
-                slug,
-                price,
-                interval: interval ? `/${interval}` : undefined,
-                isFree,
-                hasTrial: !!product.freeTrial,
-                trialDuration: product.freeTrial?.durationLength,
-                subtitle: isFree ? m.pricing_free_forever() : (product.description ?? (slug === "starter" ? m.pricing_for_small() : m.pricing_for_growing())),
-                dataFeatures,
-                platformFeatures,
-                ctaLabel: isFree ? m.cta_get_started() : (product.freeTrial ? m.pricing_start_trial({ duration: String(product.freeTrial.durationLength) }) : m.pricing_subscribe()),
-                ctaHref: "https://app.maple.dev",
-                ctaStyle: isFree ? "outline" as const : "accent" as const,
-            }
-        })
+                .map((item) => {
+                    const featureId = item.featureId as string
+                    return {
+                        featureId,
+                        label: DATA_FEATURE_LABELS[featureId] ?? item.feature?.name ?? featureId,
+                        unit: unitFor(featureId),
+                        included: Number(item.included ?? 0),
+                        rate: item.price?.amount ?? undefined,
+                    }
+                })
+                .sort((a, b) => dataFeatureRank(a.featureId) - dataFeatureRank(b.featureId)),
+            ctaLabel: product.freeTrial
+                ? m.pricing_start_trial({ duration: String(product.freeTrial.durationLength) })
+                : m.cta_get_started(),
+        }
     }
 } catch (e) {
     console.error("Failed to fetch pricing from Autumn:", e)
 }
 
-// Fallback if fetch fails
-if (plans.length === 0) {
-    plans = [
-        {
-            name: "Startup",
-            slug: "startup",
-            price: 39,
-            interval: "/month",
-            isFree: false,
-            hasTrial: true,
-            trialDuration: 14,
-            subtitle: m.pricing_for_growing(),
-            dataFeatures: [
-                { featureId: "logs", label: m.pricing_logs(), value: "100 GB", detail: "then $0.30 per GB" },
-                { featureId: "traces", label: m.pricing_traces(), value: "100 GB", detail: "then $0.30 per GB" },
-                { featureId: "metrics", label: m.pricing_metrics(), value: "100 GB", detail: "then $0.30 per GB" },
-            ],
-            platformFeatures: PLAN_FEATURES["startup"]!,
-            ctaLabel: m.pricing_start_trial({ duration: "14" }),
-            ctaHref: "https://app.maple.dev",
-            ctaStyle: "accent",
-        },
-    ]
+// Fallback mirrors autumn.config.ts exactly, browser sessions included — a
+// short fallback would render a meter that disagrees with the live one.
+if (!offer) {
+    offer = {
+        name: "Startup",
+        price: 39,
+        interval: "/month",
+        hasTrial: true,
+        trialDuration: 14,
+        allotments: [
+            { featureId: "logs", label: m.pricing_logs(), unit: "gb", included: 100, rate: 0.3 },
+            { featureId: "traces", label: m.pricing_traces(), unit: "gb", included: 100, rate: 0.3 },
+            { featureId: "metrics", label: m.pricing_metrics(), unit: "gb", included: 100, rate: 0.3 },
+            {
+                featureId: "browser_sessions",
+                label: m.nav_browser_sessions(),
+                unit: "count",
+                included: 5000,
+                rate: 0.002,
+            },
+        ],
+        ctaLabel: m.pricing_start_trial({ duration: "14" }),
+    }
 }
 
-// Enterprise is a peer card, modelled in the same shape as the self-serve plans
-// so it flows through the same grid + card template (no duplicated markup) and
-// stays visually equal — different role, not a highlighted upsell. It carries
-// the full feature set too, leading with its differentiators.
-const enterprisePlan: PlanCard = {
-    name: m.pricing_enterprise(),
-    slug: "enterprise",
-    price: 0,
-    priceLabel: m.pricing_enterprise_price(),
-    isFree: false,
-    hasTrial: false,
-    subtitle: m.pricing_enterprise_desc(),
-    dataFeatures: [
-        { featureId: "logs", label: m.pricing_logs(), value: m.pricing_custom() },
-        { featureId: "traces", label: m.pricing_traces(), value: m.pricing_custom() },
-        { featureId: "metrics", label: m.pricing_metrics(), value: m.pricing_custom() },
-        { featureId: "browser_sessions", label: m.nav_browser_sessions(), value: m.pricing_custom() },
-    ],
-    platformFeatures: [
-        m.pricing_custom_retention(),
-        m.pricing_priority_support(),
-        m.pricing_otel_data_help(),
-        m.pricing_unlimited_dashboards(),
-        m.pricing_advanced_alerting(),
-        m.pricing_mcp_server(),
-        m.pricing_ai_chat(),
-        m.pricing_ai_triage(),
-        m.pricing_full_api(),
-    ],
-    ctaLabel: m.pricing_talk_to_founder(),
-    ctaHref: "https://cal.com/david-granzin/30min?overlayCalendar=true",
-    ctaStyle: "outline",
+// ── Formatting ───────────────────────────────────────────────────────────────
+// Every number on this surface is money or volume, so it all runs through one
+// of these three and lands in font-mono tabular-nums in the template.
+const round2 = (n: number) => Math.round(n * 100) / 100
+const money = (n: number) => {
+    const r = round2(n)
+    return Number.isInteger(r) ? `$${r}` : `$${r.toFixed(2)}`
+}
+/** Sub-cent rates (per session) need three places; per-GB rates need two. */
+const rateLabel = (n: number) => `$${n < 0.01 ? n.toFixed(3) : n.toFixed(2)}`
+const volume = (a: Allotment, n: number) => (a.unit === "gb" ? `${n} GB` : n.toLocaleString("en-US"))
+
+// Each row states its own rate, in its own unit. A shared summary line below the
+// list read as detached from the rows it described, and it can't carry two units
+// without becoming a sentence.
+//
+// The amount comes back as its own piece rather than baked into the sentence:
+// this is a mono column, so "$0.30" (5 glyphs) and "$0.002" (6) push their
+// trailing "/ unit" one character apart and the rows read as misaligned. The
+// template gives the amount a fixed `ch` slot instead. Splitting on a sentinel
+// keeps every locale's own word order intact — ja renders "超過分 {rate} / セッション".
+const RATE_SLOT = "\u0000"
+const rowRate = (a: Allotment) => {
+    if (a.rate === undefined) return undefined
+    const rendered =
+        a.unit === "gb"
+            ? m.pricing_rate_gb({ rate: RATE_SLOT })
+            : m.pricing_rate_session({ rate: RATE_SLOT })
+    const [before, after = ""] = rendered.split(RATE_SLOT)
+    return { before, amount: rateLabel(a.rate), after }
 }
 
-const cards: PlanCard[] = [...plans, enterprisePlan]
+// Widest amount in the list, so every row's unit starts on the same axis.
+const rateSlotCh = Math.max(
+    ...offer.allotments.map((a) => (a.rate === undefined ? 0 : rateLabel(a.rate).length)),
+    1,
+)
 
-// Equal-peer grid: stack until lg, then go N-up — no sm 2-up state that would
-// orphan a third card onto a lonely second row. Two cards stay a clean 2-up.
-const gridClass =
-    cards.length >= 3
-        ? "grid grid-cols-1 lg:grid-cols-3 gap-4"
-        : "grid grid-cols-1 sm:grid-cols-2 gap-4"
-const maxWidthClass = cards.length >= 3 ? "max-w-6xl" : "max-w-4xl"
+/** Everything a meter row renders, resolved once. */
+const meterRows = offer.allotments.map((a) => ({
+    featureId: a.featureId,
+    label: a.label,
+    included: volume(a, a.included),
+    rate: rowRate(a),
+}))
+
+// ── Layout ───────────────────────────────────────────────────────────────────
+// `variant` is explicit rather than inferred from whether copy props are set:
+// /pricing renders this with no props at all, and inferring the container from
+// copy presence silently handed that page a different width.
+interface Props {
+    variant?: "page" | "home"
+    title?: string
+    eyebrow?: string
+    lede?: string
+    class?: string
+}
+
+const { variant = "page", title, eyebrow, lede, class: className = "" } = Astro.props
+const containerClass = variant === "home" ? "shell" : "mx-auto max-w-5xl px-6"
 ---
 
-<section class="py-20 md:py-28">
-    <div class={`mx-auto ${maxWidthClass} px-6`}>
-        <div class={gridClass}>
-            {cards.map((plan) => (
-                <div class="rounded-xl border border-border bg-bg-elevated flex flex-col">
-                    <div class="p-6 md:p-8 flex flex-col flex-1">
-                        <div class="flex items-center gap-2">
-                            <span class="text-[11px] uppercase tracking-widest text-fg-muted">{plan.name}</span>
-                            {plan.hasTrial && plan.trialDuration && (
-                                <span class="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                                    {m.pricing_trial_badge({ duration: String(plan.trialDuration) })}
-                                </span>
-                            )}
-                        </div>
+<section class={`py-16 md:py-32 ${className}`}>
+    <div class={containerClass}>
+        {(eyebrow || title || lede) && (
+            <div class="mb-10 md:mb-14">
+                {eyebrow && (
+                    <p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{eyebrow}</p>
+                )}
+                {title && (
+                    <h2 class="mt-4 max-w-[20ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]">
+                        {title}
+                    </h2>
+                )}
+                {lede && <p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">{lede}</p>}
+            </div>
+        )}
 
-                        <div class="mt-3 flex items-baseline gap-1 text-4xl font-semibold text-fg tracking-tight">
-                            {plan.priceLabel ? (
-                                <span class="text-3xl">{plan.priceLabel}</span>
-                            ) : (
-                                <>
-                                    <span class="font-mono tabular-nums">${plan.price}</span>
-                                    {plan.interval && <span class="text-base font-normal text-fg-muted">{plan.interval}</span>}
-                                </>
-                            )}
-                        </div>
-                        <p class="mt-2 text-sm text-fg-muted leading-relaxed">{plan.subtitle}</p>
-
-                        {/* Data allotments — the differentiating, usage-based numbers get the card's visual weight. */}
-                        <div class="mt-8">
-                            <span class="text-[10px] uppercase tracking-widest text-fg-muted">{m.pricing_data_included()}</span>
-                            <div class="mt-4 space-y-4">
-                                {plan.dataFeatures.map((feature) => (
-                                    <div class="flex items-start justify-between gap-3">
-                                        <div class="flex items-center gap-2 pt-0.5">
-                                            {feature.featureId === "logs" && (
-                                                <svg class="w-4 h-4 text-fg-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M8 18H16"/><path d="M8 14L11 14"/><path d="M12 4V10H8"/><path d="M4 20L4 10"/><path d="M20 20L20 4"/><path d="M12 2L18 2"/><path d="M6 22L18 22"/><path d="M6 8H6.01"/><path d="M8 6H8.01"/><path d="M10 4H10.01"/></svg>
-                                            )}
-                                            {feature.featureId === "traces" && (
-                                                <svg class="w-4 h-4 text-fg-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M6 18.01L6 18"/><path d="M18 7.01001L18 7.00001"/><path d="M8 20.01L8 20"/><path d="M2 16L4 16"/><path d="M14 9L16 9"/><path d="M20 5L22 5"/><path d="M10 16L10 18"/><path d="M12 11L12 14"/></svg>
-                                            )}
-                                            {feature.featureId === "metrics" && (
-                                                <svg class="w-4 h-4 text-fg-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M2 15.01V15"/><path d="M4 13.01V13"/><path d="M6 11.01V11"/><path d="M8 9.01V9"/><path d="M10 11.01V11"/><path d="M12 13.01V13"/><path d="M14 15.01V15"/><path d="M16 13.01V13"/><path d="M18 11.01V11"/><path d="M20 9.01V9"/><path d="M22 7.01V7"/></svg>
-                                            )}
-                                            {feature.featureId === "browser_sessions" && (
-                                                <svg class="w-4 h-4 text-fg-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M4 6L4 6.01"/><path d="M6 4L6 4.01"/><path d="M20.01 6L20 6"/><path d="M18.01 4L18 4"/><path d="M20.01 18L20 18"/><path d="M18.01 20L18 20"/><path d="M6.01001 20L6.00001 20"/><path d="M4.01001 18L4.00001 18"/><path d="M2 8L2 16"/><path d="M22 14L22 16"/><path d="M8 2L16 2"/><path d="M8 22L16 22"/><path d="M22 8V4"/><path d="M17 12.01V12"/><path d="M14 10H15"/><path d="M14 14H15"/><path d="M12 8H9L9 16L12 16"/></svg>
-                                            )}
-                                            <span class="text-sm text-fg">{feature.label}</span>
-                                        </div>
-                                        <div class="text-right">
-                                            <div class="font-mono tabular-nums text-base text-fg leading-none">{feature.value}</div>
-                                            {feature.detail && (
-                                                <div class="mt-1.5 font-mono text-xs text-fg-muted">{feature.detail}</div>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Full feature list — the visible "everything you get" value signal. */}
-                        <div class="mt-6 border-t border-border pt-6">
-                            <span class="text-[10px] uppercase tracking-widest text-fg-muted">{m.pricing_platform_features()}</span>
-                            <div class="mt-4 space-y-3">
-                                {plan.platformFeatures.map((label) => (
-                                    <div class="flex items-center gap-2.5">
-                                        <svg class="w-4 h-4 text-primary shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M8 2L16 2"/><path d="M8 22L16 22"/><path d="M2 8L2 16"/><path d="M22 8L22 16"/><path d="M6 4L6 4.01"/><path d="M4 6L4 6.01"/><path d="M18 4L18 4.01"/><path d="M20 6L20 6.01"/><path d="M6 20L6 20.01"/><path d="M4 18L4 18.01"/><path d="M18 20L18 20.01"/><path d="M20 18L20 18.01"/><path d="M8 12L11 15L16 9"/></svg>
-                                        <span class="text-sm text-fg">{label}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div class="mt-auto pt-8 space-y-2">
-                            {plan.ctaStyle === "accent" ? (
-                                <a href={plan.ctaHref} class="flex h-9 w-full items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80">
-                                    {plan.ctaLabel}
-                                </a>
-                            ) : (
-                                <a href={plan.ctaHref} class="flex h-9 w-full items-center justify-center rounded-lg border border-input bg-input/30 px-3 text-xs font-medium text-fg transition-all hover:bg-input/50">
-                                    {plan.ctaLabel}
-                                </a>
-                            )}
-                            {plan.hasTrial && plan.trialDuration && (
-                                <p class="text-[11px] text-fg-muted text-center">
-                                    {m.pricing_trial_notice({ duration: String(plan.trialDuration) })}
-                                </p>
-                            )}
-                        </div>
+        <div class="mx-auto max-w-5xl">
+            {/* gap-px over bg-border draws the rule between rails — the table-rule
+                vocabulary of the section above, without building a table. */}
+            <div class="grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-[minmax(0,340px)_1fr]">
+                {/* The claim. */}
+                <div class="bg-primary/[0.06] p-6 md:p-8">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-[11px] uppercase tracking-widest text-fg-muted">{offer.name}</span>
+                        {offer.hasTrial && offer.trialDuration && (
+                            <span class="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+                                {m.pricing_trial_badge({ duration: String(offer.trialDuration) })}
+                            </span>
+                        )}
                     </div>
+
+                    <div class="mt-5 flex items-baseline gap-1.5">
+                        <span class="font-mono text-[44px] font-medium leading-none tracking-[-0.03em] tabular-nums text-fg md:text-[56px]">
+                            {money(offer.price)}
+                        </span>
+                        {offer.interval && (
+                            <span class="font-mono text-base font-normal text-fg-muted">{offer.interval}</span>
+                        )}
+                    </div>
+                    <p class="mt-3 text-[13px] leading-relaxed text-fg-muted">{m.pricing_everything_included()}</p>
+
+                    {/* The three numbers the table above just spent eight rows earning. */}
+                    <div class="mt-6 grid grid-cols-3 gap-3">
+                        {[m.pricing_zero_host(), m.pricing_zero_seat(), m.pricing_zero_query()].map((label) => (
+                            <div>
+                                <div class="font-mono text-xl tabular-nums text-fg">$0</div>
+                                <div class="mt-1 text-[10px] uppercase tracking-widest text-fg-muted">{label}</div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <a
+                        href="https://app.maple.dev"
+                        class="mt-8 flex h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    >
+                        {offer.ctaLabel}
+                    </a>
+                    {offer.hasTrial && offer.trialDuration && (
+                        <p class="mt-3 text-pretty text-[11px] leading-relaxed text-fg-muted">
+                            {m.pricing_trial_reassure({ duration: String(offer.trialDuration) })}
+                        </p>
+                    )}
                 </div>
-            ))}
+
+                {/* The meter that backs it. */}
+                <div class="bg-bg-elevated p-6 md:p-8">
+                    <span class="text-[10px] uppercase tracking-[0.18em] text-fg-muted">
+                        {m.pricing_included_monthly()}
+                    </span>
+
+                    {/* One grid for the whole list, not one per row: the included and
+                        rate columns have to line up down the list, and per-row grids
+                        size their own columns independently. Column spacing is cell
+                        padding rather than gap-x, so the row hairline stays continuous
+                        instead of breaking into three segments. */}
+                    <div class="mt-4 grid grid-cols-[1fr_auto] items-center sm:grid-cols-[1fr_auto_auto]">
+                        {meterRows.map((a) => (
+                            <>
+                                <div class="flex items-center gap-2.5 pb-1 pt-3 sm:border-b sm:border-border/60 sm:py-3 sm:pr-4">
+                                    {a.featureId === "logs" && (
+                                        <svg class="h-4 w-4 shrink-0 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M8 18H16"/><path d="M8 14L11 14"/><path d="M12 4V10H8"/><path d="M4 20L4 10"/><path d="M20 20L20 4"/><path d="M12 2L18 2"/><path d="M6 22L18 22"/><path d="M6 8H6.01"/><path d="M8 6H8.01"/><path d="M10 4H10.01"/></svg>
+                                    )}
+                                    {a.featureId === "traces" && (
+                                        <svg class="h-4 w-4 shrink-0 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M6 18.01L6 18"/><path d="M18 7.01001L18 7.00001"/><path d="M8 20.01L8 20"/><path d="M2 16L4 16"/><path d="M14 9L16 9"/><path d="M20 5L22 5"/><path d="M10 16L10 18"/><path d="M12 11L12 14"/></svg>
+                                    )}
+                                    {a.featureId === "metrics" && (
+                                        <svg class="h-4 w-4 shrink-0 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M2 15.01V15"/><path d="M4 13.01V13"/><path d="M6 11.01V11"/><path d="M8 9.01V9"/><path d="M10 11.01V11"/><path d="M12 13.01V13"/><path d="M14 15.01V15"/><path d="M16 13.01V13"/><path d="M18 11.01V11"/><path d="M20 9.01V9"/><path d="M22 7.01V7"/></svg>
+                                    )}
+                                    {a.featureId === "browser_sessions" && (
+                                        <svg class="h-4 w-4 shrink-0 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M4 6L4 6.01"/><path d="M6 4L6 4.01"/><path d="M20.01 6L20 6"/><path d="M18.01 4L18 4"/><path d="M20.01 18L20 18"/><path d="M18.01 20L18 20"/><path d="M6.01001 20L6.00001 20"/><path d="M4.01001 18L4.00001 18"/><path d="M2 8L2 16"/><path d="M22 14L22 16"/><path d="M8 2L16 2"/><path d="M8 22L16 22"/><path d="M22 8V4"/><path d="M17 12.01V12"/><path d="M14 10H15"/><path d="M14 14H15"/><path d="M12 8H9L9 16L12 16"/></svg>
+                                    )}
+                                    <span class="text-[12.5px] text-fg">{a.label}</span>
+                                </div>
+                                <div class="whitespace-nowrap pb-1 pt-3 text-right font-mono text-[12.5px] tabular-nums text-fg sm:border-b sm:border-border/60 sm:py-3">
+                                    {a.included}
+                                </div>
+                                {/* Below sm the rate drops to its own full-width line:
+                                    three columns squeezed the label column hard enough
+                                    to wrap "Browser Sessions" (and worse in ja/ko).
+                                    From sm it's a real column, left-aligned so every
+                                    "then" starts on the same axis — right-aligning left
+                                    it ragged. */}
+                                <div class="col-span-2 whitespace-nowrap border-b border-border/60 pb-3 text-right font-mono text-[11px] tabular-nums text-fg-muted sm:col-span-1 sm:py-3 sm:pl-6 sm:text-left sm:text-[11.5px]">
+                                    {a.rate && (
+                                        <>
+                                            {a.rate.before}
+                                            <span class="inline-block text-right" style={`min-width:${rateSlotCh}ch`}>
+                                                {a.rate.amount}
+                                            </span>
+                                            {a.rate.after}
+                                        </>
+                                    )}
+                                </div>
+                            </>
+                        ))}
+                    </div>
+
+                    {/* Everything the plan carries, as one run rather than a checklist —
+                        a checklist implies some rows might have been withheld. It sits
+                        with the allotments because both answer "what do I get". */}
+                    <p class="mt-6 border-t border-border/60 pt-5 text-[12px] leading-relaxed text-fg-muted">
+                        {PLATFORM_FEATURES.join(" · ")}
+                    </p>
+
+                    {/* The one honest answer to "what will I actually pay?": the real
+                        calculator, not a canned example. */}
+                    <a
+                        href="/pricing#calculator"
+                        class="mt-5 inline-block text-[12.5px] text-primary transition-colors hover:text-fg"
+                    >
+                        {m.pricing_estimate_link()}
+                    </a>
+                </div>
+            </div>
+
+            {/* Enterprise carries the amber accent too, so it can't be skimmed past —
+                but as border and text, never a filled button. The offer above owns the
+                only solid amber block on the surface, which is what keeps the trial the
+                primary action while this still reads as a real second door. */}
+            <div class="mt-4 flex flex-col gap-5 rounded-xl border border-primary/25 bg-primary/[0.04] px-6 py-5 sm:flex-row sm:items-center sm:justify-between md:px-8">
+                <div>
+                    <span class="text-[11px] uppercase tracking-widest text-primary">
+                        {m.pricing_enterprise()}
+                    </span>
+                    <p class="mt-2 max-w-[48ch] text-[13px] leading-relaxed text-fg">
+                        {m.pricing_enterprise_rail()}
+                    </p>
+                </div>
+                <div class="flex shrink-0 items-center justify-between gap-5 sm:justify-end">
+                    <span class="whitespace-nowrap font-mono text-lg tabular-nums text-primary">
+                        {m.pricing_enterprise_price()}
+                    </span>
+                    <a
+                        href="https://cal.com/david-granzin/30min?overlayCalendar=true"
+                        class="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-primary/40 bg-primary/10 px-4 text-[13px] font-medium text-primary transition-colors hover:bg-primary/20"
+                    >
+                        {m.pricing_talk_to_founder()} →
+                    </a>
+                </div>
+            </div>
         </div>
     </div>
 </section>

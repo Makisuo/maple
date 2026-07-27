@@ -51,7 +51,10 @@ describe("computeServiceShares", () => {
 	})
 
 	it("ignores spans with unparseable start times", () => {
-		const shares = computeServiceShares([span("api", 0, 100), { serviceName: "bad", startTime: "nope", durationMs: 50 }])
+		const shares = computeServiceShares([
+			span("api", 0, 100),
+			{ serviceName: "bad", startTime: "nope", durationMs: 50 },
+		])
 		expect(shares).toHaveLength(1)
 		expect(shares[0].serviceName).toBe("api")
 	})

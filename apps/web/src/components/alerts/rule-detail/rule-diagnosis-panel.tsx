@@ -112,7 +112,10 @@ export function RuleDiagnosisPanel({
 				</div>
 				<ChevronDownIcon
 					size={16}
-					className={cn("shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-180")}
+					className={cn(
+						"shrink-0 text-muted-foreground transition-transform",
+						isOpen && "rotate-180",
+					)}
 				/>
 			</button>
 
@@ -130,7 +133,11 @@ export function RuleDiagnosisPanel({
 					)}
 					<ol className="space-y-1">
 						{visibleStages.map((stage) => (
-							<DiagnosisStageRow key={stage.id} stage={stage} onToggleEnabled={onToggleEnabled} />
+							<DiagnosisStageRow
+								key={stage.id}
+								stage={stage}
+								onToggleEnabled={onToggleEnabled}
+							/>
 						))}
 					</ol>
 					{hasHiddenSteps && (

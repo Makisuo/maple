@@ -1,6 +1,7 @@
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { spawn } from "node:child_process"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { clickHouseVersionAtLeast } from "@maple/domain/clickhouse"
 import { OrgId, RawSqlValidationError, UserId } from "@maple/domain/http"
 import { prepareRawSql } from "@maple/query-engine/runtime"
 import { OrgClickHouseSettingsService } from "../services/OrgClickHouseSettingsService"
@@ -69,6 +70,123 @@ const applyRealMigrations = async (): Promise<void> => {
 	if (exitCode !== 0) throw new Error(`Migration CLI failed (${exitCode}): ${stderr || stdout}`)
 }
 
+const assertSearchSchemaApplied = async (): Promise<void> => {
+	const migrationRevision = (
+		await clickhouseExec(
+			"SELECT count() FROM _maple_schema_migrations WHERE version = 10 FORMAT TabSeparated",
+			database,
+		)
+	).trim()
+	assert.strictEqual(migrationRevision, "1", "performance migration 10 was not recorded")
+
+	const portableIndexCount = (
+		await clickhouseExec(
+			`SELECT count()
+FROM system.data_skipping_indices
+WHERE database = currentDatabase()
+  AND (
+    (table = 'logs' AND name IN (
+      'idx_resource_attr_keys', 'idx_resource_attr_vals',
+      'idx_scope_attr_keys', 'idx_scope_attr_vals',
+      'idx_log_attr_keys', 'idx_log_attr_vals', 'idx_lower_body'
+    ))
+    OR
+    (table = 'traces' AND name IN ('idx_scope_attr_keys', 'idx_scope_attr_vals'))
+  )
+FORMAT TabSeparated`,
+			database,
+		)
+	).trim()
+	assert.strictEqual(portableIndexCount, "9", "portable search indexes are incomplete")
+
+	const computedColumnCount = (
+		await clickhouseExec(
+			`SELECT count()
+FROM system.columns
+WHERE database = currentDatabase()
+  AND (
+    (table = 'logs' AND name IN ('ResourceAttributeItems', 'ScopeAttributeItems', 'LogAttributeItems'))
+    OR
+    (table = 'traces' AND name IN ('ResourceAttributeItems', 'ScopeAttributeItems', 'SpanAttributeItems'))
+  )
+FORMAT TabSeparated`,
+			database,
+		)
+	).trim()
+	assert.strictEqual(computedColumnCount, "6", "computed search columns are incomplete")
+
+	const serverVersion = (await clickhouseExec("SELECT version() FORMAT TabSeparated", database)).trim()
+	if (!clickHouseVersionAtLeast(serverVersion, "26.2.0")) return
+
+	const textFeatureRevision = (
+		await clickhouseExec(
+			"SELECT max(revision) FROM _maple_schema_features WHERE id = 'search_text_v1' FORMAT TabSeparated",
+			database,
+		)
+	).trim()
+	assert.strictEqual(textFeatureRevision, "1", "text search feature was not recorded")
+
+	const textIndexCount = (
+		await clickhouseExec(
+			`SELECT count()
+FROM system.data_skipping_indices
+WHERE database = currentDatabase()
+  AND name IN (
+    'idx_resource_attr_items_text', 'idx_scope_attr_items_text',
+    'idx_log_attr_items_text', 'idx_span_attr_items_text', 'idx_lower_body_text'
+  )
+FORMAT TabSeparated`,
+			database,
+		)
+	).trim()
+	assert.strictEqual(textIndexCount, "7", "text search indexes are incomplete")
+
+	await clickhouseExec(
+		`INSERT INTO logs (
+  OrgId, Timestamp, TimestampTime, TraceId, SpanId, TraceFlags,
+  SeverityText, SeverityNumber, ServiceName, Body,
+  ResourceSchemaUrl, ResourceAttributes,
+  ScopeSchemaUrl, ScopeName, ScopeVersion, ScopeAttributes, LogAttributes
+) VALUES (
+  '${orgId}', now64(9), now(), 'trace-search', 'span-search', 1,
+  'ERROR', 17, 'api', 'Connection timeout while contacting database',
+  '', map('deployment.environment', 'e2e'),
+  '', 'e2e', '1', map(), map('db.system', 'postgresql')
+)`,
+		database,
+	)
+	const scanCount = (
+		await clickhouseExec(
+			`SELECT count()
+FROM logs
+WHERE OrgId = '${orgId}' AND Body ILIKE '%connection timeout%'
+FORMAT TabSeparated`,
+			database,
+		)
+	).trim()
+	const indexedCount = (
+		await clickhouseExec(
+			`SELECT count()
+FROM logs
+WHERE OrgId = '${orgId}' AND hasAllTokens(lower(Body), 'connection timeout')
+SETTINGS enable_full_text_index = 1
+FORMAT TabSeparated`,
+			database,
+		)
+	).trim()
+	assert.strictEqual(indexedCount, scanCount, "indexed and fallback log search disagree")
+
+	const explain = await clickhouseExec(
+		`EXPLAIN indexes = 1
+SELECT count()
+FROM logs
+WHERE OrgId = '${orgId}' AND hasAllTokens(lower(Body), 'connection timeout')
+SETTINGS enable_full_text_index = 1`,
+		database,
+	)
+	assert.include(explain, "idx_lower_body_text")
+}
+
 const trackedDbs: TestDb[] = []
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asUserId = Schema.decodeUnknownSync(UserId)
@@ -124,6 +242,7 @@ describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => 
 	beforeAll(async () => {
 		await clickhouseExec(`CREATE DATABASE ${database}`)
 		await applyRealMigrations()
+		await assertSearchSchemaApplied()
 		await clickhouseExec(
 			`INSERT INTO traces
 			 (OrgId, Timestamp, TraceId, SpanId, SpanName, SpanKind, ServiceName, Duration, StatusCode)

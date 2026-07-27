@@ -180,7 +180,10 @@ export const ServiceMapToolbar = memo(function ServiceMapToolbar({
 					value={String(minTrafficPct)}
 					onValueChange={(v) => onMinTrafficPctChange(Number(v))}
 				>
-					<SelectTrigger size="sm" className="h-6 min-w-0 text-[11px] border-0 bg-transparent px-1.5">
+					<SelectTrigger
+						size="sm"
+						className="h-6 min-w-0 text-[11px] border-0 bg-transparent px-1.5"
+					>
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>

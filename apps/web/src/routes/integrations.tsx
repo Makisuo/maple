@@ -17,6 +17,7 @@ import {
 	IntegrationIconPlate,
 	IntegrationsSummary,
 	catalogEntry,
+	isIntegrationId,
 	useIntegrationOverviews,
 	useIntegrationStatuses,
 	type IntegrationId,
@@ -33,18 +34,12 @@ import { Button } from "@maple/ui/components/ui/button"
 import { cn } from "@maple/ui/lib/utils"
 import { ArrowLeftIcon, CircleInfoIcon, ExternalLinkIcon, LoaderIcon } from "@/components/icons"
 
+// Deliberately a plain string rather than a literal union: this page is the
+// return target for external OAuth callbacks, which append their own
+// `?integration=<id>`. A value we don't recognise must fall back to the catalog,
+// never fail `validateSearch` and blank the page.
 const IntegrationsSearch = Schema.Struct({
-	integration: Schema.optional(
-		Schema.Literals([
-			"cloudflare",
-			"prometheus",
-			"planetscale",
-			"warpstream",
-			"hazel",
-			"github",
-			"slack",
-		]),
-	),
+	integration: Schema.optional(Schema.String),
 	// Post-OAuth return params set by the Slack install callback redirect.
 	slack: Schema.optional(Schema.Literals(["connected", "error"])),
 	slack_message: Schema.optional(Schema.String),
@@ -60,7 +55,8 @@ function IntegrationsPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 	const { visibleSections } = useVisibleSettingsSections()
-	const integration = search.integration
+	const integration =
+		search.integration && isIntegrationId(search.integration) ? search.integration : undefined
 
 	// Surface the Slack OAuth callback result once, then strip the return params
 	// from the URL so a refresh doesn't re-toast.

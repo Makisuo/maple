@@ -12,6 +12,7 @@ import {
 	type WorkflowState,
 } from "@maple/domain/http"
 import { WORKFLOW_LABEL } from "@/components/icons/workflow-ring"
+import { logClientError } from "@/lib/services/common/telemetry"
 
 const INVALIDATE = ["errorIssues"] as const
 
@@ -25,7 +26,9 @@ function describeFailure(result: Exit.Exit<unknown, unknown>): string {
 
 function logFailure(label: string, result: Exit.Exit<unknown, unknown>) {
 	if (Exit.isSuccess(result)) return
-	console.error(`[issue-mutations] ${label} failed`, result.cause)
+	logClientError("issue.mutation_failed", result.cause, {
+		"maple.issue.mutation": label,
+	})
 }
 
 export function useIssueMutations(onSuccess?: () => void) {
@@ -101,6 +104,26 @@ export function useIssueMutations(onSuccess?: () => void) {
 		return result
 	}
 
+	const claimMany = async (issueIds: ReadonlyArray<ErrorIssueId>) => {
+		if (issueIds.length === 0) return
+		const results = await Promise.all(
+			issueIds.map((issueId) =>
+				claim({
+					params: { issueId },
+					payload: new ErrorIssueClaimRequest({}),
+					reactivityKeys: [...INVALIDATE, `errorIssue:${issueId}`],
+				}),
+			),
+		)
+		const failed = results.filter((result) => !Exit.isSuccess(result))
+		if (failed.length === 0) {
+			onSuccess?.()
+			toast.success(`Claimed ${issueIds.length} issues`)
+		} else {
+			toast.error(`Claimed ${issueIds.length - failed.length} of ${issueIds.length}`)
+		}
+	}
+
 	const releaseIssue = async (issueId: ErrorIssueId) => {
 		const result = await release({
 			params: { issueId },
@@ -133,7 +156,35 @@ export function useIssueMutations(onSuccess?: () => void) {
 		return result
 	}
 
-	return { transitionTo, transitionMany, claimIssue, releaseIssue, setSeverity }
+	const setSeverityMany = async (issueIds: ReadonlyArray<ErrorIssueId>, value: IssueSeverity | null) => {
+		if (issueIds.length === 0) return
+		const results = await Promise.all(
+			issueIds.map((issueId) =>
+				severity({
+					params: { issueId },
+					payload: new ErrorIssueSetSeverityRequest({ severity: value }),
+					reactivityKeys: [...INVALIDATE, `errorIssue:${issueId}`],
+				}),
+			),
+		)
+		const failed = results.filter((result) => !Exit.isSuccess(result))
+		if (failed.length === 0) {
+			onSuccess?.()
+			toast.success(`Updated severity for ${issueIds.length} issues`)
+		} else {
+			toast.error(`Updated ${issueIds.length - failed.length} of ${issueIds.length} issues`)
+		}
+	}
+
+	return {
+		transitionTo,
+		transitionMany,
+		claimIssue,
+		claimMany,
+		releaseIssue,
+		setSeverity,
+		setSeverityMany,
+	}
 }
 
 export type IssueMutations = ReturnType<typeof useIssueMutations>

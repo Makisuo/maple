@@ -3,13 +3,11 @@ import { Result } from "@/lib/effect-atom"
 import { Effect } from "effect"
 
 import { listTraces, type Trace, type TracesResponse } from "@/api/warehouse/traces"
-import {
-	listTracesResultAtom,
-	type QueryAtomFailure,
-} from "@/lib/services/atoms/warehouse-query-atoms"
+import { listTracesResultAtom, type QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import type { TracesSearchParams } from "@/routes/traces"
+import { logClientError } from "@/lib/services/common/telemetry"
 
 const PAGE_SIZE = 100
 const FETCH_THRESHOLD = 20
@@ -128,7 +126,7 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 				// asking for more pages. Without this, hasNextPage stays true and the
 				// UI loops on a backend offset cap.
 				setPaginationStopped(true)
-				console.error("Trace pagination failed", error)
+				logClientError("trace.pagination_failed", error)
 			})
 			.finally(() => {
 				if (filterKeyRef.current === currentKey) {

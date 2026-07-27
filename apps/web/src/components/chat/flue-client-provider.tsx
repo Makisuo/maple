@@ -3,6 +3,7 @@ import { FlueProvider } from "@flue/react"
 import { createFlueClient } from "@flue/sdk"
 import { flueChatUrl } from "@/lib/services/common/flue-chat-url"
 import { getMapleAuthHeaders } from "@/lib/services/common/auth-headers"
+import { tracedFetch } from "@/lib/services/common/telemetry"
 
 /**
  * Provides a `@flue/sdk` client to the chat hooks. The `headers` resolver runs
@@ -15,9 +16,7 @@ export function FlueClientProvider({ children }: { children: ReactNode }) {
 		() =>
 			createFlueClient({
 				baseUrl: flueChatUrl,
-				fetch: async (input, init) => {
-					return globalThis.fetch(input, init)
-				},
+				fetch: (input, init) => tracedFetch("maple-chat-flue", input, init),
 				headers: async (): Promise<Record<string, string>> => {
 					const headers = await getMapleAuthHeaders()
 					return headers.authorization ? { Authorization: headers.authorization } : {}

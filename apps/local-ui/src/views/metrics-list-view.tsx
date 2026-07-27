@@ -2,10 +2,7 @@ import { useMemo } from "react"
 import { PulseIcon } from "@maple/ui/components/icons"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkline"
-import {
-	METRIC_TYPE_COLORS,
-	MetricTypeBadge,
-} from "@maple/ui/components/metrics/metric-type-badge"
+import { METRIC_TYPE_COLORS, MetricTypeBadge } from "@maple/ui/components/metrics/metric-type-badge"
 import {
 	FilterSection,
 	SearchableFilterSection,

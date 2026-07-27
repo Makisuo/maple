@@ -1,9 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Ref, Schema, Tracer } from "effect"
+import { Duration, Effect, Fiber, Ref, Schema, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { OrgId, UserId } from "@maple/domain"
 import { RawSqlValidationError } from "@maple/domain/http"
 import { compile, listRuleChecksQuery, unsafeCompiledQuery } from "../ch"
+import { logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeWarehouseExecutor } from "./executor"
 import { WarehouseResponseLimitError } from "./response-limits"
 import type {
@@ -190,6 +191,36 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 		}),
 	)
 
+	it.effect("wraps capability metadata probes in an attributed Client span", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: clickhouseConfig, clientCacheKey: "read:org_test" }, []),
+			)
+
+			yield* executor
+				.compiledQuery(
+					tenant,
+					() =>
+						unsafeCompiledQuery<{ readonly c: number }>({
+							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+						}),
+					{ context: "capabilitySpan" },
+				)
+				.pipe(Effect.withTracer(tracer))
+
+			const span = spans.find(
+				(candidate) => candidate.name === "WarehouseQueryService.inspectCapabilities",
+			)
+			assert.isDefined(span)
+			assert.strictEqual(span.kind, "client")
+			assert.strictEqual(span.attributes.get("orgId"), "org_test")
+			assert.strictEqual(span.attributes.get("warehouse.backend"), "clickhouse")
+			assert.strictEqual(span.attributes.get("warehouse.route"), "read")
+			assert.strictEqual(span.attributes.get("maple.query.capabilities.cache"), "miss")
+		}),
+	)
+
 	it.live("reports retries performed rather than failed attempts on terminal failure", () =>
 		Effect.gen(function* () {
 			const { spans, tracer } = makeRecordingTracer()
@@ -296,6 +327,308 @@ describe("makeWarehouseExecutor restricted-settings strip", () => {
 				settings: { maxBlockSize: 512 },
 			})
 			assert.isTrue(sqls[0]?.includes("max_block_size=512"))
+		}),
+	)
+})
+
+describe("makeWarehouseExecutor capability-aware compilation", () => {
+	it.effect("selects a live-index plan, enables the verified setting, and caches metadata", () =>
+		Effect.gen(function* () {
+			const sqls: string[] = []
+			let metadataQueries = 0
+			const executor = makeWarehouseExecutor({
+				createClient: () => ({
+					sql: async (sql) => {
+						sqls.push(sql)
+						if (sql.includes("SELECT version()")) {
+							metadataQueries += 1
+							return { data: [{ version: "26.2.1" }] }
+						}
+						if (sql.includes("system.data_skipping_indices")) {
+							return {
+								data: [
+									{
+										table: "logs",
+										name: "idx_lower_body_text",
+										type: "text",
+										expression: "lower(Body)",
+									},
+								],
+							}
+						}
+						if (sql.includes("system.settings")) {
+							return { data: [{ name: "enable_full_text_index", value: "0" }] }
+						}
+						if (sql.includes("system.")) return { data: [] }
+						return { data: [] }
+					},
+					insert: async () => {},
+				}),
+				resolveRoute: () =>
+					Effect.succeed({
+						source: "org-byo" as const,
+						config: clickhouseConfig,
+						clientCacheKey: "read:org_test",
+					}),
+			})
+
+			const factory = (capabilities: WarehouseCapabilities) =>
+				unsafeCompiledQuery<{ readonly c: number }>({
+					sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'text' FORMAT JSON`,
+				})
+
+			yield* executor.compiledQuery(tenant, factory, { context: "capability-test" })
+			yield* executor.compiledQuery(tenant, factory, { context: "capability-test" })
+
+			assert.strictEqual(metadataQueries, 1)
+			const executed = sqls.filter((sql) => sql.includes("FROM logs WHERE"))
+			assert.lengthOf(executed, 2)
+			assert.isTrue(executed.every((sql) => sql.includes("'text' = 'text'")))
+			assert.isTrue(executed.every((sql) => sql.includes("enable_full_text_index=1")))
+		}),
+	)
+
+	it.effect("keeps concurrent cold capability probes request-local", () =>
+		Effect.gen(function* () {
+			let versionQueries = 0
+			let releaseVersionQuery: (() => void) | undefined
+			let signalVersionQueryStarted: (() => void) | undefined
+			const versionQueryStarted = new Promise<void>((resolve) => {
+				signalVersionQueryStarted = resolve
+			})
+			const versionQueryGate = new Promise<void>((resolve) => {
+				releaseVersionQuery = resolve
+			})
+			const executor = makeWarehouseExecutor({
+				createClient: () => ({
+					sql: async (sql) => {
+						if (sql.includes("SELECT version()")) {
+							versionQueries += 1
+							signalVersionQueryStarted?.()
+							await versionQueryGate
+							return { data: [{ version: "26.2.1" }] }
+						}
+						if (sql.includes("system.settings")) {
+							return { data: [{ name: "enable_full_text_index", value: "0" }] }
+						}
+						return { data: [] }
+					},
+					insert: async () => {},
+				}),
+				resolveRoute: () =>
+					Effect.succeed({
+						source: "org-byo" as const,
+						config: clickhouseConfig,
+						clientCacheKey: "read:org_test",
+					}),
+			})
+			const query = () =>
+				executor.compiledQueryWithCapabilities(
+					tenant,
+					() =>
+						unsafeCompiledQuery<{ readonly c: number }>({
+							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+						}),
+					{ context: "capability-request-local" },
+				)
+
+			const leader = yield* Effect.forkChild(query())
+			yield* Effect.promise(() => versionQueryStarted)
+			const follower = yield* Effect.forkChild(query())
+			yield* Effect.promise(() => new Promise<void>((resolve) => globalThis.setTimeout(resolve, 10)))
+			releaseVersionQuery?.()
+			yield* Fiber.join(leader)
+			yield* Fiber.join(follower)
+
+			assert.strictEqual(versionQueries, 2)
+		}),
+	)
+
+	it.effect("falls back to the conservative plan when metadata access is denied", () =>
+		Effect.gen(function* () {
+			const executed: string[] = []
+			const executor = makeWarehouseExecutor({
+				createClient: () => ({
+					sql: async (sql) => {
+						if (sql.includes("system.") || sql.includes("SELECT version()")) {
+							throw new Error("ACCESS_DENIED")
+						}
+						executed.push(sql)
+						return { data: [] }
+					},
+					insert: async () => {},
+				}),
+				resolveRoute: () =>
+					Effect.succeed({
+						source: "org-byo" as const,
+						config: clickhouseConfig,
+						clientCacheKey: "read:org_test",
+					}),
+			})
+
+			yield* executor.compiledQuery(
+				tenant,
+				(capabilities) =>
+					unsafeCompiledQuery<{ readonly c: number }>({
+						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+					}),
+				{ context: "capability-fallback-test" },
+			)
+
+			assert.lengthOf(executed, 1)
+			assert.include(executed[0]!, "'scan' = 'scan'")
+			assert.notInclude(executed[0]!, "enable_full_text_index")
+		}),
+	)
+
+	it.effect("does not select text indexes when the Tinybird gateway rejects setting overrides", () =>
+		Effect.gen(function* () {
+			const sqls: string[] = []
+			const executor = makeWarehouseExecutor({
+				createClient: () => ({
+					sql: async (sql) => {
+						sqls.push(sql)
+						if (sql.includes("SELECT version()")) return { data: [{ version: "26.2.1" }] }
+						if (sql.includes("system.data_skipping_indices")) {
+							return {
+								data: [
+									{
+										table: "logs",
+										name: "idx_lower_body_text",
+										type: "text",
+										expression: "lower(Body)",
+									},
+								],
+							}
+						}
+						if (sql.includes("system.settings")) {
+							return { data: [{ name: "enable_full_text_index", value: "0" }] }
+						}
+						return { data: [] }
+					},
+					insert: async () => {},
+				}),
+				resolveRoute: () =>
+					Effect.succeed({
+						source: "managed" as const,
+						config: tinybirdGatewayConfig,
+						clientCacheKey: "read:managed",
+					}),
+			})
+
+			yield* executor.compiledQuery(
+				tenant,
+				(capabilities) =>
+					unsafeCompiledQuery<{ readonly c: number }>({
+						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+					}),
+				{ context: "tinybird-gateway-capabilities" },
+			)
+
+			const executed = sqls.find((sql) => sql.includes("FROM logs WHERE"))
+			assert.isDefined(executed)
+			assert.include(executed!, "'scan' = 'scan'")
+			assert.notInclude(executed!, "enable_full_text_index")
+		}),
+	)
+
+	it.effect("bounds hung metadata inspection and continues with the conservative plan", () =>
+		Effect.gen(function* () {
+			const executed: string[] = []
+			const executor = makeWarehouseExecutor({
+				createClient: () => ({
+					sql: (sql) => {
+						if (sql.includes("SELECT version()") || sql.includes("system.")) {
+							return new Promise<{ data: never[] }>(() => {})
+						}
+						executed.push(sql)
+						return Promise.resolve({ data: [] })
+					},
+					insert: async () => {},
+				}),
+				resolveRoute: () =>
+					Effect.succeed({
+						source: "org-byo" as const,
+						config: clickhouseConfig,
+						clientCacheKey: "read:org_test",
+					}),
+			})
+			const outcome = yield* Ref.make("pending")
+
+			yield* Effect.forkChild(
+				executor
+					.compiledQuery(
+						tenant,
+						(capabilities) =>
+							unsafeCompiledQuery<{ readonly c: number }>({
+								sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+							}),
+						{ context: "hung-capability-probe" },
+					)
+					.pipe(
+						Effect.matchEffect({
+							onFailure: () => Ref.set(outcome, "failure"),
+							onSuccess: () => Ref.set(outcome, "success"),
+						}),
+					),
+			)
+
+			yield* TestClock.adjust(Duration.seconds(3))
+			assert.strictEqual(yield* Ref.get(outcome), "success")
+			assert.lengthOf(executed, 1)
+			assert.include(executed[0]!, "'scan' = 'scan'")
+		}),
+	)
+
+	it.effect("optimizes named log-list queries after probing the routed warehouse", () =>
+		Effect.gen(function* () {
+			const sqls: string[] = []
+			const executor = makeWarehouseExecutor({
+				createClient: () => ({
+					sql: async (sql) => {
+						sqls.push(sql)
+						if (sql.includes("SELECT version()")) return { data: [{ version: "26.2.1" }] }
+						if (sql.includes("system.data_skipping_indices")) {
+							return {
+								data: [
+									{
+										table: "logs",
+										name: "idx_lower_body_text",
+										type: "text",
+										expression: "lower(Body)",
+									},
+								],
+							}
+						}
+						if (sql.includes("system.settings")) {
+							return { data: [{ name: "enable_full_text_index", value: "0" }] }
+						}
+						return { data: [] }
+					},
+					insert: async () => {},
+				}),
+				resolveRoute: () =>
+					Effect.succeed({
+						source: "org-byo" as const,
+						config: clickhouseConfig,
+						clientCacheKey: "read:org_test",
+					}),
+			})
+
+			yield* executor.query(tenant, {
+				pipeName: "list_logs",
+				params: {
+					start_time: "2026-01-01 00:00:00",
+					end_time: "2026-01-02 00:00:00",
+					search: "Connection Timeout",
+					limit: 10,
+				},
+			})
+
+			const executed = sqls.find((sql) => sql.includes("FROM logs") && sql.includes("hasAllTokens"))
+			assert.isDefined(executed)
+			assert.include(executed!, "Body ILIKE '%Connection Timeout%'")
+			assert.include(executed!, "enable_full_text_index=1")
 		}),
 	)
 })

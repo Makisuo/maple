@@ -13,16 +13,31 @@ export type SortDir = "asc" | "desc"
 export const ROW_LINK_CLASS =
 	"group flex items-center gap-4 border-b border-border/40 px-4 py-3 transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
 
-interface UseTableSortOptions<K> {
+/**
+ * Row className for tables whose rows *select* rather than navigate. Same chrome as
+ * `ROW_LINK_CLASS` plus button resets; pair it with `aria-pressed` so the selected
+ * row is announced, not just tinted.
+ */
+export const ROW_BUTTON_CLASS =
+	"group flex w-full items-center gap-4 border-b border-border/40 px-4 py-3 text-left transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none aria-pressed:bg-muted/40"
+
+interface UseTableSortOptions<K, Row> {
 	initialKey: K
 	initialDir?: SortDir
 	/** Keys that should default to ascending on first click (names, namespaces, …). */
 	stringKeys?: ReadonlyArray<K>
+	/**
+	 * Rows matching this always sort above the rest, in every column and direction —
+	 * for the one row that is categorically different (a production branch among
+	 * ephemeral ones). Stable sort can't express this: it only preserves order
+	 * among ties.
+	 */
+	pinned?: (row: Row) => boolean
 }
 
 export function useTableSort<Row, K extends keyof Row>(
 	rows: ReadonlyArray<Row>,
-	{ initialKey, initialDir = "desc", stringKeys }: UseTableSortOptions<K>,
+	{ initialKey, initialDir = "desc", stringKeys, pinned }: UseTableSortOptions<K, Row>,
 ) {
 	const [sortKey, setSortKey] = useState<K>(initialKey)
 	const [sortDir, setSortDir] = useState<SortDir>(initialDir)
@@ -37,8 +52,7 @@ export function useTableSort<Row, K extends keyof Row>(
 	}
 
 	const sorted = useMemo(() => {
-		const copy = [...rows]
-		copy.sort((a, b) => {
+		const compare = (a: Row, b: Row) => {
 			const av = a[sortKey]
 			const bv = b[sortKey]
 			if (typeof av === "number" && typeof bv === "number") {
@@ -47,9 +61,13 @@ export function useTableSort<Row, K extends keyof Row>(
 			const as = String(av)
 			const bs = String(bv)
 			return sortDir === "asc" ? as.localeCompare(bs) : bs.localeCompare(as)
-		})
-		return copy
-	}, [rows, sortKey, sortDir])
+		}
+		if (pinned === undefined) return [...rows].sort(compare)
+		const top: Row[] = []
+		const rest: Row[] = []
+		for (const row of rows) (pinned(row) ? top : rest).push(row)
+		return [...top.sort(compare), ...rest.sort(compare)]
+	}, [rows, sortKey, sortDir, pinned])
 
 	return { sorted, sortKey, sortDir, handleSort }
 }
@@ -122,21 +140,54 @@ interface TableShellProps {
 	header: React.ReactNode
 	isEmpty: boolean
 	emptyMessage: string
+	/**
+	 * Cap the row area at this pixel height and scroll inside it, with the column heads pinned.
+	 * For lists whose length is the server's limit rather than a human number — 100 breakdown keys,
+	 * 500 zones — this keeps the table a fixed-size instrument instead of a page that grows past
+	 * everything below it. Omit for tables that are short by nature.
+	 */
+	maxHeight?: number
+	/** Surface the pinned header sits on. Defaults to the page background; pass `bg-card` inside a card. */
+	stickySurfaceClass?: string
 	children: React.ReactNode
 }
 
-export function TableShell({ ariaLabel, waiting, header, isEmpty, emptyMessage, children }: TableShellProps) {
+export function TableShell({
+	ariaLabel,
+	waiting,
+	header,
+	isEmpty,
+	emptyMessage,
+	maxHeight,
+	stickySurfaceClass = "bg-background",
+	children,
+}: TableShellProps) {
+	const scrolls = maxHeight !== undefined
 	return (
 		<div
 			className={cn("border-y border-border/70 transition-opacity", waiting && "opacity-60")}
 			aria-label={ariaLabel}
 		>
-			<div className="flex items-center gap-4 border-b border-border/60 px-4 py-2">{header}</div>
-			{isEmpty ? (
-				<div className="px-4 py-12 text-center text-[12px] text-muted-foreground">{emptyMessage}</div>
-			) : (
-				children
-			)}
+			<div
+				className={cn(scrolls && "overflow-y-auto overscroll-contain")}
+				style={scrolls ? { maxHeight } : undefined}
+			>
+				<div
+					className={cn(
+						"flex items-center gap-4 border-b border-border/60 px-4 py-2",
+						scrolls && `sticky top-0 z-10 ${stickySurfaceClass}`,
+					)}
+				>
+					{header}
+				</div>
+				{isEmpty ? (
+					<div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
+						{emptyMessage}
+					</div>
+				) : (
+					children
+				)}
+			</div>
 		</div>
 	)
 }

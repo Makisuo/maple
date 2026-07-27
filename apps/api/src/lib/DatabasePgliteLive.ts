@@ -3,7 +3,13 @@ import { createMaplePgliteClient } from "@maple/db/client"
 import { ensureMapleDbDirectory, resolveMapleDbConfig } from "@maple/db/config"
 import { runMigrations } from "@maple/db/migrate"
 import { Effect, Layer } from "effect"
-import { Database, type DatabaseClient, type DatabaseShape, executeWithSpan, toDatabaseError } from "./DatabaseLive"
+import {
+	Database,
+	type DatabaseClient,
+	type DatabaseShape,
+	executeWithSpan,
+	toDatabaseError,
+} from "./DatabaseLive"
 import { Env } from "./Env"
 
 /**

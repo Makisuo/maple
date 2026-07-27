@@ -28,6 +28,8 @@ interface ServiceMapRollupResult {
 	readonly hoursRolledUp: number
 	readonly edgesWritten: number
 	readonly resolutionsWritten: number
+	readonly resolutionHoursChecked: number
+	readonly emptyResolutionHours: number
 	readonly orgFailures: number
 }
 
@@ -92,6 +94,8 @@ export class ServiceMapRollupService extends Context.Service<
 			let hoursRolledUp = 0
 			let edgesWritten = 0
 			let resolutionsWritten = 0
+			let resolutionHoursChecked = 0
+			let emptyResolutionHours = 0
 			yield* Effect.forEach(
 				missing,
 				(hourMs) =>
@@ -116,13 +120,9 @@ export class ServiceMapRollupService extends Context.Service<
 						// query keeps its tight shape; failure of one ingest doesn't
 						// invalidate the other (per-org Effect failure already isolated).
 						//
-						// NOTE: the hour is marked "done" purely by the presence of an edges
-						// row (see `serviceMapEdgesExistingHoursSQL`). If the edges write
-						// succeeds but the resolutions write fails (warehouse error, ingest
-						// throttling), the next tick will skip the hour and the resolutions
-						// gap is permanent — manifesting as internal-service HTTP calls
-						// leaking into the Dependencies "External" tab for that window.
-						// Backfill = re-running this rollup with the edges row deleted.
+						// A bounded repair pass below re-evaluates this companion stream
+						// for already-sealed edge hours, so a transient ingest failure does
+						// not leave a permanent address-resolution gap.
 						const resolutionsRollup = CH.serviceMapResolutionsRollupSQL({
 							orgId,
 							hourStart,
@@ -131,6 +131,7 @@ export class ServiceMapRollupService extends Context.Service<
 						const resolutionsRows = yield* warehouse.compiledQuery(tenant, resolutionsRollup, {
 							context: "serviceMapResolutionsRollup",
 						})
+						resolutionHoursChecked += 1
 						if (resolutionsRows.length > 0) {
 							yield* warehouse.ingest(
 								tenant,
@@ -138,12 +139,49 @@ export class ServiceMapRollupService extends Context.Service<
 								resolutionsRows,
 							)
 							resolutionsWritten += resolutionsRows.length
+						} else {
+							emptyResolutionHours += 1
 						}
 						hoursRolledUp += 1
 					}),
 				{ discard: true },
 			)
-			return { hoursRolledUp, edgesWritten, resolutionsWritten, failed: false }
+
+			// Edge rows are the seal for an hour, but the companion resolution
+			// ingest can fail independently. Recompute resolution rows for sealed
+			// hours in the bounded lookback as an idempotent repair pass
+			// (ReplacingMergeTree deduplicates the same mapping key).
+			yield* Effect.forEach(
+				candidates.filter((hourMs) => existing.has(Math.floor(hourMs / 1000))),
+				(hourMs) =>
+					Effect.gen(function* () {
+						const resolutionsRows = yield* warehouse.compiledQuery(
+							tenant,
+							CH.serviceMapResolutionsRollupSQL({
+								orgId,
+								hourStart: toTinybirdDateTime(hourMs),
+								hourEnd: toTinybirdDateTime(hourMs + HOUR_MS),
+							}),
+							{ context: "serviceMapResolutionsRepair" },
+						)
+						resolutionHoursChecked += 1
+						if (resolutionsRows.length === 0) {
+							emptyResolutionHours += 1
+							return
+						}
+						yield* warehouse.ingest(tenant, "service_address_resolutions_hourly", resolutionsRows)
+						resolutionsWritten += resolutionsRows.length
+					}),
+				{ discard: true },
+			)
+			return {
+				hoursRolledUp,
+				edgesWritten,
+				resolutionsWritten,
+				resolutionHoursChecked,
+				emptyResolutionHours,
+				failed: false,
+			}
 		})
 
 		const runRollupTick: ServiceMapRollupServiceShape["runRollupTick"] = Effect.fn(
@@ -174,6 +212,8 @@ export class ServiceMapRollupService extends Context.Service<
 											hoursRolledUp: 0,
 											edgesWritten: 0,
 											resolutionsWritten: 0,
+											resolutionHoursChecked: 0,
+											emptyResolutionHours: 0,
 											failed: true,
 										},
 									),
@@ -187,6 +227,8 @@ export class ServiceMapRollupService extends Context.Service<
 				hoursRolledUp: results.reduce((sum, r) => sum + r.hoursRolledUp, 0),
 				edgesWritten: results.reduce((sum, r) => sum + r.edgesWritten, 0),
 				resolutionsWritten: results.reduce((sum, r) => sum + r.resolutionsWritten, 0),
+				resolutionHoursChecked: results.reduce((sum, r) => sum + r.resolutionHoursChecked, 0),
+				emptyResolutionHours: results.reduce((sum, r) => sum + r.emptyResolutionHours, 0),
 				orgFailures: results.filter((r) => r.failed).length,
 			}
 		})

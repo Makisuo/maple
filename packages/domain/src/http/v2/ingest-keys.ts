@@ -2,11 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { Timestamp } from "./envelopes"
-import {
-	V2InvalidRequestError,
-	V2PermissionError,
-	V2ServiceUnavailableError,
-} from "./errors"
+import { V2InvalidRequestError, V2PermissionError, V2ServiceUnavailableError } from "./errors"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A

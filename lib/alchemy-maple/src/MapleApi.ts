@@ -61,10 +61,12 @@ const errorFromResponse = (status: number, bodyText: string): MapleError => {
 const isRetryable = (error: MapleError): boolean =>
 	error._tag === "Maple::ApiError" && (error.status === 429 || error.status >= 500)
 
-const retryPolicy = Schedule.exponential(Duration.millis(500), 2).pipe(
-	Schedule.either(Schedule.spaced(Duration.seconds(10))),
-	Schedule.both(Schedule.recurs(6)),
-)
+// Exponential backoff capped at 10s (`min` = fastest of the two), bounded to
+// six recurrences (`max` = continue only while every schedule still recurs).
+const retryPolicy = Schedule.max([
+	Schedule.min([Schedule.exponential(Duration.millis(500), 2), Schedule.spaced(Duration.seconds(10))]),
+	Schedule.recurs(6),
+])
 
 export const make = Effect.gen(function* () {
 	const { baseUrl, apiKey } = yield* MapleEnvironment
@@ -91,14 +93,21 @@ export const make = Effect.gen(function* () {
 			}
 			const response = yield* httpClient.execute(req).pipe(
 				Effect.mapError(
-					(error) => new MapleApiError({ status: 0, message: `Maple API request failed: ${error.message}` }),
+					(error) =>
+						new MapleApiError({
+							status: 0,
+							message: `Maple API request failed: ${error.message}`,
+						}),
 				),
 			)
 			// Drain the body either way so the connection is released.
 			const text = yield* response.text.pipe(
 				Effect.mapError(
 					(error) =>
-						new MapleApiError({ status: response.status, message: `Failed to read response: ${error.message}` }),
+						new MapleApiError({
+							status: response.status,
+							message: `Failed to read response: ${error.message}`,
+						}),
 				),
 			)
 			if (response.status >= 200 && response.status < 300) {
@@ -129,8 +138,7 @@ export const make = Effect.gen(function* () {
 })
 
 /** Live client: {@link MapleEnvironment} + the runtime's global `fetch`. */
-export const MapleApiLive = () =>
-	Layer.effect(MapleApi, make).pipe(Layer.provide(FetchHttpClient.layer))
+export const MapleApiLive = () => Layer.effect(MapleApi, make).pipe(Layer.provide(FetchHttpClient.layer))
 
 /**
  * Fetch every page of a v2 list endpoint (`{ object: "list", data, has_more,
@@ -146,7 +154,9 @@ export const listAll = (
 		do {
 			const sep = path.includes("?") ? "&" : "?"
 			const page = (yield* api.get(
-				cursor === null ? `${path}${sep}limit=100` : `${path}${sep}limit=100&cursor=${encodeURIComponent(cursor)}`,
+				cursor === null
+					? `${path}${sep}limit=100`
+					: `${path}${sep}limit=100&cursor=${encodeURIComponent(cursor)}`,
 			)) as { data?: ReadonlyArray<unknown>; has_more?: boolean; next_cursor?: string | null }
 			items.push(...(page.data ?? []))
 			cursor = page.has_more === true && typeof page.next_cursor === "string" ? page.next_cursor : null

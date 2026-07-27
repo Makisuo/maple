@@ -3,7 +3,6 @@ import { NetworkNodesIcon } from "@maple/ui/components/icons"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import { Separator } from "@maple/ui/components/ui/separator"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { formatDuration } from "@maple/ui/format"
 import { cn } from "@maple/ui/utils"
@@ -12,8 +11,16 @@ import { useLocalTraceFacets } from "../hooks/use-local-trace-facets"
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE } from "../lib/time"
 import { DurationRangeFilter } from "@maple/ui/components/filters/duration-range-filter"
-import { FilterSection, SearchableFilterSection, SingleCheckboxFilter } from "@maple/ui/components/filters/filter-section"
-import { FilterSidebarBody, FilterSidebarFrame, FilterSidebarHeader } from "@maple/ui/components/filters/filter-sidebar"
+import {
+	FilterSection,
+	SearchableFilterSection,
+	SingleCheckboxFilter,
+} from "@maple/ui/components/filters/filter-section"
+import {
+	FilterSidebarBody,
+	FilterSidebarFrame,
+	FilterSidebarHeader,
+} from "@maple/ui/components/filters/filter-sidebar"
 import { PageShell } from "../components/page-shell"
 import { parseAttributes } from "@maple/ui/lib/span-tree"
 import { Toolbar, ToolbarSearch, ToolbarStat, TimeRangeSelect, RefreshButton } from "../components/toolbar"
@@ -93,7 +100,6 @@ export function TraceListView({ onSelectTrace }: TraceListViewProps) {
 					onChange={(checked) => setParams({ errors: checked ? "1" : null })}
 					count={facets.data?.errorCount}
 				/>
-				<Separator className="my-2" />
 				<FilterSection
 					title="Environment"
 					options={facets.data?.deploymentEnvs ?? []}

@@ -225,7 +225,9 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 									<CircleWarningIcon size={18} />
 								</EmptyMedia>
 								<EmptyTitle>Failed to load alert destinations</EmptyTitle>
-								<EmptyDescription>Refresh the page or check your connection.</EmptyDescription>
+								<EmptyDescription>
+									Refresh the page or check your connection.
+								</EmptyDescription>
 							</EmptyHeader>
 						</Empty>
 					) : destinations.length === 0 ? (
@@ -272,7 +274,8 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 					<div>
 						<h2 className="text-lg font-semibold">Delivery log</h2>
 						<p className="text-muted-foreground text-sm">
-							Every queued, retried, and completed notification attempt across alert destinations.
+							Every queued, retried, and completed notification attempt across alert
+							destinations.
 						</p>
 					</div>
 
@@ -289,7 +292,9 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 									<CircleWarningIcon size={18} />
 								</EmptyMedia>
 								<EmptyTitle>Failed to load delivery history</EmptyTitle>
-								<EmptyDescription>Refresh the page or check your connection.</EmptyDescription>
+								<EmptyDescription>
+									Refresh the page or check your connection.
+								</EmptyDescription>
 							</EmptyHeader>
 						</Empty>
 					) : deliveryEvents.length === 0 ? (
@@ -360,7 +365,10 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 															)}
 														>
 															<span
-																className={cn("size-1.5 rounded-full", ev.dot)}
+																className={cn(
+																	"size-1.5 rounded-full",
+																	ev.dot,
+																)}
 															/>
 															{ev.label}
 														</span>

@@ -39,9 +39,10 @@ import { EdgeCacheService } from "@maple/query-engine/caching"
 import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "../lib/warehouse-org-quarantine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
-import { AI_TRIAGE_WORKFLOW_BINDING, maybeEnqueueTriage } from "../lib/ai-triage-enqueue"
+import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "../lib/ai-triage-enqueue"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "../lib/DatabaseLive"
+import { Env } from "../lib/Env"
 import { dateToMs, msToDate } from "../lib/time"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import {
@@ -136,7 +137,7 @@ const isBusyDatabaseError = (error: DatabaseError): boolean => {
 	return inner !== undefined && BUSY_ERROR_PATTERN.test(inner)
 }
 
-const BUSY_RETRY_SCHEDULE = Schedule.exponential("50 millis", 2.0).pipe(Schedule.both(Schedule.recurs(3)))
+const BUSY_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
 
 /**
  * Adapt a drizzle incident row (timestamptz → Date, jsonb → unknown[]) to the
@@ -224,13 +225,15 @@ const make = Effect.gen(function* () {
 	const database = yield* Database
 	const warehouse = yield* WarehouseQueryService
 	const edgeCache = yield* EdgeCacheService
+	const env = yield* Env
 	// Optional: present only inside a Worker isolate. Used to kick off the
 	// AI triage Workflow when an incident opens (org opt-in).
 	const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
-	const aiTriageWorkflowBinding = Option.match(workerEnv, {
+	const investigationAgentBinding = Option.match(workerEnv, {
 		onNone: () => undefined,
-		onSome: (e) => e[AI_TRIAGE_WORKFLOW_BINDING],
+		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
 	})
+	const investigationServiceToken = env.INTERNAL_SERVICE_TOKEN
 
 	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 		database.execute(fn).pipe(
@@ -1554,7 +1557,8 @@ const make = Effect.gen(function* () {
 								sampleCount: evaluation.sampleCount,
 								detectedAt: new Date(nowMs).toISOString(),
 							},
-							workflowBinding: aiTriageWorkflowBinding,
+							agentBinding: investigationAgentBinding,
+							internalServiceToken: investigationServiceToken,
 						}).pipe(Effect.provideService(Database, database))
 						if (triage.enqueued) {
 							yield* dbExecute((db) =>

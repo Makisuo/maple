@@ -113,10 +113,7 @@ describe("interpolateWidgetParams — sql", () => {
 	})
 
 	it("applies sql formatting to nested sql keys", () => {
-		const result = interpolateWidgetParams(
-			{ queries: [{ sql: "x = $v" }] },
-			{ v: single("it's") },
-		)
+		const result = interpolateWidgetParams({ queries: [{ sql: "x = $v" }] }, { v: single("it's") })
 		expect(result).toEqual({ queries: [{ sql: "x = 'it\\'s'" }] })
 	})
 })
@@ -183,9 +180,7 @@ describe("interpolateWidgetParams — whereClause", () => {
 
 describe("interpolateDisplayText", () => {
 	it("substitutes values in titles", () => {
-		expect(interpolateDisplayText("Latency — $service", { service: single("api") })).toBe(
-			"Latency — api",
-		)
+		expect(interpolateDisplayText("Latency — $service", { service: single("api") })).toBe("Latency — api")
 	})
 
 	it('renders "All" instead of the expanded value list', () => {
@@ -230,8 +225,8 @@ describe("hasUnresolvedVariableRefs", () => {
 	})
 
 	it("finds references nested deep in params", () => {
-		expect(
-			hasUnresolvedVariableRefs({ queries: [{ whereClause: 'x = "${env}"' }] }, defined, {}),
-		).toBe(true)
+		expect(hasUnresolvedVariableRefs({ queries: [{ whereClause: 'x = "${env}"' }] }, defined, {})).toBe(
+			true,
+		)
 	})
 })

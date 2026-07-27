@@ -1,0 +1,114 @@
+---
+/**
+ * MediaFrame — the homepage's product-visual slot.
+ *
+ * While `src` is unset it renders a labelled placeholder that states exactly
+ * what should be captured and at what size. Setting `src` swaps in the real
+ * asset with no other change; the frame keeps its aspect box either way, so
+ * filling one in never shifts the page.
+ *
+ * Assets live in `public/screenshots/` (and `public/screenshots/video/`).
+ * Export at 2× and let the browser downscale — the frame always emits
+ * width/height, so there is no layout shift on load.
+ */
+interface Props {
+	/** Shot id — the frame label while empty, the alt text once filled. */
+	label: string;
+	/** What to capture. Placeholder-only; never rendered once `src` is set. */
+	caption?: string;
+	/** e.g. "/screenshots/flow-02-trace.webp". Setting this is the whole swap. */
+	src?: string;
+	kind?: "image" | "video";
+	/** Poster frame for `kind="video"`. Renders alone if `src` isn't ready yet. */
+	poster?: string;
+	/** Intrinsic capture size. Drives the aspect box and the printed spec. */
+	width?: number;
+	height?: number;
+	loading?: "eager" | "lazy";
+	class?: string;
+}
+
+const {
+	label,
+	caption,
+	src,
+	kind = "image",
+	poster,
+	width = 992,
+	height = 600,
+	loading = "lazy",
+	class: className = "",
+} = Astro.props;
+
+const ratio = `${width} / ${height}`;
+const spec = `${width} × ${height}`;
+const isVideo = kind === "video";
+// A poster with no source still shows a real frame — lets a still land before
+// the recording does.
+const hasAsset = Boolean(src ?? (isVideo ? poster : undefined));
+---
+
+{
+	hasAsset ? (
+		<div class={`live-frame ${className}`}>
+			{isVideo && src ? (
+				<video
+					src={src}
+					poster={poster}
+					width={width}
+					height={height}
+					muted
+					loop
+					playsinline
+					preload="metadata"
+					aria-label={label}
+					class="block w-full h-auto"
+					data-autoplay-video
+				/>
+			) : (
+				<img
+					src={src ?? poster}
+					alt={label}
+					width={width}
+					height={height}
+					loading={loading}
+					decoding="async"
+					class="block w-full h-auto"
+				/>
+			)}
+		</div>
+	) : (
+		<figure class={`live-frame ${className}`} data-placeholder={label}>
+			<figcaption class="live-frame__head">
+				<span>{isVideo ? "video" : "shot"} · {label}</span>
+				<span class="tabular-nums">{spec}</span>
+			</figcaption>
+			<div class="media-frame__body" style={`aspect-ratio: ${ratio};`}>
+				<div class="media-frame__note">
+					{isVideo && (
+						<span class="media-frame__play" aria-hidden="true">
+							<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+								<path d="M8 5.5v13l11-6.5z" />
+							</svg>
+						</span>
+					)}
+					{caption && <p class="media-frame__caption">{caption}</p>}
+					<p class="media-frame__spec">
+						export @2x — {width * 2} × {height * 2}
+					</p>
+				</div>
+			</div>
+		</figure>
+	)
+}
+
+{
+	hasAsset && isVideo && src && (
+		<script is:inline>
+			{`(function(){
+				var v = document.currentScript.previousElementSibling?.querySelector("[data-autoplay-video]");
+				if (v && !matchMedia("(prefers-reduced-motion: reduce)").matches) v.play().catch(function(){});
+			})();`}
+		</script>
+	)
+}

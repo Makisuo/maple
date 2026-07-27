@@ -203,9 +203,7 @@ export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodePro
 	// spans stay visible while slow spans still dominate the eye.
 	const railDurationMs = isCombined ? aggregatedDuration.avg : span.durationMs
 	const costFraction =
-		totalDurationMs > 0
-			? Math.min(1, Math.max(0.02, Math.sqrt(railDurationMs / totalDurationMs)))
-			: 0
+		totalDurationMs > 0 ? Math.min(1, Math.max(0.02, Math.sqrt(railDurationMs / totalDurationMs))) : 0
 
 	const CategoryIcon = category.Icon
 

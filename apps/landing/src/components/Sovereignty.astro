@@ -1,37 +1,57 @@
 ---
 /**
- * Sovereignty — drenched-amber identity section.
- * The first big amber moment on the page. Single statement, three pillars.
- * No cards, no gradient text, full-width amber background.
+ * Sovereignty — drenched-amber identity section, and the page's thesis stated
+ * once at full volume.
+ *
+ * The first of exactly two amber surfaces on the page; rarity is the point.
+ * Typographic on purpose — no artifact, no plate. This is the one place the
+ * page stops showing and starts arguing.
+ *
+ * The fourth pillar ("Your perimeter") absorbs what Raindrop spends a whole
+ * security section on. Maple has no SOC 2 and must not imply one, and "you can
+ * read the source and run it on your own boxes" is the stronger claim anyway.
  */
 import * as m from "../paraglide/messages";
+
+const pillars = [
+	{ label: m.sov_pillar_1_label(), body: m.sov_pillar_1_body() },
+	{ label: m.sov_pillar_2_label(), body: m.sov_pillar_2_body() },
+	{ label: m.sov_pillar_4_label(), body: m.sov_pillar_4_body() },
+	{ label: m.sov_pillar_3_label(), body: m.sov_pillar_3_body() },
+];
 ---
 
 <section class="relative overflow-hidden drenched-amber">
-	<div class="relative mx-auto max-w-6xl px-6 py-24 md:py-32">
+	<div class="relative shell py-24 md:py-40">
 		<div class="text-[10px] uppercase tracking-[0.18em] opacity-70 mb-6">
 			{m.sov_eyebrow()}
 		</div>
-		<h2 class="font-display text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-semibold leading-[1.02] tracking-tight max-w-4xl">
+		<h2
+			class="max-w-[18ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] md:text-[40px] lg:text-[54px]"
+		>
 			{m.sov_title()}
 		</h2>
-		<p class="mt-6 text-base md:text-lg max-w-xl opacity-85 leading-relaxed">
+		<p class="mt-6 max-w-[56ch] text-sm leading-relaxed opacity-85 md:text-base">
 			{m.sov_lede()}
 		</p>
 
-		<dl class="mt-16 md:mt-20 grid grid-cols-1 md:grid-cols-3 border-t border-current/30">
-			<div class="py-8 md:py-10 md:pr-8 md:border-r border-current/30">
-				<dt class="text-[10px] uppercase tracking-[0.16em] opacity-70 mb-3">01 · {m.sov_pillar_1_label()}</dt>
-				<dd class="font-display text-xl md:text-2xl font-semibold leading-snug">{m.sov_pillar_1_body()}</dd>
-			</div>
-			<div class="py-8 md:py-10 md:px-8 md:border-r border-current/30 border-t md:border-t-0 border-current/30">
-				<dt class="text-[10px] uppercase tracking-[0.16em] opacity-70 mb-3">02 · {m.sov_pillar_2_label()}</dt>
-				<dd class="font-display text-xl md:text-2xl font-semibold leading-snug">{m.sov_pillar_2_body()}</dd>
-			</div>
-			<div class="py-8 md:py-10 md:pl-8 border-t md:border-t-0 border-current/30">
-				<dt class="text-[10px] uppercase tracking-[0.16em] opacity-70 mb-3">03 · {m.sov_pillar_3_label()}</dt>
-				<dd class="font-display text-xl md:text-2xl font-semibold leading-snug">{m.sov_pillar_3_body()}</dd>
-			</div>
+		<dl class="mt-16 grid grid-cols-1 border-t border-current/30 md:mt-20 md:grid-cols-2 lg:grid-cols-4">
+			{
+				pillars.map((pillar, i) => (
+					<div
+						class={`border-current/30 py-8 md:py-10 ${i > 0 ? "border-t md:border-t-0" : ""} ${
+							i % 2 === 1 ? "md:border-l md:pl-8" : "md:pr-8"
+						} ${i >= 2 ? "md:border-t lg:border-t-0" : ""} ${
+							i > 0 ? "lg:border-l lg:border-t-0 lg:pl-8" : ""
+						} ${i < pillars.length - 1 ? "lg:pr-8" : ""}`}
+					>
+						<dt class="mb-3 text-[10px] uppercase tracking-[0.16em] opacity-70">
+							{String(i + 1).padStart(2, "0")} · {pillar.label}
+						</dt>
+						<dd class="font-display text-lg font-semibold leading-snug md:text-xl">{pillar.body}</dd>
+					</div>
+				))
+			}
 		</dl>
 
 		<div class="mt-12 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">

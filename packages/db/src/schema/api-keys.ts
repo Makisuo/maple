@@ -16,7 +16,9 @@ export const apiKeys = pgTable(
 		metadataJson: jsonb("metadata_json").$type<unknown>(),
 		// v2 scope strings ("<family>:read"/"<family>:write"/"*"); null = legacy full access.
 		scopes: jsonb("scopes").$type<string[]>(),
-		kind: text("kind", { enum: ["standard", "mcp"] }).notNull().default("standard"),
+		kind: text("kind", { enum: ["standard", "mcp"] })
+			.notNull()
+			.default("standard"),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 		createdBy: text("created_by").notNull(),
 		createdByEmail: text("created_by_email"),

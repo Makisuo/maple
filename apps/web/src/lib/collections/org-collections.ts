@@ -96,7 +96,11 @@ const logSchemaHealGaveUp = (source: HealSource): void => {
 			"Electric sync self-heal exhausted its retry budget; collections left as-is " +
 				"(lists may show stale/empty/errored data until reload).",
 		).pipe(
-			Effect.annotateLogs({ source, attempts: schemaHealAttempts, maxAttempts: MAX_SCHEMA_HEAL_ATTEMPTS }),
+			Effect.annotateLogs({
+				source,
+				attempts: schemaHealAttempts,
+				maxAttempts: MAX_SCHEMA_HEAL_ATTEMPTS,
+			}),
 		),
 	)
 }
@@ -141,7 +145,11 @@ const scheduleBoundedHeal = (source: HealSource): void => {
 		if (source === "stuck-loading" || source === "auth-error") {
 			mapleRuntime.runFork(
 				Effect.logWarning(`Electric sync self-heal: recreating org collections (${source})`).pipe(
-					Effect.annotateLogs({ source, attempt: schemaHealAttempts, maxAttempts: MAX_SCHEMA_HEAL_ATTEMPTS }),
+					Effect.annotateLogs({
+						source,
+						attempt: schemaHealAttempts,
+						maxAttempts: MAX_SCHEMA_HEAL_ATTEMPTS,
+					}),
 				),
 			)
 		}

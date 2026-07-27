@@ -19,7 +19,7 @@ import * as Exit from "./Exit.ts"
 import { format, formatPropertyKey } from "./Formatter.ts"
 import { memoize } from "./Function.ts"
 import { effectIsExit, iterateEager } from "./internal/effect.ts"
-import * as internalRecord from "./internal/record.ts"
+import * as InternalRecord from "./internal/record.ts"
 import * as InternalAnnotations from "./internal/schema/annotations.ts"
 import * as InternalSchemaCause from "./internal/schema/cause.ts"
 import * as Option from "./Option.ts"
@@ -2131,9 +2131,9 @@ export class Objects extends Base {
             const v2 = exitValue.value.value
             if (is.merge && is.merge.decode && Object.hasOwn(s.out, k2)) {
               const [k, v] = is.merge.decode.combine([k2, s.out[k2]], [k2, v2])
-              internalRecord.set(s.out, k, v)
+              InternalRecord.set(s.out, k, v)
             } else {
-              internalRecord.set(s.out, k2, v2)
+              InternalRecord.set(s.out, k2, v2)
             }
           }
         }),
@@ -2189,7 +2189,7 @@ export class Objects extends Base {
               }
             } else {
               // preserve key
-              internalRecord.set(out, key, input[key])
+              InternalRecord.set(out, key, input[key])
             }
           }
         }
@@ -2229,7 +2229,7 @@ export class Objects extends Base {
         const preserved: Record<PropertyKey, unknown> = {}
         for (const key of keys) {
           if (Object.hasOwn(out, key)) {
-            internalRecord.set(preserved, key, out[key])
+            InternalRecord.set(preserved, key, out[key])
           }
         }
         return Option.some(preserved)
@@ -2320,7 +2320,7 @@ const parseProperties = iterateEager<{
     if (exit._tag === "Failure") {
       return wrapPropertyKeyIssue(s, s.ast, p.name, exit)
     } else if (exit.value._tag === "Some") {
-      internalRecord.set(s.out, p.name, exit.value.value)
+      InternalRecord.set(s.out, p.name, exit.value.value)
     } else if (!isOptional(p.type)) {
       const issue = new SchemaIssue.Pointer([p.name], new SchemaIssue.MissingKey(p.type.context?.annotations))
       if (s.options.errors === "all") {
@@ -2504,9 +2504,9 @@ export function collectSentinels(ast: AST): Array<Sentinel> {
 }
 
 type CandidateIndex = {
-  byType?: { [K in Type]?: Array<AST> }
-  bySentinel?: Map<PropertyKey, Map<LiteralValue | symbol, Array<AST>>>
-  otherwise?: { [K in Type]?: Array<AST> }
+  byType?: { [K in Type]?: Array<number> }
+  bySentinel?: Map<PropertyKey, Map<LiteralValue | symbol, Array<number>>>
+  otherwise?: { [K in Type]?: Array<number> }
 }
 
 const candidateIndexCache = new WeakMap<ReadonlyArray<AST>, CandidateIndex>()
@@ -2516,16 +2516,17 @@ function getIndex(types: ReadonlyArray<AST>): CandidateIndex {
   if (idx) return idx
 
   idx = {}
-  for (const a of types) {
+  for (let i = 0; i < types.length; i++) {
+    const a = types[i]
     const encoded = toEncoded(a)
     if (isNever(encoded)) continue
 
-    const types = getCandidateTypes(encoded)
+    const candidateTypes = getCandidateTypes(encoded)
     const sentinels = collectSentinels(encoded)
 
     // by-type (always filled – cheap primary filter)
     idx.byType ??= {}
-    for (const t of types) (idx.byType[t] ??= []).push(a)
+    for (const t of candidateTypes) (idx.byType[t] ??= []).push(i)
 
     if (sentinels.length > 0) { // discriminated variants
       idx.bySentinel ??= new Map()
@@ -2534,11 +2535,11 @@ function getIndex(types: ReadonlyArray<AST>): CandidateIndex {
         if (!m) idx.bySentinel.set(key, m = new Map())
         let arr = m.get(literal)
         if (!arr) m.set(literal, arr = [])
-        arr.push(a)
+        arr.push(i)
       }
     } else { // non-discriminated
       idx.otherwise ??= {}
-      for (const t of types) (idx.otherwise[t] ??= []).push(a)
+      for (const t of candidateTypes) (idx.otherwise[t] ??= []).push(i)
     }
   }
 
@@ -2571,18 +2572,22 @@ export function getCandidates(input: any, types: ReadonlyArray<AST>): ReadonlyAr
   if (idx.bySentinel) {
     const base = idx.otherwise?.[runtimeType] ?? []
     if (runtimeType === "object" || runtimeType === "array") {
+      const selected = new Set(base)
       for (const [k, m] of idx.bySentinel) {
         if (Object.hasOwn(input, k)) {
           const match = m.get((input as any)[k])
-          if (match) return [...match, ...base].filter(filterLiterals(input))
+          if (match) {
+            for (const candidate of match) selected.add(candidate)
+          }
         }
       }
+      return Array.from(selected).sort((a, b) => a - b).map((i) => types[i]).filter(filterLiterals(input))
     }
-    return base
+    return base.map((i) => types[i])
   }
 
   // 2. Fallback: runtime-type dispatch only
-  return (idx.byType?.[runtimeType] ?? []).filter(filterLiterals(input))
+  return (idx.byType?.[runtimeType] ?? []).map((i) => types[i]).filter(filterLiterals(input))
 }
 
 /**
@@ -2659,7 +2664,7 @@ export class Union<A extends AST = AST> extends Base {
         options
       }
       const concurrency = resolveConcurrency(options?.concurrency)
-      const eff = parseUnion(state, candidates, concurrency)
+      const eff = parseUnion(state, candidates, concurrency ? { ...concurrency, orderedStep: true } : undefined)
       if (!eff) {
         return state.out
           ? Effect.succeed(state.out)
@@ -3883,8 +3888,15 @@ export function isJson(u: unknown): u is Schema.Json {
     if (validated.has(u)) {
       return true
     }
+    const isArray = Array.isArray(u)
+    if (!isArray) {
+      const prototype = Object.getPrototypeOf(u)
+      if (prototype !== null && Object.getPrototypeOf(prototype) !== null) {
+        return false
+      }
+    }
     onPath.add(u)
-    const ok = Array.isArray(u)
+    const ok = isArray
       ? u.every(recur)
       : Object.keys(u).every((key) => recur((u as Record<string, unknown>)[key]))
     // Pop on exit so siblings reaching the same node via a different path

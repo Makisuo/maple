@@ -17,16 +17,18 @@ import {
 	type OrgId,
 } from "@maple/domain/http"
 import {
+	alertDestinations,
 	errorIssues,
 	issueEscalationPolicies,
 	issueEscalations,
 	type IssueEscalationPolicyRow,
 	type IssueEscalationRow,
 } from "@maple/db"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, inArray } from "drizzle-orm"
 import { Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database, type DatabaseClient, DatabaseError } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
+import { evaluateEscalationPolicy } from "../lib/escalation-policy"
 import { NotificationDispatcher, type NotificationRequest } from "./NotificationDispatcher"
 
 const ESCALATIONS_PER_TICK = 50
@@ -36,8 +38,6 @@ const decodePolicyRules = Schema.decodeUnknownOption(Schema.Array(IssueEscalatio
 const decodeSignalType = Schema.decodeUnknownOption(AlertSignalType)
 const decodeJsonRecord = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))
 const decodeConfidence = Schema.decodeUnknownOption(EscalationConfidence)
-
-const CONFIDENCE_RANK: Record<EscalationConfidence, number> = { low: 1, medium: 2, high: 3 }
 
 const chatSeverityFor = (severity: IssueSeverity): AlertSeverity =>
 	severity === "critical" || severity === "high" ? "critical" : "warning"
@@ -81,6 +81,7 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 			status: "sent" | "skipped" | "failed" | "queued",
 			timestamp: number,
 			error?: string,
+			deliveryResults?: unknown,
 		) =>
 			dbExecute((db) =>
 				db
@@ -88,6 +89,7 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 					.set({
 						status,
 						error: error ?? null,
+						...(deliveryResults === undefined ? {} : { deliveryResultsJson: deliveryResults }),
 						...(status === "queued" ? {} : { processedAt: new Date(timestamp) }),
 					})
 					.where(eq(issueEscalations.id, row.id)),
@@ -124,34 +126,45 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 				policy = yield* loadPolicy(row.orgId)
 				policyCache.set(row.orgId, policy)
 			}
-			if (policy == null || !policy.enabled) {
-				yield* finalize(row, "skipped", timestamp, "policy_disabled")
-				return "skipped" as const
-			}
-
-			const rules = Option.getOrElse(decodePolicyRules(policy.rulesJson), () => [])
-			const rule = rules.find((r) => r.severity === row.severity)
-			if (rule === undefined || rule.destinationIds.length === 0) {
-				yield* finalize(row, "skipped", timestamp, "no_destinations_for_severity")
-				return "skipped" as const
-			}
-
+			const rules =
+				policy == null ? [] : Option.getOrElse(decodePolicyRules(policy.rulesJson), () => [])
 			const payload = Option.getOrElse(
 				decodeJsonRecord(row.payloadJson),
 				(): Record<string, unknown> => ({}),
 			)
-
-			// minConfidence gates AI escalations only — a human's manual
-			// severity change is explicit intent and always routes.
-			if (row.source === "ai" && rule.minConfidence !== undefined) {
-				const rank = Option.match(decodeConfidence(payload.confidence), {
-					onNone: () => 0,
-					onSome: (confidence) => CONFIDENCE_RANK[confidence],
-				})
-				if (rank < CONFIDENCE_RANK[rule.minConfidence]) {
-					yield* finalize(row, "skipped", timestamp, "below_min_confidence")
-					return "skipped" as const
-				}
+			const configuredDestinationIds = rules.flatMap((rule) => rule.destinationIds)
+			const destinationRows =
+				configuredDestinationIds.length === 0
+					? []
+					: yield* dbExecute((db) =>
+							db
+								.select({ id: alertDestinations.id })
+								.from(alertDestinations)
+								.where(
+									and(
+										eq(alertDestinations.orgId, row.orgId),
+										eq(alertDestinations.enabled, true),
+										inArray(alertDestinations.id, configuredDestinationIds),
+									),
+								),
+						)
+			const confidence = Option.getOrUndefined(decodeConfidence(payload.confidence))
+			const decision = evaluateEscalationPolicy({
+				enabled: policy?.enabled ?? false,
+				rules,
+				severity: row.severity,
+				source: row.source,
+				...(confidence === undefined ? {} : { confidence }),
+				enabledDestinationIds: new Set(destinationRows.map((destination) => destination.id)),
+			})
+			yield* Effect.annotateCurrentSpan({
+				"maple.escalation.policy_outcome": decision.outcome,
+				...(decision.skipReason ? { "maple.escalation.skip_reason": decision.skipReason } : {}),
+				"maple.escalation.destination_count": decision.destinationIds.length,
+			})
+			if (decision.outcome === "skip") {
+				yield* finalize(row, "skipped", timestamp, decision.skipReason)
+				return "skipped" as const
 			}
 
 			const issueRows = yield* dbExecute((db) =>
@@ -208,6 +221,14 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 					...(payload.triage !== undefined ? { triage: payload.triage } : {}),
 					source: row.source,
 					reason: row.reason,
+					...(row.investigationId != null
+						? {
+								investigation: {
+									id: row.investigationId,
+									url: `${env.MAPLE_APP_BASE_URL}/investigations/${row.investigationId}`,
+								},
+							}
+						: {}),
 					...(row.runId != null ? { runId: row.runId } : {}),
 				},
 			}
@@ -220,7 +241,8 @@ const make: Effect.Effect<EscalationServiceShape, never, Database | Notification
 			// "sent" also keeps a concurrent tick's claim CAS (status = queued)
 			// from picking it up mid-dispatch.
 			yield* finalize(row, "sent", timestamp)
-			const result = yield* dispatcher.dispatch(row.orgId, rule.destinationIds, request)
+			const result = yield* dispatcher.dispatch(row.orgId, decision.destinationIds, request)
+			yield* finalize(row, "sent", timestamp, undefined, result.destinations)
 
 			if (result.delivered > 0) {
 				return "sent" as const

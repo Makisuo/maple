@@ -22,6 +22,7 @@ import {
 	computeSchemaDiff,
 	migrations as clickHouseMigrations,
 	parseEmittedStatement,
+	performanceOnlySearchColumns,
 	type ActualTable,
 	type DesiredTable,
 	type TableDiffEntry,
@@ -462,7 +463,12 @@ const parseDesiredTables = (): ReadonlyArray<DesiredTable> => {
 		out.push({
 			name: parsed.name,
 			kind: parsed.kind,
-			columns: parsed.kind === "table" ? parsed.columns : [],
+			columns:
+				parsed.kind === "table"
+					? parsed.columns.filter(
+							(column) => !performanceOnlySearchColumns.has(`${parsed.name}.${column.name}`),
+						)
+					: [],
 			createStatement: stmt,
 		})
 	}
@@ -510,9 +516,7 @@ const CLICKHOUSE_EXEC_TIMEOUT_MS = 20_000
 // DB::Exception text — retrying a bad statement is pointless), and our own
 // request timeouts (statusCode 408 — a 20s hang won't clear on an immediate
 // retry; fail fast and let the user retry once the cluster is reachable).
-const CLICKHOUSE_RETRY_SCHEDULE = Schedule.exponential("100 millis", 2.0).pipe(
-	Schedule.both(Schedule.recurs(2)),
-)
+const CLICKHOUSE_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("100 millis", 2.0), Schedule.recurs(2)])
 
 export const isRetryableUpstream = (
 	error: OrgClickHouseSettingsUpstreamRejectedError | OrgClickHouseSettingsUpstreamUnavailableError,
@@ -837,7 +841,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			payload: OrgClickHouseSettingsUpsertRequest,
 		) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			yield* Effect.annotateCurrentSpan("userId", userId)
+			yield* Effect.annotateCurrentSpan("tenant.userId", userId)
 			yield* requireAdmin(roles)
 
 			const url = yield* normalizeHttpUrl(payload.url)
@@ -1028,7 +1032,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			roles: ReadonlyArray<RoleName>,
 		) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			yield* Effect.annotateCurrentSpan("userId", userId)
+			yield* Effect.annotateCurrentSpan("tenant.userId", userId)
 			yield* requireAdmin(roles)
 			// Ensure BYO ClickHouse is configured before queuing a run.
 			yield* requireActiveRow(orgId)

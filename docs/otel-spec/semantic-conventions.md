@@ -23,12 +23,12 @@ Source: https://opentelemetry.io/docs/specs/semconv/general/naming/
 
 Source: https://opentelemetry.io/docs/specs/semconv/general/attribute-requirement-level/
 
-| Level | Definition |
-|---|---|
-| **Required** | "All instrumentations MUST populate the attribute." Expected to be efficiently available in the vast majority of cases. |
-| **Conditionally Required** | "All instrumentations MUST populate the attribute when the given condition is satisfied." The convention must spell out the triggering condition. |
-| **Recommended** | "Instrumentations SHOULD add the attribute by default if it's readily available and can be efficiently populated." May be disabled for perf/security/privacy reasons. |
-| **Opt-In** | "Instrumentations SHOULD populate the attribute if and only if the user configures the instrumentation to do so." Reserved for expensive-to-collect or privacy/security-sensitive fields. |
+| Level                      | Definition                                                                                                                                                                                |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Required**               | "All instrumentations MUST populate the attribute." Expected to be efficiently available in the vast majority of cases.                                                                   |
+| **Conditionally Required** | "All instrumentations MUST populate the attribute when the given condition is satisfied." The convention must spell out the triggering condition.                                         |
+| **Recommended**            | "Instrumentations SHOULD add the attribute by default if it's readily available and can be efficiently populated." May be disabled for perf/security/privacy reasons.                     |
+| **Opt-In**                 | "Instrumentations SHOULD populate the attribute if and only if the user configures the instrumentation to do so." Reserved for expensive-to-collect or privacy/security-sensitive fields. |
 
 ### Span naming
 
@@ -53,12 +53,12 @@ Source: https://opentelemetry.io/docs/specs/otel/versioning-and-stability/
 
 OpenTelemetry signals (including semconv domains) move through a lifecycle:
 
-| Level | Meaning |
-|---|---|
-| **Development** | May have breaking changes; "Long-term dependencies SHOULD NOT be taken against signals in Development." |
-| **Stable** | Backward compatibility guaranteed; safe to build long-term dependencies against. |
-| **Deprecated** | Being phased out; "Signals MUST NOT be marked as deprecated unless the replacement is stable." Same support guarantees as stable until removed. |
-| **Removed** | No longer supported; removal requires a major version bump. |
+| Level           | Meaning                                                                                                                                         |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Development** | May have breaking changes; "Long-term dependencies SHOULD NOT be taken against signals in Development."                                         |
+| **Stable**      | Backward compatibility guaranteed; safe to build long-term dependencies against.                                                                |
+| **Deprecated**  | Being phased out; "Signals MUST NOT be marked as deprecated unless the replacement is stable." Same support guarantees as stable until removed. |
+| **Removed**     | No longer supported; removal requires a major version bump.                                                                                     |
 
 Per-domain stability (see each section below): **HTTP is Stable**; **Database is Stable** (as of the v1.30-era stability migration); **Messaging is Development**; **RPC is Release Candidate**; **Exceptions**-as-span-events is **Deprecated** in favor of exceptions-on-logs; **Code attributes are Stable**; **General attributes (`server.*`, `client.*`, `network.*`, `url.*`) are Stable** (a handful of derived `url.*` sub-attributes remain Development); **Gen-AI is Development** and has moved to a separate spec repo.
 
@@ -103,20 +103,20 @@ Source: https://opentelemetry.io/docs/specs/semconv/http/http-spans/ · https://
 
 ### Required / Conditionally Required attributes
 
-| Attribute | Level | Client / Server | Notes |
-|---|---|---|---|
-| `http.request.method` | Required | Both | GET, POST, HEAD, … |
-| `server.address` | Required | Client | Domain/IP/socket the request targets |
-| `server.port` | Required | Client | — |
-| `url.full` | Required | Client | Absolute URL, RFC3986; credentials MUST be redacted |
-| `url.path` | Required | Server | URI path component |
-| `url.scheme` | Required | Server | `http`/`https` |
-| `http.response.status_code` | Cond. Required | Both | If a response was received/sent |
-| `error.type` | Cond. Required | Both | If the request ended in error |
-| `network.protocol.name` | Cond. Required | Both | If not `http` and version is set |
-| `http.route` | Cond. Required | Server | If available; must be low-cardinality (static segments + placeholders) |
-| `server.port` | Cond. Required | Server | If available and `server.address` set |
-| `url.query` | Cond. Required | Server | If a query string was present |
+| Attribute                   | Level          | Client / Server | Notes                                                                  |
+| --------------------------- | -------------- | --------------- | ---------------------------------------------------------------------- |
+| `http.request.method`       | Required       | Both            | GET, POST, HEAD, …                                                     |
+| `server.address`            | Required       | Client          | Domain/IP/socket the request targets                                   |
+| `server.port`               | Required       | Client          | —                                                                      |
+| `url.full`                  | Required       | Client          | Absolute URL, RFC3986; credentials MUST be redacted                    |
+| `url.path`                  | Required       | Server          | URI path component                                                     |
+| `url.scheme`                | Required       | Server          | `http`/`https`                                                         |
+| `http.response.status_code` | Cond. Required | Both            | If a response was received/sent                                        |
+| `error.type`                | Cond. Required | Both            | If the request ended in error                                          |
+| `network.protocol.name`     | Cond. Required | Both            | If not `http` and version is set                                       |
+| `http.route`                | Cond. Required | Server          | If available; must be low-cardinality (static segments + placeholders) |
+| `server.port`               | Cond. Required | Server          | If available and `server.address` set                                  |
+| `url.query`                 | Cond. Required | Server          | If a query string was present                                          |
 
 ### Span status mapping (the important compliance rule)
 
@@ -133,12 +133,12 @@ Each client resend (redirect, auth failure, 5xx, network error — cause doesn't
 
 ### Metrics (Stable)
 
-| Metric | Type | Unit | Stability | Required attrs |
-|---|---|---|---|---|
-| `http.server.request.duration` | Histogram | `s` | Stable | `http.request.method`, `url.scheme` |
-| `http.client.request.duration` | Histogram | `s` | Stable | `http.request.method`, `server.address`, `server.port` |
-| `http.server.active_requests` | UpDownCounter | `{request}` | Development | Opt-in |
-| `http.{server,client}.{request,response}.body.size` | Histogram | `By` | Development | Opt-in |
+| Metric                                              | Type          | Unit        | Stability   | Required attrs                                         |
+| --------------------------------------------------- | ------------- | ----------- | ----------- | ------------------------------------------------------ |
+| `http.server.request.duration`                      | Histogram     | `s`         | Stable      | `http.request.method`, `url.scheme`                    |
+| `http.client.request.duration`                      | Histogram     | `s`         | Stable      | `http.request.method`, `server.address`, `server.port` |
+| `http.server.active_requests`                       | UpDownCounter | `{request}` | Development | Opt-in                                                 |
+| `http.{server,client}.{request,response}.body.size` | Histogram     | `By`        | Development | Opt-in                                                 |
 
 When reported alongside a span, the duration metric value **SHOULD** equal the span's duration.
 
@@ -156,6 +156,7 @@ The stable migration renamed `db.system` → `db.system.name` (and `db.statement
 ### Span name
 
 Priority order:
+
 1. `{db.query.summary}` if available
 2. `{db.operation.name} {target}` if a low-cardinality operation name is available
 3. `{target}` alone
@@ -165,15 +166,15 @@ Where `{target}` prefers, in order: `db.collection.name` → `db.stored_procedur
 
 ### Required / Conditionally Required attributes
 
-| Attribute | Level | Notes |
-|---|---|---|
-| `db.system.name` | Required | DBMS product identifier (e.g. `postgresql`, `clickhouse`) |
-| `db.collection.name` | Cond. Required | If readily available and the operation targets a single collection |
-| `db.namespace` | Cond. Required | If available |
-| `db.operation.name` | Cond. Required | If readily available and describes a single operation |
-| `db.response.status_code` | Cond. Required | If the operation failed and a code is available |
-| `error.type` | Cond. Required | If and only if the operation failed |
-| `server.port` | Cond. Required | If a non-default port is used and `server.address` is set |
+| Attribute                 | Level          | Notes                                                              |
+| ------------------------- | -------------- | ------------------------------------------------------------------ |
+| `db.system.name`          | Required       | DBMS product identifier (e.g. `postgresql`, `clickhouse`)          |
+| `db.collection.name`      | Cond. Required | If readily available and the operation targets a single collection |
+| `db.namespace`            | Cond. Required | If available                                                       |
+| `db.operation.name`       | Cond. Required | If readily available and describes a single operation              |
+| `db.response.status_code` | Cond. Required | If the operation failed and a code is available                    |
+| `error.type`              | Cond. Required | If and only if the operation failed                                |
+| `server.port`             | Cond. Required | If a non-default port is used and `server.address` is set          |
 
 ### `db.query.text` sanitization
 
@@ -187,11 +188,11 @@ Follows the general Recording Errors doc; each system-specific DB convention sho
 
 ### Metrics
 
-| Metric | Type | Unit | Stability |
-|---|---|---|---|
-| `db.client.operation.duration` | Histogram | `s` | **Stable** |
-| `db.client.response.returned_rows` | Histogram | `{row}` | Development |
-| `db.client.connection.*` (pool size, idle, pending, timeouts, create/wait/use time) | Counter/UpDownCounter/Histogram | varies | Development |
+| Metric                                                                              | Type                            | Unit    | Stability   |
+| ----------------------------------------------------------------------------------- | ------------------------------- | ------- | ----------- |
+| `db.client.operation.duration`                                                      | Histogram                       | `s`     | **Stable**  |
+| `db.client.response.returned_rows`                                                  | Histogram                       | `{row}` | Development |
+| `db.client.connection.*` (pool size, idle, pending, timeouts, create/wait/use time) | Counter/UpDownCounter/Histogram | varies  | Development |
 
 Batch operations **SHOULD** be recorded as a single operation (not one metric event per row/statement).
 
@@ -210,25 +211,25 @@ Source: https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/
 
 ### Required / Conditionally Required attributes
 
-| Attribute | Level | Notes |
-|---|---|---|
-| `messaging.system` | Required | e.g. `kafka`, `rabbitmq`, `aws_sqs` |
-| `messaging.operation.name` | Required | System-specific operation name (`send`, `publish`, `poll`, …) |
-| `messaging.operation.type` | Cond. Required | One of `create`/`send`/`receive`/`process`/`settle` |
-| `messaging.destination.name` | Cond. Required | Single-message ops, or batch ops with a uniform destination |
-| `messaging.batch.message_count` | Cond. Required | Batch operations |
-| `messaging.consumer.group.name` | Cond. Required | If applicable to the system |
-| `error.type` | Cond. Required | If the operation failed |
+| Attribute                       | Level          | Notes                                                         |
+| ------------------------------- | -------------- | ------------------------------------------------------------- |
+| `messaging.system`              | Required       | e.g. `kafka`, `rabbitmq`, `aws_sqs`                           |
+| `messaging.operation.name`      | Required       | System-specific operation name (`send`, `publish`, `poll`, …) |
+| `messaging.operation.type`      | Cond. Required | One of `create`/`send`/`receive`/`process`/`settle`           |
+| `messaging.destination.name`    | Cond. Required | Single-message ops, or batch ops with a uniform destination   |
+| `messaging.batch.message_count` | Cond. Required | Batch operations                                              |
+| `messaging.consumer.group.name` | Cond. Required | If applicable to the system                                   |
+| `error.type`                    | Cond. Required | If the operation failed                                       |
 
 ### Span kind by operation type
 
-| Operation | Span kind |
-|---|---|
-| `create` | PRODUCER |
-| `send` | PRODUCER (if the created context is used) or CLIENT |
-| `receive` | CLIENT |
-| `process` | CONSUMER |
-| `settle` | CLIENT |
+| Operation | Span kind                                           |
+| --------- | --------------------------------------------------- |
+| `create`  | PRODUCER                                            |
+| `send`    | PRODUCER (if the created context is used) or CLIENT |
+| `receive` | CLIENT                                              |
+| `process` | CONSUMER                                            |
+| `settle`  | CLIENT                                              |
 
 Status follows the general Recording Errors doc; don't set `error.type` on success.
 
@@ -245,13 +246,13 @@ Source: https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/
 
 ### Required / Conditionally Required attributes
 
-| Attribute | Level | Notes |
-|---|---|---|
-| `rpc.system.name` | Required | `grpc`, `dubbo`, `connectrpc`, `jsonrpc`, … (client/server systems may legitimately differ for the same call) |
-| `rpc.method` | Cond. Required | If available; unrecognized methods **MUST** be set to `_OTHER`, with the original value preserved in `rpc.method_original` |
-| `error.type` | Cond. Required | On failure |
-| `rpc.response.status_code` | Cond. Required | If available (supersedes the old `rpc.grpc.status_code`) |
-| `server.address` / `server.port` | Cond. Required | If available |
+| Attribute                        | Level          | Notes                                                                                                                      |
+| -------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `rpc.system.name`                | Required       | `grpc`, `dubbo`, `connectrpc`, `jsonrpc`, … (client/server systems may legitimately differ for the same call)              |
+| `rpc.method`                     | Cond. Required | If available; unrecognized methods **MUST** be set to `_OTHER`, with the original value preserved in `rpc.method_original` |
+| `error.type`                     | Cond. Required | On failure                                                                                                                 |
+| `rpc.response.status_code`       | Cond. Required | If available (supersedes the old `rpc.grpc.status_code`)                                                                   |
+| `server.address` / `server.port` | Cond. Required | If available                                                                                                               |
 
 ---
 
@@ -265,11 +266,11 @@ Source: https://opentelemetry.io/docs/specs/semconv/exceptions/exceptions-spans/
 - Migration is gated by `OTEL_SEMCONV_EXCEPTION_SIGNAL_OPT_IN`: `logs` = emit as logs only; `logs/dup` = emit both span events and logs during a phased rollout; default = keep emitting span events. Even after an instrumentation moves to logs-only emission, "users will still have the option to route those to span events at the SDK layer."
 - Attributes (same names/semantics in both forms):
 
-| Attribute | Level | Notes |
-|---|---|---|
-| `exception.type` | Cond. Required | Fully-qualified exception class name; required if `exception.message` unset |
-| `exception.message` | Cond. Required | Required if `exception.type` unset; may contain sensitive data |
-| `exception.stacktrace` | Recommended | Natural stack-trace string for the language runtime |
+| Attribute              | Level          | Notes                                                                       |
+| ---------------------- | -------------- | --------------------------------------------------------------------------- |
+| `exception.type`       | Cond. Required | Fully-qualified exception class name; required if `exception.message` unset |
+| `exception.message`    | Cond. Required | Required if `exception.type` unset; may contain sensitive data              |
+| `exception.stacktrace` | Recommended    | Natural stack-trace string for the language runtime                         |
 
 - Instrumentations **should not** record artificial/synthetic exceptions manufactured by a framework purely to represent an error status code.
 
@@ -280,13 +281,13 @@ Source: https://opentelemetry.io/docs/specs/semconv/exceptions/exceptions-spans/
 **Stability: Stable.**
 Source: https://opentelemetry.io/docs/specs/semconv/registry/attributes/code/ · https://opentelemetry.io/docs/specs/semconv/non-normative/code-attrs-migration/
 
-| Attribute | Description |
-|---|---|
-| `code.function.name` | Fully-qualified function/method name **without arguments**, in the natural representation for the language runtime |
-| `code.file.path` | Source file identifying the code unit as uniquely as possible (prefer absolute path) |
-| `code.line.number` | Line in `code.file.path` best representing the operation; should point within the unit named by `code.function.name` |
-| `code.column.number` | Column in `code.file.path`, same "should point within" constraint |
-| `code.stacktrace` | Stack trace string in the language's natural representation; identical semantics to `exception.stacktrace` |
+| Attribute            | Description                                                                                                          |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `code.function.name` | Fully-qualified function/method name **without arguments**, in the natural representation for the language runtime   |
+| `code.file.path`     | Source file identifying the code unit as uniquely as possible (prefer absolute path)                                 |
+| `code.line.number`   | Line in `code.file.path` best representing the operation; should point within the unit named by `code.function.name` |
+| `code.column.number` | Column in `code.file.path`, same "should point within" constraint                                                    |
+| `code.stacktrace`    | Stack trace string in the language's natural representation; identical semantics to `exception.stacktrace`           |
 
 Note: as of the v1.29.0 → v1.33.0 migration, the older separate `code.namespace` and `code.function` attributes were folded into the single `code.function.name` (which now carries the fully-qualified name). All `code.*` attributes are disallowed on Profile signals (redundant with data profiling already captures).
 
@@ -299,39 +300,39 @@ Source: https://opentelemetry.io/docs/specs/semconv/registry/attributes/network/
 
 ### `server.*` / `client.*`
 
-| Attribute | Description |
-|---|---|
+| Attribute        | Description                                                                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `server.address` | Server domain name if resolvable without a reverse DNS lookup, else IP/socket. When observed client-side through an intermediary (proxy), **SHOULD** represent the real server behind it, if known |
-| `server.port` | Server port; same "behind the intermediary" preference as `server.address` |
-| `client.address` | Client address as observed by the server (may itself be a proxy) |
-| `client.port` | Client port as observed by the server |
+| `server.port`    | Server port; same "behind the intermediary" preference as `server.address`                                                                                                                         |
+| `client.address` | Client address as observed by the server (may itself be a proxy)                                                                                                                                   |
+| `client.port`    | Client port as observed by the server                                                                                                                                                              |
 
 ### `network.*`
 
-| Attribute | Description |
-|---|---|
-| `network.protocol.name` | OSI application layer or non-OSI equivalent (e.g. `http`, `amqp`); lowercase-normalized |
-| `network.protocol.version` | Actual (post-negotiation) protocol version in use |
-| `network.transport` | OSI transport layer / IPC method; lowercase-normalized |
-| `network.type` | OSI network layer or non-OSI equivalent; lowercase-normalized |
-| `network.peer.address` / `network.peer.port` | Peer (remote) address/port of the connection |
-| `network.local.address` / `network.local.port` | Local address/port of the connection |
-| `network.io.direction` | `transmit`/`receive`, from the observing host's perspective (Release Candidate) |
+| Attribute                                      | Description                                                                             |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `network.protocol.name`                        | OSI application layer or non-OSI equivalent (e.g. `http`, `amqp`); lowercase-normalized |
+| `network.protocol.version`                     | Actual (post-negotiation) protocol version in use                                       |
+| `network.transport`                            | OSI transport layer / IPC method; lowercase-normalized                                  |
+| `network.type`                                 | OSI network layer or non-OSI equivalent; lowercase-normalized                           |
+| `network.peer.address` / `network.peer.port`   | Peer (remote) address/port of the connection                                            |
+| `network.local.address` / `network.local.port` | Local address/port of the connection                                                    |
+| `network.io.direction`                         | `transmit`/`receive`, from the observing host's perspective (Release Candidate)         |
 
 Guidance: "Consider always setting the transport when setting a port number, since a port number is ambiguous without knowing the transport."
 
 ### `url.*`
 
-| Attribute | Stability | Description |
-|---|---|---|
-| `url.scheme` | Stable | `https`, `ftp`, … |
-| `url.full` | Stable | Absolute URL (RFC3986); **MUST NOT** contain credentials; sensitive query params (`X-Amz-Signature`, `sig`, `X-Goog-Signature`, …) should be redacted |
-| `url.path` | Stable | URI path component; scrub sensitive content |
-| `url.query` | Stable | URI query component; same default redaction list as `url.full` |
-| `url.fragment` | Stable | URI fragment |
-| `url.template` | Development | Low-cardinality path template, e.g. `/users/{id}` |
-| `url.domain`, `url.port`, `url.registered_domain`, `url.subdomain`, `url.top_level_domain`, `url.extension` | Development | Derived sub-components parsed out of `url.full` |
-| `url.original` | Development | Unmodified original URL as seen at the source; may retain credentials (unlike `url.full`) |
+| Attribute                                                                                                   | Stability   | Description                                                                                                                                           |
+| ----------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url.scheme`                                                                                                | Stable      | `https`, `ftp`, …                                                                                                                                     |
+| `url.full`                                                                                                  | Stable      | Absolute URL (RFC3986); **MUST NOT** contain credentials; sensitive query params (`X-Amz-Signature`, `sig`, `X-Goog-Signature`, …) should be redacted |
+| `url.path`                                                                                                  | Stable      | URI path component; scrub sensitive content                                                                                                           |
+| `url.query`                                                                                                 | Stable      | URI query component; same default redaction list as `url.full`                                                                                        |
+| `url.fragment`                                                                                              | Stable      | URI fragment                                                                                                                                          |
+| `url.template`                                                                                              | Development | Low-cardinality path template, e.g. `/users/{id}`                                                                                                     |
+| `url.domain`, `url.port`, `url.registered_domain`, `url.subdomain`, `url.top_level_domain`, `url.extension` | Development | Derived sub-components parsed out of `url.full`                                                                                                       |
+| `url.original`                                                                                              | Development | Unmodified original URL as seen at the source; may retain credentials (unlike `url.full`)                                                             |
 
 > **Maple hook:** these are the backbone of the HTTP domain above — our trace UI and ingest gateway's "new-semconv HTTP attributes" are built directly on `server.address`/`server.port`/`network.protocol.*`/`url.*` alongside `http.*`.
 
@@ -350,15 +351,15 @@ Source: https://github.com/open-telemetry/semantic-conventions-genai/blob/main/d
 
 ### Required / Conditionally Required attributes
 
-| Attribute | Level | Notes |
-|---|---|---|
-| `gen_ai.operation.name` | Required | e.g. `chat`, `embeddings`, `retrieval` |
-| `gen_ai.provider.name` | Required | Provider identifier, e.g. `openai`, `anthropic`, `gcp.vertex_ai` (supersedes the deprecated `gen_ai.system`) |
-| `gen_ai.request.model` | Cond. Required | If available |
-| `gen_ai.response.model` | Cond. Required | If available; the actual model that served the response (may differ from the requested one) |
-| `gen_ai.usage.input_tokens` | Recommended | — |
-| `gen_ai.usage.output_tokens` | Recommended | — |
-| `error.type` | Cond. Required | Should match the provider's/client library's error code |
+| Attribute                    | Level          | Notes                                                                                                        |
+| ---------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------ |
+| `gen_ai.operation.name`      | Required       | e.g. `chat`, `embeddings`, `retrieval`                                                                       |
+| `gen_ai.provider.name`       | Required       | Provider identifier, e.g. `openai`, `anthropic`, `gcp.vertex_ai` (supersedes the deprecated `gen_ai.system`) |
+| `gen_ai.request.model`       | Cond. Required | If available                                                                                                 |
+| `gen_ai.response.model`      | Cond. Required | If available; the actual model that served the response (may differ from the requested one)                  |
+| `gen_ai.usage.input_tokens`  | Recommended    | —                                                                                                            |
+| `gen_ai.usage.output_tokens` | Recommended    | —                                                                                                            |
+| `error.type`                 | Cond. Required | Should match the provider's/client library's error code                                                      |
 
 Span kinds covered by the spec include Inference, Embeddings, Retrieval, Memory, and Execute-Tool spans. Migration is gated by `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental` (opt into the newest experimental shape) vs. default (keep emitting whatever pre-1.36.0 shape was already in use) — the spec notes this transition plan will gain a genuine stable value once gen-ai conventions themselves stabilize.
 

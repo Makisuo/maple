@@ -30,11 +30,13 @@ const zoneParams = { ...baseParams, serviceName: "cloudflare/example.com" }
 const zoneTimeseriesParams = { ...zoneParams, bucketSeconds: 300 }
 
 describe("cloudflareZoneHostBreakdownSQL", () => {
-	it("groups zone HTTP counters by the http.host attribute", () => {
+	it("groups zone HTTP counters by the host attribute, coalescing the pre-rename key", () => {
 		const { sql } = compileCH(cloudflareZoneHostBreakdownSQL(), zoneParams)
 		expect(sql).toContain("FROM metrics_sum")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("ServiceName = 'cloudflare/example.com'")
+		// Rows written before commit 46ee9b129 carry `http.host`, newer ones `server.address`.
+		expect(sql).toContain("server.address']")
 		expect(sql).toContain("http.host']")
 		expect(sql).toContain("http.status_class'] = '5xx'")
 		expect(sql).toContain("cache.status'] IN ('hit', 'stale', 'revalidated', 'updating')")
@@ -48,6 +50,8 @@ describe("cloudflareZoneHostTimeseriesSQL", () => {
 		const { sql } = compileCH(cloudflareZoneHostTimeseriesSQL(), zoneTimeseriesParams)
 		expect(sql).toContain("toStartOfInterval")
 		expect(sql).toContain("MetricName = 'cloudflare.http.requests'")
+		expect(sql).toContain("server.address']")
+		expect(sql).toContain("http.host']")
 		expect(sql).toContain("GROUP BY bucket, host")
 	})
 })
@@ -66,6 +70,8 @@ describe("cloudflareZoneFirewallTopSQL", () => {
 		const { sql } = compileCH(cloudflareZoneFirewallTopSQL(), zoneParams)
 		expect(sql).toContain("firewall.source']")
 		expect(sql).toContain("firewall.rule_id']")
+		// Firewall rows carry the same coalesced host attribute as the HTTP breakdowns.
+		expect(sql).toContain("server.address']")
 		expect(sql).toContain("http.host']")
 		expect(sql).toContain("ORDER BY events DESC")
 		expect(sql).toContain("LIMIT 25")

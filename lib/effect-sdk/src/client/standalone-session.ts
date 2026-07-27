@@ -54,6 +54,8 @@ const post = (status: "active" | "ended", keepalive: boolean): void => {
 			environment: options.environment,
 			serviceVersion: options.serviceVersion,
 			traceIds: status === "ended" ? Array.from(observedBySession.get(sessionId) ?? []) : undefined,
+			// Standalone means replay is off or unsampled — metadata only, no chunks.
+			recorded: false,
 		}),
 		keepalive,
 	)

@@ -29,7 +29,7 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 			.handle("listReplays", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					yield* Effect.annotateCurrentSpan({ "maple.org_id": tenant.orgId })
+					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
 					const compiled = CH.compile(
 						CH.sessionReplaysListQuery({
 							serviceName: payload.serviceName,
@@ -69,7 +69,7 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 			.handle("facets", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					yield* Effect.annotateCurrentSpan({ "maple.org_id": tenant.orgId })
+					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
 					const compiled = CH.compileUnion(
 						CH.sessionReplaysFacetsQuery({
 							serviceName: payload.serviceName,
@@ -93,12 +93,21 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 						rows
 							.filter((row) => row.facetType === facetType)
 							.map((row) => ({ name: row.name, count: Number(row.count) }))
+					// The percentile branches ride the same {name, count} shape as the
+					// facets, with the quantile in `count` — read them back by label.
+					const stat = (name: string) =>
+						Number(
+							rows.find((row) => row.facetType === "durationStat" && row.name === name)?.count ?? 0,
+						)
 					return new ReplaysFacetsResponse({
 						services: pick("service"),
 						browsers: pick("browser"),
 						countries: pick("country"),
 						devices: pick("device"),
 						errorCount: Number(rows.find((row) => row.facetType === "error")?.count ?? 0),
+						durationBuckets: pick("durationBucket"),
+						durationP50: stat("p50"),
+						durationP95: stat("p95"),
 					})
 				}),
 			)
@@ -106,7 +115,7 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({
-						"maple.org_id": tenant.orgId,
+						orgId: tenant.orgId,
 						"maple.session.id": payload.sessionId,
 					})
 					const compiled = CH.compile(
@@ -168,7 +177,7 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({
-						"maple.org_id": tenant.orgId,
+						orgId: tenant.orgId,
 						"maple.session.id": payload.sessionId,
 					})
 					const compiled = CH.compile(
@@ -194,7 +203,7 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({
-						"maple.org_id": tenant.orgId,
+						orgId: tenant.orgId,
 						"maple.trace.id": payload.traceId,
 					})
 					const compiled = CH.compile(CH.sessionsForTraceQuery({ traceId: payload.traceId }), {
@@ -218,7 +227,7 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({
-						"maple.org_id": tenant.orgId,
+						orgId: tenant.orgId,
 						"maple.trace.count": payload.traceIds.length,
 					})
 					// `TraceId IN ()` is invalid SQL; a session with no correlated traces
@@ -253,7 +262,7 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({
-						"maple.org_id": tenant.orgId,
+						orgId: tenant.orgId,
 						"maple.session.id": payload.sessionId,
 					})
 					const compiled = CH.compile(

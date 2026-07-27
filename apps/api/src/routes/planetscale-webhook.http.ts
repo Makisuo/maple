@@ -30,6 +30,11 @@ const textResponse = (body: string, status: number) => HttpServerResponse.text(b
 
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 
+class PlanetScaleWebhookUnavailable extends Schema.TaggedErrorClass<PlanetScaleWebhookUnavailable>()(
+	"PlanetScaleWebhookUnavailable",
+	{ body: Schema.String },
+) {}
+
 export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
 		const database = yield* Database
@@ -53,18 +58,23 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 			const reject = (status: number, reason: string, body: string) =>
 				Effect.annotateCurrentSpan({
 					"http.response.status_code": status,
-					"otel.status_code": "Ok",
 					"maple.planetscale.webhook.outcome": "rejected",
 					"maple.planetscale.webhook.reason": reason,
 				}).pipe(Effect.as(textResponse(body, status)))
 
-			const unavailable = (reason: string, body: string) =>
-				Effect.annotateCurrentSpan({
-					"http.response.status_code": 503,
-					"otel.status_code": "Error",
-					"maple.planetscale.webhook.outcome": "enqueue_failed",
-					"maple.planetscale.webhook.reason": reason,
-				}).pipe(Effect.as(textResponse(body, 503)))
+			const unavailable = (
+				reason: string,
+				body: string,
+			): Effect.Effect<never, PlanetScaleWebhookUnavailable> =>
+				Effect.gen(function* () {
+					yield* Effect.annotateCurrentSpan({
+						"http.response.status_code": 503,
+						"error.type": "PlanetScaleWebhookUnavailable",
+						"maple.planetscale.webhook.outcome": "enqueue_failed",
+						"maple.planetscale.webhook.reason": reason,
+					})
+					return yield* new PlanetScaleWebhookUnavailable({ body })
+				})
 
 			if (connectionId.length === 0) {
 				return yield* reject(404, "missing_connection", "Unknown webhook endpoint")
@@ -150,7 +160,6 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 			if (classified.action === "test") {
 				yield* Effect.annotateCurrentSpan({
 					"http.response.status_code": 200,
-					"otel.status_code": "Ok",
 					"maple.planetscale.webhook.outcome": "handled",
 				})
 				return textResponse("ok", 200)
@@ -197,12 +206,17 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 
 			yield* Effect.annotateCurrentSpan({
 				"http.response.status_code": 202,
-				"otel.status_code": "Ok",
 				"maple.planetscale.webhook.outcome": "handled",
 			})
 			return textResponse("accepted", 202)
 		})
 
-		yield* router.add("POST", ROUTE, handle)
+		yield* router.add("POST", ROUTE, (req) =>
+			handle(req).pipe(
+				Effect.catchTag("PlanetScaleWebhookUnavailable", ({ body }) =>
+					Effect.succeed(textResponse(body, 503)),
+				),
+			),
+		)
 	}),
 )

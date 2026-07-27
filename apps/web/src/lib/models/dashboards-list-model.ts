@@ -69,7 +69,10 @@ export class DashboardsListModel extends Model.Service<DashboardsListModel>()("m
 	make: () =>
 		Effect.gen(function* () {
 			const orgKey = yield* makeOrgCollectionsKey
-			const rows = yield* Db.fromCollectionByKey(orgKey, (key) => getOrgCollections(orgIdOf(key)).dashboards)
+			const rows = yield* Db.fromCollectionByKey(
+				orgKey,
+				(key) => getOrgCollections(orgIdOf(key)).dashboards,
+			)
 
 			const list = rows.pipe(Store.map(buildList))
 

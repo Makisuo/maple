@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { replayPartitionWindow } from "./replay-format"
+import { recordedMarker, replayPartitionWindow } from "./replay-format"
 
 // The session-detail warehouse queries are PARTITION BY toDate(...) over a 30-day
 // TTL; `replayPartitionWindow` turns a session's start (and optional end) into the
@@ -34,5 +34,33 @@ describe("replayPartitionWindow", () => {
 		expect(replayPartitionWindow(null)).toBeUndefined()
 		expect(replayPartitionWindow("")).toBeUndefined()
 		expect(replayPartitionWindow("not-a-timestamp")).toBeUndefined()
+	})
+})
+
+// The player picks between "not recorded" and "still uploading" from this
+// marker. Anything it can't read must come back `undefined` (unknown) rather
+// than `false`, or a session mid-upload would be declared unrecorded.
+describe("recordedMarker", () => {
+	it("reads the SDK's marker in both directions", () => {
+		expect(recordedMarker(JSON.stringify({ "maple.session.recorded": "true" }))).toBe(true)
+		expect(recordedMarker(JSON.stringify({ "maple.session.recorded": "false" }))).toBe(false)
+	})
+
+	it("is undefined when the marker is absent (pre-marker sessions)", () => {
+		expect(recordedMarker(JSON.stringify({ "deployment.environment": "production" }))).toBeUndefined()
+		expect(recordedMarker("{}")).toBeUndefined()
+	})
+
+	it("is undefined for empty, unparseable, or non-object attributes", () => {
+		expect(recordedMarker(undefined)).toBeUndefined()
+		expect(recordedMarker(null)).toBeUndefined()
+		expect(recordedMarker("")).toBeUndefined()
+		expect(recordedMarker("{not json")).toBeUndefined()
+		expect(recordedMarker("null")).toBeUndefined()
+		expect(recordedMarker('"a string"')).toBeUndefined()
+	})
+
+	it("is undefined for an unexpected marker value rather than guessing", () => {
+		expect(recordedMarker(JSON.stringify({ "maple.session.recorded": "1" }))).toBeUndefined()
 	})
 })

@@ -566,6 +566,58 @@ export const partition: {
 } = internal.partition
 
 /**
+ * Reduces elements from left to right with an effectful accumulator function.
+ *
+ * **When to use**
+ *
+ * Use when each accumulation step is effectful and must run sequentially in
+ * iteration order.
+ *
+ * **Details**
+ *
+ * The accumulator function receives the current accumulator, the current
+ * element, and its zero-based index. The `zero` function is evaluated each
+ * time the effect runs. An empty iterable succeeds with its result. If a step
+ * fails, remaining elements are not processed.
+ *
+ * **Example** (Summing values sequentially)
+ *
+ * ```ts
+ * import { Console, Effect } from "effect"
+ *
+ * const program = Effect.reduce(
+ *   [1, 2, 3],
+ *   () => 0,
+ *   (total, value, index) =>
+ *     Console.log(`Adding ${value} at index ${index}`).pipe(
+ *       Effect.as(total + value)
+ *     )
+ * )
+ *
+ * Effect.runPromise(program).then(console.log)
+ * // Output:
+ * // Adding 1 at index 0
+ * // Adding 2 at index 1
+ * // Adding 3 at index 2
+ * // 6
+ * ```
+ *
+ * @category collecting
+ * @since 2.0.0
+ */
+export const reduce: {
+  <Z, A, E, R>(
+    zero: LazyArg<Z>,
+    f: (z: Z, a: A, i: number) => Effect<Z, E, R>
+  ): (elements: Iterable<A>) => Effect<Z, E, R>
+  <A, Z, E, R>(
+    elements: Iterable<A>,
+    zero: LazyArg<Z>,
+    f: (z: Z, a: A, i: number) => Effect<Z, E, R>
+  ): Effect<Z, E, R>
+} = internal.reduce
+
+/**
  * Applies an effectful function to each element and accumulates all failures.
  *
  * **Details**
@@ -5956,6 +6008,53 @@ export const provideContext: {
     context: Context.Context<XR>
   ): Effect<A, E, Exclude<R, XR>>
 } = internal.provideContext
+
+/**
+ * Runs an effect with the provided context as its complete environment.
+ *
+ * **When to use**
+ *
+ * Use when you already have a `Context` containing every service required by
+ * the effect and want the wrapped effect to run with exactly that context.
+ *
+ * **Gotchas**
+ *
+ * `setContext` replaces the current context for the wrapped effect. Services
+ * from an outer context are not inherited unless they are also present in the
+ * context passed to `setContext`.
+ *
+ * **Example** (Running with a complete context)
+ *
+ * ```ts
+ * import { Context, Effect } from "effect"
+ *
+ * class Config extends Context.Service<Config, {
+ *   readonly greeting: string
+ * }>()("Config") {}
+ *
+ * const program = Effect.gen(function*() {
+ *   const config = yield* Effect.service(Config)
+ *   return `${config.greeting}, World!`
+ * })
+ *
+ * const context = Context.make(Config, { greeting: "Hello" })
+ *
+ * const runnable = Effect.setContext(program, context)
+ *
+ * Effect.runPromise(runnable).then(console.log)
+ * // Output: "Hello, World!"
+ * ```
+ *
+ * @see {@link provideContext} for partially satisfying an effect's context requirements.
+ * @see {@link updateContext} for deriving the required context from the current one.
+ *
+ * @category environment
+ * @since 4.0.0
+ */
+export const setContext: {
+  <R>(context: Context.Context<R>): <A, E>(self: Effect<A, E, R>) => Effect<A, E>
+  <A, E, R>(self: Effect<A, E, R>, context: Context.Context<R>): Effect<A, E>
+} = internal.setContext
 
 /**
  * Accesses a service from the context.

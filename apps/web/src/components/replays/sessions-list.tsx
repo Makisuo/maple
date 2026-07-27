@@ -22,6 +22,9 @@ export interface SessionRow {
 	readonly clickCount: number
 	readonly errorCount: number
 	readonly traceCount: number
+	/** `"false"` when the SDK recorded no rrweb chunks for this session. `""` on
+	 *  sessions written before the marker existed — unknown, so no badge. */
+	readonly recorded: string
 }
 
 function parseTs(startTime: string): number {
@@ -221,7 +224,12 @@ export function SessionsList({
 											</span>
 										)}
 									</div>
-									{(session.traceCount > 0 || session.errorCount > 0) && (
+									{(session.traceCount > 0 ||
+										session.errorCount > 0 ||
+										// Without this the "No recording" flag would vanish on narrow
+										// columns for a session that has no traces and no errors —
+										// exactly the sessions most likely to be unrecorded.
+										session.recorded === "false") && (
 										<div className="mt-1.5 flex items-center gap-2 @2xl:hidden">
 											<SessionBadges session={session} />
 										</div>
@@ -288,6 +296,14 @@ export function SessionsList({
 function SessionBadges({ session }: { session: SessionRow }) {
 	return (
 		<>
+			{/* Metadata-only session — no rrweb chunks were ever written, so the
+			    detail page has no player. Flag it here rather than let the row look
+			    like every other (playable) session. */}
+			{session.recorded === "false" && (
+				<span className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+					No recording
+				</span>
+			)}
 			{session.traceCount > 0 && (
 				<span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium tabular-nums text-primary">
 					{session.traceCount} trace{session.traceCount === 1 ? "" : "s"}

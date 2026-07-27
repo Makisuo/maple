@@ -27,6 +27,67 @@
 	--color-amber-soft: var(--amber-soft);
 }
 
+/* ──────────────────────────────────────────────────────────────
+   Page shell.
+   The homepage, nav, and footer run at 1400px; every other page
+   keeps its own narrower container.
+   ────────────────────────────────────────────────────────────── */
+.shell {
+	margin-inline: auto;
+	max-width: 1400px;
+	padding-inline: 24px;
+}
+@media (min-width: 768px) {
+	.shell {
+		padding-inline: 52px;
+	}
+}
+
+/* ──────────────────────────────────────────────────────────────
+   MediaFrame placeholder body.
+   The dot grid is the product's own /infra texture, not a
+   loading affordance — placeholders are deliberate reserved
+   frames, so no shimmer (DESIGN.md: no spinners by default).
+   ────────────────────────────────────────────────────────────── */
+.media-frame__body {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background-image: radial-gradient(var(--border) 1px, transparent 1px);
+	background-size: 16px 16px;
+}
+.media-frame__note {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	max-width: 46ch;
+	text-align: center;
+}
+.media-frame__play {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	color: var(--primary);
+	padding-left: 2px;
+}
+.media-frame__caption {
+	font-size: 11px;
+	line-height: 1.6;
+	color: var(--muted-foreground);
+}
+.media-frame__spec {
+	font-size: 10px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+}
+
 /* App mock interactive sidebar — CSS-only tab switching */
 .mock-radio {
 	position: absolute;
@@ -146,6 +207,177 @@
 	);
 	background-size: 100% 24px;
 	mix-blend-mode: multiply;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Hero carousel.
+   The timer segments are span bars — scaleX off a left origin, the
+   construction .roadmap-seg and .span-bar already use. The active
+   segment widens to carry its label while the others collapse to
+   dashes, so the rail states where you are without a counter.
+
+   One motion vocabulary throughout: --hero-ease over --hero-swap
+   for the segment width, the label reveal and the plate crossfade,
+   so the rail and the plate settle together instead of racing.
+   Reduced motion freezes all of it (see the freeze block).
+   ────────────────────────────────────────────────────────────── */
+[data-hero-carousel] {
+	--hero-swap: 700ms;
+	--hero-ease: cubic-bezier(0, 0, 0.2, 1);
+	--hero-seg-idle: 20px;
+	--hero-seg-active: 92px;
+}
+.hero-carousel__stage {
+	position: relative;
+	margin-top: 32px;
+	aspect-ratio: 1400 / 720;
+}
+@media (min-width: 768px) {
+	.hero-carousel__stage {
+		margin-top: 40px;
+	}
+}
+.hero-carousel__pane {
+	position: absolute;
+	inset: 0;
+	opacity: 0;
+	pointer-events: none;
+	/* z-index, not opacity alone: the incoming plate fades in over the outgoing
+	   one, so two dark dashboards don't cross at 50% and read as a dip. */
+	z-index: 0;
+	transition: opacity var(--hero-swap) var(--hero-ease);
+}
+.hero-carousel__pane[data-on] {
+	opacity: 1;
+	pointer-events: auto;
+	z-index: 1;
+}
+/* Both MediaFrame branches fill the stage box exactly, so a real capture and a
+   placeholder occupy the same rectangle and the frame never moves. */
+.hero-carousel__pane .live-frame {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+/* The shot settles the last 2% as it fades in, so a swap reads as the plate
+   arriving rather than two stills blinking. Scaling the image and not the
+   frame keeps the border and radius fixed — .live-frame already clips, so the
+   overscan never pokes past the stage. */
+.hero-carousel__pane .live-frame img {
+	height: 100%;
+	width: 100%;
+	object-fit: cover;
+	object-position: top left;
+	transform: scale(1.02);
+	transition: transform var(--hero-swap) var(--hero-ease);
+}
+.hero-carousel__pane[data-on] .live-frame img {
+	transform: scale(1);
+}
+.hero-carousel__pane .media-frame__body {
+	flex: 1;
+	aspect-ratio: auto;
+}
+
+.hero-rail {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: 12px;
+}
+/* Fixed row height, so the track thickening on hover grows about its own
+   centre instead of nudging the caption. 24px also keeps the bare bar a legal
+   tap target. */
+.hero-tab {
+	display: flex;
+	align-items: center;
+	height: 24px;
+	cursor: pointer;
+	border-radius: 2px;
+}
+.hero-tab:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 4px;
+}
+.hero-seg {
+	display: block;
+	height: 2px;
+	width: var(--hero-seg-idle);
+	overflow: hidden;
+	border-radius: 999px;
+	background: var(--border);
+	transition:
+		width var(--hero-swap) var(--hero-ease),
+		height 200ms ease-out,
+		background-color 200ms ease-out;
+}
+.hero-tab[data-on] .hero-seg {
+	width: var(--hero-seg-active);
+}
+.hero-tab:hover .hero-seg {
+	height: 6px;
+	background: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+}
+.hero-seg__fill {
+	display: block;
+	height: 100%;
+	width: 100%;
+	transform: scaleX(0);
+	transform-origin: left center;
+	background: var(--primary);
+}
+/* Caption. All three lines share one grid cell, so the box is as tall as the
+   tallest line and a longer ja/ko string never shifts the plate below it.
+   The swap is a blur-and-fade rather than a slide: the outgoing line dissolves
+   in place, which reads as the same sentence resolving into a new one instead
+   of two labels racing past each other. */
+.hero-caption {
+	display: grid;
+	justify-items: center;
+	margin-top: 20px;
+	text-align: center;
+}
+.hero-caption__item {
+	grid-area: 1 / 1;
+	max-width: 34ch;
+	opacity: 0;
+	filter: blur(6px);
+	font-family: var(--font-display);
+	font-size: 1.125rem;
+	font-weight: 500;
+	line-height: 1.3;
+	letter-spacing: -0.01em;
+	color: var(--foreground);
+	transition:
+		opacity var(--hero-swap) var(--hero-ease),
+		filter var(--hero-swap) var(--hero-ease);
+}
+.hero-caption__item[data-on] {
+	opacity: 1;
+	filter: blur(0);
+}
+@media (min-width: 768px) {
+	.hero-caption__item {
+		font-size: 1.5rem;
+	}
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Dot-grid veil.
+   The product's own /infra texture (16×16 in --border), faded off
+   toward the edges by a radial mask. The hero backdrop on every
+   top-level page. DESIGN.md reserves this texture for sparing use —
+   it belongs behind a headline, never on a card body.
+   Absolutely positioned, so its host needs `position: relative`.
+   ────────────────────────────────────────────────────────────── */
+.dot-grid-veil {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background-image: radial-gradient(var(--border) 1px, transparent 1px);
+	background-size: 16px 16px;
+	-webkit-mask-image: radial-gradient(ellipse 70% 50% at 50% 28%, black, transparent);
+	mask-image: radial-gradient(ellipse 70% 50% at 50% 28%, black, transparent);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -619,10 +851,271 @@
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Scroll story — the pinned-pane walkthrough.
+   One IntersectionObserver writes `data-on` / `data-passed` off a
+   single index, so the step count lives in the markup and never in
+   this file. Step one ships marked, and is lit before any JS runs.
+
+   One motion vocabulary throughout: --story-swap over --story-ease
+   for the plate, the route label and the rail alike, so the three
+   settle together instead of racing. 520ms sits between the hero's
+   unhurried 700ms and a blink — a scroll-triggered swap shouldn't
+   dawdle, but it shouldn't snap either.
+
+   Nothing here dims: two steps are on screen at once, so the active
+   one is marked positively (amber label, filled node) rather than by
+   pushing its neighbours under a legible contrast.
+   ────────────────────────────────────────────────────────────── */
+[data-scrollstory] {
+	--story-swap: 520ms;
+	--story-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* The pinned frame. Same construction as .live-frame — deep-ink body,
+   elevated head, hairline border — so it reads as one of the page's live
+   artifacts rather than a new kind of box. */
+.story-frame {
+	background: var(--bg-deep);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-xl);
+	overflow: hidden;
+}
+.story-frame__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--border);
+	background: var(--bg-elevated);
+	font-family: var(--font-mono);
+	font-size: 10px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--muted-foreground);
+}
+/* All four routes share one grid cell, so the head keeps its width when
+   /alerts becomes /traces and the trace id beside it never shifts. */
+.story-frame__route {
+	display: grid;
+	justify-items: end;
+}
+.story-frame__route > span {
+	grid-area: 1 / 1;
+	opacity: 0;
+	transform: translateY(4px);
+	color: var(--primary);
+	transition:
+		opacity var(--story-swap) var(--story-ease),
+		transform var(--story-swap) var(--story-ease);
+}
+.story-frame__route > span[data-on] {
+	opacity: 1;
+	transform: none;
+}
+
+/* The clock cell, used by the use-case stories only. Same swapping-grid
+   construction as the route so the head can't shift, but foreground rather
+   than amber: the route is the thing that changes surface, the clock is just
+   how little time it took. Two amber items in one head would be noise, and the
+   page's amber budget is spent on the closing CTA. */
+.story-frame__clock {
+	display: grid;
+	justify-items: end;
+	min-width: 6ch;
+}
+.story-frame__clock > span {
+	grid-area: 1 / 1;
+	opacity: 0;
+	transform: translateY(4px);
+	color: var(--foreground);
+	transition:
+		opacity var(--story-swap) var(--story-ease),
+		transform var(--story-swap) var(--story-ease);
+}
+.story-frame__clock > span[data-on] {
+	opacity: 1;
+	transform: none;
+}
+
+/* One fixed box for every plate in a story, so the frame can't change height
+   mid-swap. Each story sets --story-aspect to whichever capture family it runs
+   (992/600 for the flow and strip shots, 1280/660 for the surface ones);
+   `contain` is the safety net, so a plate at another ratio insets against the
+   deep floor rather than getting cropped. */
+.story-frame__stage {
+	position: relative;
+	aspect-ratio: var(--story-aspect, 992 / 600);
+}
+/* z-index, not opacity alone: the incoming plate fades in over the outgoing
+   one, so two dark dashboards don't cross at 50% and read as a dip. Same fix
+   the hero carousel carries. */
+.story-frame__stage img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	object-position: center;
+	opacity: 0;
+	z-index: 0;
+	transform: translateY(10px);
+	transition:
+		opacity var(--story-swap) var(--story-ease),
+		transform var(--story-swap) var(--story-ease);
+}
+.story-frame__stage img[data-on] {
+	opacity: 1;
+	z-index: 1;
+	transform: none;
+}
+
+/* Rail. Each step owns the hairline running from its own node down to the
+   next one, so the fill is just `data-passed` and nothing counts steps.
+   --story-node-y is the node's centre: the step's top padding plus half the
+   10px label row, which is also where the segment has to start to land on the
+   next node instead of stopping short of it.
+   The step's block padding lives HERE, not as a `py-*` utility in the markup,
+   because the rail offset is derived from it — one source, so the two can't
+   drift when a step's spacing is tuned. It is also why the copy stays
+   top-aligned in the step box rather than centred: centring would float the
+   node off the rail. */
+.story-steps [data-step] {
+	position: relative;
+	--story-step-pad: 3rem;
+	--story-node-y: calc(var(--story-step-pad) + 5px);
+	padding-block: var(--story-step-pad);
+}
+@media (min-width: 1024px) {
+	.story-steps [data-step] {
+		--story-step-pad: 9rem;
+	}
+}
+.story-steps [data-step]::before,
+.story-steps [data-step]::after {
+	content: "";
+	position: absolute;
+	left: 4px;
+	top: var(--story-node-y);
+	width: 1px;
+	height: 100%;
+}
+.story-steps [data-step]::before {
+	background: var(--border);
+}
+.story-steps [data-step]::after {
+	background: var(--primary);
+	transform: scaleY(0);
+	transform-origin: top;
+	transition: transform var(--story-swap) var(--story-ease);
+}
+.story-steps [data-step][data-passed]::after {
+	transform: scaleY(1);
+}
+/* Nothing to connect to below the last node. */
+.story-steps [data-step]:last-child::before,
+.story-steps [data-step]:last-child::after {
+	display: none;
+}
+
+.story-node {
+	align-self: center;
+	width: 9px;
+	height: 9px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: var(--background);
+	/* Over the rail, so the hairline never shows through the dot. */
+	position: relative;
+	z-index: 1;
+	transition:
+		background-color var(--story-swap) var(--story-ease),
+		border-color var(--story-swap) var(--story-ease),
+		box-shadow var(--story-swap) var(--story-ease);
+}
+.story-steps [data-step][data-passed] .story-node {
+	background: var(--amber-deep);
+	border-color: var(--amber-deep);
+}
+.story-steps [data-step][data-on] .story-node {
+	background: var(--primary);
+	border-color: var(--primary);
+	box-shadow: 0 0 0 4px color-mix(in oklab, var(--primary) 14%, transparent);
+}
+
+/* .op-key is the same token wearing a different hat: the mono key gutter that
+   runs down the left edge of a feature page, from SurfacePanel's fact list
+   through CapabilityLedger's operation column. It is deliberately identical to
+   .story-surface — a key is a key, whether it labels a step or a row. */
+.story-surface,
+.story-trace,
+.op-key {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--muted-foreground);
+}
+.story-surface {
+	transition: color var(--story-swap) var(--story-ease);
+}
+.story-steps [data-step][data-on] .story-surface {
+	color: var(--primary);
+}
+
+/* ──────────────────────────────────────────────────────────────
    Reduced-motion override.
    Every live artifact freezes at a sensible static frame.
    ────────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
+	/* The scroll story unpins entirely: the pinned pane would otherwise
+	   freeze on step 1 while three steps scrolled past it. Same code path
+	   as the <lg layout — one thing to reason about, one thing to test.
+	   The observer doesn't run here either, so the rail is neutralised
+	   rather than left marking step 1 as the current step forever. */
+	[data-scrollstory] [data-sticky] {
+		display: none !important;
+	}
+	[data-scrollstory] [data-inline] {
+		display: block !important;
+	}
+	[data-scrollstory] .story-steps [data-step]::after {
+		display: none !important;
+	}
+	[data-scrollstory] .story-node,
+	[data-scrollstory] .story-surface {
+		transition: none !important;
+	}
+	[data-scrollstory] .story-steps [data-step][data-on] .story-node {
+		background: var(--background) !important;
+		border-color: var(--border) !important;
+		box-shadow: none !important;
+	}
+	[data-scrollstory] .story-steps [data-step][data-on] .story-surface {
+		color: var(--muted-foreground) !important;
+	}
+
+	/* The hero carousel stops auto-advancing in JS, so it holds slide 1 with a
+	   full segment — the same frame the no-JS state renders. The rail still
+	   switches on click; only the motion is gone. Nothing here may touch
+	   .hero-seg__fill: an !important transform would outrank the Web Animations
+	   timer for everyone, not just this query. */
+	.hero-carousel__pane,
+	[data-hero-carousel] .hero-seg,
+	[data-hero-carousel] .hero-caption__item,
+	[data-hero-carousel] .live-frame img {
+		transition: none !important;
+	}
+	/* No settle either — the shot sits at its resting scale from the start. */
+	[data-hero-carousel] .live-frame img {
+		transform: none !important;
+	}
+	/* Blur is motion's cousin here — the caption should land sharp, not soft. */
+	[data-hero-carousel] .hero-caption__item[data-on] {
+		filter: none !important;
+	}
+
 	.log-stream__belt,
 	.logo-marquee__belt,
 	.svc-map-flow,
@@ -733,7 +1226,8 @@ details[open] > summary .details-open\:rotate-180 {
 	transform: rotate(180deg);
 }
 
-/* Smooth scroll */
+/* Smooth scroll. The padding keeps anchor targets clear of the fixed nav. */
 html {
 	scroll-behavior: smooth;
+	scroll-padding-top: 5rem;
 }

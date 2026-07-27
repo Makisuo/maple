@@ -131,7 +131,10 @@ export const AlertRuleProvider = () =>
 				Effect.gen(function* () {
 					const items = yield* listAll(api, "/v2/alerts/rules")
 					const match = items.find(
-						(item) => typeof item === "object" && item !== null && (item as { name?: unknown }).name === name,
+						(item) =>
+							typeof item === "object" &&
+							item !== null &&
+							(item as { name?: unknown }).name === name,
 					)
 					return match === undefined ? undefined : yield* decodeWireRule(match)
 				})
@@ -192,7 +195,9 @@ export const AlertRuleProvider = () =>
 				}),
 				list: Effect.fn(function* () {
 					const items = yield* listAll(api, "/v2/alerts/rules")
-					return yield* Effect.forEach(items, (item) => Effect.map(decodeWireRule(item), toAttributes))
+					return yield* Effect.forEach(items, (item) =>
+						Effect.map(decodeWireRule(item), toAttributes),
+					)
 				}),
 			}
 		}),

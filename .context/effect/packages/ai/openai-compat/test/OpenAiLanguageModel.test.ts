@@ -212,6 +212,58 @@ describe("OpenAiLanguageModel", () => {
         ])
       }))
 
+    it.effect("normalizes empty assistant message content to an empty string", () =>
+      Effect.gen(function*() {
+        let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
+
+        const layer = OpenAiClient.layer({ apiKey: Redacted.make("sk-test-key") }).pipe(
+          Layer.provide(Layer.succeed(
+            HttpClient.HttpClient,
+            makeHttpClient((request) => {
+              capturedRequest = request
+              return Effect.succeed(jsonResponse(
+                request,
+                makeChatCompletion({
+                  choices: [{
+                    index: 0,
+                    finish_reason: "stop",
+                    message: {
+                      role: "assistant",
+                      content: "done"
+                    }
+                  }]
+                })
+              ))
+            })
+          ))
+        )
+
+        yield* LanguageModel.generateText({
+          prompt: Prompt.make([
+            { role: "user", content: "hello" },
+            {
+              role: "assistant",
+              content: [Prompt.textPart({ text: "" })]
+            },
+            { role: "user", content: "continue" }
+          ])
+        }).pipe(
+          Effect.provide(OpenAiLanguageModel.model("gpt-4o-mini")),
+          Effect.provide(layer)
+        )
+
+        assert.isDefined(capturedRequest)
+        if (capturedRequest === undefined) {
+          return
+        }
+
+        const requestBody = yield* getRequestBody(capturedRequest)
+        const assistantMessage = requestBody.messages.find((message: any) => message.role === "assistant")
+        assert.isDefined(assistantMessage)
+        assert.strictEqual(assistantMessage.content, "")
+        assert.isUndefined(assistantMessage.tool_calls)
+      }))
+
     it.effect("maps function_call output to tool-call part and sends function tool schema", () =>
       Effect.gen(function*() {
         let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
@@ -806,6 +858,7 @@ describe("OpenAiLanguageModel", () => {
           item.role === "assistant" && item.tool_calls?.[0]?.function?.name === "local_shell"
         )
         assert.isDefined(localShellCall)
+        assert.strictEqual(localShellCall.content, null)
         assert.strictEqual(localShellCall.tool_calls[0].id, toolCall.id)
 
         const localShellOutput = followUpBody.messages.find((item: any) => item.role === "tool")

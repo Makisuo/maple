@@ -1,49 +1,107 @@
 import { randomUUID } from "node:crypto"
-import type { AiTriageIncidentKind, ErrorIssueId, OrgId } from "@maple/domain/http"
-import { AiTriageRunId } from "@maple/domain/primitives"
-import { aiTriageRuns, aiTriageSettings, type AiTriageSettingsRow } from "@maple/db"
-import { and, eq, gte, sql } from "drizzle-orm"
-import { Cause, Clock, Effect, Schema } from "effect"
+import {
+	type AiTriageIncidentKind,
+	type ErrorIssueId,
+	InvestigationIncidentSubject,
+	InvestigationSnapshotFact,
+	InvestigationSnapshotReference,
+	InvestigationSubjectSnapshot,
+	type IssueSeverity,
+	type OrgId,
+} from "@maple/domain/http"
+import { AiTriageRunId, InvestigationId } from "@maple/domain/primitives"
+import { aiTriageSettings, investigations } from "@maple/db"
+import { and, eq, gte, lt, sql } from "drizzle-orm"
+import { Cause, Clock, Data, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
 import { Database } from "./DatabaseLive"
 
-// Cloudflare Workflow binding that runs the headless triage agent. Hosted by
-// the api worker; the alerting worker reaches it via a cross-script binding.
+/** The service binding hosting the durable `maple-chat` investigation agent. */
+export const INVESTIGATION_AGENT_BINDING = "CHAT_FLUE"
+
+/**
+ * Kept for the one-release migration window because the legacy workflow module
+ * still imports it. New producers must use `INVESTIGATION_AGENT_BINDING`.
+ */
 export const AI_TRIAGE_WORKFLOW_BINDING = "AI_TRIAGE_WORKFLOW"
 
-interface AiTriageWorkflowParams {
-	readonly orgId: string
-	readonly incidentKind: AiTriageIncidentKind
-	readonly incidentId: string
-	readonly issueId?: string
-	readonly runId: string
+interface AgentBinding {
+	readonly fetch: typeof fetch
 }
 
-interface WorkflowBinding {
-	readonly create: (options?: {
-		readonly id?: string
-		readonly params?: AiTriageWorkflowParams
-	}) => Promise<unknown>
+class InvestigationAgentRequestError extends Data.TaggedError(
+	"@maple/api/lib/InvestigationAgentRequestError",
+)<{
+	readonly message: string
+}> {}
+
+const isAgentBinding = (value: unknown): value is AgentBinding =>
+	typeof value === "object" && value !== null && typeof (value as { fetch?: unknown }).fetch === "function"
+
+const decodeInvestigationId = Schema.decodeUnknownSync(InvestigationId)
+const decodeLegacyRunId = Schema.decodeUnknownSync(AiTriageRunId)
+
+interface LegacyWorkflowBinding {
+	readonly create: (options?: unknown) => Promise<unknown>
 }
 
-export const isAiTriageWorkflowBinding = (value: unknown): value is WorkflowBinding =>
+/** @deprecated Used only by the legacy manual-run endpoint during cutover. */
+export const isAiTriageWorkflowBinding = (value: unknown): value is LegacyWorkflowBinding =>
 	typeof value === "object" &&
 	value !== null &&
 	typeof (value as { create?: unknown }).create === "function"
 
-const decodeRunIdSync = Schema.decodeUnknownSync(AiTriageRunId)
+/** @deprecated Used only by the legacy manual-run endpoint during cutover. */
+export const newAiTriageRunId = () => decodeLegacyRunId(randomUUID())
 
-export const newAiTriageRunId = () => decodeRunIdSync(randomUUID())
-
-/**
- * A run stuck in `queued`/`running` longer than this is treated as stranded
- * (workflow instance died, or its terminal write was lost) and its dedup slot
- * is reclaimable. Generous vs the workflow's 10-minute agent-step timeout.
- */
-const STALE_RUN_RECLAIM_MS = 15 * 60 * 1000
+const STALE_INVESTIGATION_MS = 15 * 60 * 1000
 
 const startOfUtcDay = (nowMs: number): number => {
 	const date = new Date(nowMs)
 	return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+}
+
+const contextString = (context: Record<string, unknown>, key: string): string | undefined => {
+	const value = context[key]
+	return typeof value === "string" && value.trim().length > 0 ? value : undefined
+}
+
+const snapshotFor = (input: MaybeEnqueueTriageInput): InstanceType<typeof InvestigationSubjectSnapshot> => {
+	const title =
+		contextString(input.context, "title") ??
+		contextString(input.context, "ruleName") ??
+		contextString(input.context, "exceptionMessage") ??
+		contextString(input.context, "signalType") ??
+		`${input.incidentKind[0]?.toUpperCase() ?? ""}${input.incidentKind.slice(1)} incident`
+	const severityValue = Schema.decodeUnknownOption(Schema.Literals(["critical", "high", "medium", "low"]))(
+		input.context.severity,
+	)
+	const severity: IssueSeverity | null = severityValue._tag === "Some" ? severityValue.value : null
+	const factKeys = [
+		["Incident", input.incidentId],
+		["Service", contextString(input.context, "serviceName")],
+		["Signal", contextString(input.context, "signalType")],
+		["Reason", contextString(input.context, "reason")],
+	] as const
+
+	return new InvestigationSubjectSnapshot({
+		title,
+		scope: contextString(input.context, "serviceName") ?? null,
+		status: "open",
+		severity,
+		facts: factKeys.flatMap(([label, value]) =>
+			value ? [new InvestigationSnapshotFact({ label, value })] : [],
+		),
+		references: input.issueId
+			? [
+					new InvestigationSnapshotReference({
+						label: "Issue",
+						url: `/errors/issues/${input.issueId}`,
+					}),
+				]
+			: [],
+		incidentStartedAt: null,
+		incidentEndedAt: null,
+	})
 }
 
 export interface MaybeEnqueueTriageInput {
@@ -51,217 +109,288 @@ export interface MaybeEnqueueTriageInput {
 	readonly incidentKind: AiTriageIncidentKind
 	readonly incidentId: string
 	readonly issueId?: ErrorIssueId
-	/** Incident context blob the agent prompt is built from (kind-specific). */
 	readonly context: Record<string, unknown>
-	/**
-	 * Raw AI_TRIAGE_WORKFLOW binding value off the worker env, captured by the
-	 * calling service at construction (Effect.serviceOption(WorkerEnvironment)).
-	 * Undefined outside a Worker isolate — the run row is marked failed then.
-	 */
-	readonly workflowBinding: unknown
-	/** Skip the per-org enabled flag (manual "Run triage" requests). */
+	readonly agentBinding: unknown
+	readonly internalServiceToken: Option.Option<Redacted.Redacted<string>>
+	/** Manual starts ignore the automation-enabled flag, but never the quota. */
 	readonly force?: boolean
 }
 
 export interface MaybeEnqueueTriageResult {
 	readonly enqueued: boolean
-	readonly runId?: AiTriageRunId
-	readonly reason?: "disabled" | "daily_cap" | "duplicate" | "no_binding" | "error"
+	readonly investigationId?: InvestigationId
+	readonly reason?: "disabled" | "daily_cap" | "duplicate" | "no_binding" | "rejected" | "error"
 }
 
-class AiTriageWorkflowCreateError extends Schema.TaggedErrorClass<AiTriageWorkflowCreateError>()(
-	"AiTriageWorkflowCreateError",
-	{
-		message: Schema.String,
-		cause: Schema.Unknown,
-	},
-) {}
-
 /**
- * Gate, record, and kick off an AI triage run for a freshly opened incident.
+ * Create and seed one durable investigation for a newly opened incident.
  *
- * Never fails: every error path is logged and reported via `reason` so the
- * calling tick (ErrorsService / AnomalyDetectionService) is isolated from
- * triage problems. Dedup is enforced by the unique
- * (orgId, incidentKind, incidentId) index on ai_triage_runs plus the
- * workflow-instance id.
+ * This is the producer-facing compatibility seam during the cutover: callers
+ * retain their non-failing "maybe enqueue" contract, while all persistence and
+ * conversation identity now use `investigations` + `inv-<id>`.
  */
 export const maybeEnqueueTriage: (
 	input: MaybeEnqueueTriageInput,
-) => Effect.Effect<MaybeEnqueueTriageResult, never, Database> = Effect.fn("maybeEnqueueTriage")(
-	function* (input: MaybeEnqueueTriageInput) {
+) => Effect.Effect<MaybeEnqueueTriageResult, never, Database> = Effect.fn("maybeStartInvestigation")(
+	function* (input) {
 		const database = yield* Database
 		const nowMs = yield* Clock.currentTimeMillis
+
+		const existingRows = yield* database.execute((db) =>
+			db
+				.select()
+				.from(investigations)
+				.where(
+					and(
+						eq(investigations.orgId, input.orgId),
+						eq(investigations.incidentKind, input.incidentKind),
+						eq(investigations.incidentId, input.incidentId),
+					),
+				)
+				.limit(1),
+		)
+		const existing = existingRows[0]
+		if (existing) {
+			if (
+				existing.status === "investigating" &&
+				existing.startedAt !== null &&
+				existing.startedAt.getTime() < nowMs - STALE_INVESTIGATION_MS
+			) {
+				yield* database.execute((db) =>
+					db
+						.update(investigations)
+						.set({
+							status: "failed",
+							error: "diagnosis_timeout: no diagnosis was submitted within 15 minutes; retry",
+							updatedAt: new Date(nowMs),
+						})
+						.where(
+							and(
+								eq(investigations.orgId, input.orgId),
+								eq(investigations.id, existing.id),
+								lt(investigations.startedAt, new Date(nowMs - STALE_INVESTIGATION_MS)),
+							),
+						),
+				)
+			}
+			return { enqueued: false, investigationId: existing.id, reason: "duplicate" as const }
+		}
 
 		const settingsRows = yield* database.execute((db) =>
 			db.select().from(aiTriageSettings).where(eq(aiTriageSettings.orgId, input.orgId)).limit(1),
 		)
-		const settings: AiTriageSettingsRow | undefined = settingsRows[0]
+		const settings = settingsRows[0]
 		if (!input.force && (settings === undefined || !settings.enabled)) {
 			return { enqueued: false, reason: "disabled" as const }
 		}
 
 		const maxRunsPerDay = settings?.maxRunsPerDay ?? 20
-		const todayCount = yield* database.execute((db) =>
+		const usageRows = yield* database.execute((db) =>
 			db
-				.select({ count: sql<number>`count(*)::int` })
-				.from(aiTriageRuns)
+				.select({
+					count: sql<number>`coalesce(sum(${investigations.autonomousTurns}), 0)::int`,
+				})
+				.from(investigations)
 				.where(
 					and(
-						eq(aiTriageRuns.orgId, input.orgId),
-						gte(aiTriageRuns.createdAt, new Date(startOfUtcDay(nowMs))),
+						eq(investigations.orgId, input.orgId),
+						gte(investigations.createdAt, new Date(startOfUtcDay(nowMs))),
 					),
 				),
 		)
-		if ((todayCount[0]?.count ?? 0) >= maxRunsPerDay) {
-			yield* Effect.logWarning("AI triage daily cap reached; skipping run").pipe(
-				Effect.annotateLogs({ orgId: input.orgId, incidentId: input.incidentId, maxRunsPerDay }),
+		if ((usageRows[0]?.count ?? 0) >= maxRunsPerDay) {
+			yield* Effect.logWarning("Investigation daily budget reached; skipping autonomous start").pipe(
+				Effect.annotateLogs({
+					orgId: input.orgId,
+					incidentId: input.incidentId,
+					maxRunsPerDay,
+				}),
 			)
 			return { enqueued: false, reason: "daily_cap" as const }
 		}
 
-		const runId = newAiTriageRunId()
+		const investigationId = decodeInvestigationId(randomUUID())
+		const subject = new InvestigationIncidentSubject({
+			type: "incident",
+			incidentKind: input.incidentKind,
+			incidentId: input.incidentId,
+			...(input.issueId ? { issueId: input.issueId } : {}),
+		})
+		const snapshot = snapshotFor(input)
 		const inserted = yield* database.execute((db) =>
 			db
-				.insert(aiTriageRuns)
+				.insert(investigations)
 				.values({
-					id: runId,
+					id: investigationId,
 					orgId: input.orgId,
+					status: "investigating",
+					seededBy: "system",
+					subjectJson: subject,
+					snapshotJson: snapshot,
 					incidentKind: input.incidentKind,
 					incidentId: input.incidentId,
 					issueId: input.issueId ?? null,
-					status: "queued",
-					contextJson: input.context,
+					startedAt: new Date(nowMs),
+					autonomousTurns: 1,
 					createdAt: new Date(nowMs),
 					updatedAt: new Date(nowMs),
 				})
 				.onConflictDoNothing()
-				.returning({ id: aiTriageRuns.id }),
+				.returning({ id: investigations.id }),
 		)
 		if (inserted.length === 0) {
-			// The unique (orgId, incidentKind, incidentId) slot is taken. Terminal
-			// rows are genuine duplicates; a non-terminal row that stopped making
-			// progress is a stranded run (dead workflow instance / lost terminal
-			// write) — without reclaiming it, the incident could never be triaged
-			// again. Mark it failed and retry the insert once.
-			const existingRows = yield* database.execute((db) =>
+			return { enqueued: false, reason: "duplicate" as const }
+		}
+
+		const agentBinding = input.agentBinding
+		if (!isAgentBinding(agentBinding)) {
+			yield* database.execute((db) =>
 				db
-					.select()
-					.from(aiTriageRuns)
-					.where(
-						and(
-							eq(aiTriageRuns.orgId, input.orgId),
-							eq(aiTriageRuns.incidentKind, input.incidentKind),
-							eq(aiTriageRuns.incidentId, input.incidentId),
-						),
-					)
-					.limit(1),
+					.update(investigations)
+					.set({
+						status: "failed",
+						error: "agent_unavailable: the investigation agent is not configured; retry",
+						updatedAt: new Date(nowMs),
+					})
+					.where(eq(investigations.id, investigationId)),
 			)
-			const existing = existingRows[0]
-			const stranded =
-				existing !== undefined &&
-				(existing.status === "queued" || existing.status === "running") &&
-				existing.updatedAt.getTime() < nowMs - STALE_RUN_RECLAIM_MS
-			if (!stranded) {
-				return { enqueued: false, reason: "duplicate" as const }
-			}
-			yield* Effect.logWarning("Reclaiming stranded AI triage run").pipe(
+			yield* Effect.annotateCurrentSpan({
+				orgId: input.orgId,
+				"maple.investigation.id": investigationId,
+				"maple.investigation.start_result": "agent_unavailable",
+			})
+			yield* Effect.logWarning("Investigation agent binding is unavailable").pipe(
 				Effect.annotateLogs({
 					orgId: input.orgId,
 					incidentId: input.incidentId,
-					strandedRunId: existing.id,
-					strandedStatus: existing.status,
+					investigationId,
 				}),
 			)
+			return { enqueued: false, investigationId, reason: "no_binding" as const }
+		}
+
+		const token = Option.getOrUndefined(input.internalServiceToken)
+		if (token === undefined) {
 			yield* database.execute((db) =>
 				db
-					.delete(aiTriageRuns)
-					.where(and(eq(aiTriageRuns.orgId, input.orgId), eq(aiTriageRuns.id, existing.id))),
-			)
-			const reinserted = yield* database.execute((db) =>
-				db
-					.insert(aiTriageRuns)
-					.values({
-						id: runId,
-						orgId: input.orgId,
-						incidentKind: input.incidentKind,
-						incidentId: input.incidentId,
-						issueId: input.issueId ?? null,
-						status: "queued",
-						contextJson: input.context,
-						createdAt: new Date(nowMs),
+					.update(investigations)
+					.set({
+						status: "failed",
+						error: "agent_unavailable: the internal service token is not configured",
 						updatedAt: new Date(nowMs),
 					})
-					.onConflictDoNothing()
-					.returning({ id: aiTriageRuns.id }),
+					.where(eq(investigations.id, investigationId)),
 			)
-			if (reinserted.length === 0) {
-				return { enqueued: false, reason: "duplicate" as const }
+			yield* Effect.annotateCurrentSpan({
+				orgId: input.orgId,
+				"maple.investigation.id": investigationId,
+				"maple.investigation.start_result": "missing_service_token",
+			})
+			yield* Effect.logError("Investigation internal service token is unavailable").pipe(
+				Effect.annotateLogs({
+					orgId: input.orgId,
+					incidentId: input.incidentId,
+					investigationId,
+				}),
+			)
+			return { enqueued: false, investigationId, reason: "no_binding" as const }
+		}
+
+		const instanceId = `${input.orgId}:inv-${investigationId}`
+		const message = [
+			"Begin the autonomous investigation now.",
+			"Use the preserved subject snapshot below as the source context, gather evidence with tools, and call submit_diagnosis exactly once.",
+			JSON.stringify({ subject, snapshot }),
+		].join("\n\n")
+		const started = yield* Effect.exit(
+			Effect.tryPromise({
+				try: (signal) =>
+					agentBinding.fetch(
+						new Request(
+							`https://chat-flue.internal/agents/maple-chat/${encodeURIComponent(instanceId)}`,
+							{
+								method: "POST",
+								headers: {
+									authorization: `Bearer maple_svc_${Redacted.value(token)}`,
+									"content-type": "application/json",
+								},
+								body: JSON.stringify({ message }),
+								signal,
+							},
+						),
+					),
+				catch: (cause) =>
+					new InvestigationAgentRequestError({
+						message:
+							cause instanceof Error ? cause.message : "Investigation agent request failed",
+					}),
+			}).pipe(
+				Effect.timeoutOrElse({
+					duration: Duration.seconds(15),
+					orElse: () =>
+						Effect.fail(
+							new InvestigationAgentRequestError({
+								message: "Investigation agent request timed out after 15 seconds",
+							}),
+						),
+				}),
+			),
+		)
+		if (Exit.isFailure(started) || !started.value.ok) {
+			const error = Exit.isFailure(started)
+				? Cause.pretty(started.cause)
+				: `agent returned HTTP ${started.value.status}`
+			const retryable =
+				Exit.isFailure(started) || started.value.status === 429 || started.value.status >= 500
+			yield* database.execute((db) =>
+				db
+					.update(investigations)
+					.set({
+						status: "failed",
+						error: retryable ? `start_failed: ${error}; retry` : `start_rejected: ${error}`,
+						updatedAt: new Date(nowMs),
+					})
+					.where(eq(investigations.id, investigationId)),
+			)
+			yield* Effect.annotateCurrentSpan({
+				orgId: input.orgId,
+				"maple.investigation.id": investigationId,
+				"maple.investigation.start_result": retryable ? "start_failed" : "start_rejected",
+			})
+			yield* Effect.logWarning("Investigation agent start failed").pipe(
+				Effect.annotateLogs({
+					orgId: input.orgId,
+					incidentId: input.incidentId,
+					investigationId,
+					retryable,
+					error,
+				}),
+			)
+			return {
+				enqueued: false,
+				investigationId,
+				reason: retryable ? ("error" as const) : ("rejected" as const),
 			}
 		}
 
-		const binding = input.workflowBinding
-		if (!isAiTriageWorkflowBinding(binding)) {
-			yield* Effect.logWarning("AI triage workflow binding unavailable; marking run failed").pipe(
-				Effect.annotateLogs({ orgId: input.orgId, runId }),
-			)
-			yield* database.execute((db) =>
-				db
-					.update(aiTriageRuns)
-					.set({ status: "failed", error: "workflow_binding_unavailable", updatedAt: new Date(nowMs) })
-					.where(eq(aiTriageRuns.id, runId)),
-			)
-			return { enqueued: false, runId, reason: "no_binding" as const }
-		}
-
-		yield* Effect.tryPromise({
-			try: () =>
-				binding.create({
-					id: runId,
-					params: {
-						orgId: input.orgId,
-						incidentKind: input.incidentKind,
-						incidentId: input.incidentId,
-						issueId: input.issueId,
-						runId,
-					},
-				}),
-			catch: (error) =>
-				new AiTriageWorkflowCreateError({
-					message: error instanceof Error ? error.message : String(error),
-					cause: error,
-				}),
-		}).pipe(
-			Effect.tapError((error) =>
-				database
-					.execute((db) =>
-						db
-							.update(aiTriageRuns)
-							.set({
-								status: "failed",
-								error: `workflow_create_failed: ${error.message}`,
-								updatedAt: new Date(nowMs),
-							})
-							.where(eq(aiTriageRuns.id, runId)),
-					)
-					.pipe(Effect.ignore),
-			),
-		)
-
-		return { enqueued: true, runId }
+		yield* Effect.annotateCurrentSpan({
+			orgId: input.orgId,
+			"maple.investigation.creation_source": input.force ? "manual" : "automatic",
+			"maple.investigation.start_result": "started",
+			"maple.investigation.id": investigationId,
+		})
+		return { enqueued: true, investigationId }
 	},
 	(effect, input) =>
 		Effect.catchCause(effect, (cause) =>
-			Effect.gen(function* () {
-				yield* Effect.logError("AI triage enqueue failed").pipe(
-					Effect.annotateLogs({
-						orgId: input.orgId,
-						incidentKind: input.incidentKind,
-						incidentId: input.incidentId,
-						error: Cause.pretty(cause),
-					}),
-				)
-				return { enqueued: false, reason: "error" as const }
-			}),
+			Effect.logError("Investigation enqueue failed").pipe(
+				Effect.annotateLogs({
+					orgId: input.orgId,
+					incidentKind: input.incidentKind,
+					incidentId: input.incidentId,
+					error: Cause.pretty(cause),
+				}),
+				Effect.as({ enqueued: false, reason: "error" as const }),
+			),
 		),
 )

@@ -2,22 +2,38 @@ import { useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
+import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import {
+	Empty,
+	EmptyDescription,
+	EmptyHeader,
+	EmptyMedia,
+	EmptyTitle,
+} from "@maple/ui/components/ui/empty"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
+import { PlanetScaleIcon } from "@/components/icons"
 import { PageHero } from "@/components/infra/primitives/page-hero"
-import { StatRail, StatRailItem } from "@/components/infra/primitives/stat-rail"
+import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
 import {
 	PlanetScaleDatabaseTable,
 	PlanetScaleDatabaseTableLoading,
 } from "@/components/infra/planetscale/planetscale-database-table"
 import { PlanetScaleNotConnected } from "@/components/infra/planetscale/planetscale-not-connected"
+import {
+	METRICS_PAUSED_MESSAGE,
+	METRICS_PAUSED_SHORT,
+	PlanetScaleInventoryNotice,
+	PlanetScaleMetricsNotice,
+	PlanetScaleRevokedNotice,
+	inventoryIsStale,
+} from "@/components/infra/planetscale/planetscale-absence"
+import { formatLag, formatStoragePercent, lagTone, utilizationTone } from "@/components/infra/planetscale/metrics"
 import { getServiceMapPlanetScaleResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { formatNumber, formatRelativeTime } from "@/lib/format"
+import { formatNumber } from "@/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -78,13 +94,13 @@ function PlanetScalePage() {
 				<div className="space-y-6">
 					<PageHero
 						title="PlanetScale"
-						description="Database health from your PlanetScale organization — connections, CPU, memory, and replication lag for every branch."
+						description="Database health from your PlanetScale organization — connections, CPU, memory, storage, and replication lag for every branch."
 					/>
 					{Result.builder(statusResult)
 						.onInitial(() => (
 							<div className="space-y-4">
-								<Skeleton className="h-28 w-full" />
-								<Skeleton className="h-64 w-full" />
+								<StatRailLoading />
+								<PlanetScaleDatabaseTableLoading />
 							</div>
 						))
 						.onError((err) => <QueryErrorState error={err} />)
@@ -94,6 +110,8 @@ function PlanetScalePage() {
 								<PlanetScaleData
 									startTime={startTime}
 									endTime={endTime}
+									metricsPaused={status.metricsAuth === "missing"}
+									revoked={status.revokedAt !== null}
 									lastInventoryError={status.lastInventoryError}
 								/>
 							)
@@ -105,17 +123,17 @@ function PlanetScalePage() {
 	)
 }
 
-// Inventory refreshes every few minutes — older than this and the database
-// list is likely out of date (poller stalled, token revoked).
-const INVENTORY_STALE_MS = 15 * 60 * 1000
-
 function PlanetScaleData({
 	startTime,
 	endTime,
+	metricsPaused,
+	revoked,
 	lastInventoryError,
 }: {
 	startTime: string
 	endTime: string
+	metricsPaused: boolean
+	revoked: boolean
 	lastInventoryError: string | null
 }) {
 	const inventoryResult = useAtomValue(
@@ -123,13 +141,15 @@ function PlanetScaleData({
 			reactivityKeys: ["planetscaleIntegrationStatus"],
 		}),
 	)
-	const statsResult = useRefreshableAtomValue(
+	// Retained so changing the time range dims the numbers instead of replacing
+	// the whole page with skeletons.
+	const statsResult = useRetainedRefreshableResultValue(
 		getServiceMapPlanetScaleResultAtom({ data: { startTime, endTime } }),
 	)
 
 	const stats = Result.builder(statsResult)
 		.onSuccess((r) => r.databases)
-		.orElse(() => [])
+		.orElse(() => NO_STATS)
 	const statsByName = useMemo(
 		() => new Map(stats.map((row) => [row.database.toLowerCase(), row])),
 		[stats],
@@ -137,70 +157,111 @@ function PlanetScaleData({
 
 	const totals = useMemo(() => {
 		let connections = 0
-		let cpuMax = 0
 		let lagMax = 0
+		let storageMax: number | null = null
+		let storageOwner: string | null = null
+		let lagOwner: string | null = null
 		for (const row of stats) {
 			connections += row.connectionsAvg
-			cpuMax = Math.max(cpuMax, row.cpuMaxPercent)
-			lagMax = Math.max(lagMax, row.replicaLagMaxSeconds)
+			if (row.replicaLagMaxSeconds > lagMax) {
+				lagMax = row.replicaLagMaxSeconds
+				lagOwner = row.database
+			}
+			if (row.storageUsedPercent !== null && (storageMax === null || row.storageUsedPercent > storageMax)) {
+				storageMax = row.storageUsedPercent
+				storageOwner = row.database
+			}
 		}
-		return { connections, cpuMax, lagMax }
+		return { connections, lagMax, lagOwner, storageMax, storageOwner }
 	}, [stats])
 
 	return Result.builder(inventoryResult)
 		.onInitial(() => (
 			<div className="space-y-4">
-				<Skeleton className="h-28 w-full" />
+				<StatRailLoading />
 				<PlanetScaleDatabaseTableLoading />
 			</div>
 		))
 		.onError((err) => <QueryErrorState error={err} />)
 		.onSuccess((inventory) => {
 			const branchTotal = inventory.databases.reduce((sum, db) => sum + db.branches.length, 0)
-			const inventoryStale =
-				inventory.lastInventoryAt !== null &&
-				Date.now() - inventory.lastInventoryAt > INVENTORY_STALE_MS
+			const showInventoryNotice =
+				lastInventoryError !== null || inventoryIsStale(inventory.lastInventoryAt, Date.now())
 			return (
 				<div className="space-y-6">
-					{lastInventoryError !== null || inventoryStale ? (
-						<p className="text-xs text-severity-warn">
-							{lastInventoryError !== null
-								? "Inventory refresh failing — the database list may be out of date."
-								: `Inventory last refreshed ${formatRelativeTime(
-										new Date(inventory.lastInventoryAt ?? 0).toISOString(),
-									)} — the database list may be out of date.`}
-						</p>
+					{revoked ? <PlanetScaleRevokedNotice /> : null}
+					{metricsPaused ? <PlanetScaleMetricsNotice /> : null}
+					{showInventoryNotice ? (
+						<PlanetScaleInventoryNotice
+							lastInventoryAt={inventory.lastInventoryAt}
+							lastInventoryError={lastInventoryError}
+						/>
 					) : null}
 					{Result.isFailure(statsResult) ? (
 						<QueryErrorState
 							error={statsResult.cause}
-							className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs flex flex-col gap-1"
+							className="flex flex-col gap-1 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs"
 						/>
 					) : null}
+					{/* Inventory counts have no time series, so no sparkline slot to reserve. */}
 					<StatRail>
-						<StatRailItem eyebrow="Databases" value={String(inventory.databases.length)} />
-						<StatRailItem eyebrow="Branches" value={String(branchTotal)} />
-						<StatRailItem eyebrow="Connections" value={formatNumber(totals.connections)} />
 						<StatRailItem
-							eyebrow="Worst replica lag"
+							compact
+							eyebrow="Databases"
+							value={String(inventory.databases.length)}
+						/>
+						<StatRailItem compact eyebrow="Branches" value={String(branchTotal)} />
+						<StatRailItem
+							compact
+							eyebrow="Worst storage"
 							value={
-								totals.lagMax >= 1
-									? `${totals.lagMax.toFixed(1)}s`
-									: `${Math.round(totals.lagMax * 1000)}ms`
+								totals.storageMax === null ? "—" : formatStoragePercent(totals.storageMax)
 							}
-							tone={totals.lagMax > 10 ? "crit" : totals.lagMax > 1 ? "warn" : "neutral"}
+							tone={totals.storageMax === null ? "neutral" : utilizationTone(totals.storageMax)}
+							subline={
+								metricsPaused
+									? METRICS_PAUSED_SHORT
+									: totals.storageOwner !== null
+										? totals.storageOwner
+										: undefined
+							}
+						/>
+						<StatRailItem
+							compact
+							eyebrow="Worst replica lag"
+							value={metricsPaused && stats.length === 0 ? "—" : formatLag(totals.lagMax)}
+							tone={lagTone(totals.lagMax)}
+							subline={
+								metricsPaused
+									? METRICS_PAUSED_SHORT
+									: totals.lagOwner !== null && totals.lagMax > 0
+										? totals.lagOwner
+										: `${formatNumber(totals.connections)} connections`
+							}
 						/>
 					</StatRail>
 					{inventory.databases.length === 0 ? (
-						<p className="text-sm text-muted-foreground">
-							No databases discovered yet — the inventory refreshes within a few minutes of
-							connecting.
-						</p>
+						<Empty className="py-16">
+							<EmptyHeader>
+								<EmptyMedia variant="icon">
+									<PlanetScaleIcon size={16} />
+								</EmptyMedia>
+								<EmptyTitle>No databases discovered yet</EmptyTitle>
+								<EmptyDescription>
+									Maple refreshes the database and branch list within a few minutes of
+									connecting. If this persists, check that the connection still has the
+									read_databases permission.
+								</EmptyDescription>
+							</EmptyHeader>
+						</Empty>
 					) : (
 						<PlanetScaleDatabaseTable
 							databases={inventory.databases}
 							statsByName={statsByName}
 							waiting={Boolean(statsResult.waiting)}
+							emptyMessage={
+								metricsPaused ? METRICS_PAUSED_MESSAGE : "No databases in the inventory."
+							}
 						/>
 					)}
 				</div>
@@ -208,3 +269,6 @@ function PlanetScaleData({
 		})
 		.render()
 }
+
+/** Stable empty fallback — a fresh `[]` per render would bust every downstream memo. */
+const NO_STATS: ReadonlyArray<never> = []

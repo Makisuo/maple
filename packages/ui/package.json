@@ -12,11 +12,13 @@
 		"./*": "./src/*"
 	},
 	"scripts": {
+		"test": "vitest run",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@base-ui/react": "catalog:ui",
 		"@maple/domain": "workspace:*",
+		"@shadcn/react": "^0.2.1",
 		"@tanstack/react-virtual": "^3.14.3",
 		"@xyflow/react": "catalog:ui",
 		"class-variance-authority": "catalog:ui",
@@ -32,7 +34,8 @@
 	"devDependencies": {
 		"@types/react": "catalog:react",
 		"@types/react-dom": "catalog:react",
-		"typescript": "catalog:tooling"
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
 	},
 	"peerDependencies": {
 		"react": "^19.0.0",

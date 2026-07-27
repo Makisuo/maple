@@ -11,7 +11,7 @@ import { cn } from "@maple/ui/lib/utils"
 
 import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@/lib/format"
-import { formatPercent } from "../format"
+import { formatBytes, formatPercent } from "../format"
 import {
 	CHART_EMPTY_MESSAGE,
 	CHART_GRID_DASH,
@@ -20,7 +20,6 @@ import {
 	transformRows,
 } from "../chart-utils"
 import { OTHER_ZONES_COLOR, OTHER_ZONES_SERIES } from "./constants"
-import { formatBytes } from "./format"
 
 export type CloudflareZoneMetric = "requests" | "errorRate" | "cacheHitRate" | "bytes"
 
@@ -72,7 +71,13 @@ function metricValue(agg: ZoneAgg, metric: CloudflareZoneMetric): number {
  * counts per bucket first and derives ratios from the pooled counts — never an
  * average of ratios.
  */
-export function CloudflareZoneChart({ buckets, metric, topZones, waiting, syncId }: CloudflareZoneChartProps) {
+export function CloudflareZoneChart({
+	buckets,
+	metric,
+	topZones,
+	waiting,
+	syncId,
+}: CloudflareZoneChartProps) {
 	const { data, series } = useMemo(() => {
 		const topSet = new Set(topZones)
 		const byBucketZone = new Map<string, Map<string, ZoneAgg>>()
@@ -119,10 +124,7 @@ export function CloudflareZoneChart({ buckets, metric, topZones, waiting, syncId
 	}, [topZones])
 
 	const config = useMemo<ChartConfig>(
-		() =>
-			Object.fromEntries(
-				series.map((name) => [name, { label: name, color: seriesColor.get(name) }]),
-			),
+		() => Object.fromEntries(series.map((name) => [name, { label: name, color: seriesColor.get(name) }])),
 		[series, seriesColor],
 	)
 
@@ -146,7 +148,11 @@ export function CloudflareZoneChart({ buckets, metric, topZones, waiting, syncId
 						syncId={syncId}
 						syncMethod="value"
 					>
-						<CartesianGrid strokeDasharray={CHART_GRID_DASH} stroke="var(--border)" vertical={false} />
+						<CartesianGrid
+							strokeDasharray={CHART_GRID_DASH}
+							stroke="var(--border)"
+							vertical={false}
+						/>
 						<XAxis
 							dataKey="time"
 							tickLine={false}

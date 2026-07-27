@@ -91,9 +91,7 @@ const SERVICE_COLOR_TIERS = [
 
 function getServiceColorTier(serviceName: string): { l: number; c: number } {
 	const hash = hashString(serviceName)
-	return SERVICE_COLOR_TIERS[
-		Math.floor(hash / SERVICE_HUES.length) % SERVICE_COLOR_TIERS.length
-	]
+	return SERVICE_COLOR_TIERS[Math.floor(hash / SERVICE_HUES.length) % SERVICE_COLOR_TIERS.length]
 }
 
 /**

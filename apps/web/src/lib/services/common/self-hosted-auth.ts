@@ -1,4 +1,5 @@
 import { clearMapleAuthHeaders, setActiveOrgId, setMapleAuthHeadersProvider } from "./auth-headers"
+import { tracedFetch } from "./telemetry"
 
 const SELF_HOSTED_TOKEN_STORAGE_KEY = "maple.self_hosted.token"
 const SELF_HOSTED_AUTH_EVENT = "maple:self-hosted-auth-changed"
@@ -64,7 +65,7 @@ export const resolveSelfHostedRouterAuth = async (apiBaseUrl: string) => {
 	if (!token) return unauthenticatedState
 
 	try {
-		const response = await window.fetch(`${apiBaseUrl}/api/auth/session`, {
+		const response = await tracedFetch("maple-api", `${apiBaseUrl}/api/auth/session`, {
 			method: "GET",
 			headers: {
 				authorization: `Bearer ${token}`,

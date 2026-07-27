@@ -1,4 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="6" fill="#e8872a"/>
-  <text x="16" y="22" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="20" font-weight="600" fill="white">M</text>
+  <!-- Maple mark: primary amber tile, primary-foreground charcoal M.
+       The M is an outlined path lifted from Geist SemiBold (the brand display
+       face) rather than a text node. Favicons get rasterized by browsers and
+       OS shells that have no access to the site's webfonts, so a text node
+       falls back to whatever system font happens to be installed and the
+       glyph shifts. Regenerate the rasters with scripts/generate-icons.sh. -->
+  <rect width="32" height="32" rx="6" fill="#E8872B"/>
+  <path d="M8.94 22.75V9.25H12.28L16.01 19.71L19.72 9.25H23.06V22.75H20.58V13.43L17.18 22.73H14.81L11.42 13.43V22.75Z" fill="#272219"/>
 </svg>

@@ -17,11 +17,7 @@ const kindLabels: Record<string, string> = {
 	SPAN_KIND_INTERNAL: "Internal",
 }
 
-export function FlamegraphTooltipContent({
-	span,
-	totalDurationMs,
-	traceStartTime,
-}: FlamegraphTooltipProps) {
+export function FlamegraphTooltipContent({ span, totalDurationMs, traceStartTime }: FlamegraphTooltipProps) {
 	const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
 
 	const serviceColor = getServiceColor(span.serviceName)

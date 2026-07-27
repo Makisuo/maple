@@ -1,5 +1,6 @@
 ---
 import { buttonVariants } from "@maple/ui/components/ui/button";
+import * as m from "../paraglide/messages";
 import { HeroCta } from "./HeroCta";
 
 interface Props {
@@ -43,7 +44,7 @@ const { label, title, subtitle } = Astro.props;
         <div class="mt-8 flex flex-wrap items-center gap-3">
             <HeroCta client:load className={buttonVariants({ size: "default" })} />
             <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class={buttonVariants({ variant: "outline", size: "default" })}>
-                View on GitHub
+                {m.cta_github()}
             </a>
         </div>
     </div>

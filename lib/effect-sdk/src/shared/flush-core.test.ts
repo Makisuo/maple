@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { Effect, Redacted } from "effect"
+import { Effect, Metric, Redacted } from "effect"
 import {
 	buildResolved,
 	makeSerializedFlush,
@@ -8,6 +8,7 @@ import {
 	type SignalState,
 } from "./flush-core.js"
 import { makeLogBuffer } from "./flushable-logger.js"
+import { makeMetricBuffer } from "./flushable-metrics.js"
 import { makeSpanBuffer } from "./flushable-tracer.js"
 
 const resolved = buildResolved(
@@ -20,7 +21,9 @@ const resolved = buildResolved(
 )
 
 const recordSpan = (spans: ReturnType<typeof makeSpanBuffer>, name: string) =>
-	Effect.runPromise(Effect.succeed(undefined).pipe(Effect.withSpan(name), Effect.provide(spans.tracerLayer)))
+	Effect.runPromise(
+		Effect.succeed(undefined).pipe(Effect.withSpan(name), Effect.provide(spans.tracerLayer)),
+	)
 
 const recordLog = (logs: ReturnType<typeof makeLogBuffer>, message: string) =>
 	Effect.runPromise(Effect.logInfo(message).pipe(Effect.provide(logs.loggerLayer)))
@@ -35,8 +38,10 @@ describe("runFlush", () => {
 		vi.setSystemTime(new Date("2026-01-01T00:00:00Z"))
 		const spans = makeSpanBuffer()
 		const logs = makeLogBuffer()
+		const metrics = makeMetricBuffer()
 		const tracesState: SignalState = { disabledUntil: 0 }
 		const logsState: SignalState = { disabledUntil: 0 }
+		const metricsState: SignalState = { disabledUntil: 0 }
 		const traceBodies: unknown[] = []
 		const logBodies: unknown[] = []
 		let failTraces = true
@@ -45,7 +50,7 @@ describe("runFlush", () => {
 				if (url.endsWith("/v1/traces")) {
 					if (failTraces) throw new Error("collector unavailable")
 					traceBodies.push(body)
-				} else {
+				} else if (url.endsWith("/v1/logs")) {
 					logBodies.push(body)
 				}
 			},
@@ -55,8 +60,10 @@ describe("runFlush", () => {
 				resolved,
 				spans,
 				logs,
+				metrics,
 				tracesState,
 				logsState,
+				metricsState,
 				transport,
 				logPrefix: "[test]",
 				onNoOp: () => undefined,
@@ -109,5 +116,48 @@ describe("runFlush", () => {
 		release?.()
 		await Promise.all([first, second])
 		expect(peak).toBe(1)
+	})
+
+	it("exports Effect metric snapshots as OTLP metrics", async () => {
+		const spans = makeSpanBuffer()
+		const logs = makeLogBuffer()
+		const metrics = makeMetricBuffer()
+		const counter = Metric.counter("test.requests_total", {
+			description: "Test requests",
+			incremental: true,
+		})
+		await Effect.runPromise(Metric.update(counter, 3).pipe(Effect.provide(metrics.layer)))
+
+		let metricsBody: unknown
+		await runFlush({
+			resolved,
+			spans,
+			logs,
+			metrics,
+			tracesState: { disabledUntil: 0 },
+			logsState: { disabledUntil: 0 },
+			metricsState: { disabledUntil: 0 },
+			transport: {
+				post: async (url, _headers, body) => {
+					if (url.endsWith("/v1/metrics")) metricsBody = body
+				},
+			},
+			logPrefix: "[test]",
+			onNoOp: () => undefined,
+		})
+
+		const body = metricsBody as {
+			resourceMetrics: Array<{
+				scopeMetrics: Array<{
+					metrics: Array<{
+						name: string
+						sum: { dataPoints: Array<{ asDouble: number }> }
+					}>
+				}>
+			}>
+		}
+		const exported = body.resourceMetrics[0]!.scopeMetrics[0]!.metrics[0]!
+		expect(exported.name).toBe("test.requests_total")
+		expect(exported.sum.dataPoints[0]!.asDouble).toBe(3)
 	})
 })

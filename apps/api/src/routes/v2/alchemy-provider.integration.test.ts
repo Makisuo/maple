@@ -13,7 +13,10 @@ import { OrgId, UserId } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
 import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli"
-import { AlertDestination, AlertDestinationProvider } from "../../../../../lib/alchemy-maple/src/AlertDestination.ts"
+import {
+	AlertDestination,
+	AlertDestinationProvider,
+} from "../../../../../lib/alchemy-maple/src/AlertDestination.ts"
 import { AlertRule, AlertRuleProvider } from "../../../../../lib/alchemy-maple/src/AlertRule.ts"
 import { ApiKey, ApiKeyProvider } from "../../../../../lib/alchemy-maple/src/ApiKey.ts"
 import { Dashboard, DashboardProvider } from "../../../../../lib/alchemy-maple/src/Dashboard.ts"

@@ -1,14 +1,8 @@
 import { DatabaseIcon } from "@maple/ui/components/icons"
+import { LatencyValue } from "@maple/ui/components/latency-value"
 import { ServiceDot } from "@maple/ui/components/service-dot"
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@maple/ui/components/ui/table"
-import { formatDuration, formatNumber } from "@maple/ui/format"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
+import { formatNumber } from "@maple/ui/format"
 import { cn } from "@maple/ui/utils"
 import { SearchableFilterSection } from "@maple/ui/components/filters/filter-section"
 import {
@@ -148,9 +142,7 @@ function ServiceRow({ entry, onSelect }: { entry: ServiceCatalogEntry; onSelect:
 				</span>
 			</TableCell>
 			<TableCell className="text-right tabular-nums">{formatNumber(entry.spanCount)}</TableCell>
-			<TableCell
-				className={cn("text-right tabular-nums", entry.errorCount > 0 && "text-destructive")}
-			>
+			<TableCell className={cn("text-right tabular-nums", entry.errorCount > 0 && "text-destructive")}>
 				{formatNumber(entry.errorCount)}
 			</TableCell>
 			<TableCell
@@ -158,8 +150,12 @@ function ServiceRow({ entry, onSelect }: { entry: ServiceCatalogEntry; onSelect:
 			>
 				{(entry.errorRate * 100).toFixed(1)}%
 			</TableCell>
-			<TableCell className="text-right tabular-nums">{formatDuration(entry.p50LatencyMs)}</TableCell>
-			<TableCell className="text-right tabular-nums">{formatDuration(entry.p95LatencyMs)}</TableCell>
+			<TableCell className="text-right">
+				<LatencyValue ms={entry.p50LatencyMs} scale="p50" />
+			</TableCell>
+			<TableCell className="text-right">
+				<LatencyValue ms={entry.p95LatencyMs} scale="p95" />
+			</TableCell>
 			<TableCell className="text-right tabular-nums">{formatNumber(entry.logCount)}</TableCell>
 		</TableRow>
 	)

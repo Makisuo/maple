@@ -12,6 +12,15 @@ import { Context, Effect, Layer, Schema } from "effect"
 const QUEUE_BINDING = "VCS_SYNC_QUEUE"
 const encodeJob = Schema.encodeSync(VcsSyncJob)
 
+// Messaging semconv identity for this queue, shared with the consumer side
+// (vcs-sync-runtime.ts) so producer and consumer spans agree. `messaging.system`
+// has no registered value for Cloudflare Queues; the lowercase vendor name is
+// what semconv prescribes for unregistered systems. Together with the Producer /
+// Consumer span kinds these are what put the queue on the service map as an
+// external dependency — an Internal span with neither is invisible there.
+export const MESSAGING_SYSTEM = "cloudflare_queues"
+export const MESSAGING_DESTINATION = QUEUE_BINDING
+
 // Cloudflare Queues transport limits, owned here (the only module that talks to
 // the binding). Producers that must pre-size their payloads — e.g. a provider
 // splitting a large push so each job fits — import these rather than hardcoding
@@ -54,10 +63,14 @@ export class VcsSyncQueue extends Context.Service<VcsSyncQueue, VcsSyncQueueShap
 			const workerEnv = yield* WorkerEnvironment
 			const queue = workerEnv[QUEUE_BINDING] as Queue<unknown> | undefined
 
-			const send = Effect.fn("VcsSyncQueue.send")(function* (
-				job: VcsSyncJob,
-				options?: { readonly delaySeconds?: number },
-			) {
+			const send = Effect.fn("VcsSyncQueue.send", {
+				kind: "producer",
+				attributes: {
+					"messaging.system": MESSAGING_SYSTEM,
+					"messaging.destination.name": MESSAGING_DESTINATION,
+					"messaging.operation.name": "send",
+				},
+			})(function* (job: VcsSyncJob, options?: { readonly delaySeconds?: number }) {
 				yield* Effect.annotateCurrentSpan({ "vcs.job.kind": job.kind, "vcs.provider": job.provider })
 				if (!queue) {
 					return yield* new VcsQueueError({ message: `Missing queue binding: ${QUEUE_BINDING}` })
@@ -76,9 +89,14 @@ export class VcsSyncQueue extends Context.Service<VcsSyncQueue, VcsSyncQueueShap
 				})
 			})
 
-			const sendBatch = Effect.fn("VcsSyncQueue.sendBatch")(function* (
-				jobs: ReadonlyArray<VcsSyncJob>,
-			) {
+			const sendBatch = Effect.fn("VcsSyncQueue.sendBatch", {
+				kind: "producer",
+				attributes: {
+					"messaging.system": MESSAGING_SYSTEM,
+					"messaging.destination.name": MESSAGING_DESTINATION,
+					"messaging.operation.name": "send",
+				},
+			})(function* (jobs: ReadonlyArray<VcsSyncJob>) {
 				// Count + distinct kinds only — a fixed, low-cardinality summary. A batch can
 				// hold hundreds of jobs, so a raw kind-per-job list would be unbounded and
 				// redundant with the count.

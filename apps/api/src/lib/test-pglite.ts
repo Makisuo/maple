@@ -56,7 +56,11 @@ export const executeSql = async (db: TestDb, sql: string, params: unknown[] = []
 	await db.pglite.query(sql, params)
 }
 
-export const queryFirstRow = async <T>(db: TestDb, sql: string, params: unknown[] = []): Promise<T | undefined> => {
+export const queryFirstRow = async <T>(
+	db: TestDb,
+	sql: string,
+	params: unknown[] = [],
+): Promise<T | undefined> => {
 	const result = await db.pglite.query<T>(sql, params)
 	return result.rows[0]
 }

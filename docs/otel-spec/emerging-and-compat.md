@@ -3,7 +3,7 @@
 This page covers the parts of the OpenTelemetry spec tree that are either **not yet stable**
 (Profiles signal, Entities) or **exist to bridge OTel with something else** (telemetry
 schemas' rename/transform machinery, and the OpenCensus/OpenTracing/Prometheus compatibility
-specs). Maple is primarily a *consumer* of OTLP data and a *producer* of its own
+specs). Maple is primarily a _consumer_ of OTLP data and a _producer_ of its own
 self-instrumentation, so this doc exists to flag: (a) data we may see on the wire that isn't
 "plain" OTLP yet, (b) a signal (Profiles) we don't ingest today but should plan schema/storage
 for, and (c) the principled alternative to the ad-hoc legacy-field coalescing we already do by
@@ -156,7 +156,7 @@ than the top-level mechanism.
 Semantic conventions evolve (attributes get renamed, split, etc.), but telemetry producers,
 telemetry consumers, and the semantic conventions themselves all evolve independently — "the
 coupling complicates the independent evolution of these 3 parties." A schema is the versioned,
-machine-readable description of *what changed between semconv versions* so a consumer can
+machine-readable description of _what changed between semconv versions_ so a consumer can
 transform old-shaped data into the shape it expects (or vice versa) without bespoke code per
 field rename. `Source: https://opentelemetry.io/docs/specs/otel/schemas/`
 
@@ -187,19 +187,19 @@ A schema file is YAML:
 file_format: 1.1.0
 schema_url: /schemas/1.2.0
 versions:
-  1.2.0:
-    all:
-      changes: [...]
-    resources:
-      changes: [...]
-    spans:
-      changes: [...]
-    span_events:
-      changes: [...]
-    metrics:
-      changes: [...]
-    logs:
-      changes: [...]
+    1.2.0:
+        all:
+            changes: [...]
+        resources:
+            changes: [...]
+        spans:
+            changes: [...]
+        span_events:
+            changes: [...]
+        metrics:
+            changes: [...]
+        logs:
+            changes: [...]
 ```
 
 - `file_format` must literally be `"1.1.0"`.
@@ -211,7 +211,7 @@ versions:
 
 Transform types by section, per the 1.1.0 format:
 
-| Section       | Supported transforms                          |
+| Section       | Supported transforms                           |
 | ------------- | ---------------------------------------------- |
 | `all`         | `rename_attributes`                            |
 | `resources`   | `rename_attributes`                            |
@@ -226,11 +226,11 @@ names via `apply_to_spans` / `apply_to_events` / `apply_to_metrics`:
 
 ```yaml
 - rename_attributes:
-    attribute_map:
-      old_name: new_name
-    apply_to_spans: [span_name]
-    apply_to_events: [event_name]
-    apply_to_metrics: [metric_name]
+      attribute_map:
+          old_name: new_name
+      apply_to_spans: [span_name]
+      apply_to_events: [event_name]
+      apply_to_metrics: [metric_name]
 ```
 
 `rename_metrics` renames a metric name outright; `split` breaks one metric into several by an
@@ -294,10 +294,10 @@ schema-driven. If schema-aware coalescing is ever generalized, this is the mecha
   (else `instance` is emitted empty). Other resource attributes **SHOULD** become a synthetic
   `target_info` metric (an OpenMetrics "info" metric, or — if the client library lacks info-metric
   support — a gauge named `target_info` with constant value `1`) or **MUST** be dropped.
-  *(Development status.)*
+  _(Development status.)_
 - **Untyped/Gauge round-trip:** exporting an OTLP Gauge back toward Prometheus, if the datapoint
   carries a `prometheus.type` attribute equal to `unknown`, it **MUST** become a Prometheus
-  Unknown-typed sample. *(Development status.)*
+  Unknown-typed sample. _(Development status.)_
 
 ### Prometheus → OTLP naming rules
 
@@ -307,7 +307,7 @@ schema-driven. If schema-aware coalescing is ever generalized, this is the mecha
 - `UNIT` metadata, if present on the Prometheus side, **MUST** be converted into the OTLP metric's
   unit.
 - A Prometheus **Unknown**-typed metric **MUST** be converted to an **OTLP Gauge** on ingest.
-  *(Development status.)*
+  _(Development status.)_
 - Summary quantiles carry a `quantile` label with the stringified float (e.g. `0.99`); histogram
   buckets use Prometheus's standard `le` (less-than-or-equal) label — the spec does not add new
   bucket-naming rules beyond these Prometheus/OpenMetrics conventions.

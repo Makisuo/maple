@@ -148,6 +148,7 @@ const KIND_HEADING: Record<InvestigationKind, string> = {
 	alert: "Attached Alert",
 	anomaly: "Attached Anomaly",
 	error: "Attached Error",
+	freeform: "Investigation subject",
 }
 
 const ERROR_TOOL_HINTS =
@@ -165,7 +166,7 @@ const formatInvestigationContextBlock = (ctx: InvestigationContext): string => {
 	const lines = [
 		"",
 		`## ${KIND_HEADING[ctx.kind]}`,
-		`The on-call engineer is investigating ${ctx.kind === "error" ? "an error issue" : `a${ctx.kind === "anomaly" ? "n" : ""} ${ctx.kind}`} that is attached to this conversation as structured context. It is pinned above the message thread and stays attached to every message.`,
+		`The on-call engineer is investigating ${ctx.kind === "error" ? "an error issue" : ctx.kind === "freeform" ? "a free-form subject" : `a${ctx.kind === "anomaly" ? "n" : ""} ${ctx.kind}`} that is attached to this conversation as structured context. It is pinned above the message thread and stays attached to every message.`,
 		"",
 		"```yaml",
 		`kind: ${ctx.kind}`,

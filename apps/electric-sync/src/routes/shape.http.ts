@@ -1,5 +1,5 @@
 import { makeResolveTenant } from "@maple/auth"
-import { Effect, Layer, Option, Redacted } from "effect"
+import { Effect, Layer, Option, Redacted, Schema } from "effect"
 import {
 	FetchHttpClient,
 	HttpClient,
@@ -238,6 +238,11 @@ const errorText = (message: string, status: number) =>
 		headers: { "content-type": "text/plain; charset=utf-8" },
 	})
 
+class ElectricSyncUnavailable extends Schema.TaggedErrorClass<ElectricSyncUnavailable>()(
+	"ElectricSyncUnavailable",
+	{ response: Schema.Any },
+) {}
+
 export const ElectricSyncRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
 		const config = yield* SyncConfig
@@ -266,14 +271,20 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 			)
 		}
 
-		const handle = (req: HttpServerRequest.HttpServerRequest) =>
+		const handleSpan = (req: HttpServerRequest.HttpServerRequest) =>
 			Effect.gen(function* () {
 				// Not configured (self-hosted without an Electric container, or a
 				// half-configured Cloud deploy missing its source secret) → 503; the
 				// web app's collections degrade and it keeps using its existing
 				// effect-atom fetches.
 				if (!electricUrl || !configCoherent) {
-					return errorText("Electric sync is not configured", 503)
+					yield* Effect.annotateCurrentSpan({
+						"http.response.status_code": 503,
+						"error.type": "ElectricConfigUnavailable",
+					})
+					return yield* new ElectricSyncUnavailable({
+						response: errorText("Electric sync is not configured", 503),
+					})
 				}
 
 				const requestUrl = new URL(req.url, "http://internal")
@@ -285,7 +296,7 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 				const tenant = yield* resolveTenant(req.headers).pipe(Effect.option)
 				if (Option.isNone(tenant)) return errorText("Unauthorized", 401)
 				const orgId = tenant.value.orgId
-				yield* Effect.annotateCurrentSpan("maple.org_id", orgId)
+				yield* Effect.annotateCurrentSpan("orgId", orgId)
 
 				const upstreamUrl = buildUpstreamShapeUrl({
 					electricUrl,
@@ -300,6 +311,7 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 				// (not an open SSE stream), and control-plane shapes are small, so we
 				// buffer the body rather than manage a scoped pass-through stream.
 				const result = yield* client.get(upstreamUrl).pipe(
+					Effect.annotateSpans("peer.service", "electric"),
 					Effect.flatMap((response) =>
 						response.text.pipe(Effect.map((body) => ({ response, body }))),
 					),
@@ -310,8 +322,28 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 					),
 					Effect.option,
 				)
-				if (Option.isNone(result)) return errorText("Electric upstream unreachable", 502)
+				if (Option.isNone(result)) {
+					yield* Effect.annotateCurrentSpan({
+						"http.response.status_code": 502,
+						"error.type": "ElectricUpstreamUnavailable",
+					})
+					return yield* new ElectricSyncUnavailable({
+						response: errorText("Electric upstream unreachable", 502),
+					})
+				}
 				const { response, body } = result.value
+				if (response.status >= 500) {
+					yield* Effect.annotateCurrentSpan({
+						"http.response.status_code": response.status,
+						"error.type": "ElectricUpstreamError",
+					})
+					return yield* new ElectricSyncUnavailable({
+						response: HttpServerResponse.raw(body, {
+							status: response.status,
+							headers: shapeResponseHeaders(response.headers),
+						}),
+					})
+				}
 
 				// Cache-isolate the org-scoped body (Vary: Authorization + no public
 				// caching) and drop headers that misdescribe the re-serialized body.
@@ -319,8 +351,12 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 					status: response.status,
 					headers: shapeResponseHeaders(response.headers),
 				})
-			}).pipe(Effect.withSpan("ElectricSync.shape"))
+			}).pipe(Effect.withSpan("electric_sync.shape"))
 
-		yield* router.add("GET", "/api/sync/shape", handle)
+		yield* router.add("GET", "/api/sync/shape", (req) =>
+			handleSpan(req).pipe(
+				Effect.catchTag("ElectricSyncUnavailable", ({ response }) => Effect.succeed(response)),
+			),
+		)
 	}),
 ).pipe(Layer.provide(FetchHttpClient.layer))

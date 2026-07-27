@@ -280,7 +280,7 @@ export const raceAll = <
     const engine = yield* EngineTag
     const exit = yield* engine.deferredResult(deferred)
     if (Option.isSome(exit)) {
-      return yield* Effect.flatten(exit.value) as Effect.Effect<any, any, any>
+      return yield* exit.value
     }
     return yield* into(
       Effect.raceAll(options.effects),

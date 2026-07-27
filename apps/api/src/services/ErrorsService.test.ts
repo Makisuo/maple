@@ -223,6 +223,7 @@ const makeSpyEdgeBackend = () => {
 	const puts: Array<string> = []
 	const gets: Array<string> = []
 	const backend: ReturnType<typeof makeMemoryBackend> = {
+		name: inner.name,
 		get: (bucket, hash, nowMs) => {
 			gets.push(bucket)
 			return inner.get(bucket, hash, nowMs)
@@ -586,7 +587,9 @@ describe("ErrorsService.setSeverity", () => {
 			assert.strictEqual(all.issues.length, 2)
 		}).pipe(
 			// The warehouse saw only fingerprint 111 in the selected environment.
-			Effect.provide(makeErrorsLayer(undefined, undefined, undefined, () => [{ fingerprintHash: "111" }])),
+			Effect.provide(
+				makeErrorsLayer(undefined, undefined, undefined, () => [{ fingerprintHash: "111" }]),
+			),
 		),
 	)
 
@@ -809,8 +812,10 @@ describe("ErrorsService.runTick", () => {
 			yield* seedIngestKey(ORG)
 
 			const result = yield* errors.runTick()
-			// Counted as known, but the expensive warehouse scan is skipped.
-			assert.strictEqual(result.orgsProcessed, 1)
+			// Not visited at all: an org with no issue/incident state has nothing to
+			// expire, wake or auto-resolve, so the per-org Postgres round-trips are
+			// pure waste. `orgsProcessed` counts orgs actually scanned, not known.
+			assert.strictEqual(result.orgsProcessed, 0)
 			assert.strictEqual(scanCalls, 0)
 		}).pipe(
 			Effect.provide(
@@ -1056,7 +1061,9 @@ describe("ErrorsService.runTick", () => {
 				states[0]?.openIncidentId,
 				incidents.find((incident) => incident.status === "open")?.id,
 			)
-		}).pipe(Effect.provide(makeErrorsLayer(() => rows, undefined, undefined, undefined, countingDispatcher)))
+		}).pipe(
+			Effect.provide(makeErrorsLayer(() => rows, undefined, undefined, undefined, countingDispatcher)),
+		)
 	})
 
 	it.effect(
@@ -1263,6 +1270,25 @@ describe("ErrorsService.runTick", () => {
 				events.filter((e) => e.type === "lease_expired"),
 				1,
 			)
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("the retention phase fires once an hour, not on the following minute", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+
+			yield* TestClock.setTime(RETENTION_TICK_MS)
+			assert.isTrue((yield* errors.runTick()).retentionRan)
+
+			// The alerting cron fires every minute while the scan window is two
+			// minutes wide. Bucketing the phase on the window put this tick in the
+			// same bucket as the one above, so retention ran twice an hour for every
+			// org — the archived-issue purge was 35% of all database time.
+			yield* TestClock.setTime(RETENTION_TICK_MS + 60_000)
+			assert.isFalse((yield* errors.runTick()).retentionRan)
+
+			yield* TestClock.setTime(RETENTION_TICK_MS + 120_000)
+			assert.isFalse((yield* errors.runTick()).retentionRan)
 		}).pipe(Effect.provide(makeErrorsLayer())),
 	)
 

@@ -1722,17 +1722,17 @@ export const withMetavar: {
  */
 export const withSchema: {
   <A, B>(
-    schema: Schema.Codec<B, A, Environment, Environment>
+    schema: Schema.ConstraintCodec<B, A, Environment, unknown>
   ): <Kind extends ParamKind>(
     self: Param<Kind, A>
   ) => Param<Kind, B>
   <Kind extends ParamKind, A, B>(
     self: Param<Kind, A>,
-    schema: Schema.Codec<B, A, Environment, Environment>
+    schema: Schema.ConstraintCodec<B, A, Environment, unknown>
   ): Param<Kind, B>
 } = dual(2, <Kind extends ParamKind, A, B>(
   self: Param<Kind, A>,
-  schema: Schema.Codec<B, A>
+  schema: Schema.ConstraintCodec<B, A, Environment, unknown>
 ) => {
   const decodeParam = Schema.decodeUnknownEffect(schema)
   return mapEffect(self, (value) =>
@@ -2101,9 +2101,19 @@ export const getUnderlyingSingleOrThrow = <Kind extends ParamKind, A>(
  */
 export const getParamMetadata = <Kind extends ParamKind, A>(
   param: Param<Kind, A>
-): { isOptional: boolean; isVariadic: boolean } => {
+): {
+  readonly isOptional: boolean
+  readonly isVariadic: boolean
+  readonly variadicMin: Option.Option<number>
+  readonly variadicMax: Option.Option<number>
+} => {
   return matchParam(param, {
-    Single: () => ({ isOptional: false, isVariadic: false }),
+    Single: () => ({
+      isOptional: false,
+      isVariadic: false,
+      variadicMin: Option.none(),
+      variadicMax: Option.none()
+    }),
     Map: (mapped) => getParamMetadata(mapped.param),
     Transform: (mapped) => getParamMetadata(mapped.param),
     Optional: (optional) => ({
@@ -2112,7 +2122,9 @@ export const getParamMetadata = <Kind extends ParamKind, A>(
     }),
     Variadic: (variadic) => ({
       ...getParamMetadata(variadic.param),
-      isVariadic: true
+      isVariadic: true,
+      variadicMin: variadic.min,
+      variadicMax: variadic.max
     })
   })
 }

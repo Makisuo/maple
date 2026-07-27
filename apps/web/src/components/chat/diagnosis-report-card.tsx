@@ -27,7 +27,9 @@ export function DiagnosisReportCard({ report }: { report: AiTriageResult }) {
 						AI Diagnosis
 					</span>
 					<span className="text-muted-foreground/40">·</span>
-					<span className={`text-[11px] font-medium capitalize ${CONFIDENCE_TONE[report.confidence] ?? ""}`}>
+					<span
+						className={`text-[11px] font-medium capitalize ${CONFIDENCE_TONE[report.confidence] ?? ""}`}
+					>
 						{report.confidence} confidence
 					</span>
 				</div>
@@ -50,7 +52,9 @@ export function DiagnosisReportCard({ report }: { report: AiTriageResult }) {
 					</h4>
 					{evidence.map((item, index) => (
 						<div key={index} className="space-y-1.5 rounded-md bg-muted/40 p-3">
-							{item.note ? <p className="text-sm leading-relaxed text-foreground">{item.note}</p> : null}
+							{item.note ? (
+								<p className="text-sm leading-relaxed text-foreground">{item.note}</p>
+							) : null}
 							{item.traceIds.length || item.logPatterns.length ? (
 								<div className="flex flex-wrap items-center gap-1.5">
 									{item.traceIds.map((traceId) => (

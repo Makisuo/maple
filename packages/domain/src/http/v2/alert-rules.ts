@@ -622,6 +622,11 @@ const ChecksQuery = Schema.Struct({
 			description: "Only return checks recorded before this time (ISO-8601 UTC).",
 		}),
 	),
+	status: Schema.optional(
+		AlertCheckStatus.annotate({
+			description: "Only return checks with this evaluation status.",
+		}),
+	),
 }).annotate({
 	identifier: "AlertCheckListQuery",
 	title: "Alert check list query",
@@ -640,6 +645,53 @@ const AlertCheckList = ListOf(V2AlertCheck).annotate({
 	identifier: "AlertCheckList",
 	title: "Alert check list",
 	description: "A cursor-paginated page of alert checks, newest first.",
+})
+
+const AlertCheckSummaryQuery = Schema.Struct({
+	since: Timestamp.annotate({
+		description: "Start of the summary window (inclusive), ISO-8601 UTC.",
+	}),
+	until: Timestamp.annotate({
+		description: "End of the summary window (inclusive), ISO-8601 UTC.",
+	}),
+}).annotate({
+	identifier: "AlertCheckSummaryQuery",
+	title: "Alert check summary query",
+})
+
+const AlertCheckSummaryTotals = Schema.Struct({
+	total: Schema.Number,
+	breached: Schema.Number,
+	healthy: Schema.Number,
+	skipped: Schema.Number,
+	error: Schema.Number,
+	transitions: Schema.Number,
+})
+
+const AlertCheckSummaryPoint = Schema.Struct({
+	bucket: Timestamp,
+	group_key: Schema.String,
+	total_count: Schema.Number,
+	breached_count: Schema.Number,
+	healthy_count: Schema.Number,
+	skipped_count: Schema.Number,
+	error_count: Schema.Number,
+	transition_count: Schema.Number,
+	observed_value: Schema.NullOr(Schema.Number),
+	threshold: Schema.Number,
+})
+
+const AlertCheckSummary = Schema.Struct({
+	object: Schema.Literal("alert_check.summary"),
+	bucket_seconds: Schema.Number,
+	top_group_keys: Schema.Array(Schema.String),
+	totals: AlertCheckSummaryTotals,
+	points: Schema.Array(AlertCheckSummaryPoint),
+}).annotate({
+	identifier: "AlertCheckSummary",
+	title: "Alert check summary",
+	description:
+		"Adaptive time buckets for up to one year of checks. The busiest 20 groups are preserved and the remainder is returned as `__other__`.",
 })
 
 export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
@@ -754,6 +806,21 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				summary: "List a rule's checks",
 				description:
 					"Returns the rule's recorded evaluations (its audit trail), newest first, optionally filtered by group key and time range. Requires the `alerts:read` scope.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.get("checksSummary", "/:id/checks/summary", {
+			params: { id: AlertRulePublicId },
+			query: AlertCheckSummaryQuery,
+			success: AlertCheckSummary,
+			error: [...commonErrors, V2NotFoundError],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "summarizeAlertRuleChecks",
+				summary: "Summarize a rule's checks",
+				description:
+					"Returns adaptive check-history buckets for a range of up to 365 days. Requires the `alerts:read` scope.",
 			}),
 		),
 	)

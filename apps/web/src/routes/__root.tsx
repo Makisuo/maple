@@ -25,14 +25,6 @@ import { GlobalChatSheet } from "@/components/chat/global-chat-sheet"
 import { GlobalShortcuts } from "@/components/command-palette/global-shortcuts"
 import { IdleRoutePrefetch } from "@/components/performance/idle-route-prefetch"
 
-const UnitflowDevtools = import.meta.env.DEV
-	? lazy(() =>
-			import("@/components/devtools/unitflow-devtools").then((module) => ({
-				default: module.UnitflowDevtools,
-			})),
-		)
-	: null
-
 const CommitShaAttributeValue = lazy(() =>
 	import("@/components/attributes/commit-sha-attribute").then((module) => ({
 		default: module.CommitShaAttributeValue,
@@ -114,11 +106,6 @@ const AppFrame = memo(function AppFrame() {
 					<GlobalShortcuts />
 					<GlobalChatSheet />
 				</>
-			)}
-			{UnitflowDevtools && (
-				<Suspense fallback={null}>
-					<UnitflowDevtools />
-				</Suspense>
 			)}
 		</AttributesProvider>
 	)

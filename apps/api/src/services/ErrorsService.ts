@@ -26,6 +26,13 @@ import {
 	type ErrorNotificationPolicyUpsertRequest,
 	ErrorPersistenceError,
 	ErrorValidationError,
+	EscalationDestinationOutcome,
+	EscalationPolicyEvaluationDocument,
+	type EscalationPolicyEvaluationRequest,
+	EscalationSkipReason,
+	IssueEscalationAttemptDocument,
+	IssueEscalationAttemptsResponse,
+	IssueEscalationId as IssueEscalationIdSchema,
 	IssueEscalationPolicyDocument,
 	IssueEscalationPolicyRule,
 	type IssueEscalationPolicyUpsertRequest,
@@ -62,6 +69,7 @@ import {
 	type ErrorNotificationPolicyRow,
 	issueEscalationPolicies,
 	type IssueEscalationPolicyRow,
+	type IssueEscalationRow,
 	issueEscalations,
 	orgClickHouseSettings,
 	orgIngestKeys,
@@ -70,20 +78,19 @@ import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "driz
 import { CH, parseWarehouseDateTime, warehouseDateTimeToIso } from "@maple/query-engine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
-import { AI_TRIAGE_WORKFLOW_BINDING, maybeEnqueueTriage } from "../lib/ai-triage-enqueue"
+import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "../lib/ai-triage-enqueue"
 import { escalationDedupeKey, escalationReasonFor } from "../lib/issue-severity"
+import { evaluateEscalationPolicy } from "../lib/escalation-policy"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "../lib/DatabaseLive"
+import { selectDistinctOrgIds } from "../lib/distinct-org-ids"
 import { readTxid, txidColumn } from "../lib/electric-txid"
 import { Env } from "../lib/Env"
 import { dateToMs, msToDate } from "../lib/time"
 import { NotificationDispatcher } from "./NotificationDispatcher"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/query-engine/caching"
-import {
-	isOrgWarehouseQuarantined,
-	quarantineOnConfigClassCause,
-} from "../lib/warehouse-org-quarantine"
+import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "../lib/warehouse-org-quarantine"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const encodeIssueListCursor = Schema.encodeSync(IssueListCursor)
@@ -93,6 +100,7 @@ const encodeIssueSeverityListCursor = (fields: IssueSeverityListCursorFields): s
 const decodeErrorIncidentIdSync = Schema.decodeUnknownSync(ErrorIncidentDocument.fields.id)
 const decodeActorIdSync = Schema.decodeUnknownSync(ActorIdSchema)
 const decodeEventIdSync = Schema.decodeUnknownSync(ErrorIssueEventIdSchema)
+const decodeIssueEscalationIdSync = Schema.decodeUnknownSync(IssueEscalationIdSchema)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.firstSeenAt)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
@@ -101,9 +109,7 @@ const decodeSpanIdSync = Schema.decodeUnknownSync(SpanIdSchema)
 
 // Lenient decoders for JSON stored in jsonb columns. Decode failures fall back
 // to an empty/null value at each call site — stored blobs are best-effort.
-const decodeStoredJsonRecord = Schema.decodeUnknownOption(
-	Schema.Record(Schema.String, Schema.Unknown),
-)
+const decodeStoredJsonRecord = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))
 const decodeStoredJsonArray = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown))
 
 const DEFAULT_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -128,7 +134,14 @@ const ACTIVE_ORGS_CACHE_KEY = "active"
 const ACTIVE_ORGS_CACHE_TTL_S = 6 * 60 * 60
 const RESOLVED_RETENTION_DAYS = 14
 const ARCHIVED_RETENTION_DAYS = 90
-const RETENTION_PHASE_EVERY_N_TICKS = 30
+/**
+ * Retention runs one tick an hour. The phase is bucketed on the CRON period,
+ * not on `TICK_WINDOW_MS`: the alerting cron fires every minute while the scan
+ * window is two minutes wide, so bucketing on the window put two consecutive
+ * ticks in the same bucket and ran retention twice an hour for every org.
+ */
+const RETENTION_PHASE_PERIOD_MS = 60_000
+const RETENTION_PHASE_EVERY_N_TICKS = 60
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 const SYSTEM_AGENT_NAME = "system-errors-tick"
@@ -222,7 +235,7 @@ export const isBusyDatabaseError = (error: DatabaseError): boolean => {
 	return false
 }
 
-const BUSY_RETRY_SCHEDULE = Schedule.exponential("50 millis", 2.0).pipe(Schedule.both(Schedule.recurs(3)))
+const BUSY_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
 
 // ---------------------------------------------------------------------------
 // Transition matrix. Rows = from, values = set of allowed "to" states.
@@ -422,6 +435,18 @@ export interface ErrorsServiceShape {
 		userId: UserId,
 		request: IssueEscalationPolicyUpsertRequest,
 	) => Effect.Effect<IssueEscalationPolicyDocument, ErrorPersistenceError | ErrorValidationError>
+	readonly evaluateEscalationPolicy: (
+		orgId: OrgId,
+		request: EscalationPolicyEvaluationRequest,
+	) => Effect.Effect<EscalationPolicyEvaluationDocument, ErrorPersistenceError>
+	readonly listIssueEscalations: (
+		orgId: OrgId,
+		issueId: ErrorIssueId,
+	) => Effect.Effect<IssueEscalationAttemptsResponse, ErrorPersistenceError>
+	readonly listRecentEscalations: (
+		orgId: OrgId,
+		limit?: number,
+	) => Effect.Effect<IssueEscalationAttemptsResponse, ErrorPersistenceError>
 	readonly runTick: () => Effect.Effect<
 		{
 			readonly orgsProcessed: number
@@ -451,15 +476,17 @@ const make: Effect.Effect<
 	// Optional: present only inside a Worker isolate. Used to kick off the
 	// AI triage Workflow when an incident opens (org opt-in).
 	const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
-	const aiTriageWorkflowBinding = Option.match(workerEnv, {
+	const investigationAgentBinding = Option.match(workerEnv, {
 		onNone: () => undefined,
-		onSome: (e) => e[AI_TRIAGE_WORKFLOW_BINDING],
+		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
 	})
+	const investigationServiceToken = env.INTERNAL_SERVICE_TOKEN
 
 	const newErrorIssueId = () => decodeErrorIssueIdSync(randomUUID())
 	const newErrorIncidentId = () => decodeErrorIncidentIdSync(randomUUID())
 	const newActorId = () => decodeActorIdSync(randomUUID())
 	const newEventId = () => decodeEventIdSync(randomUUID())
+	const newIssueEscalationId = () => decodeIssueEscalationIdSync(randomUUID())
 
 	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 		database.execute(fn).pipe(
@@ -554,7 +581,12 @@ const make: Effect.Effect<
 				// reuse it instead of fanning out to all known orgs. Best-effort.
 				Effect.tap((active) =>
 					edgeCache
-						.rawPut(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY, [...active], ACTIVE_ORGS_CACHE_TTL_S)
+						.rawPut(
+							ACTIVE_ORGS_CACHE_BUCKET,
+							ACTIVE_ORGS_CACHE_KEY,
+							[...active],
+							ACTIVE_ORGS_CACHE_TTL_S,
+						)
 						.pipe(Effect.ignore),
 				),
 				// Fail CLOSED on a genuine discovery failure: reuse the last-known active
@@ -568,13 +600,22 @@ const make: Effect.Effect<
 									"Error active-org discovery failed; reusing last-known active set",
 								).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
 								const cached = yield* edgeCache
-									.rawGet<ReadonlyArray<string>>(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY)
+									.rawGet<ReadonlyArray<string>>(
+										ACTIVE_ORGS_CACHE_BUCKET,
+										ACTIVE_ORGS_CACHE_KEY,
+									)
 									.pipe(Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()))
 								const active = new Set<string>(byo)
-								for (const orgId of Option.getOrElse(cached, () => [] as ReadonlyArray<string>)) {
+								for (const orgId of Option.getOrElse(
+									cached,
+									() => [] as ReadonlyArray<string>,
+								)) {
 									active.add(orgId)
 								}
-								yield* Effect.annotateCurrentSpan({ activeOrgs: active.size, failedClosed: true })
+								yield* Effect.annotateCurrentSpan({
+									activeOrgs: active.size,
+									failedClosed: true,
+								})
 								return active as ReadonlySet<string>
 							}),
 				),
@@ -1706,14 +1747,16 @@ const make: Effect.Effect<
 			db
 				.insert(issueEscalations)
 				.values({
-					id: randomUUID(),
+					id: newIssueEscalationId(),
 					orgId,
 					issueId,
 					severity: to,
 					source,
 					reason,
 					runId: null,
+					investigationId: null,
 					payloadJson: {},
+					deliveryResultsJson: [],
 					status: "queued",
 					attempts: 0,
 					dedupeKey: escalationDedupeKey(orgId, issueId, to),
@@ -2020,9 +2063,7 @@ const make: Effect.Effect<
 	// Escalation policy (per-org severity → destination routing).
 	// ---------------------------------------------------------------
 
-	const decodeEscalationRules = Schema.decodeUnknownOption(
-		Schema.Array(IssueEscalationPolicyRule),
-	)
+	const decodeEscalationRules = Schema.decodeUnknownOption(Schema.Array(IssueEscalationPolicyRule))
 
 	const escalationRowToDocument = (row: IssueEscalationPolicyRow | null) =>
 		new IssueEscalationPolicyDocument({
@@ -2131,6 +2172,93 @@ const make: Effect.Effect<
 		)
 
 		return escalationRowToDocument(merged)
+	})
+
+	const decodeEscalationDeliveries = Schema.decodeUnknownOption(Schema.Array(EscalationDestinationOutcome))
+	const decodeEscalationSkipReason = Schema.decodeUnknownOption(EscalationSkipReason)
+
+	const escalationAttemptDocument = (row: IssueEscalationRow) =>
+		new IssueEscalationAttemptDocument({
+			id: row.id,
+			issueId: row.issueId,
+			investigationId: row.investigationId,
+			severity: row.severity,
+			source: row.source,
+			reason: row.reason,
+			status: row.status,
+			attempts: row.attempts,
+			skipReason:
+				row.status === "skipped" ? Option.getOrNull(decodeEscalationSkipReason(row.error)) : null,
+			deliveries: Option.getOrElse(decodeEscalationDeliveries(row.deliveryResultsJson), () => []),
+			createdAt: isoFromDate(row.createdAt),
+			processedAt: row.processedAt ? isoFromDate(row.processedAt) : null,
+		})
+
+	const evaluatePolicy: ErrorsServiceShape["evaluateEscalationPolicy"] = Effect.fn(
+		"ErrorsService.evaluateEscalationPolicy",
+	)(function* (orgId, request) {
+		yield* Effect.annotateCurrentSpan({ orgId })
+		const policy = yield* loadEscalationPolicyRow(orgId)
+		const rules =
+			policy == null ? [] : Option.getOrElse(decodeEscalationRules(policy.rulesJson), () => [])
+		const referencedIds = Array.from(new Set(rules.flatMap((rule) => rule.destinationIds)))
+		const enabledRows =
+			referencedIds.length === 0
+				? []
+				: yield* dbExecute((db) =>
+						db
+							.select({ id: alertDestinations.id })
+							.from(alertDestinations)
+							.where(
+								and(
+									eq(alertDestinations.orgId, orgId),
+									eq(alertDestinations.enabled, true),
+									inArray(alertDestinations.id, referencedIds),
+								),
+							),
+					)
+		const decision = evaluateEscalationPolicy({
+			enabled: policy?.enabled ?? false,
+			rules,
+			severity: request.severity,
+			source: request.source,
+			...(request.confidence === undefined ? {} : { confidence: request.confidence }),
+			enabledDestinationIds: new Set(enabledRows.map((row) => row.id)),
+		})
+		return new EscalationPolicyEvaluationDocument({
+			outcome: decision.outcome,
+			destinationIds: [...decision.destinationIds],
+			skipReason: decision.skipReason,
+		})
+	})
+
+	const listIssueEscalations: ErrorsServiceShape["listIssueEscalations"] = Effect.fn(
+		"ErrorsService.listIssueEscalations",
+	)(function* (orgId, issueId) {
+		yield* Effect.annotateCurrentSpan({ orgId, issueId })
+		const rows = yield* dbExecute((db) =>
+			db
+				.select()
+				.from(issueEscalations)
+				.where(and(eq(issueEscalations.orgId, orgId), eq(issueEscalations.issueId, issueId)))
+				.orderBy(desc(issueEscalations.createdAt)),
+		)
+		return new IssueEscalationAttemptsResponse({ attempts: rows.map(escalationAttemptDocument) })
+	})
+
+	const listRecentEscalations: ErrorsServiceShape["listRecentEscalations"] = Effect.fn(
+		"ErrorsService.listRecentEscalations",
+	)(function* (orgId, limit) {
+		yield* Effect.annotateCurrentSpan({ orgId })
+		const rows = yield* dbExecute((db) =>
+			db
+				.select()
+				.from(issueEscalations)
+				.where(eq(issueEscalations.orgId, orgId))
+				.orderBy(desc(issueEscalations.createdAt))
+				.limit(limit ?? 25),
+		)
+		return new IssueEscalationAttemptsResponse({ attempts: rows.map(escalationAttemptDocument) })
 	})
 
 	const issueLinkUrl = (issueId: string) =>
@@ -2294,12 +2422,38 @@ const make: Effect.Effect<
 	// Scheduled tick
 	// ---------------------------------------------------------------
 
-	const expireLeasesForOrg = Effect.fn("ErrorsService.expireLeases")(function* (
+	/**
+	 * The four unconditional reads at the head of every per-org tick, in ONE
+	 * `Database.execute`. Under `DatabasePgLive` each execute dials and tears
+	 * down its own postgres.js client, so the handshake count is what costs, not
+	 * the statement count — same trade as `scrape-check-retention.ts`.
+	 *
+	 * The stale-incident sweep is deliberately NOT batched in here: it has to
+	 * observe the `last_triggered_at` writes the fingerprint loop makes, so
+	 * prefetching it would auto-resolve incidents this same tick re-triggered.
+	 */
+	const loadOrgTickPreamble = Effect.fn("ErrorsService.loadOrgTickPreamble")(function* (
 		orgId: OrgId,
 		nowMs: number,
 	) {
-		const expired = yield* dbExecute((db) =>
-			db
+		return yield* dbExecute(async (db) => {
+			const actorRows = await db
+				.select()
+				.from(actors)
+				.where(
+					and(
+						eq(actors.orgId, orgId),
+						eq(actors.type, "agent"),
+						eq(actors.agentName, SYSTEM_AGENT_NAME),
+					),
+				)
+				.limit(1)
+			const policyRows = await db
+				.select()
+				.from(errorNotificationPolicies)
+				.where(eq(errorNotificationPolicies.orgId, orgId))
+				.limit(1)
+			const expiredLeases = await db
 				.select()
 				.from(errorIssues)
 				.where(
@@ -2308,11 +2462,37 @@ const make: Effect.Effect<
 						isNotNull(errorIssues.leaseExpiresAt),
 						lt(errorIssues.leaseExpiresAt, new Date(nowMs)),
 					),
-				),
-		)
+				)
+			// Wake up wontfix issues whose snooze has elapsed, so that new events
+			// observed in this tick are treated as regressions rather than skipped.
+			const wakeCandidates = await db
+				.select()
+				.from(errorIssues)
+				.where(
+					and(
+						eq(errorIssues.orgId, orgId),
+						eq(errorIssues.workflowState, "wontfix"),
+						isNotNull(errorIssues.snoozeUntil),
+						lt(errorIssues.snoozeUntil, new Date(nowMs)),
+					),
+				)
+			return {
+				actorRow: actorRows[0] ?? null,
+				policyRow: policyRows[0] ?? null,
+				expiredLeases,
+				wakeCandidates,
+			}
+		})
+	})
+
+	const expireLeasesForOrg = Effect.fn("ErrorsService.expireLeases")(function* (
+		orgId: OrgId,
+		nowMs: number,
+		expired: ReadonlyArray<ErrorIssueRow>,
+		systemActor: ActorDocument,
+	) {
 		if (expired.length === 0) return 0
 
-		const systemActor = yield* ensureSystemActor(orgId)
 		yield* Effect.forEach(expired, (row) =>
 			Effect.gen(function* () {
 				const prevActorId = row.leaseHolderActorId
@@ -2352,26 +2532,22 @@ const make: Effect.Effect<
 	) {
 		yield* Effect.annotateCurrentSpan({ orgId, runRetention, isActive })
 		const tenant = systemTenant(orgId)
-		const systemActor = yield* ensureSystemActor(orgId)
-		const policy = (yield* loadPolicyRow(orgId)) ?? defaultPolicy(orgId, windowEndMs)
+		const preamble = yield* loadOrgTickPreamble(orgId, windowEndMs)
+		// The actor exists after an org's first tick, so the insert path is a
+		// once-per-org cost rather than a per-tick round-trip.
+		const systemActor = preamble.actorRow
+			? rowToActor(preamble.actorRow)
+			: yield* ensureSystemActor(orgId)
+		const policy = preamble.policyRow ?? defaultPolicy(orgId, windowEndMs)
 
-		const leasesExpired = yield* expireLeasesForOrg(orgId, windowEndMs)
-
-		// Wake up wontfix issues whose snooze has elapsed, so that new events
-		// observed in this tick are treated as regressions rather than skipped.
-		const wakeCandidates = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(errorIssues)
-				.where(
-					and(
-						eq(errorIssues.orgId, orgId),
-						eq(errorIssues.workflowState, "wontfix"),
-						isNotNull(errorIssues.snoozeUntil),
-						lt(errorIssues.snoozeUntil, new Date(windowEndMs)),
-					),
-				),
+		const leasesExpired = yield* expireLeasesForOrg(
+			orgId,
+			windowEndMs,
+			preamble.expiredLeases,
+			systemActor,
 		)
+
+		const wakeCandidates = preamble.wakeCandidates
 		yield* Effect.forEach(wakeCandidates, (row) =>
 			applyTransition(orgId, systemActor.id, row, "triage", {
 				payload: { viaSnoozeWakeup: true },
@@ -2382,9 +2558,9 @@ const make: Effect.Effect<
 
 		// `isActive` is false only for orgs with neither recent errors nor existing
 		// issue/incident state, so skipping the scan loses nothing: there is
-		// nothing to detect and nothing to resolve. The cheap D1 housekeeping above
-		// (lease expiry, snooze wakeup) and below (retention) still runs for every
-		// known org regardless.
+		// nothing to detect and nothing to resolve. Such orgs no longer reach
+		// `processOrg` at all (see `scanOrgs` in `runTick`) — this branch now only
+		// covers an org that went inactive between discovery and the scan.
 		const issuesCompiled = CH.compile(CH.errorIssuesQuery({ limit: 500 }), {
 			orgId,
 			startTime: toTinybirdDateTime(windowStartMs),
@@ -2612,7 +2788,8 @@ const make: Effect.Effect<
 							lastSeen: row.lastSeen,
 							issueId,
 						},
-						workflowBinding: aiTriageWorkflowBinding,
+						agentBinding: investigationAgentBinding,
+						internalServiceToken: investigationServiceToken,
 					}).pipe(Effect.provideService(Database, database))
 
 					return { touched: 1, opened: 1 }
@@ -2836,36 +3013,37 @@ const make: Effect.Effect<
 		const endMs = yield* Clock.currentTimeMillis
 		const startMs = endMs - TICK_WINDOW_MS
 
-		const retentionRan = Math.floor(endMs / TICK_WINDOW_MS) % RETENTION_PHASE_EVERY_N_TICKS === 0
+		const retentionRan =
+			Math.floor(endMs / RETENTION_PHASE_PERIOD_MS) % RETENTION_PHASE_EVERY_N_TICKS === 0
 
+		// `error_issue_states` and `error_issues` hold hundreds of thousands of rows
+		// across a couple dozen orgs, so a plain `SELECT DISTINCT` scanned 160k/270k
+		// rows a call — together ~36% of all database CPU. Walk the btree instead.
+		// `org_ingest_keys` stays a plain DISTINCT on purpose: it is ~1 row per org,
+		// where a loose index scan costs an index descent per row and wins nothing.
 		const stateOrgs = yield* dbExecute((db) =>
-			db.selectDistinct({ orgId: errorIssueStates.orgId }).from(errorIssueStates),
+			selectDistinctOrgIds(db, errorIssueStates, errorIssueStates.orgId),
 		)
-		const issueOrgs = yield* dbExecute((db) =>
-			db
-				.selectDistinct({ orgId: errorIssues.orgId })
-				.from(errorIssues)
-				.where(isNotNull(errorIssues.orgId)),
-		)
+		const issueOrgs = yield* dbExecute((db) => selectDistinctOrgIds(db, errorIssues, errorIssues.orgId))
 		const ingestOrgs = yield* dbExecute((db) =>
 			db.selectDistinct({ orgId: orgIngestKeys.orgId }).from(orgIngestKeys),
 		)
-		const knownOrgs = new Set<string>([
-			...stateOrgs.map((r) => r.orgId),
-			...issueOrgs.map((r) => r.orgId),
-			...ingestOrgs.map((r) => r.orgId),
-		])
+		const knownOrgs = new Set<string>([...stateOrgs, ...issueOrgs, ...ingestOrgs.map((r) => r.orgId)])
 
 		const activeOrgs = yield* resolveActiveOrgs([...knownOrgs], endMs)
 		// Orgs that hold issue/incident state must be scanned even with no recent
 		// errors: the scan returning empty is what drives auto-resolution and
 		// aging. Only pure ingest-key-only orgs with neither recent errors nor
 		// existing state are skipped.
-		const withState = new Set<string>([
-			...stateOrgs.map((r) => r.orgId),
-			...issueOrgs.map((r) => r.orgId),
-		])
+		const withState = new Set<string>([...stateOrgs, ...issueOrgs])
 		const isActive = (org: string) => activeOrgs.has(org) || withState.has(org)
+		// Everything `processOrg` does for an inactive org is a no-op read: lease
+		// expiry, snooze wake-up and stale-incident resolution can only match rows
+		// in error_issues / error_issue_states / error_incidents, and an org holding
+		// any of those is in `withState` by construction. Visiting the rest cost 5
+		// Postgres round-trips each per minute — ~1.6M/day, most of the statement
+		// volume on the database — to discover nothing.
+		const scanOrgs = [...knownOrgs].filter(isActive)
 
 		const emptyResult = {
 			issuesTouched: 0,
@@ -2879,7 +3057,7 @@ const make: Effect.Effect<
 
 		const orgFailures = yield* Ref.make(0)
 		const results = yield* Effect.forEach(
-			[...knownOrgs],
+			scanOrgs,
 			(org) =>
 				Effect.gen(function* () {
 					// Orgs whose warehouse rejected queries with an auth/config-class error
@@ -2901,11 +3079,18 @@ const make: Effect.Effect<
 						Cause.hasInterruptsOnly(cause)
 							? Effect.interrupt
 							: Effect.gen(function* () {
-									const quarantined = yield* quarantineOnConfigClassCause(edgeCache, org, cause, endMs)
+									const quarantined = yield* quarantineOnConfigClassCause(
+										edgeCache,
+										org,
+										cause,
+										endMs,
+									)
 									if (quarantined) {
 										yield* Effect.logInfo(
 											"Org warehouse rejected queries with a config-class error; quarantined",
-										).pipe(Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }))
+										).pipe(
+											Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }),
+										)
 									} else {
 										yield* Effect.logError("Error tick failed for org").pipe(
 											Effect.annotateLogs({
@@ -2937,13 +3122,13 @@ const make: Effect.Effect<
 
 		yield* Effect.annotateCurrentSpan({
 			orgsKnown: knownOrgs.size,
-			orgsScanned: activeOrgs.size,
+			orgsScanned: scanOrgs.length,
 			orgFailures: yield* Ref.get(orgFailures),
 			...totals,
 		})
 
 		return {
-			orgsProcessed: knownOrgs.size,
+			orgsProcessed: scanOrgs.length,
 			...totals,
 			retentionRan,
 		}
@@ -2973,6 +3158,9 @@ const make: Effect.Effect<
 		upsertNotificationPolicy,
 		getEscalationPolicy,
 		upsertEscalationPolicy,
+		evaluateEscalationPolicy: evaluatePolicy,
+		listIssueEscalations,
+		listRecentEscalations,
 		runTick,
 	})
 })

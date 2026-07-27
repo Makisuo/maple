@@ -95,9 +95,11 @@ const pipeSelectColumns = (resource: Resource): string[] => {
 }
 
 describe("materialized projection order", () => {
-	it("keeps evolved service.namespace projections aligned with target datasource column order", () => {
+	it("keeps materialized projections aligned with target datasource column order", () => {
 		const targets = [
 			["service_overview_spans", "service_overview_spans_mv"],
+			["service_overview_hourly", "service_overview_hourly_mv"],
+			["service_operations_hourly", "service_operations_hourly_mv"],
 			["trace_list_mv", "trace_list_mv_mv"],
 			["logs_aggregates_hourly", "logs_aggregates_hourly_mv"],
 		] as const

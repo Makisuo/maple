@@ -273,7 +273,9 @@ export class RecommendationIssueService extends Context.Service<
 					db
 						.update(orgRecommendationIssues)
 						.set({ ...fields, updatedAt: new Date(now) })
-						.where(and(eq(orgRecommendationIssues.orgId, orgId), eq(orgRecommendationIssues.id, id))),
+						.where(
+							and(eq(orgRecommendationIssues.orgId, orgId), eq(orgRecommendationIssues.id, id)),
+						),
 				),
 			)
 			return yield* listResponse(orgId)

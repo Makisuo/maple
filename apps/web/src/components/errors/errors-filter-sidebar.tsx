@@ -5,7 +5,6 @@ import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { FilterSection, SingleCheckboxFilter, serviceColorMap } from "@/components/traces/filter-section"
 import { Route } from "@/routes/errors/index"
-import { Separator } from "@maple/ui/components/ui/separator"
 import { getErrorsFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import {
 	FilterSidebarBody,
@@ -88,40 +87,28 @@ export function ErrorsFilterSidebar() {
 							checked={search.showSpam ?? false}
 							onChange={(checked) => updateFilter("showSpam", checked || undefined)}
 						/>
-						<Separator className="my-2" />
-						{(facets.deploymentEnvs?.length ?? 0) > 0 && (
-							<>
-								<FilterSection
-									title="Environment"
-									options={facets.deploymentEnvs}
-									selected={search.deploymentEnvs ?? []}
-									onChange={(val) => updateFilter("deploymentEnvs", val)}
-								/>
-								<Separator className="my-2" />
-							</>
-						)}
 
-						{(facets.services?.length ?? 0) > 0 && (
-							<>
-								<FilterSection
-									title="Service"
-									options={facets.services}
-									selected={search.services ?? []}
-									onChange={(val) => updateFilter("services", val)}
-									colorMap={serviceColorMap(facets.services)}
-								/>
-								<Separator className="my-2" />
-							</>
-						)}
+						<FilterSection
+							title="Environment"
+							options={facets.deploymentEnvs ?? []}
+							selected={search.deploymentEnvs ?? []}
+							onChange={(val) => updateFilter("deploymentEnvs", val)}
+						/>
 
-						{(facets.errorTypes?.length ?? 0) > 0 && (
-							<FilterSection
-								title="Error Type"
-								options={facets.errorTypes}
-								selected={search.errorTypes ?? []}
-								onChange={(val) => updateFilter("errorTypes", val)}
-							/>
-						)}
+						<FilterSection
+							title="Service"
+							options={facets.services ?? []}
+							selected={search.services ?? []}
+							onChange={(val) => updateFilter("services", val)}
+							colorMap={serviceColorMap(facets.services ?? [])}
+						/>
+
+						<FilterSection
+							title="Error Type"
+							options={facets.errorTypes ?? []}
+							selected={search.errorTypes ?? []}
+							onChange={(val) => updateFilter("errorTypes", val)}
+						/>
 
 						{!hasFacets && (
 							<p className="text-sm text-muted-foreground py-4">

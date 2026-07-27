@@ -35,10 +35,7 @@ function SetupChecklistCard() {
 
 	if (connection.status === "connected") {
 		return (
-			<FirstTraceCelebration
-				serviceName={connection.firstRealService}
-				onDismiss={dismissChecklist}
-			/>
+			<FirstTraceCelebration serviceName={connection.firstRealService} onDismiss={dismissChecklist} />
 		)
 	}
 

@@ -23,6 +23,7 @@ import {
 	interleaveAlertRulesByOrg,
 } from "./AlertsService"
 import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
+import { baselineWarehouseCapabilities } from "@maple/query-engine"
 import { CacheBackendLive } from "../lib/CacheBackendLive"
 import { Env } from "../lib/Env"
 import { HazelOAuthService } from "./HazelOAuthService"
@@ -108,6 +109,12 @@ function makeWarehouseStub(state: {
 		rawSqlQuery: sqlQueryStub,
 		compiledQuery: (_tenant, compiled) =>
 			sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
+		compiledQueryWithCapabilities: (_tenant, compile) =>
+			sqlQueryStub().pipe(
+				Effect.flatMap((rows) =>
+					compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie),
+				),
+			),
 		compiledQueryFirst: (_tenant, compiled) =>
 			sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeFirstRow(rows).pipe(Effect.orDie))),
 		ingest: () => Effect.void,
@@ -2684,6 +2691,8 @@ describe("AlertsService", () => {
 			...makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }),
 			sqlQuery: () => Effect.succeed(alertRows),
 			compiledQuery: (_tenant, compiled) => compiled.decodeRows(alertRows).pipe(Effect.orDie),
+			compiledQueryWithCapabilities: (_tenant, compile) =>
+				compile(baselineWarehouseCapabilities()).decodeRows(alertRows).pipe(Effect.orDie),
 			compiledQueryFirst: (_tenant, compiled) => compiled.decodeFirstRow(alertRows).pipe(Effect.orDie),
 		}
 
@@ -2748,6 +2757,12 @@ describe("AlertsService evaluation error persistence", () => {
 			rawSqlQuery: sqlQueryStub,
 			compiledQuery: (_tenant, compiled) =>
 				sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
+			compiledQueryWithCapabilities: (_tenant, compile) =>
+				sqlQueryStub().pipe(
+					Effect.flatMap((rows) =>
+						compile(baselineWarehouseCapabilities()).decodeRows(rows).pipe(Effect.orDie),
+					),
+				),
 			compiledQueryFirst: (_tenant, compiled) =>
 				sqlQueryStub().pipe(
 					Effect.flatMap((rows) => compiled.decodeFirstRow(rows).pipe(Effect.orDie)),

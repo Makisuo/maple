@@ -62,7 +62,15 @@ export interface Condition {
 // ---------------------------------------------------------------------------
 
 export function toFragment(value: unknown): SqlFragment {
-	if (value != null && typeof value === "object" && "_brand" in value) {
+	if (
+		value != null &&
+		typeof value === "object" &&
+		"_brand" in value &&
+		((value as { readonly _brand?: unknown })._brand === "Expr" ||
+			(value as { readonly _brand?: unknown })._brand === "Condition") &&
+		"toFragment" in value &&
+		typeof (value as { readonly toFragment?: unknown }).toFragment === "function"
+	) {
 		return (value as Expr<unknown>).toFragment()
 	}
 	if (typeof value === "string") return str(value)
@@ -100,6 +108,10 @@ export function makeExpr<T>(fragment: SqlFragment): Expr<T> {
 			return makeCond(raw(`${compile(fragment)} NOT IN (${escaped})`))
 		},
 
+		// NOTE: these do NOT parenthesize their result, so chaining follows SQL
+		// operator precedence rather than call order — `a.sub(b).div(c)` compiles
+		// to `a - b / c`, i.e. `a - (b / c)`. Order the calls so precedence works
+		// in your favour, or bind an intermediate alias in a sub-query.
 		div: (n: number | Expr<number>) =>
 			makeExpr<number>(raw(`${compile(fragment)} / ${compile(toFragment(n))}`)),
 		mul: (n: number | Expr<number>) =>
@@ -258,6 +270,7 @@ export {
 	sumIf,
 	avgIf,
 	maxIf,
+	minIf,
 	groupUniqArray,
 	argMaxMerge,
 	toString_,
@@ -269,6 +282,8 @@ export {
 	replaceOne,
 	extract_,
 	concat,
+	hasToken,
+	hasAllTokens,
 	round_,
 	intDiv,
 	toFloat64OrZero,
@@ -295,6 +310,7 @@ export {
 	arrayStringConcat,
 	arrayFilter,
 	arrayJoin,
+	has,
 	mapContains,
 	mapGet,
 	mapKeys,

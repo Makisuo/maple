@@ -1,5 +1,6 @@
 import { normalizeTimestamp } from "./format"
 import { getHttpInfo, type HttpInfo } from "./http"
+import { tracedFetch } from "./telemetry"
 
 export { getHttpInfo, type HttpInfo } from "./http"
 
@@ -17,11 +18,15 @@ async function apiRequest<T>(path: string, body: unknown): Promise<T> {
 	const headers: Record<string, string> = { "content-type": "application/json" }
 	if (token) headers.authorization = `Bearer ${token}`
 
-	const res = await fetch(`${API_BASE_URL}${path}`, {
-		method: "POST",
-		headers,
-		body: JSON.stringify(body),
-	})
+	const res = await tracedFetch(
+		`${API_BASE_URL}${path}`,
+		{
+			method: "POST",
+			headers,
+			body: JSON.stringify(body),
+		},
+		"maple-api",
+	)
 
 	if (!res.ok) {
 		throw new Error(`API ${path} failed: ${res.status}`)
@@ -35,10 +40,14 @@ async function apiGet<T>(path: string): Promise<T> {
 	const headers: Record<string, string> = { accept: "application/json" }
 	if (token) headers.authorization = `Bearer ${token}`
 
-	const res = await fetch(`${API_BASE_URL}${path}`, {
-		method: "GET",
-		headers,
-	})
+	const res = await tracedFetch(
+		`${API_BASE_URL}${path}`,
+		{
+			method: "GET",
+			headers,
+		},
+		"maple-api",
+	)
 
 	if (!res.ok) {
 		throw new Error(`API ${path} failed: ${res.status}`)
