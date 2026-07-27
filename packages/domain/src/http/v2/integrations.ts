@@ -69,6 +69,22 @@ export const V2SlackIntegrationStatus = Schema.Struct({
 	installed_at: Schema.NullOr(Timestamp).annotate({
 		description: "When the app was installed, or `null` when not installed.",
 	}),
+	disconnected_reason: Schema.NullOr(
+		Schema.Literals(["app_uninstalled", "tokens_revoked", "reconciliation"]),
+	).annotate({
+		description:
+			"Set only when `installed` is `false` and the most recent installation was disconnected from Slack's side rather than via Maple: `app_uninstalled` (the app was removed from the workspace), `tokens_revoked` (Slack revoked the bot's tokens), or `reconciliation` (Maple found the bot token dead). `null` when installed, never installed, or uninstalled via Maple.",
+		examples: ["app_uninstalled"],
+	}),
+	disconnected_team_name: Schema.NullOr(Schema.String).annotate({
+		description:
+			"The workspace name of the remotely disconnected installation, or `null` when `disconnected_reason` is `null`.",
+		examples: ["Acme"],
+	}),
+	disconnected_at: Schema.NullOr(Timestamp).annotate({
+		description:
+			"When the remote disconnect was recorded, or `null` when `disconnected_reason` is `null`.",
+	}),
 }).annotate({
 	identifier: "SlackIntegration",
 	title: "Slack integration status",
@@ -81,6 +97,9 @@ export const V2SlackIntegrationStatus = Schema.Struct({
 			team_name: "Acme",
 			bot_user_id: "U0456BOT",
 			installed_at: "2026-07-01T12:00:00.000Z",
+			disconnected_reason: null,
+			disconnected_team_name: null,
+			disconnected_at: null,
 		}),
 	],
 })

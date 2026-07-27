@@ -46,6 +46,56 @@ const absoluteDateTime = (value: string): string =>
 	})
 
 /**
+ * What happened on Slack's side, per `disconnected_reason`. Written around the
+ * workspace ("Acme") so the sentence composes as "…the {what} the Acme Slack
+ * workspace" / "…the {what} your Slack workspace" when the name is unknown.
+ */
+const remoteDisconnectDetail = (reason: string, teamName: string | null): string => {
+	const workspace = teamName ? `the ${teamName} Slack workspace` : "your Slack workspace"
+	switch (reason) {
+		case "app_uninstalled":
+			return `The Maple app was removed from ${workspace}.`
+		case "tokens_revoked":
+			return `The Maple app's access tokens were revoked in ${workspace}.`
+		default:
+			// "reconciliation" — Maple's periodic check found the token dead without
+			// ever receiving an uninstall event.
+			return `Maple's access to ${workspace} is no longer valid — the app was likely removed in Slack.`
+	}
+}
+
+/**
+ * Shown above the install empty state when the previous installation was
+ * disconnected in Slack (app removed / tokens revoked) rather than from this
+ * dashboard — without it the card silently reverts to the never-installed state
+ * and the disconnect looks like a Maple bug.
+ */
+function RemoteDisconnectNotice({
+	reason,
+	teamName,
+	disconnectedAt,
+}: {
+	reason: string
+	teamName: string | null
+	disconnectedAt: string | null
+}) {
+	return (
+		<div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+			<span className="font-medium text-foreground">Slack disconnected this integration.</span>{" "}
+			{remoteDisconnectDetail(reason, teamName)}
+			{disconnectedAt ? (
+				<span title={absoluteDateTime(disconnectedAt)}>
+					{" "}
+					Disconnected {formatRelativeTime(disconnectedAt)}.
+				</span>
+			) : null}{" "}
+			Alert rules with Slack destinations have stopped delivering — add Maple to Slack again to
+			reconnect.
+		</div>
+	)
+}
+
+/**
  * Skeleton for the first status fetch. Models the not-installed resolution — the
  * common first-run outcome — so the card doesn't jump several hundred pixels
  * when status lands: three feature tiles above the dashed waiting-room card.
@@ -163,6 +213,13 @@ export function SlackIntegrationCard() {
 	if (!isInstalled) {
 		return (
 			<IntegrationEmpty icon={SlackIcon} backerIcon={SlackMonoIcon} accent={SLACK_ACCENT}>
+				{status?.disconnected_reason ? (
+					<RemoteDisconnectNotice
+						reason={status.disconnected_reason}
+						teamName={status.disconnected_team_name}
+						disconnectedAt={status.disconnected_at}
+					/>
+				) : null}
 				<IntegrationEmptyFeatures>
 					<IntegrationEmptyFeature
 						label="Ask Maple"

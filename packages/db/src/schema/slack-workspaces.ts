@@ -50,6 +50,12 @@ export const slackWorkspaces = pgTable(
 		// Set when the install is uninstalled/revoked. Revoked rows read as "not
 		// installed" and are skipped by the bot-resolve + dispatch lookups.
 		revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+		// Why `revoked_at` was set: `uninstalled` (dashboard), `superseded` (replaced
+		// by a same-org install of another team), or a remote reason — `app_uninstalled`
+		// / `tokens_revoked` (Slack event via the bot) / `reconciliation` (cron probe).
+		// Remote reasons drive the "disconnected from Slack's side" status surface.
+		// Null on active rows and on rows revoked before this column existed.
+		revokedReason: text("revoked_reason"),
 	},
 	(table) => [
 		// One row per Slack team, ever: a re-install upserts the existing row in

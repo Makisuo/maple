@@ -12,7 +12,7 @@ import {
 	type SlackBotResolution,
 } from "@maple/domain/http"
 import { slackWorkspaces, type SlackWorkspaceRow } from "@maple/db"
-import { and, eq, isNotNull, isNull, ne, or } from "drizzle-orm"
+import { and, desc, eq, isNotNull, isNull, ne, or } from "drizzle-orm"
 import { Array as Arr, Clock, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
@@ -37,6 +37,21 @@ const SLACK_MAX_CHANNEL_PAGES = 3
 
 /** Why a workspace binding was revoked without going through `uninstall`. */
 export type SlackRevocationReason = "app_uninstalled" | "tokens_revoked" | "reconciliation"
+
+/**
+ * The remote members of the `revoked_reason` column — revocations Maple learned
+ * about rather than initiated (`uninstalled` / `superseded` are the local ones).
+ * `getStatus` surfaces these so the dashboard can say "disconnected from Slack's
+ * side" instead of silently reverting to the not-installed state.
+ */
+const REMOTE_REVOCATION_REASONS: ReadonlySet<string> = new Set([
+	"app_uninstalled",
+	"tokens_revoked",
+	"reconciliation",
+] satisfies ReadonlyArray<SlackRevocationReason>)
+
+const asRemoteRevocationReason = (reason: string | null): SlackRevocationReason | null =>
+	reason !== null && REMOTE_REVOCATION_REASONS.has(reason) ? (reason as SlackRevocationReason) : null
 
 const CROSS_ORG_CONFLICT_MESSAGE =
 	"This Slack workspace is already connected to a different Maple organization. Uninstall it there first."
@@ -146,6 +161,14 @@ export interface SlackInstallStatus {
 	readonly teamName: string | null
 	readonly botUserId: string | null
 	readonly installedAt: number | null
+	/**
+	 * Set only when `installed` is false and the org's most recent installation
+	 * was revoked from Slack's side (app uninstalled / tokens revoked / a dead
+	 * token found by reconciliation) rather than via Maple's own uninstall.
+	 */
+	readonly disconnectedReason: SlackRevocationReason | null
+	readonly disconnectedTeamName: string | null
+	readonly disconnectedAt: number | null
 }
 
 export interface SlackChannelSummary {
@@ -517,6 +540,7 @@ const make: Effect.Effect<
 			createdAt: new Date(priorRow ? priorRow.createdAt.getTime() : now),
 			updatedAt: new Date(now),
 			revokedAt: null,
+			revokedReason: null,
 		}
 
 		// Invariant: at most one active (revoked_at IS NULL) row per org. In one
@@ -534,7 +558,7 @@ const make: Effect.Effect<
 				db.transaction(async (tx) => {
 					const revokedOthers = await tx
 						.update(slackWorkspaces)
-						.set({ revokedAt: new Date(now), updatedAt: new Date(now) })
+						.set({ revokedAt: new Date(now), revokedReason: "superseded", updatedAt: new Date(now) })
 						.where(
 							and(
 								eq(slackWorkspaces.orgId, orgId),
@@ -572,6 +596,7 @@ const make: Effect.Effect<
 								createdAt: values.createdAt,
 								updatedAt: values.updatedAt,
 								revokedAt: null,
+								revokedReason: null,
 							},
 						})
 						.returning({ id: slackWorkspaces.id })
@@ -613,24 +638,46 @@ const make: Effect.Effect<
 		const rowOption = yield* loadActiveWorkspaceByOrg(database, orgId).pipe(
 			Effect.mapError(toPersistenceError),
 		)
-		return Option.match(rowOption, {
-			onNone: () =>
-				({
-					installed: false,
-					teamId: null,
-					teamName: null,
-					botUserId: null,
-					installedAt: null,
-				}) satisfies SlackInstallStatus,
-			onSome: (row) =>
-				({
-					installed: true,
-					teamId: row.teamId,
-					teamName: row.teamName,
-					botUserId: row.botUserId,
-					installedAt: row.createdAt.getTime(),
-				}) satisfies SlackInstallStatus,
-		})
+		if (Option.isSome(rowOption)) {
+			const row = rowOption.value
+			return {
+				installed: true,
+				teamId: row.teamId,
+				teamName: row.teamName,
+				botUserId: row.botUserId,
+				installedAt: row.createdAt.getTime(),
+				disconnectedReason: null,
+				disconnectedTeamName: null,
+				disconnectedAt: null,
+			} satisfies SlackInstallStatus
+		}
+		// Not installed — check whether the most recent revocation came from
+		// Slack's side, so the dashboard can say "disconnected in Slack" instead
+		// of silently reverting to the never-installed state. A dashboard
+		// uninstall (`uninstalled`), a replacement install (`superseded`), or a
+		// pre-column revocation (null reason) all read as plain not-installed.
+		const lastRevoked: SlackWorkspaceRow | undefined = (yield* database
+			.execute((db) =>
+				db
+					.select()
+					.from(slackWorkspaces)
+					.where(and(eq(slackWorkspaces.orgId, orgId), isNotNull(slackWorkspaces.revokedAt)))
+					.orderBy(desc(slackWorkspaces.revokedAt))
+					.limit(1),
+			)
+			.pipe(Effect.mapError(toPersistenceError)))[0]
+		const remoteReason = asRemoteRevocationReason(lastRevoked?.revokedReason ?? null)
+		return {
+			installed: false,
+			teamId: null,
+			teamName: null,
+			botUserId: null,
+			installedAt: null,
+			disconnectedReason: remoteReason,
+			disconnectedTeamName: remoteReason !== null ? (lastRevoked?.teamName ?? null) : null,
+			disconnectedAt:
+				remoteReason !== null ? (lastRevoked?.revokedAt?.getTime() ?? null) : null,
+		} satisfies SlackInstallStatus
 	})
 
 	/** Tell Slack to invalidate the bot token. Callers treat failures as advisory. */
@@ -694,6 +741,7 @@ const make: Effect.Effect<
 						.update(slackWorkspaces)
 						.set({
 							revokedAt: new Date(now),
+							revokedReason: "uninstalled",
 							updatedAt: new Date(now),
 							apiKeySecretCiphertext: null,
 							apiKeySecretIv: null,
@@ -909,6 +957,7 @@ const make: Effect.Effect<
 					.update(slackWorkspaces)
 					.set({
 						revokedAt: new Date(now),
+						revokedReason: reason,
 						updatedAt: new Date(now),
 						apiKeySecretCiphertext: null,
 						apiKeySecretIv: null,

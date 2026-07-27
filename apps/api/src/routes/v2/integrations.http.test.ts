@@ -181,6 +181,9 @@ describe("v2 slack integration over HTTP", () => {
 					teamName: "Acme",
 					botUserId: "U0456BOT",
 					installedAt: Date.parse("2026-07-01T12:00:00.000Z"),
+					disconnectedReason: null,
+					disconnectedTeamName: null,
+					disconnectedAt: null,
 				}),
 		})
 		const key = await harness.bootstrapAdminKey()
@@ -194,9 +197,44 @@ describe("v2 slack integration over HTTP", () => {
 			team_name: "Acme",
 			bot_user_id: "U0456BOT",
 			installed_at: "2026-07-01T12:00:00.000Z",
+			disconnected_reason: null,
+			disconnected_team_name: null,
+			disconnected_at: null,
 		})
 		// snake_case only — no camelCase leakage from the service shape.
 		expect("teamId" in body).toBe(false)
+		await harness.dispose()
+	})
+
+	it("surfaces a remote disconnect in v2 wire shape", async () => {
+		const harness = makeHarness({
+			getStatus: () =>
+				Effect.succeed({
+					installed: false,
+					teamId: null,
+					teamName: null,
+					botUserId: null,
+					installedAt: null,
+					disconnectedReason: "app_uninstalled" as const,
+					disconnectedTeamName: "Acme",
+					disconnectedAt: Date.parse("2026-07-20T08:30:00.000Z"),
+				}),
+		})
+		const key = await harness.bootstrapAdminKey()
+
+		const { status, body } = await harness.request("GET", "/v2/integrations/slack", key.secret)
+		expect(status).toBe(200)
+		expect(body).toEqual({
+			object: "slack_integration",
+			installed: false,
+			team_id: null,
+			team_name: null,
+			bot_user_id: null,
+			installed_at: null,
+			disconnected_reason: "app_uninstalled",
+			disconnected_team_name: "Acme",
+			disconnected_at: "2026-07-20T08:30:00.000Z",
+		})
 		await harness.dispose()
 	})
 
@@ -424,6 +462,9 @@ describe("v2 slack integration over HTTP", () => {
 					teamName: "Acme",
 					botUserId: "U0456BOT",
 					installedAt: null,
+					disconnectedReason: null,
+					disconnectedTeamName: null,
+					disconnectedAt: null,
 				}),
 		})
 		const member = await harness.bootstrapMemberKey()
@@ -495,6 +536,9 @@ describe("v2 slack integration over HTTP", () => {
 					teamName: null,
 					botUserId: null,
 					installedAt: null,
+					disconnectedReason: null,
+					disconnectedTeamName: null,
+					disconnectedAt: null,
 				}),
 			startInstall: () => Effect.succeed({ url: "https://slack.com/oauth/v2/authorize" }),
 		})

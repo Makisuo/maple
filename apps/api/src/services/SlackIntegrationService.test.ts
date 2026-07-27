@@ -443,6 +443,9 @@ describe("SlackIntegrationService", () => {
 
 			const status = yield* slack.getStatus(asOrgId("org_rv"))
 			assert.strictEqual(status.installed, false)
+			// A dashboard uninstall is user-initiated — it must NOT read as a
+			// remote ("Slack's side") disconnect.
+			assert.isNull(status.disconnectedReason)
 
 			// Slack did NOT confirm the revoke, so the bot token is kept — it is the
 			// only way to retry killing a token that may still be live upstream. The
@@ -1198,6 +1201,10 @@ describe("SlackIntegrationService", () => {
 
 				const status = yield* slack.getStatus(asOrgId("org_evt"))
 				assert.strictEqual(status.installed, false)
+				// The remote revocation surfaces on status so the dashboard can say
+				// the disconnect came from Slack's side.
+				assert.strictEqual(status.disconnectedReason, "app_uninstalled")
+				assert.isNotNull(status.disconnectedAt)
 
 				const secrets = yield* Effect.promise(() =>
 					queryFirstRow<{
@@ -1314,7 +1321,9 @@ describe("SlackIntegrationService", () => {
 					alive: slack.getStatus(asOrgId("org_rc_alive")),
 				})
 				assert.strictEqual(statuses.dead.installed, false)
+				assert.strictEqual(statuses.dead.disconnectedReason, "reconciliation")
 				assert.strictEqual(statuses.alive.installed, true)
+				assert.isNull(statuses.alive.disconnectedReason)
 			}).pipe(
 				Effect.provide(
 					withFetch(
