@@ -55,6 +55,7 @@ describe("Tinybird retention matrix", () => {
 		const alterCompatibleRollups = [
 			"service_map_db_edges_hourly",
 			"service_map_db_query_shapes_hourly",
+			"service_operations_minutely",
 			"service_platforms_hourly",
 		]
 
