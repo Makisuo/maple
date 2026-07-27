@@ -39,27 +39,26 @@ concurrency:
 jobs:
     sweep:
         runs-on: blacksmith-4vcpu-ubuntu-2404
-        # MUST declare an environment, or Infisical rejects the OIDC token with
-        # 403 "Access denied: OIDC subject not allowed". GitHub derives the token's
-        # `sub` from the job: `repo:<org>/<repo>:environment:<name>` when an
-        # environment is set, `repo:<org>/<repo>:ref:refs/heads/main` otherwise.
-        # The machine identity only allowlists the `environment:` form (which is
-        # why deploy-prd/stg/pr-preview authenticate and an environment-less job
-        # cannot), so running bare silently broke every scheduled sweep.
+        # Deliberately NO `environment:`. GitHub derives the Infisical OIDC
+        # token's `sub` claim from the job shape:
+        #     with `environment: <name>` -> repo:<org>/<repo>:environment:<name>
+        #     without                    -> repo:<org>/<repo>:ref:refs/heads/<branch>
+        # Scheduled runs always execute the default branch, so this job's subject
+        # is `repo:<org>/<repo>:ref:refs/heads/main`. That subject MUST stay
+        # allowlisted on the Infisical machine identity — without it the secrets
+        # step fails with 403 "Access denied: OIDC subject not allowed", and since
+        # it is the first step, EVERY sweep below is skipped: the safety net stops
+        # running while orphaned PS-DEV branches keep billing.
         #
-        # `maintenance` is a DEDICATED environment, deliberately not `pr-preview`:
-        # deploy-pr-preview.yml requires `pr-preview` to be approval-gated so
-        # PR-controlled code can't reach Infisical secrets unreviewed, and an
-        # approval gate on an unattended cron run would stall it forever —
-        # silently restoring the exact breakage this workflow exists to prevent.
+        # Don't "fix" a 403 here by borrowing an environment. `pr-preview` must
+        # stay approval-gated (see deploy-pr-preview.yml) to keep PR-controlled
+        # code away from these secrets, and an approval gate on an unattended cron
+        # run stalls it until the deployment expires — silently recreating the
+        # breakage this workflow exists to prevent. Fix the allowlist instead.
         #
-        # Two invariants keep this working; both live outside the repo:
-        #   1. `maintenance` must NEVER gain required reviewers or a deployment
-        #      branch policy (Settings > Environments) — scheduled runs have no
-        #      human to approve them.
-        #   2. `repo:<org>/<repo>:environment:maintenance` must stay allowlisted
-        #      as an OIDC subject on the Infisical machine identity.
-        environment: maintenance
+        # Testing: `workflow_dispatch` from a non-default branch yields
+        # `...:ref:refs/heads/<that-branch>`, which is NOT allowlisted. Dispatch
+        # from main.
         env:
             INFISICAL_ENV_SLUG: dev
         steps:
