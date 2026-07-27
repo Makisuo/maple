@@ -59,6 +59,36 @@ interface NavItem {
 	icon: IconComponent
 }
 
+/**
+ * Preference order for the landing tab when `/settings` is opened with no `?tab=`, most-preferred
+ * first. `organization` is the Clerk-workspace landing tab; `ingestion` is the self-hosted one, where
+ * `organization` is filtered out.
+ *
+ * This is declared rather than inferred from nav position on purpose: a positional default silently
+ * moves whenever an item is added. `setup-audit` is deliberately not Clerk-gated, so in self-hosted
+ * mode it is the only surviving Workspace item — as the first visible item it would have become the
+ * landing tab and run the audit's dozen warehouse reads on every visit to Settings.
+ *
+ * Never list a tab here whose section does expensive work on mount.
+ */
+export const DEFAULT_SETTINGS_TAB_ORDER: ReadonlyArray<SettingsTab> = ["organization", "ingestion"]
+
+/**
+ * Which tab `/settings` should render: the requested one when it is actually visible, else the first
+ * available preferred default, else whatever is on offer.
+ */
+export function resolveActiveSettingsTab(
+	requestedTab: string | undefined,
+	visibleItems: ReadonlyArray<NavItem>,
+): SettingsTab {
+	const requested = visibleItems.find((item) => item.id === requestedTab)?.id
+	if (requested !== undefined) return requested
+	const preferred = DEFAULT_SETTINGS_TAB_ORDER.find((tab) =>
+		visibleItems.some((item) => item.id === tab),
+	)
+	return preferred ?? visibleItems[0]?.id ?? "ingestion"
+}
+
 /** Sibling pages that share the settings shell (rendered as router Links). */
 interface NavLinkItem {
 	id: "integrations"
