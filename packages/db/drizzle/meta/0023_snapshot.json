@@ -6259,19 +6259,19 @@
           "name": "bot_token_ciphertext",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "bot_token_iv": {
           "name": "bot_token_iv",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "bot_token_tag": {
           "name": "bot_token_tag",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "api_key_id": {
           "name": "api_key_id",
@@ -6283,19 +6283,19 @@
           "name": "api_key_secret_ciphertext",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "api_key_secret_iv": {
           "name": "api_key_secret_iv",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "api_key_secret_tag": {
           "name": "api_key_secret_tag",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "installed_by_user_id": {
           "name": "installed_by_user_id",
