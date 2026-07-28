@@ -60,8 +60,10 @@ const PreviewWidget = memo(function PreviewWidget({ widget }: { widget: Dashboar
 	const Visualization = visualizationFor(widget.visualization)
 
 	return (
+		// Placement only, no chrome: `WidgetShell` already renders the tile as a
+		// `Card`, so a bordered wrapper here would plate every widget twice.
 		<div
-			className="min-w-0 overflow-hidden rounded-md border border-border bg-card"
+			className="min-w-0"
 			style={{
 				gridColumn: `span ${Math.min(widget.layout.w, GRID_COLUMNS)}`,
 				height: heightFor(widget),

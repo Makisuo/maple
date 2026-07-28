@@ -3509,9 +3509,7 @@ fn invalid_payload(signal: &str, format: &str, error: impl std::fmt::Display) ->
         );
         detail.push('…');
     }
-    ApiError::bad_request(format!(
-        "Invalid OTLP {signal} {format} payload: {detail}"
-    ))
+    ApiError::bad_request(format!("Invalid OTLP {signal} {format} payload: {detail}"))
 }
 
 const MAX_PAYLOAD_ERROR_DETAIL: usize = 200;
@@ -4956,13 +4954,11 @@ mod tests {
             .as_ref()
             .expect("resource re-inserted")
             .attributes;
-        assert!(attributes
-            .iter()
-            .any(|a| a.key == "maple_org_id"
-                && matches!(
-                    &a.value,
-                    Some(AnyValue { value: Some(any_value::Value::StringValue(v)) }) if v == "org_real"
-                )));
+        assert!(attributes.iter().any(|a| a.key == "maple_org_id"
+            && matches!(
+                &a.value,
+                Some(AnyValue { value: Some(any_value::Value::StringValue(v)) }) if v == "org_real"
+            )));
     }
 
     /// An export request with nothing to export is a no-op, not a rejection.
@@ -4982,7 +4978,9 @@ mod tests {
         };
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert!(
-            error.message.starts_with("Invalid OTLP logs JSON payload: "),
+            error
+                .message
+                .starts_with("Invalid OTLP logs JSON payload: "),
             "unexpected message: {}",
             error.message
         );

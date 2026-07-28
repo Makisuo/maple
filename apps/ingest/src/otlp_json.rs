@@ -77,7 +77,14 @@ fn severity_number(name: &str) -> Option<i64> {
     if rest == "UNSPECIFIED" {
         return Some(0);
     }
-    let (base, offset) = rest.split_at(rest.len() - rest.chars().rev().take_while(|c| c.is_ascii_digit()).count());
+    let (base, offset) = rest.split_at(
+        rest.len()
+            - rest
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_digit())
+                .count(),
+    );
     let step = match base {
         "TRACE" => 1,
         "DEBUG" => 5,
@@ -104,8 +111,12 @@ fn severity_number(name: &str) -> Option<i64> {
 pub fn normalize(value: &mut Value, root_field: &str) {
     normalize_value(value);
     if let Value::Object(map) = value {
-        // An export request with nothing in it is a no-op, not a 400.
-        if !matches!(map.get(root_field), Some(Value::Array(_))) {
+        // An export request with nothing in it is a no-op, not a 400. Only fill
+        // in a *missing* root (`null` having already been dropped above) — a
+        // root that is present but the wrong type is a malformed request, and
+        // replacing it with an empty list would discard the payload and answer
+        // 200, which is the failure mode this module exists to remove.
+        if !map.contains_key(root_field) {
             map.insert(root_field.to_string(), Value::Array(Vec::new()));
         }
     }
@@ -132,7 +143,9 @@ fn normalize_object(map: &mut Map<String, Value>) {
     // survives the pass below instead of collapsing to an empty AnyValue.
     for key in ["arrayValue", "kvlistValue"] {
         if let Some(Value::Object(inner)) = map.get_mut(key) {
-            inner.entry("values").or_insert_with(|| Value::Array(Vec::new()));
+            inner
+                .entry("values")
+                .or_insert_with(|| Value::Array(Vec::new()));
         }
     }
 
@@ -197,7 +210,9 @@ mod tests {
 
     #[test]
     fn numeric_nanos_become_strings() {
-        let v = norm(r#"{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":1753660000000000000}]}]}]}"#);
+        let v = norm(
+            r#"{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":1753660000000000000}]}]}]}"#,
+        );
         assert_eq!(
             v["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["timeUnixNano"],
             Value::from("1753660000000000000")
@@ -206,7 +221,8 @@ mod tests {
 
     #[test]
     fn string_nanos_are_left_alone() {
-        let v = norm(r#"{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":"17"}]}]}]}"#);
+        let v =
+            norm(r#"{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":"17"}]}]}]}"#);
         assert_eq!(
             v["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["timeUnixNano"],
             Value::from("17")
@@ -222,7 +238,9 @@ mod tests {
 
     #[test]
     fn empty_any_value_is_dropped() {
-        let v = norm(r#"{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"body":{},"attributes":[{"key":"a","value":{}}]}]}]}]}"#);
+        let v = norm(
+            r#"{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"body":{},"attributes":[{"key":"a","value":{}}]}]}]}]}"#,
+        );
         let record = &v["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0];
         assert!(record.get("body").is_none());
         assert_eq!(record["attributes"][0]["key"], Value::from("a"));
@@ -299,6 +317,20 @@ mod tests {
         assert_eq!(
             norm(r#"{"resourceLogs":null}"#),
             serde_json::json!({"resourceLogs": []})
+        );
+    }
+
+    /// A wrong-typed root must reach the deserializer and be rejected. Replacing
+    /// it with an empty list would turn a malformed request into a silent 200.
+    #[test]
+    fn a_malformed_root_is_left_intact_for_rejection() {
+        assert_eq!(
+            norm(r#"{"resourceLogs":"nope"}"#),
+            serde_json::json!({"resourceLogs": "nope"})
+        );
+        assert_eq!(
+            norm(r#"{"resourceLogs":{"a":1}}"#),
+            serde_json::json!({"resourceLogs": {"a": 1}})
         );
     }
 
