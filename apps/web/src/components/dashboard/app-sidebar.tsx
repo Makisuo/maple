@@ -364,9 +364,13 @@ function NavGroupSection({ group, currentPath }: { group: NavGroup; currentPath:
  * a mask fade, nested inside the sidebar's own scroll region. This is curated,
  * capped, and reports the true total in its header.
  *
- * Hidden on the collapsed rail: with dashboards-only pins every glyph is the
- * same grid mark, so a column of them conveys nothing. Worth revisiting once
- * pins can hold services (which carry a coloured ServiceDot).
+ * Labelled "Pinned dashboards" rather than "Pinned" because dashboards are all
+ * it holds today — broaden the label at the same time the group starts taking
+ * services and saved views, not before.
+ *
+ * Hidden on the collapsed rail for the same reason: with dashboards-only pins
+ * every glyph is the same grid mark, so a column of them conveys nothing.
+ * Services would bring a coloured ServiceDot and make the rail worth having.
  */
 function PinnedGroup({ currentPath }: { currentPath: string }) {
 	const { dashboards, isLoading } = useDashboardsRead()
@@ -382,7 +386,7 @@ function PinnedGroup({ currentPath }: { currentPath: string }) {
 	return (
 		<SidebarGroup className="group-data-[collapsible=icon]:hidden">
 			<SidebarGroupLabel className={GROUP_LABEL}>
-				<span className="flex-1">Pinned</span>
+				<span className="flex-1">Pinned dashboards</span>
 				{pinned.length > 0 ? <span className="font-normal tabular-nums">{pinned.length}</span> : null}
 			</SidebarGroupLabel>
 			<SidebarGroupContent>
