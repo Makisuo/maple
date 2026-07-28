@@ -2,11 +2,20 @@ import * as React from "react"
 import { Link } from "@tanstack/react-router"
 import { cn } from "@maple/ui/utils"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { getSessionTranscriptResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import {
+	getSessionTranscriptResultAtom,
+	getSessionTraceSummariesResultAtom,
+} from "@/lib/services/atoms/warehouse-query-atoms"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import type { ReplayPartitionWindow } from "./replay-format"
+import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
+import { parseAttributes } from "@maple/ui/lib/span-tree"
+import { DetailRail } from "@/components/common/detail-rail"
+import { ExternalLinkIcon } from "@/components/icons"
+import { formatClock, formatSessionDuration, type ReplayPartitionWindow } from "./replay-format"
 import { useReplayPlayer } from "./replay-player-context"
 import { parseChTimestampMs } from "./replay-timeline"
+import type { SessionTraceSummary } from "./replay-editor-timeline"
+import { CopyButton } from "./session-detail-parts"
 
 export type EventRow = {
 	readonly timestamp: string
@@ -24,38 +33,127 @@ export type EventRow = {
 	readonly errorStack: string
 }
 
-type Tab = "console" | "network" | "error"
+/** The session metadata the rail's Session tab renders — a subset of the studio's
+ *  session shape, structurally satisfied by both the warehouse row and the preview
+ *  fixture. */
+export interface SessionRailSession {
+	readonly durationMs: number | null
+	readonly activeTimeMs?: number | null
+	readonly idleTimeMs?: number | null
+	readonly clickCount: number
+	readonly pageViews?: number | null
+	readonly errorCount: number
+	readonly browserName?: string | null
+	readonly osName?: string | null
+	readonly deviceType?: string | null
+	readonly country?: string | null
+	readonly serviceName?: string | null
+	readonly userAgent?: string | null
+	/** From `recordedMarker()`: true/false when the SDK stamped the session, undefined when unknown. */
+	readonly recorded?: boolean
+}
 
-const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
+type RailTab = "events" | "traces" | "session"
+type EventFilter = "all" | "console" | "network" | "error"
+
+const EVENT_FILTERS: ReadonlyArray<{ id: EventFilter; label: string }> = [
+	{ id: "all", label: "All" },
 	{ id: "console", label: "Console" },
 	{ id: "network", label: "Network" },
 	{ id: "error", label: "Errors" },
 ]
 
 /**
- * Console / Network / Errors panel for a session, backed by the distilled
- * `session_events` stream. Each row seeks the player to its moment; network and
- * error rows with a trace id link through to the backend trace.
+ * The detail page's right rail: a tabbed panel over the distilled
+ * `session_events` stream (Events), the correlated backend traces (Traces) and
+ * the session metadata (Session). Event and trace rows seek the player to their
+ * moment; rows with a trace id link through to the backend trace.
  */
-export function SessionEventsPanel({
+export function SessionRail({
 	sessionId,
+	session,
+	traceIds,
 	previewEvents,
+	previewSummaries,
 	window,
 	className,
 }: {
 	sessionId: string
+	session: SessionRailSession
+	traceIds: ReadonlyArray<string>
 	/** Placeholder-data preview: render these events instead of fetching them. */
 	previewEvents?: ReadonlyArray<EventRow>
+	previewSummaries?: ReadonlyArray<SessionTraceSummary>
 	/** Partition-pruning window; must match the route prefetch key (see $sessionId.tsx). */
 	window?: ReplayPartitionWindow
-	/** Sizing handed down by the layout (the panel fills/scrolls within it). */
 	className?: string
 }) {
-	const result = useAtomValue(getSessionTranscriptResultAtom({ data: { sessionId, ...window } }))
-	const [tab, setTab] = React.useState<Tab>("console")
-	const { timeline, recordingStartEpochMs, realTotalMs, seekDisplay } = useReplayPlayer()
+	const [tab, setTab] = React.useState<RailTab>("events")
 
-	const seekTo = React.useCallback(
+	return (
+		<section
+			className={cn("flex min-h-0 flex-col overflow-hidden border-border bg-card", className)}
+		>
+			<div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+				<RailTabButton active={tab === "events"} onClick={() => setTab("events")}>
+					Events
+				</RailTabButton>
+				<RailTabButton
+					active={tab === "traces"}
+					onClick={() => setTab("traces")}
+					count={traceIds.length > 0 ? traceIds.length : (previewSummaries?.length ?? 0)}
+				>
+					Traces
+				</RailTabButton>
+				<RailTabButton active={tab === "session"} onClick={() => setTab("session")}>
+					Session
+				</RailTabButton>
+			</div>
+
+			{tab === "events" && (
+				<EventsTab sessionId={sessionId} window={window} previewEvents={previewEvents} />
+			)}
+			{tab === "traces" && (
+				<TracesTab traceIds={traceIds} previewSummaries={previewSummaries} window={window} />
+			)}
+			{tab === "session" && <SessionTab sessionId={sessionId} session={session} />}
+		</section>
+	)
+}
+
+function RailTabButton({
+	active,
+	onClick,
+	count,
+	children,
+}: {
+	active: boolean
+	onClick: () => void
+	count?: number | null
+	children: React.ReactNode
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			aria-pressed={active}
+			className={cn(
+				"flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+				active ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
+			)}
+		>
+			{children}
+			{count != null && (
+				<span className="font-mono text-[10px] tabular-nums text-muted-foreground">{count}</span>
+			)}
+		</button>
+	)
+}
+
+/** Seek the player to a warehouse event timestamp. */
+function useSeekToTimestamp() {
+	const { timeline, recordingStartEpochMs, realTotalMs, seekDisplay } = useReplayPlayer()
+	return React.useCallback(
 		(ts: string) => {
 			const epoch = parseChTimestampMs(ts)
 			if (Number.isNaN(epoch)) return
@@ -64,45 +162,75 @@ export function SessionEventsPanel({
 		},
 		[recordingStartEpochMs, realTotalMs, seekDisplay, timeline],
 	)
+}
+
+/** Clock offset of a warehouse timestamp within the recording ("04:12"), for row gutters. */
+function useClockAt() {
+	const { recordingStartEpochMs, realTotalMs, timeline } = useReplayPlayer()
+	return React.useCallback(
+		(ts: string) => {
+			const epoch = parseChTimestampMs(ts)
+			if (Number.isNaN(epoch)) return "—"
+			const realOffset = Math.max(0, Math.min(epoch - recordingStartEpochMs, realTotalMs))
+			return formatClock(timeline.toDisplay(realOffset))
+		},
+		[recordingStartEpochMs, realTotalMs, timeline],
+	)
+}
+
+// --- Events tab -------------------------------------------------------------
+
+function EventsTab({
+	sessionId,
+	window,
+	previewEvents,
+}: {
+	sessionId: string
+	window?: ReplayPartitionWindow
+	previewEvents?: ReadonlyArray<EventRow>
+}) {
+	const result = useAtomValue(getSessionTranscriptResultAtom({ data: { sessionId, ...window } }))
+	const [filter, setFilter] = React.useState<EventFilter>("all")
 
 	const renderBody = (events: ReadonlyArray<EventRow>) => {
 		const counts = {
+			all: events.length,
 			console: events.filter((e) => e.type === "console").length,
 			network: events.filter((e) => e.type === "network").length,
 			error: events.filter((e) => e.type === "error").length,
 		}
-		const rows = events.filter((e) => e.type === tab)
+		const rows = filter === "all" ? events : events.filter((e) => e.type === filter)
 		return (
-			// The panel body is the scroll container so the tab bar can stick to its
-			// top while the event rows scroll underneath.
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-				<div className="sticky top-0 z-10 flex shrink-0 border-b border-border bg-card">
-					{TABS.map((t) => (
+				<div className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-card px-3 py-2">
+					{EVENT_FILTERS.map((f) => (
 						<button
-							key={t.id}
+							key={f.id}
 							type="button"
-							onClick={() => setTab(t.id)}
-							className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold transition-colors ${
-								tab === t.id
-									? "border-b-2 border-foreground text-foreground"
-									: "text-muted-foreground hover:text-foreground"
-							}`}
+							onClick={() => setFilter(f.id)}
+							aria-pressed={filter === f.id}
+							className={cn(
+								"rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+								filter === f.id
+									? "bg-foreground text-background"
+									: f.id === "error" && counts.error > 0
+										? "border border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/15"
+										: "border border-border text-muted-foreground hover:text-foreground",
+							)}
 						>
-							{t.label}
-							<span className="rounded bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
-								{counts[t.id]}
-							</span>
+							{f.label}{" "}
+							<span className="font-mono tabular-nums opacity-70">{counts[f.id]}</span>
 						</button>
 					))}
 				</div>
 				{rows.length === 0 ? (
 					<div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
-						No {tab} events in this session.
+						No {filter === "all" ? "" : `${filter} `}events in this session.
 					</div>
 				) : (
 					<ul className="divide-y divide-border font-mono text-xs">
 						{rows.map((ev, i) => (
-							<EventLine key={i} ev={ev} onSeek={() => seekTo(ev.timestamp)} />
+							<EventLine key={i} ev={ev} showNetworkBar={filter === "network"} />
 						))}
 					</ul>
 				)}
@@ -110,31 +238,16 @@ export function SessionEventsPanel({
 		)
 	}
 
-	return (
-		<section
-			className={cn(
-				"flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card",
-				className,
-			)}
-		>
-			{previewEvents
-				? renderBody(previewEvents)
-				: Result.builder(result)
-						.onInitial(() => <Skeleton className="m-3 min-h-0 flex-1 rounded-lg" />)
-						.onError(() => (
-							<div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
-								Couldn't load session events.
-							</div>
-						))
-						.onSuccess((data) => renderBody(data.data as ReadonlyArray<EventRow>))
-						.orElse(() => <Skeleton className="m-3 min-h-0 flex-1 rounded-lg" />)}
-		</section>
-	)
-}
-
-function timeOf(ts: string): string {
-	const part = ts.split(" ")[1] ?? ts
-	return part.slice(0, 12)
+	if (previewEvents) return renderBody(previewEvents)
+	return Result.builder(result)
+		.onInitial(() => <Skeleton className="m-3 min-h-0 flex-1 rounded-lg" />)
+		.onError(() => (
+			<div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
+				Couldn't load session events.
+			</div>
+		))
+		.onSuccess((data) => renderBody(data.data as ReadonlyArray<EventRow>))
+		.orElse(() => <Skeleton className="m-3 min-h-0 flex-1 rounded-lg" />)
 }
 
 function statusTone(status: number): string {
@@ -143,48 +256,96 @@ function statusTone(status: number): string {
 	return "text-success-foreground"
 }
 
-function EventLine({ ev, onSeek }: { ev: EventRow; onSeek: () => void }) {
+/** Uppercase type tag + tone for the row gutter, per event kind. */
+function eventTag(ev: EventRow): { label: string; tone: string } {
+	switch (ev.type) {
+		case "nav":
+			return { label: "NAV", tone: "text-success-foreground" }
+		case "click":
+			return { label: "CLICK", tone: "text-warning-foreground" }
+		case "network":
+			return { label: ev.netMethod || "NET", tone: isFailedRequest(ev) ? "text-destructive" : "text-info-foreground" }
+		case "error":
+			return { label: "ERROR", tone: "text-destructive" }
+		case "console": {
+			const level = (ev.level || "log").toUpperCase()
+			if (ev.level === "error") return { label: level, tone: "text-destructive" }
+			if (ev.level === "warn") return { label: level, tone: "text-warning-foreground" }
+			return { label: level, tone: "text-muted-foreground" }
+		}
+		default:
+			return { label: ev.type.toUpperCase(), tone: "text-muted-foreground" }
+	}
+}
+
+function isFailedRequest(ev: EventRow): boolean {
+	return ev.type === "network" && (ev.netStatus >= 500 || ev.netStatus === 0)
+}
+
+function EventLine({ ev, showNetworkBar }: { ev: EventRow; showNetworkBar: boolean }) {
+	const seekTo = useSeekToTimestamp()
+	const clockAt = useClockAt()
+	const tag = eventTag(ev)
+	const isError = ev.type === "error" || isFailedRequest(ev)
+
 	return (
-		<li className="flex items-start gap-3 px-3 py-2 hover:bg-muted/50">
+		<li
+			className={cn(
+				"relative flex items-start gap-2.5 px-3 py-2 hover:bg-muted/50",
+				isError && "bg-destructive/5",
+			)}
+		>
+			{isError && (
+				<span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-destructive" />
+			)}
 			<button
 				type="button"
-				onClick={onSeek}
-				className="shrink-0 tabular-nums text-muted-foreground hover:text-foreground"
+				onClick={() => seekTo(ev.timestamp)}
+				className="w-10 shrink-0 text-left tabular-nums text-muted-foreground hover:text-foreground"
 				title="Seek replay to this moment"
 			>
-				{timeOf(ev.timestamp)}
+				{clockAt(ev.timestamp)}
 			</button>
+			<span className={cn("w-11 shrink-0 text-[10px] font-semibold leading-4", tag.tone)}>
+				{tag.label}
+			</span>
 			<div className="min-w-0 flex-1">
 				{ev.type === "console" && (
-					<span
-						className={
-							ev.level === "error" || ev.level === "warn" ? "text-warning-foreground" : ""
-						}
-					>
-						<span className="mr-1.5 uppercase opacity-60">{ev.level || "log"}</span>
+					<span className={cn(ev.level === "error" && "text-destructive")}>
 						{ev.message}
 					</span>
 				)}
 				{ev.type === "network" && (
-					<span className="flex items-center gap-2">
-						<span className="opacity-70">{ev.netMethod}</span>
-						<span className={`font-semibold ${statusTone(ev.netStatus)}`}>
-							{ev.netStatus || "ERR"}
+					<span className="flex flex-col gap-1">
+						<span className="flex items-center gap-2">
+							<span className="min-w-0 truncate">{ev.netUrl}</span>
+							<span className={cn("ml-auto shrink-0 font-semibold", statusTone(ev.netStatus))}>
+								{ev.netStatus || "ERR"}
+							</span>
+							<span className={cn("shrink-0", isError ? "font-semibold text-destructive" : "opacity-60")}>
+								{formatNetDuration(ev.netDurationMs)}
+							</span>
 						</span>
-						<span className="truncate">{ev.netUrl}</span>
-						<span className="ml-auto shrink-0 opacity-60">{ev.netDurationMs}ms</span>
+						{showNetworkBar && <NetDurationBar durationMs={ev.netDurationMs} failed={isError} />}
 					</span>
 				)}
 				{ev.type === "error" && (
 					<span className="text-destructive">
 						{ev.message}
 						{ev.errorStack && (
-							<span className="mt-0.5 block whitespace-pre-wrap text-[11px] opacity-70">
+							<span className="mt-0.5 block whitespace-pre-wrap text-[11px] text-muted-foreground">
 								{ev.errorStack.split("\n").slice(0, 3).join("\n")}
 							</span>
 						)}
 					</span>
 				)}
+				{ev.type === "click" && <span>{ev.targetText || ev.targetSelector || "click"}</span>}
+				{ev.type === "nav" && <span>{ev.url}</span>}
+				{ev.type !== "console" &&
+					ev.type !== "network" &&
+					ev.type !== "error" &&
+					ev.type !== "click" &&
+					ev.type !== "nav" && <span>{ev.message || ev.url}</span>}
 			</div>
 			{ev.traceId && (
 				<Link
@@ -200,5 +361,270 @@ function EventLine({ ev, onSeek }: { ev: EventRow; onSeek: () => void }) {
 				</Link>
 			)}
 		</li>
+	)
+}
+
+const NET_BAR_MAX_MS = 3000
+
+function formatNetDuration(ms: number): string {
+	if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
+	return `${ms}ms`
+}
+
+/** Relative-duration micro-bar for the Network view — slow requests jump out
+ *  without reading every number. Log-free linear scale capped at 3s. */
+function NetDurationBar({ durationMs, failed }: { durationMs: number; failed: boolean }) {
+	const pct = Math.min(100, Math.max(2, (durationMs / NET_BAR_MAX_MS) * 100))
+	const slow = durationMs >= 1000
+	return (
+		<span className="block h-[3px] w-full overflow-hidden rounded-full bg-muted">
+			<span
+				className={cn(
+					"block h-full rounded-full",
+					failed ? "bg-destructive" : slow ? "bg-warning" : "bg-chart-1",
+				)}
+				style={{ width: `${pct}%` }}
+			/>
+		</span>
+	)
+}
+
+// --- Traces tab -------------------------------------------------------------
+
+function TracesTab({
+	traceIds,
+	previewSummaries,
+	window,
+}: {
+	traceIds: ReadonlyArray<string>
+	previewSummaries?: ReadonlyArray<SessionTraceSummary>
+	window?: ReplayPartitionWindow
+}) {
+	if (previewSummaries) return <TraceList summaries={previewSummaries} />
+	if (traceIds.length === 0) {
+		return (
+			<p className="p-4 text-xs leading-relaxed text-muted-foreground">
+				No backend traces were linked to this session. Correlation populates automatically when the
+				page is instrumented with <span className="font-mono">@maple-dev/browser</span> tracing.
+			</p>
+		)
+	}
+	return <TracesTabLive traceIds={traceIds} window={window} />
+}
+
+function TracesTabLive({
+	traceIds,
+	window,
+}: {
+	traceIds: ReadonlyArray<string>
+	window?: ReplayPartitionWindow
+}) {
+	const result = useAtomValue(getSessionTraceSummariesResultAtom({ data: { traceIds, ...window } }))
+	return Result.builder(result)
+		.onInitial(() => (
+			<div className="space-y-2 p-4">
+				<Skeleton className="h-4 w-2/3" />
+				<Skeleton className="h-4 w-1/2" />
+			</div>
+		))
+		.onError(() => <p className="p-4 text-xs text-destructive">Couldn't load correlated traces.</p>)
+		.onSuccess((res) => {
+			const summaries: ReadonlyArray<SessionTraceSummary> = res.data
+			if (summaries.length === 0) {
+				return (
+					<p className="p-4 text-xs text-muted-foreground">
+						Linked traces aren't available yet — they may still be ingesting.
+					</p>
+				)
+			}
+			return <TraceList summaries={summaries} />
+		})
+		.render()
+}
+
+function TraceList({ summaries }: { summaries: ReadonlyArray<SessionTraceSummary> }) {
+	return (
+		<ul className="min-h-0 flex-1 divide-y divide-border overflow-y-auto">
+			{summaries.map((s) => (
+				<TraceListRow key={s.traceId} summary={s} />
+			))}
+		</ul>
+	)
+}
+
+function TraceListRow({ summary }: { summary: SessionTraceSummary }) {
+	const seekTo = useSeekToTimestamp()
+	const clockAt = useClockAt()
+	const isError = summary.hasError > 0
+	return (
+		<li
+			className={cn(
+				"relative flex flex-col gap-0.5 px-3 py-2.5 hover:bg-muted/50",
+				isError && "bg-destructive/5",
+			)}
+		>
+			{isError && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-destructive" />}
+			<div className="flex items-center gap-2.5">
+				<button
+					type="button"
+					onClick={() => seekTo(summary.startTime)}
+					className="w-10 shrink-0 text-left font-mono text-xs tabular-nums text-muted-foreground hover:text-foreground"
+					title="Seek replay to this trace"
+				>
+					{clockAt(summary.startTime)}
+				</button>
+				{/* Same method-chip + route-path label the timeline and trace views use,
+				    so a trace reads identically everywhere. */}
+				<HttpSpanLabel
+					spanName={summary.rootSpanName || "trace"}
+					spanAttributes={parseAttributes(summary.rootSpanAttributes)}
+					spanKind={summary.rootSpanKind}
+					className="min-w-0 flex-1"
+					textClassName={cn(
+						"truncate text-xs font-medium",
+						isError ? "text-destructive" : "text-foreground",
+					)}
+				/>
+				<span
+					className={cn(
+						"shrink-0 font-mono text-[11px] tabular-nums",
+						isError ? "font-semibold text-destructive" : "text-muted-foreground",
+					)}
+				>
+					{formatNetDuration(Math.round(summary.durationMs))}
+				</span>
+			</div>
+			<div className="flex items-center gap-2 pl-[3.125rem]">
+				<span className="min-w-0 truncate text-[11px] text-muted-foreground">
+					{summary.rootServiceName} · {summary.spanCount} span{summary.spanCount === 1 ? "" : "s"}
+					{isError ? " · error" : ""}
+				</span>
+				<Link
+					to="/traces/$traceId"
+					params={{ traceId: summary.traceId }}
+					search={{ t: summary.startTime }}
+					target="_blank"
+					rel="noreferrer"
+					className="inline-flex shrink-0 items-center gap-1 text-[11px] text-info-foreground underline-offset-2 hover:underline"
+				>
+					open
+					<ExternalLinkIcon className="size-3" />
+				</Link>
+			</div>
+		</li>
+	)
+}
+
+// --- Session tab ------------------------------------------------------------
+
+function SessionTab({ sessionId, session }: { sessionId: string; session: SessionRailSession }) {
+	return (
+		<div className="min-h-0 flex-1 overflow-y-auto">
+			<DetailRail.Group label="Session">
+				<DetailRail.Row label="Duration">
+					<Value mono>{formatSessionDuration(session.durationMs)}</Value>
+				</DetailRail.Row>
+				{session.activeTimeMs !== undefined && (
+					<DetailRail.Row label="Active">
+						<Value mono>{formatSessionDuration(session.activeTimeMs)}</Value>
+					</DetailRail.Row>
+				)}
+				{session.idleTimeMs !== undefined && (
+					<DetailRail.Row label="Idle">
+						<Value mono>{formatSessionDuration(session.idleTimeMs)}</Value>
+					</DetailRail.Row>
+				)}
+				<DetailRail.Row label="Pages">
+					<Value mono>{String(session.pageViews || 1)}</Value>
+				</DetailRail.Row>
+				<DetailRail.Row label="Clicks">
+					<Value mono>{String(session.clickCount)}</Value>
+				</DetailRail.Row>
+				<DetailRail.Row label="Errors">
+					<span
+						className={cn(
+							"font-mono text-xs tabular-nums",
+							session.errorCount > 0 ? "font-semibold text-destructive" : "text-foreground",
+						)}
+					>
+						{session.errorCount}
+					</span>
+				</DetailRail.Row>
+			</DetailRail.Group>
+
+			<DetailRail.Group label="Environment">
+				<DetailRail.Row label="Browser">
+					<Value mono>{session.browserName || "—"}</Value>
+				</DetailRail.Row>
+				<DetailRail.Row label="OS">
+					<Value mono>{session.osName || "—"}</Value>
+				</DetailRail.Row>
+				<DetailRail.Row label="Device">
+					<Value mono className="capitalize">
+						{session.deviceType || "—"}
+					</Value>
+				</DetailRail.Row>
+				<DetailRail.Row label="Country">
+					<Value mono>{session.country || "—"}</Value>
+				</DetailRail.Row>
+			</DetailRail.Group>
+
+			<DetailRail.Group label="Context">
+				{session.serviceName && (
+					<DetailRail.Row label="Service">
+						<span className="flex min-w-0 items-center gap-1">
+							<Value mono className="truncate">
+								{session.serviceName}
+							</Value>
+							<CopyButton value={session.serviceName} label="Copy service name" />
+						</span>
+					</DetailRail.Row>
+				)}
+				<DetailRail.Row label="Session ID" title={sessionId}>
+					<span className="flex min-w-0 items-center gap-1">
+						<Value mono className="truncate">
+							{sessionId.slice(0, 12)}…
+						</Value>
+						<CopyButton value={sessionId} label="Copy session id" />
+					</span>
+				</DetailRail.Row>
+				{session.recorded !== undefined && (
+					<DetailRail.Row label="Recording">
+						<span
+							className={cn(
+								"font-mono text-xs",
+								session.recorded ? "text-success-foreground" : "text-muted-foreground",
+							)}
+						>
+							{session.recorded ? "Complete" : "Not recorded"}
+						</span>
+					</DetailRail.Row>
+				)}
+				{session.userAgent && (
+					<div className="flex flex-col gap-1 pt-1">
+						<span className="text-xs text-muted-foreground">User agent</span>
+						<span className="break-words font-mono text-[10px] leading-[15px] text-foreground/80">
+							{session.userAgent}
+						</span>
+					</div>
+				)}
+			</DetailRail.Group>
+		</div>
+	)
+}
+
+function Value({
+	mono,
+	className,
+	children,
+}: {
+	mono?: boolean
+	className?: string
+	children: React.ReactNode
+}) {
+	return (
+		<span className={cn("text-xs text-foreground", mono && "font-mono tabular-nums", className)}>
+			{children}
+		</span>
 	)
 }
