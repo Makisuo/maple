@@ -7,6 +7,7 @@ import {
 	FileIcon,
 	GridSquareCirclePlusIcon,
 	HouseIcon,
+	KubernetesIcon,
 	LayersIcon,
 	MagnifierCheckIcon,
 	NetworkNodesIcon,
@@ -15,12 +16,19 @@ import {
 	PulseIcon,
 	ServerIcon,
 } from "@/components/icons"
+import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
 
 export interface NavSubItem {
 	title: string
 	href: string
-	/** Brand mark for integration-sourced entries (agent-sourced siblings stay text-only). */
 	icon?: typeof PulseIcon
+	/**
+	 * CSS color for marks drawn in `currentColor`. Brand marks that hardcode
+	 * their own `fill` (Kubernetes, Cloudflare) already arrive in brand color and
+	 * ignore this — PlanetScale ships its mark monochrome, so it needs the tint
+	 * to sit beside them rather than reading as a disabled sibling.
+	 */
+	iconColor?: string
 }
 
 export interface NavItem {
@@ -51,17 +59,33 @@ const overviewItem: NavItem = {
 	icon: HouseIcon,
 }
 
+/**
+ * Every child carries an icon for the same two reasons as Explore: the closed
+ * row previews what's inside it (see `NavRow`), and the expanded sub-list stops
+ * being ragged — before this only Cloudflare and PlanetScale had marks, so the
+ * four host/k8s rows sat text-only beside two brand glyphs.
+ *
+ * The three k8s pages deliberately share one mark: their labels already
+ * separate them, and the preview dedupes by icon, so six children still fit
+ * beside "Infrastructure" as four glyphs. Giving them distinct marks costs the
+ * label ~14px and truncates it to "Infrastruct…".
+ */
 const infrastructureItem: NavItem = {
 	title: "Infrastructure",
 	href: "/infra",
 	icon: ComputerIcon,
 	subItems: [
-		{ title: "Hosts", href: "/infra" },
-		{ title: "K8s Pods", href: "/infra/kubernetes/pods" },
-		{ title: "K8s Nodes", href: "/infra/kubernetes/nodes" },
-		{ title: "K8s Workloads", href: "/infra/kubernetes/workloads" },
+		{ title: "Hosts", href: "/infra", icon: ServerIcon },
+		{ title: "K8s Pods", href: "/infra/kubernetes/pods", icon: KubernetesIcon },
+		{ title: "K8s Nodes", href: "/infra/kubernetes/nodes", icon: KubernetesIcon },
+		{ title: "K8s Workloads", href: "/infra/kubernetes/workloads", icon: KubernetesIcon },
 		{ title: "Cloudflare", href: "/infra/cloudflare", icon: CloudflareIcon },
-		{ title: "PlanetScale", href: "/infra/planetscale", icon: PlanetScaleIcon },
+		{
+			title: "PlanetScale",
+			href: "/infra/planetscale",
+			icon: PlanetScaleIcon,
+			iconColor: PLANETSCALE_COLOR,
+		},
 	],
 }
 

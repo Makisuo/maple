@@ -17,6 +17,7 @@ import {
 	navGroups,
 	type NavGroup,
 	type NavItem,
+	type NavSubItem,
 } from "@/components/dashboard/nav-items"
 import { openCommandPalette, showKeyboardShortcuts } from "@/components/command-palette/global-shortcuts"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
@@ -66,14 +67,6 @@ import { useInfraEnabled } from "@/hooks/use-infra-enabled"
  */
 const RAIL_LANE = "relative before:absolute before:inset-y-0 before:left-0 before:w-0.5"
 const ACTIVE_RAIL = `${RAIL_LANE} data-[active=true]:rounded-l-none data-[active=true]:before:bg-sidebar-primary data-[active=true]:text-sidebar-primary`
-
-/**
- * The footer gear only earns the rail when collapsed. Expanded it is a 32px
- * button floating ~180px from the sidebar edge, where a rail is a stray stripe
- * and the squared-off left corners read as a sheared pill; the accent fill and
- * primary icon already say "selected" there.
- */
-const FOOTER_ACTIVE_RAIL = `${RAIL_LANE} group-data-[collapsible=icon]:data-[active=true]:rounded-l-none group-data-[collapsible=icon]:data-[active=true]:before:bg-sidebar-primary data-[active=true]:text-sidebar-primary`
 
 /** Group labels sit below the items they name, not level with them. */
 const GROUP_LABEL = "h-6 text-muted-foreground"
@@ -285,7 +278,7 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 							<DropdownMenuLabel>{item.title}</DropdownMenuLabel>
 							{subItems.map((sub) => (
 								<DropdownMenuItem key={sub.title} render={<Link to={sub.href} />}>
-									{sub.icon ? <sub.icon size={16} /> : null}
+									{sub.icon ? <sub.icon size={16} style={{ color: sub.iconColor }} /> : null}
 									{sub.title}
 								</DropdownMenuItem>
 							))}
@@ -305,8 +298,20 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 	// doesn't say traces/logs/metrics/replays. Trailing miniatures of the
 	// children's own glyphs say it without spending four rows. Only drawn when
 	// every child has a mark — a partial run reads as a broken list — and
-	// dropped once the section opens and the real rows are on screen.
-	const preview = !isOpen && subItems?.every((sub) => sub.icon) ? subItems : undefined
+	// dropped once the section opens and the real rows are on screen. Repeated
+	// marks collapse to one: Infrastructure's three k8s pages share a glyph, and
+	// drawing it three times both crowds the label and overstates the variety.
+	const preview = useMemo(() => {
+		if (isOpen || !subItems?.every((sub) => sub.icon)) return undefined
+		const seen = new Set<NavSubItem["icon"]>()
+		const unique: NavSubItem[] = []
+		for (const sub of subItems) {
+			if (!sub.icon || seen.has(sub.icon)) continue
+			seen.add(sub.icon)
+			unique.push(sub)
+		}
+		return unique
+	}, [isOpen, subItems])
 
 	return (
 		<SidebarMenuItem>
@@ -319,8 +324,16 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 				<item.icon size={18} />
 				<span className="flex-1 truncate">{item.title}</span>
 				{preview ? (
+					// Brand marks keep their own color here — Kubernetes blue and
+					// Cloudflare orange hardcode their fill, PlanetScale takes the tint —
+					// so the cluster is recognisable at 12px instead of four grey smudges.
+					// Non-brand children (Explore's signals, Hosts) stay muted.
 					<span className="flex shrink-0 items-center gap-1.5 text-muted-foreground group-data-[collapsible=icon]:hidden">
-						{preview.map((sub) => (sub.icon ? <sub.icon className="size-3" key={sub.title} /> : null))}
+						{preview.map((sub) =>
+							sub.icon ? (
+								<sub.icon className="size-3" key={sub.title} style={{ color: sub.iconColor }} />
+							) : null,
+						)}
 					</span>
 				) : null}
 			</SidebarMenuButton>
@@ -350,7 +363,7 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 								isActive={sub.href === activeSubHref}
 								render={<Link to={sub.href} />}
 							>
-								{sub.icon ? <sub.icon className="size-3.5" /> : null}
+								{sub.icon ? <sub.icon className="size-3.5" style={{ color: sub.iconColor }} /> : null}
 								<span>{sub.title}</span>
 							</SidebarMenuSubButton>
 						</SidebarMenuSubItem>
@@ -453,7 +466,31 @@ function PinnedGroup({ currentPath }: { currentPath: string }) {
 	)
 }
 
-/** Settings and help stop scrolling away by leaving SidebarContent entirely. */
+/**
+ * A full nav row rather than a 32px glyph beside the avatar: Settings is a
+ * destination like any other section, and pairing it with the user menu read as
+ * "account settings" when it is org- and project-wide. It stays in the footer so
+ * it never scrolls away behind a long Pinned list.
+ */
+function SettingsRow({ currentPath }: { currentPath: string }) {
+	return (
+		<SidebarMenu>
+			<SidebarMenuItem>
+				<SidebarMenuButton
+					className={ACTIVE_RAIL}
+					isActive={isPathActive(currentPath, "/settings")}
+					render={<Link to="/settings" />}
+					tooltip="Settings"
+				>
+					<GearIcon size={18} />
+					<span>Settings</span>
+				</SidebarMenuButton>
+			</SidebarMenuItem>
+		</SidebarMenu>
+	)
+}
+
+/** Support stops scrolling away by leaving SidebarContent entirely. */
 function SupportMenu() {
 	return (
 		<DropdownMenu>
@@ -500,22 +537,13 @@ function SupportMenu() {
 	)
 }
 
-function FooterCluster({ currentPath }: { currentPath: string }) {
+function FooterCluster() {
 	return (
 		<SidebarMenu>
 			<SidebarMenuItem className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
 				<div className="min-w-0 flex-1 group-data-[collapsible=icon]:w-full group-data-[collapsible=icon]:flex-none">
 					{isClerkAuthEnabled ? <UserMenu /> : <GuestMenu />}
 				</div>
-				<SidebarMenuButton
-					className={`${FOOTER_ACTIVE_RAIL} size-8 w-8 shrink-0 justify-center p-0 group-data-[collapsible=icon]:w-full`}
-					isActive={isPathActive(currentPath, "/settings")}
-					render={<Link to="/settings" />}
-					tooltip="Settings"
-				>
-					<GearIcon size={16} />
-					<span className="sr-only">Settings</span>
-				</SidebarMenuButton>
 				<SupportMenu />
 			</SidebarMenuItem>
 		</SidebarMenu>
@@ -543,8 +571,14 @@ export const AppSidebar = memo(function AppSidebar() {
 				))}
 				<PinnedGroup currentPath={currentPath} />
 			</SidebarContent>
-			<SidebarFooter className="border-sidebar-border border-t">
-				<FooterCluster currentPath={currentPath} />
+			{/* The rule belongs between Settings and the account cluster, not above
+			    both: Settings is the last nav row, so a line above it would cut it
+			    off from the nav it belongs to. */}
+			<SidebarFooter>
+				<SettingsRow currentPath={currentPath} />
+				<div className="-mx-2 border-sidebar-border border-t px-2 pt-2">
+					<FooterCluster />
+				</div>
 			</SidebarFooter>
 		</Sidebar>
 	)

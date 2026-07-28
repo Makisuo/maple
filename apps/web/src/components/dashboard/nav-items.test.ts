@@ -68,14 +68,26 @@ describe("navGroups", () => {
 		])
 	})
 
-	it("gives every Explore child an icon", () => {
+	it("gives every child of a previewed section an icon", () => {
 		// The closed row previews its children by drawing their glyphs (see
 		// `NavRow`), and draws nothing at all unless *every* child has one — so
 		// dropping an icon here silently removes the preview rather than
 		// rendering a gap.
-		const explore = findItem(enabled, "Explore")
-		expect(explore.subItems?.length).toBeGreaterThan(0)
-		expect(explore.subItems?.every((sub) => sub.icon)).toBe(true)
+		for (const flags of [enabled, gated]) {
+			for (const title of ["Explore", "Infrastructure"]) {
+				const item = findItem(flags, title)
+				expect(item.subItems?.length).toBeGreaterThan(0)
+				expect(item.subItems?.every((sub) => sub.icon)).toBe(true)
+			}
+		}
+	})
+
+	it("keeps Infrastructure's preview to four marks once repeats collapse", () => {
+		// Six glyphs beside "Infrastructure" overflow the 16rem sidebar and
+		// truncate the label to "Infrastruct…". The three k8s pages sharing one
+		// mark is what buys the room back — `NavRow` dedupes by icon identity.
+		const infra = findItem(enabled, "Infrastructure")
+		expect(new Set(infra.subItems?.map((sub) => sub.icon)).size).toBe(4)
 	})
 
 	it("keeps the Infrastructure row when the agent pages are gated off", () => {
