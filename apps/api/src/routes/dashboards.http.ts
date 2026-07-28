@@ -107,6 +107,7 @@ export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (
 										category: t.category,
 										tags: t.tags,
 										requirements: t.requirements,
+										requirement: t.requirement,
 										requiredMetricPrefixes: t.requiredMetricPrefixes,
 										parameters: t.parameters,
 										preview: t.preview,

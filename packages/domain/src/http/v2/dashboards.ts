@@ -430,6 +430,42 @@ const V2DashboardTemplatePreviewWidget = Schema.Struct({
 	title: Schema.String,
 })
 
+export const V2DashboardTemplateRequirement = Schema.Struct({
+	kind: Schema.Literals(["metrics", "integration", "telemetry"]).annotate({
+		description:
+			"`metrics` is gated on `required_metric_prefixes`, `integration` on a connected integration, `telemetry` is never gated.",
+	}),
+	label: Schema.String.annotate({
+		description: "Full prose — the same string the `requirements` array carries.",
+	}),
+	missing: optional(
+		Schema.String.annotate({
+			description:
+				'Short statement of what is missing, e.g. "not connected". Absent for `metrics`, where clients derive `no <prefix>*` from `required_metric_prefixes`.',
+		}),
+	),
+	collector: Schema.String.annotate({
+		description: 'Noun phrase naming what emits the data, read as "Collected by {collector}."',
+	}),
+	setupLabel: optional(
+		Schema.String.annotate({
+			description: 'Noun phrase read as "Set up {setup_label}". Absent for `telemetry`.',
+		}),
+	),
+	hint: optional(
+		Schema.String.annotate({
+			description: "One extra sentence shown when the template is gated.",
+		}),
+	),
+})
+	.pipe(Schema.encodeKeys({ setupLabel: "setup_label" }))
+	.annotate({
+		identifier: "DashboardTemplateRequirement",
+		title: "Dashboard template requirement",
+		description: "What an org needs before this template's widgets have anything to draw.",
+	})
+export type V2DashboardTemplateRequirement = Schema.Schema.Type<typeof V2DashboardTemplateRequirement>
+
 export const V2DashboardTemplate = Schema.Struct({
 	id: DashboardTemplatePublicId,
 	object: Schema.Literal("dashboard_template"),
@@ -438,6 +474,7 @@ export const V2DashboardTemplate = Schema.Struct({
 	category: DashboardTemplateCategory,
 	tags: Schema.Array(Schema.String),
 	requirements: Schema.Array(Schema.String),
+	requirement: Schema.NullOr(V2DashboardTemplateRequirement),
 	requiredMetricPrefixes: Schema.Array(Schema.String),
 	parameters: Schema.Array(V2DashboardTemplateParameter),
 	preview: Schema.Array(V2DashboardTemplatePreviewWidget),
@@ -448,6 +485,30 @@ export const V2DashboardTemplate = Schema.Struct({
 		title: "Dashboard template",
 	})
 export type V2DashboardTemplate = Schema.Schema.Type<typeof V2DashboardTemplate>
+
+export const V2DashboardTemplatePreviewParams = Schema.Struct({
+	parameters: optional(Schema.Record(DashboardTemplateParameterKey, Schema.String)),
+}).annotate({
+	identifier: "DashboardTemplatePreviewParams",
+	title: "Dashboard template preview parameters",
+})
+export type V2DashboardTemplatePreviewParams = Schema.Schema.Type<typeof V2DashboardTemplatePreviewParams>
+
+export const V2DashboardTemplatePreview = Schema.Struct({
+	object: Schema.Literal("dashboard_template_preview"),
+	name: Schema.String,
+	timeRange: V2TimeRange,
+	widgets: Schema.Array(V2DashboardWidget),
+	variables: Schema.Array(V2DashboardVariable),
+})
+	.pipe(Schema.encodeKeys({ timeRange: "time_range" }))
+	.annotate({
+		identifier: "DashboardTemplatePreview",
+		title: "Dashboard template preview",
+		description:
+			"The dashboard a template would build, without creating it. Nothing is persisted; the widgets are identical to what `instantiate` would save for the same parameters.",
+	})
+export type V2DashboardTemplatePreview = Schema.Schema.Type<typeof V2DashboardTemplatePreview>
 
 export const V2DashboardTemplateInstantiateParams = Schema.Struct({
 	parameters: optional(Schema.Record(DashboardTemplateParameterKey, Schema.String)),
@@ -527,6 +588,21 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				summary: "List dashboard templates",
 				description:
 					"Returns the built-in dashboard templates in the standard cursor-paginated list envelope.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("previewTemplate", "/templates/:template_id/preview", {
+			params: { template_id: DashboardTemplatePublicId },
+			payload: V2DashboardTemplatePreviewParams,
+			success: V2DashboardTemplatePreview,
+			error: [V2InvalidRequestError, V2NotFoundError],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "previewDashboardTemplate",
+				summary: "Preview a dashboard template",
+				description:
+					"Builds the template for the given parameters and returns the resulting dashboard without saving it. Read-only — use `instantiate` to create the dashboard.",
 			}),
 		),
 	)

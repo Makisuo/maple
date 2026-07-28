@@ -88,6 +88,15 @@ const READ_ONLY_POST_PATHS = new Set([
 	"/v2/metrics/breakdown",
 ])
 
+/** Same, for read-only POST endpoints whose path carries a resource id. */
+const READ_ONLY_POST_PATTERNS: ReadonlyArray<RegExp> = [
+	// Builds the dashboard a template would create, without creating it.
+	/^\/v2\/dashboards\/templates\/[^/]+\/preview$/,
+]
+
+const isReadOnlyPost = (path: string): boolean =>
+	READ_ONLY_POST_PATHS.has(path) || READ_ONLY_POST_PATTERNS.some((pattern) => pattern.test(path))
+
 /**
  * Mechanical scope derivation: the resource family is the first path segment
  * after `/v2/`. GET/HEAD and explicitly registered read-only POST queries require
@@ -97,7 +106,7 @@ export const requiredScopeForRequest = (method: string, path: string): RequiredS
 	const match = /^\/v2\/([a-z][a-z0-9_]*)(?:\/|$)/.exec(path)
 	if (match === null) return null
 	const access =
-		method === "GET" || method === "HEAD" || (method === "POST" && READ_ONLY_POST_PATHS.has(path))
+		method === "GET" || method === "HEAD" || (method === "POST" && isReadOnlyPost(path))
 			? "read"
 			: "write"
 	return { family: match[1]!, access }

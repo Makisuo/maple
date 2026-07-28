@@ -323,7 +323,14 @@ export const cloudflareTemplate: TemplateDefinition = {
 		"Edge traffic from the Cloudflare integration — total requests, cache hit rate, 5xx error rate and bandwidth KPIs, plus requests by status/cache, TTFB and origin latency percentiles, and Workers invocations, errors, and CPU.",
 	category: "infrastructure",
 	tags: ["cloudflare", "edge", "cdn"],
-	requirements: ["Cloudflare integration connected with analytics permissions"],
+	requirement: {
+		kind: "integration",
+		label: "Cloudflare integration connected with analytics permissions",
+		missing: "not connected",
+		collector: "the Cloudflare integration with analytics scope",
+		setupLabel: "the Cloudflare integration",
+		hint: "Connect it with analytics permissions and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["cloudflare."],
 	parameters: [
 		{

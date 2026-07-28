@@ -103,7 +103,13 @@ export const jvmRuntimeTemplate: TemplateDefinition = {
 	description: "Heap usage, GC pause time, and thread counts for JVM-based services.",
 	category: "application",
 	tags: ["jvm", "runtime"],
-	requirements: ["OpenTelemetry JVM instrumentation"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry JVM instrumentation",
+		collector: "the OpenTelemetry Java agent",
+		setupLabel: "the Java agent",
+		hint: "Attach it to your JVM and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["jvm."],
 	parameters: [
 		{

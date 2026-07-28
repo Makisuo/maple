@@ -3,25 +3,11 @@ import { GridLayout, useContainerWidth, verticalCompactor } from "react-grid-lay
 import type { Layout } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
 
-import type {
-	WidgetDataState,
-	DashboardWidget,
-	WidgetDisplayConfig,
-	WidgetMode,
-} from "@/components/dashboard-builder/types"
+import type { DashboardWidget } from "@/components/dashboard-builder/types"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
 import { WidgetActionsProvider } from "@/components/dashboard-builder/widgets/widget-actions-context"
+import { visualizationFor } from "@/components/dashboard-builder/widgets/visualization-registry"
 import { useWidgetData } from "@/hooks/use-widget-data"
-import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
-import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
-import { GaugeWidget } from "@/components/dashboard-builder/widgets/gauge-widget"
-import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
-import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
-import { PieWidget } from "@/components/dashboard-builder/widgets/pie-widget"
-import { HistogramWidget } from "@/components/dashboard-builder/widgets/histogram-widget"
-import { HeatmapWidget } from "@/components/dashboard-builder/widgets/heatmap-widget"
-import { FunnelWidget } from "@/components/dashboard-builder/widgets/funnel-widget"
-import { MarkdownWidget } from "@/components/dashboard-builder/widgets/markdown-widget"
 
 interface DashboardCanvasProps {
 	widgets: DashboardWidget[]
@@ -31,26 +17,6 @@ interface DashboardCanvasProps {
 	 * interactions don't accidentally mutate the live dashboard.
 	 */
 	readOnly?: boolean
-}
-
-const visualizationRegistry: Record<
-	string,
-	React.ComponentType<{
-		dataState: WidgetDataState
-		display: WidgetDisplayConfig
-		mode: WidgetMode
-	}>
-> = {
-	chart: ChartWidget,
-	stat: StatWidget,
-	gauge: GaugeWidget,
-	table: TableWidget,
-	list: ListWidget,
-	pie: PieWidget,
-	histogram: HistogramWidget,
-	heatmap: HeatmapWidget,
-	funnel: FunnelWidget,
-	markdown: MarkdownWidget,
 }
 
 /**
@@ -101,7 +67,7 @@ const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: Dashbo
 	const { mode } = useDashboardActions()
 	const { ref, visible } = useInViewportSticky()
 	const { dataState } = useWidgetData(widget, visible)
-	const Visualization = visualizationRegistry[widget.visualization] ?? visualizationRegistry.chart
+	const Visualization = visualizationFor(widget.visualization)
 
 	return (
 		<div ref={ref} className="h-full w-full">

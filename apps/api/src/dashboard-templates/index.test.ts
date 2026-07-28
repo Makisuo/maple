@@ -109,3 +109,66 @@ describe("dashboard template previews", () => {
 		expect(buildTemplatePreview(blank)).toEqual([])
 	})
 })
+
+describe("dashboard template requirements", () => {
+	// The picker states the requirement twice: a short `missing` beside the
+	// template name and the `collector` in the detail panel. Both are authored
+	// here rather than recovered from prose by the client, so both have to hold
+	// for every template or a row renders a blank status lane.
+	it("states a requirement on every template but blank", () => {
+		for (const template of DASHBOARD_TEMPLATES) {
+			if (template.id === "blank") {
+				expect(template.requirement, "blank needs nothing").toBeUndefined()
+				continue
+			}
+			expect(template.requirement, template.id).toBeDefined()
+			expect(template.requirement!.label.length, template.id).toBeGreaterThan(0)
+			expect(template.requirement!.collector.length, template.id).toBeGreaterThan(0)
+		}
+	})
+
+	it("pairs each requirement kind with the gate it actually checks", () => {
+		for (const template of DASHBOARD_TEMPLATES) {
+			const requirement = template.requirement
+			if (!requirement) continue
+			const prefixes = template.requiredMetricPrefixes ?? []
+
+			if (requirement.kind === "telemetry") {
+				// Never gated, so it needs no short label and no call to action.
+				expect(prefixes, `${template.id} is telemetry but declares prefixes`).toEqual([])
+				continue
+			}
+
+			// Gated kinds must be reachable: something to check, a short status for
+			// the row, and a noun for the "Set up …" button.
+			expect(
+				prefixes.length,
+				`${template.id} is ${requirement.kind} but has no prefixes`,
+			).toBeGreaterThan(0)
+			expect(requirement.setupLabel, `${template.id} needs a setupLabel`).toBeDefined()
+
+			if (requirement.kind === "integration") {
+				expect(requirement.missing, `${template.id} needs an explicit missing label`).toBeDefined()
+			}
+			// `metrics` may omit `missing`; the picker derives `no <prefix>*`. It may
+			// not omit it when the prefix is the "any metric" sentinel, which would
+			// derive the meaningless "no *".
+			if (requirement.kind === "metrics" && prefixes.includes("")) {
+				expect(
+					requirement.missing,
+					`${template.id} uses the "" prefix and must state missing`,
+				).toBeDefined()
+			}
+		}
+	})
+
+	it("derives the public requirements array from the structured requirement", () => {
+		for (const meta of listTemplateMetadata()) {
+			const template = DASHBOARD_TEMPLATES.find((t) => t.id === meta.id)!
+			expect(meta.requirement, meta.id).toEqual(template.requirement ?? null)
+			expect(meta.requirements, meta.id).toEqual(
+				template.requirement ? [template.requirement.label] : [],
+			)
+		}
+	})
+})

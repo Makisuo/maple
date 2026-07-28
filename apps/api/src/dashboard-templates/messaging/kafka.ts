@@ -92,7 +92,13 @@ export const kafkaTemplate: TemplateDefinition = {
 	description: "Messages by topic, consumer lag, brokers, replication, and request latency.",
 	category: "messaging",
 	tags: ["kafka", "messaging"],
-	requirements: ["OpenTelemetry kafkametricsreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry kafkametricsreceiver",
+		collector: "the OpenTelemetry kafkametricsreceiver",
+		setupLabel: "the Kafka receiver",
+		hint: "Point it at your brokers and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["kafka."],
 	parameters: [
 		{

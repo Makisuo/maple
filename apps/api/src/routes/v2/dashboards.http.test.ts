@@ -3,7 +3,7 @@ import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
-import { MapleApiV2 } from "@maple/domain/http/v2"
+import { DashboardTemplatePublicId, MapleApiV2 } from "@maple/domain/http/v2"
 import { Env } from "../../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
 import { ApiKeysService } from "../../services/ApiKeysService"
@@ -192,6 +192,89 @@ describe("v2 dashboards over HTTP", () => {
 			type: "permission_error",
 			code: "insufficient_scope",
 		})
+		await harness.dispose()
+	})
+
+	// The picker asks for every template in one page; `limit` defaulting to 20
+	// silently truncated the catalogue and hid the last two templates.
+	it("returns the whole template catalogue with structured requirements", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:read"])
+
+		const listed = await harness.request("GET", "/v2/dashboards/templates?limit=100", key.secret)
+		expect(listed.status).toBe(200)
+		expect(listed.body.has_more).toBe(false)
+		expect(listed.body.data.length).toBeGreaterThan(20)
+
+		const postgres = listed.body.data.find((t: { name: string }) => t.name === "Postgres Overview")
+		expect(postgres.object).toBe("dashboard_template")
+		expect(postgres.id).toMatch(/^dtpl_/)
+		expect(postgres.required_metric_prefixes).toEqual(["postgresql."])
+		expect(postgres.requirement).toMatchObject({
+			kind: "metrics",
+			collector: "the OpenTelemetry postgresreceiver",
+			setup_label: "the Postgres receiver",
+		})
+		// The prose array stays on the wire, derived from the structured field.
+		expect(postgres.requirements).toEqual([postgres.requirement.label])
+
+		const cloudflare = listed.body.data.find((t: { name: string }) => t.name === "Cloudflare Edge")
+		expect(cloudflare.requirement).toMatchObject({ kind: "integration", missing: "not connected" })
+
+		const blank = listed.body.data.find((t: { name: string }) => t.name === "Blank Dashboard")
+		expect(blank.requirement).toBeNull()
+		expect(blank.requirements).toEqual([])
+
+		await harness.dispose()
+	})
+
+	it("previews a template's widgets without creating a dashboard", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:read"])
+
+		const listed = await harness.request("GET", "/v2/dashboards/templates?limit=100", key.secret)
+		const postgres = listed.body.data.find((t: { name: string }) => t.name === "Postgres Overview")
+
+		const preview = await harness.request(
+			"POST",
+			`/v2/dashboards/templates/${postgres.id}/preview`,
+			key.secret,
+			{},
+		)
+		expect(preview.status).toBe(200)
+		expect(preview.body.object).toBe("dashboard_template_preview")
+		expect(preview.body.time_range).toEqual({ type: "relative", value: "1h" })
+		// One real widget per preview-metadata entry, carrying the data source the
+		// browser needs to evaluate it.
+		expect(preview.body.widgets.length).toBe(postgres.preview.length)
+		expect(preview.body.widgets[0].data_source.endpoint.length).toBeGreaterThan(0)
+		expect("timeRange" in preview.body).toBe(false)
+
+		// Nothing was persisted.
+		const dashboards = await harness.request("GET", "/v2/dashboards", key.secret)
+		expect(dashboards.body.data).toEqual([])
+
+		// Parameters scope the build.
+		const scoped = await harness.request(
+			"POST",
+			`/v2/dashboards/templates/${postgres.id}/preview`,
+			key.secret,
+			{ parameters: { service_name: "postgres-primary" } },
+		)
+		expect(scoped.status).toBe(200)
+		expect(JSON.stringify(scoped.body.widgets)).toContain("postgres-primary")
+
+		// Well-formed public id, no such template.
+		const unknownId = Schema.encodeUnknownSync(DashboardTemplatePublicId)("does-not-exist")
+		const missing = await harness.request(
+			"POST",
+			`/v2/dashboards/templates/${unknownId}/preview`,
+			key.secret,
+			{},
+		)
+		expect(missing.status).toBe(404)
+		expect(missing.body.error.code).toBe("dashboard_template_not_found")
+
 		await harness.dispose()
 	})
 })

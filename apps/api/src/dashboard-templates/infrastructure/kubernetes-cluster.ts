@@ -80,7 +80,13 @@ export const kubernetesClusterTemplate: TemplateDefinition = {
 	description: "Node readiness, pod phase distribution, and deployment availability.",
 	category: "infrastructure",
 	tags: ["kubernetes", "k8s"],
-	requirements: ["OpenTelemetry k8sclusterreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry k8sclusterreceiver",
+		collector: "the OpenTelemetry k8sclusterreceiver",
+		setupLabel: "the k8scluster receiver",
+		hint: "Run it against your cluster's API server and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["k8s."],
 	parameters: [
 		{

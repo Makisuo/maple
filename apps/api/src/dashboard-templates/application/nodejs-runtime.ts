@@ -86,7 +86,13 @@ export const nodejsRuntimeTemplate: TemplateDefinition = {
 	description: "Event loop lag, heap usage, GC, and active handles for Node.js services.",
 	category: "application",
 	tags: ["nodejs", "runtime"],
-	requirements: ["OpenTelemetry Node.js instrumentation"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry Node.js instrumentation",
+		collector: "the OpenTelemetry Node.js SDK",
+		setupLabel: "the Node.js SDK",
+		hint: "Enable its runtime metrics and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["process.runtime.nodejs."],
 	parameters: [
 		{

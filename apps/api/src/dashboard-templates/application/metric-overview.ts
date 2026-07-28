@@ -118,7 +118,14 @@ export const metricOverviewTemplate: TemplateDefinition = {
 	description: "Current value, time series, and per-service breakdown for any metric.",
 	category: "application",
 	tags: ["metrics"],
-	requirements: ["OpenTelemetry metrics"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry metrics",
+		missing: "no metrics",
+		collector: "any OpenTelemetry metrics exporter",
+		setupLabel: "a metrics exporter",
+		hint: "Send any metric at all and this dashboard fills in on its own.",
+	},
 	// Empty-string prefix matches any metric name — this template is usable
 	// as soon as the org has at least one metric of any kind.
 	requiredMetricPrefixes: [""],
