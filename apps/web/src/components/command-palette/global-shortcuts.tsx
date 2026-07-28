@@ -16,10 +16,19 @@ const KeyboardShortcutsDialog = lazy(() =>
 )
 
 const SHOW_SHORTCUTS_EVENT = "maple:show-keyboard-shortcuts"
+const OPEN_PALETTE_EVENT = "maple:open-command-palette"
 
 /** Open the keyboard-shortcuts help dialog from anywhere (e.g. the sidebar Support menu). */
 export function showKeyboardShortcuts() {
 	document.dispatchEvent(new CustomEvent(SHOW_SHORTCUTS_EVENT))
+}
+
+/**
+ * Open ⌘K from anywhere. The sidebar's search row is the only discoverable
+ * entry point to the palette — without it the shortcut is keyboard-only folklore.
+ */
+export function openCommandPalette() {
+	document.dispatchEvent(new CustomEvent(OPEN_PALETTE_EVENT))
 }
 
 function focusSearch() {
@@ -52,6 +61,7 @@ export function GlobalShortcuts() {
 
 	useMountEffect(() => {
 		const onShow = () => setShortcutsOpen(true)
+		const onOpenPalette = () => setPaletteOpen(true)
 		const onKeyDown = (event: KeyboardEvent) => {
 			const key = event.key.toLowerCase()
 			const mod = event.metaKey || event.ctrlKey
@@ -81,9 +91,11 @@ export function GlobalShortcuts() {
 			}
 		}
 		document.addEventListener(SHOW_SHORTCUTS_EVENT, onShow)
+		document.addEventListener(OPEN_PALETTE_EVENT, onOpenPalette)
 		document.addEventListener("keydown", onKeyDown)
 		return () => {
 			document.removeEventListener(SHOW_SHORTCUTS_EVENT, onShow)
+			document.removeEventListener(OPEN_PALETTE_EVENT, onOpenPalette)
 			document.removeEventListener("keydown", onKeyDown)
 		}
 	})
