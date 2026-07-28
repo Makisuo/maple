@@ -71,6 +71,10 @@ const infrastructureItem: NavItem = {
  * read as one section with four children rather than four top-level rows, using
  * the same reveal-when-active pattern Infrastructure already uses. The parent
  * href follows its first child; the underlying routes are unchanged.
+ *
+ * Every child carries an icon so the closed row can preview what's inside it
+ * (see `NavRow`) — a section named "Explore" says nothing about the four
+ * signals it hides.
  */
 const exploreItem: NavItem = {
 	title: "Explore",

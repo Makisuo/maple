@@ -67,6 +67,14 @@ import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 const RAIL_LANE = "relative before:absolute before:inset-y-0 before:left-0 before:w-0.5"
 const ACTIVE_RAIL = `${RAIL_LANE} data-[active=true]:rounded-l-none data-[active=true]:before:bg-sidebar-primary data-[active=true]:text-sidebar-primary`
 
+/**
+ * The footer gear only earns the rail when collapsed. Expanded it is a 32px
+ * button floating ~180px from the sidebar edge, where a rail is a stray stripe
+ * and the squared-off left corners read as a sheared pill; the accent fill and
+ * primary icon already say "selected" there.
+ */
+const FOOTER_ACTIVE_RAIL = `${RAIL_LANE} group-data-[collapsible=icon]:data-[active=true]:rounded-l-none group-data-[collapsible=icon]:data-[active=true]:before:bg-sidebar-primary data-[active=true]:text-sidebar-primary`
+
 /** Group labels sit below the items they name, not level with them. */
 const GROUP_LABEL = "h-6 text-muted-foreground"
 
@@ -293,6 +301,13 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 	// the current page. The open parent keeps the fill.
 	const isOpen = Boolean(subItems && subItems.length > 0 && isActive)
 
+	// A closed section is a word with its contents hidden behind it: "Explore"
+	// doesn't say traces/logs/metrics/replays. Trailing miniatures of the
+	// children's own glyphs say it without spending four rows. Only drawn when
+	// every child has a mark — a partial run reads as a broken list — and
+	// dropped once the section opens and the real rows are on screen.
+	const preview = !isOpen && subItems?.every((sub) => sub.icon) ? subItems : undefined
+
 	return (
 		<SidebarMenuItem>
 			<SidebarMenuButton
@@ -302,7 +317,12 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 				tooltip={item.title}
 			>
 				<item.icon size={18} />
-				<span>{item.title}</span>
+				<span className="flex-1 truncate">{item.title}</span>
+				{preview ? (
+					<span className="flex shrink-0 items-center gap-1 text-muted-foreground/70 group-data-[collapsible=icon]:hidden">
+						{preview.map((sub) => (sub.icon ? <sub.icon className="size-3" key={sub.title} /> : null))}
+					</span>
+				) : null}
 			</SidebarMenuButton>
 			{item.badge ? (
 				<SidebarMenuBadge>
@@ -488,7 +508,7 @@ function FooterCluster({ currentPath }: { currentPath: string }) {
 					{isClerkAuthEnabled ? <UserMenu /> : <GuestMenu />}
 				</div>
 				<SidebarMenuButton
-					className={`${ACTIVE_RAIL} size-8 w-8 shrink-0 justify-center p-0 group-data-[collapsible=icon]:w-full`}
+					className={`${FOOTER_ACTIVE_RAIL} size-8 w-8 shrink-0 justify-center p-0 group-data-[collapsible=icon]:w-full`}
 					isActive={isPathActive(currentPath, "/settings")}
 					render={<Link to="/settings" />}
 					tooltip="Settings"
