@@ -104,6 +104,27 @@ describe("dashboard template previews", () => {
 		expect(checked, "expected chart widgets to check").toBeGreaterThan(0)
 	})
 
+	// Templates chart whole fleets, so one series with an isolated spike would
+	// trip the sparse-data heuristic and stipple every dense series in the same
+	// chart with permanent point markers. Line/area state the preference so the
+	// heuristic never gets the casting vote.
+	it("turns point markers off on every line and area widget", () => {
+		let checked = 0
+		for (const template of DASHBOARD_TEMPLATES) {
+			for (const widget of template.build({}).widgets) {
+				const chartId = widget.display.chartId
+				if (chartId !== "query-builder-line" && chartId !== "query-builder-area") continue
+
+				expect(
+					widget.display.chartPresentation?.showPoints,
+					`${template.id}/${widget.id} (${chartId}) must state showPoints`,
+				).toBe(false)
+				checked += 1
+			}
+		}
+		expect(checked, "expected line/area widgets to check").toBeGreaterThan(0)
+	})
+
 	it("gives the blank template an empty preview", () => {
 		const blank = DASHBOARD_TEMPLATES.find((t) => t.id === "blank")!
 		expect(buildTemplatePreview(blank)).toEqual([])
