@@ -104,8 +104,92 @@ describe("dashboard template previews", () => {
 		expect(checked, "expected chart widgets to check").toBeGreaterThan(0)
 	})
 
+	// Templates chart whole fleets, so one series with an isolated spike would
+	// trip the sparse-data heuristic and stipple every dense series in the same
+	// chart with permanent point markers. Line/area state the preference so the
+	// heuristic never gets the casting vote.
+	it("turns point markers off on every line and area widget", () => {
+		let checked = 0
+		for (const template of DASHBOARD_TEMPLATES) {
+			for (const widget of template.build({}).widgets) {
+				const chartId = widget.display.chartId
+				if (chartId !== "query-builder-line" && chartId !== "query-builder-area") continue
+
+				expect(
+					widget.display.chartPresentation?.showPoints,
+					`${template.id}/${widget.id} (${chartId}) must state showPoints`,
+				).toBe(false)
+				checked += 1
+			}
+		}
+		expect(checked, "expected line/area widgets to check").toBeGreaterThan(0)
+	})
+
 	it("gives the blank template an empty preview", () => {
 		const blank = DASHBOARD_TEMPLATES.find((t) => t.id === "blank")!
 		expect(buildTemplatePreview(blank)).toEqual([])
+	})
+})
+
+describe("dashboard template requirements", () => {
+	// The picker states the requirement twice: a short `missing` beside the
+	// template name and the `collector` in the detail panel. Both are authored
+	// here rather than recovered from prose by the client, so both have to hold
+	// for every template or a row renders a blank status lane.
+	it("states a requirement on every template but blank", () => {
+		for (const template of DASHBOARD_TEMPLATES) {
+			if (template.id === "blank") {
+				expect(template.requirement, "blank needs nothing").toBeUndefined()
+				continue
+			}
+			expect(template.requirement, template.id).toBeDefined()
+			expect(template.requirement!.label.length, template.id).toBeGreaterThan(0)
+			expect(template.requirement!.collector.length, template.id).toBeGreaterThan(0)
+		}
+	})
+
+	it("pairs each requirement kind with the gate it actually checks", () => {
+		for (const template of DASHBOARD_TEMPLATES) {
+			const requirement = template.requirement
+			if (!requirement) continue
+			const prefixes = template.requiredMetricPrefixes ?? []
+
+			if (requirement.kind === "telemetry") {
+				// Never gated, so it needs no short label and no call to action.
+				expect(prefixes, `${template.id} is telemetry but declares prefixes`).toEqual([])
+				continue
+			}
+
+			// Gated kinds must be reachable: something to check, a short status for
+			// the row, and a noun for the "Set up …" button.
+			expect(
+				prefixes.length,
+				`${template.id} is ${requirement.kind} but has no prefixes`,
+			).toBeGreaterThan(0)
+			expect(requirement.setupLabel, `${template.id} needs a setupLabel`).toBeDefined()
+
+			if (requirement.kind === "integration") {
+				expect(requirement.missing, `${template.id} needs an explicit missing label`).toBeDefined()
+			}
+			// `metrics` may omit `missing`; the picker derives `no <prefix>*`. It may
+			// not omit it when the prefix is the "any metric" sentinel, which would
+			// derive the meaningless "no *".
+			if (requirement.kind === "metrics" && prefixes.includes("")) {
+				expect(
+					requirement.missing,
+					`${template.id} uses the "" prefix and must state missing`,
+				).toBeDefined()
+			}
+		}
+	})
+
+	it("derives the public requirements array from the structured requirement", () => {
+		for (const meta of listTemplateMetadata()) {
+			const template = DASHBOARD_TEMPLATES.find((t) => t.id === meta.id)!
+			expect(meta.requirement, meta.id).toEqual(template.requirement ?? null)
+			expect(meta.requirements, meta.id).toEqual(
+				template.requirement ? [template.requirement.label] : [],
+			)
+		}
 	})
 })

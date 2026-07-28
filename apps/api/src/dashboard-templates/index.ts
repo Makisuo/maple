@@ -103,7 +103,10 @@ export function listTemplateMetadata(): TemplateMetadata[] {
 		description: t.description,
 		category: t.category,
 		tags: t.tags,
-		requirements: t.requirements,
+		// `requirements` is the long-standing public prose field; it is now
+		// derived so the structured `requirement` stays the single source.
+		requirements: t.requirement ? [t.requirement.label] : [],
+		requirement: t.requirement ?? null,
 		requiredMetricPrefixes: t.requiredMetricPrefixes ?? [],
 		parameters: t.parameters,
 		preview: TEMPLATE_PREVIEWS.get(t.id) ?? [],
@@ -115,5 +118,6 @@ export type {
 	TemplateMetadata,
 	TemplateParameterValues,
 	TemplatePreviewWidget,
+	TemplateRequirement,
 	WidgetDef,
 } from "./types"

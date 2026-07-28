@@ -118,7 +118,11 @@ export const platformOverviewTemplate: TemplateDefinition = {
 	description: "Cross-service health: throughput, error rates, service table, and recent errors.",
 	category: "application",
 	tags: ["platform", "overview"],
-	requirements: ["OpenTelemetry tracing"],
+	requirement: {
+		kind: "telemetry",
+		label: "OpenTelemetry tracing",
+		collector: "your OpenTelemetry tracing instrumentation",
+	},
 	parameters: [],
 	build: () =>
 		buildPortableDashboard({

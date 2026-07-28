@@ -83,7 +83,13 @@ export const kubernetesPodTemplate: TemplateDefinition = {
 	description: "Per-pod CPU, memory, container restarts, and network I/O.",
 	category: "infrastructure",
 	tags: ["kubernetes", "k8s", "pods"],
-	requirements: ["OpenTelemetry kubeletstatsreceiver", "OpenTelemetry k8sclusterreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry kubeletstatsreceiver and k8sclusterreceiver",
+		collector: "the OpenTelemetry kubeletstats and k8scluster receivers",
+		setupLabel: "the kubeletstats receiver",
+		hint: "Run both against your cluster and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["k8s.pod."],
 	parameters: [
 		{

@@ -97,7 +97,13 @@ export const mongodbTemplate: TemplateDefinition = {
 	description: "Operations by type, connections, document ops, cache hits, and replica lag.",
 	category: "database",
 	tags: ["mongodb", "database"],
-	requirements: ["OpenTelemetry mongodbreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry mongodbreceiver",
+		collector: "the OpenTelemetry mongodbreceiver",
+		setupLabel: "the MongoDB receiver",
+		hint: "Point it at your MongoDB deployments and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["mongodb."],
 	parameters: [
 		{

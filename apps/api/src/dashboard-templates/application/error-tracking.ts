@@ -77,7 +77,11 @@ export const errorTrackingTemplate: TemplateDefinition = {
 	description: "Error rate trends, error types breakdown, and recent error traces.",
 	category: "application",
 	tags: ["errors"],
-	requirements: ["OpenTelemetry tracing"],
+	requirement: {
+		kind: "telemetry",
+		label: "OpenTelemetry tracing",
+		collector: "your OpenTelemetry tracing instrumentation",
+	},
 	parameters: [
 		{
 			key: paramKey("service_name"),

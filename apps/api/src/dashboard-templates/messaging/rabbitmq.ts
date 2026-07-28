@@ -97,7 +97,13 @@ export const rabbitmqTemplate: TemplateDefinition = {
 	description: "Queue depth, publish/deliver rates, consumers, and unacknowledged messages.",
 	category: "messaging",
 	tags: ["rabbitmq", "messaging"],
-	requirements: ["OpenTelemetry rabbitmqreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry rabbitmqreceiver",
+		collector: "the OpenTelemetry rabbitmqreceiver",
+		setupLabel: "the RabbitMQ receiver",
+		hint: "Point it at your RabbitMQ nodes and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["rabbitmq."],
 	parameters: [
 		{

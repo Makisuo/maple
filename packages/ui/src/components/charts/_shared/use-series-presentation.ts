@@ -78,7 +78,10 @@ export function useTimeseriesSeriesPresentation({
 	)
 
 	const sparse = React.useMemo(() => isSparseSeries(data, valueKeys), [data, valueKeys])
-	const renderDots = showPoints || sparse
+	// An explicit preference wins in both directions; the sparse heuristic only
+	// decides when the caller has no opinion. `||` meant a caller that had
+	// deliberately turned dots off still got them back on sparse data.
+	const renderDots = showPoints ?? sparse
 
 	const integerOnlyData = React.useMemo(() => hasOnlyIntegerValues(data, valueKeys), [data, valueKeys])
 

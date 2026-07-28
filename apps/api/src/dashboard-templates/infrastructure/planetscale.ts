@@ -151,7 +151,14 @@ export const planetscaleTemplate: TemplateDefinition = {
 		"Database health from the PlanetScale integration — active connections, pod CPU/memory utilization, replication lag, and per-branch breakdowns from the scraped branch metrics.",
 	category: "infrastructure",
 	tags: ["planetscale", "database", "mysql", "postgres"],
-	requirements: ["PlanetScale integration connected (or a planetscale scrape target)"],
+	requirement: {
+		kind: "integration",
+		label: "PlanetScale integration connected (or a planetscale scrape target)",
+		missing: "not connected",
+		collector: "the PlanetScale integration, or a planetscale scrape target",
+		setupLabel: "the PlanetScale integration",
+		hint: "Connect it and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["planetscale_"],
 	parameters: [
 		{

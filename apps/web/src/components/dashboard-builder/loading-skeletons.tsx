@@ -145,45 +145,6 @@ export function DashboardListSkeleton() {
 	)
 }
 
-function GhostTemplateCard({ index }: { index: number }) {
-	return (
-		<div
-			className="flex flex-col overflow-hidden rounded-md ring-1 ring-border bg-card animate-tile-in motion-reduce:animate-none"
-			style={tileDelay(index)}
-		>
-			<div className="h-28 w-full border-b border-border bg-sidebar/60" />
-			<div className="flex flex-col gap-2 p-4">
-				<div className="flex items-center gap-2">
-					<Skeleton className="size-4 rounded-full" />
-					<Skeleton className={`h-4 ${LIST_TITLE_WIDTHS[index % LIST_TITLE_WIDTHS.length]}`} />
-				</div>
-				<Skeleton className="h-3 w-full" />
-				<Skeleton className="h-3 w-3/4" />
-			</div>
-		</div>
-	)
-}
-
-/** Sectioned card-grid ghost for `/dashboards/templates`. */
-export function TemplateGridSkeleton() {
-	return (
-		<StatusRegion label="Loading templates">
-			<div className="flex flex-col gap-8" aria-hidden>
-				{[0, 1].map((section) => (
-					<section key={section} className="flex flex-col gap-3">
-						<Skeleton className="h-3 w-20" />
-						<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-							{[0, 1, 2].map((i) => (
-								<GhostTemplateCard key={i} index={section * 3 + i} />
-							))}
-						</div>
-					</section>
-				))}
-			</div>
-		</StatusRegion>
-	)
-}
-
 /** Preview pane + form-field ghost for the widget configure route. */
 export function WidgetEditorSkeleton() {
 	return (

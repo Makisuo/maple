@@ -117,7 +117,13 @@ export const hostMetricsTemplate: TemplateDefinition = {
 	description: "CPU, memory, disk I/O, network, load average, and filesystem usage per host.",
 	category: "infrastructure",
 	tags: ["host", "infra"],
-	requirements: ["OpenTelemetry hostmetricsreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry hostmetricsreceiver",
+		collector: "the OpenTelemetry hostmetricsreceiver",
+		setupLabel: "the host metrics receiver",
+		hint: "Run it on each host and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["system."],
 	parameters: [
 		{

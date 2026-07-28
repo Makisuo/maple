@@ -103,16 +103,21 @@ export function makeQueryBuilderBreakdownDataSource(queries: Record<string, unkn
 // breakdowns read for shape and composition, where per-series stats under a
 // cumulative plot duplicate the tooltip at best and mislead at worst (`Last` of a
 // bucketed rate is the partial trailing bucket) — those get the compact legend.
+// `showPoints` is likewise stated rather than defaulted. Templates chart whole
+// fleets, so a single series with an isolated spike would otherwise trip the
+// sparse-data heuristic and stipple every dense series in the same chart with
+// point markers. Hovering still gives the active dot, and a reader who wants
+// permanent points can turn them back on per widget.
 export const CHART_DISPLAY_AREA = {
 	chartId: "query-builder-area",
-	chartPresentation: { legend: "visible", seriesStats: false },
+	chartPresentation: { legend: "visible", seriesStats: false, showPoints: false },
 	stacked: true,
 	curveType: "monotone",
 }
 
 export const CHART_DISPLAY_LINE = {
 	chartId: "query-builder-line",
-	chartPresentation: { legend: "visible", seriesStats: true },
+	chartPresentation: { legend: "visible", seriesStats: true, showPoints: false },
 	stacked: false,
 	curveType: "monotone",
 }

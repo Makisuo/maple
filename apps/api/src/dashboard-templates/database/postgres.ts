@@ -113,7 +113,13 @@ export const postgresTemplate: TemplateDefinition = {
 	description: "Connections, commits, block I/O, DB size, deadlocks, and replication lag.",
 	category: "database",
 	tags: ["postgres", "database"],
-	requirements: ["OpenTelemetry postgresreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry postgresreceiver",
+		collector: "the OpenTelemetry postgresreceiver",
+		setupLabel: "the Postgres receiver",
+		hint: "Point it at your Postgres instances and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["postgresql."],
 	parameters: [
 		{

@@ -91,7 +91,13 @@ export const natsTemplate: TemplateDefinition = {
 	description: "Connections, in/out message rates, slow consumers, and subscriptions.",
 	category: "messaging",
 	tags: ["nats", "messaging"],
-	requirements: ["NATS Prometheus exporter via prometheusreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "NATS Prometheus exporter via prometheusreceiver",
+		collector: "the NATS Prometheus exporter, scraped by prometheusreceiver",
+		setupLabel: "the NATS exporter",
+		hint: "Scrape it with prometheusreceiver and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["nats."],
 	parameters: [
 		{

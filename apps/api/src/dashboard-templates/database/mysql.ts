@@ -110,7 +110,13 @@ export const mysqlTemplate: TemplateDefinition = {
 	description: "Queries by command, threads, buffer pool, slow queries, locks, and replica lag.",
 	category: "database",
 	tags: ["mysql", "database"],
-	requirements: ["OpenTelemetry mysqlreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry mysqlreceiver",
+		collector: "the OpenTelemetry mysqlreceiver",
+		setupLabel: "the MySQL receiver",
+		hint: "Point it at your MySQL instances and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["mysql."],
 	parameters: [
 		{

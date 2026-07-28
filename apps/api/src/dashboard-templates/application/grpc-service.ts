@@ -113,7 +113,11 @@ export const grpcServiceTemplate: TemplateDefinition = {
 	description: "RPS by status, error rate, P50/P95 latency, and top methods for gRPC services.",
 	category: "application",
 	tags: ["grpc", "rpc"],
-	requirements: ["OpenTelemetry gRPC instrumentation"],
+	requirement: {
+		kind: "telemetry",
+		label: "OpenTelemetry gRPC instrumentation",
+		collector: "your OpenTelemetry gRPC instrumentation",
+	},
 	parameters: [
 		{
 			key: paramKey("service_name"),

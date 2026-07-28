@@ -510,6 +510,34 @@ export class DashboardTemplatePreviewWidget extends Schema.Class<DashboardTempla
 	title: Schema.String,
 }) {}
 
+export const DashboardTemplateRequirementKind = Schema.Literals(["metrics", "integration", "telemetry"])
+export type DashboardTemplateRequirementKind = typeof DashboardTemplateRequirementKind.Type
+
+/**
+ * What an org needs before a template's widgets have anything to draw. The
+ * picker states it twice at different lengths — `missing` next to the template
+ * name, `collector` in the detail panel — so neither has to be recovered from
+ * prose by the client.
+ */
+export const DashboardTemplateRequirement = Schema.Struct({
+	kind: DashboardTemplateRequirementKind,
+	/** Full prose; the same string the `requirements` array carries. */
+	label: Schema.String,
+	/**
+	 * Row-sized statement of what's missing ("not connected"). Absent for
+	 * `metrics`, where clients derive `no <prefix>*` from
+	 * `requiredMetricPrefixes`.
+	 */
+	missing: Schema.optionalKey(Schema.String),
+	/** Noun phrase read as "Collected by {collector}." */
+	collector: Schema.String,
+	/** Noun phrase read as "Set up {setupLabel}". Absent for `telemetry`. */
+	setupLabel: Schema.optionalKey(Schema.String),
+	/** One extra sentence shown when the template is gated. */
+	hint: Schema.optionalKey(Schema.String),
+})
+export type DashboardTemplateRequirement = typeof DashboardTemplateRequirement.Type
+
 export class DashboardTemplateMetadata extends Schema.Class<DashboardTemplateMetadata>(
 	"DashboardTemplateMetadata",
 )({
@@ -518,7 +546,10 @@ export class DashboardTemplateMetadata extends Schema.Class<DashboardTemplateMet
 	description: Schema.String,
 	category: DashboardTemplateCategory,
 	tags: Schema.Array(Schema.String),
+	/** Derived from `requirement.label`. Empty for the blank template. */
 	requirements: Schema.Array(Schema.String),
+	/** Null only for the blank template, which needs nothing. */
+	requirement: Schema.NullOr(DashboardTemplateRequirement),
 	/**
 	 * Metric-name prefixes the template's widgets query; the picker greys out
 	 * templates whose prefixes match none of the org's metrics. Empty array =

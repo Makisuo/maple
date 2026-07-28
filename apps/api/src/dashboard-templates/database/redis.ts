@@ -108,7 +108,13 @@ export const redisTemplate: TemplateDefinition = {
 	description: "Commands/sec, memory, keyspace hits/misses, connected clients, and evictions.",
 	category: "database",
 	tags: ["redis", "cache"],
-	requirements: ["OpenTelemetry redisreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry redisreceiver",
+		collector: "the OpenTelemetry redisreceiver",
+		setupLabel: "the Redis receiver",
+		hint: "Point it at your Redis instances and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["redis."],
 	parameters: [
 		{

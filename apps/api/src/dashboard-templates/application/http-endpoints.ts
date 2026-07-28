@@ -100,7 +100,11 @@ export const httpEndpointsTemplate: TemplateDefinition = {
 	description: "Top endpoints by throughput, slowest endpoints, and error rate by endpoint.",
 	category: "application",
 	tags: ["http", "endpoints"],
-	requirements: ["OpenTelemetry HTTP instrumentation"],
+	requirement: {
+		kind: "telemetry",
+		label: "OpenTelemetry HTTP instrumentation",
+		collector: "your OpenTelemetry HTTP instrumentation",
+	},
 	parameters: [
 		{
 			key: paramKey("service_name"),

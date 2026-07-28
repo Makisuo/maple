@@ -124,7 +124,11 @@ export const serviceHealthTemplate: TemplateDefinition = {
 	description: "Throughput, error rate, and P50/P95 latency for one or all services.",
 	category: "application",
 	tags: ["service-health"],
-	requirements: ["OpenTelemetry tracing"],
+	requirement: {
+		kind: "telemetry",
+		label: "OpenTelemetry tracing",
+		collector: "your OpenTelemetry tracing instrumentation",
+	},
 	parameters: [
 		{
 			key: paramKey("service_name"),
