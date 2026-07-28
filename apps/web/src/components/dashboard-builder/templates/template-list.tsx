@@ -6,7 +6,13 @@ import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-gro
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { cn } from "@maple/ui/utils"
-import { ArrowRightIcon, MagnifierIcon, PlusIcon } from "@/components/icons"
+import {
+	ArrowRightIcon,
+	CircleCheckIcon,
+	CircleWarningIcon,
+	MagnifierIcon,
+	PlusIcon,
+} from "@/components/icons"
 import { templateIcon } from "./template-icons"
 import {
 	BLANK_TEMPLATE_ID,
@@ -114,9 +120,11 @@ function SectionHeader({
 				bordered && "mt-2 border-t border-border pt-6",
 			)}
 		>
-			<span className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
+			{/* A real heading so the two groups are navigable, and so "Needs setup"
+			    here is distinguishable from the filter button of the same name. */}
+			<h3 className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
 				{title}
-			</span>
+			</h3>
 			<span className={cn("font-mono text-[11px]", accent ? "text-primary" : "text-muted-foreground")}>
 				{count}
 			</span>
@@ -172,6 +180,10 @@ export function TemplateList({
 
 	const searching = query.trim().length > 0
 	const nothingMatched = !loading && matched === 0
+	// `matched` counts search hits before the readiness filter, so a filter that
+	// excludes every one of them empties both sections while `nothingMatched`
+	// stays false. Without its own state that renders as a blank scroll region.
+	const filterHidEverything = !loading && matched > 0 && ready.length + needsSetup.length === 0
 
 	return (
 		<div className="flex min-h-0 flex-col overflow-hidden">
@@ -226,6 +238,35 @@ export function TemplateList({
 						</EmptyHeader>
 						<Button variant="outline" size="sm" onClick={() => onQueryChange(undefined)}>
 							Clear search
+						</Button>
+					</Empty>
+				) : filterHidEverything ? (
+					<Empty className="py-14">
+						<EmptyHeader>
+							<EmptyMedia variant="icon">
+								{filter === "ready" ? (
+									<CircleWarningIcon size={17} />
+								) : (
+									<CircleCheckIcon size={17} />
+								)}
+							</EmptyMedia>
+							<EmptyTitle>
+								{filter === "ready"
+									? "None of these are ready yet"
+									: "These are all ready to use"}
+							</EmptyTitle>
+							<EmptyDescription>
+								{matched === 1 ? "The one template" : `All ${matched} templates`}{" "}
+								{searching ? "matching your search" : "here"}{" "}
+								{filter === "ready"
+									? matched === 1
+										? "still needs setup."
+										: "still need setup."
+									: "can already draw your data."}
+							</EmptyDescription>
+						</EmptyHeader>
+						<Button variant="outline" size="sm" onClick={() => onFilterChange("all")}>
+							Show all templates
 						</Button>
 					</Empty>
 				) : (
