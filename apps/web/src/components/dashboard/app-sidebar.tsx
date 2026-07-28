@@ -65,7 +65,7 @@ import { useInfraEnabled } from "@/hooks/use-infra-enabled"
  * distinguishes "selected" from "hovered", which otherwise share a fill.
  */
 const RAIL_LANE = "relative before:absolute before:inset-y-0 before:left-0 before:w-0.5"
-const ACTIVE_RAIL = `${RAIL_LANE} data-[active=true]:rounded-l-none data-[active=true]:before:bg-sidebar-primary`
+const ACTIVE_RAIL = `${RAIL_LANE} data-[active=true]:rounded-l-none data-[active=true]:before:bg-sidebar-primary data-[active=true]:text-sidebar-primary`
 
 /** Group labels sit below the items they name, not level with them. */
 const GROUP_LABEL = "h-6 text-muted-foreground"
@@ -312,11 +312,21 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 				</SidebarMenuBadge>
 			) : null}
 			{subItems && isActive ? (
-				<SidebarMenuSub>
+				// The guide line *is* the rail: each child owns a 2px segment of it,
+				// so the selected one lights the track itself instead of parking a
+				// second amber bar a few pixels beside it.
+				<SidebarMenuSub className="mx-0 ms-4 translate-x-0 gap-0 border-l-0 px-0 py-0">
 					{subItems.map((sub) => (
-						<SidebarMenuSubItem key={sub.title}>
+						<SidebarMenuSubItem
+							className={
+								sub.href === activeSubHref
+									? "border-sidebar-primary border-l-2 ps-2.5"
+									: "border-sidebar-border border-l-2 ps-2.5"
+							}
+							key={sub.title}
+						>
 							<SidebarMenuSubButton
-								className={`${ACTIVE_RAIL} [&>svg]:text-current`}
+								className="translate-x-0 data-[active=true]:text-sidebar-primary [&>svg]:text-current"
 								isActive={sub.href === activeSubHref}
 								render={<Link to={sub.href} />}
 							>
