@@ -1,17 +1,17 @@
 //! OTLP/JSON leniency shim.
 //!
 //! `opentelemetry-proto`'s serde derives are stricter than the OTLP/JSON spec
-//! requires a *receiver* to be, and the gap is not academic: the OTel JS SDK
-//! (and anything else hand-rolling OTLP/JSON) trips it on ordinary payloads.
-//! Two failure modes, both silent from the sender's point of view:
+//! requires a *receiver* to be, and the gap is not academic — an exporter that
+//! stays inside the spec can still be refused wholesale. Two failure modes,
+//! both silent from the sender's point of view:
 //!
 //! * **Logs / traces reject the whole request.** `time_unix_nano` and friends
 //!   deserialize with `deserialize_string_to_u64`, so a JSON *number* is a hard
 //!   error even though the spec says "either numbers or strings are accepted
 //!   when decoding". An empty `AnyValue` (`{}`) — which the proto explicitly
-//!   documents as a valid "empty" value, and which is what JS emits for a log
-//!   with no body or an attribute whose value is `undefined` — errors with
-//!   "no known keys found".
+//!   documents as a valid "empty" value, and which is the natural encoding for
+//!   a log with no body or an attribute with no value — errors with "no known
+//!   keys found".
 //! * **Metrics silently drop the data.** `Metric.data` is a `#[serde(flatten)]`
 //!   oneof, so the same errors resolve to `None` instead of failing: the request
 //!   is accepted, billed, and forwarded with zero data points.

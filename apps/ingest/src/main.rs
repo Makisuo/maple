@@ -4875,11 +4875,12 @@ mod tests {
         decode_and_enrich_payload(signal, PayloadFormat::Json, payload.as_bytes(), &test_key())
     }
 
-    /// The shape the OTel JS SDK emits over `http/json`: nanosecond timestamps as
-    /// JSON numbers, and `{}` for a log with no body or an attribute whose value
-    /// is `undefined`. Rejecting these 400'd effectively all of one org's logs.
+    /// Spec-legal encodings the generated types refuse: nanosecond timestamps as
+    /// JSON numbers, `{}` for a log with no body or an attribute with no value,
+    /// and `null` for an absent id. Rejecting these 400'd effectively all of one
+    /// org's logs.
     #[test]
-    fn js_sdk_log_payload_is_accepted() {
+    fn lenient_log_payload_is_accepted() {
         let decoded = decode_json(
             Signal::Logs,
             r#"{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"api"}}]},"scopeLogs":[{"scope":{"name":"app"},"logRecords":[{"timeUnixNano":1753660000000000000,"observedTimeUnixNano":1753660000000000000,"severityNumber":9,"severityText":"INFO","body":{},"attributes":[{"key":"empty","value":{}},{"key":"kept","value":{"stringValue":"v"}}],"traceId":null}]}]}]}"#,
