@@ -76,6 +76,9 @@ export const SLACK_BOT_SCOPES = [
 	"im:history",
 	"im:read",
 	"im:write",
+	// Instant "received" ack: the agent reacts :eyes: to messages it will
+	// work on (apps/slack-agent agent/lib/ack-reaction.ts).
+	"reactions:write",
 	"users:read",
 ].join(",")
 

@@ -1,5 +1,6 @@
 import { slackChannel } from "eve/channels/slack"
 import type { SlackWebhookVerifier } from "eve/channels/slack"
+import { acknowledgeIncomingMessage } from "#lib/ack-reaction.js"
 import { resolveBotToken, verifySlackV0Signature, type SlackTokenContext } from "#lib/maple.js"
 import { promoteThreadFollowUp } from "#lib/thread-follow-up.js"
 import { forwardUninstallEvent } from "#lib/uninstall-detection.js"
@@ -42,6 +43,14 @@ const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
 	// never throws (see forwardUninstallEvent).
 	void forwardUninstallEvent(body)
 
+	// Instant "received" ack: react with :eyes: on any message eve will
+	// dispatch as an agent turn (mentions + DMs), before the turn is even
+	// scheduled. Fired without awaiting — never delays the webhook ack.
+	// Slack redelivery retries skip it (`already_reacted` is also tolerated
+	// downstream, this just avoids the pointless call).
+	const isSlackRetry = request.headers.get("x-slack-retry-num") !== null
+	if (!isSlackRetry) void acknowledgeIncomingMessage(body)
+
 	// eve parses whatever body we return, which is also our hook for thread
 	// follow-ups: eve only dispatches app_mention + DM events, so an un-mentioned
 	// reply in a thread the bot is engaged in gets its `event.type` promoted to
@@ -49,7 +58,13 @@ const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
 	// through verified-but-unchanged.
 	try {
 		const promoted = await promoteThreadFollowUp(body)
-		if (promoted !== null) return promoted
+		if (promoted !== null) {
+			// A promoted follow-up is agent work too, but its raw body (a plain
+			// channel `message`) doesn't qualify above — ack it now that we know
+			// the bot is engaged.
+			if (!isSlackRetry) void acknowledgeIncomingMessage(promoted)
+			return promoted
+		}
 	} catch (error) {
 		console.warn(
 			"[slack-webhook] Thread follow-up promotion failed; passing the event through unchanged.",
