@@ -1,0 +1,414 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, setSystemTime, test } from "bun:test"
+import { createHmac } from "node:crypto"
+
+// maple.ts reads its env vars lazily (inside functions), but set dummies up
+// front anyway so no test can accidentally depend on the developer's shell or
+// .env.local values.
+process.env.MAPLE_API_BASE_URL = "https://maple-api.test"
+process.env.MAPLE_INTERNAL_SERVICE_TOKEN = "test-service-token"
+delete process.env.SLACK_BOT_TOKEN
+
+import { installFetchStub } from "./fetch-stub.js"
+import {
+	notifyMapleRevocation,
+	resetWorkspaceCacheForTests,
+	resolveBotToken,
+	resolveWorkspace,
+	verifySlackV0Signature,
+	workspaceCacheSizeForTests,
+} from "./maple.js"
+
+// ── verifySlackV0Signature ──────────────────────────────────────────────────
+
+const SIGNING_SECRET = "8f742231b10e8888abcd99yyyzzz85a5"
+
+function sign(body: string, timestamp: string, secret = SIGNING_SECRET): string {
+	return "v0=" + createHmac("sha256", secret).update(`v0:${timestamp}:${body}`).digest("hex")
+}
+
+function slackHeaders(signature: string | null, timestamp: string | null): Headers {
+	const headers = new Headers()
+	if (signature !== null) headers.set("x-slack-signature", signature)
+	if (timestamp !== null) headers.set("x-slack-request-timestamp", timestamp)
+	return headers
+}
+
+describe("verifySlackV0Signature", () => {
+	afterEach(() => {
+		setSystemTime() // restore real clock
+	})
+
+	test("accepts a valid signature", () => {
+		const body = JSON.stringify({ type: "event_callback", team_id: "T123" })
+		const ts = String(Math.floor(Date.now() / 1000))
+		expect(verifySlackV0Signature(body, slackHeaders(sign(body, ts), ts), SIGNING_SECRET)).toBe(true)
+	})
+
+	test("rejects a wrong signature (tampered body)", () => {
+		const body = JSON.stringify({ type: "event_callback", team_id: "T123" })
+		const ts = String(Math.floor(Date.now() / 1000))
+		const signatureForOtherBody = sign(`${body} `, ts)
+		expect(verifySlackV0Signature(body, slackHeaders(signatureForOtherBody, ts), SIGNING_SECRET)).toBe(
+			false,
+		)
+	})
+
+	test("rejects a signature made with a different secret", () => {
+		const body = "payload"
+		const ts = String(Math.floor(Date.now() / 1000))
+		expect(
+			verifySlackV0Signature(body, slackHeaders(sign(body, ts, "another-secret"), ts), SIGNING_SECRET),
+		).toBe(false)
+	})
+
+	test("rejects a timestamp outside the 5-minute skew window", () => {
+		const body = "payload"
+		const staleTs = String(Math.floor(Date.now() / 1000) - (5 * 60 + 1))
+		expect(verifySlackV0Signature(body, slackHeaders(sign(body, staleTs), staleTs), SIGNING_SECRET)).toBe(
+			false,
+		)
+	})
+
+	test("accepts a timestamp just inside the skew window", () => {
+		const body = "payload"
+		const ts = String(Math.floor(Date.now() / 1000) - (5 * 60 - 5))
+		expect(verifySlackV0Signature(body, slackHeaders(sign(body, ts), ts), SIGNING_SECRET)).toBe(true)
+	})
+
+	test("rejects when the signature header is missing", () => {
+		const body = "payload"
+		const ts = String(Math.floor(Date.now() / 1000))
+		expect(verifySlackV0Signature(body, slackHeaders(null, ts), SIGNING_SECRET)).toBe(false)
+	})
+
+	test("rejects when the timestamp header is missing", () => {
+		const body = "payload"
+		const sig = sign(body, "12345")
+		expect(verifySlackV0Signature(body, slackHeaders(sig, null), SIGNING_SECRET)).toBe(false)
+	})
+
+	test("rejects a non-numeric timestamp", () => {
+		const body = "payload"
+		const ts = "not-a-number"
+		expect(verifySlackV0Signature(body, slackHeaders(sign(body, ts), ts), SIGNING_SECRET)).toBe(false)
+	})
+})
+
+// ── resolveWorkspace: TTL cache + in-flight de-dupe ─────────────────────────
+
+const WORKSPACE_PAYLOAD = {
+	orgId: "org_1",
+	teamId: "T1",
+	teamName: "Acme",
+	botToken: "xoxb-test",
+	mapleApiKey: "maple_ak_test",
+}
+
+const realFetch = globalThis.fetch
+
+describe("resolveWorkspace", () => {
+	const T0 = new Date("2026-07-21T12:00:00Z")
+
+	beforeAll(() => {
+		process.env.MAPLE_API_BASE_URL = "https://maple-api.test"
+		process.env.MAPLE_INTERNAL_SERVICE_TOKEN = "test-service-token"
+	})
+
+	beforeEach(() => {
+		resetWorkspaceCacheForTests()
+		setSystemTime(T0)
+	})
+
+	afterEach(() => {
+		globalThis.fetch = realFetch
+		setSystemTime()
+	})
+
+	test("resolves and caches a positive result for ~5 minutes", async () => {
+		const stub = installFetchStub(() => Response.json(WORKSPACE_PAYLOAD))
+
+		const first = await resolveWorkspace("T1")
+		expect(first).toEqual(WORKSPACE_PAYLOAD)
+		expect(stub.calls.length).toBe(1)
+		expect(stub.calls[0]?.url).toBe("https://maple-api.test/internal/slack/workspaces/T1")
+		expect(stub.calls[0]?.headers.authorization).toBe("Bearer maple_svc_test-service-token")
+
+		// Still cached just before the 5-minute TTL.
+		setSystemTime(new Date(T0.getTime() + 5 * 60_000 - 1000))
+		expect(await resolveWorkspace("T1")).toEqual(WORKSPACE_PAYLOAD)
+		expect(stub.calls.length).toBe(1)
+
+		// Expired after the TTL → refetches.
+		setSystemTime(new Date(T0.getTime() + 5 * 60_000 + 1000))
+		expect(await resolveWorkspace("T1")).toEqual(WORKSPACE_PAYLOAD)
+		expect(stub.calls.length).toBe(2)
+	})
+
+	test("caches a negative (404) result for ~30 seconds", async () => {
+		const stub = installFetchStub(() => new Response(null, { status: 404 }))
+
+		expect(await resolveWorkspace("T404")).toBeNull()
+		expect(stub.calls.length).toBe(1)
+
+		// Still cached just before the 30-second negative TTL.
+		setSystemTime(new Date(T0.getTime() + 29_000))
+		expect(await resolveWorkspace("T404")).toBeNull()
+		expect(stub.calls.length).toBe(1)
+
+		// Expired → refetches, picking up a fresh install quickly.
+		setSystemTime(new Date(T0.getTime() + 31_000))
+		stub.respond = () => Response.json(WORKSPACE_PAYLOAD)
+		expect(await resolveWorkspace("T404")).toEqual({
+			...WORKSPACE_PAYLOAD,
+			teamId: "T1",
+		})
+		expect(stub.calls.length).toBe(2)
+	})
+
+	test("negative TTL is shorter than positive TTL", async () => {
+		const stub = installFetchStub(() => new Response(null, { status: 404 }))
+		await resolveWorkspace("T404")
+
+		// At +1 minute a positive entry would still be cached; the negative one
+		// must already be gone.
+		setSystemTime(new Date(T0.getTime() + 60_000))
+		await resolveWorkspace("T404")
+		expect(stub.calls.length).toBe(2)
+	})
+
+	test("does not cache 5xx errors as 'not installed'", async () => {
+		const stub = installFetchStub(() => new Response(null, { status: 503 }))
+
+		await expect(resolveWorkspace("T1")).rejects.toThrow(/HTTP 503/)
+
+		// Next call retries immediately instead of serving a cached failure.
+		stub.respond = () => Response.json(WORKSPACE_PAYLOAD)
+		expect(await resolveWorkspace("T1")).toEqual(WORKSPACE_PAYLOAD)
+		expect(stub.calls.length).toBe(2)
+	})
+
+	test("de-dupes concurrent resolves for the same team into one fetch", async () => {
+		let release!: (response: Response) => void
+		const gate = new Promise<Response>((resolve) => {
+			release = resolve
+		})
+		const stub = installFetchStub(() => gate)
+
+		const a = resolveWorkspace("T1")
+		const b = resolveWorkspace("T1")
+		// Both calls issued while the first fetch is still in flight.
+		expect(stub.calls.length).toBe(1)
+
+		release(Response.json(WORKSPACE_PAYLOAD))
+		const [resultA, resultB] = await Promise.all([a, b])
+		expect(resultA).toEqual(WORKSPACE_PAYLOAD)
+		expect(resultB).toEqual(WORKSPACE_PAYLOAD)
+		expect(stub.calls.length).toBe(1)
+
+		// After settling, the in-flight entry is cleared and the cache serves.
+		expect(await resolveWorkspace("T1")).toEqual(WORKSPACE_PAYLOAD)
+		expect(stub.calls.length).toBe(1)
+	})
+
+	test("does not de-dupe across different teams", async () => {
+		const stub = installFetchStub((url) =>
+			Response.json({ ...WORKSPACE_PAYLOAD, teamId: url.split("/").at(-1) }),
+		)
+
+		const [a, b] = await Promise.all([resolveWorkspace("T1"), resolveWorkspace("T2")])
+		expect(stub.calls.length).toBe(2)
+		expect(a?.teamId).toBe("T1")
+		expect(b?.teamId).toBe("T2")
+	})
+
+	// Each entry holds a decrypted bot token and a full-access Maple API key, so
+	// an expired entry has to leave memory — including for a workspace that
+	// uninstalled and will never be resolved again.
+	test("drops expired entries instead of retaining them per team forever", async () => {
+		installFetchStub((url) => Response.json({ ...WORKSPACE_PAYLOAD, teamId: url.split("/").at(-1) }))
+
+		await resolveWorkspace("T_GONE")
+		expect(workspaceCacheSizeForTests()).toBe(1)
+
+		// T_GONE never resolves again; another workspace's traffic sweeps it.
+		setSystemTime(new Date(T0.getTime() + 6 * 60_000))
+		await resolveWorkspace("T_OTHER")
+		expect(workspaceCacheSizeForTests()).toBe(1)
+	})
+
+	test("rejects incomplete resolve payloads", async () => {
+		installFetchStub(() => Response.json({ orgId: "org_1" }))
+		await expect(resolveWorkspace("T1")).rejects.toThrow(/incomplete payload/)
+	})
+
+	// Truthiness alone would let a wrongly-typed field flow into
+	// `Bearer ${...}` headers as "[object Object]" and fail far from here.
+	test("rejects payloads whose fields are not strings", async () => {
+		installFetchStub(() =>
+			Response.json({
+				...WORKSPACE_PAYLOAD,
+				botToken: { ciphertext: "xoxb-wrapped" },
+			}),
+		)
+		await expect(resolveWorkspace("T1")).rejects.toThrow(/incomplete payload/)
+
+		resetWorkspaceCacheForTests()
+		installFetchStub(() => Response.json({ ...WORKSPACE_PAYLOAD, orgId: 42 }))
+		await expect(resolveWorkspace("T1")).rejects.toThrow(/incomplete payload/)
+	})
+
+	test("non-string teamName/teamId fall back instead of poisoning the entry", async () => {
+		installFetchStub(() => Response.json({ ...WORKSPACE_PAYLOAD, teamId: 7, teamName: { x: 1 } }))
+		expect(await resolveWorkspace("T1")).toEqual({ ...WORKSPACE_PAYLOAD, teamId: "T1", teamName: null })
+	})
+})
+
+// ── notifyMapleRevocation: forwards app_uninstalled/tokens_revoked ─────────
+
+describe("notifyMapleRevocation", () => {
+	beforeEach(() => {
+		resetWorkspaceCacheForTests()
+	})
+
+	afterEach(() => {
+		globalThis.fetch = realFetch
+	})
+
+	test("POSTs the reason to the revoke endpoint with the internal bearer", async () => {
+		const stub = installFetchStub(() => new Response(null, { status: 200 }))
+
+		await notifyMapleRevocation("T1", "app_uninstalled")
+
+		expect(stub.calls.length).toBe(1)
+		expect(stub.calls[0]?.method).toBe("POST")
+		expect(stub.calls[0]?.url).toBe("https://maple-api.test/internal/slack/workspaces/T1/revoke")
+		expect(stub.calls[0]?.headers.authorization).toBe("Bearer maple_svc_test-service-token")
+		expect(JSON.parse(String(stub.calls[0]?.body))).toEqual({ reason: "app_uninstalled" })
+	})
+
+	test("evicts the cached resolveWorkspace entry for the team", async () => {
+		const resolveStub = installFetchStub(() => Response.json(WORKSPACE_PAYLOAD))
+		await resolveWorkspace("T1")
+		expect(workspaceCacheSizeForTests()).toBe(1)
+		expect(resolveStub.calls.length).toBe(1)
+
+		resolveStub.respond = () => new Response(null, { status: 200 })
+		await notifyMapleRevocation("T1", "tokens_revoked")
+		expect(workspaceCacheSizeForTests()).toBe(0)
+
+		// A subsequent resolve is a cache miss — it refetches instead of serving
+		// the now-stale positive entry.
+		resolveStub.respond = (url) =>
+			url.endsWith("/revoke") ? new Response(null, { status: 200 }) : Response.json(WORKSPACE_PAYLOAD)
+		await resolveWorkspace("T1")
+		expect(resolveStub.calls.length).toBe(3)
+	})
+
+	test("throws on a non-ok response", async () => {
+		installFetchStub(() => new Response(null, { status: 503 }))
+		await expect(notifyMapleRevocation("T1", "app_uninstalled")).rejects.toThrow(/HTTP 503/)
+	})
+})
+
+// ── resolveBotToken: patched credential context → env fallback ──────────────
+
+describe("resolveBotToken", () => {
+	beforeEach(() => {
+		resetWorkspaceCacheForTests()
+		delete process.env.SLACK_BOT_TOKEN
+		delete process.env.RAILWAY_ENVIRONMENT_NAME
+		delete process.env.SLACK_ALLOW_ENV_BOT_TOKEN
+		process.env.NODE_ENV = "test"
+	})
+
+	afterEach(() => {
+		globalThis.fetch = realFetch
+		delete process.env.SLACK_BOT_TOKEN
+		delete process.env.RAILWAY_ENVIRONMENT_NAME
+		delete process.env.SLACK_ALLOW_ENV_BOT_TOKEN
+		process.env.NODE_ENV = "test"
+	})
+
+	test("resolves via the context teamId", async () => {
+		const stub = installFetchStub(() =>
+			Response.json({ ...WORKSPACE_PAYLOAD, teamId: "T_CTX", botToken: "xoxb-ctx" }),
+		)
+
+		expect(await resolveBotToken({ teamId: "T_CTX" })).toBe("xoxb-ctx")
+		expect(stub.calls[0]?.url).toBe("https://maple-api.test/internal/slack/workspaces/T_CTX")
+	})
+
+	test("resolves per team even when SLACK_BOT_TOKEN is set", async () => {
+		installFetchStub(() => Response.json({ ...WORKSPACE_PAYLOAD, teamId: "T_CTX", botToken: "xoxb-ctx" }))
+
+		process.env.SLACK_BOT_TOKEN = "xoxb-env"
+		expect(await resolveBotToken({ teamId: "T_CTX" })).toBe("xoxb-ctx")
+	})
+
+	test("falls back to SLACK_BOT_TOKEN when called without context", async () => {
+		const stub = installFetchStub(() => Response.json(WORKSPACE_PAYLOAD))
+
+		process.env.SLACK_BOT_TOKEN = "xoxb-env"
+		expect(await resolveBotToken()).toBe("xoxb-env")
+		expect(stub.calls.length).toBe(0)
+	})
+
+	test("throws when called without context and no env fallback exists", async () => {
+		installFetchStub(() => Response.json(WORKSPACE_PAYLOAD))
+
+		await expect(resolveBotToken()).rejects.toThrow(/No current Slack team context/)
+	})
+
+	test("falls back to SLACK_BOT_TOKEN when the team is not installed", async () => {
+		installFetchStub(() => new Response(null, { status: 404 }))
+
+		process.env.SLACK_BOT_TOKEN = "xoxb-env"
+		expect(await resolveBotToken({ teamId: "T_UNINSTALLED" })).toBe("xoxb-env")
+	})
+
+	test("throws when the team is unlinked and no env fallback exists", async () => {
+		installFetchStub(() => new Response(null, { status: 404 }))
+
+		await expect(resolveBotToken({ teamId: "T_UNINSTALLED" })).rejects.toThrow(/not linked/)
+	})
+
+	// ── the cross-workspace credential gate ───────────────────────────────────
+	// The Slack app is publicly distributed: any workspace can install it. In a
+	// deployed environment an unlinked team must NOT borrow whatever single
+	// token sits in the env — that is another tenant's credential.
+
+	test("refuses the env fallback for an unlinked team when deployed (Railway)", async () => {
+		installFetchStub(() => new Response(null, { status: 404 }))
+		process.env.RAILWAY_ENVIRONMENT_NAME = "production"
+		process.env.SLACK_BOT_TOKEN = "xoxb-other-workspace"
+
+		await expect(resolveBotToken({ teamId: "T_UNINSTALLED" })).rejects.toThrow(
+			/ignored in a deployed environment/,
+		)
+	})
+
+	test("refuses the env fallback for a context-less call when deployed (NODE_ENV)", async () => {
+		installFetchStub(() => Response.json(WORKSPACE_PAYLOAD))
+		process.env.NODE_ENV = "production"
+		process.env.SLACK_BOT_TOKEN = "xoxb-other-workspace"
+
+		await expect(resolveBotToken()).rejects.toThrow(/ignored in a deployed environment/)
+	})
+
+	test("SLACK_ALLOW_ENV_BOT_TOKEN=true re-enables it for a private single-workspace install", async () => {
+		installFetchStub(() => new Response(null, { status: 404 }))
+		process.env.RAILWAY_ENVIRONMENT_NAME = "production"
+		process.env.SLACK_ALLOW_ENV_BOT_TOKEN = "true"
+		process.env.SLACK_BOT_TOKEN = "xoxb-single-workspace"
+
+		expect(await resolveBotToken({ teamId: "T_UNINSTALLED" })).toBe("xoxb-single-workspace")
+	})
+
+	test("a linked team is unaffected by the deployed gate", async () => {
+		installFetchStub(() => Response.json({ ...WORKSPACE_PAYLOAD, teamId: "T_CTX", botToken: "xoxb-ctx" }))
+		process.env.RAILWAY_ENVIRONMENT_NAME = "production"
+		process.env.SLACK_BOT_TOKEN = "xoxb-other-workspace"
+
+		expect(await resolveBotToken({ teamId: "T_CTX" })).toBe("xoxb-ctx")
+	})
+})

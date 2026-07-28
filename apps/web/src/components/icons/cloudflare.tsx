@@ -1,7 +1,24 @@
 import type { IconProps } from "./icon"
 
-// Source: simple-icons (MIT) — https://simpleicons.org/icons/cloudflare
-function CloudflareIcon({ size = 24, className, ...props }: IconProps) {
+interface CloudflareIconProps extends IconProps {
+	/**
+	 * Render the mark in `currentColor` instead of the brand orange — for surfaces
+	 * that own the color (a dimmed backer glyph behind the colored center plate).
+	 * The `fill` attribute wins over inherited color, so tinting the full-color
+	 * mark via `className`/`color` does nothing; this is the only monochrome path.
+	 */
+	monochrome?: boolean
+}
+
+/**
+ * The Cloudflare mark. Rendered in brand orange by default (the convention for
+ * brand marks here — see `slack.tsx`, `clickhouse.tsx`), which means the fill is
+ * fixed and `className`/`color` cannot tint it. Pass `monochrome` when the glyph
+ * has to inherit its surface's text color.
+ *
+ * Source: simple-icons (MIT) — https://simpleicons.org/icons/cloudflare
+ */
+function CloudflareIcon({ size = 24, className, monochrome = false, ...props }: CloudflareIconProps) {
 	return (
 		<svg
 			xmlns="http://www.w3.org/2000/svg"
@@ -9,7 +26,7 @@ function CloudflareIcon({ size = 24, className, ...props }: IconProps) {
 			width={size}
 			height={size}
 			className={className}
-			fill="#F38020"
+			fill={monochrome ? "currentColor" : "#F38020"}
 			aria-hidden="true"
 			{...props}
 		>
@@ -18,4 +35,13 @@ function CloudflareIcon({ size = 24, className, ...props }: IconProps) {
 	)
 }
 
-export { CloudflareIcon }
+/**
+ * Monochrome Cloudflare mark as a plain icon component — for the
+ * `ComponentType<{ size, className }>` slots (catalog entries, icon plates) that
+ * can't pass the `monochrome` prop themselves.
+ */
+function CloudflareMonoIcon({ size = 24, className, ...props }: IconProps) {
+	return <CloudflareIcon size={size} className={className} monochrome {...props} />
+}
+
+export { CloudflareIcon, CloudflareMonoIcon }

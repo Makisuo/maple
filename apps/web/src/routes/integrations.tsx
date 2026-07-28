@@ -1,5 +1,7 @@
+import { useEffect } from "react"
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
+import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import {
@@ -9,6 +11,7 @@ import {
 import { GithubIntegrationCard } from "@/components/integrations/github-integration-card"
 import { HazelIntegrationCard } from "@/components/integrations/hazel-integration-card"
 import { PlanetScaleIntegrationCard } from "@/components/integrations/planetscale-integration-card"
+import { SlackIntegrationCard } from "@/components/integrations/slack-integration-card"
 import {
 	IntegrationCatalog,
 	IntegrationIconPlate,
@@ -37,7 +40,62 @@ import { ArrowLeftIcon, CircleInfoIcon, ExternalLinkIcon, LoaderIcon } from "@/c
 // never fail `validateSearch` and blank the page.
 const IntegrationsSearch = Schema.Struct({
 	integration: Schema.optional(Schema.String),
+	// Post-OAuth return params set by the Slack install callback redirect. Plain
+	// strings for the same reason as `integration` — a truncated, retried, or
+	// hand-edited callback URL must degrade to the catalog, not the error boundary.
+	slack: Schema.optional(Schema.String),
+	slack_message: Schema.optional(Schema.String),
+	slack_team: Schema.optional(Schema.String),
 })
+
+/**
+ * Slack's documented OAuth `error` codes, plus the messages our own callback
+ * emits, mapped to curated copy. Everything reaching the toast is an untrusted
+ * URL param — rendering a backend/attacker-authored string verbatim inside an
+ * authenticated page is a phishing surface — so unknown values fall back to a
+ * generic line rather than being echoed.
+ */
+// A Map, not an object literal: the key is attacker-controlled, and a plain
+// object would happily resolve `toString` / `constructor` off the prototype.
+const SLACK_ERROR_COPY = new Map<string, string>([
+	["access_denied", "Slack install cancelled — the app wasn't authorized."],
+	["invalid_scope", "Slack rejected the requested permissions. Try installing again."],
+	[
+		"invalid_team_for_non_distributed_app",
+		"That Slack workspace can't install this app. Ask a workspace admin for access.",
+	],
+	["invalid_browser", "Slack couldn't complete the install in this browser. Try again from Slack."],
+	["invalid_client_id", "Slack rejected Maple's app credentials. Contact support."],
+	["bad_client_secret", "Slack rejected Maple's app credentials. Contact support."],
+	["oauth_authorization_url_mismatch", "The Slack install link expired. Start the install again."],
+	// Messages our own callback emits (exact literals from
+	// `apps/api/src/routes/slack-integration.http.ts` + SlackIntegrationService).
+	[
+		"This Slack workspace is already connected to a different Maple organization. Uninstall it there first.",
+		"That Slack workspace is already connected to a different Maple organization. Uninstall it there first.",
+	],
+	[
+		"Slack state expired — restart the install flow",
+		"The Slack install link expired. Start the install again.",
+	],
+	[
+		"Slack state not recognized — restart the install flow",
+		"The Slack install link is no longer valid. Start the install again.",
+	],
+	["Missing code or state in callback", "Slack's callback was incomplete. Start the install again."],
+	["Malformed callback URL", "Slack's callback was incomplete. Start the install again."],
+])
+
+const GENERIC_SLACK_ERROR = "Slack connection failed. Try installing again."
+
+/** Longest attacker-controlled string we'll surface (workspace names in a toast). */
+const MAX_UNTRUSTED_LABEL = 64
+
+const clampLabel = (value: string): string =>
+	value.length > MAX_UNTRUSTED_LABEL ? `${value.slice(0, MAX_UNTRUSTED_LABEL - 1)}…` : value
+
+const slackErrorMessage = (raw: string | undefined): string =>
+	(raw ? SLACK_ERROR_COPY.get(raw.trim()) : undefined) ?? GENERIC_SLACK_ERROR
 
 export const Route = createFileRoute("/integrations")({
 	component: IntegrationsPage,
@@ -50,6 +108,26 @@ function IntegrationsPage() {
 	const { visibleSections } = useVisibleSettingsSections()
 	const integration =
 		search.integration && isIntegrationId(search.integration) ? search.integration : undefined
+
+	// Surface the Slack OAuth callback result once, then strip the return params
+	// from the URL so a refresh doesn't re-toast. Narrowed here rather than in
+	// `validateSearch` — an unrecognised value is simply not a callback return.
+	const slackReturn = search.slack === "connected" || search.slack === "error" ? search.slack : undefined
+	const slackMessage = search.slack_message
+	const slackTeam = search.slack_team
+	useEffect(() => {
+		if (!slackReturn) return
+		// Keyed toast: StrictMode double-invokes effects, and the navigate below can
+		// re-run the effect before the params are stripped — the id dedupes both.
+		if (slackReturn === "connected") {
+			toast.success(slackTeam ? `Slack connected to ${clampLabel(slackTeam)}` : "Slack connected", {
+				id: "slack-oauth",
+			})
+		} else {
+			toast.error(slackErrorMessage(slackMessage), { id: "slack-oauth" })
+		}
+		navigate({ search: { integration: "slack" }, replace: true })
+	}, [slackReturn, slackMessage, slackTeam, navigate])
 
 	// The hub shares the settings shell: same sidebar, "Integrations" highlighted.
 	const settingsSidebar = (
@@ -137,6 +215,8 @@ function IntegrationsPage() {
 									<GithubIntegrationCard />
 								) : integration === "planetscale" ? (
 									<PlanetScaleIntegrationCard />
+								) : integration === "slack" ? (
+									<SlackIntegrationCard />
 								) : (
 									// prometheus + warpstream share the generic scrape-target flow
 									<ScrapeTargetsSection sourceFilter="prometheus" />

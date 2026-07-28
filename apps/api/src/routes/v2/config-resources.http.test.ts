@@ -24,6 +24,7 @@ import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	Phase1ResourceStubsLayer,
+	SlackIntegrationServiceStubLayer,
 	SetupAuditServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
@@ -104,6 +105,7 @@ const makeHarness = () => {
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(Phase1ResourceStubsLayer),
 		Layer.provide(SetupAuditServiceStubLayer),

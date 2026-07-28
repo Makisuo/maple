@@ -24,9 +24,10 @@
 	],
 	// Cron schedules — handler: worker.ts `scheduled`, dispatched on `event.cron`.
 	// "0 */12 * * *" = VCS sync backstop; "0 * * * *" = scrape_target_checks
-	// retention. (Mirrored in alchemy.run.ts for deploy.)
+	// retention; "0 */6 * * *" = Slack workspace reconciliation (backstop for
+	// SlackEventsRouter). (Mirrored in alchemy.run.ts for deploy.)
 	"triggers": {
-		"crons": ["0 */12 * * *", "0 * * * *"],
+		"crons": ["0 */12 * * *", "0 * * * *", "0 */6 * * *"],
 	},
 	// Local dev: wrangler connects the binding straight to localConnectionString
 	// (the docker-compose Postgres; see `bun run db:up` + `bun run db:migrate:local`).

@@ -8,6 +8,7 @@ import { OrganizationService } from "../../services/OrganizationService"
 import { OrgIngestKeysService } from "../../services/OrgIngestKeysService"
 import { RecommendationIssueService } from "../../services/RecommendationIssueService"
 import { ScrapeTargetsService } from "../../services/ScrapeTargetsService"
+import { SlackIntegrationService } from "../../services/SlackIntegrationService"
 import { SetupAuditService } from "../../services/SetupAuditService"
 import { ApiV2RateLimiter } from "../../services/ApiV2RateLimiter"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
@@ -19,6 +20,7 @@ import { HttpV2ApiKeysLive } from "./api-keys.http"
 import { HttpV2AttributeMappingsLive } from "./attribute-mappings.http"
 import { HttpV2DashboardsLive } from "./dashboards.http"
 import { HttpV2IngestKeysLive } from "./ingest-keys.http"
+import { HttpV2SlackIntegrationsLive } from "./integrations.http"
 import { HttpV2ErrorIssuesLive } from "./error-issues.http"
 import { HttpV2AnomaliesLive } from "./anomalies.http"
 import { HttpV2InvestigationsLive } from "./investigations.http"
@@ -44,6 +46,7 @@ import {
 
 export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2ApiKeysLive,
+	HttpV2SlackIntegrationsLive,
 	HttpV2DashboardsLive,
 	HttpV2AlertRulesLive,
 	HttpV2AlertDestinationsLive,
@@ -69,7 +72,7 @@ export const ApiV2RateLimiterAllowAllLayer = Layer.succeed(ApiV2RateLimiter, {
 	check: () => Effect.succeed("allowed" as const),
 })
 
-const die = () => Effect.die(new Error("AlertsService is not available in this test harness"))
+const die = () => Effect.die(new Error("This service is not available in this test harness"))
 
 /** Synchronous stub for non-Effect-returning service methods (e.g. `asExecutor`). */
 const dieSync = (): never => {
@@ -200,6 +203,21 @@ export const ConfigResourceServiceStubsLayer = Layer.mergeAll(
 	}),
 	Phase1ResourceStubsLayer,
 	WarehouseServiceStubLayer,
+)
+
+/** Inert SlackIntegrationService for harnesses that never touch the slack integration group. */
+export const SlackIntegrationServiceStubLayer = Layer.succeed(
+	SlackIntegrationService,
+	SlackIntegrationService.of({
+		startInstall: die,
+		completeInstall: die,
+		getStatus: die,
+		uninstall: die,
+		listChannels: die,
+		resolveForBot: die,
+		revokeByTeamId: die,
+		reconcileWorkspaces: die,
+	}),
 )
 
 /** Inert AlertsService for harnesses that never touch the alert groups. */

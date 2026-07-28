@@ -29,6 +29,7 @@ import {
 	orgClickHouseSettings,
 	orgIngestKeys,
 	scrapeTargets,
+	slackWorkspaces,
 	vcsCommits,
 	vcsInstallations,
 	vcsRepositories,
@@ -68,6 +69,10 @@ const ORG_SCOPED_TABLES = [
 	scrapeTargets,
 	oauthConnections,
 	oauthAuthStates,
+	// Holds an encrypted Slack bot token and the id of a full-access API key —
+	// there is no `orgs` table to cascade from, so this purge is what stops a
+	// deleted org's live credentials outliving it.
+	slackWorkspaces,
 	digestSubscriptions,
 	cloudflareLogpushConnectors,
 	errorIssueEvents,

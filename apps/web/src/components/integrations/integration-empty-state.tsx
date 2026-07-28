@@ -6,13 +6,23 @@ import { motion, useReducedMotion } from "motion/react"
 import { cn } from "@maple/ui/lib/utils"
 import { IntegrationIconPlate } from "./integration-catalog"
 
+type IntegrationGlyph = React.ComponentType<{ size?: number; className?: string }>
+
 /**
  * Brand identity shared by every part of the empty state — provided once by
  * `IntegrationEmpty` so `IntegrationEmptyMedia` (and anything else that renders
  * the provider mark) never needs it re-passed.
  */
 interface IntegrationEmptyContextValue {
-	icon: React.ComponentType<{ size?: number; className?: string }>
+	icon: IntegrationGlyph
+	/**
+	 * Glyph for the two dimmed backer plates — defaults to `icon`. Multicolor marks
+	 * hard-code their path fills, so the backers' `text-muted-foreground/70` can't
+	 * reach them and all three plates render equally loud, flattening the depth
+	 * hierarchy. Pass the mark's monochrome variant (e.g. `SlackMonoIcon`) so the
+	 * backers recede and the center plate keeps the brand color to itself.
+	 */
+	backerIcon?: IntegrationGlyph
 	accent: string
 	/** Set for monochrome marks (GitHub) — glyph tints via className, wash goes neutral. */
 	iconClassName?: string
@@ -33,7 +43,7 @@ function useIntegrationEmptyContext(caller: string): IntegrationEmptyContextValu
  * not-connected / no-items view:
  *
  * ```tsx
- * <IntegrationEmpty icon={CloudflareIcon} accent={CLOUDFLARE_ACCENT}>
+ * <IntegrationEmpty icon={CloudflareIcon} backerIcon={CloudflareMonoIcon} accent={CLOUDFLARE_ACCENT}>
  *   <IntegrationEmptyFeatures>
  *     <IntegrationEmptyFeature label="Zone analytics" title="…" description="…" />
  *   </IntegrationEmptyFeatures>
@@ -45,9 +55,14 @@ function useIntegrationEmptyContext(caller: string): IntegrationEmptyContextValu
  *   </IntegrationEmptyCard>
  * </IntegrationEmpty>
  * ```
+ *
+ * Marks whose fills are hard-coded per path (Slack) additionally pass
+ * `backerIcon={SlackMonoIcon}` so the dim backer plates don't render at full brand
+ * saturation next to the colored center plate.
  */
 export function IntegrationEmpty({
 	icon,
+	backerIcon,
 	accent,
 	iconClassName,
 	className,
@@ -57,7 +72,7 @@ export function IntegrationEmpty({
 	children: React.ReactNode
 }) {
 	return (
-		<IntegrationEmptyContext value={{ icon, accent, iconClassName }}>
+		<IntegrationEmptyContext value={{ icon, backerIcon, accent, iconClassName }}>
 			<div className={cn("flex flex-col gap-4", className)}>{children}</div>
 		</IntegrationEmptyContext>
 	)
@@ -137,20 +152,28 @@ export function IntegrationEmptyCard({
 /**
  * The fanned brand mark: two muted provider glyphs tilted behind a larger
  * brand-washed center plate, bottom-aligned like a hand of cards. Reads
- * icon/accent from `IntegrationEmpty`.
+ * icon/backerIcon/accent from `IntegrationEmpty`.
  */
 export function IntegrationEmptyMedia() {
-	const { icon: Icon, accent, iconClassName } = useIntegrationEmptyContext("IntegrationEmptyMedia")
+	const {
+		icon: Icon,
+		// Multicolor marks pass a monochrome twin here so the backers can actually dim;
+		// everything else reuses the same glyph, which is what `text-muted-foreground/70`
+		// already tints.
+		backerIcon: BackerIcon = Icon,
+		accent,
+		iconClassName,
+	} = useIntegrationEmptyContext("IntegrationEmptyMedia")
 	// Slightly smaller, dimmer, and lower than the center plate — depth, not clutter.
 	const backer =
 		"absolute bottom-0.5 flex size-11 items-center justify-center rounded-[10px] border border-border/60 bg-muted text-muted-foreground/70 opacity-80"
 	return (
 		<div aria-hidden className="relative mb-1 flex h-16 shrink-0 items-end justify-center">
 			<span className={cn(backer, "origin-bottom -translate-x-8 -rotate-10")}>
-				<Icon size={20} />
+				<BackerIcon size={20} />
 			</span>
 			<span className={cn(backer, "origin-bottom translate-x-8 rotate-10")}>
-				<Icon size={20} />
+				<BackerIcon size={20} />
 			</span>
 			<IntegrationIconPlate
 				icon={Icon}
