@@ -2,7 +2,8 @@ import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/time-format"
 import { useCallback, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { GlobeIcon, ClockIcon, PulseIcon, CircleWarningIcon, EyeIcon } from "@/components/icons"
+import { cn } from "@maple/ui/utils"
+import { EyeIcon } from "@/components/icons"
 import { browserIconFor, deviceIconFor } from "./session-icons"
 import { formatSessionDuration, gradientFor, hostFromUrl } from "./replay-format"
 
@@ -51,6 +52,9 @@ interface SessionsListProps {
 	loadingMore?: boolean
 	/** The client retention guard stopped pagination before the backend ended. */
 	isCapped?: boolean
+	/** p95 session duration (ms) from the facets query — sessions above it get a
+	 *  "long" chip beside their duration. No chip when unavailable. */
+	durationP95?: number
 }
 
 function SessionsSentinel({
@@ -83,6 +87,7 @@ export function SessionsList({
 	hasMore = false,
 	loadingMore = false,
 	isCapped = false,
+	durationP95,
 }: SessionsListProps) {
 	const navigate = useNavigate()
 	const [listElement, setListElement] = useState<HTMLDivElement | null>(null)
@@ -90,7 +95,7 @@ export function SessionsList({
 	const virtualizer = useVirtualizer({
 		count: sessions.length,
 		getScrollElement: () => scrollElement,
-		estimateSize: () => 78,
+		estimateSize: () => 65,
 		overscan: 8,
 		scrollMargin: listElement?.offsetTop ?? 0,
 	})
@@ -129,6 +134,8 @@ export function SessionsList({
 					const session = sessions[virtualRow.index]!
 					const id = identity(session)
 					const isActive = session.status === "active"
+					const isUnrecorded = session.recorded === "false"
+					const hasErrors = session.errorCount > 0
 					const BrowserIcon = browserIconFor(session.browserName)
 					const DeviceIcon = deviceIconFor(session.deviceType)
 					return (
@@ -136,7 +143,7 @@ export function SessionsList({
 							key={session.sessionId}
 							data-index={virtualRow.index}
 							ref={virtualizer.measureElement}
-							className="absolute top-0 left-0 w-full pb-2"
+							className="absolute top-0 left-0 w-full"
 							style={{
 								transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
 							}}
@@ -150,26 +157,39 @@ export function SessionsList({
 										search: { t: session.startTime },
 									})
 								}
-								className="group flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3.5 py-3 text-left transition-all hover:-translate-y-px hover:border-primary/40 hover:bg-accent/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @2xl:gap-4 @2xl:px-4"
+								className="group relative flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring @2xl:gap-4"
 							>
+								{/* Errored sessions get a left accent so they can be picked out
+								    while scanning — the strongest "watch this one first" signal. */}
+								{hasErrors && (
+									<span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-destructive" />
+								)}
+
 								<div
-									className={`grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br ${id.gradient} text-sm font-semibold text-white shadow-sm @2xl:size-10`}
+									className={cn(
+										"grid size-8 shrink-0 place-items-center rounded-full text-xs font-semibold",
+										isUnrecorded
+											? "bg-muted text-muted-foreground"
+											: `bg-gradient-to-br ${id.gradient} text-white shadow-sm`,
+									)}
 								>
 									{id.initial}
 								</div>
 
-								<div className="min-w-0 flex-1">
+								{/* Identity lane */}
+								<div className="min-w-0 flex-1 overflow-hidden">
 									<div className="flex items-center gap-2">
-										<span className="min-w-0 truncate text-sm font-medium @2xl:max-w-[16rem]">
+										<span
+											className={cn(
+												"min-w-0 truncate text-sm font-medium",
+												isUnrecorded && "text-muted-foreground",
+											)}
+										>
 											{id.label}
 										</span>
-										<StatusDot active={isActive} />
-										<span className="hidden shrink-0 font-mono text-xs text-muted-foreground @2xl:inline">
-											{session.sessionId.slice(0, 8)} ·{" "}
-											{formatSessionDuration(session.durationMs)}
-										</span>
-										{/* On phones the right-hand columns are gone, so the timestamp
-								    anchors the top-right corner of the stacked row. */}
+										{isActive && <LivePill />}
+										{/* On phones the right-hand lanes are gone, so the timestamp
+										    anchors the top-right corner of the stacked row. */}
 										<span
 											className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground @2xl:hidden"
 											title={absoluteTs(session.startTime)}
@@ -177,78 +197,80 @@ export function SessionsList({
 											{formatRelativeTimeOrDate(session.startTime)}
 										</span>
 									</div>
-									<div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
-										<span className="shrink-0 font-mono @2xl:hidden">
-											{session.sessionId.slice(0, 8)} ·{" "}
-											{formatSessionDuration(session.durationMs)}
-										</span>
-										<span className="flex min-w-0 items-center gap-1.5">
-											<GlobeIcon className="size-3.5 shrink-0 opacity-60" />
-											<span className="min-w-0 truncate @2xl:max-w-[18rem]">
-												{hostFromUrl(session.urlInitial)}
-											</span>
-										</span>
-										<span className="hidden items-center gap-1.5 @2xl:flex">
-											<BrowserIcon className="size-3.5 shrink-0" />
-											<span className="truncate">
-												{session.browserName || "Unknown"}
-												{session.osName ? ` · ${session.osName}` : ""}
-											</span>
-										</span>
-										<span
-											className="hidden shrink-0 @2xl:block"
-											title={session.deviceType || "desktop"}
-										>
-											<DeviceIcon className="size-3.5 opacity-60" />
-										</span>
-										{session.country && (
-											<span className="hidden truncate @3xl:inline">
-												{session.country}
-											</span>
-										)}
+									<div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+										{session.sessionId.slice(0, 8)} · {hostFromUrl(session.urlInitial)}
 									</div>
-									{(session.traceCount > 0 ||
-										session.errorCount > 0 ||
-										// Without this the "No recording" flag would vanish on narrow
-										// columns for a session that has no traces and no errors —
-										// exactly the sessions most likely to be unrecorded.
-										session.recorded === "false") && (
-										<div className="mt-1.5 flex items-center gap-2 @2xl:hidden">
+									{(session.traceCount > 0 || hasErrors || isUnrecorded) && (
+										<div className="mt-1.5 flex items-center gap-1.5 @2xl:hidden">
 											<SessionBadges session={session} />
 										</div>
 									)}
 								</div>
 
-								<div className="hidden shrink-0 items-center gap-2.5 text-xs text-muted-foreground @2xl:flex">
-									{/* Click/page-view counts are low-signal — drop them on phones and
-							    keep the load-bearing trace/error badges. */}
-									<span className="flex items-center gap-2.5">
-										<Stat
-											icon={<PulseIcon className="size-3.5" />}
-											value={session.clickCount}
-											title="clicks"
-										/>
-										<Stat
-											icon={<EyeIcon className="size-3.5" />}
-											value={session.pageViews || 1}
-											title="page views"
-										/>
+								{/* Context lane: browser + device icons (details on hover) + country */}
+								<div className="hidden w-[6.5rem] shrink-0 items-center gap-2.5 @2xl:flex">
+									<span
+										className="shrink-0"
+										title={`${session.browserName || "Unknown"}${session.osName ? ` · ${session.osName}` : ""}`}
+									>
+										<BrowserIcon className="size-4" />
 									</span>
+									<span
+										className="shrink-0 text-muted-foreground"
+										title={session.deviceType || "desktop"}
+									>
+										<DeviceIcon className="size-4 opacity-70" />
+									</span>
+									{session.country && (
+										<span className="truncate text-xs text-muted-foreground">
+											{session.country}
+										</span>
+									)}
+								</div>
+
+								{/* Activity lane: duration (flagged when unusually long) + pages/clicks */}
+								<div className="hidden w-[13.5rem] shrink-0 items-baseline gap-2 overflow-hidden whitespace-nowrap @3xl:flex">
+									<span className="font-mono text-[13px] font-semibold tabular-nums">
+										{formatSessionDuration(session.durationMs)}
+									</span>
+									{durationP95 != null &&
+										durationP95 > 0 &&
+										session.durationMs != null &&
+										session.durationMs > durationP95 && (
+											<span
+												className="shrink-0 self-center rounded-full bg-accent px-1.5 py-px text-[10px] font-medium text-accent-foreground"
+												title={`Longer than 95% of sessions in this view (p95: ${formatSessionDuration(durationP95)})`}
+											>
+												long
+											</span>
+										)}
+									<span className="truncate text-xs text-muted-foreground">
+										{session.pageViews || 1} page{(session.pageViews || 1) === 1 ? "" : "s"} ·{" "}
+										{session.clickCount} click{session.clickCount === 1 ? "" : "s"}
+									</span>
+								</div>
+
+								{/* Signal lane: error / trace / transcript-only chips */}
+								<div className="hidden w-[8.75rem] shrink-0 items-center gap-1.5 overflow-hidden @2xl:flex">
 									<SessionBadges session={session} />
 								</div>
 
-								<div className="hidden shrink-0 items-center gap-3 @2xl:flex">
+								{/* Time lane */}
+								<div className="hidden shrink-0 items-center gap-2 @2xl:flex">
 									<span
-										className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-muted-foreground"
+										className="whitespace-nowrap text-xs text-muted-foreground"
 										title={absoluteTs(session.startTime)}
 									>
-										<ClockIcon className="size-3.5 opacity-60" />
 										{formatRelativeTimeOrDate(session.startTime)}
 									</span>
-									{/* Tap affordance: hover-revealed on desktop. Phones skip it —
-							    the whole card is the tap target and the stacked row needs
-							    every horizontal pixel. */}
-									<span className="grid size-7 place-items-center rounded-full bg-primary/10 text-primary opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
+									<span
+										className={cn(
+											"grid size-6 place-items-center rounded-full border border-border text-foreground transition-opacity",
+											isUnrecorded
+												? "opacity-30"
+												: "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100",
+										)}
+									>
 										<PlayGlyph />
 									</span>
 								</div>
@@ -279,51 +301,44 @@ export function SessionsList({
 function SessionBadges({ session }: { session: SessionRow }) {
 	return (
 		<>
+			{session.errorCount > 0 && (
+				<span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-destructive">
+					<span className="size-1 rounded-full bg-destructive" aria-hidden />
+					{session.errorCount} error{session.errorCount === 1 ? "" : "s"}
+				</span>
+			)}
+			{session.traceCount > 0 && (
+				<span className="inline-flex shrink-0 items-center rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-muted-foreground">
+					{session.traceCount} trace{session.traceCount === 1 ? "" : "s"}
+				</span>
+			)}
 			{/* Metadata-only session — no rrweb chunks were ever written, so the
 			    detail page has no player. Flag it here rather than let the row look
 			    like every other (playable) session. */}
 			{session.recorded === "false" && (
-				<span className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-					No recording
-				</span>
-			)}
-			{session.traceCount > 0 && (
-				<span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium tabular-nums text-primary">
-					{session.traceCount} trace{session.traceCount === 1 ? "" : "s"}
-				</span>
-			)}
-			{session.errorCount > 0 && (
-				<span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-medium tabular-nums text-destructive">
-					<CircleWarningIcon className="size-3" />
-					{session.errorCount}
+				<span className="inline-flex shrink-0 items-center rounded-full border border-dashed border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+					Transcript only
 				</span>
 			)}
 		</>
 	)
 }
 
-function StatusDot({ active }: { active: boolean }) {
-	if (!active) return <span className="size-1.5 rounded-full bg-muted-foreground/40" title="ended" />
+function LivePill() {
 	return (
-		<span className="relative flex size-1.5" title="active">
-			<span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
-			<span className="relative inline-flex size-1.5 rounded-full bg-success" />
-		</span>
-	)
-}
-
-function Stat({ icon, value, title }: { icon: React.ReactNode; value: number; title: string }) {
-	return (
-		<span className="inline-flex items-center gap-1 tabular-nums" title={title}>
-			<span className="opacity-60">{icon}</span>
-			{value}
+		<span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/10 px-1.5 py-px text-[10px] font-medium tracking-wide text-success">
+			<span className="relative flex size-1.5" aria-hidden>
+				<span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
+				<span className="relative inline-flex size-1.5 rounded-full bg-success" />
+			</span>
+			LIVE
 		</span>
 	)
 }
 
 function PlayGlyph() {
 	return (
-		<svg viewBox="0 0 24 24" className="size-3.5 translate-x-px fill-current" aria-hidden>
+		<svg viewBox="0 0 24 24" className="size-3 translate-x-px fill-current" aria-hidden>
 			<path d="M8 5v14l11-7z" />
 		</svg>
 	)

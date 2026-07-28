@@ -16,12 +16,11 @@ import { formatClock, MARKER_STYLES, type ReplayPartitionWindow } from "./replay
 import {
 	ChevronRightIcon,
 	ChevronDownIcon,
-	MediaPlayIcon,
-	MediaPauseIcon,
-	ArrowPathIcon,
+	CursorIcon,
 	PulseIcon,
 	ExternalLinkIcon,
 } from "@/components/icons"
+import { MarkerLegend } from "./marker-legend"
 
 // ---------------------------------------------------------------------------
 // Replay editor timeline
@@ -108,7 +107,7 @@ export function ReplayEditorTimeline({
 
 	return (
 		<section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-			<TransportRow player={player} />
+			<TimelineHeader />
 			{/* Shared time region. The playhead overlays every track; scrubbing is
 			    driven from the scrub surface spanning the ruler + activity rows. */}
 			<div className="relative">
@@ -131,39 +130,18 @@ export function ReplayEditorTimeline({
 	)
 }
 
-// --- Transport ------------------------------------------------------------
+// --- Header ----------------------------------------------------------------
 
-function TransportRow({ player }: { player: ReplayPlayerContextValue }) {
-	const { isPlaying, finished, displayCurrentMs, displayTotalMs } = player
-	// Slim header: the speed / skip-idle / fullscreen controls live in the player
-	// above. This strip just labels the timeline and mirrors play + clock so the
-	// view is usable on its own while you're scanning traces.
+function TimelineHeader() {
+	// Slim header: the play / scrub / speed controls live in the transport docked
+	// to the player above, so this strip just labels the timeline and carries the
+	// marker legend for the activity dots below.
 	return (
-		<div className="flex items-center gap-3 border-b border-border bg-muted/30 px-3 py-2">
-			<button
-				type="button"
-				onClick={player.togglePlay}
-				aria-label={finished ? "Replay" : isPlaying ? "Pause" : "Play"}
-				className="grid size-7 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-transform hover:scale-105 active:scale-95"
-			>
-				{finished ? (
-					<ArrowPathIcon className="size-3.5" />
-				) : isPlaying ? (
-					<MediaPauseIcon className="size-3.5" />
-				) : (
-					<MediaPlayIcon className="size-3.5 translate-x-px" />
-				)}
-			</button>
-
+		<div className="flex items-center justify-between gap-3 border-b border-border bg-muted/30 px-3 py-2">
 			<span className="font-display text-xs font-semibold uppercase tracking-wide text-muted-foreground">
 				Timeline
 			</span>
-
-			<div className="ml-auto flex shrink-0 items-center gap-1 font-mono text-xs tabular-nums text-muted-foreground">
-				<span className="text-foreground">{formatClock(displayCurrentMs)}</span>
-				<span className="opacity-50">/</span>
-				<span>{formatClock(displayTotalMs)}</span>
-			</div>
+			<MarkerLegend />
 		</div>
 	)
 }
@@ -265,7 +243,7 @@ function ActivityTrack({ player }: { player: ReplayPlayerContextValue }) {
 					"flex shrink-0 items-center gap-1.5 border-r border-border/60 px-3 py-2 text-xs font-medium text-muted-foreground",
 				)}
 			>
-				<PulseIcon className="size-3.5 opacity-70" />
+				<CursorIcon className="size-3.5 opacity-70" />
 				Activity
 			</div>
 			<div className="relative h-9 flex-1">
@@ -432,7 +410,7 @@ function TraceRow({
 				<div
 					className={cn(
 						LANE_GUTTER,
-						"flex shrink-0 items-center gap-0.5 border-r border-border/60 pr-1 pl-1.5 text-xs",
+						"flex shrink-0 items-center gap-1.5 border-r border-border/60 pr-2 pl-2 text-xs",
 					)}
 				>
 					{preview ? (
@@ -461,8 +439,8 @@ function TraceRow({
 						title={`Open trace in new tab · ${summary.rootServiceName} · ${summary.spanCount} spans`}
 						className="group/trace flex min-w-0 flex-1 items-center rounded px-1 py-1.5 text-left transition-colors hover:bg-muted/50"
 					>
-						<span className="min-w-0 flex-1">
-							<span className="flex items-center gap-1 truncate font-medium text-foreground">
+						<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+							<span className="flex items-center gap-1 truncate font-medium leading-tight text-foreground">
 								<HttpSpanLabel
 									spanName={summary.rootSpanName || "trace"}
 									spanAttributes={parseAttributes(summary.rootSpanAttributes)}
@@ -472,7 +450,7 @@ function TraceRow({
 								/>
 								<ExternalLinkIcon className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/trace:opacity-100" />
 							</span>
-							<span className="block truncate font-mono text-[10px] text-muted-foreground">
+							<span className="block truncate font-mono text-[10px] leading-tight text-muted-foreground">
 								{summary.rootServiceName}
 							</span>
 						</span>

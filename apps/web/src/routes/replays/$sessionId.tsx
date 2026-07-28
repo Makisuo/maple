@@ -109,17 +109,17 @@ function ReplayDetailPage() {
 					<DashboardLayout.Breadcrumbs items={breadcrumbs} />
 					<DashboardLayout.Body>
 						<DashboardLayout.Content>
-							<DashboardLayout.Sticky>
-								<DashboardLayout.Header title="Session Replay" />
-							</DashboardLayout.Sticky>
-							<DashboardLayout.Scroll>
+							{/* No sticky page header: the studio's identity bar is the header,
+							    and `Fill` hands the studio the full height so the player, the
+							    timeline and the rail manage their own scrolling. */}
+							<DashboardLayout.Fill>
 								<ReplayStudio
 									sessionId={sessionId}
 									session={session}
 									traceIds={session.traceIds}
 									window={window}
 								/>
-							</DashboardLayout.Scroll>
+							</DashboardLayout.Fill>
 						</DashboardLayout.Content>
 					</DashboardLayout.Body>
 				</DashboardLayout.Root>

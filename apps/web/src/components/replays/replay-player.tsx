@@ -32,12 +32,16 @@ function prettyUrl(url: string | undefined): string {
 export function ReplaySurface({
 	url,
 	detachedTransport = false,
+	docked = false,
 }: {
 	url?: string
 	/** Render only the browser chrome + video; the caller places `<ReplayTransport>`
 	 *  separately (so a side panel can match just the video block). Fullscreen always
 	 *  keeps the controls inside the figure. */
 	detachedTransport?: boolean
+	/** A docked `<ReplayTransport docked>` sits flush below: square off the bottom
+	 *  corners so surface + transport read as one unit. */
+	docked?: boolean
 }) {
 	const { status, error, sessionActive, figureRef, surfaceRef, mountRef, isFullscreen } = useReplayPlayer()
 	// A scrubber over a session that has no recording is a dead control; drop the
@@ -52,6 +56,7 @@ export function ReplaySurface({
 			ref={figureRef}
 			className={cn(
 				"m-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm",
+				docked && "rounded-b-none shadow-none",
 				isFullscreen && "flex h-screen w-screen flex-col rounded-none border-0 bg-black",
 			)}
 		>
@@ -125,16 +130,25 @@ export function ReplaySurface({
 }
 
 /**
- * The transport controls + scrubber legend, rendered detached from the player
- * surface. Pair with `<ReplaySurface detachedTransport />` so a side panel can
- * match the height of the video block while the controls span their own row.
+ * The transport controls, rendered detached from the player surface. Pair with
+ * `<ReplaySurface detachedTransport />`. With `docked` it drops its own card
+ * chrome and sits flush against a `<ReplaySurface docked>` above — one visual
+ * unit, separated by the shared border. The marker legend then lives in the
+ * timeline header instead of here.
  */
-export function ReplayTransport() {
+export function ReplayTransport({ docked = false }: { docked?: boolean }) {
 	const { isFullscreen, status } = useReplayPlayer()
 	// In fullscreen the controls live inside the fullscreen figure.
 	if (isFullscreen) return null
 	// Nothing was ever recorded — see `showTransport` in `<ReplaySurface>`.
 	if (status === "unrecorded") return null
+	if (docked) {
+		return (
+			<div className="overflow-hidden rounded-b-xl border border-t-0 border-border bg-card">
+				<ReplayControls detached />
+			</div>
+		)
+	}
 	return (
 		<div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
 			<ReplayControls detached />

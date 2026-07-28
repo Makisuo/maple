@@ -90,18 +90,18 @@ describe("SessionsList recording badge", () => {
 		const view = render(<SessionsList sessions={[{ ...session, recorded: "false" }]} />)
 		// Rendered twice — the row carries a narrow-column badge strip and a wide
 		// one, with CSS container queries picking which is visible.
-		expect(view.getAllByText("No recording")).toHaveLength(2)
+		expect(view.getAllByText("Transcript only")).toHaveLength(2)
 	})
 
 	it("stays silent for a recorded session", () => {
 		const view = render(<SessionsList sessions={[session]} />)
-		expect(view.queryAllByText("No recording")).toHaveLength(0)
+		expect(view.queryAllByText("Transcript only")).toHaveLength(0)
 	})
 
 	// Sessions written before the SDK stamped the marker read `""`. That is
 	// "unknown", not "not recorded" — badging them would be a guess.
 	it("stays silent when the marker is absent", () => {
 		const view = render(<SessionsList sessions={[{ ...session, recorded: "" }]} />)
-		expect(view.queryAllByText("No recording")).toHaveLength(0)
+		expect(view.queryAllByText("Transcript only")).toHaveLength(0)
 	})
 })
