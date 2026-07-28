@@ -26,6 +26,7 @@ import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	Phase1ResourceStubsLayer,
+	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
 
@@ -127,6 +128,7 @@ const makeHarness = (warehouse: WarehouseQueryServiceShape = warehouseStub()) =>
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(Phase1ResourceStubsLayer),
+		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provide(warehouseLive),
 		Layer.provideMerge(ApiAuthorizationV2Layer),

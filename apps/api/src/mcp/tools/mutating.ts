@@ -4,7 +4,13 @@
  * The Flue chat agent wraps these so a model call returns a `proposed` marker
  * instead of mutating (see `apps/chat-flue/src/lib/approval.ts`); the web client
  * applies the real change via `POST /api/chat/apply`, which only accepts tools
- * in this set. Keep the two lists in sync.
+ * in this set. The Slack agent gates the same set behind eve's native
+ * human-in-the-loop approval (`apps/slack-agent/agent/lib/approval.ts`).
+ *
+ * Keep in sync — three mirrored copies, no shared import:
+ *   - apps/api/src/mcp/tools/mutating.ts (this file, the source of truth)
+ *   - apps/chat-flue/src/lib/approval.ts
+ *   - apps/slack-agent/agent/lib/approval.ts
  */
 export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
 	// dashboards

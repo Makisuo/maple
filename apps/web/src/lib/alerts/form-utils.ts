@@ -468,6 +468,14 @@ export type DestinationFormState = {
 	channelLabel: string
 	/** Slack and Discord both use this incoming-webhook URL field. */
 	webhookUrl: string
+	/**
+	 * Slack (bot) destination: the channel the installed Maple bot posts to.
+	 * `slackChannelId` is the Slack channel id (`C0789CHAN`), `slackChannelName`
+	 * its display name (`incidents`). No webhook/secret — the bot token is
+	 * resolved from the org's Slack workspace at dispatch.
+	 */
+	slackChannelId: string
+	slackChannelName: string
 	integrationKey: string
 	url: string
 	signingSecret: string
@@ -483,13 +491,19 @@ export type DestinationFormState = {
 
 export const MAX_EMAIL_MEMBER_RECIPIENTS = 10
 
-export function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
+/**
+ * Defaults to `slack-bot` — the recommended flow, and the tile the dialog lists
+ * first (`DESTINATION_TYPES`); the legacy `slack` webhook trails it.
+ */
+export function defaultDestinationForm(type: AlertDestinationType = "slack-bot"): DestinationFormState {
 	return {
 		type,
 		name: "",
 		enabled: true,
 		channelLabel: "",
 		webhookUrl: "",
+		slackChannelId: "",
+		slackChannelName: "",
 		integrationKey: "",
 		url: "",
 		signingSecret: "",
@@ -510,6 +524,11 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 		enabled: destination.enabled,
 		channelLabel: destination.channelLabel ?? "",
 		webhookUrl: "",
+		// slack-bot hydrates `channelLabel` as `#name`; keep the current channel
+		// visible on edit (its id isn't returned — an empty id keeps the stored one).
+		slackChannelId: "",
+		slackChannelName:
+			destination.type === "slack-bot" ? (destination.channelLabel?.replace(/^#/, "") ?? "") : "",
 		integrationKey: "",
 		url: "",
 		signingSecret: "",
@@ -533,6 +552,16 @@ export function buildDestinationCreateParamsV2(form: DestinationFormState): V2Al
 				enabled: form.enabled,
 				webhook_url: form.webhookUrl.trim(),
 				...(channelLabel ? { channel_label: channelLabel } : {}),
+			}
+		}
+		case "slack-bot": {
+			const channelName = form.slackChannelName.trim()
+			return {
+				type: "slack-bot",
+				name: form.name.trim(),
+				enabled: form.enabled,
+				channel_id: form.slackChannelId.trim(),
+				...(channelName ? { channel_name: channelName } : {}),
 			}
 		}
 		case "pagerduty":
@@ -610,6 +639,17 @@ export function buildDestinationUpdateParamsV2(form: DestinationFormState): V2Al
 				...(name ? { name } : {}),
 				...(channelLabel ? { channel_label: channelLabel } : {}),
 				...(webhookUrl ? { webhook_url: webhookUrl } : {}),
+			}
+		}
+		case "slack-bot": {
+			const channelId = form.slackChannelId.trim()
+			const channelName = form.slackChannelName.trim()
+			return {
+				type: "slack-bot",
+				enabled: form.enabled,
+				...(name ? { name } : {}),
+				...(channelId ? { channel_id: channelId } : {}),
+				...(channelName ? { channel_name: channelName } : {}),
 			}
 		}
 		case "pagerduty": {

@@ -4,6 +4,7 @@ import ReactDOM from "react-dom/client"
 import { EffectRouterProvider } from "@effect-router/core/react"
 import { apiBaseUrl } from "./lib/services/common/api-base-url"
 import { ClerkAuthBridge } from "./lib/services/common/clerk-auth-bridge"
+import { purgeForeignClerkCookies } from "./lib/services/common/clerk-cookie-guard"
 import { isClerkAuthEnabled } from "./lib/services/common/auth-mode"
 import {
 	installSelfHostedAuthHeadersProvider,
@@ -188,8 +189,20 @@ const app = isClerkAuthEnabled ? (
 	<SelfHostedInnerApp />
 )
 
-ReactDOM.createRoot(root).render(
-	<StrictMode>
-		<AppErrorBoundary>{app}</AppErrorBoundary>
-	</StrictMode>,
-)
+const renderApp = () => {
+	ReactDOM.createRoot(root).render(
+		<StrictMode>
+			<AppErrorBoundary>{app}</AppErrorBoundary>
+		</StrictMode>,
+	)
+}
+
+// All deployed environments share the `maple.dev` parent domain but not the
+// same Clerk instance; purge the other instances' parent-domain cookies
+// BEFORE ClerkJS reads them, or it handshakes against the wrong instance and
+// intermittently 403s (see clerk-cookie-guard.ts). The purge never rejects.
+if (isClerkAuthEnabled && clerkPublishableKey) {
+	void purgeForeignClerkCookies(clerkPublishableKey).then(renderApp)
+} else {
+	renderApp()
+}

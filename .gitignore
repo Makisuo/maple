@@ -32,6 +32,8 @@ apps/api/.data/
 apps/api/scripts/.bench/
 
 .alchemy
+# eve agent build/model-catalog cache
+.eve
 .mcp.json
 .dev.vars
 apps/chat-agent/.dev.vars

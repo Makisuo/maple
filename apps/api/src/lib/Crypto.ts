@@ -25,15 +25,25 @@ export const parseBase64Aes256GcmKey = <E>(raw: string, onError: (message: strin
 		catch: (error) => onError(error instanceof Error ? error.message : "Invalid encryption key"),
 	})
 
+/**
+ * Optional additional authenticated data. AAD is authenticated but not stored,
+ * so it binds a ciphertext to the row it was written for: decryption only
+ * succeeds when the caller reconstructs the exact same bytes. Omitting it keeps
+ * the original (AAD-free) format — existing ciphertexts written without one must
+ * keep decrypting, so callers may only start passing an `aad` for columns with
+ * no live rows.
+ */
 export const encryptAes256Gcm = <E>(
 	plaintext: string,
 	encryptionKey: Buffer,
 	onError: (message: string) => E,
+	aad?: Buffer,
 ) =>
 	Effect.try({
 		try: () => {
 			const iv = randomBytes(12)
 			const cipher = createCipheriv("aes-256-gcm", encryptionKey, iv)
+			if (aad !== undefined) cipher.setAAD(aad)
 			const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()])
 
 			return {
@@ -45,10 +55,12 @@ export const encryptAes256Gcm = <E>(
 		catch: (error) => onError(error instanceof Error ? error.message : "Encryption failed"),
 	})
 
+/** Counterpart to {@link encryptAes256Gcm} — `aad` must match the value used to encrypt. */
 export const decryptAes256Gcm = <E>(
 	encrypted: EncryptedValue,
 	encryptionKey: Buffer,
 	onError: (message: string) => E,
+	aad?: Buffer,
 ) =>
 	Effect.try({
 		try: () => {
@@ -57,6 +69,7 @@ export const decryptAes256Gcm = <E>(
 				encryptionKey,
 				Buffer.from(encrypted.iv, "base64"),
 			)
+			if (aad !== undefined) decipher.setAAD(aad)
 			decipher.setAuthTag(Buffer.from(encrypted.tag, "base64"))
 
 			const plaintext = Buffer.concat([

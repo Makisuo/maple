@@ -1,0 +1,8 @@
+node_modules
+.eve
+.output
+.nitro
+.env*
+!.env.local.example
+*.tsbuildinfo
+.DS_Store

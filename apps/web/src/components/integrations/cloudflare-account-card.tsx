@@ -6,7 +6,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { toast } from "sonner"
 
-import { CircleWarningIcon, CloudflareIcon, LoaderIcon } from "@/components/icons"
+import { CircleWarningIcon, CloudflareIcon, CloudflareMonoIcon, LoaderIcon } from "@/components/icons"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { CLOUDFLARE_ACCENT, IntegrationIconPlate } from "./integration-catalog"
@@ -159,7 +159,11 @@ export function CloudflareAccountCard() {
 
 	if (!isConnected) {
 		return (
-			<IntegrationEmpty icon={CloudflareIcon} accent={CLOUDFLARE_ACCENT}>
+			<IntegrationEmpty
+				icon={CloudflareIcon}
+				backerIcon={CloudflareMonoIcon}
+				accent={CLOUDFLARE_ACCENT}
+			>
 				<IntegrationEmptyFeatures>
 					<IntegrationEmptyFeature
 						label="Zone analytics"

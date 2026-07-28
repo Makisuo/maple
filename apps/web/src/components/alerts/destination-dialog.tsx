@@ -10,12 +10,16 @@ import {
 	ProviderLogo,
 	type DestinationProvider,
 } from "@/components/alerts/destination-provider"
-import { HazelIcon, LoaderIcon } from "@/components/icons"
+import { ArrowRightIcon, CircleInfoIcon, HazelIcon, LoaderIcon } from "@/components/icons"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { v2ErrorInfo } from "@/lib/error-messages"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
-import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import type { HazelChannelsListResponse } from "@maple/domain/http"
-import { Exit } from "effect"
+import type { V2SlackChannelList } from "@maple/domain/http/v2"
+import { Exit, Option } from "effect"
+import { Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -36,6 +40,14 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@maple/ui/components/ui/select"
+import {
+	Combobox,
+	ComboboxContent,
+	ComboboxEmpty,
+	ComboboxInput,
+	ComboboxItem,
+	ComboboxList,
+} from "@maple/ui/components/ui/combobox"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Avatar, AvatarFallback, AvatarImage } from "@maple/ui/components/ui/avatar"
 import { Checkbox } from "@maple/ui/components/ui/checkbox"
@@ -65,6 +77,9 @@ function isFormReady(form: DestinationFormState, isEditing: boolean): boolean {
 	switch (form.type) {
 		case "hazel-oauth":
 			return form.hazelOrganizationId.trim().length > 0 && form.hazelChannelId.trim().length > 0
+		case "slack-bot":
+			// Editing keeps the stored channel when left untouched; creating requires a pick.
+			return isEditing || form.slackChannelId.trim().length > 0
 		// On create the secret is required; when editing, a blank value keeps the
 		// stored one.
 		case "discord":
@@ -384,7 +399,13 @@ function HazelOAuthFields({
 					size="sm"
 					onClick={handleConnect}
 					disabled={busy}
-					style={{ background: "#F46F0F", borderColor: "#F46F0F", color: "#fff" }}
+					// Same brand fill as the save button below, so it takes the same
+					// measured ink instead of a second copy of the hex + white.
+					style={{
+						background: PROVIDERS["hazel-oauth"].accent,
+						borderColor: PROVIDERS["hazel-oauth"].accent,
+						color: PROVIDERS["hazel-oauth"].accentOn,
+					}}
 				>
 					{busy ? <LoaderIcon size={14} className="animate-spin" /> : null}
 					Connect Hazel
@@ -524,6 +545,266 @@ function HazelOAuthFields({
 	)
 }
 
+/**
+ * Slack (bot) destination fields. Requires the org-level Slack app install (the
+ * bot token is resolved from the org's workspace at dispatch — no per-destination
+ * secret). When the app isn't installed we point the user at the integrations
+ * page; when it is, we let them pick a channel the bot can see.
+ */
+function SlackBotFields({
+	form,
+	onFormChange,
+	isEditing,
+}: {
+	form: DestinationFormState
+	onFormChange: (updater: (current: DestinationFormState) => DestinationFormState) => void
+	isEditing: boolean
+}) {
+	const statusResult = useAtomValue(
+		MapleApiV2AtomClient.query("slackIntegration", "status", {
+			reactivityKeys: ["slackIntegration"],
+		}),
+	)
+
+	// Fall back to the last good status on a failed refetch so an already-valid
+	// form isn't hard-swapped to an error paragraph mid-edit.
+	const status = Result.builder(statusResult)
+		.onSuccess((s) => s)
+		.orElse(() =>
+			Result.isFailure(statusResult)
+				? Option.getOrNull(Option.map(statusResult.previousSuccess, (previous) => previous.value))
+				: null,
+		)
+	const installed = status?.installed === true
+
+	const channelsAtom = installed
+		? MapleApiV2AtomClient.query("slackIntegration", "channels", {
+				reactivityKeys: ["slackIntegration", "slackChannels"],
+			})
+		: disabledResultAtom<V2SlackChannelList>()
+	const channelsResult = useAtomValue(channelsAtom)
+	const refreshChannelsAtom = useAtomRefresh(channelsAtom)
+	// When the app isn't installed `channelsAtom` is the module-scope
+	// `disabledResultAtom` singleton shared by every disabled reader in the app —
+	// refreshing that would poke all of them. Only the real query is refreshable.
+	const refreshChannels = installed ? refreshChannelsAtom : () => {}
+
+	// Same previous-value fallback as `status`: this query re-runs on every Slack
+	// mutation (reactivity keys), and emptying the Combobox mid-selection would
+	// silently drop the channel the user is picking.
+	const previousChannels = Result.isFailure(channelsResult)
+		? Option.getOrNull(
+				Option.map(channelsResult.previousSuccess, (previous) => [...previous.value.channels]),
+			)
+		: null
+	const channels = Result.builder(channelsResult)
+		.onSuccess((c) => [...c.channels])
+		.orElse(() => previousChannels ?? ([] as V2SlackChannelList["channels"][number][]))
+	const channelsLoading = installed && channelsResult.waiting
+
+	// `GET /v2/integrations/slack/channels` is admin-gated (`requireAdmin`), so a
+	// regular member gets a 403 that no amount of retrying will clear. The v2
+	// envelope ({ error: { type, code, message } }) survives into the Result's
+	// cause, and `v2ErrorInfo` unwraps it — branch on the closed `type` enum, never
+	// on the human-readable message.
+	const channelsPermissionDenied =
+		Result.isFailure(channelsResult) && v2ErrorInfo(channelsResult.cause)?.type === "permission_error"
+	// Requires no prior success, matching the `statusFailed` rule below: if we
+	// already have channels in hand (a role change mid-edit), keep the picker
+	// rather than yanking the user's selection away.
+	const channelsForbidden = channelsPermissionDenied && previousChannels === null
+	// A 403 is never worth a Retry button, with or without a stale list to fall
+	// back on. Everything else keeps the retryable error line.
+	const channelsFailed = Result.isFailure(channelsResult) && !channelsPermissionDenied
+
+	const statusPending = Result.isInitial(statusResult) && status === null
+	const statusFailed = Result.isFailure(statusResult) && status === null
+
+	if (statusPending) {
+		return (
+			<div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
+				<p className="text-xs text-muted-foreground">Checking your Slack connection…</p>
+			</div>
+		)
+	}
+
+	if (statusFailed) {
+		return (
+			<div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
+				<p className="text-xs text-destructive">
+					Couldn&apos;t check your Slack connection. This may be a temporary issue — try again.
+				</p>
+			</div>
+		)
+	}
+
+	if (!installed) {
+		return (
+			<div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
+				<p className="text-xs text-muted-foreground">
+					The Maple Slack app isn&apos;t installed for this organization yet. Install it from the
+					integrations page (opens in a new tab), then come back to pick a channel.
+				</p>
+				<Button
+					type="button"
+					size="sm"
+					variant="outline"
+					render={
+						<Link
+							to="/integrations"
+							search={{ integration: "slack" }}
+							target="_blank"
+							rel="noreferrer"
+						/>
+					}
+				>
+					Open Slack integration
+					<ArrowRightIcon size={14} />
+				</Button>
+			</div>
+		)
+	}
+
+	// Non-admins can still *create* destinations — only the channel inventory is
+	// gated. Say so plainly instead of rendering an empty picker over a Retry that
+	// can never succeed, and name the two ways forward. Editing keeps its stored
+	// channel, so the rest of the form still saves; creating cannot complete here,
+	// which is what leaves the footer's Save disabled.
+	if (channelsForbidden) {
+		return (
+			<div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
+				{isEditing && form.slackChannelName.length > 0 ? (
+					<p className="truncate text-[11px] text-muted-foreground">
+						Currently{" "}
+						<span className="font-medium text-foreground">#{form.slackChannelName}</span>
+					</p>
+				) : null}
+				<p className="text-xs text-muted-foreground">
+					{isEditing
+						? "Listing this workspace's Slack channels is limited to org admins, so the channel can't be changed here. Your other edits still save — ask an admin to move this destination to another channel."
+						: "Listing this workspace's Slack channels is limited to org admins, so this destination can't be finished here. Ask an admin to create it, or use a Slack webhook destination — any member can set one up."}
+				</p>
+				{!isEditing ? (
+					<Button
+						type="button"
+						size="sm"
+						variant="outline"
+						onClick={() =>
+							onFormChange((current) => ({
+								...defaultDestinationForm("slack"),
+								// Carry over what isn't Slack-bot-specific so switching
+								// providers doesn't discard the user's typing.
+								name: current.name,
+								enabled: current.enabled,
+							}))
+						}
+					>
+						Use a Slack webhook instead
+						<ArrowRightIcon size={14} />
+					</Button>
+				) : null}
+			</div>
+		)
+	}
+
+	const label = (id: string): string => {
+		const channel = channels.find((c) => c.id === id)
+		// Unknown id (stale/stored channel not in the fetched list): prefer the
+		// stored name, but never render an empty label — show the raw id.
+		if (!channel) return form.slackChannelName ? `#${form.slackChannelName}` : id
+		return channel.is_private ? `#${channel.name} (private)` : `#${channel.name}`
+	}
+
+	const selectedChannel = channels.find((c) => c.id === form.slackChannelId)
+	// Editing keeps the stored channel until a new one is picked — its id isn't
+	// returned, so the form field is empty by design. Render the stored value as a
+	// value (not as placeholder gray, which reads as "nothing configured").
+	const storedChannelName =
+		isEditing && form.slackChannelId.length === 0 && form.slackChannelName.length > 0
+			? form.slackChannelName
+			: null
+
+	return (
+		<div className="space-y-1.5">
+			<div className="flex items-baseline justify-between gap-2">
+				<Label htmlFor="destination-slack-channel" className="text-xs">
+					Channel
+				</Label>
+				{storedChannelName ? (
+					<span className="truncate text-[11px] text-muted-foreground">
+						Currently <span className="font-medium text-foreground">#{storedChannelName}</span>
+					</span>
+				) : null}
+			</div>
+			<Combobox
+				value={form.slackChannelId || null}
+				itemToStringLabel={(value: string) => label(value)}
+				onValueChange={(value) => {
+					if (value == null) return
+					const channel = channels.find((c) => c.id === value)
+					onFormChange((current) => ({
+						...current,
+						slackChannelId: value,
+						slackChannelName: channel?.name ?? current.slackChannelName,
+					}))
+				}}
+			>
+				<ComboboxInput
+					id="destination-slack-channel"
+					// The stored channel is shown as a value above; the placeholder stays
+					// the actual prompt so the field never looks pre-filled.
+					placeholder={channelsLoading ? "Loading channels…" : "Search channels…"}
+					className="w-full"
+				/>
+				<ComboboxContent>
+					<ComboboxEmpty>No matching channels.</ComboboxEmpty>
+					<ComboboxList>
+						{channels.map((channel) => (
+							<ComboboxItem key={channel.id} value={channel.id}>
+								<span className="flex items-center gap-2">
+									<span className="truncate">#{channel.name}</span>
+									{/* One type size on the row; the tone carries the difference
+									    between a neutral attribute and a warning. */}
+									{channel.is_private ? (
+										<span className="text-[11px] text-muted-foreground">private</span>
+									) : null}
+									{!channel.is_member ? (
+										<span className="text-[11px] text-warning-foreground">
+											bot not in channel
+										</span>
+									) : null}
+								</span>
+							</ComboboxItem>
+						))}
+					</ComboboxList>
+				</ComboboxContent>
+			</Combobox>
+			{channelsFailed ? (
+				<div className="flex items-center gap-2">
+					<p className="text-[11px] text-destructive">Couldn&apos;t load Slack channels.</p>
+					<Button type="button" size="xs" variant="ghost" onClick={refreshChannels}>
+						Retry
+					</Button>
+				</div>
+			) : channels.length === 0 && !channelsLoading ? (
+				<p className="text-[11px] text-muted-foreground">
+					No channels returned. Make sure the Maple bot has been added to at least one channel.
+				</p>
+			) : null}
+			<p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+				<CircleInfoIcon size={12} className="mt-0.5 shrink-0" />
+				<span>
+					For private channels — and public ones if posting fails — invite the bot with{" "}
+					<code className="rounded bg-muted px-1">/invite @Maple</code> in that channel.
+					{selectedChannel && !selectedChannel.is_member
+						? " The bot isn't in the selected channel yet."
+						: ""}
+				</span>
+			</p>
+		</div>
+	)
+}
+
 function FieldHelper({ provider }: { provider: DestinationProvider }) {
 	if (!provider.docsUrl) return null
 	return (
@@ -647,6 +928,14 @@ export function DestinationDialog({
 										/>
 									</div>
 								</>
+							)}
+
+							{form.type === "slack-bot" && (
+								<SlackBotFields
+									form={form}
+									onFormChange={onFormChange}
+									isEditing={isEditing}
+								/>
 							)}
 
 							{form.type === "pagerduty" && (
@@ -870,9 +1159,11 @@ export function DestinationDialog({
 						onClick={onSave}
 						disabled={saving || !isFormReady(form, isEditing)}
 						style={{
+							// `accentOn` is the ink the provider has measured against its own
+							// accent — never assume a brand color is dark enough for white.
 							background: provider.accent,
 							borderColor: provider.accent,
-							color: "#fff",
+							color: provider.accentOn,
 						}}
 					>
 						{saving ? <LoaderIcon size={14} className="animate-spin" /> : null}

@@ -139,6 +139,7 @@ import {
 	type DestinationSecretConfig,
 	type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
+import { SlackBotTokenResolver } from "./slack-bot-token"
 import { dateToMs } from "../lib/time"
 
 interface NormalizedRule {
@@ -588,6 +589,10 @@ const buildPublicConfig = (
 				summary: r.channelLabel?.trim() || "Slack incoming webhook",
 				channelLabel: normalizeOptionalString(r.channelLabel),
 			}),
+			"slack-bot": (r) => ({
+				summary: r.channelName?.trim() ? `#${r.channelName.trim()}` : "Slack channel",
+				channelLabel: r.channelName?.trim() ? `#${r.channelName.trim()}` : null,
+			}),
 			pagerduty: () => ({
 				summary: "PagerDuty Events API v2" as string,
 				channelLabel: null,
@@ -627,6 +632,11 @@ const buildSecretConfig = (
 			slack: (r) => ({
 				type: "slack" as const,
 				webhookUrl: r.webhookUrl.trim(),
+			}),
+			"slack-bot": (r) => ({
+				type: "slack-bot" as const,
+				channelId: r.channelId.trim(),
+				channelName: normalizeOptionalString(r.channelName) ?? null,
 			}),
 			pagerduty: (r) => ({
 				type: "pagerduty" as const,
@@ -1199,6 +1209,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const hazelOAuth = yield* HazelOAuthService
 			const email = yield* EmailService
 			const orgMembers = yield* OrgMembersService
+			const slackBotToken = yield* SlackBotTokenResolver
 
 			const resolveEmailMembers = (
 				orgId: OrgId,
@@ -1875,7 +1886,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					deliveryTimeoutMs(),
 					context.linkUrl,
 					composeChatUrl(context),
-					{ sendEmail },
+					{ sendEmail, resolveSlackBotToken: slackBotToken.resolve },
 				)
 
 			const buildPayload = (context: DeliveryPayloadContext) => ({
@@ -2230,6 +2241,35 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											: ""),
 								} satisfies DestinationSecretConfig,
 							}),
+						"slack-bot": (r) => {
+							const channelName = normalizeOptionalString(r.channelName)
+							return Effect.succeed({
+								nextPublicConfig: {
+									summary:
+										channelName != null
+											? `#${channelName}`
+											: hydrated.publicConfig.summary,
+									channelLabel:
+										channelName != null
+											? `#${channelName}`
+											: hydrated.publicConfig.channelLabel,
+								} satisfies DestinationPublicConfig,
+								nextSecretConfig: {
+									type: "slack-bot" as const,
+									channelId:
+										normalizeOptionalString(r.channelId) ??
+										(hydrated.secretConfig.type === "slack-bot"
+											? hydrated.secretConfig.channelId
+											: ""),
+									channelName:
+										r.channelName === undefined
+											? hydrated.secretConfig.type === "slack-bot"
+												? hydrated.secretConfig.channelName
+												: null
+											: (channelName ?? null),
+								} satisfies DestinationSecretConfig,
+							})
+						},
 						pagerduty: (r) =>
 							Effect.succeed({
 								nextPublicConfig: hydrated.publicConfig,
@@ -5074,5 +5114,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 		}),
 	},
 ) {
-	static readonly layer = Layer.effect(this, this.make)
+	// The resolver is self-provided (it needs only Database + Env, which every
+	// caller already supplies) so wiring stays unchanged in app.ts and the
+	// alerting worker.
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SlackBotTokenResolver.layer))
 }

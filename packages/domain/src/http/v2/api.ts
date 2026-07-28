@@ -7,6 +7,7 @@ import { V2ApiKeysApiGroup } from "./api-keys"
 import { V2AttributeMappingsApiGroup } from "./attribute-mappings"
 import { V2DashboardsApiGroup } from "./dashboards"
 import { V2IngestKeysApiGroup } from "./ingest-keys"
+import { V2SlackIntegrationsApiGroup } from "./integrations"
 import { V2ErrorIssuesApiGroup } from "./error-issues"
 import { V2InvestigationsApiGroup } from "./investigations"
 import { V2OrganizationApiGroup } from "./organization"
@@ -66,6 +67,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2AlertDestinationsApiGroup)
 	.add(V2AlertIncidentsApiGroup)
 	.add(V2IngestKeysApiGroup)
+	.add(V2SlackIntegrationsApiGroup)
 	.add(V2ErrorIssuesApiGroup)
 	.add(V2AttributeMappingsApiGroup)
 	.add(V2ScrapeTargetsApiGroup)

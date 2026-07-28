@@ -8,6 +8,7 @@ import {
 	HazelOAuthAlertDestinationConfig,
 	PagerDutyAlertDestinationConfig,
 	SlackAlertDestinationConfig,
+	SlackBotAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
 } from "@maple/domain/http"
 import type {
@@ -49,6 +50,14 @@ const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
 				name: params.name,
 				webhookUrl: params.webhook_url,
 				...(params.channel_label !== undefined ? { channelLabel: params.channel_label } : {}),
+				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+			})
+		case "slack-bot":
+			return new SlackBotAlertDestinationConfig({
+				type: "slack-bot",
+				name: params.name,
+				channelId: params.channel_id,
+				...(params.channel_name !== undefined ? { channelName: params.channel_name } : {}),
 				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
 			})
 		case "pagerduty":
@@ -116,6 +125,13 @@ const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinati
 				...shared,
 				...(params.webhook_url !== undefined ? { webhookUrl: params.webhook_url } : {}),
 				...(params.channel_label !== undefined ? { channelLabel: params.channel_label } : {}),
+			}
+		case "slack-bot":
+			return {
+				type: "slack-bot",
+				...shared,
+				...(params.channel_id !== undefined ? { channelId: params.channel_id } : {}),
+				...(params.channel_name !== undefined ? { channelName: params.channel_name } : {}),
 			}
 		case "pagerduty":
 			return {

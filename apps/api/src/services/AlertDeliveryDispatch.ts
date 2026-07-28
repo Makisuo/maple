@@ -8,7 +8,7 @@ import {
 	type AlertSignalType,
 } from "@maple/domain/http"
 import type { AlertDestinationRow } from "@maple/db"
-import { Clock, Duration, Effect, Match, Option } from "effect"
+import { Clock, Duration, Effect, Match, Option, Schema } from "effect"
 import type { EnrichedDestinationSecretConfig } from "./AlertDestinationHydration"
 import { safeFetch } from "../lib/url-validator"
 // Circular with ./alert-email (it imports our formatting helpers); safe — both
@@ -211,6 +211,20 @@ export const formatWindow = (minutes: number): string => {
 	return hours % 1 === 0 ? `${hours}h` : `${minutes}m`
 }
 
+export const severityEmoji = (severity: AlertSeverity): string =>
+	Match.value(severity).pipe(
+		Match.when("critical", () => "\u{1F534}"),
+		Match.when("warning", () => "\u{1F7E0}"),
+		Match.exhaustive,
+	)
+
+export const formatSeverityLabel = (severity: AlertSeverity): string =>
+	Match.value(severity).pipe(
+		Match.when("critical", () => "Critical"),
+		Match.when("warning", () => "Warning"),
+		Match.exhaustive,
+	)
+
 export const slackAttachmentColor = (eventType: string, severity: string): string => {
 	if (eventType === "resolve") return "#2eb67d"
 	if (eventType === "test") return "#36c5f0"
@@ -231,21 +245,50 @@ type ObservedContext = Pick<
 	"value" | "signalType" | "comparator" | "threshold" | "thresholdUpper"
 >
 
-export const formatObservedSummary = (context: ObservedContext): string => {
-	const observed = formatSignalMetric(context.value, context.signalType)
-	const comparison =
-		context.comparator === "between" || context.comparator === "not_between"
-			? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)}`
-			: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`
-	return `${observed} ${comparison}`
+type ThresholdContext = Omit<ObservedContext, "value">
+
+/** The comparator + formatted threshold(s), e.g. `> 5%` or `between 5% and 10%`. */
+export const formatThresholdSummary = (context: ThresholdContext): string =>
+	context.comparator === "between" || context.comparator === "not_between"
+		? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)}`
+		: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`
+
+export const formatObservedSummary = (context: ObservedContext): string =>
+	`${formatSignalMetric(context.value, context.signalType)} ${formatThresholdSummary(context)}`
+
+/** Prose form of the breach condition, e.g. "above the 5% threshold". */
+const comparatorBreachPhrase = (context: ThresholdContext): string => {
+	const threshold = formatSignalMetric(context.threshold, context.signalType)
+	const upper = formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)
+	return Match.value(context.comparator).pipe(
+		Match.whenOr("gt", "gte", () => `above the ${threshold} threshold`),
+		Match.whenOr("lt", "lte", () => `below the ${threshold} threshold`),
+		Match.when("eq", () => `at the ${threshold} threshold`),
+		Match.when("neq", () => `away from the ${threshold} target`),
+		Match.when("between", () => `inside the ${threshold}–${upper} range`),
+		Match.when("not_between", () => `outside the ${threshold}–${upper} range`),
+		Match.exhaustive,
+	)
 }
 
 /* -------------------------------------------------------------------------- */
 /*  Dispatch                                                                  */
 /* -------------------------------------------------------------------------- */
 
-const makeDeliveryError = (message: string, destinationType?: AlertDestinationType) =>
-	new AlertDeliveryError({ message, destinationType })
+const makeDeliveryError = (message: string, destinationType?: AlertDestinationType, cause?: unknown) =>
+	new AlertDeliveryError({ message, destinationType, ...(cause === undefined ? {} : { cause }) })
+
+/**
+ * Slack Web API `chat.postMessage` response envelope. Slack returns HTTP 200
+ * with `{ ok: false, error }` on logical failures, so the body is the source
+ * of truth.
+ */
+const SlackPostMessageResponseSchema = Schema.Struct({
+	ok: Schema.optionalKey(Schema.Boolean),
+	error: Schema.optionalKey(Schema.String),
+	ts: Schema.optionalKey(Schema.String),
+})
+const decodeSlackPostMessageResponse = Schema.decodeUnknownEffect(SlackPostMessageResponseSchema)
 
 const runTimedFetch = <A>(
 	destinationType: AlertDestinationType,
@@ -260,6 +303,7 @@ const runTimedFetch = <A>(
 			makeDeliveryError(
 				error instanceof Error ? error.message : `${label} delivery failed`,
 				destinationType,
+				error,
 			),
 	}).pipe(
 		Effect.timeoutOrElse({
@@ -271,55 +315,105 @@ const runTimedFetch = <A>(
 		}),
 	)
 
-const buildSlackBlocks = (context: DispatchContext, linkUrl: string, chatUrl: string) => [
+/**
+ * Escape Slack mrkdwn control characters in dynamic text (Slack parses `<...>`
+ * as link/mention syntax). Required by https://docs.slack.dev/messaging/formatting-message-text
+ * for any user-controlled value interpolated into mrkdwn.
+ */
+const escapeSlackMrkdwn = (value: string): string =>
+	value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+/**
+ * One human-readable sentence describing what happened — the message lead, per
+ * Slack's Block Kit guidance (header as subject line, then a short clear
+ * sentence, with details relegated to fields/context).
+ */
+const buildSlackSummaryLine = (
+	context: Pick<
+		DispatchContext,
+		"eventType" | "signalType" | "comparator" | "threshold" | "thresholdUpper" | "value" | "windowMinutes"
+	>,
+): string => {
+	const signal = formatSignalLabel(context.signalType)
+	const observed = formatSignalMetric(context.value, context.signalType)
+	const window = formatWindow(context.windowMinutes)
+	if (context.eventType === "test") {
+		return `This is a test notification. Live alerts fire when *${signal}* is ${comparatorBreachPhrase(context)} over a ${window} window.`
+	}
+	if (context.eventType === "resolve") {
+		const now = context.value != null ? ` — now *${observed}*` : ""
+		return `*${signal}* is back within its threshold (${formatThresholdSummary(context)})${now}.`
+	}
+	return `*${signal}* is *${observed}* — ${comparatorBreachPhrase(context)}, measured over the last ${window}.`
+}
+
+const buildSlackActionsBlock = (linkUrl: string, chatUrl: string) => ({
+	type: "actions",
+	elements: [
+		{
+			type: "button",
+			text: { type: "plain_text", text: "Open in Maple", emoji: true },
+			url: linkUrl,
+			style: "primary",
+		},
+		{
+			type: "button",
+			text: { type: "plain_text", text: "✨ Ask Maple AI", emoji: true },
+			url: chatUrl,
+		},
+	],
+})
+
+/**
+ * Footer: brand + incident reference + a `<!date^…>` timestamp so Slack renders
+ * the fire time in each viewer's local timezone (ISO fallback for exports).
+ */
+const buildSlackContextBlock = (context: Pick<DispatchContext, "sentAtMs" | "incidentId">) => {
+	const parts = ["\u{1F341} Maple Alerts"]
+	if (context.incidentId) parts.push(`Incident \`${escapeSlackMrkdwn(context.incidentId)}\``)
+	if (context.sentAtMs != null) {
+		const seconds = Math.floor(context.sentAtMs / 1000)
+		const iso = new Date(context.sentAtMs).toISOString()
+		parts.push(`<!date^${seconds}^{date_short_pretty} at {time}|${iso}>`)
+	}
+	return { type: "context", elements: [{ type: "mrkdwn", text: parts.join("  ·  ") }] }
+}
+
+export const buildSlackBlocks = (context: TemplateRenderContext, linkUrl: string, chatUrl: string) => [
 	{
 		type: "header",
 		text: {
 			type: "plain_text",
-			text: `${eventTypeEmoji(context.eventType)} ${context.ruleName} — ${formatEventTypeLabel(context.eventType)}`,
+			text: truncate(
+				`${eventTypeEmoji(context.eventType)} ${context.ruleName} — ${formatEventTypeLabel(context.eventType)}`,
+				150,
+			),
 			emoji: true,
 		},
 	},
 	{
 		type: "section",
+		text: { type: "mrkdwn", text: buildSlackSummaryLine(context) },
 		fields: [
-			{ type: "mrkdwn", text: `*Severity*\n${context.severity}` },
-			{ type: "mrkdwn", text: `*Signal*\n${formatSignalLabel(context.signalType)}` },
-			{ type: "mrkdwn", text: `*Group*\n${context.groupKey ?? "all"}` },
 			{
 				type: "mrkdwn",
-				text: `*Observed*\n${formatSignalMetric(context.value, context.signalType)} ${
-					context.comparator === "between" || context.comparator === "not_between"
-						? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)}`
-						: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`
-				}`,
+				text: `*Severity*\n${severityEmoji(context.severity)} ${formatSeverityLabel(context.severity)}`,
 			},
-			{ type: "mrkdwn", text: `*Window*\n${formatWindow(context.windowMinutes)}` },
+			...(context.groupKey != null
+				? [{ type: "mrkdwn", text: `*Group*\n\`${escapeSlackMrkdwn(context.groupKey)}\`` }]
+				: []),
 		],
 	},
-	{ type: "divider" },
-	{
-		type: "actions",
-		elements: [
-			{
-				type: "button",
-				text: { type: "plain_text", text: "Open in Maple", emoji: true },
-				url: linkUrl,
-				...(context.eventType !== "resolve" && { style: "danger" }),
-			},
-			{
-				type: "button",
-				text: { type: "plain_text", text: "Ask Maple AI", emoji: true },
-				url: chatUrl,
-				style: "primary",
-			},
-		],
-	},
-	{
-		type: "context",
-		elements: [{ type: "mrkdwn", text: "\u{1F341} Maple Alerts" }],
-	},
+	buildSlackActionsBlock(linkUrl, chatUrl),
+	buildSlackContextBlock(context),
 ]
+
+/**
+ * Notification-preview fallback (`text` alongside blocks): a complete one-line
+ * summary, since push/desktop previews render only this string.
+ */
+export const buildSlackFallbackText = (context: TemplateRenderContext): string =>
+	`${eventTypeEmoji(context.eventType)} ${escapeSlackMrkdwn(context.ruleName)} — ${formatEventTypeLabel(context.eventType)} · ${formatSignalLabel(context.signalType)} ${formatObservedSummary(context)}`
 
 const buildDiscordEmbeds = (context: DispatchContext, linkUrl: string, chatUrl: string) => [
 	{
@@ -410,9 +504,26 @@ export const buildTemplateContext = (
 	sentAt: context.sentAtMs != null ? new Date(context.sentAtMs).toISOString() : "",
 })
 
-/** Minimal Markdown → Slack mrkdwn transform: `**b**`→`*b*`, `[t](url)`→`<url|t>`. */
+/**
+ * Minimal Markdown → Slack mrkdwn transform: `**b**`→`*b*`, `[t](url)`→`<url|t>`.
+ *
+ * The body is a user-authored notification template, so it is escaped BEFORE the
+ * rewrites: every `<…>` the author typed becomes literal text, which neutralizes
+ * `<!channel>`/`<!here>`/`<!everyone>` broadcasts (the slack-bot destination holds
+ * `chat:write.public` and can post to any public channel) and hand-written
+ * deceptive links like `<https://evil.test|Open in Maple>`. Only the `<…>` this
+ * function builds itself reaches Slack as markup. Slack decodes `&amp;`/`&lt;`/
+ * `&gt;` for display, so legitimate text and `&`-bearing URLs survive intact.
+ */
 const markdownToSlackMrkdwn = (markdown: string): string =>
-	markdown.replace(/\*\*([^*]+)\*\*/g, "*$1*").replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>")
+	escapeSlackMrkdwn(markdown)
+		.replace(/\*\*([^*]+)\*\*/g, "*$1*")
+		.replace(
+			/\[([^\]]+)\]\(([^)]+)\)/g,
+			// `|` would otherwise end the link target and let the rest of the URL pose
+			// as the label.
+			(_match, text: string, url: string) => `<${url.replaceAll("|", "%7C")}|${text}>`,
+		)
 
 const truncate = (value: string, max: number): string =>
 	value.length > max ? `${value.slice(0, max - 1)}…` : value
@@ -507,7 +618,7 @@ const renderTitleBody = (
 export const buildSlackBlocksFromTemplate = (
 	title: string,
 	body: string,
-	context: Pick<DispatchContext, "eventType">,
+	context: Pick<DispatchContext, "eventType" | "sentAtMs" | "incidentId">,
 	linkUrl: string,
 	chatUrl: string,
 ) => [
@@ -519,28 +630,8 @@ export const buildSlackBlocksFromTemplate = (
 		type: "section",
 		text: { type: "mrkdwn", text: markdownToSlackMrkdwn(body) },
 	},
-	{ type: "divider" },
-	{
-		type: "actions",
-		elements: [
-			{
-				type: "button",
-				text: { type: "plain_text", text: "Open in Maple", emoji: true },
-				url: linkUrl,
-				...(context.eventType !== "resolve" && { style: "danger" }),
-			},
-			{
-				type: "button",
-				text: { type: "plain_text", text: "Ask Maple AI", emoji: true },
-				url: chatUrl,
-				style: "primary",
-			},
-		],
-	},
-	{
-		type: "context",
-		elements: [{ type: "mrkdwn", text: "\u{1F341} Maple Alerts" }],
-	},
+	buildSlackActionsBlock(linkUrl, chatUrl),
+	buildSlackContextBlock(context),
 ]
 
 export const buildDiscordEmbedsFromTemplate = (
@@ -572,6 +663,13 @@ export interface DispatchDeps {
 	 * binding). Injected like `fetchFn` so this module stays dependency-free.
 	 */
 	readonly sendEmail: (to: string, subject: string, html: string) => Effect.Effect<void, AlertDeliveryError>
+	/**
+	 * Resolves the decrypted Slack bot token for an org from its
+	 * `slack_workspaces` row. Injected like `sendEmail` so this module stays
+	 * dependency-free — only the `slack-bot` destination arm invokes it. Fails
+	 * (AlertDeliveryError) when the org has no active Slack installation.
+	 */
+	readonly resolveSlackBotToken: (orgId: string) => Effect.Effect<string, AlertDeliveryError>
 }
 
 export const dispatchDelivery = (
@@ -603,12 +701,13 @@ export const dispatchDelivery = (
 								method: "POST",
 								headers: { "content-type": "application/json" },
 								body: JSON.stringify({
-									text:
-										templated?.title ??
-										`${context.ruleName}: ${formatEventTypeLabel(context.eventType)}`,
+									// No top-level `text`: alongside attachments (and no top-level
+									// blocks) Slack renders it as a duplicate line above the color
+									// bar. `fallback` carries the notification-preview one-liner.
 									attachments: [
 										{
 											color: slackAttachmentColor(context.eventType, context.severity),
+											fallback: templated?.title ?? buildSlackFallbackText(context),
 											blocks,
 										},
 									],
@@ -628,6 +727,91 @@ export const dispatchDelivery = (
 						return {
 							providerMessage: "Delivered to Slack",
 							providerReference: null,
+							responseCode: response.status,
+						} as DispatchResult
+					}),
+				"slack-bot": (config) =>
+					Effect.gen(function* () {
+						const botToken = yield* deps.resolveSlackBotToken(context.destination.orgId)
+						const templated = renderTitleBody(context, "slack", linkUrl, chatUrl)
+						const blocks = templated
+							? buildSlackBlocksFromTemplate(
+									templated.title,
+									templated.body,
+									context,
+									linkUrl,
+									chatUrl,
+								)
+							: buildSlackBlocks(context, linkUrl, chatUrl)
+						const response = yield* runTimedFetch("slack-bot", "Slack", fetchFn, timeoutMs, () =>
+							fetchFn("https://slack.com/api/chat.postMessage", {
+								method: "POST",
+								headers: {
+									"content-type": "application/json; charset=utf-8",
+									authorization: `Bearer ${botToken}`,
+								},
+								body: JSON.stringify({
+									channel: config.channelId,
+									// Blocks ride inside a colored attachment so the message
+									// carries the severity color bar — same as the webhook
+									// destination (the bar has no Block Kit equivalent). No
+									// top-level `text`: alongside attachments Slack renders it
+									// as a duplicate line above the bar; `fallback` carries
+									// the notification-preview one-liner instead.
+									attachments: [
+										{
+											color: slackAttachmentColor(context.eventType, context.severity),
+											fallback: templated?.title ?? buildSlackFallbackText(context),
+											blocks,
+										},
+									],
+								}),
+							}),
+						)
+						if (!response.ok) {
+							const detail = yield* readErrorBody(response)
+							return yield* Effect.fail(
+								makeDeliveryError(
+									`Slack delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
+									"slack-bot",
+								),
+							)
+						}
+						// Slack Web API returns HTTP 200 with `{ ok: false, error }` on
+						// logical failures, so the JSON body — not the status — is the
+						// source of truth.
+						const rawPayload = yield* Effect.tryPromise({
+							try: () => response.json(),
+							catch: (error) =>
+								makeDeliveryError("Slack returned a non-JSON response", "slack-bot", error),
+						})
+						const payload = yield* decodeSlackPostMessageResponse(rawPayload).pipe(
+							Effect.mapError((error) =>
+								makeDeliveryError(
+									`Slack returned an unexpected response payload: ${error.message}`,
+									"slack-bot",
+								),
+							),
+						)
+						if (!payload.ok) {
+							const error = payload.error ?? "unknown_error"
+							// HTTP 200 + `ok:false` is the dominant operational failure here
+							// (`not_in_channel` after a rename/kick). NotificationDispatcher
+							// only records outcome "failed", so annotate the Slack error code
+							// on the span to make it aggregatable.
+							yield* Effect.annotateCurrentSpan({
+								"maple.delivery.destination_type": "slack-bot",
+								"maple.delivery.provider_error": error,
+							})
+							const message =
+								error === "not_in_channel" || error === "channel_not_found"
+									? `Slack rejected the message (${error}) — invite the Maple bot to the channel and try again`
+									: `Slack rejected the message: ${error}`
+							return yield* Effect.fail(makeDeliveryError(message, "slack-bot"))
+						}
+						return {
+							providerMessage: `Delivered to Slack #${config.channelName ?? config.channelId}`,
+							providerReference: payload.ts ?? null,
 							responseCode: response.status,
 						} as DispatchResult
 					}),
