@@ -68,6 +68,16 @@ describe("navGroups", () => {
 		])
 	})
 
+	it("gives every Explore child an icon", () => {
+		// The closed row previews its children by drawing their glyphs (see
+		// `NavRow`), and draws nothing at all unless *every* child has one — so
+		// dropping an icon here silently removes the preview rather than
+		// rendering a gap.
+		const explore = findItem(enabled, "Explore")
+		expect(explore.subItems?.length).toBeGreaterThan(0)
+		expect(explore.subItems?.every((sub) => sub.icon)).toBe(true)
+	})
+
 	it("keeps the Infrastructure row when the agent pages are gated off", () => {
 		// The row must survive so the sidebar's shape doesn't change when the
 		// Clerk flag resolves — only the children it offers do.

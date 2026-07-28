@@ -319,7 +319,7 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 				<item.icon size={18} />
 				<span className="flex-1 truncate">{item.title}</span>
 				{preview ? (
-					<span className="flex shrink-0 items-center gap-1 text-muted-foreground/70 group-data-[collapsible=icon]:hidden">
+					<span className="flex shrink-0 items-center gap-1.5 text-muted-foreground group-data-[collapsible=icon]:hidden">
 						{preview.map((sub) => (sub.icon ? <sub.icon className="size-3" key={sub.title} /> : null))}
 					</span>
 				) : null}
