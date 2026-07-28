@@ -18,15 +18,25 @@
  * service.name="alerting", masquerading as a production alerting outage
  * (observed 2026-07-27..29).
  *
- * Deletion is double-gated like the sibling sweeps: the worker name must match
- * `maple-<base>-pr-<digits>` exactly, where <base> may not contain `-dev-`
- * (prd `maple-api`, stg `maple-api-stg` can never match; a dev stage named
- * "pr-3" would produce `maple-api-dev-pr-3`, hence the -dev- exclusion), AND
- * the GitHub API must affirmatively report that PR closed — unknown/open →
- * keep. Deletes use ?force=true because preview workers service-bind each
- * other (alerting → chat-flue) and hold Workflows; without force those
- * deletions 400. Deleting a worker out from under a later alchemy destroy of
- * the same stage is fine: alchemy tolerates already-deleted resources.
+ * Queues sweep first, workers second: each preview api worker is a consumer
+ * of its stage's `maple-vcs-sync-pr-<n>` / `maple-planetscale-webhooks-pr-<n>`
+ * queues (apps/api/alchemy.run.ts), and Cloudflare refuses to delete a Worker
+ * that is a registered queue consumer — error 10064, NOT covered by
+ * ?force=true (run 30406588392 failed all 15 deletions this way; it is also
+ * why the original close-event teardowns wedged, stranding these workers).
+ * Deleting the stage's queues drops the consumer registrations, after which
+ * the worker delete succeeds.
+ *
+ * Deletion is double-gated like the sibling sweeps: the queue/worker name must
+ * match `maple-<base>-pr-<digits>` exactly, where <base> may not contain
+ * `-dev-` (prd `maple-api`, stg `maple-api-stg` can never match; a dev stage
+ * named "pr-3" would produce `maple-api-dev-pr-3`, hence the -dev- exclusion),
+ * AND the GitHub API must affirmatively report that PR closed — unknown/open →
+ * keep. Worker deletes use ?force=true because preview workers service-bind
+ * each other (alerting → chat-flue) and hold Workflows; without force those
+ * deletions 400. Deleting a queue or worker out from under a later alchemy
+ * destroy of the same stage is fine: alchemy tolerates already-deleted
+ * resources.
  *
  * Auth: CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID (the same credentials
  * the deploy workflow's alchemy steps use), GITHUB_REPOSITORY +
@@ -83,6 +93,13 @@ interface WorkerScript {
 	readonly id?: string
 }
 
+interface QueueInfo {
+	readonly queue_id?: string
+	readonly queue_name?: string
+}
+
+const PR_RESOURCE_PATTERN = /^maple-((?:(?!-dev-).)+)-pr-(\d+)$/
+
 const cfRequest = async (
 	token: string,
 	path: string,
@@ -121,12 +138,75 @@ const main = async (): Promise<void> => {
 	const token = requireEnv("CLOUDFLARE_API_TOKEN")
 	const accountId = requireEnv("CLOUDFLARE_ACCOUNT_ID")
 
+	// One PR-state lookup per PR number, shared across both passes — a stage
+	// leaks ~8 workers + 2 queues and they all share the same verdict.
+	const stateByPr = new Map<string, "open" | "closed" | "unknown">()
+	const prState = async (prNumber: string): Promise<"open" | "closed" | "unknown"> => {
+		let state = stateByPr.get(prNumber)
+		if (!state) {
+			state = await fetchPrState(prNumber)
+			stateByPr.set(prNumber, state)
+		}
+		return state
+	}
+	const failures: string[] = []
+
+	// Pass 1: queues. Must go first — a worker that is still a registered
+	// consumer of any queue cannot be deleted (error 10064), and deleting the
+	// stage's queues is what drops those registrations.
+	const listedQueues = await cfRequest(token, `/accounts/${accountId}/queues?per_page=100`)
+	if (!listedQueues.ok) {
+		fail(
+			`Could not list Queues (HTTP ${listedQueues.status}): ${JSON.stringify(listedQueues.errors)}`,
+		)
+	}
+	// A success response whose `result` isn't an array means the API shape
+	// changed under us — fail loudly rather than green-no-op'ing the safety net.
+	if (!Array.isArray(listedQueues.result)) {
+		fail(
+			`Unexpected Queue list response shape (result is ${typeof listedQueues.result}, expected array)`,
+		)
+	}
+	const queues = listedQueues.result as ReadonlyArray<QueueInfo>
+	const queueCandidates = queues
+		.map((queue) => ({
+			id: queue.queue_id ?? "",
+			name: queue.queue_name ?? "",
+			match: PR_RESOURCE_PATTERN.exec(queue.queue_name ?? ""),
+		}))
+		.filter(
+			(entry): entry is { id: string; name: string; match: RegExpExecArray } =>
+				entry.match !== null && entry.id.length > 0,
+		)
+	console.log(
+		`Found ${queues.length} Queue(s), ${queueCandidates.length} maple-*-pr-*: ${queueCandidates.map((c) => c.name).join(", ") || "—"}`,
+	)
+	for (const { id, name, match } of queueCandidates) {
+		const prNumber = match[2] as string
+		const state = await prState(prNumber)
+		if (state === "open") {
+			console.log(`… keeping ${name} (PR #${prNumber} is open)`)
+			continue
+		}
+		if (state === "unknown") {
+			console.log(`⚠ skipping ${name} (PR #${prNumber} state unknown)`)
+			continue
+		}
+		console.log(`… deleting orphan queue ${name} (PR #${prNumber} is closed)`)
+		const removed = await cfRequest(token, `/accounts/${accountId}/queues/${id}`, {
+			method: "DELETE",
+		})
+		if (!removed.ok && removed.status !== 404) {
+			console.log(`✗ delete failed (HTTP ${removed.status}): ${JSON.stringify(removed.errors)}`)
+			failures.push(name)
+		}
+	}
+
+	// Pass 2: workers.
 	const listed = await cfRequest(token, `/accounts/${accountId}/workers/scripts`)
 	if (!listed.ok) {
 		fail(`Could not list Worker scripts (HTTP ${listed.status}): ${JSON.stringify(listed.errors)}`)
 	}
-	// A success response whose `result` isn't an array means the API shape
-	// changed under us — fail loudly rather than green-no-op'ing the safety net.
 	if (!Array.isArray(listed.result)) {
 		fail(`Unexpected Worker list response shape (result is ${typeof listed.result}, expected array)`)
 	}
@@ -134,7 +214,7 @@ const main = async (): Promise<void> => {
 	const candidates = scripts
 		.map((script) => ({
 			name: script.id ?? "",
-			match: /^maple-((?:(?!-dev-).)+)-pr-(\d+)$/.exec(script.id ?? ""),
+			match: PR_RESOURCE_PATTERN.exec(script.id ?? ""),
 		}))
 		.filter(
 			(entry): entry is { name: string; match: RegExpExecArray } =>
@@ -143,18 +223,9 @@ const main = async (): Promise<void> => {
 	console.log(
 		`Found ${scripts.length} Worker script(s), ${candidates.length} maple-*-pr-*: ${candidates.map((c) => c.name).join(", ") || "—"}`,
 	)
-
-	// One PR-state lookup per PR number, not per worker — a stage leaks ~8
-	// workers and they all share the same verdict.
-	const stateByPr = new Map<string, "open" | "closed" | "unknown">()
-	const failures: string[] = []
 	for (const { name, match } of candidates) {
 		const prNumber = match[2] as string
-		let state = stateByPr.get(prNumber)
-		if (!state) {
-			state = await fetchPrState(prNumber)
-			stateByPr.set(prNumber, state)
-		}
+		const state = await prState(prNumber)
 		if (state === "open") {
 			console.log(`… keeping ${name} (PR #${prNumber} is open)`)
 			continue
@@ -164,16 +235,19 @@ const main = async (): Promise<void> => {
 			continue
 		}
 		console.log(`… deleting orphan ${name} (PR #${prNumber} is closed)`)
-		const removed = await cfRequest(token, `/accounts/${accountId}/workers/scripts/${name}?force=true`, {
-			method: "DELETE",
-		})
+		const removed = await cfRequest(
+			token,
+			`/accounts/${accountId}/workers/scripts/${name}?force=true`,
+			{ method: "DELETE" },
+		)
 		if (!removed.ok && removed.status !== 404) {
 			console.log(`✗ delete failed (HTTP ${removed.status}): ${JSON.stringify(removed.errors)}`)
 			failures.push(name)
 		}
 	}
+
 	if (failures.length > 0) {
-		fail(`Failed to delete orphan Worker(s): ${failures.join(", ")}`)
+		fail(`Failed to delete orphan Queue(s)/Worker(s): ${failures.join(", ")}`)
 	}
 	console.log("✓ Sweep complete")
 }

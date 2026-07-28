@@ -126,8 +126,11 @@ jobs:
             # the Hyperdrive config they bind, every tick floods
             # self-observability with "Hyperdrive config deleted." as
             # service.name="alerting" (observed 2026-07-27..29). Sweeping the
-            # workers first closes that window for future leaks.
-            - name: Sweep orphaned preview Workers
+            # workers first closes that window for future leaks. Sweeps the
+            # stage's Queues before its Workers: a worker that is still a
+            # registered queue consumer cannot be deleted (error 10064, not
+            # covered by ?force=true — run 30406588392).
+            - name: Sweep orphaned preview Queues and Workers
               if: ${{ !cancelled() && env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' }}
               env:
                   GITHUB_TOKEN: ${{ github.token }}
