@@ -41,6 +41,15 @@ static ORG_THROTTLED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
+static ORG_DATA_LOSS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_org_data_loss_total")
+        .with_description(
+            "Requests rejected in a way that loses the sender's telemetry, by org and signal",
+        )
+        .build()
+});
+
 static BACKPRESSURE_SHED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("ingest_backpressure_shed_total")
@@ -370,6 +379,26 @@ pub fn org_throttled(org_id: &str, reason: &'static str) {
         &[
             KeyValue::new("org_id", org_id.to_string()),
             KeyValue::new("reason", reason),
+        ],
+    );
+}
+
+/// A request was rejected in a way that destroys the sender's telemetry — an
+/// undecodable body or an invalid OTLP payload (see `rejection_loses_data`).
+///
+/// Carries `org_id`, which `ingest_requests_total` deliberately does not. That
+/// omission is why a bug rejecting 99.2% of one org's logs read as a diffuse
+/// platform-wide ~19% and nobody looked: the shape of the failure — *one* tenant
+/// at *total* loss — was averaged away. Labeling is affordable here precisely
+/// because this counter only moves when something is broken; a healthy fleet
+/// emits no series at all.
+pub fn org_data_loss(org_id: &str, signal: &str, error_kind: &str) {
+    ORG_DATA_LOSS_TOTAL.add(
+        1,
+        &[
+            KeyValue::new("org_id", org_id.to_string()),
+            KeyValue::new("signal", signal.to_string()),
+            KeyValue::new("error_kind", error_kind.to_string()),
         ],
     );
 }

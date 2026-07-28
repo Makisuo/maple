@@ -1,5 +1,5 @@
 import {
-	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	makeQueryBuilderBreakdownDataSource,
 	makeQueryBuilderTimeseriesDataSource,
@@ -71,8 +71,8 @@ function widgets(serviceName?: string): WidgetDef[] {
 					groupBy: ["span.name"],
 				}),
 			]),
-			display: { title: "Error Rate by Endpoint", ...CHART_DISPLAY_AREA },
-			layout: { x: 0, y: 5, w: 12, h: 4 },
+			display: { title: "Error Rate by Endpoint", ...CHART_DISPLAY_LINE, unit: "percent" },
+			layout: { x: 0, y: 5, w: 12, h: 6 },
 		},
 		{
 			id: "recent-traces",
@@ -89,7 +89,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				listDataSource: "traces",
 				listLimit: 10,
 			},
-			layout: { x: 0, y: 9, w: 12, h: 5 },
+			layout: { x: 0, y: 11, w: 12, h: 5 },
 		},
 	]
 }
@@ -100,7 +100,11 @@ export const httpEndpointsTemplate: TemplateDefinition = {
 	description: "Top endpoints by throughput, slowest endpoints, and error rate by endpoint.",
 	category: "application",
 	tags: ["http", "endpoints"],
-	requirements: ["OpenTelemetry HTTP instrumentation"],
+	requirement: {
+		kind: "telemetry",
+		label: "OpenTelemetry HTTP instrumentation",
+		collector: "your OpenTelemetry HTTP instrumentation",
+	},
 	parameters: [
 		{
 			key: paramKey("service_name"),

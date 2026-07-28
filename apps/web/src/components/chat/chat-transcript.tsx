@@ -22,37 +22,20 @@ import { Tool, ToolRow, toolLabel } from "@/components/ai-elements/tool"
 import { ToolGroup } from "@/components/ai-elements/tool-group"
 import { ApprovalCard } from "./approval-card"
 import { DiagnosisReportCard } from "./diagnosis-report-card"
-import { MessageActions } from "./message-actions"
+import { MessageActions, messageText } from "./message-actions"
 import { parseDiagnosisMarker } from "./diagnosis-marker"
 import { parseToolProposal } from "./tool-proposal"
 import { stripContextPreamble } from "./context-preamble"
+import {
+	buildTranscriptRows,
+	deriveToolStatus,
+	isToolPart,
+	toolNameFor,
+	toolPartsOf,
+	type ToolPart,
+} from "./transcript-rows"
 import type { UIMessage } from "@/components/ai-elements/types"
 import type { AiTriageResult } from "@maple/domain/http"
-
-type ToolPart = {
-	type: string
-	toolCallId: string
-	toolName?: string
-	state: string
-	input?: unknown
-	output?: unknown
-	errorText?: string
-}
-
-export function isToolPart(part: UIMessage["parts"][number]): boolean {
-	return part.type.startsWith("tool-") || part.type === "dynamic-tool"
-}
-
-function toolNameFor(part: ToolPart): string {
-	if (part.type.startsWith("tool-")) return part.type.replace(/^tool-/, "")
-	return part.toolName ?? "unknown"
-}
-
-function deriveToolStatus(state: string): "running" | "completed" | "error" {
-	if (state === "output-available") return "completed"
-	if (state === "output-error" || state === "output-denied") return "error"
-	return "running"
-}
 
 function shouldShowThinkingIndicator(
 	message: UIMessage,
@@ -77,6 +60,55 @@ export function findDiagnosisMessageId(messages: readonly UIMessage[]): string |
 		}
 	}
 	return undefined
+}
+
+/**
+ * A buffer of tool calls → one card: a bare row when there's a single call, a
+ * collapsed `Used N tools` group when there are several. Shared by the two callers
+ * that produce tool cards — the within-message flush below and the merged tool-run
+ * row — so a burst looks the same however it arrived.
+ */
+function renderToolNodes(buf: readonly ToolPart[], keyHint: string): ReactNode {
+	if (buf.length === 0) return null
+	if (buf.length === 1) {
+		const t = buf[0]!
+		return (
+			<Tool
+				key={t.toolCallId ?? keyHint}
+				toolName={toolNameFor(t)}
+				toolCallId={t.toolCallId}
+				state={t.state}
+				input={t.input}
+				output={t.output}
+				errorText={t.errorText}
+			/>
+		)
+	}
+	const runningCount = buf.filter((t) => deriveToolStatus(t.state) === "running").length
+	const errorCount = buf.filter((t) => deriveToolStatus(t.state) === "error").length
+	const lastRunning = [...buf].reverse().find((t) => deriveToolStatus(t.state) === "running")
+	return (
+		<ToolGroup
+			key={`group-${buf[0]!.toolCallId ?? keyHint}`}
+			count={buf.length}
+			runningCount={runningCount}
+			errorCount={errorCount}
+			completedCount={buf.length - runningCount}
+			currentLabel={lastRunning ? toolLabel(toolNameFor(lastRunning)) : undefined}
+		>
+			{buf.map((t) => (
+				<ToolRow
+					key={t.toolCallId}
+					toolName={toolNameFor(t)}
+					toolCallId={t.toolCallId}
+					state={t.state}
+					input={t.input}
+					output={t.output}
+					errorText={t.errorText}
+				/>
+			))}
+		</ToolGroup>
+	)
 }
 
 interface RenderPartsOptions {
@@ -104,46 +136,7 @@ function renderMessageParts({
 		if (toolBuf.length === 0) return
 		const buf = toolBuf
 		toolBuf = []
-		if (buf.length === 1) {
-			const t = buf[0]!
-			nodes.push(
-				<Tool
-					key={t.toolCallId ?? `tool-${nodes.length}`}
-					toolName={toolNameFor(t)}
-					toolCallId={t.toolCallId}
-					state={t.state}
-					input={t.input}
-					output={t.output}
-					errorText={t.errorText}
-				/>,
-			)
-			return
-		}
-		const runningCount = buf.filter((t) => deriveToolStatus(t.state) === "running").length
-		const errorCount = buf.filter((t) => deriveToolStatus(t.state) === "error").length
-		const lastRunning = [...buf].reverse().find((t) => deriveToolStatus(t.state) === "running")
-		nodes.push(
-			<ToolGroup
-				key={`group-${buf[0]!.toolCallId ?? nodes.length}`}
-				count={buf.length}
-				runningCount={runningCount}
-				errorCount={errorCount}
-				completedCount={buf.length - runningCount}
-				currentLabel={lastRunning ? toolLabel(toolNameFor(lastRunning)) : undefined}
-			>
-				{buf.map((t) => (
-					<ToolRow
-						key={t.toolCallId}
-						toolName={toolNameFor(t)}
-						toolCallId={t.toolCallId}
-						state={t.state}
-						input={t.input}
-						output={t.output}
-						errorText={t.errorText}
-					/>
-				))}
-			</ToolGroup>,
-		)
+		nodes.push(renderToolNodes(buf, `tool-${nodes.length}`))
 	}
 
 	for (let i = 0; i < message.parts.length; i++) {
@@ -197,6 +190,14 @@ function renderMessageParts({
  * out at the call site and leave the primitive registry-pristine.
  */
 const TRANSCRIPT_ITEM = "[content-visibility:visible] [contain-intrinsic-size:none]"
+
+/**
+ * The one knob for the rhythm *inside* a turn. Parts used to carry their own `my-2`,
+ * which the bubble's `overflow-hidden` block formatting context trapped — so every
+ * card also padded the bubble's top and bottom edges on top of the list gap. A real
+ * flex gap spaces siblings and leaves the edges alone.
+ */
+const PART_STACK = "flex flex-col gap-2"
 
 export interface ChatTranscriptProps {
 	messages: readonly UIMessage[]
@@ -258,12 +259,13 @@ export function ChatTranscript({
 	}
 
 	const awaitingFirstToken = isLoading && messages[messages.length - 1]?.role === "user"
+	const lastMessageId = messages[messages.length - 1]?.id
 
 	return (
 		<MessageScrollerProvider autoScroll defaultScrollPosition="end">
 			<MessageScroller className="min-h-0 flex-1">
 				<MessageScrollerViewport>
-					<MessageScrollerContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6">
+					<MessageScrollerContent className="mx-auto w-full max-w-3xl gap-4 px-4 py-6">
 						{readOnly ? (
 							<MessageScrollerItem messageId="__read-only" className={TRANSCRIPT_ITEM}>
 								<Marker variant="separator">
@@ -276,7 +278,37 @@ export function ChatTranscript({
 								<DiagnosisReportCard report={fallbackDiagnosis} />
 							</MessageScrollerItem>
 						) : null}
-						{messages.map((message, messageIndex) => {
+						{buildTranscriptRows(messages).map((row) => {
+							if (row.kind === "tool-run") {
+								const last = row.messages[row.messages.length - 1]!
+								return (
+									<MessageScrollerItem
+										key={row.id}
+										messageId={row.id}
+										className={TRANSCRIPT_ITEM}
+									>
+										<Message align="start" className="text-sm">
+											<MessageContent>
+												<Bubble variant="ghost" align="start">
+													<BubbleContent className="text-sm">
+														<div className={PART_STACK}>
+															{renderToolNodes(toolPartsOf(row), row.id)}
+															{shouldShowThinkingIndicator(
+																last,
+																isLoading,
+																last.id === lastMessageId,
+															) ? (
+																<StatusMarker />
+															) : null}
+														</div>
+													</BubbleContent>
+												</Bubble>
+											</MessageContent>
+										</Message>
+									</MessageScrollerItem>
+								)
+							}
+							const message = row.message
 							const isUser = message.role === "user"
 							if (isUser && isMachineTurn(message)) {
 								return (
@@ -291,7 +323,6 @@ export function ChatTranscript({
 									</MessageScrollerItem>
 								)
 							}
-							const permalink = permalinkFor?.(message.id)
 							return (
 								<MessageScrollerItem
 									key={message.id}
@@ -310,24 +341,31 @@ export function ChatTranscript({
 														isUser ? "rounded-lg px-4 py-3 text-sm" : "text-sm"
 													}
 												>
-													{renderMessageParts({
-														message,
-														resolvedApprovals,
-														onApprove,
-														onDeny,
-													})}
-													{shouldShowThinkingIndicator(
-														message,
-														isLoading,
-														messageIndex === messages.length - 1,
-													) ? (
-														<StatusMarker className="mt-1" />
-													) : null}
+													<div className={PART_STACK}>
+														{renderMessageParts({
+															message,
+															resolvedApprovals,
+															onApprove,
+															onDeny,
+														})}
+														{shouldShowThinkingIndicator(
+															message,
+															isLoading,
+															message.id === lastMessageId,
+														) ? (
+															<StatusMarker />
+														) : null}
+													</div>
 												</BubbleContent>
 											</Bubble>
-											{isUser ? null : (
+											{/* An empty footer still reserves the height of the
+											    hover actions, so only text-bearing turns get one. */}
+											{isUser || !messageText(message) ? null : (
 												<MessageFooter>
-													<MessageActions message={message} permalink={permalink} />
+													<MessageActions
+														message={message}
+														permalink={permalinkFor?.(message.id)}
+													/>
 												</MessageFooter>
 											)}
 										</MessageContent>

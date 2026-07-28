@@ -145,6 +145,7 @@ export default Alchemy.Stack(
 			stage,
 			domains,
 			mapleDb,
+			chatFlue,
 		})
 
 		const summary = {

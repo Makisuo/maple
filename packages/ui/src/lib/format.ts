@@ -296,6 +296,10 @@ export const formatValueByUnit: (num: number, unit?: string) => string = (num, u
 	pipe(
 		Match.value(unit),
 		Match.when("percent", () => `${(num * 100).toFixed(1)}%`),
+		// For sources that already report 0–100 (PlanetScale's `*_util_percentages`, NATS varz
+		// `cpu`, most Prometheus exporters). Without this they had to borrow `percent` and render
+		// 100× high, or drop the `%` entirely by falling back to `number`.
+		Match.when("percent_100", () => `${num.toFixed(1)}%`),
 		Match.when("duration_ms", () => formatDuration(num)),
 		Match.when("duration_us", () => formatDuration(num / 1000)),
 		Match.when("duration_s", () => formatDuration(num * 1000)),

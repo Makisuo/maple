@@ -7,7 +7,6 @@ export const blankTemplate: TemplateDefinition = {
 	description: "Start from an empty dashboard and add widgets manually.",
 	category: "application",
 	tags: [],
-	requirements: [],
 	parameters: [],
 	build: () =>
 		buildPortableDashboard({

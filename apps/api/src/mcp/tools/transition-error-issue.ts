@@ -10,7 +10,7 @@ import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "../lib/query-warehouse"
 import { resolveActorId } from "../lib/resolve-actor"
 import { ErrorsService } from "@/services/ErrorsService"
-import { ErrorIssueId, WorkflowState } from "@maple/domain/http"
+import { ErrorIssueId, WorkflowState, describeWorkflowTransitions } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
 const decodeWorkflowState = Schema.decodeUnknownOption(WorkflowState)
@@ -18,7 +18,7 @@ const decodeWorkflowState = Schema.decodeUnknownOption(WorkflowState)
 export function registerTransitionErrorIssueTool(server: McpToolRegistrar) {
 	server.tool(
 		"transition_error_issue",
-		"Move an error issue to a new workflow state. Valid transitions: triage→(todo|in_progress|cancelled|wontfix); todo→(triage|in_progress|cancelled|wontfix); in_progress→(triage|todo|in_review|cancelled|wontfix); in_review→(triage|in_progress|done|cancelled|wontfix); done→(triage|in_progress|cancelled|wontfix); wontfix→(triage|cancelled).",
+		`Move an error issue to a new workflow state. Valid transitions: ${describeWorkflowTransitions()}.`,
 		Schema.Struct({
 			issue_id: requiredStringParam("The error issue ID (from list_error_issues)"),
 			to_state: requiredStringParam(

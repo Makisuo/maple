@@ -12,6 +12,7 @@ import { and, eq, sql } from "drizzle-orm"
 import { Cause, Clock, Effect, Option, Redacted, Schema } from "effect"
 import { Database } from "./DatabaseLive"
 import { maybeEnqueueTriage } from "./ai-triage-enqueue"
+import { SYSTEM_ALERTS_AGENT_NAME } from "./system-actors"
 
 /**
  * Issue-hub glue: alert incidents create/refresh `error_issues` rows
@@ -20,7 +21,6 @@ import { maybeEnqueueTriage } from "./ai-triage-enqueue"
  * doesn't need the full ErrorsService layer.
  */
 
-const SYSTEM_ALERTS_AGENT_NAME = "system-alerts"
 
 const decodeIssueId = Schema.decodeUnknownSync(ErrorIssueId)
 const decodeEventId = Schema.decodeUnknownSync(ErrorIssueEventId)

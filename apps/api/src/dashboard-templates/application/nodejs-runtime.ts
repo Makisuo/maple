@@ -1,5 +1,5 @@
 import {
-	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_BAR,
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	metricsTimeseries,
@@ -31,7 +31,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Event Loop Lag (Max)", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "heap-used",
@@ -45,7 +45,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Heap Used", ...CHART_DISPLAY_LINE, unit: "bytes" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "gc-count",
@@ -60,8 +60,8 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 				groupBy,
 			}),
-			display: { title: "GC Count / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			display: { title: "GC Count / sec", ...CHART_DISPLAY_BAR, unit: "number" },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "active-handles",
@@ -75,7 +75,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Active Handles", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 	]
 }
@@ -86,7 +86,13 @@ export const nodejsRuntimeTemplate: TemplateDefinition = {
 	description: "Event loop lag, heap usage, GC, and active handles for Node.js services.",
 	category: "application",
 	tags: ["nodejs", "runtime"],
-	requirements: ["OpenTelemetry Node.js instrumentation"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry Node.js instrumentation",
+		collector: "the OpenTelemetry Node.js SDK",
+		setupLabel: "the Node.js SDK",
+		hint: "Enable its runtime metrics and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["process.runtime.nodejs."],
 	parameters: [
 		{

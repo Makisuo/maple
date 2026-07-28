@@ -95,23 +95,40 @@ export function makeQueryBuilderBreakdownDataSource(queries: Record<string, unkn
 // Chart display presets
 // ---------------------------------------------------------------------------
 
+// `seriesStats` (the Min/Max/Mean/Last table) is opt-in and costs up to 45% of a
+// widget's height. Every preset states it outright rather than leaning on the
+// default, so an exported dashboard renders the same wherever it is imported.
+// It earns that space only where the answer is a number: line charts here are
+// levels (heap, latency, lag, utilization). Area and bar are stacked rates and
+// breakdowns read for shape and composition, where per-series stats under a
+// cumulative plot duplicate the tooltip at best and mislead at worst (`Last` of a
+// bucketed rate is the partial trailing bucket) — those get the compact legend.
+// `showPoints` is likewise stated rather than defaulted. Templates chart whole
+// fleets, so a single series with an isolated spike would otherwise trip the
+// sparse-data heuristic and stipple every dense series in the same chart with
+// point markers. Hovering still gives the active dot, and a reader who wants
+// permanent points can turn them back on per widget.
 export const CHART_DISPLAY_AREA = {
 	chartId: "query-builder-area",
-	chartPresentation: { legend: "visible" },
+	chartPresentation: { legend: "visible", seriesStats: false, showPoints: false },
 	stacked: true,
 	curveType: "monotone",
 }
 
 export const CHART_DISPLAY_LINE = {
 	chartId: "query-builder-line",
-	chartPresentation: { legend: "visible" },
+	chartPresentation: { legend: "visible", seriesStats: true, showPoints: false },
 	stacked: false,
 	curveType: "monotone",
 }
 
-const CHART_DISPLAY_BAR = {
+// Bar is for counted events that are sparse and bursty — restarts, deadlocks,
+// evictions, slow queries, dropped messages. A stacked area over those draws a
+// continuous ribbon between two isolated incidents and reads as sustained
+// pressure; discrete bars read as "three restarts, at these three times".
+export const CHART_DISPLAY_BAR = {
 	chartId: "query-builder-bar",
-	chartPresentation: { legend: "visible" },
+	chartPresentation: { legend: "visible", seriesStats: false, showPoints: false },
 	stacked: true,
 	curveType: "linear",
 }

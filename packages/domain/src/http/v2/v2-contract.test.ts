@@ -485,6 +485,24 @@ describe("scopes", () => {
 			access: "write",
 		})
 	})
+
+	// Template preview builds the dashboard without saving it, so a read key
+	// must reach it; instantiate right next to it must not.
+	it("treats template preview as a read-only POST but instantiate as a write", () => {
+		expect(requiredScopeForRequest("POST", "/v2/dashboards/templates/dtpl_abc/preview")).toEqual({
+			family: "dashboards",
+			access: "read",
+		})
+		expect(requiredScopeForRequest("POST", "/v2/dashboards/templates/dtpl_abc/instantiate")).toEqual({
+			family: "dashboards",
+			access: "write",
+		})
+		// The pattern must not open up nested or lookalike paths.
+		expect(requiredScopeForRequest("POST", "/v2/dashboards/templates/dtpl_abc/preview/apply")).toEqual({
+			family: "dashboards",
+			access: "write",
+		})
+	})
 })
 
 describe("telemetry contracts", () => {

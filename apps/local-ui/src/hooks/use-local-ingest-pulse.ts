@@ -25,7 +25,7 @@ export interface IngestPulse {
 /**
  * Polls the local binary for a live "are we receiving telemetry" signal that
  * drives the header heartbeat. Unions a span + log probe (see
- * `localIngestPulseQuery`) over a recent window and reduces it to the latest
+ * `orgTelemetryPulseQuery`) over a recent window and reduces it to the latest
  * timestamp seen.
  */
 export function useLocalIngestPulse() {
@@ -37,7 +37,7 @@ export function useLocalIngestPulse() {
 		retry: false,
 		queryFn: async () => {
 			const now = Date.now()
-			const compiled = CH.compileUnion(CH.localIngestPulseQuery(), {
+			const compiled = CH.compileUnion(CH.orgTelemetryPulseQuery(), {
 				orgId: LOCAL_ORG_ID,
 				startTime: toClickHouseDateTime(now - WINDOW_MS),
 				endTime: toClickHouseDateTime(now + 60 * 1000),

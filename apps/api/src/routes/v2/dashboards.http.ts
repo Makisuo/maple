@@ -211,182 +211,226 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 	Effect.gen(function* () {
 		const persistence = yield* DashboardPersistenceService
 
-		return handlers
-			.handle("list", ({ query }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const response = yield* persistence
-						.list(tenant.orgId)
-						.pipe(Effect.mapError(mapPersistenceError))
-					const page = yield* paginateArray(response.dashboards.map(toV2Dashboard), query)
-					return { object: "list" as const, ...page }
-				}),
-			)
-			.handle("retrieve", ({ params }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const dashboard = yield* persistence
-						.get(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapReadError))
-					return toV2Dashboard(dashboard)
-				}),
-			)
-			.handle("create", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const dashboard = yield* persistence
-						.create(tenant.orgId, tenant.userId, toPortable(payload))
-						.pipe(Effect.mapError(mapWriteError("create")))
-					return toV2DashboardMutation(dashboard)
-				}),
-			)
-			.handle("update", ({ params, payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const updatedAt = asIsoDateTime(new Date(yield* Clock.currentTimeMillis).toISOString())
-					const dashboard = yield* persistence
-						.mutate(tenant.orgId, tenant.userId, params.id, (current) =>
-							Effect.succeed(applyUpdate(current, payload, updatedAt)),
+		return (
+			handlers
+				.handle("list", ({ query }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const response = yield* persistence
+							.list(tenant.orgId)
+							.pipe(Effect.mapError(mapPersistenceError))
+						const page = yield* paginateArray(response.dashboards.map(toV2Dashboard), query)
+						return { object: "list" as const, ...page }
+					}),
+				)
+				.handle("retrieve", ({ params }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const dashboard = yield* persistence
+							.get(tenant.orgId, params.id)
+							.pipe(Effect.mapError(mapReadError))
+						return toV2Dashboard(dashboard)
+					}),
+				)
+				.handle("create", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const dashboard = yield* persistence
+							.create(tenant.orgId, tenant.userId, toPortable(payload))
+							.pipe(Effect.mapError(mapWriteError("create")))
+						return toV2DashboardMutation(dashboard)
+					}),
+				)
+				.handle("update", ({ params, payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const updatedAt = asIsoDateTime(
+							new Date(yield* Clock.currentTimeMillis).toISOString(),
 						)
-						.pipe(Effect.mapError(mapUpdateError("update")))
-					return toV2DashboardMutation(dashboard)
-				}),
-			)
-			.handle("delete", ({ params }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const deleted = yield* persistence
-						.delete(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapReadError))
-					return {
-						id: deleted.id,
-						object: "dashboard" as const,
-						deleted: true as const,
-						...(deleted.txid !== undefined ? { txid: deleted.txid } : {}),
-					}
-				}),
-			)
-			.handle("importPerses", ({ payload }) =>
-				Effect.gen(function* () {
-					const converted = yield* convertPersesDashboardToPortable(payload.dashboard).pipe(
-						Effect.mapError((error) => invalidRequest("parameter_invalid", error.message)),
-					)
-					const tenant = yield* CurrentTenant.Context
-					const dashboard = yield* persistence
-						.create(tenant.orgId, tenant.userId, converted.dashboard)
-						.pipe(Effect.mapError(mapWriteError("import")))
-					return {
-						object: "dashboard_import" as const,
-						dashboard: toV2DashboardMutation(dashboard),
-						warnings: [...converted.warnings],
-					}
-				}),
-			)
-			.handle("listVersions", ({ params, query }) =>
-				Effect.gen(function* () {
-					const before = query.cursor === undefined ? undefined : decodeVersionCursor(query.cursor)
-					if (query.cursor !== undefined && before === null) {
-						return yield* Effect.fail(
-							invalidRequest("parameter_invalid", "Invalid dashboard version cursor", "cursor"),
+						const dashboard = yield* persistence
+							.mutate(tenant.orgId, tenant.userId, params.id, (current) =>
+								Effect.succeed(applyUpdate(current, payload, updatedAt)),
+							)
+							.pipe(Effect.mapError(mapUpdateError("update")))
+						return toV2DashboardMutation(dashboard)
+					}),
+				)
+				.handle("delete", ({ params }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const deleted = yield* persistence
+							.delete(tenant.orgId, params.id)
+							.pipe(Effect.mapError(mapReadError))
+						return {
+							id: deleted.id,
+							object: "dashboard" as const,
+							deleted: true as const,
+							...(deleted.txid !== undefined ? { txid: deleted.txid } : {}),
+						}
+					}),
+				)
+				.handle("importPerses", ({ payload }) =>
+					Effect.gen(function* () {
+						const converted = yield* convertPersesDashboardToPortable(payload.dashboard).pipe(
+							Effect.mapError((error) => invalidRequest("parameter_invalid", error.message)),
 						)
-					}
-					const tenant = yield* CurrentTenant.Context
-					const response = yield* persistence
-						.listVersions(tenant.orgId, params.id, {
-							limit: query.limit ?? LIST_LIMIT_DEFAULT,
-							...(before !== undefined && before !== null ? { before } : {}),
-						})
-						.pipe(Effect.mapError(mapReadError))
-					const data = response.versions.map(toV2Version)
-					return {
-						object: "list" as const,
-						data,
-						has_more: response.hasMore,
-						next_cursor:
-							response.hasMore && data.length > 0
-								? encodeVersionCursor(data[data.length - 1]!.versionNumber)
-								: null,
-					}
-				}),
-			)
-			.handle("retrieveVersion", ({ params }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const version = yield* persistence
-						.getVersion(tenant.orgId, params.id, params.version_id)
-						.pipe(Effect.mapError(mapVersionError))
-					return toV2VersionDetail(version)
-				}),
-			)
-			.handle("restoreVersion", ({ params }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const dashboard = yield* persistence
-						.restoreVersion(tenant.orgId, tenant.userId, params.id, params.version_id)
-						.pipe(Effect.mapError(mapRestoreError("restore_version")))
-					return toV2DashboardMutation(dashboard)
-				}),
-			)
-			.handle("listTemplates", ({ query }) =>
-				Effect.map(
-					paginateArray(
-						listTemplateMetadata().map((template) =>
-							toV2Template(new DashboardTemplateMetadata(template)),
+						const tenant = yield* CurrentTenant.Context
+						const dashboard = yield* persistence
+							.create(tenant.orgId, tenant.userId, converted.dashboard)
+							.pipe(Effect.mapError(mapWriteError("import")))
+						return {
+							object: "dashboard_import" as const,
+							dashboard: toV2DashboardMutation(dashboard),
+							warnings: [...converted.warnings],
+						}
+					}),
+				)
+				.handle("listVersions", ({ params, query }) =>
+					Effect.gen(function* () {
+						const before =
+							query.cursor === undefined ? undefined : decodeVersionCursor(query.cursor)
+						if (query.cursor !== undefined && before === null) {
+							return yield* Effect.fail(
+								invalidRequest(
+									"parameter_invalid",
+									"Invalid dashboard version cursor",
+									"cursor",
+								),
+							)
+						}
+						const tenant = yield* CurrentTenant.Context
+						const response = yield* persistence
+							.listVersions(tenant.orgId, params.id, {
+								limit: query.limit ?? LIST_LIMIT_DEFAULT,
+								...(before !== undefined && before !== null ? { before } : {}),
+							})
+							.pipe(Effect.mapError(mapReadError))
+						const data = response.versions.map(toV2Version)
+						return {
+							object: "list" as const,
+							data,
+							has_more: response.hasMore,
+							next_cursor:
+								response.hasMore && data.length > 0
+									? encodeVersionCursor(data[data.length - 1]!.versionNumber)
+									: null,
+						}
+					}),
+				)
+				.handle("retrieveVersion", ({ params }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const version = yield* persistence
+							.getVersion(tenant.orgId, params.id, params.version_id)
+							.pipe(Effect.mapError(mapVersionError))
+						return toV2VersionDetail(version)
+					}),
+				)
+				.handle("restoreVersion", ({ params }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const dashboard = yield* persistence
+							.restoreVersion(tenant.orgId, tenant.userId, params.id, params.version_id)
+							.pipe(Effect.mapError(mapRestoreError("restore_version")))
+						return toV2DashboardMutation(dashboard)
+					}),
+				)
+				.handle("listTemplates", ({ query }) =>
+					Effect.map(
+						paginateArray(
+							listTemplateMetadata().map((template) =>
+								toV2Template(new DashboardTemplateMetadata(template)),
+							),
+							query,
 						),
-						query,
+						(page) => ({ object: "list" as const, ...page }),
 					),
-					(page) => ({ object: "list" as const, ...page }),
-				),
-			)
-			.handle("instantiateTemplate", ({ params, payload }) =>
-				Effect.gen(function* () {
-					const template = getTemplateById(params.template_id)
-					if (!template)
-						return yield* Effect.fail(
-							resourceNotFound(
-								"dashboard_template",
-								"No such dashboard template.",
-								"template_id",
-							),
-						)
+				)
+				// Read-only sibling of `instantiateTemplate`: same pure build, nothing
+				// persisted. Unlike instantiate it does not enforce required
+				// parameters — the picker previews a template before you have filled
+				// them in, and showing the dashboard you would get is the whole point.
+				.handle("previewTemplate", ({ params, payload }) =>
+					Effect.gen(function* () {
+						const template = getTemplateById(params.template_id)
+						if (!template)
+							return yield* Effect.fail(
+								resourceNotFound(
+									"dashboard_template",
+									"No such dashboard template.",
+									"template_id",
+								),
+							)
 
-					const provided: TemplateParameterValues = payload.parameters ?? {}
-					const missing = template.parameters
-						.filter((parameter) => parameter.required && !provided[parameter.key])
-						.map((parameter) => parameter.key)
-					if (missing.length > 0) {
-						return yield* Effect.fail(
-							invalidRequest(
-								"parameter_missing",
-								`Missing required template parameters: ${missing.join(", ")}`,
-								"parameters",
-							),
-						)
-					}
+						const built = yield* Effect.try({
+							try: () => template.build(payload.parameters ?? {}),
+							catch: (error) =>
+								invalidRequest(
+									"parameter_invalid",
+									error instanceof Error ? error.message : "Template build failed",
+									"parameters",
+								),
+						})
 
-					const built = yield* Effect.try({
-						try: () => template.build(provided),
-						catch: (error) =>
-							invalidRequest(
-								"parameter_invalid",
-								error instanceof Error ? error.message : "Template build failed",
-								"parameters",
-							),
-					})
+						return {
+							object: "dashboard_template_preview" as const,
+							name: built.name,
+							timeRange: built.timeRange,
+							widgets: built.widgets,
+							variables: built.variables ?? [],
+						}
+					}),
+				)
+				.handle("instantiateTemplate", ({ params, payload }) =>
+					Effect.gen(function* () {
+						const template = getTemplateById(params.template_id)
+						if (!template)
+							return yield* Effect.fail(
+								resourceNotFound(
+									"dashboard_template",
+									"No such dashboard template.",
+									"template_id",
+								),
+							)
 
-					const portable = new PortableDashboardDocument({
-						name: payload.name ?? built.name,
-						...(built.description !== undefined ? { description: built.description } : {}),
-						...(built.tags !== undefined ? { tags: built.tags } : {}),
-						timeRange: built.timeRange,
-						widgets: built.widgets,
-					})
-					const tenant = yield* CurrentTenant.Context
-					const dashboard = yield* persistence
-						.create(tenant.orgId, tenant.userId, portable)
-						.pipe(Effect.mapError(mapWriteError("instantiate_template")))
-					return toV2DashboardMutation(dashboard)
-				}),
-			)
+						const provided: TemplateParameterValues = payload.parameters ?? {}
+						const missing = template.parameters
+							.filter((parameter) => parameter.required && !provided[parameter.key])
+							.map((parameter) => parameter.key)
+						if (missing.length > 0) {
+							return yield* Effect.fail(
+								invalidRequest(
+									"parameter_missing",
+									`Missing required template parameters: ${missing.join(", ")}`,
+									"parameters",
+								),
+							)
+						}
+
+						const built = yield* Effect.try({
+							try: () => template.build(provided),
+							catch: (error) =>
+								invalidRequest(
+									"parameter_invalid",
+									error instanceof Error ? error.message : "Template build failed",
+									"parameters",
+								),
+						})
+
+						const portable = new PortableDashboardDocument({
+							name: payload.name ?? built.name,
+							...(built.description !== undefined ? { description: built.description } : {}),
+							...(built.tags !== undefined ? { tags: built.tags } : {}),
+							timeRange: built.timeRange,
+							widgets: built.widgets,
+						})
+						const tenant = yield* CurrentTenant.Context
+						const dashboard = yield* persistence
+							.create(tenant.orgId, tenant.userId, portable)
+							.pipe(Effect.mapError(mapWriteError("instantiate_template")))
+						return toV2DashboardMutation(dashboard)
+					}),
+				)
+		)
 	}),
 )

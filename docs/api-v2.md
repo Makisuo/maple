@@ -142,7 +142,7 @@ Implemented in phases; the pilot (`api_keys`) ships first and proves every conve
 | ------------------------------------ | ------------------------------------------------------------------------------------------------ | ---------------------------------------- |
 | `api_keys` ✅ pilot                  | list/create/retrieve/roll/revoke, `scopes` param                                                 | `apiKeys` / `ApiKeysService`             |
 | `ingest_keys` ✅                     | retrieve, `POST …/public/roll`, `POST …/private/roll`                                            | `ingestKeys`                             |
-| `dashboards` ✅                      | CRUD + `versions` (list/retrieve/restore) + `templates` (list/instantiate) + Perses import       | `dashboards`                             |
+| `dashboards` ✅                      | CRUD + `versions` (list/retrieve/restore) + `templates` (list/preview/instantiate) + Perses import | `dashboards`                             |
 | `alerts/rules` ✅                    | CRUD + `test` + `preview` + `checks`                                                             | `alerts`                                 |
 | `alerts/destinations` ✅             | CRUD + `test`                                                                                    | `alerts`                                 |
 | `alerts/incidents` ✅                | list/retrieve                                                                                    | `alerts`                                 |

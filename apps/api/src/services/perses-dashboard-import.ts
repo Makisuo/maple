@@ -4,6 +4,7 @@ import {
 	DashboardWidgetSchema,
 	PortableDashboardDocument,
 	type RawSqlDisplayType,
+	defaultWidgetHeight,
 } from "@maple/domain/http"
 
 type UnknownRecord = Record<string, unknown>
@@ -157,11 +158,15 @@ function displayForPanel(args: {
 	}
 
 	switch (args.kind) {
+		// `seriesStats` follows the same rule as the dashboard templates: on for
+		// line charts, where the series are levels and the answer is a number;
+		// off for stacked bars, where per-series stats under a cumulative plot
+		// only duplicate the tooltip. See CHART_DISPLAY_* in dashboard-templates.
 		case "TimeSeriesChart":
 			return {
 				...base,
 				chartId: "query-builder-line",
-				chartPresentation: { legend: "visible" },
+				chartPresentation: { legend: "visible", seriesStats: true },
 				stacked: false,
 				curveType: "monotone",
 			}
@@ -169,7 +174,7 @@ function displayForPanel(args: {
 			return {
 				...base,
 				chartId: "query-builder-bar",
-				chartPresentation: { legend: "visible" },
+				chartPresentation: { legend: "visible", seriesStats: false },
 				stacked: true,
 				curveType: "linear",
 			}
@@ -196,11 +201,10 @@ function displayForPanel(args: {
 }
 
 function defaultLayoutForVisualization(visualization: string) {
-	if (visualization === "stat") return { w: 3, h: 4, minW: 2, minH: 2 }
-	if (visualization === "table" || visualization === "markdown") {
-		return { w: 6, h: 5, minW: 3, minH: 3 }
-	}
-	return { w: 6, h: 5, minW: 3, minH: 2 }
+	const { h, minH } = defaultWidgetHeight(visualization)
+	// Stats keep the taller hand-added height, matching the web store.
+	if (visualization === "stat") return { w: 3, h: 4, minW: 2, minH }
+	return { w: 6, h, minW: 3, minH }
 }
 
 function nextLayout(widgets: readonly DashboardWidget[], visualization: string) {

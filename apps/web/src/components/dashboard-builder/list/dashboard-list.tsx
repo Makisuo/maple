@@ -1,4 +1,5 @@
 import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
+import { defaultWidgetHeight } from "@maple/domain/http"
 import { useState, useMemo } from "react"
 
 import {
@@ -48,8 +49,10 @@ function DashboardPreview({ widgets }: { widgets: DashboardWidget[] }) {
 		return <div className="flex items-center justify-center h-full text-dim text-xs">No widgets</div>
 	}
 
+	const fallbackHeight = (widget: DashboardWidget) => defaultWidgetHeight(widget.visualization).h
+
 	const maxX = Math.max(...widgets.map((w) => (w.layout?.x ?? 0) + (w.layout?.w ?? 4)))
-	const maxY = Math.max(...widgets.map((w) => (w.layout?.y ?? 0) + (w.layout?.h ?? 4)))
+	const maxY = Math.max(...widgets.map((w) => (w.layout?.y ?? 0) + (w.layout?.h ?? fallbackHeight(w))))
 	const cols = Math.max(maxX, 12)
 	const rows = Math.max(maxY, 4)
 
@@ -59,7 +62,7 @@ function DashboardPreview({ widgets }: { widgets: DashboardWidget[] }) {
 				const x = widget.layout?.x ?? 0
 				const y = widget.layout?.y ?? 0
 				const w = widget.layout?.w ?? 4
-				const h = widget.layout?.h ?? 4
+				const h = widget.layout?.h ?? fallbackHeight(widget)
 				const gap = 3
 				const left = `calc(${(x / cols) * 100}% + ${gap}px)`
 				const top = `calc(${(y / rows) * 100}% + ${gap}px)`

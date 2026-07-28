@@ -7,6 +7,7 @@ import {
 	DashboardId,
 	IsoDateTimeString,
 	PortableDashboardDocument,
+	defaultWidgetHeight,
 } from "@maple/domain/http"
 import type { V2DashboardMutation } from "@maple/domain/http/v2"
 import { useLiveQuery } from "@tanstack/react-db"
@@ -234,12 +235,15 @@ function makeWidgetMutators(deps: {
 			throw new Error("Dashboards are read-only")
 		}
 
+		const { h, minH } = defaultWidgetHeight(visualization)
 		const layoutDefaults =
 			visualization === "stat"
-				? { w: 3, h: 4, minW: 2, minH: 2 }
+				? // Deliberately taller than the `h: 2` stat tiles the templates use — a
+					// hand-added stat gets room for a sparkline.
+					{ w: 3, h: 4, minW: 2, minH }
 				: visualization === "table" || visualization === "list"
-					? { w: 6, h: 5, minW: 3, minH: 3 }
-					: { w: 4, h: 5, minW: 2, minH: 2 }
+					? { w: 6, h, minW: 3, minH }
+					: { w: 4, h, minW: 2, minH }
 
 		// Build the widget synchronously from the current dashboard so we can
 		// return it to the caller. `mutateDashboard`'s updater runs asynchronously

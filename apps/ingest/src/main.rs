@@ -35,13 +35,15 @@ use maple_ingest::metrics;
 use maple_ingest::otel::{
     accept_internal_span, auth_internal_span, build_resource, decode_internal_span,
     entitlement_internal_span, forward_client_span, grpc_server_span, parse_internal_span,
-    record_stage_error, resolve_config_internal_span, ResourceConfig,
+    record_stage_error, rejection_loses_data, resolve_config_internal_span, ResourceConfig,
 };
+use maple_ingest::otlp_json;
 use maple_ingest::telemetry::{
     AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget, ClickHouseTargetProvider,
     DatasourceNames, ExportDestination, MappingOperation, MappingSourceContext, PipelineError,
     SamplingPolicy, TelemetryPipeline, TelemetrySignal, TinybirdConfig,
 };
+use maple_ingest::usage_metrics::{billable_gb, usage_cardinality_view, UsageMetrics};
 use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
@@ -54,7 +56,7 @@ use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_sdk::logs::{BatchLogProcessor, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
 use opentelemetry_sdk::runtime::Tokio as OtelTokio;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_sdk::trace::{BatchConfigBuilder, SdkTracerProvider};
@@ -694,6 +696,11 @@ struct AppState {
     cloudflare_resolver: CloudflareConnectorResolver,
     autumn_tracker: Option<AutumnTracker>,
     autumn_entitlements: Option<AutumnEntitlements>,
+    /// Per-org ingest volume, on its own delta-temporality provider. Recorded
+    /// beside `autumn_tracker` from the same value so the warehouse is ground
+    /// truth for what the gateway metered. `None` when metric export is skipped
+    /// (local dev, or a loopback endpoint).
+    usage_metrics: Option<Arc<UsageMetrics>>,
     replay_session_budget: ReplaySessionBudget,
 }
 
@@ -926,21 +933,34 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// OTEL span status (`otel.status_code`) for a rejected request, by HTTP status.
+/// OTEL span status (`otel.status_code`) for a rejected request.
 ///
-/// Per the OpenTelemetry HTTP semantic conventions, a SERVER span is only an
-/// `Error` for 5xx responses; 4xx client rejections (missing/invalid ingest key,
-/// billing limit, throttle, oversized/undecodable payload) are the caller's fault
-/// and must NOT mark the span `Error` — otherwise they flood the error dashboards
-/// (which count `StatusCode='Error'`). The genuine server-side auth failure
-/// (resolver unavailable → 503) is 5xx and stays `Error`. `http.response.status_code`,
-/// `error.type`, and the `request_completed(… "error" …)` metric are recorded
-/// regardless, so 4xx rejections remain fully observable.
-fn otel_status_for_rejection(status: u16) -> &'static str {
-    if status >= 500 {
+/// 5xx is always `Error` (server fault). Below that, see `rejection_loses_data`:
+/// a rejection that drops the caller's telemetry is an `Error`, a rejection of
+/// the caller itself is not.
+fn otel_status_for_rejection(status: u16, error_kind: &str) -> &'static str {
+    if status >= 500 || rejection_loses_data(error_kind) {
         "Error"
     } else {
         "Ok"
+    }
+}
+
+/// Record why a request was rejected, on the server span.
+///
+/// `otel.status_description` cannot be the sole carrier: it resolves to
+/// `Status::error(reason)`, and the SDK keeps only the winner of `Ok > Error >
+/// Unset` — so on a rejection left deliberately `Ok`, the description is dropped
+/// and the span records *that* a request was refused but never *why*. The reason
+/// therefore always gets its own attribute, and the description is additionally
+/// written where an `Error` status will keep it. Counterpart of
+/// `record_stage_error` for the stage spans.
+fn record_rejection_reason(span: &Span, status: u16, error_kind: &str, reason: &str) {
+    span.record("maple.ingest.reject_reason", reason);
+    if otel_status_for_rejection(status, error_kind) == "Error" {
+        span.record("otel.status_description", reason);
+    } else {
+        span.record("otel.status_code", "Ok");
     }
 }
 
@@ -988,8 +1008,14 @@ fn record_grpc_outcome<T>(span: &Span, result: &Result<tonic::Response<T>, tonic
             let code = status.code();
             span.record("rpc.grpc.status_code", code as i32);
             span.record("error.type", code.description());
-            span.record("otel.status_description", status.message());
-            span.record("otel.status_code", grpc_otel_status_for_rejection(code));
+            span.record("maple.ingest.reject_reason", status.message());
+            if grpc_otel_status_for_rejection(code) == "Error" {
+                // See `record_rejection_reason`: the description is only kept
+                // on a span whose status stays `Error`.
+                span.record("otel.status_description", status.message());
+            } else {
+                span.record("otel.status_code", "Ok");
+            }
         }
     }
 }
@@ -1225,6 +1251,72 @@ fn init_metrics(
     Some(provider)
 }
 
+/// Wire up the per-org ingest volume pipeline. Deliberately a *second* meter
+/// provider rather than more instruments on the global one, for three reasons:
+///
+/// - Temporality is an exporter setting in opentelemetry 0.31, and these metrics
+///   need [`Temporality::Delta`] to be exact (see `usage_metrics` module docs).
+///   Flipping the shared exporter would silently change every operational metric.
+/// - It is never installed with `set_meter_provider`, so nothing can accidentally
+///   bind a cumulative operational instrument to the delta exporter.
+/// - A 60s interval halves the row count versus the operational provider's 30s,
+///   which under delta costs nothing but chart granularity below a minute.
+///
+/// Shares `service_instance_id` with `init_metrics` so both providers describe
+/// one process. Skipped under exactly the same conditions as `init_metrics`.
+fn init_usage_metrics(
+    forward_endpoint: &str,
+    bind_port: u16,
+    service_instance_id: &str,
+) -> Option<UsageMetrics> {
+    let deployment_env = resolve_deployment_env();
+    let internal_org_id =
+        std::env::var("MAPLE_INTERNAL_ORG_ID").unwrap_or_else(|_| "internal".to_string());
+
+    let forward_explicit = std::env::var("INGEST_FORWARD_OTLP_ENDPOINT").is_ok();
+    let skip_dev = deployment_env == "development" && !forward_explicit;
+    if skip_dev || endpoint_loopback_to_self(forward_endpoint, bind_port) {
+        return None;
+    }
+
+    let resource = build_resource(ResourceConfig {
+        service_name: "ingest",
+        service_namespace: "ingest",
+        service_version: env!("CARGO_PKG_VERSION"),
+        service_instance_id: service_instance_id.to_string(),
+        deployment_env,
+        internal_org_id,
+    });
+
+    let exporter = match MetricExporter::builder()
+        .with_http()
+        .with_endpoint(format!("{forward_endpoint}/v1/metrics"))
+        .with_protocol(Protocol::HttpBinary)
+        .with_temporality(Temporality::Delta)
+        .build()
+    {
+        Ok(exporter) => exporter,
+        Err(error) => {
+            eprintln!(
+                "Failed to build OTLP usage metric exporter: {error}; usage metrics disabled"
+            );
+            return None;
+        }
+    };
+
+    let reader = PeriodicReader::builder(exporter, OtelTokio)
+        .with_interval(Duration::from_secs(60))
+        .build();
+
+    let provider = SdkMeterProvider::builder()
+        .with_resource(resource)
+        .with_reader(reader)
+        .with_view(usage_cardinality_view)
+        .build();
+
+    Some(UsageMetrics::new(provider))
+}
+
 fn endpoint_loopback_to_self(forward_endpoint: &str, bind_port: u16) -> bool {
     let Ok(parsed) = url::Url::parse(forward_endpoint) else {
         return false;
@@ -1253,6 +1345,9 @@ async fn main() {
     let telemetry_providers =
         init_tracing(&config.forward_endpoint, config.port, &service_instance_id);
     let meter_provider = init_metrics(&config.forward_endpoint, config.port, &service_instance_id);
+    let usage_metrics =
+        init_usage_metrics(&config.forward_endpoint, config.port, &service_instance_id)
+            .map(Arc::new);
 
     let http_client = match Client::builder()
         .timeout(config.forward_timeout)
@@ -1397,6 +1492,7 @@ async fn main() {
         config: config.clone(),
         autumn_tracker,
         autumn_entitlements,
+        usage_metrics: usage_metrics.clone(),
         replay_session_budget: ReplaySessionBudget::new(config.replay_max_session_bytes),
     });
 
@@ -1493,6 +1589,13 @@ async fn main() {
         let _ = provider.shutdown();
     }
 
+    if let Some(usage) = usage_metrics {
+        // Load-bearing, unlike the cumulative provider above: a delta interval
+        // that is never collected is lost outright rather than folded into the
+        // next export, so skipping this silently under-reports billable volume.
+        usage.shutdown();
+    }
+
     if let Err(error) = serve_result {
         eprintln!("Ingest server failed: {error}");
         std::process::exit(1);
@@ -1576,6 +1679,10 @@ impl opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::Tra
         let result = async {
             let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
             let mut inner = request.into_inner();
+            // Sized before enrichment injects resource attributes, so this is
+            // the client's own payload size — the same basis as the HTTP path's
+            // `decoded_payload.len()`.
+            let decoded_bytes = inner.encoded_len();
             enrich_trace_request(&mut inner, &resolved);
             record_grpc_identity(&resolved);
             accept_grpc_decoded(
@@ -1583,6 +1690,7 @@ impl opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::Tra
                 Signal::Traces,
                 DecodedPayload::Traces(inner),
                 &resolved,
+                decoded_bytes,
             )
             .await?;
             Ok(tonic::Response::new(
@@ -1614,6 +1722,7 @@ impl opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsS
         let result = async {
             let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
             let mut inner = request.into_inner();
+            let decoded_bytes = inner.encoded_len();
             enrich_logs_request(&mut inner, &resolved);
             record_grpc_identity(&resolved);
             accept_grpc_decoded(
@@ -1621,6 +1730,7 @@ impl opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsS
                 Signal::Logs,
                 DecodedPayload::Logs(inner),
                 &resolved,
+                decoded_bytes,
             )
             .await?;
             Ok(tonic::Response::new(
@@ -1654,6 +1764,7 @@ impl opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server:
         let result = async {
             let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
             let mut inner = request.into_inner();
+            let decoded_bytes = inner.encoded_len();
             enrich_metrics_request(&mut inner, &resolved);
             record_grpc_identity(&resolved);
             accept_grpc_decoded(
@@ -1661,6 +1772,7 @@ impl opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server:
                 Signal::Metrics,
                 DecodedPayload::Metrics(inner),
                 &resolved,
+                decoded_bytes,
             )
             .await?;
             Ok(tonic::Response::new(
@@ -1681,11 +1793,13 @@ async fn accept_grpc_decoded(
     signal: Signal,
     decoded: DecodedPayload,
     resolved: &ResolvedIngestKey,
+    decoded_bytes: usize,
 ) -> Result<(), tonic::Status> {
     let _org_inflight_permit = state
         .org_inflight_limiter
         .try_acquire(&resolved.org_id)
         .ok_or_else(|| tonic::Status::resource_exhausted("Per-org ingest limit exceeded"))?;
+    let item_count = decoded.item_count();
     process_decoded_payload(
         state,
         signal,
@@ -1695,7 +1809,23 @@ async fn accept_grpc_decoded(
         resolved,
     )
     .await
-    .map(|_| ())
+    .map(|_| {
+        // gRPC volume is recorded but deliberately NOT metered to Autumn here:
+        // this path has never been billed, and switching that on is a
+        // customer-facing pricing change that needs its own review. Recording it
+        // makes the internal dashboard honest about total ingest, and the
+        // warehouse-vs-Autumn gap then quantifies exactly what is unbilled.
+        if resolved.org_id != SENTINEL_ORG_ID {
+            if let Some(usage) = &state.usage_metrics {
+                usage.record(
+                    &resolved.org_id,
+                    signal.path(),
+                    decoded_bytes as u64,
+                    item_count as u64,
+                );
+            }
+        }
+    })
     .map_err(|error| {
         if error.status == StatusCode::TOO_MANY_REQUESTS {
             tonic::Status::resource_exhausted(error.message)
@@ -1891,6 +2021,7 @@ async fn handle_replay_meta(
         otel.kind = "server",
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
         "http.request.method" = "POST",
         "http.route" = "/v1/sessionReplays/meta",
         "http.request.body.size" = body.len(),
@@ -1915,8 +2046,12 @@ async fn handle_replay_meta(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error.error_kind());
-            span_handle.record("otel.status_code", otel_status_for_rejection(status));
-            span_handle.record("otel.status_description", error.message.as_str());
+            record_rejection_reason(
+                &span_handle,
+                status,
+                error.error_kind(),
+                error.message.as_str(),
+            );
             error.into_response()
         }
     }
@@ -2024,6 +2159,7 @@ async fn handle_session_events(
         otel.kind = "server",
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
         "http.request.method" = "POST",
         "http.route" = "/v1/sessionEvents",
         "http.request.body.size" = body.len(),
@@ -2048,8 +2184,12 @@ async fn handle_session_events(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error.error_kind());
-            span_handle.record("otel.status_code", otel_status_for_rejection(status));
-            span_handle.record("otel.status_description", error.message.as_str());
+            record_rejection_reason(
+                &span_handle,
+                status,
+                error.error_kind(),
+                error.message.as_str(),
+            );
             error.into_response()
         }
     }
@@ -2134,6 +2274,7 @@ async fn handle_replay_blob(
         otel.kind = "server",
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
         "http.request.method" = "POST",
         "http.route" = "/v1/sessionReplays/blob",
         "http.request.body.size" = body.len(),
@@ -2159,8 +2300,12 @@ async fn handle_replay_blob(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error.error_kind());
-            span_handle.record("otel.status_code", otel_status_for_rejection(status));
-            span_handle.record("otel.status_description", error.message.as_str());
+            record_rejection_reason(
+                &span_handle,
+                status,
+                error.error_kind(),
+                error.message.as_str(),
+            );
             error.into_response()
         }
     }
@@ -2331,6 +2476,7 @@ async fn handle_signal(
         otel.kind = "server",
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
         "http.request.method" = "POST",
         "http.route" = %route,
         "http.request.body.size" = body_bytes,
@@ -2361,11 +2507,16 @@ async fn handle_signal(
             span_handle.record("http.response.status_code", status_code);
             span_handle.record("otel.status_code", "Ok");
             metrics::request_completed(signal.path(), "ok", "none", duration.as_secs_f64());
-            if let Some(tracker) = &state.autumn_tracker {
-                if org_id != SENTINEL_ORG_ID {
-                    let feature_id = signal.path();
-                    let value_gb = decoded_bytes as f64 / 1_000_000_000.0;
-                    tracker.track(&org_id, feature_id, value_gb);
+            // Usage and billing are emitted together, from one value, behind one
+            // guard — they must never drift. `signal.path()` is both the Autumn
+            // feature id and the metric's `signal` dimension.
+            if org_id != SENTINEL_ORG_ID {
+                let feature_id = signal.path();
+                if let Some(usage) = &state.usage_metrics {
+                    usage.record(&org_id, feature_id, decoded_bytes as u64, item_count as u64);
+                }
+                if let Some(tracker) = &state.autumn_tracker {
+                    tracker.track(&org_id, feature_id, billable_gb(decoded_bytes as u64));
                 }
             }
             info!(
@@ -2378,8 +2529,7 @@ async fn handle_signal(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error_kind);
-            span_handle.record("otel.status_code", otel_status_for_rejection(status));
-            span_handle.record("otel.status_description", error.message.as_str());
+            record_rejection_reason(&span_handle, status, error_kind, error.message.as_str());
             metrics::request_completed(signal.path(), "error", error_kind, duration.as_secs_f64());
             error.into_response()
         }
@@ -2407,6 +2557,7 @@ async fn handle_cloudflare_logpush(
         otel.kind = "server",
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
         "http.request.method" = "POST",
         "http.route" = "/v1/logpush/cloudflare/http_requests/{connector_id}",
         "http.request.body.size" = body_bytes,
@@ -2452,8 +2603,7 @@ async fn handle_cloudflare_logpush(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error_kind);
-            span_handle.record("otel.status_code", otel_status_for_rejection(status));
-            span_handle.record("otel.status_description", error.message.as_str());
+            record_rejection_reason(&span_handle, status, error_kind, error.message.as_str());
             metrics::request_completed("logs", "error", error_kind, duration.as_secs_f64());
             if error_kind == "auth" {
                 metrics::cloudflare_auth_failure("http_requests");
@@ -2635,6 +2785,7 @@ async fn handle_signal_inner(
         let decoded_payload = decode_payload(&body, content_encoding.as_deref()).map_err(|e| {
             warn!(body_bytes = body.len(), "Failed to decode payload");
             record_stage_error(&decode_span, "decode", &e.message, false);
+            metrics::org_data_loss(&resolved_key.org_id, signal.path(), "decode");
             (e, "decode")
         })?;
         decode_span.record("maple.ingest.decoded_bytes", decoded_payload.len());
@@ -2668,6 +2819,7 @@ async fn handle_signal_inner(
                     // The reason previously only reached the log; on the span it
                     // is what tells you *why* a customer's SDK is being rejected.
                     record_stage_error(&parse_span, "enrich", &e.message, false);
+                    metrics::org_data_loss(&resolved_key.org_id, signal.path(), "enrich");
                     (e, "enrich")
                 })?;
         parse_span.record("maple.ingest.item_count", decoded.item_count());
@@ -2890,6 +3042,22 @@ async fn handle_cloudflare_logpush_inner(
                 .cloudflare_resolver
                 .record_success(&resolved.connector_id)
                 .await;
+
+            // Logpush already *checks* the `logs` entitlement above but has never
+            // reported usage against it, so this org consumes quota without ever
+            // metering. Record the volume here (same `decoded_payload.len()` basis
+            // as the OTLP path); switching on the Autumn `track` is a separate,
+            // customer-facing decision.
+            if resolved.org_id != SENTINEL_ORG_ID {
+                if let Some(usage) = &state.usage_metrics {
+                    usage.record(
+                        &resolved.org_id,
+                        Signal::Logs.path(),
+                        decoded_payload.len() as u64,
+                        item_count as u64,
+                    );
+                }
+            }
 
             Ok((response, item_count, resolved.org_id.clone(), false))
         }
@@ -3283,42 +3451,80 @@ fn decode_and_enrich_payload(
     match (signal, payload_format) {
         (Signal::Traces, PayloadFormat::Protobuf) => {
             let mut request = ExportTraceServiceRequest::decode(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP traces protobuf payload"))?;
+                .map_err(|e| invalid_payload("traces", "protobuf", e))?;
             enrich_trace_request(&mut request, resolved_key);
             Ok(DecodedPayload::Traces(request))
         }
         (Signal::Logs, PayloadFormat::Protobuf) => {
             let mut request = ExportLogsServiceRequest::decode(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP logs protobuf payload"))?;
+                .map_err(|e| invalid_payload("logs", "protobuf", e))?;
             enrich_logs_request(&mut request, resolved_key);
             Ok(DecodedPayload::Logs(request))
         }
         (Signal::Metrics, PayloadFormat::Protobuf) => {
             let mut request = ExportMetricsServiceRequest::decode(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP metrics protobuf payload"))?;
+                .map_err(|e| invalid_payload("metrics", "protobuf", e))?;
             enrich_metrics_request(&mut request, resolved_key);
             Ok(DecodedPayload::Metrics(request))
         }
         (Signal::Traces, PayloadFormat::Json) => {
-            let mut request: ExportTraceServiceRequest = serde_json::from_slice(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP traces JSON payload"))?;
+            let mut request: ExportTraceServiceRequest =
+                decode_otlp_json(payload, "traces", "resourceSpans")?;
             enrich_trace_request(&mut request, resolved_key);
             Ok(DecodedPayload::Traces(request))
         }
         (Signal::Logs, PayloadFormat::Json) => {
-            let mut request: ExportLogsServiceRequest = serde_json::from_slice(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP logs JSON payload"))?;
+            let mut request: ExportLogsServiceRequest =
+                decode_otlp_json(payload, "logs", "resourceLogs")?;
             enrich_logs_request(&mut request, resolved_key);
             Ok(DecodedPayload::Logs(request))
         }
         (Signal::Metrics, PayloadFormat::Json) => {
-            let mut request: ExportMetricsServiceRequest = serde_json::from_slice(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP metrics JSON payload"))?;
+            let mut request: ExportMetricsServiceRequest =
+                decode_otlp_json(payload, "metrics", "resourceMetrics")?;
             enrich_metrics_request(&mut request, resolved_key);
             Ok(DecodedPayload::Metrics(request))
         }
     }
 }
+
+/// OTLP/JSON decode, via the leniency pass in `otlp_json`.
+///
+/// Deserializing straight into the generated types rejects encodings the spec
+/// says a receiver must accept (a `time_unix_nano` sent as a JSON number) and,
+/// for metrics, silently discards the data points instead of failing. So the
+/// payload goes through `serde_json::Value` first and is normalized onto the
+/// encoding the derives handle. See `otlp_json` for the full list.
+fn decode_otlp_json<T: serde::de::DeserializeOwned>(
+    payload: &[u8],
+    signal: &str,
+    root_field: &str,
+) -> Result<T, ApiError> {
+    let mut json: serde_json::Value =
+        serde_json::from_slice(payload).map_err(|e| invalid_payload(signal, "JSON", e))?;
+    otlp_json::normalize(&mut json, root_field);
+    serde_json::from_value(json).map_err(|e| invalid_payload(signal, "JSON", e))
+}
+
+/// The parser's own complaint is the only thing that says *which* field a
+/// customer's SDK got wrong, so it goes in the response body (and from there
+/// onto the span) rather than being flattened into "Invalid OTLP payload".
+/// Bounded because it is attacker-influenced and lands on a span attribute.
+fn invalid_payload(signal: &str, format: &str, error: impl std::fmt::Display) -> ApiError {
+    let mut detail = error.to_string();
+    if detail.len() > MAX_PAYLOAD_ERROR_DETAIL {
+        detail.truncate(
+            (0..=MAX_PAYLOAD_ERROR_DETAIL)
+                .rev()
+                .find(|i| detail.is_char_boundary(*i))
+                .unwrap_or(0),
+        );
+        detail.push('…');
+    }
+    ApiError::bad_request(format!("Invalid OTLP {signal} {format} payload: {detail}"))
+}
+
+const MAX_PAYLOAD_ERROR_DETAIL: usize = 200;
 
 fn count_trace_items(request: &ExportTraceServiceRequest) -> usize {
     request
@@ -4521,6 +4727,7 @@ mod tests {
     use super::*;
     // `AtomicBool` is only used by the test fakes below; keeping it out of the
     // top-level import avoids an unused-import warning in non-test bin builds.
+    use opentelemetry_proto::tonic::metrics::v1::metric;
     use std::sync::atomic::AtomicBool;
 
     #[test]
@@ -4530,17 +4737,57 @@ mod tests {
         assert_eq!(hash_a, hash_b);
     }
 
+    /// Rejections of the *caller* stay `Ok` — a rotated key or a 429 storm is
+    /// high-volume and expected, and must not page anyone.
     #[test]
-    fn rejection_span_status_is_error_only_for_5xx() {
-        // 4xx client rejections must not mark the SERVER span Error.
-        assert_eq!(otel_status_for_rejection(401), "Ok"); // missing/invalid ingest key
-        assert_eq!(otel_status_for_rejection(402), "Ok"); // billing limit
-        assert_eq!(otel_status_for_rejection(413), "Ok"); // payload too large
-        assert_eq!(otel_status_for_rejection(415), "Ok"); // unsupported media type
-        assert_eq!(otel_status_for_rejection(429), "Ok"); // throttle
-                                                          // 5xx server faults stay Error (e.g. auth resolver unavailable → 503).
-        assert_eq!(otel_status_for_rejection(500), "Error");
-        assert_eq!(otel_status_for_rejection(503), "Error");
+    fn caller_fault_rejections_do_not_mark_the_span_error() {
+        assert_eq!(otel_status_for_rejection(401, "auth"), "Ok"); // missing/invalid ingest key
+        assert_eq!(otel_status_for_rejection(402, "error"), "Ok"); // billing limit
+        assert_eq!(otel_status_for_rejection(413, "payload_too_large"), "Ok");
+        assert_eq!(otel_status_for_rejection(415, "unsupported_media"), "Ok");
+        assert_eq!(otel_status_for_rejection(429, "throttle"), "Ok");
+        assert_eq!(otel_status_for_rejection(429, "forward"), "Ok"); // pipeline shed
+    }
+
+    /// Rejections that destroy the sender's telemetry are `Error` regardless of
+    /// status class. This is the regression that let a bug drop 99.2% of one
+    /// org's logs for over a day while every dashboard read 0%.
+    #[test]
+    fn data_loss_rejections_mark_the_span_error_even_at_4xx() {
+        assert_eq!(otel_status_for_rejection(400, "enrich"), "Error");
+        assert_eq!(otel_status_for_rejection(400, "decode"), "Error");
+        assert_eq!(otel_status_for_rejection(400, "bad_request"), "Error");
+
+        assert!(rejection_loses_data("enrich"));
+        assert!(rejection_loses_data("decode"));
+        assert!(rejection_loses_data("bad_request"));
+        assert!(!rejection_loses_data("auth"));
+        assert!(!rejection_loses_data("throttle"));
+        assert!(!rejection_loses_data("payload_too_large"));
+        assert!(!rejection_loses_data("forward"));
+    }
+
+    #[test]
+    fn server_faults_stay_error() {
+        // e.g. auth resolver unavailable → 503.
+        assert_eq!(otel_status_for_rejection(500, "error"), "Error");
+        assert_eq!(otel_status_for_rejection(503, "unavailable"), "Error");
+        assert_eq!(otel_status_for_rejection(503, "forward"), "Error");
+    }
+
+    /// Every label `rejection_loses_data` claims must actually be producible, or
+    /// the rule silently covers nothing — the failure mode it exists to prevent.
+    #[test]
+    fn data_loss_labels_match_the_kinds_the_gateway_emits() {
+        assert_eq!(ApiError::bad_request("x").error_kind(), "bad_request");
+        // `decode` and `enrich` are the stage labels attached in
+        // `handle_signal_inner`; they reach the span via the Err tuple.
+        for stage in ["decode", "enrich"] {
+            assert!(
+                rejection_loses_data(stage),
+                "{stage} is emitted as an error.type but is not classified"
+            );
+        }
     }
 
     #[test]
@@ -4591,8 +4838,8 @@ mod tests {
             api_error_from_pipeline(&PipelineError::Encode("x".into())).status,
             StatusCode::SERVICE_UNAVAILABLE
         );
-        assert_eq!(otel_status_for_rejection(429), "Ok");
-        assert_eq!(otel_status_for_rejection(503), "Error");
+        assert_eq!(otel_status_for_rejection(429, "forward"), "Ok");
+        assert_eq!(otel_status_for_rejection(503, "forward"), "Error");
     }
 
     #[test]
@@ -4662,6 +4909,145 @@ mod tests {
             Some(&INGEST_SOURCE.to_string())
         );
         assert!(!values.contains_key("org_id"));
+    }
+
+    fn test_key() -> ResolvedIngestKey {
+        ResolvedIngestKey {
+            org_id: "org_real".to_string(),
+            key_type: IngestKeyType::Private,
+            key_id: "abc".to_string(),
+            self_managed: false,
+            clickhouse_ready: false,
+        }
+    }
+
+    fn decode_json(signal: Signal, payload: &str) -> Result<DecodedPayload, ApiError> {
+        decode_and_enrich_payload(signal, PayloadFormat::Json, payload.as_bytes(), &test_key())
+    }
+
+    /// Spec-legal encodings the generated types refuse: nanosecond timestamps as
+    /// JSON numbers, `{}` for a log with no body or an attribute with no value,
+    /// and `null` for an absent id. Rejecting these 400'd effectively all of one
+    /// org's logs.
+    #[test]
+    fn lenient_log_payload_is_accepted() {
+        let decoded = decode_json(
+            Signal::Logs,
+            r#"{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"api"}}]},"scopeLogs":[{"scope":{"name":"app"},"logRecords":[{"timeUnixNano":1753660000000000000,"observedTimeUnixNano":1753660000000000000,"severityNumber":9,"severityText":"INFO","body":{},"attributes":[{"key":"empty","value":{}},{"key":"kept","value":{"stringValue":"v"}}],"traceId":null}]}]}]}"#,
+        )
+        .expect("payload accepted");
+
+        let DecodedPayload::Logs(request) = decoded else {
+            panic!("expected logs");
+        };
+        assert_eq!(count_log_items(&request), 1);
+        let record = &request.resource_logs[0].scope_logs[0].log_records[0];
+        assert_eq!(record.time_unix_nano, 1753660000000000000);
+        assert_eq!(record.severity_number, 9);
+        assert!(record.body.is_none());
+        // The empty attribute survives as a key with no value; the real one is intact.
+        assert_eq!(record.attributes.len(), 2);
+        assert!(record.attributes[0].value.is_none());
+        assert!(record.attributes[1].value.is_some());
+    }
+
+    /// Metrics fail differently and worse: `Metric.data` is a flattened oneof, so
+    /// the same encoding deserializes to `None` — a 200 with the data points
+    /// thrown away, billed and never stored.
+    #[test]
+    fn numeric_nanos_no_longer_silently_empty_a_metric() {
+        let decoded = decode_json(
+            Signal::Metrics,
+            r#"{"resourceMetrics":[{"resource":{"attributes":[]},"scopeMetrics":[{"metrics":[{"name":"m","gauge":{"dataPoints":[{"timeUnixNano":1753660000000000000,"asDouble":1.5}]}}]}]}]}"#,
+        )
+        .expect("payload accepted");
+
+        let DecodedPayload::Metrics(request) = decoded else {
+            panic!("expected metrics");
+        };
+        let metric = &request.resource_metrics[0].scope_metrics[0].metrics[0];
+        let Some(metric::Data::Gauge(gauge)) = &metric.data else {
+            panic!("gauge data dropped");
+        };
+        assert_eq!(gauge.data_points.len(), 1);
+    }
+
+    #[test]
+    fn spec_compliant_payloads_still_decode() {
+        let decoded = decode_json(
+            Signal::Traces,
+            r#"{"resourceSpans":[{"resource":{"attributes":[]},"scopeSpans":[{"spans":[{"traceId":"5b8efff798038103d269b633813fc60c","spanId":"eee19b7ec3c1b174","name":"GET /","kind":2,"startTimeUnixNano":"1753660000000000000","endTimeUnixNano":"1753660000000000001","status":{"code":1}}]}]}]}"#,
+        )
+        .expect("payload accepted");
+
+        let DecodedPayload::Traces(request) = decoded else {
+            panic!("expected traces");
+        };
+        let span = &request.resource_spans[0].scope_spans[0].spans[0];
+        assert_eq!(span.name, "GET /");
+        assert_eq!(span.kind, 2);
+        assert_eq!(span.end_time_unix_nano, 1753660000000000001);
+    }
+
+    /// Enrichment still has to reach a request whose resource we normalized away.
+    #[test]
+    fn enrichment_applies_to_a_payload_with_no_resource() {
+        let decoded = decode_json(
+            Signal::Logs,
+            r#"{"resourceLogs":[{"resource":{},"scopeLogs":[{"logRecords":[{"timeUnixNano":"1"}]}]}]}"#,
+        )
+        .expect("payload accepted");
+
+        let DecodedPayload::Logs(request) = decoded else {
+            panic!("expected logs");
+        };
+        let attributes = &request.resource_logs[0]
+            .resource
+            .as_ref()
+            .expect("resource re-inserted")
+            .attributes;
+        assert!(attributes.iter().any(|a| a.key == "maple_org_id"
+            && matches!(
+                &a.value,
+                Some(AnyValue { value: Some(any_value::Value::StringValue(v)) }) if v == "org_real"
+            )));
+    }
+
+    /// An export request with nothing to export is a no-op, not a rejection.
+    #[test]
+    fn empty_export_request_is_accepted() {
+        let decoded = decode_json(Signal::Logs, r#"{}"#).expect("payload accepted");
+        assert_eq!(decoded.item_count(), 0);
+    }
+
+    /// Genuinely malformed input is still refused — and now says why, which is
+    /// the whole point: the previous message named neither the field nor the
+    /// offset, so a customer had no way to find the bug in their exporter.
+    #[test]
+    fn malformed_payload_is_rejected_with_the_parser_reason() {
+        let Err(error) = decode_json(Signal::Logs, r#"{"resourceLogs":"nope"}"#) else {
+            panic!("expected rejection");
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(
+            error
+                .message
+                .starts_with("Invalid OTLP logs JSON payload: "),
+            "unexpected message: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains("invalid type"),
+            "reason not preserved: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn rejection_reason_is_bounded() {
+        let error = invalid_payload("logs", "JSON", "x".repeat(10_000));
+        assert!(error.message.len() < MAX_PAYLOAD_ERROR_DETAIL + 64);
+        assert!(error.message.ends_with('…'));
     }
 
     #[test]
@@ -5219,6 +5605,7 @@ mod tests {
             },
             autumn_tracker: None,
             autumn_entitlements: None,
+            usage_metrics: None,
             replay_session_budget: ReplaySessionBudget::new(1024 * 1024 * 1024),
         }
     }
@@ -5604,7 +5991,7 @@ mod tests {
                 error.is_server_fault()
             );
             assert_eq!(
-                otel_status_for_rejection(status),
+                otel_status_for_rejection(status, "forward"),
                 if error.is_server_fault() {
                     "Error"
                 } else {

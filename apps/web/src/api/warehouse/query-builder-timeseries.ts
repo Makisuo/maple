@@ -673,6 +673,26 @@ const runQueryWindow = Effect.fn("QueryEngine.runQueryWindow")(function* (
 	}
 })
 
+/**
+ * Ids of queries and formulas whose series must not be plotted.
+ *
+ * `hidden` means "feed the formulas, don't draw me" — a hidden query still runs, because the
+ * formula that references it needs its numbers. The query-builder UI has always honored the flag
+ * (`widget-builder-utils`) but this data source did not, so a saved widget built on a hidden
+ * numerator/denominator plotted its raw operands next to the formula. On a ratio widget that also
+ * means raw counts rendered with the ratio's unit — the Cloudflare cache-hit chart drew
+ * "416849856400.0%" beside its real 0–1 hit rate.
+ */
+function collectHiddenResultIds(input: {
+	queries: ReadonlyArray<{ id: string; hidden?: boolean }>
+	formulas?: ReadonlyArray<{ id: string; hidden?: boolean }>
+}): Set<string> {
+	return new Set([
+		...input.queries.filter((query) => query.hidden).map((query) => query.id),
+		...(input.formulas ?? []).filter((formula) => formula.hidden).map((formula) => formula.id),
+	])
+}
+
 function shiftRunResults(results: QueryRunResult[], shiftMs: number): QueryRunResult[] {
 	return results.map((result) => ({
 		...result,
@@ -689,6 +709,7 @@ export const __testables = {
 	executeTimeseriesQueryWithFallbackUsing,
 	noQueryDataMessage,
 	countSuccessfulQuerySeries,
+	collectHiddenResultIds,
 	mergeQueryRunResults,
 	appendPercentChangeSeries,
 }
@@ -710,6 +731,8 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 		expression: formula.expression,
 		legend: formula.legend,
 	}))
+	const hiddenResultIds = collectHiddenResultIds(input)
+	const isPlotted = (result: QueryRunResult): boolean => !hiddenResultIds.has(result.queryId)
 	const strategy = resolveStrategy(input)
 	const comparison = {
 		mode: input.comparison?.mode ?? "none",
@@ -751,6 +774,17 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 		)
 	}
 
+	// Data came back, but nothing plottable did — say why rather than drawing an empty chart the
+	// reader would blame on the time range. On a ratio widget the plotted series is the formula,
+	// so its own failure (an unknown reference, no overlapping buckets) is the useful message.
+	if (!allResults.some((result) => isPlotted(result) && hasAnySeriesData(result.data))) {
+		const plottedError = allResults.find((result) => isPlotted(result) && result.error)?.error
+		return yield* invalidWarehouseInput(
+			"getQueryBuilderTimeseries",
+			plottedError ?? "Every query and formula with data is hidden — nothing to plot",
+		)
+	}
+
 	const displayNameById = toDisplayNameById([
 		...enabledQueries,
 		...formulas.map((formula) => ({
@@ -760,7 +794,7 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 		})),
 	])
 	const usedSeriesNames = new Set<string>()
-	const mergedCurrent = mergeQueryRunResults(allResults, displayNameById, {
+	const mergedCurrent = mergeQueryRunResults(allResults.filter(isPlotted), displayNameById, {
 		usedSeriesNames,
 	})
 	const mergedSets = [mergedCurrent]
@@ -791,7 +825,7 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("QueryEngine.getQueryBuilderTi
 		)
 		previousDebug = previousWindow.debug
 
-		const shiftedPreviousResults = shiftRunResults(previousWindow.allResults, shiftMs)
+		const shiftedPreviousResults = shiftRunResults(previousWindow.allResults.filter(isPlotted), shiftMs)
 		mergedPrevious = mergeQueryRunResults(shiftedPreviousResults, displayNameById, {
 			seriesSuffix: " (prev)",
 			usedSeriesNames,

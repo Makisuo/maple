@@ -1077,8 +1077,8 @@ describe("ErrorsService.runTick", () => {
 				yield* errors.runTick()
 				const issue = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
 
-				// Resolve through the public workflow (triage -> done is not a legal
-				// direct transition).
+				// Walk the long way round on purpose: the direct triage -> done path is
+				// covered separately, and this keeps the multi-step route exercised.
 				const actor = yield* errors.ensureUserActor(ORG, USER)
 				yield* errors.transitionIssue(ORG, actor.id, issue.id, "in_progress")
 				yield* errors.transitionIssue(ORG, actor.id, issue.id, "in_review")
@@ -1109,6 +1109,41 @@ describe("ErrorsService.runTick", () => {
 				const open = incidents.filter((i) => i.status === "open")
 				assert.lengthOf(open, 1)
 				assert.strictEqual(open[0]?.reason, "regression")
+			}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+		},
+		15_000,
+	)
+
+	it.effect(
+		"triage resolves straight to done, stamping the resolver and closing the open incident",
+		() => {
+			const rows = [scanRow()]
+			return Effect.gen(function* () {
+				const errors = yield* ErrorsService
+				yield* TestClock.setTime(TICK_MS)
+				yield* seedIssue(asIssueId(randomUUID()))
+				yield* errors.runTick()
+				const issue = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
+				assert.strictEqual(issue.workflowState, "triage")
+
+				// The path auto-resolve uses. It was previously illegal, which is why
+				// nothing could ever retire a quiet alert- or integration-kind issue:
+				// those are created in triage and never advance through review.
+				const actor = yield* errors.ensureUserActor(ORG, USER)
+				yield* errors.transitionIssue(ORG, actor.id, issue.id, "done")
+
+				const resolved = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
+				assert.strictEqual(resolved.workflowState, "done")
+				assert.isNotNull(resolved.resolvedAt)
+				assert.strictEqual(resolved.resolvedByActorId, actor.id)
+
+				// Reaching done must force-resolve the flare-up underneath it,
+				// regardless of which state it came from.
+				const incidents = yield* loadIncidentsForIssue(issue.id)
+				assert.lengthOf(
+					incidents.filter((i) => i.status === "open"),
+					0,
+				)
 			}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
 		},
 		15_000,

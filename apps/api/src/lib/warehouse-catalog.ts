@@ -49,10 +49,21 @@ const TABLE_NOTES: Record<string, ReadonlyArray<string>> = {
 	metrics_sum: [
 		"Cumulative or delta counter metrics. Use `rate(Value) OVER (PARTITION BY MetricName ORDER BY TimeUnix)` for rate-of-change when `IsMonotonic=1`.",
 		"`Attributes` is a Map — filter with `Attributes['service.name']`.",
+		"Check `AggregationTemporality` before choosing an aggregation: delta rows (temporality 1) already carry the per-interval increment, so `sum(Value)` per bucket is exact and a rate/lag reconstruction would double-difference them. Only cumulative rows (temporality 2) need the window function above.",
+		"`maple_ingest_org_bytes_total` / `maple_ingest_org_items_total` are delta counters written under Maple's internal org, carrying `Attributes['org_id']` (the *tenant* org whose data was ingested) and `Attributes['signal']` ('logs' | 'traces' | 'metrics'). Bytes are the real decoded payload size metered to billing — divide by 1e9 for GB. Sum them; never rate them.",
+		"An `Attributes['otel.metric.overflow'] = 'true'` datapoint means the SDK exceeded its per-interval series limit and collapsed the excess — per-org attribution is incomplete for that interval, so surface it rather than silently including it in a total.",
 	],
 	metrics_gauge: ["Point-in-time numeric values. Aggregate with avg/min/max/last over time buckets."],
 	metrics_histogram: [
 		"Pre-aggregated histograms (bucket counts + sum + count). Reconstruct percentiles with `quantilesExact`/`quantileBFloat16` if needed.",
+	],
+	service_usage: [
+		"Hourly per-service rollup of STORED rows, 365-day TTL — far longer than the 30-day `logs`/`traces` retention, so it is the right table for long-range volume trends.",
+		"`Hour` is a top-of-hour DateTime. Snap both range bounds to their hour floor (`toStartOfHour`) or sub-hour windows return no rows at all; this necessarily over-reports at the window edges.",
+		"The `*SizeBytes` columns are STORAGE ESTIMATES, not measured bytes — the materialized views compute them as `length(Body) + 200` (logs), `length(SpanName) + 300` (spans) and flat per-point constants (metrics). They will NOT reconcile with an Autumn invoice and must never be presented as billed usage.",
+		"For real billed bytes use `metrics_sum` / `maple_ingest_org_bytes_total`, which records the decoded payload size the gateway actually metered. Counts here are also post-sampling and post-drop, i.e. what was stored, not what was accepted.",
+		"Metric counts are split across four columns by point type (`SumMetricCount`, `GaugeMetricCount`, `HistogramMetricCount`, `ExpHistogramMetricCount`) — add all four for a total metric-point count.",
+		"Has no `DeploymentEnv` dimension, so prod-vs-staging splits are impossible here; use `logs_aggregates_hourly` / `traces_aggregates_hourly` for that.",
 	],
 }
 

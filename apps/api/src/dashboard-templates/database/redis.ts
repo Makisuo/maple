@@ -1,7 +1,10 @@
 import {
 	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_BAR,
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
+	makeQueryBuilderTimeseriesDataSource,
+	makeQueryDraft,
 	metricsTimeseries,
 	paramKey,
 	paramValue,
@@ -26,7 +29,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Commands / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "memory-used",
@@ -39,37 +42,88 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 			}),
 			display: { title: "Memory Used", ...CHART_DISPLAY_LINE, unit: "bytes" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
-			id: "keyspace-hits",
+			// Hits and misses are the two halves of every keyspace lookup, so they belong on one
+			// stacked chart (total lookups, split by outcome) rather than two charts nobody can
+			// visually divide.
+			id: "keyspace",
 			visualization: "chart",
-			dataSource: metricsTimeseries({
-				id: "redis-hits",
-				name: "Hits",
-				metricName: "redis.keyspace.hits",
-				metricType: "sum",
-				aggregation: "rate",
-				isMonotonic: true,
-				whereClause: where,
-			}),
-			display: { title: "Keyspace Hits / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			dataSource: makeQueryBuilderTimeseriesDataSource([
+				makeQueryDraft({
+					id: "redis-hits",
+					name: "Hits",
+					dataSource: "metrics",
+					aggregation: "rate",
+					isMonotonic: true,
+					whereClause: where,
+					metricName: "redis.keyspace.hits",
+					metricType: "sum",
+				}),
+				makeQueryDraft({
+					id: "redis-misses",
+					name: "Misses",
+					dataSource: "metrics",
+					aggregation: "rate",
+					isMonotonic: true,
+					whereClause: where,
+					metricName: "redis.keyspace.misses",
+					metricType: "sum",
+				}),
+			]),
+			display: { title: "Keyspace Hits / Misses per sec", ...CHART_DISPLAY_AREA, unit: "number" },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
-			id: "keyspace-misses",
+			// The number people actually act on. `unit: "percent"` is a 0–1 ratio, so no `* 100`.
+			id: "keyspace-hit-rate",
 			visualization: "chart",
-			dataSource: metricsTimeseries({
-				id: "redis-misses",
-				name: "Misses",
-				metricName: "redis.keyspace.misses",
-				metricType: "sum",
-				aggregation: "rate",
-				isMonotonic: true,
-				whereClause: where,
-			}),
-			display: { title: "Keyspace Misses / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			dataSource: {
+				endpoint: "custom_query_builder_timeseries",
+				params: {
+					queries: [
+						{
+							...makeQueryDraft({
+								id: "redis-hit-rate-hits",
+								name: "A",
+								dataSource: "metrics",
+								aggregation: "rate",
+								isMonotonic: true,
+								whereClause: where,
+								metricName: "redis.keyspace.hits",
+								metricType: "sum",
+							}),
+							hidden: true,
+						},
+						{
+							...makeQueryDraft({
+								id: "redis-hit-rate-misses",
+								name: "B",
+								dataSource: "metrics",
+								aggregation: "rate",
+								isMonotonic: true,
+								whereClause: where,
+								metricName: "redis.keyspace.misses",
+								metricType: "sum",
+							}),
+							hidden: true,
+						},
+					],
+					formulas: [
+						{
+							id: "redis-hit-rate",
+							name: "Keyspace hit rate",
+							expression: "A / (A + B)",
+							legend: "hit rate",
+						},
+					],
+					comparison: { mode: "none", includePercentChange: true },
+					debug: false,
+				},
+			},
+			display: { title: "Keyspace Hit Rate", ...CHART_DISPLAY_LINE, unit: "percent" },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "connected-clients",
@@ -78,11 +132,13 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "redis-clients",
 				name: "Connected Clients",
 				metricName: "redis.clients.connected",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "avg",
+				isMonotonic: false,
 				whereClause: where,
 			}),
 			display: { title: "Connected Clients", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 8, w: 6, h: 4 },
+			layout: { x: 0, y: 12, w: 6, h: 6 },
 		},
 		{
 			id: "evictions",
@@ -96,8 +152,8 @@ function widgets(serviceName?: string): WidgetDef[] {
 				isMonotonic: true,
 				whereClause: where,
 			}),
-			display: { title: "Evictions / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 8, w: 6, h: 4 },
+			display: { title: "Evictions / sec", ...CHART_DISPLAY_BAR, unit: "number" },
+			layout: { x: 6, y: 12, w: 6, h: 6 },
 		},
 	]
 }
@@ -105,10 +161,16 @@ function widgets(serviceName?: string): WidgetDef[] {
 export const redisTemplate: TemplateDefinition = {
 	id: templateId("redis-overview"),
 	name: "Redis Overview",
-	description: "Commands/sec, memory, keyspace hits/misses, connected clients, and evictions.",
+	description: "Commands/sec, memory, keyspace hits/misses and hit rate, connected clients, and evictions.",
 	category: "database",
 	tags: ["redis", "cache"],
-	requirements: ["OpenTelemetry redisreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry redisreceiver",
+		collector: "the OpenTelemetry redisreceiver",
+		setupLabel: "the Redis receiver",
+		hint: "Point it at your Redis instances and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["redis."],
 	parameters: [
 		{

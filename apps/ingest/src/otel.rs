@@ -189,22 +189,70 @@ fn rustc_version() -> &'static str {
     option_env!("CARGO_PKG_RUST_VERSION").unwrap_or("unknown")
 }
 
+/// Does this rejection mean the caller lost telemetry it believed it had sent?
+///
+/// This is the distinction that matters operationally, and it is *not* the same
+/// as the 4xx/5xx split:
+///
+/// * **Caller-fault** (`auth`, `payload_too_large`, `throttle`, `unsupported_media`)
+///   — the sender is misconfigured, over quota, or being shed. Expected, usually
+///   self-inflicted, and high-volume: a rotated key or a 429 storm must not page
+///   anyone. These stay `Ok`.
+/// * **Data loss** (`decode`, `enrich`, `bad_request`) — an undecodable body or
+///   an invalid OTLP payload. The sender is healthy, believes it is shipping
+///   telemetry, and is silently getting none of it stored. That is an outage for
+///   that customer, and it is the gateway's problem whether the cause is our
+///   strictness or their encoder.
+///
+/// Classifying the second group as `Ok` is how a bug that rejected 99.2% of one
+/// org's logs for over 24h sat behind a 0% error rate: every dashboard counts
+/// `StatusCode='Error'`, and by the old rule there was nothing to count. Payload
+/// rejections are `Error` now. A healthy exporter produces none, so this reports
+/// real breakage rather than re-flooding the dashboards that the 4xx/5xx rule was
+/// written to protect.
+///
+/// Accepts both `error.type` vocabularies, since both reach the spans: the
+/// per-stage labels from `handle_signal_inner` (`decode`, `enrich`) and the
+/// status-derived kinds from `ApiError::error_kind` (`bad_request`, used by the
+/// replay/session handlers).
+///
+/// `payload_too_large` is deliberately *not* here. It also drops data, but it is
+/// a bounded, self-announcing config problem — the sender is told exactly what
+/// happened and can batch smaller — rather than a healthy exporter shipping into
+/// a void.
+pub fn rejection_loses_data(error_type: &str) -> bool {
+    matches!(error_type, "bad_request" | "decode" | "enrich")
+}
+
 /// Record a failed stage on `span`.
 ///
-/// `error.type` and `otel.status_description` are recorded unconditionally so
+/// `error.type` and `maple.ingest.reject_reason` are recorded unconditionally so
 /// the failure is always searchable and always carries its reason. The span
 /// status follows the same rule the server span uses (`otel_status_for_rejection`
-/// in main.rs): only a server-side fault is `Error`. A caller-caused rejection —
-/// bad key, undecodable body, invalid OTLP, per-org throttle — leaves the span
-/// `Ok`, because error dashboards count `StatusCode='Error'` and would otherwise
-/// be flooded by things working exactly as designed.
+/// in main.rs): `Error` for a server fault or a rejection that loses the caller's
+/// data (see `rejection_loses_data`), `Ok` for a rejection of the caller itself —
+/// a bad key or a per-org throttle — because error dashboards count
+/// `StatusCode='Error'` and would otherwise be flooded by things working exactly
+/// as designed.
+///
+/// The reason is its own attribute rather than `otel.status_description` because
+/// the two cannot coexist: tracing-opentelemetry turns a description into
+/// `Status::error(detail)`, and an `Ok` written next replaces it wholesale — so
+/// on a rejection left `Ok`, the reason exported as an empty `StatusMessage` and
+/// the span said only *that* a payload was refused, never *why*.
 pub fn record_stage_error(span: &Span, error_type: &str, detail: &str, server_fault: bool) {
     span.record("error.type", error_type);
-    span.record("otel.status_description", detail);
-    span.record(
-        "otel.status_code",
-        if server_fault { "Error" } else { "Ok" },
-    );
+    span.record("maple.ingest.reject_reason", detail);
+    if server_fault || rejection_loses_data(error_type) {
+        // One write, not two: `otel.status_description` already resolves to
+        // `Status::error(detail)`. Also writing `otel.status_code = "Error"`
+        // would contend for the same slot, and which of the two survives
+        // depends on write order and on the SDK's `Ok > Error > Unset`
+        // comparison — for two `Error`s, on how their descriptions sort.
+        span.record("otel.status_description", detail);
+    } else {
+        span.record("otel.status_code", "Ok");
+    }
 }
 
 /// Downstream-forward client-kind span. `peer_service` is the canonical name of
@@ -245,6 +293,7 @@ pub fn grpc_server_span(rpc_service: &'static str, signal_path: &'static str) ->
         otel.kind = "server",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "rpc.system" = "grpc",
         "rpc.service" = rpc_service,
         "rpc.method" = "Export",
@@ -266,6 +315,7 @@ pub fn auth_internal_span() -> Span {
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.ingest.cache_hit" = Empty,
         "maple.ingest.key_type" = Empty,
@@ -295,6 +345,7 @@ pub fn decode_internal_span(content_encoding: &str, body_size: usize) -> Span {
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.ingest.content_encoding" = content_encoding,
         "http.request.body.size" = body_size,
@@ -309,6 +360,7 @@ pub fn parse_internal_span(payload_format: &'static str, signal_path: &'static s
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.ingest.payload_format" = payload_format,
         "maple.signal" = signal_path,
@@ -324,6 +376,7 @@ pub fn accept_internal_span(signal_path: &'static str, destination: &'static str
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.signal" = signal_path,
         "maple.ingest.destination" = destination,
@@ -340,6 +393,7 @@ pub fn encode_rows_internal_span(signal_path: &'static str) -> Span {
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.signal" = signal_path,
         "maple.ingest.row_count" = Empty,
@@ -362,6 +416,7 @@ pub fn wal_commit_internal_span(destination: &'static str) -> Span {
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.ingest.destination" = destination,
         "maple.ingest.frame_count" = Empty,
@@ -403,6 +458,7 @@ pub fn export_client_span(
         otel.kind = "client",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "http.request.method" = "POST",
         "http.request.body.size" = body_size,
@@ -442,6 +498,22 @@ mod tests {
             .iter()
             .find(|(k, _)| k.as_str() == key)
             .map(|(_, v)| v.to_string())
+    }
+
+    /// The stage spans classify identically to the server span, so a payload
+    /// rejection is `Error` at every level rather than only on the outermost one.
+    #[test]
+    fn stage_spans_treat_payload_rejections_as_data_loss() {
+        assert!(rejection_loses_data("decode"));
+        assert!(rejection_loses_data("enrich"));
+        assert!(rejection_loses_data("bad_request"));
+
+        // Caller-fault stages stay Ok so they cannot flood the error dashboards.
+        assert!(!rejection_loses_data("auth"));
+        assert!(!rejection_loses_data("forward"));
+        // A genuine server fault is Error via the `server_fault` flag instead,
+        // which is how `auth_unavailable` (503) is reported.
+        assert!(!rejection_loses_data("auth_unavailable"));
     }
 
     /// `tracing` only accepts `record()` for fields declared when the span was
@@ -491,11 +563,16 @@ mod tests {
     }
 
     /// Every span that `record_stage_error` can be called on must declare its
-    /// three fields, or a failure records nothing at all — the worst case, since
-    /// that is exactly when the span is being read.
+    /// fields, or a failure records nothing at all — the worst case, since that
+    /// is exactly when the span is being read.
     #[test]
     fn every_fallible_span_declares_the_stage_error_fields() {
-        let fields = ["error.type", "otel.status_code", "otel.status_description"];
+        let fields = [
+            "error.type",
+            "otel.status_code",
+            "otel.status_description",
+            "maple.ingest.reject_reason",
+        ];
         for span in [
             auth_internal_span(),
             decode_internal_span("gzip", 1),

@@ -1,5 +1,5 @@
 import {
-	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	makeQueryBuilderTimeseriesDataSource,
 	makeQueryDraft,
@@ -27,8 +27,8 @@ function widgets(serviceName?: string): WidgetDef[] {
 					groupBy,
 				}),
 			]),
-			display: { title: "Error Rate Over Time", ...CHART_DISPLAY_AREA },
-			layout: { x: 0, y: 0, w: 12, h: 4 },
+			display: { title: "Error Rate Over Time", ...CHART_DISPLAY_LINE, unit: "percent" },
+			layout: { x: 0, y: 0, w: 12, h: 6 },
 		},
 		{
 			id: "errors-by-type",
@@ -48,7 +48,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 					{ field: "affectedServicesCount", header: "Services" },
 				],
 			},
-			layout: { x: 0, y: 4, w: 12, h: 5 },
+			layout: { x: 0, y: 6, w: 12, h: 5 },
 		},
 		{
 			id: "recent-error-traces",
@@ -66,7 +66,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				listDataSource: "traces",
 				listLimit: 10,
 			},
-			layout: { x: 0, y: 9, w: 12, h: 5 },
+			layout: { x: 0, y: 11, w: 12, h: 5 },
 		},
 	]
 }
@@ -77,7 +77,11 @@ export const errorTrackingTemplate: TemplateDefinition = {
 	description: "Error rate trends, error types breakdown, and recent error traces.",
 	category: "application",
 	tags: ["errors"],
-	requirements: ["OpenTelemetry tracing"],
+	requirement: {
+		kind: "telemetry",
+		label: "OpenTelemetry tracing",
+		collector: "your OpenTelemetry tracing instrumentation",
+	},
 	parameters: [
 		{
 			key: paramKey("service_name"),

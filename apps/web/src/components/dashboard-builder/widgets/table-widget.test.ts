@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { formatValueByUnit } from "@maple/ui/format"
 
 import { formatCellValue } from "./table-widget"
 
@@ -15,5 +16,27 @@ describe("formatCellValue", () => {
 		expect(formatCellValue("checkout", "percent")).toBe("checkout")
 		expect(formatCellValue(null, "percent")).toBe("-")
 		expect(formatCellValue("raw", undefined)).toBe("raw")
+	})
+
+	// A unitless numeric column is an id, a commit sha or a small count — the
+	// reader needs the digits, not "1.2K".
+	it("keeps unitless numbers unabbreviated", () => {
+		expect(formatCellValue(1234, undefined)).toBe("1234")
+	})
+
+	// Regression: this switch used to be a parallel copy of formatValueByUnit
+	// that had no `bytes` case at all, so byte columns fell through to the raw
+	// number while the same value in a chart read "314.6 MB".
+	it("formats byte columns the way charts and stat tiles do", () => {
+		expect(formatCellValue(314_572_800, "bytes")).toBe(formatValueByUnit(314_572_800, "bytes"))
+		expect(formatCellValue(314_572_800, "bytes")).not.toBe("314572800")
+	})
+
+	// The delegation is the point: every unit @maple/ui knows must render
+	// identically in a table, so the two can never drift apart again.
+	it("matches formatValueByUnit for every shared unit", () => {
+		for (const unit of ["bytes", "number", "percent", "duration_ms", "duration_s", "requests_per_sec"]) {
+			expect(formatCellValue(1536, unit), unit).toBe(formatValueByUnit(1536, unit))
+		}
 	})
 })

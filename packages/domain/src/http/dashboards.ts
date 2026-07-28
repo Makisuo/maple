@@ -213,6 +213,31 @@ export const WidgetLayoutSchema = Schema.Struct({
 	maxH: Schema.optional(Schema.Number),
 })
 
+/**
+ * Grid rows a widget occupies by default, and the smallest it may be resized to.
+ *
+ * The dashboard canvas is a 12-column grid with `rowHeight: 60` and a 12px
+ * gutter, so a tile's pixel height is `h * 60 + (h - 1) * 12` — charts at `h: 6`
+ * render 420px tall. Every place that auto-places a widget (the "Add widget"
+ * store, the MCP tools, the portable-dashboard importer, the Perses importer)
+ * reads its height from here so the numbers can't drift apart again. Widths stay
+ * with the caller: full-bleed `w: 12` from `create_dashboard` and `w: 4` from the
+ * web store are deliberate, per-context choices.
+ */
+export const defaultWidgetHeight = (visualization: string): { h: number; minH: number } => {
+	switch (visualization) {
+		case "stat":
+			return { h: 2, minH: 2 }
+		case "table":
+		case "list":
+		case "markdown":
+			return { h: 5, minH: 3 }
+		default:
+			// chart, gauge, pie, heatmap, … — a timeseries needs the vertical room.
+			return { h: 6, minH: 2 }
+	}
+}
+
 export const DashboardWidgetSchema = Schema.Struct({
 	id: Schema.String,
 	visualization: Schema.String,
@@ -485,6 +510,34 @@ export class DashboardTemplatePreviewWidget extends Schema.Class<DashboardTempla
 	title: Schema.String,
 }) {}
 
+export const DashboardTemplateRequirementKind = Schema.Literals(["metrics", "integration", "telemetry"])
+export type DashboardTemplateRequirementKind = typeof DashboardTemplateRequirementKind.Type
+
+/**
+ * What an org needs before a template's widgets have anything to draw. The
+ * picker states it twice at different lengths — `missing` next to the template
+ * name, `collector` in the detail panel — so neither has to be recovered from
+ * prose by the client.
+ */
+export const DashboardTemplateRequirement = Schema.Struct({
+	kind: DashboardTemplateRequirementKind,
+	/** Full prose; the same string the `requirements` array carries. */
+	label: Schema.String,
+	/**
+	 * Row-sized statement of what's missing ("not connected"). Absent for
+	 * `metrics`, where clients derive `no <prefix>*` from
+	 * `requiredMetricPrefixes`.
+	 */
+	missing: Schema.optionalKey(Schema.String),
+	/** Noun phrase read as "Collected by {collector}." */
+	collector: Schema.String,
+	/** Noun phrase read as "Set up {setupLabel}". Absent for `telemetry`. */
+	setupLabel: Schema.optionalKey(Schema.String),
+	/** One extra sentence shown when the template is gated. */
+	hint: Schema.optionalKey(Schema.String),
+})
+export type DashboardTemplateRequirement = typeof DashboardTemplateRequirement.Type
+
 export class DashboardTemplateMetadata extends Schema.Class<DashboardTemplateMetadata>(
 	"DashboardTemplateMetadata",
 )({
@@ -493,7 +546,10 @@ export class DashboardTemplateMetadata extends Schema.Class<DashboardTemplateMet
 	description: Schema.String,
 	category: DashboardTemplateCategory,
 	tags: Schema.Array(Schema.String),
+	/** Derived from `requirement.label`. Empty for the blank template. */
 	requirements: Schema.Array(Schema.String),
+	/** Null only for the blank template, which needs nothing. */
+	requirement: Schema.NullOr(DashboardTemplateRequirement),
 	/**
 	 * Metric-name prefixes the template's widgets query; the picker greys out
 	 * templates whose prefixes match none of the org's metrics. Empty array =

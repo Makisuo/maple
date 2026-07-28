@@ -1,5 +1,6 @@
 import {
 	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	makeQueryBuilderTimeseriesDataSource,
 	makeQueryDraft,
@@ -77,7 +78,7 @@ function widgets(): WidgetDef[] {
 				}),
 			]),
 			display: { title: "Throughput by Service", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 7, w: 6, h: 4 },
+			layout: { x: 0, y: 7, w: 6, h: 6 },
 		},
 		{
 			id: "error-rate-by-service",
@@ -91,8 +92,8 @@ function widgets(): WidgetDef[] {
 					groupBy: ["service.name"],
 				}),
 			]),
-			display: { title: "Error Rate by Service", ...CHART_DISPLAY_AREA },
-			layout: { x: 6, y: 7, w: 6, h: 4 },
+			display: { title: "Error Rate by Service", ...CHART_DISPLAY_LINE, unit: "percent" },
+			layout: { x: 6, y: 7, w: 6, h: 6 },
 		},
 		{
 			id: "recent-error-traces",
@@ -107,7 +108,7 @@ function widgets(): WidgetDef[] {
 				listWhereClause: "has_error = true",
 				listLimit: 10,
 			},
-			layout: { x: 0, y: 11, w: 12, h: 5 },
+			layout: { x: 0, y: 13, w: 12, h: 5 },
 		},
 	]
 }
@@ -118,7 +119,11 @@ export const platformOverviewTemplate: TemplateDefinition = {
 	description: "Cross-service health: throughput, error rates, service table, and recent errors.",
 	category: "application",
 	tags: ["platform", "overview"],
-	requirements: ["OpenTelemetry tracing"],
+	requirement: {
+		kind: "telemetry",
+		label: "OpenTelemetry tracing",
+		collector: "your OpenTelemetry tracing instrumentation",
+	},
 	parameters: [],
 	build: () =>
 		buildPortableDashboard({

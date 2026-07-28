@@ -13,7 +13,8 @@ export type LegendPosition = "bottom" | "right" | "hidden"
 const UNIT_OPTIONS: Array<{ value: string; label: string }> = [
 	{ value: "none", label: "None" },
 	{ value: "number", label: "Number" },
-	{ value: "percent", label: "Percent" },
+	{ value: "percent", label: "Percent (0–1)" },
+	{ value: "percent_100", label: "Percent (0–100)" },
 	{ value: "duration", label: "Duration" },
 	{ value: "bytes", label: "Bytes" },
 	{ value: "requests_per_sec", label: "Requests/sec" },

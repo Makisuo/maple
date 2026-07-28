@@ -170,7 +170,10 @@ const getQueryBuilderBreakdownEffect = Effect.fn("QueryEngine.getQueryBuilderBre
 }) {
 	const input = yield* decodeInput(QueryBuilderBreakdownInputSchema, data, "getQueryBuilderBreakdown")
 
-	const enabledQueries = input.queries.filter((query) => query.enabled !== false)
+	// A breakdown has no formulas, so a hidden query has nothing to feed — it is purely "don't
+	// show me", and running it would only cost a warehouse round trip to plot a row the author
+	// asked to hide.
+	const enabledQueries = input.queries.filter((query) => query.enabled !== false && !query.hidden)
 	if (enabledQueries.length === 0) {
 		return yield* invalidWarehouseInput("getQueryBuilderBreakdown", "No enabled queries to run")
 	}

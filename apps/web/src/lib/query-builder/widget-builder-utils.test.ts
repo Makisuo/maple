@@ -6,6 +6,7 @@ import {
 	deriveDefaultWidgetTitle,
 	inferDisplayUnitForQuery,
 	inferDefaultUnitForQueries,
+	toInitialState,
 	type QueryBuilderWidgetState,
 } from "@/lib/query-builder/widget-builder-utils"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
@@ -256,5 +257,41 @@ describe("deriveDefaultWidgetTitle (MAP-49)", () => {
 		const widget = makeWidget()
 		const display = buildWidgetDisplay(widget, { ...makeState(), title: "My chart" })
 		expect(display.title).toBe("My chart")
+	})
+})
+
+// The Min/Max/Mean/Last table used to be inferred from legend visibility, which
+// switched it on for every widget that showed a legend. It is opt-in now, so a
+// widget has to say so — a visible legend on its own must not bring it back.
+describe("widget-builder series stats default", () => {
+	function widgetWithPresentation(
+		chartPresentation: DashboardWidget["display"]["chartPresentation"],
+	): DashboardWidget {
+		const widget = makeWidget()
+		return { ...widget, display: { ...widget.display, chartPresentation } }
+	}
+
+	it("leaves the stats table off when the widget does not ask for it", () => {
+		expect(toInitialState(widgetWithPresentation({ legend: "visible" })).seriesStatsEnabled).toBe(
+			false,
+		)
+		expect(toInitialState(widgetWithPresentation(undefined)).seriesStatsEnabled).toBe(false)
+	})
+
+	it("honors an explicit flag in both directions", () => {
+		expect(
+			toInitialState(widgetWithPresentation({ legend: "visible", seriesStats: true }))
+				.seriesStatsEnabled,
+		).toBe(true)
+		expect(
+			toInitialState(widgetWithPresentation({ legend: "visible", seriesStats: false }))
+				.seriesStatsEnabled,
+		).toBe(false)
+	})
+
+	it("round-trips the flag back into the saved display config", () => {
+		const widget = widgetWithPresentation({ legend: "visible", seriesStats: true })
+		const state = toInitialState(widget)
+		expect(buildWidgetDisplay(widget, state).chartPresentation?.seriesStats).toBe(true)
 	})
 })

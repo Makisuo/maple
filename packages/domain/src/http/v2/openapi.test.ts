@@ -133,6 +133,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/dashboards",
 			"POST /v2/dashboards/import/perses",
 			"POST /v2/dashboards/templates/{template_id}/instantiate",
+			"POST /v2/dashboards/templates/{template_id}/preview",
 			"POST /v2/dashboards/{id}/versions/{version_id}/restore",
 			"POST /v2/ingest_keys/private/roll",
 			"POST /v2/ingest_keys/public/roll",

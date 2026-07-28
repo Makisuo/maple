@@ -1,5 +1,6 @@
 import {
 	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_BAR,
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	metricsTimeseries,
@@ -10,9 +11,13 @@ import {
 } from "../helpers"
 import type { TemplateDefinition, WidgetDef } from "../types"
 
+// The postgresreceiver puts database identity on the RESOURCE, not on the datapoint
+// (`postgresql.database.name`), and reports its level metrics — backends, db_size — as
+// non-monotonic Sums (UpDownCounters), not Gauges. `metricType` picks the warehouse table, so a
+// UpDownCounter charted as `gauge` reads `metrics_gauge` and renders an empty widget.
 function widgets(serviceName?: string): WidgetDef[] {
 	const where = serviceWhereClause(serviceName)
-	const groupBy = ["attr.postgresql_database_name"]
+	const groupBy = ["resource.postgresql.database.name"]
 	return [
 		{
 			id: "active-connections",
@@ -21,12 +26,14 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "pg-backends",
 				name: "Active Connections",
 				metricName: "postgresql.backends",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "avg",
+				isMonotonic: false,
 				whereClause: where,
 				groupBy,
 			}),
 			display: { title: "Active Connections", ...CHART_DISPLAY_LINE, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "commits-rollbacks",
@@ -42,7 +49,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Commits per sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "blocks-read",
@@ -58,7 +65,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				groupBy,
 			}),
 			display: { title: "Disk Blocks Read / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "db-size",
@@ -67,12 +74,14 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "pg-db-size",
 				name: "DB Size",
 				metricName: "postgresql.db_size",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "max",
+				isMonotonic: false,
 				whereClause: where,
 				groupBy,
 			}),
 			display: { title: "Database Size", ...CHART_DISPLAY_LINE, unit: "bytes" },
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
 			id: "deadlocks",
@@ -87,22 +96,26 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 				groupBy,
 			}),
-			display: { title: "Deadlocks / sec", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 8, w: 6, h: 4 },
+			display: { title: "Deadlocks / sec", ...CHART_DISPLAY_BAR, unit: "number" },
+			layout: { x: 0, y: 12, w: 6, h: 6 },
 		},
 		{
+			// `postgresql.replication.data_delay` is the replication backlog in BYTES, keyed by
+			// replication client — not a lag in seconds. (The seconds-valued companion is
+			// `postgresql.wal.delay`, which the receiver leaves disabled by default.)
 			id: "replication-lag",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
 				id: "pg-replication-lag",
-				name: "Replication Lag",
+				name: "Replication Delay",
 				metricName: "postgresql.replication.data_delay",
 				metricType: "gauge",
+				aggregation: "max",
 				whereClause: where,
-				groupBy,
+				groupBy: ["attr.replication_client"],
 			}),
-			display: { title: "Replication Lag", ...CHART_DISPLAY_LINE, unit: "duration_s" },
-			layout: { x: 6, y: 8, w: 6, h: 4 },
+			display: { title: "Replication Delay (bytes behind)", ...CHART_DISPLAY_LINE, unit: "bytes" },
+			layout: { x: 6, y: 12, w: 6, h: 6 },
 		},
 	]
 }
@@ -113,7 +126,13 @@ export const postgresTemplate: TemplateDefinition = {
 	description: "Connections, commits, block I/O, DB size, deadlocks, and replication lag.",
 	category: "database",
 	tags: ["postgres", "database"],
-	requirements: ["OpenTelemetry postgresreceiver"],
+	requirement: {
+		kind: "metrics",
+		label: "OpenTelemetry postgresreceiver",
+		collector: "the OpenTelemetry postgresreceiver",
+		setupLabel: "the Postgres receiver",
+		hint: "Point it at your Postgres instances and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["postgresql."],
 	parameters: [
 		{

@@ -63,7 +63,7 @@ function widgets(database?: string): WidgetDef[] {
 				groupBy: ["attr.planetscale_database_name"],
 			}),
 			display: { title: "Active Connections (MySQL)", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 0, w: 6, h: 4 },
+			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
 			id: "connections-postgres",
@@ -78,43 +78,46 @@ function widgets(database?: string): WidgetDef[] {
 				groupBy: ["attr.planetscale_database_name"],
 			}),
 			display: { title: "Active Connections (Postgres)", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 6, y: 0, w: 6, h: 4 },
+			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
+		// PlanetScale reports these two as 0–100 percentages (see `PlanetScaleDatabaseStatsOutput`
+		// in @maple/query-engine), so they take `percent_100`. The plain `percent` unit is a 0–1
+		// ratio that multiplies by 100 at display — under it, 85% CPU rendered as "8500.0%".
 		gaugeChart({
 			id: "cpu",
 			name: "CPU",
 			metricName: "planetscale_pods_cpu_util_percentages",
 			title: "Pod CPU Utilization (max)",
-			unit: "percent",
+			unit: "percent_100",
 			where,
-			layout: { x: 0, y: 4, w: 6, h: 4 },
+			layout: { x: 0, y: 6, w: 6, h: 6 },
 		}),
 		gaugeChart({
 			id: "memory",
 			name: "Memory",
 			metricName: "planetscale_pods_mem_util_percentages",
 			title: "Pod Memory Utilization (max)",
-			unit: "percent",
+			unit: "percent_100",
 			where,
-			layout: { x: 6, y: 4, w: 6, h: 4 },
+			layout: { x: 6, y: 6, w: 6, h: 6 },
 		}),
 		gaugeChart({
 			id: "replica-lag-mysql",
 			name: "Replica lag",
 			metricName: "planetscale_mysql_replica_lag_seconds",
 			title: "Replica Lag (MySQL)",
-			unit: "seconds",
+			unit: "duration_s",
 			where,
-			layout: { x: 0, y: 8, w: 6, h: 4 },
+			layout: { x: 0, y: 12, w: 6, h: 6 },
 		}),
 		gaugeChart({
 			id: "replica-lag-postgres",
 			name: "Replica lag",
 			metricName: "planetscale_postgres_replica_lag_seconds",
 			title: "Replica Lag (Postgres)",
-			unit: "seconds",
+			unit: "duration_s",
 			where,
-			layout: { x: 6, y: 8, w: 6, h: 4 },
+			layout: { x: 6, y: 12, w: 6, h: 6 },
 		}),
 		{
 			id: "queries-by-branch",
@@ -129,7 +132,7 @@ function widgets(database?: string): WidgetDef[] {
 				groupBy: ["attr.planetscale_branch_name"],
 			}),
 			display: { title: "Connections by Branch", ...CHART_DISPLAY_AREA, unit: "number" },
-			layout: { x: 0, y: 12, w: 6, h: 4 },
+			layout: { x: 0, y: 18, w: 6, h: 6 },
 		},
 		gaugeChart({
 			id: "storage-available",
@@ -139,7 +142,7 @@ function widgets(database?: string): WidgetDef[] {
 			unit: "bytes",
 			where,
 			aggregation: "min",
-			layout: { x: 6, y: 12, w: 6, h: 4 },
+			layout: { x: 6, y: 18, w: 6, h: 6 },
 		}),
 	]
 }
@@ -151,7 +154,14 @@ export const planetscaleTemplate: TemplateDefinition = {
 		"Database health from the PlanetScale integration — active connections, pod CPU/memory utilization, replication lag, and per-branch breakdowns from the scraped branch metrics.",
 	category: "infrastructure",
 	tags: ["planetscale", "database", "mysql", "postgres"],
-	requirements: ["PlanetScale integration connected (or a planetscale scrape target)"],
+	requirement: {
+		kind: "integration",
+		label: "PlanetScale integration connected (or a planetscale scrape target)",
+		missing: "not connected",
+		collector: "the PlanetScale integration, or a planetscale scrape target",
+		setupLabel: "the PlanetScale integration",
+		hint: "Connect it and every widget fills in on its own.",
+	},
 	requiredMetricPrefixes: ["planetscale_"],
 	parameters: [
 		{

@@ -50,6 +50,8 @@ import {
 	type UserId,
 	UserId as UserIdSchema,
 	type WorkflowState,
+	WORKFLOW_TRANSITIONS,
+	TERMINAL_WORKFLOW_STATES,
 } from "@maple/domain/http"
 import {
 	actors,
@@ -80,6 +82,7 @@ import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedu
 import type { TenantContext } from "./AuthService"
 import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "../lib/ai-triage-enqueue"
 import { escalationDedupeKey, escalationReasonFor } from "../lib/issue-severity"
+import { SYSTEM_ERRORS_AGENT_NAME, isReservedAgentName } from "../lib/system-actors"
 import { evaluateEscalationPolicy } from "../lib/escalation-policy"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "../lib/DatabaseLive"
@@ -144,7 +147,7 @@ const RETENTION_PHASE_PERIOD_MS = 60_000
 const RETENTION_PHASE_EVERY_N_TICKS = 60
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
-const SYSTEM_AGENT_NAME = "system-errors-tick"
+const SYSTEM_AGENT_NAME = SYSTEM_ERRORS_AGENT_NAME
 const D1_INARRAY_CHUNK_SIZE = 90
 const ACTIONABLE_WORKFLOW_STATES: ReadonlyArray<WorkflowState> = [
 	"triage",
@@ -236,21 +239,6 @@ export const isBusyDatabaseError = (error: DatabaseError): boolean => {
 }
 
 const BUSY_RETRY_SCHEDULE = Schedule.max([Schedule.exponential("50 millis", 2.0), Schedule.recurs(3)])
-
-// ---------------------------------------------------------------------------
-// Transition matrix. Rows = from, values = set of allowed "to" states.
-// ---------------------------------------------------------------------------
-const TRANSITIONS: Record<WorkflowState, ReadonlySet<WorkflowState>> = {
-	triage: new Set<WorkflowState>(["todo", "in_progress", "cancelled", "wontfix"]),
-	todo: new Set<WorkflowState>(["triage", "in_progress", "cancelled", "wontfix"]),
-	in_progress: new Set<WorkflowState>(["triage", "todo", "in_review", "cancelled", "wontfix"]),
-	in_review: new Set<WorkflowState>(["triage", "in_progress", "done", "cancelled", "wontfix"]),
-	done: new Set<WorkflowState>(["triage", "in_progress", "cancelled", "wontfix"]),
-	cancelled: new Set<WorkflowState>(),
-	wontfix: new Set<WorkflowState>(["triage", "cancelled"]),
-}
-
-const TERMINAL_STATES: ReadonlySet<WorkflowState> = new Set(["done", "cancelled"])
 
 export interface ErrorsServiceShape {
 	readonly listIssues: (
@@ -794,10 +782,13 @@ const make: Effect.Effect<
 					}),
 				)
 			}
-			if (name === SYSTEM_AGENT_NAME) {
+			// Every platform-authored actor name, not just the errors tick: an org
+			// registering as one of these would author audit events that read as
+			// Maple's own.
+			if (isReservedAgentName(name)) {
 				return yield* Effect.fail(
 					new ErrorValidationError({
-						message: `Agent name '${SYSTEM_AGENT_NAME}' is reserved`,
+						message: `Agent name '${name}' is reserved`,
 						details: [name],
 					}),
 				)
@@ -1373,8 +1364,8 @@ const make: Effect.Effect<
 	// ---------------------------------------------------------------
 
 	const validateTransition = (issueId: ErrorIssueId, from: WorkflowState, to: WorkflowState) => {
-		const allowed = TRANSITIONS[from]
-		if (!allowed.has(to)) {
+		const allowed = WORKFLOW_TRANSITIONS[from]
+		if (!allowed.includes(to)) {
 			return Effect.fail(
 				new ErrorIssueTransitionError({
 					message: `Illegal transition from '${from}' to '${to}'`,
@@ -1427,7 +1418,7 @@ const make: Effect.Effect<
 			update.snoozeUntil = null
 		}
 
-		if (TERMINAL_STATES.has(toState)) {
+		if (TERMINAL_WORKFLOW_STATES.has(toState)) {
 			update.leaseHolderActorId = null
 			update.leaseExpiresAt = null
 			update.claimedAt = null
@@ -1534,7 +1525,7 @@ const make: Effect.Effect<
 			yield* Effect.annotateCurrentSpan({ orgId, issueId, actorId, leaseMs })
 
 			const current = yield* requireIssue(orgId, issueId)
-			if (TERMINAL_STATES.has(current.workflowState)) {
+			if (TERMINAL_WORKFLOW_STATES.has(current.workflowState)) {
 				return yield* Effect.fail(
 					new ErrorIssueTransitionError({
 						message: `Cannot claim an issue in state '${current.workflowState}'`,
