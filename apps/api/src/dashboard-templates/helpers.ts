@@ -95,23 +95,31 @@ export function makeQueryBuilderBreakdownDataSource(queries: Record<string, unkn
 // Chart display presets
 // ---------------------------------------------------------------------------
 
+// `seriesStats` (the Min/Max/Mean/Last table) is opt-in and costs up to 45% of a
+// widget's height. Every preset states it outright rather than leaning on the
+// default, so an exported dashboard renders the same wherever it is imported.
+// It earns that space only where the answer is a number: line charts here are
+// levels (heap, latency, lag, utilization). Area and bar are stacked rates and
+// breakdowns read for shape and composition, where per-series stats under a
+// cumulative plot duplicate the tooltip at best and mislead at worst (`Last` of a
+// bucketed rate is the partial trailing bucket) — those get the compact legend.
 export const CHART_DISPLAY_AREA = {
 	chartId: "query-builder-area",
-	chartPresentation: { legend: "visible" },
+	chartPresentation: { legend: "visible", seriesStats: false },
 	stacked: true,
 	curveType: "monotone",
 }
 
 export const CHART_DISPLAY_LINE = {
 	chartId: "query-builder-line",
-	chartPresentation: { legend: "visible" },
+	chartPresentation: { legend: "visible", seriesStats: true },
 	stacked: false,
 	curveType: "monotone",
 }
 
 const CHART_DISPLAY_BAR = {
 	chartId: "query-builder-bar",
-	chartPresentation: { legend: "visible" },
+	chartPresentation: { legend: "visible", seriesStats: false },
 	stacked: true,
 	curveType: "linear",
 }

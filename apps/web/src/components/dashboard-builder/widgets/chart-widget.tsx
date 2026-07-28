@@ -34,7 +34,9 @@ export const ChartWidget = memo(function ChartWidget({
 	const chartData =
 		dataState.status === "ready" && Array.isArray(dataState.data) ? dataState.data : undefined
 	const legend = display.chartPresentation?.legend ?? "hidden"
-	const seriesStats = display.chartPresentation?.seriesStats ?? legend !== "hidden"
+	// Opt-in, not inherited from legend visibility: the stats table costs up to
+	// 45% of the widget's height, so a chart shows it only by asking for it.
+	const seriesStats = display.chartPresentation?.seriesStats ?? false
 	const tooltip = display.chartPresentation?.tooltip
 
 	return (

@@ -3,7 +3,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
-import { formatDuration, formatNumber } from "@maple/ui/format"
+import { formatValueByUnit } from "@maple/ui/format"
 
 interface TableWidgetProps {
 	dataState: WidgetDataState
@@ -15,31 +15,24 @@ interface TableWidgetProps {
 	onFix?: () => void
 }
 
+/**
+ * Render one table cell using the same unit vocabulary as charts and stat tiles.
+ *
+ * This delegates to `formatValueByUnit` rather than keeping its own switch: the
+ * parallel implementation this replaces had already drifted, silently missing
+ * `bytes` entirely, so a byte column rendered as a bare `314572800` in a table
+ * while the identical value read "314.6 MB" in a chart. Delegating means a unit
+ * added to @maple/ui works everywhere at once.
+ *
+ * Unitless columns deliberately stay raw. They carry ids, commit shas and small
+ * counts, where abbreviating `1234` to "1.2K" destroys the value being read.
+ */
 export function formatCellValue(value: unknown, unit?: string): string {
 	if (value == null) return "-"
 	const num = Number(value)
 	if (Number.isNaN(num)) return String(value)
-
-	switch (unit) {
-		case "duration_ms":
-			return formatDuration(num)
-		case "duration_us":
-			return formatDuration(num / 1000)
-		case "duration_s":
-			return formatDuration(num * 1000)
-		case "duration_ns":
-			return formatDuration(num / 1_000_000)
-		case "percent":
-			// Percent values arrive as 0–1 ratios (warehouse errorRate columns);
-			// scale on format, matching @maple/ui's formatValueByUnit.
-			return `${(num * 100).toFixed(1)}%`
-		case "number":
-			return formatNumber(num)
-		case "requests_per_sec":
-			return `${num.toFixed(1)}/s`
-		default:
-			return String(value)
-	}
+	if (!unit) return String(value)
+	return formatValueByUnit(num, unit)
 }
 
 function getCellThresholdColor(

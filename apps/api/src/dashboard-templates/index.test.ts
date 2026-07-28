@@ -58,7 +58,7 @@ describe("dashboard template previews", () => {
 	})
 
 	it("exposes previews through listTemplateMetadata", () => {
-		const metadata = listTemplateMetadata({ includeInternal: true })
+		const metadata = listTemplateMetadata()
 		expect(metadata.length).toBe(DASHBOARD_TEMPLATES.length)
 		for (const meta of metadata) {
 			const template = DASHBOARD_TEMPLATES.find((t) => t.id === meta.id)
@@ -74,30 +74,38 @@ describe("dashboard template previews", () => {
 		expect(kinds).toContain("area")
 	})
 
+	// `seriesStats` is opt-in, so an omitted flag silently means "no Min/Max/Mean/
+	// Last table". Templates state it outright instead, both to keep exported
+	// dashboards self-describing and to force a new template author to make the
+	// call: on for line charts (levels — the answer is a number), off for area/bar
+	// (stacked rates and breakdowns read for shape).
+	it("states seriesStats explicitly on every chart widget, per chart kind", () => {
+		const EXPECTED: Record<string, boolean> = {
+			"query-builder-line": true,
+			"query-builder-area": false,
+			"query-builder-bar": false,
+		}
+
+		let checked = 0
+		for (const template of DASHBOARD_TEMPLATES) {
+			for (const widget of template.build({}).widgets) {
+				if (widget.visualization !== "chart") continue
+				const chartId = widget.display.chartId
+				const expected = chartId ? EXPECTED[chartId] : undefined
+				if (expected === undefined) continue // pie/histogram/heatmap ignore the flag
+
+				expect(
+					widget.display.chartPresentation?.seriesStats,
+					`${template.id}/${widget.id} (${chartId}) must state seriesStats`,
+				).toBe(expected)
+				checked += 1
+			}
+		}
+		expect(checked, "expected chart widgets to check").toBeGreaterThan(0)
+	})
+
 	it("gives the blank template an empty preview", () => {
 		const blank = DASHBOARD_TEMPLATES.find((t) => t.id === "blank")!
 		expect(buildTemplatePreview(blank)).toEqual([])
-	})
-})
-
-describe("internal template visibility", () => {
-	// Maple-internal templates read cross-org telemetry written under Maple's own
-	// org. `requiredMetricPrefixes` would only grey the card out, so customers
-	// would still see the template exists — hence a hard filter, defaulting to the
-	// customer-facing set so a new call site cannot leak them by omission.
-	it("hides internal templates by default and reveals them on request", () => {
-		const internalIds = DASHBOARD_TEMPLATES.filter((t) => t.internal).map((t) => t.id)
-		expect(internalIds.length, "expected at least one internal template").toBeGreaterThan(0)
-
-		const customerFacing = listTemplateMetadata().map((t) => t.id)
-		for (const id of internalIds) {
-			expect(customerFacing, `${id} must not reach customers`).not.toContain(id)
-		}
-
-		const withInternal = listTemplateMetadata({ includeInternal: true }).map((t) => t.id)
-		for (const id of internalIds) {
-			expect(withInternal, `${id} must be visible to the internal org`).toContain(id)
-		}
-		expect(withInternal.length).toBe(customerFacing.length + internalIds.length)
 	})
 })

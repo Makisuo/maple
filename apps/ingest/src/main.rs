@@ -37,6 +37,7 @@ use maple_ingest::otel::{
     entitlement_internal_span, forward_client_span, grpc_server_span, parse_internal_span,
     record_stage_error, resolve_config_internal_span, ResourceConfig,
 };
+use maple_ingest::otlp_json;
 use maple_ingest::telemetry::{
     AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget, ClickHouseTargetProvider,
     DatasourceNames, ExportDestination, MappingOperation, MappingSourceContext, PipelineError,
@@ -950,6 +951,24 @@ fn otel_status_for_rejection(status: u16) -> &'static str {
     }
 }
 
+/// Record why a request was rejected, on the server span.
+///
+/// `otel.status_description` cannot be the carrier: it resolves to
+/// `Status::error(reason)`, and the SDK keeps only the winner of `Ok > Error >
+/// Unset` — so on the 4xx rejections this path is mostly made of, which are
+/// deliberately `Ok`, the description was dropped and the span recorded *that*
+/// a payload was refused but never *why*. The reason therefore gets its own
+/// attribute, and the description is written only for the 5xx that keep an
+/// `Error` status. Counterpart of `record_stage_error` for the stage spans.
+fn record_rejection_reason(span: &Span, status: u16, reason: &str) {
+    span.record("maple.ingest.reject_reason", reason);
+    if otel_status_for_rejection(status) == "Error" {
+        span.record("otel.status_description", reason);
+    } else {
+        span.record("otel.status_code", "Ok");
+    }
+}
+
 /// gRPC counterpart of `otel_status_for_rejection`, applying the same rule: a
 /// caller-caused rejection leaves the SERVER span `Ok`, only a server-side
 /// failure is `Error`. `accept_grpc_decoded` maps the pipeline's 429 to
@@ -994,8 +1013,14 @@ fn record_grpc_outcome<T>(span: &Span, result: &Result<tonic::Response<T>, tonic
             let code = status.code();
             span.record("rpc.grpc.status_code", code as i32);
             span.record("error.type", code.description());
-            span.record("otel.status_description", status.message());
-            span.record("otel.status_code", grpc_otel_status_for_rejection(code));
+            span.record("maple.ingest.reject_reason", status.message());
+            if grpc_otel_status_for_rejection(code) == "Error" {
+                // See `record_rejection_reason`: the description is only kept
+                // on a span whose status stays `Error`.
+                span.record("otel.status_description", status.message());
+            } else {
+                span.record("otel.status_code", "Ok");
+            }
         }
     }
 }
@@ -2001,6 +2026,7 @@ async fn handle_replay_meta(
         otel.kind = "server",
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
         "http.request.method" = "POST",
         "http.route" = "/v1/sessionReplays/meta",
         "http.request.body.size" = body.len(),
@@ -2025,8 +2051,7 @@ async fn handle_replay_meta(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error.error_kind());
-            span_handle.record("otel.status_code", otel_status_for_rejection(status));
-            span_handle.record("otel.status_description", error.message.as_str());
+            record_rejection_reason(&span_handle, status, error.message.as_str());
             error.into_response()
         }
     }
@@ -2134,6 +2159,7 @@ async fn handle_session_events(
         otel.kind = "server",
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
         "http.request.method" = "POST",
         "http.route" = "/v1/sessionEvents",
         "http.request.body.size" = body.len(),
@@ -2158,8 +2184,7 @@ async fn handle_session_events(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error.error_kind());
-            span_handle.record("otel.status_code", otel_status_for_rejection(status));
-            span_handle.record("otel.status_description", error.message.as_str());
+            record_rejection_reason(&span_handle, status, error.message.as_str());
             error.into_response()
         }
     }
@@ -2244,6 +2269,7 @@ async fn handle_replay_blob(
         otel.kind = "server",
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
         "http.request.method" = "POST",
         "http.route" = "/v1/sessionReplays/blob",
         "http.request.body.size" = body.len(),
@@ -2269,8 +2295,7 @@ async fn handle_replay_blob(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error.error_kind());
-            span_handle.record("otel.status_code", otel_status_for_rejection(status));
-            span_handle.record("otel.status_description", error.message.as_str());
+            record_rejection_reason(&span_handle, status, error.message.as_str());
             error.into_response()
         }
     }
@@ -2441,6 +2466,7 @@ async fn handle_signal(
         otel.kind = "server",
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
         "http.request.method" = "POST",
         "http.route" = %route,
         "http.request.body.size" = body_bytes,
@@ -2493,8 +2519,7 @@ async fn handle_signal(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error_kind);
-            span_handle.record("otel.status_code", otel_status_for_rejection(status));
-            span_handle.record("otel.status_description", error.message.as_str());
+            record_rejection_reason(&span_handle, status, error.message.as_str());
             metrics::request_completed(signal.path(), "error", error_kind, duration.as_secs_f64());
             error.into_response()
         }
@@ -2522,6 +2547,7 @@ async fn handle_cloudflare_logpush(
         otel.kind = "server",
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,
+        "maple.ingest.reject_reason" = tracing::field::Empty,
         "http.request.method" = "POST",
         "http.route" = "/v1/logpush/cloudflare/http_requests/{connector_id}",
         "http.request.body.size" = body_bytes,
@@ -2567,8 +2593,7 @@ async fn handle_cloudflare_logpush(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error_kind);
-            span_handle.record("otel.status_code", otel_status_for_rejection(status));
-            span_handle.record("otel.status_description", error.message.as_str());
+            record_rejection_reason(&span_handle, status, error.message.as_str());
             metrics::request_completed("logs", "error", error_kind, duration.as_secs_f64());
             if error_kind == "auth" {
                 metrics::cloudflare_auth_failure("http_requests");
@@ -3414,42 +3439,82 @@ fn decode_and_enrich_payload(
     match (signal, payload_format) {
         (Signal::Traces, PayloadFormat::Protobuf) => {
             let mut request = ExportTraceServiceRequest::decode(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP traces protobuf payload"))?;
+                .map_err(|e| invalid_payload("traces", "protobuf", e))?;
             enrich_trace_request(&mut request, resolved_key);
             Ok(DecodedPayload::Traces(request))
         }
         (Signal::Logs, PayloadFormat::Protobuf) => {
             let mut request = ExportLogsServiceRequest::decode(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP logs protobuf payload"))?;
+                .map_err(|e| invalid_payload("logs", "protobuf", e))?;
             enrich_logs_request(&mut request, resolved_key);
             Ok(DecodedPayload::Logs(request))
         }
         (Signal::Metrics, PayloadFormat::Protobuf) => {
             let mut request = ExportMetricsServiceRequest::decode(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP metrics protobuf payload"))?;
+                .map_err(|e| invalid_payload("metrics", "protobuf", e))?;
             enrich_metrics_request(&mut request, resolved_key);
             Ok(DecodedPayload::Metrics(request))
         }
         (Signal::Traces, PayloadFormat::Json) => {
-            let mut request: ExportTraceServiceRequest = serde_json::from_slice(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP traces JSON payload"))?;
+            let mut request: ExportTraceServiceRequest =
+                decode_otlp_json(payload, "traces", "resourceSpans")?;
             enrich_trace_request(&mut request, resolved_key);
             Ok(DecodedPayload::Traces(request))
         }
         (Signal::Logs, PayloadFormat::Json) => {
-            let mut request: ExportLogsServiceRequest = serde_json::from_slice(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP logs JSON payload"))?;
+            let mut request: ExportLogsServiceRequest =
+                decode_otlp_json(payload, "logs", "resourceLogs")?;
             enrich_logs_request(&mut request, resolved_key);
             Ok(DecodedPayload::Logs(request))
         }
         (Signal::Metrics, PayloadFormat::Json) => {
-            let mut request: ExportMetricsServiceRequest = serde_json::from_slice(payload)
-                .map_err(|_| ApiError::bad_request("Invalid OTLP metrics JSON payload"))?;
+            let mut request: ExportMetricsServiceRequest =
+                decode_otlp_json(payload, "metrics", "resourceMetrics")?;
             enrich_metrics_request(&mut request, resolved_key);
             Ok(DecodedPayload::Metrics(request))
         }
     }
 }
+
+/// OTLP/JSON decode, via the leniency pass in `otlp_json`.
+///
+/// Deserializing straight into the generated types rejects encodings the spec
+/// says a receiver must accept (a `time_unix_nano` sent as a JSON number) and,
+/// for metrics, silently discards the data points instead of failing. So the
+/// payload goes through `serde_json::Value` first and is normalized onto the
+/// encoding the derives handle. See `otlp_json` for the full list.
+fn decode_otlp_json<T: serde::de::DeserializeOwned>(
+    payload: &[u8],
+    signal: &str,
+    root_field: &str,
+) -> Result<T, ApiError> {
+    let mut json: serde_json::Value =
+        serde_json::from_slice(payload).map_err(|e| invalid_payload(signal, "JSON", e))?;
+    otlp_json::normalize(&mut json, root_field);
+    serde_json::from_value(json).map_err(|e| invalid_payload(signal, "JSON", e))
+}
+
+/// The parser's own complaint is the only thing that says *which* field a
+/// customer's SDK got wrong, so it goes in the response body (and from there
+/// onto the span) rather than being flattened into "Invalid OTLP payload".
+/// Bounded because it is attacker-influenced and lands on a span attribute.
+fn invalid_payload(signal: &str, format: &str, error: impl std::fmt::Display) -> ApiError {
+    let mut detail = error.to_string();
+    if detail.len() > MAX_PAYLOAD_ERROR_DETAIL {
+        detail.truncate(
+            (0..=MAX_PAYLOAD_ERROR_DETAIL)
+                .rev()
+                .find(|i| detail.is_char_boundary(*i))
+                .unwrap_or(0),
+        );
+        detail.push('…');
+    }
+    ApiError::bad_request(format!(
+        "Invalid OTLP {signal} {format} payload: {detail}"
+    ))
+}
+
+const MAX_PAYLOAD_ERROR_DETAIL: usize = 200;
 
 fn count_trace_items(request: &ExportTraceServiceRequest) -> usize {
     request
@@ -4652,6 +4717,7 @@ mod tests {
     use super::*;
     // `AtomicBool` is only used by the test fakes below; keeping it out of the
     // top-level import avoids an unused-import warning in non-test bin builds.
+    use opentelemetry_proto::tonic::metrics::v1::metric;
     use std::sync::atomic::AtomicBool;
 
     #[test]
@@ -4793,6 +4859,144 @@ mod tests {
             Some(&INGEST_SOURCE.to_string())
         );
         assert!(!values.contains_key("org_id"));
+    }
+
+    fn test_key() -> ResolvedIngestKey {
+        ResolvedIngestKey {
+            org_id: "org_real".to_string(),
+            key_type: IngestKeyType::Private,
+            key_id: "abc".to_string(),
+            self_managed: false,
+            clickhouse_ready: false,
+        }
+    }
+
+    fn decode_json(signal: Signal, payload: &str) -> Result<DecodedPayload, ApiError> {
+        decode_and_enrich_payload(signal, PayloadFormat::Json, payload.as_bytes(), &test_key())
+    }
+
+    /// The shape the OTel JS SDK emits over `http/json`: nanosecond timestamps as
+    /// JSON numbers, and `{}` for a log with no body or an attribute whose value
+    /// is `undefined`. Rejecting these 400'd effectively all of one org's logs.
+    #[test]
+    fn js_sdk_log_payload_is_accepted() {
+        let decoded = decode_json(
+            Signal::Logs,
+            r#"{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"api"}}]},"scopeLogs":[{"scope":{"name":"app"},"logRecords":[{"timeUnixNano":1753660000000000000,"observedTimeUnixNano":1753660000000000000,"severityNumber":9,"severityText":"INFO","body":{},"attributes":[{"key":"empty","value":{}},{"key":"kept","value":{"stringValue":"v"}}],"traceId":null}]}]}]}"#,
+        )
+        .expect("payload accepted");
+
+        let DecodedPayload::Logs(request) = decoded else {
+            panic!("expected logs");
+        };
+        assert_eq!(count_log_items(&request), 1);
+        let record = &request.resource_logs[0].scope_logs[0].log_records[0];
+        assert_eq!(record.time_unix_nano, 1753660000000000000);
+        assert_eq!(record.severity_number, 9);
+        assert!(record.body.is_none());
+        // The empty attribute survives as a key with no value; the real one is intact.
+        assert_eq!(record.attributes.len(), 2);
+        assert!(record.attributes[0].value.is_none());
+        assert!(record.attributes[1].value.is_some());
+    }
+
+    /// Metrics fail differently and worse: `Metric.data` is a flattened oneof, so
+    /// the same encoding deserializes to `None` — a 200 with the data points
+    /// thrown away, billed and never stored.
+    #[test]
+    fn numeric_nanos_no_longer_silently_empty_a_metric() {
+        let decoded = decode_json(
+            Signal::Metrics,
+            r#"{"resourceMetrics":[{"resource":{"attributes":[]},"scopeMetrics":[{"metrics":[{"name":"m","gauge":{"dataPoints":[{"timeUnixNano":1753660000000000000,"asDouble":1.5}]}}]}]}]}"#,
+        )
+        .expect("payload accepted");
+
+        let DecodedPayload::Metrics(request) = decoded else {
+            panic!("expected metrics");
+        };
+        let metric = &request.resource_metrics[0].scope_metrics[0].metrics[0];
+        let Some(metric::Data::Gauge(gauge)) = &metric.data else {
+            panic!("gauge data dropped");
+        };
+        assert_eq!(gauge.data_points.len(), 1);
+    }
+
+    #[test]
+    fn spec_compliant_payloads_still_decode() {
+        let decoded = decode_json(
+            Signal::Traces,
+            r#"{"resourceSpans":[{"resource":{"attributes":[]},"scopeSpans":[{"spans":[{"traceId":"5b8efff798038103d269b633813fc60c","spanId":"eee19b7ec3c1b174","name":"GET /","kind":2,"startTimeUnixNano":"1753660000000000000","endTimeUnixNano":"1753660000000000001","status":{"code":1}}]}]}]}"#,
+        )
+        .expect("payload accepted");
+
+        let DecodedPayload::Traces(request) = decoded else {
+            panic!("expected traces");
+        };
+        let span = &request.resource_spans[0].scope_spans[0].spans[0];
+        assert_eq!(span.name, "GET /");
+        assert_eq!(span.kind, 2);
+        assert_eq!(span.end_time_unix_nano, 1753660000000000001);
+    }
+
+    /// Enrichment still has to reach a request whose resource we normalized away.
+    #[test]
+    fn enrichment_applies_to_a_payload_with_no_resource() {
+        let decoded = decode_json(
+            Signal::Logs,
+            r#"{"resourceLogs":[{"resource":{},"scopeLogs":[{"logRecords":[{"timeUnixNano":"1"}]}]}]}"#,
+        )
+        .expect("payload accepted");
+
+        let DecodedPayload::Logs(request) = decoded else {
+            panic!("expected logs");
+        };
+        let attributes = &request.resource_logs[0]
+            .resource
+            .as_ref()
+            .expect("resource re-inserted")
+            .attributes;
+        assert!(attributes
+            .iter()
+            .any(|a| a.key == "maple_org_id"
+                && matches!(
+                    &a.value,
+                    Some(AnyValue { value: Some(any_value::Value::StringValue(v)) }) if v == "org_real"
+                )));
+    }
+
+    /// An export request with nothing to export is a no-op, not a rejection.
+    #[test]
+    fn empty_export_request_is_accepted() {
+        let decoded = decode_json(Signal::Logs, r#"{}"#).expect("payload accepted");
+        assert_eq!(decoded.item_count(), 0);
+    }
+
+    /// Genuinely malformed input is still refused — and now says why, which is
+    /// the whole point: the previous message named neither the field nor the
+    /// offset, so a customer had no way to find the bug in their exporter.
+    #[test]
+    fn malformed_payload_is_rejected_with_the_parser_reason() {
+        let Err(error) = decode_json(Signal::Logs, r#"{"resourceLogs":"nope"}"#) else {
+            panic!("expected rejection");
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(
+            error.message.starts_with("Invalid OTLP logs JSON payload: "),
+            "unexpected message: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains("invalid type"),
+            "reason not preserved: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn rejection_reason_is_bounded() {
+        let error = invalid_payload("logs", "JSON", "x".repeat(10_000));
+        assert!(error.message.len() < MAX_PAYLOAD_ERROR_DETAIL + 64);
+        assert!(error.message.ends_with('…'));
     }
 
     #[test]

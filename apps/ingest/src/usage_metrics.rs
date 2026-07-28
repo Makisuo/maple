@@ -175,6 +175,7 @@ mod tests {
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::runtime::Tokio as OtelTokio;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;

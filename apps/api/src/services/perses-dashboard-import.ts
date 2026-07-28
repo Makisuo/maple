@@ -158,11 +158,15 @@ function displayForPanel(args: {
 	}
 
 	switch (args.kind) {
+		// `seriesStats` follows the same rule as the dashboard templates: on for
+		// line charts, where the series are levels and the answer is a number;
+		// off for stacked bars, where per-series stats under a cumulative plot
+		// only duplicate the tooltip. See CHART_DISPLAY_* in dashboard-templates.
 		case "TimeSeriesChart":
 			return {
 				...base,
 				chartId: "query-builder-line",
-				chartPresentation: { legend: "visible" },
+				chartPresentation: { legend: "visible", seriesStats: true },
 				stacked: false,
 				curveType: "monotone",
 			}
@@ -170,7 +174,7 @@ function displayForPanel(args: {
 			return {
 				...base,
 				chartId: "query-builder-bar",
-				chartPresentation: { legend: "visible" },
+				chartPresentation: { legend: "visible", seriesStats: false },
 				stacked: true,
 				curveType: "linear",
 			}

@@ -191,20 +191,33 @@ fn rustc_version() -> &'static str {
 
 /// Record a failed stage on `span`.
 ///
-/// `error.type` and `otel.status_description` are recorded unconditionally so
+/// `error.type` and `maple.ingest.reject_reason` are recorded unconditionally so
 /// the failure is always searchable and always carries its reason. The span
 /// status follows the same rule the server span uses (`otel_status_for_rejection`
 /// in main.rs): only a server-side fault is `Error`. A caller-caused rejection —
 /// bad key, undecodable body, invalid OTLP, per-org throttle — leaves the span
 /// `Ok`, because error dashboards count `StatusCode='Error'` and would otherwise
 /// be flooded by things working exactly as designed.
+///
+/// The reason is its own attribute rather than `otel.status_description` because
+/// the two cannot coexist: tracing-opentelemetry turns a description into
+/// `Status::error(detail)`, and the `Ok` written next replaces it wholesale — so
+/// on the rejection path, which is every 4xx, the reason exported as an empty
+/// `StatusMessage` and the span said only *that* a payload was refused, never
+/// *why*. It is still set for a server fault, where the `Error` status keeps it.
 pub fn record_stage_error(span: &Span, error_type: &str, detail: &str, server_fault: bool) {
     span.record("error.type", error_type);
-    span.record("otel.status_description", detail);
-    span.record(
-        "otel.status_code",
-        if server_fault { "Error" } else { "Ok" },
-    );
+    span.record("maple.ingest.reject_reason", detail);
+    if server_fault {
+        // One write, not two: `otel.status_description` already resolves to
+        // `Status::error(detail)`. Also writing `otel.status_code = "Error"`
+        // would contend for the same slot, and which of the two survives
+        // depends on write order and on the SDK's `Ok > Error > Unset`
+        // comparison — for two `Error`s, on how their descriptions sort.
+        span.record("otel.status_description", detail);
+    } else {
+        span.record("otel.status_code", "Ok");
+    }
 }
 
 /// Downstream-forward client-kind span. `peer_service` is the canonical name of
@@ -245,6 +258,7 @@ pub fn grpc_server_span(rpc_service: &'static str, signal_path: &'static str) ->
         otel.kind = "server",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "rpc.system" = "grpc",
         "rpc.service" = rpc_service,
         "rpc.method" = "Export",
@@ -266,6 +280,7 @@ pub fn auth_internal_span() -> Span {
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.ingest.cache_hit" = Empty,
         "maple.ingest.key_type" = Empty,
@@ -295,6 +310,7 @@ pub fn decode_internal_span(content_encoding: &str, body_size: usize) -> Span {
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.ingest.content_encoding" = content_encoding,
         "http.request.body.size" = body_size,
@@ -309,6 +325,7 @@ pub fn parse_internal_span(payload_format: &'static str, signal_path: &'static s
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.ingest.payload_format" = payload_format,
         "maple.signal" = signal_path,
@@ -324,6 +341,7 @@ pub fn accept_internal_span(signal_path: &'static str, destination: &'static str
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.signal" = signal_path,
         "maple.ingest.destination" = destination,
@@ -340,6 +358,7 @@ pub fn encode_rows_internal_span(signal_path: &'static str) -> Span {
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.signal" = signal_path,
         "maple.ingest.row_count" = Empty,
@@ -362,6 +381,7 @@ pub fn wal_commit_internal_span(destination: &'static str) -> Span {
         otel.kind = "internal",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "maple.ingest.destination" = destination,
         "maple.ingest.frame_count" = Empty,
@@ -403,6 +423,7 @@ pub fn export_client_span(
         otel.kind = "client",
         otel.status_code = Empty,
         otel.status_description = Empty,
+        "maple.ingest.reject_reason" = Empty,
         "error.type" = Empty,
         "http.request.method" = "POST",
         "http.request.body.size" = body_size,
@@ -491,11 +512,16 @@ mod tests {
     }
 
     /// Every span that `record_stage_error` can be called on must declare its
-    /// three fields, or a failure records nothing at all — the worst case, since
-    /// that is exactly when the span is being read.
+    /// fields, or a failure records nothing at all — the worst case, since that
+    /// is exactly when the span is being read.
     #[test]
     fn every_fallible_span_declares_the_stage_error_fields() {
-        let fields = ["error.type", "otel.status_code", "otel.status_description"];
+        let fields = [
+            "error.type",
+            "otel.status_code",
+            "otel.status_description",
+            "maple.ingest.reject_reason",
+        ];
         for span in [
             auth_internal_span(),
             decode_internal_span("gzip", 1),

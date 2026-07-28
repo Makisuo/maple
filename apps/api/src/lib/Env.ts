@@ -34,14 +34,6 @@ export interface EnvShape {
 	readonly CLERK_PUBLISHABLE_KEY: Option.Option<string>
 	readonly CLERK_JWT_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly MAPLE_ORG_ID_OVERRIDE: Option.Option<string>
-	/**
-	 * Maple's own org, whose dashboards may read cross-org internal telemetry (the
-	 * ingest gateway writes its per-org volume metrics under this org). Gates
-	 * `internal` dashboard templates. Absent means no org is internal, so those
-	 * templates are invisible everywhere — fail closed. Mirrors the env var of the
-	 * same name read by `apps/ingest`.
-	 */
-	readonly MAPLE_INTERNAL_ORG_ID: Option.Option<string>
 	readonly AUTUMN_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly AUTUMN_API_URL: string
 	readonly SD_INTERNAL_TOKEN: Option.Option<Redacted.Redacted<string>>
@@ -118,7 +110,6 @@ const envConfig = Config.all({
 	CLERK_PUBLISHABLE_KEY: optionalString("CLERK_PUBLISHABLE_KEY"),
 	CLERK_JWT_KEY: optionalRedacted("CLERK_JWT_KEY"),
 	MAPLE_ORG_ID_OVERRIDE: optionalString("MAPLE_ORG_ID_OVERRIDE"),
-	MAPLE_INTERNAL_ORG_ID: optionalString("MAPLE_INTERNAL_ORG_ID"),
 	AUTUMN_SECRET_KEY: optionalRedacted("AUTUMN_SECRET_KEY"),
 	AUTUMN_API_URL: stringWithDefault("AUTUMN_API_URL", "https://api.useautumn.com"),
 	SD_INTERNAL_TOKEN: optionalRedacted("SD_INTERNAL_TOKEN"),

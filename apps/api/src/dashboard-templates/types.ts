@@ -42,13 +42,6 @@ export interface TemplateDefinition {
 	 * means the template is never gated (trace/log templates).
 	 */
 	requiredMetricPrefixes?: readonly string[]
-	/**
-	 * Maple-internal template: hidden from the gallery and non-instantiable for
-	 * every org except `MAPLE_INTERNAL_ORG_ID`. `requiredMetricPrefixes` is not a
-	 * substitute — it only greys a card out, so customers would still see the
-	 * template exists. Absent/false means a normal customer-facing template.
-	 */
-	internal?: boolean
 	parameters: readonly TemplateParameter[]
 	build: (params: TemplateParameterValues) => PortableDashboardDocument
 }

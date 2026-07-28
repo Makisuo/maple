@@ -302,9 +302,11 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 				: legendRaw === "visible"
 					? "bottom"
 					: "hidden"
-	// Legacy widgets persisted a `legend` value but no `seriesStats`; if they
-	// showed a legend they showed the stats table, so default it on for them.
-	const seriesStatsEnabled = chartPresentation?.seriesStats ?? (legendRaw != null && legendRaw !== "hidden")
+	// The Min/Max/Mean/Last table is opt-in: it costs up to 45% of the widget's
+	// height, so a widget only shows it by asking for it. Widgets persisted before
+	// the flag existed carry no `seriesStats` and therefore lose the table — that
+	// is the intent, and re-ticking the box restores it per widget.
+	const seriesStatsEnabled = chartPresentation?.seriesStats ?? false
 
 	const baseFromWidget = {
 		visualization: widget.visualization,

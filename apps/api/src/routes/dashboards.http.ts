@@ -9,27 +9,15 @@ import {
 	MapleApi,
 	PortableDashboardDocument,
 } from "@maple/domain/http"
-import { Effect, Option } from "effect"
+import { Effect } from "effect"
 import { DashboardPersistenceService } from "../services/DashboardPersistenceService"
 import { getTemplateById, listTemplateMetadata } from "../dashboard-templates"
 import type { TemplateParameterValues } from "../dashboard-templates"
-import { Env } from "../lib/Env"
 import { convertPersesDashboardToPortable } from "../services/perses-dashboard-import"
 
 export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (handlers) =>
 	Effect.gen(function* () {
 		const persistence = yield* DashboardPersistenceService
-		const env = yield* Env
-
-		/**
-		 * Whether this caller may see Maple-internal templates. Fails closed: with
-		 * `MAPLE_INTERNAL_ORG_ID` unset no org qualifies.
-		 */
-		const isInternalOrg = (orgId: string) =>
-			Option.match(env.MAPLE_INTERNAL_ORG_ID, {
-				onNone: () => false,
-				onSome: (internalOrgId) => internalOrgId === orgId,
-			})
 
 		return handlers
 			.handle("create", ({ payload }) =>
@@ -107,35 +95,30 @@ export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (
 				}),
 			)
 			.handle("listTemplates", () =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					return new DashboardTemplatesListResponse({
-						templates: listTemplateMetadata({
-							includeInternal: isInternalOrg(tenant.orgId),
-						}).map(
-							(t) =>
-								new DashboardTemplateMetadata({
-									id: t.id,
-									name: t.name,
-									description: t.description,
-									category: t.category,
-									tags: t.tags,
-									requirements: t.requirements,
-									requiredMetricPrefixes: t.requiredMetricPrefixes,
-									parameters: t.parameters,
-									preview: t.preview,
-								}),
-						),
-					})
-				}),
+				Effect.sync(
+					() =>
+						new DashboardTemplatesListResponse({
+							templates: listTemplateMetadata().map(
+								(t) =>
+									new DashboardTemplateMetadata({
+										id: t.id,
+										name: t.name,
+										description: t.description,
+										category: t.category,
+										tags: t.tags,
+										requirements: t.requirements,
+										requiredMetricPrefixes: t.requiredMetricPrefixes,
+										parameters: t.parameters,
+										preview: t.preview,
+									}),
+							),
+						}),
+				),
 			)
 			.handle("instantiateTemplate", ({ params, payload }) =>
 				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
 					const template = getTemplateById(params.templateId)
-					// An internal template is reported as not-found rather than
-					// forbidden, so the response can't be used to prove it exists.
-					if (!template || (template.internal && !isInternalOrg(tenant.orgId))) {
+					if (!template) {
 						return yield* new DashboardTemplateNotFoundError({
 							templateId: params.templateId,
 							message: `Template "${params.templateId}" not found`,
@@ -173,6 +156,7 @@ export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (
 						widgets: built.widgets,
 					})
 
+					const tenant = yield* CurrentTenant.Context
 					return yield* persistence.create(tenant.orgId, tenant.userId, portable)
 				}),
 			)
