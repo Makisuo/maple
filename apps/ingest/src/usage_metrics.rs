@@ -262,6 +262,13 @@ mod tests {
     /// Mirrors `init_usage_metrics` in `main.rs` — delta exporter plus the
     /// cardinality view — with collection driven by `force_flush` instead of a
     /// timer, so the interval is deliberately far longer than any test.
+    ///
+    /// Every test using this harness must run on a **multi-thread** runtime.
+    /// `PeriodicReader` (the async-runtime variant) collects on a background
+    /// task, and `force_flush` blocks the calling thread until that task
+    /// answers. On the current-thread runtime `#[tokio::test]` gives by default,
+    /// the blocked test thread is the only thread that could run the reader, so
+    /// the flush deadlocks and the test hangs forever rather than failing.
     fn harness() -> (UsageMetrics, CaptureExporter) {
         let exporter = CaptureExporter::new(Temporality::Delta);
         let reader = PeriodicReader::builder(exporter.clone(), OtelTokio)
@@ -274,7 +281,7 @@ mod tests {
         (UsageMetrics::new(provider), exporter)
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn records_bytes_and_items_per_org_and_signal() {
         let (usage, exporter) = harness();
 
@@ -317,7 +324,7 @@ mod tests {
     /// increment, and an org that goes quiet stops emitting altogether. That is
     /// what makes `sum(Value)` per bucket exact in ClickHouse, and what keeps row
     /// cost proportional to *active* orgs rather than every org ever seen.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn each_interval_exports_only_its_own_increment() {
         let (usage, exporter) = harness();
 
@@ -355,7 +362,7 @@ mod tests {
     /// 2000 series per instrument, past which excess series silently collapse
     /// into an `otel.metric.overflow=true` bucket — the worst failure mode for a
     /// billing number, because per-org attribution degrades without erroring.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cardinality_view_admits_more_orgs_than_the_sdk_default() {
         const ORGS: usize = 3_000;
         assert!(
