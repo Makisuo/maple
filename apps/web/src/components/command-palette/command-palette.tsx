@@ -25,12 +25,7 @@ import {
 	SunIcon,
 } from "@/components/icons"
 import { openGlobalChat } from "@/components/chat/global-chat-sheet"
-import {
-	investigateNavItems,
-	mainNavItems,
-	topologyNavItems,
-	visibleSignalsNavItems,
-} from "@/components/dashboard/nav-items"
+import { paletteNavItems } from "@/components/dashboard/nav-items"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
@@ -143,29 +138,18 @@ function PaletteContent({
 	}, [close, toggle])
 
 	const entries = useMemo<PaletteEntry[]>(() => {
-		const navItems = [
-			...mainNavItems,
-			...topologyNavItems,
-			...visibleSignalsNavItems({ infraEnabled }),
-			...investigateNavItems,
-		]
+		// Sections *and* their children — Traces, Logs, Metrics, Replays, Hosts,
+		// the K8s lists and the integration pages are all reachable by name here,
+		// which is what lets the sidebar fold them into two sections.
 		const navigation: PaletteEntry[] = [
-			...navItems.map((item) => ({
-				id: `nav:${item.href}`,
+			...paletteNavItems({ infraEnabled }).map((item) => ({
+				id: item.id,
 				title: item.title,
 				group: "Navigation" as const,
 				keywords: `go to ${item.title}`,
 				icon: item.icon,
 				href: item.href,
 			})),
-			{
-				id: "nav:/dashboards",
-				title: "Dashboards",
-				group: "Navigation",
-				keywords: "go to all dashboards",
-				icon: GridSquareCirclePlusIcon,
-				href: "/dashboards",
-			},
 			{
 				id: "nav:/settings",
 				title: "Settings",

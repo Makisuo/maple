@@ -1,4 +1,4 @@
-import { memo } from "react"
+import { memo, useMemo } from "react"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { useUser, useClerk } from "@clerk/clerk-react"
 import {
@@ -6,20 +6,19 @@ import {
 	DiscordIcon,
 	EnvelopeIcon,
 	GearIcon,
-	LogoutIcon,
-	ChevronUpIcon,
-	ChevronRightIcon,
 	GridSquareCirclePlusIcon,
+	KeyboardIcon,
+	LogoutIcon,
+	MagnifierIcon,
 } from "@/components/icons"
 import {
-	investigateNavItems,
-	mainNavItems,
-	topologyNavItems,
-	visibleSignalsNavItems,
-	type NavSubItem,
+	isNavItemActive,
+	isPathActive,
+	navGroups,
+	type NavGroup,
+	type NavItem,
 } from "@/components/dashboard/nav-items"
-import { showKeyboardShortcuts } from "@/components/command-palette/global-shortcuts"
-import { KeyboardIcon } from "@/components/icons"
+import { openCommandPalette, showKeyboardShortcuts } from "@/components/command-palette/global-shortcuts"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
 import { ThemeToggle } from "@/components/dashboard/theme-toggle"
 import {
@@ -47,20 +46,51 @@ import {
 	SidebarMenuSub,
 	SidebarMenuSubButton,
 	SidebarMenuSubItem,
+	useSidebar,
 } from "@maple/ui/components/ui/sidebar"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@maple/ui/components/ui/collapsible"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Kbd } from "@maple/ui/components/ui/kbd"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
-import { Badge } from "@maple/ui/components/ui/badge"
 
-function UserAvatar({ imageUrl, initials, name }: { imageUrl?: string; initials: string; name: string }) {
+/**
+ * A 2px lane is reserved on every row so icons share one vertical line whether
+ * or not the row is selected — only the active row paints it. Squaring the left
+ * corners is what makes it read as a rail against the sidebar edge rather than
+ * a rounded sliver floating inside the pill. `--sidebar-primary` was defined in
+ * tokens.css and consumed by nothing before this; it is the one thing that
+ * distinguishes "selected" from "hovered", which otherwise share a fill.
+ */
+const RAIL_LANE = "relative before:absolute before:inset-y-0 before:left-0 before:w-0.5"
+const ACTIVE_RAIL = `${RAIL_LANE} data-[active=true]:rounded-l-none data-[active=true]:before:bg-sidebar-primary`
+
+/** Group labels sit below the items they name, not level with them. */
+const GROUP_LABEL = "h-6 text-muted-foreground"
+
+/** Beyond this the Pinned list stops being a shortcut and becomes a second list. */
+const MAX_PINNED = 5
+
+function UserAvatar({
+	imageUrl,
+	initials,
+	name,
+	className,
+}: {
+	imageUrl?: string
+	initials: string
+	name: string
+	className?: string
+}) {
+	const base = className ?? "size-6 rounded-md text-[10px]"
 	return imageUrl ? (
-		<img src={imageUrl} alt={name} className="size-8 shrink-0 rounded-md object-cover" />
+		<img alt={name} className={`${base} shrink-0 object-cover`} src={imageUrl} />
 	) : (
-		<div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground text-xs font-medium">
+		<div
+			className={`${base} flex shrink-0 items-center justify-center bg-muted font-medium text-muted-foreground`}
+		>
 			{initials}
 		</div>
 	)
@@ -85,27 +115,28 @@ function UserMenu() {
 			<DropdownMenuTrigger
 				render={
 					<SidebarMenuButton
-						size="lg"
 						className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+						tooltip={name}
 					/>
 				}
 			>
 				<UserAvatar imageUrl={imageUrl} initials={initials} name={name} />
-				<div className="grid flex-1 text-left text-sm leading-tight">
-					<span className="truncate font-medium">{name}</span>
-					{email && <span className="truncate text-xs text-muted-foreground">{email}</span>}
-				</div>
-				<ChevronUpIcon size={16} className="ml-auto" />
+				<span className="truncate font-medium">{name}</span>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent side="top" align="start" sideOffset={4} className="min-w-56">
+			<DropdownMenuContent align="start" className="min-w-56" side="top" sideOffset={4}>
 				<DropdownMenuGroup>
 					<DropdownMenuLabel>
 						<div className="flex items-center gap-2 py-1 text-left text-sm">
-							<UserAvatar imageUrl={imageUrl} initials={initials} name={name} />
+							<UserAvatar
+								className="size-8 rounded-md text-xs"
+								imageUrl={imageUrl}
+								initials={initials}
+								name={name}
+							/>
 							<div className="grid flex-1 text-left text-sm leading-tight">
 								<span className="truncate font-medium">{name}</span>
 								{email && (
-									<span className="truncate text-xs text-muted-foreground">{email}</span>
+									<span className="truncate text-muted-foreground text-xs">{email}</span>
 								)}
 							</div>
 						</div>
@@ -150,18 +181,15 @@ function GuestMenu() {
 			<DropdownMenuTrigger
 				render={
 					<SidebarMenuButton
-						size="lg"
 						className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+						tooltip="Root"
 					/>
 				}
 			>
 				<UserAvatar initials="RT" name="Root" />
-				<div className="grid flex-1 text-left text-sm leading-tight">
-					<span className="truncate font-medium">Root</span>
-				</div>
-				<ChevronUpIcon size={16} className="ml-auto" />
+				<span className="truncate font-medium">Root</span>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent side="top" align="start" sideOffset={4} className="min-w-56">
+			<DropdownMenuContent align="start" className="min-w-56" side="top" sideOffset={4}>
 				<DropdownMenuGroup>
 					<ThemeToggle />
 				</DropdownMenuGroup>
@@ -189,241 +217,300 @@ function GuestMenu() {
 	)
 }
 
+/**
+ * ⌘K is the escape hatch that lets the nav stay short, so it needs to be
+ * visible rather than folklore. Collapses to the magnifier alone on the rail.
+ */
+function SearchRow() {
+	return (
+		<SidebarMenu>
+			<SidebarMenuItem>
+				<SidebarMenuButton
+					className="border border-sidebar-border bg-background text-muted-foreground hover:bg-background hover:text-foreground"
+					onClick={openCommandPalette}
+					tooltip="Search"
+				>
+					<MagnifierIcon size={16} />
+					<span className="flex-1 text-left">Search</span>
+					<Kbd className="group-data-[collapsible=icon]:hidden">⌘K</Kbd>
+				</SidebarMenuButton>
+			</SidebarMenuItem>
+		</SidebarMenu>
+	)
+}
+
+function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
+	const { state, isMobile } = useSidebar()
+	const isActive = isNavItemActive(currentPath, item)
+	const subItems = item.subItems
+	const collapsed = state === "collapsed" && !isMobile
+
+	// Longest match wins: Infrastructure's Hosts child is `/infra`, which
+	// prefixes every one of its siblings, so a plain match would light up two
+	// rows on /infra/kubernetes/pods.
+	const activeSubHref = useMemo(() => {
+		let best: string | undefined
+		for (const sub of subItems ?? []) {
+			if (!isPathActive(currentPath, sub.href)) continue
+			if (best === undefined || sub.href.length > best.length) best = sub.href
+		}
+		return best
+	}, [subItems, currentPath])
+
+	// The sub-list can't render at 48px, so the rail turns the row into a menu.
+	// Without this, every child route is stranded while the sidebar is collapsed
+	// — which is the state Infrastructure ships in today.
+	if (collapsed && subItems && subItems.length > 0) {
+		return (
+			<SidebarMenuItem>
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						render={<SidebarMenuButton className={ACTIVE_RAIL} isActive={isActive} />}
+					>
+						<item.icon size={18} />
+						<span>{item.title}</span>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="start" className="min-w-44" side="right" sideOffset={4}>
+						{/* Base UI scopes labels to a group — a bare DropdownMenuLabel
+						    throws MenuGroupContext is missing. */}
+						<DropdownMenuGroup>
+							<DropdownMenuLabel>{item.title}</DropdownMenuLabel>
+							{subItems.map((sub) => (
+								<DropdownMenuItem key={sub.title} render={<Link to={sub.href} />}>
+									{sub.icon ? <sub.icon size={16} /> : null}
+									{sub.title}
+								</DropdownMenuItem>
+							))}
+						</DropdownMenuGroup>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			</SidebarMenuItem>
+		)
+	}
+
+	// While a section is open the rail belongs to the child you're actually on,
+	// not the parent — otherwise two amber bars compete and neither points at
+	// the current page. The open parent keeps the fill.
+	const isOpen = Boolean(subItems && subItems.length > 0 && isActive)
+
+	return (
+		<SidebarMenuItem>
+			<SidebarMenuButton
+				className={isOpen ? RAIL_LANE : ACTIVE_RAIL}
+				isActive={isActive}
+				render={<Link to={item.href} />}
+				tooltip={item.title}
+			>
+				<item.icon size={18} />
+				<span>{item.title}</span>
+			</SidebarMenuButton>
+			{item.badge ? (
+				<SidebarMenuBadge>
+					<Badge className="h-4 px-1.5 py-0 font-medium text-[10px]" variant="secondary">
+						{item.badge}
+					</Badge>
+				</SidebarMenuBadge>
+			) : null}
+			{subItems && isActive ? (
+				<SidebarMenuSub>
+					{subItems.map((sub) => (
+						<SidebarMenuSubItem key={sub.title}>
+							<SidebarMenuSubButton
+								className={`${ACTIVE_RAIL} [&>svg]:text-current`}
+								isActive={sub.href === activeSubHref}
+								render={<Link to={sub.href} />}
+							>
+								{sub.icon ? <sub.icon className="size-3.5" /> : null}
+								<span>{sub.title}</span>
+							</SidebarMenuSubButton>
+						</SidebarMenuSubItem>
+					))}
+				</SidebarMenuSub>
+			) : null}
+		</SidebarMenuItem>
+	)
+}
+
+function NavGroupSection({ group, currentPath }: { group: NavGroup; currentPath: string }) {
+	return (
+		<SidebarGroup>
+			{group.label ? (
+				<SidebarGroupLabel className={GROUP_LABEL}>{group.label}</SidebarGroupLabel>
+			) : null}
+			<SidebarGroupContent>
+				<SidebarMenu>
+					{group.items.map((item) => (
+						<NavRow currentPath={currentPath} item={item} key={item.title} />
+					))}
+				</SidebarMenu>
+			</SidebarGroupContent>
+		</SidebarGroup>
+	)
+}
+
+/**
+ * Replaces the old inline dashboards list, which had no ceiling — every
+ * dashboard in the org landed in the sidebar behind a 160px scroll region with
+ * a mask fade, nested inside the sidebar's own scroll region. This is curated,
+ * capped, and reports the true total in its header.
+ *
+ * Hidden on the collapsed rail: with dashboards-only pins every glyph is the
+ * same grid mark, so a column of them conveys nothing. Worth revisiting once
+ * pins can hold services (which carry a coloured ServiceDot).
+ */
+function PinnedGroup({ currentPath }: { currentPath: string }) {
+	const { dashboards, isLoading } = useDashboardsRead()
+	const { favorites } = useDashboardPreferences()
+
+	const pinned = useMemo(() => dashboards.filter((d) => favorites.has(d.id)), [dashboards, favorites])
+	const visible = pinned.slice(0, MAX_PINNED)
+	const overflow = pinned.length - visible.length
+	const activeDashboardId = currentPath.match(/^\/dashboards\/([^/]+)/)?.[1]
+
+	if (isLoading) return null
+
+	return (
+		<SidebarGroup className="group-data-[collapsible=icon]:hidden">
+			<SidebarGroupLabel className={GROUP_LABEL}>
+				<span className="flex-1">Pinned</span>
+				{pinned.length > 0 ? <span className="font-normal tabular-nums">{pinned.length}</span> : null}
+			</SidebarGroupLabel>
+			<SidebarGroupContent>
+				{visible.length === 0 ? (
+					<p className="rounded-md border border-sidebar-border border-dashed px-2.5 py-2 text-[11px] text-muted-foreground leading-relaxed">
+						Pin a dashboard to keep it here.
+					</p>
+				) : (
+					<SidebarMenu>
+						{visible.map((dashboard) => (
+							<SidebarMenuItem key={dashboard.id}>
+								<SidebarMenuButton
+									className={ACTIVE_RAIL}
+									isActive={activeDashboardId === dashboard.id}
+									render={
+										<Link
+											params={{ dashboardId: dashboard.id }}
+											to="/dashboards/$dashboardId"
+										/>
+									}
+									size="sm"
+								>
+									<GridSquareCirclePlusIcon className="size-3.5 text-muted-foreground" />
+									<span>{dashboard.name}</span>
+								</SidebarMenuButton>
+							</SidebarMenuItem>
+						))}
+						{overflow > 0 ? (
+							<SidebarMenuItem>
+								<SidebarMenuButton
+									className={`${ACTIVE_RAIL} text-muted-foreground`}
+									render={<Link to="/dashboards" />}
+									size="sm"
+								>
+									<span className="size-3.5 shrink-0" />
+									<span>{overflow} more…</span>
+								</SidebarMenuButton>
+							</SidebarMenuItem>
+						) : null}
+					</SidebarMenu>
+				)}
+			</SidebarGroupContent>
+		</SidebarGroup>
+	)
+}
+
+/** Settings and help stop scrolling away by leaving SidebarContent entirely. */
+function SupportMenu() {
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				render={
+					<SidebarMenuButton
+						className="size-8 w-8 shrink-0 justify-center p-0 group-data-[collapsible=icon]:w-full"
+						tooltip="Support"
+					/>
+				}
+			>
+				<CircleQuestionIcon size={16} />
+				<span className="sr-only">Support</span>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" side="top" sideOffset={4}>
+				<DropdownMenuGroup>
+					<DropdownMenuItem
+						render={
+							<a
+								aria-label="Community Discord"
+								href="https://discord.gg/BnXjKuwJqP"
+								rel="noopener noreferrer"
+								target="_blank"
+							/>
+						}
+					>
+						<DiscordIcon size={16} />
+						Community Discord
+					</DropdownMenuItem>
+					<DropdownMenuItem
+						render={<a aria-label="Email Support" href="mailto:support@maple.dev" />}
+					>
+						<EnvelopeIcon size={16} />
+						Email Support
+					</DropdownMenuItem>
+					<DropdownMenuItem onClick={showKeyboardShortcuts}>
+						<KeyboardIcon size={16} />
+						Keyboard shortcuts
+						<DropdownMenuShortcut>?</DropdownMenuShortcut>
+					</DropdownMenuItem>
+				</DropdownMenuGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	)
+}
+
+function FooterCluster({ currentPath }: { currentPath: string }) {
+	return (
+		<SidebarMenu>
+			<SidebarMenuItem className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
+				<div className="min-w-0 flex-1 group-data-[collapsible=icon]:w-full group-data-[collapsible=icon]:flex-none">
+					{isClerkAuthEnabled ? <UserMenu /> : <GuestMenu />}
+				</div>
+				<SidebarMenuButton
+					className={`${ACTIVE_RAIL} size-8 w-8 shrink-0 justify-center p-0 group-data-[collapsible=icon]:w-full`}
+					isActive={isPathActive(currentPath, "/settings")}
+					render={<Link to="/settings" />}
+					tooltip="Settings"
+				>
+					<GearIcon size={16} />
+					<span className="sr-only">Settings</span>
+				</SidebarMenuButton>
+				<SupportMenu />
+			</SidebarMenuItem>
+		</SidebarMenu>
+	)
+}
+
 // Memoized: DashboardLayout renders this inside every page, so without memo the
 // sidebar's ~500-fiber subtree rerenders on every page-level state change
 // (refresh version bumps, search-param updates, query settles). The selector
 // (instead of bare useRouterState) keeps it quiet during loader/pending ticks.
 export const AppSidebar = memo(function AppSidebar() {
 	const currentPath = useRouterState({ select: (s) => s.location.pathname })
-	const { dashboards, isLoading } = useDashboardsRead()
-	const { favorites } = useDashboardPreferences()
-
-	const dashboardMatch = currentPath.match(/^\/dashboards\/([^/]+)/)
-	const activeDashboardId = dashboardMatch?.[1]
-
-	const favoriteDashboards = dashboards.filter((d) => favorites.has(d.id))
-	const otherDashboards = dashboards.filter((d) => !favorites.has(d.id))
-
 	const infraEnabled = useInfraEnabled()
-	const signalsItems = visibleSignalsNavItems({ infraEnabled })
+	const groups = useMemo(() => navGroups({ infraEnabled }), [infraEnabled])
 
 	return (
 		<Sidebar collapsible="icon">
 			<SidebarHeader>
 				<OrgSwitcher />
+				<SearchRow />
 			</SidebarHeader>
 			<SidebarContent>
-				<SidebarGroup>
-					<SidebarGroupContent>
-						<SidebarMenu>
-							{mainNavItems.map((item) => {
-								const isActive = currentPath === item.href
-								return (
-									<SidebarMenuItem key={item.title}>
-										<SidebarMenuButton
-											render={<Link to={item.href} />}
-											tooltip={item.title}
-											isActive={isActive}
-										>
-											<item.icon size={18} />
-											<span>{item.title}</span>
-										</SidebarMenuButton>
-									</SidebarMenuItem>
-								)
-							})}
-						</SidebarMenu>
-					</SidebarGroupContent>
-				</SidebarGroup>
-
-				{[topologyNavItems, signalsItems, investigateNavItems].map((group) => (
-					<SidebarGroup key={group[0].title}>
-						<SidebarGroupContent>
-							<SidebarMenu>
-								{group.map((item) => {
-									const isActive = currentPath.startsWith(item.href)
-									const subItems =
-										"subItems" in item
-											? (item.subItems as NavSubItem[] | undefined)
-											: undefined
-									return (
-										<SidebarMenuItem key={item.title}>
-											<SidebarMenuButton
-												render={<Link to={item.href} />}
-												tooltip={item.title}
-												isActive={isActive}
-											>
-												<item.icon size={18} />
-												<span>{item.title}</span>
-											</SidebarMenuButton>
-											{"badge" in item && (item.badge as string) ? (
-												<SidebarMenuBadge>
-													<Badge
-														variant="secondary"
-														className="text-[10px] px-1.5 py-0 h-4 font-medium"
-													>
-														{item.badge as string}
-													</Badge>
-												</SidebarMenuBadge>
-											) : null}
-											{subItems && isActive ? (
-												<SidebarMenuSub>
-													{subItems.map((sub) => {
-														const subActive =
-															sub.href === item.href
-																? currentPath === item.href ||
-																	currentPath === `${item.href}/`
-																: currentPath.startsWith(sub.href)
-														return (
-															<SidebarMenuSubItem key={sub.title}>
-																<SidebarMenuSubButton
-																	render={<Link to={sub.href} />}
-																	isActive={subActive}
-																>
-																	{sub.icon ? <sub.icon size={14} /> : null}
-																	<span>{sub.title}</span>
-																</SidebarMenuSubButton>
-															</SidebarMenuSubItem>
-														)
-													})}
-												</SidebarMenuSub>
-											) : null}
-										</SidebarMenuItem>
-									)
-								})}
-							</SidebarMenu>
-						</SidebarGroupContent>
-					</SidebarGroup>
+				{groups.map((group) => (
+					<NavGroupSection currentPath={currentPath} group={group} key={group.id} />
 				))}
-
-				<Collapsible defaultOpen className="group/dashboards flex flex-col">
-					<SidebarGroup className="flex flex-col">
-						<SidebarGroupLabel render={<CollapsibleTrigger />}>
-							<GridSquareCirclePlusIcon size={14} className="mr-1 !size-3.5" />
-							Dashboards
-							<ChevronRightIcon
-								size={14}
-								className="ml-auto !size-3.5 transition-transform group-data-[open]/dashboards:rotate-90"
-							/>
-						</SidebarGroupLabel>
-						<CollapsibleContent className="flex flex-col">
-							<SidebarGroupContent className="flex flex-col">
-								<SidebarMenu className="flex flex-col">
-									<SidebarMenuItem>
-										<SidebarMenuButton
-											render={<Link to="/dashboards" />}
-											tooltip="All Dashboards"
-											isActive={
-												currentPath === "/dashboards" ||
-												currentPath === "/dashboards/"
-											}
-										>
-											<GridSquareCirclePlusIcon size={18} />
-											<span>All Dashboards</span>
-										</SidebarMenuButton>
-									</SidebarMenuItem>
-									{!isLoading && dashboards.length > 0 && (
-										<SidebarMenuSub className="max-h-40 overflow-y-auto [mask-image:linear-gradient(to_bottom,transparent_0,black_8px,black_calc(100%-8px),transparent_100%)]">
-											{favoriteDashboards.map((dashboard) => (
-												<SidebarMenuSubItem key={dashboard.id}>
-													<SidebarMenuSubButton
-														render={
-															<Link
-																to="/dashboards/$dashboardId"
-																params={{ dashboardId: dashboard.id }}
-															/>
-														}
-														isActive={activeDashboardId === dashboard.id}
-													>
-														<span className="text-amber-500 mr-1">&#9733;</span>
-														<span>{dashboard.name}</span>
-													</SidebarMenuSubButton>
-												</SidebarMenuSubItem>
-											))}
-											{otherDashboards.map((dashboard) => (
-												<SidebarMenuSubItem key={dashboard.id}>
-													<SidebarMenuSubButton
-														render={
-															<Link
-																to="/dashboards/$dashboardId"
-																params={{ dashboardId: dashboard.id }}
-															/>
-														}
-														isActive={activeDashboardId === dashboard.id}
-													>
-														<span>{dashboard.name}</span>
-													</SidebarMenuSubButton>
-												</SidebarMenuSubItem>
-											))}
-										</SidebarMenuSub>
-									)}
-								</SidebarMenu>
-							</SidebarGroupContent>
-						</CollapsibleContent>
-					</SidebarGroup>
-				</Collapsible>
-
-				<SidebarGroup>
-					<SidebarGroupContent>
-						<SidebarMenu>
-							<SidebarMenuItem>
-								<DropdownMenu>
-									<DropdownMenuTrigger render={<SidebarMenuButton tooltip="Support" />}>
-										<CircleQuestionIcon size={18} />
-										<span>Support</span>
-									</DropdownMenuTrigger>
-									<DropdownMenuContent side="right" align="start" sideOffset={4}>
-										<DropdownMenuGroup>
-											<DropdownMenuItem
-												render={
-													<a
-														href="https://discord.gg/BnXjKuwJqP"
-														target="_blank"
-														rel="noopener noreferrer"
-														aria-label="Community Discord"
-													/>
-												}
-											>
-												<DiscordIcon size={16} />
-												Community Discord
-											</DropdownMenuItem>
-											<DropdownMenuItem
-												render={
-													<a
-														href="mailto:support@maple.dev"
-														aria-label="Email Support"
-													/>
-												}
-											>
-												<EnvelopeIcon size={16} />
-												Email Support
-											</DropdownMenuItem>
-											<DropdownMenuItem onClick={showKeyboardShortcuts}>
-												<KeyboardIcon size={16} />
-												Keyboard shortcuts
-												<DropdownMenuShortcut>?</DropdownMenuShortcut>
-											</DropdownMenuItem>
-										</DropdownMenuGroup>
-									</DropdownMenuContent>
-								</DropdownMenu>
-							</SidebarMenuItem>
-							<SidebarMenuItem>
-								<SidebarMenuButton
-									render={<Link to="/settings" />}
-									tooltip="Settings"
-									isActive={currentPath.startsWith("/settings")}
-								>
-									<GearIcon size={18} />
-									<span>Settings</span>
-								</SidebarMenuButton>
-							</SidebarMenuItem>
-						</SidebarMenu>
-					</SidebarGroupContent>
-				</SidebarGroup>
+				<PinnedGroup currentPath={currentPath} />
 			</SidebarContent>
-			<SidebarFooter>
-				<SidebarMenu>
-					<SidebarMenuItem>{isClerkAuthEnabled ? <UserMenu /> : <GuestMenu />}</SidebarMenuItem>
-				</SidebarMenu>
+			<SidebarFooter className="border-sidebar-border border-t">
+				<FooterCluster currentPath={currentPath} />
 			</SidebarFooter>
 		</Sidebar>
 	)
