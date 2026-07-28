@@ -18,14 +18,17 @@
  * service.name="alerting", masquerading as a production alerting outage
  * (observed 2026-07-27..29).
  *
- * Queues sweep first, workers second: each preview api worker is a consumer
- * of its stage's `maple-vcs-sync-pr-<n>` / `maple-planetscale-webhooks-pr-<n>`
- * queues (apps/api/alchemy.run.ts), and Cloudflare refuses to delete a Worker
- * that is a registered queue consumer — error 10064, NOT covered by
- * ?force=true (run 30406588392 failed all 15 deletions this way; it is also
- * why the original close-event teardowns wedged, stranding these workers).
- * Deleting the stage's queues drops the consumer registrations, after which
- * the worker delete succeeds.
+ * Worker ↔ queue deletion is mutually deadlocked: a Worker that is a
+ * registered queue CONSUMER cannot be deleted (error 10064, NOT covered by
+ * ?force=true — run 30406588392, and why the original close-event teardowns
+ * wedged), and a queue referenced by a Worker's producer BINDING cannot be
+ * deleted either (error 11005 — run 30407693847). Each preview api worker
+ * both binds and consumes its stage's `maple-vcs-sync-pr-<n>` /
+ * `maple-planetscale-webhooks-pr-<n>` queues (apps/api/alchemy.run.ts), so
+ * the sweep breaks the cycle in three passes:
+ *   1. detach the consumer registrations of closed-PR queues,
+ *   2. delete the workers (their producer bindings die with them),
+ *   3. delete the now-unreferenced queues.
  *
  * Deletion is double-gated like the sibling sweeps: the queue/worker name must
  * match `maple-<base>-pr-<digits>` exactly, where <base> may not contain
@@ -98,6 +101,13 @@ interface QueueInfo {
 	readonly queue_name?: string
 }
 
+interface QueueConsumer {
+	readonly consumer_id?: string
+	readonly id?: string
+	readonly script?: string
+	readonly script_name?: string
+}
+
 const PR_RESOURCE_PATTERN = /^maple-((?:(?!-dev-).)+)-pr-(\d+)$/
 
 const cfRequest = async (
@@ -151,9 +161,10 @@ const main = async (): Promise<void> => {
 	}
 	const failures: string[] = []
 
-	// Pass 1: queues. Must go first — a worker that is still a registered
-	// consumer of any queue cannot be deleted (error 10064), and deleting the
-	// stage's queues is what drops those registrations.
+	// Pass 1: detach consumer registrations from closed-PR queues, so the
+	// worker deletions in pass 2 stop failing with 10064. The queues
+	// themselves are deleted in pass 3, after the workers' producer bindings
+	// are gone (deleting them here fails with 11005).
 	const listedQueues = await cfRequest(token, `/accounts/${accountId}/queues?per_page=100`)
 	if (!listedQueues.ok) {
 		fail(
@@ -181,6 +192,7 @@ const main = async (): Promise<void> => {
 	console.log(
 		`Found ${queues.length} Queue(s), ${queueCandidates.length} maple-*-pr-*: ${queueCandidates.map((c) => c.name).join(", ") || "—"}`,
 	)
+	const queuesToDelete: Array<{ id: string; name: string }> = []
 	for (const { id, name, match } of queueCandidates) {
 		const prNumber = match[2] as string
 		const state = await prState(prNumber)
@@ -192,13 +204,34 @@ const main = async (): Promise<void> => {
 			console.log(`⚠ skipping ${name} (PR #${prNumber} state unknown)`)
 			continue
 		}
-		console.log(`… deleting orphan queue ${name} (PR #${prNumber} is closed)`)
-		const removed = await cfRequest(token, `/accounts/${accountId}/queues/${id}`, {
-			method: "DELETE",
-		})
-		if (!removed.ok && removed.status !== 404) {
-			console.log(`✗ delete failed (HTTP ${removed.status}): ${JSON.stringify(removed.errors)}`)
+		queuesToDelete.push({ id, name })
+		const consumers = await cfRequest(token, `/accounts/${accountId}/queues/${id}/consumers`)
+		if (!consumers.ok || !Array.isArray(consumers.result)) {
+			console.log(
+				`✗ could not list consumers of ${name} (HTTP ${consumers.status}): ${JSON.stringify(consumers.errors)}`,
+			)
 			failures.push(name)
+			continue
+		}
+		for (const consumer of consumers.result as ReadonlyArray<QueueConsumer>) {
+			// Newer API rows carry consumer_id; older ones are addressed by the
+			// consuming script's name. Try whichever this row has.
+			const consumerRef = consumer.consumer_id ?? consumer.id ?? consumer.script ?? consumer.script_name
+			if (!consumerRef) {
+				console.log(`✗ consumer of ${name} has no usable id: ${JSON.stringify(consumer)}`)
+				failures.push(name)
+				continue
+			}
+			console.log(`… detaching consumer ${consumerRef} from ${name} (PR #${prNumber} is closed)`)
+			const detached = await cfRequest(
+				token,
+				`/accounts/${accountId}/queues/${id}/consumers/${consumerRef}`,
+				{ method: "DELETE" },
+			)
+			if (!detached.ok && detached.status !== 404) {
+				console.log(`✗ detach failed (HTTP ${detached.status}): ${JSON.stringify(detached.errors)}`)
+				failures.push(name)
+			}
 		}
 	}
 
@@ -246,8 +279,20 @@ const main = async (): Promise<void> => {
 		}
 	}
 
+	// Pass 3: the queues themselves — only now that no worker binds them.
+	for (const { id, name } of queuesToDelete) {
+		console.log(`… deleting orphan queue ${name}`)
+		const removed = await cfRequest(token, `/accounts/${accountId}/queues/${id}`, {
+			method: "DELETE",
+		})
+		if (!removed.ok && removed.status !== 404) {
+			console.log(`✗ delete failed (HTTP ${removed.status}): ${JSON.stringify(removed.errors)}`)
+			failures.push(name)
+		}
+	}
+
 	if (failures.length > 0) {
-		fail(`Failed to delete orphan Queue(s)/Worker(s): ${failures.join(", ")}`)
+		fail(`Failed to sweep orphan Queue(s)/Worker(s): ${failures.join(", ")}`)
 	}
 	console.log("✓ Sweep complete")
 }
