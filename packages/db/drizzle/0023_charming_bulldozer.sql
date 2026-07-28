@@ -15,7 +15,8 @@ CREATE TABLE "slack_workspaces" (
 	"installed_by_user_id" text,
 	"created_at" timestamp with time zone NOT NULL,
 	"updated_at" timestamp with time zone NOT NULL,
-	"revoked_at" timestamp with time zone
+	"revoked_at" timestamp with time zone,
+	"revoked_reason" text
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX "slack_workspaces_team_id_idx" ON "slack_workspaces" USING btree ("team_id");--> statement-breakpoint

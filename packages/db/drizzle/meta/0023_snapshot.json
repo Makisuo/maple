@@ -1,5 +1,5 @@
 {
-  "id": "89014cc9-95a3-4687-94a2-6cd6a1edeaee",
+  "id": "152dce32-2d6c-487d-8278-2aeb9d29eaa3",
   "prevId": "8881abe6-19a0-48be-b930-88b43e90810c",
   "version": "7",
   "dialect": "postgresql",
@@ -6318,6 +6318,12 @@
         "revoked_at": {
           "name": "revoked_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_reason": {
+          "name": "revoked_reason",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         }
