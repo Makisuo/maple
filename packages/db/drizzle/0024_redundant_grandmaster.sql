@@ -1,1 +1,0 @@
-ALTER TABLE "slack_workspaces" ADD COLUMN "revoked_reason" text;

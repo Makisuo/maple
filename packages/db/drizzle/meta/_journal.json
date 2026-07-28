@@ -166,15 +166,8 @@
     {
       "idx": 23,
       "version": "7",
-      "when": 1785150155026,
-      "tag": "0023_stormy_gorgon",
-      "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "7",
-      "when": 1785194962140,
-      "tag": "0024_redundant_grandmaster",
+      "when": 1785275382874,
+      "tag": "0023_charming_bulldozer",
       "breakpoints": true
     }
   ]
