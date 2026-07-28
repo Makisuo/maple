@@ -11,6 +11,7 @@ import {
 	LoaderIcon,
 	SquareTerminalIcon,
 } from "@/components/icons"
+import { RULE_FORM_MAX_WIDTH } from "@/components/alerts/rule-form-layout"
 
 interface RuleActionBarProps {
 	editing: boolean
@@ -57,7 +58,7 @@ export function RuleActionBar({
 				"sticky bottom-0 z-20 -mx-4 -mb-4 mt-6 border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80",
 			)}
 		>
-			<div className="mx-auto flex max-w-[1100px] items-center justify-between gap-4">
+			<div className={cn("mx-auto flex items-center justify-between gap-4", RULE_FORM_MAX_WIDTH)}>
 				<div className="flex min-w-0 items-center gap-3">
 					{onShowTemplates && (
 						<Button

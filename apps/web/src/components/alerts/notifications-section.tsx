@@ -13,7 +13,7 @@ import {
 	type AlertSegmentedOption,
 } from "@/components/alerts/alert-segmented-select"
 import { ProviderLogo } from "@/components/alerts/destination-provider"
-import { SectionLabel } from "@/components/alerts/signal-and-threshold-section"
+import { SectionHeader } from "@/components/layout/section-header"
 import { destinationTypeLabels, type RuleFormState } from "@/lib/alerts/form-utils"
 import { ChevronDownIcon, ChevronRightIcon, LoaderIcon, PaperPlaneIcon } from "@/components/icons"
 
@@ -60,7 +60,7 @@ export function NotificationsSection({
 	return (
 		<Card className="p-4">
 			<div className="flex items-center justify-between gap-3">
-				<SectionLabel>Notifications</SectionLabel>
+				<SectionHeader id="rule-notifications-heading" label="Notifications" className="mb-0" />
 				{hasDestinations && (
 					<Button
 						variant="ghost"
@@ -149,9 +149,7 @@ export function NotificationsSection({
 						</p>
 
 						<div className="space-y-1.5">
-							<Label htmlFor="notification-title" className="text-xs">
-								Title
-							</Label>
+							<Label htmlFor="notification-title">Title</Label>
 							<Input
 								id="notification-title"
 								value={form.notificationTitle}
@@ -163,9 +161,7 @@ export function NotificationsSection({
 						</div>
 
 						<div className="space-y-1.5">
-							<Label htmlFor="notification-body" className="text-xs">
-								Body (Markdown)
-							</Label>
+							<Label htmlFor="notification-body">Body (Markdown)</Label>
 							<Textarea
 								id="notification-body"
 								value={form.notificationBody}
@@ -179,7 +175,7 @@ export function NotificationsSection({
 						</div>
 
 						<div className="space-y-1.5">
-							<span className="text-muted-foreground text-[11px]">Insert a variable:</span>
+							<span className="text-muted-foreground text-xs">Insert a variable:</span>
 							<div className="flex flex-wrap gap-1">
 								{ALERT_TEMPLATE_VARIABLES.map((variable) => (
 									<button

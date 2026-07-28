@@ -18,7 +18,7 @@ import {
 	TraceListMv,
 	Traces,
 } from "../tables"
-import { buildProjectedMapExpr } from "./query-helpers"
+import { buildProjectedMapExpr, inclusionValues, inclusionCondition } from "./query-helpers"
 import { httpDisplaySpanName } from "../../traces-shared"
 
 function errorEventsTableForRecentScan(opts: {
@@ -380,6 +380,16 @@ export interface TracesDurationStatsOpts {
 	httpStatusCode?: string
 	deploymentEnv?: string
 	namespace?: string
+	/**
+	 * Multi-value spellings, compiled to `IN (...)` against trace_list_mv's
+	 * pre-extracted columns. Each wins over its scalar counterpart when non-empty.
+	 */
+	serviceNames?: readonly string[]
+	spanNames?: readonly string[]
+	httpMethods?: readonly string[]
+	httpStatusCodes?: readonly string[]
+	deploymentEnvs?: readonly string[]
+	namespaces?: readonly string[]
 	matchModes?: {
 		serviceName?: "contains"
 		spanName?: "contains"
@@ -397,6 +407,12 @@ export interface TracesDurationStatsOutput {
 
 export function tracesDurationStatsQuery(opts: TracesDurationStatsOpts) {
 	const mm = opts.matchModes
+	const services = inclusionValues(opts.serviceName, opts.serviceNames)
+	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
+	const httpMethods = inclusionValues(opts.httpMethod, opts.httpMethods)
+	const httpStatusCodes = inclusionValues(opts.httpStatusCode, opts.httpStatusCodes)
+	const envs = inclusionValues(opts.deploymentEnv, opts.deploymentEnvs)
+	const namespaces = inclusionValues(opts.namespace, opts.namespaces)
 
 	return from(TraceListMv)
 		.select(($) => ({
@@ -409,30 +425,30 @@ export function tracesDurationStatsQuery(opts: TracesDurationStatsOpts) {
 			$.OrgId.eq(param.string("orgId")),
 			$.Timestamp.gte(param.dateTime("startTime")),
 			$.Timestamp.lte(param.dateTime("endTime")),
-			CH.when(opts.serviceName, (v: string) =>
-				mm?.serviceName === "contains"
-					? CH.positionCaseInsensitive($.ServiceName, CH.lit(v)).gt(0)
-					: $.ServiceName.eq(v),
+			CH.when(services, (v: readonly string[]) =>
+				mm?.serviceName === "contains" && v.length === 1
+					? CH.positionCaseInsensitive($.ServiceName, CH.lit(v[0]!)).gt(0)
+					: inclusionCondition($.ServiceName, v),
 			),
-			CH.when(opts.spanName, (v: string) =>
-				mm?.spanName === "contains"
-					? CH.positionCaseInsensitive($.SpanName, CH.lit(v)).gt(0)
-					: $.SpanName.eq(v),
+			CH.when(spanNames, (v: readonly string[]) =>
+				mm?.spanName === "contains" && v.length === 1
+					? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!)).gt(0)
+					: inclusionCondition($.SpanName, v),
 			),
 			CH.whenTrue(!!opts.hasError, () => $.HasError.eq(1)),
 			CH.when(opts.minDurationMs, (v: number) => $.Duration.gte(v * 1000000)),
 			CH.when(opts.maxDurationMs, (v: number) => $.Duration.lte(v * 1000000)),
-			CH.when(opts.httpMethod, (v: string) => $.HttpMethod.eq(v)),
-			CH.when(opts.httpStatusCode, (v: string) => $.HttpStatusCode.eq(v)),
-			CH.when(opts.deploymentEnv, (v: string) =>
-				mm?.deploymentEnv === "contains"
-					? CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(v)).gt(0)
-					: $.DeploymentEnv.eq(v),
+			CH.when(httpMethods, (v: readonly string[]) => inclusionCondition($.HttpMethod, v)),
+			CH.when(httpStatusCodes, (v: readonly string[]) => inclusionCondition($.HttpStatusCode, v)),
+			CH.when(envs, (v: readonly string[]) =>
+				mm?.deploymentEnv === "contains" && v.length === 1
+					? CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(v[0]!)).gt(0)
+					: inclusionCondition($.DeploymentEnv, v),
 			),
-			CH.when(opts.namespace, (v: string) =>
-				mm?.serviceNamespace === "contains"
-					? CH.positionCaseInsensitive($.ServiceNamespace, CH.lit(v)).gt(0)
-					: $.ServiceNamespace.eq(v),
+			CH.when(namespaces, (v: readonly string[]) =>
+				mm?.serviceNamespace === "contains" && v.length === 1
+					? CH.positionCaseInsensitive($.ServiceNamespace, CH.lit(v[0]!)).gt(0)
+					: inclusionCondition($.ServiceNamespace, v),
 			),
 		])
 		.format("JSON")
@@ -460,6 +476,16 @@ export interface TracesFacetsOpts {
 	httpStatusCode?: string
 	deploymentEnv?: string
 	namespace?: string
+	/**
+	 * Multi-value spellings, compiled to `IN (...)` against trace_list_mv's
+	 * pre-extracted columns. Each wins over its scalar counterpart when non-empty.
+	 */
+	serviceNames?: readonly string[]
+	spanNames?: readonly string[]
+	httpMethods?: readonly string[]
+	httpStatusCodes?: readonly string[]
+	deploymentEnvs?: readonly string[]
+	namespaces?: readonly string[]
 	matchModes?: {
 		serviceName?: "contains"
 		spanName?: "contains"
@@ -490,37 +516,44 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 			$.Timestamp.lte(param.dateTime("endTime")),
 		]
 
-		if (opts.serviceName) {
+		const services = inclusionValues(opts.serviceName, opts.serviceNames)
+		const spanNames = inclusionValues(opts.spanName, opts.spanNames)
+		const httpMethods = inclusionValues(opts.httpMethod, opts.httpMethods)
+		const httpStatusCodes = inclusionValues(opts.httpStatusCode, opts.httpStatusCodes)
+		const envs = inclusionValues(opts.deploymentEnv, opts.deploymentEnvs)
+		const namespaces = inclusionValues(opts.namespace, opts.namespaces)
+
+		if (services) {
 			conditions.push(
-				opts.matchModes?.serviceName === "contains"
-					? CH.positionCaseInsensitive($.ServiceName, CH.lit(opts.serviceName)).gt(0)
-					: $.ServiceName.eq(opts.serviceName),
+				opts.matchModes?.serviceName === "contains" && services.length === 1
+					? CH.positionCaseInsensitive($.ServiceName, CH.lit(services[0]!)).gt(0)
+					: inclusionCondition($.ServiceName, services),
 			)
 		}
-		if (opts.spanName) {
+		if (spanNames) {
 			conditions.push(
-				opts.matchModes?.spanName === "contains"
-					? CH.positionCaseInsensitive($.SpanName, CH.lit(opts.spanName)).gt(0)
-					: $.SpanName.eq(opts.spanName),
+				opts.matchModes?.spanName === "contains" && spanNames.length === 1
+					? CH.positionCaseInsensitive($.SpanName, CH.lit(spanNames[0]!)).gt(0)
+					: inclusionCondition($.SpanName, spanNames),
 			)
 		}
 		if (opts.hasError) conditions.push($.HasError.eq(1))
 		if (opts.minDurationMs != null) conditions.push($.Duration.gte(opts.minDurationMs * 1000000))
 		if (opts.maxDurationMs != null) conditions.push($.Duration.lte(opts.maxDurationMs * 1000000))
-		if (opts.httpMethod) conditions.push($.HttpMethod.eq(opts.httpMethod))
-		if (opts.httpStatusCode) conditions.push($.HttpStatusCode.eq(opts.httpStatusCode))
-		if (opts.deploymentEnv) {
+		if (httpMethods) conditions.push(inclusionCondition($.HttpMethod, httpMethods))
+		if (httpStatusCodes) conditions.push(inclusionCondition($.HttpStatusCode, httpStatusCodes))
+		if (envs) {
 			conditions.push(
-				opts.matchModes?.deploymentEnv === "contains"
-					? CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(opts.deploymentEnv)).gt(0)
-					: $.DeploymentEnv.eq(opts.deploymentEnv),
+				opts.matchModes?.deploymentEnv === "contains" && envs.length === 1
+					? CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(envs[0]!)).gt(0)
+					: inclusionCondition($.DeploymentEnv, envs),
 			)
 		}
-		if (opts.namespace) {
+		if (namespaces) {
 			conditions.push(
-				opts.matchModes?.serviceNamespace === "contains"
-					? CH.positionCaseInsensitive($.ServiceNamespace, CH.lit(opts.namespace)).gt(0)
-					: $.ServiceNamespace.eq(opts.namespace),
+				opts.matchModes?.serviceNamespace === "contains" && namespaces.length === 1
+					? CH.positionCaseInsensitive($.ServiceNamespace, CH.lit(namespaces[0]!)).gt(0)
+					: inclusionCondition($.ServiceNamespace, namespaces),
 			)
 		}
 

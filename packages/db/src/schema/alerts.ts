@@ -57,6 +57,13 @@ export const alertRules = pgTable(
 		severity: text("severity").notNull(),
 		serviceNamesJson: jsonb("service_names_json").$type<ReadonlyArray<string>>(),
 		excludeServiceNamesJson: jsonb("exclude_service_names_json").$type<ReadonlyArray<string>>(),
+		/**
+		 * Deployment environments the rule is scoped to. Null/empty means every
+		 * environment (the historical behaviour). Applies to the built-in trace
+		 * signals and `metric`; `builder_query` / `raw_query` carry their own
+		 * filters, so it is always empty for those.
+		 */
+		environmentsJson: jsonb("environments_json").$type<ReadonlyArray<string>>(),
 		/** JSON-encoded `string[]` of free-form tags used to group and filter rules. */
 		tagsJson: jsonb("tags_json").$type<ReadonlyArray<string>>(),
 		signalType: text("signal_type").notNull(),

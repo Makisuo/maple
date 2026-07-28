@@ -64,6 +64,7 @@ const alertRuleExample = {
 	severity: "critical",
 	service_names: ["checkout"],
 	exclude_service_names: [],
+	environments: ["production"],
 	tags: ["payments"],
 	group_by: null,
 	signal_type: "error_rate",
@@ -126,6 +127,11 @@ export const V2AlertRule = Schema.Struct({
 	}),
 	exclude_service_names: Schema.Array(Schema.String).annotate({
 		description: "Services excluded from evaluation.",
+	}),
+	environments: Schema.Array(Schema.String).annotate({
+		description:
+			"Deployment environments the rule is scoped to. Empty for all environments. Always empty for `builder_query` / `raw_query`, whose queries carry their own filters.",
+		examples: [["production"]],
 	}),
 	tags: Schema.Array(Schema.String).annotate({
 		description: "Free-form tags used to group and filter rules.",
@@ -283,6 +289,13 @@ const createParamsFields = {
 	}),
 	service_names: Schema.optionalKey(Schema.Array(Schema.String)),
 	exclude_service_names: Schema.optionalKey(Schema.Array(Schema.String)),
+	environments: Schema.optionalKey(
+		Schema.Array(Schema.String).annotate({
+			description:
+				"Deployment environments to scope the rule to. Omit or pass `[]` for all environments.",
+			examples: [["production"]],
+		}),
+	),
 	tags: Schema.optionalKey(RuleTags),
 	group_by: Schema.optionalKey(Schema.NullOr(GroupBy)),
 	signal_type: AlertSignalType.annotate({
@@ -353,6 +366,7 @@ export const V2AlertRuleUpdateParams = Schema.Struct({
 	enabled: createParamsFields.enabled,
 	service_names: createParamsFields.service_names,
 	exclude_service_names: createParamsFields.exclude_service_names,
+	environments: createParamsFields.environments,
 	tags: createParamsFields.tags,
 	group_by: createParamsFields.group_by,
 	threshold_upper: createParamsFields.threshold_upper,

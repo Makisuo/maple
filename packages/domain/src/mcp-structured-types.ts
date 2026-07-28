@@ -290,6 +290,8 @@ export interface AlertRuleRow {
 	enabled: boolean
 	severity: string
 	serviceNames: string[]
+	/** Deployment environments the rule is scoped to. Empty means all. */
+	environments: string[]
 	signalType: string
 	comparator: string
 	threshold: number

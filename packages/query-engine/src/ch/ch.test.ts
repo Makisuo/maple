@@ -749,6 +749,45 @@ describe("tracesListQuery", () => {
 		expect(sql).toContain("ServiceName = 'api'")
 	})
 
+	it("emits IN for multiple services", () => {
+		const q = tracesListQuery({ serviceNames: ["api", "checkout", "billing"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ServiceName IN ('api', 'checkout', 'billing')")
+		// Regression: the sidebar is multi-select, but the query layer used to take
+		// only `services[0]`, so ticking three services filtered by one.
+		expect(sql).not.toContain("ServiceName = 'api'")
+	})
+
+	it("keeps plain equality for a single service in the array spelling", () => {
+		const q = tracesListQuery({ serviceNames: ["api"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ServiceName = 'api'")
+	})
+
+	it("lets serviceNames win over the scalar serviceName", () => {
+		const q = tracesListQuery({ serviceName: "api", serviceNames: ["checkout", "billing"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ServiceName IN ('checkout', 'billing')")
+		expect(sql).not.toContain("ServiceName = 'api'")
+	})
+
+	it("emits IN against both raw and display span names for multiple spanNames", () => {
+		const q = tracesListQuery({ spanNames: ["GET /a", "GET /b"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("SpanName IN ('GET /a', 'GET /b')")
+		// Display-name aware, same as the single-value path.
+		expect(sql).toContain("replaceOne(SpanName, 'http.server ', '')")
+	})
+
+	it("emits IN for a multi-value http attribute filter", () => {
+		const q = tracesListQuery({
+			attributeFilters: [{ key: "http.method", values: ["GET", "POST"], mode: "in" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		// Coalesced across the http.method / http.request.method semconv aliases.
+		expect(sql).toMatch(/IN \('GET', 'POST'\)/)
+	})
+
 	it("uses traces table when rootOnly (MV disabled)", () => {
 		const q = tracesListQuery({ rootOnly: true })
 		const { sql } = compileCH(q, baseParams)

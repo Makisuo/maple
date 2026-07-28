@@ -29,6 +29,14 @@ function resourceFilterConditions(
 	return (filters ?? []).map((rf) => buildAttrFilterCondition(rf, "ResourceAttributes"))
 }
 
+/**
+ * Resource-attribute key holding the deployment environment. Metrics tables
+ * carry no pre-extracted `DeploymentEnv` column (unlike the trace MVs), so an
+ * environment filter reads the map directly — the same key
+ * `tracesBaseWhereConditions` uses on the raw `traces` table.
+ */
+const DEPLOYMENT_ENV_KEY = "deployment.environment"
+
 // ---------------------------------------------------------------------------
 // Shared options & output types
 // ---------------------------------------------------------------------------
@@ -36,6 +44,8 @@ function resourceFilterConditions(
 interface MetricsQueryOpts {
 	metricType: MetricType
 	serviceName?: string
+	/** Deployment environments to scope to. Empty/undefined means all. */
+	environments?: readonly string[]
 	groupByAttributeKey?: string
 	/** Group by a ResourceAttributes key instead of a datapoint Attributes key. */
 	groupByResourceAttributeKey?: string
@@ -106,6 +116,9 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 			$.TimeUnix.lte(param.dateTime("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
+			opts.environments?.length
+				? CH.inList($.ResourceAttributes.get(DEPLOYMENT_ENV_KEY), opts.environments)
+				: undefined,
 			...resourceFilterConditions(opts.resourceAttributeFilters),
 		])
 
@@ -130,6 +143,8 @@ export interface MetricsRateTimeseriesOpts {
 	metricNames?: ReadonlyArray<string>
 	bucketSeconds?: number
 	serviceName?: string
+	/** Deployment environments to scope to. Empty/undefined means all. */
+	environments?: readonly string[]
 	groupByAttributeKey?: string
 	/** Group by a ResourceAttributes key instead of a datapoint Attributes key. */
 	groupByResourceAttributeKey?: string
@@ -177,9 +192,11 @@ function canUseSpanMetricsCallsHourly(opts: MetricsRateTimeseriesOpts): boolean 
 		(opts.attributeKey === undefined || opts.attributeKey === "span.kind") &&
 		(opts.groupByAttributeKey === undefined || opts.groupByAttributeKey === "span.kind") &&
 		// The hourly MV folds ResourceAttributes into a fingerprint — it cannot
-		// serve resource-attribute filters or group-bys.
+		// serve resource-attribute filters or group-bys, and `deployment.environment`
+		// lives in that same map, so an environment filter also drops to the raw path.
 		opts.groupByResourceAttributeKey === undefined &&
-		(opts.resourceAttributeFilters === undefined || opts.resourceAttributeFilters.length === 0)
+		(opts.resourceAttributeFilters === undefined || opts.resourceAttributeFilters.length === 0) &&
+		(opts.environments === undefined || opts.environments.length === 0)
 	)
 }
 
@@ -367,6 +384,9 @@ export function metricsTimeseriesRateQuery(
 				$.TimeUnix.lte(param.dateTime("endTime")),
 				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
+				opts.environments?.length
+					? CH.inList($.ResourceAttributes.get(DEPLOYMENT_ENV_KEY), opts.environments)
+					: undefined,
 				...resourceFilterConditions(opts.resourceAttributeFilters),
 			]),
 		{},

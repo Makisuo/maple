@@ -169,6 +169,13 @@
       "when": 1785275382874,
       "tag": "0023_charming_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785280474376,
+      "tag": "0024_burly_grim_reaper",
+      "breakpoints": true
     }
   ]
 }

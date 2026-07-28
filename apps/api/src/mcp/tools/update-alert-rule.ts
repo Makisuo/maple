@@ -38,6 +38,7 @@ interface UpdateAlertRuleParams {
 	window_minutes?: number
 	destination_ids?: string
 	service_names?: string
+	environments?: string
 	enabled?: boolean
 	group_by?: string
 	minimum_sample_count?: number
@@ -72,6 +73,7 @@ function buildUpdatedRequest(
 		severity: current.severity,
 		serviceNames: [...current.serviceNames],
 		excludeServiceNames: [...current.excludeServiceNames],
+		environments: [...current.environments],
 		tags: [...current.tags],
 		groupBy: current.groupBy ? [...current.groupBy] : null,
 		signalType: current.signalType,
@@ -102,6 +104,7 @@ function buildUpdatedRequest(
 	if (params.enabled !== undefined) request.enabled = params.enabled
 	if (params.destination_ids !== undefined) request.destinationIds = splitCsv(params.destination_ids)
 	if (params.service_names !== undefined) request.serviceNames = splitCsv(params.service_names)
+	if (params.environments !== undefined) request.environments = splitCsv(params.environments)
 	if (params.group_by !== undefined) request.groupBy = splitCsv(params.group_by)
 	if (params.minimum_sample_count !== undefined) request.minimumSampleCount = params.minimum_sample_count
 	if (params.consecutive_breaches !== undefined)
@@ -156,6 +159,9 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 			window_minutes: optionalNumberParam("Evaluation window in minutes"),
 			service_names: optionalStringParam(
 				"Comma-separated service names to scope the alert to (replaces the current scope)",
+			),
+			environments: optionalStringParam(
+				"Comma-separated deployment environments to scope the alert to (replaces the current scope; pass '' for all environments). Ignored for builder_query / raw_query.",
 			),
 			enabled: optionalBooleanParam("Whether the rule is enabled"),
 			destination_ids: optionalStringParam(
@@ -301,6 +307,9 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 			if (rule.serviceNames.length > 0) {
 				lines.splice(3, 0, `Service Names: ${rule.serviceNames.join(", ")}`)
 			}
+			if (rule.environments.length > 0) {
+				lines.push(`Environments: ${rule.environments.join(", ")}`)
+			}
 
 			return {
 				content: createDualContent(lines.join("\n"), {
@@ -312,6 +321,7 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 							enabled: rule.enabled,
 							severity: rule.severity,
 							serviceNames: [...rule.serviceNames],
+							environments: [...rule.environments],
 							signalType: rule.signalType,
 							comparator: rule.comparator,
 							threshold: rule.threshold,

@@ -53,6 +53,12 @@ export type RuleFormState = {
 	severity: AlertSeverity
 	serviceNames: string[]
 	excludeServiceNames: string[]
+	/**
+	 * Deployment environments the rule is scoped to. Empty means every
+	 * environment. Not submitted for `builder_query` / `raw_query`, whose queries
+	 * carry their own filters.
+	 */
+	environments: string[]
 	/** Free-form tags used to group and filter rules in the alerts list. */
 	tags: string[]
 	/**
@@ -220,6 +226,7 @@ export function defaultRuleForm(serviceName?: string): RuleFormState {
 		severity: "warning",
 		serviceNames: serviceName ? [serviceName] : [],
 		excludeServiceNames: [],
+		environments: [],
 		tags: [],
 		groupBy: [],
 		signalType: "error_rate",
@@ -277,6 +284,7 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
 		severity: rule.severity,
 		serviceNames: rule.serviceNames?.length > 0 ? [...rule.serviceNames] : [],
 		excludeServiceNames: rule.excludeServiceNames?.length > 0 ? [...rule.excludeServiceNames] : [],
+		environments: rule.environments?.length > 0 ? [...rule.environments] : [],
 		tags: rule.tags?.length > 0 ? [...rule.tags] : [],
 		groupBy: rule.groupBy ? [...rule.groupBy] : [],
 		signalType: rule.signalType === "metric" ? "builder_query" : rule.signalType,
@@ -404,6 +412,7 @@ export function buildRuleCreateParamsV2(form: RuleFormState): V2AlertRuleCreateP
 		exclude_service_names: queryOwnsScope
 			? []
 			: form.excludeServiceNames.filter((s) => s.trim().length > 0),
+		environments: queryOwnsScope ? [] : form.environments.filter((s) => s.trim().length > 0),
 		group_by: queryOwnsScope ? null : form.groupBy.length > 0 ? form.groupBy : null,
 		signal_type: signalType,
 		comparator: form.comparator,
@@ -418,9 +427,13 @@ export function buildRuleCreateParamsV2(form: RuleFormState): V2AlertRuleCreateP
 		consecutive_breaches_required: parsePositiveNumber(form.consecutiveBreachesRequired, 2),
 		consecutive_healthy_required: parsePositiveNumber(form.consecutiveHealthyRequired, 2),
 		renotify_interval_minutes: parsePositiveNumber(form.renotifyIntervalMinutes, 30),
-		metric_name: signalType === "metric" ? form.metricName.trim() || null : null,
-		metric_type: signalType === "metric" ? form.metricType : null,
-		metric_aggregation: signalType === "metric" ? form.metricAggregation : null,
+		// Always null: `ruleToFormState` rewrites a stored `metric` rule to
+		// `builder_query` on load and nothing in the form can produce `"metric"`
+		// again, so these can never be populated from here. A legacy metric rule
+		// therefore converts to a builder_query rule the first time it is saved.
+		metric_name: null,
+		metric_type: null,
+		metric_aggregation: null,
 		apdex_threshold_ms: signalType === "apdex" ? parsePositiveNumber(form.apdexThresholdMs, 500) : null,
 		query_builder_draft: signalType === "builder_query" ? buildQueryDraftFromForm(form) : null,
 		raw_query_sql: signalType === "raw_query" ? form.rawQuerySql.trim() || null : null,

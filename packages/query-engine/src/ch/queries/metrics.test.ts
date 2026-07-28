@@ -37,6 +37,20 @@ describe("metricsTimeseriesQuery", () => {
 		expect(sql).toContain("FORMAT JSON")
 	})
 
+	it("filters by deployment environment via ResourceAttributes", () => {
+		// Metrics tables carry no pre-extracted DeploymentEnv column, so the env
+		// scope reads the resource-attribute map directly.
+		const q = metricsTimeseriesQuery({ metricType: "sum", environments: ["production"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+	})
+
+	it("omits the environment predicate when no environments are selected", () => {
+		const q = metricsTimeseriesQuery({ metricType: "sum", environments: [] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).not.toContain("deployment.environment")
+	})
+
 	it("compiles value timeseries (gauge)", () => {
 		const q = metricsTimeseriesQuery({ metricType: "gauge" })
 		const { sql } = compileCH(q, baseParams)
@@ -238,6 +252,27 @@ describe("metricsTimeseriesRateQuery", () => {
 		expect(sql).toContain("SpanKind = 'SPAN_KIND_SERVER'")
 		expect(sql).toContain("SpanKind AS attributeValue")
 		expect(sql).toContain("GROUP BY bucket, serviceName, attributeValue")
+	})
+
+	it("applies an environment filter in the CTE", () => {
+		const q = metricsTimeseriesRateQuery({ environments: ["production", "staging"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain(
+			"ResourceAttributes['deployment.environment'] IN ('production', 'staging')",
+		)
+	})
+
+	it("falls back to raw metrics_sum when an environment filter is set", () => {
+		// deployment.environment lives in ResourceAttributes, which the hourly
+		// rollup folds into a fingerprint — it cannot serve the predicate.
+		const q = metricsTimeseriesRateQuery({
+			metricName: "span.metrics.calls",
+			bucketSeconds: 3600,
+			environments: ["production"],
+		})
+		const { sql } = compileCH(q, { ...baseParams, metricName: "span.metrics.calls" })
+		expect(sql).toContain("FROM metrics_sum")
+		expect(sql).not.toContain("span_metrics_calls_hourly")
 	})
 
 	it("falls back to raw metrics_sum when attributeValue has no attributeKey", () => {

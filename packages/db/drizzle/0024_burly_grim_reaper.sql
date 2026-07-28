@@ -1,0 +1,1 @@
+ALTER TABLE "alert_rules" ADD COLUMN "environments_json" jsonb;

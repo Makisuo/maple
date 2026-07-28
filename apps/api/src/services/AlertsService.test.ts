@@ -648,6 +648,139 @@ describe("AlertsService", () => {
 			assert.strictEqual(spec.metric, "error_rate")
 			assert.deepStrictEqual(spec.groupBy, ["none"])
 			assert.strictEqual(spec.filters.serviceName, "checkout")
+			// No environment scope selected → the filter must be absent entirely, not
+			// an empty array (which the CH lowering would still treat as "no rows").
+			assert.isUndefined((spec.filters as { environments?: unknown }).environments)
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
+		)
+	})
+
+	it.effect("lowers the environment scope into a built-in signal's compiled plan", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_env_scope")
+			const userId = asUserId("user_env_scope")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Checkout error rate (prod)",
+					severity: "critical",
+					serviceNames: ["checkout"],
+					// Duplicates and whitespace are normalized away on write.
+					environments: ["production", " staging ", "production"],
+					signalType: "error_rate",
+					comparator: "gt",
+					threshold: 5,
+					windowMinutes: 5,
+					destinationIds: [destination.id],
+				}),
+			)
+
+			const row = yield* Effect.promise(() =>
+				queryFirstRow<{ querySpecJson: unknown; environmentsJson: unknown }>(
+					testDb,
+					`select query_spec_json as "querySpecJson", environments_json as "environmentsJson"
+					 from alert_rules limit 1`,
+				),
+			)
+
+			assert.deepStrictEqual(row?.environmentsJson, ["production", "staging"])
+			const spec = row?.querySpecJson as { filters: { environments: ReadonlyArray<string> } }
+			assert.deepStrictEqual(spec.filters.environments, ["production", "staging"])
+
+			const rules = yield* alerts.listRules(orgId)
+			assert.deepStrictEqual([...(rules.rules[0]?.environments ?? [])], ["production", "staging"])
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
+		)
+	})
+
+	it.effect("lowers the environment scope into a metric signal's compiled plan", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_env_metric")
+			const userId = asUserId("user_env_metric")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Queue depth (prod)",
+					severity: "warning",
+					environments: ["production"],
+					signalType: "metric",
+					metricName: "queue.depth",
+					metricType: "gauge",
+					metricAggregation: "avg",
+					comparator: "gt",
+					threshold: 100,
+					windowMinutes: 5,
+					destinationIds: [destination.id],
+				}),
+			)
+
+			const row = yield* Effect.promise(() =>
+				queryFirstRow<{ querySpecJson: unknown }>(
+					testDb,
+					`select query_spec_json as "querySpecJson" from alert_rules limit 1`,
+				),
+			)
+
+			const spec = row?.querySpecJson as {
+				source: string
+				filters: { metricName: string; environments: ReadonlyArray<string> }
+			}
+			assert.strictEqual(spec.source, "metrics")
+			assert.deepStrictEqual(spec.filters.environments, ["production"])
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
+		)
+	})
+
+	it.effect("drops the environment scope for builder_query rules", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_env_builder")
+			const userId = asUserId("user_env_builder")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			// A builder_query draft already expresses environment in its where clause;
+			// a second rule-level predicate would silently AND onto the user's query.
+			const rule = yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Custom query",
+					severity: "warning",
+					environments: ["production"],
+					signalType: "builder_query",
+					queryBuilderDraft: {
+						id: "alert-query",
+						name: "A",
+						dataSource: "traces",
+						aggregation: "count",
+						whereClause: "",
+						groupBy: [],
+					},
+					comparator: "gt",
+					threshold: 10,
+					windowMinutes: 5,
+					destinationIds: [destination.id],
+				}),
+			)
+
+			assert.deepStrictEqual([...rule.environments], [])
 		}).pipe(
 			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
 		)

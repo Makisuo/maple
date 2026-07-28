@@ -5,10 +5,12 @@ import { toast } from "sonner"
 
 import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
+import { cn } from "@maple/ui/utils"
 
 import { DetailsSection } from "@/components/alerts/details-section"
 import { NotificationsSection } from "@/components/alerts/notifications-section"
 import { RuleActionBar } from "@/components/alerts/rule-action-bar"
+import { RULE_FORM_MAX_WIDTH } from "@/components/alerts/rule-form-layout"
 import { RuleLiveChartHero } from "@/components/alerts/rule-live-chart-hero"
 import { RuleTemplatesOverlay } from "@/components/alerts/rule-templates-overlay"
 import { ScopeSection } from "@/components/alerts/scope-section"
@@ -40,6 +42,7 @@ export function AlertCreateFormSurface({
 	showTemplatesInitially,
 	destinations,
 	serviceNameOptions,
+	environmentOptions,
 	autocompleteValues,
 }: {
 	initialForm: RuleFormState
@@ -48,6 +51,7 @@ export function AlertCreateFormSurface({
 	showTemplatesInitially: boolean
 	destinations: AlertDestinationDocument[]
 	serviceNameOptions: string[]
+	environmentOptions: string[]
 	autocompleteValues: ReturnType<typeof useAutocompleteValuesContext>
 }) {
 	const navigate = useNavigate({ from: "/alerts/create" })
@@ -65,7 +69,12 @@ export function AlertCreateFormSurface({
 	const [savingRule, setSavingRule] = useState(false)
 	const [previewingRule, setPreviewingRule] = useState(false)
 	const [sendingTestNotification, setSendingTestNotification] = useState(false)
+	// Tagged with the rule config it was produced from. A "Would trigger" verdict
+	// is only meaningful for the exact signal/threshold/scope that was tested, so
+	// editing any of those makes the stored result stale rather than wrong-but-shown.
+	// Compared at render time — no effect needed to clear it.
 	const [previewResult, setPreviewResult] = useState<{
+		key: string
 		status: "breached" | "healthy" | "skipped"
 		value: number | null
 		sampleCount: number
@@ -123,12 +132,14 @@ export function AlertCreateFormSurface({
 		}
 		const setLoading = sendNotification ? setSendingTestNotification : setPreviewingRule
 		setLoading(true)
+		const testedKey = previewIdentityKey(ruleForm)
 		const result = await testRule({
 			payload: buildRuleTestParamsV2(ruleForm, sendNotification),
 			reactivityKeys: ["alertDeliveryEvents"],
 		})
 		if (Exit.isSuccess(result)) {
 			setPreviewResult({
+				key: testedKey,
 				status: result.value.status,
 				value: result.value.value,
 				sampleCount: result.value.sample_count,
@@ -143,6 +154,9 @@ export function AlertCreateFormSurface({
 
 	const pageTitle = editingRule ? "Edit alert rule" : "Create alert rule"
 	const showScope = ruleForm.signalType !== "builder_query" && ruleForm.signalType !== "raw_query"
+	// Drop the verdict as soon as the user edits anything it depended on.
+	const currentPreviewKey = previewIdentityKey(ruleForm)
+	const freshPreviewResult = previewResult?.key === currentPreviewKey ? previewResult : null
 
 	return (
 		<DashboardLayout.Root>
@@ -158,7 +172,7 @@ export function AlertCreateFormSurface({
 						<DashboardLayout.Header title={pageTitle} />
 					</DashboardLayout.Sticky>
 					<DashboardLayout.Scroll>
-						<div className="mx-auto w-full max-w-[1100px] space-y-4">
+						<div className={cn("mx-auto w-full space-y-4", RULE_FORM_MAX_WIDTH)}>
 							<WidgetPrefillNoticeBanner notices={prefillNotices} />
 							<RuleLiveChartHero
 								form={ruleForm}
@@ -167,7 +181,7 @@ export function AlertCreateFormSurface({
 								previewError={previewError}
 								onTestRule={() => runTest(false)}
 								testing={previewingRule}
-								previewResult={previewResult}
+								previewResult={freshPreviewResult}
 							/>
 							<div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
 								<SignalAndThresholdSection
@@ -181,6 +195,7 @@ export function AlertCreateFormSurface({
 											form={ruleForm}
 											onChange={setRuleForm}
 											serviceNameOptions={serviceNameOptions}
+											environmentOptions={environmentOptions}
 											autocompleteValues={autocompleteValues}
 										/>
 									)}
@@ -238,9 +253,20 @@ function deriveValidationIssues(form: RuleFormState, destinations: AlertDestinat
 	if (isRangeComparator(form.comparator) && !Number.isFinite(Number(form.thresholdUpper))) {
 		issues.push("Upper threshold")
 	}
-	if (form.signalType === "metric" && form.metricName.trim().length === 0) {
-		issues.push("Metric name")
+	// The four timing fields silently fall back to a default when they don't parse
+	// (see `parsePositiveNumber` in form-utils), so name them here rather than
+	// letting a typo save as a different rule than the one on screen.
+	for (const [label, value] of [
+		["Window (min)", form.windowMinutes],
+		["Breaches to fire", form.consecutiveBreachesRequired],
+		["Healthy to resolve", form.consecutiveHealthyRequired],
+		["Renotify (min)", form.renotifyIntervalMinutes],
+	] as const) {
+		const parsed = Number(value)
+		if (!Number.isFinite(parsed) || parsed <= 0) issues.push(label)
 	}
+	const minSamples = Number(form.minimumSampleCount)
+	if (!Number.isFinite(minSamples) || minSamples < 0) issues.push("Min samples")
 	if (form.signalType === "raw_query") {
 		const sql = form.rawQuerySql.trim()
 		if (sql.length === 0) {
@@ -256,6 +282,25 @@ function deriveValidationIssues(form: RuleFormState, destinations: AlertDestinat
 		issues.push("At least one destination")
 	}
 	return issues
+}
+
+/**
+ * Identity of the rule *as evaluated*. Derived from the exact payload the test
+ * endpoint receives, minus the fields that don't change the verdict (name,
+ * notes, tags, destinations, notification template) — so retitling a rule keeps
+ * its verdict but retuning the threshold discards it.
+ */
+function previewIdentityKey(form: RuleFormState): string {
+	const {
+		name: _name,
+		notes: _notes,
+		tags: _tags,
+		destination_ids: _destinationIds,
+		notification_template: _notificationTemplate,
+		enabled: _enabled,
+		...evaluated
+	} = buildRuleCreateParamsV2(form)
+	return JSON.stringify(evaluated)
 }
 
 function makeSuggestedName(form: RuleFormState): string | null {
@@ -275,5 +320,7 @@ function makeSuggestedName(form: RuleFormState): string | null {
 					: form.groupBy.length > 0
 						? `per ${form.groupBy.join(" · ")}`
 						: null
-	return scope ? `${base} — ${scope}` : base
+	const env = form.environments.length > 0 ? form.environments.join(" · ") : null
+	const suffix = [scope, env].filter((part) => part !== null).join(" · ")
+	return suffix.length > 0 ? `${base} — ${suffix}` : base
 }

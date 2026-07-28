@@ -90,12 +90,29 @@ describe("buildRuleCreateParamsV2", () => {
 			signalType: "builder_query",
 			serviceNames: ["checkout"],
 			excludeServiceNames: ["internal"],
+			environments: ["production"],
 			groupBy: ["service.name"],
 		})
 		expect(params.service_names).toEqual([])
 		expect(params.exclude_service_names).toEqual([])
+		expect(params.environments).toEqual([])
 		expect(params.group_by).toBeNull()
 		expect(params.query_builder_draft).not.toBeNull()
+	})
+
+	it("submits the environment scope for built-in signals", () => {
+		const params = buildRuleCreateParamsV2({
+			...defaultRuleForm(),
+			name: "Prod error rate",
+			signalType: "error_rate",
+			environments: ["production", "  ", "staging"],
+		})
+		expect(params.environments).toEqual(["production", "staging"])
+	})
+
+	it("defaults to an empty environment scope (all environments)", () => {
+		const params = buildRuleCreateParamsV2({ ...defaultRuleForm(), name: "A" })
+		expect(params.environments).toEqual([])
 	})
 })
 

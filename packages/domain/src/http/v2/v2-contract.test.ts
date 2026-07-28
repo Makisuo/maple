@@ -246,6 +246,7 @@ describe("V2 alerts wire format", () => {
 		severity: "critical",
 		service_names: ["checkout"],
 		exclude_service_names: [],
+		environments: ["production"],
 		tags: ["payments"],
 		group_by: null,
 		signal_type: "error_rate",

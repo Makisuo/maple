@@ -461,7 +461,7 @@ function RuleDetailContent() {
 	}
 
 	const isFiring = openRuleIncidents.length > 0
-	const subtitle = `${signalLabels[rule.signalType]} ${comparatorLabels[rule.comparator]} ${formatSignalValue(rule.signalType, rule.threshold)} over ${rule.windowMinutes}min${rule.serviceNames?.length > 0 ? ` on ${rule.serviceNames.join(", ")}` : ""}${rule.excludeServiceNames?.length > 0 ? ` (excl. ${rule.excludeServiceNames.join(", ")})` : ""}`
+	const subtitle = `${signalLabels[rule.signalType]} ${comparatorLabels[rule.comparator]} ${formatSignalValue(rule.signalType, rule.threshold)} over ${rule.windowMinutes}min${rule.serviceNames?.length > 0 ? ` on ${rule.serviceNames.join(", ")}` : ""}${rule.environments?.length > 0 ? ` in ${rule.environments.join(", ")}` : ""}${rule.excludeServiceNames?.length > 0 ? ` (excl. ${rule.excludeServiceNames.join(", ")})` : ""}`
 
 	const stickyContent = (
 		<div className="space-y-3">
@@ -623,6 +623,23 @@ function RuleDetailContent() {
 																	? `all (per ${rule.groupBy.join(" \u00b7 ")})`
 																	: "all"}
 															</span>
+														)}
+													</div>
+												</ConfigRow>
+												<ConfigRow label="Environments">
+													<div className="flex flex-wrap gap-1 justify-end">
+														{rule.environments?.length > 0 ? (
+															rule.environments.map((env) => (
+																<Badge
+																	key={env}
+																	variant="outline"
+																	className="text-xs"
+																>
+																	{env}
+																</Badge>
+															))
+														) : (
+															<span className="font-mono font-medium">all</span>
 														)}
 													</div>
 												</ConfigRow>

@@ -65,6 +65,7 @@ const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 	severity: doc.severity,
 	service_names: doc.serviceNames,
 	exclude_service_names: doc.excludeServiceNames,
+	environments: doc.environments,
 	tags: doc.tags,
 	group_by: doc.groupBy,
 	signal_type: doc.signalType,
@@ -164,6 +165,7 @@ const toUpsertRequest = (
 			...(params.exclude_service_names !== undefined
 				? { excludeServiceNames: params.exclude_service_names }
 				: {}),
+			...(params.environments !== undefined ? { environments: params.environments } : {}),
 			...(params.tags !== undefined ? { tags: params.tags } : {}),
 			...(params.group_by !== undefined ? { groupBy: params.group_by } : {}),
 			...(params.threshold_upper !== undefined ? { thresholdUpper: params.threshold_upper } : {}),
@@ -241,6 +243,7 @@ const mergeUpsertRequest = (
 			severity: patch.severity ?? doc.severity,
 			serviceNames: patch.service_names ?? doc.serviceNames,
 			excludeServiceNames: patch.exclude_service_names ?? doc.excludeServiceNames,
+			environments: patch.environments ?? doc.environments,
 			tags: patch.tags ?? doc.tags,
 			groupBy: patch.group_by !== undefined ? patch.group_by : doc.groupBy,
 			signalType,

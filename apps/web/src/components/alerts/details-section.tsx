@@ -6,7 +6,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Textarea } from "@maple/ui/components/ui/textarea"
 
-import { SectionLabel } from "@/components/alerts/signal-and-threshold-section"
+import { SectionHeader } from "@/components/layout/section-header"
 import { TagInput } from "@/components/alerts/tag-input"
 import { PlusIcon } from "@/components/icons"
 import type { RuleFormState } from "@/lib/alerts/form-utils"
@@ -31,14 +31,12 @@ export function DetailsSection({ form, onChange, suggestedName, tagSuggestions }
 
 	return (
 		<Card className="p-4">
-			<SectionLabel>Details</SectionLabel>
+			<SectionHeader id="rule-details-heading" label="Details" />
 
-			<div className="mt-3 space-y-3">
+			<div className="space-y-3">
 				<div className="space-y-1.5">
 					<div className="flex items-center justify-between gap-2">
-						<Label htmlFor="rule-name" className="text-xs">
-							Rule name
-						</Label>
+						<Label htmlFor="rule-name">Rule name</Label>
 						{showSuggest && (
 							<Button
 								type="button"
@@ -60,9 +58,7 @@ export function DetailsSection({ form, onChange, suggestedName, tagSuggestions }
 				</div>
 
 				<div className="space-y-1.5">
-					<Label htmlFor="rule-tags" className="text-xs">
-						Tags
-					</Label>
+					<Label htmlFor="rule-tags">Tags</Label>
 					<TagInput
 						id="rule-tags"
 						value={form.tags}
@@ -70,16 +66,14 @@ export function DetailsSection({ form, onChange, suggestedName, tagSuggestions }
 						suggestions={tagSuggestions}
 						placeholder="prod, payments, team-checkout…"
 					/>
-					<p className="text-[11px] text-muted-foreground">
+					<p className="text-muted-foreground text-xs">
 						Group and filter rules in the alerts list. Press Enter to add.
 					</p>
 				</div>
 
 				{notesOpen ? (
 					<div className="space-y-1.5">
-						<Label htmlFor="rule-notes" className="text-xs">
-							Notes
-						</Label>
+						<Label htmlFor="rule-notes">Notes</Label>
 						<Textarea
 							id="rule-notes"
 							value={form.notes}

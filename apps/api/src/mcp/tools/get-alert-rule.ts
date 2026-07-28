@@ -69,6 +69,11 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 			if (rule.excludeServiceNames.length > 0) {
 				lines.push(`Exclude: ${rule.excludeServiceNames.join(", ")}`)
 			}
+			lines.push(
+				rule.environments.length > 0
+					? `Environments: ${rule.environments.join(", ")}`
+					: `Environments: All environments`,
+			)
 			if (rule.groupBy && rule.groupBy.length > 0) {
 				lines.push(`Group By: ${rule.groupBy.join(", ")}`)
 			}
@@ -156,6 +161,7 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 							severity: rule.severity,
 							serviceNames: [...rule.serviceNames],
 							excludeServiceNames: [...rule.excludeServiceNames],
+							environments: [...rule.environments],
 							groupBy: rule.groupBy ? [...rule.groupBy] : null,
 							signalType: rule.signalType,
 							comparator: rule.comparator,

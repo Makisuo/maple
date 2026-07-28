@@ -111,6 +111,7 @@ export function registerListAlertRulesTool(server: McpToolRegistrar) {
 							enabled: r.enabled,
 							severity: r.severity,
 							serviceNames: [...r.serviceNames],
+							environments: [...r.environments],
 							signalType: r.signalType,
 							comparator: r.comparator,
 							threshold: r.threshold,

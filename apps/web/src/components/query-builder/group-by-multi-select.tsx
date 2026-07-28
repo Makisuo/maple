@@ -14,6 +14,8 @@ import {
 import { GROUP_BY_OPTIONS, type QueryBuilderDataSource } from "@/lib/query-builder/model"
 
 interface GroupByMultiSelectProps {
+	/** Wired to the field's `<Label htmlFor>` so clicking the label focuses the input. */
+	id?: string
 	value: string[]
 	onChange: (value: string[]) => void
 	dataSource: QueryBuilderDataSource
@@ -36,6 +38,7 @@ interface GroupByMultiSelectProps {
  * across dashboards and alerts.
  */
 export function GroupByMultiSelect({
+	id,
 	value,
 	onChange,
 	dataSource,
@@ -74,7 +77,7 @@ export function GroupByMultiSelect({
 					{value.map((key) => (
 						<ComboboxChip key={key}>{key}</ComboboxChip>
 					))}
-					<ComboboxChipsInput placeholder={value.length === 0 ? placeholder : ""} />
+					<ComboboxChipsInput id={id} placeholder={value.length === 0 ? placeholder : ""} />
 				</ComboboxChips>
 				<ComboboxContent anchor={anchor}>
 					<ComboboxEmpty>No fields found.</ComboboxEmpty>

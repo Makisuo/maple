@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@maple/ui/utils"
 
 import { AlertSegmentedSelect } from "@/components/alerts/alert-segmented-select"
+import { SectionHeader } from "@/components/layout/section-header"
 import { QueryPanel } from "@/components/dashboard-builder/config/query-panel"
 import { RawSqlEditorPanel } from "@/components/dashboard-builder/config/raw-sql-editor-panel"
 import {
@@ -202,9 +203,9 @@ export function SignalAndThresholdSection({
 
 	return (
 		<Card className="p-4">
-			<SectionLabel>Signal &amp; threshold</SectionLabel>
+			<SectionHeader id="rule-signal-heading" label="Signal & threshold" />
 
-			<div className="mt-3 space-y-4">
+			<div className="space-y-4">
 				{/* Tier 1: signal kind. Always visible. */}
 				<AlertSegmentedSelect<SignalKind>
 					options={SIGNAL_KIND_OPTIONS}
@@ -232,9 +233,7 @@ export function SignalAndThresholdSection({
 				    chevron into the next field. */}
 				<div className="grid gap-3 sm:grid-cols-[140px_1fr_1fr]">
 					<div className="min-w-0 space-y-1.5">
-						<Label htmlFor="rule-comparator" className="text-xs">
-							Condition
-						</Label>
+						<Label htmlFor="rule-comparator">Condition</Label>
 						<Select
 							items={comparatorLabels}
 							value={form.comparator}
@@ -255,7 +254,7 @@ export function SignalAndThresholdSection({
 						</Select>
 					</div>
 					<div className="min-w-0 space-y-1.5">
-						<Label htmlFor="rule-threshold" className="text-xs">
+						<Label htmlFor="rule-threshold">
 							{rangeMode ? "Lower" : "Threshold"}
 							{isErrorRate && <span className="text-muted-foreground"> (%)</span>}
 							{isBuilderErrorRate && (
@@ -275,7 +274,7 @@ export function SignalAndThresholdSection({
 					<div className="min-w-0 space-y-1.5">
 						<Label
 							htmlFor="rule-threshold-upper"
-							className={cn("text-xs", !rangeMode && "text-muted-foreground/60")}
+							className={cn(!rangeMode && "text-muted-foreground/60")}
 						>
 							Upper
 							{isErrorRate && <span className="text-muted-foreground"> (%)</span>}
@@ -298,7 +297,7 @@ export function SignalAndThresholdSection({
 
 				{/* Severity inline — branded pills, not neutral toggle. */}
 				<div className="flex items-center justify-between gap-3">
-					<Label className="text-xs">Severity</Label>
+					<Label id="rule-severity-label">Severity</Label>
 					<SeverityToggle
 						value={form.severity}
 						onChange={(value) => onChange((c) => ({ ...c, severity: value }))}
@@ -326,7 +325,7 @@ export function SignalAndThresholdSection({
 						</span>
 					</button>
 					{advancedOpen && (
-						<div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+						<div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 							<NumericField
 								id="rule-window-minutes"
 								label="Window (min)"
@@ -343,6 +342,18 @@ export function SignalAndThresholdSection({
 									onChange((c) => ({
 										...c,
 										consecutiveBreachesRequired: value,
+									}))
+								}
+							/>
+							<NumericField
+								id="rule-consecutive-healthy"
+								label="Healthy to resolve"
+								hint="Consecutive healthy checks required."
+								value={form.consecutiveHealthyRequired}
+								onChange={(value) =>
+									onChange((c) => ({
+										...c,
+										consecutiveHealthyRequired: value,
 									}))
 								}
 							/>
@@ -390,6 +401,7 @@ function BuiltinSignalChips({
 			role="radiogroup"
 			aria-label="Built-in signal"
 			className="-mt-1 flex flex-wrap items-center gap-1 rounded-md border border-dashed border-border/60 bg-muted/20 p-1"
+			data-slot="builtin-signal-chips"
 		>
 			{BUILTIN_SIGNAL_OPTIONS.map((opt) => {
 				const selected = value === opt.value
@@ -442,7 +454,7 @@ function SeverityToggle({
 	return (
 		<div
 			role="radiogroup"
-			aria-label="Severity"
+			aria-labelledby="rule-severity-label"
 			className="inline-flex items-center gap-1 rounded-md bg-muted/30 p-0.5"
 		>
 			{SEVERITY_OPTIONS.map((opt) => {
@@ -457,7 +469,9 @@ function SeverityToggle({
 						className={cn(
 							"inline-flex h-7 items-center gap-1.5 rounded-[5px] border border-transparent px-2.5 text-xs font-medium",
 							"transition-[background-color,border-color,color] duration-150",
-							"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+							// `ring-ring` is the base so an unselected pill still shows a focus
+							// ring; the selected variants override it with their brand color.
+							"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
 							selected ? opt.selectedClass : "text-muted-foreground hover:text-foreground",
 						)}
 					>
@@ -476,10 +490,6 @@ function SeverityToggle({
 	)
 }
 
-export function SectionLabel({ children }: { children: React.ReactNode }) {
-	return <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</h3>
-}
-
 function NumericField({
 	id,
 	label,
@@ -494,10 +504,8 @@ function NumericField({
 	onChange: (value: string) => void
 }) {
 	return (
-		<div className="space-y-1">
-			<Label htmlFor={id} className="text-xs">
-				{label}
-			</Label>
+		<div className="space-y-1.5">
+			<Label htmlFor={id}>{label}</Label>
 			<Input
 				id={id}
 				type="number"
@@ -507,7 +515,7 @@ function NumericField({
 				onChange={(e) => onChange(e.target.value)}
 				className={NUMERIC_INPUT_CLASS}
 			/>
-			{hint && <p className="text-muted-foreground text-[10px] leading-tight">{hint}</p>}
+			{hint && <p className="text-muted-foreground text-xs">{hint}</p>}
 		</div>
 	)
 }
@@ -639,9 +647,7 @@ function SignalSubConfig({ form, onChange, autocompleteValues }: SignalAndThresh
 			return (
 				<div className="flex items-end gap-3">
 					<div className="space-y-1.5">
-						<Label htmlFor="apdex-threshold" className="text-xs">
-							Apdex target (ms)
-						</Label>
+						<Label htmlFor="apdex-threshold">Apdex target (ms)</Label>
 						<Input
 							id="apdex-threshold"
 							type="number"
@@ -670,12 +676,12 @@ function SignalSubConfig({ form, onChange, autocompleteValues }: SignalAndThresh
 						showBucketControl={false}
 						targetLabel="alert rule"
 					/>
-					<p className="text-muted-foreground text-[10px] leading-tight">
+					<p className="text-muted-foreground text-xs">
 						Alert SQL must return a numeric <code>value</code> column.
 					</p>
 					<div className="flex items-end gap-3">
 						<div className="space-y-1.5">
-							<Label className="text-xs">Reduce buckets by</Label>
+							<Label htmlFor="rule-raw-reducer">Reduce buckets by</Label>
 							<Select
 								items={RAW_QUERY_REDUCER_LABELS}
 								value={form.rawQueryReducer}
@@ -687,7 +693,7 @@ function SignalSubConfig({ form, onChange, autocompleteValues }: SignalAndThresh
 									}))
 								}
 							>
-								<SelectTrigger className="w-[180px]">
+								<SelectTrigger id="rule-raw-reducer" className="w-[180px]">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>

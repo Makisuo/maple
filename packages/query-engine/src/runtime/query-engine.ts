@@ -545,6 +545,10 @@ function hasNarrowingFilter(request: QueryEngineExecuteRequest): boolean {
 	if (Array.isArray(envs) && envs.length > 0) return true
 	const services = filters.services
 	if (Array.isArray(services) && services.length > 0) return true
+	const serviceNames = filters.serviceNames
+	if (Array.isArray(serviceNames) && serviceNames.length > 0) return true
+	const spanNames = filters.spanNames
+	if (Array.isArray(spanNames) && spanNames.length > 0) return true
 	const namespaces = filters.namespaces
 	if (Array.isArray(namespaces) && namespaces.length > 0) return true
 	const attributeFilters = filters.attributeFilters
@@ -914,7 +918,8 @@ function resolveAttributeScope(source: "traces" | "logs" | "metrics", scope?: "s
 type AttrFilterArray = Array<{
 	key: string
 	value?: string
-	mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains"
+	values?: readonly string[]
+	mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains" | "in"
 	negated?: boolean
 }>
 
@@ -922,6 +927,8 @@ function extractTracesOpts(filters: Record<string, unknown> | undefined) {
 	return {
 		serviceName: filters?.serviceName as string | undefined,
 		spanName: filters?.spanName as string | undefined,
+		serviceNames: filters?.serviceNames as readonly string[] | undefined,
+		spanNames: filters?.spanNames as readonly string[] | undefined,
 		statusCode: filters?.statusCode as "Ok" | "Error" | "Unset" | undefined,
 		rootOnly: filters?.rootSpansOnly as boolean | undefined,
 		errorsOnly: filters?.errorsOnly as boolean | undefined,
@@ -972,8 +979,12 @@ function extractTracesFacetsOpts(filters: Record<string, unknown> | undefined): 
 	const attrFilters = (filters?.attributeFilters ?? []) as AttrFilterArray
 	const resFilters = (filters?.resourceAttributeFilters ?? []) as AttrFilterArray
 
-	const httpMethodFilter = attrFilters.find((f) => f.key === "http.method")
-	const httpStatusFilter = attrFilters.find((f) => f.key === "http.status_code")
+	// Positive http filters arrive either as a single `equals` or, when the user
+	// ticks several facet values, as one `in` carrying the whole set. Negated
+	// entries are exclusions and must not be read as inclusions here.
+	const isPositiveHttp = (f: AttrFilterArray[number], key: string) => f.key === key && !f.negated
+	const httpMethodFilter = attrFilters.find((f) => isPositiveHttp(f, "http.method"))
+	const httpStatusFilter = attrFilters.find((f) => isPositiveHttp(f, "http.status_code"))
 	const customAttr = attrFilters.find((f) => f.key !== "http.method" && f.key !== "http.status_code")
 	const customRes = resFilters[0]
 
@@ -983,13 +994,17 @@ function extractTracesFacetsOpts(filters: Record<string, unknown> | undefined): 
 	return {
 		serviceName: filters?.serviceName as string | undefined,
 		spanName: filters?.spanName as string | undefined,
+		serviceNames: filters?.serviceNames as readonly string[] | undefined,
+		spanNames: filters?.spanNames as readonly string[] | undefined,
 		hasError: filters?.errorsOnly as boolean | undefined,
 		minDurationMs: filters?.minDurationMs as number | undefined,
 		maxDurationMs: filters?.maxDurationMs as number | undefined,
-		httpMethod: httpMethodFilter?.value,
-		httpStatusCode: httpStatusFilter?.value,
-		deploymentEnv: envs?.[0],
-		namespace: namespaces?.[0],
+		httpMethod: httpMethodFilter?.mode === "in" ? undefined : httpMethodFilter?.value,
+		httpStatusCode: httpStatusFilter?.mode === "in" ? undefined : httpStatusFilter?.value,
+		httpMethods: httpMethodFilter?.mode === "in" ? httpMethodFilter.values : undefined,
+		httpStatusCodes: httpStatusFilter?.mode === "in" ? httpStatusFilter.values : undefined,
+		deploymentEnvs: envs,
+		namespaces,
 		matchModes: filters?.matchModes as CH.TracesFacetsOpts["matchModes"],
 		attributeFilterKey: customAttr?.key,
 		attributeFilterValue: customAttr?.value,
@@ -1022,13 +1037,17 @@ function extractTracesDurationStatsOpts(
 	return {
 		serviceName: facetsOpts.serviceName,
 		spanName: facetsOpts.spanName,
+		serviceNames: facetsOpts.serviceNames,
+		spanNames: facetsOpts.spanNames,
 		hasError: facetsOpts.hasError,
 		minDurationMs: facetsOpts.minDurationMs,
 		maxDurationMs: facetsOpts.maxDurationMs,
 		httpMethod: facetsOpts.httpMethod,
 		httpStatusCode: facetsOpts.httpStatusCode,
-		deploymentEnv: facetsOpts.deploymentEnv,
-		namespace: facetsOpts.namespace,
+		httpMethods: facetsOpts.httpMethods,
+		httpStatusCodes: facetsOpts.httpStatusCodes,
+		deploymentEnvs: facetsOpts.deploymentEnvs,
+		namespaces: facetsOpts.namespaces,
 		matchModes: facetsOpts.matchModes,
 	}
 }
@@ -1236,6 +1255,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						metricNames: request.query.filters.metricNames,
 						bucketSeconds: bucketSeconds!,
 						serviceName: request.query.filters.serviceName,
+						environments: request.query.filters.environments,
 						groupByAttributeKey,
 						groupByResourceAttributeKey,
 						attributeKey: attributeFilter?.key,
@@ -1285,6 +1305,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				CH.metricsTimeseriesQuery({
 					metricType: request.query.filters.metricType,
 					serviceName: request.query.filters.serviceName,
+					environments: request.query.filters.environments,
 					groupByAttributeKey,
 					groupByResourceAttributeKey,
 					attributeKey: attributeFilter?.key,
@@ -1518,7 +1539,14 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
 
 			// Graceful limit clamping: cap at 200, auto-reduce to 50 when no indexed filters
-			const hasIndexedFilter = !!(opts.serviceName || opts.spanName || opts.errorsOnly || opts.rootOnly)
+			const hasIndexedFilter = !!(
+				opts.serviceName ||
+				opts.spanName ||
+				opts.serviceNames?.length ||
+				opts.spanNames?.length ||
+				opts.errorsOnly ||
+				opts.rootOnly
+			)
 			const maxLimit = hasIndexedFilter ? 200 : 50
 			const clampedLimit = Math.min(tracesQuery.limit ?? 25, maxLimit)
 

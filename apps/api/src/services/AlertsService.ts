@@ -151,6 +151,8 @@ interface NormalizedRule {
 	readonly serviceName: string | null
 	readonly serviceNames: ReadonlyArray<string>
 	readonly excludeServiceNames: ReadonlyArray<string>
+	/** Deployment environments the rule is scoped to. Empty means all. */
+	readonly environments: ReadonlyArray<string>
 	readonly tags: ReadonlyArray<string>
 	readonly groupBy: AlertGroupBy | null
 	readonly signalType: AlertSignalType
@@ -671,6 +673,7 @@ const safeParseStringArray = (value: unknown): ReadonlyArray<string> =>
 const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (rule: {
 	readonly signalType: AlertSignalType
 	readonly serviceName: string | null
+	readonly environments: ReadonlyArray<string>
 	readonly metricName: string | null
 	readonly metricType: AlertMetricType | null
 	readonly metricAggregation: AlertMetricAggregationValue | null
@@ -683,7 +686,14 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 	readonly groupBy: AlertGroupBy | null
 }): Effect.fn.Return<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> {
 	const bucketSeconds = Math.max(rule.windowMinutes * 60, 60)
-	const baseTraceFilters = rule.serviceName == null ? undefined : { serviceName: rule.serviceName }
+	// Rule-level scope shared by the trace built-ins and the `metric` signal.
+	// `environments` is empty for builder_query / raw_query — those carry their
+	// own filters — so it never reaches those branches.
+	const envFilter = rule.environments.length > 0 ? { environments: rule.environments } : {}
+	const baseTraceFilters = {
+		...(rule.serviceName == null ? {} : { serviceName: rule.serviceName }),
+		...envFilter,
+	}
 
 	const noDataBehavior: QueryEngineNoDataBehavior =
 		rule.signalType === "throughput" && ["lt", "lte"].includes(rule.comparator) ? "zero" : "skip"
@@ -792,6 +802,7 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 			metricName: rule.metricName,
 			metricType: rule.metricType,
 			...(rule.serviceName == null ? {} : { serviceName: rule.serviceName }),
+			...envFilter,
 		}
 		if (groupResolved && groupResolved.attributeKeys.length > 0) {
 			// Metrics group-by-attribute is single-key today; pick the first.
@@ -921,6 +932,9 @@ const serviceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
 const excludeServiceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
 	row.excludeServiceNamesJson ? safeParseStringArray(row.excludeServiceNamesJson) : []
 
+const environmentsFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
+	row.environmentsJson ? safeParseStringArray(row.environmentsJson) : []
+
 const tagsFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
 	row.tagsJson ? safeParseStringArray(row.tagsJson) : []
 
@@ -962,6 +976,7 @@ const rowToRuleDocument = (
 		severity: decodeAlertSeveritySync(row.severity),
 		serviceNames: [...serviceNames],
 		excludeServiceNames: [...excludeServiceNamesFromRow(row)],
+		environments: [...environmentsFromRow(row)],
 		tags: [...tagsFromRow(row)],
 		groupBy: parseStoredGroupBy(row.groupBy),
 		signalType: decodeAlertSignalTypeSync(row.signalType),
@@ -1354,6 +1369,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					serviceName: serviceNames.length === 1 ? serviceNames[0] : null,
 					serviceNames,
 					excludeServiceNames: excludeServiceNamesFromRow(row),
+					environments: environmentsFromRow(row),
 					tags: tagsFromRow(row),
 					groupBy: parseStoredGroupBy(row.groupBy),
 					signalType: decodeAlertSignalTypeSync(row.signalType),
@@ -1403,6 +1419,19 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const excludeServiceNames = request.excludeServiceNames
 					? request.excludeServiceNames.map((s) => s.trim()).filter((s) => s.length > 0)
 					: []
+				// builder_query / raw_query express environment scope inside their own
+				// query, so the rule-level filter is dropped for them rather than
+				// silently AND-ing a second, invisible predicate onto the user's query.
+				const queryOwnsScope =
+					request.signalType === "builder_query" || request.signalType === "raw_query"
+				const environments =
+					request.environments && !queryOwnsScope
+						? [
+								...new Set(
+									request.environments.map((s) => s.trim()).filter((s) => s.length > 0),
+								),
+							]
+						: []
 				const tags = normalizeTags(request.tags)
 				const metricName = normalizeOptionalString(request.metricName)
 				const groupBy = request.groupBy ?? null
@@ -1512,6 +1541,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					serviceName,
 					serviceNames,
 					excludeServiceNames,
+					environments,
 					tags,
 					groupBy,
 					signalType: request.signalType,
@@ -2625,6 +2655,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					serviceNamesJson: normalized.serviceNames.length > 0 ? normalized.serviceNames : null,
 					excludeServiceNamesJson:
 						normalized.excludeServiceNames.length > 0 ? normalized.excludeServiceNames : null,
+					environmentsJson: normalized.environments.length > 0 ? normalized.environments : null,
 					tagsJson: normalized.tags.length > 0 ? normalized.tags : null,
 					groupBy: normalized.groupBy != null ? JSON.stringify(normalized.groupBy) : null,
 					signalType: normalized.signalType,

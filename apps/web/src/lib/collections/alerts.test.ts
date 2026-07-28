@@ -33,6 +33,7 @@ const ruleRow: AlertRuleRow = {
 	severity: "warning",
 	service_names_json: ["checkout", "api"],
 	exclude_service_names_json: null,
+	environments_json: ["production"],
 	tags_json: ["prod"],
 	signal_type: "error_rate",
 	comparator: "gt",

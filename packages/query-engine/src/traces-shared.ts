@@ -124,6 +124,17 @@ export function buildAttrFilterCondition(
 		if (af.mode === "contains") {
 			return CH.positionCaseInsensitive(colExpr, CH.lit(value)).gt(0)
 		}
+		if (af.mode === "in") {
+			// No index prefilter: bloom/text candidates are per-value, so an OR of N
+			// of them plus the exact IN reads more granules than the IN alone once N
+			// grows. The IN over the coalesced alias expression is already exact.
+			const values = af.values ?? []
+			// `x IN ()` is a ClickHouse syntax error, and an empty candidate set
+			// matches nothing by definition — emit a constant-false predicate so a
+			// `negated` empty filter still correctly excludes nothing.
+			if (values.length === 0) return CH.rawCond("0")
+			return CH.inList(colExpr, values)
+		}
 		if (af.mode === "gt") {
 			return CH.toFloat64OrZero(colExpr).gt(Number(value))
 		}

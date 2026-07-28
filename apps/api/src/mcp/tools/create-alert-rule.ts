@@ -79,6 +79,7 @@ interface CreateAlertRuleParams {
 	destination_ids: string
 	template?: string
 	service_names?: string
+	environments?: string
 	enabled?: boolean
 	group_by?: string
 	minimum_sample_count?: number
@@ -202,6 +203,7 @@ function buildAlertRuleRequest(
 
 	if (params.enabled !== undefined) request.enabled = params.enabled
 	if (params.service_names) request.serviceNames = splitCsv(params.service_names)
+	if (params.environments) request.environments = splitCsv(params.environments)
 	if (params.group_by) {
 		const dimensions = String(params.group_by)
 			.split(",")
@@ -272,6 +274,9 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			),
 			window_minutes: optionalNumberParam("Evaluation window in minutes (default: 5)"),
 			service_names: optionalStringParam("Comma-separated service names to scope the alert to"),
+			environments: optionalStringParam(
+				"Comma-separated deployment environments to scope the alert to (e.g. 'production'). Omit for all environments. Ignored for builder_query / raw_query, which filter inside their own query.",
+			),
 			enabled: optionalBooleanParam("Whether the rule is enabled (default: true)"),
 			// Custom-mode params (used when template is 'custom' or omitted)
 			signal_type: optionalStringParam(
@@ -396,6 +401,9 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			if (rule.serviceNames.length > 0) {
 				lines.splice(3, 0, `Service Names: ${rule.serviceNames.join(", ")}`)
 			}
+			if (rule.environments.length > 0) {
+				lines.push(`Environments: ${rule.environments.join(", ")}`)
+			}
 
 			return {
 				content: createDualContent(lines.join("\n"), {
@@ -407,6 +415,7 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 							enabled: rule.enabled,
 							severity: rule.severity,
 							serviceNames: [...rule.serviceNames],
+							environments: [...rule.environments],
 							signalType: rule.signalType,
 							comparator: rule.comparator,
 							threshold: rule.threshold,

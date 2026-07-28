@@ -486,6 +486,12 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
 	severity: AlertSeverity,
 	serviceNames: Schema.Array(Schema.String),
 	excludeServiceNames: Schema.Array(Schema.String),
+	/**
+	 * Deployment environments the rule is scoped to. Empty means every
+	 * environment. Ignored for `builder_query` / `raw_query`, whose queries carry
+	 * their own filters.
+	 */
+	environments: Schema.Array(Schema.String),
 	/** Free-form tags used to group and filter rules in the alerts list. */
 	tags: Schema.Array(Schema.String),
 	groupBy: Schema.NullOr(AlertGroupBy),
@@ -531,6 +537,7 @@ export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>
 	severity: AlertSeverity,
 	serviceNames: Schema.optionalKey(Schema.Array(Schema.String)),
 	excludeServiceNames: Schema.optionalKey(Schema.Array(Schema.String)),
+	environments: Schema.optionalKey(Schema.Array(Schema.String)),
 	tags: Schema.optionalKey(RuleTags),
 	groupBy: Schema.optionalKey(Schema.NullOr(AlertGroupBy)),
 	signalType: AlertSignalType,

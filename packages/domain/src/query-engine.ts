@@ -39,7 +39,9 @@ export type MetricType = Schema.Schema.Type<typeof MetricType>
 export const AttributeFilter = Schema.Struct({
 	key: Schema.String,
 	value: Schema.optional(Schema.String),
-	mode: Schema.Literals(["equals", "exists", "gt", "gte", "lt", "lte", "contains"]),
+	/** Candidate set for `mode: "in"`. Ignored by every other mode, which read `value`. */
+	values: Schema.optional(Schema.Array(Schema.String)),
+	mode: Schema.Literals(["equals", "exists", "gt", "gte", "lt", "lte", "contains", "in"]),
 	negated: Schema.optional(Schema.Boolean),
 })
 export type AttributeFilter = Schema.Schema.Type<typeof AttributeFilter>
@@ -55,6 +57,15 @@ export type TracesMatchModes = Schema.Schema.Type<typeof TracesMatchModes>
 export const TracesFilters = Schema.Struct({
 	serviceName: Schema.optional(ServiceName),
 	spanName: Schema.optional(SpanName),
+	/**
+	 * Multi-value spelling of `serviceName` / `spanName`, compiled to `IN (...)`.
+	 * The scalar fields stay for the dashboard DSL, MCP tools and alert rules that
+	 * only ever select one; when both are present the array wins. `matchModes`
+	 * "contains" only applies to the single-value case — a substring form of an
+	 * N-value IN has no meaning.
+	 */
+	serviceNames: Schema.optional(Schema.Array(ServiceName)),
+	spanNames: Schema.optional(Schema.Array(SpanName)),
 	statusCode: Schema.optional(Schema.Literals(["Ok", "Error", "Unset"])),
 	rootSpansOnly: Schema.optional(Schema.Boolean),
 	environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
@@ -108,6 +119,10 @@ export const MetricsFilters = Schema.Struct({
 	metricNames: Schema.optional(Schema.Array(MetricName)),
 	metricType: MetricType,
 	serviceName: Schema.optional(ServiceName),
+	// Metrics tables have no pre-extracted DeploymentEnv column, so this lowers to
+	// a predicate on `ResourceAttributes['deployment.environment']` (see
+	// `metricsTimeseriesQuery`). Same field name as TracesFilters/LogsFilters.
+	environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
 	groupByAttributeKey: Schema.optional(Schema.String),
 	// Resource-attribute counterpart of `groupByAttributeKey` — groups by a
 	// ResourceAttributes key (host.name, k8s.pod.name, …) instead of a datapoint
