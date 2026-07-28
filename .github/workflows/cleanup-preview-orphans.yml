@@ -120,6 +120,19 @@ jobs:
                   GITHUB_TOKEN: ${{ github.token }}
               run: bun scripts/tinybird-pr-branch.ts sweep
 
+            # Leaked preview WORKERS must go before their resources: zombie
+            # `maple-alerting-pr-<n>` workers keep cron triggers (pre-#239
+            # deploys have no non-prod gate), and once a sibling sweep deletes
+            # the Hyperdrive config they bind, every tick floods
+            # self-observability with "Hyperdrive config deleted." as
+            # service.name="alerting" (observed 2026-07-27..29). Sweeping the
+            # workers first closes that window for future leaks.
+            - name: Sweep orphaned preview Workers
+              if: ${{ !cancelled() && env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' }}
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+              run: bun scripts/cloudflare-worker-orphan-sweep.ts
+
             # Hyperdrive is the one preview resource `alchemy destroy` alone
             # owns — and close runs execute the PR branch's OLD workflow, so
             # branches predating the placeholder-MAPLE_PG_URL destroy fix can
