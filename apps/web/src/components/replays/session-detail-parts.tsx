@@ -4,7 +4,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { GlobeIcon, ClockIcon, CopyIcon, CheckIcon } from "@/components/icons"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { formatRelativeFrom } from "@maple/ui/time-format"
-import { gradientFor, hostFromUrl } from "./replay-format"
+import { formatSessionDuration, gradientFor, hostFromUrl } from "./replay-format"
 import { parseChTimestampMs } from "./replay-timeline"
 
 // Presentational building blocks for the session-replay detail page. Extracted
@@ -63,101 +63,101 @@ function StatusPill({ active }: { active: boolean }) {
 	)
 }
 
-/** Avatar + label + status + URL/started/id meta row. */
-export function SessionIdentityHeader({
+/**
+ * Single-line identity bar for the player-first detail layout: who + where +
+ * when on the left, the headline duration and error count on the right. All
+ * remaining metadata lives in the rail's Session tab, so this stays one row.
+ */
+export function SessionIdentityBar({
 	sessionId,
 	label,
 	urlInitial,
 	startTime,
 	isActive,
+	durationMs,
+	errorCount,
 }: {
 	sessionId: string
 	label: string
 	urlInitial: string
 	startTime: string
 	isActive: boolean
+	durationMs: number | null
+	errorCount: number
 }) {
 	const startedEpoch = parseChTimestampMs(startTime)
 	const startedValid = Number.isFinite(startedEpoch)
 	return (
-		<div className="flex flex-wrap items-center gap-3">
-			<div
-				className={`grid size-11 shrink-0 place-items-center rounded-full bg-gradient-to-br ${gradientFor(sessionId)} font-display text-base font-semibold text-white shadow-sm`}
-			>
-				{(label[0] ?? "?").toUpperCase()}
-			</div>
-			<div className="min-w-0 flex-1">
-				<div className="flex items-center gap-2">
-					<h2 className="truncate font-display text-lg font-semibold leading-tight">{label}</h2>
-					<StatusPill active={isActive} />
+		<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+			<div className="flex min-w-0 flex-1 items-center gap-2.5">
+				<div
+					className={`grid size-8 shrink-0 place-items-center rounded-full bg-gradient-to-br ${gradientFor(sessionId)} text-xs font-semibold text-white shadow-sm`}
+				>
+					{(label[0] ?? "?").toUpperCase()}
 				</div>
-				<div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-					<a
-						href={urlInitial}
-						target="_blank"
-						rel="noreferrer"
-						title={urlInitial}
-						className="inline-flex min-w-0 max-w-md items-center gap-1.5 font-mono hover:text-foreground"
+				<h2 className="min-w-0 truncate text-sm font-medium leading-tight">{label}</h2>
+				<StatusPill active={isActive} />
+				<a
+					href={urlInitial}
+					target="_blank"
+					rel="noreferrer"
+					title={urlInitial}
+					className="hidden min-w-0 max-w-64 items-center gap-1.5 font-mono text-xs text-muted-foreground hover:text-foreground sm:inline-flex"
+				>
+					<GlobeIcon className="size-3 shrink-0 opacity-70" />
+					<span className="truncate">{hostFromUrl(urlInitial)}</span>
+				</a>
+				{startedValid && (
+					<span
+						className="hidden shrink-0 items-center gap-1.5 text-xs text-muted-foreground md:inline-flex"
+						title={new Date(startedEpoch).toLocaleString()}
 					>
-						<GlobeIcon className="size-3 shrink-0 opacity-70" />
-						<span className="truncate">{hostFromUrl(urlInitial)}</span>
-					</a>
-					{startedValid && (
-						<>
-							<span className="opacity-40">·</span>
-							<span
-								className="inline-flex shrink-0 items-center gap-1.5"
-								title={new Date(startedEpoch).toLocaleString()}
-							>
-								<ClockIcon className="size-3 shrink-0 opacity-70" />
-								{formatRelativeFrom(startedEpoch)}
-							</span>
-						</>
-					)}
-					<span className="opacity-40">·</span>
-					<span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-						{sessionId.slice(0, 12)}
-						<CopyButton value={sessionId} label="Copy session id" />
+						<ClockIcon className="size-3 shrink-0 opacity-70" />
+						started {formatRelativeFrom(startedEpoch)}
 					</span>
-				</div>
+				)}
+				<span className="hidden shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground xl:inline-flex">
+					{sessionId.slice(0, 8)}
+					<CopyButton value={sessionId} label="Copy session id" />
+				</span>
+			</div>
+			<div className="flex shrink-0 items-center gap-3">
+				<span className="flex items-baseline gap-1.5">
+					<span className="font-mono text-[15px] font-semibold tabular-nums">
+						{formatSessionDuration(durationMs)}
+					</span>
+					<span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+						duration
+					</span>
+				</span>
+				{errorCount > 0 && (
+					<span className="inline-flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-destructive">
+						<span className="size-1 rounded-full bg-destructive" aria-hidden />
+						{errorCount} error{errorCount === 1 ? "" : "s"}
+					</span>
+				)}
 			</div>
 		</div>
 	)
 }
 
 export function ReplayDetailSkeleton() {
-	// Mirrors the studio layout (full-width header, a player | event-stream row,
-	// then a full-width trace timeline) so the page doesn't reflow on load.
+	// Mirrors the studio layout (identity bar, player + docked transport on the
+	// left, the tabbed rail on the right) so the page doesn't reflow on load.
 	return (
-		<div className="flex flex-col gap-4">
-			{/* Header: identity + vitals strip, then a divided meta line */}
-			<div className="flex flex-col gap-3">
-				<div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-					<div className="flex items-center gap-3">
-						<Skeleton className="size-11 shrink-0 rounded-full" />
-						<div className="space-y-2">
-							<Skeleton className="h-4 w-44" />
-							<Skeleton className="h-3 w-64" />
-						</div>
-					</div>
-					<Skeleton className="h-10 w-64 shrink-0 rounded-lg" />
+		<div className="flex flex-col gap-3.5 lg:flex-row">
+			<div className="flex min-w-0 flex-1 flex-col gap-3.5">
+				<div className="flex items-center gap-3">
+					<Skeleton className="size-8 shrink-0 rounded-full" />
+					<Skeleton className="h-4 w-44" />
+					<Skeleton className="h-4 w-64" />
+					<Skeleton className="ml-auto h-4 w-24" />
 				</div>
-				<div className="border-t border-border/60 pt-3">
-					<Skeleton className="h-4 w-96 max-w-full rounded" />
-				</div>
+				<Skeleton className="aspect-video w-full rounded-t-xl" />
+				<Skeleton className="-mt-3.5 h-14 w-full rounded-b-xl" />
+				<Skeleton className="h-48 w-full rounded-xl" />
 			</div>
-
-			{/* Browser chrome + video | event stream */}
-			<div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,64rem)_minmax(20rem,1fr)] lg:items-stretch">
-				<Skeleton className="aspect-video w-full rounded-xl" />
-				<Skeleton className="h-[clamp(20rem,60vh,28rem)] w-full rounded-xl lg:h-auto" />
-			</div>
-
-			{/* Transport bar — full width */}
-			<Skeleton className="h-20 w-full rounded-xl" />
-
-			{/* Trace timeline — full width */}
-			<Skeleton className="h-56 w-full rounded-xl" />
+			<Skeleton className="h-72 w-full rounded-xl lg:h-auto lg:w-84 lg:shrink-0" />
 		</div>
 	)
 }

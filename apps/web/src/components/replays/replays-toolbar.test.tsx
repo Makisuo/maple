@@ -13,9 +13,11 @@ afterEach(cleanup)
 
 const props = {
 	onSearch: () => {},
-	totalSessions: 12,
-	activeSessions: 3,
 	errorSessions: 1,
+	errorsOnly: false,
+	onToggleErrorsOnly: () => {},
+	engagedOnly: false,
+	onToggleEngagedOnly: () => {},
 }
 
 function input() {
@@ -76,12 +78,38 @@ describe("ReplaysToolbar search", () => {
 	})
 })
 
-describe("ReplaysToolbar stats", () => {
-	it("renders each count with its label", () => {
-		render(<ReplaysToolbar {...props} query="" onSearch={() => {}} />)
-		expect(screen.getByText("12")).toBeTruthy()
-		expect(screen.getByText("sessions")).toBeTruthy()
-		expect(screen.getByText("active")).toBeTruthy()
-		expect(screen.getByText("with errors")).toBeTruthy()
+describe("ReplaysToolbar filter chips", () => {
+	it("renders the error count and toggles the filter on click", () => {
+		const onToggleErrorsOnly = vi.fn()
+		render(
+			<ReplaysToolbar
+				{...props}
+				query=""
+				onSearch={() => {}}
+				onToggleErrorsOnly={onToggleErrorsOnly}
+			/>,
+		)
+		const chip = screen.getByText("with errors").closest("button")!
+		expect(chip.textContent).toContain("1")
+		expect(chip.getAttribute("aria-pressed")).toBe("false")
+		fireEvent.click(chip)
+		expect(onToggleErrorsOnly).toHaveBeenCalledOnce()
+	})
+
+	it("marks the engaged chip pressed when the preset is active", () => {
+		const onToggleEngagedOnly = vi.fn()
+		render(
+			<ReplaysToolbar
+				{...props}
+				query=""
+				onSearch={() => {}}
+				engagedOnly
+				onToggleEngagedOnly={onToggleEngagedOnly}
+			/>,
+		)
+		const chip = screen.getByText(/Engaged/).closest("button")!
+		expect(chip.getAttribute("aria-pressed")).toBe("true")
+		fireEvent.click(chip)
+		expect(onToggleEngagedOnly).toHaveBeenCalledOnce()
 	})
 })

@@ -18,6 +18,7 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import type { TimeRange } from "@/components/time-range-picker/types"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ToolbarStat } from "@maple/ui/components/toolbar"
 
 const replaysSearchSchema = Schema.Struct({
 	service: Schema.optional(Schema.String),
@@ -106,24 +107,51 @@ function ReplaysPage() {
 
 	const sessions = allData
 	const errorSessions = Result.isSuccess(facetsResult) ? facetsResult.value.errorCount : 0
+	const durationP95 = Result.isSuccess(facetsResult) ? facetsResult.value.durationP95 : undefined
+	// "Engaged" chip mirrors the sidebar preset exactly (activeMin=30, no max), so
+	// toggling either surface keeps the other in sync.
+	const engagedOnly = search.activeMin === 30 && search.activeMax == null
 
 	const headerActions = (
-		<TimeRangeHeaderControls
-			startTime={search.startTime ?? startTime}
-			endTime={search.endTime ?? endTime}
-			presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
-			defaultPreset="24h"
-			onTimeChange={handleTimeChange}
-		/>
+		<>
+			<div className="mr-2 hidden items-center gap-4 sm:flex">
+				<ToolbarStat value={sessions.length} label="sessions" />
+				<ToolbarStat
+					value={sessions.filter((s) => s.status === "active").length}
+					label="live"
+					dot
+				/>
+			</div>
+			<TimeRangeHeaderControls
+				startTime={search.startTime ?? startTime}
+				endTime={search.endTime ?? endTime}
+				presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
+				defaultPreset="24h"
+				onTimeChange={handleTimeChange}
+			/>
+		</>
 	)
 
 	const toolbar = (
 		<ReplaysToolbar
 			query={search.q ?? ""}
 			onSearch={handleSearch}
-			totalSessions={sessions.length}
-			activeSessions={sessions.filter((s) => s.status === "active").length}
 			errorSessions={errorSessions}
+			errorsOnly={search.hasErrors === true}
+			onToggleErrorsOnly={() =>
+				navigate({
+					search: (prev) => ({ ...prev, hasErrors: prev.hasErrors ? undefined : true }),
+				})
+			}
+			engagedOnly={engagedOnly}
+			onToggleEngagedOnly={() =>
+				navigate({
+					search: (prev) =>
+						engagedOnly
+							? { ...prev, activeMin: undefined }
+							: { ...prev, activeMin: 30, activeMax: undefined },
+				})
+			}
 			waiting={firstPageResult.waiting}
 		/>
 	)
@@ -156,9 +184,16 @@ function ReplaysPage() {
 							)}
 							{Result.builder(firstPageResult)
 								.onInitial(() => (
-									<div className="space-y-2">
-										{Array.from({ length: 6 }).map((_, i) => (
-											<Skeleton key={i} className="h-[68px] w-full rounded-xl" />
+									<div className="divide-y divide-border">
+										{Array.from({ length: 8 }).map((_, i) => (
+											<div key={i} className="flex items-center gap-3 py-2.5">
+												<Skeleton className="size-8 shrink-0 rounded-full" />
+												<div className="flex-1 space-y-1.5">
+													<Skeleton className="h-3.5 w-48" />
+													<Skeleton className="h-3 w-64" />
+												</div>
+												<Skeleton className="hidden h-3.5 w-40 sm:block" />
+											</div>
 										))}
 									</div>
 								))
@@ -175,6 +210,7 @@ function ReplaysPage() {
 										isCapped={isCapped}
 										loadingMore={isFetchingNextPage}
 										onReachEnd={fetchNextPage}
+										durationP95={durationP95}
 									/>
 								))
 								.render()}

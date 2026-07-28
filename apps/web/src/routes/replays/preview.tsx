@@ -25,10 +25,7 @@ function ReplayPreviewPage() {
 			<DashboardLayout.Breadcrumbs items={breadcrumbs} />
 			<DashboardLayout.Body>
 				<DashboardLayout.Content>
-					<DashboardLayout.Sticky>
-						<DashboardLayout.Header title="Session Replay (preview)" />
-					</DashboardLayout.Sticky>
-					<DashboardLayout.Scroll>
+					<DashboardLayout.Fill>
 						<ReplayStudio
 							sessionId={session.sessionId}
 							session={session}
@@ -39,7 +36,7 @@ function ReplayPreviewPage() {
 								transcript: PREVIEW_TRANSCRIPT,
 							}}
 						/>
-					</DashboardLayout.Scroll>
+					</DashboardLayout.Fill>
 				</DashboardLayout.Content>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
