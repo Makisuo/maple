@@ -189,26 +189,61 @@ fn rustc_version() -> &'static str {
     option_env!("CARGO_PKG_RUST_VERSION").unwrap_or("unknown")
 }
 
+/// Does this rejection mean the caller lost telemetry it believed it had sent?
+///
+/// This is the distinction that matters operationally, and it is *not* the same
+/// as the 4xx/5xx split:
+///
+/// * **Caller-fault** (`auth`, `payload_too_large`, `throttle`, `unsupported_media`)
+///   — the sender is misconfigured, over quota, or being shed. Expected, usually
+///   self-inflicted, and high-volume: a rotated key or a 429 storm must not page
+///   anyone. These stay `Ok`.
+/// * **Data loss** (`decode`, `enrich`, `bad_request`) — an undecodable body or
+///   an invalid OTLP payload. The sender is healthy, believes it is shipping
+///   telemetry, and is silently getting none of it stored. That is an outage for
+///   that customer, and it is the gateway's problem whether the cause is our
+///   strictness or their encoder.
+///
+/// Classifying the second group as `Ok` is how a bug that rejected 99.2% of one
+/// org's logs for over 24h sat behind a 0% error rate: every dashboard counts
+/// `StatusCode='Error'`, and by the old rule there was nothing to count. Payload
+/// rejections are `Error` now. A healthy exporter produces none, so this reports
+/// real breakage rather than re-flooding the dashboards that the 4xx/5xx rule was
+/// written to protect.
+///
+/// Accepts both `error.type` vocabularies, since both reach the spans: the
+/// per-stage labels from `handle_signal_inner` (`decode`, `enrich`) and the
+/// status-derived kinds from `ApiError::error_kind` (`bad_request`, used by the
+/// replay/session handlers).
+///
+/// `payload_too_large` is deliberately *not* here. It also drops data, but it is
+/// a bounded, self-announcing config problem — the sender is told exactly what
+/// happened and can batch smaller — rather than a healthy exporter shipping into
+/// a void.
+pub fn rejection_loses_data(error_type: &str) -> bool {
+    matches!(error_type, "bad_request" | "decode" | "enrich")
+}
+
 /// Record a failed stage on `span`.
 ///
 /// `error.type` and `maple.ingest.reject_reason` are recorded unconditionally so
 /// the failure is always searchable and always carries its reason. The span
 /// status follows the same rule the server span uses (`otel_status_for_rejection`
-/// in main.rs): only a server-side fault is `Error`. A caller-caused rejection —
-/// bad key, undecodable body, invalid OTLP, per-org throttle — leaves the span
-/// `Ok`, because error dashboards count `StatusCode='Error'` and would otherwise
-/// be flooded by things working exactly as designed.
+/// in main.rs): `Error` for a server fault or a rejection that loses the caller's
+/// data (see `rejection_loses_data`), `Ok` for a rejection of the caller itself —
+/// a bad key or a per-org throttle — because error dashboards count
+/// `StatusCode='Error'` and would otherwise be flooded by things working exactly
+/// as designed.
 ///
 /// The reason is its own attribute rather than `otel.status_description` because
 /// the two cannot coexist: tracing-opentelemetry turns a description into
-/// `Status::error(detail)`, and the `Ok` written next replaces it wholesale — so
-/// on the rejection path, which is every 4xx, the reason exported as an empty
-/// `StatusMessage` and the span said only *that* a payload was refused, never
-/// *why*. It is still set for a server fault, where the `Error` status keeps it.
+/// `Status::error(detail)`, and an `Ok` written next replaces it wholesale — so
+/// on a rejection left `Ok`, the reason exported as an empty `StatusMessage` and
+/// the span said only *that* a payload was refused, never *why*.
 pub fn record_stage_error(span: &Span, error_type: &str, detail: &str, server_fault: bool) {
     span.record("error.type", error_type);
     span.record("maple.ingest.reject_reason", detail);
-    if server_fault {
+    if server_fault || rejection_loses_data(error_type) {
         // One write, not two: `otel.status_description` already resolves to
         // `Status::error(detail)`. Also writing `otel.status_code = "Error"`
         // would contend for the same slot, and which of the two survives
@@ -463,6 +498,22 @@ mod tests {
             .iter()
             .find(|(k, _)| k.as_str() == key)
             .map(|(_, v)| v.to_string())
+    }
+
+    /// The stage spans classify identically to the server span, so a payload
+    /// rejection is `Error` at every level rather than only on the outermost one.
+    #[test]
+    fn stage_spans_treat_payload_rejections_as_data_loss() {
+        assert!(rejection_loses_data("decode"));
+        assert!(rejection_loses_data("enrich"));
+        assert!(rejection_loses_data("bad_request"));
+
+        // Caller-fault stages stay Ok so they cannot flood the error dashboards.
+        assert!(!rejection_loses_data("auth"));
+        assert!(!rejection_loses_data("forward"));
+        // A genuine server fault is Error via the `server_fault` flag instead,
+        // which is how `auth_unavailable` (503) is reported.
+        assert!(!rejection_loses_data("auth_unavailable"));
     }
 
     /// `tracing` only accepts `record()` for fields declared when the span was

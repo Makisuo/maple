@@ -35,7 +35,7 @@ use maple_ingest::metrics;
 use maple_ingest::otel::{
     accept_internal_span, auth_internal_span, build_resource, decode_internal_span,
     entitlement_internal_span, forward_client_span, grpc_server_span, parse_internal_span,
-    record_stage_error, resolve_config_internal_span, ResourceConfig,
+    record_stage_error, rejection_loses_data, resolve_config_internal_span, ResourceConfig,
 };
 use maple_ingest::otlp_json;
 use maple_ingest::telemetry::{
@@ -933,18 +933,13 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// OTEL span status (`otel.status_code`) for a rejected request, by HTTP status.
+/// OTEL span status (`otel.status_code`) for a rejected request.
 ///
-/// Per the OpenTelemetry HTTP semantic conventions, a SERVER span is only an
-/// `Error` for 5xx responses; 4xx client rejections (missing/invalid ingest key,
-/// billing limit, throttle, oversized/undecodable payload) are the caller's fault
-/// and must NOT mark the span `Error` — otherwise they flood the error dashboards
-/// (which count `StatusCode='Error'`). The genuine server-side auth failure
-/// (resolver unavailable → 503) is 5xx and stays `Error`. `http.response.status_code`,
-/// `error.type`, and the `request_completed(… "error" …)` metric are recorded
-/// regardless, so 4xx rejections remain fully observable.
-fn otel_status_for_rejection(status: u16) -> &'static str {
-    if status >= 500 {
+/// 5xx is always `Error` (server fault). Below that, see `rejection_loses_data`:
+/// a rejection that drops the caller's telemetry is an `Error`, a rejection of
+/// the caller itself is not.
+fn otel_status_for_rejection(status: u16, error_kind: &str) -> &'static str {
+    if status >= 500 || rejection_loses_data(error_kind) {
         "Error"
     } else {
         "Ok"
@@ -953,16 +948,16 @@ fn otel_status_for_rejection(status: u16) -> &'static str {
 
 /// Record why a request was rejected, on the server span.
 ///
-/// `otel.status_description` cannot be the carrier: it resolves to
+/// `otel.status_description` cannot be the sole carrier: it resolves to
 /// `Status::error(reason)`, and the SDK keeps only the winner of `Ok > Error >
-/// Unset` — so on the 4xx rejections this path is mostly made of, which are
-/// deliberately `Ok`, the description was dropped and the span recorded *that*
-/// a payload was refused but never *why*. The reason therefore gets its own
-/// attribute, and the description is written only for the 5xx that keep an
-/// `Error` status. Counterpart of `record_stage_error` for the stage spans.
-fn record_rejection_reason(span: &Span, status: u16, reason: &str) {
+/// Unset` — so on a rejection left deliberately `Ok`, the description is dropped
+/// and the span records *that* a request was refused but never *why*. The reason
+/// therefore always gets its own attribute, and the description is additionally
+/// written where an `Error` status will keep it. Counterpart of
+/// `record_stage_error` for the stage spans.
+fn record_rejection_reason(span: &Span, status: u16, error_kind: &str, reason: &str) {
     span.record("maple.ingest.reject_reason", reason);
-    if otel_status_for_rejection(status) == "Error" {
+    if otel_status_for_rejection(status, error_kind) == "Error" {
         span.record("otel.status_description", reason);
     } else {
         span.record("otel.status_code", "Ok");
@@ -2051,7 +2046,12 @@ async fn handle_replay_meta(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error.error_kind());
-            record_rejection_reason(&span_handle, status, error.message.as_str());
+            record_rejection_reason(
+                &span_handle,
+                status,
+                error.error_kind(),
+                error.message.as_str(),
+            );
             error.into_response()
         }
     }
@@ -2184,7 +2184,12 @@ async fn handle_session_events(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error.error_kind());
-            record_rejection_reason(&span_handle, status, error.message.as_str());
+            record_rejection_reason(
+                &span_handle,
+                status,
+                error.error_kind(),
+                error.message.as_str(),
+            );
             error.into_response()
         }
     }
@@ -2295,7 +2300,12 @@ async fn handle_replay_blob(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error.error_kind());
-            record_rejection_reason(&span_handle, status, error.message.as_str());
+            record_rejection_reason(
+                &span_handle,
+                status,
+                error.error_kind(),
+                error.message.as_str(),
+            );
             error.into_response()
         }
     }
@@ -2519,7 +2529,7 @@ async fn handle_signal(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error_kind);
-            record_rejection_reason(&span_handle, status, error.message.as_str());
+            record_rejection_reason(&span_handle, status, error_kind, error.message.as_str());
             metrics::request_completed(signal.path(), "error", error_kind, duration.as_secs_f64());
             error.into_response()
         }
@@ -2593,7 +2603,7 @@ async fn handle_cloudflare_logpush(
             let status = error.status.as_u16();
             span_handle.record("http.response.status_code", status);
             span_handle.record("error.type", error_kind);
-            record_rejection_reason(&span_handle, status, error.message.as_str());
+            record_rejection_reason(&span_handle, status, error_kind, error.message.as_str());
             metrics::request_completed("logs", "error", error_kind, duration.as_secs_f64());
             if error_kind == "auth" {
                 metrics::cloudflare_auth_failure("http_requests");
@@ -2775,6 +2785,7 @@ async fn handle_signal_inner(
         let decoded_payload = decode_payload(&body, content_encoding.as_deref()).map_err(|e| {
             warn!(body_bytes = body.len(), "Failed to decode payload");
             record_stage_error(&decode_span, "decode", &e.message, false);
+            metrics::org_data_loss(&resolved_key.org_id, signal.path(), "decode");
             (e, "decode")
         })?;
         decode_span.record("maple.ingest.decoded_bytes", decoded_payload.len());
@@ -2808,6 +2819,7 @@ async fn handle_signal_inner(
                     // The reason previously only reached the log; on the span it
                     // is what tells you *why* a customer's SDK is being rejected.
                     record_stage_error(&parse_span, "enrich", &e.message, false);
+                    metrics::org_data_loss(&resolved_key.org_id, signal.path(), "enrich");
                     (e, "enrich")
                 })?;
         parse_span.record("maple.ingest.item_count", decoded.item_count());
@@ -4725,17 +4737,57 @@ mod tests {
         assert_eq!(hash_a, hash_b);
     }
 
+    /// Rejections of the *caller* stay `Ok` — a rotated key or a 429 storm is
+    /// high-volume and expected, and must not page anyone.
     #[test]
-    fn rejection_span_status_is_error_only_for_5xx() {
-        // 4xx client rejections must not mark the SERVER span Error.
-        assert_eq!(otel_status_for_rejection(401), "Ok"); // missing/invalid ingest key
-        assert_eq!(otel_status_for_rejection(402), "Ok"); // billing limit
-        assert_eq!(otel_status_for_rejection(413), "Ok"); // payload too large
-        assert_eq!(otel_status_for_rejection(415), "Ok"); // unsupported media type
-        assert_eq!(otel_status_for_rejection(429), "Ok"); // throttle
-                                                          // 5xx server faults stay Error (e.g. auth resolver unavailable → 503).
-        assert_eq!(otel_status_for_rejection(500), "Error");
-        assert_eq!(otel_status_for_rejection(503), "Error");
+    fn caller_fault_rejections_do_not_mark_the_span_error() {
+        assert_eq!(otel_status_for_rejection(401, "auth"), "Ok"); // missing/invalid ingest key
+        assert_eq!(otel_status_for_rejection(402, "error"), "Ok"); // billing limit
+        assert_eq!(otel_status_for_rejection(413, "payload_too_large"), "Ok");
+        assert_eq!(otel_status_for_rejection(415, "unsupported_media"), "Ok");
+        assert_eq!(otel_status_for_rejection(429, "throttle"), "Ok");
+        assert_eq!(otel_status_for_rejection(429, "forward"), "Ok"); // pipeline shed
+    }
+
+    /// Rejections that destroy the sender's telemetry are `Error` regardless of
+    /// status class. This is the regression that let a bug drop 99.2% of one
+    /// org's logs for over a day while every dashboard read 0%.
+    #[test]
+    fn data_loss_rejections_mark_the_span_error_even_at_4xx() {
+        assert_eq!(otel_status_for_rejection(400, "enrich"), "Error");
+        assert_eq!(otel_status_for_rejection(400, "decode"), "Error");
+        assert_eq!(otel_status_for_rejection(400, "bad_request"), "Error");
+
+        assert!(rejection_loses_data("enrich"));
+        assert!(rejection_loses_data("decode"));
+        assert!(rejection_loses_data("bad_request"));
+        assert!(!rejection_loses_data("auth"));
+        assert!(!rejection_loses_data("throttle"));
+        assert!(!rejection_loses_data("payload_too_large"));
+        assert!(!rejection_loses_data("forward"));
+    }
+
+    #[test]
+    fn server_faults_stay_error() {
+        // e.g. auth resolver unavailable → 503.
+        assert_eq!(otel_status_for_rejection(500, "error"), "Error");
+        assert_eq!(otel_status_for_rejection(503, "unavailable"), "Error");
+        assert_eq!(otel_status_for_rejection(503, "forward"), "Error");
+    }
+
+    /// Every label `rejection_loses_data` claims must actually be producible, or
+    /// the rule silently covers nothing — the failure mode it exists to prevent.
+    #[test]
+    fn data_loss_labels_match_the_kinds_the_gateway_emits() {
+        assert_eq!(ApiError::bad_request("x").error_kind(), "bad_request");
+        // `decode` and `enrich` are the stage labels attached in
+        // `handle_signal_inner`; they reach the span via the Err tuple.
+        for stage in ["decode", "enrich"] {
+            assert!(
+                rejection_loses_data(stage),
+                "{stage} is emitted as an error.type but is not classified"
+            );
+        }
     }
 
     #[test]
@@ -4786,8 +4838,8 @@ mod tests {
             api_error_from_pipeline(&PipelineError::Encode("x".into())).status,
             StatusCode::SERVICE_UNAVAILABLE
         );
-        assert_eq!(otel_status_for_rejection(429), "Ok");
-        assert_eq!(otel_status_for_rejection(503), "Error");
+        assert_eq!(otel_status_for_rejection(429, "forward"), "Ok");
+        assert_eq!(otel_status_for_rejection(503, "forward"), "Error");
     }
 
     #[test]
@@ -5939,7 +5991,7 @@ mod tests {
                 error.is_server_fault()
             );
             assert_eq!(
-                otel_status_for_rejection(status),
+                otel_status_for_rejection(status, "forward"),
                 if error.is_server_fault() {
                     "Error"
                 } else {
