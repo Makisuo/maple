@@ -20,16 +20,41 @@ const GRID_COLUMNS = 12
  * to stay legible. Charts scaled purely by row unit lose their plot area and
  * render as a bare axis; stats clip their value. The floors below are what each
  * visualization needs to actually show something.
+ *
+ * The canvas draws a row unit at 60px plus a 12px margin (`dashboard-canvas`),
+ * so 32 plus the 8px grid gap below is a little over half scale. Enough that a
+ * deliberately tall widget still reads as taller than its neighbours, rather
+ * than every widget bottoming out on its floor.
  */
-const ROW_HEIGHT = 20
+const ROW_HEIGHT = 32
+
+/**
+ * What `WidgetShell`'s `Card` costs before the visualization gets a pixel:
+ * `CardHeader py-2.5` around a text-xs title, plus `CardContent p-2`. Measured,
+ * not derived — the header's line box rounds up. Every floor below is this plus
+ * what the visualization itself needs.
+ */
+const CARD_CHROME = 58
 
 /** Minimum rendered height per visualization, in pixels. */
 const MIN_HEIGHT: Record<string, number> = {
-	stat: 84,
-	gauge: 110,
-	markdown: 64,
+	// Value (text-2xl, 32) over a sparkline (h-10, 40) with the content's pt-4.
+	// Within a few px of what the canvas gives the `h: 2` stats templates author,
+	// so the preview isn't lying about the row it draws.
+	stat: CARD_CHROME + 80,
+	gauge: CARD_CHROME + 108,
+	markdown: CARD_CHROME + 28,
 }
-const MIN_HEIGHT_DEFAULT = 170
+/**
+ * Charts and the table/list family. The two terms are the chart box's whole
+ * budget: a 128px plot, comfortably clear of `MIN_CHART_PLOT_HEIGHT` (100), and
+ * a legend at the 94px its widest form wants (it caps at 12 series, so four
+ * wrapped rows is the worst case). Sized this way `responsiveLegendHeight`'s
+ * 45%-of-box cap never binds, so the legend is never handed less than it asked
+ * for and its last row is never sliced in half by the card edge — which is what
+ * the preview did at every size before.
+ */
+const MIN_HEIGHT_DEFAULT = CARD_CHROME + 128 + 94
 
 /**
  * Widgets drawn beyond this point are not worth the warehouse round trip in a
@@ -74,13 +99,20 @@ const PreviewWidget = memo(function PreviewWidget({ widget }: { widget: Dashboar
 	)
 })
 
+/**
+ * The shape most templates open with — a row of stats over a pair of charts —
+ * drawn at the heights the real widgets will take, so the panel below the
+ * preview doesn't jump when the request resolves.
+ */
 function PreviewSkeleton() {
+	const statHeight = MIN_HEIGHT.stat
 	return (
 		<div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${GRID_COLUMNS}, 1fr)` }}>
-			<Skeleton className="col-span-4 h-[62px] rounded-md" />
-			<Skeleton className="col-span-4 h-[62px] rounded-md" />
-			<Skeleton className="col-span-4 h-[62px] rounded-md" />
-			<Skeleton className="col-span-12 h-[84px] rounded-md" />
+			<Skeleton className="col-span-4 rounded-md" style={{ height: statHeight }} />
+			<Skeleton className="col-span-4 rounded-md" style={{ height: statHeight }} />
+			<Skeleton className="col-span-4 rounded-md" style={{ height: statHeight }} />
+			<Skeleton className="col-span-6 rounded-md" style={{ height: MIN_HEIGHT_DEFAULT }} />
+			<Skeleton className="col-span-6 rounded-md" style={{ height: MIN_HEIGHT_DEFAULT }} />
 		</div>
 	)
 }

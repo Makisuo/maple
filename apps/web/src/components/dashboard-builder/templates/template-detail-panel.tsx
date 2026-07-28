@@ -124,7 +124,10 @@ export function TemplateDetailPanel({ template, readiness, creating, onCreate }:
 	}
 
 	return (
-		<div className="flex flex-col gap-6 p-8">
+		// `bg-inherit` carries whichever surface the panel was dropped onto — the
+		// page or the sheet — down to the sticky footer, which has to paint over
+		// the preview scrolling beneath it.
+		<div className="flex flex-col gap-6 bg-inherit p-8">
 			<div className="flex flex-col gap-3">
 				<div className="flex items-center gap-3">
 					<span className="border-border bg-card flex size-8.5 shrink-0 items-center justify-center rounded-lg border">
@@ -196,9 +199,26 @@ export function TemplateDetailPanel({ template, readiness, creating, onCreate }:
 			)}
 
 			{/* Never blocking: a gated template can still be created, and its widgets
-			    fill in on their own once the data starts arriving. */}
-			<div className="flex flex-col gap-2.5 pt-1.5">
-				<div className="flex flex-wrap items-center gap-2.5">
+			    fill in on their own once the data starts arriving.
+
+			    Pinned to the bottom of the scroll area rather than sitting at the end
+			    of it: a live preview is taller than the pane, so the action that the
+			    whole page exists for would otherwise start below the fold. The
+			    negative margins bleed it past the container's `p-8` so it spans the
+			    pane, and it paints `--panel-surface` so the preview can't show
+			    through. A rule across the top would read as the end of the content
+			    and leave the widgets under it looking sliced off; the gradient above
+			    instead fades them out, which says "keep scrolling". At the bottom of
+			    the scroll there is nothing left to fade and it disappears on its
+			    own. */}
+			<div className="sticky bottom-0 z-10 -mx-8 -mb-8 bg-[var(--panel-surface)] px-8 pt-3 pb-6">
+				<div
+					aria-hidden
+					className="pointer-events-none absolute inset-x-0 bottom-full h-12 bg-gradient-to-t from-[var(--panel-surface)] to-transparent"
+				/>
+				{/* One row while it fits: the button carries the action and the note
+				    trails it, wrapping to its own line only when it can't. */}
+				<div className="flex flex-wrap items-center gap-x-3.5 gap-y-2">
 					{ready ? (
 						<Button onClick={submit} disabled={missingRequired.length > 0} loading={creating}>
 							Create dashboard
@@ -220,14 +240,14 @@ export function TemplateDetailPanel({ template, readiness, creating, onCreate }:
 							</Button>
 						</>
 					)}
+					<p className="text-muted-foreground min-w-0 text-[11px]">
+						{missingRequired.length > 0
+							? `Fill in ${missingRequired.join(" and ")} first.`
+							: ready
+								? "Creates a copy you own — edit or delete it freely."
+								: `Creating it now is fine — the widgets stay empty until the data shows up, then fill in on their own.`}
+					</p>
 				</div>
-				<p className="text-muted-foreground text-[11px]">
-					{missingRequired.length > 0
-						? `Fill in ${missingRequired.join(" and ")} first.`
-						: ready
-							? "Creates a copy you own — edit or delete it freely."
-							: `Creating it now is fine — the widgets stay empty until the data shows up, then fill in on their own.`}
-				</p>
 			</div>
 		</div>
 	)

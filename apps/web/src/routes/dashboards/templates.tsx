@@ -237,7 +237,15 @@ function TemplatesPage() {
 										loading={loading}
 									/>
 								</div>
-								{!panelIsSheet && <div className="min-w-0 grow overflow-y-auto">{panel}</div>}
+								{/* `--panel-surface` is the colour the panel's sticky footer
+								    paints and fades the scrolling preview into. It has to be
+								    declared by whoever owns the surface — here the page, in the
+								    sheet below its popover. */}
+								{!panelIsSheet && (
+									<div className="bg-background min-w-0 grow overflow-y-auto [--panel-surface:var(--background)]">
+										{panel}
+									</div>
+								)}
 							</div>
 						)}
 					</DashboardLayout.Fill>
@@ -251,7 +259,10 @@ function TemplatesPage() {
 						if (!open) setSelected(undefined)
 					}}
 				>
-					<SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-lg">
+					<SheetContent
+						side="right"
+						className="w-full overflow-y-auto p-0 [--panel-surface:var(--popover)] sm:max-w-lg"
+					>
 						<SheetHeader className="sr-only">
 							<SheetTitle>{selected?.name ?? "Template"}</SheetTitle>
 							<SheetDescription>What this template builds and what it needs.</SheetDescription>
