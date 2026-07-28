@@ -56,7 +56,8 @@ const LOG_FIELDS = ["timestamp", "severityText", "severityNumber", "serviceName"
 const UNIT_OPTIONS: Array<{ value: string; label: string }> = [
 	{ value: "none", label: "None" },
 	{ value: "number", label: "Number" },
-	{ value: "percent", label: "Percent" },
+	{ value: "percent", label: "Percent (0–1)" },
+	{ value: "percent_100", label: "Percent (0–100)" },
 	{ value: "duration_ms", label: "Duration (ms)" },
 	{ value: "duration_us", label: "Duration (us)" },
 	{ value: "bytes", label: "Bytes" },

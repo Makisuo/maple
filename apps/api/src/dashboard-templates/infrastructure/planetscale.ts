@@ -80,12 +80,15 @@ function widgets(database?: string): WidgetDef[] {
 			display: { title: "Active Connections (Postgres)", ...CHART_DISPLAY_AREA, unit: "number" },
 			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
+		// PlanetScale reports these two as 0–100 percentages (see `PlanetScaleDatabaseStatsOutput`
+		// in @maple/query-engine), so they take `percent_100`. The plain `percent` unit is a 0–1
+		// ratio that multiplies by 100 at display — under it, 85% CPU rendered as "8500.0%".
 		gaugeChart({
 			id: "cpu",
 			name: "CPU",
 			metricName: "planetscale_pods_cpu_util_percentages",
 			title: "Pod CPU Utilization (max)",
-			unit: "percent",
+			unit: "percent_100",
 			where,
 			layout: { x: 0, y: 6, w: 6, h: 6 },
 		}),
@@ -94,7 +97,7 @@ function widgets(database?: string): WidgetDef[] {
 			name: "Memory",
 			metricName: "planetscale_pods_mem_util_percentages",
 			title: "Pod Memory Utilization (max)",
-			unit: "percent",
+			unit: "percent_100",
 			where,
 			layout: { x: 6, y: 6, w: 6, h: 6 },
 		}),
@@ -103,7 +106,7 @@ function widgets(database?: string): WidgetDef[] {
 			name: "Replica lag",
 			metricName: "planetscale_mysql_replica_lag_seconds",
 			title: "Replica Lag (MySQL)",
-			unit: "seconds",
+			unit: "duration_s",
 			where,
 			layout: { x: 0, y: 12, w: 6, h: 6 },
 		}),
@@ -112,7 +115,7 @@ function widgets(database?: string): WidgetDef[] {
 			name: "Replica lag",
 			metricName: "planetscale_postgres_replica_lag_seconds",
 			title: "Replica Lag (Postgres)",
-			unit: "seconds",
+			unit: "duration_s",
 			where,
 			layout: { x: 6, y: 12, w: 6, h: 6 },
 		}),

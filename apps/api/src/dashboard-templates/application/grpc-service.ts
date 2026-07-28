@@ -24,7 +24,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 			dataSource: makeQueryBuilderTimeseriesDataSource([
 				makeQueryDraft({
 					id: "grpc-rps",
-					name: "Requests / sec",
+					name: "Requests",
 					dataSource: "traces",
 					aggregation: "count",
 					whereClause: where,
@@ -47,7 +47,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 					groupBy: ["service.name"],
 				}),
 			]),
-			display: { title: "Error Rate", ...CHART_DISPLAY_AREA },
+			display: { title: "Error Rate", ...CHART_DISPLAY_LINE, unit: "percent" },
 			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{

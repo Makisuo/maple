@@ -1,5 +1,6 @@
 import {
 	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	makeQueryBuilderTimeseriesDataSource,
 	makeQueryDraft,
@@ -91,7 +92,7 @@ function widgets(): WidgetDef[] {
 					groupBy: ["service.name"],
 				}),
 			]),
-			display: { title: "Error Rate by Service", ...CHART_DISPLAY_AREA },
+			display: { title: "Error Rate by Service", ...CHART_DISPLAY_LINE, unit: "percent" },
 			layout: { x: 6, y: 7, w: 6, h: 6 },
 		},
 		{

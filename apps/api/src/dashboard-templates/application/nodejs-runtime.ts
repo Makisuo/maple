@@ -1,5 +1,5 @@
 import {
-	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_BAR,
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	metricsTimeseries,
@@ -60,7 +60,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 				groupBy,
 			}),
-			display: { title: "GC Count / sec", ...CHART_DISPLAY_AREA, unit: "number" },
+			display: { title: "GC Count / sec", ...CHART_DISPLAY_BAR, unit: "number" },
 			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{

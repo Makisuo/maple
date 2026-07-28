@@ -1,6 +1,7 @@
 import {
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
+	combineWhere,
 	metricsBreakdown,
 	metricsTimeseries,
 	paramKey,
@@ -10,8 +11,18 @@ import {
 } from "../helpers"
 import type { TemplateDefinition, WidgetDef } from "../types"
 
+// Every metric here is an OTel semconv JVM metric, and all of them except `jvm.gc.duration` are
+// UpDownCounters — non-monotonic Sums, not Gauges. `metricType` picks the warehouse table, so the
+// old `gauge` spelling read `metrics_gauge` and rendered empty widgets.
+//
+// `jvm.memory.used`/`committed` are also reported per memory pool AND per `jvm.memory.type`
+// (heap / non_heap). Charting them without the heap filter and with the default `avg` aggregation
+// gave the average of every pool of both types — not heap usage. Filter to heap, sum the pools.
+const HEAP_ONLY = `attr.jvm.memory.type = "heap"`
+
 function widgets(serviceName?: string): WidgetDef[] {
 	const where = serviceWhereClause(serviceName)
+	const heapWhere = combineWhere(serviceWhereClause(serviceName), HEAP_ONLY)
 	const groupBy = ["service.name"]
 	return [
 		{
@@ -21,8 +32,10 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "jvm-heap-used",
 				name: "Heap Used",
 				metricName: "jvm.memory.used",
-				metricType: "gauge",
-				whereClause: where,
+				metricType: "sum",
+				aggregation: "sum",
+				isMonotonic: false,
+				whereClause: heapWhere,
 				groupBy,
 			}),
 			display: { title: "JVM Heap Used", ...CHART_DISPLAY_LINE, unit: "bytes" },
@@ -35,8 +48,10 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "jvm-heap-committed",
 				name: "Heap Committed",
 				metricName: "jvm.memory.committed",
-				metricType: "gauge",
-				whereClause: where,
+				metricType: "sum",
+				aggregation: "sum",
+				isMonotonic: false,
+				whereClause: heapWhere,
 				groupBy,
 			}),
 			display: { title: "JVM Heap Committed", ...CHART_DISPLAY_LINE, unit: "bytes" },
@@ -57,7 +72,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 				groupBy,
 			}),
-			display: { title: "GC Pause Time (Max)", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
+			display: { title: "GC Pause Time (Max)", ...CHART_DISPLAY_LINE, unit: "duration_s" },
 			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
@@ -67,7 +82,9 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "jvm-thread-count",
 				name: "Threads",
 				metricName: "jvm.thread.count",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "sum",
+				isMonotonic: false,
 				whereClause: where,
 				groupBy,
 			}),
@@ -81,7 +98,8 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "jvm-classes-loaded",
 				name: "Classes Loaded",
 				metricName: "jvm.class.count",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "sum",
 				whereClause: where,
 				groupBy,
 			}),

@@ -338,6 +338,15 @@ function aggregateByBucket(points: TimeseriesPoint[]): Map<string, number> {
 	return aggregated
 }
 
+function listIntersectedBuckets(bucketMaps: Map<string, number>[]): string[] {
+	if (bucketMaps.length === 0) {
+		return []
+	}
+
+	const [first, ...rest] = bucketMaps
+	return [...first.keys()].filter((bucket) => rest.every((bucketMap) => bucketMap.has(bucket))).sort()
+}
+
 function listUnionBuckets(bucketMaps: Map<string, number>[]): string[] {
 	const bucketSet = new Set<string>()
 
@@ -348,15 +357,6 @@ function listUnionBuckets(bucketMaps: Map<string, number>[]): string[] {
 	}
 
 	return Array.from(bucketSet).sort()
-}
-
-function listIntersectedBuckets(bucketMaps: Map<string, number>[]): string[] {
-	if (bucketMaps.length === 0) {
-		return []
-	}
-
-	const [first, ...rest] = bucketMaps
-	return [...first.keys()].filter((bucket) => rest.every((bucketMap) => bucketMap.has(bucket))).sort()
 }
 
 function formatBucketWarning(reason: string, buckets: string[]): string {
@@ -442,6 +442,13 @@ export function buildFormulaResults(
 			.map((identifier) => seriesByAlias.get(identifier))
 			.filter((bucketMap): bucketMap is Map<string, number> => bucketMap != null)
 
+		// Every operand must have a value in a bucket for the formula to evaluate there — a
+		// missing operand is unknown, not zero, so nothing is synthesized.
+		//
+		// Consequence worth knowing before writing a formula: a term that is sparse or absent
+		// (a filter matching a rare attribute value) empties the intersection and silences the
+		// whole formula. Multi-term numerators over rare values are therefore not expressible
+		// here; see the note in `dashboard-templates/infrastructure/cloudflare.ts`.
 		const eligibleBuckets =
 			referencedBucketMaps.length === 0 ? allBuckets : listIntersectedBuckets(referencedBucketMaps)
 
@@ -468,7 +475,13 @@ export function buildFormulaResults(
 			const variableValues: Record<string, number> = {}
 
 			for (const identifier of compiled.identifiers) {
-				const value = seriesByAlias.get(identifier)?.get(bucket)
+				const bucketMap = seriesByAlias.get(identifier)
+				if (bucketMap == null) {
+					evaluationError = `Unknown reference: ${identifier} at bucket ${bucket}`
+					break
+				}
+
+				const value = bucketMap.get(bucket)
 				if (value == null) {
 					evaluationError = `Unknown reference: ${identifier} at bucket ${bucket}`
 					break
@@ -521,10 +534,18 @@ export function buildFormulaResults(
 		}
 
 		if (data.length === 0) {
+			// Name the operands, not just the outcome. "Formula produced no valid buckets" on a
+			// five-operand ratio gives the reader nothing to act on; which alias came back empty
+			// usually is the answer (a filter that matches nothing, a metric that isn't emitted).
+			const emptyOperands = compiled.identifiers.filter(
+				(identifier) => (seriesByAlias.get(identifier)?.size ?? 0) === 0,
+			)
 			const error =
 				divisionByZeroBuckets.length > 0
 					? "Formula produced no valid buckets due to division by zero"
-					: "Formula produced no valid buckets"
+					: emptyOperands.length > 0
+						? `Formula produced no valid buckets — no data for ${emptyOperands.join(", ")}`
+						: "Formula produced no valid buckets"
 
 			formulaResults.push({
 				queryId: formula.id,

@@ -38,10 +38,14 @@ function widgets(hostName?: string): WidgetDef[] {
 			id: "memory",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
+				// A non-monotonic Sum, not a Gauge — `metricType` picks the warehouse table, so
+				// `gauge` here read `metrics_gauge` and rendered an empty widget.
 				id: "host-memory",
 				name: "Memory",
 				metricName: "system.memory.usage",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "avg",
+				isMonotonic: false,
 				whereClause: where,
 				groupBy: ["attr.state"],
 			}),

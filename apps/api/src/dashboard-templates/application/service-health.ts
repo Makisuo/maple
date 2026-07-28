@@ -96,7 +96,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 					groupBy,
 				}),
 			]),
-			display: { title: "Error Rate Over Time", ...CHART_DISPLAY_AREA },
+			display: { title: "Error Rate Over Time", ...CHART_DISPLAY_LINE, unit: "percent" },
 			layout: { x: 6, y: 2, w: 6, h: 6 },
 		},
 		{

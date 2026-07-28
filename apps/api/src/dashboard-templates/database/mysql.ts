@@ -1,5 +1,6 @@
 import {
 	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_BAR,
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	metricsTimeseries,
@@ -10,6 +11,9 @@ import {
 } from "../helpers"
 import type { TemplateDefinition, WidgetDef } from "../types"
 
+// The mysqlreceiver reports its level metrics — threads, buffer pool, replica lag — as
+// non-monotonic Sums (UpDownCounters), not Gauges. `metricType` picks the warehouse table, so
+// charting one as `gauge` reads `metrics_gauge` and renders an empty widget.
 function widgets(serviceName?: string): WidgetDef[] {
 	const where = serviceWhereClause(serviceName)
 	return [
@@ -36,7 +40,9 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "mysql-threads",
 				name: "Threads",
 				metricName: "mysql.threads",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "avg",
+				isMonotonic: false,
 				whereClause: where,
 				groupBy: ["attr.kind"],
 			}),
@@ -44,17 +50,20 @@ function widgets(serviceName?: string): WidgetDef[] {
 			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
+			// clean + dirty are the two halves of one pool, so they stack.
 			id: "buffer-pool",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
 				id: "mysql-buffer-pool",
 				name: "Buffer Pool",
 				metricName: "mysql.buffer_pool.usage",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "avg",
+				isMonotonic: false,
 				whereClause: where,
 				groupBy: ["attr.status"],
 			}),
-			display: { title: "Buffer Pool Usage", ...CHART_DISPLAY_LINE, unit: "bytes" },
+			display: { title: "Buffer Pool Usage", ...CHART_DISPLAY_AREA, unit: "bytes" },
 			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
@@ -63,13 +72,13 @@ function widgets(serviceName?: string): WidgetDef[] {
 			dataSource: metricsTimeseries({
 				id: "mysql-slow",
 				name: "Slow Queries",
-				metricName: "mysql.slow_queries",
+				metricName: "mysql.query.slow.count",
 				metricType: "sum",
 				aggregation: "rate",
 				isMonotonic: true,
 				whereClause: where,
 			}),
-			display: { title: "Slow Queries / sec", ...CHART_DISPLAY_AREA, unit: "number" },
+			display: { title: "Slow Queries / sec", ...CHART_DISPLAY_BAR, unit: "number" },
 			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
@@ -95,7 +104,9 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "mysql-replica-lag",
 				name: "Replica Lag",
 				metricName: "mysql.replica.time_behind_source",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "max",
+				isMonotonic: false,
 				whereClause: where,
 			}),
 			display: { title: "Replica Lag", ...CHART_DISPLAY_LINE, unit: "duration_s" },

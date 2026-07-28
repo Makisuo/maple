@@ -383,6 +383,22 @@ describe("query-builder timeseries strategy", () => {
 		expect(rows[1]).not.toHaveProperty("Errors: checkout (%Δ)")
 	})
 
+	// A ratio widget hides its numerator/denominator queries and plots only the formula. Merging
+	// the hidden operands in anyway put raw counts on the same axis as a 0–1 ratio — and, under
+	// the widget's own `percent` unit, drew them as "416849856400.0%".
+	it("collects hidden query and formula ids so they are dropped before merging", () => {
+		const hidden = __testables.collectHiddenResultIds({
+			queries: [{ id: "num", hidden: true }, { id: "den", hidden: true }, { id: "plain" }],
+			formulas: [{ id: "ratio" }, { id: "scratch", hidden: true }],
+		})
+
+		expect([...hidden].sort()).toEqual(["den", "num", "scratch"])
+	})
+
+	it("treats a widget with no formulas and nothing hidden as fully plotted", () => {
+		expect(__testables.collectHiddenResultIds({ queries: [{ id: "a" }, { id: "b" }] }).size).toBe(0)
+	})
+
 	it("does not rescale error_rate series — the engine's 0–1 ratio is canonical", () => {
 		// Regression guard: a ÷100 "normalize" survived from the Tinybird-pipe
 		// era (which returned percent points) long after the CH engine switched

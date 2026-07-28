@@ -122,9 +122,13 @@ export const CHART_DISPLAY_LINE = {
 	curveType: "monotone",
 }
 
-const CHART_DISPLAY_BAR = {
+// Bar is for counted events that are sparse and bursty — restarts, deadlocks,
+// evictions, slow queries, dropped messages. A stacked area over those draws a
+// continuous ribbon between two isolated incidents and reads as sustained
+// pressure; discrete bars read as "three restarts, at these three times".
+export const CHART_DISPLAY_BAR = {
 	chartId: "query-builder-bar",
-	chartPresentation: { legend: "visible", seriesStats: false },
+	chartPresentation: { legend: "visible", seriesStats: false, showPoints: false },
 	stacked: true,
 	curveType: "linear",
 }

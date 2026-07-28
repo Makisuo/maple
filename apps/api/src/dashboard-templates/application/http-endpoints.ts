@@ -1,5 +1,5 @@
 import {
-	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	makeQueryBuilderBreakdownDataSource,
 	makeQueryBuilderTimeseriesDataSource,
@@ -71,7 +71,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 					groupBy: ["span.name"],
 				}),
 			]),
-			display: { title: "Error Rate by Endpoint", ...CHART_DISPLAY_AREA },
+			display: { title: "Error Rate by Endpoint", ...CHART_DISPLAY_LINE, unit: "percent" },
 			layout: { x: 0, y: 5, w: 12, h: 6 },
 		},
 		{

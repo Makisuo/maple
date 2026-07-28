@@ -97,6 +97,63 @@ describe("dashboard template query specs", () => {
 		expect(queryBuilderQueries).toBeGreaterThan(0)
 	})
 
+	// `unit` is an open string on the wire, so a misspelling doesn't fail validation — it falls
+	// through `formatValueByUnit`'s `orElse` and silently renders a bare number. Templates shipped
+	// `unit: "ms"` and `unit: "seconds"` for months, dropping the suffix off every latency readout.
+	const KNOWN_UNITS = new Set([
+		"none",
+		"number",
+		"percent",
+		"percent_100",
+		"duration_ns",
+		"duration_us",
+		"duration_ms",
+		"duration_s",
+		"bytes",
+		"requests_per_sec",
+		"short",
+	])
+
+	function* displayUnits(display: Record<string, unknown>): Generator<[string, string]> {
+		if (typeof display.unit === "string") yield ["display.unit", display.unit]
+		if (Array.isArray(display.columns)) {
+			for (const column of display.columns) {
+				const unit = (column as { unit?: unknown; field?: unknown }).unit
+				if (typeof unit === "string") yield [`column ${String(column.field)}`, unit]
+			}
+		}
+	}
+
+	it("only uses units formatValueByUnit knows how to render", () => {
+		for (const template of DASHBOARD_TEMPLATES) {
+			for (const widget of template.build(allParams(template)).widgets) {
+				for (const [where, unit] of displayUnits(widget.display)) {
+					expect(KNOWN_UNITS, `${template.id}/${widget.id}: ${where} = "${unit}"`).toContain(unit)
+				}
+			}
+		}
+	})
+
+	// `percent` is the canonical 0–1 ratio and multiplies by 100 at display, so a formula that
+	// already scales to 0–100 renders 100× high — the Cloudflare cache-hit and 5xx KPIs read
+	// "8500.0%" until this was caught.
+	it("never pairs a *-100 formula with the 0–1 percent unit", () => {
+		for (const template of DASHBOARD_TEMPLATES) {
+			for (const widget of template.build(allParams(template)).widgets) {
+				if (widget.display.unit !== "percent") continue
+				const formulas = widget.dataSource.params?.formulas
+				if (!Array.isArray(formulas)) continue
+				for (const formula of formulas) {
+					const expression = String((formula as { expression?: unknown }).expression ?? "")
+					expect(
+						expression.replace(/\s+/g, ""),
+						`${template.id}/${widget.id}: "${expression}" under unit "percent"`,
+					).not.toMatch(/\*100$/)
+				}
+			}
+		}
+	})
+
 	it("uses PlanetScale's canonical discovery label keys", () => {
 		const template = DASHBOARD_TEMPLATES.find((candidate) => candidate.id === "planetscale")
 		expect(template).toBeDefined()

@@ -1,5 +1,6 @@
 import {
 	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_BAR,
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	metricsTimeseries,
@@ -10,9 +11,13 @@ import {
 } from "../helpers"
 import type { TemplateDefinition, WidgetDef } from "../types"
 
+// The postgresreceiver puts database identity on the RESOURCE, not on the datapoint
+// (`postgresql.database.name`), and reports its level metrics — backends, db_size — as
+// non-monotonic Sums (UpDownCounters), not Gauges. `metricType` picks the warehouse table, so a
+// UpDownCounter charted as `gauge` reads `metrics_gauge` and renders an empty widget.
 function widgets(serviceName?: string): WidgetDef[] {
 	const where = serviceWhereClause(serviceName)
-	const groupBy = ["attr.postgresql_database_name"]
+	const groupBy = ["resource.postgresql.database.name"]
 	return [
 		{
 			id: "active-connections",
@@ -21,7 +26,9 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "pg-backends",
 				name: "Active Connections",
 				metricName: "postgresql.backends",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "avg",
+				isMonotonic: false,
 				whereClause: where,
 				groupBy,
 			}),
@@ -67,7 +74,9 @@ function widgets(serviceName?: string): WidgetDef[] {
 				id: "pg-db-size",
 				name: "DB Size",
 				metricName: "postgresql.db_size",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "max",
+				isMonotonic: false,
 				whereClause: where,
 				groupBy,
 			}),
@@ -87,21 +96,25 @@ function widgets(serviceName?: string): WidgetDef[] {
 				whereClause: where,
 				groupBy,
 			}),
-			display: { title: "Deadlocks / sec", ...CHART_DISPLAY_AREA, unit: "number" },
+			display: { title: "Deadlocks / sec", ...CHART_DISPLAY_BAR, unit: "number" },
 			layout: { x: 0, y: 12, w: 6, h: 6 },
 		},
 		{
+			// `postgresql.replication.data_delay` is the replication backlog in BYTES, keyed by
+			// replication client — not a lag in seconds. (The seconds-valued companion is
+			// `postgresql.wal.delay`, which the receiver leaves disabled by default.)
 			id: "replication-lag",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
 				id: "pg-replication-lag",
-				name: "Replication Lag",
+				name: "Replication Delay",
 				metricName: "postgresql.replication.data_delay",
 				metricType: "gauge",
+				aggregation: "max",
 				whereClause: where,
-				groupBy,
+				groupBy: ["attr.replication_client"],
 			}),
-			display: { title: "Replication Lag", ...CHART_DISPLAY_LINE, unit: "duration_s" },
+			display: { title: "Replication Delay (bytes behind)", ...CHART_DISPLAY_LINE, unit: "bytes" },
 			layout: { x: 6, y: 12, w: 6, h: 6 },
 		},
 	]

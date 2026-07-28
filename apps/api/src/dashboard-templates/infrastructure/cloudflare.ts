@@ -1,5 +1,6 @@
 import {
 	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_BAR,
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	combineWhere,
@@ -22,9 +23,11 @@ function zoneWhere(zoneName?: string): string {
 type DataSource = { endpoint: string; params: Record<string, unknown> }
 
 /**
- * A / B * 100 ratio over `cloudflare.http.requests`, as two hidden query-builder queries plus a
- * formula. Powers both the KPI stat and the over-time chart for cache hit rate and 5xx error rate
- * (the numerator is the single equality attr-filter the metrics query-builder supports).
+ * A ratio over `cloudflare.http.requests`, as two hidden query-builder queries plus a formula.
+ * Powers both the KPI stat and the over-time chart for cache hit rate and 5xx error rate.
+ *
+ * The result is the canonical 0–1 ratio, NOT a 0–100 percentage: every `unit: "percent"` readout
+ * in the app multiplies by 100 at display, so a formula ending in `* 100` renders 100× high.
  */
 function requestsRatioDataSource(opts: {
 	idPrefix: string
@@ -66,7 +69,7 @@ function requestsRatioDataSource(opts: {
 				{
 					id: `${opts.idPrefix}-ratio`,
 					name: opts.formulaName,
-					expression: "A / B * 100",
+					expression: "A / B",
 					legend: opts.legend,
 				},
 			],
@@ -76,18 +79,30 @@ function requestsRatioDataSource(opts: {
 	}
 }
 
+/**
+ * KNOWN DIVERGENCE from /infra/cloudflare, which counts `hit | stale | revalidated | updating` as
+ * served from the edge (`CACHE_SERVED_STATUSES` in @maple/query-engine's `cloudflare-infra.ts`).
+ * This widget counts `hit` only, so it reads a little low against that page.
+ *
+ * Two engine limits force it, and both would have to lift to close the gap: the metrics
+ * query-builder honors exactly ONE equality attr-filter per query (so the wider set needs one
+ * query per status), and `buildFormulaResults` intersects its operands' buckets (so a status that
+ * is sparse or absent — `updating` appears in no real zone we have — empties the intersection and
+ * blanks the whole widget rather than contributing zero). A four-term numerator was tried and
+ * renders nothing at all; `hit`-only is the accurate-where-it-reports choice.
+ */
 const CACHE_HIT_RATE = {
 	idPrefix: "cf-cache-hit",
 	numeratorWhere: `attr.cache.status = "hit"`,
 	formulaName: "Cache hit rate",
-	legend: "hit rate %",
+	legend: "hit rate",
 } as const
 
 const ERROR_RATE = {
 	idPrefix: "cf-error-rate",
 	numeratorWhere: `attr.http.status_class = "5xx"`,
 	formulaName: "5xx error rate",
-	legend: "5xx %",
+	legend: "5xx rate",
 } as const
 
 /** A single-metric stat: reduce one query-builder series to one number. */
@@ -120,7 +135,7 @@ function metricStat(opts: {
 	}
 }
 
-/** A ratio stat: reduce the A/B*100 formula series (its legend field) to its window average. */
+/** A ratio stat: reduce the ratio formula series (its legend field) to its window average. */
 function ratioStat(opts: {
 	id: string
 	ratio: typeof CACHE_HIT_RATE | typeof ERROR_RATE
@@ -158,7 +173,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 			id: "kpi-cache-hit-rate",
 			ratio: CACHE_HIT_RATE,
 			where,
-			title: "Cache Hit Rate",
+			title: "Edge Cache Hit Rate",
 			layout: { x: 3, y: 0, w: 3, h: 2 },
 		}),
 		ratioStat({
@@ -214,7 +229,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 			id: "cache-hit-rate",
 			visualization: "chart",
 			dataSource: requestsRatioDataSource({ ...CACHE_HIT_RATE, where }),
-			display: { title: "Cache Hit Rate", ...CHART_DISPLAY_LINE, unit: "percent" },
+			display: { title: "Edge Cache Hit Rate", ...CHART_DISPLAY_LINE, unit: "percent" },
 			layout: { x: 0, y: 8, w: 6, h: 6 },
 		},
 		{
@@ -237,7 +252,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 				whereClause: where,
 				groupBy: ["attr.quantile"],
 			}),
-			display: { title: "Edge TTFB (p50/p95/p99)", ...CHART_DISPLAY_LINE, unit: "ms" },
+			display: { title: "Edge TTFB (p50/p95/p99)", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
 			layout: { x: 0, y: 14, w: 6, h: 6 },
 		},
 		{
@@ -251,7 +266,11 @@ function widgets(zoneName?: string): WidgetDef[] {
 				whereClause: where,
 				groupBy: ["attr.quantile"],
 			}),
-			display: { title: "Origin Response Duration (p50/p95/p99)", ...CHART_DISPLAY_LINE, unit: "ms" },
+			display: {
+				title: "Origin Response Duration (p50/p95/p99)",
+				...CHART_DISPLAY_LINE,
+				unit: "duration_ms",
+			},
 			layout: { x: 6, y: 14, w: 6, h: 6 },
 		},
 
@@ -296,7 +315,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 				aggregation: "sum",
 				groupBy: ["resource.service.name"],
 			}),
-			display: { title: "Worker Errors by Script", ...CHART_DISPLAY_AREA, unit: "number" },
+			display: { title: "Worker Errors by Script", ...CHART_DISPLAY_BAR, unit: "number" },
 			layout: { x: 0, y: 26, w: 6, h: 6 },
 		},
 		{
@@ -310,7 +329,7 @@ function widgets(zoneName?: string): WidgetDef[] {
 				whereClause: `attr.quantile = "0.99"`,
 				groupBy: ["resource.service.name"],
 			}),
-			display: { title: "Worker CPU Time p99 by Script", ...CHART_DISPLAY_LINE, unit: "ms" },
+			display: { title: "Worker CPU Time p99 by Script", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
 			layout: { x: 6, y: 26, w: 6, h: 6 },
 		},
 	]

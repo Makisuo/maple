@@ -31,16 +31,21 @@ function widgets(serviceName?: string): WidgetDef[] {
 			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
+			// Non-monotonic Sum, not a Gauge — and it carries `active`, `available` and `current`
+			// on the same metric, so without the split this charted their meaningless total.
 			id: "active-connections",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
 				id: "mongo-connections",
-				name: "Active Connections",
+				name: "Connections",
 				metricName: "mongodb.connection.count",
-				metricType: "gauge",
+				metricType: "sum",
+				aggregation: "avg",
+				isMonotonic: false,
 				whereClause: where,
+				groupBy: ["attr.type"],
 			}),
-			display: { title: "Active Connections", ...CHART_DISPLAY_LINE, unit: "number" },
+			display: { title: "Connections by Type", ...CHART_DISPLAY_LINE, unit: "number" },
 			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
@@ -76,16 +81,21 @@ function widgets(serviceName?: string): WidgetDef[] {
 			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 		{
-			id: "replica-lag",
+			// Was `mongodb.replication.lag`, which the mongodbreceiver has never emitted — the
+			// widget could only ever render empty. Operation latency is the real per-operation
+			// health signal the receiver does expose (microseconds, keyed by operation).
+			id: "operation-latency",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
-				id: "mongo-replica-lag",
-				name: "Replica Lag",
-				metricName: "mongodb.replication.lag",
+				id: "mongo-op-latency",
+				name: "Latency",
+				metricName: "mongodb.operation.latency.time",
 				metricType: "gauge",
+				aggregation: "avg",
 				whereClause: where,
+				groupBy: ["attr.operation"],
 			}),
-			display: { title: "Replica Lag", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
+			display: { title: "Operation Latency by Type", ...CHART_DISPLAY_LINE, unit: "duration_us" },
 			layout: { x: 0, y: 12, w: 12, h: 6 },
 		},
 	]
@@ -94,7 +104,7 @@ function widgets(serviceName?: string): WidgetDef[] {
 export const mongodbTemplate: TemplateDefinition = {
 	id: templateId("mongodb-overview"),
 	name: "MongoDB Overview",
-	description: "Operations by type, connections, document ops, cache hits, and replica lag.",
+	description: "Operations by type, connections, document ops, cache hits, and operation latency.",
 	category: "database",
 	tags: ["mongodb", "database"],
 	requirement: {

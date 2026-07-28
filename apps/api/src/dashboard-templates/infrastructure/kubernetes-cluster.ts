@@ -1,5 +1,6 @@
 import {
 	CHART_DISPLAY_AREA,
+	CHART_DISPLAY_BAR,
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	combineWhere,
@@ -30,6 +31,10 @@ function widgets(clusterName?: string): WidgetDef[] {
 			layout: { x: 0, y: 0, w: 6, h: 6 },
 		},
 		{
+			// `k8s.pod.phase`'s VALUE is a phase enum (1 Pending … 5 Unknown), one datapoint per
+			// pod. Averaging or stacking those codes across a namespace produces a number that
+			// means nothing; counting the datapoints is the pod count, which is what the chart
+			// was always trying to say.
 			id: "pod-count",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
@@ -37,38 +42,46 @@ function widgets(clusterName?: string): WidgetDef[] {
 				name: "Pods",
 				metricName: "k8s.pod.phase",
 				metricType: "gauge",
+				aggregation: "count",
 				whereClause: where,
 				groupBy: ["resource.k8s.namespace.name"],
 			}),
-			display: { title: "Pod Phase by Namespace", ...CHART_DISPLAY_AREA, unit: "number" },
+			display: { title: "Pods by Namespace", ...CHART_DISPLAY_AREA, unit: "number" },
 			layout: { x: 6, y: 0, w: 6, h: 6 },
 		},
 		{
+			// One datapoint per deployment, so the namespace total needs `sum` — the default
+			// `avg` gave the mean replica count of a namespace's deployments.
 			id: "deployment-available",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
 				id: "k8s-deployments",
-				name: "Deployments Available",
+				name: "Available Pods",
 				metricName: "k8s.deployment.available",
 				metricType: "gauge",
+				aggregation: "sum",
 				whereClause: where,
 				groupBy: ["resource.k8s.namespace.name"],
 			}),
-			display: { title: "Deployment Availability", ...CHART_DISPLAY_LINE, unit: "number" },
+			display: { title: "Available Deployment Pods", ...CHART_DISPLAY_LINE, unit: "number" },
 			layout: { x: 0, y: 6, w: 6, h: 6 },
 		},
 		{
-			id: "pods-by-namespace",
+			// Replaces a stacked `k8s.namespace.phase`, whose value is 1 for active and 0 for
+			// terminating — stacking it just counted namespaces. Restarts are the signal an
+			// operator actually opens a cluster dashboard for, and they're bursty, so bars.
+			id: "container-restarts",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
-				id: "k8s-namespace-phase",
-				name: "Namespaces",
-				metricName: "k8s.namespace.phase",
+				id: "k8s-restarts",
+				name: "Restarts",
+				metricName: "k8s.container.restarts",
 				metricType: "gauge",
+				aggregation: "sum",
 				whereClause: where,
 				groupBy: ["resource.k8s.namespace.name"],
 			}),
-			display: { title: "Namespace Phase", ...CHART_DISPLAY_AREA, unit: "number" },
+			display: { title: "Container Restarts by Namespace", ...CHART_DISPLAY_BAR, unit: "number" },
 			layout: { x: 6, y: 6, w: 6, h: 6 },
 		},
 	]
@@ -77,7 +90,7 @@ function widgets(clusterName?: string): WidgetDef[] {
 export const kubernetesClusterTemplate: TemplateDefinition = {
 	id: templateId("kubernetes-cluster"),
 	name: "Kubernetes Cluster",
-	description: "Node readiness, pod phase distribution, and deployment availability.",
+	description: "Node readiness, pods per namespace, deployment availability, and container restarts.",
 	category: "infrastructure",
 	tags: ["kubernetes", "k8s"],
 	requirement: {

@@ -73,6 +73,7 @@ export type ValueUnit =
 	| "none"
 	| "number"
 	| "percent"
+	| "percent_100"
 	| "duration_ms"
 	| "duration_us"
 	| "duration_s"

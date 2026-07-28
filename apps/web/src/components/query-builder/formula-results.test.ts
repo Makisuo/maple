@@ -96,6 +96,31 @@ describe("buildFormulaResults", () => {
 		expect(result.warnings.some((warning) => warning.includes("division by zero"))).toBe(false)
 	})
 
+	// Operands are intersected, so a term that matches nothing silences the whole formula rather
+	// than contributing zero. That rules out multi-term numerators over rare attribute values —
+	// the reason `cloudflare.ts` cannot express its canonical four-status cache-hit numerator.
+	// The message must name the empty operand; "no valid buckets" alone is undiagnosable.
+	it("names the empty operand when a term matches nothing", () => {
+		const formula = makeFormula({ expression: "(A + B) / C" })
+		const queryResults: QueryRunResult[] = [
+			makeResult({
+				queryName: "A",
+				data: [{ bucket: "2026-02-10 11:56:00", series: { total: 6 } }],
+			}),
+			makeResult({ queryId: "query-2", queryName: "B", data: [] }),
+			makeResult({
+				queryId: "query-3",
+				queryName: "C",
+				data: [{ bucket: "2026-02-10 11:56:00", series: { total: 12 } }],
+			}),
+		]
+
+		const [result] = buildFormulaResults([formula], queryResults)
+
+		expect(result.status).toBe("error")
+		expect(result.error).toBe("Formula produced no valid buckets — no data for B")
+	})
+
 	it("treats empty-series buckets as missing operands instead of zero", () => {
 		const formula = makeFormula()
 		const queryResults: QueryRunResult[] = [
@@ -113,7 +138,7 @@ describe("buildFormulaResults", () => {
 		const [result] = buildFormulaResults([formula], queryResults)
 
 		expect(result.status).toBe("error")
-		expect(result.error).toBe("Formula produced no valid buckets")
+		expect(result.error).toBe("Formula produced no valid buckets — no data for B")
 		expect(result.warnings.some((warning) => warning.includes("division by zero"))).toBe(false)
 	})
 
