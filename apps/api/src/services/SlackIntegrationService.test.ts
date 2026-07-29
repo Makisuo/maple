@@ -67,6 +67,45 @@ const SLACK_STATE_TTL_MS = 10 * 60_000
 /** Mirror of the service's (unexported) `SLACK_MAX_CHANNEL_PAGES` runaway guard. */
 const SLACK_MAX_CHANNEL_PAGES = 20
 
+/** Mirror of the service's (unexported) `SLACK_CHANNEL_WALK_BUDGET_MS`. */
+const SLACK_CHANNEL_WALK_BUDGET_MS = 45_000
+
+/**
+ * Run an effect that interleaves real-promise fetch mocks with TestClock sleeps.
+ *
+ * The fetch mock resolves on the real microtask queue while the backoff sleeps
+ * sit on the TestClock, so neither drains the other and both have to be pumped.
+ * Pump until the fiber actually finishes rather than for a fixed number of
+ * turns: a fixed count is coupled to how many macrotask turns PGlite happens to
+ * take, and when it guesses low the failure mode is `Fiber.join` blocking to the
+ * vitest timeout instead of a readable assertion. Running out of steps fails
+ * loudly here instead.
+ */
+const runInterleaved = <A, E, R>(
+	effect: Effect.Effect<A, E, R>,
+	options?: { readonly stepMs?: number; readonly maxSteps?: number },
+) =>
+	Effect.gen(function* () {
+		const stepMs = options?.stepMs ?? 1_000
+		const maxSteps = options?.maxSteps ?? 400
+		let settled = false
+		const fiber = yield* Effect.forkChild(
+			effect.pipe(
+				Effect.onExit(() =>
+					Effect.sync(() => {
+						settled = true
+					}),
+				),
+			),
+		)
+		for (let step = 0; step < maxSteps && !settled; step++) {
+			yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)))
+			if (!settled) yield* TestClock.adjust(stepMs)
+		}
+		assert.isTrue(settled, `effect did not settle within ${maxSteps} interleaved steps`)
+		return yield* Fiber.join(fiber)
+	})
+
 /**
  * Wrap the real ApiKeysService so `create` runs `inject` first. `apiKeys.create`
  * is the only seam between completeInstall's cross-org pre-check and its
@@ -1110,15 +1149,7 @@ describe("SlackIntegrationService", () => {
 			const slack = yield* SlackIntegrationService
 			// `conversations.list` is Tier 2 — a 429 must back off, not surface as an
 			// "unexpected payload" error (Slack sends an empty body with the 429).
-			const fiber = yield* Effect.forkChild(slack.listChannels(asOrgId("org_lc")))
-			// The fetch mock resolves on the real microtask queue while the sleep is
-			// on the TestClock, so alternate between draining one and advancing the
-			// other until the walk finishes.
-			for (let i = 0; i < 5; i++) {
-				yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)))
-				yield* TestClock.adjust(5_000)
-			}
-			const channels = yield* Fiber.join(fiber)
+			const channels = yield* runInterleaved(slack.listChannels(asOrgId("org_lc")))
 			assert.strictEqual(calls, 2)
 			assert.deepStrictEqual(
 				channels.map((c) => c.id),
@@ -1132,6 +1163,135 @@ describe("SlackIntegrationService", () => {
 						calls++
 						return call === 0
 							? new Response("", { status: 429, headers: { "retry-after": "2" } })
+							: jsonResponse({ ok: true, channels: [{ id: "C1", name: "one" }] })
+					}),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels stops at the overall time budget and returns what it collected", () => {
+		const testDb = createTestDb(trackedDbs)
+		let calls = 0
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lcbudget",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			// Page 1 is rate limited for a full Tier 2 window (60s), which is longer
+			// than the whole walk is allowed to take. The walk must give up at the
+			// budget and hand back page 0 rather than sleeping past Cloudflare's
+			// ~100s edge cutoff on a request nobody is listening to any more.
+			const channels = yield* runInterleaved(slack.listChannels(asOrgId("org_lc")), {
+				maxSteps: Math.ceil(SLACK_CHANNEL_WALK_BUDGET_MS / 1_000) + 30,
+			})
+			assert.deepStrictEqual(
+				channels.map((c) => c.id),
+				["C1"],
+			)
+			// Exactly two: the successful page and the 429. A third would mean the
+			// 60s `Retry-After` had been clamped below the budget and retried —
+			// `conversations.list` is Tier 2, so 60 is the honest wait.
+			assert.strictEqual(calls, 2)
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, (_url, call) => {
+						calls++
+						if (call === 0) {
+							return jsonResponse({
+								ok: true,
+								channels: [{ id: "C1", name: "one" }],
+								response_metadata: { next_cursor: "cursor-2" },
+							})
+						}
+						if (call === 1) {
+							return new Response("", { status: 429, headers: { "retry-after": "60" } })
+						}
+						return jsonResponse({ ok: true, channels: [{ id: "C2", name: "two" }] })
+					}),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels retries a Slack 5xx and reports the status when it persists", () => {
+		const testDb = createTestDb(trackedDbs)
+		let calls = 0
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc5xx",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			// A 1000-channel page can time out server-side; Slack answers with an
+			// HTML error page, not JSON. That must not surface as the misleading
+			// "returned a non-JSON response".
+			const error = yield* runInterleaved(Effect.flip(slack.listChannels(asOrgId("org_lc"))))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsUpstreamError")
+			assert.include(error.message, "HTTP 503")
+			assert.notInclude(error.message, "non-JSON")
+			// One attempt plus SLACK_RATE_LIMIT_RETRIES.
+			assert.strictEqual(calls, 4)
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, () => {
+						calls++
+						return new Response("<html>upstream timeout</html>", {
+							status: 503,
+							headers: { "content-type": "text/html" },
+						})
+					}),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels recovers when a transient 5xx clears on retry", () => {
+		const testDb = createTestDb(trackedDbs)
+		let calls = 0
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc5xxok",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const channels = yield* runInterleaved(slack.listChannels(asOrgId("org_lc")))
+			assert.deepStrictEqual(
+				channels.map((c) => c.id),
+				["C1"],
+			)
+			assert.strictEqual(calls, 2)
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, (_url, call) => {
+						calls++
+						return call === 0
+							? new Response("", { status: 500 })
 							: jsonResponse({ ok: true, channels: [{ id: "C1", name: "one" }] })
 					}),
 				),

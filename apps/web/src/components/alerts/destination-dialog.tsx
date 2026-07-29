@@ -17,7 +17,12 @@ import {
 	HazelIcon,
 	LoaderIcon,
 } from "@/components/icons"
-import { CHANNEL_RESULT_LIMIT, rankChannels } from "@/components/alerts/slack-channel-search"
+import {
+	CHANNEL_RESULT_LIMIT,
+	channelLabel,
+	channelPickerView,
+	resolveSearchQuery,
+} from "@/components/alerts/slack-channel-search"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { v2ErrorInfo } from "@/lib/error-messages"
@@ -623,13 +628,17 @@ function SlackBotFields({
 	// popup's empty state and keyboard highlighting agree with what's rendered.
 	const [channelQuery, setChannelQuery] = useState("")
 	// Picking a channel makes Base UI write its label into the input; that is a
-	// selection, not a search, and must not narrow the list to one row.
-	const selectedLabel = channels.find((c) => c.id === form.slackChannelId)?.name
-	const searchQuery =
-		selectedLabel !== undefined && channelQuery.replace(/^#/, "") === selectedLabel ? "" : channelQuery
-	const visibleChannels = useMemo(() => rankChannels(channels, searchQuery), [channels, searchQuery])
+	// selection, not a search, and must not narrow the list to one row. Compare
+	// against the same label function the Combobox displays — a private channel's
+	// label carries a " (private)" suffix that a bare-name compare misses, which
+	// left `searchQuery` holding "#alerts (private)" and emptied the picker.
+	const selectedChannel = channels.find((c) => c.id === form.slackChannelId)
+	const searchQuery = resolveSearchQuery(channelQuery, selectedChannel)
+	const { visible: visibleChannels, truncated } = useMemo(
+		() => channelPickerView(channels, searchQuery, form.slackChannelId || null),
+		[channels, searchQuery, form.slackChannelId],
+	)
 	const visibleChannelIds = useMemo(() => visibleChannels.map((c) => c.id), [visibleChannels])
-	const truncated = visibleChannels.length < channels.length
 
 	// `GET /v2/integrations/slack/channels` is admin-gated (`requireAdmin`), so a
 	// regular member gets a 403 that no amount of retrying will clear. The v2
@@ -741,10 +750,9 @@ function SlackBotFields({
 		// Unknown id (stale/stored channel not in the fetched list): prefer the
 		// stored name, but never render an empty label — show the raw id.
 		if (!channel) return form.slackChannelName ? `#${form.slackChannelName}` : id
-		return channel.is_private ? `#${channel.name} (private)` : `#${channel.name}`
+		return channelLabel(channel)
 	}
 
-	const selectedChannel = channels.find((c) => c.id === form.slackChannelId)
 	// Editing keeps the stored channel until a new one is picked — its id isn't
 	// returned, so the form field is empty by design. Render the stored value as a
 	// value (not as placeholder gray, which reads as "nothing configured").
@@ -809,6 +817,10 @@ function SlackBotFields({
 					// The stored channel is shown as a value above; the placeholder stays
 					// the actual prompt so the field never looks pre-filled.
 					placeholder={channelsLoading ? "Loading channels…" : "Search channels…"}
+					// Single-select never clears the input on close, so a query that
+					// matched nothing would survive an Escape and reopen as an empty
+					// popup with no way out. The clear button is the way out.
+					showClear
 					className="w-full"
 				/>
 				<ComboboxContent>
@@ -842,11 +854,16 @@ function SlackBotFields({
 					</ComboboxList>
 					{/* Big workspaces run to thousands of channels; rendering them all is
 					    both slow and useless. Say that the list is a top-N so an absent
-					    channel reads as "keep typing", not "we don't have it". */}
+					    channel reads as "keep typing", not "we don't have it".
+					    `truncated` means matches were actually dropped, so this can never
+					    render over an empty list — and while a query is active we don't
+					    know the true match count, only that it exceeded the cap, so don't
+					    print the workspace total as if it were one. */}
 					{truncated ? (
 						<p className="shrink-0 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-							Showing the closest {CHANNEL_RESULT_LIMIT} of {channels.length} channels — keep
-							typing to narrow.
+							{searchQuery.trim().length > 0
+								? `Showing the closest ${CHANNEL_RESULT_LIMIT} matches — keep typing to narrow.`
+								: `Showing ${CHANNEL_RESULT_LIMIT} of ${channels.length} channels — type to narrow.`}
 						</p>
 					) : null}
 				</ComboboxContent>
