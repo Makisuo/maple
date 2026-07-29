@@ -581,6 +581,8 @@ struct KeyRow {
     org_id: String,
     self_managed: bool,
     clickhouse_ready: bool,
+    spend_paused: bool,
+    paused_features: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -591,6 +593,8 @@ struct ConnectorRow {
     dataset: String,
     self_managed: bool,
     clickhouse_ready: bool,
+    spend_paused: bool,
+    paused_features: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -623,6 +627,8 @@ impl IngestKeyIdentity {
             key_id: self.key_id,
             self_managed: routing.self_managed,
             clickhouse_ready: routing.clickhouse_ready,
+            spend_paused: routing.spend_paused,
+            paused_features: routing.paused_features,
         }
     }
 }
@@ -648,6 +654,8 @@ impl CloudflareConnectorIdentity {
             secret_key_id: self.secret_key_id,
             self_managed: routing.self_managed,
             clickhouse_ready: routing.clickhouse_ready,
+            spend_paused: routing.spend_paused,
+            paused_features: routing.paused_features,
         }
     }
 }
@@ -656,6 +664,14 @@ impl CloudflareConnectorIdentity {
 struct OrgRouting {
     self_managed: bool,
     clickhouse_ready: bool,
+    /// The org is over its configured monthly spend ceiling AND chose to pause
+    /// ingest on breach. Stamped on `org_spend_limits` by the API's hourly
+    /// spend-limit cron — the gateway never prices a cycle itself. Defaults to
+    /// false, so an org with no row (the common case) is never paused.
+    spend_paused: bool,
+    /// Autumn featureIds whose per-cycle cap is exceeded. Per signal on purpose:
+    /// blowing the logs cap must not stop traces.
+    paused_features: Vec<String>,
 }
 
 impl OrgRouting {
@@ -663,6 +679,8 @@ impl OrgRouting {
         Self {
             self_managed: row.self_managed,
             clickhouse_ready: row.clickhouse_ready,
+            spend_paused: row.spend_paused,
+            paused_features: row.paused_features.clone(),
         }
     }
 
@@ -670,8 +688,21 @@ impl OrgRouting {
         Self {
             self_managed: row.self_managed,
             clickhouse_ready: row.clickhouse_ready,
+            spend_paused: row.spend_paused,
+            paused_features: row.paused_features.clone(),
         }
     }
+
+}
+
+/// Is this signal blocked by the org's own spend guardrails?
+///
+/// `feature_id` is the Autumn featureId the signal meters as (`logs` / `traces` /
+/// `metrics`). A whole-org pause blocks everything; a cap blocks only its own
+/// signal. Shared by the OTLP and Cloudflare Logpush paths so the two can't
+/// diverge on what "paused" means.
+fn spend_blocks_signal(spend_paused: bool, paused_features: &[String], feature_id: &str) -> bool {
+    spend_paused || paused_features.iter().any(|id| id == feature_id)
 }
 
 #[derive(Clone, Debug)]
@@ -720,6 +751,10 @@ struct ResolvedIngestKey {
     // version (SCHEMA_VERSION) — NOT the Tinybird-coupled PROJECT_REVISION, so a
     // Tinybird-only schema change can't silently un-ready a BYO-CH org.
     clickhouse_ready: bool,
+    // Spend guardrails, resolved with routing: whole-org pause (spend ceiling
+    // breached in "pause ingest" mode) and per-signal cap pauses.
+    spend_paused: bool,
+    paused_features: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -734,6 +769,8 @@ struct ResolvedCloudflareConnector {
     // to the self-managed pool when the owning org has BYO Tinybird active.
     self_managed: bool,
     clickhouse_ready: bool,
+    spend_paused: bool,
+    paused_features: Vec<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -1866,6 +1903,9 @@ async fn resolve_grpc_ingest_key(
             key_id: "sentinel".to_string(),
             self_managed: false,
             clickhouse_ready: false,
+            // The sentinel is a synthetic health probe, not a billable org.
+            spend_paused: false,
+            paused_features: Vec::new(),
         });
     }
 
@@ -2692,6 +2732,44 @@ async fn handle_signal_inner(
         "Authenticated"
     );
 
+    // --- Customer-configured spend guardrails (per-signal) ---
+    // The org's OWN ceiling, not the plan's: `paused_at` / `paused_features` are
+    // stamped on `org_spend_limits` by the API's hourly spend-limit cron, and are
+    // only ever set when the customer chose "pause ingest at limit". Checked
+    // before the Autumn entitlement because it needs no network call — the state
+    // arrived with the resolved key — and because a customer who asked us to stop
+    // spending their money should not wait on a billing-provider round-trip.
+    //
+    // Never fails open into a pause: the cron leaves the previous state untouched
+    // when it can't price a cycle, and an org with no row is never paused.
+    {
+        let feature_id = signal.path();
+        if spend_blocks_signal(
+            resolved_key.spend_paused,
+            &resolved_key.paused_features,
+            feature_id,
+        ) {
+            let by_cap = !resolved_key.spend_paused;
+            warn!(
+                org_id = %resolved_key.org_id,
+                feature_id,
+                by_cap,
+                "Ingestion blocked: customer spend limit reached"
+            );
+            return Err((
+                ApiError::new(
+                    StatusCode::PAYMENT_REQUIRED,
+                    if by_cap {
+                        "Per-feature volume cap reached for this billing cycle"
+                    } else {
+                        "Monthly spend limit reached; ingest paused by your organization's settings"
+                    },
+                ),
+                "spend_limit",
+            ));
+        }
+    }
+
     // --- Billing entitlement (per-signal) ---
     // Reject ingestion when the org has no active subscription or has exhausted
     // its hard-capped base-plan allotment for this signal. Fails open on any
@@ -2893,6 +2971,24 @@ async fn handle_cloudflare_logpush_inner(
     Span::current().record("maple.ingest.self_managed", resolved.self_managed);
     Span::current().record("maple.ingest.clickhouse_ready", resolved.clickhouse_ready);
 
+    // Logpush bills the `logs` feature — so the customer's own spend guardrails
+    // gate it exactly like OTLP logs do.
+    if spend_blocks_signal(resolved.spend_paused, &resolved.paused_features, "logs") {
+        warn!(
+            org_id = %resolved.org_id,
+            connector_id,
+            by_cap = !resolved.spend_paused,
+            "Cloudflare logpush blocked: customer spend limit reached"
+        );
+        return Err((
+            ApiError::new(
+                StatusCode::PAYMENT_REQUIRED,
+                "Spend limit reached; ingest paused by your organization's settings",
+            ),
+            "spend_limit",
+        ));
+    }
+
     // Logpush bills the `logs` feature — gate it the same way as OTLP logs.
     if let Some(entitlements) = &state.autumn_entitlements {
         if !entitlements.is_allowed(&resolved.org_id, "logs").await {
@@ -3016,6 +3112,8 @@ async fn handle_cloudflare_logpush_inner(
                 key_id: resolved.secret_key_id.clone(),
                 self_managed: resolved.self_managed,
                 clickhouse_ready: resolved.clickhouse_ready,
+                spend_paused: resolved.spend_paused,
+                paused_features: resolved.paused_features.clone(),
             };
             let decoded = DecodedPayload::Logs(request);
             let response = match process_decoded_payload(
@@ -4222,10 +4320,15 @@ impl PostgresKeyStore {
         let client = self.client().await?;
         client
             .query(
+                // Exercises every join the production lookup uses, so a missing
+                // table or column exits at startup instead of 503'ing requests.
                 "SELECT k.org_id, \
-                        COALESCE(s.sync_status = 'connected', false) AS self_managed \
+                        COALESCE(s.sync_status = 'connected', false) AS self_managed, \
+                        COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
+                        COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{}')::text[] AS paused_features \
                  FROM org_ingest_keys k \
                  LEFT JOIN org_clickhouse_settings s ON s.org_id = k.org_id \
+                 LEFT JOIN org_spend_limits l ON l.org_id = k.org_id \
                  WHERE k.private_key_hash = $1 LIMIT 1",
                 &[&"__ingest_probe_no_match__"],
             )
@@ -4249,9 +4352,12 @@ impl KeyStore for PostgresKeyStore {
         let sql = format!(
             "SELECT k.org_id, \
                     COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                    COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready \
+                    COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
+                    COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
+                    COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
              FROM org_ingest_keys k \
              LEFT JOIN org_clickhouse_settings s ON s.org_id = k.org_id \
+             LEFT JOIN org_spend_limits l ON l.org_id = k.org_id \
              WHERE k.{hash_column} = $2 LIMIT 1"
         );
         let client = self.client().await?;
@@ -4267,6 +4373,8 @@ impl KeyStore for PostgresKeyStore {
             org_id: row.get("org_id"),
             self_managed: row.get("self_managed"),
             clickhouse_ready: row.get("clickhouse_ready"),
+            spend_paused: row.get("spend_paused"),
+            paused_features: row.get("paused_features"),
         }))
     }
 
@@ -4281,9 +4389,12 @@ impl KeyStore for PostgresKeyStore {
             .query(
                 "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
                         COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                        COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready \
+                        COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
+                        COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
+                        COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{}')::text[] AS paused_features \
                  FROM cloudflare_logpush_connectors c \
                  LEFT JOIN org_clickhouse_settings s ON s.org_id = c.org_id \
+                 LEFT JOIN org_spend_limits l ON l.org_id = c.org_id \
                  WHERE c.id = $2 AND c.secret_hash = $3 AND c.enabled = true LIMIT 1",
                 &[&revision, &connector_id, &secret_hash],
             )
@@ -4300,6 +4411,8 @@ impl KeyStore for PostgresKeyStore {
             dataset: row.get("dataset"),
             self_managed: row.get("self_managed"),
             clickhouse_ready: row.get("clickhouse_ready"),
+            spend_paused: row.get("spend_paused"),
+            paused_features: row.get("paused_features"),
         }))
     }
 
@@ -4389,9 +4502,17 @@ impl KeyStore for PostgresKeyStore {
         let client = self.client().await?;
         let rows = client
             .query(
-                "SELECT COALESCE(sync_status = 'connected', false) AS self_managed, \
-                        COALESCE(sync_status = 'connected' AND schema_version = $1, false) AS clickhouse_ready \
-                 FROM org_clickhouse_settings WHERE org_id = $2 LIMIT 1",
+                // Anchored on a one-row scalar subquery, not on
+                // org_clickhouse_settings: an org can have spend limits and no
+                // BYO-ClickHouse config, and the old FROM would return no row at
+                // all for it — reading as "never paused".
+                "SELECT COALESCE(s.sync_status = 'connected', false) AS self_managed, \
+                        COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
+                        COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
+                        COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{}')::text[] AS paused_features \
+                 FROM (SELECT $2::text AS org_id) o \
+                 LEFT JOIN org_clickhouse_settings s ON s.org_id = o.org_id \
+                 LEFT JOIN org_spend_limits l ON l.org_id = o.org_id LIMIT 1",
                 &[&revision, &org_id],
             )
             .instrument(postgres_client_span("fetch_org_routing"))
@@ -4403,6 +4524,8 @@ impl KeyStore for PostgresKeyStore {
         Ok(Some(OrgRouting {
             self_managed: row.get("self_managed"),
             clickhouse_ready: row.get("clickhouse_ready"),
+            spend_paused: row.get("spend_paused"),
+            paused_features: row.get("paused_features"),
         }))
     }
 
@@ -4466,6 +4589,9 @@ impl KeyStore for StaticKeyStore {
             org_id: self.org_id.clone(),
             self_managed: false,
             clickhouse_ready: false,
+            // Self-hosted / local: no billing provider, so nothing can be paused.
+            spend_paused: false,
+            paused_features: Vec::new(),
         }))
     }
 
@@ -4885,6 +5011,8 @@ mod tests {
             key_id: "abc".to_string(),
             self_managed: false,
             clickhouse_ready: false,
+            spend_paused: false,
+            paused_features: Vec::new(),
         };
 
         enrich_resource_attributes(&mut attributes, &resolved);
@@ -4918,6 +5046,8 @@ mod tests {
             key_id: "abc".to_string(),
             self_managed: false,
             clickhouse_ready: false,
+            spend_paused: false,
+            paused_features: Vec::new(),
         }
     }
 
@@ -5111,6 +5241,8 @@ mod tests {
             secret_key_id: "secret".to_string(),
             self_managed: false,
             clickhouse_ready: false,
+            spend_paused: false,
+            paused_features: Vec::new(),
         };
         let record = serde_json::from_str::<JsonMap<String, JsonValue>>(
             r#"{
@@ -5231,6 +5363,8 @@ mod tests {
                 OrgRouting {
                     self_managed: row.self_managed,
                     clickhouse_ready: row.clickhouse_ready,
+                    spend_paused: false,
+                    paused_features: Vec::new(),
                 },
             );
             self.keys
@@ -5246,6 +5380,8 @@ mod tests {
                 OrgRouting {
                     self_managed: row.self_managed,
                     clickhouse_ready: row.clickhouse_ready,
+                    spend_paused: false,
+                    paused_features: Vec::new(),
                 },
             );
             self.connectors
@@ -5646,6 +5782,55 @@ mod tests {
         assert!(!budget.is_exhausted("org_a", "s1").await);
     }
 
+    #[test]
+    fn spend_blocks_signal_pauses_the_whole_org_or_just_the_capped_signal() {
+        // Whole-org pause: the spend ceiling was breached in "pause ingest" mode.
+        assert!(spend_blocks_signal(true, &[], "logs"));
+        assert!(spend_blocks_signal(true, &[], "traces"));
+
+        // A per-feature cap blocks only its own signal — blowing the logs cap
+        // must not stop traces, which is the whole point of a per-feature cap.
+        let caps = vec!["logs".to_string()];
+        assert!(spend_blocks_signal(false, &caps, "logs"));
+        assert!(!spend_blocks_signal(false, &caps, "traces"));
+        assert!(!spend_blocks_signal(false, &caps, "metrics"));
+
+        // The default state — no row in org_spend_limits — never blocks.
+        assert!(!spend_blocks_signal(false, &[], "logs"));
+    }
+
+    #[tokio::test]
+    async fn resolve_ingest_key_carries_spend_pause_state_from_the_key_lookup() {
+        // The cold path builds routing from the key row, so a paused org must be
+        // paused on the very first request after a key-cache miss — not only once
+        // the separate routing cache refreshes.
+        let store = Arc::new(FakeKeyStore::default());
+        store.insert_private(
+            "maple_sk_test_paused",
+            KeyRow {
+                org_id: "org_paused".to_string(),
+                self_managed: false,
+                clickhouse_ready: false,
+                spend_paused: true,
+                paused_features: vec!["logs".to_string()],
+            },
+        );
+
+        let resolved = make_resolver(store)
+            .resolve_ingest_key("maple_sk_test_paused")
+            .await
+            .expect("resolve should succeed")
+            .expect("key should be found");
+
+        assert!(resolved.spend_paused);
+        assert_eq!(resolved.paused_features, vec!["logs".to_string()]);
+        assert!(spend_blocks_signal(
+            resolved.spend_paused,
+            &resolved.paused_features,
+            "traces"
+        ));
+    }
+
     #[tokio::test]
     async fn resolve_ingest_key_returns_self_managed_false_when_no_settings_row() {
         let store = Arc::new(FakeKeyStore::default());
@@ -5655,6 +5840,8 @@ mod tests {
                 org_id: "org_shared".to_string(),
                 self_managed: false,
                 clickhouse_ready: false,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
 
@@ -5678,6 +5865,8 @@ mod tests {
                 org_id: "org_byo".to_string(),
                 self_managed: true,
                 clickhouse_ready: true,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
 
@@ -5701,6 +5890,8 @@ mod tests {
                 org_id: "org_stale".to_string(),
                 self_managed: true,
                 clickhouse_ready: false,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
 
@@ -5727,6 +5918,8 @@ mod tests {
                 org_id: "org_transition".to_string(),
                 self_managed: false,
                 clickhouse_ready: false,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
 
@@ -5744,6 +5937,8 @@ mod tests {
             OrgRouting {
                 self_managed: true,
                 clickhouse_ready: true,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -5776,6 +5971,8 @@ mod tests {
                 org_id: "org_d1_blip".to_string(),
                 self_managed: false,
                 clickhouse_ready: false,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
 
@@ -5792,6 +5989,8 @@ mod tests {
             OrgRouting {
                 self_managed: true,
                 clickhouse_ready: true,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -5839,6 +6038,8 @@ mod tests {
                 dataset: "http_requests".to_string(),
                 self_managed: false,
                 clickhouse_ready: false,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
         let routing = make_routing_resolver(Arc::clone(&store), Duration::from_millis(5));
@@ -5866,6 +6067,8 @@ mod tests {
             OrgRouting {
                 self_managed: true,
                 clickhouse_ready: true,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -6026,6 +6229,8 @@ mod tests {
                 org_id: "org_span_tree".to_string(),
                 self_managed: true,
                 clickhouse_ready: true,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
         store.insert_clickhouse_target(
@@ -6120,6 +6325,8 @@ mod tests {
                 org_id: "org_forward_ready".to_string(),
                 self_managed: false,
                 clickhouse_ready: false,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
         let state = test_app_state(
@@ -6160,6 +6367,8 @@ mod tests {
             OrgRouting {
                 self_managed: true,
                 clickhouse_ready: true,
+                spend_paused: false,
+                paused_features: Vec::new(),
             },
         );
         store.insert_clickhouse_target(

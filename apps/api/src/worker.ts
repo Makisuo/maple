@@ -345,11 +345,12 @@ const handleQueue = async (
 	}
 }
 
-// Cron handler. Three schedules (see wrangler.jsonc / alchemy.run.ts
+// Cron handler. Four schedules (see wrangler.jsonc / alchemy.run.ts
 // `triggers.crons`), dispatched on `event.cron`:
 //   "0 */12 * * *" — enqueue a periodic VCS sync per installation
 //   "0 * * * *"    — apply scrape-check retention
 //   "0 */6 * * *"  — Slack workspace reconciliation
+//   "5 * * * *"    — evaluate org spend limits
 // Retention is hourly rather than 12-hourly because a busy target can write
 // ~75k check rows a day, so the 10k-row cap binds within a few hours.
 const SCRAPE_RETENTION_CRON = "0 * * * *"
@@ -358,6 +359,11 @@ const SCRAPE_RETENTION_CRON = "0 * * * *"
 // doesn't need to be tight, it only catches a forward call the bot never
 // made (crash, network blip) or installs that predate that wiring.
 const SLACK_RECONCILE_CRON = "0 */6 * * *"
+// Spend-limit evaluation. Hourly is the resolution the billing page promises
+// ("alerts fire before any enforcement") and the ceiling it protects is a
+// monthly one, so a tighter cadence would only add Autumn round-trips. Runs on
+// the same minute as scrape retention but is dispatched by its own cron string.
+const SPEND_LIMIT_CRON = "5 * * * *"
 
 const handleScheduled = async (
 	event: ScheduledController,
@@ -373,6 +379,20 @@ const handleScheduled = async (
 			})
 		} finally {
 			ctx.waitUntil(flushVcsTelemetry(env))
+		}
+		return
+	}
+
+	if (event.cron === SPEND_LIMIT_CRON) {
+		const { buildSpendLimitLayer, runSpendLimitEvaluation, flushSpendLimitTelemetry } = await import(
+			"./spend-limit-runtime"
+		)
+		try {
+			await runScheduledEffect(buildSpendLimitLayer(env), runSpendLimitEvaluation, ctx, {
+				onInterrupt: "graceful",
+			})
+		} finally {
+			ctx.waitUntil(flushSpendLimitTelemetry(env))
 		}
 		return
 	}

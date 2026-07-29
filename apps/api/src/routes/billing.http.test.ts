@@ -1,14 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { type EdgeCacheBackend, makeEdgeCacheService, makeMemoryBackend } from "@maple/query-engine/caching"
 import {
 	CUSTOMER_CACHE_BUCKET,
 	CUSTOMER_CACHE_TTL_SECONDS,
 	CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS,
-	decodeInvoices,
 	readCustomerCached,
 	responseHasActivePlan,
-} from "./billing.http"
+} from "../lib/autumn-client"
+import { BillingCustomer } from "@maple/domain/http"
+import { decodeInvoices, resolveCycleWindow } from "./billing.http"
 
 const ORG = "org_test_123"
 
@@ -192,6 +193,44 @@ describe("decodeInvoices", () => {
 			assert.isTrue(exit._tag === "Failure")
 		}),
 	)
+})
+
+describe("resolveCycleWindow", () => {
+	const asCustomer = (subscriptions: ReadonlyArray<Record<string, unknown>>) =>
+		Schema.decodeUnknownSync(BillingCustomer)({ id: ORG, subscriptions })
+
+	const NOW = Date.UTC(2026, 6, 29, 12) // Jul 29, 2026
+
+	it("uses the active subscription's period, not the calendar month", () => {
+		// An org that subscribed on the 12th is billed on its own anniversary; a
+		// calendar-month chart would disagree with the invoice.
+		const window = resolveCycleWindow(
+			asCustomer([
+				{
+					planId: "startup",
+					status: "active",
+					currentPeriodStart: Date.UTC(2026, 6, 12),
+					currentPeriodEnd: Date.UTC(2026, 7, 12),
+				},
+			]),
+			NOW,
+		)
+
+		assert.strictEqual(window.startMs, Date.UTC(2026, 6, 12))
+		// The full period, NOT clamped to now: the chart has to reach the day the
+		// bill closes to show where the cycle is headed. `nowMs` rides along so the
+		// warehouse read can clamp itself.
+		assert.strictEqual(window.endMs, Date.UTC(2026, 7, 12))
+		assert.strictEqual(window.nowMs, NOW)
+	})
+
+	it("falls back to the calendar month with no active subscription — there is still usage to show", () => {
+		const window = resolveCycleWindow(asCustomer([]), NOW)
+
+		assert.strictEqual(window.startMs, Date.UTC(2026, 6, 1))
+		// Through the end of July, so a planless org still gets a full axis.
+		assert.strictEqual(window.endMs, Date.UTC(2026, 7, 1) - 1)
+	})
 })
 
 describe("responseHasActivePlan", () => {

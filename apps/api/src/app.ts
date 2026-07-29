@@ -77,8 +77,10 @@ import { ApiAuthorizationV2Layer } from "./services/ApiAuthorizationV2Layer"
 import { CloudflareAnalyticsService } from "./services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "./services/CloudflareOAuthService"
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService"
+import { DailySpendService } from "./services/DailySpendService"
 import { DemoService } from "./services/DemoService"
 import { DigestService } from "./services/DigestService"
+import { SpendLimitsService } from "./services/SpendLimitsService"
 import { OnboardingService } from "./services/OnboardingService"
 import { EmailService } from "./lib/EmailService"
 import { OrgMembersService } from "./services/OrgMembersService"
@@ -165,6 +167,7 @@ const CoreServicesLive = Layer.mergeAll(
 	),
 	PlanetScaleService.layer.pipe(Layer.provide(PlanetScaleOAuthLive)),
 	IngestAttributeMappingService.layer,
+	SpendLimitsService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
 
 const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provideMerge(CoreServicesLive))
@@ -273,8 +276,13 @@ const VcsServicesLive = Layer.mergeAll(
 	VcsSourceService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
 ).pipe(Layer.provideMerge(InfraLive))
 
+// The spend chart's warehouse series. The Postgres-backed spend guardrails ride
+// along in CoreServicesLive with the other config services.
+const DailySpendServiceLive = DailySpendService.layer.pipe(Layer.provideMerge(WarehouseQueryServiceLive))
+
 export const MainLive = Layer.mergeAll(
 	CoreServicesLive,
+	DailySpendServiceLive,
 	CloudflareAnalyticsServiceLive,
 	WarehouseQueryServiceLive,
 	EdgeCacheServiceLive,

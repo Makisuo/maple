@@ -18,7 +18,7 @@ export type { CatalogPlan }
 const METERED_INGEST_FEATURES = ["logs", "traces", "metrics"] as const
 
 // Surface a warning once usage crosses 80% of the included grant; "over" once it
-// reaches 100%. Mirrors the meter thresholds in usage-meters.tsx.
+// reaches 100%. Mirrors the meter thresholds in feature-usage-cards.tsx.
 const APPROACHING_RATIO = 0.8
 
 export type QuotaLevel = "ok" | "approaching" | "over"

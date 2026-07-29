@@ -520,6 +520,16 @@ export {
 	type DbStatementSamplesOutput,
 } from "./queries/internal"
 
+// Queries — Billing (daily ingested volume behind the spend chart)
+export {
+	dailySessionCountQuery,
+	dailySessionCountRowSchema,
+	dailySignalVolumeQuery,
+	dailySignalVolumeRowSchema,
+	type DailySessionCountOutput,
+	type DailySignalVolumeOutput,
+} from "./queries/billing-usage"
+
 // Queries — Telemetry liveness (auto-resolve gating + local-mode header heartbeat)
 export {
 	orgTelemetryPulseQuery,

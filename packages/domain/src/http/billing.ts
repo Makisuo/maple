@@ -1,6 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { Authorization } from "./current-tenant"
+import { WarehouseQueryError } from "./warehouse-errors"
 
 // Typed Maple contract in front of the `autumn-js/backend` proxy. The handlers
 // (apps/api/src/routes/billing.http.ts) still call `autumnHandler` internally, so
@@ -140,6 +141,84 @@ const BillingUsageQuery = Schema.Struct({
 	range: Schema.String,
 })
 
+// ---- Daily spend series (warehouse-backed) ----
+
+/**
+ * One UTC day of billable volume. Units match how the ingest gateway meters to
+ * Autumn — decimal GB for the byte signals, a raw count for sessions — so the
+ * client can price a day with the catalog's overage rates and land on the same
+ * dollars as the invoice.
+ */
+export class DailyVolume extends Schema.Class<DailyVolume>("DailyVolume")({
+	/** `YYYY-MM-DD`, UTC. */
+	date: Schema.String,
+	logsGB: Schema.Number,
+	tracesGB: Schema.Number,
+	metricsGB: Schema.Number,
+	browserSessions: Schema.Number,
+}) {}
+
+export class DailySpendResponse extends Schema.Class<DailySpendResponse>("DailySpendResponse")({
+	/** Ascending by date, gap-filled across the whole cycle so day N is index N. */
+	days: Schema.Array(DailyVolume),
+	/** Cycle bounds the series covers, epoch ms. */
+	cycleStart: Schema.Number,
+	cycleEnd: Schema.Number,
+}) {}
+
+// ---- Spend limits (Postgres-backed) ----
+
+export const SpendEnforcementMode = Schema.Literals(["notify", "pause"])
+export type SpendEnforcementMode = typeof SpendEnforcementMode.Type
+
+export class SpendLimits extends Schema.Class<SpendLimits>("SpendLimits")({
+	/** Null = no ceiling configured; per-feature caps may still apply. */
+	monthlyLimitCents: Schema.NullOr(Schema.Number),
+	enforcementMode: SpendEnforcementMode,
+	alertThresholdPercents: Schema.Array(Schema.Number),
+	/** Keyed by Autumn featureId; null = no cap, overage billed at the plan rate. */
+	featureCaps: Schema.Record(Schema.String, Schema.NullOr(Schema.Number)),
+
+	// Derived evaluation state, written by the spend-limit cron. Read-only here:
+	// the client renders breach/pause state, it never asserts it.
+	lastEvaluatedAt: Schema.NullOr(Schema.Number),
+	evaluatedSpendCents: Schema.NullOr(Schema.Number),
+	breachedAt: Schema.NullOr(Schema.Number),
+	pausedAt: Schema.NullOr(Schema.Number),
+	/** Features paused by their own cap — a logs cap never stops traces. */
+	pausedFeatures: Schema.Array(Schema.String),
+}) {}
+
+/**
+ * Full replace of the editable fields — the billing page edits this as one card
+ * (limit + thresholds + mode + caps), so a partial patch would let two
+ * concurrent saves interleave into a state neither user chose.
+ */
+export class UpdateSpendLimitsRequest extends Schema.Class<UpdateSpendLimitsRequest>(
+	"UpdateSpendLimitsRequest",
+)({
+	monthlyLimitCents: Schema.NullOr(Schema.Number),
+	enforcementMode: SpendEnforcementMode,
+	alertThresholdPercents: Schema.Array(Schema.Number),
+	featureCaps: Schema.Record(Schema.String, Schema.NullOr(Schema.Number)),
+}) {}
+
+export class SpendLimitValidationError extends Schema.TaggedErrorClass<SpendLimitValidationError>()(
+	"@maple/http/errors/SpendLimitValidationError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 400 },
+) {}
+
+export class SpendLimitPersistenceError extends Schema.TaggedErrorClass<SpendLimitPersistenceError>()(
+	"@maple/http/errors/SpendLimitPersistenceError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 500 },
+) {}
+
 // ---- Mutations (attach / previewAttach / openCustomerPortal) ----
 
 export class AttachRequest extends Schema.Class<AttachRequest>("AttachRequest")({
@@ -211,6 +290,28 @@ export class BillingApiGroup extends HttpApiGroup.make("billing")
 		HttpApiEndpoint.get("listInvoices", "/invoices", {
 			success: BillingInvoicesResponse,
 			error: BillingUpstreamError,
+		}),
+	)
+	// Warehouse-backed, unlike every other read in this group: Autumn only knows
+	// cycle totals, so the daily shape behind the spend chart comes from
+	// `service_usage` + `session_replays`.
+	.add(
+		HttpApiEndpoint.get("getDailySpend", "/daily-spend", {
+			success: DailySpendResponse,
+			error: [BillingUpstreamError, WarehouseQueryError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("getSpendLimits", "/spend-limits", {
+			success: SpendLimits,
+			error: SpendLimitPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.put("updateSpendLimits", "/spend-limits", {
+			payload: UpdateSpendLimitsRequest,
+			success: SpendLimits,
+			error: [SpendLimitValidationError, SpendLimitPersistenceError],
 		}),
 	)
 	.add(

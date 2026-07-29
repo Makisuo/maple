@@ -1,34 +1,57 @@
 import { useMemo, type ReactNode } from "react"
 import { format } from "date-fns"
-import type { BillingCustomer } from "@maple/domain/http"
 
+import { SpendLimits } from "@maple/domain/http"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Button } from "@maple/ui/components/ui/button"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { cn } from "@maple/ui/utils"
+
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { billingCustomerAtom, billingPlansAtom, billingUsageAtom } from "@/lib/services/atoms/billing-atoms"
+import {
+	billingCustomerAtom,
+	billingDailySpendAtom,
+	billingInvoicesAtom,
+	billingPlansAtom,
+	billingUsageAtom,
+	spendLimitsAtom,
+} from "@/lib/services/atoms/billing-atoms"
 import { useBillingActions } from "@/hooks/use-billing-actions"
 import { getLegacyPlanInfo, getTrialStatus, type TrialStatus } from "@/lib/billing/plan-gating"
-import { getPlanLimits, type PlanLimits } from "@/lib/billing/plans"
-import type { AggregatedUsage } from "@/lib/billing/usage"
+import { buildSpendModel } from "@/lib/billing/spend"
 import { estimateCycleCost } from "@/lib/billing/cost-estimate"
-import { UsageMeters } from "./usage-meters"
-import { PricingCards } from "./pricing-cards"
+import { BillingKpis, BillingKpisSkeleton } from "./billing-kpis"
+import { FeatureUsageCards, FeatureUsageCardsSkeleton } from "./feature-usage-cards"
+import { SpendChart, SpendChartSkeleton } from "./spend-chart"
+import { SpendLimitsCard, SpendLimitsCardSkeleton } from "./spend-limits-card"
+import { PlanOffer } from "./plan-offer"
 import { CostBreakdown, CostBreakdownSkeleton } from "./cost-breakdown"
 import { InvoicesSection } from "./invoices-section"
 
-function limitsFromCustomer(balances: BillingCustomer["balances"]): PlanLimits | null {
-	if (!balances) return null
-	const defaults = getPlanLimits("starter")
-	return {
-		logsGB: balances.logs?.granted ?? defaults.logsGB,
-		tracesGB: balances.traces?.granted ?? defaults.tracesGB,
-		metricsGB: balances.metrics?.granted ?? defaults.metricsGB,
-		retentionDays: balances.retention_days?.remaining ?? defaults.retentionDays,
-		browserSessions: balances.browser_sessions?.granted ?? defaults.browserSessions,
-	}
-}
+/**
+ * Billing, spend-first.
+ *
+ * Reading order matches the question a customer actually arrives with: what am I
+ * on → what is this cycle costing → which signals are driving it → how it accrues
+ * → what stops it → the itemized proof → what plan options exist. The four
+ * feature cards sit ABOVE the chart deliberately: they are the things being
+ * billed, and the chart is only their sum over time.
+ */
+
+// The guardrails card renders for an org that has never configured limits, so an
+// absent row must resolve to the same defaults the API would synthesize rather
+// than hiding the card entirely.
+const DEFAULT_SPEND_LIMITS = new SpendLimits({
+	monthlyLimitCents: null,
+	enforcementMode: "notify",
+	alertThresholdPercents: [80, 100],
+	featureCaps: {},
+	lastEvaluatedAt: null,
+	evaluatedSpendCents: null,
+	breachedAt: null,
+	pausedAt: null,
+	pausedFeatures: [],
+})
 
 function DataPoint({
 	label,
@@ -149,32 +172,32 @@ function SubscriptionStrip({
 	)
 }
 
-function UsageSkeleton() {
-	return (
-		<div className="space-y-4">
-			{Array.from({ length: 4 }).map((_, i) => (
-				<div key={i} className="flex flex-col gap-2">
-					<div className="flex items-center gap-2">
-						<Skeleton className="h-3 w-3 rounded-sm" />
-						<Skeleton className="h-3 w-16" />
-						<Skeleton className="ml-auto h-3 w-24" />
-					</div>
-					<Skeleton className="h-1.5 w-full" />
-				</div>
-			))}
-		</div>
-	)
-}
-
-export function BillingSection() {
+export function BillingSection({ isAdmin = true }: { isAdmin?: boolean }) {
 	const customerResult = useAtomValue(billingCustomerAtom)
 	const plansResult = useAtomValue(billingPlansAtom)
 	const usageResult = useAtomValue(billingUsageAtom)
+	const dailySpendResult = useAtomValue(billingDailySpendAtom)
+	const spendLimitsResult = useAtomValue(spendLimitsAtom)
+	const invoicesResult = useAtomValue(billingInvoicesAtom)
 	const { openCustomerPortal } = useBillingActions()
 
 	const customer = Result.isSuccess(customerResult) ? customerResult.value : undefined
 	const plans = Result.isSuccess(plansResult) ? plansResult.value.plans : undefined
 	const usageTotal = Result.isSuccess(usageResult) ? usageResult.value.total : undefined
+	const daily = Result.isSuccess(dailySpendResult) ? dailySpendResult.value : undefined
+	// A failed limits read must not hide the guardrails card — the defaults are a
+	// truthful "nothing configured", which is what an absent row means anyway.
+	const limits = Result.isSuccess(spendLimitsResult) ? spendLimitsResult.value : DEFAULT_SPEND_LIMITS
+
+	// Most recent closed invoice, for the edit dialog's "last cycle closed at"
+	// anchor — what the ceiling is being set against.
+	const lastCycleTotal = useMemo(() => {
+		if (!Result.isSuccess(invoicesResult)) return null
+		const closed = invoicesResult.value.invoices
+			.filter((invoice) => invoice.status === "paid")
+			.sort((a, b) => b.createdAt - a.createdAt)
+		return closed[0]?.total ?? null
+	}, [invoicesResult])
 
 	const isLoading = Result.isInitial(customerResult) || Result.isInitial(usageResult)
 	// The estimate also needs the plan catalog (for base price + overage rates);
@@ -201,13 +224,12 @@ export function BillingSection() {
 		[customer, plans, usageTotal],
 	)
 
-	const limits = limitsFromCustomer(customer?.balances) ?? getPlanLimits("starter")
-	const usage: AggregatedUsage = {
-		logsGB: usageTotal?.logs?.sum ?? 0,
-		tracesGB: usageTotal?.traces?.sum ?? 0,
-		metricsGB: usageTotal?.metrics?.sum ?? 0,
-		browserSessions: usageTotal?.browser_sessions?.sum ?? 0,
-	}
+	// One spend model feeds the KPI row, the feature cards, and the chart, so the
+	// three can't disagree about what this cycle costs.
+	const model = useMemo(
+		() => buildSpendModel({ customer, plans, usage: usageTotal, nowMs: Date.now() }),
+		[customer, plans, usageTotal],
+	)
 
 	return (
 		<div>
@@ -219,37 +241,88 @@ export function BillingSection() {
 				onManageBilling={() => openCustomerPortal({ returnUrl: window.location.href })}
 			/>
 
+			<section className="mt-8">
+				{isLoading || model === null ? (
+					<BillingKpisSkeleton />
+				) : (
+					<BillingKpis
+						model={model}
+						limitCents={limits.monthlyLimitCents}
+						pausedAt={limits.pausedAt}
+					/>
+				)}
+			</section>
+
 			<section className="mt-10">
-				<SectionHeader title="Current usage" subtitle={billingPeriodLabel} />
-				<div className="mt-5">
-					{isLoading ? <UsageSkeleton /> : <UsageMeters usage={usage} limits={limits} />}
+				<SectionHeader title="Usage by feature" subtitle={billingPeriodLabel} />
+				<div className="mt-4">
+					{isLoading || model === null ? (
+						<FeatureUsageCardsSkeleton />
+					) : (
+						<FeatureUsageCards
+							model={model}
+							featureCaps={limits.featureCaps}
+							pausedFeatures={limits.pausedFeatures}
+						/>
+					)}
 				</div>
 			</section>
 
-			{(isCostLoading || costEstimate !== null) && (
-				<section className="mt-12">
-					<SectionHeader title="Estimated costs" subtitle={billingPeriodLabel} />
+			<section className="mt-10">
+				{isLoading || model === null || Result.isInitial(dailySpendResult) ? (
+					<SpendChartSkeleton />
+				) : (
+					<SpendChart model={model} daily={daily} limitCents={limits.monthlyLimitCents} />
+				)}
+			</section>
+
+			<section className="mt-12">
+				<SectionHeader
+					title="Spend limits"
+					subtitle="Enforced at the ingest gateway · nothing is dropped without warning first"
+				/>
+				<div className="mt-4">
+					{Result.isInitial(spendLimitsResult) ? (
+						<SpendLimitsCardSkeleton />
+					) : (
+						<SpendLimitsCard
+							limits={limits}
+							model={model}
+							lastCycleTotal={lastCycleTotal}
+							canEdit={isAdmin}
+						/>
+					)}
+				</div>
+			</section>
+
+			<div className="mt-12 grid grid-cols-1 gap-8 lg:grid-cols-2">
+				{(isCostLoading || costEstimate !== null) && (
+					<section>
+						<SectionHeader title="Estimated costs" subtitle={billingPeriodLabel} />
+						<div className="mt-3">
+							{isCostLoading || !costEstimate ? (
+								<CostBreakdownSkeleton />
+							) : (
+								<CostBreakdown estimate={costEstimate} />
+							)}
+						</div>
+					</section>
+				)}
+
+				<section>
+					<SectionHeader title="Invoices" />
 					<div className="mt-3">
-						{isCostLoading || !costEstimate ? (
-							<CostBreakdownSkeleton />
-						) : (
-							<CostBreakdown estimate={costEstimate} />
-						)}
+						<InvoicesSection
+							onManageBilling={() => openCustomerPortal({ returnUrl: window.location.href })}
+						/>
 					</div>
 				</section>
-			)}
+			</div>
 
 			<section className="mt-12">
-				<SectionHeader title="Plans" />
-				<div className="mt-5">
-					<PricingCards />
-				</div>
-			</section>
-
-			<section className="mt-12">
-				<SectionHeader title="Invoices" />
-				<div className="mt-3">
-					<InvoicesSection
+				<SectionHeader title="Plans" subtitle="Need higher volume or custom retention?" />
+				<div className="mt-4">
+					<PlanOffer
 						onManageBilling={() => openCustomerPortal({ returnUrl: window.location.href })}
 					/>
 				</div>
