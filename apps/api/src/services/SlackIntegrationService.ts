@@ -66,6 +66,9 @@ export const SLACK_CALLBACK_PATH = "/oauth/slack/callback"
  */
 const SLACK_BOT_SCOPE_LIST = [
 	"app_mentions:read",
+	// Agent surface (top bar / split pane): suggested prompts, thread titles,
+	// status. Without this in the grant, Slack shows the app as a plain bot.
+	"assistant:write",
 	"chat:write",
 	"chat:write.public",
 	"channels:read",

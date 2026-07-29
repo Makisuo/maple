@@ -123,6 +123,7 @@ oauth_config:
     scopes:
         bot:
             - app_mentions:read # receive @mentions
+            - assistant:write # agent surface: suggested prompts, thread titles, status
             - chat:write # post replies
             - chat:write.public # post in channels the bot isn't a member of
             - channels:read # resolve public channel metadata
@@ -133,6 +134,7 @@ oauth_config:
             - im:history # read DM history (message.im)
             - im:read # resolve DM conversation metadata
             - im:write # open/DM the user
+            - reactions:write # :eyes: ack + add_reaction tool (agent/lib/ack-reaction.ts)
             - users:read # attribute speakers
 settings:
     event_subscriptions:
@@ -444,7 +446,8 @@ tools server-side (or add a `tools.allow` here once the concrete names are confi
 **Slack app manifest changes for multi-workspace** (see the manifest in
 [Deploy → step 1](#1-create-the-slack-app)): add the OAuth **redirect URL** pointing at the Maple
 API callback (`/oauth/slack/callback`), broaden the bot scopes to
-`app_mentions:read,chat:write,chat:write.public,channels:read,files:write,groups:read,im:history,im:read,im:write,users:read`,
+`app_mentions:read,assistant:write,chat:write,chat:write.public,channels:read,channels:history,files:write,groups:read,groups:history,im:history,im:read,im:write,reactions:write,users:read`
+(keep in sync with `SLACK_BOT_SCOPE_LIST` in `apps/api/src/services/SlackIntegrationService.ts`),
 and **activate public distribution** so the app can be installed into any workspace.
 
 ## Notes
