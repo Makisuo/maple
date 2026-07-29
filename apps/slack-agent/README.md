@@ -115,6 +115,11 @@ features:
     bot_user:
         display_name: maple
         always_online: true
+    app_home:
+        # The agent surface (split pane) opens the Messages tab; without these the
+        # composer is disabled ("Sending messages to this app has been turned off").
+        messages_tab_enabled: true
+        messages_tab_read_only_enabled: false
 oauth_config:
     # OAuth completes at the MAPLE API (not this agent). Maple stores the per-team
     # install (bot token + Maple API key) that this agent later resolves.
