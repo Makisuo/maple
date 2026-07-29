@@ -3,88 +3,40 @@ import { useAtom } from "@/lib/effect-atom"
 import {
 	dashboardFavoritesAtom,
 	dashboardSortAtom,
-	dashboardTagFilterAtom,
+	isDashboardSortOption,
 	type DashboardSortOption,
 } from "@/atoms/dashboard-preferences-atoms"
-import type { Dashboard } from "@/components/dashboard-builder/types"
 
+/**
+ * Device-local dashboard preferences: which dashboards are starred, and the sort
+ * to fall back to when the URL carries no `?sort`. Both live in localStorage, so
+ * favorites are per-browser and invisible to teammates — the list says so beside
+ * the Favorites header rather than implying shared state.
+ *
+ * Search / scope / tags / sort selection are URL-owned and live on the route, not
+ * here. Sorting itself is `sortDashboards` in dashboard-summary.ts, which
+ * deliberately does *not* hoist favorites — the Favorites section already does.
+ */
 export function useDashboardPreferences() {
 	const [favorites, setFavorites] = useAtom(dashboardFavoritesAtom)
-	const [sortOption, setSortOption] = useAtom(dashboardSortAtom)
-	const [tagFilter, setTagFilter] = useAtom(dashboardTagFilterAtom)
+	const [storedSort, setStoredSort] = useAtom(dashboardSortAtom)
 
 	const favoritesSet = useMemo(() => new Set(favorites), [favorites])
 
 	const toggleFavorite = useCallback(
 		(dashboardId: string) => {
-			setFavorites((prev) => {
-				const current = [...prev]
-				const index = current.indexOf(dashboardId)
-				if (index >= 0) {
-					current.splice(index, 1)
-				} else {
-					current.push(dashboardId)
-				}
-				return current
-			})
+			setFavorites((prev) =>
+				prev.includes(dashboardId) ? prev.filter((id) => id !== dashboardId) : [...prev, dashboardId],
+			)
 		},
 		[setFavorites],
 	)
 
-	const isFavorite = useCallback((dashboardId: string) => favoritesSet.has(dashboardId), [favoritesSet])
-
-	const sortAndFilter = useCallback(
-		(dashboards: ReadonlyArray<Dashboard>) => {
-			let filtered = dashboards
-			if (tagFilter) {
-				filtered = dashboards.filter((d) => d.tags?.includes(tagFilter))
-			}
-
-			const sorted = filtered.toSorted((a, b) => {
-				const aFav = favoritesSet.has(a.id) ? 0 : 1
-				const bFav = favoritesSet.has(b.id) ? 0 : 1
-				if (aFav !== bFav) return aFav - bFav
-
-				const sort = sortOption as DashboardSortOption
-				switch (sort) {
-					case "name-asc":
-						return a.name.localeCompare(b.name)
-					case "name-desc":
-						return b.name.localeCompare(a.name)
-					case "created":
-						return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-					case "widgets":
-						return b.widgets.length - a.widgets.length
-					case "updated":
-					default:
-						return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-				}
-			})
-
-			return sorted
-		},
-		[favoritesSet, sortOption, tagFilter],
-	)
-
-	const allTags = useCallback((dashboards: ReadonlyArray<Dashboard>) => {
-		const tags = new Set<string>()
-		for (const d of dashboards) {
-			if (d.tags) {
-				for (const t of d.tags) tags.add(t)
-			}
-		}
-		return Array.from(tags).sort()
-	}, [])
-
 	return {
 		favorites: favoritesSet,
-		sortOption: sortOption as DashboardSortOption,
-		tagFilter,
 		toggleFavorite,
-		isFavorite,
-		setSortOption: (opt: DashboardSortOption) => setSortOption(opt),
-		setTagFilter,
-		sortAndFilter,
-		allTags,
+		/** Fallback sort for when `?sort` is absent. */
+		defaultSort: isDashboardSortOption(storedSort) ? storedSort : ("updated" as DashboardSortOption),
+		setDefaultSort: (sort: DashboardSortOption) => setStoredSort(sort),
 	}
 }
