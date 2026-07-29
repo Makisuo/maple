@@ -186,7 +186,7 @@ function PiePreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
 	return (
 		<div className="aspect-[4/3] flex flex-col gap-1.5">
 			<div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
-			<ChartPreview component={Component} />
+			<ChartPreview component={Component} data={entry.sampleData} />
 		</div>
 	)
 }
@@ -198,7 +198,7 @@ function FunnelPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
 	return (
 		<div className="aspect-[4/3] flex flex-col gap-1.5">
 			<div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
-			<ChartPreview component={Component} />
+			<ChartPreview component={Component} data={entry.sampleData} />
 		</div>
 	)
 }
@@ -210,7 +210,7 @@ function HistogramPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
 	return (
 		<div className="aspect-[4/3] flex flex-col gap-1.5">
 			<div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
-			<ChartPreview component={Component} />
+			<ChartPreview component={Component} data={entry.sampleData} />
 		</div>
 	)
 }
@@ -222,7 +222,7 @@ function HeatmapPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
 	return (
 		<div className="aspect-[4/3] flex flex-col gap-1.5">
 			<div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
-			<ChartPreview component={Component} />
+			<ChartPreview component={Component} data={entry.sampleData} />
 		</div>
 	)
 }
@@ -390,7 +390,7 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 											onClick={() => handleSelectChart(chartId)}
 											className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
 										>
-											<ChartPreview component={Component} />
+											<ChartPreview component={Component} data={entry.sampleData} />
 											<div className="flex flex-col gap-0.5">
 												<div className="text-xs font-medium">{label}</div>
 												<div className="text-[11px] text-dim">

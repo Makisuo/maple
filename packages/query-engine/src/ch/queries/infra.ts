@@ -15,9 +15,11 @@
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
-import { from, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
-import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
+import { Schema } from "effect"
+import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
+import { unionAll, type CHUnionQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
+import { CHNumber } from "../schema"
 
 const HOSTMETRIC_NAMES = [
 	"system.cpu.utilization",
@@ -286,6 +288,32 @@ const POD_METRIC_NAMES = [
 // (The *_utilization metrics require requests/limits to be set; cpu.usage does not.)
 const POD_FACET_PROBE_METRIC = "k8s.pod.cpu.usage" as const
 
+/**
+ * Sort keys for the pod list. All of these are select-list aliases, so they sort
+ * the aggregated rows rather than the raw scan.
+ *
+ * `saturation` is the default and means "peak of CPU-vs-limit or memory-vs-limit
+ * over the window" — the thing that decides whether a pod is about to be
+ * throttled or OOM-killed. Sorting on the *average* (which is all the list used
+ * to compute) hides a pod that pinned at 100% for four minutes of a twelve-hour
+ * window behind pods that idle slightly higher.
+ */
+export type PodSortKey =
+	| "saturation"
+	| "cpuUsage"
+	| "cpuLimitPct"
+	| "memoryLimitPct"
+	| "podName"
+	| "lastSeen"
+
+export type SortDirection = "asc" | "desc"
+
+/** Pods whose saturation is 0 because no limits are set sort by raw usage instead. */
+const POD_SORT_TIEBREAK: ReadonlyArray<[PodSortKey | "cpuUsagePeak", SortDirection]> = [
+	["cpuUsagePeak", "desc"],
+	["podName", "asc"],
+]
+
 export interface ListPodsOpts {
 	search?: string
 	podNames?: ReadonlyArray<string>
@@ -302,9 +330,22 @@ export interface ListPodsOpts {
 	// page, which still narrows by a single workload owner.
 	workloadKind?: "deployment" | "statefulset" | "daemonset"
 	workloadName?: string
+	/** Defaults to `saturation` — see PodSortKey. */
+	sortBy?: PodSortKey
+	sortDir?: SortDirection
+	/** One-click fleet scope from the summary band. */
+	scope?: PodScope
 	limit?: number
 	offset?: number
 }
+
+/**
+ * Scopes filter on *aggregated* values, so they can't live in the WHERE clause
+ * alongside the row filters. The builder has no HAVING, so a scoped list wraps
+ * the grouped query and filters outside it — same plan ClickHouse would produce
+ * for HAVING, and it keeps the unscoped query (the common case) single-level.
+ */
+export type PodScope = "saturated" | "elevated" | "unbounded" | "stale"
 
 export interface ListPodsOutput {
 	readonly podName: string
@@ -323,14 +364,23 @@ export interface ListPodsOutput {
 	// label, in which case the UI should treat it as ec2).
 	readonly computeType: string
 	readonly lastSeen: string
+	// Window averages.
 	readonly cpuUsage: number
 	readonly cpuLimitPct: number
 	readonly memoryLimitPct: number
 	readonly cpuRequestPct: number
 	readonly memoryRequestPct: number
+	// Window peaks. The list sorts and tones on these; the averages are shown
+	// beside them so a row reads "0.42 → 0.97 cores" rather than one number that
+	// could mean either.
+	readonly cpuUsagePeak: number
+	readonly cpuLimitPctPeak: number
+	readonly memoryLimitPctPeak: number
+	/** greatest(cpuLimitPctPeak, memoryLimitPctPeak) — 0 when no limits are set. */
+	readonly saturation: number
 }
 
-const workloadAttrKey = (kind: "deployment" | "statefulset" | "daemonset") =>
+const workloadAttrKey =(kind: "deployment" | "statefulset" | "daemonset") =>
 	kind === "deployment"
 		? "k8s.deployment.name"
 		: kind === "statefulset"
@@ -384,8 +434,18 @@ const podFilterConditions = (
 	),
 ]
 
+/** Ten collection intervals at the chart's 30s default. */
+const STALE_POD_SECONDS = 300
+
 export function listPodsQuery(opts: ListPodsOpts = {}) {
-	return from(MetricsGauge)
+	const sortBy = opts.sortBy ?? "saturation"
+	const sortDir = opts.sortDir ?? (sortBy === "podName" ? "asc" : "desc")
+	const orderBy: Array<[string, SortDirection]> = [
+		[sortBy, sortDir],
+		...POD_SORT_TIEBREAK.filter(([key]) => key !== sortBy),
+	]
+
+	const grouped = from(MetricsGauge)
 		.select(($) => ({
 			podName: $.ResourceAttributes.get("k8s.pod.name"),
 			namespace: CH.any_($.ResourceAttributes.get("k8s.namespace.name")),
@@ -405,12 +465,144 @@ export function listPodsQuery(opts: ListPodsOpts = {}) {
 			memoryLimitPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
 			cpuRequestPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu_request_utilization")),
 			memoryRequestPct: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.memory_request_utilization")),
+			// Peaks ride along on the same scan the averages already pay for.
+			cpuUsagePeak: CH.maxIf($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
+			cpuLimitPctPeak: CH.maxIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
+			memoryLimitPctPeak: CH.maxIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
+			saturation: CH.greatest_(
+				CH.maxIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
+				CH.maxIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
+			),
 		}))
 		.where(($) => [...podBaseConditions($), ...podFilterConditions($, opts)])
 		.groupBy("podName")
-		.orderBy(["lastSeen", "desc"])
-		.limit(opts.limit ?? 200)
+
+	// Always wrapped, scope or not: sorting and scoping both operate on aggregates,
+	// and one code path is worth more than saving a subquery ClickHouse flattens
+	// anyway.
+	return fromQuery(grouped, "pods")
+		.select(($) => ({
+			podName: $.podName,
+			namespace: $.namespace,
+			nodeName: $.nodeName,
+			clusterName: $.clusterName,
+			environment: $.environment,
+			deploymentName: $.deploymentName,
+			statefulsetName: $.statefulsetName,
+			daemonsetName: $.daemonsetName,
+			jobName: $.jobName,
+			qosClass: $.qosClass,
+			podUid: $.podUid,
+			computeType: $.computeType,
+			lastSeen: $.lastSeen,
+			cpuUsage: $.cpuUsage,
+			cpuLimitPct: $.cpuLimitPct,
+			memoryLimitPct: $.memoryLimitPct,
+			cpuRequestPct: $.cpuRequestPct,
+			memoryRequestPct: $.memoryRequestPct,
+			cpuUsagePeak: $.cpuUsagePeak,
+			cpuLimitPctPeak: $.cpuLimitPctPeak,
+			memoryLimitPctPeak: $.memoryLimitPctPeak,
+			saturation: $.saturation,
+		}))
+		.where(($) => [opts.scope ? podScopeCondition($, opts.scope) : undefined])
+		.orderBy(...(orderBy as Array<[never, SortDirection]>))
+		.limit(opts.limit ?? 50)
 		.offset(opts.offset ?? 0)
+		.format("JSON")
+}
+
+/**
+ * A pod with no limits set reports 0 for both limit utilizations — the metrics
+ * simply aren't emitted — so `saturation = 0 AND cpuUsagePeak > 0` is exactly
+ * "burning CPU with nothing capping it", with no extra column to carry.
+ */
+function podScopeCondition(
+	$: {
+		saturation: CH.Expr<number>
+		cpuUsagePeak: CH.Expr<number>
+		lastSeen: CH.Expr<string>
+	},
+	scope: PodScope,
+): CH.Condition {
+	switch (scope) {
+		case "saturated":
+			return $.saturation.gte(0.9)
+		case "elevated":
+			return $.saturation.gte(0.6).and($.saturation.lt(0.9))
+		case "unbounded":
+			return $.saturation.eq(0).and($.cpuUsagePeak.gt(0))
+		case "stale":
+			return $.lastSeen.lt(CH.intervalSub(param.dateTime("endTime"), STALE_POD_SECONDS))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Pod count — the denominator behind "Top 50 of 1,284".
+//
+// The list is limited, so `rows.length` only ever tells you how many rows came
+// back, never how many matched. Without this the UI silently claims the fleet is
+// the size of the page.
+// ---------------------------------------------------------------------------
+
+export interface ListPodsSummaryOutput {
+	readonly totalPods: number
+	/** Peak of either limit ≥ 0.9 — matches severityLevel("crit") in the web app. */
+	readonly saturatedPods: number
+	/** Peak of either limit in [0.6, 0.9). */
+	readonly elevatedPods: number
+	/** Burning CPU with no limit set at all — invisible to a saturation ranking. */
+	readonly unboundedPods: number
+	/** Last scrape older than ten collection intervals (5 min at the 30s default). */
+	readonly stalePods: number
+}
+
+/** Counts arrive as strings on BYO-ClickHouse, so decode rather than trust JSON. */
+export const ListPodsSummaryOutputSchema: CompiledQueryRowSchema<ListPodsSummaryOutput> =
+	Schema.Struct({
+		totalPods: CHNumber,
+		saturatedPods: CHNumber,
+		elevatedPods: CHNumber,
+		unboundedPods: CHNumber,
+		stalePods: CHNumber,
+	})
+
+
+/**
+ * One row of fleet-shape counts for the browse summary band.
+ *
+ * Deliberately runs over the *same* WHERE as the list so the band and the table
+ * agree, and aggregates per pod first so the counts are exact rather than HLL
+ * estimates — `uniq` set-differences would drift on exactly the small numbers
+ * ("7 saturated") the band leads with.
+ */
+export function listPodsSummaryQuery(opts: ListPodsOpts = {}) {
+	const perPod = from(MetricsGauge)
+		.select(($) => ({
+			podName: $.ResourceAttributes.get("k8s.pod.name"),
+			lastSeen: CH.max_($.TimeUnix),
+			cpuUsagePeak: CH.maxIf($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
+			saturation: CH.greatest_(
+				CH.maxIf($.Value, $.MetricName.eq("k8s.pod.cpu_limit_utilization")),
+				CH.maxIf($.Value, $.MetricName.eq("k8s.pod.memory_limit_utilization")),
+			),
+			limitSamples: CH.countIf(
+				$.MetricName.in_("k8s.pod.cpu_limit_utilization", "k8s.pod.memory_limit_utilization"),
+			),
+		}))
+		.where(($) => [...podBaseConditions($), ...podFilterConditions($, opts)])
+		.groupBy("podName")
+
+	return fromQuery(perPod, "pods")
+		.select(($) => ({
+			totalPods: CH.count(),
+			saturatedPods: CH.countIf($.saturation.gte(0.9)),
+			elevatedPods: CH.countIf($.saturation.gte(0.6).and($.saturation.lt(0.9))),
+			unboundedPods: CH.countIf($.limitSamples.eq(0).and($.cpuUsagePeak.gt(0))),
+			stalePods: CH.countIf(
+				$.lastSeen.lt(CH.intervalSub(param.dateTime("endTime"), STALE_POD_SECONDS)),
+			),
+		}))
 		.format("JSON")
 }
 

@@ -76,6 +76,11 @@ export function visualizationToDisplayType(
 			return "table"
 		case "stat":
 			return "stat"
+		// A gauge is a scalar on an arc — the same single-row shape as a stat, and
+		// there is no `gauge` member of RawSqlDisplayType. Mirrors the API-side
+		// mapping in apps/api/src/mcp/lib/raw-sql-widget.ts.
+		case "gauge":
+			return "stat"
 		case "pie":
 			return "pie"
 		case "histogram":

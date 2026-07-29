@@ -3,9 +3,9 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Textarea } from "@maple/ui/components/ui/textarea"
 import { cn } from "@maple/ui/utils"
-import { chartRegistry } from "@maple/ui/components/charts/registry"
-import type { ValueUnit, VisualizationType } from "@/components/dashboard-builder/types"
+import type { ValueUnit } from "@/components/dashboard-builder/types"
 import { useWidgetBuilder } from "@/hooks/use-widget-builder"
+import { PANEL_TYPES, fromPanelType, toPanelType } from "@/lib/query-builder/panel-types"
 import type { StatAggregate } from "@/lib/query-builder/widget-builder-utils"
 
 export type LegendPosition = "bottom" | "right" | "hidden"
@@ -31,14 +31,6 @@ const DURATION_SCALE_OPTIONS: Array<{ value: ValueUnit; label: string }> = [
 function isDurationUnit(value: string): boolean {
 	return value.startsWith("duration_")
 }
-
-const VISUALIZATION_OPTIONS: Array<{ value: VisualizationType; label: string }> = [
-	{ value: "chart", label: "Chart" },
-	{ value: "stat", label: "Stat" },
-	{ value: "gauge", label: "Gauge" },
-	{ value: "table", label: "Table" },
-	{ value: "list", label: "List" },
-]
 
 type Threshold = { value: number; color: string }
 
@@ -102,7 +94,7 @@ function ThresholdsEditor({
 	)
 }
 
-export function WidgetSettingsBar() {
+export function WidgetSettingsBar({ sourceMode = "builder" }: { sourceMode?: "builder" | "rawSql" }) {
 	const {
 		state,
 		actions: { setState },
@@ -135,32 +127,21 @@ export function WidgetSettingsBar() {
 
 	const onChange = (updates: Record<string, unknown>) => setState((current) => ({ ...current, ...updates }))
 
-	const isChart = visualization === "chart"
-	const isStat = visualization === "stat"
-	const isGauge = visualization === "gauge"
-	const isTable = visualization === "table"
-	const isList = visualization === "list"
-	const isHeatmap = visualization === "heatmap"
+	// The one user-facing type axis. `visualization` + `chartId` are derived from
+	// it on write, so the sections below gate on the panel type rather than on
+	// `visualization` — "chart" alone can't tell a line from a bar.
+	const panelType = toPanelType(visualization, chartId)
 
-	const chartStyleOptions = isChart
-		? chartRegistry
-				.filter((chart) => chart.tags?.includes("query-builder"))
-				.map((chart) => ({
-					...chart,
-					name:
-						chart.category === "line"
-							? "Line"
-							: chart.category === "bar"
-								? "Bar"
-								: chart.category === "area"
-									? "Area"
-									: chart.name,
-				}))
-		: []
+	const isChart = panelType === "line" || panelType === "bar" || panelType === "area"
+	const isStat = panelType === "stat"
+	const isGauge = panelType === "gauge"
+	const isTable = panelType === "table"
+	const isList = panelType === "list"
+	const isHeatmap = panelType === "heatmap"
+	const isMarkdown = panelType === "markdown"
 
-	const chartCategory = isChart ? chartRegistry.find((c) => c.id === chartId)?.category : undefined
-	const showStackedToggle = isChart && (chartCategory === "bar" || chartCategory === "area")
-	const showCurveToggle = isChart && (chartCategory === "line" || chartCategory === "area")
+	const showStackedToggle = panelType === "bar" || panelType === "area"
+	const showCurveToggle = panelType === "line" || panelType === "area"
 
 	const effectiveStatValueField =
 		isStat &&
@@ -201,15 +182,18 @@ export function WidgetSettingsBar() {
 			{/* Type */}
 			<div className="space-y-1.5">
 				<p className="text-[11px] uppercase tracking-wide text-muted-foreground">Type</p>
-				<div className="flex h-9 rounded-md border bg-muted/40 p-0.5">
-					{VISUALIZATION_OPTIONS.map((opt) => (
+				{/* Three columns, not four: "Histogram" overflows a quarter of the
+				    272px rail and collides with its neighbour. */}
+				<div className="grid grid-cols-3 gap-1 rounded-md border bg-muted/40 p-1">
+					{PANEL_TYPES.map((opt) => (
 						<button
 							key={opt.value}
 							type="button"
-							onClick={() => onChange({ visualization: opt.value })}
+							onClick={() => onChange(fromPanelType(opt.value, chartId))}
+							aria-pressed={panelType === opt.value}
 							className={cn(
-								"flex-1 text-xs rounded-sm transition-colors",
-								visualization === opt.value
+								"h-7 rounded-sm text-xs transition-colors",
+								panelType === opt.value
 									? "bg-background text-foreground shadow-sm"
 									: "text-muted-foreground hover:text-foreground",
 							)}
@@ -219,28 +203,6 @@ export function WidgetSettingsBar() {
 					))}
 				</div>
 			</div>
-
-			{isChart && (
-				<div className="space-y-1.5">
-					<p className="text-[11px] uppercase tracking-wide text-muted-foreground">Chart Style</p>
-					<Select
-						items={Object.fromEntries(chartStyleOptions.map((c) => [c.id, c.name]))}
-						value={chartId}
-						onValueChange={(value) => onChange({ chartId: value })}
-					>
-						<SelectTrigger className="w-full">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{chartStyleOptions.map((chart) => (
-								<SelectItem key={chart.id} value={chart.id}>
-									{chart.name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-				</div>
-			)}
 
 			{showStackedToggle && (
 				<div className="space-y-1.5">
@@ -256,7 +218,7 @@ export function WidgetSettingsBar() {
 									: "text-muted-foreground hover:text-foreground",
 							)}
 						>
-							{chartCategory === "bar" ? "Grouped" : "Overlapping"}
+							{panelType === "bar" ? "Grouped" : "Overlapping"}
 						</button>
 						<button
 							type="button"
@@ -529,7 +491,12 @@ export function WidgetSettingsBar() {
 				</div>
 			)}
 
-			{isStat && (
+			{/*
+			  * The sparkline embeds a second data source built from the query-builder
+			  * state, so in Raw SQL mode it would fetch the placeholder queries rather
+			  * than the user's SQL. Offer it only where it can be honest.
+			  */}
+			{isStat && sourceMode === "builder" && (
 				<div className="flex items-center gap-2">
 					<Checkbox
 						id="qb-sparkline"
@@ -562,7 +529,7 @@ export function WidgetSettingsBar() {
 				</div>
 			)}
 
-			{!isList && (
+			{!isList && !isMarkdown && (
 				<>
 					<div className="h-px bg-border" />
 

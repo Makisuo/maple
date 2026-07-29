@@ -26,7 +26,10 @@ export const ChartWidget = memo(function ChartWidget({
 	onCreateAlert,
 	onFix,
 }: ChartWidgetProps) {
-	const chartId = display.chartId ?? "gradient-area"
+	// Matches the editor's default (`toPanelType`/`toInitialState`) so a chart
+	// widget with no persisted chartId doesn't render as an area on the canvas
+	// while the Type picker reads "Line".
+	const chartId = display.chartId ?? "query-builder-line"
 	const entry = getChartById(chartId)
 	if (!entry) return null
 

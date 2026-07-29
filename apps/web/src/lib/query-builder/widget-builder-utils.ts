@@ -23,6 +23,7 @@ import type {
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
 import type { LegendPosition } from "@/components/dashboard-builder/config/widget-settings-bar"
+import { fromPanelType, toPanelType } from "@/lib/query-builder/panel-types"
 import {
 	normalizeKey,
 	parseBoolean,
@@ -65,6 +66,18 @@ export interface QueryBuilderWidgetState {
 	// Heatmap-specific
 	heatmapColorScale: "viridis" | "magma" | "cividis" | "blues" | "reds"
 	heatmapScaleType: "linear" | "log"
+	// Markdown-specific: the note body. Static — never hits the warehouse.
+	markdownContent: string
+}
+
+/**
+ * The numeric column a group-by-less histogram bucketizes client-side.
+ *
+ * Only traces expose one; logs and metrics have no per-row numeric field, so a
+ * histogram over them must group by something instead (see `validateQueries`).
+ */
+export function histogramValueColumn(dataSource: QueryBuilderDataSource): string | undefined {
+	return dataSource === "traces" ? "durationMs" : undefined
 }
 
 export function inferDisplayUnitForQuery(query: QueryBuilderQueryDraft): ValueUnit | undefined {
@@ -308,11 +321,21 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 	// is the intent, and re-ticking the box restores it per widget.
 	const seriesStatsEnabled = chartPresentation?.seriesStats ?? false
 
+	// Normalize the (visualization, chartId) pair through the panel-type map on
+	// open. This repairs widgets corrupted by the old "Chart Style" dropdown —
+	// `visualization: "chart"` + `chartId: "query-builder-pie"` becomes a real pie
+	// widget — so the picker, the settings sections and the endpoint can't
+	// disagree about what the widget is.
+	const normalized = fromPanelType(
+		toPanelType(widget.visualization, widget.display.chartId),
+		widget.display.chartId,
+	)
+
 	const baseFromWidget = {
-		visualization: widget.visualization,
+		visualization: normalized.visualization,
 		title: widget.display.title ?? "",
 		description: widget.display.description ?? "",
-		chartId: widget.display.chartId ?? "query-builder-line",
+		chartId: normalized.chartId ?? "query-builder-line",
 		stacked: widget.display.stacked ?? false,
 		curveType: widget.display.curveType ?? "linear",
 		comparisonMode: rawComparison.mode === "previous_period" ? "previous_period" : "none",
@@ -348,16 +371,21 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		gaugeMin: widget.display.gauge?.min != null ? String(widget.display.gauge.min) : "",
 		gaugeMax: widget.display.gauge?.max != null ? String(widget.display.gauge.max) : "",
 		sparklineEnabled: widget.display.sparkline?.enabled === true,
+		markdownContent: widget.display.markdown?.content ?? "",
 	} satisfies Omit<QueryBuilderWidgetState, "queries" | "formulas">
 
 	// List widgets don't use the query builder — return early with a dummy query
-	if (widget.visualization === "list") {
+	if (normalized.visualization === "list") {
 		return { ...baseFromWidget, queries: [createQueryDraft(0)], formulas: [] }
 	}
 
 	if (
 		(widget.dataSource.endpoint === "custom_query_builder_timeseries" ||
-			widget.dataSource.endpoint === "custom_query_builder_breakdown") &&
+			widget.dataSource.endpoint === "custom_query_builder_breakdown" ||
+			// Histograms with no group-by persist their raw value rows through the
+			// list endpoint — without this the preset's query is dropped the moment
+			// the widget is opened, and replaced by the fallback draft below.
+			widget.dataSource.endpoint === "custom_query_builder_list") &&
 		Array.isArray(params.queries)
 	) {
 		const loadedQueries = params.queries
@@ -498,6 +526,11 @@ export function buildWidgetDataSource(
 	state: QueryBuilderWidgetState,
 	seriesFieldOptions: string[],
 ): WidgetDataSource {
+	// Notes are static — no warehouse round-trip at all.
+	if (state.visualization === "markdown") {
+		return { endpoint: "markdown_static" as const }
+	}
+
 	if (state.visualization === "list") {
 		const limit = parsePositiveNumber(state.listLimit) ?? 50
 		// For logs without rich filtering, fall back to the simple list_logs endpoint
@@ -570,6 +603,28 @@ export function buildWidgetDataSource(
 		}
 	}
 
+	// A histogram is a *distribution*, so it has two legitimate shapes. Grouped,
+	// it's pre-bucketed `{name, value}` breakdown rows (one bar per group).
+	// Ungrouped, it's raw per-row values that the chart bucketizes client-side —
+	// which needs the list endpoint, because a count-by-group breakdown is not a
+	// duration distribution (MAP-49). Routing every histogram to `breakdown`
+	// silently converted the second kind into the first on Apply.
+	if (state.visualization === "histogram") {
+		const visibleQueries = state.queries.filter(isVisibleQuery)
+		if (!visibleQueries.some(hasActiveGroupBy)) {
+			const valueColumn = histogramValueColumn(visibleQueries[0]?.dataSource ?? "traces")
+			return {
+				endpoint: "custom_query_builder_list",
+				params: {
+					queries: visibleQueries,
+					limit: parsePositiveNumber(state.tableLimit) ?? 200,
+					...(valueColumn ? { columns: [valueColumn] } : {}),
+				},
+				transform: sharedTransform,
+			}
+		}
+	}
+
 	// Pie, histogram, funnel, and heatmap render a breakdown (one row per
 	// category) — they need the `breakdown` endpoint that returns
 	// `{name, value}[]`, not the timeseries endpoint that returns
@@ -585,6 +640,12 @@ export function buildWidgetDataSource(
 		const visibleQueries = state.queries.filter(isVisibleQuery)
 		return {
 			endpoint: "custom_query_builder_breakdown",
+			// Deliberately NOT forwarding `state.formulas`. A formula is a timeseries
+			// expression with no meaning in a categorical breakdown, and
+			// `QueryBuilderBreakdownInputSchema` (api/warehouse/query-builder-breakdown.ts)
+			// accepts only startTime/endTime/queries — smuggling formulas through the
+			// params to preserve them across a reopen fails the request decode and
+			// leaves the widget stuck on its loading skeleton.
 			params: { queries: visibleQueries },
 			transform: sharedTransform,
 		}
@@ -615,6 +676,27 @@ export function buildWidgetDataSource(
 
 	return base
 }
+
+/**
+ * Display keys owned by exactly one visualization. `buildWidgetDisplay` clears
+ * all of them before the per-visualization branches write back the ones the new
+ * visualization actually owns, so nothing leaks across a type switch.
+ */
+const OWNED_DISPLAY_KEYS = [
+	"chartId",
+	"stacked",
+	"curveType",
+	"markdown",
+	"gauge",
+	"heatmap",
+	"sparkline",
+	"thresholds",
+	"columns",
+	"listDataSource",
+	"listWhereClause",
+	"listLimit",
+	"listRootOnly",
+] as const satisfies ReadonlyArray<keyof WidgetDisplayConfig>
 
 export function buildWidgetDisplay(
 	widget: DashboardWidget,
@@ -655,8 +737,24 @@ export function buildWidgetDisplay(
 			seriesStats: state.seriesStatsEnabled,
 		},
 	}
+
+	// Spreading `widget.display` carries over every key the PREVIOUS visualization
+	// owned, so each per-visualization key has to be cleared unless the new
+	// visualization writes it below. Leaving `chartId` behind was the worst case:
+	// a line chart switched to Pie kept `chartId: "query-builder-line"`, and
+	// `pie-widget.tsx`'s `?? "query-builder-pie"` fallback never fires on a
+	// defined-but-wrong id — so it mounted a line chart over breakdown rows.
+	for (const key of OWNED_DISPLAY_KEYS) {
+		delete display[key]
+	}
+
+	// Every visualization that mounts a chartRegistry component gets an id, not
+	// just `chart` — canonical for the panel type, or the state's own id when it
+	// already belongs to that panel (preserving styles like `latency-line`).
+	const { chartId } = fromPanelType(toPanelType(state.visualization, state.chartId), state.chartId)
+	if (chartId) display.chartId = chartId
+
 	if (state.visualization === "chart") {
-		display.chartId = state.chartId
 		display.stacked = state.stacked
 		display.curveType = state.curveType
 		display.unit = state.unit
@@ -700,6 +798,9 @@ export function buildWidgetDisplay(
 			scaleType: state.heatmapScaleType,
 		}
 	}
+	if (state.visualization === "markdown") {
+		display.markdown = { content: state.markdownContent }
+	}
 	if (state.visualization === "table") {
 		const groupByQuery = state.queries.find((query) => isVisibleQuery(query) && hasActiveGroupBy(query))
 		if (groupByQuery) {
@@ -721,13 +822,43 @@ export function buildWidgetDisplay(
 	return display
 }
 
+/** Visualizations whose data comes from the group-by breakdown endpoint. */
+const BREAKDOWN_VISUALIZATIONS = ["pie", "funnel", "heatmap"] as const
+
 export function validateQueries(state: QueryBuilderWidgetState): string | null {
-	if (state.visualization === "list") return null
+	// Neither uses the query builder — a list is configured by ListConfigPanel and
+	// a note doesn't query at all, so validating their placeholder draft would
+	// block Apply on an error the user has no panel to fix.
+	if (state.visualization === "list" || state.visualization === "markdown") return null
+
 	const activeQueries = state.queries.filter((query) => query.enabled !== false)
 	if (activeQueries.length === 0) return "Add at least one query"
 	for (const query of activeQueries) {
 		const built = buildTimeseriesQuerySpec(query)
 		if (!built.query) return `${query.name}: ${built.error ?? "invalid query"}`
 	}
+
+	// Pie/funnel/heatmap lower to a breakdown, which requires a group-by. Catching
+	// it here surfaces the existing inline message and disables Apply, instead of
+	// letting the server error land as a tile after Run Preview.
+	if ((BREAKDOWN_VISUALIZATIONS as ReadonlyArray<string>).includes(state.visualization)) {
+		if (!activeQueries.filter(isVisibleQuery).some(hasActiveGroupBy)) {
+			return "This visualization groups data into categories — add a group-by field"
+		}
+	}
+
+	// A histogram either groups (pre-bucketed bars) or bucketizes raw per-row
+	// values client-side. The latter needs a numeric column, which only traces
+	// have — an ungrouped logs/metrics histogram would render nothing.
+	if (state.visualization === "histogram") {
+		const visibleQueries = activeQueries.filter(isVisibleQuery)
+		if (!visibleQueries.some(hasActiveGroupBy)) {
+			const unsupported = visibleQueries.find((query) => !histogramValueColumn(query.dataSource))
+			if (unsupported) {
+				return `${unsupported.name}: a ${unsupported.dataSource} histogram needs a group-by field`
+			}
+		}
+	}
+
 	return null
 }

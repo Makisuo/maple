@@ -31,8 +31,8 @@ export const chartRegistry: ChartRegistryEntry[] = [
 	// Query Builder Bar
 	{
 		id: "query-builder-bar",
-		name: "Query Builder Bar",
-		description: "Dynamic multi-query bar chart for query builder widgets",
+		name: "Bar",
+		description: "Bar chart driven by the query builder",
 		category: "bar",
 		component: lazy(() =>
 			import("./bar/query-builder-bar-chart").then((m) => ({
@@ -59,8 +59,8 @@ export const chartRegistry: ChartRegistryEntry[] = [
 	// Query Builder Area
 	{
 		id: "query-builder-area",
-		name: "Query Builder Area",
-		description: "Dynamic multi-query area chart for query builder widgets",
+		name: "Area",
+		description: "Area chart driven by the query builder",
 		category: "area",
 		component: lazy(() =>
 			import("./area/query-builder-area-chart").then((m) => ({
@@ -85,8 +85,8 @@ export const chartRegistry: ChartRegistryEntry[] = [
 	},
 	{
 		id: "query-builder-line",
-		name: "Query Builder Line",
-		description: "Dynamic multi-query line chart for query builder widgets",
+		name: "Line",
+		description: "Line chart driven by the query builder",
 		category: "line",
 		component: lazy(() =>
 			import("./line/query-builder-line-chart").then((m) => ({
@@ -144,7 +144,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 	// Pie Charts
 	{
 		id: "query-builder-pie",
-		name: "Query Builder Pie",
+		name: "Pie",
 		description: "Categorical distribution as a pie or donut",
 		category: "pie",
 		component: lazy(() =>
@@ -159,7 +159,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 	// Histograms
 	{
 		id: "query-builder-histogram",
-		name: "Query Builder Histogram",
+		name: "Histogram",
 		description: "Distribution of values across buckets",
 		category: "histogram",
 		component: lazy(() =>
@@ -174,7 +174,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 	// Heatmaps
 	{
 		id: "query-builder-heatmap",
-		name: "Query Builder Heatmap",
+		name: "Heatmap",
 		description: "2D density visualization across two dimensions",
 		category: "heatmap",
 		component: lazy(() =>
@@ -189,7 +189,7 @@ export const chartRegistry: ChartRegistryEntry[] = [
 	// Funnels
 	{
 		id: "query-builder-funnel",
-		name: "Query Builder Funnel",
+		name: "Funnel",
 		description: "Stage-by-stage conversion as descending bars",
 		category: "funnel",
 		component: lazy(() =>

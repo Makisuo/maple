@@ -41,6 +41,7 @@ import {
 	hostInfraTimeseries,
 	listHosts,
 	listPods,
+	podsSummary,
 	podDetailSummary,
 	podInfraTimeseries,
 	listNodes,
@@ -337,6 +338,10 @@ export const fleetUtilizationTimeseriesResultAtom = makeQueryAtomFamily(fleetUti
 })
 
 export const listPodsResultAtom = makeQueryAtomFamily(listPods, {
+	staleTime: 30_000,
+})
+
+export const podsSummaryResultAtom = makeQueryAtomFamily(podsSummary, {
 	staleTime: 30_000,
 })
 

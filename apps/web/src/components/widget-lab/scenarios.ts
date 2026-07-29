@@ -344,7 +344,7 @@ export const chartScenarios: ChartScenario[] = [
 	{
 		label: "Line + thresholds",
 		chartId: "query-builder-line",
-		chartName: "Query Builder Line",
+		chartName: "Line",
 		category: "line",
 		dataState: ready(sampleFor("query-builder-line")),
 		display: {
@@ -357,7 +357,7 @@ export const chartScenarios: ChartScenario[] = [
 	{
 		label: "Area + thresholds",
 		chartId: "query-builder-area",
-		chartName: "Query Builder Area",
+		chartName: "Area",
 		category: "area",
 		dataState: ready(sampleFor("query-builder-area")),
 		display: {
@@ -370,7 +370,7 @@ export const chartScenarios: ChartScenario[] = [
 	{
 		label: "Bar + thresholds",
 		chartId: "query-builder-bar",
-		chartName: "Query Builder Bar",
+		chartName: "Bar",
 		category: "bar",
 		dataState: ready(sampleFor("query-builder-bar")),
 		display: {
@@ -383,7 +383,7 @@ export const chartScenarios: ChartScenario[] = [
 	{
 		label: "Legend — right (stats table)",
 		chartId: "query-builder-line",
-		chartName: "Query Builder Line",
+		chartName: "Line",
 		category: "line",
 		dataState: ready(sampleFor("query-builder-line")),
 		display: {
@@ -509,7 +509,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Line — 25 series (compact legend)",
 		chartId: "query-builder-line",
-		chartName: "Query Builder Line",
+		chartName: "Line",
 		category: "line",
 		dataState: ready(makeManySeries(25)),
 		display: {
@@ -522,7 +522,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Line — 50 series (stats legend)",
 		chartId: "query-builder-line",
-		chartName: "Query Builder Line",
+		chartName: "Line",
 		category: "line",
 		dataState: ready(makeManySeries(50)),
 		display: {
@@ -535,7 +535,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Area — 25 series (stacked)",
 		chartId: "query-builder-area",
-		chartName: "Query Builder Area",
+		chartName: "Area",
 		category: "area",
 		dataState: ready(makeManySeries(25)),
 		display: {
@@ -548,7 +548,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Bar — 25 series → Other (stacked)",
 		chartId: "query-builder-bar",
-		chartName: "Query Builder Bar",
+		chartName: "Bar",
 		category: "bar",
 		dataState: ready(makeManySeries(25)),
 		display: {
@@ -561,7 +561,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Bar — 50 series → Other (right legend)",
 		chartId: "query-builder-bar",
-		chartName: "Query Builder Bar",
+		chartName: "Bar",
 		category: "bar",
 		dataState: ready(makeManySeries(50)),
 		display: {
@@ -576,7 +576,7 @@ export const stressScenarios: ChartScenario[] = [
 		// genuinely tall — confirms it scrolls within the card instead of overflowing.
 		label: "Line — 50 series (right legend, scrolls)",
 		chartId: "query-builder-line",
-		chartName: "Query Builder Line",
+		chartName: "Line",
 		category: "line",
 		dataState: ready(makeManySeries(50)),
 		display: {
@@ -589,7 +589,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Pie — 20 slices → Other",
 		chartId: "query-builder-pie",
-		chartName: "Query Builder Pie",
+		chartName: "Pie",
 		category: "pie",
 		dataState: ready(makePieSlices(20)),
 		display: { title: "Traffic by service (20 → Other)", chartId: "query-builder-pie", pie: {} },
@@ -597,7 +597,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Pie — 50 slices → Other",
 		chartId: "query-builder-pie",
-		chartName: "Query Builder Pie",
+		chartName: "Pie",
 		category: "pie",
 		dataState: ready(makePieSlices(50)),
 		display: {
@@ -609,7 +609,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Line — long series names",
 		chartId: "query-builder-line",
-		chartName: "Query Builder Line",
+		chartName: "Line",
 		category: "line",
 		dataState: ready(longNameSeries),
 		display: {
@@ -622,7 +622,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Line — null / NaN values",
 		chartId: "query-builder-line",
-		chartName: "Query Builder Line",
+		chartName: "Line",
 		category: "line",
 		dataState: ready(nullySeries),
 		display: {
@@ -634,7 +634,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Area — all-zero series",
 		chartId: "query-builder-area",
-		chartName: "Query Builder Area",
+		chartName: "Area",
 		category: "area",
 		dataState: ready(allZeroSeries),
 		display: {
@@ -646,7 +646,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Pie — all-zero (No data)",
 		chartId: "query-builder-pie",
-		chartName: "Query Builder Pie",
+		chartName: "Pie",
 		category: "pie",
 		dataState: ready([
 			{ name: "a", value: 0 },
@@ -657,7 +657,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Area — sparse rate (isolated points)",
 		chartId: "query-builder-area",
-		chartName: "Query Builder Area",
+		chartName: "Area",
 		category: "area",
 		dataState: ready(sparseRateSeries),
 		display: {
@@ -669,7 +669,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Bar — sparse rate (isolated points)",
 		chartId: "query-builder-bar",
-		chartName: "Query Builder Bar",
+		chartName: "Bar",
 		category: "bar",
 		dataState: ready(sparseRateSeries),
 		display: {
@@ -681,7 +681,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Line — sparse rate (isolated points)",
 		chartId: "query-builder-line",
-		chartName: "Query Builder Line",
+		chartName: "Line",
 		category: "line",
 		dataState: ready(sparseRateSeries),
 		display: {
@@ -693,7 +693,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Area — single point",
 		chartId: "query-builder-area",
-		chartName: "Query Builder Area",
+		chartName: "Area",
 		category: "area",
 		dataState: ready(singlePointSeries),
 		display: {
@@ -705,7 +705,7 @@ export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Bar — all-zero series",
 		chartId: "query-builder-bar",
-		chartName: "Query Builder Bar",
+		chartName: "Bar",
 		category: "bar",
 		dataState: ready(allZeroSeries),
 		display: {

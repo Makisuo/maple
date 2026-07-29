@@ -4,6 +4,7 @@ import {
 	HostInfraTimeseriesRequest,
 	ListHostsRequest,
 	ListPodsRequest,
+	PodsSummaryRequest,
 	PodDetailSummaryRequest,
 	PodInfraTimeseriesRequest,
 	PodFacetsRequest,
@@ -20,6 +21,7 @@ import {
 	type HostInfraTimeseriesResponse,
 	type ListHostsResponse,
 	type ListPodsResponse,
+	type PodsSummaryResponse,
 	type PodDetailSummaryResponse,
 	type PodInfraTimeseriesResponse,
 	type PodFacetsResponse,
@@ -37,6 +39,20 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { runWarehouseQuery } from "./effect-utils"
 
 export type WorkloadKind = "deployment" | "statefulset" | "daemonset"
+
+/** Mirrors PodSortKeyLiteral in @maple/domain — `saturation` is peak-of-either-limit. */
+export type PodSortKey =
+	| "saturation"
+	| "cpuUsage"
+	| "cpuLimitPct"
+	| "memoryLimitPct"
+	| "podName"
+	| "lastSeen"
+
+export type SortDirection = "asc" | "desc"
+
+/** One-click fleet scopes from the summary band. */
+export type PodScope = "saturated" | "elevated" | "unbounded" | "stale"
 
 export interface ListHostsInput {
 	startTime: string
@@ -157,6 +173,9 @@ export interface ListPodsInput {
 	computeTypes?: ReadonlyArray<string>
 	workloadKind?: WorkloadKind
 	workloadName?: string
+	scope?: PodScope
+	sortBy?: PodSortKey
+	sortDir?: SortDirection
 	limit?: number
 	offset?: number
 }
@@ -182,8 +201,42 @@ export function listPods({ data }: { data: ListPodsInput }) {
 					computeTypes: data.computeTypes,
 					workloadKind: data.workloadKind,
 					workloadName: data.workloadName,
+					scope: data.scope,
+					sortBy: data.sortBy,
+					sortDir: data.sortDir,
 					limit: data.limit,
 					offset: data.offset,
+				}),
+			})
+			return response
+		}),
+	)
+}
+
+export interface PodsSummaryInput {
+	startTime: string
+	endTime: string
+	namespaces?: ReadonlyArray<string>
+	clusters?: ReadonlyArray<string>
+	environments?: ReadonlyArray<string>
+}
+
+/**
+ * Fleet-shape counts for the browse summary band. Deliberately scope-only — it
+ * answers "how much of the fleet did my filters hide", which a filtered count
+ * cannot.
+ */
+export function podsSummary({ data }: { data: PodsSummaryInput }) {
+	return runWarehouseQuery("podsSummary", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			const response: PodsSummaryResponse = yield* client.queryEngine.podsSummary({
+				payload: new PodsSummaryRequest({
+					startTime: data.startTime,
+					endTime: data.endTime,
+					namespaces: data.namespaces,
+					clusters: data.clusters,
+					environments: data.environments,
 				}),
 			})
 			return response

@@ -51,6 +51,7 @@ import {
 	HostInfraTimeseriesResponse,
 	FleetUtilizationTimeseriesResponse,
 	ListPodsResponse,
+	PodsSummaryResponse,
 	PodDetailSummaryResponse,
 	PodInfraTimeseriesResponse,
 	PodFacetsResponse,
@@ -2512,14 +2513,52 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							computeTypes: payload.computeTypes,
 							workloadKind: payload.workloadKind,
 							workloadName: payload.workloadName,
+							scope: payload.scope,
+							sortBy: payload.sortBy,
+							sortDir: payload.sortDir,
 							limit: payload.limit,
 							offset: payload.offset,
 						}),
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, { profile: "list", context: "listPods" }),
-						"listPods query failed",
+					// The page and its denominator run the same WHERE clause, so the
+					// "N of M" the list prints can never disagree with the rows above it.
+					const countCompiled = CH.compile(
+						CH.listPodsSummaryQuery({
+								search: payload.search,
+								podNames: payload.podNames,
+								namespaces: payload.namespaces,
+								nodeNames: payload.nodeNames,
+								clusters: payload.clusters,
+								deployments: payload.deployments,
+								statefulsets: payload.statefulsets,
+								daemonsets: payload.daemonsets,
+								jobs: payload.jobs,
+								environments: payload.environments,
+								computeTypes: payload.computeTypes,
+								workloadKind: payload.workloadKind,
+								workloadName: payload.workloadName,
+						}),
+						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+						{ rowSchema: CH.ListPodsSummaryOutputSchema },
+					)
+					const [rows, countRow] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, compiled, { profile: "list", context: "listPods" }),
+								"listPods query failed",
+							),
+							mapExecError(
+								warehouse
+									.compiledQueryFirst(tenant, countCompiled, {
+										profile: "aggregation",
+										context: "listPodsCount",
+									})
+									.pipe(Effect.map(Option.getOrNull)),
+								"listPods count query failed",
+							),
+						],
+						{ concurrency: 2 },
 					)
 					const typedRows = rows
 					return new ListPodsResponse({
@@ -2542,7 +2581,60 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							memoryLimitPct: Number(row.memoryLimitPct) || 0,
 							cpuRequestPct: Number(row.cpuRequestPct) || 0,
 							memoryRequestPct: Number(row.memoryRequestPct) || 0,
+							cpuUsagePeak: Number(row.cpuUsagePeak) || 0,
+							cpuLimitPctPeak: Number(row.cpuLimitPctPeak) || 0,
+							memoryLimitPctPeak: Number(row.memoryLimitPctPeak) || 0,
+							saturation: Number(row.saturation) || 0,
 						})),
+						// The denominator has to match the predicate the list ran, or a scoped
+						// view reads "Top 17 of 541". The scope counts are already computed.
+						totalCount:
+							Number(
+								payload.scope === "saturated"
+									? countRow?.saturatedPods
+								: payload.scope === "elevated"
+									? countRow?.elevatedPods
+								: payload.scope === "unbounded"
+									? countRow?.unboundedPods
+								: payload.scope === "stale"
+									? countRow?.stalePods
+								: countRow?.totalPods,
+							) ||
+							// A failed count must not render as "0 of 0" under a list with rows.
+							typedRows.length,
+					})
+				}),
+			)
+			.handle("podsSummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					// Scope only — no row filters. The browse band is what tells you how
+					// much of the fleet your filters just hid, so narrowing it too would
+					// defeat the point.
+					const compiled = CH.compile(
+						CH.listPodsSummaryQuery({
+							namespaces: payload.namespaces,
+							clusters: payload.clusters,
+							environments: payload.environments,
+						}),
+						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+						{ rowSchema: CH.ListPodsSummaryOutputSchema },
+					)
+					const row = yield* mapExecError(
+						warehouse
+							.compiledQueryFirst(tenant, compiled, {
+								profile: "aggregation",
+								context: "podsSummary",
+							})
+							.pipe(Effect.map(Option.getOrNull)),
+						"podsSummary query failed",
+					)
+					return new PodsSummaryResponse({
+						totalPods: Number(row?.totalPods) || 0,
+						saturatedPods: Number(row?.saturatedPods) || 0,
+						elevatedPods: Number(row?.elevatedPods) || 0,
+						unboundedPods: Number(row?.unboundedPods) || 0,
+						stalePods: Number(row?.stalePods) || 0,
 					})
 				}),
 			)
