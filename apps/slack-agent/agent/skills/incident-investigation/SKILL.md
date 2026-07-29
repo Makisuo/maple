@@ -90,9 +90,9 @@ only when independent signals agree.
 
 Hold everything else — the full timeline, the hypotheses you ruled out, the
 secondary evidence — and close with a short offer to expand. Do NOT emit
-`*Summary*` / `*Evidence*` / `*Confidence*` section headers, and do not paste
-raw tool output; that shape is only for when the engineer explicitly asks for a
-written report or a deep-dive.
+`**Summary**` / `**Evidence**` / `**Confidence**` section headers, and do not
+paste raw tool output; that shape is only for when the engineer explicitly asks
+for a written report or a deep-dive.
 
 ## After diagnosing
 
