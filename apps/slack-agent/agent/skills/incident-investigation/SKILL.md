@@ -74,18 +74,25 @@ application.
 
 ## Reporting the diagnosis
 
-Your reply in the thread IS the report. Structure it so a responder can act in
-15 seconds:
+Your reply in the thread IS the report — and it is a Slack message, not a
+document. Investigate thoroughly, report briefly: a responder should be able to
+act in 15 seconds. Target shape, roughly 6 lines:
 
-- **Summary**: 2–4 sentences on what happened and how bad it is.
-- **Suspected cause**: the most likely root cause with the mechanism; say
-  "unknown" honestly if inconclusive and lower your stated confidence.
-- **Affected scope**: which services/endpoints/users are hit and how broadly.
-- **Evidence**: only trace IDs, services, log patterns, commit SHAs, and source
-  paths you actually observed via tools — never invent identifiers. Link
-  traces/services/errors to their Maple detail pages.
-- **Suggested actions**: ordered, concrete next steps.
-- **Confidence**: high only when multiple independent signals agree.
+- One line: what broke, how bad, since when.
+- 2–4 bullets covering the suspected cause and its mechanism, the affected
+  scope, and the evidence that actually carries the weight — trace IDs,
+  services, log patterns, commit SHAs, source paths you observed via tools,
+  never invented, linked to their Maple detail pages.
+- One line for the first action to take, if it's clear.
+
+Say "cause unknown" plainly when it's inconclusive, and claim high confidence
+only when independent signals agree.
+
+Hold everything else — the full timeline, the hypotheses you ruled out, the
+secondary evidence — and close with a short offer to expand. Do NOT emit
+`*Summary*` / `*Evidence*` / `*Confidence*` section headers, and do not paste
+raw tool output; that shape is only for when the engineer explicitly asks for a
+written report or a deep-dive.
 
 ## After diagnosing
 
