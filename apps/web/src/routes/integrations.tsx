@@ -112,7 +112,10 @@ function IntegrationsPage() {
 	// Surface the Slack OAuth callback result once, then strip the return params
 	// from the URL so a refresh doesn't re-toast. Narrowed here rather than in
 	// `validateSearch` — an unrecognised value is simply not a callback return.
-	const slackReturn = search.slack === "connected" || search.slack === "error" ? search.slack : undefined
+	const slackReturn =
+		search.slack === "connected" || search.slack === "updated" || search.slack === "error"
+			? search.slack
+			: undefined
 	const slackMessage = search.slack_message
 	const slackTeam = search.slack_team
 	useEffect(() => {
@@ -123,6 +126,10 @@ function IntegrationsPage() {
 			toast.success(slackTeam ? `Slack connected to ${clampLabel(slackTeam)}` : "Slack connected", {
 				id: "slack-oauth",
 			})
+		} else if (slackReturn === "updated") {
+			// An in-place re-auth of the existing installation (permissions refresh) —
+			// "connected" would wrongly suggest it had been disconnected in between.
+			toast.success("Slack connection updated", { id: "slack-oauth" })
 		} else {
 			toast.error(slackErrorMessage(slackMessage), { id: "slack-oauth" })
 		}

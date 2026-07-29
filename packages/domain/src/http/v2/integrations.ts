@@ -85,6 +85,11 @@ export const V2SlackIntegrationStatus = Schema.Struct({
 		description:
 			"When the remote disconnect was recorded, or `null` when `disconnected_reason` is `null`.",
 	}),
+	missing_scopes: Schema.Array(Schema.String).annotate({
+		description:
+			"Bot scopes Maple now requires that the current installation has not granted. Non-empty means the app should be reconnected (a fresh OAuth install over the existing one) to pick up the new permissions — the bot keeps its channel memberships. Always empty when not installed.",
+		examples: [["reactions:write"]],
+	}),
 }).annotate({
 	identifier: "SlackIntegration",
 	title: "Slack integration status",
@@ -100,6 +105,7 @@ export const V2SlackIntegrationStatus = Schema.Struct({
 			disconnected_reason: null,
 			disconnected_team_name: null,
 			disconnected_at: null,
+			missing_scopes: [],
 		}),
 	],
 })
@@ -210,7 +216,7 @@ export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegra
 				identifier: "installSlackIntegration",
 				summary: "Begin a Slack installation",
 				description:
-					"Returns a Slack OAuth authorize URL to redirect the user to. Requires an org-admin role and the `integrations:write` scope.",
+					"Returns a Slack OAuth authorize URL to redirect the user to. Also the way to reconnect an existing installation (e.g. to grant newly required scopes): re-approving updates the installation in place without removing the bot from its channels. Requires an org-admin role and the `integrations:write` scope.",
 			}),
 		),
 	)

@@ -5,7 +5,7 @@ import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
 import { Env } from "../lib/Env"
-import { SlackIntegrationService } from "./SlackIntegrationService"
+import { SLACK_BOT_SCOPES, SlackIntegrationService } from "./SlackIntegrationService"
 import {
 	resolveSlackBotTokenForDispatch,
 	slackSecretAad,
@@ -752,6 +752,152 @@ describe("SlackIntegrationService", () => {
 			)
 			assert.isTrue(rejected, "second active row for the same org should violate the unique index")
 		}).pipe(Effect.provide(databaseLayer(testDb)))
+	})
+
+	// --- In-place re-auth (permissions refresh) -------------------------------
+
+	it.effect(
+		"completeInstall over an active same-org install keeps the API key and refreshes the scope (zero-downtime re-auth)",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			return Effect.gen(function* () {
+				const slack = yield* SlackIntegrationService
+
+				const start1 = yield* slack.startInstall(asOrgId("org_re"), asUserId("user_re"), "https://cb")
+				const first = yield* slack.completeInstall("code_1", stateFromInstallUrl(start1.url))
+				assert.strictEqual(first.updated, false)
+				const before = yield* slack.resolveForBot("T-RE")
+				const firstRow = yield* Effect.promise(() =>
+					queryFirstRow<{ id: string; api_key_id: string; scope: string }>(
+						testDb,
+						"SELECT id, api_key_id, scope FROM slack_workspaces WHERE team_id = 'T-RE'",
+					),
+				)
+				assert.strictEqual(firstRow?.scope, "chat:write")
+
+				// Re-auth WITHOUT uninstalling — the scope-upgrade flow.
+				const start2 = yield* slack.startInstall(asOrgId("org_re"), asUserId("user_re"), "https://cb")
+				const second = yield* slack.completeInstall("code_2", stateFromInstallUrl(start2.url))
+				assert.strictEqual(second.updated, true)
+
+				const secondRow = yield* Effect.promise(() =>
+					queryFirstRow<{ id: string; api_key_id: string; scope: string; revoked_at: string | null }>(
+						testDb,
+						"SELECT id, api_key_id, scope, revoked_at FROM slack_workspaces WHERE team_id = 'T-RE'",
+					),
+				)
+				// Same row, same API key — the Slack agent's cached credentials stay
+				// valid through the re-auth (no downtime); only the grant is refreshed.
+				assert.strictEqual(secondRow?.id, firstRow?.id)
+				assert.strictEqual(secondRow?.api_key_id, firstRow?.api_key_id)
+				assert.strictEqual(secondRow?.scope, "chat:write,reactions:write")
+				assert.isNull(secondRow?.revoked_at)
+
+				const keyRow = yield* Effect.promise(() =>
+					queryFirstRow<{ revoked: boolean }>(testDb, "SELECT revoked FROM api_keys WHERE id = $1", [
+						firstRow!.api_key_id,
+					]),
+				)
+				assert.strictEqual(keyRow?.revoked, false)
+				// And the resolvable plaintext key is byte-for-byte the one from before.
+				const after = yield* slack.resolveForBot("T-RE")
+				assert.strictEqual(after.mapleApiKey, before.mapleApiKey)
+				assert.strictEqual(after.botToken, "xoxb-T-RE")
+
+				const status = yield* slack.getStatus(asOrgId("org_re"))
+				assert.strictEqual(status.installed, true)
+			}).pipe(
+				Effect.provide(
+					withFetch(
+						testDb,
+						slackApiFetch(OAUTH_URL, (_url, call) =>
+							jsonResponse({
+								ok: true,
+								access_token: "xoxb-T-RE",
+								token_type: "bot",
+								// The re-approval is what grants the newly required scope.
+								scope: call === 0 ? "chat:write" : "chat:write,reactions:write",
+								bot_user_id: "U0BOT",
+								team: { id: "T-RE", name: "ReAuth" },
+							}),
+						),
+					),
+				),
+			)
+		},
+	)
+
+	it.effect("completeInstall after an uninstall mints a fresh API key (no reuse of a revoked key)", () => {
+		const testDb = createTestDb(trackedDbs)
+		const teamRef = { current: { id: "T-ROT", name: "Rotate" } }
+		const revokeCalls: Array<string | null> = []
+		return Effect.gen(function* () {
+			const slack = yield* SlackIntegrationService
+
+			const start1 = yield* slack.startInstall(asOrgId("org_rot"), asUserId("user_rot"), "https://cb")
+			yield* slack.completeInstall("code_1", stateFromInstallUrl(start1.url))
+			const firstRow = yield* Effect.promise(() =>
+				queryFirstRow<{ api_key_id: string }>(
+					testDb,
+					"SELECT api_key_id FROM slack_workspaces WHERE team_id = 'T-ROT'",
+				),
+			)
+			yield* slack.uninstall(asOrgId("org_rot"))
+
+			const start2 = yield* slack.startInstall(asOrgId("org_rot"), asUserId("user_rot"), "https://cb")
+			const second = yield* slack.completeInstall("code_2", stateFromInstallUrl(start2.url))
+			// A reinstall over a revoked row is a fresh connect, not an update.
+			assert.strictEqual(second.updated, false)
+
+			const secondRow = yield* Effect.promise(() =>
+				queryFirstRow<{ api_key_id: string; revoked_at: string | null }>(
+					testDb,
+					"SELECT api_key_id, revoked_at FROM slack_workspaces WHERE team_id = 'T-ROT'",
+				),
+			)
+			assert.isNull(secondRow?.revoked_at)
+			assert.notStrictEqual(secondRow?.api_key_id, firstRow?.api_key_id)
+		}).pipe(Effect.provide(withFetch(testDb, slackInstallAndRevokeFetch(teamRef, revokeCalls))))
+	})
+
+	// --- Scope drift (getStatus.missingScopes) ---------------------------------
+
+	it.effect("getStatus reports required scopes the stored grant is missing", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			// The fixture stores scope = 'chat:write' only.
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_drift",
+					orgId: "org_drift",
+					teamId: "T-DRIFT",
+					teamName: "Drift",
+					botToken: "xoxb-drift",
+					apiKey: "maple_ak_drift",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const status = yield* slack.getStatus(asOrgId("org_drift"))
+			assert.include(status.missingScopes, "reactions:write")
+			assert.include(status.missingScopes, "app_mentions:read")
+			assert.notInclude(status.missingScopes, "chat:write")
+
+			// A grant covering everything (order/spacing-insensitive) reports no drift.
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE slack_workspaces SET scope = $1 WHERE id = 'sw_drift'", [
+					` ${SLACK_BOT_SCOPES.split(",").reverse().join(" , ")} ,extra:scope`,
+				]),
+			)
+			const full = yield* slack.getStatus(asOrgId("org_drift"))
+			assert.deepStrictEqual([...full.missingScopes], [])
+
+			// A pre-column row (NULL scope) must not nag — there is no record of the grant.
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE slack_workspaces SET scope = NULL WHERE id = 'sw_drift'"),
+			)
+			const unknown = yield* slack.getStatus(asOrgId("org_drift"))
+			assert.deepStrictEqual([...unknown.missingScopes], [])
+		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
 	// --- Cross-org rebind rejection -----------------------------------------

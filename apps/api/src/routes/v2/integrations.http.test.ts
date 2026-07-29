@@ -184,6 +184,7 @@ describe("v2 slack integration over HTTP", () => {
 					disconnectedReason: null,
 					disconnectedTeamName: null,
 					disconnectedAt: null,
+					missingScopes: ["reactions:write"],
 				}),
 		})
 		const key = await harness.bootstrapAdminKey()
@@ -200,6 +201,7 @@ describe("v2 slack integration over HTTP", () => {
 			disconnected_reason: null,
 			disconnected_team_name: null,
 			disconnected_at: null,
+			missing_scopes: ["reactions:write"],
 		})
 		// snake_case only — no camelCase leakage from the service shape.
 		expect("teamId" in body).toBe(false)
@@ -218,6 +220,7 @@ describe("v2 slack integration over HTTP", () => {
 					disconnectedReason: "app_uninstalled" as const,
 					disconnectedTeamName: "Acme",
 					disconnectedAt: Date.parse("2026-07-20T08:30:00.000Z"),
+					missingScopes: [],
 				}),
 		})
 		const key = await harness.bootstrapAdminKey()
@@ -234,6 +237,7 @@ describe("v2 slack integration over HTTP", () => {
 			disconnected_reason: "app_uninstalled",
 			disconnected_team_name: "Acme",
 			disconnected_at: "2026-07-20T08:30:00.000Z",
+			missing_scopes: [],
 		})
 		await harness.dispose()
 	})
@@ -465,6 +469,7 @@ describe("v2 slack integration over HTTP", () => {
 					disconnectedReason: null,
 					disconnectedTeamName: null,
 					disconnectedAt: null,
+					missingScopes: [],
 				}),
 		})
 		const member = await harness.bootstrapMemberKey()
@@ -539,6 +544,7 @@ describe("v2 slack integration over HTTP", () => {
 					disconnectedReason: null,
 					disconnectedTeamName: null,
 					disconnectedAt: null,
+					missingScopes: [],
 				}),
 			startInstall: () => Effect.succeed({ url: "https://slack.com/oauth/v2/authorize" }),
 		})

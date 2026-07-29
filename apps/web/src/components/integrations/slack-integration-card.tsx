@@ -170,12 +170,16 @@ export function SlackIntegrationCard() {
 	const isLoading = Result.isInitial(statusResult) && status === null
 	const loadFailed = Result.isFailure(statusResult) && status === null
 
+	// Shared by "Add to Slack", "Reconnect", and "Update permissions": a
+	// reconnect is the same OAuth install run over the existing installation —
+	// the backend updates the workspace row in place, so the bot keeps its
+	// channel memberships (unlike disconnect + reinstall).
 	async function handleInstall() {
 		setBusy("install")
 		const result = await install({ reactivityKeys: ["slackIntegration"] })
 		if (Exit.isSuccess(result)) {
 			// Full-page redirect to Slack's consent screen; the callback returns the
-			// browser to /integrations?slack=connected.
+			// browser to /integrations?slack=connected (or slack=updated on a re-auth).
 			window.location.href = result.value.url
 			return
 		}
@@ -262,8 +266,29 @@ export function SlackIntegrationCard() {
 		)
 	}
 
+	const missingScopes = status?.missing_scopes ?? []
+	const needsReauth = missingScopes.length > 0
+
 	return (
 		<>
+			{needsReauth ? (
+				<div className="mb-4 flex flex-col gap-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+					<div>
+						<span className="font-medium text-foreground">
+							Maple needs additional Slack permissions.
+						</span>{" "}
+						This installation predates permissions Maple now relies on (
+						<span className="font-mono">{missingScopes.join(", ")}</span>). Updating re-runs the
+						Slack approval — the bot stays in its channels and alert destinations keep working.
+					</div>
+					<div>
+						<Button size="sm" onClick={handleInstall} disabled={!isAdmin || busy !== null}>
+							{busy === "install" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+							Update permissions
+						</Button>
+					</div>
+				</div>
+			) : null}
 			<div className="flex items-start gap-4 rounded-lg border border-border/60 bg-card p-4">
 				<IntegrationIconPlate icon={SlackIcon} accent={SLACK_ACCENT} />
 
@@ -301,6 +326,20 @@ export function SlackIntegrationCard() {
 					) : null}
 
 					<div className="flex flex-wrap gap-2">
+						{/* Hidden while the drift banner shows its "Update permissions"
+						    button — both run the same OAuth re-install, and two identical
+						    affordances would compete. */}
+						{!needsReauth ? (
+							<Button
+								size="sm"
+								onClick={handleInstall}
+								disabled={!isAdmin || busy !== null}
+								variant="outline"
+							>
+								{busy === "install" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+								Reconnect
+							</Button>
+						) : null}
 						{/* No spinner here: the confirm dialog stays open for the whole
 						    uninstall, so its own action button carries the busy state. */}
 						<Button
@@ -314,9 +353,14 @@ export function SlackIntegrationCard() {
 					</div>
 					{showNotAdmin ? (
 						<p className="text-[11px] text-muted-foreground">
-							Only organization admins can disconnect the Slack app.
+							Only organization admins can reconnect or disconnect the Slack app.
 						</p>
-					) : null}
+					) : (
+						<p className="text-[11px] text-muted-foreground">
+							Reconnect re-runs the Slack approval in place — use it to refresh the connection or
+							grant new permissions without removing the bot from its channels.
+						</p>
+					)}
 				</div>
 			</div>
 
@@ -325,9 +369,11 @@ export function SlackIntegrationCard() {
 					<AlertDialogHeader>
 						<AlertDialogTitle>Disconnect Slack</AlertDialogTitle>
 						<AlertDialogDescription>
-							This uninstalls the Maple Slack app and revokes the API key minted for the bot.
-							Alert rules using Slack (bot) destinations will stop delivering to Slack. You can
-							reinstall at any time.
+							This uninstalls the Maple Slack app, revokes the API key minted for the bot, and
+							removes the bot from every channel it was invited to. Alert rules using Slack (bot)
+							destinations will stop delivering, and after a reinstall the bot must be re-invited
+							to private channels. To refresh the connection or grant new permissions, use
+							Reconnect instead — it keeps channel memberships.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

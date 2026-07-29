@@ -64,7 +64,7 @@ export const SLACK_CALLBACK_PATH = "/oauth/slack/callback"
  * bot post to public channels it hasn't been invited to; `im:*` power the DM
  * agent surface. Keep in sync with the Slack app manifest.
  */
-export const SLACK_BOT_SCOPES = [
+const SLACK_BOT_SCOPE_LIST = [
 	"app_mentions:read",
 	"chat:write",
 	"chat:write.public",
@@ -80,7 +80,27 @@ export const SLACK_BOT_SCOPES = [
 	// work on (apps/slack-agent agent/lib/ack-reaction.ts).
 	"reactions:write",
 	"users:read",
-].join(",")
+] as const
+
+export const SLACK_BOT_SCOPES = SLACK_BOT_SCOPE_LIST.join(",")
+
+/**
+ * Required scopes the stored grant is missing — the "needs a reconnect" signal
+ * `getStatus` exposes so the dashboard can prompt an in-place OAuth re-install
+ * when {@link SLACK_BOT_SCOPES} grows. A `null` stored scope (a pre-column row)
+ * yields no drift: with no record of what was granted, an unattended nag could
+ * be wrong, and the next successful install backfills the column anyway.
+ */
+export const missingBotScopes = (grantedScope: string | null): ReadonlyArray<string> => {
+	if (grantedScope === null) return []
+	const granted = new Set(
+		grantedScope
+			.split(",")
+			.map((scope) => scope.trim())
+			.filter((scope) => scope.length > 0),
+	)
+	return SLACK_BOT_SCOPE_LIST.filter((scope) => !granted.has(scope))
+}
 
 /**
  * Thrown inside the install transaction (throwing is the only way to make a
@@ -175,6 +195,12 @@ export interface SlackInstallStatus {
 	readonly disconnectedReason: SlackRevocationReason | null
 	readonly disconnectedTeamName: string | null
 	readonly disconnectedAt: number | null
+	/**
+	 * Required bot scopes the active installation has not granted (see
+	 * {@link missingBotScopes}). Non-empty means the dashboard should prompt a
+	 * reconnect. Always empty when not installed.
+	 */
+	readonly missingScopes: ReadonlyArray<string>
 }
 
 export interface SlackChannelSummary {
@@ -196,7 +222,7 @@ export interface SlackIntegrationServiceShape {
 		code: string,
 		state: string,
 	) => Effect.Effect<
-		{ readonly orgId: OrgId; readonly teamName: string | null },
+		{ readonly orgId: OrgId; readonly teamName: string | null; readonly updated: boolean },
 		| IntegrationsValidationError
 		| IntegrationsForbiddenError
 		| IntegrationsUpstreamError
@@ -498,34 +524,74 @@ const make: Effect.Effect<
 		}
 		const priorRow = Option.getOrUndefined(existingByTeam)
 
-		// Mint a full-access MCP-kind API key for the bot; capture the plaintext.
-		const created = yield* apiKeys
-			.create(orgId, initiatedByUserId, {
-				name: `Slack bot (${teamName ?? teamId})`,
-				kind: "mcp",
-				scopes: null,
-			})
-			.pipe(
-				Effect.mapError(
-					(error) =>
-						new IntegrationsPersistenceError({
-							message: `Failed to mint Slack API key: ${error.message}`,
-						}),
-				),
-			)
+		// An in-place re-auth: the same org re-runs the OAuth install over its own
+		// still-active binding — the flow for granting newly required scopes. The
+		// existing API key is KEPT rather than rotated: the Slack agent caches the
+		// resolved key with no invalidation hook, so a rotation here would break
+		// its MCP calls until the cache expires. Reuse requires the key to still be
+		// live (an out-of-band revoke falls back to minting a fresh one), and the
+		// stored ciphertext stays valid as-is because its AAD is (org, team, column)
+		// and both are unchanged on this path.
+		const reusableSecret =
+			priorRow !== undefined &&
+			priorRow.orgId === orgId &&
+			priorRow.revokedAt === null &&
+			priorRow.apiKeyId !== null &&
+			priorRow.apiKeySecretCiphertext !== null &&
+			priorRow.apiKeySecretIv !== null &&
+			priorRow.apiKeySecretTag !== null
+				? {
+						apiKeyId: priorRow.apiKeyId,
+						ciphertext: priorRow.apiKeySecretCiphertext,
+						iv: priorRow.apiKeySecretIv,
+						tag: priorRow.apiKeySecretTag,
+					}
+				: undefined
+		const reusableKeyId = reusableSecret ? decodeApiKeyIdOption(reusableSecret.apiKeyId) : Option.none()
+		const priorKeyLive = Option.isSome(reusableKeyId)
+			? yield* apiKeys.get(orgId, reusableKeyId.value).pipe(
+					Effect.map((key) => !key.revoked && (key.expiresAt === null || key.expiresAt > now)),
+					Effect.catch(() => Effect.succeed(false)),
+				)
+			: false
+		const reusedKey = priorKeyLive ? reusableSecret : undefined
 
-		// The key exists before the row that points at it, so every failure from
-		// here on has to take it back out — otherwise the org keeps an active,
-		// unusable full-access key.
-		const revokeMintedKey = apiKeys.revoke(orgId, created.id).pipe(Effect.ignore)
+		let apiKeyId: string
+		let apiKeyEnc: EncryptedValue
+		// The minted key exists before the row that points at it, so every failure
+		// from here on has to take it back out — otherwise the org keeps an active,
+		// unusable full-access key. A no-op on the reuse path.
+		let revokeMintedKey: Effect.Effect<void> = Effect.void
+		if (reusedKey !== undefined) {
+			apiKeyId = reusedKey.apiKeyId
+			apiKeyEnc = { ciphertext: reusedKey.ciphertext, iv: reusedKey.iv, tag: reusedKey.tag }
+		} else {
+			// Mint a full-access MCP-kind API key for the bot; capture the plaintext.
+			const created = yield* apiKeys
+				.create(orgId, initiatedByUserId, {
+					name: `Slack bot (${teamName ?? teamId})`,
+					kind: "mcp",
+					scopes: null,
+				})
+				.pipe(
+					Effect.mapError(
+						(error) =>
+							new IntegrationsPersistenceError({
+								message: `Failed to mint Slack API key: ${error.message}`,
+							}),
+					),
+				)
+			revokeMintedKey = apiKeys.revoke(orgId, created.id).pipe(Effect.ignore)
+			apiKeyId = created.id
+			apiKeyEnc = yield* encryptValue(
+				created.secret,
+				slackSecretAad(orgId, teamId, "api_key_secret"),
+			).pipe(Effect.tapError(() => revokeMintedKey))
+		}
 
 		const botTokenEnc = yield* encryptValue(
 			access.accessToken,
 			slackSecretAad(orgId, teamId, "bot_token"),
-		).pipe(Effect.tapError(() => revokeMintedKey))
-		const apiKeyEnc = yield* encryptValue(
-			created.secret,
-			slackSecretAad(orgId, teamId, "api_key_secret"),
 		).pipe(Effect.tapError(() => revokeMintedKey))
 
 		const values = {
@@ -538,7 +604,7 @@ const make: Effect.Effect<
 			botTokenCiphertext: botTokenEnc.ciphertext,
 			botTokenIv: botTokenEnc.iv,
 			botTokenTag: botTokenEnc.tag,
-			apiKeyId: created.id,
+			apiKeyId,
 			apiKeySecretCiphertext: apiKeyEnc.ciphertext,
 			apiKeySecretIv: apiKeyEnc.iv,
 			apiKeySecretTag: apiKeyEnc.tag,
@@ -625,18 +691,30 @@ const make: Effect.Effect<
 			)
 
 		// Best-effort: revoke the API keys of every workspace this install
-		// replaced — the prior same-team row (whose key we just rotated) and any
-		// other-team rows we deactivated above. Bookkeeping must not fail the
-		// install now that the DB write has committed.
-		const keyIdsToRevoke = [priorRow?.apiKeyId ?? null, ...writeResult.revokedOtherKeyIds]
+		// replaced — the prior same-team row (whose key we just rotated — unless
+		// this was an in-place re-auth that reused it) and any other-team rows we
+		// deactivated above. Bookkeeping must not fail the install now that the DB
+		// write has committed.
+		const keyIdsToRevoke = [
+			reusedKey !== undefined ? null : (priorRow?.apiKeyId ?? null),
+			...writeResult.revokedOtherKeyIds,
+		]
 		yield* Effect.forEach(keyIdsToRevoke, (rawKeyId) => {
 			if (!rawKeyId) return Effect.void
 			const keyId = decodeApiKeyIdOption(rawKeyId)
 			return Option.isSome(keyId) ? apiKeys.revoke(orgId, keyId.value).pipe(Effect.ignore) : Effect.void
 		})
 
-		yield* Effect.logInfo("Slack workspace installed", { orgId, teamId, teamName })
-		return { orgId, teamName }
+		// "Updated" = the org re-authorized its own still-active binding (the
+		// permissions-refresh flow) rather than connecting from scratch.
+		const updated = priorRow !== undefined && priorRow.orgId === orgId && priorRow.revokedAt === null
+		yield* Effect.logInfo(updated ? "Slack workspace re-authorized" : "Slack workspace installed", {
+			orgId,
+			teamId,
+			teamName,
+			reusedApiKey: reusedKey !== undefined,
+		})
+		return { orgId, teamName, updated }
 	})
 
 	const getStatus = Effect.fn("SlackIntegrationService.getStatus")(function* (orgId: OrgId) {
@@ -655,6 +733,7 @@ const make: Effect.Effect<
 				disconnectedReason: null,
 				disconnectedTeamName: null,
 				disconnectedAt: null,
+				missingScopes: missingBotScopes(row.scope),
 			} satisfies SlackInstallStatus
 		}
 		// Not installed — check whether the most recent revocation came from
@@ -683,6 +762,7 @@ const make: Effect.Effect<
 			disconnectedTeamName: remoteReason !== null ? (lastRevoked?.teamName ?? null) : null,
 			disconnectedAt:
 				remoteReason !== null ? (lastRevoked?.revokedAt?.getTime() ?? null) : null,
+			missingScopes: [],
 		} satisfies SlackInstallStatus
 	})
 

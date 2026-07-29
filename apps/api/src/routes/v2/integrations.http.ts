@@ -98,6 +98,7 @@ const toStatus = (status: SlackInstallStatus): V2SlackIntegrationStatus => ({
 	disconnected_reason: status.disconnectedReason,
 	disconnected_team_name: status.disconnectedTeamName,
 	disconnected_at: isoTimestampOrNull(status.disconnectedAt),
+	missing_scopes: status.missingScopes,
 })
 
 const toChannelList = (channels: ReadonlyArray<SlackChannelSummary>): V2SlackChannelList => ({
