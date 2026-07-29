@@ -33,7 +33,31 @@ const SLACK_OAUTH_ACCESS_URL = "https://slack.com/api/oauth.v2.access"
 const SLACK_OAUTH_REVOKE_URL = "https://slack.com/api/auth.revoke"
 const SLACK_CONVERSATIONS_LIST_URL = "https://slack.com/api/conversations.list"
 const SLACK_AUTH_TEST_URL = "https://slack.com/api/auth.test"
-const SLACK_MAX_CHANNEL_PAGES = 3
+/**
+ * Per-page size for `conversations.list`. Slack's documented maximum is 1000;
+ * their docs *recommend* <= 200 because very large pages are more likely to time
+ * out server-side. We take the max anyway and lean on the retry below, because
+ * the binding constraint here is the rate limit, not page latency:
+ * `conversations.list` is Tier 2 (~20 req/min), so at 200/page a 10k-channel
+ * workspace would need 50 requests — guaranteed 429s and a multi-minute wait.
+ * At 1000/page the same workspace is 10 requests, comfortably inside one window.
+ */
+const SLACK_CHANNELS_PER_PAGE = 1000
+
+/**
+ * Safety cap on the cursor walk — a runaway `next_cursor` must not loop forever.
+ * At {@link SLACK_CHANNELS_PER_PAGE} this allows ~20k channels, well past the
+ * largest real workspaces, while still fitting the Tier 2 budget with the
+ * 429 backoff below. Hitting it logs a warning (the result is silently truncated
+ * otherwise).
+ */
+const SLACK_MAX_CHANNEL_PAGES = 20
+
+/** Attempts per page when Slack answers 429; each waits out `Retry-After`. */
+const SLACK_RATE_LIMIT_RETRIES = 3
+
+/** Upper bound on an honoured `Retry-After`, so one page can't hang the request. */
+const SLACK_MAX_RETRY_AFTER_MS = 30_000
 
 /** Why a workspace binding was revoked without going through `uninstall`. */
 export type SlackRevocationReason = "app_uninstalled" | "tokens_revoked" | "reconciliation"
@@ -141,6 +165,17 @@ const DEAD_TOKEN_AUTH_TEST_ERRORS: ReadonlySet<string> = new Set([
 	"token_revoked",
 	"token_expired",
 ])
+
+/**
+ * Slack's 429 `Retry-After` is whole seconds. Missing/garbage header → 1s, and
+ * anything longer than {@link SLACK_MAX_RETRY_AFTER_MS} is clamped so a single
+ * page can't hold the HTTP request open indefinitely.
+ */
+const retryAfterMs = (header: string | undefined): number => {
+	const seconds = Number.parseInt(header ?? "", 10)
+	if (!Number.isFinite(seconds) || seconds <= 0) return 1_000
+	return Math.min(seconds * 1_000, SLACK_MAX_RETRY_AFTER_MS)
+}
 
 const SlackConversationsListSchema = Schema.Struct({
 	ok: Schema.Boolean,
@@ -782,15 +817,21 @@ const make: Effect.Effect<
 		return { uninstalled: false }
 	})
 
-	/** Fetch one `conversations.list` page; returns the page's channels + next cursor. */
+	/**
+	 * Fetch one `conversations.list` page; returns the page's channels + next cursor.
+	 *
+	 * `conversations.list` is Tier 2 (~20 req/min) and answers 429 with an empty
+	 * body plus `Retry-After`, so a rate-limited page is retried here rather than
+	 * being surfaced as an "unexpected payload" upstream error.
+	 */
 	const fetchChannelPage = Effect.fnUntraced(function* (botToken: string, cursor: Option.Option<string>) {
 		const params = new URLSearchParams({
 			types: "public_channel,private_channel",
 			exclude_archived: "true",
-			limit: "200",
+			limit: String(SLACK_CHANNELS_PER_PAGE),
 		})
 		if (Option.isSome(cursor)) params.set("cursor", cursor.value)
-		const response = yield* httpClient
+		const request = httpClient
 			.get(`${SLACK_CONVERSATIONS_LIST_URL}?${params.toString()}`, {
 				headers: { authorization: `Bearer ${botToken}`, accept: "application/json" },
 			})
@@ -803,6 +844,24 @@ const make: Effect.Effect<
 						}),
 				),
 			)
+		let response = yield* request
+		for (let attempt = 0; response.status === 429 && attempt < SLACK_RATE_LIMIT_RETRIES; attempt++) {
+			const waitMs = retryAfterMs(response.headers["retry-after"])
+			yield* Effect.logWarning("Slack conversations.list rate limited — backing off", {
+				attempt: attempt + 1,
+				waitMs,
+			})
+			yield* Effect.sleep(waitMs)
+			response = yield* request
+		}
+		if (response.status === 429) {
+			return yield* Effect.fail(
+				new IntegrationsUpstreamError({
+					message: "Slack conversations.list is rate limited — try again in a minute",
+					status: 429,
+				}),
+			)
+		}
 		const json = yield* response.json.pipe(
 			Effect.mapError(
 				(error) =>
@@ -843,7 +902,11 @@ const make: Effect.Effect<
 	})
 
 	/**
-	 * Cursor-driven page walk, capped at {@link SLACK_MAX_CHANNEL_PAGES} pages.
+	 * Cursor-driven page walk that runs to cursor exhaustion, with
+	 * {@link SLACK_MAX_CHANNEL_PAGES} as a runaway guard rather than an intended
+	 * limit. Truncation is logged: a workspace that trips the cap gets a silently
+	 * short channel list, which is exactly the failure mode we can't see from the
+	 * UI.
 	 */
 	const collectChannelPages = Effect.fnUntraced(function* (botToken: string) {
 		const collected: Array<SlackChannelSummary> = []
@@ -851,9 +914,14 @@ const make: Effect.Effect<
 		for (let page = 0; page < SLACK_MAX_CHANNEL_PAGES; page++) {
 			const { channels, next } = yield* fetchChannelPage(botToken, cursor)
 			collected.push(...channels)
-			if (Option.isNone(next)) break
+			if (Option.isNone(next)) return collected
 			cursor = next
 		}
+		yield* Effect.logWarning("Slack channel list truncated at the page cap", {
+			pages: SLACK_MAX_CHANNEL_PAGES,
+			perPage: SLACK_CHANNELS_PER_PAGE,
+			channels: collected.length,
+		})
 		return collected
 	})
 

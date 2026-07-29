@@ -1,6 +1,6 @@
 import { createCipheriv, randomBytes } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { ConfigProvider, Effect, Fiber, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
@@ -63,6 +63,9 @@ const makeLayer = (
 
 /** Mirror of the service's (unexported) `SLACK_STATE_TTL_MS` — 10 minutes. */
 const SLACK_STATE_TTL_MS = 10 * 60_000
+
+/** Mirror of the service's (unexported) `SLACK_MAX_CHANNEL_PAGES` runaway guard. */
+const SLACK_MAX_CHANNEL_PAGES = 20
 
 /**
  * Wrap the real ApiKeysService so `create` runs `inject` first. `apiKeys.create`
@@ -1048,6 +1051,7 @@ describe("SlackIntegrationService", () => {
 
 	it.effect("listChannels caps pagination at SLACK_MAX_CHANNEL_PAGES pages", () => {
 		const testDb = createTestDb(trackedDbs)
+		const pageUrls: string[] = []
 		let calls = 0
 		return Effect.gen(function* () {
 			yield* Effect.promise(() =>
@@ -1063,11 +1067,62 @@ describe("SlackIntegrationService", () => {
 			const slack = yield* SlackIntegrationService
 			const channels = yield* slack.listChannels(asOrgId("org_lc"))
 			// The mock ALWAYS hands back a next_cursor — the walk must stop at the
-			// page cap (SLACK_MAX_CHANNEL_PAGES = 3) instead of looping forever.
-			assert.strictEqual(calls, 3)
+			// runaway guard (SLACK_MAX_CHANNEL_PAGES) instead of looping forever.
+			assert.strictEqual(calls, SLACK_MAX_CHANNEL_PAGES)
+			assert.strictEqual(channels.length, SLACK_MAX_CHANNEL_PAGES)
+			assert.strictEqual(channels[0]?.id, "C-page-0")
+			assert.strictEqual(channels.at(-1)?.id, `C-page-${SLACK_MAX_CHANNEL_PAGES - 1}`)
+			// 1000 per page (Slack's documented max) keeps a 10k-channel workspace
+			// inside the Tier 2 (~20 req/min) budget.
+			assert.strictEqual(new URL(pageUrls[0]!).searchParams.get("limit"), "1000")
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, (url, call) => {
+						pageUrls.push(url)
+						calls++
+						return jsonResponse({
+							ok: true,
+							channels: [{ id: `C-page-${call}` }],
+							response_metadata: { next_cursor: "more" },
+						})
+					}),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels waits out a 429 and retries the same page", () => {
+		const testDb = createTestDb(trackedDbs)
+		let calls = 0
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc429",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			// `conversations.list` is Tier 2 — a 429 must back off, not surface as an
+			// "unexpected payload" error (Slack sends an empty body with the 429).
+			const fiber = yield* Effect.forkChild(slack.listChannels(asOrgId("org_lc")))
+			// The fetch mock resolves on the real microtask queue while the sleep is
+			// on the TestClock, so alternate between draining one and advancing the
+			// other until the walk finishes.
+			for (let i = 0; i < 5; i++) {
+				yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)))
+				yield* TestClock.adjust(5_000)
+			}
+			const channels = yield* Fiber.join(fiber)
+			assert.strictEqual(calls, 2)
 			assert.deepStrictEqual(
 				channels.map((c) => c.id),
-				["C-page-0", "C-page-1", "C-page-2"],
+				["C1"],
 			)
 		}).pipe(
 			Effect.provide(
@@ -1075,11 +1130,9 @@ describe("SlackIntegrationService", () => {
 					testDb,
 					slackApiFetch(CONVERSATIONS_URL, (_url, call) => {
 						calls++
-						return jsonResponse({
-							ok: true,
-							channels: [{ id: `C-page-${call}` }],
-							response_metadata: { next_cursor: "more" },
-						})
+						return call === 0
+							? new Response("", { status: 429, headers: { "retry-after": "2" } })
+							: jsonResponse({ ok: true, channels: [{ id: "C1", name: "one" }] })
 					}),
 				),
 			),
