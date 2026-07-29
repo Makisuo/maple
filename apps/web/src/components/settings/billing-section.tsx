@@ -323,6 +323,7 @@ export function BillingSection({ isAdmin = true }: { isAdmin?: boolean }) {
 				<SectionHeader title="Plans" subtitle="Need higher volume or custom retention?" />
 				<div className="mt-4">
 					<PlanOffer
+						model={model}
 						onManageBilling={() => openCustomerPortal({ returnUrl: window.location.href })}
 					/>
 				</div>

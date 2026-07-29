@@ -2,8 +2,11 @@ import type { BillingCustomer, BillingUsage, CatalogPlan, DailySpendResponse } f
 import {
 	cycleSpend,
 	isActivePlanSubscription,
+	isPricedPlan,
 	projectCycleSpend,
+	resolveSubscriptionPlan,
 	type FeatureUsagePricing,
+	type PlanLike,
 } from "@maple/domain/billing"
 
 /**
@@ -77,8 +80,19 @@ export interface SpendModel {
 	readonly cycleDays: number
 	/** Name of the active plan, for the plan strip and the offer plate. */
 	readonly planName: string | null
-	readonly basePlan: CatalogPlan | null
-	readonly addOns: ReadonlyArray<CatalogPlan>
+	/**
+	 * The plan actually governing this cycle — the customer's own expanded plan
+	 * when they have one, else the catalog entry. For a custom-priced customer
+	 * this is NOT a catalog plan.
+	 */
+	readonly basePlan: PlanLike | null
+	readonly addOns: ReadonlyArray<PlanLike>
+	/**
+	 * True when the governing plan isn't the public catalog entry it claims to be —
+	 * a custom or grandfathered plan. The plans section must not advertise a
+	 * catalog plan as theirs in that case.
+	 */
+	readonly isCustomPlan: boolean
 }
 
 const DAY_MS = 86_400_000
@@ -115,31 +129,35 @@ export function buildSpendModel({
 
 	const catalog = plans ?? []
 	const activeSub = customer.subscriptions.find((sub) => isActivePlanSubscription(sub))
-	const basePlan = activeSub ? (catalog.find((plan) => plan.id === activeSub.planId) ?? null) : null
+	// The customer's own plan wins over the catalog — see `resolveSubscriptionPlan`.
+	// This is what makes usage-based pricing correct on a custom plan.
+	const basePlan = activeSub ? resolveSubscriptionPlan(activeSub, catalog) : null
 	const addOns = customer.subscriptions
 		.filter((sub) => sub.addOn === true && sub.status === "active")
-		.map((sub) => catalog.find((plan) => plan.id === sub.planId))
-		.filter((plan): plan is CatalogPlan => plan !== undefined)
+		.map((sub) => resolveSubscriptionPlan(sub, catalog))
+		.filter((plan): plan is PlanLike => plan !== null)
 
-	// Unknown base price (a legacy plan absent from the catalog) must read as
+	// A plan we can't price (neither expanded nor in the catalog) must read as
 	// partial rather than as a $0 base.
 	const baseDollars =
 		activeSub === undefined
 			? 0
-			: basePlan === null
+			: !isPricedPlan(basePlan)
 				? null
-				: (basePlan.price?.amount ?? 0) +
+				: (basePlan?.price?.amount ?? 0) +
 					addOns.reduce((sum, addOn) => sum + (addOn.price?.amount ?? 0), 0)
 
 	const pricing: Record<string, FeatureUsagePricing> = {}
 	for (const featureId of SPEND_FEATURES) {
 		const balance = customer.balances?.[featureId]
-		const item = basePlan?.items.find((entry) => entry.featureId === featureId)
+		const item = basePlan?.items?.find((entry) => entry.featureId === featureId)
 		pricing[featureId] = {
 			used: usage?.[featureId]?.sum ?? 0,
 			included: balance?.granted ?? item?.included ?? null,
 			ratePerUnit: item?.price?.amount ?? null,
 			unlimited: balance?.unlimited === true,
+			// A hard-capped feature bills no overage — see `billsOverage`.
+			overageAllowed: balance?.overageAllowed,
 		}
 	}
 
@@ -191,6 +209,9 @@ export function buildSpendModel({
 		planName: basePlan?.name ?? activeSub?.plan?.name ?? null,
 		basePlan,
 		addOns,
+		isCustomPlan:
+			activeSub !== undefined &&
+			!catalog.some((plan) => plan.id === activeSub.planId && !plan.addOn),
 	}
 }
 

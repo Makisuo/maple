@@ -11,46 +11,11 @@ import { WarehouseQueryError } from "./warehouse-errors"
 // shape addition can't fail decoding and 500 the endpoint (excess keys are
 // dropped by `Schema.Struct`/`Schema.Class` decoding).
 
-// ---- Customer (getOrCreateCustomer) ----
-
-export class BillingBalance extends Schema.Class<BillingBalance>("BillingBalance")({
-	granted: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	usage: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	remaining: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	unlimited: Schema.optionalKey(Schema.Boolean),
-	overageAllowed: Schema.optionalKey(Schema.Boolean),
-}) {}
-
-export class BillingSubscriptionPlan extends Schema.Class<BillingSubscriptionPlan>("BillingSubscriptionPlan")(
-	{
-		name: Schema.optionalKey(Schema.NullOr(Schema.String)),
-		archived: Schema.optionalKey(Schema.Boolean),
-	},
-) {}
-
-export class BillingSubscription extends Schema.Class<BillingSubscription>("BillingSubscription")({
-	planId: Schema.String,
-	// getOrCreateCustomer does NOT expand the plan, so this is usually absent —
-	// legacy detection compares planId against the live catalog instead.
-	plan: Schema.optionalKey(Schema.NullOr(BillingSubscriptionPlan)),
-	status: Schema.String,
-	addOn: Schema.optionalKey(Schema.Boolean),
-	autoEnable: Schema.optionalKey(Schema.Boolean),
-	pastDue: Schema.optionalKey(Schema.Boolean),
-	trialEndsAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	currentPeriodStart: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	currentPeriodEnd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	quantity: Schema.optionalKey(Schema.Number),
-}) {}
-
-export class BillingCustomer extends Schema.Class<BillingCustomer>("BillingCustomer")({
-	id: Schema.String,
-	subscriptions: Schema.Array(BillingSubscription),
-	balances: Schema.optionalKey(Schema.Record(Schema.String, BillingBalance)),
-	flags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
-}) {}
-
-// ---- Plan catalog (listPlans) ----
+// ---- Plan shapes shared by the catalog and the customer's own plan ----
+//
+// Declared first because `BillingSubscriptionPlan` (the customer's expanded plan)
+// is built from them, and a Schema.Class evaluates its fields at module init —
+// referencing a class declared further down would throw at import time.
 
 export class CatalogPlanItemPrice extends Schema.Class<CatalogPlanItemPrice>("CatalogPlanItemPrice")({
 	amount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
@@ -75,6 +40,62 @@ export class CatalogPlanPrice extends Schema.Class<CatalogPlanPrice>("CatalogPla
 	amount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 	interval: Schema.optionalKey(Schema.NullOr(Schema.String)),
 }) {}
+
+// ---- Customer (getOrCreateCustomer) ----
+
+export class BillingBalance extends Schema.Class<BillingBalance>("BillingBalance")({
+	granted: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	usage: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	remaining: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	unlimited: Schema.optionalKey(Schema.Boolean),
+	overageAllowed: Schema.optionalKey(Schema.Boolean),
+}) {}
+
+/**
+ * The customer's OWN plan, as returned by `getOrCreateCustomer` with
+ * `expand: ["subscriptions.plan"]`.
+ *
+ * This is the authority on what the customer pays. The public catalog
+ * (`listPlans`) only describes what is *for sale*, so for a custom-priced or
+ * grandfathered plan its prices are somebody else's — pricing anything from the
+ * catalog when this is present shows the customer a bill that isn't theirs.
+ *
+ * Shares `CatalogPlanItem` / `CatalogPlanPrice`: same shape, same units.
+ */
+export class BillingSubscriptionPlan extends Schema.Class<BillingSubscriptionPlan>("BillingSubscriptionPlan")(
+	{
+		id: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		name: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		archived: Schema.optionalKey(Schema.Boolean),
+		price: Schema.optionalKey(Schema.NullOr(CatalogPlanPrice)),
+		// Absent unless expanded, so every consumer has to tolerate its absence.
+		items: Schema.optionalKey(Schema.NullOr(Schema.Array(CatalogPlanItem))),
+	},
+) {}
+
+export class BillingSubscription extends Schema.Class<BillingSubscription>("BillingSubscription")({
+	planId: Schema.String,
+	// Present when the caller expands `subscriptions.plan` (the customer read
+	// does). Legacy detection still compares planId against the live catalog.
+	plan: Schema.optionalKey(Schema.NullOr(BillingSubscriptionPlan)),
+	status: Schema.String,
+	addOn: Schema.optionalKey(Schema.Boolean),
+	autoEnable: Schema.optionalKey(Schema.Boolean),
+	pastDue: Schema.optionalKey(Schema.Boolean),
+	trialEndsAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	currentPeriodStart: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	currentPeriodEnd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	quantity: Schema.optionalKey(Schema.Number),
+}) {}
+
+export class BillingCustomer extends Schema.Class<BillingCustomer>("BillingCustomer")({
+	id: Schema.String,
+	subscriptions: Schema.Array(BillingSubscription),
+	balances: Schema.optionalKey(Schema.Record(Schema.String, BillingBalance)),
+	flags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+}) {}
+
+// ---- Plan catalog (listPlans) ----
 
 export class CatalogPlanEligibility extends Schema.Class<CatalogPlanEligibility>("CatalogPlanEligibility")({
 	status: Schema.optionalKey(Schema.NullOr(Schema.String)),

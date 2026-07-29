@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { cycleSpend, isActivePlanSubscription, overageUnits, projectCycleSpend } from "./billing"
+import {
+	cycleSpend,
+	isActivePlanSubscription,
+	isPricedPlan,
+	overageUnits,
+	projectCycleSpend,
+	resolveSubscriptionPlan,
+} from "./billing"
 
 // The Startup plan as it ships in apps/api/autumn.config.ts: $39/mo, 100 GB of
 // each byte signal at $0.30/GB, 5,000 sessions at $0.002 each.
@@ -109,5 +116,79 @@ describe("isActivePlanSubscription", () => {
 		expect(isActivePlanSubscription({})).toBe(false)
 		expect(isActivePlanSubscription(null)).toBe(false)
 		expect(isActivePlanSubscription(undefined)).toBe(false)
+	})
+})
+
+describe("resolveSubscriptionPlan", () => {
+	const catalogStartup = {
+		id: "startup",
+		name: "Startup",
+		price: { amount: 39 },
+		items: [{ featureId: "logs", included: 100, price: { amount: 0.3 } }],
+	}
+
+	it("prefers the customer's own expanded plan over the catalog entry", () => {
+		// The whole point: a customer on a custom-priced "startup" must be billed at
+		// THEIR $19/50 GB, not at the catalog's $39/100 GB.
+		const own = {
+			id: "startup",
+			name: "Startup (custom)",
+			price: { amount: 19 },
+			items: [{ featureId: "logs", included: 50, price: { amount: 0.1 } }],
+		}
+		const resolved = resolveSubscriptionPlan(
+			{ planId: "startup", status: "active", plan: own },
+			[catalogStartup],
+		)
+
+		expect(resolved?.price?.amount).toBe(19)
+		expect(resolved?.items?.[0]?.included).toBe(50)
+	})
+
+	it("falls back to the catalog when the plan was not expanded", () => {
+		// An unexpanded `plan` carries only a name; it must not shadow the catalog
+		// entry that actually has prices.
+		const resolved = resolveSubscriptionPlan(
+			{ planId: "startup", status: "active", plan: { name: "Startup" } },
+			[catalogStartup],
+		)
+		expect(resolved?.price?.amount).toBe(39)
+	})
+
+	it("returns the unpriced plan when neither source can price it", () => {
+		const resolved = resolveSubscriptionPlan(
+			{ planId: "legacy_pro", status: "active", plan: { name: "Legacy Pro" } },
+			[catalogStartup],
+		)
+		expect(resolved?.name).toBe("Legacy Pro")
+		expect(isPricedPlan(resolved)).toBe(false)
+	})
+})
+
+describe("cycleSpend with hard-capped features", () => {
+	it("bills nothing for a hard-capped feature and stays exact", () => {
+		// An archived plan can grant 50 GB with no overage rate at all: the excess is
+		// rejected at the gateway, so $0 is the correct AND knowable answer. Marking
+		// it partial would tell the customer their bill might be higher.
+		const spend = cycleSpend({
+			baseDollars: 19,
+			features: {
+				logs: { used: 90, included: 50, ratePerUnit: null, overageAllowed: false },
+			},
+		})
+
+		expect(spend.overageByFeature.logs).toBe(0)
+		expect(spend.totalCents).toBe(1_900)
+		expect(spend.partial).toBe(false)
+	})
+
+	it("still flags a missing rate when the plan DOES allow overage", () => {
+		const spend = cycleSpend({
+			baseDollars: 19,
+			features: {
+				logs: { used: 90, included: 50, ratePerUnit: null, overageAllowed: true },
+			},
+		})
+		expect(spend.partial).toBe(true)
 	})
 })

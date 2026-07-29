@@ -118,7 +118,15 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 						const { result, hit } = yield* readCustomerCached(
 							edgeCache,
 							tenant.orgId,
-							callAutumn("getOrCreateCustomer", {}, tenant.orgId),
+							callAutumn(
+								"getOrCreateCustomer",
+								// The customer's OWN plan: for a custom-priced or
+								// grandfathered plan it is the only source of their real
+								// price and allotments. Without it the page would quote the
+								// public catalog's rates at them.
+								{ expand: ["subscriptions.plan"] },
+								tenant.orgId,
+							),
 						)
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, "cache.hit": hit })
 						const response = yield* ensureOk(result)
@@ -163,7 +171,15 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 						const { result } = yield* readCustomerCached(
 							edgeCache,
 							tenant.orgId,
-							callAutumn("getOrCreateCustomer", {}, tenant.orgId),
+							callAutumn(
+								"getOrCreateCustomer",
+								// The customer's OWN plan: for a custom-priced or
+								// grandfathered plan it is the only source of their real
+								// price and allotments. Without it the page would quote the
+								// public catalog's rates at them.
+								{ expand: ["subscriptions.plan"] },
+								tenant.orgId,
+							),
 						)
 						const response = yield* ensureOk(result)
 						const customer = yield* decodeUpstream(BillingCustomer, response)

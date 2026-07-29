@@ -80,6 +80,19 @@ export function SpendChart({
 	// Where "today" sits on an axis that now runs to the end of the cycle, and
 	// where the projection lands.
 	const todayPoint = useMemo(() => data.findLast((point) => !point.future), [data])
+
+	// Cycle-to-date dollars per band, read off the last actual day — the legend
+	// states what each color is worth so far.
+	const bandTotals = useMemo(() => {
+		const latest = data.findLast((point) => !point.future)
+		return {
+			base: latest?.base ?? 0,
+			logs: latest?.logs ?? 0,
+			traces: latest?.traces ?? 0,
+			metrics: latest?.metrics ?? 0,
+			browser_sessions: latest?.browser_sessions ?? 0,
+		} satisfies Record<(typeof BANDS)[number], number>
+	}, [data])
 	const lastPoint = data[data.length - 1]
 	const hasFuture = lastPoint !== undefined && lastPoint.future
 
@@ -100,7 +113,12 @@ export function SpendChart({
 						Cumulative estimated spend by feature
 					</p>
 				</div>
-				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+				{/* The legend carries each band's cycle-to-date dollars, not just its
+				    color: a row of five dots tells you which color is which, but not
+				    which band is worth reading. With the amounts it doubles as the
+				    breakdown, and the "$0.00" bands say plainly that they contribute
+				    nothing rather than hiding somewhere on the axis. */}
+				<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
 					{BANDS.map((band) => (
 						<span key={band} className="inline-flex items-baseline gap-1.5">
 							<span
@@ -110,6 +128,9 @@ export function SpendChart({
 							/>
 							<span className="text-[11px] text-muted-foreground">
 								{chartConfig[band]?.label}
+							</span>
+							<span className="font-mono text-[11px] tabular-nums text-foreground/85">
+								{formatCurrency(bandTotals[band], model.currency)}
 							</span>
 						</span>
 					))}

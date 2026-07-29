@@ -1,6 +1,11 @@
-import { cycleSpend, type FeatureUsagePricing } from "@maple/domain/billing"
+import {
+	cycleSpend,
+	isActivePlanSubscription,
+	isPricedPlan,
+	resolveSubscriptionPlan,
+	type FeatureUsagePricing,
+} from "@maple/domain/billing"
 import type { BillingCustomer, BillingUsage, CatalogPlan, SpendLimits } from "@maple/domain/http"
-import { isActivePlanSubscription } from "@maple/domain/billing"
 
 /**
  * Pure spend-limit evaluation: given an org's Autumn snapshot and its configured
@@ -36,11 +41,12 @@ export interface SpendEvaluation {
 
 /**
  * Build the per-feature pricing inputs from the customer's balances and the
- * plan's catalog items.
+ * plan governing this cycle.
  *
  * Included amounts come from `balances` (the same source the usage meters read)
  * so the evaluator can't price against a different allotment than the page
- * shows; rates come from the catalog, which is the only place they exist.
+ * shows; rates come from the resolved plan — the customer's own expanded plan
+ * when they have one, else the catalog.
  */
 export const featurePricingFor = ({
 	customer,
@@ -52,17 +58,22 @@ export const featurePricingFor = ({
 	readonly usage: BillingUsage["total"] | undefined
 }): Record<string, FeatureUsagePricing> => {
 	const activeSub = customer.subscriptions.find((sub) => isActivePlanSubscription(sub))
-	const basePlan = activeSub ? plans.find((plan) => plan.id === activeSub.planId) : undefined
+	// The customer's own expanded plan wins over the catalog: on a custom plan the
+	// catalog's rates belong to somebody else, and pausing ingestion on a number
+	// computed from them would be indefensible.
+	const basePlan = activeSub ? resolveSubscriptionPlan(activeSub, plans) : null
 
 	const features: Record<string, FeatureUsagePricing> = {}
 	for (const featureId of METERED_FEATURES) {
 		const balance = customer.balances?.[featureId]
-		const item = basePlan?.items.find((entry) => entry.featureId === featureId)
+		const item = basePlan?.items?.find((entry) => entry.featureId === featureId)
 		features[featureId] = {
 			used: usage?.[featureId]?.sum ?? 0,
 			included: balance?.granted ?? item?.included ?? null,
 			ratePerUnit: item?.price?.amount ?? null,
 			unlimited: balance?.unlimited === true,
+			// A hard-capped feature bills no overage — see `billsOverage`.
+			overageAllowed: balance?.overageAllowed,
 		}
 	}
 	return features
@@ -83,14 +94,14 @@ export const baseDollarsFor = ({
 
 	let total = 0
 	for (const sub of activeSubs) {
-		const plan = plans.find((entry) => entry.id === sub.planId)
-		// A legacy plan absent from the catalog has no knowable price: return null
-		// so the whole estimate is marked partial rather than silently missing a
-		// base fee and reading as under-limit.
-		if (!plan) return null
-		const amount = plan.price?.amount
+		const plan = resolveSubscriptionPlan(sub, plans)
+		// A plan we can price from neither source has no knowable price: return
+		// null so the whole estimate is marked partial rather than silently missing
+		// a base fee and reading as under-limit.
+		if (!isPricedPlan(plan)) return null
+		const amount = plan?.price?.amount
 		if (amount == null) {
-			if (!plan.autoEnable) return null
+			if (!sub.autoEnable) return null
 			continue
 		}
 		const quantity = sub.quantity != null && sub.quantity > 1 ? sub.quantity : 1

@@ -50,7 +50,11 @@ function FeatureCard({
 	// a card whose usage is mostly overage reads that way at a glance.
 	const includedFraction =
 		included === null || feature.used <= 0 ? 100 : Math.min(100, (included / feature.used) * 100)
-	const hasOverage = feature.overageUnits > 0
+	// A hard-capped feature is rejected past its allotment rather than billed, so
+	// it must never read as pending overage — that is the whole difference between
+	// "you will be charged for this" and "we stopped accepting it".
+	const hardCapped = feature.overageAllowed === false && !feature.unlimited
+	const hasOverage = feature.overageUnits > 0 && !hardCapped
 
 	return (
 		// Fixed-height slots for the title and the headline, so the meter and the
@@ -97,7 +101,11 @@ function FeatureCard({
 					{feature.unlimited
 						? "unlimited"
 						: included === null
-							? "no allotment"
+							? // No allotment AND no rate means the plan doesn't carry this
+								// feature at all — say that, rather than implying a zero quota.
+								feature.ratePerUnit === null
+								? "not on your plan"
+								: "no allotment"
 							: `of ${formatVolume(feature.featureId, included)} included`}
 				</span>
 			</div>
@@ -116,16 +124,20 @@ function FeatureCard({
 								{formatCurrency(feature.overageCents / 100, currency)}
 							</span>
 						</>
+					) : hardCapped && feature.overageUnits > 0 ? (
+						<span className="text-severity-warn">Over cap · rejected</span>
 					) : (
 						"No overage"
 					)}
 				</span>
 				<span className="font-mono tabular-nums text-muted-foreground/70">
-					{feature.ratePerUnit === null
-						? "—"
-						: featureUnit(feature.featureId) === "GB"
-							? `$${feature.ratePerUnit.toFixed(2)}/GB`
-							: `$${feature.ratePerUnit}/session`}
+					{hardCapped
+						? "hard cap"
+						: feature.ratePerUnit === null
+							? "—"
+							: featureUnit(feature.featureId) === "GB"
+								? `$${feature.ratePerUnit.toFixed(2)}/GB`
+								: `$${feature.ratePerUnit}/session`}
 				</span>
 			</div>
 		</div>

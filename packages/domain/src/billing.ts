@@ -44,6 +44,13 @@ export interface FeatureUsagePricing {
 	readonly ratePerUnit: number | null
 	/** True when the feature is unlimited on this plan: never any overage. */
 	readonly unlimited?: boolean
+	/**
+	 * `false` when the plan hard-caps this feature: usage past the allotment is
+	 * rejected, never billed. Distinct from "we don't know the rate" — a hard cap
+	 * costs a knowable $0, so it must NOT make the estimate partial. Autumn reports
+	 * it per feature on the customer's balances.
+	 */
+	readonly overageAllowed?: boolean
 }
 
 export interface CycleSpend {
@@ -68,6 +75,10 @@ export function overageUnits(feature: FeatureUsagePricing): number {
 	return Math.max(0, feature.used - feature.included)
 }
 
+/** Can this feature bill past its allotment at all? */
+export const billsOverage = (feature: FeatureUsagePricing): boolean =>
+	feature.unlimited !== true && feature.overageAllowed !== false
+
 /**
  * Estimated spend for the cycle so far: base subscription price plus per-feature
  * overage. No extrapolation — projection is the caller's job, because only the
@@ -90,6 +101,12 @@ export function cycleSpend({
 	for (const [featureId, feature] of Object.entries(features)) {
 		const units = overageUnits(feature)
 		if (units <= 0) {
+			overageByFeature[featureId] = 0
+			continue
+		}
+		if (!billsOverage(feature)) {
+			// Hard-capped: the excess was rejected at the gateway, not billed. A
+			// knowable zero, so the estimate stays exact.
 			overageByFeature[featureId] = 0
 			continue
 		}
@@ -134,3 +151,61 @@ export function projectCycleSpend({
 	if (elapsedMs <= 0 || totalMs <= 0 || elapsedMs >= totalMs) return baseCents + overageCents
 	return baseCents + Math.round(overageCents * (totalMs / elapsedMs))
 }
+
+// ---------------------------------------------------------------------------
+// Whose prices apply
+//
+// Two sources describe a plan: the customer's OWN subscription plan (expanded
+// via `subscriptions.plan`) and the public catalog (`listPlans`). They agree for
+// a self-serve customer and diverge for every custom-priced or grandfathered
+// one — where the catalog describes what is *for sale*, not what this customer
+// pays. Pricing from the catalog in that case bills them at somebody else's
+// rates, so the customer's own plan always wins and the catalog is the fallback
+// for the (common) case where nothing was expanded.
+// ---------------------------------------------------------------------------
+
+/** Structural view of a plan's per-feature line, from either source. */
+export interface PlanItemLike {
+	readonly featureId?: string | null
+	readonly included?: number | null
+	readonly unlimited?: boolean | null
+	readonly price?: {
+		readonly amount?: number | null
+		/** Units the rate is quoted per (e.g. 1 GB, 1,000 sessions). */
+		readonly billingUnits?: number | null
+	} | null
+}
+
+/** Structural view of a plan, from either source. */
+export interface PlanLike {
+	readonly id?: string | null
+	readonly name?: string | null
+	readonly price?: { readonly amount?: number | null; readonly interval?: string | null } | null
+	readonly items?: ReadonlyArray<PlanItemLike> | null
+}
+
+export interface SubscriptionLike extends PlanGatingSubscription {
+	readonly plan?: PlanLike | null
+	readonly quantity?: number | null
+}
+
+/**
+ * The plan that governs a subscription: its own expanded plan when present (and
+ * priced), else the catalog entry with the same id.
+ *
+ * "And priced" matters: an unexpanded `plan` carries only `{ name }`, which would
+ * otherwise shadow the catalog entry that does have prices.
+ */
+export const resolveSubscriptionPlan = <P extends PlanLike>(
+	subscription: SubscriptionLike,
+	catalog: ReadonlyArray<P>,
+): PlanLike | null => {
+	const own = subscription.plan
+	if (own && (own.price != null || (own.items != null && own.items.length > 0))) return own
+	const planId = subscription.planId
+	return (planId ? catalog.find((plan) => plan.id === planId) : undefined) ?? own ?? null
+}
+
+/** Is this plan's pricing knowable — i.e. can we quote a bill from it at all? */
+export const isPricedPlan = (plan: PlanLike | null): boolean =>
+	plan !== null && (plan.price?.amount != null || (plan.items?.length ?? 0) > 0)

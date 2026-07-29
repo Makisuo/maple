@@ -79,7 +79,9 @@ const evaluateOrg = Effect.fn("SpendLimitEvaluation.evaluateOrg")(function* (
 	const { result } = yield* readCustomerCached(
 		deps.edgeCache,
 		entry.orgId,
-		deps.callAutumn("getOrCreateCustomer", {}, entry.orgId),
+		// Same expansion as the route: the evaluator must price a custom plan
+		// with the customer's own rates, not the public catalog's.
+		deps.callAutumn("getOrCreateCustomer", { expand: ["subscriptions.plan"] }, entry.orgId),
 	)
 	const customer = yield* decodeUpstream(BillingCustomer, yield* ensureOk(result))
 
