@@ -177,11 +177,27 @@ export const prepareRawSql = Effect.fn("RawSql.prepare")(function* (input: Prepa
 		sql = sql.replace(match[0], `${column} >= ${startLiteral} AND ${column} <= ${endLiteral}`)
 	}
 
+	// Bucketing macro. An alert query that selects `$__timeGroup(Timestamp) AS bucket`
+	// returns one row per evaluation window, so the preview chart renders a real
+	// series instead of a single point; without it the whole range collapses into
+	// one synthetic bucket, which reduces to exactly the same scalar.
+	const timeGroupMatches = [...sql.matchAll(/\$__timeGroup\(([^)]*)\)/g)]
+	for (const match of timeGroupMatches) {
+		const column = match[1].trim()
+		if (!COLUMN_IDENT_RE.test(column)) {
+			return yield* fail(
+				"InvalidMacro",
+				`$__timeGroup argument '${column}' must be a column identifier (letters, digits, underscores, dots).`,
+			)
+		}
+		sql = sql.replace(match[0], `toStartOfInterval(${column}, INTERVAL ${granularity} SECOND)`)
+	}
+
 	if (sql.includes("$__")) {
 		const leftover = sql.match(/\$__\w+/)?.[0] ?? "$__?"
 		return yield* fail(
 			"UnresolvedMacro",
-			`Unknown macro ${leftover}. Supported: $__orgFilter, $__timeFilter(col), $__startTime, $__endTime, $__interval_s.`,
+			`Unknown macro ${leftover}. Supported: $__orgFilter, $__timeFilter(col), $__timeGroup(col), $__startTime, $__endTime, $__interval_s.`,
 		)
 	}
 

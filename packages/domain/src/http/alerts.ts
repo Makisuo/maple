@@ -91,6 +91,19 @@ export type AlertComparator = Schema.Schema.Type<typeof AlertComparator>
 export const isRangeComparator = (c: AlertComparator): c is "between" | "not_between" =>
 	c === "between" || c === "not_between"
 
+/**
+ * The group key an *ungrouped* rule stores its state, incidents and check rows
+ * under. It is part of the public surface — the v2 wire, the ClickHouse
+ * `alert_checks.GroupKey` column and the Electric-synced web collection all
+ * carry it — so it can never be renamed.
+ *
+ * The query engine has its own generic vocabulary for the same idea (`"all"`),
+ * which is deliberately not this constant: `AlertsService.evaluateRule` is the
+ * single boundary that translates, so `"all"` never escapes into storage and no
+ * other call site re-derives the key.
+ */
+export const UNGROUPED_GROUP_KEY = "__total__"
+
 export const AlertMetricType = Schema.Literals([
 	"sum",
 	"gauge",
@@ -914,10 +927,14 @@ export class AlertsApiGroup extends HttpApiGroup.make("alerts")
 		HttpApiEndpoint.post("previewRule", "/rules/preview", {
 			payload: AlertRulePreviewRequest,
 			success: AlertRulePreviewResponse,
-			// No AlertForbiddenError: preview is read-only (unlike testRule, which can
-			// send notifications), so it is not admin-gated.
+			// Preview is read-only (unlike testRule, which can send notifications) and
+			// so is not admin-gated in general. The one exception is a raw_query rule:
+			// replaying it executes user-authored ClickHouse against the org's
+			// warehouse, which is the same capability createRule/testRule gate behind
+			// org-admin — hence AlertForbiddenError is reachable here.
 			error: [
 				AlertValidationError,
+				AlertForbiddenError,
 				AlertPersistenceError,
 				AlertNotFoundError,
 				AlertDeliveryError,

@@ -129,7 +129,7 @@ export const HttpAlertsLive = HttpApiBuilder.group(MapleApi, "alerts", (handlers
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-					return yield* alerts.previewRule(tenant.orgId, payload)
+					return yield* alerts.previewRule(tenant.orgId, tenant.roles, payload)
 				}).pipe(Effect.withSpan("alerts.previewRule")),
 			)
 			.handle("listIncidents", () =>

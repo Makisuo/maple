@@ -43,6 +43,7 @@ const makeRule = (overrides: Record<string, unknown> = {}): AlertRuleDocument =>
 		severity: "warning",
 		serviceNames: [],
 		excludeServiceNames: [],
+		environments: [],
 		tags: [],
 		groupBy: null,
 		signalType: "error_rate",

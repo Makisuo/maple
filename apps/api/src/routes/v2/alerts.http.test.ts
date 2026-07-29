@@ -329,7 +329,7 @@ describe("v2 alerts over HTTP", () => {
 		await harness.dispose()
 	})
 
-	it("blocks raw SQL preview for alerts:read keys without querying the warehouse", async () => {
+	it("blocks raw SQL preview for non-admin keys without querying the warehouse", async () => {
 		let warehouseCalls = 0
 		const harness = makeHarness({
 			...warehouseStub,
@@ -338,6 +338,9 @@ describe("v2 alerts over HTTP", () => {
 				return Effect.succeed([{ value: 42 }])
 			},
 		})
+		// Preview needs only `alerts:read`, but replaying a raw_query rule executes
+		// user-authored ClickHouse — the same capability creating one requires. A
+		// read-only key must not get there via preview.
 		const key = await harness.bootstrapKey(["alerts:read"])
 		const response = await harness.request("POST", "/v2/alerts/rules/preview", key.secret, {
 			rule: {
@@ -355,9 +358,36 @@ describe("v2 alerts over HTTP", () => {
 			start_time: "2026-01-01T00:00:00.000Z",
 			end_time: "2026-01-01T00:30:00.000Z",
 		})
-		expect(response.status).toBe(400)
-		expect(JSON.stringify(response.body)).toContain("cannot be previewed")
+		expect(response.status).toBe(403)
 		expect(warehouseCalls).toBe(0)
+		await harness.dispose()
+	})
+
+	it("previews a raw SQL alert for alerts:write keys", async () => {
+		const harness = makeHarness({
+			...warehouseStub,
+			rawSqlQuery: () => Effect.succeed([{ value: 42, samples: 20 }]),
+		})
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const response = await harness.request("POST", "/v2/alerts/rules/preview", key.secret, {
+			rule: {
+				name: "Raw preview",
+				severity: "warning",
+				signal_type: "raw_query",
+				raw_query_sql:
+					"SELECT count() AS value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+				raw_query_reducer: "max",
+				comparator: "gt",
+				threshold: 10,
+				window_minutes: 5,
+				destination_ids: [],
+			},
+			start_time: "2026-01-01T00:00:00.000Z",
+			end_time: "2026-01-01T00:30:00.000Z",
+		})
+		expect(response.status).toBe(200)
+		expect(response.body.object).toBe("alert_rule.preview")
+		expect(response.body.series.length).toBeGreaterThan(0)
 		await harness.dispose()
 	})
 

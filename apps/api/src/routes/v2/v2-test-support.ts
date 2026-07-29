@@ -156,7 +156,6 @@ export const TelemetryServiceStubsLayer = Layer.mergeAll(
 	Layer.succeed(QueryEngineService, {
 		execute: die,
 		evaluate: die,
-		evaluateRawSql: die,
 		evaluateSeries: die,
 		cachedDirect: die,
 	}),

@@ -3038,7 +3038,7 @@ describe("AlertsService.previewRule", () => {
 				endTime: "2026-01-01T00:30:00.000Z",
 			})
 
-			const response = yield* alerts.previewRule(orgId, request)
+			const response = yield* alerts.previewRule(orgId, adminRoles, request)
 
 			assert.strictEqual(response.bucketSeconds, 300)
 			assert.strictEqual(response.windowMinutes, 5)
@@ -3097,7 +3097,7 @@ describe("AlertsService.previewRule", () => {
 				endTime: "2026-01-01T00:32:30.000Z",
 			})
 
-			const response = yield* alerts.previewRule(orgId, request)
+			const response = yield* alerts.previewRule(orgId, adminRoles, request)
 
 			assert.lengthOf(response.series, 1)
 			const points = response.series[0]!.points
@@ -3119,7 +3119,7 @@ describe("AlertsService.previewRule", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 
-	it.effect("rejects raw-SQL previews before warehouse execution", () => {
+	it.effect("previews a raw-SQL rule through the same path as every other kind", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = { rawQueryRows: [{ value: 42, samples: 20 }] }
 
@@ -3149,11 +3149,13 @@ describe("AlertsService.previewRule", () => {
 				endTime: "2026-01-01T00:30:00.000Z",
 			})
 
-			const exit = yield* alerts.previewRule(orgId, request).pipe(Effect.exit)
-			assert.isTrue(Exit.isFailure(exit))
-			const failure = getError(exit)
-			assert.instanceOf(failure, AlertValidationError)
-			assert.include((failure as AlertValidationError).message, "cannot be previewed")
+			// Raw SQL used to be rejected here even though the UI offers the chart.
+			// It is now just another evaluate source, so the preview renders.
+			const preview = yield* alerts.previewRule(orgId, adminRoles, request)
+			assert.isAbove(preview.series.length, 0)
+			const points = preview.series[0]?.points ?? []
+			assert.isAbove(points.length, 0)
+			assert.isTrue(points.some((p) => p.value === 42))
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 })
