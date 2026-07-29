@@ -245,6 +245,19 @@ export interface SlackIntegrationServiceShape {
 		teamId: string,
 	) => Effect.Effect<SlackBotResolution, IntegrationsNotConnectedError | IntegrationsPersistenceError>
 	/**
+	 * The org a Slack team's active install is bound to — and nothing else.
+	 *
+	 * Deliberately NOT {@link resolveForBot}: usage reporting only needs the
+	 * billing subject, so it must not decrypt (or risk logging) the workspace's
+	 * bot token and full-access Maple API key just to attribute a token count.
+	 */
+	readonly resolveOrgForTeam: (
+		teamId: string,
+	) => Effect.Effect<
+		{ readonly orgId: OrgId },
+		IntegrationsNotConnectedError | IntegrationsPersistenceError
+	>
+	/**
 	 * Revoke a workspace binding by Slack team id without calling Slack's
 	 * `auth.revoke` — for the two cases where Slack has already told us (or we've
 	 * already confirmed) the token is dead: an inbound `app_uninstalled` /
@@ -1000,6 +1013,44 @@ const make: Effect.Effect<
 		} satisfies SlackBotResolution
 	})
 
+	const resolveOrgForTeam = Effect.fn("SlackIntegrationService.resolveOrgForTeam")(function* (
+		teamId: string,
+	) {
+		yield* Effect.annotateCurrentSpan({ teamId })
+		// Only the org column — the secret columns are never read here, so an
+		// install whose secrets were dropped by `revokeByTeamId` is still matched
+		// by the `revokedAt IS NULL` filter alone, exactly as elsewhere.
+		const rowOption: Option.Option<{ orgId: string }> = yield* database
+			.execute((db) =>
+				db
+					.select({ orgId: slackWorkspaces.orgId })
+					.from(slackWorkspaces)
+					.where(and(eq(slackWorkspaces.teamId, teamId), isNull(slackWorkspaces.revokedAt)))
+					.limit(1),
+			)
+			.pipe(
+				Effect.mapError(toPersistenceError),
+				Effect.map((rows) => Option.fromNullishOr(rows[0])),
+			)
+		if (Option.isNone(rowOption)) {
+			return yield* Effect.fail(
+				new IntegrationsNotConnectedError({
+					message: "No active Slack installation for this team",
+				}),
+			)
+		}
+		const orgId = yield* decodeOrgId(rowOption.value.orgId).pipe(
+			Effect.mapError(
+				(error) =>
+					new IntegrationsPersistenceError({
+						message: `Stored Slack workspace has an invalid orgId: ${error.message}`,
+					}),
+			),
+		)
+		yield* Effect.annotateCurrentSpan({ orgId })
+		return { orgId }
+	})
+
 	const revokeByTeamId = Effect.fn("SlackIntegrationService.revokeByTeamId")(function* (
 		teamId: string,
 		reason: SlackRevocationReason,
@@ -1119,6 +1170,7 @@ const make: Effect.Effect<
 		uninstall,
 		listChannels,
 		resolveForBot,
+		resolveOrgForTeam,
 		revokeByTeamId,
 		reconcileWorkspaces,
 	})

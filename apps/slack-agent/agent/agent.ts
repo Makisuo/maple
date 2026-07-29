@@ -1,5 +1,6 @@
 import { defineAgent } from "eve"
 import { createWorkersAI } from "workers-ai-provider"
+import { workersAiModelId } from "#lib/model.js"
 
 /**
  * Cloudflare Workers AI over its REST API (no Workers runtime / AI binding
@@ -22,11 +23,8 @@ if (missingModelEnv.length > 0 && !isEveBuildInvocation) {
 	)
 }
 
-/**
- * Must support tool calling **while streaming** — eve's harness is tool-driven and
- * always streams.
- */
-const modelId = process.env.WORKERS_AI_MODEL ?? "@cf/zai-org/glm-5.2"
+/** Shared with AI-usage reporting — see `agent/lib/model.ts`. */
+const modelId = workersAiModelId()
 const contextWindowTokens = Number(process.env.WORKERS_AI_CONTEXT_WINDOW ?? 262_144)
 
 /**

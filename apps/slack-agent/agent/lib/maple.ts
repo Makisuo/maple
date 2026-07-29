@@ -171,6 +171,51 @@ export async function notifyMapleRevocation(
 	}
 }
 
+/**
+ * Same budget and the same reasoning as {@link NOTIFY_REVOCATION_TIMEOUT_MS}:
+ * usage reporting is fired without awaiting from a hook, so nothing in the
+ * Slack reply path is waiting on it.
+ */
+const REPORT_USAGE_TIMEOUT_MS = 10_000
+
+/** One model call's provider-reported token usage, as sent to Maple. */
+export interface TokenUsageReport {
+	/** De-dupe id, unique per model call — Maple namespaces it by team. */
+	readonly idempotencyKey: string
+	readonly inputTokens: number
+	readonly outputTokens: number
+	readonly model: string
+}
+
+/**
+ * Reports one model call's token usage to Maple, which attributes it to the
+ * org bound to this Slack team and forwards it to the billing provider.
+ *
+ * The bot deliberately does NOT talk to the billing provider itself: that
+ * credential is org-agnostic, so holding it would mean being able to write
+ * usage against any customer. This endpoint lets the bot prove only that it is
+ * the bot, and Maple decides whose spend it is.
+ *
+ * Throws on transport/server errors (mirrors the other two internal calls) —
+ * the caller (`agent/lib/token-usage.ts`) catches and logs, because a billing
+ * write must never cost the user their Slack reply.
+ */
+export async function reportTokenUsage(teamId: string, usage: TokenUsageReport): Promise<void> {
+	const url = `${mapleApiBaseUrl()}/internal/slack/workspaces/${encodeURIComponent(teamId)}/usage`
+	const res = await fetch(url, {
+		method: "POST",
+		headers: {
+			authorization: `Bearer maple_svc_${mapleServiceToken()}`,
+			"content-type": "application/json",
+		},
+		body: JSON.stringify(usage),
+		signal: AbortSignal.timeout(REPORT_USAGE_TIMEOUT_MS),
+	})
+	if (!res.ok) {
+		throw new Error(`Maple usage report failed for team ${teamId}: HTTP ${res.status}`)
+	}
+}
+
 async function fetchWorkspace(teamId: string): Promise<MapleWorkspace | null> {
 	const url = `${mapleApiBaseUrl()}/internal/slack/workspaces/${encodeURIComponent(teamId)}`
 	const res = await fetch(url, {

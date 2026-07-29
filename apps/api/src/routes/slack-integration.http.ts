@@ -1,7 +1,8 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { Effect, Option, Redacted, Schema } from "effect"
+import { Cause, Effect, Option, Redacted, Schema } from "effect"
 import { timingSafeEqual } from "node:crypto"
 import { SlackBotResolutionResponseSchema } from "@maple/domain/http"
+import { trackTokenUsage } from "../lib/autumn-tracker"
 import { Env } from "../lib/Env"
 import {
 	SlackIntegrationService,
@@ -291,7 +292,132 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 			)
 		})
 
+		// ---------------------------------------------------------------------
+		// AI usage reporting — the Slack bot runs its own model (Cloudflare
+		// Workers AI) on Railway, so its spend is invisible to billing unless it
+		// tells us. It reports one call per completed model step (eve's
+		// `step.completed`, which carries provider-reported token counts) and
+		// this endpoint attributes it to the team's bound org.
+		//
+		// Autumn credentials deliberately stay here rather than on the bot:
+		// `AUTUMN_SECRET_KEY` is org-agnostic and would let its holder write
+		// usage for ANY customer. The bot only ever proves it is the bot.
+		// ---------------------------------------------------------------------
+
+		const decodeUsageBody = Schema.decodeUnknownOption(
+			Schema.Struct({
+				/**
+				 * Producer-side de-dupe id — `<sessionId>:<turnId>:<stepIndex>` from
+				 * the bot. Slack retries webhook deliveries and eve replays durable
+				 * steps, so the same model call can be reported more than once;
+				 * Autumn drops the repeat on this key.
+				 */
+				idempotencyKey: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
+				inputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+				outputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+				/** Reported for attribution on the span/logs only — Autumn bills tokens, not models. */
+				model: Schema.optionalKey(Schema.String),
+			}),
+		)
+
+		const autumnEnv = {
+			AUTUMN_SECRET_KEY: Option.match(env.AUTUMN_SECRET_KEY, {
+				onNone: () => undefined,
+				onSome: Redacted.value,
+			}),
+			AUTUMN_API_URL: env.AUTUMN_API_URL,
+			MAPLE_DEFAULT_ORG_ID: env.MAPLE_DEFAULT_ORG_ID,
+		}
+
+		const handleUsage = Effect.fn("SlackInternal.usage")(function* (
+			req: HttpServerRequest.HttpServerRequest,
+		) {
+			if (!internalToken) {
+				yield* logAccess(undefined, "unauthorized", 401)
+				return errorText("Slack internal service token is not configured", 401)
+			}
+			if (!isValidServiceBearer(req.headers.authorization, internalToken)) {
+				yield* logAccess(undefined, "unauthorized", 401)
+				return errorText("Unauthorized", 401)
+			}
+
+			const params = yield* HttpRouter.params
+			const teamIdOption = decodeTeamIdParam(
+				typeof params.teamId === "string"
+					? Option.getOrUndefined(decodeUriComponentOption(params.teamId))
+					: undefined,
+			)
+			if (Option.isNone(teamIdOption)) {
+				yield* logAccess(undefined, "invalid", 400)
+				return errorText("Missing teamId", 400)
+			}
+			const teamId = teamIdOption.value
+
+			const bodyOption = yield* req.text.pipe(Effect.option)
+			const usageOption = Option.flatMap(bodyOption, (body) =>
+				Option.liftThrowable(() => JSON.parse(body))().pipe(Option.flatMap(decodeUsageBody)),
+			)
+			if (Option.isNone(usageOption)) {
+				yield* logAccess(teamId, "invalid", 400)
+				return errorText(
+					'Body must be JSON: { "idempotencyKey": string, "inputTokens": int >= 0, "outputTokens": int >= 0, "model"?: string }',
+					400,
+				)
+			}
+			const usage = usageOption.value
+
+			return yield* slack.resolveOrgForTeam(teamId).pipe(
+				Effect.flatMap(({ orgId }) =>
+					Effect.gen(function* () {
+						yield* Effect.annotateCurrentSpan({
+							orgId,
+							"maple.ai.input_tokens": usage.inputTokens,
+							"maple.ai.output_tokens": usage.outputTokens,
+							...(usage.model === undefined ? {} : { "maple.ai.model": usage.model }),
+						})
+						// Namespaced by team so two workspaces can never collide on a
+						// session/turn/step triple minted independently by the bot.
+						yield* Effect.tryPromise(() =>
+							trackTokenUsage(autumnEnv, {
+								orgId,
+								inputTokens: usage.inputTokens,
+								outputTokens: usage.outputTokens,
+								idempotencyKey: `slack:${teamId}:${usage.idempotencyKey}`,
+								source: "slack-agent",
+							}),
+						).pipe(
+							// Tracking is best-effort by contract: the bot has already
+							// replied in Slack and cannot undo it, so a 5xx here would only
+							// buy a retry of something Autumn may already have recorded.
+							Effect.catchCause((cause) =>
+								Effect.logWarning("Slack agent token usage tracking failed").pipe(
+									Effect.annotateLogs({ teamId, orgId, cause: Cause.pretty(cause) }),
+								),
+							),
+						)
+						yield* logAccess(teamId, "found", 202)
+						return yield* HttpServerResponse.json({ tracked: true }, { status: 202 })
+					}),
+				),
+				Effect.catchTags({
+					"@maple/http/errors/IntegrationsNotConnectedError": () =>
+						logAccess(teamId, "not-found", 404).pipe(
+							Effect.as(errorText("No active Slack installation for this team", 404)),
+						),
+					"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+						Effect.logError("Slack internal usage lookup failed", {
+							teamId,
+							message: error.message,
+						}).pipe(
+							Effect.andThen(logAccess(teamId, "unavailable", 503)),
+							Effect.as(errorText("Slack workspace lookup unavailable", 503)),
+						),
+				}),
+			)
+		})
+
 		yield* router.add("GET", "/internal/slack/workspaces/:teamId", handle)
 		yield* router.add("POST", "/internal/slack/workspaces/:teamId/revoke", handleRevoke)
+		yield* router.add("POST", "/internal/slack/workspaces/:teamId/usage", handleUsage)
 	}),
 )

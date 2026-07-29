@@ -11,6 +11,7 @@ delete process.env.SLACK_BOT_TOKEN
 import { installFetchStub } from "./fetch-stub.js"
 import {
 	notifyMapleRevocation,
+	reportTokenUsage,
 	resetWorkspaceCacheForTests,
 	resolveBotToken,
 	resolveWorkspace,
@@ -307,6 +308,44 @@ describe("notifyMapleRevocation", () => {
 	test("throws on a non-ok response", async () => {
 		installFetchStub(() => new Response(null, { status: 503 }))
 		await expect(notifyMapleRevocation("T1", "app_uninstalled")).rejects.toThrow(/HTTP 503/)
+	})
+})
+
+// ── reportTokenUsage: AI spend attribution ─────────────────────────────────
+
+describe("reportTokenUsage", () => {
+	afterEach(() => {
+		globalThis.fetch = realFetch
+	})
+
+	const usage = {
+		idempotencyKey: "sess_1:turn_1:2",
+		inputTokens: 120,
+		outputTokens: 34,
+		model: "@cf/zai-org/glm-5.2",
+	}
+
+	test("POSTs the usage to the team's usage endpoint with the internal bearer", async () => {
+		const stub = installFetchStub(() => new Response(null, { status: 202 }))
+
+		await reportTokenUsage("T1", usage)
+
+		expect(stub.calls.length).toBe(1)
+		expect(stub.calls[0]?.method).toBe("POST")
+		expect(stub.calls[0]?.url).toBe("https://maple-api.test/internal/slack/workspaces/T1/usage")
+		expect(stub.calls[0]?.headers.authorization).toBe("Bearer maple_svc_test-service-token")
+		expect(JSON.parse(String(stub.calls[0]?.body))).toEqual(usage)
+	})
+
+	test("percent-encodes the team id into the path", async () => {
+		const stub = installFetchStub(() => new Response(null, { status: 202 }))
+		await reportTokenUsage("T/1", usage)
+		expect(stub.calls[0]?.url).toBe("https://maple-api.test/internal/slack/workspaces/T%2F1/usage")
+	})
+
+	test("throws on a non-ok response", async () => {
+		installFetchStub(() => new Response(null, { status: 503 }))
+		await expect(reportTokenUsage("T1", usage)).rejects.toThrow(/HTTP 503/)
 	})
 })
 

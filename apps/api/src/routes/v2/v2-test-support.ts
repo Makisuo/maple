@@ -215,6 +215,7 @@ export const SlackIntegrationServiceStubLayer = Layer.succeed(
 		uninstall: die,
 		listChannels: die,
 		resolveForBot: die,
+		resolveOrgForTeam: die,
 		revokeByTeamId: die,
 		reconcileWorkspaces: die,
 	}),

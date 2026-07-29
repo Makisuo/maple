@@ -12,7 +12,13 @@ export interface TrackTokenUsageOptions {
 	readonly inputTokens: number
 	readonly outputTokens: number
 	readonly idempotencyKey: string
-	readonly source: "triage"
+	/**
+	 * Namespaces the idempotency key per producer, so a triage run and a Slack
+	 * bot turn can never collide on a shared id. `slack-agent` is the
+	 * Railway-hosted bot (apps/slack-agent), which reports its own Workers AI
+	 * usage through `POST /internal/slack/workspaces/:teamId/usage`.
+	 */
+	readonly source: "triage" | "slack-agent"
 }
 
 interface TrackEvent {

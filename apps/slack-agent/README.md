@@ -404,6 +404,35 @@ Authorization: Bearer maple_svc_{MAPLE_INTERNAL_SERVICE_TOKEN}
 `agent/lib/maple.ts` wraps this in `resolveWorkspace(teamId)` with an in-memory TTL cache (5 min
 positive, 30 s negative, in-flight de-dupe). It never caches 5xx/network errors as "not installed".
 
+**AI usage reporting (billing):** this agent runs its own model (Cloudflare Workers AI) on Railway,
+outside every path the Maple API already meters — so without reporting, Slack-driven AI spend is
+invisible to billing. `agent/hooks/token-usage.ts` subscribes to eve's `step.completed`, the only
+hook event carrying provider-reported token counts (one per model call; `turn.completed` has none),
+and posts them per step:
+
+```
+POST {MAPLE_API_BASE_URL}/internal/slack/workspaces/{teamId}/usage
+Authorization: Bearer maple_svc_{MAPLE_INTERNAL_SERVICE_TOKEN}
+{ "idempotencyKey": "{sessionId}:{turnId}:{stepIndex}", "inputTokens": 120,
+  "outputTokens": 34, "model": "@cf/..." }
+
+202 → tracked (or deliberately skipped — see below)
+404 → team not installed / revoked
+```
+
+The Maple API resolves the team's org and forwards it to the billing provider. The billing
+credential deliberately stays on the API side: it is org-agnostic, so holding it would mean being
+able to write usage against any customer — the bot only ever proves it is the bot. No new env vars:
+this reuses `MAPLE_API_BASE_URL` + `MAPLE_INTERNAL_SERVICE_TOKEN`.
+
+Reported per step rather than accumulated per turn, because per-turn batching needs mutable state
+keyed by turn id that leaks on a turn which never terminates and loses the whole turn's spend if
+the process dies mid-turn. Steps with zero tokens (a truncated stream — `workers-ai-provider`
+reports all-zeros rather than `undefined` when the provider never sends its usage chunk) and
+sessions with no Slack team (local dev, no org to bill) are skipped client-side.
+`agent/lib/token-usage.ts` never throws: a failed billing write is logged and dropped, never
+costing the user their reply.
+
 **Inbound (webhook verification):** `agent/channels/slack.ts` installs a custom `webhookVerifier`.
 Because a `webhookVerifier` is set, eve skips its built-in signing-secret check and this verifier
 owns verification: it HMAC-verifies the Slack **v0** signature (`v0:{timestamp}:{rawBody}`, SHA-256,

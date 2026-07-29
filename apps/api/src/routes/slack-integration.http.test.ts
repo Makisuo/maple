@@ -79,7 +79,16 @@ const insertWorkspace = async (
 	)
 }
 
-const makeConfig = (tokens: { slack?: string; shared?: string } = {}) =>
+/** Router-layer knobs: which internal bearers are configured, and Autumn wiring for usage tracking. */
+interface HarnessConfig {
+	slack?: string
+	shared?: string
+	autumnSecret?: string
+	autumnApiUrl?: string
+	defaultOrgId?: string
+}
+
+const makeConfig = (tokens: HarnessConfig = {}) =>
 	ConfigProvider.layer(
 		ConfigProvider.fromUnknown({
 			PORT: "3472",
@@ -87,16 +96,18 @@ const makeConfig = (tokens: { slack?: string; shared?: string } = {}) =>
 			TINYBIRD_TOKEN: "test-token",
 			MAPLE_AUTH_MODE: "self_hosted",
 			MAPLE_ROOT_PASSWORD: "test-root-password",
-			MAPLE_DEFAULT_ORG_ID: "default",
+			MAPLE_DEFAULT_ORG_ID: tokens.defaultOrgId ?? "default",
 			MAPLE_INGEST_KEY_ENCRYPTION_KEY: ENCRYPTION_KEY.toString("base64"),
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
 			MAPLE_APP_BASE_URL: "https://web.localhost",
 			...(tokens.slack !== undefined ? { SLACK_INTERNAL_SERVICE_TOKEN: tokens.slack } : {}),
 			...(tokens.shared !== undefined ? { INTERNAL_SERVICE_TOKEN: tokens.shared } : {}),
+			...(tokens.autumnSecret !== undefined ? { AUTUMN_SECRET_KEY: tokens.autumnSecret } : {}),
+			...(tokens.autumnApiUrl !== undefined ? { AUTUMN_API_URL: tokens.autumnApiUrl } : {}),
 		}),
 	)
 
-const makeRouterLayer = (testDb: TestDb, tokens: { slack?: string; shared?: string } = {}) =>
+const makeRouterLayer = (testDb: TestDb, tokens: HarnessConfig = {}) =>
 	SlackInternalRouter.pipe(
 		Layer.provide(SlackIntegrationService.layer),
 		Layer.provide(Layer.mergeAll(ApiKeysService.layer, OAuthStateRepository.layer)),
@@ -139,7 +150,7 @@ const postRevoke = (
 /** Run `body` against a web handler for the internal router, disposing after. */
 const withHandler = (
 	testDb: TestDb,
-	tokens: { slack?: string; shared?: string },
+	tokens: HarnessConfig,
 	body: (handler: (request: Request) => Promise<Response>) => Effect.Effect<void>,
 ) => {
 	const { handler, dispose } = HttpRouter.toWebHandler(makeRouterLayer(testDb, tokens), {
@@ -491,6 +502,335 @@ describe("SlackInternalRouter (revoke)", () => {
 					),
 				)
 				assert.strictEqual(notJson.status, 400)
+			}),
+		)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Usage reporting. The Railway-hosted bot runs its own model (Cloudflare
+// Workers AI), so its AI spend reaches billing only by being reported here and
+// attributed to the org bound to the Slack team.
+// ---------------------------------------------------------------------------
+
+const AUTUMN_URL = "https://autumn.test"
+
+interface AutumnCall {
+	readonly customerId: string
+	readonly featureId: string
+	readonly value: number
+	readonly idempotencyKey: string
+}
+
+/**
+ * Stubs `globalThis.fetch` for the duration of `body`. `trackTokenUsage` issues
+ * a bare `fetch` (it is shared with Workers-runtime call sites and takes no
+ * injected client), so the global is the only seam.
+ */
+const withAutumnStub = <A, E, R>(
+	body: (calls: AutumnCall[]) => Effect.Effect<A, E, R>,
+	respond: () => Response = () => new Response("{}", { status: 200 }),
+) =>
+	Effect.suspend(() => {
+		const realFetch = globalThis.fetch
+		const calls: AutumnCall[] = []
+		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+			const url = String(input instanceof Request ? input.url : input)
+			if (!url.startsWith(AUTUMN_URL)) return realFetch(input as RequestInfo, init)
+			const parsed = JSON.parse(String(init?.body)) as {
+				customer_id: string
+				feature_id: string
+				value: number
+				idempotency_key: string
+			}
+			calls.push({
+				customerId: parsed.customer_id,
+				featureId: parsed.feature_id,
+				value: parsed.value,
+				idempotencyKey: parsed.idempotency_key,
+			})
+			return respond()
+		}) as typeof fetch
+		return body(calls).pipe(
+			Effect.ensuring(
+				Effect.sync(() => {
+					globalThis.fetch = realFetch
+				}),
+			),
+		)
+	})
+
+const postUsage = (
+	handler: (request: Request) => Promise<Response>,
+	teamId: string,
+	body: unknown,
+	bearer?: string,
+) =>
+	Effect.promise(() =>
+		handler(
+			new Request(`http://api.localhost${TEAM_PATH}/${teamId}/usage`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					...(bearer !== undefined ? { authorization: bearer } : {}),
+				},
+				body: typeof body === "string" ? body : JSON.stringify(body),
+			}),
+		),
+	)
+
+const USAGE_TOKENS: HarnessConfig = {
+	slack: "slack-secret-token",
+	autumnSecret: "autumn-secret",
+	autumnApiUrl: AUTUMN_URL,
+}
+
+const USAGE_BEARER = "Bearer maple_svc_slack-secret-token"
+
+describe("SlackInternalRouter (usage)", () => {
+	it.effect("tracks input and output tokens against the team's org", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_us1",
+					orgId: "org_us1",
+					teamId: "T-US1",
+					teamName: "UsOrg1",
+					botToken: "xoxb-us1",
+					apiKey: "maple_ak_us1",
+				}),
+			)
+			yield* withAutumnStub((calls) =>
+				withHandler(
+					testDb,
+					USAGE_TOKENS,
+					Effect.fnUntraced(function* (handler) {
+						const response = yield* postUsage(
+							handler,
+							"T-US1",
+							{
+								idempotencyKey: "sess_1:turn_1:0",
+								inputTokens: 120,
+								outputTokens: 34,
+								model: "@cf/zai-org/glm-5.2",
+							},
+							USAGE_BEARER,
+						)
+						assert.strictEqual(response.status, 202)
+						assert.deepStrictEqual(yield* Effect.promise(() => response.json()), {
+							tracked: true,
+						})
+						// Billed to the org the team resolves to — never to the team id.
+						// The key is team-namespaced and source-tagged so a bot step and a
+						// triage run can never collide.
+						assert.deepStrictEqual(
+							[...calls].sort((a, b) => a.featureId.localeCompare(b.featureId)),
+							[
+								{
+									customerId: "org_us1",
+									featureId: "ai_input_tokens",
+									value: 120,
+									idempotencyKey: "slack:T-US1:sess_1:turn_1:0:slack-agent:input",
+								},
+								{
+									customerId: "org_us1",
+									featureId: "ai_output_tokens",
+									value: 34,
+									idempotencyKey: "slack:T-US1:sess_1:turn_1:0:slack-agent:output",
+								},
+							],
+						)
+					}),
+				),
+			)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("skips a zero-token side rather than tracking a zero", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_us2",
+					orgId: "org_us2",
+					teamId: "T-US2",
+					teamName: "UsOrg2",
+					botToken: "xoxb-us2",
+					apiKey: "maple_ak_us2",
+				}),
+			)
+			yield* withAutumnStub((calls) =>
+				withHandler(
+					testDb,
+					USAGE_TOKENS,
+					Effect.fnUntraced(function* (handler) {
+						const response = yield* postUsage(
+							handler,
+							"T-US2",
+							{ idempotencyKey: "k", inputTokens: 7, outputTokens: 0 },
+							USAGE_BEARER,
+						)
+						assert.strictEqual(response.status, 202)
+						assert.strictEqual(calls.length, 1)
+						assert.strictEqual(calls[0]?.featureId, "ai_input_tokens")
+					}),
+				),
+			)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("still answers 202 when the billing provider fails — the reply already went out", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_us3",
+					orgId: "org_us3",
+					teamId: "T-US3",
+					teamName: "UsOrg3",
+					botToken: "xoxb-us3",
+					apiKey: "maple_ak_us3",
+				}),
+			)
+			yield* withAutumnStub(
+				() =>
+					withHandler(
+						testDb,
+						USAGE_TOKENS,
+						Effect.fnUntraced(function* (handler) {
+							const response = yield* postUsage(
+								handler,
+								"T-US3",
+								{ idempotencyKey: "k", inputTokens: 5, outputTokens: 5 },
+								USAGE_BEARER,
+							)
+							assert.strictEqual(response.status, 202)
+						}),
+					),
+				() => new Response("nope", { status: 500 }),
+			)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("does not bill the self-hosted default org", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_us4",
+					orgId: "org_default",
+					teamId: "T-US4",
+					teamName: "UsOrg4",
+					botToken: "xoxb-us4",
+					apiKey: "maple_ak_us4",
+				}),
+			)
+			yield* withAutumnStub((calls) =>
+				withHandler(
+					testDb,
+					{ ...USAGE_TOKENS, defaultOrgId: "org_default" },
+					Effect.fnUntraced(function* (handler) {
+						const response = yield* postUsage(
+							handler,
+							"T-US4",
+							{ idempotencyKey: "k", inputTokens: 9, outputTokens: 9 },
+							USAGE_BEARER,
+						)
+						assert.strictEqual(response.status, 202)
+						assert.strictEqual(calls.length, 0)
+					}),
+				),
+			)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("rejects an unknown or revoked team with 404", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_us5",
+					orgId: "org_us5",
+					teamId: "T-US5",
+					teamName: "UsOrg5",
+					botToken: "xoxb-us5",
+					apiKey: "maple_ak_us5",
+					revoked: true,
+				}),
+			)
+			yield* withAutumnStub((calls) =>
+				withHandler(
+					testDb,
+					USAGE_TOKENS,
+					Effect.fnUntraced(function* (handler) {
+						const body = { idempotencyKey: "k", inputTokens: 1, outputTokens: 1 }
+						assert.strictEqual((yield* postUsage(handler, "T-US5", body, USAGE_BEARER)).status, 404)
+						assert.strictEqual((yield* postUsage(handler, "T-NOPE", body, USAGE_BEARER)).status, 404)
+						assert.strictEqual(calls.length, 0)
+					}),
+				),
+			)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("requires the dedicated slack bearer", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withHandler(
+			testDb,
+			{ ...USAGE_TOKENS, shared: "shared-secret-token" },
+			Effect.fnUntraced(function* (handler) {
+				const body = { idempotencyKey: "k", inputTokens: 1, outputTokens: 1 }
+				assert.strictEqual((yield* postUsage(handler, "T-US1", body)).status, 401)
+				assert.strictEqual(
+					(yield* postUsage(handler, "T-US1", body, "Bearer maple_svc_wrong")).status,
+					401,
+				)
+				// The shared internal token is NOT accepted here, same as resolve/revoke.
+				assert.strictEqual(
+					(yield* postUsage(handler, "T-US1", body, "Bearer maple_svc_shared-secret-token")).status,
+					401,
+				)
+			}),
+		)
+	})
+
+	it.effect("answers 401 when the slack internal token is unset", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withHandler(
+			testDb,
+			{ autumnSecret: "autumn-secret", autumnApiUrl: AUTUMN_URL },
+			Effect.fnUntraced(function* (handler) {
+				const response = yield* postUsage(
+					handler,
+					"T-US1",
+					{ idempotencyKey: "k", inputTokens: 1, outputTokens: 1 },
+					USAGE_BEARER,
+				)
+				assert.strictEqual(response.status, 401)
+			}),
+		)
+	})
+
+	it.effect("rejects a malformed body with 400", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withHandler(
+			testDb,
+			USAGE_TOKENS,
+			Effect.fnUntraced(function* (handler) {
+				const cases: unknown[] = [
+					{},
+					{ idempotencyKey: "", inputTokens: 1, outputTokens: 1 },
+					{ idempotencyKey: "k", inputTokens: -1, outputTokens: 1 },
+					{ idempotencyKey: "k", inputTokens: 1.5, outputTokens: 1 },
+					{ idempotencyKey: "k", inputTokens: "1", outputTokens: 1 },
+					{ idempotencyKey: "k", inputTokens: 1 },
+					"not json",
+				]
+				for (const body of cases) {
+					const response = yield* postUsage(handler, "T-US1", body, USAGE_BEARER)
+					assert.strictEqual(response.status, 400, `expected 400 for ${JSON.stringify(body)}`)
+				}
 			}),
 		)
 	})
