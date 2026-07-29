@@ -465,8 +465,7 @@ export type DestinationFormState = {
 	type: AlertDestinationType
 	name: string
 	enabled: boolean
-	channelLabel: string
-	/** Slack and Discord both use this incoming-webhook URL field. */
+	/** Discord incoming-webhook URL. */
 	webhookUrl: string
 	/**
 	 * Slack (bot) destination: the channel the installed Maple bot posts to.
@@ -491,16 +490,12 @@ export type DestinationFormState = {
 
 export const MAX_EMAIL_MEMBER_RECIPIENTS = 10
 
-/**
- * Defaults to `slack-bot` — the recommended flow, and the tile the dialog lists
- * first (`DESTINATION_TYPES`); the legacy `slack` webhook trails it.
- */
+/** Defaults to `slack-bot` — the tile the dialog lists first (`DESTINATION_TYPES`). */
 export function defaultDestinationForm(type: AlertDestinationType = "slack-bot"): DestinationFormState {
 	return {
 		type,
 		name: "",
 		enabled: true,
-		channelLabel: "",
 		webhookUrl: "",
 		slackChannelId: "",
 		slackChannelName: "",
@@ -522,7 +517,6 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 		type: destination.type,
 		name: destination.name,
 		enabled: destination.enabled,
-		channelLabel: destination.channelLabel ?? "",
 		webhookUrl: "",
 		// slack-bot hydrates `channelLabel` as `#name`; keep the current channel
 		// visible on edit (its id isn't returned — an empty id keeps the stored one).
@@ -544,16 +538,6 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 
 export function buildDestinationCreateParamsV2(form: DestinationFormState): V2AlertDestinationCreateParams {
 	switch (form.type) {
-		case "slack": {
-			const channelLabel = form.channelLabel.trim()
-			return {
-				type: "slack",
-				name: form.name.trim(),
-				enabled: form.enabled,
-				webhook_url: form.webhookUrl.trim(),
-				...(channelLabel ? { channel_label: channelLabel } : {}),
-			}
-		}
 		case "slack-bot": {
 			const channelName = form.slackChannelName.trim()
 			return {
@@ -630,17 +614,6 @@ export function buildDestinationCreateParamsV2(form: DestinationFormState): V2Al
 export function buildDestinationUpdateParamsV2(form: DestinationFormState): V2AlertDestinationUpdateParams {
 	const name = form.name.trim()
 	switch (form.type) {
-		case "slack": {
-			const channelLabel = form.channelLabel.trim()
-			const webhookUrl = form.webhookUrl.trim()
-			return {
-				type: "slack",
-				enabled: form.enabled,
-				...(name ? { name } : {}),
-				...(channelLabel ? { channel_label: channelLabel } : {}),
-				...(webhookUrl ? { webhook_url: webhookUrl } : {}),
-			}
-		}
 		case "slack-bot": {
 			const channelId = form.slackChannelId.trim()
 			const channelName = form.slackChannelName.trim()

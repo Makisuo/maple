@@ -682,27 +682,8 @@ function SlackBotFields({
 				<p className="text-xs text-muted-foreground">
 					{isEditing
 						? "Listing this workspace's Slack channels is limited to org admins, so the channel can't be changed here. Your other edits still save — ask an admin to move this destination to another channel."
-						: "Listing this workspace's Slack channels is limited to org admins, so this destination can't be finished here. Ask an admin to create it, or use a Slack webhook destination — any member can set one up."}
+						: "Listing this workspace's Slack channels is limited to org admins, so this destination can't be finished here. Ask an admin to create it for you."}
 				</p>
-				{!isEditing ? (
-					<Button
-						type="button"
-						size="sm"
-						variant="outline"
-						onClick={() =>
-							onFormChange((current) => ({
-								...defaultDestinationForm("slack"),
-								// Carry over what isn't Slack-bot-specific so switching
-								// providers doesn't discard the user's typing.
-								name: current.name,
-								enabled: current.enabled,
-							}))
-						}
-					>
-						Use a Slack webhook instead
-						<ArrowRightIcon size={14} />
-					</Button>
-				) : null}
 			</div>
 		)
 	}
@@ -886,49 +867,6 @@ export function DestinationDialog({
 									placeholder="Production paging"
 								/>
 							</div>
-
-							{form.type === "slack" && (
-								<>
-									<div className="space-y-1.5">
-										<Label htmlFor="destination-webhook" className="text-xs">
-											Slack webhook URL
-										</Label>
-										<Input
-											id="destination-webhook"
-											value={form.webhookUrl}
-											onChange={(event) =>
-												onFormChange((current) => ({
-													...current,
-													webhookUrl: event.target.value,
-												}))
-											}
-											placeholder={
-												isEditing
-													? "Leave blank to keep current webhook"
-													: "https://hooks.slack.com/services/..."
-											}
-											className="font-mono text-xs"
-										/>
-									</div>
-									<div className="space-y-1.5">
-										<Label htmlFor="destination-channel" className="text-xs">
-											Channel label
-										</Label>
-										<Input
-											id="destination-channel"
-											value={form.channelLabel}
-											onChange={(event) =>
-												onFormChange((current) => ({
-													...current,
-													channelLabel: event.target.value,
-												}))
-											}
-											placeholder="#ops-alerts"
-											className="font-mono text-xs"
-										/>
-									</div>
-								</>
-							)}
 
 							{form.type === "slack-bot" && (
 								<SlackBotFields

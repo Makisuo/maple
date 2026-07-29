@@ -112,13 +112,14 @@ describe("hydrateDestinationRow", () => {
 		const testDb = createTestDb(createdDbs)
 		const id = asDestinationId("00000000-0000-4000-8000-000000000002")
 		const secretConfig: DestinationSecretConfig = {
-			type: "slack",
-			webhookUrl: "https://hooks.slack.com/services/T000/B000/xxx",
+			type: "slack-bot",
+			channelId: "C0789CHAN",
+			channelName: "alerts",
 		}
 		return Effect.gen(function* () {
 			yield* seedDestination({
 				id,
-				type: "slack",
+				type: "slack-bot",
 				publicConfig: {
 					summary: "#alerts",
 					channelLabel: "#alerts",

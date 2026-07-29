@@ -14,10 +14,10 @@
  * export default Alchemy.Stack("my-app", {
  *   providers: Maple.providers(),
  * }, Effect.gen(function* () {
- *   const slack = yield* Maple.AlertDestination("oncall", {
- *     type: "slack",
- *     name: "On-call Slack",
- *     webhook_url: process.env.SLACK_WEBHOOK_URL!,
+ *   const oncall = yield* Maple.AlertDestination("oncall", {
+ *     type: "discord",
+ *     name: "On-call Discord",
+ *     webhook_url: process.env.DISCORD_WEBHOOK_URL!,
  *   })
  *   yield* Maple.AlertRule("checkout-errors", {
  *     name: "Checkout error rate",
@@ -26,7 +26,7 @@
  *     comparator: "gt",
  *     threshold: 0.05,
  *     window_minutes: 5,
- *     destination_ids: [slack.destinationId],
+ *     destination_ids: [oncall.destinationId],
  *   })
  * }))
  * ```

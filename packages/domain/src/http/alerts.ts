@@ -19,7 +19,6 @@ import { QueryBuilderQueryDraftSchema } from "./query-engine"
 import { warehouseHttpErrors } from "./warehouse"
 
 export const AlertDestinationType = Schema.Literals([
-	"slack",
 	"slack-bot",
 	"pagerduty",
 	"webhook",
@@ -163,16 +162,6 @@ export const AlertWindowMinutes = PositiveInt.pipe(
 	Schema.check(Schema.isLessThanOrEqualTo(MAX_ALERT_WINDOW_MINUTES)),
 )
 
-export class SlackAlertDestinationConfig extends Schema.Class<SlackAlertDestinationConfig>(
-	"SlackAlertDestinationConfig",
-)({
-	type: Schema.Literal("slack"),
-	name: ChannelLabel,
-	webhookUrl: NonEmptyString,
-	channelLabel: OptionalNonEmptyString,
-	enabled: Schema.optionalKey(Schema.Boolean),
-}) {}
-
 export class SlackBotAlertDestinationConfig extends Schema.Class<SlackBotAlertDestinationConfig>(
 	"SlackBotAlertDestinationConfig",
 )({
@@ -258,7 +247,6 @@ export class EmailAlertDestinationConfig extends Schema.Class<EmailAlertDestinat
 }) {}
 
 export const AlertDestinationCreateRequest = Schema.Union([
-	SlackAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
 	PagerDutyAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
@@ -268,15 +256,6 @@ export const AlertDestinationCreateRequest = Schema.Union([
 	EmailAlertDestinationConfig,
 ])
 export type AlertDestinationCreateRequest = Schema.Schema.Type<typeof AlertDestinationCreateRequest>
-
-export class UpdateSlackAlertDestinationConfig extends Schema.Class<UpdateSlackAlertDestinationConfig>(
-	"UpdateSlackAlertDestinationConfig",
-)({
-	name: OptionalNonEmptyString,
-	webhookUrl: Schema.optionalKey(Schema.String),
-	channelLabel: OptionalNonEmptyString,
-	enabled: Schema.optionalKey(Schema.Boolean),
-}) {}
 
 export class UpdateSlackBotAlertDestinationConfig extends Schema.Class<UpdateSlackBotAlertDestinationConfig>(
 	"UpdateSlackBotAlertDestinationConfig",
@@ -342,10 +321,6 @@ export class UpdateEmailAlertDestinationConfig extends Schema.Class<UpdateEmailA
 }) {}
 
 export const AlertDestinationUpdateRequest = Schema.Union([
-	Schema.Struct({
-		type: Schema.Literal("slack"),
-		...UpdateSlackAlertDestinationConfig.fields,
-	}),
 	Schema.Struct({
 		type: Schema.Literal("slack-bot"),
 		...UpdateSlackBotAlertDestinationConfig.fields,

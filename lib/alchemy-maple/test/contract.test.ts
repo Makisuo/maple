@@ -42,13 +42,6 @@ describe("provider request bodies decode against the real v2 create-param schema
 
 	it("alert destination create bodies (each channel type)", () => {
 		const bodies = [
-			_alertDestinationCreateBody({
-				type: "slack",
-				name: "On-call Slack",
-				webhook_url: "https://hooks.slack.com/services/T000/B000/XXXX",
-				channel_label: "#incidents",
-				enabled: true,
-			}),
 			_alertDestinationCreateBody({ type: "pagerduty", name: "PD", integration_key: "key" }),
 			_alertDestinationCreateBody({
 				type: "webhook",

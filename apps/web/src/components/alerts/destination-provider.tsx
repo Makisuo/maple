@@ -78,23 +78,6 @@ export type DestinationProvider = {
 }
 
 export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
-	slack: {
-		type: "slack",
-		label: "Slack (webhook)",
-		description: "Post alerts to a Slack channel via an incoming webhook you manage.",
-		accent: SLACK_ACCENT,
-		accentBg: SLACK_ACCENT_BG,
-		accentText: SLACK_ACCENT_TEXT,
-		// White clears both halves of the aubergine pair: 14.0:1 on #4A154B (light),
-		// 4.65:1 on #AD51A7 (dark) — the dark stand-in was picked for this margin.
-		accentOn: INK_ON_DARK_ACCENT,
-		// Deliberately no `brandfetchDomain`: the bot entry renders the local
-		// SlackIcon and the two rows sit next to each other — a remote CDN bitmap
-		// here would make the same product look like two.
-		fallbackIcon: ({ size = 22, className }) => <SlackIcon size={size} className={className} />,
-		docsUrl: "https://api.slack.com/messaging/webhooks",
-		docsLabel: "Slack webhook docs",
-	},
 	"slack-bot": {
 		type: "slack-bot",
 		label: "Slack (bot)",
@@ -102,7 +85,7 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		accent: SLACK_ACCENT,
 		accentBg: SLACK_ACCENT_BG,
 		accentText: SLACK_ACCENT_TEXT,
-		// Same aubergine pair as the webhook row — 14.0:1 light / 4.65:1 dark.
+		// 14.0:1 on #4A154B (light), 4.65:1 on #AD51A7 (dark).
 		accentOn: INK_ON_DARK_ACCENT,
 		fallbackIcon: ({ size = 22, className }) => <SlackIcon size={size} className={className} />,
 		docsUrl: "https://maple.dev/docs/integrations/slack",
@@ -195,10 +178,8 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 	},
 }
 
-// The recommended bot flow leads; the legacy webhook entry trails it.
 export const DESTINATION_TYPES: ReadonlyArray<AlertDestinationType> = [
 	"slack-bot",
-	"slack",
 	"discord",
 	"email",
 	"pagerduty",

@@ -190,11 +190,11 @@ describe("rowToAlertDestinationDocument", () => {
 		id: DEST_ID,
 		org_id: "org_1",
 		name: "Ops Slack",
-		type: "slack",
+		type: "slack-bot",
 		enabled: true,
 		// Only the public config the browser renders — no secrets (those live in
 		// the excluded encrypted columns, which the shape never projects).
-		config_json: { summary: "Slack incoming webhook", channelLabel: "#ops" },
+		config_json: { summary: "#ops", channelLabel: "#ops" },
 		last_tested_at: "2026-07-04T00:00:00.000Z",
 		last_test_error: null,
 		created_at: "2026-06-01T00:00:00.000Z",
@@ -205,9 +205,9 @@ describe("rowToAlertDestinationDocument", () => {
 		const doc = rowToAlertDestinationDocument(base)
 		assert.strictEqual(doc.id, DEST_ID)
 		assert.strictEqual(doc.name, "Ops Slack")
-		assert.strictEqual(doc.type, "slack")
+		assert.strictEqual(doc.type, "slack-bot")
 		assert.strictEqual(doc.enabled, true)
-		assert.strictEqual(doc.summary, "Slack incoming webhook")
+		assert.strictEqual(doc.summary, "#ops")
 		assert.strictEqual(doc.channelLabel, "#ops")
 		assert.strictEqual(doc.lastTestedAt, "2026-07-04T00:00:00.000Z")
 		assert.strictEqual(doc.lastTestError, null)

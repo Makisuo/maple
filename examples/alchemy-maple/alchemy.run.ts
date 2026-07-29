@@ -27,11 +27,11 @@ export default Alchemy.Stack(
 		const api = yield* Api
 
 		// Where alerts go. Channel secrets are write-only server-side.
-		const slack = yield* Maple.AlertDestination("oncall-slack", {
-			type: "slack",
-			name: "On-call Slack",
-			webhook_url: process.env.SLACK_WEBHOOK_URL ?? "https://hooks.slack.com/services/CHANGE/ME/PLEASE",
-			channel_label: "#incidents",
+		const oncall = yield* Maple.AlertDestination("oncall-discord", {
+			type: "discord",
+			name: "On-call Discord",
+			webhook_url:
+				process.env.DISCORD_WEBHOOK_URL ?? "https://discord.com/api/webhooks/CHANGE/ME_PLEASE",
 		})
 
 		// Alerts on the service name the Worker reports as — `SERVICE_NAME` is the
@@ -46,7 +46,7 @@ export default Alchemy.Stack(
 			threshold: 0.05, // error rates are 0–1 ratios, not percentages
 			window_minutes: 5,
 			service_names: [SERVICE_NAME],
-			destination_ids: [slack.destinationId],
+			destination_ids: [oncall.destinationId],
 		})
 
 		yield* Maple.AlertRule("checkout-p95", {
@@ -57,7 +57,7 @@ export default Alchemy.Stack(
 			threshold: 750,
 			window_minutes: 10,
 			service_names: [SERVICE_NAME],
-			destination_ids: [slack.destinationId],
+			destination_ids: [oncall.destinationId],
 		})
 
 		yield* Maple.Dashboard("service-health", {

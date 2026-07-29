@@ -21,10 +21,6 @@ export const DestinationPublicConfigSchema = Schema.Struct({
 
 const DestinationSecretConfigSchema = Schema.Union([
 	Schema.Struct({
-		type: Schema.Literal("slack"),
-		webhookUrl: Schema.String,
-	}),
-	Schema.Struct({
 		type: Schema.Literal("slack-bot"),
 		// No secret token here — the bot token is resolved from the org's
 		// slack_workspaces row at dispatch time. Only the target channel is stored.

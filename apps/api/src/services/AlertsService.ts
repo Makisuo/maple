@@ -585,10 +585,6 @@ const buildPublicConfig = (
 ): DestinationPublicConfig =>
 	Match.value(request).pipe(
 		Match.discriminatorsExhaustive("type")({
-			slack: (r) => ({
-				summary: r.channelLabel?.trim() || "Slack incoming webhook",
-				channelLabel: normalizeOptionalString(r.channelLabel),
-			}),
 			"slack-bot": (r) => ({
 				summary: r.channelName?.trim() ? `#${r.channelName.trim()}` : "Slack channel",
 				channelLabel: r.channelName?.trim() ? `#${r.channelName.trim()}` : null,
@@ -629,10 +625,6 @@ const buildSecretConfig = (
 ): DestinationSecretConfig =>
 	Match.value(request).pipe(
 		Match.discriminatorsExhaustive("type")({
-			slack: (r) => ({
-				type: "slack" as const,
-				webhookUrl: r.webhookUrl.trim(),
-			}),
 			"slack-bot": (r) => ({
 				type: "slack-bot" as const,
 				channelId: r.channelId.trim(),
@@ -2097,9 +2089,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				yield* requireAdmin(roles)
 				// Reject URLs pointing at internal/loopback/metadata networks before we
 				// persist them. The dispatcher will later POST to whatever we store.
-				if (request.type === "slack") {
-					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
-				} else if (request.type === "webhook") {
+				if (request.type === "webhook") {
 					yield* validateDestinationUrl(request.url, "url")
 				} else if (request.type === "hazel") {
 					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
@@ -2194,17 +2184,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// Validate any URL the request supplies before we persist it. Each
 				// branch only validates when the field is non-empty so the existing
 				// (already-validated) stored URL can stay unchanged on partial updates.
-				if (
-					request.type === "slack" &&
-					request.webhookUrl != null &&
-					request.webhookUrl.trim().length > 0
-				) {
-					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
-				} else if (
-					request.type === "webhook" &&
-					request.url != null &&
-					request.url.trim().length > 0
-				) {
+				if (request.type === "webhook" && request.url != null && request.url.trim().length > 0) {
 					yield* validateDestinationUrl(request.url, "url")
 				} else if (
 					request.type === "hazel" &&
@@ -2222,25 +2202,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 				const { nextPublicConfig, nextSecretConfig } = yield* Match.value(request).pipe(
 					Match.discriminatorsExhaustive("type")({
-						slack: (r) =>
-							Effect.succeed({
-								nextPublicConfig: {
-									summary:
-										normalizeOptionalString(r.channelLabel) ??
-										hydrated.publicConfig.summary,
-									channelLabel:
-										normalizeOptionalString(r.channelLabel) ??
-										hydrated.publicConfig.channelLabel,
-								} satisfies DestinationPublicConfig,
-								nextSecretConfig: {
-									type: "slack" as const,
-									webhookUrl:
-										normalizeOptionalString(r.webhookUrl) ??
-										(hydrated.secretConfig.type === "slack"
-											? hydrated.secretConfig.webhookUrl
-											: ""),
-								} satisfies DestinationSecretConfig,
-							}),
 						"slack-bot": (r) => {
 							const channelName = normalizeOptionalString(r.channelName)
 							return Effect.succeed({

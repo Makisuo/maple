@@ -595,13 +595,22 @@ export const verifyPagerDutyRoutingKey = (
  * formatter) or when rendering fails for any reason — templating must never
  * block delivery.
  */
+/**
+ * The key a rule's notification-template `overrides` map is keyed by. It mostly
+ * mirrors `AlertDestinationType`, but `"slack"` is deliberately retained as the
+ * *dialect* for Slack deliveries even though the legacy `slack` webhook
+ * destination type is gone: it is the key already stored in customers' template
+ * overrides, and `slack-bot` renders the same mrkdwn blocks.
+ */
+type TemplateDialect = AlertDestinationType | "slack"
+
 const renderTitleBody = (
 	context: TemplateRenderContext,
-	destinationType: AlertDestinationType,
+	dialect: TemplateDialect,
 	linkUrl: string,
 	chatUrl: string,
 ): { title: string; body: string } | null => {
-	const resolved = resolveTemplate(context.template, destinationType)
+	const resolved = resolveTemplate(context.template, dialect)
 	if (!hasCustomTemplate(resolved)) return null
 	try {
 		const templateCtx = buildTemplateContext(context, linkUrl, chatUrl)
@@ -684,52 +693,6 @@ export const dispatchDelivery = (
 	Effect.gen(function* () {
 		return yield* Match.value(context.secretConfig).pipe(
 			Match.discriminatorsExhaustive("type")({
-				slack: (config) =>
-					Effect.gen(function* () {
-						const templated = renderTitleBody(context, "slack", linkUrl, chatUrl)
-						const blocks = templated
-							? buildSlackBlocksFromTemplate(
-									templated.title,
-									templated.body,
-									context,
-									linkUrl,
-									chatUrl,
-								)
-							: buildSlackBlocks(context, linkUrl, chatUrl)
-						const response = yield* runTimedFetch("slack", "Slack", fetchFn, timeoutMs, () =>
-							safeFetch(config.webhookUrl, {
-								method: "POST",
-								headers: { "content-type": "application/json" },
-								body: JSON.stringify({
-									// No top-level `text`: alongside attachments (and no top-level
-									// blocks) Slack renders it as a duplicate line above the color
-									// bar. `fallback` carries the notification-preview one-liner.
-									attachments: [
-										{
-											color: slackAttachmentColor(context.eventType, context.severity),
-											fallback: templated?.title ?? buildSlackFallbackText(context),
-											blocks,
-										},
-									],
-								}),
-								fetchFn,
-							}),
-						)
-						if (!response.ok) {
-							const detail = yield* readErrorBody(response)
-							return yield* Effect.fail(
-								makeDeliveryError(
-									`Slack delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
-									"slack",
-								),
-							)
-						}
-						return {
-							providerMessage: "Delivered to Slack",
-							providerReference: null,
-							responseCode: response.status,
-						} as DispatchResult
-					}),
 				"slack-bot": (config) =>
 					Effect.gen(function* () {
 						const botToken = yield* deps.resolveSlackBotToken(context.destination.orgId)

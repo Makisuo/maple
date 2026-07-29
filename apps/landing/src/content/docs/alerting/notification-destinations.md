@@ -17,11 +17,13 @@ If a test fails, Maple surfaces the provider's own rejection reason in the toast
 
 ## Slack
 
-Post alerts to a Slack channel via an [incoming webhook](https://api.slack.com/messaging/webhooks).
+Post alerts to a Slack channel through the Maple Slack app — there is no webhook to create or rotate.
 
-1. Create a Slack app (or use an existing one) and enable **Incoming Webhooks**.
-2. Add a webhook to the channel you want alerts in.
-3. Copy the `https://hooks.slack.com/services/...` URL into the **Slack webhook URL** field.
+1. In the Maple dashboard, open **Integrations → Slack** and click **Connect** to install the Maple app into your Slack workspace.
+2. Back under **Alerts → Destinations**, click **Add destination** and pick **Slack**.
+3. Choose the channel the bot should post to. For private channels, invite the Maple app to the channel first.
+
+Listing the workspace's channels is limited to org admins; other members can still create destinations once an admin has picked a channel.
 
 ## PagerDuty
 

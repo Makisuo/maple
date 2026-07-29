@@ -22,11 +22,10 @@ export default Alchemy.Stack(
 	{ providers: Layer.mergeAll(Cloudflare.providers(), Maple.providers()) },
 	Effect.gen(function* () {
 		// A notification channel…
-		const slack = yield* Maple.AlertDestination("oncall", {
-			type: "slack",
-			name: "On-call Slack",
-			webhook_url: process.env.SLACK_WEBHOOK_URL!,
-			channel_label: "#incidents",
+		const oncall = yield* Maple.AlertDestination("oncall", {
+			type: "discord",
+			name: "On-call Discord",
+			webhook_url: process.env.DISCORD_WEBHOOK_URL!,
 		})
 
 		// …an alert rule that delivers to it (dependency resolved automatically)…
@@ -37,7 +36,7 @@ export default Alchemy.Stack(
 			comparator: "gt",
 			threshold: 0.05, // error rates are 0–1 ratios
 			window_minutes: 5,
-			destination_ids: [slack.destinationId],
+			destination_ids: [oncall.destinationId],
 		})
 
 		// …a dashboard…
@@ -79,7 +78,7 @@ Set `MAPLE_API_KEY` to a Maple API key (create one in the Maple dashboard, or wi
 | Resource                 | Semantics                                                                                                                                                                                                                                                         |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Maple.Dashboard`        | Full CRUD. Props are the v2 wire shape (`snake_case`, see `/v2/docs`); widget/variable documents pass through verbatim. Updates PATCH in place.                                                                                                                   |
-| `Maple.AlertDestination` | Full CRUD. Discriminated on `type` (slack, pagerduty, webhook, hazel, discord, email). Channel secrets are write-only — accept `Redacted` values. Changing `type` replaces the destination.                                                                       |
+| `Maple.AlertDestination` | Full CRUD. Discriminated on `type` (pagerduty, webhook, hazel, discord, email). Channel secrets are write-only — accept `Redacted` values. Changing `type` replaces the destination.                                                                       |
 | `Maple.AlertRule`        | Full CRUD. `destination_ids` accepts outputs from `Maple.AlertDestination`. Rule names are org-unique, so lost state is re-adopted by name instead of duplicating.                                                                                                |
 | `Maple.ApiKey`           | Create / roll / revoke (the API has no key update). Changing props replaces the key; bumping the `rotate` prop rolls it in place (same name/scopes, new secret). `secret` is captured once and preserved in Alchemy state — it can never be re-read from the API. |
 | `Maple.IngestKeys`       | Read-only per-org singleton. Surfaces `publicKey` / `privateKey` as `Redacted` outputs; delete only stops tracking it.                                                                                                                                            |
