@@ -3024,3 +3024,58 @@ describe("AlertsService.previewRule", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 })
+
+// Rows written before a destination type was retired (the legacy `slack`
+// webhook destination) are still in Postgres. Reads must tolerate them: a
+// throwing decode on `alert_destinations.type` would defect, which surfaces as
+// a bare 500 on every list for the whole org — not just for that one row.
+describe("retired destination types", () => {
+	it.effect("skips an undecodable stored type instead of failing the destinations list", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_legacy_type")
+			const userId = asUserId("user_legacy_type")
+			const legacy = yield* createWebhookDestination(alerts, orgId, userId)
+			const supported = yield* alerts.createDestination(orgId, userId, adminRoles, {
+				type: "discord",
+				name: "Discord",
+				enabled: true,
+				webhookUrl: "https://discord.com/api/webhooks/1/token",
+			})
+			const rule = yield* createErrorRateRule(alerts, orgId, userId, legacy.id)
+			yield* Effect.promise(() =>
+				executeSql(testDb, "update alert_destinations set type = 'slack' where id = $1", [
+					legacy.id,
+				]),
+			)
+			yield* Effect.promise(() =>
+				insertDeliveryEventRow(testDb, {
+					id: "00000000-0000-4000-8000-00000000dead",
+					orgId,
+					incidentId: null,
+					ruleId: rule.id,
+					destinationId: legacy.id,
+					deliveryKey: "legacy-delivery",
+					eventType: "trigger",
+					attemptNumber: 1,
+					status: "success",
+					scheduledAt: DEFAULT_CLOCK_EPOCH_MS,
+					payloadJson: JSON.stringify({}),
+				}),
+			)
+
+			const list = yield* alerts.listDestinations(orgId)
+			assert.deepStrictEqual(
+				list.destinations.map((destination) => destination.id),
+				[supported.id],
+			)
+
+			// Delivery history still renders; the retired type falls back the same
+			// way a deleted destination does.
+			const events = yield* alerts.listDeliveryEvents(orgId)
+			assert.lengthOf(events.events, 1)
+			assert.strictEqual(events.events[0]?.destinationType, "webhook")
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}), { fetch: okFetch })))
+	})
+})

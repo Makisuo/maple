@@ -202,7 +202,7 @@ describe("rowToAlertDestinationDocument", () => {
 	}
 
 	it("maps a raw alert_destinations row and derives the public config", () => {
-		const doc = rowToAlertDestinationDocument(base)
+		const doc = rowToAlertDestinationDocument(base)!
 		assert.strictEqual(doc.id, DEST_ID)
 		assert.strictEqual(doc.name, "Ops Slack")
 		assert.strictEqual(doc.type, "slack-bot")
@@ -215,13 +215,20 @@ describe("rowToAlertDestinationDocument", () => {
 	})
 
 	it("falls back to the server's invalid-config summary when config_json is unusable", () => {
-		const doc = rowToAlertDestinationDocument({ ...base, config_json: { nope: true } })
+		const doc = rowToAlertDestinationDocument({ ...base, config_json: { nope: true } })!
 		assert.strictEqual(doc.summary, "Invalid destination config")
 		assert.strictEqual(doc.channelLabel, null)
 	})
 
 	it("leaves lastTestedAt null when the destination was never tested", () => {
-		const doc = rowToAlertDestinationDocument({ ...base, last_tested_at: null })
+		const doc = rowToAlertDestinationDocument({ ...base, last_tested_at: null })!
 		assert.strictEqual(doc.lastTestedAt, null)
+	})
+
+	// Electric syncs whatever is in Postgres, including rows written before a
+	// destination type was retired (the legacy `slack` webhook destination).
+	// Decoding those threw during render and white-screened the Alerts page.
+	it("returns null for a row whose type is no longer a supported destination", () => {
+		assert.strictEqual(rowToAlertDestinationDocument({ ...base, type: "slack" }), null)
 	})
 })

@@ -30,7 +30,13 @@ const asUserId = Schema.decodeUnknownSync(UserId)
 const asErrorIssueId = Schema.decodeUnknownSync(ErrorIssueId)
 const decodeDestinationId = Schema.decodeUnknownSync(AlertDestinationId)
 
-const asDestinationType = Schema.decodeUnknownSync(AlertDestinationType)
+/**
+ * Tolerant on purpose: Electric syncs raw `alert_destinations` rows, and a row
+ * whose `type` was retired from the union (the legacy `slack` webhook
+ * destination) would throw here — during render, white-screening the Alerts
+ * page. `None` → the row is dropped, matching the server's `listDestinations`.
+ */
+const decodeDestinationType = Schema.decodeUnknownOption(AlertDestinationType)
 
 const asSeverity = Schema.decodeUnknownSync(AlertSeverity)
 const asSignalType = Schema.decodeUnknownSync(AlertSignalType)
@@ -342,8 +348,13 @@ const decodeDestinationPublicConfig = Schema.decodeUnknownOption(AlertDestinatio
  * {@link AlertDestinationDocument}, mirroring `rowToDestinationDocument` +
  * `safeParsePublicConfig` in AlertsService.ts (invalid config → the same
  * "Invalid destination config" fallback the server uses).
+ *
+ * Returns `null` for a row whose `type` is no longer a supported destination;
+ * callers skip it, exactly as the server's `listDestinations` does.
  */
-export const rowToAlertDestinationDocument = (row: AlertDestinationRow): AlertDestinationDocument => {
+export const rowToAlertDestinationDocument = (
+	row: AlertDestinationRow,
+): AlertDestinationDocument | null => {
 	const publicConfig = Option.getOrElse(
 		decodeDestinationPublicConfig(row.config_json),
 		(): Schema.Schema.Type<typeof AlertDestinationPublicConfig> => ({
@@ -351,10 +362,12 @@ export const rowToAlertDestinationDocument = (row: AlertDestinationRow): AlertDe
 			channelLabel: null,
 		}),
 	)
+	const type = decodeDestinationType(row.type)
+	if (Option.isNone(type)) return null
 	return new AlertDestinationDocument({
 		id: decodeDestinationId(row.id),
 		name: row.name,
-		type: asDestinationType(row.type),
+		type: type.value,
 		enabled: row.enabled,
 		summary: publicConfig.summary,
 		channelLabel: publicConfig.channelLabel,

@@ -116,7 +116,12 @@ export function useAlertDestinationsList(): AlertDestinationsListHook {
 
 	const result = useMemo<Result.Result<AlertDestinationsListResponse, ListError>>(() => {
 		if (isLoading && (rows?.length ?? 0) === 0) return Result.initial(true)
-		const destinations = (rows ?? []).map(rowToAlertDestinationDocument)
+		// `rowToAlertDestinationDocument` returns null for a row whose type is no
+		// longer supported; those are skipped instead of crashing the render.
+		const destinations = (rows ?? []).flatMap((row) => {
+			const document = rowToAlertDestinationDocument(row)
+			return document === null ? [] : [document]
+		})
 		return Result.success(new AlertDestinationsListResponse({ destinations }))
 	}, [rows, isLoading])
 

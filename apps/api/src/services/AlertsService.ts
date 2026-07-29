@@ -307,7 +307,15 @@ const decodeQuerySpecSync = Schema.decodeUnknownSync(QuerySpec)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.createdAt)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
-const decodeAlertDestinationTypeSync = Schema.decodeUnknownSync(AlertDestinationTypeSchema)
+/**
+ * Stored `alert_destinations.type` values outlive the union: rows written before
+ * a destination type was retired (the legacy `slack` webhook variant) are still
+ * in Postgres. Decoding one of those with the throwing decoder raises a *defect*,
+ * turning a single stale row into a bare 500 for every destination list and
+ * delivery-history read in the org — so read paths decode tolerantly and skip or
+ * substitute, the same way `safeParsePublicConfig` tolerates an unusable config.
+ */
+const decodeAlertDestinationTypeOption = Schema.decodeUnknownOption(AlertDestinationTypeSchema)
 const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
 const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
@@ -892,11 +900,15 @@ const parseCompiledPlan = (
 	)
 }
 
-const rowToDestinationDocument = (row: AlertDestinationRow, publicConfig: DestinationPublicConfig) =>
+const rowToDestinationDocument = (
+	row: AlertDestinationRow,
+	publicConfig: DestinationPublicConfig,
+	type: AlertDestinationType,
+) =>
 	new AlertDestinationDocument({
 		id: decodeAlertDestinationIdSync(row.id),
 		name: row.name,
-		type: decodeAlertDestinationTypeSync(row.type),
+		type,
 		enabled: row.enabled,
 		summary: publicConfig.summary,
 		channelLabel: publicConfig.channelLabel,
@@ -905,6 +917,32 @@ const rowToDestinationDocument = (row: AlertDestinationRow, publicConfig: Destin
 		lastTestError: row.lastTestError,
 		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
 		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
+	})
+
+/**
+ * `None` when the row's `type` is no longer a supported destination. Callers pick
+ * the behaviour: lists drop the row, single-row reads fail with a typed error.
+ */
+const rowToDestinationDocumentOption = (
+	row: AlertDestinationRow,
+	publicConfig: DestinationPublicConfig,
+): Option.Option<AlertDestinationDocument> =>
+	Option.map(decodeAlertDestinationTypeOption(row.type), (type) =>
+		rowToDestinationDocument(row, publicConfig, type),
+	)
+
+/**
+ * Single-row variant: a retired `type` surfaces as a typed validation error,
+ * mirroring how an unparseable stored config already fails, instead of a defect.
+ */
+const destinationDocumentFromRow = (
+	row: AlertDestinationRow,
+	publicConfig: DestinationPublicConfig,
+): Effect.Effect<AlertDestinationDocument, AlertValidationError> =>
+	Option.match(rowToDestinationDocumentOption(row, publicConfig), {
+		onNone: () =>
+			Effect.fail(makeValidationError("Stored destination type is no longer supported", ["type"])),
+		onSome: Effect.succeed,
 	})
 
 const serviceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
@@ -1291,7 +1329,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					row,
 					publicConfig,
 					secretConfig,
-					document: rowToDestinationDocument(row, publicConfig),
+					document: yield* destinationDocumentFromRow(row, publicConfig),
 				} as const
 			})
 
@@ -2046,9 +2084,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						.orderBy(desc(alertDestinations.createdAt), desc(alertDestinations.id)),
 				)
 
-				const destinations = rows.map((row) =>
-					rowToDestinationDocument(row, safeParsePublicConfig(row)),
-				)
+				// Drop rows whose stored `type` no longer decodes (legacy `slack`
+				// webhook destinations) — one of them must not 500 the whole list.
+				const destinations = rows
+					.map((row) => rowToDestinationDocumentOption(row, safeParsePublicConfig(row)))
+					.filter(Option.isSome)
+					.map((option) => option.value)
 
 				return new AlertDestinationsListResponse({ destinations })
 			})
@@ -2162,7 +2203,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					db.insert(alertDestinations).values(row).returning(txidColumn),
 				)
 				const txid = readTxid(writeRows)
-				const document = rowToDestinationDocument(row, publicConfig)
+				const document = yield* destinationDocumentFromRow(row, publicConfig)
 				return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 			})
 
@@ -2443,7 +2484,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				)
 
 				const txid = readTxid(writeRows)
-				const document = rowToDestinationDocument(
+				const document = yield* destinationDocumentFromRow(
 					{
 						...existing,
 						name: nextName,
@@ -2554,7 +2595,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							? error
 							: makeDeliveryError(
 									error instanceof Error ? error.message : "Destination test failed",
-									decodeAlertDestinationTypeSync(row.type),
+									// Purely descriptive on the error payload — an unknown stored
+									// type must not turn a failed test into a defect.
+									Option.getOrUndefined(decodeAlertDestinationTypeOption(row.type)),
 								),
 					),
 				)
@@ -3499,10 +3542,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						ruleId: decodeAlertRuleIdSync(row.ruleId),
 						destinationId: decodeAlertDestinationIdSync(row.destinationId),
 						destinationName: destination?.name ?? "Deleted destination",
-						destinationType:
+						// Same fallback as a deleted destination: history rows must render
+						// even when the destination's type has since been retired.
+						destinationType: Option.getOrElse(
 							destination?.type != null
-								? decodeAlertDestinationTypeSync(destination.type)
-								: decodeAlertDestinationTypeSync("webhook"),
+								? decodeAlertDestinationTypeOption(destination.type)
+								: Option.none(),
+							() => "webhook" as const,
+						),
 						deliveryKey: row.deliveryKey,
 						eventType: decodeAlertEventTypeSync(row.eventType),
 						attemptNumber: row.attemptNumber,

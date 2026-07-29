@@ -178,6 +178,22 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 	},
 }
 
+/**
+ * Never index {@link PROVIDERS} with a value that came from the database — a
+ * retired destination type (the legacy `slack` webhook row) misses the record
+ * and every `provider.*` read below would throw on `undefined`, taking the whole
+ * Alerts page down. Such rows are already filtered out upstream; this is the
+ * belt-and-braces so a lookup miss degrades to a neutral card instead.
+ */
+const UNKNOWN_PROVIDER: DestinationProvider = {
+	...PROVIDERS.webhook,
+	label: "Unknown",
+	description: "This destination type is no longer supported.",
+}
+
+export const getProvider = (type: AlertDestinationType): DestinationProvider =>
+	PROVIDERS[type] ?? UNKNOWN_PROVIDER
+
 export const DESTINATION_TYPES: ReadonlyArray<AlertDestinationType> = [
 	"slack-bot",
 	"discord",
@@ -198,7 +214,7 @@ interface ProviderLogoProps {
 }
 
 export function ProviderLogo({ type, size = 40, className, bare }: ProviderLogoProps) {
-	const provider = PROVIDERS[type]
+	const provider = getProvider(type)
 	const [errored, setErrored] = useState(false)
 	const inner = size - 14
 

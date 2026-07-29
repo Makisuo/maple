@@ -1,5 +1,5 @@
 import type { AlertDestinationDocument } from "@maple/domain/http"
-import { PROVIDERS, ProviderLogo } from "@/components/alerts/destination-provider"
+import { getProvider, ProviderLogo } from "@/components/alerts/destination-provider"
 import {
 	AlertWarningIcon,
 	CheckIcon,
@@ -42,7 +42,7 @@ export function DestinationCard({
 	onEdit,
 	onDelete,
 }: DestinationCardProps) {
-	const provider = PROVIDERS[destination.type]
+	const provider = getProvider(destination.type)
 
 	return (
 		<Card
