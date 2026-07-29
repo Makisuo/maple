@@ -64,7 +64,22 @@ wait_health
 query "INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'local', toDateTime64('2026-06-29 12:00:00', 9, 'UTC'), 't'||toString(number+4), 's'||toString(number+4), '', '', 'probe', 'Server', 'merge-probe', 'Ok', '' FROM numbers(4)" >/dev/null
 query "INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'local', toDateTime64('2026-06-29 12:00:00', 9, 'UTC'), 't'||toString(number), 's'||toString(number), '', '', 'probe', 'Server', 'merge-probe', 'Ok', '' FROM numbers(4)" >/dev/null
 
-# Verify two parts exist.
+# Wait for both batches to become queryable before inspecting the part layout.
+# The insert endpoint returns once the write is accepted, which is not the same
+# instant the part is visible to SELECT — reading straight through raced and
+# reported "0 parts" (an empty table), not "1 part" (a merge). Poll the row
+# count so the part assertion below tests the layout rather than the timing.
+ROWCOUNT=0
+for _ in $(seq 1 100); do
+	ROWCOUNT=$(query "SELECT count() AS n FROM traces WHERE toDate(Timestamp,'UTC')='2026-06-29' AND toHour(Timestamp,'UTC')=12" | jq -r '.[0].n')
+	[[ "$ROWCOUNT" == "8" ]] && break
+	sleep 0.1
+done
+[[ "$ROWCOUNT" == "8" ]] || fail "expected 8 rows to be visible before checkpoint, got $ROWCOUNT"
+
+# Verify two parts exist. Still strict: a background merge collapsing these into
+# one part defeats the scenario this probe exists to cover, so it must fail loudly
+# rather than silently degrade into a single-part export.
 NPARTS=$(query "SELECT count(DISTINCT _part) AS n FROM traces WHERE toDate(Timestamp,'UTC')='2026-06-29' AND toHour(Timestamp,'UTC')=12" | jq -r '.[0].n')
 [[ "$NPARTS" == "2" ]] || fail "expected 2 parts before checkpoint, got $NPARTS"
 
