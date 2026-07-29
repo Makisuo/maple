@@ -30,10 +30,12 @@ const inputSchema = z.object({
 export default defineTool({
 	description:
 		"React to the user's triggering Slack message with an emoji, replacing the " +
-		"automatic :eyes: acknowledgement. Use it at most once per message, and only " +
-		"when a reaction adds real signal — acknowledging thanks or praise, marking a " +
-		"confirmed finding, flagging something alarming. Most messages need no " +
-		"reaction. Never mention the reaction in your reply.",
+		"automatic :eyes: acknowledgement. Call it whenever the message or your " +
+		"findings warrant one: thanks or praise (raised_hands), agreement (thumbsup), " +
+		"a confirmed fix or healthy system (white_check_mark), an active incident or " +
+		"alarming data (rotating_light), a found culprit (bug). Skip only neutral " +
+		"informational exchanges. At most once per message; never mention the " +
+		"reaction in your reply.",
 	inputSchema,
 	async execute(input, ctx) {
 		return reactToTriggeringMessage(input.emoji, {
