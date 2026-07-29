@@ -31,7 +31,7 @@ export default defineTool({
 	description:
 		"React to the user's triggering Slack message with an emoji, replacing the " +
 		"automatic :eyes: acknowledgement. Call it whenever the message or your " +
-		"findings warrant one: thanks or praise (raised_hands), agreement (thumbsup), " +
+		"findings warrant one: a greeting (wave), thanks or praise (raised_hands), agreement (thumbsup), " +
 		"a confirmed fix or healthy system (white_check_mark), an active incident or " +
 		"alarming data (rotating_light), a found culprit (bug). Skip only neutral " +
 		"informational exchanges. At most once per message; never mention the " +
