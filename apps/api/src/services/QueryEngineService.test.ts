@@ -12,7 +12,6 @@ import {
 } from "@maple/query-engine"
 import {
 	makeQueryEngineEvaluate,
-	makeQueryEngineEvaluateRawSql,
 	makeQueryEngineExecute,
 } from "@maple/query-engine/runtime"
 import type { TenantContext } from "./AuthService"
@@ -774,11 +773,14 @@ describe("makeQueryEngineEvaluate", () => {
 				endTime: "2026-01-01 00:05:00",
 				reducer: "identity",
 				sampleCountStrategy: "trace_count",
-				query: {
-					kind: "timeseries",
-					source: "traces",
-					metric: "error_rate",
-					groupBy: ["none"],
+				source: {
+					kind: "spec",
+					query: {
+						kind: "timeseries",
+						source: "traces",
+						metric: "error_rate",
+						groupBy: ["none"],
+					},
 				},
 			}
 
@@ -821,12 +823,15 @@ describe("makeQueryEngineEvaluate", () => {
 				endTime: "2026-01-01 00:05:00",
 				reducer: "identity",
 				sampleCountStrategy: "trace_count",
-				query: {
-					kind: "timeseries",
-					source: "traces",
-					metric: "apdex",
-					groupBy: ["none"],
-					apdexThresholdMs: 350,
+				source: {
+					kind: "spec",
+					query: {
+						kind: "timeseries",
+						source: "traces",
+						metric: "apdex",
+						groupBy: ["none"],
+						apdexThresholdMs: 350,
+					},
 				},
 			})
 
@@ -861,14 +866,17 @@ describe("makeQueryEngineEvaluate", () => {
 				endTime: "2026-01-01 00:05:00",
 				reducer: "identity",
 				sampleCountStrategy: "metric_data_points",
-				query: {
-					kind: "timeseries",
-					source: "metrics",
-					metric: "avg",
-					groupBy: ["none"],
-					filters: {
-						metricName: asMetricName("cpu.usage"),
-						metricType: "gauge",
+				source: {
+					kind: "spec",
+					query: {
+						kind: "timeseries",
+						source: "metrics",
+						metric: "avg",
+						groupBy: ["none"],
+						filters: {
+							metricName: asMetricName("cpu.usage"),
+							metricType: "gauge",
+						},
 					},
 				},
 			})
@@ -894,14 +902,17 @@ describe("makeQueryEngineEvaluate", () => {
 				endTime: "2026-01-01 00:05:00",
 				reducer: "identity",
 				sampleCountStrategy: "metric_data_points",
-				query: {
-					kind: "timeseries",
-					source: "metrics",
-					metric: "sum",
-					groupBy: ["none"],
-					filters: {
-						metricName: asMetricName("requests"),
-						metricType: "sum",
+				source: {
+					kind: "spec",
+					query: {
+						kind: "timeseries",
+						source: "metrics",
+						metric: "sum",
+						groupBy: ["none"],
+						filters: {
+							metricName: asMetricName("requests"),
+							metricType: "sum",
+						},
 					},
 				},
 			})
@@ -934,14 +945,17 @@ describe("makeQueryEngineEvaluate", () => {
 				endTime: "2026-01-01 00:05:00",
 				reducer: "identity",
 				sampleCountStrategy: "log_count",
-				query: {
-					kind: "timeseries",
-					source: "logs",
-					metric: "count",
-					groupBy: ["none"],
-					filters: {
-						serviceName: asServiceName("checkout"),
-						severity: "error",
+				source: {
+					kind: "spec",
+					query: {
+						kind: "timeseries",
+						source: "logs",
+						metric: "count",
+						groupBy: ["none"],
+						filters: {
+							serviceName: asServiceName("checkout"),
+							severity: "error",
+						},
 					},
 				},
 			})
@@ -979,13 +993,16 @@ describe("makeQueryEngineEvaluate", () => {
 				endTime: "2026-01-01 00:05:00",
 				reducer: "identity",
 				sampleCountStrategy: "log_count",
-				query: {
-					kind: "timeseries",
-					source: "logs",
-					metric: "count",
-					groupBy: ["service"],
-					filters: {
-						severity: "error",
+				source: {
+					kind: "spec",
+					query: {
+						kind: "timeseries",
+						source: "logs",
+						metric: "count",
+						groupBy: ["service"],
+						filters: {
+							severity: "error",
+						},
 					},
 				},
 			})
@@ -1008,10 +1025,11 @@ describe("makeQueryEngineEvaluate", () => {
 	)
 })
 
-describe("makeQueryEngineEvaluateRawSql", () => {
+// Raw SQL now flows through the very same `evaluate` as every spec source.
+describe("evaluate with a raw_sql source", () => {
 	it.effect("translates raw warehouse limits once into the alert validation contract", () =>
 		Effect.gen(function* () {
-			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+			const evaluateRawSql = makeQueryEngineEvaluate(
 				makeTinybirdStub({
 					rawSqlQuery: () =>
 						Effect.fail(
@@ -1026,9 +1044,13 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 			const exit = yield* evaluateRawSql(tenant, {
 				startTime: "2026-01-01 00:00:00",
 				endTime: "2026-01-01 00:05:00",
-				sql: "SELECT value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+				source: {
+					kind: "raw_sql",
+					sql: "SELECT value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+					windowMinutes: 5,
+				},
 				reducer: "identity",
-				windowMinutes: 5,
+				sampleCountStrategy: null,
 			}).pipe(Effect.exit)
 			const failure = Option.getOrUndefined(Exit.findErrorOption(exit)) as
 				| { readonly _tag?: string; readonly details?: ReadonlyArray<string> }
@@ -1045,7 +1067,7 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 		Effect.gen(function* () {
 			let profile: string | undefined
 			let context: string | undefined
-			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+			const evaluateRawSql = makeQueryEngineEvaluate(
 				makeTinybirdStub({
 					rawSqlQuery: (_tenant, _sql, options) => {
 						profile = options?.profile
@@ -1062,9 +1084,13 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 			const response = yield* evaluateRawSql(tenant, {
 				startTime: "2026-01-01 00:00:00",
 				endTime: "2026-01-01 00:05:00",
-				sql: "SELECT group, value FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+				source: {
+					kind: "raw_sql",
+					sql: "SELECT group, value FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+					windowMinutes: 5,
+				},
 				reducer: "max",
-				windowMinutes: 5,
+				sampleCountStrategy: null,
 			})
 
 			const byGroup = Object.fromEntries(response.map((o) => [o.groupKey, o]))
@@ -1081,7 +1107,7 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 
 	it.effect("rejects invalid sample counts returned by raw SQL", () =>
 		Effect.gen(function* () {
-			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+			const evaluateRawSql = makeQueryEngineEvaluate(
 				makeTinybirdStub({
 					sqlQuery: () => Effect.succeed([{ value: 1, samples: -1 }]),
 				}),
@@ -1090,9 +1116,13 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 			const exit = yield* evaluateRawSql(tenant, {
 				startTime: "2026-01-01 00:00:00",
 				endTime: "2026-01-01 00:05:00",
-				sql: "SELECT value, samples FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+				source: {
+					kind: "raw_sql",
+					sql: "SELECT value, samples FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+					windowMinutes: 5,
+				},
 				reducer: "identity",
-				windowMinutes: 5,
+				sampleCountStrategy: null,
 			}).pipe(Effect.exit)
 
 			assert.isTrue(Exit.isFailure(exit))
@@ -1107,16 +1137,20 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 
 	it.effect("emits a single no-data observation when the query returns no rows", () =>
 		Effect.gen(function* () {
-			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+			const evaluateRawSql = makeQueryEngineEvaluate(
 				makeTinybirdStub({ sqlQuery: () => Effect.succeed([]) }),
 			)
 
 			const response = yield* evaluateRawSql(tenant, {
 				startTime: "2026-01-01 00:00:00",
 				endTime: "2026-01-01 00:05:00",
-				sql: "SELECT value FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+				source: {
+					kind: "raw_sql",
+					sql: "SELECT value FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+					windowMinutes: 5,
+				},
 				reducer: "identity",
-				windowMinutes: 5,
+				sampleCountStrategy: null,
 			})
 
 			assert.deepStrictEqual(response, [
@@ -1127,7 +1161,7 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 
 	it.effect("fails with a validation error when returned rows omit the value column", () =>
 		Effect.gen(function* () {
-			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+			const evaluateRawSql = makeQueryEngineEvaluate(
 				makeTinybirdStub({
 					sqlQuery: () => Effect.succeed([{ bucket: "2026-01-01 00:00:00", errors: 42 }]),
 				}),
@@ -1137,9 +1171,13 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 				evaluateRawSql(tenant, {
 					startTime: "2026-01-01 00:00:00",
 					endTime: "2026-01-01 00:05:00",
-					sql: "SELECT bucket, errors FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+					source: {
+						kind: "raw_sql",
+						sql: "SELECT bucket, errors FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+						windowMinutes: 5,
+					},
 					reducer: "identity",
-					windowMinutes: 5,
+					sampleCountStrategy: null,
 				}),
 			)
 			const failure = Option.getOrUndefined(Exit.findErrorOption(exit)) as
@@ -1157,7 +1195,7 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 
 	it.effect("fails with a validation error when the SQL omits $__orgFilter", () =>
 		Effect.gen(function* () {
-			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+			const evaluateRawSql = makeQueryEngineEvaluate(
 				makeTinybirdStub({ sqlQuery: () => Effect.die(new Error("should not run")) }),
 			)
 
@@ -1165,9 +1203,13 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 				evaluateRawSql(tenant, {
 					startTime: "2026-01-01 00:00:00",
 					endTime: "2026-01-01 00:05:00",
-					sql: "SELECT value FROM otel_traces",
+					source: {
+						kind: "raw_sql",
+						sql: "SELECT value FROM otel_traces",
+						windowMinutes: 5,
+					},
 					reducer: "identity",
-					windowMinutes: 5,
+					sampleCountStrategy: null,
 				}),
 			)
 
