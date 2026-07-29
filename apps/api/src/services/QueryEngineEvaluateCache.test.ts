@@ -4,7 +4,11 @@ import { strict as assert } from "node:assert"
 import { OrgId, UserId } from "@maple/domain"
 import { baselineWarehouseCapabilities, type QueryEngineEvaluateRequest } from "@maple/query-engine"
 import type { CompiledQuery } from "@maple/query-engine/ch"
-import { makeQueryEngineEvaluate, makeQueryEngineEvaluateSeries } from "@maple/query-engine/runtime"
+import {
+	makeQueryEngineEvaluate,
+	makeQueryEngineEvaluateRawSql,
+	makeQueryEngineEvaluateSeries,
+} from "@maple/query-engine/runtime"
 import { QueryEngineService } from "./QueryEngineService"
 import type { TenantContext } from "./AuthService"
 import { WarehouseQueryService, type WarehouseQueryServiceShape } from "../lib/WarehouseQueryService"
@@ -164,6 +168,88 @@ describe("makeQueryEngineEvaluateSeries (per-bucket preview core)", () => {
 		Effect.gen(function* () {
 			const series = yield* makeQueryEngineEvaluateSeries(evalStub([]))(tenant, countRequest("sum"))
 			assert.deepStrictEqual(series, [])
+		}),
+	)
+})
+
+// --- Raw SQL is just a fourth source of the same bucket observations. ---
+
+const rawStub = (rows: ReadonlyArray<Record<string, unknown>>) =>
+	({
+		sqlQuery: () => Effect.die(new Error("sqlQuery is not used by raw SQL tests")),
+		rawSqlQuery: () => Effect.succeed(rows),
+		compiledQuery: () => Effect.die(new Error("compiledQuery is not used by raw SQL tests")),
+		compiledQueryWithCapabilities: () =>
+			Effect.die(new Error("compiledQueryWithCapabilities is not used by raw SQL tests")),
+	}) satisfies Parameters<typeof makeQueryEngineEvaluateRawSql>[0]
+
+const rawRequest = (reducer: QueryEngineEvaluateRequest["reducer"]) => ({
+	startTime: "2026-01-01 00:00:00",
+	endTime: "2026-01-01 00:15:00",
+	sql: "SELECT $__timeGroup(Timestamp) AS bucket, count() AS value FROM Logs WHERE $__orgFilter AND $__timeFilter(Timestamp) GROUP BY bucket",
+	reducer,
+	windowMinutes: 5,
+})
+
+describe("makeQueryEngineEvaluateRawSql (raw SQL over the shared core)", () => {
+	it.effect("reduces bucketed rows exactly like the spec sources do", () =>
+		Effect.gen(function* () {
+			// Same 2/3/5 shape as COUNT_ROWS, so the reduced result must match
+			// the trace built-in's byte for byte.
+			const rows = [
+				{ bucket: "2026-01-01 00:00:00", value: 2, samples: 2 },
+				{ bucket: "2026-01-01 00:05:00", value: 3, samples: 3 },
+				{ bucket: "2026-01-01 00:10:00", value: 5, samples: 5 },
+			]
+			const raw = yield* makeQueryEngineEvaluateRawSql(rawStub(rows))(tenant, rawRequest("sum"))
+			const spec = yield* makeQueryEngineEvaluate(evalStub(COUNT_ROWS))(tenant, countRequest("sum"))
+			assert.deepStrictEqual(raw, spec)
+		}),
+	)
+
+	it.effect("collapses an unbucketed query into one synthetic bucket", () =>
+		Effect.gen(function* () {
+			const raw = yield* makeQueryEngineEvaluateRawSql(rawStub([{ value: 10, samples: 10 }]))(
+				tenant,
+				rawRequest("sum"),
+			)
+			assert.deepStrictEqual(raw, [
+				{ groupKey: "all", value: 10, sampleCount: 10, hasData: true },
+			])
+		}),
+	)
+
+	it.effect("treats a null value as no data rather than a missing scalar", () =>
+		Effect.gen(function* () {
+			// `hasData === sampleCount > 0` must hold for raw rows exactly as it does
+			// for the spec sources — that invariant is what the bucket codec assumes.
+			const raw = yield* makeQueryEngineEvaluateRawSql(rawStub([{ value: null }]))(
+				tenant,
+				rawRequest("sum"),
+			)
+			assert.deepStrictEqual(raw, [
+				{ groupKey: "all", value: null, sampleCount: 0, hasData: false },
+			])
+		}),
+	)
+
+	it.effect("emits a single no-data observation when there are no rows", () =>
+		Effect.gen(function* () {
+			const raw = yield* makeQueryEngineEvaluateRawSql(rawStub([]))(tenant, rawRequest("sum"))
+			const spec = yield* makeQueryEngineEvaluate(evalStub([]))(tenant, countRequest("sum"))
+			assert.deepStrictEqual(raw, spec)
+		}),
+	)
+
+	it.effect("rejects a group key containing NUL, which would collide with the codec", () =>
+		Effect.gen(function* () {
+			const exit = yield* Effect.exit(
+				makeQueryEngineEvaluateRawSql(rawStub([{ value: 1, group: "a\u0000v\u0000b" }]))(
+					tenant,
+					rawRequest("sum"),
+				),
+			)
+			assert.equal(exit._tag, "Failure")
 		}),
 	)
 })

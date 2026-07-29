@@ -10,14 +10,15 @@ import {
 	buildEvaluateCacheKey,
 	cacheTtlForQueryKind,
 	computeBucketSeconds,
-	computeEvaluateBuckets,
-	decodeEvalPoints,
+	computeAlertBuckets,
+	decodeEvalSeries,
+	encodeEvalPoints,
 	makeQueryEngineEvaluate,
 	makeQueryEngineEvaluateRawSql,
 	makeQueryEngineEvaluateSeries,
 	makeQueryEngineExecute,
 	msToTinybirdDateTime,
-	reducePerGroupObservations,
+	reduceAlertBuckets,
 	resolveDirectRouteCachePolicy,
 	toEpochMs,
 	validateEvaluate,
@@ -285,16 +286,16 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 						endMs: range.endMs,
 					},
 					({ startMs, endMs }) =>
-						computeEvaluateBuckets(
+						computeAlertBuckets(
 							warehouse,
 							tenant,
 							{
-								query: request.query,
+								source: { kind: "spec", query: request.query },
 								startTime: msToTinybirdDateTime(startMs),
 								endTime: msToTinybirdDateTime(endMs),
 							},
 							bucketSeconds,
-						),
+						).pipe(Effect.map(encodeEvalPoints)),
 				)
 
 				yield* Metric.update(QueryEngineMetrics.bucketCacheBucketsHit, outcome.bucketsHit)
@@ -314,11 +315,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				yield* Effect.annotateCurrentSpan("cache.bucketsMissed", outcome.bucketsMissed)
 				yield* Effect.annotateCurrentSpan("cache.missingRangeCount", outcome.missingRangeCount)
 
-				const byGroup = decodeEvalPoints(outcome.points)
-				if (byGroup.size === 0) {
-					byGroup.set("all", [{ value: null, sampleCount: 0, hasData: false }])
-				}
-				const result = reducePerGroupObservations(byGroup, request.reducer)
+				const result = reduceAlertBuckets(decodeEvalSeries(outcome.points), request.reducer)
 				yield* Effect.annotateCurrentSpan("result.groupCount", result.length)
 				return result
 			})

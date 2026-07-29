@@ -38,7 +38,7 @@ import {
 import { computeBucketSeconds } from "../datetime"
 import { attributeIndexMode, logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeExecuteRawSql } from "./raw-sql"
-import { decodeEvalSeries, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
+import type { BucketGroupObs } from "./evaluate-bucket-codec"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
 // `computeBucketSeconds` from here; the implementation now lives in the pure
@@ -1906,38 +1906,70 @@ const composeMetricsGroupKey = (
 	return filtered.join(" \u00b7 ")
 }
 
-/** Structural request slice that `computeEvaluateBuckets` needs for one range. */
-interface EvaluateRangeRequest {
-	readonly query: QuerySpec
+/**
+ * Column convention for a raw-SQL alert query: a numeric `value`, plus optional
+ * `group` (splits results into per-group observations, default `"all"`),
+ * `samples` (the sample count, else 1 per row) and `bucket` (a timestamp from
+ * `$__timeGroup(col)`; absent means the whole window is one bucket).
+ */
+const RawSqlAlertRowSchema = Schema.Struct({
+	value: Schema.Unknown,
+	group: Schema.optional(Schema.Unknown),
+	samples: Schema.optional(Schema.Unknown),
+	bucket: Schema.optional(Schema.Unknown),
+})
+
+/**
+ * Where the observations for one alert evaluation come from. Every alert rule
+ * kind — the trace built-ins, the query builder, and user-authored SQL —
+ * compiles down to one of these two, so there is exactly one lowering to
+ * maintain (see {@link computeAlertBuckets}).
+ */
+export type AlertBucketSource =
+	| { readonly kind: "spec"; readonly query: QuerySpec }
+	| { readonly kind: "raw_sql"; readonly sql: string; readonly windowMinutes: number }
+
+/** Structural request slice that {@link computeAlertBuckets} needs for one range. */
+export interface AlertBucketRequest {
+	readonly source: AlertBucketSource
 	readonly startTime: string
 	readonly endTime: string
 }
 
 /**
- * Run the alert query for a single time range and emit one `TimeseriesPoint`
- * per bucket, encoding the per-(bucket, group) value + sample count via
- * `encodeEvalPoints`. Backs the bucket-cached evaluate path: the bucket cache
- * stores these points and re-fetches only the missing ranges. Decoding them
- * (`decodeEvalPoints`) reproduces the same per-group observations the direct
- * `evaluate` path builds inline, so a cached evaluation matches an uncached one
- * for real timeseries data (where each (bucket, group) row is unique). Assumes
- * the source is already validated as a supported timeseries query.
+ * THE single alert lowering: run one alert source over one time range and emit
+ * per-(bucket, group) observations.
+ *
+ * Everything downstream is a thin derivation of this — `evaluate` reduces the
+ * buckets to a scalar per group (`reduceAlertBuckets`), `evaluateSeries` returns
+ * them as-is for the preview chart, and the bucket cache stores them encoded via
+ * `encodeEvalPoints` and re-fetches only the missing ranges. Because a cached
+ * evaluation decodes back into the very same observations an uncached one
+ * builds, the two agree for real timeseries data (where each (bucket, group) row
+ * is unique).
+ *
+ * Assumes a spec source is already validated as a supported timeseries query.
  */
-export const computeEvaluateBuckets = Effect.fnUntraced(function* <T extends QueryTenant>(
+export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryTenant>(
 	warehouse: QueryEngineWarehouse<T>,
 	tenant: T,
-	request: EvaluateRangeRequest,
+	request: AlertBucketRequest,
 	bucketSeconds: number,
 ) {
+	if (request.source.kind === "raw_sql") {
+		return yield* computeRawSqlBuckets(warehouse, tenant, request.source, request)
+	}
+
 	const obs: BucketGroupObs[] = []
-	const query = request.query
+	const query = request.source.query
 
 	// Caller guarantees a supported timeseries query; this guard also narrows the
 	// QuerySpec union (discriminated on both `kind` and `source`) so the per-source
 	// branches can read `filters`/`metric`/`groupBy`.
 	if (query.kind !== "timeseries") {
-		return encodeEvalPoints(obs)
+		return obs as ReadonlyArray<BucketGroupObs>
 	}
+
 
 	if (query.source === "traces") {
 		const opts = extractTracesOpts(query.filters as Record<string, unknown>)
@@ -2044,8 +2076,145 @@ export const computeEvaluateBuckets = Effect.fnUntraced(function* <T extends Que
 		}
 	}
 
-	return encodeEvalPoints(obs)
+	return obs as ReadonlyArray<BucketGroupObs>
 })
+
+/**
+ * The `raw_sql` arm of {@link computeAlertBuckets}, split out only because it
+ * needs its own `makeExecuteRawSql` closure.
+ *
+ * `bucket` is optional: a query using `$__timeGroup(col)` returns one row per
+ * bucket and previews as a real series, while one that doesn't returns a single
+ * window aggregate and lands in one synthetic bucket. Reduction collapses across
+ * buckets either way, so the scheduler sees the same scalar for both.
+ *
+ * `sampleCount` is forced to 0 whenever `value` is null so that
+ * `hasData === sampleCount > 0` holds for raw rows exactly as it does for the
+ * spec sources — the bucket codec derives `hasData` from the sample count alone,
+ * so a `{value: null, samples: 1}` row would otherwise decode as "has data but
+ * no scalar" rather than the no-data case the alert engine expects.
+ */
+const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>(
+	warehouse: QueryEngineWarehouse<T>,
+	tenant: T,
+	source: Extract<AlertBucketSource, { kind: "raw_sql" }>,
+	range: { readonly startTime: string; readonly endTime: string },
+) {
+	const executeRawSql = makeExecuteRawSql<T, WarehouseError | RawSqlValidationError>(warehouse)
+	const granularitySeconds = Math.max(source.windowMinutes * 60, 60)
+
+	const { rows: rawRows } = yield* executeRawSql(tenant, {
+		sql: source.sql,
+		orgId: tenant.orgId,
+		startTime: range.startTime,
+		endTime: range.endTime,
+		granularitySeconds,
+		workload: "alert",
+		context: "alertRawQuery",
+	}).pipe(
+		Effect.catchTag("@maple/http/errors/RawSqlValidationError", (error) =>
+			Effect.fail(
+				new QueryEngineValidationError({
+					message: "Invalid raw SQL alert query",
+					details: [error.message],
+				}),
+			),
+		),
+	)
+
+	const rows = yield* Schema.decodeUnknownEffect(Schema.Array(RawSqlAlertRowSchema))(rawRows).pipe(
+		Effect.mapError(
+			() =>
+				new QueryEngineValidationError({
+					message: "Invalid raw SQL alert query",
+					details: ["Raw SQL alert queries must return a column named value."],
+				}),
+		),
+	)
+
+	const obs: BucketGroupObs[] = []
+	const seenGroups = new Set<string>()
+	for (const row of rows) {
+		const rawGroup = row.group
+		const groupKey = typeof rawGroup === "string" && rawGroup.length > 0 ? rawGroup : "all"
+		if (groupKey.length > MAX_RAW_SQL_GROUP_KEY_LENGTH) {
+			return yield* new QueryEngineValidationError({
+				message: "Invalid raw SQL alert query",
+				details: [
+					`Raw SQL alert group keys may contain at most ${MAX_RAW_SQL_GROUP_KEY_LENGTH} characters.`,
+				],
+			})
+		}
+		// `encodeEvalPoints` prefixes group keys with NUL-delimited markers and relies
+		// on real keys never containing NUL. That holds for CH-derived keys but not
+		// for arbitrary user SQL, so reject rather than let a crafted key collide
+		// with the codec's value/count namespaces.
+		if (groupKey.includes("\u0000")) {
+			return yield* new QueryEngineValidationError({
+				message: "Invalid raw SQL alert query",
+				details: ["Raw SQL alert group keys may not contain NUL characters."],
+			})
+		}
+		const numValue = row.value == null ? null : Number(row.value)
+		const value = numValue != null && Number.isFinite(numValue) ? numValue : null
+		const rawSamples = row.samples == null ? 1 : Number(row.samples)
+		if (!Number.isFinite(rawSamples) || rawSamples < 0) {
+			return yield* new QueryEngineValidationError({
+				message: "Invalid raw SQL alert query",
+				details: ["Raw SQL alert samples must be finite and nonnegative."],
+			})
+		}
+		if (!seenGroups.has(groupKey)) {
+			if (seenGroups.size >= MAX_RAW_SQL_ALERT_GROUPS) {
+				return yield* new QueryEngineValidationError({
+					message: "Invalid raw SQL alert query",
+					details: [`Raw SQL alerts may return at most ${MAX_RAW_SQL_ALERT_GROUPS} groups.`],
+				})
+			}
+			seenGroups.add(groupKey)
+		}
+		obs.push({
+			// A query without `$__timeGroup` has no bucket column: the whole window
+			// collapses into one synthetic bucket at its start.
+			bucket:
+				typeof row.bucket === "string" || row.bucket instanceof Date
+					? normalizeBucket(row.bucket)
+					: range.startTime,
+			groupKey,
+			value,
+			sampleCount: value == null ? 0 : rawSamples,
+		})
+	}
+
+	return obs as ReadonlyArray<BucketGroupObs>
+})
+
+/**
+ * The single reduce tail: collapse per-(bucket, group) observations into one
+ * `GroupedAlertObservation` per group. An empty result still yields a single
+ * ungrouped no-data observation so the alert engine can apply its configured
+ * no-data behavior.
+ */
+export const reduceAlertBuckets = (
+	obs: ReadonlyArray<BucketGroupObs>,
+	reducer: QueryEngineAlertReducer,
+): ReadonlyArray<GroupedAlertObservation> => {
+	const byGroup = new Map<
+		string,
+		Array<{ value: number | null; sampleCount: number; hasData: boolean }>
+	>()
+	for (const o of obs) {
+		const entry = { value: o.value, sampleCount: o.sampleCount, hasData: o.sampleCount > 0 }
+		const list = byGroup.get(o.groupKey)
+		if (list) list.push(entry)
+		else byGroup.set(o.groupKey, [entry])
+	}
+	if (byGroup.size === 0) {
+		byGroup.set("all", [{ value: null, sampleCount: 0, hasData: false }])
+	}
+	return reducePerGroupObservations(byGroup, reducer)
+}
+
 
 export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
 	Effect.fn("QueryEngineService.evaluate")(function* (
@@ -2089,140 +2258,18 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 		const endMs = toEpochMs(request.endTime)
 		const bucketSeconds = request.query.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
 
-		const byGroup = new Map<
-			string,
-			Array<{ value: number | null; sampleCount: number; hasData: boolean }>
-		>()
-		const pushObs = (
-			groupKey: string,
-			obs: { value: number | null; sampleCount: number; hasData: boolean },
-		) => {
-			const list = byGroup.get(groupKey)
-			if (list) list.push(obs)
-			else byGroup.set(groupKey, [obs])
-		}
+		const obs = yield* computeAlertBuckets(
+			warehouse,
+			tenant,
+			{
+				source: { kind: "spec", query: request.query },
+				startTime: request.startTime,
+				endTime: request.endTime,
+			},
+			bucketSeconds,
+		)
 
-		if (request.query.source === "traces") {
-			const tracesQuery = request.query
-			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
-			const rows = yield* executeCHQuery(
-				warehouse,
-				tenant,
-				(capabilities) =>
-					CH.tracesTimeseriesQuery({
-						...opts,
-						attributeIndexMode: attributeIndexMode(capabilities, "traces"),
-						metric: tracesQuery.metric,
-						needsSampling: false,
-						groupBy: tracesQuery.groupBy as readonly string[] | undefined,
-						apdexThresholdMs:
-							tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
-						bucketSeconds,
-					}),
-				{
-					orgId: tenant.orgId,
-					startTime: request.startTime,
-					endTime: request.endTime,
-					bucketSeconds,
-				},
-				"tracesAlertEval",
-			)
-
-			for (const row of rows) {
-				const sampleCount = Number(row.count ?? 0)
-				const value = sampleCount > 0 ? tracesAggregateValueForMetric(tracesQuery.metric, row) : null
-				pushObs(row.groupName || "all", {
-					value,
-					sampleCount,
-					hasData: sampleCount > 0,
-				})
-			}
-		} else if (request.query.source === "logs") {
-			const logsQuery = request.query
-			const opts = extractLogsOpts(request.query.filters as Record<string, unknown> | undefined)
-			const rows = yield* executeCHQuery(
-				warehouse,
-				tenant,
-				(capabilities) =>
-					CH.logsTimeseriesQuery({
-						...opts,
-						attributeIndexMode: attributeIndexMode(capabilities, "logs"),
-						bodySearchMode: logBodySearchMode(capabilities),
-						groupBy: logsQuery.groupBy as readonly string[] | undefined,
-						bucketSeconds,
-					}),
-				{
-					orgId: tenant.orgId,
-					startTime: request.startTime,
-					endTime: request.endTime,
-					bucketSeconds,
-				},
-				"logsAlertEval",
-			)
-
-			for (const row of rows) {
-				const sampleCount = Number(row.count ?? 0)
-				pushObs(row.groupName || "all", {
-					value: sampleCount > 0 ? sampleCount : null,
-					sampleCount,
-					hasData: sampleCount > 0,
-				})
-			}
-		} else {
-			const metricsQuery = request.query
-			const groupByAttribute = metricsQuery.groupBy?.includes("attribute")
-			const groupByAttributeKey = groupByAttribute
-				? metricsQuery.filters.groupByAttributeKey
-				: undefined
-			const groupByResourceAttributeKey = metricsQuery.groupBy?.includes("resource_attribute")
-				? metricsQuery.filters.groupByResourceAttributeKey
-				: undefined
-
-			const rows = yield* executeCHQuery(
-				warehouse,
-				tenant,
-				CH.metricsTimeseriesQuery({
-					metricType: metricsQuery.filters.metricType,
-					serviceName: metricsQuery.filters.serviceName,
-					groupByAttributeKey,
-					groupByResourceAttributeKey,
-					resourceAttributeFilters: metricsQuery.filters.resourceAttributeFilters,
-				}),
-				{
-					orgId: tenant.orgId,
-					metricName: metricsQuery.filters.metricName,
-					startTime: request.startTime,
-					endTime: request.endTime,
-					bucketSeconds,
-				},
-				"metricsAlertEval",
-			)
-
-			for (const row of rows) {
-				const sampleCount = Number(row.dataPointCount ?? 0)
-				const value =
-					sampleCount > 0 ? metricsAggregateValueForMetric(metricsQuery.metric, row) : null
-				const groupKey = composeMetricsGroupKey(
-					metricsQuery.groupBy as readonly string[] | undefined,
-					row.serviceName ?? "",
-					row.attributeValue ?? "",
-				)
-				pushObs(groupKey, {
-					value,
-					sampleCount,
-					hasData: sampleCount > 0,
-				})
-			}
-		}
-
-		// When the query is ungrouped (or returned no rows) ensure we still emit
-		// a single "all" observation with hasData=false so the alert engine can
-		// apply its no-data behavior.
-		if (byGroup.size === 0) {
-			byGroup.set("all", [{ value: null, sampleCount: 0, hasData: false }])
-		}
-
-		const result = reducePerGroupObservations(byGroup, request.reducer)
+		const result = reduceAlertBuckets(obs, request.reducer)
 		yield* Effect.annotateCurrentSpan("result.groupCount", result.length)
 		return result
 	})
@@ -2267,112 +2314,45 @@ export const makeQueryEngineEvaluateSeries = <T extends QueryTenant>(warehouse: 
 		const endMs = toEpochMs(request.endTime)
 		const bucketSeconds = request.query.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
 
-		const points = yield* computeEvaluateBuckets(warehouse, tenant, request, bucketSeconds)
-		const series = decodeEvalSeries(points)
+		const series = yield* computeAlertBuckets(
+			warehouse,
+			tenant,
+			{
+				source: { kind: "spec", query: request.query },
+				startTime: request.startTime,
+				endTime: request.endTime,
+			},
+			bucketSeconds,
+		)
 		yield* Effect.annotateCurrentSpan("result.pointCount", series.length)
 		return series
 	})
 
-const RawSqlAlertRowSchema = Schema.Struct({
-	value: Schema.Unknown,
-	group: Schema.optional(Schema.Unknown),
-	samples: Schema.optional(Schema.Unknown),
-})
-
 /**
- * Evaluate a raw-SQL alert query. Mirrors `makeQueryEngineEvaluate` but the
- * data comes from user-authored ClickHouse SQL instead of a structured spec.
- *
- * Column convention: the query returns a numeric `value` column; an optional
- * `group` column splits results into per-group observations (default `"all"`),
- * and an optional `samples` column carries the sample count (else each row
- * counts as 1). Per group, `value` rows are collapsed with the reducer.
+ * Evaluate a raw-SQL alert query. A thin wrapper over the same
+ * {@link computeAlertBuckets} lowering the spec sources use — kept as its own
+ * entry point only while `AlertsService` still dispatches on the plan kind.
  */
-export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) => {
-	const executeRawSql = makeExecuteRawSql<T, WarehouseError | RawSqlValidationError>(warehouse)
-	return Effect.fn("QueryEngineService.evaluateRawSql")(function* (
+export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
+	Effect.fn("QueryEngineService.evaluateRawSql")(function* (
 		tenant: T,
 		request: QueryEngineRawSqlEvaluateRequest,
 	): Effect.fn.Return<ReadonlyArray<GroupedAlertObservation>, QueryEngineValidationError | WarehouseError> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		yield* Effect.annotateCurrentSpan("query.reducer", request.reducer)
 
-		const granularitySeconds = Math.max(request.windowMinutes * 60, 60)
-		const { rows: rawRows } = yield* executeRawSql(tenant, {
-			sql: request.sql,
-			orgId: tenant.orgId,
-			startTime: request.startTime,
-			endTime: request.endTime,
-			granularitySeconds,
-			workload: "alert",
-			context: "alertRawQuery",
-		}).pipe(
-			Effect.catchTag("@maple/http/errors/RawSqlValidationError", (error) =>
-				Effect.fail(
-					new QueryEngineValidationError({
-						message: "Invalid raw SQL alert query",
-						details: [error.message],
-					}),
-				),
-			),
-		)
-		const rows = yield* Schema.decodeUnknownEffect(Schema.Array(RawSqlAlertRowSchema))(rawRows).pipe(
-			Effect.mapError(
-				() =>
-					new QueryEngineValidationError({
-						message: "Invalid raw SQL alert query",
-						details: ["Raw SQL alert queries must return a column named value."],
-					}),
-			),
+		const obs = yield* computeAlertBuckets(
+			warehouse,
+			tenant,
+			{
+				source: { kind: "raw_sql", sql: request.sql, windowMinutes: request.windowMinutes },
+				startTime: request.startTime,
+				endTime: request.endTime,
+			},
+			Math.max(request.windowMinutes * 60, 60),
 		)
 
-		const byGroup = new Map<
-			string,
-			Array<{ value: number | null; sampleCount: number; hasData: boolean }>
-		>()
-		for (const row of rows) {
-			const rawGroup = row.group
-			const groupKey = typeof rawGroup === "string" && rawGroup.length > 0 ? rawGroup : "all"
-			if (groupKey.length > MAX_RAW_SQL_GROUP_KEY_LENGTH) {
-				return yield* new QueryEngineValidationError({
-					message: "Invalid raw SQL alert query",
-					details: [
-						`Raw SQL alert group keys may contain at most ${MAX_RAW_SQL_GROUP_KEY_LENGTH} characters.`,
-					],
-				})
-			}
-			const numValue = row.value == null ? null : Number(row.value)
-			const value = numValue != null && Number.isFinite(numValue) ? numValue : null
-			const rawSamples = row.samples == null ? 1 : Number(row.samples)
-			if (!Number.isFinite(rawSamples) || rawSamples < 0) {
-				return yield* new QueryEngineValidationError({
-					message: "Invalid raw SQL alert query",
-					details: ["Raw SQL alert samples must be finite and nonnegative."],
-				})
-			}
-			const sampleCount = rawSamples
-			const list = byGroup.get(groupKey)
-			const obs = { value, sampleCount, hasData: value != null }
-			if (list) list.push(obs)
-			else {
-				if (byGroup.size >= MAX_RAW_SQL_ALERT_GROUPS) {
-					return yield* new QueryEngineValidationError({
-						message: "Invalid raw SQL alert query",
-						details: [`Raw SQL alerts may return at most ${MAX_RAW_SQL_ALERT_GROUPS} groups.`],
-					})
-				}
-				byGroup.set(groupKey, [obs])
-			}
-		}
-
-		// No rows → emit a single no-data observation so the alert engine can
-		// apply its configured no-data behavior.
-		if (byGroup.size === 0) {
-			byGroup.set("all", [{ value: null, sampleCount: 0, hasData: false }])
-		}
-
-		const result = reducePerGroupObservations(byGroup, request.reducer)
+		const result = reduceAlertBuckets(obs, request.reducer)
 		yield* Effect.annotateCurrentSpan("result.groupCount", result.length)
 		return result
 	})
-}
