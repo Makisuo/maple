@@ -20,7 +20,13 @@ ARCHIVE="$ROOT/archive"
 SCRATCH="$ROOT/scratch"
 SERVER_PID=""
 
-RANGE_DATE="2026-06-29"
+# MUST stay inside the traces TTL (`toDate(Timestamp) + INTERVAL 30 DAY` in
+# local-schema.sql). A hardcoded calendar date is a time bomb: this probe pinned
+# 2026-06-29 and passed until that date fell exactly 30 days behind, after which
+# every inserted row expired on write and the probe read an empty table. Use
+# yesterday — a completed day, comfortably inside the window, stable forever.
+# `date -u -d` is GNU (CI), `date -u -v` is BSD (local macOS).
+RANGE_DATE="$(date -u -d '1 day ago' +%F 2>/dev/null || date -u -v-1d +%F)"
 
 cleanup() {
 	if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -61,31 +67,21 @@ wait_health
 
 # Insert two batches at the SAME UTC hour (12:00 UTC) to create two parts.
 # Batch 1: IDs 5-8. Batch 2: IDs 1-4. (Out-of-order insertion, like the cross-check.)
-query "INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'local', toDateTime64('2026-06-29 12:00:00', 9, 'UTC'), 't'||toString(number+4), 's'||toString(number+4), '', '', 'probe', 'Server', 'merge-probe', 'Ok', '' FROM numbers(4)" >/dev/null
-query "INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'local', toDateTime64('2026-06-29 12:00:00', 9, 'UTC'), 't'||toString(number), 's'||toString(number), '', '', 'probe', 'Server', 'merge-probe', 'Ok', '' FROM numbers(4)" >/dev/null
+query "INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'local', toDateTime64('$RANGE_DATE 12:00:00', 9, 'UTC'), 't'||toString(number+4), 's'||toString(number+4), '', '', 'probe', 'Server', 'merge-probe', 'Ok', '' FROM numbers(4)" >/dev/null
+query "INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'local', toDateTime64('$RANGE_DATE 12:00:00', 9, 'UTC'), 't'||toString(number), 's'||toString(number), '', '', 'probe', 'Server', 'merge-probe', 'Ok', '' FROM numbers(4)" >/dev/null
 
-# Wait for both batches to become queryable before inspecting the part layout.
-# The insert endpoint returns once the write is accepted, which is not the same
-# instant the part is visible to SELECT — reading straight through raced and
-# reported "0 parts" (an empty table), not "1 part" (a merge). Poll the row
-# count so the part assertion below tests the layout rather than the timing.
-ROWCOUNT=0
-for _ in $(seq 1 100); do
-	ROWCOUNT=$(query "SELECT count() AS n FROM traces WHERE toDate(Timestamp,'UTC')='2026-06-29' AND toHour(Timestamp,'UTC')=12" | jq -r '.[0].n')
-	[[ "$ROWCOUNT" == "8" ]] && break
-	sleep 0.1
-done
-[[ "$ROWCOUNT" == "8" ]] || fail "expected 8 rows to be visible before checkpoint, got $ROWCOUNT"
+# Sanity-check that both batches landed before inspecting the part layout, so a
+# write problem reports itself rather than surfacing as a confusing part count.
+ROWCOUNT=$(query "SELECT count() AS n FROM traces WHERE toDate(Timestamp,'UTC')='$RANGE_DATE' AND toHour(Timestamp,'UTC')=12" | jq -r '.[0].n')
+[[ "$ROWCOUNT" == "8" ]] || fail "expected 8 rows before checkpoint, got $ROWCOUNT (retention window? see RANGE_DATE)"
 
-# Verify two parts exist. Still strict: a background merge collapsing these into
-# one part defeats the scenario this probe exists to cover, so it must fail loudly
-# rather than silently degrade into a single-part export.
-NPARTS=$(query "SELECT count(DISTINCT _part) AS n FROM traces WHERE toDate(Timestamp,'UTC')='2026-06-29' AND toHour(Timestamp,'UTC')=12" | jq -r '.[0].n')
+# Verify two parts exist.
+NPARTS=$(query "SELECT count(DISTINCT _part) AS n FROM traces WHERE toDate(Timestamp,'UTC')='$RANGE_DATE' AND toHour(Timestamp,'UTC')=12" | jq -r '.[0].n')
 [[ "$NPARTS" == "2" ]] || fail "expected 2 parts before checkpoint, got $NPARTS"
 
 # The exact set of TraceIds that MUST appear in the archive (1-8).
 # The endpoint returns a JSON array; use .[].TraceId to iterate.
-SOURCE_IDS=$(query "SELECT TraceId FROM traces WHERE toDate(Timestamp,'UTC')='2026-06-29' AND toHour(Timestamp,'UTC')=12 ORDER BY TraceId" | jq -r '.[].TraceId' | sort | tr '\n' ',')
+SOURCE_IDS=$(query "SELECT TraceId FROM traces WHERE toDate(Timestamp,'UTC')='$RANGE_DATE' AND toHour(Timestamp,'UTC')=12 ORDER BY TraceId" | jq -r '.[].TraceId' | sort | tr '\n' ',')
 echo "source IDs: $SOURCE_IDS"
 
 # Checkpoint (creates a restored snapshot to export from).
