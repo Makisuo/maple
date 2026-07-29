@@ -620,6 +620,7 @@ describe("SlackInternalRouter (usage)", () => {
 						assert.strictEqual(response.status, 202)
 						assert.deepStrictEqual(yield* Effect.promise(() => response.json()), {
 							tracked: true,
+							outcome: "tracked",
 						})
 						// Billed to the org the team resolves to — never to the team id.
 						// The key is team-namespaced and source-tagged so a bot step and a
@@ -680,7 +681,7 @@ describe("SlackInternalRouter (usage)", () => {
 		}).pipe(Effect.provide(testDb.layer))
 	})
 
-	it.effect("still answers 202 when the billing provider fails — the reply already went out", () => {
+	it.effect("answers 202 but reports NOT tracked when the billing provider fails", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
 			yield* Effect.promise(() =>
@@ -694,7 +695,7 @@ describe("SlackInternalRouter (usage)", () => {
 				}),
 			)
 			yield* withAutumnStub(
-				() =>
+				(calls) =>
 					withHandler(
 						testDb,
 						USAGE_TOKENS,
@@ -705,10 +706,59 @@ describe("SlackInternalRouter (usage)", () => {
 								{ idempotencyKey: "k", inputTokens: 5, outputTokens: 5 },
 								USAGE_BEARER,
 							)
+							// Still 202 — the Slack reply already went out and a retry would
+							// only re-post something Autumn may have recorded. But the body
+							// must not claim success, or a week-long Autumn outage is
+							// indistinguishable from a week of billed traffic.
 							assert.strictEqual(response.status, 202)
+							assert.deepStrictEqual(yield* Effect.promise(() => response.json()), {
+								tracked: false,
+								outcome: "failed",
+							})
+							// It really did attempt both writes — this asserts the failure
+							// path, not merely that nothing threw.
+							assert.strictEqual(calls.length, 2)
 						}),
 					),
 				() => new Response("nope", { status: 500 }),
+			)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("reports NOT tracked when Autumn is unconfigured — optionalSecret can drop the key", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_us3b",
+					orgId: "org_us3b",
+					teamId: "T-US3B",
+					teamName: "UsOrg3b",
+					botToken: "xoxb-us3b",
+					apiKey: "maple_ak_us3b",
+				}),
+			)
+			yield* withAutumnStub((calls) =>
+				// No `autumnSecret`: exactly what a PR preview looks like when the key
+				// is missing from the Infisical environment `optionalSecret()` reads.
+				withHandler(
+					testDb,
+					{ slack: "slack-secret-token", autumnApiUrl: AUTUMN_URL },
+					Effect.fnUntraced(function* (handler) {
+						const response = yield* postUsage(
+							handler,
+							"T-US3B",
+							{ idempotencyKey: "k", inputTokens: 5, outputTokens: 5 },
+							USAGE_BEARER,
+						)
+						assert.strictEqual(response.status, 202)
+						assert.deepStrictEqual(yield* Effect.promise(() => response.json()), {
+							tracked: false,
+							outcome: "no-credentials",
+						})
+						assert.strictEqual(calls.length, 0)
+					}),
+				),
 			)
 		}).pipe(Effect.provide(testDb.layer))
 	})
@@ -833,5 +883,59 @@ describe("SlackInternalRouter (usage)", () => {
 				}
 			}),
 		)
+	})
+
+	it.effect("rejects an absurd token count — this is a financial write on a shared bearer", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_us6",
+					orgId: "org_us6",
+					teamId: "T-US6",
+					teamName: "UsOrg6",
+					botToken: "xoxb-us6",
+					apiKey: "maple_ak_us6",
+				}),
+			)
+			yield* withAutumnStub((calls) =>
+				withHandler(
+					testDb,
+					USAGE_TOKENS,
+					Effect.fnUntraced(function* (handler) {
+						// The bearer is one shared service token that works against every
+						// org and there is no rate limiting, so a single POST of 1e15 would
+						// otherwise land on a customer's meter and blow their invoice.
+						const overCap = 8 * 262_144 + 1
+						const cases: unknown[] = [
+							{ idempotencyKey: "k", inputTokens: overCap, outputTokens: 1 },
+							{ idempotencyKey: "k", inputTokens: 1, outputTokens: overCap },
+							{ idempotencyKey: "k", inputTokens: 1e15, outputTokens: 1 },
+							{ idempotencyKey: "k", inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 1 },
+						]
+						for (const body of cases) {
+							const response = yield* postUsage(handler, "T-US6", body, USAGE_BEARER)
+							assert.strictEqual(
+								response.status,
+								400,
+								`expected 400 for ${JSON.stringify(body)}`,
+							)
+						}
+						// Nothing reached the billing provider.
+						assert.strictEqual(calls.length, 0)
+
+						// A plausible large step still goes through — the cap must not
+						// reject real traffic after a context-window bump.
+						const atCap = yield* postUsage(
+							handler,
+							"T-US6",
+							{ idempotencyKey: "k2", inputTokens: 8 * 262_144, outputTokens: 0 },
+							USAGE_BEARER,
+						)
+						assert.strictEqual(atCap.status, 202)
+					}),
+				),
+			)
+		}).pipe(Effect.provide(testDb.layer))
 	})
 })

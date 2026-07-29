@@ -148,22 +148,34 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 			onSome: Redacted.value,
 		})
 
-		const logAccess = Effect.fnUntraced(function* (
-			teamId: string | undefined,
-			outcome: "found" | "not-found" | "invalid" | "unauthorized" | "unavailable",
-			status: number,
-		) {
-			yield* Effect.annotateCurrentSpan({
-				...(teamId === undefined ? {} : { teamId }),
-				outcome,
-				"http.response.status_code": status,
+		/**
+		 * Shared by all three internal endpoints, so the line has to name the one
+		 * that produced it: a 401 on `usage` and a 401 on `resolve` mean different
+		 * things, and labelling both "resolve" sends anyone triaging a billing
+		 * anomaly to the wrong endpoint.
+		 */
+		const logAccess = (route: "resolve" | "revoke" | "usage") =>
+			Effect.fnUntraced(function* (
+				teamId: string | undefined,
+				outcome: "found" | "not-found" | "invalid" | "unauthorized" | "unavailable",
+				status: number,
+			) {
+				yield* Effect.annotateCurrentSpan({
+					...(teamId === undefined ? {} : { teamId }),
+					outcome,
+					"http.response.status_code": status,
+				})
+				// `resolve` hands out decrypted tokens and `usage` is a financial write
+				// primitive, so a rejected caller on either is a security signal rather
+				// than routine traffic.
+				yield* outcome === "unauthorized"
+					? Effect.logWarning(`Slack internal ${route} rejected`, { teamId, route, outcome })
+					: Effect.logInfo(`Slack internal ${route} access`, { teamId, route, outcome })
 			})
-			// This endpoint hands out decrypted tokens — a rejected caller is a
-			// security signal, not routine traffic.
-			yield* outcome === "unauthorized"
-				? Effect.logWarning("Slack internal resolve rejected", { teamId, outcome })
-				: Effect.logInfo("Slack internal resolve access", { teamId, outcome })
-		})
+
+		const logResolveAccess = logAccess("resolve")
+		const logRevokeAccess = logAccess("revoke")
+		const logUsageAccess = logAccess("usage")
 
 		const handle = Effect.fn("SlackInternal.resolve")(function* (
 			req: HttpServerRequest.HttpServerRequest,
@@ -171,11 +183,11 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 			// Auth first: everything below (including path-param decoding) must be
 			// unreachable for an unauthenticated caller.
 			if (!internalToken) {
-				yield* logAccess(undefined, "unauthorized", 401)
+				yield* logResolveAccess(undefined, "unauthorized", 401)
 				return errorText("Slack internal service token is not configured", 401)
 			}
 			if (!isValidServiceBearer(req.headers.authorization, internalToken)) {
-				yield* logAccess(undefined, "unauthorized", 401)
+				yield* logResolveAccess(undefined, "unauthorized", 401)
 				return errorText("Unauthorized", 401)
 			}
 
@@ -186,21 +198,21 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 					: undefined,
 			)
 			if (Option.isNone(teamIdOption)) {
-				yield* logAccess(undefined, "invalid", 400)
+				yield* logResolveAccess(undefined, "invalid", 400)
 				return errorText("Missing teamId", 400)
 			}
 			const teamId = teamIdOption.value
 
 			return yield* slack.resolveForBot(teamId).pipe(
 				Effect.flatMap((resolved) =>
-					logAccess(teamId, "found", 200).pipe(
+					logResolveAccess(teamId, "found", 200).pipe(
 						Effect.andThen(encodeBotResolution(resolved).pipe(Effect.orDie)),
 						Effect.flatMap((encoded) => HttpServerResponse.json(encoded)),
 					),
 				),
 				Effect.catchTags({
 					"@maple/http/errors/IntegrationsNotConnectedError": () =>
-						logAccess(teamId, "not-found", 404).pipe(
+						logResolveAccess(teamId, "not-found", 404).pipe(
 							Effect.as(errorText("No active Slack installation for this team", 404)),
 						),
 					"@maple/http/errors/IntegrationsPersistenceError": (error) =>
@@ -208,7 +220,7 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 							teamId,
 							message: error.message,
 						}).pipe(
-							Effect.andThen(logAccess(teamId, "unavailable", 503)),
+							Effect.andThen(logResolveAccess(teamId, "unavailable", 503)),
 							Effect.as(errorText("Slack workspace lookup unavailable", 503)),
 						),
 				}),
@@ -243,11 +255,11 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 			req: HttpServerRequest.HttpServerRequest,
 		) {
 			if (!internalToken) {
-				yield* logAccess(undefined, "unauthorized", 401)
+				yield* logRevokeAccess(undefined, "unauthorized", 401)
 				return errorText("Slack internal service token is not configured", 401)
 			}
 			if (!isValidServiceBearer(req.headers.authorization, internalToken)) {
-				yield* logAccess(undefined, "unauthorized", 401)
+				yield* logRevokeAccess(undefined, "unauthorized", 401)
 				return errorText("Unauthorized", 401)
 			}
 
@@ -258,7 +270,7 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 					: undefined,
 			)
 			if (Option.isNone(teamIdOption)) {
-				yield* logAccess(undefined, "invalid", 400)
+				yield* logRevokeAccess(undefined, "invalid", 400)
 				return errorText("Missing teamId", 400)
 			}
 			const teamId = teamIdOption.value
@@ -268,14 +280,14 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 				Option.liftThrowable(() => JSON.parse(body))().pipe(Option.flatMap(decodeRevokeBody)),
 			)
 			if (Option.isNone(reasonOption)) {
-				yield* logAccess(teamId, "invalid", 400)
+				yield* logRevokeAccess(teamId, "invalid", 400)
 				return errorText('Body must be JSON: { "reason": "app_uninstalled" | "tokens_revoked" }', 400)
 			}
 			const reason: SlackRevocationReason = reasonOption.value.reason
 
 			return yield* slack.revokeByTeamId(teamId, reason).pipe(
 				Effect.flatMap((result) =>
-					logAccess(teamId, result.revoked ? "found" : "not-found", 200).pipe(
+					logRevokeAccess(teamId, result.revoked ? "found" : "not-found", 200).pipe(
 						Effect.andThen(HttpServerResponse.json({ revoked: result.revoked })),
 					),
 				),
@@ -285,7 +297,7 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 						reason,
 						message: error.message,
 					}).pipe(
-						Effect.andThen(logAccess(teamId, "unavailable", 503)),
+						Effect.andThen(logRevokeAccess(teamId, "unavailable", 503)),
 						Effect.as(errorText("Slack workspace revoke unavailable", 503)),
 					),
 				),
@@ -304,17 +316,37 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 		// usage for ANY customer. The bot only ever proves it is the bot.
 		// ---------------------------------------------------------------------
 
+		/**
+		 * Per-step ceiling on a reported token count. This is a financial write —
+		 * the value lands on the org's Autumn meter — and the bearer is a single
+		 * shared service token that works against EVERY org, on a plain
+		 * `HttpRouter` with no rate limiting. Without a ceiling one malformed (or
+		 * malicious) POST of `1e15` blows a customer's plan limit and invoice.
+		 *
+		 * 8x the bot's 262,144-token context window (`modelContextWindowTokens` in
+		 * apps/slack-agent/agent/agent.ts): comfortably above anything one model
+		 * call can legitimately report even after a context-window bump, and far
+		 * below the range where a bogus value does damage.
+		 */
+		const MAX_STEP_TOKENS = 8 * 262_144
+
 		const decodeUsageBody = Schema.decodeUnknownOption(
 			Schema.Struct({
 				/**
-				 * Producer-side de-dupe id — `<sessionId>:<turnId>:<stepIndex>` from
-				 * the bot. Slack retries webhook deliveries and eve replays durable
-				 * steps, so the same model call can be reported more than once;
-				 * Autumn drops the repeat on this key.
+				 * Producer-side de-dupe id, unique per reported model call. Guards
+				 * against a duplicate DELIVERY of one call, not against two distinct
+				 * calls — see `apps/slack-agent/agent/lib/token-usage.ts` for why the
+				 * bot appends a per-process unique component.
 				 */
 				idempotencyKey: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
-				inputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-				outputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+				inputTokens: Schema.Int.check(
+					Schema.isGreaterThanOrEqualTo(0),
+					Schema.isLessThanOrEqualTo(MAX_STEP_TOKENS),
+				),
+				outputTokens: Schema.Int.check(
+					Schema.isGreaterThanOrEqualTo(0),
+					Schema.isLessThanOrEqualTo(MAX_STEP_TOKENS),
+				),
 				/** Reported for attribution on the span/logs only — Autumn bills tokens, not models. */
 				model: Schema.optionalKey(Schema.String),
 			}),
@@ -333,11 +365,11 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 			req: HttpServerRequest.HttpServerRequest,
 		) {
 			if (!internalToken) {
-				yield* logAccess(undefined, "unauthorized", 401)
+				yield* logUsageAccess(undefined, "unauthorized", 401)
 				return errorText("Slack internal service token is not configured", 401)
 			}
 			if (!isValidServiceBearer(req.headers.authorization, internalToken)) {
-				yield* logAccess(undefined, "unauthorized", 401)
+				yield* logUsageAccess(undefined, "unauthorized", 401)
 				return errorText("Unauthorized", 401)
 			}
 
@@ -348,7 +380,7 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 					: undefined,
 			)
 			if (Option.isNone(teamIdOption)) {
-				yield* logAccess(undefined, "invalid", 400)
+				yield* logUsageAccess(undefined, "invalid", 400)
 				return errorText("Missing teamId", 400)
 			}
 			const teamId = teamIdOption.value
@@ -358,9 +390,9 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 				Option.liftThrowable(() => JSON.parse(body))().pipe(Option.flatMap(decodeUsageBody)),
 			)
 			if (Option.isNone(usageOption)) {
-				yield* logAccess(teamId, "invalid", 400)
+				yield* logUsageAccess(teamId, "invalid", 400)
 				return errorText(
-					'Body must be JSON: { "idempotencyKey": string, "inputTokens": int >= 0, "outputTokens": int >= 0, "model"?: string }',
+					`Body must be JSON: { "idempotencyKey": string, "inputTokens": int 0..${MAX_STEP_TOKENS}, "outputTokens": int 0..${MAX_STEP_TOKENS}, "model"?: string }`,
 					400,
 				)
 			}
@@ -376,8 +408,8 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 							...(usage.model === undefined ? {} : { "maple.ai.model": usage.model }),
 						})
 						// Namespaced by team so two workspaces can never collide on a
-						// session/turn/step triple minted independently by the bot.
-						yield* Effect.tryPromise(() =>
+						// key minted independently by the bot.
+						const result = yield* Effect.tryPromise(() =>
 							trackTokenUsage(autumnEnv, {
 								orgId,
 								inputTokens: usage.inputTokens,
@@ -386,22 +418,62 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 								source: "slack-agent",
 							}),
 						).pipe(
-							// Tracking is best-effort by contract: the bot has already
-							// replied in Slack and cannot undo it, so a 5xx here would only
-							// buy a retry of something Autumn may already have recorded.
+							// `trackTokenUsage` does not reject, so this only catches a defect
+							// in it; either way an unbilled write must not read as billed.
 							Effect.catchCause((cause) =>
-								Effect.logWarning("Slack agent token usage tracking failed").pipe(
-									Effect.annotateLogs({ teamId, orgId, cause: Cause.pretty(cause) }),
-								),
+								Effect.succeed({
+									outcome: "failed" as const,
+									attempted: 0,
+									succeeded: 0,
+									failureReason: Cause.pretty(cause),
+								}),
 							),
 						)
-						yield* logAccess(teamId, "found", 202)
-						return yield* HttpServerResponse.json({ tracked: true }, { status: 202 })
+
+						const tracked = result.outcome === "tracked"
+						yield* Effect.annotateCurrentSpan({
+							"maple.billing.outcome": result.outcome,
+							"maple.billing.events_succeeded": result.succeeded,
+							"maple.billing.events_attempted": result.attempted,
+						})
+						// A billing write that silently does nothing is the failure mode
+						// worth paging on: without this, a rotated AUTUMN_SECRET_KEY or a
+						// week-long Autumn outage looks exactly like success — every
+						// response 202 `{tracked:true}`, every span Ok, nothing billed.
+						// `excluded-org` / `no-tokens` are deliberate no-ops, not failures.
+						if (result.outcome === "failed" || result.outcome === "partial") {
+							yield* Effect.logError("Slack agent token usage tracking failed", {
+								teamId,
+								orgId,
+								outcome: result.outcome,
+								succeeded: result.succeeded,
+								attempted: result.attempted,
+								reason: result.failureReason,
+							})
+						} else if (result.outcome === "no-credentials") {
+							// AUTUMN_SECRET_KEY is bound with `optionalSecret()`, so a key
+							// missing from an Infisical environment disables billing with no
+							// deploy-time error anywhere.
+							yield* Effect.logError("Slack agent token usage not billed: Autumn is unconfigured", {
+								teamId,
+								orgId,
+							})
+						}
+
+						yield* logUsageAccess(teamId, "found", 202)
+						// Still 202 regardless: the Slack reply already went out and cannot
+						// be held or undone, so a 5xx would only buy a retry of something
+						// Autumn may already have recorded. But `tracked` now reports what
+						// actually happened instead of asserting success unconditionally.
+						return yield* HttpServerResponse.json(
+							{ tracked, outcome: result.outcome },
+							{ status: 202 },
+						)
 					}),
 				),
 				Effect.catchTags({
 					"@maple/http/errors/IntegrationsNotConnectedError": () =>
-						logAccess(teamId, "not-found", 404).pipe(
+						logUsageAccess(teamId, "not-found", 404).pipe(
 							Effect.as(errorText("No active Slack installation for this team", 404)),
 						),
 					"@maple/http/errors/IntegrationsPersistenceError": (error) =>
@@ -409,7 +481,7 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 							teamId,
 							message: error.message,
 						}).pipe(
-							Effect.andThen(logAccess(teamId, "unavailable", 503)),
+							Effect.andThen(logUsageAccess(teamId, "unavailable", 503)),
 							Effect.as(errorText("Slack workspace lookup unavailable", 503)),
 						),
 				}),

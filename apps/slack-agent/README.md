@@ -413,12 +413,22 @@ and posts them per step:
 ```
 POST {MAPLE_API_BASE_URL}/internal/slack/workspaces/{teamId}/usage
 Authorization: Bearer maple_svc_{MAPLE_INTERNAL_SERVICE_TOKEN}
-{ "idempotencyKey": "{sessionId}:{turnId}:{stepIndex}", "inputTokens": 120,
+{ "idempotencyKey": "{sessionId}:{turnId}:{stepIndex}:{bootId}-{n}", "inputTokens": 120,
   "outputTokens": 34, "model": "@cf/..." }
 
-202 → tracked (or deliberately skipped — see below)
+202 { "tracked": true|false, "outcome": "tracked"|"failed"|"no-credentials"|… }
 404 → team not installed / revoked
+400 → malformed body, or a token count above the per-step cap (8x the context window)
 ```
+
+The key's `{bootId}-{n}` suffix is load-bearing: eve derives `turnId` from a `sequence` that a
+*terminal* model failure never advances, so `{sessionId}:{turnId}:{stepIndex}` alone repeats across
+a user's retry and the billing provider silently drops the second one. See
+`agent/lib/token-usage.ts` for the full trade-off.
+
+The 202 is unconditional — the Slack reply has already gone out — but `tracked`/`outcome` report
+whether the billing write actually landed, so an outage or a missing credential is visible in Maple's
+logs and spans instead of looking exactly like success.
 
 The Maple API resolves the team's org and forwards it to the billing provider. The billing
 credential deliberately stays on the API side: it is org-agnostic, so holding it would mean being
@@ -429,8 +439,10 @@ Reported per step rather than accumulated per turn, because per-turn batching ne
 keyed by turn id that leaks on a turn which never terminates and loses the whole turn's spend if
 the process dies mid-turn. Steps with zero tokens (a truncated stream — `workers-ai-provider`
 reports all-zeros rather than `undefined` when the provider never sends its usage chunk) and
-sessions with no Slack team (local dev, no org to bill) are skipped client-side.
-`agent/lib/token-usage.ts` never throws: a failed billing write is logged and dropped, never
+sessions with no Slack team (local dev, no org to bill) are skipped client-side. Zero-token skips
+emit a throttled `usage_report_zero_tokens` warning — if the provider never surfaces usage for the
+configured model, every step is skipped and the feature bills exactly nothing, which must not be
+silent. `agent/lib/token-usage.ts` never throws: a failed billing write is logged and dropped, never
 costing the user their reply.
 
 **Inbound (webhook verification):** `agent/channels/slack.ts` installs a custom `webhookVerifier`.

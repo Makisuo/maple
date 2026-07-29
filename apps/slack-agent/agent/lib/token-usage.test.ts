@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { DEFAULT_WORKERS_AI_MODEL } from "./model.js"
-import { prepareUsageReport, trackStepUsage, type StepUsageInput } from "./token-usage.js"
+import {
+	prepareUsageReport,
+	resetZeroTokenDiagnosticsForTests,
+	trackStepUsage,
+	type StepUsageInput,
+} from "./token-usage.js"
 
 const step = (overrides: Partial<StepUsageInput> = {}): StepUsageInput => ({
 	sessionId: "sess_1",
@@ -19,16 +24,16 @@ afterEach(() => {
 })
 
 describe("prepareUsageReport", () => {
-	test("builds a report keyed by session, turn and step", () => {
-		expect(prepareUsageReport(step({ stepIndex: 3 }))).toEqual({
-			teamId: "T1",
-			report: {
-				idempotencyKey: "sess_1:turn_1:3",
-				inputTokens: 120,
-				outputTokens: 34,
-				model: DEFAULT_WORKERS_AI_MODEL,
-			},
+	test("builds a report prefixed by session, turn and step", () => {
+		const prepared = prepareUsageReport(step({ stepIndex: 3 }))
+		expect(prepared?.teamId).toBe("T1")
+		expect(prepared?.report).toMatchObject({
+			inputTokens: 120,
+			outputTokens: 34,
+			model: DEFAULT_WORKERS_AI_MODEL,
 		})
+		// Readable prefix for debugging, plus a per-process unique suffix.
+		expect(prepared?.report.idempotencyKey).toStartWith("sess_1:turn_1:3:")
 	})
 
 	test("stamps the configured model", () => {
@@ -40,6 +45,18 @@ describe("prepareUsageReport", () => {
 		const first = prepareUsageReport(step({ stepIndex: 0 }))?.report.idempotencyKey
 		const second = prepareUsageReport(step({ stepIndex: 1 }))?.report.idempotencyKey
 		expect(first).not.toBe(second)
+	})
+
+	test("keys a re-used session/turn/step triple distinctly — eve reuses turn ids", () => {
+		// A terminal model failure does not advance eve's `sequence`, so the next
+		// turn is minted as the same `turn_${sequence}` with `stepIndex` back at 0.
+		// Identical input must NOT produce an identical key, or the billing
+		// provider silently drops the retry's spend.
+		const first = prepareUsageReport(step())?.report.idempotencyKey
+		const second = prepareUsageReport(step())?.report.idempotencyKey
+		expect(first).not.toBe(second)
+		expect(first).toStartWith("sess_1:turn_1:0:")
+		expect(second).toStartWith("sess_1:turn_1:0:")
 	})
 
 	test("skips a session with no Slack team — nothing maps it to a payer", () => {
@@ -71,7 +88,9 @@ describe("trackStepUsage", () => {
 				calls.push({ teamId, idempotencyKey: usage.idempotencyKey, inputTokens: usage.inputTokens })
 			},
 		})
-		expect(calls).toEqual([{ teamId: "T1", idempotencyKey: "sess_1:turn_1:0", inputTokens: 120 }])
+		expect(calls).toHaveLength(1)
+		expect(calls[0]).toMatchObject({ teamId: "T1", inputTokens: 120 })
+		expect(calls[0]?.idempotencyKey).toStartWith("sess_1:turn_1:0:")
 	})
 
 	test("does not call Maple for a skipped step", async () => {
@@ -91,5 +110,47 @@ describe("trackStepUsage", () => {
 			},
 		})
 		await expect(promise).resolves.toBeUndefined()
+	})
+
+	test("warns once per window when steps are skipped for zero tokens", async () => {
+		// If the provider never surfaces usage, EVERY step is skipped and nothing
+		// is ever billed — that has to be visible in the logs, not silent.
+		resetZeroTokenDiagnosticsForTests()
+		const warnings: string[] = []
+		const originalWarn = console.warn
+		console.warn = (line: unknown) => {
+			warnings.push(String(line))
+		}
+		try {
+			const zero = step({ inputTokens: 0, outputTokens: 0 })
+			const deps = { reportTokenUsage: async () => {} }
+			await trackStepUsage(zero, deps)
+			await trackStepUsage(zero, deps)
+			await trackStepUsage(zero, deps)
+		} finally {
+			console.warn = originalWarn
+			resetZeroTokenDiagnosticsForTests()
+		}
+
+		// Throttled to the first of the window, not one line per skipped step.
+		const zeroTokenLines = warnings.filter((line) => line.includes("usage_report_zero_tokens"))
+		expect(zeroTokenLines).toHaveLength(1)
+		expect(zeroTokenLines[0]).toContain("maple.ai.zero_token_steps")
+	})
+
+	test("does not warn about zero tokens when there is simply no team to bill", async () => {
+		resetZeroTokenDiagnosticsForTests()
+		const warnings: string[] = []
+		const originalWarn = console.warn
+		console.warn = (line: unknown) => {
+			warnings.push(String(line))
+		}
+		try {
+			await trackStepUsage(step({ teamId: undefined }), { reportTokenUsage: async () => {} })
+		} finally {
+			console.warn = originalWarn
+			resetZeroTokenDiagnosticsForTests()
+		}
+		expect(warnings.filter((line) => line.includes("usage_report_zero_tokens"))).toHaveLength(0)
 	})
 })
