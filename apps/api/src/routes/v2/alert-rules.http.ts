@@ -16,7 +16,15 @@ import type {
 	V2AlertRuleUpdateParams,
 	V2InvalidRequestError,
 } from "@maple/domain/http/v2"
-import { MapleApiV2, invalidRequest, paginateArray, resourceNotFound, timestamp } from "@maple/domain/http/v2"
+import {
+	MapleApiV2,
+	invalidRequest,
+	paginateArray,
+	resourceNotFound,
+	scopeAllows,
+	timestamp,
+} from "@maple/domain/http/v2"
+import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
 import { AlertsService } from "../../services/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
@@ -381,9 +389,24 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const rule = yield* toUpsertRequest(payload.rule)
+					// Preview is otherwise an `alerts:read` endpoint, but replaying a
+					// raw_query rule executes user-authored ClickHouse against the org's
+					// warehouse — the capability creating one requires. API keys carry
+					// root roles, so scope (not role) is what separates a read-only key
+					// here; the role check inside previewRule covers the session path.
+					if (
+						payload.rule.signal_type === "raw_query" &&
+						!scopeAllows(tenant.scopes, { family: "alerts", access: "write" })
+					) {
+						return yield* new AlertForbiddenError({
+							message:
+								'Previewing a raw SQL alert requires the "alerts:write" scope, because it executes your query against the warehouse.',
+						}).pipe(mapAlertError("rule_preview"))
+					}
 					const preview = yield* alerts
 						.previewRule(
 							tenant.orgId,
+							tenant.roles,
 							new AlertRulePreviewRequest({
 								rule,
 								startTime: decodeIsoDateTime(payload.start_time),

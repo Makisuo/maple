@@ -112,17 +112,24 @@ export interface GroupedAlertObservation {
 	readonly hasData: boolean
 }
 
-export interface QueryEngineRawSqlEvaluateRequest {
+/**
+ * One alert evaluation, whatever kind of rule it came from.
+ *
+ * The `source` discriminator is the whole point: a trace built-in, a query
+ * builder draft and user-authored SQL all arrive here as the same request, so
+ * `evaluate` / `evaluateSeries` have a single implementation and callers never
+ * branch on the rule kind.
+ */
+export interface AlertEvaluateRequest {
 	/** Tinybird-format datetime (`YYYY-MM-DD HH:mm:ss`) — window start. */
 	readonly startTime: string
 	/** Tinybird-format datetime — window end. */
 	readonly endTime: string
-	/** User-authored ClickHouse SQL with `$__` macros. */
-	readonly sql: string
+	readonly source: AlertBucketSource
 	/** Collapses each group's bucket rows into a single scalar. */
 	readonly reducer: QueryEngineAlertReducer
-	/** Drives the `$__interval_s` macro value. */
-	readonly windowMinutes: number
+	/** Null for raw SQL, whose sample counts come from the `samples` column. */
+	readonly sampleCountStrategy: QueryEngineEvaluateRequest["sampleCountStrategy"] | null
 }
 
 export type QueryEngineDirectError = QueryEngineExecutionError | QueryEngineTimeoutError | WarehouseError
@@ -245,8 +252,14 @@ export function buildCacheKey(orgId: string, request: QueryEngineExecuteRequest)
 	return `${orgId}:${snapToWindow(request.startTime, snap)}:${snapToWindow(request.endTime, snap)}:${JSON.stringify(request.query)}`
 }
 
-export function buildEvaluateCacheKey(orgId: string, request: QueryEngineEvaluateRequest): string {
-	return `eval:${orgId}:${snapSeconds(request.startTime)}:${snapSeconds(request.endTime)}:${request.reducer}:${request.sampleCountStrategy}:${JSON.stringify(request.query)}`
+export function buildEvaluateCacheKey(orgId: string, request: AlertEvaluateRequest): string {
+	// `source.kind` is part of the key so a spec plan and a raw-SQL plan can
+	// never share an entry.
+	const source =
+		request.source.kind === "spec"
+			? `spec:${JSON.stringify(request.source.query)}`
+			: `raw:${request.source.windowMinutes}:${request.source.sql}`
+	return `eval:${orgId}:${snapSeconds(request.startTime)}:${snapSeconds(request.endTime)}:${request.reducer}:${request.sampleCountStrategy}:${source}`
 }
 
 const DIRECT_CACHE_SNAP_KEYS = new Set(["startTime", "endTime"])
@@ -758,11 +771,15 @@ const validateExecute = Effect.fn("QueryEngineService.validateExecute")(function
 })
 
 export const validateEvaluate = Effect.fn("QueryEngineService.validateEvaluate")(function* (
-	request: QueryEngineEvaluateRequest,
+	request: AlertEvaluateRequest,
 ): Effect.fn.Return<TimeRangeBounds, QueryEngineValidationError> {
 	const range = yield* validateTimeRange(request)
-	yield* validateTraceAttributeFilters(request.query)
-	yield* validateMetricsAttributeFilters(request.query)
+	// Attribute-filter validation only applies to a structured spec; raw SQL is
+	// validated by `prepareRawSql` at compile and execute time instead.
+	if (request.source.kind === "spec") {
+		yield* validateTraceAttributeFilters(request.source.query)
+		yield* validateMetricsAttributeFilters(request.source.query)
+	}
 	return range
 })
 
@@ -2175,11 +2192,15 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 		}
 		obs.push({
 			// A query without `$__timeGroup` has no bucket column: the whole window
-			// collapses into one synthetic bucket at its start.
-			bucket:
+			// collapses into one synthetic bucket at its start. Normalize either way
+			// — `range.startTime` is a Tinybird datetime, and consumers key buckets
+			// by `Date.parse`, which would read that space-separated form as local
+			// time rather than UTC.
+			bucket: normalizeBucket(
 				typeof row.bucket === "string" || row.bucket instanceof Date
-					? normalizeBucket(row.bucket)
+					? row.bucket
 					: range.startTime,
+			),
 			groupKey,
 			value,
 			sampleCount: value == null ? 0 : rawSamples,
@@ -2216,56 +2237,72 @@ export const reduceAlertBuckets = (
 }
 
 
+/**
+ * Annotate, validate and resolve the bucket size for one alert evaluation.
+ * Shared by `evaluate` and `evaluateSeries` so the two can never drift on which
+ * queries they accept or how they bucket them.
+ */
+const prepareAlertEvaluation = Effect.fnUntraced(function* (request: AlertEvaluateRequest) {
+	yield* Effect.annotateCurrentSpan("query.sourceKind", request.source.kind)
+	yield* Effect.annotateCurrentSpan("query.reducer", request.reducer)
+
+	if (request.source.kind === "spec") {
+		const query = request.source.query
+		yield* Effect.annotateCurrentSpan("query.source", query.source)
+		yield* Effect.annotateCurrentSpan("query.kind", query.kind)
+		if ("metric" in query && query.metric) {
+			yield* Effect.annotateCurrentSpan("query.metric", query.metric)
+		}
+		if ("groupBy" in query && query.groupBy) {
+			yield* Effect.annotateCurrentSpan(
+				"query.groupBy",
+				(query.groupBy as ReadonlyArray<string>).join(","),
+			)
+		}
+	}
+
+	yield* validateEvaluate(request)
+
+	const startMs = toEpochMs(request.startTime)
+	const endMs = toEpochMs(request.endTime)
+
+	if (request.source.kind === "raw_sql") {
+		// One evaluation window is one bucket; a query using `$__timeGroup` lines
+		// its rows up on exactly that grid.
+		return Math.max(request.source.windowMinutes * 60, 60)
+	}
+
+	const query = request.source.query
+	if (
+		query.kind !== "timeseries" ||
+		(query.source !== "traces" && query.source !== "metrics" && query.source !== "logs")
+	) {
+		return yield* new QueryEngineValidationError({
+			message: "Unsupported alert evaluation query",
+			details: ["Alert evaluation supports traces, logs, and metrics timeseries queries only"],
+		})
+	}
+
+	// Use the spec's bucketSeconds when present, otherwise auto-compute from the
+	// time range — same as the dashboard execute path.
+	return query.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
+})
+
 export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
 	Effect.fn("QueryEngineService.evaluate")(function* (
 		tenant: T,
-		request: QueryEngineEvaluateRequest,
+		request: AlertEvaluateRequest,
 	): Effect.fn.Return<
 		ReadonlyArray<GroupedAlertObservation>,
 		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
 	> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
-		yield* Effect.annotateCurrentSpan("query.source", request.query.source)
-		yield* Effect.annotateCurrentSpan("query.kind", request.query.kind)
-		yield* Effect.annotateCurrentSpan("query.reducer", request.reducer)
-		if ("metric" in request.query && request.query.metric) {
-			yield* Effect.annotateCurrentSpan("query.metric", request.query.metric)
-		}
-		if ("groupBy" in request.query && request.query.groupBy) {
-			yield* Effect.annotateCurrentSpan(
-				"query.groupBy",
-				(request.query.groupBy as ReadonlyArray<string>).join(","),
-			)
-		}
-
-		yield* validateEvaluate(request)
-
-		if (
-			request.query.kind !== "timeseries" ||
-			(request.query.source !== "traces" &&
-				request.query.source !== "metrics" &&
-				request.query.source !== "logs")
-		) {
-			return yield* new QueryEngineValidationError({
-				message: "Unsupported alert evaluation query",
-				details: ["Alert evaluation supports traces, logs, and metrics timeseries queries only"],
-			})
-		}
-
-		// Use the spec's bucketSeconds when present, otherwise auto-compute from
-		// the time range — same as the dashboard execute path.
-		const startMs = toEpochMs(request.startTime)
-		const endMs = toEpochMs(request.endTime)
-		const bucketSeconds = request.query.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
+		const bucketSeconds = yield* prepareAlertEvaluation(request)
 
 		const obs = yield* computeAlertBuckets(
 			warehouse,
 			tenant,
-			{
-				source: { kind: "spec", query: request.query },
-				startTime: request.startTime,
-				endTime: request.endTime,
-			},
+			{ source: request.source, startTime: request.startTime, endTime: request.endTime },
 			bucketSeconds,
 		)
 
@@ -2287,72 +2324,20 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 export const makeQueryEngineEvaluateSeries = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
 	Effect.fn("QueryEngineService.evaluateSeries")(function* (
 		tenant: T,
-		request: QueryEngineEvaluateRequest,
+		request: AlertEvaluateRequest,
 	): Effect.fn.Return<
 		ReadonlyArray<BucketGroupObs>,
 		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
 	> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
-		yield* Effect.annotateCurrentSpan("query.source", request.query.source)
-		yield* Effect.annotateCurrentSpan("query.kind", request.query.kind)
-
-		yield* validateEvaluate(request)
-
-		if (
-			request.query.kind !== "timeseries" ||
-			(request.query.source !== "traces" &&
-				request.query.source !== "metrics" &&
-				request.query.source !== "logs")
-		) {
-			return yield* new QueryEngineValidationError({
-				message: "Unsupported alert evaluation query",
-				details: ["Alert evaluation supports traces, logs, and metrics timeseries queries only"],
-			})
-		}
-
-		const startMs = toEpochMs(request.startTime)
-		const endMs = toEpochMs(request.endTime)
-		const bucketSeconds = request.query.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
+		const bucketSeconds = yield* prepareAlertEvaluation(request)
 
 		const series = yield* computeAlertBuckets(
 			warehouse,
 			tenant,
-			{
-				source: { kind: "spec", query: request.query },
-				startTime: request.startTime,
-				endTime: request.endTime,
-			},
+			{ source: request.source, startTime: request.startTime, endTime: request.endTime },
 			bucketSeconds,
 		)
 		yield* Effect.annotateCurrentSpan("result.pointCount", series.length)
 		return series
-	})
-
-/**
- * Evaluate a raw-SQL alert query. A thin wrapper over the same
- * {@link computeAlertBuckets} lowering the spec sources use — kept as its own
- * entry point only while `AlertsService` still dispatches on the plan kind.
- */
-export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
-	Effect.fn("QueryEngineService.evaluateRawSql")(function* (
-		tenant: T,
-		request: QueryEngineRawSqlEvaluateRequest,
-	): Effect.fn.Return<ReadonlyArray<GroupedAlertObservation>, QueryEngineValidationError | WarehouseError> {
-		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
-		yield* Effect.annotateCurrentSpan("query.reducer", request.reducer)
-
-		const obs = yield* computeAlertBuckets(
-			warehouse,
-			tenant,
-			{
-				source: { kind: "raw_sql", sql: request.sql, windowMinutes: request.windowMinutes },
-				startTime: request.startTime,
-				endTime: request.endTime,
-			},
-			Math.max(request.windowMinutes * 60, 60),
-		)
-
-		const result = reduceAlertBuckets(obs, request.reducer)
-		yield* Effect.annotateCurrentSpan("result.groupCount", result.length)
-		return result
 	})

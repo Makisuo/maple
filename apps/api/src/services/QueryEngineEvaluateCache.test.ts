@@ -6,8 +6,8 @@ import { baselineWarehouseCapabilities, type QueryEngineEvaluateRequest } from "
 import type { CompiledQuery } from "@maple/query-engine/ch"
 import {
 	makeQueryEngineEvaluate,
-	makeQueryEngineEvaluateRawSql,
 	makeQueryEngineEvaluateSeries,
+	type AlertEvaluateRequest,
 } from "@maple/query-engine/runtime"
 import { QueryEngineService } from "./QueryEngineService"
 import type { TenantContext } from "./AuthService"
@@ -62,14 +62,17 @@ const COUNT_ROWS = [
 	traceRow({ bucket: "2026-01-01 00:10:00", count: 5 }),
 ]
 
-const countRequest = (reducer: QueryEngineEvaluateRequest["reducer"]): QueryEngineEvaluateRequest =>
+const countRequest = (reducer: QueryEngineEvaluateRequest["reducer"]): AlertEvaluateRequest =>
 	({
 		startTime: "2026-01-01 00:00:00",
 		endTime: "2026-01-01 00:15:00",
-		query: { kind: "timeseries", source: "traces", metric: "count", bucketSeconds: 300 },
+		source: {
+			kind: "spec",
+			query: { kind: "timeseries", source: "traces", metric: "count", bucketSeconds: 300 },
+		},
 		reducer,
 		sampleCountStrategy: "trace_count",
-	}) as QueryEngineEvaluateRequest
+	}) as AlertEvaluateRequest
 
 const evalStub = (rows: ReadonlyArray<Record<string, unknown>>) =>
 	({
@@ -107,8 +110,8 @@ describe("makeQueryEngineEvaluate (shared bucket-encoding core)", () => {
 			const req = countRequest("sum")
 			const result = yield* makeQueryEngineEvaluate(evalStub(rows))(tenant, {
 				...req,
-				query: { ...req.query, groupBy: ["service"] },
-			} as QueryEngineEvaluateRequest)
+				source: { kind: "spec", query: { ...req.source.query, groupBy: ["service"] } },
+			} as AlertEvaluateRequest)
 			assert.deepStrictEqual(result, [
 				{ groupKey: "a", value: 6, sampleCount: 6, hasData: true },
 				{ groupKey: "b", value: 3, sampleCount: 3, hasData: true },
@@ -154,8 +157,8 @@ describe("makeQueryEngineEvaluateSeries (per-bucket preview core)", () => {
 			const req = countRequest("sum")
 			const series = yield* makeQueryEngineEvaluateSeries(evalStub(rows))(tenant, {
 				...req,
-				query: { ...req.query, groupBy: ["service"] },
-			} as QueryEngineEvaluateRequest)
+				source: { kind: "spec", query: { ...req.source.query, groupBy: ["service"] } },
+			} as AlertEvaluateRequest)
 			assert.deepStrictEqual(series, [
 				{ bucket: "2026-01-01T00:00:00.000Z", groupKey: "a", value: 2, sampleCount: 2 },
 				{ bucket: "2026-01-01T00:00:00.000Z", groupKey: "b", value: 3, sampleCount: 3 },
@@ -181,17 +184,23 @@ const rawStub = (rows: ReadonlyArray<Record<string, unknown>>) =>
 		compiledQuery: () => Effect.die(new Error("compiledQuery is not used by raw SQL tests")),
 		compiledQueryWithCapabilities: () =>
 			Effect.die(new Error("compiledQueryWithCapabilities is not used by raw SQL tests")),
-	}) satisfies Parameters<typeof makeQueryEngineEvaluateRawSql>[0]
+	}) satisfies Parameters<typeof makeQueryEngineEvaluate>[0]
 
-const rawRequest = (reducer: QueryEngineEvaluateRequest["reducer"]) => ({
+const rawRequest = (reducer: QueryEngineEvaluateRequest["reducer"]): AlertEvaluateRequest => ({
 	startTime: "2026-01-01 00:00:00",
 	endTime: "2026-01-01 00:15:00",
-	sql: "SELECT $__timeGroup(Timestamp) AS bucket, count() AS value FROM Logs WHERE $__orgFilter AND $__timeFilter(Timestamp) GROUP BY bucket",
+	source: {
+		kind: "raw_sql",
+		sql: "SELECT $__timeGroup(Timestamp) AS bucket, count() AS value FROM Logs WHERE $__orgFilter AND $__timeFilter(Timestamp) GROUP BY bucket",
+		windowMinutes: 5,
+	},
 	reducer,
-	windowMinutes: 5,
+	sampleCountStrategy: null,
 })
 
-describe("makeQueryEngineEvaluateRawSql (raw SQL over the shared core)", () => {
+// Raw SQL goes through the very same `evaluate` as every spec source — there is
+// no separate entry point to test.
+describe("evaluate with a raw_sql source", () => {
 	it.effect("reduces bucketed rows exactly like the spec sources do", () =>
 		Effect.gen(function* () {
 			// Same 2/3/5 shape as COUNT_ROWS, so the reduced result must match
@@ -201,7 +210,7 @@ describe("makeQueryEngineEvaluateRawSql (raw SQL over the shared core)", () => {
 				{ bucket: "2026-01-01 00:05:00", value: 3, samples: 3 },
 				{ bucket: "2026-01-01 00:10:00", value: 5, samples: 5 },
 			]
-			const raw = yield* makeQueryEngineEvaluateRawSql(rawStub(rows))(tenant, rawRequest("sum"))
+			const raw = yield* makeQueryEngineEvaluate(rawStub(rows))(tenant, rawRequest("sum"))
 			const spec = yield* makeQueryEngineEvaluate(evalStub(COUNT_ROWS))(tenant, countRequest("sum"))
 			assert.deepStrictEqual(raw, spec)
 		}),
@@ -209,7 +218,7 @@ describe("makeQueryEngineEvaluateRawSql (raw SQL over the shared core)", () => {
 
 	it.effect("collapses an unbucketed query into one synthetic bucket", () =>
 		Effect.gen(function* () {
-			const raw = yield* makeQueryEngineEvaluateRawSql(rawStub([{ value: 10, samples: 10 }]))(
+			const raw = yield* makeQueryEngineEvaluate(rawStub([{ value: 10, samples: 10 }]))(
 				tenant,
 				rawRequest("sum"),
 			)
@@ -223,7 +232,7 @@ describe("makeQueryEngineEvaluateRawSql (raw SQL over the shared core)", () => {
 		Effect.gen(function* () {
 			// `hasData === sampleCount > 0` must hold for raw rows exactly as it does
 			// for the spec sources — that invariant is what the bucket codec assumes.
-			const raw = yield* makeQueryEngineEvaluateRawSql(rawStub([{ value: null }]))(
+			const raw = yield* makeQueryEngineEvaluate(rawStub([{ value: null }]))(
 				tenant,
 				rawRequest("sum"),
 			)
@@ -235,7 +244,7 @@ describe("makeQueryEngineEvaluateRawSql (raw SQL over the shared core)", () => {
 
 	it.effect("emits a single no-data observation when there are no rows", () =>
 		Effect.gen(function* () {
-			const raw = yield* makeQueryEngineEvaluateRawSql(rawStub([]))(tenant, rawRequest("sum"))
+			const raw = yield* makeQueryEngineEvaluate(rawStub([]))(tenant, rawRequest("sum"))
 			const spec = yield* makeQueryEngineEvaluate(evalStub([]))(tenant, countRequest("sum"))
 			assert.deepStrictEqual(raw, spec)
 		}),
@@ -244,7 +253,7 @@ describe("makeQueryEngineEvaluateRawSql (raw SQL over the shared core)", () => {
 	it.effect("rejects a group key containing NUL, which would collide with the codec", () =>
 		Effect.gen(function* () {
 			const exit = yield* Effect.exit(
-				makeQueryEngineEvaluateRawSql(rawStub([{ value: 1, group: "a\u0000v\u0000b" }]))(
+				makeQueryEngineEvaluate(rawStub([{ value: 1, group: "a\u0000v\u0000b" }]))(
 					tenant,
 					rawRequest("sum"),
 				),

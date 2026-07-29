@@ -1,17 +1,16 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { MetricName } from "@maple/domain"
-import { QueryEngineEvaluateRequest, type MetricsTimeseriesQuery } from "../query-engine"
-import { validateEvaluate } from "./query-engine"
+import type { MetricsTimeseriesQuery } from "../query-engine"
+import { validateEvaluate, type AlertEvaluateRequest } from "./query-engine"
 
-const makeRequest = (query: MetricsTimeseriesQuery) =>
-	new QueryEngineEvaluateRequest({
-		startTime: "2026-04-01 00:00:00",
-		endTime: "2026-04-01 01:00:00",
-		query,
-		reducer: "avg",
-		sampleCountStrategy: "metric_data_points",
-	})
+const makeRequest = (query: MetricsTimeseriesQuery): AlertEvaluateRequest => ({
+	startTime: "2026-04-01 00:00:00",
+	endTime: "2026-04-01 01:00:00",
+	source: { kind: "spec", query },
+	reducer: "avg",
+	sampleCountStrategy: "metric_data_points",
+})
 
 const baseFilters = {
 	metricName: Schema.decodeUnknownSync(MetricName)("cpu.usage"),

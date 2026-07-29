@@ -8,7 +8,7 @@ import {
 } from "@maple/query-engine"
 import * as CH from "@maple/query-engine/ch"
 import { buildTimeseriesQuerySpec, resolveGroupBy } from "@maple/query-engine/query-builder"
-import { prepareRawSql } from "@maple/query-engine/runtime"
+import { prepareRawSql, type AlertBucketSource } from "@maple/query-engine/runtime"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -61,6 +61,7 @@ import {
 	type AlertSeverity,
 	type AlertSignalType,
 	type AlertGroupBy,
+	UNGROUPED_GROUP_KEY,
 	OrgId,
 	type AlertRuleId,
 	type AlertDestinationId,
@@ -350,12 +351,34 @@ const planGroupingTokens = (
 const isGroupedPlan = (plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>): boolean =>
 	plan.kind === "raw_sql" || planGroupingTokens(plan) != null
 
+/**
+ * Turn a compiled plan into the query engine's evaluate source. This is the only
+ * place the plan's `kind` is inspected on the evaluation path — everything
+ * downstream (`evaluate`, `evaluateSeries`, preview, testRule) takes the source
+ * and never branches on the rule kind again.
+ */
+const planEvaluateSource = (
+	plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>,
+	windowMinutes: number,
+): Effect.Effect<AlertBucketSource, AlertValidationError> => {
+	if (plan.kind === "raw_sql") {
+		if (plan.rawSql == null) {
+			return Effect.fail(makeValidationError("Compiled alert plan is missing its SQL query"))
+		}
+		return Effect.succeed({ kind: "raw_sql", sql: plan.rawSql, windowMinutes })
+	}
+	if (plan.query == null || plan.sampleCountStrategy == null) {
+		return Effect.fail(makeValidationError("Compiled alert plan is missing its query spec"))
+	}
+	return Effect.succeed({ kind: "spec", query: plan.query })
+}
+
 const resolveServiceLinkName = (
 	rule: Pick<NormalizedRule, "serviceNames" | "groupBy">,
 	groupKey: string | null,
 ): string | null => {
 	if (rule.serviceNames.length === 1) return rule.serviceNames[0] ?? null
-	if (groupKey != null && groupKey !== "all" && isServiceGroupBy(rule.groupBy)) {
+	if (groupKey != null && groupKey !== UNGROUPED_GROUP_KEY && isServiceGroupBy(rule.groupBy)) {
 		return groupKey
 	}
 	return null
@@ -1125,12 +1148,22 @@ export interface AlertsServiceShape {
 		| AlertDeliveryError
 		| WarehouseError
 	>
+	/**
+	 * `roles` gates raw-SQL previews only: preview itself needs just `alerts:read`,
+	 * but replaying a raw_query rule executes user-authored ClickHouse, which is
+	 * the org-admin capability `createRule`/`testRule` already require.
+	 */
 	readonly previewRule: (
 		orgId: OrgId,
+		roles: ReadonlyArray<RoleName>,
 		request: AlertRulePreviewRequest,
 	) => Effect.Effect<
 		AlertRulePreviewResponse,
-		AlertValidationError | AlertDeliveryError | AlertPersistenceError | WarehouseError
+		| AlertValidationError
+		| AlertForbiddenError
+		| AlertDeliveryError
+		| AlertPersistenceError
+		| WarehouseError
 	>
 	readonly listIncidents: (
 		orgId: OrgId,
@@ -1673,11 +1706,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				)
 
 			/**
-			 * Evaluate the alert rule and return one outcome per group. For
-			 * ungrouped rules the array always has length 1 with `groupKey = "all"`.
-			 * For grouped rules every distinct value (or composite value, when
-			 * multiple dimensions are picked) becomes its own entry that is
-			 * processed and dedup'd independently downstream.
+			 * Evaluate the alert rule and return one outcome per group.
+			 *
+			 * This is the single boundary between the query engine's group-key
+			 * vocabulary and storage's. The engine emits a generic `"all"` for an
+			 * ungrouped result; every returned `groupKey` here is already in storage
+			 * vocabulary — `UNGROUPED_GROUP_KEY` for an ungrouped plan, a real group
+			 * name otherwise — so no caller re-derives it. For grouped rules every
+			 * distinct value (or composite value, when multiple dimensions are
+			 * picked) becomes its own entry, processed and dedup'd independently
+			 * downstream.
 			 */
 			const evaluateRule = Effect.fn("AlertsService.evaluateRule")(function* (
 				orgId: OrgId,
@@ -1689,37 +1727,21 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const endMs = yield* now
 				const startMs = endMs - rule.windowMinutes * 60_000
 				const plan = rule.compiledPlan
-				let observations: ReadonlyArray<GroupedAlertObservation>
-				if (plan.kind === "raw_sql") {
-					observations = yield* queryEngine
-						.evaluateRawSql(systemTenant(orgId), {
-							startTime: toTinybirdDateTime(startMs),
-							endTime: toTinybirdDateTime(endMs),
-							sql: plan.rawSql ?? "",
-							reducer: plan.reducer,
-							windowMinutes: rule.windowMinutes,
-						})
-						.pipe(catchQueryEngineErrors)
-				} else {
-					if (plan.query == null || plan.sampleCountStrategy == null) {
-						return yield* Effect.fail(
-							makeValidationError("Compiled alert plan is missing its query spec"),
-						)
-					}
-					observations = yield* queryEngine
-						.evaluate(systemTenant(orgId), {
-							startTime: toTinybirdDateTime(startMs),
-							endTime: toTinybirdDateTime(endMs),
-							query: plan.query,
-							reducer: plan.reducer,
-							sampleCountStrategy: plan.sampleCountStrategy,
-						})
-						.pipe(catchQueryEngineErrors)
-				}
+				const source = yield* planEvaluateSource(plan, rule.windowMinutes)
+				const observations: ReadonlyArray<GroupedAlertObservation> = yield* queryEngine
+					.evaluate(systemTenant(orgId), {
+						startTime: toTinybirdDateTime(startMs),
+						endTime: toTinybirdDateTime(endMs),
+						source,
+						reducer: plan.reducer,
+						sampleCountStrategy: plan.sampleCountStrategy,
+					})
+					.pipe(catchQueryEngineErrors)
 
+				const grouped = isGroupedPlan(plan)
 				return observations.map((obs) => ({
 					evaluation: applyEvaluationLogic(rule, obs),
-					groupKey: obs.groupKey,
+					groupKey: grouped ? obs.groupKey : UNGROUPED_GROUP_KEY,
 				}))
 			})
 
@@ -3004,15 +3026,25 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			 */
 			const previewRule = Effect.fn("AlertsService.previewRule")(function* (
 				orgId: OrgId,
+				roles: ReadonlyArray<RoleName>,
 				request: AlertRulePreviewRequest,
 			): Effect.fn.Return<
 				AlertRulePreviewResponse,
-				AlertValidationError | AlertDeliveryError | AlertPersistenceError | WarehouseError
+				| AlertValidationError
+				| AlertForbiddenError
+				| AlertDeliveryError
+				| AlertPersistenceError
+				| WarehouseError
 			> {
 				const normalized = yield* normalizeRule(orgId, request.rule, { forPreview: true })
 				const plan = normalized.compiledPlan
+
+				// Preview only needs `alerts:read`, but a raw-SQL rule executes
+				// user-authored ClickHouse against the org's warehouse — the same
+				// capability `createRule`/`testRule` gate behind org-admin. Previewing
+				// one must not be a cheaper route to that than creating it.
 				if (plan.kind === "raw_sql") {
-					return yield* Effect.fail(makeValidationError("Raw SQL alerts cannot be previewed"))
+					yield* requireAdmin(roles)
 				}
 
 				const windowMs = normalized.windowMinutes * 60_000
@@ -3082,11 +3114,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					buckets.set(bucketMs, obs)
 				}
 
-				if (plan.query == null || plan.sampleCountStrategy == null) {
-					return yield* Effect.fail(
-						makeValidationError("Compiled alert plan is missing its query spec"),
-					)
-				}
 				if (normalized.serviceNames.length > 1) {
 					// Mirror the scheduler's multi-service mode: independent per-service
 					// plans, groupKey = service name.
@@ -3098,17 +3125,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									...normalized,
 									serviceName: svcName,
 								})
-								if (
-									perServicePlan.query == null ||
-									perServicePlan.sampleCountStrategy == null
-								) {
-									return
-								}
+								const perServiceSource = yield* planEvaluateSource(
+									perServicePlan,
+									normalized.windowMinutes,
+								)
 								const observations = yield* queryEngine
 									.evaluateSeries(systemTenant(orgId), {
 										startTime: toTinybirdDateTime(startMs),
 										endTime: toTinybirdDateTime(queryEndMs),
-										query: perServicePlan.query,
+										source: perServiceSource,
 										reducer: perServicePlan.reducer,
 										sampleCountStrategy: perServicePlan.sampleCountStrategy,
 									})
@@ -3124,19 +3149,24 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						{ concurrency: 5 },
 					)
 				} else {
+					const source = yield* planEvaluateSource(plan, normalized.windowMinutes)
 					const observations = yield* queryEngine
 						.evaluateSeries(systemTenant(orgId), {
 							startTime: toTinybirdDateTime(startMs),
 							endTime: toTinybirdDateTime(queryEndMs),
-							query: plan.query,
+							source,
 							reducer: plan.reducer,
 							sampleCountStrategy: plan.sampleCountStrategy,
 						})
 						.pipe(catchQueryEngineErrors)
 					const excludeSet = new Set(normalized.excludeServiceNames)
+					// Preview must key its series exactly as the scheduler stores them,
+					// or the preview chart and the tracking chart disagree on the
+					// ungrouped series' name.
+					const grouped = isGroupedPlan(plan)
 					for (const obs of observations) {
 						if (excludeSet.has(obs.groupKey)) continue
-						record(obs.groupKey, Date.parse(obs.bucket), {
+						record(grouped ? obs.groupKey : UNGROUPED_GROUP_KEY, Date.parse(obs.bucket), {
 							value: obs.value,
 							sampleCount: obs.sampleCount,
 							hasData: obs.sampleCount > 0,
@@ -3144,14 +3174,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}
 				}
 
-				// Ungrouped rules always observe *something* per tick ("all"), so chart
-				// a series even when the whole range is empty.
+				// Ungrouped rules always observe *something* per tick, so chart a series
+				// even when the whole range is empty.
 				if (
 					obsByGroup.size === 0 &&
 					!isGroupedPlan(normalized.compiledPlan) &&
 					normalized.serviceNames.length <= 1
 				) {
-					obsByGroup.set("all", new Map())
+					obsByGroup.set(UNGROUPED_GROUP_KEY, new Map())
 				}
 
 				const NO_DATA: PreviewObs = { value: null, sampleCount: 0, hasData: false }
@@ -4518,7 +4548,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					normalized,
 					"Auto-resolved: rule configuration changed",
 				)
-				const staleGroupKeys = Arr.map(toResolve, (i) => i.groupKey ?? "__total__")
+				const staleGroupKeys = Arr.map(toResolve, (i) => i.groupKey ?? UNGROUPED_GROUP_KEY)
 
 				// Serialized per rule via the claim lock + idempotent writes
 				// (incident status update converges; delivery events onConflictDoNothing).
@@ -4600,7 +4630,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 					const orphaned = Arr.filter(
 						openIncidents,
-						(i) => !HashSet.has(evaluatedGroups, i.groupKey ?? "__total__"),
+						(i) => !HashSet.has(evaluatedGroups, i.groupKey ?? UNGROUPED_GROUP_KEY),
 					)
 
 					if (orphaned.length === 0) return
@@ -4644,7 +4674,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 					// Serialized per rule via claim lock + idempotent writes.
 					yield* Effect.forEach(orphaned, (incident) => {
-						const groupKey = incident.groupKey ?? "__total__"
+						const groupKey = incident.groupKey ?? UNGROUPED_GROUP_KEY
 						return Effect.gen(function* () {
 							yield* dbExecute((db) =>
 								db
@@ -4780,7 +4810,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						checks.push({
 							OrgId: row.orgId,
 							RuleId: row.id,
-							GroupKey: "__total__",
+							GroupKey: UNGROUPED_GROUP_KEY,
 							Timestamp: toIngestDateTime64(failedAt),
 							Status: "error",
 							SignalType: row.signalType,
@@ -4820,7 +4850,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										and(
 											eq(alertRuleStates.orgId, row.orgId),
 											eq(alertRuleStates.ruleId, row.id),
-											eq(alertRuleStates.groupKey, "__total__"),
+											eq(alertRuleStates.groupKey, UNGROUPED_GROUP_KEY),
 										),
 									)
 									.limit(1),
@@ -4837,7 +4867,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								.values({
 									orgId: row.orgId,
 									ruleId: row.id,
-									groupKey: "__total__",
+									groupKey: UNGROUPED_GROUP_KEY,
 									consecutiveBreaches: 0,
 									consecutiveHealthy: 0,
 									lastStatus: null,
@@ -4924,11 +4954,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									return
 								}
 
-								// Uniform grouped/ungrouped path. The engine always returns one
-								// observation per group — a single "all" observation (with a
-								// no-data fallback) when the compiled plan is ungrouped — so both
-								// shapes flow through the same loop; ungrouped rules keep their
-								// historical "__total__" storage key at this boundary.
+								// Uniform grouped/ungrouped path. `evaluateRule` returns one
+								// outcome per group already keyed in storage vocabulary — a single
+								// UNGROUPED_GROUP_KEY entry (with a no-data fallback) when the
+								// compiled plan is ungrouped — so both shapes flow through the
+								// same loop with no key translation here.
 								const grouped = isGroupedPlan(normalized.compiledPlan)
 								const results = yield* evaluateRule(row.orgId, normalized)
 								const excludeSet = HashSet.fromIterable(normalized.excludeServiceNames)
@@ -4943,7 +4973,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											row,
 											normalized,
 											evaluation,
-											grouped ? groupKey : "__total__",
+											groupKey,
 											timestamp,
 											pendingChecks,
 											issueBudget,
@@ -4951,9 +4981,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									}),
 								)
 
-								const evaluatedGroups = grouped
-									? HashSet.fromIterable(Arr.map(eligible, (r) => r.groupKey))
-									: HashSet.fromIterable(["__total__"])
+								const evaluatedGroups = HashSet.fromIterable(
+									Arr.map(eligible, (r) => r.groupKey),
+								)
 								yield* resolveOrphanedGroupIncidents(
 									row.orgId,
 									normalized.id,
@@ -4963,8 +4993,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								)
 
 								// Self-heal state rows whose key shape contradicts the rule's
-								// groupedness: a grouped rule can never legitimately own a
-								// "__total__" row (left behind when this rule evaluated ungrouped,
+								// groupedness: a grouped rule can never legitimately own an
+								// ungrouped row (left behind when this rule evaluated ungrouped,
 								// or by recordEvaluationFailure), and vice versa. Orphan resolution
 								// above only deletes incident-backed rows. Zero rows touched in
 								// steady state, so the Electric shape stays quiet.
@@ -4976,8 +5006,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 												eq(alertRuleStates.orgId, row.orgId),
 												eq(alertRuleStates.ruleId, row.id),
 												grouped
-													? eq(alertRuleStates.groupKey, "__total__")
-													: ne(alertRuleStates.groupKey, "__total__"),
+													? eq(alertRuleStates.groupKey, UNGROUPED_GROUP_KEY)
+													: ne(alertRuleStates.groupKey, UNGROUPED_GROUP_KEY),
 											),
 										),
 								)
