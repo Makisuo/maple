@@ -302,9 +302,9 @@ export function SlackIntegrationCard() {
 							</span>
 						</div>
 						<p className="mt-1 text-xs text-muted-foreground">
-							The Maple bot answers questions, creates dashboards and other resources on request, and
-							delivers alerts to channels. Create a Slack (bot) destination on an alert rule to route
-							notifications.
+							The Maple bot answers questions, creates dashboards and other resources on
+							request, and delivers alerts to channels. Create a Slack (bot) destination on an
+							alert rule to route notifications.
 						</p>
 					</div>
 
@@ -336,7 +336,9 @@ export function SlackIntegrationCard() {
 								disabled={!isAdmin || busy !== null}
 								variant="outline"
 							>
-								{busy === "install" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+								{busy === "install" ? (
+									<LoaderIcon size={14} className="animate-spin" />
+								) : null}
 								Reconnect
 							</Button>
 						) : null}
@@ -357,8 +359,8 @@ export function SlackIntegrationCard() {
 						</p>
 					) : (
 						<p className="text-[11px] text-muted-foreground">
-							Reconnect re-runs the Slack approval in place — use it to refresh the connection or
-							grant new permissions without removing the bot from its channels.
+							Reconnect re-runs the Slack approval in place — use it to refresh the connection
+							or grant new permissions without removing the bot from its channels.
 						</p>
 					)}
 				</div>
@@ -370,10 +372,10 @@ export function SlackIntegrationCard() {
 						<AlertDialogTitle>Disconnect Slack</AlertDialogTitle>
 						<AlertDialogDescription>
 							This uninstalls the Maple Slack app, revokes the API key minted for the bot, and
-							removes the bot from every channel it was invited to. Alert rules using Slack (bot)
-							destinations will stop delivering, and after a reinstall the bot must be re-invited
-							to private channels. To refresh the connection or grant new permissions, use
-							Reconnect instead — it keeps channel memberships.
+							removes the bot from every channel it was invited to. Alert rules using Slack
+							(bot) destinations will stop delivering, and after a reinstall the bot must be
+							re-invited to private channels. To refresh the connection or grant new
+							permissions, use Reconnect instead — it keeps channel memberships.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

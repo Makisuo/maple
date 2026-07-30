@@ -8,6 +8,7 @@ import {
 	DownloadIcon,
 	HistoryIcon,
 	BracketsCurlyIcon,
+	TagIcon,
 } from "@/components/icons"
 
 import { Button } from "@maple/ui/components/ui/button"
@@ -25,6 +26,8 @@ import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
 import { downloadPortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
 import { VariablesManagerDialog } from "@/components/dashboard-builder/config/variables-manager-dialog"
+import { TagEditorDialog } from "@/components/dashboard-builder/tag-editor"
+import { collectTags } from "@/components/dashboard-builder/list/dashboard-summary"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import type { Dashboard } from "@/components/dashboard-builder/types"
 
@@ -46,8 +49,9 @@ export function DashboardToolbar({
 		state: { timeRange, resolvedTimeRange },
 		actions: { setTimeRange },
 	} = useDashboardTimeRange()
-	const { updateDashboardVariables } = useDashboardStore()
+	const { updateDashboardVariables, updateDashboard, dashboards } = useDashboardStore()
 	const [variablesDialogOpen, setVariablesDialogOpen] = useState(false)
+	const [tagsDialogOpen, setTagsDialogOpen] = useState(false)
 
 	const isEdit = mode === "edit"
 
@@ -128,6 +132,16 @@ export function DashboardToolbar({
 								Variables
 							</DropdownMenuItem>
 						)}
+						{isEdit && (
+							<DropdownMenuItem
+								onClick={() => setTagsDialogOpen(true)}
+								disabled={readOnly}
+								className="whitespace-nowrap"
+							>
+								<TagIcon size={14} />
+								Tags
+							</DropdownMenuItem>
+						)}
 						{onOpenHistory && (
 							<DropdownMenuItem onClick={onOpenHistory} className="whitespace-nowrap">
 								<HistoryIcon size={14} />
@@ -151,6 +165,15 @@ export function DashboardToolbar({
 				onOpenChange={setVariablesDialogOpen}
 				variables={dashboard.variables ?? []}
 				onSave={(variables) => updateDashboardVariables(dashboard.id, variables)}
+			/>
+
+			<TagEditorDialog
+				open={tagsDialogOpen}
+				onOpenChange={setTagsDialogOpen}
+				dashboardName={dashboard.name}
+				tags={dashboard.tags ?? []}
+				suggestions={collectTags(dashboards)}
+				onSave={(tags) => updateDashboard(dashboard.id, { tags })}
 			/>
 		</div>
 	)

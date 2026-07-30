@@ -781,7 +781,12 @@ describe("SlackIntegrationService", () => {
 				assert.strictEqual(second.updated, true)
 
 				const secondRow = yield* Effect.promise(() =>
-					queryFirstRow<{ id: string; api_key_id: string; scope: string; revoked_at: string | null }>(
+					queryFirstRow<{
+						id: string
+						api_key_id: string
+						scope: string
+						revoked_at: string | null
+					}>(
 						testDb,
 						"SELECT id, api_key_id, scope, revoked_at FROM slack_workspaces WHERE team_id = 'T-RE'",
 					),
@@ -794,9 +799,11 @@ describe("SlackIntegrationService", () => {
 				assert.isNull(secondRow?.revoked_at)
 
 				const keyRow = yield* Effect.promise(() =>
-					queryFirstRow<{ revoked: boolean }>(testDb, "SELECT revoked FROM api_keys WHERE id = $1", [
-						firstRow!.api_key_id,
-					]),
+					queryFirstRow<{ revoked: boolean }>(
+						testDb,
+						"SELECT revoked FROM api_keys WHERE id = $1",
+						[firstRow!.api_key_id],
+					),
 				)
 				assert.strictEqual(keyRow?.revoked, false)
 				// And the resolvable plaintext key is byte-for-byte the one from before.
@@ -1373,7 +1380,11 @@ describe("SlackIntegrationService", () => {
 			const teamRef = { current: { id: "T-EVT2", name: "EvtOrg2" } }
 			return Effect.gen(function* () {
 				const slack = yield* SlackIntegrationService
-				const start = yield* slack.startInstall(asOrgId("org_evt2"), asUserId("user_evt2"), "https://cb")
+				const start = yield* slack.startInstall(
+					asOrgId("org_evt2"),
+					asUserId("user_evt2"),
+					"https://cb",
+				)
 				yield* slack.completeInstall("code_evt2", stateFromInstallUrl(start.url))
 
 				const workspace = yield* Effect.promise(() =>
@@ -1391,9 +1402,11 @@ describe("SlackIntegrationService", () => {
 				yield* slack.revokeByTeamId("T-EVT2", "tokens_revoked")
 
 				const keyRow = yield* Effect.promise(() =>
-					queryFirstRow<{ revoked: boolean }>(testDb, "SELECT revoked FROM api_keys WHERE id = $1", [
-						workspace!.api_key_id,
-					]),
+					queryFirstRow<{ revoked: boolean }>(
+						testDb,
+						"SELECT revoked FROM api_keys WHERE id = $1",
+						[workspace!.api_key_id],
+					),
 				)
 				assert.strictEqual(keyRow?.revoked, true)
 			}).pipe(
@@ -1508,9 +1521,7 @@ describe("SlackIntegrationService", () => {
 				Effect.provide(
 					withFetch(
 						testDb,
-						slackApiFetch(AUTH_TEST_URL, () =>
-							jsonResponse({ ok: false, error: "ratelimited" }),
-						),
+						slackApiFetch(AUTH_TEST_URL, () => jsonResponse({ ok: false, error: "ratelimited" })),
 					),
 				),
 			)

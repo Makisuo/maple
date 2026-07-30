@@ -165,7 +165,8 @@ export function buildSpendModel({
 
 	const features: FeatureSpend[] = SPEND_FEATURES.map((featureId) => {
 		const entry = pricing[featureId] as FeatureUsagePricing
-		const overUnits = entry.unlimited || entry.included == null ? 0 : Math.max(0, entry.used - entry.included)
+		const overUnits =
+			entry.unlimited || entry.included == null ? 0 : Math.max(0, entry.used - entry.included)
 		return {
 			...entry,
 			featureId,
@@ -210,8 +211,7 @@ export function buildSpendModel({
 		basePlan,
 		addOns,
 		isCustomPlan:
-			activeSub !== undefined &&
-			!catalog.some((plan) => plan.id === activeSub.planId && !plan.addOn),
+			activeSub !== undefined && !catalog.some((plan) => plan.id === activeSub.planId && !plan.addOn),
 	}
 }
 
@@ -284,13 +284,12 @@ export function buildCumulativeSeries({
 		{ used: number; included: number; rate: number; scale: number }
 	>()
 	for (const feature of model.features) {
-		const warehouseTotal = daily.days.reduce(
-			(sum, day) => sum + volumeOf(day, feature.featureId),
-			0,
-		)
+		const warehouseTotal = daily.days.reduce((sum, day) => sum + volumeOf(day, feature.featureId), 0)
 		byFeature.set(feature.featureId, {
 			used: 0,
-			included: feature.unlimited ? Number.POSITIVE_INFINITY : (feature.included ?? Number.POSITIVE_INFINITY),
+			included: feature.unlimited
+				? Number.POSITIVE_INFINITY
+				: (feature.included ?? Number.POSITIVE_INFINITY),
 			rate: feature.ratePerUnit ?? 0,
 			// Only scale when both sides have something to compare; otherwise the
 			// warehouse shape stands on its own.
@@ -325,8 +324,7 @@ export function buildCumulativeSeries({
 			}
 		}
 
-		const total =
-			baseDollars + accrued.logs + accrued.traces + accrued.metrics + accrued.browser_sessions
+		const total = baseDollars + accrued.logs + accrued.traces + accrued.metrics + accrued.browser_sessions
 
 		// Two anchors only. Recharts joins them into one straight dashed segment,
 		// which is the honest shape for a linear projection — a curve through

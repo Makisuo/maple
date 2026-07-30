@@ -116,11 +116,7 @@ function ReplaysPage() {
 		<>
 			<div className="mr-2 hidden items-center gap-4 sm:flex">
 				<ToolbarStat value={sessions.length} label="sessions" />
-				<ToolbarStat
-					value={sessions.filter((s) => s.status === "active").length}
-					label="live"
-					dot
-				/>
+				<ToolbarStat value={sessions.filter((s) => s.status === "active").length} label="live" dot />
 			</div>
 			<TimeRangeHeaderControls
 				startTime={search.startTime ?? startTime}

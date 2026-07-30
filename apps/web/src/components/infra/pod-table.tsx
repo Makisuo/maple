@@ -40,8 +40,7 @@ function workloadOf(pod: PodRow): { kind: string; name: string } | null {
 	return null
 }
 
-const formatPct = (fraction: number) =>
-	Number.isFinite(fraction) ? `${Math.round(fraction * 100)}%` : "—"
+const formatPct = (fraction: number) => (Number.isFinite(fraction) ? `${Math.round(fraction * 100)}%` : "—")
 
 /** Cores read at very different magnitudes across a fleet; keep them comparable. */
 const formatCores = (cores: number) => {

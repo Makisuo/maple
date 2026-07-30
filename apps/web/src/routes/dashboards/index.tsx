@@ -60,6 +60,7 @@ function DashboardListPage() {
 		importDashboard,
 		importPersesDashboard,
 		deleteDashboard,
+		updateDashboard,
 	} = useDashboardMutations()
 
 	const { favorites, toggleFavorite, defaultSort, setDefaultSort } = useDashboardPreferences()
@@ -167,6 +168,10 @@ function DashboardListPage() {
 		onDelete: deleteDashboard,
 		onDuplicate: handleDuplicate,
 		onExport: downloadPortableDashboard,
+		onSaveTags: (dashboard, tags) => {
+			if (readOnly) return
+			updateDashboard(dashboard.id, { tags })
+		},
 		onToggleFavorite: toggleFavorite,
 	}
 

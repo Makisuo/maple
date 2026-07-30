@@ -53,8 +53,7 @@ const MODE_COPY: Record<SpendEnforcementMode, { title: string; detail: string }>
 		title: "Notify only",
 	},
 	pause: {
-		detail:
-			"Capped features are rejected at the gateway (HTTP 402) until the cycle resets or the limit is raised. SDKs retry safely.",
+		detail: "Capped features are rejected at the gateway (HTTP 402) until the cycle resets or the limit is raised. SDKs retry safely.",
 		title: "Pause ingest at limit",
 	},
 }
@@ -142,7 +141,11 @@ export function SpendLimitDialog({
 			.join(", "),
 	)
 	const [capInput, setCapInput] = useState(
-		capFeature ? (limits.featureCaps[capFeature] == null ? "" : String(limits.featureCaps[capFeature])) : "",
+		capFeature
+			? limits.featureCaps[capFeature] == null
+				? ""
+				: String(limits.featureCaps[capFeature])
+			: "",
 	)
 
 	const editingCap = capFeature !== undefined
@@ -304,7 +307,9 @@ export function SpendLimitDialog({
 									>
 										<Radio value={value} className="mt-0.5" />
 										<span className="flex flex-col gap-0.5">
-											<span className="text-sm font-medium">{MODE_COPY[value].title}</span>
+											<span className="text-sm font-medium">
+												{MODE_COPY[value].title}
+											</span>
 											<span className="text-[11px] leading-4 text-muted-foreground">
 												{MODE_COPY[value].detail}
 											</span>

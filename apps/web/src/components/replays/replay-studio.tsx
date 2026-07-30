@@ -1,9 +1,6 @@
 import { ReplaySurface, ReplayTransport } from "@/components/replays/replay-player"
 import { ReplayPlayerProvider } from "@/components/replays/replay-player-context"
-import {
-	ReplayEditorTimeline,
-	type SessionTraceSummary,
-} from "@/components/replays/replay-editor-timeline"
+import { ReplayEditorTimeline, type SessionTraceSummary } from "@/components/replays/replay-editor-timeline"
 import { SessionRail, type EventRow } from "@/components/replays/session-events-panel"
 import { recordedMarker, type ReplayPartitionWindow } from "@/components/replays/replay-format"
 import { Reveal, SessionIdentityBar } from "@/components/replays/session-detail-parts"

@@ -1459,11 +1459,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					request.signalType === "builder_query" || request.signalType === "raw_query"
 				const environments =
 					request.environments && !queryOwnsScope
-						? [
-								...new Set(
-									request.environments.map((s) => s.trim()).filter((s) => s.length > 0),
-								),
-							]
+						? [...new Set(request.environments.map((s) => s.trim()).filter((s) => s.length > 0))]
 						: []
 				const tags = normalizeTags(request.tags)
 				const metricName = normalizeOptionalString(request.metricName)

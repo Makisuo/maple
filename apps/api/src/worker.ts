@@ -384,9 +384,8 @@ const handleScheduled = async (
 	}
 
 	if (event.cron === SPEND_LIMIT_CRON) {
-		const { buildSpendLimitLayer, runSpendLimitEvaluation, flushSpendLimitTelemetry } = await import(
-			"./spend-limit-runtime"
-		)
+		const { buildSpendLimitLayer, runSpendLimitEvaluation, flushSpendLimitTelemetry } =
+			await import("./spend-limit-runtime")
 		try {
 			await runScheduledEffect(buildSpendLimitLayer(env), runSpendLimitEvaluation, ctx, {
 				onInterrupt: "graceful",
@@ -398,9 +397,8 @@ const handleScheduled = async (
 	}
 
 	if (event.cron === SLACK_RECONCILE_CRON) {
-		const { buildSlackReconcileLayer, runSlackReconciliation, flushSlackTelemetry } = await import(
-			"./slack-reconcile-runtime"
-		)
+		const { buildSlackReconcileLayer, runSlackReconciliation, flushSlackTelemetry } =
+			await import("./slack-reconcile-runtime")
 		try {
 			await runScheduledEffect(buildSlackReconcileLayer(env), runSlackReconciliation, ctx, {
 				onInterrupt: "graceful",

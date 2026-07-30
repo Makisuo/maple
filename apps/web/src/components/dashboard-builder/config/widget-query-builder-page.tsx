@@ -2,7 +2,7 @@ import * as React from "react"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
-import { visualizationFor } from "@/components/dashboard-builder/widgets/visualization-registry"
+import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
 import { QueryPanel } from "@/components/dashboard-builder/config/query-panel"
 import { MarkdownEditorPanel } from "@/components/dashboard-builder/config/markdown-editor-panel"
 import { FormulaPanel } from "@/components/dashboard-builder/config/formula-panel"
@@ -243,9 +243,7 @@ export function WidgetQueryBuilderPage({
 	// Reseed the SQL when the panel type changes, but only while the draft is still
 	// a pristine template — never clobber SQL the user has written. line/bar/area
 	// share one template, so switching among them is a no-op.
-	const lastDisplayTypeRef = React.useRef(
-		visualizationToDisplayType(state.visualization, state.chartId),
-	)
+	const lastDisplayTypeRef = React.useRef(visualizationToDisplayType(state.visualization, state.chartId))
 	const currentDisplayType = visualizationToDisplayType(state.visualization, state.chartId)
 	if (currentDisplayType !== lastDisplayTypeRef.current) {
 		const previous = lastDisplayTypeRef.current

@@ -10,10 +10,7 @@ import {
 	type QueryEngineResult,
 	type TimeseriesPoint,
 } from "@maple/query-engine"
-import {
-	makeQueryEngineEvaluate,
-	makeQueryEngineExecute,
-} from "@maple/query-engine/runtime"
+import { makeQueryEngineEvaluate, makeQueryEngineExecute } from "@maple/query-engine/runtime"
 import type { TenantContext } from "./AuthService"
 
 const assert: typeof nodeAssert & {

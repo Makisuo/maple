@@ -633,7 +633,11 @@ const make: Effect.Effect<
 				db.transaction(async (tx) => {
 					const revokedOthers = await tx
 						.update(slackWorkspaces)
-						.set({ revokedAt: new Date(now), revokedReason: "superseded", updatedAt: new Date(now) })
+						.set({
+							revokedAt: new Date(now),
+							revokedReason: "superseded",
+							updatedAt: new Date(now),
+						})
 						.where(
 							and(
 								eq(slackWorkspaces.orgId, orgId),
@@ -763,8 +767,7 @@ const make: Effect.Effect<
 			installedAt: null,
 			disconnectedReason: remoteReason,
 			disconnectedTeamName: remoteReason !== null ? (lastRevoked?.teamName ?? null) : null,
-			disconnectedAt:
-				remoteReason !== null ? (lastRevoked?.revokedAt?.getTime() ?? null) : null,
+			disconnectedAt: remoteReason !== null ? (lastRevoked?.revokedAt?.getTime() ?? null) : null,
 			missingScopes: [],
 		} satisfies SlackInstallStatus
 	})

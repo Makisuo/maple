@@ -41,13 +41,7 @@ import { runWarehouseQuery } from "./effect-utils"
 export type WorkloadKind = "deployment" | "statefulset" | "daemonset"
 
 /** Mirrors PodSortKeyLiteral in @maple/domain — `saturation` is peak-of-either-limit. */
-export type PodSortKey =
-	| "saturation"
-	| "cpuUsage"
-	| "cpuLimitPct"
-	| "memoryLimitPct"
-	| "podName"
-	| "lastSeen"
+export type PodSortKey = "saturation" | "cpuUsage" | "cpuLimitPct" | "memoryLimitPct" | "podName" | "lastSeen"
 
 export type SortDirection = "asc" | "desc"
 

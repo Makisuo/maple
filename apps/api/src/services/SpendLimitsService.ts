@@ -55,7 +55,10 @@ export interface SpendLimitsServiceShape {
 		evaluation: SpendEvaluationRecord,
 	) => Effect.Effect<void, SpendLimitPersistenceError>
 	/** Cron-only: every org with guardrails configured — the evaluation work-list. */
-	readonly listConfigured: () => Effect.Effect<ReadonlyArray<ConfiguredSpendLimits>, SpendLimitPersistenceError>
+	readonly listConfigured: () => Effect.Effect<
+		ReadonlyArray<ConfiguredSpendLimits>,
+		SpendLimitPersistenceError
+	>
 }
 
 /**

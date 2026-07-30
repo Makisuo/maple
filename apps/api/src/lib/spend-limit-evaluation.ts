@@ -135,17 +135,13 @@ export const evaluateSpendLimits = ({
 	const breached = ceiling !== null && spend.totalCents >= ceiling
 
 	const crossedThresholds =
-		percentUsed === null
-			? []
-			: limits.alertThresholdPercents.filter((percent) => percentUsed >= percent)
+		percentUsed === null ? [] : limits.alertThresholdPercents.filter((percent) => percentUsed >= percent)
 
 	// A cycle rollover resets notification state: crossing 80% in August must
 	// alert again even though July already did.
 	const sameCycle = previousCycleStartMs === cycleStartMs
 	const alreadyNotified = sameCycle ? previouslyNotified : []
-	const newlyCrossedThresholds = crossedThresholds.filter(
-		(percent) => !alreadyNotified.includes(percent),
-	)
+	const newlyCrossedThresholds = crossedThresholds.filter((percent) => !alreadyNotified.includes(percent))
 
 	const exceededCaps = Object.entries(limits.featureCaps)
 		.filter(([featureId, cap]) => cap != null && (features[featureId]?.used ?? 0) > cap)

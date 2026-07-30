@@ -9,7 +9,13 @@ import {
 	PostgresTransactionId,
 	UserId,
 } from "../../primitives"
-import { DashboardQueryVariableFacet, DashboardVariableName, DashboardVersionChangeKind } from "../dashboards"
+import {
+	DashboardQueryVariableFacet,
+	DashboardRefreshIntervalSeconds,
+	DashboardTemplatePreviewKind,
+	DashboardVariableName,
+	DashboardVersionChangeKind,
+} from "../dashboards"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ConflictError, V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
@@ -298,12 +304,21 @@ const dashboardFields = {
 	timeRange: V2TimeRange,
 	widgets: Schema.Array(V2DashboardWidget),
 	variables: Schema.Array(V2DashboardVariable),
+	// `null` is off, matching `description`'s absence convention on this resource.
+	refreshIntervalSeconds: Schema.NullOr(DashboardRefreshIntervalSeconds),
 	createdAt: Timestamp,
 	updatedAt: Timestamp,
 }
 
 export const V2Dashboard = Schema.Struct(dashboardFields)
-	.pipe(Schema.encodeKeys({ timeRange: "time_range", createdAt: "created_at", updatedAt: "updated_at" }))
+	.pipe(
+		Schema.encodeKeys({
+			timeRange: "time_range",
+			refreshIntervalSeconds: "refresh_interval_seconds",
+			createdAt: "created_at",
+			updatedAt: "updated_at",
+		}),
+	)
 	.annotate({
 		identifier: "Dashboard",
 		title: "Dashboard",
@@ -315,7 +330,14 @@ export const V2DashboardMutation = Schema.Struct({
 	...dashboardFields,
 	txid: optional(PostgresTransactionId),
 })
-	.pipe(Schema.encodeKeys({ timeRange: "time_range", createdAt: "created_at", updatedAt: "updated_at" }))
+	.pipe(
+		Schema.encodeKeys({
+			timeRange: "time_range",
+			refreshIntervalSeconds: "refresh_interval_seconds",
+			createdAt: "created_at",
+			updatedAt: "updated_at",
+		}),
+	)
 	.annotate({
 		identifier: "DashboardMutationResponse",
 		title: "Dashboard mutation response",
@@ -331,8 +353,14 @@ export const V2DashboardCreateParams = Schema.Struct({
 	timeRange: optional(V2TimeRange),
 	widgets: optional(Schema.Array(V2DashboardWidget)),
 	variables: optional(Schema.Array(V2DashboardVariable)),
+	refreshIntervalSeconds: optional(Schema.NullOr(DashboardRefreshIntervalSeconds)),
 })
-	.pipe(Schema.encodeKeys({ timeRange: "time_range" }))
+	.pipe(
+		Schema.encodeKeys({
+			timeRange: "time_range",
+			refreshIntervalSeconds: "refresh_interval_seconds",
+		}),
+	)
 	.annotate({
 		identifier: "DashboardCreateParams",
 		title: "Dashboard create parameters",
@@ -346,8 +374,14 @@ export const V2DashboardUpdateParams = Schema.Struct({
 	timeRange: optional(V2TimeRange),
 	widgets: optional(Schema.Array(V2DashboardWidget)),
 	variables: optional(Schema.Array(V2DashboardVariable)),
+	refreshIntervalSeconds: optional(Schema.NullOr(DashboardRefreshIntervalSeconds)),
 })
-	.pipe(Schema.encodeKeys({ timeRange: "time_range" }))
+	.pipe(
+		Schema.encodeKeys({
+			timeRange: "time_range",
+			refreshIntervalSeconds: "refresh_interval_seconds",
+		}),
+	)
 	.annotate({
 		identifier: "DashboardUpdateParams",
 		title: "Dashboard update parameters",
@@ -426,7 +460,7 @@ const V2DashboardTemplatePreviewWidget = Schema.Struct({
 	y: Schema.Number,
 	w: Schema.Number,
 	h: Schema.Number,
-	kind: Schema.Literals(["line", "area", "bar", "stat", "table", "list"]),
+	kind: DashboardTemplatePreviewKind,
 	title: Schema.String,
 })
 

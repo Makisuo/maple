@@ -44,6 +44,7 @@ const toV2Dashboard = (dashboard: DashboardDocument): V2Dashboard => ({
 	timeRange: dashboard.timeRange,
 	widgets: dashboard.widgets,
 	variables: dashboard.variables ?? [],
+	refreshIntervalSeconds: dashboard.refreshIntervalSeconds ?? null,
 	createdAt: dashboard.createdAt,
 	updatedAt: dashboard.updatedAt,
 })
@@ -107,6 +108,9 @@ const toPortable = (payload: V2DashboardCreateParams): PortableDashboardDocument
 				: toInternalTimeRange(payload.timeRange),
 		widgets: payload.widgets ?? [],
 		...(payload.variables !== undefined ? { variables: payload.variables } : {}),
+		...(payload.refreshIntervalSeconds !== undefined && payload.refreshIntervalSeconds !== null
+			? { refreshIntervalSeconds: payload.refreshIntervalSeconds }
+			: {}),
 	})
 
 const applyUpdate = (
@@ -118,6 +122,12 @@ const applyUpdate = (
 		payload.description === undefined ? current.description : (payload.description ?? undefined)
 	const tags = payload.tags === undefined ? current.tags : payload.tags
 	const variables = payload.variables === undefined ? current.variables : payload.variables
+	// `null` clears the cadence (off); an omitted key retains it — same contract as
+	// `description`.
+	const refreshIntervalSeconds =
+		payload.refreshIntervalSeconds === undefined
+			? current.refreshIntervalSeconds
+			: (payload.refreshIntervalSeconds ?? undefined)
 
 	return new DashboardDocument({
 		id: current.id,
@@ -128,6 +138,7 @@ const applyUpdate = (
 			payload.timeRange === undefined ? current.timeRange : toInternalTimeRange(payload.timeRange),
 		widgets: payload.widgets ?? current.widgets,
 		...(variables !== undefined ? { variables } : {}),
+		...(refreshIntervalSeconds !== undefined ? { refreshIntervalSeconds } : {}),
 		createdAt: current.createdAt,
 		updatedAt,
 	})

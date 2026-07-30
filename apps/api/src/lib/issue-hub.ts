@@ -21,7 +21,6 @@ import { SYSTEM_ALERTS_AGENT_NAME } from "./system-actors"
  * doesn't need the full ErrorsService layer.
  */
 
-
 const decodeIssueId = Schema.decodeUnknownSync(ErrorIssueId)
 const decodeEventId = Schema.decodeUnknownSync(ErrorIssueEventId)
 const decodeActorId = Schema.decodeUnknownSync(ActorId)

@@ -18,11 +18,7 @@ import { FolderIcon, MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { PageHero } from "@/components/infra/primitives/page-hero"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { PodTable, PodTableLoading } from "@/components/infra/pod-table"
-import {
-	PodSummaryBand,
-	PodSummaryBandLoading,
-	type PodScope,
-} from "@/components/infra/pod-summary-band"
+import { PodSummaryBand, PodSummaryBandLoading, type PodScope } from "@/components/infra/pod-summary-band"
 import { PodsFilterSidebarView, type PodFilters } from "@/components/infra/k8s-filter-sidebar"
 import {
 	listPodsResultAtom,
@@ -297,7 +293,9 @@ function PodsPageContent() {
 															<InputGroupAddon align="inline-end">
 																<InputGroupButton
 																	aria-label="Clear search"
-																	onClick={() => patchSearch({ q: undefined })}
+																	onClick={() =>
+																		patchSearch({ q: undefined })
+																	}
 																>
 																	<XmarkIcon />
 																</InputGroupButton>
@@ -318,7 +316,9 @@ function PodsPageContent() {
 															<EmptyMedia variant="icon">
 																<MagnifierIcon size={16} />
 															</EmptyMedia>
-															<EmptyTitle>No pods match these filters</EmptyTitle>
+															<EmptyTitle>
+																No pods match these filters
+															</EmptyTitle>
 															<EmptyDescription>
 																{scope
 																	? `Nothing is ${SCOPE_LABEL[scope]} in this window — which is good news.`
