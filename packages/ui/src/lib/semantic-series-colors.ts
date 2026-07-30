@@ -26,6 +26,7 @@ const HTTP_METHOD_COLORS: Record<string, string> = {
 // Base OKLCH parameters for each status code class
 // Each individual code gets a unique variation within its class
 const STATUS_CLASS_BASES: Record<number, { l: number; c: number; h: number }> = {
+	1: { l: 0.62, c: 0.04, h: 265 }, // low-chroma slate — informational, reads as background
 	2: { l: 0.696, c: 0.17, h: 162 }, // green (matches --severity-info)
 	3: { l: 0.62, c: 0.14, h: 250 }, // blue (matches --chart-p50)
 	4: { l: 0.769, c: 0.188, h: 70 }, // amber (matches --severity-warn)

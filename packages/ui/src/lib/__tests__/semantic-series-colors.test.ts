@@ -24,6 +24,22 @@ describe("getSeriesColorByIndex", () => {
 	})
 })
 
+describe("getSemanticSeriesColor", () => {
+	it("resolves every HTTP status class, including 1xx", () => {
+		const classes = ["1xx", "2xx", "3xx", "4xx", "5xx"]
+		for (const key of classes) {
+			expect(getSemanticSeriesColor(key), key).toMatch(/^oklch\(/)
+		}
+		// Each class is visually distinct — 1xx must not read as 2xx green or 3xx blue.
+		const colors = classes.map((key) => getSemanticSeriesColor(key))
+		expect(new Set(colors).size).toBe(classes.length)
+	})
+
+	it("resolves individual 1xx codes", () => {
+		expect(getSemanticSeriesColor("101")).toMatch(/^oklch\(/)
+	})
+})
+
 describe("resolveSeriesColor", () => {
 	it("prefers a semantic color when the name matches a known pattern", () => {
 		// "error" maps to the error severity var regardless of index.
