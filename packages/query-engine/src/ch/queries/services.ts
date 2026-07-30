@@ -16,7 +16,7 @@ import {
 } from "@maple-dev/clickhouse-builder"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
-import { ServiceOverviewHourly, ServiceOverviewSpans, ServiceUsage, TracesAggregatesHourly } from "../tables"
+import { LogsAggregatesHourly, MetricCatalog, MetricsGauge, MetricsHistogram, MetricsSum, ServiceOverviewHourly, ServiceOverviewSpans, ServiceUsage, TracesAggregatesHourly } from "../tables"
 import { CHNumber } from "../schema"
 import { apdexExprs, serviceOverviewWhereConditions } from "./query-helpers"
 
@@ -621,7 +621,7 @@ export function serviceUsageWithPreviousQuery(opts: ServiceUsageOpts) {
 }
 
 // ---------------------------------------------------------------------------
-// Services facets (UNION ALL — environment + commit_sha facets)
+// Services facets (UNION ALL — environment + commit_sha facets + all signal types)
 // ---------------------------------------------------------------------------
 
 export interface ServicesFacetsOutput {
@@ -630,12 +630,18 @@ export interface ServicesFacetsOutput {
 	readonly facetType: string
 }
 
-// NOTE: kept as a 4-way UNION ALL on purpose. A single-scan rewrite (ARRAY JOIN
+// NOTE: kept as a UNION ALL on purpose. A single-scan rewrite (ARRAY JOIN
 // of (facetType, value) pairs, or GROUP BY GROUPING SETS) reads ~3× fewer rows
 // but benchmarked 2–4× SLOWER in wall-clock on the deployed warehouse: ClickHouse
 // runs the UNION branches in parallel and each is a cheap LowCardinality GROUP BY,
 // whereas the array/tuple/lambda CPU + row replication of the single-scan forms
 // dominates. The I/O saving doesn't translate to latency here.
+
+// Services facets now include services from ALL signal types:
+// - service_overview_spans / service_overview_hourly (traces)
+// - logs_aggregates_hourly (logs)
+// - metrics_sum / metrics_gauge / metrics_histogram / metric_catalog (metrics)
+// - service_usage (aggregated rollup of all signals)
 export function servicesFacetsQuery(): CHUnionQuery<ServicesFacetsOutput> {
 	const envQuery = serviceOverviewWindows({})
 		.select(($) => ({
@@ -670,7 +676,8 @@ export function servicesFacetsQuery(): CHUnionQuery<ServicesFacetsOutput> {
 		.orderBy(["count", "desc"])
 		.limit(50)
 
-	const serviceQuery = serviceOverviewWindows({})
+	// Service names from traces (service_overview_spans / service_overview_hourly)
+	const traceServiceQuery = serviceOverviewWindows({})
 		.select(($) => ({
 			name: $.bServiceName,
 			count: CH.sum($.bSpanCount),
@@ -681,5 +688,122 @@ export function servicesFacetsQuery(): CHUnionQuery<ServicesFacetsOutput> {
 		.orderBy(["count", "desc"])
 		.limit(50)
 
-	return unionAll(envQuery, namespaceQuery, commitQuery, serviceQuery).format("JSON")
+	// Service names from logs (logs_aggregates_hourly)
+	const logsServiceQuery = from(LogsAggregatesHourly)
+		.select(($) => ({
+			name: $.ServiceName,
+			count: CH.sum($.Count),
+			facetType: CH.lit("service"),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Hour.gte(param.dateTime("startTime")),
+			$.Hour.lte(param.dateTime("endTime")),
+			$.ServiceName.neq(""),
+		])
+		.groupBy("name")
+		.orderBy(["count", "desc"])
+		.limit(50)
+
+	// Service names from metrics (metrics_gauge)
+	const metricsGaugeServiceQuery = from(MetricsGauge)
+		.select(($) => ({
+			name: $.ServiceName,
+			count: CH.count(),
+			facetType: CH.lit("service"),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.TimeUnix.gte(param.dateTime("startTime")),
+			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.ServiceName.neq(""),
+		])
+		.groupBy("name")
+		.orderBy(["count", "desc"])
+		.limit(50)
+
+	// Service names from metrics (metrics_sum)
+	const metricsSumServiceQuery = from(MetricsSum)
+		.select(($) => ({
+			name: $.ServiceName,
+			count: CH.count(),
+			facetType: CH.lit("service"),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.TimeUnix.gte(param.dateTime("startTime")),
+			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.ServiceName.neq(""),
+		])
+		.groupBy("name")
+		.orderBy(["count", "desc"])
+		.limit(50)
+
+	// Service names from metrics (metrics_histogram)
+	const metricsHistogramServiceQuery = from(MetricsHistogram)
+		.select(($) => ({
+			name: $.ServiceName,
+			count: CH.count(),
+			facetType: CH.lit("service"),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.TimeUnix.gte(param.dateTime("startTime")),
+			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.ServiceName.neq(""),
+		])
+		.groupBy("name")
+		.orderBy(["count", "desc"])
+		.limit(50)
+
+	// Service names from metric_catalog
+	const catalogServiceQuery = from(MetricCatalog)
+		.select(($) => ({
+			name: $.ServiceName,
+			count: CH.sum($.DataPointCount),
+			facetType: CH.lit("service"),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Hour.gte(param.dateTime("startTime")),
+			$.Hour.lte(param.dateTime("endTime")),
+			$.ServiceName.neq(""),
+		])
+		.groupBy("name")
+		.orderBy(["count", "desc"])
+		.limit(50)
+
+	// Service names from service_usage (aggregated rollup)
+	const usageServiceQuery = from(ServiceUsage)
+		.select(($) => ({
+			name: $.ServiceName,
+			count: CH.sum($.LogCount).add(CH.sum($.TraceCount))
+				.add(CH.sum($.SumMetricCount))
+				.add(CH.sum($.GaugeMetricCount))
+				.add(CH.sum($.HistogramMetricCount))
+				.add(CH.sum($.ExpHistogramMetricCount)),
+			facetType: CH.lit("service"),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Hour.gte(param.dateTime("startTime")),
+			$.Hour.lte(param.dateTime("endTime")),
+			$.ServiceName.neq(""),
+		])
+		.groupBy("name")
+		.orderBy(["count", "desc"])
+		.limit(50)
+
+	return unionAll(
+		envQuery,
+		namespaceQuery,
+		commitQuery,
+		traceServiceQuery,
+		logsServiceQuery,
+		metricsGaugeServiceQuery,
+		metricsSumServiceQuery,
+		metricsHistogramServiceQuery,
+		catalogServiceQuery,
+		usageServiceQuery
+	).format("JSON")
 }
