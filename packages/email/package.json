@@ -9,6 +9,7 @@
 	},
 	"scripts": {
 		"dev:email": "email dev --dir src/emails --port 3055",
+		"build:onboarding-html": "bun run src/export-onboarding.tsx",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
