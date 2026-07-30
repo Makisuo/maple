@@ -29,6 +29,7 @@
 		"alchemy:destroy:pr": "alchemy destroy --yes --stage pr-${PR_NUMBER}",
 		"test": "turbo test",
 		"bento:check": "bun run ./scripts/bento-check.ts",
+		"bento:templates": "bun run ./scripts/bento-templates.ts",
 		"tinybird:manifest": "bun run ./scripts/generate-tinybird-project-manifest.ts",
 		"tinybird:manifest:check": "bun run ./scripts/generate-tinybird-project-manifest.ts --check",
 		"clickhouse:schema": "bun run ./scripts/generate-clickhouse-schema.ts && bun run ./scripts/generate-clickhouse-schema-sql.ts && bun run ./scripts/generate-clickhouse-insert-mappings.ts && bun run ./scripts/lint-clickhouse-schema.ts",

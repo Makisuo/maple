@@ -8,6 +8,26 @@ Email *content* is still authored here: [`packages/email/src/onboarding.tsx`](..
 renders to [`packages/email/bento-html/`](../packages/email/bento-html/) via
 `bun run --cwd packages/email build:onboarding-html`.
 
+## Why the emails are Workflow steps, not a Sequence
+
+Bento has two objects and they are not interchangeable:
+
+| | Branching | Emails writable via API |
+|---|---|---|
+| **Sequence** | no — linear, time delays only | yes (`POST /fetch/sequences/:id/emails/templates`) |
+| **Workflow / Flow** | yes | no — dashboard only |
+
+We need the `maple_activated` branch before each send, so the emails have to be
+Workflow steps, and their HTML is pasted in by hand once. A Sequence would send
+"Need a hand connecting your app?" to somebody who is already live.
+
+`GET /fetch/workflows` still returns each workflow's `email_templates`
+read-only, which is enough for drift detection:
+`bun run bento:templates diff` compares live HTML against `bento-html/`.
+
+**Live flow IDs:** `flow_yNj92LPvpDxoIJPxp6nWAQwX` (Onboarding),
+`flow_Xr6voL3JEw6qSLv4pWjZma1g` (Activated).
+
 ## Subscriber fields
 
 Written by the daily sync tick. Every flow decision reads these, never event
