@@ -288,5 +288,6 @@ describe("servicesFacetsQuery", () => {
 		expect(sql).toContain("FROM metrics_histogram")
 		expect(sql).toContain("FROM metric_catalog")
 		expect(sql).toContain("FROM service_usage")
+		expect(sql).toContain("UNION ALL")
 	})
 })
