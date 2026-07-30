@@ -100,7 +100,13 @@ export const createAlertingWorker = ({ stage, mapleDb, chatFlue }: CreateAlertin
 				MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",
 				EMAIL_FROM: process.env.EMAIL_FROM?.trim() || "Maple <notifications@noreply.maple.dev>",
 				...optionalPlain("MAPLE_ENDPOINT"),
-				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
+				// Derived from the stage, deliberately NOT `optionalPlain` — that helper
+				// lets `process.env` win over the fallback, so a stray
+				// MAPLE_ENVIRONMENT=production in a pr-N deploy environment would open
+				// both email gates at once (the worker's scheduled() early-return and
+				// EmailService.emailAllowed both derive from this one value), leaving
+				// the prd-only EMAIL binding as the sole guard.
+				MAPLE_ENVIRONMENT: resolveDeploymentEnvironment(stage),
 				// Non-prod stages skip all crons (they share live org data via the prod
 				// DB); set to "1" on a stage to deliberately exercise crons there.
 				...optionalPlain("MAPLE_ALERTING_ALLOW_NONPROD"),
