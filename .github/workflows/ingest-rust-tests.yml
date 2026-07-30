@@ -38,6 +38,7 @@ jobs:
     test:
         name: Cargo test and load benchmark
         runs-on: blacksmith-4vcpu-ubuntu-2404
+        timeout-minutes: 45
         defaults:
             run:
                 working-directory: apps/ingest
@@ -57,14 +58,14 @@ jobs:
               run: |
                   set +e
                   set -o pipefail
-                  cargo test 2>&1 | tee "$RUNNER_TEMP/ingest-cargo-test.txt"
+                  cargo test --locked 2>&1 | tee "$RUNNER_TEMP/ingest-cargo-test.txt"
                   echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-cargo-test.exit"
                   exit 0
 
             - name: Build PR ingest and benchmark binaries
               run: |
                   set +e
-                  cargo build --release --bin maple-ingest --bin load_test 2>&1 | tee "$RUNNER_TEMP/ingest-head-build.txt"
+                  cargo build --locked --release --bin maple-ingest --bin load_test 2>&1 | tee "$RUNNER_TEMP/ingest-head-build.txt"
                   echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-head-build.exit"
                   mkdir -p "$RUNNER_TEMP/head"
                   if [ -x target/release/maple-ingest ]; then
@@ -122,14 +123,23 @@ jobs:
                   # branch (it's added by the PR that introduces the harness).
                   # The probe + benchmark steps always use the head's load_test
                   # binary pointed at the base's maple-ingest.
+                  #
+                  # Build into the head's target dir rather than the worktree's own.
+                  # Swatinem/rust-cache only covers `workspaces: apps/ingest`, so a
+                  # worktree-local target/ under $RUNNER_TEMP was a full cold compile
+                  # of every dependency on every PR. Sharing the dir reuses those
+                  # cached dep artifacts and recompiles only what actually differs.
+                  # Safe because the head binaries were already copied to
+                  # $RUNNER_TEMP/head above, so overwriting target/release is fine.
                   (
                     cd "$RUNNER_TEMP/base/apps/ingest"
-                    cargo build --release --bin maple-ingest
+                    CARGO_TARGET_DIR="$GITHUB_WORKSPACE/apps/ingest/target" \
+                      cargo build --locked --release --bin maple-ingest
                   ) 2>&1 | tee "$RUNNER_TEMP/ingest-base-build.txt"
                   echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-base-build.exit"
                   mkdir -p "$RUNNER_TEMP/base-bin"
-                  if [ -x "$RUNNER_TEMP/base/apps/ingest/target/release/maple-ingest" ]; then
-                    cp "$RUNNER_TEMP/base/apps/ingest/target/release/maple-ingest" "$RUNNER_TEMP/base-bin/maple-ingest"
+                  if [ -x "$GITHUB_WORKSPACE/apps/ingest/target/release/maple-ingest" ]; then
+                    cp "$GITHUB_WORKSPACE/apps/ingest/target/release/maple-ingest" "$RUNNER_TEMP/base-bin/maple-ingest"
                   fi
                   exit 0
 

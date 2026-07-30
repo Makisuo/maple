@@ -1,0 +1,25 @@
+name: bun install
+description: >-
+    Frozen-lockfile install, shared by every CI job so there is one place to
+    change install behaviour.
+
+    Deliberately NOT cached. ~/.bun/install/cache for this repo is ~739MB, and
+    caching it measured consistently SLOWER than a cold install: knip's install
+    went 34s -> 57s and local-checkpoint-native's 44s -> 113s, because restoring
+    and re-saving that much data costs more than bun spends fetching. Do not
+    re-add actions/cache here without measuring the step both ways. If this
+    becomes a bottleneck the thing to try is a Blacksmith sticky disk mounted at
+    node_modules, which avoids the tarball round-trip entirely.
+
+inputs:
+    working-directory:
+        description: Directory holding the bun.lock to install from.
+        required: false
+        default: "."
+
+runs:
+    using: composite
+    steps:
+        - run: bun install --frozen-lockfile
+          shell: bash
+          working-directory: ${{ inputs.working-directory }}

@@ -39,6 +39,7 @@ concurrency:
 jobs:
     sweep:
         runs-on: blacksmith-4vcpu-ubuntu-2404
+        timeout-minutes: 20
         # ⚠️ STOPGAP. This job borrows `pr-preview` purely to shape its Infisical
         # OIDC subject — it deploys nothing and reads no environment secrets.
         #
