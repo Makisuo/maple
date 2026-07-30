@@ -692,17 +692,94 @@ impl OrgRouting {
             paused_features: row.paused_features.clone(),
         }
     }
-
 }
+
+/// The Autumn featureId session replay meters as. A `&'static str` for the same
+/// reason `Signal::path()` is: it is simultaneously the billing feature, the
+/// spend-cap key, and the usage metric's `signal` dimension, and those three must
+/// never drift apart.
+const BROWSER_SESSIONS_FEATURE_ID: &str = "browser_sessions";
 
 /// Is this signal blocked by the org's own spend guardrails?
 ///
 /// `feature_id` is the Autumn featureId the signal meters as (`logs` / `traces` /
-/// `metrics`). A whole-org pause blocks everything; a cap blocks only its own
-/// signal. Shared by the OTLP and Cloudflare Logpush paths so the two can't
-/// diverge on what "paused" means.
+/// `metrics` / `browser_sessions`). A whole-org pause blocks everything; a cap
+/// blocks only its own signal. Shared by the OTLP, session-replay and Cloudflare
+/// Logpush paths so they can't diverge on what "paused" means.
 fn spend_blocks_signal(spend_paused: bool, paused_features: &[String], feature_id: &str) -> bool {
     spend_paused || paused_features.iter().any(|id| id == feature_id)
+}
+
+/// The 402 the org's own spend guardrails produce for `feature_id`, or `None`
+/// when it is clear to ingest.
+///
+/// The org's OWN ceiling, not the plan's: `paused_at` / `paused_features` are
+/// stamped on `org_spend_limits` by the API's hourly spend-limit cron, and are
+/// only ever set when the customer chose "pause ingest at limit". Checked before
+/// the Autumn entitlement because it needs no network call — the state arrived
+/// with the resolved key — and because a customer who asked us to stop spending
+/// their money should not wait on a billing-provider round-trip.
+///
+/// Never fails open into a pause: the cron leaves the previous state untouched
+/// when it can't price a cycle, and an org with no row is never paused.
+fn spend_limit_rejection(
+    org_id: &str,
+    spend_paused: bool,
+    paused_features: &[String],
+    feature_id: &str,
+) -> Option<ApiError> {
+    if !spend_blocks_signal(spend_paused, paused_features, feature_id) {
+        return None;
+    }
+    let by_cap = !spend_paused;
+    warn!(
+        org_id,
+        feature_id, by_cap, "Ingestion blocked: customer spend limit reached"
+    );
+    Some(ApiError::new(
+        StatusCode::PAYMENT_REQUIRED,
+        if by_cap {
+            "Per-feature volume cap reached for this billing cycle"
+        } else {
+            "Monthly spend limit reached; ingest paused by your organization's settings"
+        },
+    ))
+}
+
+/// The 402 Autumn's entitlement check produces for `feature_id`, or `None` when
+/// the org may ingest it.
+///
+/// Rejects when the org has no active subscription or has exhausted a hard-capped
+/// allotment. Fails open on any Autumn error (see `AutumnEntitlements::is_allowed`).
+/// Inert unless `AUTUMN_ENFORCE_LIMITS=true` and `AUTUMN_SECRET_KEY` is set.
+async fn entitlement_rejection(
+    state: &AppState,
+    org_id: &str,
+    // `&'static str` because `entitlement_internal_span` records it as a span
+    // field; every caller already has one (`Signal::path()`, the feature consts).
+    feature_id: &'static str,
+) -> Option<ApiError> {
+    let entitlements = state.autumn_entitlements.as_ref()?;
+    // Parent for the existing `autumn.check` client span, so a cache miss that
+    // blocks on Autumn is visible even when the HTTP call itself is fast.
+    let entitlement_span = entitlement_internal_span(feature_id);
+    let entitlement_span_handle = entitlement_span.clone();
+    let allowed = entitlements
+        .is_allowed(org_id, feature_id)
+        .instrument(entitlement_span)
+        .await;
+    entitlement_span_handle.record("maple.billing.allowed", allowed);
+    if allowed {
+        return None;
+    }
+    warn!(
+        org_id,
+        feature_id, "Ingestion blocked: plan limit reached or no active subscription"
+    );
+    Some(ApiError::new(
+        StatusCode::PAYMENT_REQUIRED,
+        "Plan limit reached or no active subscription",
+    ))
 }
 
 #[derive(Clone, Debug)]
@@ -1832,6 +1909,22 @@ async fn accept_grpc_decoded(
     resolved: &ResolvedIngestKey,
     decoded_bytes: usize,
 ) -> Result<(), tonic::Status> {
+    // The customer's own pause applies here even though this path is unbilled:
+    // "pause my ingest" has to mean every door, or an org that set a ceiling
+    // keeps ingesting over gRPC and never understands why. No entitlement check
+    // — gating an unbilled path on a balance it never decrements would be
+    // incoherent; see the note in the metering block below.
+    if resolved.org_id != SENTINEL_ORG_ID {
+        if let Some(error) = spend_limit_rejection(
+            &resolved.org_id,
+            resolved.spend_paused,
+            &resolved.paused_features,
+            signal.path(),
+        ) {
+            return Err(tonic::Status::resource_exhausted(error.message));
+        }
+    }
+
     let _org_inflight_permit = state
         .org_inflight_limiter
         .try_acquire(&resolved.org_id)
@@ -2115,6 +2208,27 @@ async fn handle_replay_meta_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
+    // Replay is metered to Autumn at the end of this function, so it has to be
+    // gated like every other billable signal: a `browser_sessions` cap that
+    // keeps billing is the worst way for a spend limit to fail. Same two gates,
+    // in the same order, as handle_signal_inner. The sentinel org is a synthetic
+    // probe, never billed and never blocked.
+    if org_id != SENTINEL_ORG_ID {
+        if let Some(error) = spend_limit_rejection(
+            &org_id,
+            resolved_key.spend_paused,
+            &resolved_key.paused_features,
+            BROWSER_SESSIONS_FEATURE_ID,
+        ) {
+            return Err(error);
+        }
+        if let Some(error) =
+            entitlement_rejection(state, &org_id, BROWSER_SESSIONS_FEATURE_ID).await
+        {
+            return Err(error);
+        }
+    }
+
     let pipeline = native_rows_pipeline_for(
         state,
         destination,
@@ -2253,6 +2367,22 @@ async fn handle_session_events_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
+    // Spend pause only, no entitlement check: distilled session events are not
+    // metered to Autumn, so gating them on a balance they never decrement would
+    // be incoherent. The customer's own pause is different — they asked us to
+    // stop writing their data, and honouring that only on the metadata endpoint
+    // would keep storing the bulk of the session anyway.
+    if org_id != SENTINEL_ORG_ID {
+        if let Some(error) = spend_limit_rejection(
+            &org_id,
+            resolved_key.spend_paused,
+            &resolved_key.paused_features,
+            BROWSER_SESSIONS_FEATURE_ID,
+        ) {
+            return Err(error);
+        }
+    }
+
     let pipeline = native_rows_pipeline_for(
         state,
         destination,
@@ -2368,6 +2498,20 @@ async fn handle_replay_blob_inner(
     );
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
+
+    // Spend pause only — see handle_session_events_inner: rrweb chunks are not
+    // metered, but they are the bulk of a session's bytes, so a pause that
+    // didn't cover them would barely be a pause.
+    if org_id != SENTINEL_ORG_ID {
+        if let Some(error) = spend_limit_rejection(
+            &org_id,
+            resolved_key.spend_paused,
+            &resolved_key.paused_features,
+            BROWSER_SESSIONS_FEATURE_ID,
+        ) {
+            return Err(error);
+        }
+    }
 
     let pipeline = native_rows_pipeline_for(
         state,
@@ -2732,74 +2876,20 @@ async fn handle_signal_inner(
         "Authenticated"
     );
 
-    // --- Customer-configured spend guardrails (per-signal) ---
-    // The org's OWN ceiling, not the plan's: `paused_at` / `paused_features` are
-    // stamped on `org_spend_limits` by the API's hourly spend-limit cron, and are
-    // only ever set when the customer chose "pause ingest at limit". Checked
-    // before the Autumn entitlement because it needs no network call — the state
-    // arrived with the resolved key — and because a customer who asked us to stop
-    // spending their money should not wait on a billing-provider round-trip.
-    //
-    // Never fails open into a pause: the cron leaves the previous state untouched
-    // when it can't price a cycle, and an org with no row is never paused.
-    {
-        let feature_id = signal.path();
-        if spend_blocks_signal(
-            resolved_key.spend_paused,
-            &resolved_key.paused_features,
-            feature_id,
-        ) {
-            let by_cap = !resolved_key.spend_paused;
-            warn!(
-                org_id = %resolved_key.org_id,
-                feature_id,
-                by_cap,
-                "Ingestion blocked: customer spend limit reached"
-            );
-            return Err((
-                ApiError::new(
-                    StatusCode::PAYMENT_REQUIRED,
-                    if by_cap {
-                        "Per-feature volume cap reached for this billing cycle"
-                    } else {
-                        "Monthly spend limit reached; ingest paused by your organization's settings"
-                    },
-                ),
-                "spend_limit",
-            ));
-        }
+    // --- Billing gates (per-signal) ---
+    // Customer's own spend guardrails first (no network), then the plan
+    // entitlement. Same pair, in the same order, as the session-replay path.
+    if let Some(error) = spend_limit_rejection(
+        &resolved_key.org_id,
+        resolved_key.spend_paused,
+        &resolved_key.paused_features,
+        signal.path(),
+    ) {
+        return Err((error, "spend_limit"));
     }
 
-    // --- Billing entitlement (per-signal) ---
-    // Reject ingestion when the org has no active subscription or has exhausted
-    // its hard-capped base-plan allotment for this signal. Fails open on any
-    // Autumn error (see AutumnEntitlements::is_allowed). Inert unless
-    // AUTUMN_ENFORCE_LIMITS=true and AUTUMN_SECRET_KEY is set.
-    if let Some(entitlements) = &state.autumn_entitlements {
-        let feature_id = signal.path();
-        // Parent for the existing `autumn.check` client span, so a cache miss
-        // that blocks on Autumn is visible even when the HTTP call itself is fast.
-        let entitlement_span = entitlement_internal_span(feature_id);
-        let entitlement_span_handle = entitlement_span.clone();
-        let allowed = entitlements
-            .is_allowed(&resolved_key.org_id, feature_id)
-            .instrument(entitlement_span)
-            .await;
-        entitlement_span_handle.record("maple.billing.allowed", allowed);
-        if !allowed {
-            warn!(
-                org_id = %resolved_key.org_id,
-                feature_id,
-                "Ingestion blocked: plan limit reached or no active subscription"
-            );
-            return Err((
-                ApiError::new(
-                    StatusCode::PAYMENT_REQUIRED,
-                    "Plan limit reached or no active subscription",
-                ),
-                "billing_limit",
-            ));
-        }
+    if let Some(error) = entitlement_rejection(state, &resolved_key.org_id, signal.path()).await {
+        return Err((error, "billing_limit"));
     }
 
     let _org_inflight_permit = state
@@ -5829,6 +5919,71 @@ mod tests {
             &resolved.paused_features,
             "traces"
         ));
+    }
+
+    #[test]
+    fn a_browser_sessions_cap_blocks_replay_without_touching_other_signals() {
+        // Replay is metered as `browser_sessions`, so the cap has to reach it —
+        // a cap that keeps billing is the worst way for a spend limit to fail.
+        let caps = vec![BROWSER_SESSIONS_FEATURE_ID.to_string()];
+
+        let rejection = spend_limit_rejection("org_1", false, &caps, BROWSER_SESSIONS_FEATURE_ID)
+            .expect("a browser_sessions cap must block replay");
+        assert_eq!(rejection.status, StatusCode::PAYMENT_REQUIRED);
+        assert!(rejection.message.contains("Per-feature volume cap"));
+
+        // And only replay: capping sessions must not stop trace ingestion.
+        assert!(spend_limit_rejection("org_1", false, &caps, "traces").is_none());
+
+        // A whole-org pause blocks replay too, with the ceiling's message.
+        let paused = spend_limit_rejection("org_1", true, &[], BROWSER_SESSIONS_FEATURE_ID)
+            .expect("a whole-org pause must block replay");
+        assert!(paused.message.contains("Monthly spend limit reached"));
+
+        // No guardrails configured — never blocked.
+        assert!(spend_limit_rejection("org_1", false, &[], BROWSER_SESSIONS_FEATURE_ID).is_none());
+    }
+
+    #[tokio::test]
+    async fn replay_metadata_is_rejected_and_unmetered_when_sessions_are_capped() {
+        // End-to-end on the handler: the 402 must land before the pipeline write
+        // and before the Autumn `track`, or we bill for data we refused.
+        let store = Arc::new(FakeKeyStore::default());
+        store.insert_private(
+            "maple_sk_test_replay_capped",
+            KeyRow {
+                org_id: "org_replay_capped".to_string(),
+                self_managed: false,
+                clickhouse_ready: false,
+                spend_paused: false,
+                paused_features: vec![BROWSER_SESSIONS_FEATURE_ID.to_string()],
+            },
+        );
+
+        let queue_dir = unique_main_test_dir("replay-capped");
+        let state = test_app_state(
+            store,
+            queue_dir.clone(),
+            "http://127.0.0.1:1".to_string(),
+            Duration::from_secs(30),
+        )
+        .await;
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            "Bearer maple_sk_test_replay_capped".parse().unwrap(),
+        );
+        let body = Bytes::from(r#"{"session_id":"s1","version":1,"status":"active"}"#.to_string());
+
+        let error = handle_replay_meta_inner(&state, &headers, body)
+            .await
+            .expect_err("a browser_sessions cap must reject replay metadata");
+        assert_eq!(error.status, StatusCode::PAYMENT_REQUIRED);
+
+        // `state.autumn_tracker` is None in tests, so the assertion that matters
+        // is structural: the gate returns before the metering block is reached.
+        let _ = std::fs::remove_dir_all(&queue_dir);
     }
 
     #[tokio::test]

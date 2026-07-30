@@ -66,12 +66,12 @@ const METERED_FEATURE_IDS = ["logs", "traces", "metrics", "browser_sessions"]
  * must not abandon the rest of the work-list, and it must not pause anyone:
  * without a fresh spend number we leave the previous state exactly as it was.
  */
-const evaluateOrg = Effect.fn("SpendLimitEvaluation.evaluateOrg")(function* (
+export const evaluateOrg = Effect.fn("SpendLimitEvaluation.evaluateOrg")(function* (
 	entry: ConfiguredSpendLimits,
 	deps: {
 		readonly callAutumn: ReturnType<typeof makeCallAutumn>
 		readonly edgeCache: Pick<EdgeCacheServiceShape, "getOrCompute">
-		readonly spendLimits: SpendLimitsServiceShape
+		readonly spendLimits: Pick<SpendLimitsServiceShape, "recordEvaluation">
 	},
 ) {
 	const orgId = decodeOrgId(entry.orgId)
@@ -111,15 +111,25 @@ const evaluateOrg = Effect.fn("SpendLimitEvaluation.evaluateOrg")(function* (
 	})
 
 	// A lower-bound estimate must never pause a customer: we'd be cutting off
-	// ingestion on a number we know is incomplete.
-	const breached = evaluation.breached && !evaluation.partial
+	// ingestion on a number we know is incomplete. That applies to per-feature
+	// caps exactly as it does to the ceiling — `exceededCaps` becomes
+	// `pausedFeatures` in the gateway, so letting it through on a partial
+	// estimate would pause on the very number the line above refuses to act on.
+	const trustworthy = !evaluation.partial
+	const breached = evaluation.breached && trustworthy
 
 	yield* deps.spendLimits.recordEvaluation(orgId, {
 		spendCents: evaluation.spendCents,
 		breached,
 		cycleStartMs: cycle.startMs,
-		notifiedThresholds: evaluation.crossedThresholds,
-		exceededCaps: evaluation.exceededCaps,
+		// Delivery isn't wired yet (see below), so nothing has been notified.
+		// Recording the crossings as notified would mean the first customer to
+		// hit a limit gets no warning at all: when delivery lands, every
+		// threshold already stamped this cycle is skipped forever. Stay empty
+		// until something actually sends — the crossing then re-detects each
+		// tick and fires once.
+		notifiedThresholds: [],
+		exceededCaps: trustworthy ? evaluation.exceededCaps : [],
 	})
 
 	yield* Effect.annotateCurrentSpan({
@@ -128,15 +138,16 @@ const evaluateOrg = Effect.fn("SpendLimitEvaluation.evaluateOrg")(function* (
 		"billing.limit_cents": entry.limits.monthlyLimitCents ?? 0,
 		"billing.breached": breached,
 		"billing.partial": evaluation.partial,
-		"billing.paused_features": evaluation.exceededCaps.join(","),
+		"billing.paused_features": (trustworthy ? evaluation.exceededCaps : []).join(","),
 	})
 
 	if (evaluation.newlyCrossedThresholds.length > 0) {
 		// Delivery (Slack / email to billing admins) is not wired yet — the
 		// existing NotificationDispatcher speaks alert-rule payloads and a spend
-		// alert needs its own. The crossing is still recorded so that when
-		// delivery lands, a threshold notifies once rather than replaying every
-		// tick from here to the end of the cycle.
+		// alert needs its own. Until it exists this log is the only signal, and
+		// it repeats every tick by design: nothing is stamped as notified, so
+		// the day delivery lands it fires for orgs already over their threshold
+		// instead of silently skipping them.
 		yield* Effect.logWarning("Spend limit threshold crossed").pipe(
 			Effect.annotateLogs({
 				orgId: entry.orgId,
