@@ -1,4 +1,5 @@
 import path from "node:path"
+import type { Output } from "alchemy"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
@@ -38,8 +39,12 @@ export interface CreateAlertingWorkerOptions {
 	 * error/anomaly/alert ticks all start investigations when an incident opens,
 	 * and `maybeEnqueueTriage` needs this binding to reach the agent — without it
 	 * every run is written straight to `failed` with `agent_unavailable`.
+	 *
+	 * `workerName` is an `Output` because it comes from a not-yet-applied worker
+	 * resource; the service binding below resolves it at apply time. Declaring it
+	 * as a bare `string` did not match what createChatFlueWorker actually returns.
 	 */
-	chatFlue: { workerName: string }
+	chatFlue: { workerName: string | Output<string> }
 }
 
 export const createAlertingWorker = ({ stage, mapleDb, chatFlue }: CreateAlertingWorkerOptions) =>
