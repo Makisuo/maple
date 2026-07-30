@@ -14,8 +14,81 @@ permissions:
     contents: read
 
 jobs:
+    # Which jobs are worth running for this diff. Every filter carries the `base`
+    # anchor, so a lockfile/turbo/tsconfig/workflow change re-enables everything.
+    #
+    # On push to main every output is forced true: paths-filter compares against the
+    # previous commit on push events, which is the wrong base for a merge commit, and
+    # main should get the full suite regardless.
+    changes:
+        name: Detect changes
+        runs-on: blacksmith-4vcpu-ubuntu-2404
+        timeout-minutes: 5
+        outputs:
+            ts: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ts == 'true' }}
+            cli: ${{ github.event_name != 'pull_request' || steps.filter.outputs.cli == 'true' }}
+            web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' }}
+            clickhouse: ${{ github.event_name != 'pull_request' || steps.filter.outputs.clickhouse == 'true' }}
+            shell: ${{ github.event_name != 'pull_request' || steps.filter.outputs.shell == 'true' }}
+            slack: ${{ github.event_name != 'pull_request' || steps.filter.outputs.slack == 'true' }}
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+              id: filter
+              with:
+                  filters: |
+                      base: &base
+                        - 'bun.lock'
+                        - 'package.json'
+                        - 'turbo.json'
+                        - 'tsconfig*.json'
+                        - 'mise.toml'
+                        - '.github/workflows/ci.yml'
+                        - '.github/actions/**'
+                      ts:
+                        - *base
+                        - 'apps/**'
+                        - 'packages/**'
+                        - 'lib/**'
+                        - 'scripts/**'
+                        - '!apps/ingest/**'
+                        - '!apps/slack-agent/**'
+                      cli:
+                        - *base
+                        - 'apps/cli/**'
+                        - 'apps/local-ui/**'
+                        - 'lib/**'
+                        - 'packages/**'
+                        - 'scripts/build-local-binary.sh'
+                      web:
+                        - *base
+                        - 'apps/web/**'
+                        - 'packages/ui/**'
+                        - 'packages/domain/**'
+                        - 'packages/query-engine/**'
+                      clickhouse:
+                        - *base
+                        - 'lib/clickhouse-builder/**'
+                        - 'apps/api/src/lib/**'
+                        - 'packages/db/**'
+                        - 'scripts/*clickhouse*'
+                      shell:
+                        - *base
+                        - 'scripts/*.sh'
+                        - 'apps/cli/test/*.sh'
+                      slack:
+                        - *base
+                        - 'apps/slack-agent/**'
+                        # The approval-list drift canary below fails when a mutating
+                        # MCP tool lands on the API side without being mirrored here,
+                        # so apps/api has to re-trigger this job. Do not narrow.
+                        - 'apps/api/**'
+
     typescript:
         name: TypeScript
+        needs: changes
+        if: ${{ needs.changes.outputs.ts == 'true' }}
         # 8 vCPU rather than 4: with `^typecheck` gone from turbo.json this job is a
         # wide fan of ~26 single-threaded `tsc` + ~15 vitest processes gated only by the
         # four tsdown builds, so it scales near-linearly to 8. Blacksmith bills per
@@ -65,6 +138,8 @@ jobs:
 
     slack-agent:
         name: Slack agent
+        needs: changes
+        if: ${{ needs.changes.outputs.slack == 'true' }}
         runs-on: blacksmith-4vcpu-ubuntu-2404
         timeout-minutes: 10
         steps:
@@ -90,6 +165,8 @@ jobs:
 
     clickhouse-schema-e2e:
         name: ClickHouse schema E2E (${{ matrix.clickhouse }})
+        needs: changes
+        if: ${{ needs.changes.outputs.clickhouse == 'true' }}
         runs-on: blacksmith-4vcpu-ubuntu-2404
         timeout-minutes: 20
         strategy:
@@ -154,6 +231,8 @@ jobs:
 
     shell:
         name: Shell
+        needs: changes
+        if: ${{ needs.changes.outputs.shell == 'true' }}
         runs-on: blacksmith-4vcpu-ubuntu-2404
         timeout-minutes: 5
         steps:
@@ -180,6 +259,8 @@ jobs:
 
     local-checkpoint-native:
         name: Local checkpoint native
+        needs: changes
+        if: ${{ needs.changes.outputs.cli == 'true' }}
         runs-on: blacksmith-4vcpu-ubuntu-2404
         timeout-minutes: 20
         steps:
@@ -219,6 +300,8 @@ jobs:
         # takes ~14s including the libchdb download. Uploading once and downloading
         # seven times is strictly slower.
         name: Local archive native (${{ matrix.probe }})
+        needs: changes
+        if: ${{ needs.changes.outputs.cli == 'true' }}
         runs-on: blacksmith-4vcpu-ubuntu-2404
         timeout-minutes: 20
         strategy:
@@ -303,6 +386,8 @@ jobs:
 
     service-map-perf:
         name: Service Map Perf
+        needs: changes
+        if: ${{ needs.changes.outputs.web == 'true' }}
         runs-on: blacksmith-4vcpu-ubuntu-2404
         timeout-minutes: 20
         steps:
@@ -364,6 +449,35 @@ jobs:
             # route (120 services / 400 edges at high traffic).
             - name: Run perf gate
               run: bun --filter=@maple/web test:perf
+
+    # The single required status check. Individual jobs above are path-filtered, and a
+    # skipped job never reports — so if any of them were required directly, branch
+    # protection would hang pending forever on PRs that legitimately skip them. This
+    # job always runs and collapses the fan-in to one result.
+    #
+    # `skipped` is deliberately absent from the failure condition; that is the point.
+    # Requires branch protection to require exactly "CI passed" and nothing else.
+    ci:
+        name: CI passed
+        runs-on: blacksmith-4vcpu-ubuntu-2404
+        timeout-minutes: 5
+        if: ${{ always() }}
+        needs:
+            - changes
+            - typescript
+            - slack-agent
+            - clickhouse-schema-e2e
+            - knip
+            - shell
+            - local-checkpoint-native
+            - local-archive-native
+            - service-map-perf
+        steps:
+            - name: Fail if any job failed or was cancelled
+              if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+              run: |
+                  echo "One or more CI jobs did not pass." >&2
+                  exit 1
 
     # Note: the `apps/ingest` Rust crate is built and tested by
     # `.github/workflows/ingest-rust-tests.yml`, which also runs the load
