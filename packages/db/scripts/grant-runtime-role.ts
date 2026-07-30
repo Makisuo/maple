@@ -75,6 +75,21 @@ const grantStatements = (role: string): readonly string[] => {
 		`GRANT USAGE ON SCHEMA public TO ${ident}`,
 		`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${ident}`,
 		`GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO ${ident}`,
+		// …and to PUBLIC, which is what actually keeps the fleet up.
+		//
+		// Granting the single named role is NOT sufficient. Prod has six
+		// `pscale_api_*` login roles; only the Hyperdrive one holds explicit
+		// grants, and every other consumer reads through PUBLIC — including the
+		// ingest gateway, which connects via PSBouncer (6432, no Hyperdrive) as a
+		// different role entirely. Every pre-existing table carries these PUBLIC
+		// grants, so a new table without them is the odd one out and breaks the
+		// gateway alone while the API and alerting keep working — which is exactly
+		// how the 2026-07-29 outage hid for 21.7h.
+		//
+		// PUBLIC is a keyword, not an identifier: it must never be quoted.
+		"GRANT USAGE ON SCHEMA public TO PUBLIC",
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO PUBLIC",
+		"GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO PUBLIC",
 	]
 }
 
