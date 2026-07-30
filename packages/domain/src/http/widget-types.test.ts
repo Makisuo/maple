@@ -119,8 +119,16 @@ describe("rawSqlDisplayTypeFor", () => {
 		expect(rawSqlDisplayTypeFor("gauge")).toBe("stat")
 	})
 
+	// Pinned: both are configured by their own panel, never by SQL, and the MCP
+	// tools have always rendered them as `line`. Giving `list` a `"table"` display
+	// type reads as an obvious improvement and is a silent behavior change.
 	it("falls back to line for types with no SQL rendering", () => {
 		expect(rawSqlDisplayTypeFor("markdown")).toBe("line")
+		expect(rawSqlDisplayTypeFor("list")).toBe("line")
+	})
+
+	it("falls back to line for a visualization it doesn't know", () => {
+		expect(rawSqlDisplayTypeFor("sankey")).toBe("line")
 	})
 })
 

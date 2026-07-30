@@ -226,7 +226,11 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		visualization: "list",
 		defaultLayout: WIDE_LAYOUT,
 		templateHeight: WIDE_TEMPLATE_HEIGHT,
-		rawSqlDisplayType: "table",
+		// Deliberately absent. A list is configured by `ListConfigPanel`, never by
+		// SQL — the widget editor hides the Raw SQL toggle for it — so it has no
+		// raw-SQL rendering and falls back to `line` like every other type without
+		// one. Giving it `"table"` looks right but silently changes what an
+		// MCP-created `visualization: "list"` + `sql` widget renders as.
 		ownedDisplayKeys: ["columns", "listDataSource", "listWhereClause", "listLimit", "listRootOnly"],
 		requiresGroupBy: false,
 		mcpExposed: true,
