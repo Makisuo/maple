@@ -272,7 +272,7 @@ describe("servicesFacetsQuery", () => {
 		const q = servicesFacetsQuery()
 		const { sql } = compileUnion(q, baseParams)
 		const unionCount = (sql.match(/UNION ALL/g) || []).length
-		expect(unionCount).toBe(9) // 10 branches → 9 UNION ALL separators (env, namespace, commit_sha, trace_service, logs_service, metrics_gauge, metrics_sum, metrics_histogram, catalog, usage)
+		expect(unionCount).toBe(9) // 10 branches (3 non-service + 7 service) → 9 UNION ALL separators
 		expect(sql).toContain("'environment' AS facetType")
 		expect(sql).toContain("'namespace' AS facetType")
 		expect(sql).toContain("'commit_sha' AS facetType")
