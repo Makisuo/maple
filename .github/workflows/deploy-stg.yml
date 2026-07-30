@@ -1,9 +1,11 @@
 name: Deploy STG (Cloudflare via Alchemy)
 
+# Gated on CI rather than `push: main` — see the note in deploy-prd.yml.
 on:
-    push:
-        branches:
-            - main
+    workflow_run:
+        workflows: ["CI"]
+        types: [completed]
+        branches: [main]
     workflow_dispatch:
 
 concurrency:
@@ -17,16 +19,20 @@ permissions:
 jobs:
     deploy-stg:
         runs-on: blacksmith-4vcpu-ubuntu-2404
+        timeout-minutes: 30
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
         environment: staging
         env:
             INFISICAL_ENV_SLUG: staging
             # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
             # reads COMMIT_SHA; web build reads VITE_COMMIT_SHA via Vite define).
-            COMMIT_SHA: ${{ github.sha }}
-            VITE_COMMIT_SHA: ${{ github.sha }}
+            COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+            VITE_COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         steps:
             - name: Checkout
               uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+              with:
+                  ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
             - name: Setup mise (toolchain)
               uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4

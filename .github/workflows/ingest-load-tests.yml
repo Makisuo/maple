@@ -35,6 +35,7 @@ jobs:
     load:
         name: OTLP protobuf load test
         runs-on: blacksmith-4vcpu-ubuntu-2404
+        timeout-minutes: 45
         defaults:
             run:
                 working-directory: apps/ingest
