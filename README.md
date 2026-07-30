@@ -163,6 +163,15 @@ Secrets source model (CI):
     - `CLERK_SECRET_KEY`
     - `CLERK_PUBLISHABLE_KEY`
     - `CLERK_JWT_KEY`
+- **`prod` only** — Bento (onboarding drip). `alchemy.run.ts` reads these inside a
+  `stage.kind === "prd"` guard, so a non-prod worker never receives them and
+  `BentoService` stays disabled there. Adding them to `staging`/`dev` has no
+  effect and defeats the containment — don't. Verify with
+  `infisical run --env=prod --silent -- bun run bento:check` (read-only; `--write`
+  additionally upserts one throwaway subscriber).
+    - `BENTO_SITE_UUID`
+    - `BENTO_PUBLISHABLE_KEY`
+    - `BENTO_SECRET_KEY`
 
 Setup note: the machine identity must have a **GitHub OIDC** auth method configured in Infisical (scoped to this repo, ideally to the `production`/`staging`/`pr-preview` GitHub environments) and read access to the project. The workflows select secrets via `project-slug` (`INFISICAL_PROJECT_SLUG`) and per-stage `env-slug` (`prod`/`staging`/`dev`).
 

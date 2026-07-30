@@ -208,7 +208,11 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				SERVICE_OPERATIONS_ROLLUP_ENABLED:
 					process.env.SERVICE_OPERATIONS_ROLLUP_ENABLED?.trim() || "false",
 				...optionalPlain("MAPLE_ENDPOINT"),
-				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
+				// Derived from the stage, deliberately NOT `optionalPlain` — that helper
+				// lets `process.env` win over the fallback, so a stray
+				// MAPLE_ENVIRONMENT=production in a pr-N deploy environment would open
+				// EmailService.emailAllowed on a stage that shares live org data.
+				MAPLE_ENVIRONMENT: resolveDeploymentEnvironment(stage),
 				...optionalPlain("COMMIT_SHA"),
 				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 				...optionalSecret("MAPLE_ROOT_PASSWORD"),

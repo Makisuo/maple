@@ -100,7 +100,12 @@ export const createAlertingWorker = ({ stage, mapleDb, chatFlue }: CreateAlertin
 				MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",
 				EMAIL_FROM: process.env.EMAIL_FROM?.trim() || "Maple <notifications@noreply.maple.dev>",
 				...optionalPlain("MAPLE_ENDPOINT"),
-				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
+				// Derived from the stage, deliberately NOT `optionalPlain` — that helper
+				// lets `process.env` win over the fallback, so a stray
+				// MAPLE_ENVIRONMENT=production in a pr-N deploy environment would open
+				// both email gates at once (the worker's scheduled() early-return and
+				// EmailService.emailAllowed both derive from this one value).
+				MAPLE_ENVIRONMENT: resolveDeploymentEnvironment(stage),
 				// Non-prod stages skip all crons (they share live org data via the prod
 				// DB); set to "1" on a stage to deliberately exercise crons there.
 				...optionalPlain("MAPLE_ALERTING_ALLOW_NONPROD"),
@@ -133,6 +138,27 @@ export const createAlertingWorker = ({ stage, mapleDb, chatFlue }: CreateAlertin
 				...optionalPlain("PLANETSCALE_OAUTH_AUTHORIZE_URL"),
 				...optionalPlain("PLANETSCALE_OAUTH_TOKEN_URL"),
 				...optionalPlain("MAPLE_PLANETSCALE_API_BASE_URL"),
+				// Bento (onboarding drip). Production credentials are attached prd-only
+				// for the same reason as the EMAIL binding above — but the reason is
+				// stronger here, because Bento is a plain HTTPS API rather than a
+				// binding, so a code-level gate is all that stands between a non-prod
+				// stage and real contacts. Credential scoping is what makes that
+				// unbypassable: non-prod stages get the `maple-nonprod` site (which has
+				// zero automations) or nothing, so even a fully defeated gate posts
+				// into an account that cannot send. Keep BENTO_* for the prod site out
+				// of any repo-wide/shared deploy environment.
+				...(stage.kind === "prd"
+					? {
+							...optionalPlain("BENTO_SITE_UUID"),
+							...optionalSecret("BENTO_PUBLISHABLE_KEY"),
+							...optionalSecret("BENTO_SECRET_KEY"),
+						}
+					: {}),
+				...optionalPlain("BENTO_API_BASE_URL"),
+				// Deliberately separate from MAPLE_ALERTING_ALLOW_NONPROD: exercising
+				// the crons on a stage must not imply permission to write contacts.
+				...optionalPlain("MAPLE_BENTO_ALLOW_NONPROD"),
+				...optionalPlain("MAPLE_BENTO_DRY_RUN"),
 			},
 		})
 

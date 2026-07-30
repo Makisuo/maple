@@ -36,6 +36,26 @@ export interface EnvShape {
 	readonly MAPLE_ORG_ID_OVERRIDE: Option.Option<string>
 	readonly AUTUMN_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly AUTUMN_API_URL: string
+	/**
+	 * Bento (bentonow.com) — owns the onboarding drip sequence. Credentials are
+	 * attached prd-only by alchemy and point at the `maple-prod` site; non-prod
+	 * stages get either nothing or the `maple-nonprod` site, which has zero
+	 * automations. That credential scoping — not a code check — is what replaces
+	 * the prd-only `EMAIL` binding as the guard that survives a bad env var.
+	 */
+	readonly BENTO_SITE_UUID: Option.Option<string>
+	/** Basic-auth username half. Still a credential — not public despite the name. */
+	readonly BENTO_PUBLISHABLE_KEY: Option.Option<Redacted.Redacted<string>>
+	readonly BENTO_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
+	readonly BENTO_API_BASE_URL: string
+	/**
+	 * Escape hatch for Bento sends outside production. Deliberately SEPARATE from
+	 * MAPLE_ALERTING_ALLOW_NONPROD: "run the crons on stg to debug the telemetry
+	 * query" is routine and must not imply "allowed to touch real contacts".
+	 */
+	readonly MAPLE_BENTO_ALLOW_NONPROD: string
+	/** Log the Bento payload instead of POSTing it (rollout step 3). */
+	readonly MAPLE_BENTO_DRY_RUN: string
 	readonly SD_INTERNAL_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly EMAIL_FROM: string
@@ -121,6 +141,12 @@ const envConfig = Config.all({
 	MAPLE_ORG_ID_OVERRIDE: optionalString("MAPLE_ORG_ID_OVERRIDE"),
 	AUTUMN_SECRET_KEY: optionalRedacted("AUTUMN_SECRET_KEY"),
 	AUTUMN_API_URL: stringWithDefault("AUTUMN_API_URL", "https://api.useautumn.com"),
+	BENTO_SITE_UUID: optionalString("BENTO_SITE_UUID"),
+	BENTO_PUBLISHABLE_KEY: optionalRedacted("BENTO_PUBLISHABLE_KEY"),
+	BENTO_SECRET_KEY: optionalRedacted("BENTO_SECRET_KEY"),
+	BENTO_API_BASE_URL: stringWithDefault("BENTO_API_BASE_URL", "https://app.bentonow.com/api/v1"),
+	MAPLE_BENTO_ALLOW_NONPROD: stringWithDefault("MAPLE_BENTO_ALLOW_NONPROD", "false"),
+	MAPLE_BENTO_DRY_RUN: stringWithDefault("MAPLE_BENTO_DRY_RUN", "false"),
 	SD_INTERNAL_TOKEN: optionalRedacted("SD_INTERNAL_TOKEN"),
 	INTERNAL_SERVICE_TOKEN: optionalRedacted("INTERNAL_SERVICE_TOKEN"),
 	EMAIL_FROM: stringWithDefault("EMAIL_FROM", "Maple <notifications@noreply.maple.dev>"),

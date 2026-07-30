@@ -1,6 +1,7 @@
 export { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 export { AlertRuntime, AlertsService } from "./services/AlertsService"
 export { AnomalyDetectionService } from "./services/AnomalyDetectionService"
+export { BentoService } from "./services/BentoService"
 export { BucketCacheService } from "@maple/query-engine/caching"
 export { CacheBackendLive } from "./lib/CacheBackendLive"
 export { CloudflareAnalyticsService } from "./services/CloudflareAnalyticsService"
