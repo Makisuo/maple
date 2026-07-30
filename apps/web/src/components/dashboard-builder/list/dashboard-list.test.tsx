@@ -50,6 +50,7 @@ const renderList = (props: Partial<React.ComponentProps<typeof DashboardList>> =
 			onDelete={vi.fn()}
 			onDuplicate={vi.fn()}
 			onExport={vi.fn()}
+			onSaveTags={vi.fn()}
 			onToggleFavorite={vi.fn()}
 			{...props}
 		/>,
@@ -105,6 +106,26 @@ describe("toolbar menus open without throwing", () => {
 		fireEvent.click(screen.getByRole("button", { name: "More actions for Checkout latency" }))
 		expect(screen.getByRole("menuitem", { name: "Export JSON" })).toBeTruthy()
 		expect(screen.getByRole("menuitem", { name: "Delete…" })).toBeTruthy()
+	})
+
+	it("edits tags from the row menu and reports them normalized", () => {
+		const onSaveTags = vi.fn()
+		renderList({ onSaveTags })
+		fireEvent.click(screen.getByRole("button", { name: "More actions for Checkout latency" }))
+		fireEvent.click(screen.getByRole("menuitem", { name: "Edit tags…" }))
+		const input = screen.getByLabelText("Add a tag")
+		fireEvent.change(input, { target: { value: "Cost" } })
+		fireEvent.keyDown(input, { key: "Enter" })
+		fireEvent.click(screen.getByRole("button", { name: "Save" }))
+		expect(onSaveTags).toHaveBeenCalledWith(expect.objectContaining({ id: "d1" }), ["api", "cost", "slo"])
+	})
+
+	it("disables the write actions in the row menu when the store is unreachable", () => {
+		renderList({ readOnly: true })
+		fireEvent.click(screen.getByRole("button", { name: "More actions for Checkout latency" }))
+		expect(
+			screen.getByRole("menuitem", { name: "Edit tags…" }).getAttribute("data-disabled"),
+		).not.toBeNull()
 	})
 
 	it("keeps the Tags control present but disabled when no dashboard has a tag", () => {

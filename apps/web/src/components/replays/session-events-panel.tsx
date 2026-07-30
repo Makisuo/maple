@@ -91,9 +91,7 @@ export function SessionRail({
 	const [tab, setTab] = React.useState<RailTab>("events")
 
 	return (
-		<section
-			className={cn("flex min-h-0 flex-col overflow-hidden border-border bg-card", className)}
-		>
+		<section className={cn("flex min-h-0 flex-col overflow-hidden border-border bg-card", className)}>
 			<div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
 				<RailTabButton active={tab === "events"} onClick={() => setTab("events")}>
 					Events
@@ -264,7 +262,10 @@ function eventTag(ev: EventRow): { label: string; tone: string } {
 		case "click":
 			return { label: "CLICK", tone: "text-warning-foreground" }
 		case "network":
-			return { label: ev.netMethod || "NET", tone: isFailedRequest(ev) ? "text-destructive" : "text-info-foreground" }
+			return {
+				label: ev.netMethod || "NET",
+				tone: isFailedRequest(ev) ? "text-destructive" : "text-info-foreground",
+			}
 		case "error":
 			return { label: "ERROR", tone: "text-destructive" }
 		case "console": {
@@ -295,9 +296,7 @@ function EventLine({ ev, showNetworkBar }: { ev: EventRow; showNetworkBar: boole
 				isError && "bg-destructive/5",
 			)}
 		>
-			{isError && (
-				<span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-destructive" />
-			)}
+			{isError && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-destructive" />}
 			<button
 				type="button"
 				onClick={() => seekTo(ev.timestamp)}
@@ -311,9 +310,7 @@ function EventLine({ ev, showNetworkBar }: { ev: EventRow; showNetworkBar: boole
 			</span>
 			<div className="min-w-0 flex-1">
 				{ev.type === "console" && (
-					<span className={cn(ev.level === "error" && "text-destructive")}>
-						{ev.message}
-					</span>
+					<span className={cn(ev.level === "error" && "text-destructive")}>{ev.message}</span>
 				)}
 				{ev.type === "network" && (
 					<span className="flex flex-col gap-1">
@@ -322,7 +319,12 @@ function EventLine({ ev, showNetworkBar }: { ev: EventRow; showNetworkBar: boole
 							<span className={cn("ml-auto shrink-0 font-semibold", statusTone(ev.netStatus))}>
 								{ev.netStatus || "ERR"}
 							</span>
-							<span className={cn("shrink-0", isError ? "font-semibold text-destructive" : "opacity-60")}>
+							<span
+								className={cn(
+									"shrink-0",
+									isError ? "font-semibold text-destructive" : "opacity-60",
+								)}
+							>
 								{formatNetDuration(ev.netDurationMs)}
 							</span>
 						</span>

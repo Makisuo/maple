@@ -10,10 +10,6 @@ interface StatWidgetProps {
 	dataState: WidgetDataState
 	display: WidgetDisplayConfig
 	mode: WidgetMode
-	onRemove?: () => void
-	onClone?: () => void
-	onConfigure?: () => void
-	onFix?: () => void
 }
 
 export function formatValue(value: unknown, unit?: string, prefix?: string, suffix?: string): string {
@@ -55,15 +51,7 @@ function StatSparklineLoader({ dataSource, color }: { dataSource: WidgetDataSour
 	return <StatSparkline data={data} color={color} className="h-10 w-full shrink-0" />
 }
 
-export const StatWidget = memo(function StatWidget({
-	dataState,
-	display,
-	mode,
-	onRemove,
-	onClone,
-	onConfigure,
-	onFix,
-}: StatWidgetProps) {
+export const StatWidget = memo(function StatWidget({ dataState, display, mode }: StatWidgetProps) {
 	const displayName = display.title || "Untitled"
 	const value = dataState.status === "ready" ? dataState.data : undefined
 	const formattedValue = formatValue(value, display.unit, display.prefix, display.suffix)
@@ -82,10 +70,6 @@ export const StatWidget = memo(function StatWidget({
 			title={displayName}
 			dataState={dataState}
 			mode={mode}
-			onRemove={onRemove}
-			onClone={onClone}
-			onConfigure={onConfigure}
-			onFix={onFix}
 			contentClassName={
 				sparklineSource
 					? "flex-1 min-h-0 flex flex-col"

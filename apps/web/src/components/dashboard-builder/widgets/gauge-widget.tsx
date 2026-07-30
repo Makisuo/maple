@@ -8,10 +8,6 @@ interface GaugeWidgetProps {
 	dataState: WidgetDataState
 	display: WidgetDisplayConfig
 	mode: WidgetMode
-	onRemove?: () => void
-	onClone?: () => void
-	onConfigure?: () => void
-	onFix?: () => void
 }
 
 // Geometry for a 270° segmented gauge drawn in a 240×212 viewBox.
@@ -72,15 +68,7 @@ function toNumber(value: unknown): number | null {
 	return Number.isFinite(num) ? num : null
 }
 
-export const GaugeWidget = memo(function GaugeWidget({
-	dataState,
-	display,
-	mode,
-	onRemove,
-	onClone,
-	onConfigure,
-	onFix,
-}: GaugeWidgetProps) {
+export const GaugeWidget = memo(function GaugeWidget({ dataState, display, mode }: GaugeWidgetProps) {
 	const glowId = useId().replace(/:/g, "")
 	const rawValue = dataState.status === "ready" ? dataState.data : undefined
 	const value = toNumber(rawValue)
@@ -142,10 +130,6 @@ export const GaugeWidget = memo(function GaugeWidget({
 			title={display.title || "Untitled"}
 			dataState={dataState}
 			mode={mode}
-			onRemove={onRemove}
-			onClone={onClone}
-			onConfigure={onConfigure}
-			onFix={onFix}
 			contentClassName="flex-1 min-h-0 flex items-center justify-center p-2"
 			loadingSkeleton={<ChartSkeleton variant="gauge" />}
 		>

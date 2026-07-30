@@ -93,6 +93,7 @@ const rowToUpdateRequest = (row: DashboardRow): V2DashboardUpdateParams => {
 		timeRange: dashboard.timeRange,
 		widgets: dashboard.widgets,
 		variables: dashboard.variables ?? [],
+		refreshIntervalSeconds: dashboard.refreshIntervalSeconds ?? null,
 	}
 }
 

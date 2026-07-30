@@ -7,8 +7,9 @@ import {
 	DashboardId,
 	IsoDateTimeString,
 	PortableDashboardDocument,
-	defaultWidgetHeight,
+	defaultWidgetLayout,
 } from "@maple/domain/http"
+import type { DashboardRefreshIntervalSeconds } from "@maple/domain/http"
 import type { V2DashboardMutation } from "@maple/domain/http/v2"
 import { useLiveQuery } from "@tanstack/react-db"
 import { runMapleApiV2 } from "@/lib/collections/api-runner"
@@ -132,6 +133,9 @@ const v2DashboardToDashboard = (value: V2DashboardMutation): Dashboard => ({
 	timeRange: value.timeRange,
 	widgets: [...value.widgets] as Dashboard["widgets"],
 	variables: [...value.variables] as Dashboard["variables"],
+	...(value.refreshIntervalSeconds !== null
+		? { refreshIntervalSeconds: value.refreshIntervalSeconds }
+		: {}),
 	createdAt: value.createdAt,
 	updatedAt: value.updatedAt,
 })
@@ -141,7 +145,7 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 	// the Schema.Class constructor rejects a present `undefined`. The web `Dashboard`
 	// carries them as optional and `ensureDashboard` stamps an explicit
 	// `tags: undefined`, so destructure them out of the spread and re-add only when set.
-	const { description, tags, variables, ...rest } = dashboard
+	const { description, tags, variables, refreshIntervalSeconds, ...rest } = dashboard
 	return new DashboardDocument({
 		...rest,
 		id: asDashboardId(dashboard.id),
@@ -150,6 +154,7 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 		...(description !== undefined && { description }),
 		...(tags !== undefined && { tags }),
 		...(variables !== undefined && { variables }),
+		...(refreshIntervalSeconds !== undefined && { refreshIntervalSeconds }),
 		timeRange:
 			dashboard.timeRange.type === "absolute"
 				? {
@@ -169,12 +174,13 @@ const jsonClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDashboardDocument {
 	// See `toDashboardDocument`: omit the optionalKey `description`/`tags`/`variables`
 	// rather than forwarding a present `undefined`, which the Schema.Class constructor rejects.
-	const { description, tags, variables, ...rest } = dashboard
+	const { description, tags, variables, refreshIntervalSeconds, ...rest } = dashboard
 	return new PortableDashboardDocument({
 		...rest,
 		...(description !== undefined && { description }),
 		...(tags !== undefined && { tags: [...tags] }),
 		...(variables !== undefined && { variables: jsonClone(variables) }),
+		...(refreshIntervalSeconds !== undefined && { refreshIntervalSeconds }),
 		widgets: jsonClone(dashboard.widgets),
 		timeRange:
 			dashboard.timeRange.type === "absolute"
@@ -225,6 +231,20 @@ function makeWidgetMutators(deps: {
 		}))
 	}
 
+	// `0` is the off sentinel and is stored as-is rather than deleting the key, so
+	// "explicitly off" survives a round-trip and reads differently in the version
+	// history from "never configured".
+	const updateDashboardRefreshInterval = (
+		id: string,
+		refreshIntervalSeconds: DashboardRefreshIntervalSeconds,
+	) => {
+		void mutateDashboard(id, (dashboard) => ({
+			...dashboard,
+			refreshIntervalSeconds,
+			updatedAt: new Date().toISOString(),
+		}))
+	}
+
 	const addWidget = (
 		dashboardId: string,
 		visualization: VisualizationType,
@@ -235,15 +255,7 @@ function makeWidgetMutators(deps: {
 			throw new Error("Dashboards are read-only")
 		}
 
-		const { h, minH } = defaultWidgetHeight(visualization)
-		const layoutDefaults =
-			visualization === "stat"
-				? // Deliberately taller than the `h: 2` stat tiles the templates use — a
-					// hand-added stat gets room for a sparkline.
-					{ w: 3, h: 4, minW: 2, minH }
-				: visualization === "table" || visualization === "list"
-					? { w: 6, h, minW: 3, minH }
-					: { w: 4, h, minW: 2, minH }
+		const layoutDefaults = defaultWidgetLayout(visualization)
 
 		// Build the widget synchronously from the current dashboard so we can
 		// return it to the caller. `mutateDashboard`'s updater runs asynchronously
@@ -432,6 +444,7 @@ function makeWidgetMutators(deps: {
 		updateDashboard,
 		updateDashboardTimeRange,
 		updateDashboardVariables,
+		updateDashboardRefreshInterval,
 		addWidget,
 		cloneWidget,
 		removeWidget,

@@ -1,4 +1,4 @@
-import { PortableDashboardDocument, defaultWidgetHeight } from "@maple/domain/http"
+import { PortableDashboardDocument, defaultWidgetLayout } from "@maple/domain/http"
 import { Schema } from "effect"
 
 import type { Dashboard, DashboardWidget, WidgetLayout } from "@/components/dashboard-builder/types"
@@ -54,19 +54,9 @@ function findNextWidgetPosition(widgets: DashboardWidget[], width: number) {
 
 function normalizeWidgetLayouts(widgets: DashboardWidget[]): DashboardWidget[] {
 	return widgets.reduce<DashboardWidget[]>((normalized, widget) => {
-		const { h, minH } = defaultWidgetHeight(widget.visualization)
-		const defaultLayout = {
-			w:
-				widget.visualization === "stat"
-					? 3
-					: widget.visualization === "table" || widget.visualization === "list"
-						? 6
-						: 4,
-			// Stats keep the taller hand-added height, matching `addWidget`.
-			h: widget.visualization === "stat" ? 4 : h,
-			minW: widget.visualization === "stat" ? 2 : 3,
-			minH,
-		}
+		// The same grid size the "Add widget" store hands a click-added widget, so
+		// an imported dashboard doesn't lay out differently from a built one.
+		const defaultLayout = defaultWidgetLayout(widget.visualization)
 
 		const layout = isWidgetLayout(widget.layout)
 			? widget.layout
@@ -92,6 +82,7 @@ export function toPortableDashboard(dashboard: Dashboard): PortableDashboard {
 		timeRange: clonePortableDashboard(dashboard.timeRange),
 		widgets: normalizeWidgetLayouts(clonePortableDashboard(dashboard.widgets)),
 		variables: dashboard.variables ? clonePortableDashboard(dashboard.variables) : undefined,
+		refreshIntervalSeconds: dashboard.refreshIntervalSeconds,
 	}
 }
 
@@ -113,6 +104,7 @@ export function parsePortableDashboardJson(json: string): PortableDashboard {
 		variables: decoded.variables
 			? clonePortableDashboard(decoded.variables as PortableDashboard["variables"])
 			: undefined,
+		refreshIntervalSeconds: decoded.refreshIntervalSeconds,
 		timeRange:
 			decoded.timeRange.type === "absolute"
 				? {

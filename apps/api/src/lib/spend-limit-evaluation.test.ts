@@ -56,7 +56,11 @@ const limits = (overrides: Partial<SpendLimits> = {}) =>
 		...overrides,
 	})
 
-const evaluate = (overrides: Parameters<typeof evaluateSpendLimits>[0] extends never ? never : Partial<Parameters<typeof evaluateSpendLimits>[0]>) =>
+const evaluate = (
+	overrides: Parameters<typeof evaluateSpendLimits>[0] extends never
+		? never
+		: Partial<Parameters<typeof evaluateSpendLimits>[0]>,
+) =>
 	evaluateSpendLimits({
 		limits: limits(),
 		customer: customerOn("startup"),

@@ -28,16 +28,6 @@ import { interpolateDisplayText } from "@/lib/dashboard-variables/interpolate"
 interface WidgetShellProps {
 	title: string
 	mode: WidgetMode
-	/**
-	 * Action callbacks. When omitted, they fall back to the nearest
-	 * `WidgetActionsProvider`; explicit props override context (used by the
-	 * widget lab, which renders widgets outside a dashboard provider).
-	 */
-	onRemove?: () => void
-	onClone?: () => void
-	onConfigure?: () => void
-	/** When set, a "Create alert" menu item is shown (in edit and view mode). */
-	onCreateAlert?: () => void
 	/** Headline stat rendered at the top-right of the card header. */
 	headerValue?: ReactNode
 	/** Summary stat rendered below the card content. */
@@ -49,20 +39,19 @@ interface WidgetShellProps {
 export function WidgetShell({
 	title,
 	mode,
-	onRemove,
-	onClone,
-	onConfigure,
-	onCreateAlert,
 	headerValue,
 	footer,
 	contentClassName,
 	children,
 }: WidgetShellProps) {
+	// Actions come from context only. They used to be optional props forwarded
+	// verbatim through every renderer, which meant a five-prop tail on all ten
+	// widget components that no dashboard call site ever passed.
 	const ctx = useWidgetActions()
-	const remove = onRemove ?? ctx?.remove
-	const clone = onClone ?? ctx?.clone
-	const configure = onConfigure ?? ctx?.configure
-	const createAlert = onCreateAlert ?? ctx?.createAlert
+	const remove = ctx?.remove
+	const clone = ctx?.clone
+	const configure = ctx?.configure
+	const createAlert = ctx?.createAlert
 	const isEditable = mode === "edit"
 	// The menu is also shown in view mode when "Create alert" is available, so
 	// alerts can be spun off a chart without entering dashboard edit mode.
@@ -200,16 +189,6 @@ interface WidgetFrameProps {
 	title: string
 	dataState: WidgetDataState
 	mode: WidgetMode
-	/**
-	 * Action callbacks. When omitted, they fall back to the nearest
-	 * `WidgetActionsProvider`; explicit props override context (used by the
-	 * widget lab, which renders widgets outside a dashboard provider).
-	 */
-	onRemove?: () => void
-	onClone?: () => void
-	onConfigure?: () => void
-	onCreateAlert?: () => void
-	onFix?: () => void
 	contentClassName?: string
 	loadingSkeleton: ReactNode
 	children: ReactNode
@@ -219,30 +198,16 @@ export function WidgetFrame({
 	title,
 	dataState,
 	mode,
-	onRemove,
-	onClone,
-	onConfigure,
-	onCreateAlert,
-	onFix,
 	contentClassName,
 	loadingSkeleton,
 	children,
 }: WidgetFrameProps) {
 	// `WidgetShell` resolves the menu actions against context itself; `fix`
 	// drives the inline error CTA below, so it is resolved here too.
-	const ctx = useWidgetActions()
-	const fix = onFix ?? ctx?.fix
+	const fix = useWidgetActions()?.fix
 
 	return (
-		<WidgetShell
-			title={title}
-			mode={mode}
-			onRemove={onRemove}
-			onClone={onClone}
-			onConfigure={onConfigure}
-			onCreateAlert={onCreateAlert}
-			contentClassName={contentClassName}
-		>
+		<WidgetShell title={title} mode={mode} contentClassName={contentClassName}>
 			{dataState.status === "loading" ? (
 				loadingSkeleton
 			) : dataState.status === "error" ? (

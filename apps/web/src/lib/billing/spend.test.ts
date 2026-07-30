@@ -59,8 +59,7 @@ const usage = {
 	browser_sessions: { sum: 26_700 },
 } as unknown as BillingUsage["total"]
 
-const model = () =>
-	buildSpendModel({ customer: buildCustomer(), plans: [startupPlan], usage, nowMs: NOW })
+const model = () => buildSpendModel({ customer: buildCustomer(), plans: [startupPlan], usage, nowMs: NOW })
 
 describe("buildSpendModel", () => {
 	it("prices base + overage and projects to cycle end", () => {

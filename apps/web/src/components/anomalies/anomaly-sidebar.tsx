@@ -203,20 +203,29 @@ export function AnomalySidebar({
 			) : null}
 
 			<DetailRail.Group label="Timing">
-				<DetailRail.Row label="First triggered" title={new Date(incident.firstTriggeredAt).toLocaleString()}>
+				<DetailRail.Row
+					label="First triggered"
+					title={new Date(incident.firstTriggeredAt).toLocaleString()}
+				>
 					<span className="text-right text-sm tabular-nums text-foreground">
 						{formatRelativeTime(incident.firstTriggeredAt)}
 					</span>
 				</DetailRail.Row>
 				{incident.reopenCount > 0 && incident.lastReopenedAt !== null ? (
-					<DetailRail.Row label="Reopened" title={new Date(incident.lastReopenedAt).toLocaleString()}>
+					<DetailRail.Row
+						label="Reopened"
+						title={new Date(incident.lastReopenedAt).toLocaleString()}
+					>
 						<span className="text-right text-sm tabular-nums text-muted-foreground">
 							{formatRelativeTime(incident.lastReopenedAt)}
 							{incident.reopenCount > 1 ? ` (×${incident.reopenCount})` : ""}
 						</span>
 					</DetailRail.Row>
 				) : null}
-				<DetailRail.Row label="Last triggered" title={new Date(incident.lastTriggeredAt).toLocaleString()}>
+				<DetailRail.Row
+					label="Last triggered"
+					title={new Date(incident.lastTriggeredAt).toLocaleString()}
+				>
 					<span className="text-right text-sm tabular-nums text-foreground">
 						{formatRelativeTime(incident.lastTriggeredAt)}
 					</span>
@@ -254,5 +263,3 @@ export function AnomalySidebar({
 		</div>
 	)
 }
-
-

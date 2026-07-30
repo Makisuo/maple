@@ -6,7 +6,7 @@ import "react-grid-layout/css/styles.css"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
 import { WidgetActionsProvider } from "@/components/dashboard-builder/widgets/widget-actions-context"
-import { visualizationFor } from "@/components/dashboard-builder/widgets/visualization-registry"
+import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
 import { useWidgetData } from "@/hooks/use-widget-data"
 
 interface DashboardCanvasProps {

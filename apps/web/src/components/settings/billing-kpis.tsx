@@ -127,7 +127,9 @@ export function BillingKpis({
 							/>
 						</div>
 						{pausedAt !== null && (
-							<p className="mt-2 text-[11px] text-severity-error">Ingest paused at this limit</p>
+							<p className="mt-2 text-[11px] text-severity-error">
+								Ingest paused at this limit
+							</p>
 						)}
 					</>
 				)}

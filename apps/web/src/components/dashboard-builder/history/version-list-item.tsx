@@ -11,6 +11,7 @@ const KIND_LABEL: Record<DashboardVersionChangeKind, string> = {
 	tags_changed: "Tags",
 	time_range_changed: "Time range",
 	variables_changed: "Variables",
+	refresh_interval_changed: "Auto-refresh",
 	widget_added: "Widget added",
 	widget_removed: "Widget removed",
 	widget_updated: "Widget updated",
@@ -28,6 +29,8 @@ const KIND_DOT: Record<DashboardVersionChangeKind, string> = {
 	tags_changed: "bg-chart-1",
 	time_range_changed: "bg-chart-2",
 	variables_changed: "bg-chart-2",
+	// Same family as the other view-state changes (time range, variables).
+	refresh_interval_changed: "bg-chart-2",
 	widget_added: "bg-chart-3",
 	widget_removed: "bg-severity-warn",
 	widget_updated: "bg-chart-4",

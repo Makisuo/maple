@@ -222,9 +222,7 @@ describe("evaluate with a raw_sql source", () => {
 				tenant,
 				rawRequest("sum"),
 			)
-			assert.deepStrictEqual(raw, [
-				{ groupKey: "all", value: 10, sampleCount: 10, hasData: true },
-			])
+			assert.deepStrictEqual(raw, [{ groupKey: "all", value: 10, sampleCount: 10, hasData: true }])
 		}),
 	)
 
@@ -232,13 +230,8 @@ describe("evaluate with a raw_sql source", () => {
 		Effect.gen(function* () {
 			// `hasData === sampleCount > 0` must hold for raw rows exactly as it does
 			// for the spec sources — that invariant is what the bucket codec assumes.
-			const raw = yield* makeQueryEngineEvaluate(rawStub([{ value: null }]))(
-				tenant,
-				rawRequest("sum"),
-			)
-			assert.deepStrictEqual(raw, [
-				{ groupKey: "all", value: null, sampleCount: 0, hasData: false },
-			])
+			const raw = yield* makeQueryEngineEvaluate(rawStub([{ value: null }]))(tenant, rawRequest("sum"))
+			assert.deepStrictEqual(raw, [{ groupKey: "all", value: null, sampleCount: 0, hasData: false }])
 		}),
 	)
 

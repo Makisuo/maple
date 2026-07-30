@@ -1,301 +1,65 @@
-import {
-	buildTimeseriesQuerySpec,
-	createQueryDraft,
-	formatFiltersAsWhereClause,
-	formulaLabel,
-	queryLabel,
-	type QueryBuilderDataSource,
-	type QueryBuilderFormulaDraft,
-	type QueryBuilderMetricType,
-	type QueryBuilderQueryDraft,
-} from "@/lib/query-builder/model"
+import { buildTimeseriesQuerySpec, createQueryDraft } from "@/lib/query-builder/model"
 import {
 	TRACE_DEFAULT_COLUMNS,
-	LOG_DEFAULT_COLUMNS,
 	type ListColumnDraft,
-	type ListDataSource,
 } from "@/components/dashboard-builder/config/list-config-panel"
 import type {
 	DashboardWidget,
-	ValueUnit,
-	VisualizationType,
 	WidgetDataSource,
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
-import type { LegendPosition } from "@/components/dashboard-builder/config/widget-settings-bar"
+import type { LegendPosition } from "@/components/dashboard-builder/config/settings-fields"
+import { widgetTypes } from "@/components/dashboard-builder/widgets/types"
 import { fromPanelType, toPanelType } from "@/lib/query-builder/panel-types"
 import {
-	normalizeKey,
-	parseBoolean,
-	parseWhereClause as parseWhereClauses,
-} from "@maple/query-engine/where-clause"
-
-export type StatAggregate = "sum" | "first" | "count" | "avg" | "max" | "min"
-
-export interface QueryBuilderWidgetState {
-	visualization: VisualizationType
-	title: string
-	description: string
-	chartId: string
-	stacked: boolean
-	curveType: "linear" | "monotone"
-	queries: QueryBuilderQueryDraft[]
-	formulas: QueryBuilderFormulaDraft[]
-	comparisonMode: "none" | "previous_period"
-	includePercentChange: boolean
-	debug: boolean
-	statAggregate: StatAggregate
-	statValueField: string
-	unit: ValueUnit
-	legendPosition: LegendPosition
-	seriesStatsEnabled: boolean
-	tableLimit: string
-	// Threshold lines (chart) / threshold coloring (stat, gauge)
-	thresholds: Array<{ value: number; color: string }>
-	// Gauge-specific
-	gaugeMin: string
-	gaugeMax: string
-	// Stat-specific: render a trend sparkline behind the value
-	sparklineEnabled: boolean
-	// List-specific
-	listDataSource: ListDataSource
-	listWhereClause: string
-	listLimit: string
-	listColumns: ListColumnDraft[]
-	listRootOnly: boolean
-	// Heatmap-specific
-	heatmapColorScale: "viridis" | "magma" | "cividis" | "blues" | "reds"
-	heatmapScaleType: "linear" | "log"
-	// Markdown-specific: the note body. Static — never hits the warehouse.
-	markdownContent: string
-}
+	deriveDefaultWidgetTitle,
+	hasActiveGroupBy,
+	inferDefaultUnitForQueries,
+	isVisibleQuery,
+	legacyQueryDraft,
+	loadQueryDrafts,
+	toHiddenSeriesBaseNames,
+	type BuildDataSourceContext,
+	type QueryBuilderWidgetState,
+} from "@/lib/query-builder/widget-builder-shared"
+import { WIDGET_TYPES } from "@maple/domain/http"
 
 /**
- * The numeric column a group-by-less histogram bucketizes client-side.
- *
- * Only traces expose one; logs and metrics have no per-row numeric field, so a
- * histogram over them must group by something instead (see `validateQueries`).
+ * Endpoints whose `params.queries` are query-builder drafts. Histograms with no
+ * group-by persist their raw value rows through the list endpoint — without it
+ * the preset's query is dropped the moment the widget is opened and replaced by
+ * the legacy fallback draft.
  */
-export function histogramValueColumn(dataSource: QueryBuilderDataSource): string | undefined {
-	return dataSource === "traces" ? "durationMs" : undefined
-}
+const QUERY_BUILDER_ENDPOINTS = new Set([
+	"custom_query_builder_timeseries",
+	"custom_query_builder_breakdown",
+	"custom_query_builder_list",
+])
 
-export function inferDisplayUnitForQuery(query: QueryBuilderQueryDraft): ValueUnit | undefined {
-	if (query.dataSource === "traces") {
-		if (query.aggregation === "error_rate") return "percent"
-		if (
-			query.aggregation === "avg_duration" ||
-			query.aggregation === "p50_duration" ||
-			query.aggregation === "p95_duration" ||
-			query.aggregation === "p99_duration"
-		) {
-			return "duration_ms"
-		}
-		if (query.aggregation === "count") return "number"
-		return undefined
-	}
+// ---------------------------------------------------------------------------
+// Lowering the widget editor's state to a persisted widget, and back.
+//
+// This module owns only what every widget type shares. The per-type halves live
+// in `components/dashboard-builder/widgets/types/*` — see `widget-type-registry`
+// for why. What used to be four if-chains over `state.visualization` is now four
+// dispatches through one registry.
+// ---------------------------------------------------------------------------
 
-	if (query.dataSource === "logs") {
-		return "number"
-	}
+export type { QueryBuilderWidgetState, StatAggregate } from "@/lib/query-builder/widget-builder-shared"
+export {
+	deriveDefaultWidgetTitle,
+	histogramValueColumn,
+	inferDefaultUnitForQueries,
+	inferDisplayUnitForQuery,
+	toSeriesFieldOptions,
+} from "@/lib/query-builder/widget-builder-shared"
 
-	if (query.dataSource === "metrics") {
-		const lower = query.metricName.toLowerCase()
-		if (/\b(error[._ -]?rate|percentage|percent)\b/.test(lower)) return "percent"
-		if (/[._](seconds|s)$/.test(lower) || /\b(duration[._]seconds)\b/.test(lower)) return "duration_s"
-		if (/\b(duration|latency|response[._]time)\b/.test(lower)) return "duration_ms"
-		if (/\b(bytes|memory|size)\b/.test(lower)) return "bytes"
-		if (query.aggregation === "rate") return "requests_per_sec"
-		if (
-			query.aggregation === "count" ||
-			query.aggregation === "sum" ||
-			query.aggregation === "avg" ||
-			query.aggregation === "min" ||
-			query.aggregation === "max" ||
-			query.aggregation === "increase"
-		) {
-			return "number"
-		}
-	}
+const definitionForState = (state: QueryBuilderWidgetState) =>
+	widgetTypes[toPanelType(state.visualization, state.chartId)]
 
-	return undefined
-}
-
-export function inferDefaultUnitForQueries(queries: QueryBuilderQueryDraft[]): ValueUnit | undefined {
-	const activeQueries = queries.filter((query) => query.enabled !== false && !query.hidden)
-	if (activeQueries.length === 0) return undefined
-
-	const inferredUnits = activeQueries.map(inferDisplayUnitForQuery)
-	const [firstUnit] = inferredUnits
-	if (!firstUnit) return undefined
-	return inferredUnits.every((unit) => unit === firstUnit) ? firstUnit : undefined
-}
-
-function parsePositiveNumber(raw: string): number | undefined {
-	const parsed = Number.parseInt(raw.trim(), 10)
-	if (!Number.isFinite(parsed) || parsed <= 0) return undefined
-	return parsed
-}
-
-function parseFiniteNumber(raw: string): number | undefined {
-	const trimmed = raw.trim()
-	if (trimmed.length === 0) return undefined
-	const parsed = Number(trimmed)
-	return Number.isFinite(parsed) ? parsed : undefined
-}
-
-function toQueryGroupByArray(groupBy: unknown): string[] {
-	if (Array.isArray(groupBy)) {
-		return groupBy.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-	}
-	return ["service.name"]
-}
-
-function toMetricType(input: unknown, fallback: QueryBuilderMetricType): QueryBuilderMetricType {
-	if (input === "sum" || input === "gauge" || input === "histogram" || input === "exponential_histogram")
-		return input
-	return fallback
-}
-
-function toStatAggregate(value: unknown): StatAggregate {
-	return value === "sum" ||
-		value === "first" ||
-		value === "count" ||
-		value === "avg" ||
-		value === "max" ||
-		value === "min"
-		? value
-		: "first"
-}
-
-function normalizeLoadedQuery(raw: QueryBuilderQueryDraft, index: number): QueryBuilderQueryDraft {
-	const base = createQueryDraft(index)
-	const source: QueryBuilderDataSource =
-		raw.dataSource === "traces" || raw.dataSource === "logs" || raw.dataSource === "metrics"
-			? raw.dataSource
-			: base.dataSource
-
-	const shared = {
-		id: raw.id || base.id,
-		name: raw.name || queryLabel(index),
-		enabled: raw.enabled ?? base.enabled,
-		hidden: raw.hidden ?? base.hidden,
-		whereClause: raw.whereClause ?? base.whereClause,
-		aggregation: raw.aggregation || base.aggregation,
-		stepInterval: raw.stepInterval ?? base.stepInterval,
-		orderByDirection: raw.orderByDirection ?? base.orderByDirection,
-		addOns: {
-			groupBy: raw.addOns?.groupBy ?? base.addOns.groupBy,
-			having: raw.addOns?.having ?? base.addOns.having,
-			orderBy: raw.addOns?.orderBy ?? base.addOns.orderBy,
-			limit: raw.addOns?.limit ?? base.addOns.limit,
-			legend: raw.addOns?.legend ?? base.addOns.legend,
-		},
-		groupBy: toQueryGroupByArray(raw.groupBy),
-		having: raw.having ?? base.having,
-		orderBy: raw.orderBy ?? base.orderBy,
-		limit: raw.limit ?? base.limit,
-		legend: raw.legend ?? base.legend,
-	}
-
-	if (source === "metrics") {
-		const metrics = raw.dataSource === "metrics" ? raw : undefined
-		return {
-			...shared,
-			dataSource: "metrics",
-			signalSource: metrics?.signalSource === "meter" ? "meter" : "default",
-			metricName: metrics?.metricName ?? "",
-			metricType: toMetricType(metrics?.metricType, "gauge"),
-			isMonotonic: metrics?.isMonotonic ?? metrics?.metricType === "sum",
-		}
-	}
-	return source === "logs" ? { ...shared, dataSource: "logs" } : { ...shared, dataSource: "traces" }
-}
-
-export function toSeriesFieldOptions(state: QueryBuilderWidgetState): string[] {
-	const usedNames = new Set<string>()
-	const options: string[] = []
-	const addUnique = (base: string) => {
-		if (!usedNames.has(base)) {
-			usedNames.add(base)
-			options.push(base)
-			return
-		}
-		let suffix = 2
-		while (usedNames.has(`${base} (${suffix})`)) suffix += 1
-		const next = `${base} (${suffix})`
-		usedNames.add(next)
-		options.push(next)
-	}
-	for (const query of state.queries) {
-		if (!query.hidden) addUnique(query.legend.trim() || query.name)
-	}
-	for (const formula of state.formulas) {
-		if (!formula.hidden) addUnique(formula.legend.trim() || formula.name)
-	}
-	return options
-}
-
-function isVisibleQuery(query: QueryBuilderQueryDraft): boolean {
-	return query.enabled !== false && !query.hidden
-}
-
-const TRACES_AGGREGATION_TITLES: Record<string, string> = {
-	count: "Count of traces",
-	avg_duration: "Avg duration",
-	p50_duration: "P50 duration",
-	p95_duration: "P95 duration",
-	p99_duration: "P99 duration",
-	error_rate: "Error rate",
-	apdex: "Apdex",
-}
-
-/**
- * Human-readable fallback title derived from the first visible query, e.g.
- * "Error rate by service.name" or "Count of logs by severity" — so widgets
- * added from the chart picker never render as "Untitled" (MAP-49).
- */
-export function deriveDefaultWidgetTitle(queries: readonly QueryBuilderQueryDraft[]): string {
-	const query = queries.find(isVisibleQuery) ?? queries[0]
-	if (!query) return "Untitled"
-
-	const groupBy = hasActiveGroupBy(query)
-		? query.groupBy
-				.map((g) => g.trim())
-				.filter((g) => g !== "" && g.toLowerCase() !== "none")
-				.join(", ")
-		: ""
-	const bySuffix = groupBy ? ` by ${groupBy}` : ""
-
-	if (query.dataSource === "metrics") {
-		const metric = query.metricName.trim()
-		if (!metric) return "Metric"
-		return `${query.aggregation} of ${metric}${bySuffix}`
-	}
-	if (query.dataSource === "logs") {
-		return `Count of logs${bySuffix}`
-	}
-	const base = TRACES_AGGREGATION_TITLES[query.aggregation] ?? `${query.aggregation} of traces`
-	return `${base}${bySuffix}`
-}
-
-function hasActiveGroupBy(query: QueryBuilderQueryDraft): boolean {
-	return (
-		query.addOns.groupBy &&
-		query.groupBy.some((g) => g.trim() !== "" && g.trim().toLowerCase() !== "none")
-	)
-}
-
-function toHiddenSeriesBaseNames(state: QueryBuilderWidgetState): string[] {
-	const names = new Set<string>()
-	for (const query of state.queries) {
-		if (query.hidden) names.add(query.legend.trim() || query.name)
-	}
-	for (const formula of state.formulas) {
-		if (formula.hidden) names.add(formula.legend.trim() || formula.name)
-	}
-	return [...names]
-}
+// ---------------------------------------------------------------------------
+// Persisted widget → editor state
+// ---------------------------------------------------------------------------
 
 export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState {
 	const params = (widget.dataSource.params ?? {}) as Record<string, unknown>
@@ -304,7 +68,15 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 			? (params.comparison as Record<string, unknown>)
 			: {}
 
-	const listDs = widget.display.listDataSource === "logs" ? ("logs" as const) : ("traces" as const)
+	// Normalize the (visualization, chartId) pair through the panel-type map on
+	// open. This repairs widgets corrupted by the old "Chart Style" dropdown —
+	// `visualization: "chart"` + `chartId: "query-builder-pie"` becomes a real pie
+	// widget — so the picker, the settings sections and the endpoint can't
+	// disagree about what the widget is.
+	const panelType = toPanelType(widget.visualization, widget.display.chartId)
+	const normalized = fromPanelType(panelType, widget.display.chartId)
+	const definition = widgetTypes[panelType]
+
 	const chartPresentation = widget.display.chartPresentation
 	const legendRaw = chartPresentation?.legend
 	const legendPosition: LegendPosition =
@@ -315,210 +87,104 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 				: legendRaw === "visible"
 					? "bottom"
 					: "hidden"
-	// The Min/Max/Mean/Last table is opt-in: it costs up to 45% of the widget's
-	// height, so a widget only shows it by asking for it. Widgets persisted before
-	// the flag existed carry no `seriesStats` and therefore lose the table — that
-	// is the intent, and re-ticking the box restores it per widget.
-	const seriesStatsEnabled = chartPresentation?.seriesStats ?? false
 
-	// Normalize the (visualization, chartId) pair through the panel-type map on
-	// open. This repairs widgets corrupted by the old "Chart Style" dropdown —
-	// `visualization: "chart"` + `chartId: "query-builder-pie"` becomes a real pie
-	// widget — so the picker, the settings sections and the endpoint can't
-	// disagree about what the widget is.
-	const normalized = fromPanelType(
-		toPanelType(widget.visualization, widget.display.chartId),
-		widget.display.chartId,
-	)
-
-	const baseFromWidget = {
+	const shared: QueryBuilderWidgetState = {
 		visualization: normalized.visualization,
 		title: widget.display.title ?? "",
 		description: widget.display.description ?? "",
 		chartId: normalized.chartId ?? "query-builder-line",
 		stacked: widget.display.stacked ?? false,
 		curveType: widget.display.curveType ?? "linear",
+		queries: [],
+		formulas: [],
 		comparisonMode: rawComparison.mode === "previous_period" ? "previous_period" : "none",
 		includePercentChange:
 			typeof rawComparison.includePercentChange === "boolean"
 				? rawComparison.includePercentChange
 				: true,
 		debug: params.debug === true,
-		statAggregate: toStatAggregate(widget.dataSource.transform?.reduceToValue?.aggregate),
-		statValueField: widget.dataSource.transform?.reduceToValue?.field ?? "",
-		unit:
-			widget.display.unit ??
-			inferDefaultUnitForQueries((params.queries as QueryBuilderQueryDraft[] | undefined) ?? []) ??
-			"number",
+		statAggregate: "first",
+		statValueField: "",
+		unit: widget.display.unit ?? inferDefaultUnitForQueries(loadQueryDrafts(params).queries) ?? "number",
 		legendPosition,
-		seriesStatsEnabled,
-		tableLimit:
-			typeof widget.dataSource.transform?.limit === "number"
-				? String(widget.dataSource.transform.limit)
-				: "",
-		listDataSource: listDs,
-		listWhereClause: widget.display.listWhereClause ?? "",
-		listLimit: typeof widget.display.listLimit === "number" ? String(widget.display.listLimit) : "",
-		listColumns: (widget.display.columns ??
-			(listDs === "logs" ? LOG_DEFAULT_COLUMNS : TRACE_DEFAULT_COLUMNS)) as ListColumnDraft[],
-		listRootOnly: widget.display.listRootOnly ?? true,
-		heatmapColorScale: widget.display.heatmap?.colorScale ?? "blues",
-		heatmapScaleType: widget.display.heatmap?.scaleType ?? "linear",
+		// The Min/Max/Mean/Last table is opt-in: it costs up to 45% of the widget's
+		// height, so a widget only shows it by asking for it. Widgets persisted
+		// before the flag existed carry no `seriesStats` and therefore lose the
+		// table — that is the intent, and re-ticking the box restores it.
+		seriesStatsEnabled: chartPresentation?.seriesStats ?? false,
+		tableLimit: "",
 		thresholds: (widget.display.thresholds ?? []).map((threshold) => ({
 			value: threshold.value,
 			color: threshold.color,
 		})),
-		gaugeMin: widget.display.gauge?.min != null ? String(widget.display.gauge.min) : "",
-		gaugeMax: widget.display.gauge?.max != null ? String(widget.display.gauge.max) : "",
-		sparklineEnabled: widget.display.sparkline?.enabled === true,
-		markdownContent: widget.display.markdown?.content ?? "",
-	} satisfies Omit<QueryBuilderWidgetState, "queries" | "formulas">
-
-	// List widgets don't use the query builder — return early with a dummy query
-	if (normalized.visualization === "list") {
-		return { ...baseFromWidget, queries: [createQueryDraft(0)], formulas: [] }
+		gaugeMin: "",
+		gaugeMax: "",
+		sparklineEnabled: false,
+		listDataSource: "traces",
+		listWhereClause: "",
+		listLimit: "",
+		listColumns: TRACE_DEFAULT_COLUMNS as ListColumnDraft[],
+		listRootOnly: true,
+		heatmapColorScale: "blues",
+		heatmapScaleType: "linear",
+		markdownContent: "",
+		...definition.initialState?.(widget),
 	}
 
-	if (
-		(widget.dataSource.endpoint === "custom_query_builder_timeseries" ||
-			widget.dataSource.endpoint === "custom_query_builder_breakdown" ||
-			// Histograms with no group-by persist their raw value rows through the
-			// list endpoint — without this the preset's query is dropped the moment
-			// the widget is opened, and replaced by the fallback draft below.
-			widget.dataSource.endpoint === "custom_query_builder_list") &&
-		Array.isArray(params.queries)
-	) {
-		const loadedQueries = params.queries
-			.filter(
-				(query): query is QueryBuilderQueryDraft =>
-					query != null &&
-					typeof query === "object" &&
-					typeof (query as QueryBuilderQueryDraft).id === "string" &&
-					typeof (query as QueryBuilderQueryDraft).whereClause === "string",
-			)
-			.map((query, index) => normalizeLoadedQuery(query, index))
-
-		const loadedFormulas = Array.isArray(params.formulas)
-			? params.formulas
-					.filter(
-						(formula): formula is QueryBuilderFormulaDraft =>
-							formula != null &&
-							typeof formula === "object" &&
-							typeof (formula as QueryBuilderFormulaDraft).id === "string" &&
-							typeof (formula as QueryBuilderFormulaDraft).expression === "string" &&
-							typeof (formula as QueryBuilderFormulaDraft).legend === "string",
-					)
-					.map((formula, index) => ({
-						...formula,
-						name: formula.name || formulaLabel(index),
-						hidden: formula.hidden ?? false,
-					}))
-			: []
-
-		if (loadedQueries.length > 0) {
-			return { ...baseFromWidget, queries: loadedQueries, formulas: loadedFormulas }
-		}
+	// A list is configured by `ListConfigPanel`, not the query builder; its draft
+	// query exists only to satisfy the state shape.
+	if (definition.queryEditor === "list") {
+		return { ...shared, queries: [createQueryDraft(0)], formulas: [] }
 	}
 
-	const fallbackQuery = createQueryDraft(0)
-	const source: QueryBuilderDataSource =
-		params.source === "traces" || params.source === "logs" || params.source === "metrics"
-			? params.source
-			: "traces"
-
-	const fallbackBase = {
-		id: fallbackQuery.id,
-		name: fallbackQuery.name,
-		enabled: fallbackQuery.enabled,
-		hidden: fallbackQuery.hidden,
-		whereClause: formatFiltersAsWhereClause(params),
-		aggregation: typeof params.metric === "string" ? params.metric : fallbackQuery.aggregation,
-		stepInterval:
-			typeof params.bucketSeconds === "number"
-				? String(params.bucketSeconds)
-				: fallbackQuery.stepInterval,
-		orderByDirection: fallbackQuery.orderByDirection,
-		addOns: {
-			...fallbackQuery.addOns,
-			groupBy: Array.isArray(params.groupBy) ? params.groupBy.length > 0 : false,
-		},
-		groupBy: toQueryGroupByArray(params.groupBy),
-		having: fallbackQuery.having,
-		orderBy: fallbackQuery.orderBy,
-		limit: fallbackQuery.limit,
-		legend: fallbackQuery.legend,
+	if (QUERY_BUILDER_ENDPOINTS.has(widget.dataSource.endpoint)) {
+		const { queries, formulas } = loadQueryDrafts(params)
+		if (queries.length > 0) return { ...shared, queries, formulas }
 	}
 
-	const filterRecord = params.filters as Record<string, unknown> | undefined
-	const fallback: QueryBuilderQueryDraft =
-		source === "metrics"
-			? {
-					...fallbackBase,
-					dataSource: "metrics",
-					signalSource: "default",
-					metricName: typeof filterRecord?.metricName === "string" ? filterRecord.metricName : "",
-					metricType: toMetricType(filterRecord?.metricType, "gauge"),
-					isMonotonic: false,
-				}
-			: source === "logs"
-				? { ...fallbackBase, dataSource: "logs" }
-				: { ...fallbackBase, dataSource: "traces" }
-
-	return { ...baseFromWidget, queries: [fallback], formulas: [] }
+	return { ...shared, queries: [legacyQueryDraft(params)], formulas: [] }
 }
 
-function buildListEndpointParams(
-	dataSource: ListDataSource,
-	whereClause: string,
-	limit: number,
-): Record<string, unknown> {
-	const { clauses } = parseWhereClauses(whereClause)
-	// NOTE: startTime/endTime are injected by useWidgetData from the dashboard
-	// time range — do NOT include them here or they'll clash with interpolation.
-	const params: Record<string, unknown> = { limit }
+// ---------------------------------------------------------------------------
+// Editor state → persisted widget
+// ---------------------------------------------------------------------------
 
-	if (dataSource === "traces") {
-		const attributeFilters: Array<{ key: string; value: string; matchMode?: string }> = []
-		const resourceAttributeFilters: Array<{ key: string; value: string; matchMode?: string }> = []
+/** The plain timeseries data source every query-driven type starts from. */
+function timeseriesDataSource(state: QueryBuilderWidgetState): {
+	base: WidgetDataSource
+	sharedTransform: WidgetDataSource["transform"]
+} {
+	const hiddenSeriesBaseNames = toHiddenSeriesBaseNames(state)
+	const sharedTransform =
+		hiddenSeriesBaseNames.length > 0 ? { hideSeries: { baseNames: hiddenSeriesBaseNames } } : undefined
 
-		for (const clause of clauses) {
-			const key = normalizeKey(clause.key)
-			if (key === "service.name") params.service = clause.value
-			else if (key === "span.name") params.spanName = clause.value
-			else if (key === "has_error") {
-				const b = parseBoolean(clause.value)
-				if (b != null) params.hasError = b
-			} else if (key === "root_only") {
-				const b = parseBoolean(clause.value)
-				if (b != null) params.rootOnly = b
-			} else if (key === "deployment.environment") params.deploymentEnv = clause.value
-			else if (key.startsWith("attr.")) {
-				attributeFilters.push({
-					key: key.slice(5),
-					value: clause.operator !== "exists" ? clause.value : "",
-					matchMode: clause.operator === "contains" ? "contains" : undefined,
-				})
-			} else if (key.startsWith("resource.")) {
-				resourceAttributeFilters.push({
-					key: key.slice(9),
-					value: clause.operator !== "exists" ? clause.value : "",
-					matchMode: clause.operator === "contains" ? "contains" : undefined,
-				})
-			}
-		}
-
-		if (attributeFilters.length > 0) params.attributeFilters = attributeFilters
-		if (resourceAttributeFilters.length > 0) params.resourceAttributeFilters = resourceAttributeFilters
-	} else {
-		for (const clause of clauses) {
-			const key = normalizeKey(clause.key)
-			if (key === "service.name") params.service = clause.value
-			else if (key === "severity") params.severity = clause.value
-			else if (key === "search" || key === "body") params.search = clause.value
-		}
+	return {
+		sharedTransform,
+		base: {
+			endpoint: "custom_query_builder_timeseries",
+			params: {
+				queries: state.queries,
+				formulas: state.formulas,
+				comparison: {
+					mode: state.comparisonMode,
+					includePercentChange: state.includePercentChange,
+				},
+				debug: state.debug,
+			},
+			transform: sharedTransform,
+		},
 	}
+}
 
-	return params
+function buildContext(state: QueryBuilderWidgetState, seriesFieldOptions: string[]): BuildDataSourceContext {
+	const { base, sharedTransform } = timeseriesDataSource(state)
+	return {
+		state,
+		base,
+		sharedTransform,
+		seriesFieldOptions,
+		visibleQueries: state.queries.filter(isVisibleQuery),
+	}
 }
 
 export function buildWidgetDataSource(
@@ -526,193 +192,25 @@ export function buildWidgetDataSource(
 	state: QueryBuilderWidgetState,
 	seriesFieldOptions: string[],
 ): WidgetDataSource {
-	// Notes are static — no warehouse round-trip at all.
-	if (state.visualization === "markdown") {
-		return { endpoint: "markdown_static" as const }
-	}
-
-	if (state.visualization === "list") {
-		const limit = parsePositiveNumber(state.listLimit) ?? 50
-		// For logs without rich filtering, fall back to the simple list_logs endpoint
-		if (state.listDataSource === "logs") {
-			return {
-				endpoint: "list_logs" as const,
-				params: buildListEndpointParams(state.listDataSource, state.listWhereClause, limit),
-			}
-		}
-		// For traces, use the query engine which supports full attr.* filtering
-		const listQuery = createQueryDraft(0)
-		// Inject root_only filter when toggle is on (enables MV usage for faster queries)
-		const effectiveWhereClause = state.listRootOnly
-			? state.listWhereClause.trim()
-				? `root_only = true AND ${state.listWhereClause}`
-				: "root_only = true"
-			: state.listWhereClause
-		const queryForEngine: QueryBuilderQueryDraft = {
-			...listQuery,
-			dataSource: state.listDataSource,
-			whereClause: effectiveWhereClause,
-			aggregation: "count", // required by the spec builder but unused for list
-		}
-		const columnFields = state.listColumns.flatMap((c) => (c.field ? [c.field] : []))
-		return {
-			endpoint: "custom_query_builder_list" as const,
-			params: {
-				queries: [queryForEngine],
-				limit,
-				columns: columnFields.length > 0 ? columnFields : undefined,
-			},
-		}
-	}
-
-	const hiddenSeriesBaseNames = toHiddenSeriesBaseNames(state)
-	const sharedTransform =
-		hiddenSeriesBaseNames.length > 0
-			? {
-					hideSeries: {
-						baseNames: hiddenSeriesBaseNames,
-					},
-				}
-			: undefined
-
-	const base: WidgetDataSource = {
-		endpoint: "custom_query_builder_timeseries",
-		params: {
-			queries: state.queries,
-			formulas: state.formulas,
-			comparison: {
-				mode: state.comparisonMode,
-				includePercentChange: state.includePercentChange,
-			},
-			debug: state.debug,
-		},
-		transform: sharedTransform,
-	}
-
-	// Stat and gauge both reduce the timeseries to a single scalar.
-	if (state.visualization === "stat" || state.visualization === "gauge") {
-		return {
-			...base,
-			transform: {
-				...sharedTransform,
-				reduceToValue: {
-					field: state.statValueField || seriesFieldOptions[0] || "A",
-					aggregate: state.statAggregate,
-				},
-			},
-		}
-	}
-
-	// A histogram is a *distribution*, so it has two legitimate shapes. Grouped,
-	// it's pre-bucketed `{name, value}` breakdown rows (one bar per group).
-	// Ungrouped, it's raw per-row values that the chart bucketizes client-side —
-	// which needs the list endpoint, because a count-by-group breakdown is not a
-	// duration distribution (MAP-49). Routing every histogram to `breakdown`
-	// silently converted the second kind into the first on Apply.
-	if (state.visualization === "histogram") {
-		const visibleQueries = state.queries.filter(isVisibleQuery)
-		if (!visibleQueries.some(hasActiveGroupBy)) {
-			const valueColumn = histogramValueColumn(visibleQueries[0]?.dataSource ?? "traces")
-			return {
-				endpoint: "custom_query_builder_list",
-				params: {
-					queries: visibleQueries,
-					limit: parsePositiveNumber(state.tableLimit) ?? 200,
-					...(valueColumn ? { columns: [valueColumn] } : {}),
-				},
-				transform: sharedTransform,
-			}
-		}
-	}
-
-	// Pie, histogram, funnel, and heatmap render a breakdown (one row per
-	// category) — they need the `breakdown` endpoint that returns
-	// `{name, value}[]`, not the timeseries endpoint that returns
-	// `{bucket, series}[]`. Without this, the widget silently calls the wrong
-	// endpoint and renders one row/slice per time bucket (uniform values,
-	// missing labels) instead of per group.
-	if (
-		state.visualization === "pie" ||
-		state.visualization === "histogram" ||
-		state.visualization === "funnel" ||
-		state.visualization === "heatmap"
-	) {
-		const visibleQueries = state.queries.filter(isVisibleQuery)
-		return {
-			endpoint: "custom_query_builder_breakdown",
-			// Deliberately NOT forwarding `state.formulas`. A formula is a timeseries
-			// expression with no meaning in a categorical breakdown, and
-			// `QueryBuilderBreakdownInputSchema` (api/warehouse/query-builder-breakdown.ts)
-			// accepts only startTime/endTime/queries — smuggling formulas through the
-			// params to preserve them across a reopen fails the request decode and
-			// leaves the widget stuck on its loading skeleton.
-			params: { queries: visibleQueries },
-			transform: sharedTransform,
-		}
-	}
-
-	if (state.visualization === "table") {
-		const limit = parsePositiveNumber(state.tableLimit)
-		const visibleQueries = state.queries.filter(isVisibleQuery)
-		const hasGroupBy = visibleQueries.some(hasActiveGroupBy)
-
-		if (hasGroupBy) {
-			return {
-				endpoint: "custom_query_builder_breakdown",
-				params: { queries: visibleQueries },
-				transform: limit ? { limit } : undefined,
-			}
-		}
-
-		if (!limit) return base
-		return {
-			...base,
-			transform: {
-				...sharedTransform,
-				limit,
-			},
-		}
-	}
-
-	return base
+	return definitionForState(state).buildDataSource(buildContext(state, seriesFieldOptions))
 }
 
 /**
- * Display keys owned by exactly one visualization. `buildWidgetDisplay` clears
- * all of them before the per-visualization branches write back the ones the new
- * visualization actually owns, so nothing leaks across a type switch.
+ * Display keys owned by a panel type. Cleared before the type writes back the
+ * ones it owns, so nothing leaks across a type switch — a line chart switched to
+ * Pie must not keep `chartId: "query-builder-line"`, because the pie renderer's
+ * `?? "query-builder-pie"` fallback never fires on a defined-but-wrong id and it
+ * would mount a line chart over breakdown rows.
  */
 const OWNED_DISPLAY_KEYS = [
-	"chartId",
-	"stacked",
-	"curveType",
-	"markdown",
-	"gauge",
-	"heatmap",
-	"sparkline",
-	"thresholds",
-	"columns",
-	"listDataSource",
-	"listWhereClause",
-	"listLimit",
-	"listRootOnly",
-] as const satisfies ReadonlyArray<keyof WidgetDisplayConfig>
+	...new Set(Object.values(WIDGET_TYPES).flatMap((meta) => meta.ownedDisplayKeys)),
+] as ReadonlyArray<keyof WidgetDisplayConfig>
 
 export function buildWidgetDisplay(
 	widget: DashboardWidget,
 	state: QueryBuilderWidgetState,
 ): WidgetDisplayConfig {
-	if (state.visualization === "list") {
-		return {
-			title: state.title.trim() || undefined,
-			description: state.description.trim() || undefined,
-			listDataSource: state.listDataSource,
-			listWhereClause: state.listWhereClause,
-			listLimit: parsePositiveNumber(state.listLimit) ?? 25,
-			listRootOnly: state.listRootOnly,
-			columns: state.listColumns.length > 0 ? state.listColumns : undefined,
-		}
-	}
+	const definition = definitionForState(state)
 
 	const legendValue =
 		state.legendPosition === "hidden"
@@ -721,15 +219,16 @@ export function buildWidgetDisplay(
 				? ("right" as const)
 				: ("visible" as const)
 
-	const display: WidgetDisplayConfig = {
+	const base: WidgetDisplayConfig = {
 		...widget.display,
 		// Query-driven widgets saved without a title get a derived one
 		// ("Error rate by service.name") instead of rendering as "Untitled".
+		// Lists and notes have no queries to derive from.
 		title: state.title.trim()
 			? state.title.trim()
-			: state.visualization === "markdown"
-				? undefined
-				: deriveDefaultWidgetTitle(state.queries),
+			: definition.queryEditor === "builder"
+				? deriveDefaultWidgetTitle(state.queries)
+				: undefined,
 		description: state.description.trim() || undefined,
 		chartPresentation: {
 			...widget.display.chartPresentation,
@@ -738,98 +237,35 @@ export function buildWidgetDisplay(
 		},
 	}
 
-	// Spreading `widget.display` carries over every key the PREVIOUS visualization
-	// owned, so each per-visualization key has to be cleared unless the new
-	// visualization writes it below. Leaving `chartId` behind was the worst case:
-	// a line chart switched to Pie kept `chartId: "query-builder-line"`, and
-	// `pie-widget.tsx`'s `?? "query-builder-pie"` fallback never fires on a
-	// defined-but-wrong id — so it mounted a line chart over breakdown rows.
 	for (const key of OWNED_DISPLAY_KEYS) {
-		delete display[key]
+		delete base[key]
 	}
 
-	// Every visualization that mounts a chartRegistry component gets an id, not
-	// just `chart` — canonical for the panel type, or the state's own id when it
+	// Every type that mounts a chartRegistry component gets an id, not just
+	// `chart` — canonical for the panel type, or the state's own id when it
 	// already belongs to that panel (preserving styles like `latency-line`).
 	const { chartId } = fromPanelType(toPanelType(state.visualization, state.chartId), state.chartId)
-	if (chartId) display.chartId = chartId
+	if (chartId) base.chartId = chartId
 
-	if (state.visualization === "chart") {
-		display.stacked = state.stacked
-		display.curveType = state.curveType
-		display.unit = state.unit
-	}
-	if (state.visualization === "stat") {
-		display.unit = state.unit
-		display.sparkline = state.sparklineEnabled
-			? {
-					enabled: true,
-					// The sparkline reuses the stat's query as a raw timeseries —
-					// i.e. the same data source minus the scalar reduceToValue.
-					dataSource: buildWidgetDataSource(widget, { ...state, visualization: "chart" }, []),
-				}
-			: undefined
-	}
-	if (state.visualization === "gauge") {
-		display.unit = state.unit
-		const min = parseFiniteNumber(state.gaugeMin)
-		const max = parseFiniteNumber(state.gaugeMax)
-		display.gauge = {
-			min: min ?? 0,
-			max: max ?? 100,
-		}
-	}
-	if (
-		state.visualization === "chart" ||
-		state.visualization === "stat" ||
-		state.visualization === "gauge"
-	) {
-		display.thresholds =
-			state.thresholds.length > 0
-				? state.thresholds.map((threshold) => ({
-						value: threshold.value,
-						color: threshold.color,
-					}))
-				: undefined
-	}
-	if (state.visualization === "heatmap") {
-		display.heatmap = {
-			colorScale: state.heatmapColorScale,
-			scaleType: state.heatmapScaleType,
-		}
-	}
-	if (state.visualization === "markdown") {
-		display.markdown = { content: state.markdownContent }
-	}
-	if (state.visualization === "table") {
-		const groupByQuery = state.queries.find((query) => isVisibleQuery(query) && hasActiveGroupBy(query))
-		if (groupByQuery) {
-			const groupLabel =
-				groupByQuery.groupBy.find((g) => g.trim() && g.trim().toLowerCase() !== "none") ?? "name"
-			display.columns = [
-				{ field: "name", header: groupLabel, align: "left" as const },
-				{
-					field: "value",
-					header: groupByQuery.aggregation ?? "value",
-					unit: inferDisplayUnitForQuery(groupByQuery) ?? "number",
-					align: "right" as const,
-				},
-			]
-		} else {
-			display.columns = undefined
-		}
-	}
-	return display
+	return definition.buildDisplay({
+		widget,
+		state,
+		base,
+		timeseriesDataSource: timeseriesDataSource(state).base,
+	})
 }
 
-/** Visualizations whose data comes from the group-by breakdown endpoint. */
-const BREAKDOWN_VISUALIZATIONS = ["pie", "funnel", "heatmap"] as const
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
 
 export function validateQueries(state: QueryBuilderWidgetState): string | null {
+	const definition = definitionForState(state)
+
 	// Neither uses the query builder — a list is configured by ListConfigPanel and
 	// a note doesn't query at all, so validating their placeholder draft would
 	// block Apply on an error the user has no panel to fix.
-	if (state.visualization === "list" || state.visualization === "markdown") return null
+	if (definition.queryEditor !== "builder") return null
 
 	const activeQueries = state.queries.filter((query) => query.enabled !== false)
 	if (activeQueries.length === 0) return "Add at least one query"
@@ -838,27 +274,15 @@ export function validateQueries(state: QueryBuilderWidgetState): string | null {
 		if (!built.query) return `${query.name}: ${built.error ?? "invalid query"}`
 	}
 
-	// Pie/funnel/heatmap lower to a breakdown, which requires a group-by. Catching
-	// it here surfaces the existing inline message and disables Apply, instead of
-	// letting the server error land as a tile after Run Preview.
-	if ((BREAKDOWN_VISUALIZATIONS as ReadonlyArray<string>).includes(state.visualization)) {
-		if (!activeQueries.filter(isVisibleQuery).some(hasActiveGroupBy)) {
-			return "This visualization groups data into categories — add a group-by field"
-		}
+	const visibleQueries = activeQueries.filter(isVisibleQuery)
+
+	// Types that lower to a breakdown render one row per category, so without a
+	// group-by they render one row per time bucket. Catching it here surfaces the
+	// inline message and disables Apply, instead of letting the server error land
+	// as a tile after Run Preview.
+	if (definition.meta.requiresGroupBy && !visibleQueries.some(hasActiveGroupBy)) {
+		return "This visualization groups data into categories — add a group-by field"
 	}
 
-	// A histogram either groups (pre-bucketed bars) or bucketizes raw per-row
-	// values client-side. The latter needs a numeric column, which only traces
-	// have — an ungrouped logs/metrics histogram would render nothing.
-	if (state.visualization === "histogram") {
-		const visibleQueries = activeQueries.filter(isVisibleQuery)
-		if (!visibleQueries.some(hasActiveGroupBy)) {
-			const unsupported = visibleQueries.find((query) => !histogramValueColumn(query.dataSource))
-			if (unsupported) {
-				return `${unsupported.name}: a ${unsupported.dataSource} histogram needs a group-by field`
-			}
-		}
-	}
-
-	return null
+	return definition.validate?.({ state, activeQueries, visibleQueries }) ?? null
 }

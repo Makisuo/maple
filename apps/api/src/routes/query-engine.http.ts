@@ -2525,19 +2525,19 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// "N of M" the list prints can never disagree with the rows above it.
 					const countCompiled = CH.compile(
 						CH.listPodsSummaryQuery({
-								search: payload.search,
-								podNames: payload.podNames,
-								namespaces: payload.namespaces,
-								nodeNames: payload.nodeNames,
-								clusters: payload.clusters,
-								deployments: payload.deployments,
-								statefulsets: payload.statefulsets,
-								daemonsets: payload.daemonsets,
-								jobs: payload.jobs,
-								environments: payload.environments,
-								computeTypes: payload.computeTypes,
-								workloadKind: payload.workloadKind,
-								workloadName: payload.workloadName,
+							search: payload.search,
+							podNames: payload.podNames,
+							namespaces: payload.namespaces,
+							nodeNames: payload.nodeNames,
+							clusters: payload.clusters,
+							deployments: payload.deployments,
+							statefulsets: payload.statefulsets,
+							daemonsets: payload.daemonsets,
+							jobs: payload.jobs,
+							environments: payload.environments,
+							computeTypes: payload.computeTypes,
+							workloadKind: payload.workloadKind,
+							workloadName: payload.workloadName,
 						}),
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 						{ rowSchema: CH.ListPodsSummaryOutputSchema },
@@ -2545,7 +2545,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const [rows, countRow] = yield* Effect.all(
 						[
 							mapExecError(
-								warehouse.compiledQuery(tenant, compiled, { profile: "list", context: "listPods" }),
+								warehouse.compiledQuery(tenant, compiled, {
+									profile: "list",
+									context: "listPods",
+								}),
 								"listPods query failed",
 							),
 							mapExecError(
@@ -2592,13 +2595,13 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							Number(
 								payload.scope === "saturated"
 									? countRow?.saturatedPods
-								: payload.scope === "elevated"
-									? countRow?.elevatedPods
-								: payload.scope === "unbounded"
-									? countRow?.unboundedPods
-								: payload.scope === "stale"
-									? countRow?.stalePods
-								: countRow?.totalPods,
+									: payload.scope === "elevated"
+										? countRow?.elevatedPods
+										: payload.scope === "unbounded"
+											? countRow?.unboundedPods
+											: payload.scope === "stale"
+												? countRow?.stalePods
+												: countRow?.totalPods,
 							) ||
 							// A failed count must not render as "0 of 0" under a list with rows.
 							typedRows.length,

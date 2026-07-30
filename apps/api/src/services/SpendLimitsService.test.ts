@@ -80,9 +80,7 @@ describe("SpendLimitsService", () => {
 
 	const readRows = (testDb: TestDb, orgId: string) =>
 		testDb.pglite
-			.query<{ updated_by: string | null }>("SELECT * FROM org_spend_limits WHERE org_id = $1", [
-				orgId,
-			])
+			.query<{ updated_by: string | null }>("SELECT * FROM org_spend_limits WHERE org_id = $1", [orgId])
 			.then((result) => result.rows)
 
 	it.effect("returns notify-only defaults for an org that has never configured limits", () => {
@@ -152,7 +150,11 @@ describe("SpendLimitsService", () => {
 
 				// The gateway reads this row directly, so a mode change that left
 				// `paused_at` set would keep 402ing until the next cron tick.
-				const unpaused = yield* service.update(orgId, request({ enforcementMode: "notify" }), "user_1")
+				const unpaused = yield* service.update(
+					orgId,
+					request({ enforcementMode: "notify" }),
+					"user_1",
+				)
 				expect(unpaused.pausedAt).toBeNull()
 			}),
 		)

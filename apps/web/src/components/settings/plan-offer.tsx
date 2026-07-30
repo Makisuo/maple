@@ -54,13 +54,7 @@ export function PlanOfferSkeleton() {
  * plan. Their plan is not for sale, so it can never come from the catalog — the
  * numbers here are their own, from the expanded subscription plus balances.
  */
-function CustomPlanPlate({
-	model,
-	onManageBilling,
-}: {
-	model: SpendModel
-	onManageBilling: () => void
-}) {
+function CustomPlanPlate({ model, onManageBilling }: { model: SpendModel; onManageBilling: () => void }) {
 	const price = model.basePlan?.price?.amount
 	const interval = model.basePlan?.price?.interval ?? "month"
 	// A hard-capped plan bills nothing past its allotments, so "+ usage" would be
@@ -121,9 +115,7 @@ function CustomPlanPlate({
 				<Button variant="outline" size="sm" onClick={onManageBilling}>
 					Manage plan
 				</Button>
-				<p className="text-center text-[11px] text-muted-foreground">
-					Invoices and payment method
-				</p>
+				<p className="text-center text-[11px] text-muted-foreground">Invoices and payment method</p>
 			</div>
 		</div>
 	)
@@ -171,9 +163,7 @@ export function PlanOffer({
 			toast.success("Plan updated successfully.")
 			refreshCustomer()
 		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Something went wrong. Please try again.",
-			)
+			toast.error(error instanceof Error ? error.message : "Something went wrong. Please try again.")
 		} finally {
 			setAttaching(null)
 		}
@@ -181,9 +171,7 @@ export function PlanOffer({
 
 	return (
 		<div className="space-y-3">
-			{showCustomPlate && model && (
-				<CustomPlanPlate model={model} onManageBilling={onManageBilling} />
-			)}
+			{showCustomPlate && model && <CustomPlanPlate model={model} onManageBilling={onManageBilling} />}
 			{offers.map((plan) => {
 				const isActive = !showCustomPlate && plan.customerEligibility?.status === "active"
 				const trialAvailable = plan.customerEligibility?.trialAvailable === true
@@ -235,10 +223,7 @@ export function PlanOffer({
 									{addOns.map((addOn) => {
 										const addOnActive = addOn.customerEligibility?.status === "active"
 										return (
-											<p
-												key={addOn.id}
-												className="text-[11px] text-muted-foreground"
-											>
+											<p key={addOn.id} className="text-[11px] text-muted-foreground">
 												{addOnActive ? "Add-on active · " : "Add-on available · "}
 												{addOn.name}
 												{addOn.price?.amount != null &&
@@ -298,9 +283,7 @@ export function PlanOffer({
 						variant="outline"
 						size="sm"
 						className="border-primary/40 text-primary hover:bg-primary/10"
-						onClick={() =>
-							window.open(ENTERPRISE_CALL_URL, "_blank", "noopener,noreferrer")
-						}
+						onClick={() => window.open(ENTERPRISE_CALL_URL, "_blank", "noopener,noreferrer")}
 					>
 						Talk to the founder →
 					</Button>

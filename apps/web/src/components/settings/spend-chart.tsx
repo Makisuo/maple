@@ -68,12 +68,7 @@ export function SpendChart({
 	// The y-domain must contain the limit line and the projection, or the two
 	// things the chart exists to compare would sit off-canvas.
 	const yMax = useMemo(() => {
-		const peak = Math.max(
-			projected,
-			limitDollars ?? 0,
-			...data.map((point) => point.total ?? 0),
-			1,
-		)
+		const peak = Math.max(projected, limitDollars ?? 0, ...data.map((point) => point.total ?? 0), 1)
 		return Math.ceil((peak * 1.1) / 10) * 10
 	}, [data, limitDollars, projected])
 
@@ -173,9 +168,7 @@ export function SpendChart({
 											timeZone: "UTC",
 										})
 									}
-									formatter={(value) =>
-										formatCurrency(Number(value), model.currency)
-									}
+									formatter={(value) => formatCurrency(Number(value), model.currency)}
 								/>
 							}
 						/>

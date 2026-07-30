@@ -136,10 +136,9 @@ describe("resolveSubscriptionPlan", () => {
 			price: { amount: 19 },
 			items: [{ featureId: "logs", included: 50, price: { amount: 0.1 } }],
 		}
-		const resolved = resolveSubscriptionPlan(
-			{ planId: "startup", status: "active", plan: own },
-			[catalogStartup],
-		)
+		const resolved = resolveSubscriptionPlan({ planId: "startup", status: "active", plan: own }, [
+			catalogStartup,
+		])
 
 		expect(resolved?.price?.amount).toBe(19)
 		expect(resolved?.items?.[0]?.included).toBe(50)

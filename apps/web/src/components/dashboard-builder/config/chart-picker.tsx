@@ -14,279 +14,102 @@ import type {
 	WidgetDataSource,
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
-import {
-	statPresets,
-	tablePresets,
-	listPresets,
-	piePresets,
-	funnelPresets,
-	histogramPresets,
-	heatmapPresets,
-	markdownPresets,
-	type WidgetPresetDefinition,
-} from "@/components/dashboard-builder/widgets/widget-definitions"
-import { formatValue } from "@/components/dashboard-builder/widgets/stat-widget"
-import { formatCellValue } from "@/components/dashboard-builder/widgets/table-widget"
+import type { WidgetPresetDefinition } from "@/components/dashboard-builder/widgets/widget-definitions"
+import { widgetTypeList } from "@/components/dashboard-builder/widgets/types"
 import { createQueryDraft } from "@/lib/query-builder/model"
 import { deriveDefaultWidgetTitle } from "@/lib/query-builder/widget-builder-utils"
 
-type ChartCategory = "bar" | "area" | "line"
+// ---------------------------------------------------------------------------
+// "Add widget".
+//
+// Every section but the first is a widget type's `presets` rendered with its
+// `PresetPreview`, so the picker gains a tab the moment a type declares presets.
+// This used to be nine hand-written sections behind nine parallel `showX`
+// booleans, with the sample data for four of them inlined here.
+//
+// Charts are the exception: line/bar/area have no presets because they are the
+// blank starting point, so their section offers the three chart styles directly.
+// ---------------------------------------------------------------------------
 
-const categoryDefaults: Array<{
-	category: ChartCategory
-	chartId: string
-	previewChartId: string
-	label: string
-}> = [
-	{ category: "bar", chartId: "query-builder-bar", previewChartId: "default-bar", label: "Bar Chart" },
-	{ category: "area", chartId: "query-builder-area", previewChartId: "gradient-area", label: "Area Chart" },
-	{ category: "line", chartId: "query-builder-line", previewChartId: "dotted-line", label: "Line Chart" },
+const CHART_STYLES = [
+	{
+		chartId: "query-builder-bar",
+		previewChartId: "default-bar",
+		label: "Bar Chart",
+		description: "Compare values across categories",
+	},
+	{
+		chartId: "query-builder-area",
+		previewChartId: "gradient-area",
+		label: "Area Chart",
+		description: "Visualize trends over time",
+	},
+	{
+		chartId: "query-builder-line",
+		previewChartId: "dotted-line",
+		label: "Line Chart",
+		description: "Track metrics over time",
+	},
 ]
 
-type PickerTab =
-	| "all"
-	| "charts"
-	| "stats"
-	| "tables"
-	| "lists"
-	| "pies"
-	| "funnels"
-	| "histograms"
-	| "heatmaps"
-	| "notes"
+/** Sections after "Charts": one per widget type that ships presets. */
+const PRESET_SECTIONS = widgetTypeList
+	.filter((definition) => definition.presets.length > 0 && definition.PresetPreview)
+	.map((definition) => ({
+		id: definition.meta.panelType,
+		// "Pie" → "Pies", "Note" → "Notes".
+		label: `${definition.meta.label}s`,
+		presets: definition.presets,
+		Preview: definition.PresetPreview!,
+	}))
 
-const tabs: { id: PickerTab; label: string }[] = [
+const TABS = [
 	{ id: "all", label: "All" },
 	{ id: "charts", label: "Charts" },
-	{ id: "pies", label: "Pies" },
-	{ id: "funnels", label: "Funnels" },
-	{ id: "histograms", label: "Histograms" },
-	{ id: "heatmaps", label: "Heatmaps" },
-	{ id: "stats", label: "Stats" },
-	{ id: "tables", label: "Tables" },
-	{ id: "lists", label: "Lists" },
-	{ id: "notes", label: "Notes" },
+	...PRESET_SECTIONS.map((section) => ({ id: section.id, label: section.label })),
 ]
 
-const chartDescriptions: Record<string, string> = {
-	"query-builder-bar": "Compare values across categories",
-	"query-builder-area": "Visualize trends over time",
-	"query-builder-line": "Track metrics over time",
-}
-
-// Sample values for stat previews
-const statSampleValues: Record<string, number> = {
-	"stat-total-traces": 48293,
-	"stat-total-logs": 124817,
-	"stat-error-rate": 0.032,
-	"stat-total-errors": 1247,
-	"stat-total-services": 12,
-}
-
-// Sample rows for list previews
-const listSampleRows: Record<string, Record<string, unknown>[]> = {
-	"list-traces": [
-		{ serviceName: "api-gw", spanName: "GET /api/users", durationMs: 142, statusCode: "Ok" },
-		{ serviceName: "order-svc", spanName: "POST /api/orders", durationMs: 891, statusCode: "Error" },
-		{ serviceName: "api-gw", spanName: "GET /api/health", durationMs: 3, statusCode: "Ok" },
-	],
-	"list-error-traces": [
-		{ serviceName: "order-svc", spanName: "POST /api/orders", durationMs: 891, statusCode: "Error" },
-		{ serviceName: "auth-svc", spanName: "GET /api/auth", durationMs: 2301, statusCode: "Error" },
-		{ serviceName: "item-svc", spanName: "PUT /api/items", durationMs: 445, statusCode: "Error" },
-	],
-	"list-logs": [
-		{ timestamp: "12:04:23", severityText: "ERROR", serviceName: "api-gw", body: "Connection refused" },
-		{ timestamp: "12:04:21", severityText: "WARN", serviceName: "user-svc", body: "Slow query" },
-		{ timestamp: "12:04:19", severityText: "INFO", serviceName: "api-gw", body: "Request handled" },
-	],
-}
-
-// Sample rows for table previews
-const tableSampleRows: Record<string, Record<string, unknown>[]> = {
-	"table-traces": [
-		{ serviceName: "api-gw", spanName: "GET /api/users", durationMs: 142, hasError: false },
-		{ serviceName: "order-svc", spanName: "POST /api/orders", durationMs: 891, hasError: true },
-		{ serviceName: "api-gw", spanName: "GET /api/health", durationMs: 3, hasError: false },
-	],
-	"table-errors": [
-		{ errorType: "ConnectionTimeout", count: 342, affectedServicesCount: 5 },
-		{ errorType: "NullPointerException", count: 128, affectedServicesCount: 3 },
-		{ errorType: "RateLimitExceeded", count: 87, affectedServicesCount: 2 },
-	],
-	"table-services": [
-		{ serviceName: "api-gateway", p95LatencyMs: 245, errorRate: 2.1, throughput: 1250 },
-		{ serviceName: "user-service", p95LatencyMs: 89, errorRate: 0.4, throughput: 830 },
-		{ serviceName: "order-service", p95LatencyMs: 412, errorRate: 5.2, throughput: 340 },
-	],
-}
-
-function StatPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
-	const sampleValue = statSampleValues[preset.id] ?? 0
-	const formatted = formatValue(
-		sampleValue,
-		preset.display.unit,
-		preset.display.prefix,
-		preset.display.suffix,
-	)
-
+function PickerCard({
+	title,
+	description,
+	onClick,
+	children,
+}: {
+	title: string
+	description?: string
+	onClick: () => void
+	children: React.ReactNode
+}) {
 	return (
-		<div className="aspect-[4/3] flex flex-col items-center justify-center gap-1.5">
-			<div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
-			<div className="text-lg font-bold">{formatted}</div>
-		</div>
+		<button
+			type="button"
+			onClick={onClick}
+			className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
+		>
+			{children}
+			<div className="flex flex-col gap-0.5">
+				<div className="text-xs font-medium">{title}</div>
+				{description && <div className="text-[11px] text-dim">{description}</div>}
+			</div>
+		</button>
 	)
 }
 
-function TablePreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
-	const rows = tableSampleRows[preset.id] ?? []
-	const columns = preset.display.columns ?? []
-
+function PickerSection({
+	title,
+	showHeading,
+	children,
+}: {
+	title: string
+	showHeading: boolean
+	children: React.ReactNode
+}) {
 	return (
-		<div className="aspect-[4/3] flex flex-col overflow-hidden">
-			<div className="text-[10px] text-muted-foreground mb-1 px-0.5">{preset.display.title}</div>
-			<table className="w-full text-[9px]">
-				<thead>
-					<tr className="border-b border-border">
-						{columns.map((col) => (
-							<th
-								key={col.field}
-								className="px-1 py-0.5 font-medium text-muted-foreground"
-								style={{ textAlign: col.align ?? "left" }}
-							>
-								{col.header}
-							</th>
-						))}
-					</tr>
-				</thead>
-				<tbody>
-					{rows.map((row, i) => (
-						<tr key={i} className="border-b border-border/50">
-							{columns.map((col) => (
-								<td
-									key={col.field}
-									className="px-1 py-0.5 truncate max-w-[80px]"
-									style={{ textAlign: col.align ?? "left" }}
-								>
-									{formatCellValue(row[col.field], col.unit)}
-								</td>
-							))}
-						</tr>
-					))}
-				</tbody>
-			</table>
-		</div>
-	)
-}
-
-function PiePreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
-	const entry = getChartById(preset.display.chartId ?? "query-builder-pie")
-	if (!entry) return <div className="aspect-[4/3]" />
-	const Component = entry.component
-	return (
-		<div className="aspect-[4/3] flex flex-col gap-1.5">
-			<div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
-			<ChartPreview component={Component} data={entry.sampleData} />
-		</div>
-	)
-}
-
-function FunnelPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
-	const entry = getChartById(preset.display.chartId ?? "query-builder-funnel")
-	if (!entry) return <div className="aspect-[4/3]" />
-	const Component = entry.component
-	return (
-		<div className="aspect-[4/3] flex flex-col gap-1.5">
-			<div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
-			<ChartPreview component={Component} data={entry.sampleData} />
-		</div>
-	)
-}
-
-function HistogramPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
-	const entry = getChartById(preset.display.chartId ?? "query-builder-histogram")
-	if (!entry) return <div className="aspect-[4/3]" />
-	const Component = entry.component
-	return (
-		<div className="aspect-[4/3] flex flex-col gap-1.5">
-			<div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
-			<ChartPreview component={Component} data={entry.sampleData} />
-		</div>
-	)
-}
-
-function HeatmapPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
-	const entry = getChartById(preset.display.chartId ?? "query-builder-heatmap")
-	if (!entry) return <div className="aspect-[4/3]" />
-	const Component = entry.component
-	return (
-		<div className="aspect-[4/3] flex flex-col gap-1.5">
-			<div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
-			<ChartPreview component={Component} data={entry.sampleData} />
-		</div>
-	)
-}
-
-function MarkdownPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
-	const content = preset.display.markdown?.content ?? ""
-	const lines = content
-		.split("\n")
-		.filter((l) => l.trim().length > 0)
-		.slice(0, 4)
-	return (
-		<div className="aspect-[4/3] flex flex-col gap-1 overflow-hidden p-1">
-			<div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
-			{lines.map((line, i) => (
-				<div
-					key={i}
-					className={`text-[9px] ${
-						line.startsWith("#") ? "font-semibold" : "text-muted-foreground"
-					} truncate`}
-				>
-					{line.replace(/^#+\s*/, "").replace(/[*`]/g, "")}
-				</div>
-			))}
-		</div>
-	)
-}
-
-function ListPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
-	const rows = listSampleRows[preset.id] ?? []
-	const columns = preset.display.columns ?? []
-
-	return (
-		<div className="aspect-[4/3] flex flex-col overflow-hidden">
-			<div className="text-[10px] text-muted-foreground mb-1 px-0.5">{preset.display.title}</div>
-			<table className="w-full text-[9px]">
-				<thead>
-					<tr className="border-b border-border">
-						{columns.map((col) => (
-							<th
-								key={col.field}
-								className="px-1 py-0.5 font-medium text-muted-foreground"
-								style={{ textAlign: col.align ?? "left" }}
-							>
-								{col.header}
-							</th>
-						))}
-					</tr>
-				</thead>
-				<tbody>
-					{rows.map((row, i) => (
-						<tr key={i} className="border-b border-border/50">
-							{columns.map((col) => (
-								<td
-									key={col.field}
-									className="px-1 py-0.5 truncate max-w-[80px]"
-									style={{ textAlign: col.align ?? "left" }}
-								>
-									{formatCellValue(row[col.field], col.unit)}
-								</td>
-							))}
-						</tr>
-					))}
-				</tbody>
-			</table>
+		<div className="flex flex-col gap-3">
+			{showHeading && (
+				<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">{title}</h3>
+			)}
+			<div className="grid grid-cols-3 gap-3">{children}</div>
 		</div>
 	)
 }
@@ -302,7 +125,9 @@ interface WidgetPickerProps {
 }
 
 export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps) {
-	const [activeTab, setActiveTab] = useState<PickerTab>("all")
+	const [activeTab, setActiveTab] = useState<string>("all")
+	const isVisible = (id: string) => activeTab === "all" || activeTab === id
+	const showHeading = activeTab === "all"
 
 	const handleSelectChart = (chartId: string) => {
 		const draft = createQueryDraft(0)
@@ -313,10 +138,7 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 				params: {
 					queries: [draft],
 					formulas: [],
-					comparison: {
-						mode: "none",
-						includePercentChange: true,
-					},
+					comparison: { mode: "none", includePercentChange: true },
 					debug: false,
 				},
 			},
@@ -332,16 +154,6 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 		onOpenChange(false)
 	}
 
-	const showCharts = activeTab === "all" || activeTab === "charts"
-	const showStats = activeTab === "all" || activeTab === "stats"
-	const showTables = activeTab === "all" || activeTab === "tables"
-	const showLists = activeTab === "all" || activeTab === "lists"
-	const showPies = activeTab === "all" || activeTab === "pies"
-	const showFunnels = activeTab === "all" || activeTab === "funnels"
-	const showHistograms = activeTab === "all" || activeTab === "histograms"
-	const showHeatmaps = activeTab === "all" || activeTab === "heatmaps"
-	const showNotes = activeTab === "all" || activeTab === "notes"
-
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="sm:max-w-3xl">
@@ -353,7 +165,7 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 				</DialogHeader>
 
 				<div className="flex gap-0 border-b border-border">
-					{tabs.map((tab) => (
+					{TABS.map((tab) => (
 						<button
 							key={tab.id}
 							type="button"
@@ -370,279 +182,39 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 				</div>
 
 				<div className="flex flex-col gap-5 max-h-[60vh] overflow-y-auto py-5 px-4">
-					{showCharts && (
-						<div className="flex flex-col gap-3">
-							{activeTab === "all" && (
-								<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
-									Charts
-								</h3>
-							)}
-							<div className="grid grid-cols-3 gap-3">
-								{categoryDefaults.map(({ chartId, previewChartId, label }) => {
-									const entry = getChartById(previewChartId)
-									if (!entry) return null
-									const Component = entry.component
-
-									return (
-										<button
-											key={chartId}
-											type="button"
-											onClick={() => handleSelectChart(chartId)}
-											className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
-										>
-											<ChartPreview component={Component} data={entry.sampleData} />
-											<div className="flex flex-col gap-0.5">
-												<div className="text-xs font-medium">{label}</div>
-												<div className="text-[11px] text-dim">
-													{chartDescriptions[chartId] ?? ""}
-												</div>
-											</div>
-										</button>
-									)
-								})}
-							</div>
-						</div>
-					)}
-
-					{showPies && (
-						<div className="flex flex-col gap-3">
-							{activeTab === "all" && (
-								<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
-									Pies
-								</h3>
-							)}
-							<div className="grid grid-cols-3 gap-3">
-								{piePresets.map((preset) => (
-									<button
-										key={preset.id}
-										type="button"
-										onClick={() => handleSelectPreset(preset)}
-										className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
+					{isVisible("charts") && (
+						<PickerSection title="Charts" showHeading={showHeading}>
+							{CHART_STYLES.map((style) => {
+								const entry = getChartById(style.previewChartId)
+								if (!entry) return null
+								return (
+									<PickerCard
+										key={style.chartId}
+										title={style.label}
+										description={style.description}
+										onClick={() => handleSelectChart(style.chartId)}
 									>
-										<PiePreviewCard preset={preset} />
-										<div className="flex flex-col gap-0.5">
-											<div className="text-xs font-medium">{preset.name}</div>
-											{preset.description && (
-												<div className="text-[11px] text-dim">
-													{preset.description}
-												</div>
-											)}
-										</div>
-									</button>
-								))}
-							</div>
-						</div>
+										<ChartPreview component={entry.component} data={entry.sampleData} />
+									</PickerCard>
+								)
+							})}
+						</PickerSection>
 					)}
 
-					{showFunnels && (
-						<div className="flex flex-col gap-3">
-							{activeTab === "all" && (
-								<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
-									Funnels
-								</h3>
-							)}
-							<div className="grid grid-cols-3 gap-3">
-								{funnelPresets.map((preset) => (
-									<button
-										key={preset.id}
-										type="button"
-										onClick={() => handleSelectPreset(preset)}
-										className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
-									>
-										<FunnelPreviewCard preset={preset} />
-										<div className="flex flex-col gap-0.5">
-											<div className="text-xs font-medium">{preset.name}</div>
-											{preset.description && (
-												<div className="text-[11px] text-dim">
-													{preset.description}
-												</div>
-											)}
-										</div>
-									</button>
-								))}
-							</div>
-						</div>
-					)}
-
-					{showHistograms && (
-						<div className="flex flex-col gap-3">
-							{activeTab === "all" && (
-								<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
-									Histograms
-								</h3>
-							)}
-							<div className="grid grid-cols-3 gap-3">
-								{histogramPresets.map((preset) => (
-									<button
-										key={preset.id}
-										type="button"
-										onClick={() => handleSelectPreset(preset)}
-										className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
-									>
-										<HistogramPreviewCard preset={preset} />
-										<div className="flex flex-col gap-0.5">
-											<div className="text-xs font-medium">{preset.name}</div>
-											{preset.description && (
-												<div className="text-[11px] text-dim">
-													{preset.description}
-												</div>
-											)}
-										</div>
-									</button>
-								))}
-							</div>
-						</div>
-					)}
-
-					{showHeatmaps && (
-						<div className="flex flex-col gap-3">
-							{activeTab === "all" && (
-								<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
-									Heatmaps
-								</h3>
-							)}
-							<div className="grid grid-cols-3 gap-3">
-								{heatmapPresets.map((preset) => (
-									<button
-										key={preset.id}
-										type="button"
-										onClick={() => handleSelectPreset(preset)}
-										className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
-									>
-										<HeatmapPreviewCard preset={preset} />
-										<div className="flex flex-col gap-0.5">
-											<div className="text-xs font-medium">{preset.name}</div>
-											{preset.description && (
-												<div className="text-[11px] text-dim">
-													{preset.description}
-												</div>
-											)}
-										</div>
-									</button>
-								))}
-							</div>
-						</div>
-					)}
-
-					{showNotes && (
-						<div className="flex flex-col gap-3">
-							{activeTab === "all" && (
-								<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
-									Notes
-								</h3>
-							)}
-							<div className="grid grid-cols-3 gap-3">
-								{markdownPresets.map((preset) => (
-									<button
-										key={preset.id}
-										type="button"
-										onClick={() => handleSelectPreset(preset)}
-										className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
-									>
-										<MarkdownPreviewCard preset={preset} />
-										<div className="flex flex-col gap-0.5">
-											<div className="text-xs font-medium">{preset.name}</div>
-											{preset.description && (
-												<div className="text-[11px] text-dim">
-													{preset.description}
-												</div>
-											)}
-										</div>
-									</button>
-								))}
-							</div>
-						</div>
-					)}
-
-					{showStats && (
-						<div className="flex flex-col gap-3">
-							{activeTab === "all" && (
-								<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
-									Stats
-								</h3>
-							)}
-							<div className="grid grid-cols-3 gap-3">
-								{statPresets.map((preset) => (
-									<button
-										key={preset.id}
-										type="button"
-										onClick={() => handleSelectPreset(preset)}
-										className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
-									>
-										<StatPreviewCard preset={preset} />
-										<div className="flex flex-col gap-0.5">
-											<div className="text-xs font-medium">{preset.name}</div>
-											{preset.description && (
-												<div className="text-[11px] text-dim">
-													{preset.description}
-												</div>
-											)}
-										</div>
-									</button>
-								))}
-							</div>
-						</div>
-					)}
-
-					{showTables && (
-						<div className="flex flex-col gap-3">
-							{activeTab === "all" && (
-								<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
-									Tables
-								</h3>
-							)}
-							<div className="grid grid-cols-3 gap-3">
-								{tablePresets.map((preset) => (
-									<button
-										key={preset.id}
-										type="button"
-										onClick={() => handleSelectPreset(preset)}
-										className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
-									>
-										<TablePreviewCard preset={preset} />
-										<div className="flex flex-col gap-0.5">
-											<div className="text-xs font-medium">{preset.name}</div>
-											{preset.description && (
-												<div className="text-[11px] text-dim">
-													{preset.description}
-												</div>
-											)}
-										</div>
-									</button>
-								))}
-							</div>
-						</div>
-					)}
-
-					{showLists && (
-						<div className="flex flex-col gap-3">
-							{activeTab === "all" && (
-								<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
-									Lists
-								</h3>
-							)}
-							<div className="grid grid-cols-3 gap-3">
-								{listPresets.map((preset) => (
-									<button
-										key={preset.id}
-										type="button"
-										onClick={() => handleSelectPreset(preset)}
-										className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
-									>
-										<ListPreviewCard preset={preset} />
-										<div className="flex flex-col gap-0.5">
-											<div className="text-xs font-medium">{preset.name}</div>
-											{preset.description && (
-												<div className="text-[11px] text-dim">
-													{preset.description}
-												</div>
-											)}
-										</div>
-									</button>
-								))}
-							</div>
-						</div>
-					)}
+					{PRESET_SECTIONS.filter((section) => isVisible(section.id)).map((section) => (
+						<PickerSection key={section.id} title={section.label} showHeading={showHeading}>
+							{section.presets.map((preset) => (
+								<PickerCard
+									key={preset.id}
+									title={preset.name}
+									description={preset.description}
+									onClick={() => handleSelectPreset(preset)}
+								>
+									<section.Preview preset={preset} />
+								</PickerCard>
+							))}
+						</PickerSection>
+					))}
 				</div>
 			</DialogContent>
 		</Dialog>

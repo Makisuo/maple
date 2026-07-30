@@ -76,10 +76,7 @@ export type ServiceWindowPair = readonly [
  * dependency legible, and it keeps `WarehouseQueryService` out of the R channel
  * of callers that already resolved the service inside their own closure.
  */
-export type LivenessWarehouse = Pick<
-	WarehouseQueryServiceShape,
-	"compiledQuery" | "compiledQueryFirst"
->
+export type LivenessWarehouse = Pick<WarehouseQueryServiceShape, "compiledQuery" | "compiledQueryFirst">
 
 export interface LivenessProbeInput {
 	readonly warehouse: LivenessWarehouse
@@ -166,56 +163,61 @@ const probeOrgWindow = (
  * Prove telemetry is still flowing for a subject before its silence is allowed
  * to mean anything. Never fails — an unprovable probe is a veto, not an error.
  */
-export const probeLiveness: (input: LivenessProbeInput) => Effect.Effect<LivenessVerdict, never> =
-	Effect.fn("telemetry.liveness")(function* (input) {
-		const { warehouse, tenant, serviceNames } = input
-		const { windowStartMs, windowEndMs, baselineStartMs, baselineEndMs } = input
+export const probeLiveness: (input: LivenessProbeInput) => Effect.Effect<LivenessVerdict, never> = Effect.fn(
+	"telemetry.liveness",
+)(function* (input) {
+	const { warehouse, tenant, serviceNames } = input
+	const { windowStartMs, windowEndMs, baselineStartMs, baselineEndMs } = input
 
-		const result =
-			serviceNames.length === 0
-				? verdictForOrgTotals(
-						...(yield* Effect.all(
-							[
-								probeOrgWindow(warehouse, tenant, windowStartMs, windowEndMs),
-								probeOrgWindow(warehouse, tenant, baselineStartMs, baselineEndMs),
-							],
-							{ concurrency: 2 },
-						)),
-					)
-				: verdictForServiceTotals(
-						yield* Effect.forEach(
-							serviceNames,
-							(serviceName): Effect.Effect<ServiceWindowPair, never> =>
-								Effect.all(
-									[
-										probeServiceWindow(warehouse, tenant, serviceName, windowStartMs, windowEndMs),
-										probeServiceWindow(
-											warehouse,
-											tenant,
-											serviceName,
-											baselineStartMs,
-											baselineEndMs,
-										),
-									],
-									{ concurrency: 2 },
-								),
-							{ concurrency: 4 },
-						),
-					)
+	const result =
+		serviceNames.length === 0
+			? verdictForOrgTotals(
+					...(yield* Effect.all(
+						[
+							probeOrgWindow(warehouse, tenant, windowStartMs, windowEndMs),
+							probeOrgWindow(warehouse, tenant, baselineStartMs, baselineEndMs),
+						],
+						{ concurrency: 2 },
+					)),
+				)
+			: verdictForServiceTotals(
+					yield* Effect.forEach(
+						serviceNames,
+						(serviceName): Effect.Effect<ServiceWindowPair, never> =>
+							Effect.all(
+								[
+									probeServiceWindow(
+										warehouse,
+										tenant,
+										serviceName,
+										windowStartMs,
+										windowEndMs,
+									),
+									probeServiceWindow(
+										warehouse,
+										tenant,
+										serviceName,
+										baselineStartMs,
+										baselineEndMs,
+									),
+								],
+								{ concurrency: 2 },
+							),
+						{ concurrency: 4 },
+					),
+				)
 
-		yield* Effect.annotateCurrentSpan({
-			"maple.liveness.data_flowing": result.dataFlowing,
-			"maple.liveness.reason": result.reason,
-			"maple.liveness.observed_count": result.observedCount,
-			"maple.liveness.baseline_count": result.baselineCount,
-			...(result.ratio != null ? { "maple.liveness.volume_ratio": result.ratio } : {}),
-			...(result.samplingDelta != null
-				? { "maple.liveness.sampling_delta": result.samplingDelta }
-				: {}),
-		})
-
-		return result
+	yield* Effect.annotateCurrentSpan({
+		"maple.liveness.data_flowing": result.dataFlowing,
+		"maple.liveness.reason": result.reason,
+		"maple.liveness.observed_count": result.observedCount,
+		"maple.liveness.baseline_count": result.baselineCount,
+		...(result.ratio != null ? { "maple.liveness.volume_ratio": result.ratio } : {}),
+		...(result.samplingDelta != null ? { "maple.liveness.sampling_delta": result.samplingDelta } : {}),
 	})
+
+	return result
+})
 
 // ---------------------------------------------------------------------------
 // Pure verdict logic
@@ -231,10 +233,7 @@ const verdict = (
 ): LivenessVerdict => ({ dataFlowing, reason, observedCount, baselineCount, ratio, samplingDelta })
 
 /** Org-wide pulse verdict. `null` on either side means the probe failed. */
-export const verdictForOrgTotals = (
-	observed: number | null,
-	baseline: number | null,
-): LivenessVerdict => {
+export const verdictForOrgTotals = (observed: number | null, baseline: number | null): LivenessVerdict => {
 	if (observed === null || baseline === null) return verdict(false, "probe_failed", 0, 0, null, null)
 	// Nothing to compare against: the org was already dark before the incident,
 	// so this probe can neither confirm nor deny a gap.
@@ -253,9 +252,7 @@ export const verdictForOrgTotals = (
  * services keep the totals healthy, so the per-service check runs before any
  * aggregation.
  */
-export const verdictForServiceTotals = (
-	perService: ReadonlyArray<ServiceWindowPair>,
-): LivenessVerdict => {
+export const verdictForServiceTotals = (perService: ReadonlyArray<ServiceWindowPair>): LivenessVerdict => {
 	let observedRaw = 0
 	let observedEst = 0
 	let baselineRaw = 0

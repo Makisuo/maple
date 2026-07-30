@@ -672,5 +672,3 @@ function SectionHeader({ label }: { label: string }) {
 		</h2>
 	)
 }
-
-

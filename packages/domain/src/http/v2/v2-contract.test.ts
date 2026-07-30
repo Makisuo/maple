@@ -205,6 +205,9 @@ describe("V2Dashboard wire format", () => {
 					source: { kind: "attribute", scope: "resource", attribute_key: "service.name" },
 				},
 			],
+			// Required with a nullable value, like `description` on this resource:
+			// `null` means auto-refresh is off, not that the field was omitted.
+			refresh_interval_seconds: null,
 			created_at: "2026-07-15T00:00:00.000Z",
 			updated_at: "2026-07-16T00:00:00.000Z",
 			txid: "81234",
@@ -212,6 +215,7 @@ describe("V2Dashboard wire format", () => {
 
 		expect(decoded.id).toBe(UUID)
 		expect(decoded.timeRange.type).toBe("absolute")
+		expect(decoded.refreshIntervalSeconds).toBeNull()
 		expect(decoded.widgets[0]?.dataSource.transform?.fieldMap).toEqual({ value: "requests" })
 		expect(decoded.widgets[0]?.dataSource.params).toEqual({
 			startTime: "now-1h",

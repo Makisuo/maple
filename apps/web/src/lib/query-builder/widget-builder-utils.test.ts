@@ -420,9 +420,7 @@ describe("widget-builder series stats default", () => {
 	}
 
 	it("leaves the stats table off when the widget does not ask for it", () => {
-		expect(toInitialState(widgetWithPresentation({ legend: "visible" })).seriesStatsEnabled).toBe(
-			false,
-		)
+		expect(toInitialState(widgetWithPresentation({ legend: "visible" })).seriesStatsEnabled).toBe(false)
 		expect(toInitialState(widgetWithPresentation(undefined)).seriesStatsEnabled).toBe(false)
 	})
 

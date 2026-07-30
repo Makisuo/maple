@@ -50,6 +50,7 @@ import {
 } from "@/components/icons"
 import { DASHBOARD_SORT_OPTIONS, type DashboardSortOption } from "@/atoms/dashboard-preferences-atoms"
 import type { Dashboard } from "@/components/dashboard-builder/types"
+import { TagEditorDialog } from "@/components/dashboard-builder/tag-editor"
 import {
 	collectTags,
 	dashboardDomains,
@@ -106,6 +107,7 @@ function DashboardRow({
 	onDelete,
 	onDuplicate,
 	onExport,
+	onEditTags,
 }: {
 	dashboard: Dashboard
 	isFavorite: boolean
@@ -114,6 +116,7 @@ function DashboardRow({
 	onDelete: (dashboard: Dashboard) => void
 	onDuplicate: (dashboard: Dashboard) => void
 	onExport: (dashboard: Dashboard) => void
+	onEditTags: (dashboard: Dashboard) => void
 }) {
 	const Glyph = dashboardGlyph(dashboard)
 	const reads = readsFromLabel(dashboard)
@@ -189,6 +192,7 @@ function DashboardRow({
 					onDelete={onDelete}
 					onDuplicate={onDuplicate}
 					onExport={onExport}
+					onEditTags={onEditTags}
 				/>
 			</div>
 		</div>
@@ -201,12 +205,14 @@ function DashboardRowMenu({
 	onDelete,
 	onDuplicate,
 	onExport,
+	onEditTags,
 }: {
 	dashboard: Dashboard
 	readOnly: boolean
 	onDelete: (dashboard: Dashboard) => void
 	onDuplicate: (dashboard: Dashboard) => void
 	onExport: (dashboard: Dashboard) => void
+	onEditTags: (dashboard: Dashboard) => void
 }) {
 	return (
 		<DropdownMenu>
@@ -229,6 +235,11 @@ function DashboardRowMenu({
 					<DropdownMenuItem onClick={() => onExport(dashboard)}>Export JSON</DropdownMenuItem>
 					<DropdownMenuItem disabled={readOnly} onClick={() => onDuplicate(dashboard)}>
 						Duplicate
+					</DropdownMenuItem>
+					{/* Editing, not display: the row deliberately carries no tag chips
+					    (see the row comment above), so this is the only way in from here. */}
+					<DropdownMenuItem disabled={readOnly} onClick={() => onEditTags(dashboard)}>
+						Edit tags…
 					</DropdownMenuItem>
 					<DropdownMenuSeparator />
 					<DropdownMenuItem
@@ -307,6 +318,7 @@ interface DashboardListProps {
 	onDelete: (id: string) => void
 	onDuplicate: (dashboard: Dashboard) => void
 	onExport: (dashboard: Dashboard) => void
+	onSaveTags: (dashboard: Dashboard, tags: string[]) => void
 	onToggleFavorite: (id: string) => void
 }
 
@@ -326,9 +338,11 @@ export function DashboardList({
 	onDelete,
 	onDuplicate,
 	onExport,
+	onSaveTags,
 	onToggleFavorite,
 }: DashboardListProps) {
 	const [pendingDelete, setPendingDelete] = useState<Dashboard | null>(null)
+	const [pendingTags, setPendingTags] = useState<Dashboard | null>(null)
 
 	const allTags = useMemo(() => collectTags(dashboards), [dashboards])
 
@@ -361,6 +375,7 @@ export function DashboardList({
 		onDelete: setPendingDelete,
 		onDuplicate,
 		onExport,
+		onEditTags: setPendingTags,
 	}
 
 	return (
@@ -497,6 +512,22 @@ export function DashboardList({
 					<CreateRow readOnly={readOnly} onCreate={onCreate} />
 				</>
 			)}
+
+			{/* `allTags` is the org-wide set the Tags filter already computes, reused
+			    here as one-click suggestions so tags converge instead of sprawling. */}
+			<TagEditorDialog
+				open={pendingTags !== null}
+				onOpenChange={(open) => {
+					if (!open) setPendingTags(null)
+				}}
+				dashboardName={pendingTags?.name ?? ""}
+				tags={pendingTags?.tags ?? []}
+				suggestions={allTags}
+				onSave={(next) => {
+					if (pendingTags) onSaveTags(pendingTags, next)
+					setPendingTags(null)
+				}}
+			/>
 
 			<AlertDialog
 				open={pendingDelete !== null}
