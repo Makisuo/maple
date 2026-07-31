@@ -630,6 +630,7 @@ function TagFilterMenu({
 			onChange={onChange}
 			options={allTags.map((tag) => ({ value: tag }))}
 			searchPlaceholder="Filter tags…"
+			triggerAriaLabel="Tags"
 			triggerLabel={
 				<>
 					Tags

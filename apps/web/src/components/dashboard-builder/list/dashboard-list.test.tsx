@@ -93,12 +93,13 @@ describe("toolbar menus open without throwing", () => {
 		expect(screen.getByRole("menuitemradio", { name: "Name A–Z" })).toBeTruthy()
 	})
 
-	it("opens the tag menu with its label and a checkbox per tag", () => {
+	// The trigger is a combobox, not a button: `role="combobox"` takes no name from
+	// its own content, so the visible "Tags" text only names it via aria-label.
+	it("opens the tag combobox with an option per tag", () => {
 		renderList()
-		fireEvent.click(screen.getByRole("button", { name: "Tags" }))
-		expect(screen.getByText("Filter by tag")).toBeTruthy()
-		expect(screen.getByRole("menuitemcheckbox", { name: "api" })).toBeTruthy()
-		expect(screen.getByRole("menuitemcheckbox", { name: "slo" })).toBeTruthy()
+		fireEvent.click(screen.getByRole("combobox", { name: "Tags" }))
+		expect(screen.getByRole("option", { name: "api" })).toBeTruthy()
+		expect(screen.getByRole("option", { name: "slo" })).toBeTruthy()
 	})
 
 	it("opens a row's overflow menu", () => {

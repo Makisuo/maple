@@ -45,6 +45,12 @@ export interface MultiSelectComboboxProps<T extends string = string> {
 	mode?: "chips" | "trigger"
 	/** Trigger-mode button content, rendered before the selected-count badge. */
 	triggerLabel?: React.ReactNode
+	/**
+	 * Accessible name for the trigger button. Required in trigger mode: the button
+	 * carries `role="combobox"`, which takes no name from its own content, so the
+	 * visible `triggerLabel` alone leaves it unnamed.
+	 */
+	triggerAriaLabel?: string
 	/** Chips-mode placeholder, shown in the inline input. */
 	placeholder?: string
 	/** Trigger-mode placeholder for the search input inside the popup. */
@@ -76,6 +82,7 @@ export function MultiSelectCombobox<T extends string = string>({
 	options,
 	mode = "chips",
 	triggerLabel,
+	triggerAriaLabel,
 	placeholder,
 	searchPlaceholder = "Search…",
 	emptyMessage,
@@ -152,6 +159,7 @@ export function MultiSelectCombobox<T extends string = string>({
 				value={value as T[]}
 			>
 				<ComboboxTrigger
+					aria-label={triggerAriaLabel}
 					className={className}
 					render={<Button className="shrink-0 gap-1.5" size="sm" variant="outline" />}
 				>

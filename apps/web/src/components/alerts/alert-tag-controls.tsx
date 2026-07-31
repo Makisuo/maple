@@ -44,6 +44,7 @@ export function AlertTagControls({
 				onChange={onSelectedChange}
 				options={options}
 				searchPlaceholder="Filter tags…"
+				triggerAriaLabel="Tags"
 				triggerLabel={
 					<>
 						<TagIcon size={14} />
