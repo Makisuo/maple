@@ -119,6 +119,8 @@ export const MetricsFilters = Schema.Struct({
 	metricNames: Schema.optional(Schema.Array(MetricName)),
 	metricType: MetricType,
 	serviceName: Schema.optional(ServiceName),
+	/** Multi-value service scope. When present it supersedes `serviceName`. */
+	serviceNames: Schema.optional(Schema.Array(ServiceName)),
 	// Metrics tables have no pre-extracted DeploymentEnv column, so this lowers to
 	// a predicate on `ResourceAttributes['deployment.environment']` (see
 	// `metricsTimeseriesQuery`). Same field name as TracesFilters/LogsFilters.

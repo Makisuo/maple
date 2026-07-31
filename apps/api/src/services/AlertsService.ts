@@ -31,8 +31,6 @@ import {
 	AlertIncidentsListResponse,
 	AlertIncidentStatus,
 	AlertIncidentTransition as AlertIncidentTransitionSchema,
-	AlertMetricAggregation as AlertMetricAggregationSchema,
-	AlertMetricType as AlertMetricTypeSchema,
 	AlertNotFoundError,
 	AlertPersistenceError,
 	AlertRuleDeleteResponse,
@@ -54,8 +52,6 @@ import {
 	type AlertDestinationType,
 	type AlertDestinationUpdateRequest,
 	type AlertEventType as AlertEventTypeValue,
-	type AlertMetricAggregation as AlertMetricAggregationValue,
-	type AlertMetricType,
 	type AlertRuleUpsertRequest,
 	type QueryBuilderQueryDraftPayload,
 	type AlertSeverity,
@@ -165,9 +161,6 @@ interface NormalizedRule {
 	readonly consecutiveBreachesRequired: number
 	readonly consecutiveHealthyRequired: number
 	readonly renotifyIntervalMinutes: number
-	readonly metricName: string | null
-	readonly metricType: AlertMetricType | null
-	readonly metricAggregation: AlertMetricAggregationValue | null
 	readonly apdexThresholdMs: number | null
 	readonly queryBuilderDraft: QueryBuilderQueryDraftPayload | null
 	readonly rawQuerySql: string | null
@@ -316,8 +309,6 @@ const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
 const decodeAlertCheckStatusSync = Schema.decodeUnknownSync(AlertCheckStatusSchema)
 const decodeAlertIncidentTransitionSync = Schema.decodeUnknownSync(AlertIncidentTransitionSchema)
-const decodeAlertMetricTypeSync = Schema.decodeUnknownSync(AlertMetricTypeSchema)
-const decodeAlertMetricAggregationSync = Schema.decodeUnknownSync(AlertMetricAggregationSchema)
 const decodeAlertIncidentStatusSync = Schema.decodeUnknownSync(AlertIncidentStatus)
 const decodeAlertEventTypeSync = Schema.decodeUnknownSync(AlertEventTypeSchema)
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.errorIssueId)
@@ -610,10 +601,6 @@ const buildPublicConfig = (
 ): DestinationPublicConfig =>
 	Match.value(request).pipe(
 		Match.discriminatorsExhaustive("type")({
-			slack: (r) => ({
-				summary: r.channelLabel?.trim() || "Slack incoming webhook",
-				channelLabel: normalizeOptionalString(r.channelLabel),
-			}),
 			"slack-bot": (r) => ({
 				summary: r.channelName?.trim() ? `#${r.channelName.trim()}` : "Slack channel",
 				channelLabel: r.channelName?.trim() ? `#${r.channelName.trim()}` : null,
@@ -624,10 +611,6 @@ const buildPublicConfig = (
 			}),
 			webhook: (r) => ({
 				summary: summarizeWebhookUrl(r.url),
-				channelLabel: null,
-			}),
-			hazel: (r) => ({
-				summary: summarizeWebhookUrl(r.webhookUrl),
 				channelLabel: null,
 			}),
 			"hazel-oauth": (r) => ({
@@ -654,10 +637,6 @@ const buildSecretConfig = (
 ): DestinationSecretConfig =>
 	Match.value(request).pipe(
 		Match.discriminatorsExhaustive("type")({
-			slack: (r) => ({
-				type: "slack" as const,
-				webhookUrl: r.webhookUrl.trim(),
-			}),
 			"slack-bot": (r) => ({
 				type: "slack-bot" as const,
 				channelId: r.channelId.trim(),
@@ -670,11 +649,6 @@ const buildSecretConfig = (
 			webhook: (r) => ({
 				type: "webhook" as const,
 				url: r.url.trim(),
-				signingSecret: normalizeOptionalString(r.signingSecret),
-			}),
-			hazel: (r) => ({
-				type: "hazel" as const,
-				webhookUrl: r.webhookUrl.trim(),
 				signingSecret: normalizeOptionalString(r.signingSecret),
 			}),
 			discord: (r) => ({
@@ -697,9 +671,6 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 	readonly signalType: AlertSignalType
 	readonly serviceName: string | null
 	readonly environments: ReadonlyArray<string>
-	readonly metricName: string | null
-	readonly metricType: AlertMetricType | null
-	readonly metricAggregation: AlertMetricAggregationValue | null
 	readonly apdexThresholdMs: number | null
 	readonly queryBuilderDraft: QueryBuilderQueryDraftPayload | null
 	readonly rawQuerySql: string | null
@@ -709,7 +680,7 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 	readonly groupBy: AlertGroupBy | null
 }): Effect.fn.Return<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> {
 	const bucketSeconds = Math.max(rule.windowMinutes * 60, 60)
-	// Rule-level scope shared by the trace built-ins and the `metric` signal.
+	// Rule-level scope shared by the trace built-ins.
 	// `environments` is empty for builder_query / raw_query — those carry their
 	// own filters — so it never reaches those branches.
 	const envFilter = rule.environments.length > 0 ? { environments: rule.environments } : {}
@@ -814,35 +785,6 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 			filters,
 		})
 		sampleCountStrategy = "trace_count"
-	} else if (rule.signalType === "metric") {
-		if (rule.metricName == null || rule.metricType == null || rule.metricAggregation == null) {
-			return yield* Effect.fail(
-				makeValidationError("metric alerts require metricName, metricType, and metricAggregation"),
-			)
-		}
-		const groupResolved = yield* resolveRuleGroupBy("metrics")
-		const filters: Record<string, unknown> = {
-			metricName: rule.metricName,
-			metricType: rule.metricType,
-			...(rule.serviceName == null ? {} : { serviceName: rule.serviceName }),
-			...envFilter,
-		}
-		if (groupResolved && groupResolved.attributeKeys.length > 0) {
-			// Metrics group-by-attribute is single-key today; pick the first.
-			filters.groupByAttributeKey = groupResolved.attributeKeys[0]
-		}
-		if (groupResolved && groupResolved.resourceAttributeKeys.length > 0) {
-			filters.groupByResourceAttributeKey = groupResolved.resourceAttributeKeys[0]
-		}
-		query = decodeQuerySpecSync({
-			kind: "timeseries",
-			source: "metrics",
-			metric: rule.metricAggregation,
-			groupBy: groupResolved ? [...groupResolved.tokens] : ["none"],
-			bucketSeconds,
-			filters,
-		})
-		sampleCountStrategy = "metric_data_points"
 	} else if (rule.signalType === "builder_query") {
 		// Reuse the exact compiler that dashboard query-builder charts use, so
 		// an alert and a chart built from the same draft evaluate identically.
@@ -850,9 +792,12 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 			return yield* Effect.fail(makeValidationError("builder_query alerts require a queryBuilderDraft"))
 		}
 		const built = buildTimeseriesQuerySpec(rule.queryBuilderDraft)
-		if (built.error != null || built.query == null) {
+		if (built.error != null || built.query == null || built.warnings.length > 0) {
 			return yield* Effect.fail(
-				makeValidationError(built.error ?? "Failed to build query builder spec", [...built.warnings]),
+				makeValidationError(
+					built.error ?? built.warnings[0] ?? "Failed to build query builder spec",
+					[...built.warnings],
+				),
 			)
 		}
 		// Force the evaluation window's bucket size; the draft's stepInterval is
@@ -1011,10 +956,6 @@ const rowToRuleDocument = (
 		consecutiveBreachesRequired: row.consecutiveBreachesRequired,
 		consecutiveHealthyRequired: row.consecutiveHealthyRequired,
 		renotifyIntervalMinutes: row.renotifyIntervalMinutes,
-		metricName: row.metricName,
-		metricType: row.metricType != null ? decodeAlertMetricTypeSync(row.metricType) : null,
-		metricAggregation:
-			row.metricAggregation != null ? decodeAlertMetricAggregationSync(row.metricAggregation) : null,
 		apdexThresholdMs: row.apdexThresholdMs,
 		queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
 		rawQuerySql: row.signalType === "raw_query" ? (row.rawQuerySql ?? null) : null,
@@ -1414,12 +1355,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					consecutiveBreachesRequired: row.consecutiveBreachesRequired,
 					consecutiveHealthyRequired: row.consecutiveHealthyRequired,
 					renotifyIntervalMinutes: row.renotifyIntervalMinutes,
-					metricName: row.metricName,
-					metricType: row.metricType != null ? decodeAlertMetricTypeSync(row.metricType) : null,
-					metricAggregation:
-						row.metricAggregation != null
-							? decodeAlertMetricAggregationSync(row.metricAggregation)
-							: null,
 					apdexThresholdMs: row.apdexThresholdMs,
 					queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
 					rawQuerySql: row.rawQuerySql ?? null,
@@ -1462,7 +1397,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						? [...new Set(request.environments.map((s) => s.trim()).filter((s) => s.length > 0))]
 						: []
 				const tags = normalizeTags(request.tags)
-				const metricName = normalizeOptionalString(request.metricName)
 				const groupBy = request.groupBy ?? null
 				// Dedupe while preserving selection order — a destination listed twice still
 				// notifies once, so we persist each id at most once. This is the authoritative
@@ -1486,13 +1420,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}
 				} else if (request.thresholdUpper != null) {
 					details.push("thresholdUpper is only supported for between / not_between comparators")
-				}
-				if (request.signalType === "metric") {
-					if (!metricName) details.push("metricName is required for metric alerts")
-					if (!request.metricType) details.push("metricType is required for metric alerts")
-					if (!request.metricAggregation) {
-						details.push("metricAggregation is required for metric alerts")
-					}
 				}
 				if (request.signalType === "builder_query") {
 					if (!request.queryBuilderDraft) {
@@ -1519,16 +1446,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					if (request.rawQueryReducer != null) {
 						details.push("rawQueryReducer is only supported for raw_query alerts")
 					}
-				}
-				const allowsMetricFields = request.signalType === "metric"
-				if (!allowsMetricFields && request.metricType) {
-					details.push("metricType is only supported for metric alerts")
-				}
-				if (!allowsMetricFields && metricName) {
-					details.push("metricName is only supported for metric alerts")
-				}
-				if (request.signalType !== "metric" && request.metricAggregation) {
-					details.push("metricAggregation is only supported for metric alerts")
 				}
 				if (groupBy != null && serviceNames.length > 0) {
 					details.push("groupBy is only supported when no service is specified")
@@ -1582,9 +1499,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					consecutiveBreachesRequired: request.consecutiveBreachesRequired ?? 2,
 					consecutiveHealthyRequired: request.consecutiveHealthyRequired ?? 2,
 					renotifyIntervalMinutes: request.renotifyIntervalMinutes ?? 30,
-					metricName,
-					metricType: request.metricType ?? null,
-					metricAggregation: request.metricAggregation ?? null,
 					apdexThresholdMs:
 						request.apdexThresholdMs ?? (request.signalType === "apdex" ? 500 : null),
 					queryBuilderDraft: request.queryBuilderDraft ?? null,
@@ -1758,10 +1672,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						threshold: rule.threshold,
 						thresholdUpper: rule.thresholdUpper,
 						comparator: rule.comparator,
-						reason:
-							rule.signalType === "metric"
-								? "No metric data in the selected window"
-								: "No data in the selected window",
+						reason: "No data in the selected window",
 						// Inert: `skipped` never resolves an incident, so this branch
 						// short-circuits before any status is derived from a synthesized value.
 						derivedFromNoData: false,
@@ -2145,12 +2056,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				yield* requireAdmin(roles)
 				// Reject URLs pointing at internal/loopback/metadata networks before we
 				// persist them. The dispatcher will later POST to whatever we store.
-				if (request.type === "slack") {
-					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
-				} else if (request.type === "webhook") {
+				if (request.type === "webhook") {
 					yield* validateDestinationUrl(request.url, "url")
-				} else if (request.type === "hazel") {
-					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
 				} else if (request.type === "discord") {
 					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
 				}
@@ -2242,24 +2149,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// Validate any URL the request supplies before we persist it. Each
 				// branch only validates when the field is non-empty so the existing
 				// (already-validated) stored URL can stay unchanged on partial updates.
-				if (
-					request.type === "slack" &&
-					request.webhookUrl != null &&
-					request.webhookUrl.trim().length > 0
-				) {
-					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
-				} else if (
-					request.type === "webhook" &&
-					request.url != null &&
-					request.url.trim().length > 0
-				) {
+				if (request.type === "webhook" && request.url != null && request.url.trim().length > 0) {
 					yield* validateDestinationUrl(request.url, "url")
-				} else if (
-					request.type === "hazel" &&
-					request.webhookUrl != null &&
-					request.webhookUrl.trim().length > 0
-				) {
-					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
 				} else if (
 					request.type === "discord" &&
 					request.webhookUrl != null &&
@@ -2270,25 +2161,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 				const { nextPublicConfig, nextSecretConfig } = yield* Match.value(request).pipe(
 					Match.discriminatorsExhaustive("type")({
-						slack: (r) =>
-							Effect.succeed({
-								nextPublicConfig: {
-									summary:
-										normalizeOptionalString(r.channelLabel) ??
-										hydrated.publicConfig.summary,
-									channelLabel:
-										normalizeOptionalString(r.channelLabel) ??
-										hydrated.publicConfig.channelLabel,
-								} satisfies DestinationPublicConfig,
-								nextSecretConfig: {
-									type: "slack" as const,
-									webhookUrl:
-										normalizeOptionalString(r.webhookUrl) ??
-										(hydrated.secretConfig.type === "slack"
-											? hydrated.secretConfig.webhookUrl
-											: ""),
-								} satisfies DestinationSecretConfig,
-							}),
 						"slack-bot": (r) => {
 							const channelName = normalizeOptionalString(r.channelName)
 							return Effect.succeed({
@@ -2349,30 +2221,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									signingSecret:
 										r.signingSecret === undefined
 											? hydrated.secretConfig.type === "webhook"
-												? hydrated.secretConfig.signingSecret
-												: null
-											: normalizeOptionalString(r.signingSecret),
-								} satisfies DestinationSecretConfig,
-							}),
-						hazel: (r) =>
-							Effect.succeed({
-								nextPublicConfig: {
-									summary:
-										r.webhookUrl != null && r.webhookUrl.trim().length > 0
-											? summarizeWebhookUrl(r.webhookUrl)
-											: hydrated.publicConfig.summary,
-									channelLabel: null,
-								} satisfies DestinationPublicConfig,
-								nextSecretConfig: {
-									type: "hazel" as const,
-									webhookUrl:
-										normalizeOptionalString(r.webhookUrl) ??
-										(hydrated.secretConfig.type === "hazel"
-											? hydrated.secretConfig.webhookUrl
-											: ""),
-									signingSecret:
-										r.signingSecret === undefined
-											? hydrated.secretConfig.type === "hazel"
 												? hydrated.secretConfig.signingSecret
 												: null
 											: normalizeOptionalString(r.signingSecret),
@@ -2685,9 +2533,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					consecutiveBreachesRequired: normalized.consecutiveBreachesRequired,
 					consecutiveHealthyRequired: normalized.consecutiveHealthyRequired,
 					renotifyIntervalMinutes: normalized.renotifyIntervalMinutes,
-					metricName: normalized.metricName,
-					metricType: normalized.metricType,
-					metricAggregation: normalized.metricAggregation,
 					apdexThresholdMs: normalized.apdexThresholdMs,
 					queryBuilderDraftJson: normalized.queryBuilderDraft ?? null,
 					rawQuerySql: normalized.rawQuerySql,
@@ -3974,9 +3819,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						))[0] ?? null
 
 					// Look up the open incident for this group via the unique
-					// (orgId, ruleId, status, groupKey) combination. The legacy
-					// serviceName-based filter is gone — composite group keys make
-					// serviceName ambiguous, and we now persist groupKey directly.
+					// (orgId, ruleId, status, groupKey) combination. Composite group
+					// keys make serviceName ambiguous, so groupKey is authoritative.
 					const openIncident =
 						(yield* dbExecute((db) =>
 							db

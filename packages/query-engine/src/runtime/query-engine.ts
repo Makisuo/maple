@@ -1272,6 +1272,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						metricNames: request.query.filters.metricNames,
 						bucketSeconds: bucketSeconds!,
 						serviceName: request.query.filters.serviceName,
+						serviceNames: request.query.filters.serviceNames,
 						environments: request.query.filters.environments,
 						groupByAttributeKey,
 						groupByResourceAttributeKey,
@@ -1322,6 +1323,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				CH.metricsTimeseriesQuery({
 					metricType: request.query.filters.metricType,
 					serviceName: request.query.filters.serviceName,
+					serviceNames: request.query.filters.serviceNames,
 					environments: request.query.filters.environments,
 					groupByAttributeKey,
 					groupByResourceAttributeKey,
@@ -1987,7 +1989,6 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 		return obs as ReadonlyArray<BucketGroupObs>
 	}
 
-
 	if (query.source === "traces") {
 		const opts = extractTracesOpts(query.filters as Record<string, unknown>)
 		const rows = yield* executeCHQuery(
@@ -2057,25 +2058,55 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 		const groupByResourceAttributeKey = query.groupBy?.includes("resource_attribute")
 			? query.filters.groupByResourceAttributeKey
 			: undefined
-		const rows = yield* executeCHQuery(
-			warehouse,
-			tenant,
-			CH.metricsTimeseriesQuery({
-				metricType: query.filters.metricType,
-				serviceName: query.filters.serviceName,
-				groupByAttributeKey,
-				groupByResourceAttributeKey,
-				resourceAttributeFilters: query.filters.resourceAttributeFilters,
-			}),
-			{
-				orgId: tenant.orgId,
-				metricName: query.filters.metricName,
-				startTime: request.startTime,
-				endTime: request.endTime,
-				bucketSeconds,
-			},
-			"metricsAlertEval",
-		)
+		const attributeFilter = query.filters.attributeFilters?.[0]
+		const metricOptions = {
+			serviceName: query.filters.serviceName,
+			serviceNames: query.filters.serviceNames,
+			environments: query.filters.environments,
+			groupByAttributeKey,
+			groupByResourceAttributeKey,
+			attributeKey: attributeFilter?.key,
+			attributeValue: attributeFilter?.value,
+			resourceAttributeFilters: query.filters.resourceAttributeFilters,
+			groupBy: query.groupBy,
+			seriesLimit: query.seriesLimit,
+		}
+		const isRateOrIncrease = query.metric === "rate" || query.metric === "increase"
+		const rows = isRateOrIncrease
+			? yield* executeCHQuery(
+					warehouse,
+					tenant,
+					CH.metricsTimeseriesRateQuery({
+						...metricOptions,
+						metricName: query.filters.metricName,
+						metricNames: query.filters.metricNames,
+						bucketSeconds,
+					}),
+					{
+						orgId: tenant.orgId,
+						metricName: query.filters.metricName,
+						startTime: request.startTime,
+						endTime: request.endTime,
+						bucketSeconds,
+					},
+					"metricsRateIncreaseAlertEval",
+				)
+			: yield* executeCHQuery(
+					warehouse,
+					tenant,
+					CH.metricsTimeseriesQuery({
+						...metricOptions,
+						metricType: query.filters.metricType,
+					}),
+					{
+						orgId: tenant.orgId,
+						metricName: query.filters.metricName,
+						startTime: request.startTime,
+						endTime: request.endTime,
+						bucketSeconds,
+					},
+					"metricsAlertEval",
+				)
 		for (const row of rows) {
 			const sampleCount = Number(row.dataPointCount ?? 0)
 			const value = sampleCount > 0 ? metricsAggregateValueForMetric(query.metric, row) : null
@@ -2197,9 +2228,7 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 			// by `Date.parse`, which would read that space-separated form as local
 			// time rather than UTC.
 			bucket: normalizeBucket(
-				typeof row.bucket === "string" || row.bucket instanceof Date
-					? row.bucket
-					: range.startTime,
+				typeof row.bucket === "string" || row.bucket instanceof Date ? row.bucket : range.startTime,
 			),
 			groupKey,
 			value,
@@ -2220,10 +2249,7 @@ export const reduceAlertBuckets = (
 	obs: ReadonlyArray<BucketGroupObs>,
 	reducer: QueryEngineAlertReducer,
 ): ReadonlyArray<GroupedAlertObservation> => {
-	const byGroup = new Map<
-		string,
-		Array<{ value: number | null; sampleCount: number; hasData: boolean }>
-	>()
+	const byGroup = new Map<string, Array<{ value: number | null; sampleCount: number; hasData: boolean }>>()
 	for (const o of obs) {
 		const entry = { value: o.value, sampleCount: o.sampleCount, hasData: o.sampleCount > 0 }
 		const list = byGroup.get(o.groupKey)
@@ -2235,7 +2261,6 @@ export const reduceAlertBuckets = (
 	}
 	return reducePerGroupObservations(byGroup, reducer)
 }
-
 
 /**
  * Annotate, validate and resolve the bucket size for one alert evaluation.

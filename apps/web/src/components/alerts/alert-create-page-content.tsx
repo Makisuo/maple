@@ -2,7 +2,6 @@ import { useSearch } from "@tanstack/react-router"
 import { useMemo } from "react"
 
 import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/http"
-import type { Dashboard } from "@/components/dashboard-builder/types"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/utils"
@@ -14,20 +13,13 @@ import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
 import { defaultRuleForm, ruleToFormState, type RuleFormState } from "@/lib/alerts/form-utils"
 import { ALERT_TEMPLATES, applyTemplate } from "@/lib/alerts/templates"
 import { decodeAlertChartFromSearchParam, type AlertChartContext } from "@/lib/alerts/widget-chart-param"
-import {
-	createWidgetAlertPrefill,
-	resolveWidgetAlertPrefill,
-	type WidgetAlertPrefillNotice,
-} from "@/lib/alerts/widget-prefill"
+import { createWidgetAlertPrefill, type WidgetAlertPrefillNotice } from "@/lib/alerts/widget-prefill"
 import { useAlertDestinationsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 import { Result } from "@/lib/effect-atom"
-import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 
 type AlertCreateSearchValue = {
 	serviceName?: string
 	ruleId?: string
-	dashboardId?: string
-	widgetId?: string
 	chart?: string
 	template?: string
 }
@@ -39,10 +31,9 @@ type InitialRuleDraft = {
 	editingRule: AlertRuleDocument | null
 	showTemplatesInitially: boolean
 	/**
-	 * The draft is a placeholder while the real rule (or its dashboard source) is
-	 * still loading. The form must not be shown yet — `form` is a blank default
-	 * that would read as "Create alert rule" until the fetch resolves and the
-	 * `key` change remounts it with the actual values.
+	 * The draft is a placeholder while the real rule is loading. The form must
+	 * not be shown yet — `form` is a blank default that would read as "Create
+	 * alert rule" until the fetch resolves and the `key` change remounts it.
 	 */
 	loading?: boolean
 }
@@ -55,20 +46,8 @@ export function AlertCreatePageContent() {
 		[search.chart],
 	)
 
-	// The dashboards list is only needed for the legacy id-lookup fallback —
-	// when the navigation carried a decodable widget snapshot, prefill is
-	// synchronous and the fetch (plus its loading remount) is skipped entirely.
-	const needsDashboards =
-		!search.ruleId && chartContext == null && Boolean(search.dashboardId || search.widgetId)
-
 	const { result: destinationsResult } = useAlertDestinationsList()
 	const { result: rulesResult } = useAlertRulesList()
-	const { dashboards, isLoading: dashboardsLoading, isError: dashboardsError } = useDashboardsRead()
-	const dashboardsResult = useMemo(() => {
-		if (!needsDashboards || dashboardsLoading) return Result.initial(dashboardsLoading)
-		if (dashboardsError) return Result.fail(new Error("Dashboard sync failed"))
-		return Result.success({ dashboards })
-	}, [needsDashboards, dashboardsLoading, dashboardsError, dashboards])
 
 	const autocompleteValues = useAutocompleteValuesContext()
 	const serviceNameOptions = autocompleteValues.traces.services ?? []
@@ -86,9 +65,8 @@ export function AlertCreatePageContent() {
 				search,
 				chartContext,
 				rulesResult,
-				dashboardsResult,
 			}),
-		[search, chartContext, rulesResult, dashboardsResult],
+		[search, chartContext, rulesResult],
 	)
 
 	// Showing the blank default form here would paint a "Create alert rule" page
@@ -113,10 +91,9 @@ export function AlertCreatePageContent() {
 }
 
 /**
- * Placeholder shown while an existing rule (or a dashboard widget's prefill
- * source) loads. Mirrors the real surface's chrome — same breadcrumb, same
- * title, same two-column grid — so resolving the fetch swaps content into a
- * page that is already the right shape.
+ * Placeholder shown while an existing rule loads. Mirrors the real surface's
+ * chrome — same breadcrumb, same title, same two-column grid — so resolving the
+ * fetch swaps content into a page that is already the right shape.
  */
 function AlertRuleFormSkeleton({ editing }: { editing: boolean }) {
 	return (
@@ -152,17 +129,10 @@ export function deriveInitialRuleDraft({
 	search,
 	chartContext,
 	rulesResult,
-	dashboardsResult,
 }: {
 	search: AlertCreateSearchValue
 	chartContext: AlertChartContext | undefined
 	rulesResult: Result.Result<{ rules: readonly AlertRuleDocument[] }, unknown>
-	dashboardsResult: Result.Result<
-		{
-			dashboards: readonly Dashboard[]
-		},
-		unknown
-	>
 }): InitialRuleDraft {
 	const base = defaultRuleForm(search.serviceName)
 
@@ -201,9 +171,8 @@ export function deriveInitialRuleDraft({
 		}
 	}
 
-	// Snapshot carried through navigation — synchronous prefill, no dashboards
-	// fetch, immune to the autosave race. Garbage/oversized params decode to
-	// undefined and fall through to the id-lookup path below.
+	// Snapshot carried through navigation: synchronous and immune to the
+	// dashboard autosave race.
 	if (chartContext) {
 		const result = createWidgetAlertPrefill(chartContext.widget, base)
 		return {
@@ -215,58 +184,18 @@ export function deriveInitialRuleDraft({
 		}
 	}
 
-	if (search.dashboardId || search.widgetId) {
-		if (!search.dashboardId || !search.widgetId) {
-			const result = resolveWidgetAlertPrefill({
-				dashboards: [],
-				dashboardId: search.dashboardId,
-				widgetId: search.widgetId,
-				base,
-			})
-			return {
-				key: `missing-chart-source:${search.dashboardId ?? "dashboard"}:${search.widgetId ?? "widget"}`,
-				form: result.form,
-				prefillNotices: result.notices,
-				editingRule: null,
-				showTemplatesInitially: false,
-			}
-		}
-		if (Result.isSuccess(dashboardsResult)) {
-			const result = resolveWidgetAlertPrefill({
-				dashboards: dashboardsResult.value.dashboards,
-				dashboardId: search.dashboardId,
-				widgetId: search.widgetId,
-				base,
-			})
-			return {
-				key: `dashboard:${search.dashboardId}:widget:${search.widgetId}`,
-				form: result.form,
-				prefillNotices: result.notices,
-				editingRule: null,
-				showTemplatesInitially: false,
-			}
-		}
-		if (Result.isFailure(dashboardsResult)) {
-			return {
-				key: `dashboard-load-failed:${search.dashboardId}:${search.widgetId}`,
-				form: base,
-				prefillNotices: [
-					{
-						severity: "warning",
-						message: "Dashboards could not be loaded. Starting from a blank alert.",
-					},
-				],
-				editingRule: null,
-				showTemplatesInitially: false,
-			}
-		}
+	if (search.chart) {
 		return {
-			key: `loading-dashboard:${search.dashboardId}:${search.widgetId}`,
+			key: "invalid-chart-snapshot",
 			form: base,
-			prefillNotices: [],
+			prefillNotices: [
+				{
+					severity: "warning",
+					message: "The source chart snapshot was invalid. Starting from a blank alert.",
+				},
+			],
 			editingRule: null,
 			showTemplatesInitially: false,
-			loading: true,
 		}
 	}
 

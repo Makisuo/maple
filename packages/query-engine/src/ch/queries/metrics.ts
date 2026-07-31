@@ -44,6 +44,8 @@ const DEPLOYMENT_ENV_KEY = "deployment.environment"
 interface MetricsQueryOpts {
 	metricType: MetricType
 	serviceName?: string
+	/** Multi-service scope. When non-empty it supersedes `serviceName`. */
+	serviceNames?: readonly string[]
 	/** Deployment environments to scope to. Empty/undefined means all. */
 	environments?: readonly string[]
 	groupByAttributeKey?: string
@@ -114,7 +116,9 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 			$.OrgId.eq(param.string("orgId")),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
-			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+			opts.serviceNames?.length
+				? CH.inList($.ServiceName, opts.serviceNames)
+				: CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
 			opts.environments?.length
 				? CH.inList($.ResourceAttributes.get(DEPLOYMENT_ENV_KEY), opts.environments)
@@ -143,6 +147,8 @@ export interface MetricsRateTimeseriesOpts {
 	metricNames?: ReadonlyArray<string>
 	bucketSeconds?: number
 	serviceName?: string
+	/** Multi-service scope. When non-empty it supersedes `serviceName`. */
+	serviceNames?: ReadonlyArray<string>
 	/** Deployment environments to scope to. Empty/undefined means all. */
 	environments?: readonly string[]
 	groupByAttributeKey?: string
@@ -230,7 +236,9 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 				$.MetricName.eq(param.string("metricName")),
 				$.Hour.gte(previousBucket),
 				$.Hour.lte(endBucket),
-				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+				opts.serviceNames?.length
+					? CH.inList($.ServiceName, opts.serviceNames)
+					: CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.attributeKey === "span.kind" ? opts.attributeValue : undefined, (v: string) =>
 					$.SpanKind.eq(v),
 				),
@@ -382,7 +390,9 @@ export function metricsTimeseriesRateQuery(
 				CH.dynamicColumn<number>("IsMonotonic").eq(1),
 				$.TimeUnix.gte(CH.intervalSub(param.dateTime("startTime"), param.int("bucketSeconds"))),
 				$.TimeUnix.lte(param.dateTime("endTime")),
-				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+				opts.serviceNames?.length
+					? CH.inList($.ServiceName, opts.serviceNames)
+					: CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
 				opts.environments?.length
 					? CH.inList($.ResourceAttributes.get(DEPLOYMENT_ENV_KEY), opts.environments)

@@ -4,10 +4,8 @@ import {
 	CurrentTenant,
 	DiscordAlertDestinationConfig,
 	EmailAlertDestinationConfig,
-	HazelAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
 	PagerDutyAlertDestinationConfig,
-	SlackAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
 } from "@maple/domain/http"
@@ -44,14 +42,6 @@ const toV2DestinationMutation = (doc: AlertDestinationDocument): V2AlertDestinat
 
 const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
 	switch (params.type) {
-		case "slack":
-			return new SlackAlertDestinationConfig({
-				type: "slack",
-				name: params.name,
-				webhookUrl: params.webhook_url,
-				...(params.channel_label !== undefined ? { channelLabel: params.channel_label } : {}),
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
-			})
 		case "slack-bot":
 			return new SlackBotAlertDestinationConfig({
 				type: "slack-bot",
@@ -72,14 +62,6 @@ const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
 				type: "webhook",
 				name: params.name,
 				url: params.url,
-				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
-			})
-		case "hazel":
-			return new HazelAlertDestinationConfig({
-				type: "hazel",
-				name: params.name,
-				webhookUrl: params.webhook_url,
 				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
 				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
 			})
@@ -119,13 +101,6 @@ const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinati
 		...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
 	}
 	switch (params.type) {
-		case "slack":
-			return {
-				type: "slack",
-				...shared,
-				...(params.webhook_url !== undefined ? { webhookUrl: params.webhook_url } : {}),
-				...(params.channel_label !== undefined ? { channelLabel: params.channel_label } : {}),
-			}
 		case "slack-bot":
 			return {
 				type: "slack-bot",
@@ -144,13 +119,6 @@ const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinati
 				type: "webhook",
 				...shared,
 				...(params.url !== undefined ? { url: params.url } : {}),
-				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
-			}
-		case "hazel":
-			return {
-				type: "hazel",
-				...shared,
-				...(params.webhook_url !== undefined ? { webhookUrl: params.webhook_url } : {}),
 				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
 			}
 		case "hazel-oauth":

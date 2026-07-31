@@ -5,9 +5,8 @@ import { deriveInitialRuleDraft } from "./alert-create-page-content"
 
 /**
  * The starter-template deep link from the overview empty state. With no ruleId /
- * chart / dashboard params, `deriveInitialRuleDraft` reaches the template branch
- * before the rules/dashboards results ever matter, so `Result.initial()` stands
- * in for both.
+ * chart params, `deriveInitialRuleDraft` reaches the template branch before the
+ * rules result matters, so `Result.initial()` stands in for it.
  */
 const loading = Result.initial()
 
@@ -19,7 +18,6 @@ describe("deriveInitialRuleDraft — template deep link", () => {
 			search: { template: "low_apdex" },
 			chartContext: undefined,
 			rulesResult: loading,
-			dashboardsResult: loading,
 		})
 
 		expect(draft.form.signalType).toBe("apdex")
@@ -36,7 +34,6 @@ describe("deriveInitialRuleDraft — template deep link", () => {
 			search: { template: "not-a-real-template" },
 			chartContext: undefined,
 			rulesResult: loading,
-			dashboardsResult: loading,
 		})
 
 		expect(draft.form.signalType).toBe("error_rate")
@@ -44,5 +41,18 @@ describe("deriveInitialRuleDraft — template deep link", () => {
 		// No serviceName + unknown template → the overlay still leads the flow.
 		expect(draft.showTemplatesInitially).toBe(true)
 		expect(draft.key).toBe("new:blank")
+	})
+
+	it("surfaces an invalid chart snapshot instead of using a second lookup path", () => {
+		const draft = deriveInitialRuleDraft({
+			search: { chart: "not-a-snapshot" },
+			chartContext: undefined,
+			rulesResult: loading,
+		})
+
+		expect(draft.form.signalType).toBe("error_rate")
+		expect(draft.prefillNotices[0]?.message).toContain("chart snapshot was invalid")
+		expect(draft.showTemplatesInitially).toBe(false)
+		expect(draft.key).toBe("invalid-chart-snapshot")
 	})
 })

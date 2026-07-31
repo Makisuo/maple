@@ -59,8 +59,8 @@ export const alertRules = pgTable(
 		excludeServiceNamesJson: jsonb("exclude_service_names_json").$type<ReadonlyArray<string>>(),
 		/**
 		 * Deployment environments the rule is scoped to. Null/empty means every
-		 * environment (the historical behaviour). Applies to the built-in trace
-		 * signals and `metric`; `builder_query` / `raw_query` carry their own
+		 * environment. Applies to the built-in trace signals;
+		 * `builder_query` / `raw_query` carry their own
 		 * filters, so it is always empty for those.
 		 */
 		environmentsJson: jsonb("environments_json").$type<ReadonlyArray<string>>(),
@@ -75,9 +75,6 @@ export const alertRules = pgTable(
 		consecutiveBreachesRequired: integer("consecutive_breaches_required").notNull().default(2),
 		consecutiveHealthyRequired: integer("consecutive_healthy_required").notNull().default(2),
 		renotifyIntervalMinutes: integer("renotify_interval_minutes").notNull().default(30),
-		metricName: text("metric_name"),
-		metricType: text("metric_type"),
-		metricAggregation: text("metric_aggregation"),
 		apdexThresholdMs: doublePrecision("apdex_threshold_ms"),
 		queryBuilderDraftJson: jsonb("query_builder_draft_json").$type<unknown>(),
 		rawQuerySql: text("raw_query_sql"),

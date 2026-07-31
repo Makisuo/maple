@@ -22,11 +22,10 @@ export default Alchemy.Stack(
 	{ providers: Layer.mergeAll(Cloudflare.providers(), Maple.providers()) },
 	Effect.gen(function* () {
 		// A notification channel…
-		const slack = yield* Maple.AlertDestination("oncall", {
-			type: "slack",
-			name: "On-call Slack",
-			webhook_url: process.env.SLACK_WEBHOOK_URL!,
-			channel_label: "#incidents",
+		const oncall = yield* Maple.AlertDestination("oncall", {
+			type: "pagerduty",
+			name: "On-call PagerDuty",
+			integration_key: process.env.PAGERDUTY_ROUTING_KEY!,
 		})
 
 		// …an alert rule that delivers to it (dependency resolved automatically)…
@@ -37,7 +36,7 @@ export default Alchemy.Stack(
 			comparator: "gt",
 			threshold: 0.05, // error rates are 0–1 ratios
 			window_minutes: 5,
-			destination_ids: [slack.destinationId],
+			destination_ids: [oncall.destinationId],
 		})
 
 		// …a dashboard…

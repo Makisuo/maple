@@ -1,4 +1,5 @@
 import { HttpApi, OpenApi } from "effect/unstable/httpapi"
+import { V2AlertDeliveriesApiGroup } from "./alert-deliveries"
 import { V2AlertDestinationsApiGroup } from "./alert-destinations"
 import { V2AnomaliesApiGroup } from "./anomalies"
 import { V2AlertIncidentsApiGroup } from "./alert-incidents"
@@ -64,6 +65,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2ApiKeysApiGroup)
 	.add(V2DashboardsApiGroup)
 	.add(V2AlertRulesApiGroup)
+	.add(V2AlertDeliveriesApiGroup)
 	.add(V2AlertDestinationsApiGroup)
 	.add(V2AlertIncidentsApiGroup)
 	.add(V2IngestKeysApiGroup)

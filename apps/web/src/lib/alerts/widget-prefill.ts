@@ -24,11 +24,6 @@ type AlertableDashboardWidget = {
 	display?: { title?: string }
 }
 
-type DashboardWithWidgets = {
-	id: string
-	widgets: readonly AlertableDashboardWidget[]
-}
-
 const QUERY_BUILDER_ENDPOINTS = new Set([
 	"custom_query_builder_timeseries",
 	"custom_query_builder_breakdown",
@@ -226,67 +221,4 @@ export function createWidgetAlertPrefill(
 			},
 		],
 	}
-}
-
-export function resolveWidgetAlertPrefill({
-	dashboards,
-	dashboardId,
-	widgetId,
-	base,
-}: {
-	dashboards: readonly DashboardWithWidgets[]
-	dashboardId?: string
-	widgetId?: string
-	base: RuleFormState
-}): WidgetAlertPrefillResult {
-	if (!dashboardId) {
-		return {
-			form: base,
-			notices: [
-				{
-					severity: "warning",
-					message: "The source dashboard id was missing. Starting from a blank alert.",
-				},
-			],
-		}
-	}
-	if (!widgetId) {
-		return {
-			form: base,
-			notices: [
-				{
-					severity: "warning",
-					message: "The source chart id was missing. Starting from a blank alert.",
-				},
-			],
-		}
-	}
-
-	const dashboard = dashboards.find((candidate) => candidate.id === dashboardId)
-	if (!dashboard) {
-		return {
-			form: base,
-			notices: [
-				{
-					severity: "warning",
-					message: "The source dashboard could not be found. Starting from a blank alert.",
-				},
-			],
-		}
-	}
-
-	const widget = dashboard.widgets.find((candidate) => candidate.id === widgetId)
-	if (!widget) {
-		return {
-			form: base,
-			notices: [
-				{
-					severity: "warning",
-					message: "The source chart could not be found. Starting from a blank alert.",
-				},
-			],
-		}
-	}
-
-	return createWidgetAlertPrefill(widget, base)
 }

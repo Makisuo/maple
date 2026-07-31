@@ -51,7 +51,7 @@ interface SignalAndThresholdSectionProps {
 	autocompleteValues: AutocompleteValuesContextType
 }
 
-/* Eight signal types is too many for a single segmented bar — they wrap and
+/* Seven signal types is too many for a single segmented bar — they wrap and
    every option looks equally weighted even though five of them are "I want a
    common metric" and the other two are "I'll define my own". We split the
    choice into two tiers:
@@ -64,7 +64,7 @@ interface SignalAndThresholdSectionProps {
 type SignalKind = "builtin" | "builder_query" | "raw_query"
 
 function signalTypeToKind(signalType: AlertSignalType): SignalKind {
-	if (signalType === "builder_query" || signalType === "metric") return "builder_query"
+	if (signalType === "builder_query") return "builder_query"
 	if (signalType === "raw_query") return "raw_query"
 	return "builtin"
 }

@@ -35,8 +35,7 @@ export type AlertChartContext = Schema.Schema.Type<typeof AlertChartContextSchem
 const decodeAlertChartContext = Schema.decodeUnknownOption(AlertChartContextSchema)
 
 /**
- * Keep the encoded param well under practical URL limits; widgets that blow
- * past this (e.g. a very large raw SQL body) fall back to the id-lookup path.
+ * Keep the encoded param under practical URL limits.
  */
 const MAX_ENCODED_LENGTH = 12_000
 

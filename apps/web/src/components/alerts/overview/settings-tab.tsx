@@ -19,11 +19,11 @@ import {
 	formatAlertTime,
 	getExitErrorMessage,
 	groupDeliveryEventsByDay,
+	v2DeliveryToDocument,
 	type DestinationFormState,
 } from "@/lib/alerts/form-utils"
 import { v2ErrorInfo } from "@/lib/error-messages"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -186,17 +186,18 @@ export function useDestinationManager(): DestinationManager {
  */
 export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationManager; isAdmin: boolean }) {
 	const { result: destinationsResult } = useAlertDestinationsList()
-	// TODO(v2): delivery events have no v2 endpoint (internal delivery-audit
-	// schema); the proper follow-up is an Electric shape for alert_delivery_events.
 	const deliveryEventsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listDeliveryEvents", { reactivityKeys: ["alertDeliveryEvents"] }),
+		MapleApiV2AtomClient.query("alertDeliveries", "list", {
+			query: { limit: 100 },
+			reactivityKeys: ["alertDeliveryEvents"],
+		}),
 	)
 
 	const destinations = Result.builder(destinationsResult)
 		.onSuccess((response) => [...response.destinations] as AlertDestinationDocument[])
 		.orElse(() => [])
 	const deliveryEvents = Result.builder(deliveryEventsResult)
-		.onSuccess((response) => [...response.events] as AlertDeliveryEventDocument[])
+		.onSuccess((response) => response.data.map(v2DeliveryToDocument) as AlertDeliveryEventDocument[])
 		.orElse(() => [])
 	const deliveryEventGroups = groupDeliveryEventsByDay(deliveryEvents)
 

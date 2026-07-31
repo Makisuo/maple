@@ -326,9 +326,6 @@ export interface AlertRuleDetailRow extends AlertRuleRow {
 	consecutiveBreachesRequired: number
 	consecutiveHealthyRequired: number
 	renotifyIntervalMinutes: number
-	metricName: string | null
-	metricType: string | null
-	metricAggregation: string | null
 	apdexThresholdMs: number | null
 	queryBuilderDraft: Record<string, unknown> | null
 	rawQuerySql: string | null

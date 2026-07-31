@@ -5,7 +5,7 @@ import {
 	AlertNotificationTemplate,
 	AlertRuleUpsertRequest,
 	PagerDutyAlertDestinationConfig,
-	SlackAlertDestinationConfig,
+	SlackBotAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
 } from "./alerts"
 
@@ -17,23 +17,23 @@ describe("AlertDestinationCreateRequest", () => {
 	// side and produces the plain wire-format object on the output side.
 	// These tests assert the encoded wire shape matches what HTTP clients
 	// see on the wire.
-	it("encodes slack destination instances to the plain wire shape", () => {
+	it("encodes slack bot destination instances to the plain wire shape", () => {
 		expect(
 			encode(
-				new SlackAlertDestinationConfig({
-					type: "slack",
+				new SlackBotAlertDestinationConfig({
+					type: "slack-bot",
 					name: "Ops Slack",
 					enabled: true,
-					webhookUrl: "https://hooks.slack.com/services/T/B/X",
-					channelLabel: "#ops-alerts",
+					channelId: "C123",
+					channelName: "ops-alerts",
 				}),
 			),
 		).toEqual({
-			type: "slack",
+			type: "slack-bot",
 			name: "Ops Slack",
 			enabled: true,
-			webhookUrl: "https://hooks.slack.com/services/T/B/X",
-			channelLabel: "#ops-alerts",
+			channelId: "C123",
+			channelName: "ops-alerts",
 		})
 	})
 
@@ -78,22 +78,22 @@ describe("AlertDestinationCreateRequest", () => {
 
 	// Decode goes the other direction: plain wire-format objects in, class
 	// instances out. The union discriminates on `type`.
-	it("decodes a slack wire object into a SlackAlertDestinationConfig instance", () => {
+	it("decodes a slack bot wire object into a SlackBotAlertDestinationConfig instance", () => {
 		const decoded = decode({
-			type: "slack",
+			type: "slack-bot",
 			name: "Ops Slack",
 			enabled: true,
-			webhookUrl: "https://hooks.slack.com/services/T/B/X",
-			channelLabel: "#ops-alerts",
+			channelId: "C123",
+			channelName: "ops-alerts",
 		})
 
-		expect(decoded).toBeInstanceOf(SlackAlertDestinationConfig)
+		expect(decoded).toBeInstanceOf(SlackBotAlertDestinationConfig)
 		expect(decoded).toMatchObject({
-			type: "slack",
+			type: "slack-bot",
 			name: "Ops Slack",
 			enabled: true,
-			webhookUrl: "https://hooks.slack.com/services/T/B/X",
-			channelLabel: "#ops-alerts",
+			channelId: "C123",
+			channelName: "ops-alerts",
 		})
 	})
 
@@ -141,12 +141,12 @@ describe("AlertDestinationCreateRequest", () => {
 		expect(Exit.isFailure(result)).toBe(true)
 	})
 
-	it("fails to decode a slack destination missing the required webhookUrl", () => {
+	it("fails to decode a slack bot destination missing the required channelId", () => {
 		const result = decodeExit({
-			type: "slack",
+			type: "slack-bot",
 			name: "Ops Slack",
 			enabled: true,
-			channelLabel: "#ops-alerts",
+			channelName: "ops-alerts",
 		})
 
 		expect(Exit.isFailure(result)).toBe(true)

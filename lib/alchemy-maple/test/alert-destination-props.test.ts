@@ -18,29 +18,25 @@ import {
 
 // Every channel type is constructible with its own fields.
 export const accepts = Effect.gen(function* () {
-	yield* AlertDestination("slack", { type: "slack", name: "s", webhook_url: "u", channel_label: "#c" })
 	yield* AlertDestination("pagerduty", { type: "pagerduty", name: "p", integration_key: "k" })
 	yield* AlertDestination("webhook", { type: "webhook", name: "w", url: "https://x", signing_secret: "s" })
-	yield* AlertDestination("hazel", { type: "hazel", name: "h", webhook_url: "u" })
 	yield* AlertDestination("discord", { type: "discord", name: "d", webhook_url: "u" })
 	yield* AlertDestination("email", { type: "email", name: "e", member_user_ids: ["u_1"] })
 })
 
 // …and only with its own fields.
 export const rejects = Effect.gen(function* () {
-	// @ts-expect-error slack requires webhook_url
-	yield* AlertDestination("a", { type: "slack", name: "no secret" })
-	// @ts-expect-error integration_key belongs to pagerduty
-	yield* AlertDestination("b", { type: "slack", name: "x", webhook_url: "u", integration_key: "k" })
+	// @ts-expect-error pagerduty requires integration_key
+	yield* AlertDestination("a", { type: "pagerduty", name: "no secret" })
+	// @ts-expect-error url belongs to webhook
+	yield* AlertDestination("b", { type: "pagerduty", name: "x", integration_key: "k", url: "u" })
 	// @ts-expect-error email requires member_user_ids
 	yield* AlertDestination("c", { type: "email", name: "x" })
 })
 
 const channels: ReadonlyArray<[string, AlertDestinationProps, string]> = [
-	["slack", { type: "slack", name: "s", webhook_url: "u" }, "webhook_url"],
 	["pagerduty", { type: "pagerduty", name: "p", integration_key: "k" }, "integration_key"],
 	["webhook", { type: "webhook", name: "w", url: "https://x" }, "url"],
-	["hazel", { type: "hazel", name: "h", webhook_url: "u" }, "webhook_url"],
 	["discord", { type: "discord", name: "d", webhook_url: "u" }, "webhook_url"],
 	["email", { type: "email", name: "e", member_user_ids: ["u_1"] }, "member_user_ids"],
 ]

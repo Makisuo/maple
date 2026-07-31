@@ -45,6 +45,17 @@ describe("metricsTimeseriesQuery", () => {
 		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
 	})
 
+	it("uses a multi-service IN predicate instead of the scalar service filter", () => {
+		const q = metricsTimeseriesQuery({
+			metricType: "sum",
+			serviceName: "ignored",
+			serviceNames: ["api", "checkout"],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ServiceName IN ('api', 'checkout')")
+		expect(sql).not.toContain("ServiceName = 'ignored'")
+	})
+
 	it("omits the environment predicate when no environments are selected", () => {
 		const q = metricsTimeseriesQuery({ metricType: "sum", environments: [] })
 		const { sql } = compileCH(q, baseParams)
@@ -173,6 +184,13 @@ describe("metricsTimeseriesRateQuery", () => {
 		expect(sql).toContain("ServiceName = 'api'")
 	})
 
+	it("applies a multi-service filter in the CTE", () => {
+		const q = metricsTimeseriesRateQuery({ serviceName: "ignored", serviceNames: ["api", "checkout"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ServiceName IN ('api', 'checkout')")
+		expect(sql).not.toContain("ServiceName = 'ignored'")
+	})
+
 	it("applies attributeKey filter", () => {
 		const q = metricsTimeseriesRateQuery({
 			attributeKey: "region",
@@ -257,9 +275,7 @@ describe("metricsTimeseriesRateQuery", () => {
 	it("applies an environment filter in the CTE", () => {
 		const q = metricsTimeseriesRateQuery({ environments: ["production", "staging"] })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain(
-			"ResourceAttributes['deployment.environment'] IN ('production', 'staging')",
-		)
+		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
 	})
 
 	it("falls back to raw metrics_sum when an environment filter is set", () => {

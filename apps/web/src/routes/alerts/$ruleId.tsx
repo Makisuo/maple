@@ -6,7 +6,6 @@ import { useCallback, useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { useAlertRuleChecks } from "@/hooks/use-alert-rule-checks"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
@@ -31,6 +30,7 @@ import {
 	computeIncidentStats,
 	getExitErrorMessage,
 	v2CheckToDocument,
+	v2DeliveryToDocument,
 } from "@/lib/alerts/form-utils"
 import { RuleDiagnosisPanel } from "@/components/alerts/rule-detail/rule-diagnosis-panel"
 import { useAlertRuleStates } from "@/hooks/use-alert-rule-states"
@@ -132,10 +132,9 @@ function RuleDetailContent() {
 	const { result: incidentsResult, refresh: refreshIncidents } = useAlertIncidentsList()
 	const ruleStates = useAlertRuleStates(ruleId)
 	const { result: destinationsResult } = useAlertDestinationsList()
-	// TODO(v2): delivery events have no v2 endpoint (internal delivery-audit
-	// schema); the proper follow-up is an Electric shape for alert_delivery_events.
 	const deliveryEventsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listDeliveryEvents", {
+		MapleApiV2AtomClient.query("alertDeliveries", "list", {
+			query: { limit: 100 },
 			reactivityKeys: ["alertDeliveryEvents"],
 		}),
 	)
@@ -188,7 +187,9 @@ function RuleDetailContent() {
 	const ruleDeliveryEvents = useMemo(
 		() =>
 			Result.builder(deliveryEventsResult)
-				.onSuccess((response) => response.events.filter((event) => event.ruleId === ruleId))
+				.onSuccess((response) =>
+					response.data.map(v2DeliveryToDocument).filter((event) => event.ruleId === ruleId),
+				)
 				.orElse(() => []),
 		[deliveryEventsResult, ruleId],
 	)

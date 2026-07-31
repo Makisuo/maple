@@ -12,7 +12,6 @@ export type AlertSignalType =
 	| "p99_latency"
 	| "apdex"
 	| "throughput"
-	| "metric"
 	| "builder_query"
 	| "raw_query"
 
@@ -20,8 +19,8 @@ export type AlertComparator = "gt" | "gte" | "lt" | "lte" | "eq" | "neq" | "betw
 
 /**
  * Alert rule props, authored in the v2 wire shape — mirrors
- * `POST /v2/alerts/rules`. Signal-specific fields (`metric_*`,
- * `apdex_threshold_ms`, `query_builder_draft`, `raw_query_*`) are validated
+ * `POST /v2/alerts/rules`. Signal-specific fields (`apdex_threshold_ms`,
+ * `query_builder_draft`, `raw_query_*`) are validated
  * server-side against `signal_type`.
  */
 export interface AlertRuleProps {
@@ -46,9 +45,6 @@ export interface AlertRuleProps {
 	consecutive_breaches_required?: number
 	consecutive_healthy_required?: number
 	renotify_interval_minutes?: number
-	metric_name?: string | null
-	metric_type?: "sum" | "gauge" | "histogram" | "exponential_histogram" | null
-	metric_aggregation?: "avg" | "min" | "max" | "sum" | "count" | null
 	apdex_threshold_ms?: number | null
 	/** Opaque query-builder draft for `builder_query` rules (verbatim passthrough). */
 	query_builder_draft?: Record<string, unknown> | null

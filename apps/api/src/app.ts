@@ -6,10 +6,10 @@ import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { McpLive } from "./mcp/app"
 import { HttpBillingLive, HttpBillingPublicLive } from "./routes/billing.http"
 import { HttpAiTriageLive } from "./routes/ai-triage.http"
-import { HttpAlertsLive } from "./routes/alerts.http"
 import { HttpAnomaliesLive } from "./routes/anomalies.http"
 import { HttpErrorsLive } from "./routes/errors.http"
 import { HttpApiKeysLive } from "./routes/api-keys.http"
+import { HttpV2AlertDeliveriesLive } from "./routes/v2/alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "./routes/v2/alert-destinations.http"
 import { HttpV2AlertIncidentsLive } from "./routes/v2/alert-incidents.http"
 import { HttpV2AlertRulesLive } from "./routes/v2/alert-rules.http"
@@ -306,7 +306,6 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(Layer.mergeAll(HttpAiTriageLive, HttpAnomaliesLive, HttpChatLive, HttpInvestigationsLive)),
 	Layer.provide(HttpApiKeysLive),
 	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
-	Layer.provide(HttpAlertsLive),
 	Layer.provide(HttpErrorsLive),
 	Layer.provide(HttpDashboardsLive),
 	Layer.provide(HttpDemoLive),
@@ -334,6 +333,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.mergeAll(
 			HttpV2ApiKeysLive,
 			HttpV2DashboardsLive,
+			HttpV2AlertDeliveriesLive,
 			HttpV2AlertRulesLive,
 			HttpV2AlertDestinationsLive,
 			HttpV2AlertIncidentsLive,

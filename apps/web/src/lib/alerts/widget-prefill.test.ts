@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { defaultRuleForm } from "@/lib/alerts/form-utils"
-import { createWidgetAlertPrefill, resolveWidgetAlertPrefill } from "./widget-prefill"
+import { createWidgetAlertPrefill } from "./widget-prefill"
 
 function builderQuery(overrides: Record<string, unknown> = {}) {
 	return {
@@ -156,53 +156,5 @@ describe("createWidgetAlertPrefill", () => {
 		expect(result.notices.map((notice) => notice.message).join("\n")).toContain(
 			"Metric source requires a metric name",
 		)
-	})
-})
-
-describe("resolveWidgetAlertPrefill", () => {
-	it("returns a blank alert with a notice when the dashboard id is missing", () => {
-		const result = resolveWidgetAlertPrefill({
-			dashboards: [{ id: "dash", widgets: [] }],
-			widgetId: "w1",
-			base: defaultRuleForm(),
-		})
-
-		expect(result.form.signalType).toBe("error_rate")
-		expect(result.notices[0]?.message).toContain("dashboard id was missing")
-	})
-
-	it("returns a blank alert with a notice when the widget id is missing", () => {
-		const result = resolveWidgetAlertPrefill({
-			dashboards: [{ id: "dash", widgets: [] }],
-			dashboardId: "dash",
-			base: defaultRuleForm(),
-		})
-
-		expect(result.form.signalType).toBe("error_rate")
-		expect(result.notices[0]?.message).toContain("chart id was missing")
-	})
-
-	it("returns a blank alert with a notice when the dashboard is missing", () => {
-		const result = resolveWidgetAlertPrefill({
-			dashboards: [],
-			dashboardId: "missing",
-			widgetId: "w1",
-			base: defaultRuleForm(),
-		})
-
-		expect(result.form.signalType).toBe("error_rate")
-		expect(result.notices[0]?.message).toContain("dashboard could not be found")
-	})
-
-	it("returns a blank alert with a notice when the widget is missing", () => {
-		const result = resolveWidgetAlertPrefill({
-			dashboards: [{ id: "dash", widgets: [] }],
-			dashboardId: "dash",
-			widgetId: "missing",
-			base: defaultRuleForm(),
-		})
-
-		expect(result.form.signalType).toBe("error_rate")
-		expect(result.notices[0]?.message).toContain("source chart could not be found")
 	})
 })

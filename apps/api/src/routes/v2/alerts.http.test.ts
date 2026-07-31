@@ -252,6 +252,10 @@ describe("v2 alerts over HTTP", () => {
 		expect(incidents.status).toBe(200)
 		expect(incidents.body).toMatchObject({ object: "list", data: [] })
 
+		const deliveries = await harness.request("GET", "/v2/alerts/deliveries", key.secret)
+		expect(deliveries.status).toBe(200)
+		expect(deliveries.body).toMatchObject({ object: "list", data: [], has_more: false })
+
 		// A destination referenced by a rule cannot be deleted.
 		const conflicted = await harness.request("DELETE", `/v2/alerts/destinations/${destId}`, key.secret)
 		expect(conflicted.status).toBe(409)

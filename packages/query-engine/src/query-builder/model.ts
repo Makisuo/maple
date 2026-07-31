@@ -457,6 +457,8 @@ interface MetricsFilterAccumulator {
 	metricName: string
 	metricType: QueryBuilderMetricType
 	serviceName?: string
+	serviceNames?: string[]
+	environments?: string[]
 	groupByAttributeKey?: string
 	groupByResourceAttributeKey?: string
 	attributeFilters: AccumulatedAttributeFilter[]
@@ -512,7 +514,19 @@ function applyMetricsClause(
 	}
 
 	return Match.value(key).pipe(
-		Match.when("service.name", () => ({ ...filters, serviceName: clause.value })),
+		Match.when("service.name", () => {
+			const serviceNames = splitCsv(clause.value)
+			if (serviceNames.length > 1) {
+				const { serviceName: _serviceName, ...rest } = filters
+				return { ...rest, serviceNames }
+			}
+			const { serviceNames: _serviceNames, ...rest } = filters
+			return { ...rest, serviceName: serviceNames[0] ?? clause.value }
+		}),
+		Match.when("deployment.environment", () => ({
+			...filters,
+			environments: splitCsv(clause.value),
+		})),
 		Match.when("metric.type", () => {
 			if (QUERY_BUILDER_METRIC_TYPES.includes(clause.value as QueryBuilderMetricType)) {
 				return { ...filters, metricType: clause.value as QueryBuilderMetricType }
@@ -603,6 +617,15 @@ function resolveMetricsGroupByToken(
 					warnings.push("Invalid attr.* group by ignored")
 					return null
 				}
+				if (
+					metricsFilters.groupByAttributeKey !== undefined &&
+					metricsFilters.groupByAttributeKey !== attributeKey
+				) {
+					warnings.push(
+						`Metrics queries support a single attr.* group by; ignoring attr.${attributeKey}`,
+					)
+					return null
+				}
 				metricsFilters.groupByAttributeKey = attributeKey
 				return "attribute" as const
 			}
@@ -610,6 +633,15 @@ function resolveMetricsGroupByToken(
 				const resourceKey = t.slice(9)
 				if (!resourceKey) {
 					warnings.push("Invalid resource.* group by ignored")
+					return null
+				}
+				if (
+					metricsFilters.groupByResourceAttributeKey !== undefined &&
+					metricsFilters.groupByResourceAttributeKey !== resourceKey
+				) {
+					warnings.push(
+						`Metrics queries support a single resource.* group by; ignoring resource.${resourceKey}`,
+					)
 					return null
 				}
 				metricsFilters.groupByResourceAttributeKey = resourceKey
@@ -1131,7 +1163,10 @@ export function formatFiltersAsWhereClause(params: Record<string, unknown>): str
 
 	const clauses: string[] = []
 
-	if (typeof filters.serviceName === "string" && filters.serviceName.trim()) {
+	if (Array.isArray(filters.serviceNames) && filters.serviceNames.length > 0) {
+		const val = filters.serviceNames.filter((item): item is string => typeof item === "string").join(",")
+		if (val) clauses.push(`service.name = "${val}"`)
+	} else if (typeof filters.serviceName === "string" && filters.serviceName.trim()) {
 		clauses.push(`service.name = "${filters.serviceName.trim()}"`)
 	}
 

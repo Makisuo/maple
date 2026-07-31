@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { PGlite } from "@electric-sql/pglite"
@@ -17,6 +17,15 @@ const readJournal = (): MigrationJournal => {
 	const path = resolve(dirname(fileURLToPath(import.meta.url)), "../drizzle/meta/_journal.json")
 	return JSON.parse(readFileSync(path, "utf8")) as MigrationJournal
 }
+
+const migrationsDir = () => resolve(dirname(fileURLToPath(import.meta.url)), "../drizzle")
+
+const readMigrationSqlBefore = (tag: string): string =>
+	readdirSync(migrationsDir())
+		.filter((file) => file.endsWith(".sql") && file < `${tag}.sql`)
+		.sort()
+		.map((file) => readFileSync(resolve(migrationsDir(), file), "utf8"))
+		.join("\n")
 
 describe("drizzle migrations", () => {
 	it("keeps journal timestamps increasing in migration order", () => {
@@ -96,5 +105,88 @@ describe("bundled migrations", () => {
 		for (const row of pruned.rows) {
 			expect(row.relreplident, `${row.relname} replica identity`).toBe("d")
 		}
+	}, 30_000)
+
+	it("converts metric rules and removes retired destinations without runtime compatibility", async () => {
+		const pg = new PGlite()
+		await pg.exec(readMigrationSqlBefore("0026_windy_bromley"))
+
+		const now = "2026-07-31T00:00:00.000Z"
+		await pg.query(
+			`INSERT INTO alert_destinations (
+				id, org_id, name, type, config_json, secret_ciphertext, secret_iv, secret_tag,
+				created_at, updated_at, created_by, updated_by
+			) VALUES
+				('dest_slack', 'org_1', 'Old Slack', 'slack', '{}', 'x', 'x', 'x', $1, $1, 'user_1', 'user_1'),
+				('dest_webhook', 'org_1', 'Webhook', 'webhook', '{}', 'x', 'x', 'x', $1, $1, 'user_1', 'user_1')`,
+			[now],
+		)
+		await pg.query(
+			`INSERT INTO alert_rules (
+				id, org_id, name, severity, service_names_json, environments_json, signal_type,
+				comparator, threshold, window_minutes, metric_name, metric_type, metric_aggregation,
+				destination_ids_json, query_spec_json, reducer, no_data_behavior,
+				created_at, updated_at, created_by, updated_by
+			) VALUES
+				(
+					'rule_multi', 'org_1', 'Multi-service metric', 'warning',
+					'["api", "checkout"]', '["prod", "staging"]', 'metric',
+					'gt', 10, 5, 'http.requests', 'sum', 'rate',
+					'["dest_slack", "dest_webhook"]', '{"preserved": true}', 'max', 'skip',
+					$1, $1, 'user_1', 'user_1'
+				),
+				(
+					'rule_orphaned', 'org_1', 'Only retired destination', 'warning',
+					NULL, NULL, 'error_rate', 'gt', 0.1, 5, NULL, NULL, NULL,
+					'["dest_slack"]', '{}', 'max', 'skip',
+					$1, $1, 'user_1', 'user_1'
+				)`,
+			[now],
+		)
+
+		await pg.exec(readFileSync(resolve(migrationsDir(), "0026_windy_bromley.sql"), "utf8"))
+
+		const migrated = await pg.query<{
+			signal_type: string
+			service_names_json: unknown
+			environments_json: unknown
+			group_by: string | null
+			destination_ids_json: string[]
+			query_spec_json: { preserved?: boolean }
+			query_builder_draft_json: {
+				whereClause: string
+				groupBy: string[]
+				addOns: { groupBy: boolean }
+			}
+		}>("SELECT * FROM alert_rules WHERE id = 'rule_multi'")
+		expect(migrated.rows[0]).toMatchObject({
+			signal_type: "builder_query",
+			service_names_json: null,
+			environments_json: null,
+			group_by: null,
+			destination_ids_json: ["dest_webhook"],
+			query_spec_json: { preserved: true },
+			query_builder_draft_json: {
+				whereClause: 'service.name = "api,checkout" AND deployment.environment = "prod,staging"',
+				groupBy: ["service.name"],
+				addOns: { groupBy: true },
+			},
+		})
+
+		const orphaned = await pg.query<{ enabled: boolean; destination_ids_json: string[] }>(
+			"SELECT enabled, destination_ids_json FROM alert_rules WHERE id = 'rule_orphaned'",
+		)
+		expect(orphaned.rows[0]).toEqual({ enabled: false, destination_ids_json: [] })
+
+		const retired = await pg.query("SELECT id FROM alert_destinations WHERE type IN ('slack', 'hazel')")
+		expect(retired.rows).toEqual([])
+
+		const columns = await pg.query<{ column_name: string }>(
+			`SELECT column_name
+			 FROM information_schema.columns
+			 WHERE table_name = 'alert_rules'
+				AND column_name IN ('metric_name', 'metric_type', 'metric_aggregation')`,
+		)
+		expect(columns.rows).toEqual([])
 	}, 30_000)
 })

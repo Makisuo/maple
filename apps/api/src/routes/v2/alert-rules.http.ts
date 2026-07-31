@@ -85,9 +85,6 @@ const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 	consecutive_breaches_required: doc.consecutiveBreachesRequired,
 	consecutive_healthy_required: doc.consecutiveHealthyRequired,
 	renotify_interval_minutes: doc.renotifyIntervalMinutes,
-	metric_name: doc.metricName,
-	metric_type: doc.metricType,
-	metric_aggregation: doc.metricAggregation,
 	apdex_threshold_ms: doc.apdexThresholdMs,
 	query_builder_draft: doc.queryBuilderDraft,
 	raw_query_sql: doc.rawQuerySql,
@@ -189,11 +186,6 @@ const toUpsertRequest = (
 			...(params.renotify_interval_minutes !== undefined
 				? { renotifyIntervalMinutes: params.renotify_interval_minutes }
 				: {}),
-			...(params.metric_name !== undefined ? { metricName: params.metric_name } : {}),
-			...(params.metric_type !== undefined ? { metricType: params.metric_type } : {}),
-			...(params.metric_aggregation !== undefined
-				? { metricAggregation: params.metric_aggregation }
-				: {}),
 			...(params.apdex_threshold_ms !== undefined
 				? { apdexThresholdMs: params.apdex_threshold_ms }
 				: {}),
@@ -204,7 +196,7 @@ const toUpsertRequest = (
 	})
 
 /**
- * PATCH semantics over the v1 full-upsert `updateRule`: overlay the fields
+ * PATCH semantics over the domain full-upsert `updateRule`: overlay the fields
  * present in the patch onto the rule's current state. Read-merge-write — no
  * version check, mirroring the dashboard's behavior.
  */
@@ -264,10 +256,6 @@ const mergeUpsertRequest = (
 				patch.consecutive_breaches_required ?? doc.consecutiveBreachesRequired,
 			consecutiveHealthyRequired: patch.consecutive_healthy_required ?? doc.consecutiveHealthyRequired,
 			renotifyIntervalMinutes: patch.renotify_interval_minutes ?? doc.renotifyIntervalMinutes,
-			metricName: patch.metric_name !== undefined ? patch.metric_name : doc.metricName,
-			metricType: patch.metric_type !== undefined ? patch.metric_type : doc.metricType,
-			metricAggregation:
-				patch.metric_aggregation !== undefined ? patch.metric_aggregation : doc.metricAggregation,
 			apdexThresholdMs:
 				patch.apdex_threshold_ms !== undefined ? patch.apdex_threshold_ms : doc.apdexThresholdMs,
 			queryBuilderDraft,

@@ -701,7 +701,7 @@ describe("AlertsService", () => {
 		)
 	})
 
-	it.effect("lowers the environment scope into a metric signal's compiled plan", () => {
+	it.effect("lowers a metrics query-builder draft into the compiled plan", () => {
 		const testDb = createTestDb(trackedDbs)
 
 		return Effect.gen(function* () {
@@ -716,11 +716,17 @@ describe("AlertsService", () => {
 				new AlertRuleUpsertRequest({
 					name: "Queue depth (prod)",
 					severity: "warning",
-					environments: ["production"],
-					signalType: "metric",
-					metricName: "queue.depth",
-					metricType: "gauge",
-					metricAggregation: "avg",
+					signalType: "builder_query",
+					queryBuilderDraft: {
+						id: "alert-query",
+						name: "A",
+						dataSource: "metrics",
+						aggregation: "avg",
+						metricName: "queue.depth",
+						metricType: "gauge",
+						whereClause: 'deployment.environment = "production"',
+						groupBy: [],
+					},
 					comparator: "gt",
 					threshold: 100,
 					windowMinutes: 5,
@@ -1772,8 +1778,24 @@ describe("AlertsService", () => {
 						name: "Grouped metrics alert",
 						severity: "warning",
 						enabled: true,
-						groupBy: ["attr.http.method", "attr.http.route"],
-						signalType: "metric",
+						signalType: "builder_query",
+						queryBuilderDraft: {
+							id: "alert-query",
+							name: "A",
+							dataSource: "metrics",
+							aggregation: "avg",
+							metricName: "http.server.request.duration",
+							metricType: "histogram",
+							whereClause: "",
+							addOns: {
+								groupBy: true,
+								having: false,
+								orderBy: false,
+								limit: false,
+								legend: false,
+							},
+							groupBy: ["attr.http.method", "attr.http.route"],
+						},
 						comparator: "gt",
 						threshold: 100,
 						windowMinutes: 5,
@@ -1781,9 +1803,6 @@ describe("AlertsService", () => {
 						consecutiveBreachesRequired: 1,
 						consecutiveHealthyRequired: 1,
 						renotifyIntervalMinutes: 30,
-						metricName: "http.server.request.duration",
-						metricType: "histogram",
-						metricAggregation: "avg",
 						destinationIds: [destination.id],
 					}),
 				)
@@ -1799,7 +1818,10 @@ describe("AlertsService", () => {
 
 			assert.isTrue(Exit.isFailure(exit))
 			assert.instanceOf(failure, AlertValidationError)
-			assert.strictEqual(failure.message, "Metrics alerts support at most one attr.* groupBy dimension")
+			assert.strictEqual(
+				failure.message,
+				"Metrics queries support a single attr.* group by; ignoring attr.http.route",
+			)
 		})
 	})
 
