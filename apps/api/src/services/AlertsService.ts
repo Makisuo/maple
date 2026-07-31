@@ -77,6 +77,7 @@ import {
 	type AlertDestinationRow,
 	alertIncidents,
 	type AlertIncidentRow,
+	alertRuleClaims,
 	alertRules,
 	type AlertRuleRow,
 	alertRuleStates,
@@ -2665,6 +2666,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						await tx
 							.delete(alertRuleStates)
 							.where(and(eq(alertRuleStates.orgId, orgId), eq(alertRuleStates.ruleId, ruleId)))
+						await tx.delete(alertRuleClaims).where(eq(alertRuleClaims.ruleId, ruleId))
 						return tx
 							.delete(alertRules)
 							.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
@@ -4517,7 +4519,42 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			// shape stays quiet; lastEvaluatedAt is refreshed at most this often.
 			const STATE_HEARTBEAT_MS = 5 * 60_000
 
-			const claimRule = (ruleId: AlertRuleId, timestamp: number) =>
+			// `alert_rules.last_scheduled_at` is still exposed on the API and read by the
+			// web diagnosis panel, but it is only refreshed this often — the per-minute
+			// claim itself lives in the unpublished `alert_rule_claims` table so it never
+			// enters Electric's replication stream. Mirrors STATE_HEARTBEAT_MS above.
+			const SCHEDULER_HEARTBEAT_MS = 5 * 60_000
+
+			/**
+			 * CAS the per-rule scheduler lock. Winning the claim returns one row; losing
+			 * returns zero, so callers can keep using `claimed.length === 0` to bail.
+			 *
+			 * The `INSERT` arm covers the first tick for a rule (replacing the old
+			 * `isNull(lastScheduledAt)` branch); `setWhere` makes a loser's conflict
+			 * update a no-op so `RETURNING` stays empty.
+			 */
+			const claimRule = (orgId: OrgId, ruleId: AlertRuleId, timestamp: number) =>
+				dbExecute((db) =>
+					db
+						.insert(alertRuleClaims)
+						.values({ ruleId, orgId, lastScheduledAt: new Date(timestamp) })
+						.onConflictDoUpdate({
+							target: alertRuleClaims.ruleId,
+							set: { lastScheduledAt: new Date(timestamp) },
+							setWhere: lt(
+								alertRuleClaims.lastScheduledAt,
+								new Date(timestamp - SCHEDULER_LOCK_TTL_MS),
+							),
+						})
+						.returning({ id: alertRuleClaims.ruleId }),
+				)
+
+			/**
+			 * Coarse heartbeat for the user-visible `alert_rules.last_scheduled_at`.
+			 * Gated in SQL so it touches zero rows — and so writes no WAL tuple — on the
+			 * ~4 of every 5 ticks that fall inside the heartbeat window.
+			 */
+			const touchRuleScheduledAt = (ruleId: AlertRuleId, timestamp: number) =>
 				dbExecute((db) =>
 					db
 						.update(alertRules)
@@ -4529,12 +4566,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									isNull(alertRules.lastScheduledAt),
 									lt(
 										alertRules.lastScheduledAt,
-										new Date(timestamp - SCHEDULER_LOCK_TTL_MS),
+										new Date(timestamp - SCHEDULER_HEARTBEAT_MS),
 									),
 								),
 							),
-						)
-						.returning({ id: alertRules.id }),
+						),
 				)
 
 			const recordEvaluationStatus = (evaluation: EvaluatedRule) =>
@@ -4696,8 +4732,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					(row) =>
 						Effect.gen(function* () {
 							const timestamp = yield* now
-							const claimed = yield* claimRule(row.id, timestamp)
+							const claimed = yield* claimRule(row.orgId, row.id, timestamp)
 							if (claimed.length === 0) return
+
+							yield* touchRuleScheduledAt(row.id, timestamp).pipe(Effect.ignore)
 
 							yield* Effect.gen(function* () {
 								const ruleStart = yield* now

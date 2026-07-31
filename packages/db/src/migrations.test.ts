@@ -85,8 +85,25 @@ describe("bundled migrations", () => {
 		)
 		expect(members.rows.map((r) => r.tablename).sort()).toEqual([...SYNCED_TABLES].sort())
 
-		// relreplident 'f' = FULL — Electric needs the full old row to key deletes
-		// on composite-PK tables and to emit deletes when a row leaves a shape.
+		// relreplident 'f' = FULL. Electric refuses to serve a shape over a table that
+		// is not FULL — verified empirically against electricsql/electric:latest, which
+		// answers any shape request for such a table with
+		//   {"message":"Database table \"public.<t>\" does not have its replica identity
+		//    set to FULL"}
+		// and that is unconditional: it holds with and without a `where`, with and
+		// without a `columns` projection, and with (org_id, id) present in a USING INDEX
+		// identity. So the reasoning in 0009's header is wrong in its details — DEFAULT
+		// keys deletes on the primary key perfectly well, composite or not — but its
+		// conclusion is binding: a published table MUST be FULL.
+		//
+		// This costs real money. FULL makes every UPDATE write the entire old row into
+		// the WAL on top of the new one, and those bytes are billed PlanetScale egress
+		// on their way to Electric Cloud. Since the per-write cost is not negotiable,
+		// the only lever on these tables is the *write rate* — which is why the
+		// scheduler claim lock moved to the unpublished `alert_rule_claims` (0027) and
+		// why `api_keys.last_used_at` is heartbeat-gated in ApiKeysService. Do not try
+		// to reclaim this by relaxing the replica identity; Electric will 400 the shape
+		// and the synced lists will fail to load outright.
 		const identities = await pg.query<{ relname: string; relreplident: string }>(
 			`select relname, relreplident from pg_class where relname = any($1)`,
 			[SYNCED_TABLES],
@@ -94,6 +111,11 @@ describe("bundled migrations", () => {
 		for (const row of identities.rows) {
 			expect(row.relreplident, `${row.relname} replica identity`).toBe("f")
 		}
+
+		// The scheduler claim lock (0027) must stay out of the publication: it is
+		// written once per enabled rule per minute, which is precisely the churn that
+		// splitting it off `alert_rules` was meant to keep off the replication stream.
+		expect(members.rows.map((r) => r.tablename)).not.toContain("alert_rule_claims")
 
 		// 'd' = DEFAULT (primary key only). An unpublished table must not keep paying
 		// FULL's WAL cost — writing the whole old row on every UPDATE/DELETE.

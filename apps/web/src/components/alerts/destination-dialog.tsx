@@ -50,7 +50,7 @@ import {
 } from "@maple/ui/components/ui/combobox"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Avatar, AvatarFallback, AvatarImage } from "@maple/ui/components/ui/avatar"
-import { Checkbox } from "@maple/ui/components/ui/checkbox"
+import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
 import { cn } from "@maple/ui/utils"
 import { useOrganization } from "@clerk/clerk-react"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
@@ -154,72 +154,57 @@ function EmailMemberPicker({
 	form: DestinationFormState
 	onFormChange: (updater: (current: DestinationFormState) => DestinationFormState) => void
 }) {
-	const { memberships, isLoaded } = useOrganization({ memberships: { infinite: true } })
-	const members = memberships?.data ?? []
+	// pageSize is bumped well past Clerk's default of 10 so the combobox's
+	// typeahead searches the whole workspace in one page for all but the largest
+	// orgs; "Load more" in the popup footer covers the rest.
+	const { memberships, isLoaded } = useOrganization({
+		memberships: { infinite: true, pageSize: 100 },
+	})
 
-	const toggleMember = (userId: string) =>
-		onFormChange((current) => ({
-			...current,
-			memberUserIds: current.memberUserIds.includes(userId)
-				? current.memberUserIds.filter((id) => id !== userId)
-				: [...current.memberUserIds, userId],
-		}))
+	const options = (memberships?.data ?? []).flatMap((member) => {
+		const userId = member.publicUserData?.userId
+		const email = member.publicUserData?.identifier
+		if (!userId || !email) return []
+		const name = [member.publicUserData?.firstName, member.publicUserData?.lastName]
+			.filter(Boolean)
+			.join(" ")
+		return [
+			{
+				value: userId,
+				label: name || email,
+				adornment: (
+					<Avatar className="size-5">
+						<AvatarImage alt={name || email} src={member.publicUserData?.imageUrl} />
+						<AvatarFallback>{(name || email)[0]?.toUpperCase() ?? "?"}</AvatarFallback>
+					</Avatar>
+				),
+				meta: name ? email : undefined,
+			},
+		]
+	})
 
 	return (
 		<div className="space-y-1.5">
 			<Label className="text-xs">Recipients</Label>
-			<div className="max-h-56 space-y-0.5 overflow-y-auto rounded-md border border-border/60 p-1">
-				{!isLoaded && (
-					<p className="px-2 py-1.5 text-[11px] text-muted-foreground">Loading members…</p>
-				)}
-				{isLoaded && members.length === 0 && (
-					<p className="px-2 py-1.5 text-[11px] text-muted-foreground">
-						No members found in this workspace.
-					</p>
-				)}
-				{members.map((member) => {
-					const userId = member.publicUserData?.userId
-					const email = member.publicUserData?.identifier
-					if (!userId || !email) return null
-					const name = [member.publicUserData?.firstName, member.publicUserData?.lastName]
-						.filter(Boolean)
-						.join(" ")
-					const checked = form.memberUserIds.includes(userId)
-					return (
-						<label
-							key={userId}
-							className={cn(
-								"flex cursor-pointer items-center gap-2.5 rounded-sm px-2 py-1.5 hover:bg-muted/40",
-								checked && "bg-muted/40",
-							)}
+			<MultiSelectCombobox
+				emptyMessage={isLoaded ? "No members found in this workspace." : "Loading members…"}
+				footer={
+					memberships?.hasNextPage ? (
+						<Button
+							className="w-full text-xs"
+							onClick={() => memberships.fetchNext?.()}
+							size="sm"
+							variant="ghost"
 						>
-							<Checkbox checked={checked} onCheckedChange={() => toggleMember(userId)} />
-							<Avatar className="size-6">
-								<AvatarImage src={member.publicUserData?.imageUrl} alt={name || email} />
-								<AvatarFallback>{(name || email)[0]?.toUpperCase() ?? "?"}</AvatarFallback>
-							</Avatar>
-							<span className="min-w-0 flex-1">
-								<span className="block truncate text-xs font-medium">{name || email}</span>
-								{name && (
-									<span className="block truncate text-[11px] text-muted-foreground">
-										{email}
-									</span>
-								)}
-							</span>
-						</label>
-					)
-				})}
-				{memberships?.hasNextPage && (
-					<Button
-						variant="ghost"
-						size="sm"
-						className="w-full text-xs"
-						onClick={() => memberships.fetchNext?.()}
-					>
-						Load more
-					</Button>
-				)}
-			</div>
+							Load more
+						</Button>
+					) : undefined
+				}
+				onChange={(memberUserIds) => onFormChange((current) => ({ ...current, memberUserIds }))}
+				options={options}
+				placeholder={form.memberUserIds.length === 0 ? "Select members…" : "Add member..."}
+				value={form.memberUserIds}
+			/>
 			<p className="text-[11px] text-muted-foreground">
 				Alert emails go to the selected workspace members (up to {MAX_EMAIL_MEMBER_RECIPIENTS}).
 			</p>

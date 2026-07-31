@@ -656,6 +656,73 @@ describe("AlertsService", () => {
 		)
 	})
 
+	it.effect("holds the scheduler claim outside alert_rules and heartbeats the rule row", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_claim_lock")
+			const userId = asUserId("user_claim_lock")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+
+			const claimAt = () =>
+				Effect.promise(() =>
+					queryFirstRow<{ lastScheduledAt: Date | null }>(
+						testDb,
+						`select last_scheduled_at as "lastScheduledAt" from alert_rule_claims limit 1`,
+					),
+				)
+			const ruleScheduledAt = () =>
+				Effect.promise(() =>
+					queryFirstRow<{ lastScheduledAt: Date | null }>(
+						testDb,
+						`select last_scheduled_at as "lastScheduledAt" from alert_rules limit 1`,
+					),
+				)
+
+			yield* alerts.runSchedulerTick()
+			const claimFirst = yield* claimAt()
+			const ruleFirst = yield* ruleScheduledAt()
+
+			// One minute on: the claim must advance (it is the actual per-tick lock)
+			// while alert_rules must NOT, because it is Electric-synced and every write
+			// to it is replicated out of PlanetScale. That divergence is the whole point
+			// of splitting the lock out — if these two move together, the WAL churn the
+			// split was meant to remove is back.
+			yield* TestClock.adjust(Duration.minutes(1))
+			yield* alerts.runSchedulerTick()
+			const claimSecond = yield* claimAt()
+			const ruleSecond = yield* ruleScheduledAt()
+
+			// Past the 5-minute heartbeat the rule row catches up, so the column stays
+			// meaningful for the API and the web diagnosis panel.
+			yield* TestClock.adjust(Duration.minutes(6))
+			yield* alerts.runSchedulerTick()
+			const ruleThird = yield* ruleScheduledAt()
+
+			assert.isOk(claimFirst?.lastScheduledAt, "claim row is created on the first tick")
+			assert.isAbove(
+				claimSecond!.lastScheduledAt!.getTime(),
+				claimFirst!.lastScheduledAt!.getTime(),
+				"claim advances every tick",
+			)
+			assert.strictEqual(
+				ruleSecond?.lastScheduledAt?.getTime(),
+				ruleFirst?.lastScheduledAt?.getTime(),
+				"alert_rules is not rewritten inside the heartbeat window",
+			)
+			assert.isAbove(
+				ruleThird!.lastScheduledAt!.getTime(),
+				ruleFirst!.lastScheduledAt!.getTime(),
+				"alert_rules catches up once the heartbeat window elapses",
+			)
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
+		)
+	})
+
 	it.effect("lowers the environment scope into a built-in signal's compiled plan", () => {
 		const testDb = createTestDb(trackedDbs)
 

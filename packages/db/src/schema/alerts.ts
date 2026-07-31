@@ -97,6 +97,32 @@ export const alertRules = pgTable(
 	],
 )
 
+/**
+ * Scheduler claim lock — deliberately NOT a member of `electric_publication_default`.
+ *
+ * The alerting cron CAS-claims every enabled rule once a minute. That claim used to
+ * be an `UPDATE alert_rules SET last_scheduled_at`, which is the worst possible table
+ * to touch that often: `alert_rules` is the widest control-plane table (eight jsonb
+ * columns plus `raw_query_sql`), it is Electric-synced, and it carried
+ * `REPLICA IDENTITY FULL` — so each claim wrote the entire old row *and* the new row
+ * into the WAL, shipped both out of PlanetScale to Electric Cloud, and fanned the row
+ * out to every connected browser as a shape delta.
+ *
+ * Holding the lock in its own narrow, unpublished table keeps the per-minute write out
+ * of the replication stream entirely. Electric runs with
+ * ELECTRIC_MANUAL_TABLE_PUBLISHING=true (see 0009_electric_publication.sql), so a new
+ * table is unpublished unless a migration explicitly adds it — do not add this one.
+ */
+export const alertRuleClaims = pgTable(
+	"alert_rule_claims",
+	{
+		ruleId: text("rule_id").$type<AlertRuleId>().notNull().primaryKey(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		lastScheduledAt: timestamp("last_scheduled_at", { withTimezone: true, mode: "date" }).notNull(),
+	},
+	(table) => [index("alert_rule_claims_org_idx").on(table.orgId)],
+)
+
 export const alertRuleStates = pgTable(
 	"alert_rule_states",
 	{
