@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@effect/vitest"
+import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import type { InternalRpcToolNotFoundError } from "@maple/domain/internal-rpc"
 import { callMcpTool, listMcpTools } from "./dispatcher"
@@ -16,13 +16,14 @@ describe("MCP dispatcher", () => {
 			}))
 			.filter(({ type }) => type !== "object")
 
-		expect(invalidSchemas).toEqual([])
+		assert.deepStrictEqual(invalidSchemas, [])
 	})
 
 	it.effect("publishes the same names, descriptions, and schemas used by HTTP MCP", () =>
 		Effect.gen(function* () {
 			const descriptors = yield* listMcpTools
-			expect(descriptors).toEqual(
+			assert.deepStrictEqual(
+				descriptors,
 				mapleToolDefinitions.map((definition) => ({
 					name: definition.name,
 					description: definition.description,
@@ -35,7 +36,7 @@ describe("MCP dispatcher", () => {
 	it("normalizes an empty Struct root and rejects a non-object root", () => {
 		// Effect emits `{ anyOf: [{type:"object"},{type:"array"}] }` — no `type` —
 		// for a no-parameter tool; that exact shape is normalized.
-		expect(toInputSchema(Schema.Struct({}))).toEqual({
+		assert.deepStrictEqual(toInputSchema(Schema.Struct({})), {
 			type: "object",
 			properties: {},
 			additionalProperties: false,
@@ -43,8 +44,8 @@ describe("MCP dispatcher", () => {
 
 		// Anything else with a non-object root has parameters an empty object
 		// schema would erase, so registration fails loudly instead.
-		expect(() => toInputSchema(Schema.Literals(["a", "b"]))).toThrow(/object root/)
-		expect(() => toInputSchema(Schema.Array(Schema.String))).toThrow(/object root/)
+		assert.throws(() => toInputSchema(Schema.Literals(["a", "b"])), /object root/)
+		assert.throws(() => toInputSchema(Schema.Array(Schema.String)), /object root/)
 	})
 
 	it.effect("returns MCP validation feedback for invalid model tool input", () =>
@@ -57,9 +58,9 @@ describe("MCP dispatcher", () => {
 				never,
 				never
 			>
-			expect(result.isError).toBe(true)
-			expect(result.content[0]?.text).toContain("Invalid parameters")
-			expect(result.content[0]?.text).toContain("inspect_trace")
+			assert.strictEqual(result.isError, true)
+			assert.include(result.content[0]?.text ?? "", "Invalid parameters")
+			assert.include(result.content[0]?.text ?? "", "inspect_trace")
 		}),
 	)
 
@@ -72,8 +73,8 @@ describe("MCP dispatcher", () => {
 					never
 				>,
 			)
-			expect(error._tag).toBe("@maple/internal-rpc/ToolNotFoundError")
-			expect(error.name).toBe("not_a_maple_tool")
+			assert.strictEqual(error._tag, "@maple/internal-rpc/ToolNotFoundError")
+			assert.strictEqual(error.name, "not_a_maple_tool")
 		}),
 	)
 })

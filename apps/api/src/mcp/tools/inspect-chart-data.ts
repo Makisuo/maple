@@ -243,10 +243,10 @@ export function registerInspectChartDataTool(server: McpToolRegistrar) {
 
 			let timeRange: InspectWidgetTimeRange
 			if (start_time && end_time) {
-				const range = resolveTimeRange(start_time, end_time)
+				const range = yield* resolveTimeRange(start_time, end_time)
 				timeRange = { startTime: range.st, endTime: range.et, source: "override" }
 			} else {
-				const resolved = resolveDashboardTimeRange(dashboard.timeRange as DashboardTimeRangeInput)
+				const resolved = yield* resolveDashboardTimeRange(dashboard.timeRange as DashboardTimeRangeInput)
 				if (resolved) {
 					timeRange = {
 						startTime: resolved.startTime,
@@ -254,7 +254,7 @@ export function registerInspectChartDataTool(server: McpToolRegistrar) {
 						source: "dashboard",
 					}
 				} else {
-					const fallback = resolveTimeRange(undefined, undefined, 6)
+					const fallback = yield* resolveTimeRange(undefined, undefined, 6)
 					timeRange = { startTime: fallback.st, endTime: fallback.et, source: "fallback" }
 				}
 			}

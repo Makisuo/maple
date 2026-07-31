@@ -1,4 +1,5 @@
 import * as DateTime from "effect/DateTime"
+import { Effect, Option } from "effect"
 
 const formatUtc = (dt: DateTime.DateTime): string => DateTime.formatIso(dt).replace("T", " ").slice(0, 19)
 
@@ -37,32 +38,31 @@ export type DashboardTimeRangeInput =
  * Returns `null` for unrecognized relative shorthands so the caller can fall
  * back to a sensible default window.
  */
-export function resolveDashboardTimeRange(timeRange: DashboardTimeRangeInput): ResolvedTimeRange | null {
+export function resolveDashboardTimeRange(
+	timeRange: DashboardTimeRangeInput,
+): Effect.Effect<ResolvedTimeRange | null> {
 	if (timeRange.type === "absolute") {
 		const start = DateTime.make(timeRange.startTime)
 		const end = DateTime.make(timeRange.endTime)
-		if (start._tag === "None" || end._tag === "None") return null
-		return {
+		if (Option.isNone(start) || Option.isNone(end)) return Effect.succeed(null)
+		return Effect.succeed({
 			startTime: formatUtc(start.value),
 			endTime: formatUtc(end.value),
-		}
+		})
 	}
 
 	const trimmed = timeRange.value.trim().toLowerCase()
-	if (!trimmed) return null
+	if (!trimmed) return Effect.succeed(null)
 
 	const match = trimmed.match(RELATIVE_PATTERN)
-	if (!match) return null
+	if (!match) return Effect.succeed(null)
 
 	const amount = Number.parseInt(match[1], 10)
-	if (!Number.isFinite(amount) || amount <= 0) return null
+	if (!Number.isFinite(amount) || amount <= 0) return Effect.succeed(null)
 
 	const unit = match[2] as RelativeUnit
-	const now = DateTime.nowUnsafe()
-	const start = subtractRelative(now, amount, unit)
-
-	return {
-		startTime: formatUtc(start),
+	return Effect.map(DateTime.now, (now) => ({
+		startTime: formatUtc(subtractRelative(now, amount, unit)),
 		endTime: formatUtc(now),
-	}
+	}))
 }

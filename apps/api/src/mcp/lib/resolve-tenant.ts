@@ -16,16 +16,14 @@ const apiKeyDefaultRoles = [decodeRoleNameSync("root")]
 
 const AGENT_ACTOR_HEADER = "x-maple-agent-id"
 
+const decodeJsonValue = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
+
 const extractAgentActorIdFromMetadata = (metadataJson: string | null): string | null => {
 	if (!metadataJson) return null
-	try {
-		const parsed = JSON.parse(metadataJson)
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-			const candidate = (parsed as Record<string, unknown>).agentActorId
-			return typeof candidate === "string" ? candidate : null
-		}
-	} catch {
-		// fall through
+	const parsed = Option.getOrUndefined(decodeJsonValue(metadataJson))
+	if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+		const candidate = (parsed as Record<string, unknown>).agentActorId
+		return typeof candidate === "string" ? candidate : null
 	}
 	return null
 }
@@ -61,7 +59,7 @@ export const mcpResourceForRequest = (request: Request) => {
 	return `${protocol}://${host}/mcp`
 }
 
-export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(function* (request: Request) {
+export const resolveMcpTenantContext = Effect.fnUntraced(function* (request: Request) {
 	const token = getBearerToken(request.headers)
 
 	// Internal service auth (e.g. chat agent)

@@ -8,7 +8,7 @@ import {
 	type McpToolResult,
 } from "./types"
 import { resolveTimeRange } from "../lib/time"
-import { Effect, Match, Schema } from "effect"
+import { Effect, Match, Option, Schema } from "effect"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { QueryEngineService } from "@/services/QueryEngineService"
 import {
@@ -35,11 +35,11 @@ import {
 	type QueryDataQueryContext,
 } from "@maple/domain"
 
-const asServiceName = Schema.decodeUnknownSync(ServiceName)
-const asSpanName = Schema.decodeUnknownSync(SpanName)
-const asDeploymentEnvironment = Schema.decodeUnknownSync(DeploymentEnvironment)
-const asCommitSha = Schema.decodeUnknownSync(CommitSha)
-const asMetricName = Schema.decodeUnknownSync(MetricName)
+const asServiceName = Schema.decodeUnknownOption(ServiceName)
+const asSpanName = Schema.decodeUnknownOption(SpanName)
+const asDeploymentEnvironment = Schema.decodeUnknownOption(DeploymentEnvironment)
+const asCommitSha = Schema.decodeUnknownOption(CommitSha)
+const asMetricName = Schema.decodeUnknownOption(MetricName)
 
 const queryDataSchema = Schema.Struct({
 	source: Schema.Literals(["traces", "logs", "metrics"]).annotate({
@@ -119,7 +119,7 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 		queryDataDescription,
 		queryDataSchema,
 		Effect.fn("McpTool.queryData")(function* (params) {
-			const { st, et } = resolveTimeRange(params.start_time, params.end_time)
+			const { st, et } = yield* resolveTimeRange(params.start_time, params.end_time)
 
 			// Validate attribute params
 			if (params.attribute_value && !params.attribute_key) {
@@ -146,6 +146,54 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 				}
 			}
 
+			// Branded filter values are decoded up front so a malformed value comes
+			// back as an actionable tool error naming the field instead of a defect.
+			const invalidFilters: string[] = []
+			const decodeFilter = <A>(
+				decode: (input: unknown) => Option.Option<A>,
+				field: string,
+				value: string,
+			): A | undefined => {
+				const decoded = decode(value)
+				if (Option.isNone(decoded)) {
+					invalidFilters.push(`${field}="${value}"`)
+					return undefined
+				}
+				return decoded.value
+			}
+			const decodeFilterList = <A>(
+				decode: (input: unknown) => Option.Option<A>,
+				field: string,
+				value: string,
+			): Array<A> =>
+				splitCsv(value).flatMap((entry) => {
+					const decoded = decodeFilter(decode, field, entry)
+					return decoded === undefined ? [] : [decoded]
+				})
+
+			const serviceName = params.service_name
+				? decodeFilter(asServiceName, "service_name", params.service_name)
+				: undefined
+			const spanName = params.span_name
+				? decodeFilter(asSpanName, "span_name", params.span_name)
+				: undefined
+			const environments = params.environments
+				? decodeFilterList(asDeploymentEnvironment, "environments", params.environments)
+				: undefined
+			const commitShas = params.commit_shas
+				? decodeFilterList(asCommitSha, "commit_shas", params.commit_shas)
+				: undefined
+			const metricName = params.metric_name
+				? decodeFilter(asMetricName, "metric_name", params.metric_name)
+				: undefined
+
+			if (invalidFilters.length > 0) {
+				return validationError(
+					`Invalid filter value(s): ${invalidFilters.join(", ")}. Use list_services, explore_attributes, or list_metrics to discover valid values.`,
+					'service_name="checkout-api" environments="production"',
+				)
+			}
+
 			// Track defaults applied for transparency
 			const decisions: string[] = []
 
@@ -169,17 +217,11 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 					}
 
 					const filters: TracesFilters = {
-						...(params.service_name && { serviceName: asServiceName(params.service_name) }),
-						...(params.span_name && { spanName: asSpanName(params.span_name) }),
+						...(serviceName && { serviceName }),
+						...(spanName && { spanName }),
 						...(params.root_spans_only && { rootSpansOnly: params.root_spans_only }),
-						...(params.environments && {
-							environments: splitCsv(params.environments).map((env) =>
-								asDeploymentEnvironment(env),
-							),
-						}),
-						...(params.commit_shas && {
-							commitShas: splitCsv(params.commit_shas).map((sha) => asCommitSha(sha)),
-						}),
+						...(environments && { environments }),
+						...(commitShas && { commitShas }),
 						...(params.group_by === "attribute" &&
 							params.attribute_key && { groupByAttributeKeys: [params.attribute_key] }),
 						...(attributeFilters.length > 0 && { attributeFilters }),
@@ -228,7 +270,7 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 					if (!params.metric) decisions.push(`metric: fixed to "count" (only option for logs)`)
 
 					const filters: LogsFilters = {
-						...(params.service_name && { serviceName: asServiceName(params.service_name) }),
+						...(serviceName && { serviceName }),
 						...(params.severity && { severity: params.severity }),
 					}
 					const hasFilters = Object.keys(filters).length > 0
@@ -264,7 +306,6 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 				}),
 				Match.when("metrics", (): QuerySpecType => {
 					// metric_name presence is enforced by the validation above.
-					const metricName = params.metric_name ?? ""
 					const metricType = params.metric_type ?? "sum"
 
 					const metricsAttributeFilters: Array<{
@@ -282,9 +323,9 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 					}
 
 					const filters: MetricsFilters = {
-						metricName: asMetricName(metricName),
+						metricName: metricName as MetricName,
 						metricType,
-						...(params.service_name && { serviceName: asServiceName(params.service_name) }),
+						...(serviceName && { serviceName }),
 						...(params.group_by === "attribute" &&
 							params.attribute_key && { groupByAttributeKey: params.attribute_key }),
 						...(metricsAttributeFilters.length > 0 && {

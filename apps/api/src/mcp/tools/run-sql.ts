@@ -54,7 +54,7 @@ export function registerRunSqlTool(server: McpToolRegistrar) {
 		runSqlSchema,
 		Effect.fn("McpTool.runSql")(function* (params) {
 			const tenant = yield* resolveTenant
-			const { st, et } = resolveTimeRange(params.start_time, params.end_time)
+			const { st, et } = yield* resolveTimeRange(params.start_time, params.end_time)
 			const granularitySeconds = params.granularity_seconds ?? autoBucketSeconds(st, et)
 
 			const outcome = yield* runRawSql({

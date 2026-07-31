@@ -19,7 +19,7 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
 			environment: optionalStringParam("Filter by deployment environment"),
 		}),
 		Effect.fn("McpTool.serviceMap")(function* ({ start_time, end_time, service_name, environment }) {
-			const { st, et } = resolveTimeRange(start_time, end_time)
+			const { st, et } = yield* resolveTimeRange(start_time, end_time)
 			const tenant = yield* resolveTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,

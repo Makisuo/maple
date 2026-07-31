@@ -1,5 +1,6 @@
 import { InternalRpcToolNotFoundError, type InternalMcpToolDescriptor } from "@maple/domain/internal-rpc"
-import { Effect, Schema } from "effect"
+import { Cause, Effect, Option, Schema } from "effect"
+import { CurrentMcpTenant } from "./lib/query-warehouse"
 import { mapleToolDefinitions, toInputSchema, type MapleToolDefinition } from "./tools/registry"
 import type { McpToolResult } from "./tools/types"
 
@@ -8,8 +9,10 @@ class McpDecodeError extends Schema.TaggedErrorClass<McpDecodeError>()("@maple/m
 }) {}
 
 const toErrorMessage = (error: unknown): string => {
-	if (error instanceof Error && "error" in error && error.error != null) {
-		const inner = error.error
+	// `Effect.try`/`tryPromise` wrap thrown values in `Cause.UnknownError`; report
+	// the thrown value rather than the wrapper's generic message.
+	if (Cause.isUnknownError(error) && error.cause != null) {
+		const inner = error.cause
 		return inner instanceof Error ? inner.message : String(inner)
 	}
 	if (error instanceof Error) return error.message
@@ -42,7 +45,13 @@ export const callMcpTool = Effect.fn("McpToolDispatcher.call")(function* (name: 
 	}
 
 	const execute = Effect.gen(function* () {
-		yield* Effect.annotateCurrentSpan({ tool: definition.name })
+		const tenant = yield* Effect.serviceOption(CurrentMcpTenant)
+		const spanAnnotations = Option.match(tenant, {
+			onNone: () => ({ tool: definition.name }),
+			onSome: ({ orgId }) => ({ tool: definition.name, orgId }),
+		})
+		yield* Effect.annotateCurrentSpan(spanAnnotations)
+
 		const decoded = yield* Effect.try({
 			try: () => Schema.decodeUnknownSync(definition.schema)(input),
 			catch: (error) => error,
@@ -55,7 +64,14 @@ export const callMcpTool = Effect.fn("McpToolDispatcher.call")(function* (name: 
 			),
 		)
 
-		return yield* definition.handler(decoded).pipe(Effect.tap(() => Effect.logInfo("Tool completed")))
+		// The tool's own span is opened inside `definition.handler` (every handler is
+		// an `Effect.fn`), so the annotations are attached with `annotateSpans` —
+		// inherited by every span created below — rather than `annotateCurrentSpan`,
+		// which would only reach this dispatch span.
+		return yield* definition.handler(decoded).pipe(
+			Effect.annotateSpans(spanAnnotations),
+			Effect.tap(() => Effect.logInfo("Tool completed")),
+		)
 	})
 
 	return yield* execute.pipe(
@@ -77,14 +93,6 @@ export const callMcpTool = Effect.fn("McpToolDispatcher.call")(function* (name: 
 			"@maple/mcp/errors/McpQueryError": (error) =>
 				Effect.logError(`Tool error: ${error.message}`).pipe(
 					Effect.annotateLogs({ errorTag: error._tag, pipe: error.pipeName }),
-					Effect.as({
-						isError: true,
-						content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
-					} satisfies McpToolResult),
-				),
-			"@maple/mcp/errors/McpTenantError": (error) =>
-				Effect.logError(`Tool error: ${error.message}`).pipe(
-					Effect.annotateLogs({ errorTag: error._tag }),
 					Effect.as({
 						isError: true,
 						content: [{ type: "text", text: `${error._tag}: ${error.message}` }],

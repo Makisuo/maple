@@ -57,7 +57,6 @@ export const HttpChatLive = HttpApiBuilder.group(MapleApi, "chat", (handlers) =>
 			const result = yield* definition.handler(decoded).pipe(
 				Effect.catchTags({
 					"@maple/mcp/errors/McpQueryError": (e) => Effect.succeed(errorResult(e._tag, e.message)),
-					"@maple/mcp/errors/McpTenantError": (e) => Effect.succeed(errorResult(e._tag, e.message)),
 					"@maple/mcp/errors/McpAuthMissingError": (e) =>
 						Effect.succeed(errorResult(e._tag, e.message)),
 					"@maple/mcp/errors/McpAuthInvalidError": (e) =>

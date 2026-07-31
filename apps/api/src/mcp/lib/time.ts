@@ -1,5 +1,5 @@
 import * as DateTime from "effect/DateTime"
-import { Option } from "effect"
+import { Effect, Option } from "effect"
 
 const formatUtc = (dt: DateTime.DateTime): string => DateTime.formatIso(dt).replace("T", " ").slice(0, 19)
 
@@ -25,8 +25,7 @@ export function normalizeTime(input: string): string {
 
 const DEFAULT_HOURS = 6
 
-function defaultTimeRange(hours = DEFAULT_HOURS) {
-	const now = DateTime.nowUnsafe()
+function defaultTimeRange(now: DateTime.Utc, hours = DEFAULT_HOURS) {
 	const start = DateTime.subtract(now, { hours })
 	return {
 		startTime: formatUtc(start),
@@ -74,28 +73,30 @@ export function resolveTimeRange(
 	startTime: string | undefined,
 	endTime: string | undefined,
 	opts: ResolveTimeRangeOptions | number = {},
-): ResolvedTimeRange {
-	const { defaultHours = DEFAULT_HOURS, maxHours } =
-		typeof opts === "number" ? { defaultHours: opts, maxHours: undefined } : opts
+): Effect.Effect<ResolvedTimeRange> {
+	return Effect.map(DateTime.now, (now) => {
+		const { defaultHours = DEFAULT_HOURS, maxHours } =
+			typeof opts === "number" ? { defaultHours: opts, maxHours: undefined } : opts
 
-	const defaults = defaultTimeRange(defaultHours)
-	let st = startTime ? normalizeTime(startTime) : defaults.startTime
-	let et = endTime ? normalizeTime(endTime) : defaults.endTime
+		const defaults = defaultTimeRange(now, defaultHours)
+		let st = startTime ? normalizeTime(startTime) : defaults.startTime
+		let et = endTime ? normalizeTime(endTime) : defaults.endTime
 
-	let clamped = false
-	if (maxHours !== undefined && maxHours > 0) {
-		const stMs = toEpochMs(st)
-		const etMs = toEpochMs(et)
-		if (stMs !== undefined && etMs !== undefined) {
-			const maxMs = maxHours * 3600 * 1000
-			if (etMs - stMs > maxMs) {
-				st = fromEpochMs(etMs - maxMs)
-				clamped = true
+		let clamped = false
+		if (maxHours !== undefined && maxHours > 0) {
+			const stMs = toEpochMs(st)
+			const etMs = toEpochMs(et)
+			if (stMs !== undefined && etMs !== undefined) {
+				const maxMs = maxHours * 3600 * 1000
+				if (etMs - stMs > maxMs) {
+					st = fromEpochMs(etMs - maxMs)
+					clamped = true
+				}
 			}
 		}
-	}
 
-	return { st, et, clamped, maxHours }
+		return { st, et, clamped, maxHours }
+	})
 }
 
 /**

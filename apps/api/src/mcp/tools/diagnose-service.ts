@@ -20,7 +20,7 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
 			environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
 		}),
 		Effect.fn("McpTool.diagnoseService")(function* ({ service_name, start_time, end_time, environment }) {
-			const { st, et } = resolveTimeRange(start_time, end_time)
+			const { st, et } = yield* resolveTimeRange(start_time, end_time)
 			const tenant = yield* resolveTenant
 
 			const result = yield* diagnoseService({

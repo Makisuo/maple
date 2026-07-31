@@ -106,7 +106,7 @@ function buildAlertRuleRequest(
 	let signalType = params.signal_type
 	let comparator = params.comparator
 	let threshold = params.threshold
-	let windowMinutes = params.window_minutes ?? 5
+	const windowMinutes = params.window_minutes ?? 5
 	let templateDefaults: Record<string, unknown> = {}
 
 	if (params.template && params.template !== "custom") {
@@ -349,16 +349,15 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			const alerts = yield* AlertsService
 
 			const rule = yield* alerts.createRule(tenant.orgId, tenant.userId, tenant.roles, decoded).pipe(
-				Effect.catchTag("@maple/http/errors/AlertValidationError", (error) =>
-					Effect.fail(
-						new McpQueryError({
-							message: `${error._tag}: ${error.message}\n${error.details.join("\n")}`,
-							pipeName: "create_alert_rule",
-							cause: error,
-						}),
-					),
-				),
 				Effect.catchTags({
+					"@maple/http/errors/AlertValidationError": (error) =>
+						Effect.fail(
+							new McpQueryError({
+								message: `${error._tag}: ${error.message}\n${error.details.join("\n")}`,
+								pipeName: "create_alert_rule",
+								cause: error,
+							}),
+						),
 					"@maple/http/errors/AlertForbiddenError": (error) =>
 						Effect.fail(
 							new McpQueryError({

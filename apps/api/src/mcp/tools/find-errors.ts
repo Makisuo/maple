@@ -21,7 +21,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max results (default 20)"),
 		}),
 		Effect.fn("McpTool.findErrors")(function* ({ start_time, end_time, service, environment, limit }) {
-			const { st, et } = resolveTimeRange(start_time, end_time)
+			const { st, et } = yield* resolveTimeRange(start_time, end_time)
 			const tenant = yield* resolveTenant
 
 			const errors = yield* findErrors({

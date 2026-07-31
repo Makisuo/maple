@@ -40,7 +40,7 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 			end_time,
 			limit,
 		}) {
-			const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
+			const range = yield* resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
 			const { st, et } = range
 			const metricOption =
 				metric === undefined ? Option.some("count" as const) : decodeTracesMetric(metric)

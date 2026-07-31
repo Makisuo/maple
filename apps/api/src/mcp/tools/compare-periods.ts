@@ -53,7 +53,7 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
 				curEt = new Date(center.getTime() + halfWindow).toISOString().replace("T", " ").slice(0, 19)
 			} else {
 				// Resolve current period
-				const current = resolveTimeRange(current_start, current_end, 1)
+				const current = yield* resolveTimeRange(current_start, current_end, 1)
 				curSt = current.st
 				curEt = current.et
 

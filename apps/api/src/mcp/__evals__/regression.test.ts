@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
+import { Effect } from "effect"
 import { installFakeWarehouse, restoreWarehouse, type FixtureRule } from "./fake-warehouse"
 import { makeEvalRuntime, runToolDirect, type EvalRuntime } from "./eval-runtime"
 import {
@@ -58,48 +59,64 @@ afterAll(async () => {
 })
 
 describe("inspect_trace bounded-overview rendering", () => {
-	it("renders a small trace in full (no truncation note)", async () => {
-		const result = await runToolDirect(rt, "inspect_trace", { trace_id: SMALL_TRACE_ID })
-		const text = renderedText(result)
-		expect(text).not.toContain("Showing")
-		expect(text).toContain("GET /api/orders")
-		// Span ids are surfaced at the end of each line for follow-up lookups.
-		expect(text).toContain("span=")
-	})
+	it.effect("renders a small trace in full (no truncation note)", () =>
+		Effect.gen(function* () {
+			const result = yield* Effect.promise(() =>
+				runToolDirect(rt, "inspect_trace", { trace_id: SMALL_TRACE_ID }),
+			)
+			const text = renderedText(result)
+			assert.notInclude(text, "Showing")
+			assert.include(text, "GET /api/orders")
+			// Span ids are surfaced at the end of each line for follow-up lookups.
+			assert.include(text, "span=")
+		}),
+	)
 
-	it("caps a large trace and keeps the error span + omitted marker", async () => {
-		const result = await runToolDirect(rt, "inspect_trace", { trace_id: FIXTURES.traceId })
-		const text = renderedText(result)
-		// Bounded overview note.
-		expect(text).toContain(`of ${LARGE_TRACE_SPAN_COUNT} spans (errors and longest first)`)
-		// The single error span survives selection even though it's low-duration.
-		expect(text).toContain("[Error]")
-		expect(text).toContain("db.query users")
-		// Dropped siblings are surfaced, not silently hidden.
-		expect(text).toContain("more spans")
-		// Full span ids remain available for inspect_span pivots.
-		expect(text).toContain("span=")
-	})
+	it.effect("caps a large trace and keeps the error span + omitted marker", () =>
+		Effect.gen(function* () {
+			const result = yield* Effect.promise(() =>
+				runToolDirect(rt, "inspect_trace", { trace_id: FIXTURES.traceId }),
+			)
+			const text = renderedText(result)
+			// Bounded overview note.
+			assert.include(text, `of ${LARGE_TRACE_SPAN_COUNT} spans (errors and longest first)`)
+			// The single error span survives selection even though it's low-duration.
+			assert.include(text, "[Error]")
+			assert.include(text, "db.query users")
+			// Dropped siblings are surfaced, not silently hidden.
+			assert.include(text, "more spans")
+			// Full span ids remain available for inspect_span pivots.
+			assert.include(text, "span=")
+		}),
+	)
 })
 
 describe("inspect_span drill-down", () => {
-	it("returns the full attribute set for a known span", async () => {
-		const result = await runToolDirect(rt, "inspect_span", {
-			trace_id: SPAN_DETAIL_TRACE_ID,
-			span_id: SPAN_DETAIL_SPAN_ID,
-		})
-		const text = renderedText(result)
-		expect(text).toContain("http.method")
-		expect(text).toContain("POST")
-		expect(text).toContain("/api/checkout")
-	})
+	it.effect("returns the full attribute set for a known span", () =>
+		Effect.gen(function* () {
+			const result = yield* Effect.promise(() =>
+				runToolDirect(rt, "inspect_span", {
+					trace_id: SPAN_DETAIL_TRACE_ID,
+					span_id: SPAN_DETAIL_SPAN_ID,
+				}),
+			)
+			const text = renderedText(result)
+			assert.include(text, "http.method")
+			assert.include(text, "POST")
+			assert.include(text, "/api/checkout")
+		}),
+	)
 
-	it("reports a friendly message for an unknown span (no crash)", async () => {
-		const result = await runToolDirect(rt, "inspect_span", {
-			trace_id: SPAN_DETAIL_TRACE_ID,
-			span_id: MISSING_SPAN_ID,
-		})
-		const text = renderedText(result)
-		expect(text.toLowerCase()).toContain("not found")
-	})
+	it.effect("reports a friendly message for an unknown span (no crash)", () =>
+		Effect.gen(function* () {
+			const result = yield* Effect.promise(() =>
+				runToolDirect(rt, "inspect_span", {
+					trace_id: SPAN_DETAIL_TRACE_ID,
+					span_id: MISSING_SPAN_ID,
+				}),
+			)
+			const text = renderedText(result)
+			assert.include(text.toLowerCase(), "not found")
+		}),
+	)
 })

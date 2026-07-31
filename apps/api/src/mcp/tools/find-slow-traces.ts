@@ -27,7 +27,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
 			environment,
 			limit,
 		}) {
-			const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
+			const range = yield* resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
 			const { st, et } = range
 			const lim = clampLimit(limit, { defaultValue: 10, max: 100 })
 

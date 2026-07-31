@@ -31,7 +31,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
 			offset,
 			limit,
 		}) {
-			const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 30 })
+			const range = yield* resolveTimeRange(start_time, end_time, { maxHours: 24 * 30 })
 			const { st, et } = range
 			const lim = clampLimit(limit, { defaultValue: 50, max: 500 })
 			const off = clampOffset(offset, { max: 10_000 })

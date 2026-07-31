@@ -19,7 +19,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
 			environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
 		}),
 		Effect.fn("McpTool.listServices")(function* ({ start_time, end_time, environment }) {
-			const { st, et } = resolveTimeRange(start_time, end_time)
+			const { st, et } = yield* resolveTimeRange(start_time, end_time)
 			const tenant = yield* resolveTenant
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,

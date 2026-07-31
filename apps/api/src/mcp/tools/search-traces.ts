@@ -45,7 +45,7 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max results (default 20)"),
 		}),
 		Effect.fn("McpTool.searchTraces")(function* (params) {
-			const range = resolveTimeRange(params.start_time, params.end_time, { maxHours: 24 * 7 })
+			const range = yield* resolveTimeRange(params.start_time, params.end_time, { maxHours: 24 * 7 })
 			const { st, et } = range
 			const lim = clampLimit(params.limit, { defaultValue: 20, max: 200 })
 			const off = clampOffset(params.offset, { max: 10_000 })

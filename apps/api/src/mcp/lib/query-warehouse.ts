@@ -1,10 +1,10 @@
 import { HttpServerRequest } from "effect/unstable/http"
 import type { WarehouseQueryName } from "@maple/domain"
-import { Context, Effect } from "effect"
+import { Context, Effect, Schema } from "effect"
 import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
 import type { TenantContext } from "@/lib/tenant-context"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
-import { McpAuthMissingError } from "@/mcp/tools/types"
+import { McpAuthMissingError, McpQueryError } from "@/mcp/tools/types"
 import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 import { WarehouseExecutor } from "@maple/query-engine/observability"
 import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
@@ -25,14 +25,19 @@ export const resolveTenant = CurrentMcpTenant
 
 /** Infrastructure binding: resolves tenant and provides WarehouseExecutor layer. */
 export const withTenantExecutor = <A, E>(effect: Effect.Effect<A, E, WarehouseExecutor>) =>
-	Effect.fn("withTenantExecutor")(function* () {
+	Effect.gen(function* () {
 		const tenant = yield* resolveTenant
 		return yield* Effect.provide(effect, makeWarehouseExecutorFromTenant(tenant))
-	})()
+	}).pipe(Effect.withSpan("withTenantExecutor"))
 
+/**
+ * Pass `rowSchema` to validate the warehouse rows; without it the rows are
+ * returned as an unchecked `T[]` cast.
+ */
 export const queryWarehouse = Effect.fn("queryWarehouse")(function* <T = any>(
 	pipe: WarehouseQueryName,
 	params?: Record<string, unknown>,
+	rowSchema?: Schema.ConstraintDecoder<T>,
 ) {
 	const tenant = yield* resolveTenant
 	const service = yield* WarehouseQueryService
@@ -40,5 +45,18 @@ export const queryWarehouse = Effect.fn("queryWarehouse")(function* <T = any>(
 		.query(tenant, { pipeName: pipe, params })
 		.pipe(Effect.mapError(toMcpQueryError(pipe)))
 
-	return { data: response.data as T[] }
+	if (rowSchema === undefined) return { data: response.data as T[] }
+
+	const rows = yield* Schema.decodeUnknownEffect(Schema.Array(rowSchema))(response.data).pipe(
+		Effect.mapError(
+			(error) =>
+				new McpQueryError({
+					message: `Unexpected ${pipe} response shape: ${String(error)}`,
+					pipeName: pipe,
+					cause: error,
+				}),
+		),
+	)
+
+	return { data: rows as T[] }
 })

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "@effect/vitest"
+import { afterEach, assert, describe, it } from "@effect/vitest"
 import { OrgId, UserId } from "@maple/domain/http"
 import { ConfigProvider, Context, Effect, Layer, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
@@ -26,47 +26,50 @@ const testConfig = () =>
 	)
 
 describe("MCP HTTP authorization", () => {
-	it("challenges unauthenticated clients before MCP initialization", async () => {
+	it.effect("challenges unauthenticated clients before MCP initialization", () => {
 		const db = createTestDb(createdDbs)
 		const base = Layer.mergeAll(db.layer, Env.layer.pipe(Layer.provide(testConfig())))
 		const services = Layer.mergeAll(ApiKeysService.layer, AuthService.layer).pipe(
 			Layer.provideMerge(base),
 		)
 		const routes = McpLive.pipe(Layer.provideMerge(services))
-		const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true })
-		try {
-			const response = await handler(
-				new Request("https://api.example.com/mcp", {
-					method: "POST",
-					headers: {
-						"content-type": "application/json",
-						host: "api.example.com",
-						"x-forwarded-proto": "https",
-					},
-					body: JSON.stringify({
-						jsonrpc: "2.0",
-						id: 1,
-						method: "initialize",
-						params: {
-							protocolVersion: "2025-11-25",
-							capabilities: {},
-							clientInfo: { name: "test", version: "1.0.0" },
+
+		return Effect.gen(function* () {
+			const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true })
+			const response = yield* Effect.promise(() =>
+				handler(
+					new Request("https://api.example.com/mcp", {
+						method: "POST",
+						headers: {
+							"content-type": "application/json",
+							host: "api.example.com",
+							"x-forwarded-proto": "https",
 						},
+						body: JSON.stringify({
+							jsonrpc: "2.0",
+							id: 1,
+							method: "initialize",
+							params: {
+								protocolVersion: "2025-11-25",
+								capabilities: {},
+								clientInfo: { name: "test", version: "1.0.0" },
+							},
+						}),
 					}),
-				}),
-				Context.empty() as never,
-			)
-			expect(response.status).toBe(401)
-			expect(response.headers.get("www-authenticate")).toContain(
+					Context.empty() as never,
+				),
+			).pipe(Effect.ensuring(Effect.promise(() => dispose())))
+
+			assert.strictEqual(response.status, 401)
+			assert.include(
+				response.headers.get("www-authenticate") ?? "",
 				'resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp"',
 			)
-			expect(response.headers.get("www-authenticate")).toContain('scope="mcp:tools"')
-		} finally {
-			await dispose()
-		}
+			assert.include(response.headers.get("www-authenticate") ?? "", 'scope="mcp:tools"')
+		})
 	})
 
-	it("accepts an audience-bound OAuth key behind a forwarded HTTPS proxy", async () => {
+	it.effect("accepts an audience-bound OAuth key behind a forwarded HTTPS proxy", () => {
 		const db = createTestDb(createdDbs)
 		const base = Layer.mergeAll(db.layer, Env.layer.pipe(Layer.provide(testConfig())))
 		const services = Layer.mergeAll(ApiKeysService.layer, AuthService.layer).pipe(
@@ -74,51 +77,50 @@ describe("MCP HTTP authorization", () => {
 		)
 		const orgId = Schema.decodeUnknownSync(OrgId)("org_test")
 		const userId = Schema.decodeUnknownSync(UserId)("user_test")
-		const key = await Effect.runPromise(
-			Effect.gen(function* () {
-				const apiKeys = yield* ApiKeysService
-				return yield* apiKeys.create(orgId, userId, {
-					name: "OAuth MCP test",
-					kind: "mcp",
-					scopes: ["mcp:tools"],
-					metadataJson: {
-						source: "maple_mcp_oauth",
-						roles: ["org:member"],
-						clientId: "client_test",
-						resource: "https://api.example.com/mcp",
-					},
-				})
-			}).pipe(Effect.provide(services)),
-		)
-		const routes = McpLive.pipe(Layer.provideMerge(services))
-		const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true })
-		try {
-			const response = await handler(
-				new Request("http://internal-worker.invalid/mcp", {
-					method: "POST",
-					headers: {
-						authorization: `Bearer ${key.secret}`,
-						"content-type": "application/json",
-						host: "internal-worker.invalid",
-						"x-forwarded-host": "api.example.com",
-						"x-forwarded-proto": "https",
-					},
-					body: JSON.stringify({
-						jsonrpc: "2.0",
-						id: 1,
-						method: "initialize",
-						params: {
-							protocolVersion: "2025-11-25",
-							capabilities: {},
-							clientInfo: { name: "test", version: "1.0.0" },
+
+		return Effect.gen(function* () {
+			const apiKeys = yield* ApiKeysService
+			const key = yield* apiKeys.create(orgId, userId, {
+				name: "OAuth MCP test",
+				kind: "mcp",
+				scopes: ["mcp:tools"],
+				metadataJson: {
+					source: "maple_mcp_oauth",
+					roles: ["org:member"],
+					clientId: "client_test",
+					resource: "https://api.example.com/mcp",
+				},
+			})
+
+			const routes = McpLive.pipe(Layer.provideMerge(services))
+			const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true })
+			const response = yield* Effect.promise(() =>
+				handler(
+					new Request("http://internal-worker.invalid/mcp", {
+						method: "POST",
+						headers: {
+							authorization: `Bearer ${key.secret}`,
+							"content-type": "application/json",
+							host: "internal-worker.invalid",
+							"x-forwarded-host": "api.example.com",
+							"x-forwarded-proto": "https",
 						},
+						body: JSON.stringify({
+							jsonrpc: "2.0",
+							id: 1,
+							method: "initialize",
+							params: {
+								protocolVersion: "2025-11-25",
+								capabilities: {},
+								clientInfo: { name: "test", version: "1.0.0" },
+							},
+						}),
 					}),
-				}),
-				Context.empty() as never,
-			)
-			expect(response.status).toBe(200)
-		} finally {
-			await dispose()
-		}
+					Context.empty() as never,
+				),
+			).pipe(Effect.ensuring(Effect.promise(() => dispose())))
+
+			assert.strictEqual(response.status, 200)
+		}).pipe(Effect.provide(services))
 	})
 })

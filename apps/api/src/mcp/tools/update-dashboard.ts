@@ -8,7 +8,7 @@ import { IsoDateTimeString } from "@maple/domain"
 
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
 const decodeIsoDateTimeString = Schema.decodeUnknownSync(IsoDateTimeString)
-const decodeDashboardId = Schema.decodeUnknownSync(DashboardId)
+const decodeDashboardId = Schema.decodeUnknownEffect(DashboardId)
 
 const TIME_RANGE_MAP: Record<string, string> = {
 	"1h": "1h",
@@ -55,7 +55,16 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 					)
 				: null
 
-			const dashboardIdBranded = decodeDashboardId(dashboard_id)
+			const dashboardIdBranded = yield* decodeDashboardId(dashboard_id).pipe(
+				Effect.mapError(
+					(cause) =>
+						new McpQueryError({
+							message: `Invalid dashboard_id: ${dashboard_id}. Use list_dashboards to find available dashboard IDs.`,
+							pipeName: "update_dashboard",
+							cause,
+						}),
+				),
+			)
 
 			const nowMillis = yield* Clock.currentTimeMillis
 			const now = decodeIsoDateTimeString(new Date(nowMillis).toISOString())

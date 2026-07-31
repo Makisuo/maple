@@ -1,5 +1,5 @@
 import { McpQueryError, optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
@@ -22,6 +22,7 @@ import type { TemplateParameterValues, WidgetDef } from "@/dashboard-templates"
 const decodePortableDashboard = Schema.decodeUnknownEffect(PortableDashboardDocument)
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
 const decodeParamKey = Schema.decodeUnknownSync(DashboardTemplateParameterKey)
+const decodeJsonValue = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 
 // ---------------------------------------------------------------------------
 // Simplified widget specs path — MCP-only, parses JSON tool input
@@ -246,12 +247,11 @@ function computeAutoLayout(specs: SimpleWidgetSpec[]): Array<{ x: number; y: num
 }
 
 function parseSimpleWidgets(json: string): WidgetDef[] | string {
-	let specs: SimpleWidgetSpec[]
-	try {
-		specs = JSON.parse(json)
-	} catch {
+	const parsed = decodeJsonValue(json)
+	if (Option.isNone(parsed)) {
 		return "Invalid widgets JSON. Expected a JSON array of widget specs."
 	}
+	const specs = parsed.value as SimpleWidgetSpec[]
 
 	if (!Array.isArray(specs) || specs.length === 0) {
 		return "widgets must be a non-empty JSON array."

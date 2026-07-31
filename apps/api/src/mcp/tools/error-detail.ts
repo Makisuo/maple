@@ -39,7 +39,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
 			include_timeseries,
 			limit,
 		}) {
-			const { st, et } = resolveTimeRange(start_time, end_time)
+			const { st, et } = yield* resolveTimeRange(start_time, end_time)
 			const tenant = yield* resolveTenant
 
 			const result = yield* errorDetail({

@@ -91,10 +91,11 @@ describe("dashboard concurrency", () => {
 		const layer = makeLayer(testDb)
 
 		return Effect.gen(function* () {
-			yield* DashboardPersistenceService.upsert(ORG, USER, seed())
+			const dashboards = yield* DashboardPersistenceService
+			yield* dashboards.upsert(ORG, USER, seed())
 
 			const addWidget = (widgetId: string) =>
-				DashboardPersistenceService.mutate(ORG, USER, DASHBOARD, (existing) =>
+				dashboards.mutate(ORG, USER, DASHBOARD, (existing) =>
 					Effect.succeed(
 						new DashboardDocument({
 							...existing,
@@ -106,7 +107,7 @@ describe("dashboard concurrency", () => {
 
 			yield* Effect.all([addWidget("w-a"), addWidget("w-b")], { concurrency: 2 })
 
-			const listed = yield* DashboardPersistenceService.list(ORG)
+			const listed = yield* dashboards.list(ORG)
 
 			assert.strictEqual(listed.dashboards.length, 1)
 			const widgets = listed.dashboards[0]!.widgets.map((w) => w.id).sort()
@@ -119,8 +120,10 @@ describe("dashboard concurrency", () => {
 		const layer = makeLayer(testDb)
 
 		return Effect.gen(function* () {
+			const dashboards = yield* DashboardPersistenceService
+
 			// Establish baseline at version=1.
-			yield* DashboardPersistenceService.upsert(ORG, USER, seed({ name: "Initial" }))
+			yield* dashboards.upsert(ORG, USER, seed({ name: "Initial" }))
 
 			// Fire two upserts concurrently. Both will read the same version
 			// before either writes. The first commit wins the CAS; the second
@@ -128,7 +131,7 @@ describe("dashboard concurrency", () => {
 			const exits = yield* Effect.all(
 				[
 					Effect.exit(
-						DashboardPersistenceService.upsert(
+						dashboards.upsert(
 							ORG,
 							USER,
 							seed({
@@ -140,7 +143,7 @@ describe("dashboard concurrency", () => {
 						),
 					),
 					Effect.exit(
-						DashboardPersistenceService.upsert(
+						dashboards.upsert(
 							ORG,
 							USER,
 							seed({
@@ -155,7 +158,7 @@ describe("dashboard concurrency", () => {
 				{ concurrency: 2 },
 			)
 
-			const exitsAndListed = { exits, listed: yield* DashboardPersistenceService.list(ORG) }
+			const exitsAndListed = { exits, listed: yield* dashboards.list(ORG) }
 
 			const successes = exitsAndListed.exits.filter(Exit.isSuccess)
 			const failures = exitsAndListed.exits.filter(Exit.isFailure)
@@ -181,7 +184,9 @@ describe("dashboard concurrency", () => {
 		const layer = makeLayer(testDb)
 
 		return Effect.gen(function* () {
-			yield* DashboardPersistenceService.upsert(ORG, USER, seed({ name: "Initial" }))
+			const dashboards = yield* DashboardPersistenceService
+
+			yield* dashboards.upsert(ORG, USER, seed({ name: "Initial" }))
 
 			// Race two upserts so we deterministically observe at least one
 			// CAS conflict. (`upsert` re-reads on every call, so the only way
@@ -190,7 +195,7 @@ describe("dashboard concurrency", () => {
 			const exits = yield* Effect.all(
 				[
 					Effect.exit(
-						DashboardPersistenceService.upsert(
+						dashboards.upsert(
 							ORG,
 							USER,
 							seed({
@@ -202,7 +207,7 @@ describe("dashboard concurrency", () => {
 						),
 					),
 					Effect.exit(
-						DashboardPersistenceService.upsert(
+						dashboards.upsert(
 							ORG,
 							USER,
 							seed({
@@ -220,10 +225,10 @@ describe("dashboard concurrency", () => {
 			// Recovery path: refetch fresh state and re-apply the loser's
 			// edit on top of it. This is exactly what the web hook does in
 			// response to a `DashboardConcurrencyError`.
-			const fresh = yield* DashboardPersistenceService.list(ORG)
+			const fresh = yield* dashboards.list(ORG)
 			const current = fresh.dashboards[0]!
 
-			yield* DashboardPersistenceService.upsert(
+			yield* dashboards.upsert(
 				ORG,
 				USER,
 				new DashboardDocument({
@@ -233,7 +238,7 @@ describe("dashboard concurrency", () => {
 				}),
 			)
 
-			const listed = yield* DashboardPersistenceService.list(ORG)
+			const listed = yield* dashboards.list(ORG)
 
 			// At least one writer should have hit a CAS conflict. We don't assert
 			// on which — under serialized scheduling either A or B can win — only

@@ -147,7 +147,7 @@ export function registerGetInstrumentationRecommendationsTool(server: McpToolReg
 			// Coverage degrades gracefully: if the warehouse is unavailable the issue list
 			// (possibly stale) still renders, with the coverage section marked unavailable.
 			const wantCoverage = include_coverage !== false
-			const range = resolveTimeRange(undefined, undefined, { defaultHours: 24 })
+			const range = yield* resolveTimeRange(undefined, undefined, { defaultHours: 24 })
 			const resourceKeysOpt = wantCoverage
 				? yield* exploreAttributeKeys({
 						source: "traces",

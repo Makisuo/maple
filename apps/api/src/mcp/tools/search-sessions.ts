@@ -49,7 +49,7 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max results (default 25)"),
 		}),
 		Effect.fn("McpTool.searchSessions")(function* (params) {
-			const range = resolveTimeRange(params.start_time, params.end_time, { maxHours: 24 * 7 })
+			const range = yield* resolveTimeRange(params.start_time, params.end_time, { maxHours: 24 * 7 })
 			const { st, et } = range
 			const lim = clampLimit(params.limit, { defaultValue: 25, max: 200 })
 			const off = clampOffset(params.offset, { max: 10_000 })

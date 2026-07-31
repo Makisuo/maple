@@ -40,7 +40,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 			offset,
 			limit,
 		}) {
-			const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
+			const range = yield* resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
 			const { st, et } = range
 			const lim = clampLimit(limit, { defaultValue: 30, max: 200 })
 			const off = clampOffset(offset, { max: 10_000 })

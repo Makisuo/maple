@@ -1,10 +1,6 @@
 import type { Effect } from "effect"
 import { Schema } from "effect"
 
-class McpTenantError extends Schema.TaggedErrorClass<McpTenantError>()("@maple/mcp/errors/McpTenantError", {
-	message: Schema.String,
-}) {}
-
 export class McpAuthMissingError extends Schema.TaggedErrorClass<McpAuthMissingError>()(
 	"@maple/mcp/errors/McpAuthMissingError",
 	{ message: Schema.String, header: Schema.optionalKey(Schema.String) },
@@ -26,7 +22,6 @@ export class McpQueryError extends Schema.TaggedErrorClass<McpQueryError>()(
 ) {}
 
 export type McpToolError =
-	| McpTenantError
 	| McpAuthMissingError
 	| McpAuthInvalidError
 	| McpInvalidTenantError

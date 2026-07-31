@@ -37,7 +37,7 @@ export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 			sample_size,
 			limit,
 		}) {
-			const range = resolveTimeRange(start_time, end_time, { maxHours: 24 })
+			const range = yield* resolveTimeRange(start_time, end_time, { maxHours: 24 })
 			const { st, et } = range
 			const sampleSize = Math.min(Math.max(Number(sample_size) || 10_000, 1), 50_000)
 			const lim = Math.min(Math.max(Number(limit) || 50, 1), 200)

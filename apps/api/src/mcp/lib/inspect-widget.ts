@@ -25,6 +25,7 @@ import {
 import { resolveDashboardTimeRange, type DashboardTimeRangeInput } from "./resolve-dashboard-time-range"
 import { resolveTimeRange } from "./time"
 import { autoBucketSeconds, runRawSql } from "./run-raw-sql"
+import { toMcpQueryError } from "./map-warehouse-error"
 import type { DashboardDocument, DashboardWidgetSchema } from "@maple/domain/http"
 import type {
 	InspectChartDataData,
@@ -34,6 +35,7 @@ import type {
 	WidgetInspectionEntry,
 	WidgetInspectionSummary,
 	WidgetInspectionVerdict,
+	WarehouseError,
 } from "@maple/domain"
 import type { TenantContext } from "@/lib/tenant-context"
 
@@ -264,6 +266,11 @@ const metricExistsInCatalog = Effect.fn("metricExistsInCatalog")(function* (
 					(m) => m.metricName === metricName,
 				),
 			),
+			Effect.tapCause((cause) =>
+				Effect.logDebug("[inspect-widget] metric catalog lookup failed; assuming metric exists").pipe(
+					Effect.annotateLogs({ metricName, metricType, cause }),
+				),
+			),
 			Effect.orElseSucceed(() => true),
 		)
 })
@@ -308,6 +315,9 @@ export interface InspectWidgetInput {
 	timeRange: InspectWidgetTimeRange
 }
 
+/** `@maple/http/errors/WarehouseAuthError` → `WarehouseAuthError`. */
+const warehouseErrorLabel = (error: WarehouseError): string => error._tag.split("/").pop() ?? error._tag
+
 /**
  * Inspect a raw_sql_chart widget by running its stored SQL through the exact
  * same macro-expansion + safety pass + warehouse execution as the dashboard UI,
@@ -346,7 +356,15 @@ const inspectRawSqlWidget = Effect.fn("inspectRawSqlWidget")(function* (
 		Effect.catchTag("@maple/http/errors/RawSqlValidationError", (error) =>
 			Effect.succeed({ ok: false as const, error: `${error.code}: ${error.message}` }),
 		),
-		Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.message })),
+		// Everything left is a `WarehouseSqlError`; keep the tag so the agent can
+		// tell auth/config/quota apart from a genuinely bad query, and reuse the
+		// shared mapper so BYO-ClickHouse schema drift still gets its hint.
+		Effect.catch((error) =>
+			Effect.succeed({
+				ok: false as const,
+				error: `${warehouseErrorLabel(error)}: ${toMcpQueryError(RAW_SQL_ENDPOINT)(error).message}`,
+			}),
+		),
 	)
 
 	if (!result.ok) {
@@ -714,10 +732,13 @@ export const inspectWidget = Effect.fn("inspectWidget")(
 		return { kind: "supported", data } satisfies InspectionOutcome
 	},
 	Effect.catchCause((cause) =>
-		Effect.succeed<InspectionOutcome>({
-			kind: "inspection_error",
-			message: Cause.pretty(cause),
-		}),
+		Effect.logDebug("[inspect-widget] widget inspection failed").pipe(
+			Effect.annotateLogs({ cause }),
+			Effect.as<InspectionOutcome>({
+				kind: "inspection_error",
+				message: Cause.pretty(cause),
+			}),
+		),
 	),
 )
 
@@ -838,13 +859,14 @@ export const inspectWidgetsAfterMutation = Effect.fn("inspectWidgetsAfterMutatio
 		const capped = targets.length > maxWidgets
 		const toInspect = capped ? targets.slice(0, maxWidgets) : targets
 
-		const resolved = resolveDashboardTimeRange(dashboard.timeRange as DashboardTimeRangeInput)
-		const timeRange: InspectWidgetTimeRange = resolved
-			? { startTime: resolved.startTime, endTime: resolved.endTime, source: "dashboard" }
-			: (() => {
-					const fallback = resolveTimeRange(undefined, undefined, 6)
-					return { startTime: fallback.st, endTime: fallback.et, source: "fallback" as const }
-				})()
+		const resolved = yield* resolveDashboardTimeRange(dashboard.timeRange as DashboardTimeRangeInput)
+		let timeRange: InspectWidgetTimeRange
+		if (resolved) {
+			timeRange = { startTime: resolved.startTime, endTime: resolved.endTime, source: "dashboard" }
+		} else {
+			const fallback = yield* resolveTimeRange(undefined, undefined, 6)
+			timeRange = { startTime: fallback.st, endTime: fallback.et, source: "fallback" }
+		}
 
 		const outcomes = yield* Effect.forEach(
 			toInspect,
@@ -894,7 +916,12 @@ export const inspectWidgetsAfterMutation = Effect.fn("inspectWidgetsAfterMutatio
 		}
 		return summary
 	},
-	Effect.catchCause(() => Effect.succeed(SKIPPED_SUMMARY)),
+	Effect.catchCause((cause) =>
+		Effect.logError("[inspect-widget] post-mutation widget validation failed").pipe(
+			Effect.annotateLogs({ cause }),
+			Effect.as(SKIPPED_SUMMARY),
+		),
+	),
 )
 
 /**

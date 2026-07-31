@@ -100,7 +100,8 @@ describe("dashboard mutations on tag-less / description-less dashboards", () => 
 		const layer = makeLayer(testDb)
 
 		return Effect.gen(function* () {
-			yield* DashboardPersistenceService.upsert(asOrgId(ORG), asUserId("seed-user"), seed())
+			const dashboards = yield* DashboardPersistenceService
+			yield* dashboards.upsert(asOrgId(ORG), asUserId("seed-user"), seed())
 
 			const result = yield* withDashboardMutation(DASHBOARD, "update_dashboard_widget", (widgets) =>
 				Effect.succeed([...widgets, widget("w-new")]),
@@ -108,7 +109,7 @@ describe("dashboard mutations on tag-less / description-less dashboards", () => 
 
 			assert.strictEqual(result.ok, true)
 
-			const listed = yield* DashboardPersistenceService.list(asOrgId(ORG))
+			const listed = yield* dashboards.list(asOrgId(ORG))
 			assert.strictEqual(listed.dashboards.length, 1)
 			assert.deepStrictEqual(
 				listed.dashboards[0]!.widgets.map((w) => w.id),
@@ -132,13 +133,14 @@ describe("dashboard mutations on tag-less / description-less dashboards", () => 
 		const invoke = handler as unknown as ToolHandler
 
 		return Effect.gen(function* () {
-			yield* DashboardPersistenceService.upsert(asOrgId(ORG), asUserId("seed-user"), seed())
+			const dashboards = yield* DashboardPersistenceService
+			yield* dashboards.upsert(asOrgId(ORG), asUserId("seed-user"), seed())
 
 			const result = yield* invoke({ dashboard_id: DASHBOARD, name: "Renamed" })
 
 			assert.notStrictEqual(result.isError, true)
 
-			const listed = yield* DashboardPersistenceService.list(asOrgId(ORG))
+			const listed = yield* dashboards.list(asOrgId(ORG))
 			assert.strictEqual(listed.dashboards[0]!.name, "Renamed")
 		}).pipe(Effect.provide(layer))
 	})

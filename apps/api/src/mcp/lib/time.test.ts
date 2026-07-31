@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { assert, describe, it } from "@effect/vitest"
+import { Effect } from "effect"
+import { TestClock } from "effect/testing"
+import { expect } from "vitest"
 import { formatClampNote, normalizeTime, resolveTimeRange } from "./time"
+
+// 2026-03-30 12:00:00 UTC — every default-window assertion derives from this.
+const NOW = Date.UTC(2026, 2, 30, 12, 0, 0)
 
 describe("normalizeTime", () => {
 	it("passes through already-correct format", () => {
@@ -36,57 +42,72 @@ describe("normalizeTime", () => {
 })
 
 describe("resolveTimeRange", () => {
-	it("normalizes both provided values", () => {
-		const { st, et } = resolveTimeRange("2026-03-30T10:00:00Z", "2026-03-30T16:00:00Z")
-		expect(st).toBe("2026-03-30 10:00:00")
-		expect(et).toBe("2026-03-30 16:00:00")
-	})
+	it.effect("normalizes both provided values", () =>
+		Effect.gen(function* () {
+			const { st, et } = yield* resolveTimeRange("2026-03-30T10:00:00Z", "2026-03-30T16:00:00Z")
+			assert.strictEqual(st, "2026-03-30 10:00:00")
+			assert.strictEqual(et, "2026-03-30 16:00:00")
+		}),
+	)
 
-	it("returns default window when neither is provided", () => {
-		const { st, et } = resolveTimeRange(undefined, undefined)
-		// Both should match YYYY-MM-DD HH:mm:ss format
-		expect(st).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
-		expect(et).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
-		// Default window is 6 hours
-		const startMs = new Date(st.replace(" ", "T") + "Z").getTime()
-		const endMs = new Date(et.replace(" ", "T") + "Z").getTime()
-		const diffHours = (endMs - startMs) / (1000 * 60 * 60)
-		expect(diffHours).toBeCloseTo(6, 0)
-	})
+	it.effect("returns default 6h window when neither is provided", () =>
+		Effect.gen(function* () {
+			yield* TestClock.setTime(NOW)
+			const { st, et } = yield* resolveTimeRange(undefined, undefined)
+			assert.strictEqual(st, "2026-03-30 06:00:00")
+			assert.strictEqual(et, "2026-03-30 12:00:00")
+		}),
+	)
 
-	it("normalizes start and uses default end when only start provided", () => {
-		const { st, et } = resolveTimeRange("2026-03-30T10:00:00+09:00", undefined)
-		expect(st).toBe("2026-03-30 01:00:00")
-		expect(et).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
-	})
+	it.effect("normalizes start and uses the clock for end when only start provided", () =>
+		Effect.gen(function* () {
+			yield* TestClock.setTime(NOW)
+			const { st, et } = yield* resolveTimeRange("2026-03-30T10:00:00+09:00", undefined)
+			assert.strictEqual(st, "2026-03-30 01:00:00")
+			assert.strictEqual(et, "2026-03-30 12:00:00")
+		}),
+	)
 
-	it("uses default start and normalizes end when only end provided", () => {
-		const { st, et } = resolveTimeRange(undefined, "2026-03-30T16:00:00Z")
-		expect(st).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
-		expect(et).toBe("2026-03-30 16:00:00")
-	})
+	it.effect("uses default start and normalizes end when only end provided", () =>
+		Effect.gen(function* () {
+			yield* TestClock.setTime(NOW)
+			const { st, et } = yield* resolveTimeRange(undefined, "2026-03-30T16:00:00Z")
+			assert.strictEqual(st, "2026-03-30 06:00:00")
+			assert.strictEqual(et, "2026-03-30 16:00:00")
+		}),
+	)
 
-	it("preserves numeric third-arg as defaultHours (back-compat)", () => {
-		const { st, et } = resolveTimeRange(undefined, undefined, 1)
-		const startMs = new Date(st.replace(" ", "T") + "Z").getTime()
-		const endMs = new Date(et.replace(" ", "T") + "Z").getTime()
-		expect((endMs - startMs) / 3600_000).toBeCloseTo(1, 0)
-	})
+	it.effect("preserves numeric third-arg as defaultHours (back-compat)", () =>
+		Effect.gen(function* () {
+			yield* TestClock.setTime(NOW)
+			const { st, et } = yield* resolveTimeRange(undefined, undefined, 1)
+			assert.strictEqual(st, "2026-03-30 11:00:00")
+			assert.strictEqual(et, "2026-03-30 12:00:00")
+		}),
+	)
 
-	it("clamps start when range exceeds maxHours", () => {
-		const result = resolveTimeRange("2026-03-01T00:00:00Z", "2026-03-30T00:00:00Z", { maxHours: 24 * 7 })
-		expect(result.clamped).toBe(true)
-		expect(result.et).toBe("2026-03-30 00:00:00")
-		expect(result.st).toBe("2026-03-23 00:00:00")
-		expect(result.maxHours).toBe(24 * 7)
-	})
+	it.effect("clamps start when range exceeds maxHours", () =>
+		Effect.gen(function* () {
+			const result = yield* resolveTimeRange("2026-03-01T00:00:00Z", "2026-03-30T00:00:00Z", {
+				maxHours: 24 * 7,
+			})
+			assert.isTrue(result.clamped)
+			assert.strictEqual(result.et, "2026-03-30 00:00:00")
+			assert.strictEqual(result.st, "2026-03-23 00:00:00")
+			assert.strictEqual(result.maxHours, 24 * 7)
+		}),
+	)
 
-	it("does not clamp when range is within maxHours", () => {
-		const result = resolveTimeRange("2026-03-29T00:00:00Z", "2026-03-30T00:00:00Z", { maxHours: 24 * 7 })
-		expect(result.clamped).toBe(false)
-		expect(result.st).toBe("2026-03-29 00:00:00")
-		expect(result.et).toBe("2026-03-30 00:00:00")
-	})
+	it.effect("does not clamp when range is within maxHours", () =>
+		Effect.gen(function* () {
+			const result = yield* resolveTimeRange("2026-03-29T00:00:00Z", "2026-03-30T00:00:00Z", {
+				maxHours: 24 * 7,
+			})
+			assert.isFalse(result.clamped)
+			assert.strictEqual(result.st, "2026-03-29 00:00:00")
+			assert.strictEqual(result.et, "2026-03-30 00:00:00")
+		}),
+	)
 })
 
 describe("formatClampNote", () => {
