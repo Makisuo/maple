@@ -17,9 +17,18 @@ export { Toolbar, ToolbarSearch, ToolbarStat, ToolbarStats } from "@maple/ui/com
  * so invalidating that prefix refetches exactly the mounted view's queries
  * (list + facets) — React Query only refetches active observers.
  */
-export function RefreshButton({ className }: { className?: string }) {
+export function RefreshButton({
+	className,
+	onBeforeRefresh,
+}: {
+	className?: string
+	onBeforeRefresh?: () => void
+}) {
 	const queryClient = useQueryClient()
-	const onRefresh = useCallback(() => queryClient.invalidateQueries({ queryKey: ["local"] }), [queryClient])
+	const onRefresh = useCallback(() => {
+		onBeforeRefresh?.()
+		return queryClient.invalidateQueries({ queryKey: ["local"] })
+	}, [onBeforeRefresh, queryClient])
 	return <SharedRefreshButton onRefresh={onRefresh} className={className} />
 }
 

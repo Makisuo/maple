@@ -294,8 +294,8 @@ describe("logsBreakdownQuery", () => {
 		expect(sql).toContain("LIMIT 25")
 	})
 
-	it("can force an exact raw scan for retention-aligned service membership", () => {
-		const { sql } = compileCH(logsBreakdownQuery({ groupBy: "service", limit: 500, source: "raw" }), {
+	it("can force an unbounded exact raw scan for retention-aligned service membership", () => {
+		const { sql } = compileCH(logsBreakdownQuery({ groupBy: "service", limit: null, source: "raw" }), {
 			...baseParams,
 			startTime: "2024-01-01 13:05:00",
 			endTime: "2024-01-01 14:05:00",
@@ -306,6 +306,7 @@ describe("logsBreakdownQuery", () => {
 		expect(sql).toContain("TimestampTime <= '2024-01-01 14:05:00'")
 		expect(sql).toContain("Timestamp >= '2024-01-01 13:05:00'")
 		expect(sql).toContain("Timestamp <= '2024-01-01 14:05:00'")
+		expect(sql).not.toContain("LIMIT")
 	})
 })
 

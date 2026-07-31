@@ -12,7 +12,7 @@ describe("compileLocalLogServicesQuery", () => {
 		expect(sql).toContain("Timestamp >= '2026-07-30 13:05:00'")
 		expect(sql).toContain("Timestamp <= '2026-07-30 14:05:00'")
 		expect(sql).toContain("GROUP BY name")
-		expect(sql).toContain("LIMIT 500")
+		expect(sql).not.toContain("LIMIT")
 		expect(sql).not.toContain("UNION ALL")
 		expect(sql).not.toContain("logs_aggregates_hourly")
 	})
