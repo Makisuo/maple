@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { PGlite } from "@electric-sql/pglite"
@@ -17,6 +17,15 @@ const readJournal = (): MigrationJournal => {
 	const path = resolve(dirname(fileURLToPath(import.meta.url)), "../drizzle/meta/_journal.json")
 	return JSON.parse(readFileSync(path, "utf8")) as MigrationJournal
 }
+
+const migrationsDir = () => resolve(dirname(fileURLToPath(import.meta.url)), "../drizzle")
+
+const readMigrationSqlBefore = (tag: string): string =>
+	readdirSync(migrationsDir())
+		.filter((file) => file.endsWith(".sql") && file < `${tag}.sql`)
+		.sort()
+		.map((file) => readFileSync(resolve(migrationsDir(), file), "utf8"))
+		.join("\n")
 
 describe("drizzle migrations", () => {
 	it("keeps journal timestamps increasing in migration order", () => {
@@ -96,5 +105,94 @@ describe("bundled migrations", () => {
 		for (const row of pruned.rows) {
 			expect(row.relreplident, `${row.relname} replica identity`).toBe("d")
 		}
+	}, 30_000)
+
+	it("deletes metric rules and removes retired destinations", async () => {
+		const pg = new PGlite()
+		await pg.exec(readMigrationSqlBefore("0026_windy_bromley"))
+
+		const now = "2026-07-31T00:00:00.000Z"
+		await pg.query(
+			`INSERT INTO alert_destinations (
+				id, org_id, name, type, config_json, secret_ciphertext, secret_iv, secret_tag,
+				created_at, updated_at, created_by, updated_by
+			) VALUES
+				('dest_slack', 'org_1', 'Old Slack', 'slack', '{}', 'x', 'x', 'x', $1, $1, 'user_1', 'user_1'),
+				('dest_webhook', 'org_1', 'Webhook', 'webhook', '{}', 'x', 'x', 'x', $1, $1, 'user_1', 'user_1')`,
+			[now],
+		)
+		await pg.query(
+			`INSERT INTO alert_rules (
+				id, org_id, name, severity, service_names_json, environments_json, signal_type,
+				comparator, threshold, window_minutes, metric_name, metric_type, metric_aggregation,
+				destination_ids_json, query_spec_json, reducer, no_data_behavior,
+				created_at, updated_at, created_by, updated_by
+			) VALUES
+				(
+					'rule_metric', 'org_1', 'Legacy metric', 'warning',
+					'["api"]', '["prod"]', 'metric',
+					'gt', 10, 5, 'http.requests', 'sum', 'rate',
+					'["dest_slack", "dest_webhook"]', '{"preserved": true}', 'max', 'skip',
+					$1, $1, 'user_1', 'user_1'
+				),
+				(
+					'rule_orphaned', 'org_1', 'Only retired destination', 'warning',
+					NULL, NULL, 'error_rate', 'gt', 0.1, 5, NULL, NULL, NULL,
+					'["dest_slack"]', '{}', 'max', 'skip',
+					$1, $1, 'user_1', 'user_1'
+				)`,
+			[now],
+		)
+		await pg.query(
+			`INSERT INTO alert_rule_states (org_id, rule_id, group_key, updated_at)
+			 VALUES ('org_1', 'rule_metric', '__total__', $1)`,
+			[now],
+		)
+		await pg.query(
+			`INSERT INTO alert_incidents (
+				id, org_id, rule_id, incident_key, rule_name, signal_type, severity, status,
+				comparator, threshold, first_triggered_at, last_triggered_at, dedupe_key,
+				created_at, updated_at
+			) VALUES (
+				'inc_metric', 'org_1', 'rule_metric', 'metric-incident', 'Legacy metric',
+				'metric', 'warning', 'open', 'gt', 10, $1, $1, 'metric-dedupe', $1, $1
+			)`,
+			[now],
+		)
+		await pg.query(
+			`INSERT INTO alert_delivery_events (
+				id, org_id, incident_id, rule_id, destination_id, delivery_key, event_type,
+				attempt_number, status, scheduled_at, payload_json, created_at, updated_at
+			) VALUES (
+				'delivery_metric', 'org_1', 'inc_metric', 'rule_metric', 'dest_webhook',
+				'metric-delivery', 'trigger', 1, 'queued', $1, '{}', $1, $1
+			)`,
+			[now],
+		)
+
+		await pg.exec(readFileSync(resolve(migrationsDir(), "0026_windy_bromley.sql"), "utf8"))
+
+		for (const table of ["alert_delivery_events", "alert_incidents", "alert_rule_states", "alert_rules"]) {
+			const deleted = await pg.query<{ count: number }>(
+				`SELECT count(*)::int AS count FROM ${table} WHERE ${table === "alert_rules" ? "id" : "rule_id"} = 'rule_metric'`,
+			)
+			expect(deleted.rows[0]?.count, `${table} metric rows`).toBe(0)
+		}
+
+		const orphaned = await pg.query<{ enabled: boolean; destination_ids_json: string[] }>(
+			"SELECT enabled, destination_ids_json FROM alert_rules WHERE id = 'rule_orphaned'",
+		)
+		expect(orphaned.rows[0]).toEqual({ enabled: false, destination_ids_json: [] })
+
+		const retired = await pg.query("SELECT id FROM alert_destinations WHERE type IN ('slack', 'hazel')")
+		expect(retired.rows).toEqual([])
+
+		const columns = await pg.query<{ column_name: string }>(
+			`SELECT column_name
+			 FROM information_schema.columns
+			 WHERE table_name = 'alert_rules'
+				AND column_name IN ('metric_name', 'metric_type', 'metric_aggregation')`,
+		)
+		expect(columns.rows).toEqual([])
 	}, 30_000)
 })

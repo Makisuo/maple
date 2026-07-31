@@ -70,8 +70,6 @@ export const signalLabel = (signalType: string): string => {
 			return "Apdex"
 		case "throughput":
 			return "throughput"
-		case "metric":
-			return "metric"
 		default:
 			return signalType
 	}

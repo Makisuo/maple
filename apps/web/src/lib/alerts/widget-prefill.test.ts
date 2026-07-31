@@ -92,7 +92,7 @@ describe("createWidgetAlertPrefill", () => {
 		)
 
 		expect(result.form.signalType).toBe("builder_query")
-		expect(result.form.queryWhereClause).toBe('service.name = "checkout"')
+		expect(result.form.queryBuilderDraft.whereClause).toBe('service.name = "checkout"')
 		expect(result.form.name).toBe("Alert - Traffic")
 		expect(result.notices.map((notice) => notice.message).join("\n")).toContain("2 visible queries")
 	})
@@ -152,7 +152,7 @@ describe("createWidgetAlertPrefill", () => {
 			defaultRuleForm(),
 		)
 
-		expect(result.form.queryDataSource).toBe("metrics")
+		expect(result.form.queryBuilderDraft.dataSource).toBe("metrics")
 		expect(result.notices.map((notice) => notice.message).join("\n")).toContain(
 			"Metric source requires a metric name",
 		)

@@ -262,9 +262,6 @@ describe("V2 alerts wire format", () => {
 		consecutive_breaches_required: 2,
 		consecutive_healthy_required: 3,
 		renotify_interval_minutes: 60,
-		metric_name: null,
-		metric_type: null,
-		metric_aggregation: null,
 		apdex_threshold_ms: null,
 		query_builder_draft: { queries: [{ signalType: "traces", attributeKey: "service.name" }] },
 		raw_query_sql: null,
@@ -310,12 +307,12 @@ describe("V2 alerts wire format", () => {
 
 	it("decodes destination create params per union arm and rejects mismatched configs", () => {
 		const slack = Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
-			type: "slack",
+			type: "slack-bot",
 			name: "On-call",
-			webhook_url: "https://hooks.slack.com/services/T/B/X",
-			channel_label: "#incidents",
+			channel_id: "C123",
+			channel_name: "incidents",
 		})
-		expect(slack.type).toBe("slack")
+		expect(slack.type).toBe("slack-bot")
 
 		const email = Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
 			type: "email",

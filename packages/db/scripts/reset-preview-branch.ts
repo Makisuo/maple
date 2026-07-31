@@ -54,7 +54,7 @@ const fail = (message: string): never => {
 /**
  * Role/publication names are interpolated as quoted identifiers (they cannot be
  * bind parameters), so whitelist a conservative charset — same rationale as
- * grant-runtime-role.ts. PlanetScale roles are dotted; `.` is literal inside
+ * ensure-privileges.ts. PlanetScale roles are dotted; `.` is literal inside
  * double quotes.
  */
 const IDENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_$.-]*$/

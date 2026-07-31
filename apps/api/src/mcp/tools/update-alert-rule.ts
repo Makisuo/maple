@@ -45,9 +45,6 @@ interface UpdateAlertRuleParams {
 	consecutive_breaches?: number
 	consecutive_healthy?: number
 	renotify_interval_minutes?: number
-	metric_name?: string
-	metric_type?: string
-	metric_aggregation?: string
 	apdex_threshold_ms?: number
 	query_builder_draft?: string
 	raw_query_sql?: string
@@ -85,9 +82,6 @@ function buildUpdatedRequest(
 		consecutiveBreachesRequired: current.consecutiveBreachesRequired,
 		consecutiveHealthyRequired: current.consecutiveHealthyRequired,
 		renotifyIntervalMinutes: current.renotifyIntervalMinutes,
-		metricName: current.metricName,
-		metricType: current.metricType,
-		metricAggregation: current.metricAggregation,
 		apdexThresholdMs: current.apdexThresholdMs,
 		queryBuilderDraft: current.queryBuilderDraft,
 		rawQuerySql: current.rawQuerySql,
@@ -113,9 +107,6 @@ function buildUpdatedRequest(
 		request.consecutiveHealthyRequired = params.consecutive_healthy
 	if (params.renotify_interval_minutes !== undefined)
 		request.renotifyIntervalMinutes = params.renotify_interval_minutes
-	if (params.metric_name !== undefined) request.metricName = params.metric_name
-	if (params.metric_type !== undefined) request.metricType = params.metric_type
-	if (params.metric_aggregation !== undefined) request.metricAggregation = params.metric_aggregation
 	if (params.apdex_threshold_ms !== undefined) request.apdexThresholdMs = params.apdex_threshold_ms
 	if (params.raw_query_sql !== undefined) request.rawQuerySql = params.raw_query_sql
 	if (params.raw_query_reducer !== undefined) request.rawQueryReducer = params.raw_query_reducer
@@ -168,7 +159,7 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 				"Comma-separated destination IDs to notify (replaces the current destinations; use list_alert_rules to find IDs)",
 			),
 			signal_type: optionalStringParam(
-				"Signal type: error_rate, p95_latency, p99_latency, apdex, throughput, metric, builder_query, raw_query",
+				"Signal type: error_rate, p95_latency, p99_latency, apdex, throughput, builder_query, raw_query. Use builder_query with a metrics draft for custom metrics.",
 			),
 			comparator: optionalStringParam("Comparison operator: gt (>), gte (>=), lt (<), lte (<=)"),
 			group_by: optionalStringParam(
@@ -179,13 +170,6 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 			consecutive_breaches: optionalNumberParam("Consecutive breaches before alerting"),
 			consecutive_healthy: optionalNumberParam("Consecutive healthy evaluations before resolving"),
 			renotify_interval_minutes: optionalNumberParam("Re-notification interval in minutes"),
-			metric_name: optionalStringParam("Metric name (for signal_type=metric)"),
-			metric_type: optionalStringParam(
-				"Metric type: sum, gauge, histogram, exponential_histogram (for signal_type=metric)",
-			),
-			metric_aggregation: optionalStringParam(
-				"Metric aggregation: avg, min, max, sum, count (for signal_type=metric)",
-			),
 			apdex_threshold_ms: optionalNumberParam(
 				"Apdex threshold in milliseconds (for signal_type=apdex)",
 			),

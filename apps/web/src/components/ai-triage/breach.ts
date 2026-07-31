@@ -13,7 +13,6 @@ export function toAlertSignalType(value: string): AlertSignalType | null {
 		case "p99_latency":
 		case "apdex":
 		case "throughput":
-		case "metric":
 		case "builder_query":
 		case "raw_query":
 			return value

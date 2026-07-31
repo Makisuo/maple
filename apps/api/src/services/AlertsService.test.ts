@@ -701,51 +701,6 @@ describe("AlertsService", () => {
 		)
 	})
 
-	it.effect("lowers the environment scope into a metric signal's compiled plan", () => {
-		const testDb = createTestDb(trackedDbs)
-
-		return Effect.gen(function* () {
-			const alerts = yield* AlertsService
-			const orgId = asOrgId("org_env_metric")
-			const userId = asUserId("user_env_metric")
-			const destination = yield* createWebhookDestination(alerts, orgId, userId)
-			yield* alerts.createRule(
-				orgId,
-				userId,
-				adminRoles,
-				new AlertRuleUpsertRequest({
-					name: "Queue depth (prod)",
-					severity: "warning",
-					environments: ["production"],
-					signalType: "metric",
-					metricName: "queue.depth",
-					metricType: "gauge",
-					metricAggregation: "avg",
-					comparator: "gt",
-					threshold: 100,
-					windowMinutes: 5,
-					destinationIds: [destination.id],
-				}),
-			)
-
-			const row = yield* Effect.promise(() =>
-				queryFirstRow<{ querySpecJson: unknown }>(
-					testDb,
-					`select query_spec_json as "querySpecJson" from alert_rules limit 1`,
-				),
-			)
-
-			const spec = row?.querySpecJson as {
-				source: string
-				filters: { metricName: string; environments: ReadonlyArray<string> }
-			}
-			assert.strictEqual(spec.source, "metrics")
-			assert.deepStrictEqual(spec.filters.environments, ["production"])
-		}).pipe(
-			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
-		)
-	})
-
 	it.effect("drops the environment scope for builder_query rules", () => {
 		const testDb = createTestDb(trackedDbs)
 
@@ -1754,53 +1709,52 @@ describe("AlertsService", () => {
 		})
 	})
 
-	it.effect("rejects metrics alerts with multiple attr groupBy dimensions", () => {
+	it.effect("accepts a builder query when lowering emits a warning", () => {
 		const testDb = createTestDb(trackedDbs)
 
 		return Effect.gen(function* () {
-			const exit = yield* Effect.gen(function* () {
-				const alerts = yield* AlertsService
-				const orgId = asOrgId("org_metrics_group_validation")
-				const userId = asUserId("user_metrics_group_validation")
-				const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_builder_warning")
+			const userId = asUserId("user_builder_warning")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
 
-				return yield* alerts.createRule(
-					orgId,
-					userId,
-					adminRoles,
-					new AlertRuleUpsertRequest({
-						name: "Grouped metrics alert",
-						severity: "warning",
-						enabled: true,
-						groupBy: ["attr.http.method", "attr.http.route"],
-						signalType: "metric",
-						comparator: "gt",
-						threshold: 100,
-						windowMinutes: 5,
-						minimumSampleCount: 1,
-						consecutiveBreachesRequired: 1,
-						consecutiveHealthyRequired: 1,
-						renotifyIntervalMinutes: 30,
+			const rule = yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Grouped metrics alert",
+					severity: "warning",
+					signalType: "builder_query",
+					queryBuilderDraft: {
+						id: "alert-query",
+						name: "A",
+						dataSource: "metrics",
+						aggregation: "avg",
 						metricName: "http.server.request.duration",
 						metricType: "histogram",
-						metricAggregation: "avg",
-						destinationIds: [destination.id],
-					}),
-				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows })),
-					),
-				)
-				.pipe(Effect.exit)
+						whereClause: "",
+						addOns: {
+							groupBy: true,
+							having: false,
+							orderBy: false,
+							limit: false,
+							legend: false,
+						},
+						groupBy: ["attr.http.method", "attr.http.route"],
+					},
+					comparator: "gt",
+					threshold: 100,
+					windowMinutes: 5,
+					destinationIds: [destination.id],
+				}),
+			)
 
-			const failure = getError(exit)
-
-			assert.isTrue(Exit.isFailure(exit))
-			assert.instanceOf(failure, AlertValidationError)
-			assert.strictEqual(failure.message, "Metrics alerts support at most one attr.* groupBy dimension")
-		})
+			assert.strictEqual(rule.signalType, "builder_query")
+			assert.deepStrictEqual(rule.queryBuilderDraft?.groupBy, ["attr.http.method", "attr.http.route"])
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows }))),
+		)
 	})
 
 	const VALID_PD_KEY = "e93facc04764012d7bfb002500d5d1a6" // 32 hex chars

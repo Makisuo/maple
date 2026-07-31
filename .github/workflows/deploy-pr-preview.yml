@@ -114,17 +114,18 @@ jobs:
                   GITHUB_TOKEN: ${{ github.token }}
               run: bun scripts/planetscale-pr-branch.ts up "$PR_NUMBER"
 
+            # BEFORE migrate: installs default privileges granting PUBLIC on every
+            # table created from here on, so a new or rebuilt table can never land
+            # owner-only and leave a consumer with "permission denied for table …".
+            # Default privileges only apply to objects created after they are set,
+            # hence the ordering. See packages/db/scripts/ensure-privileges.ts.
+            - name: Ensure database privileges
+              if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
+              run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:ensure-privileges
+
             - name: Run database migrations
               if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:migrate
-
-            # Re-grant table/sequence privileges to the runtime role after every
-            # migrate — table-rebuild migrations DROP+CREATE tables, which strips
-            # grants and leaves the deployed worker with "permission denied for
-            # table …" on every tick. See packages/db/scripts/grant-runtime-role.ts.
-            - name: Grant runtime role privileges
-              if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
-              run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:grant
 
             # Reassign everything this run's ephemeral role created to `postgres`
             # so the NEXT deploy's role (which inherits postgres) can drop it —

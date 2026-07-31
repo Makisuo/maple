@@ -1,12 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import {
-	AlertDestinationId,
-	HazelChannelId,
-	HazelOrganizationId,
-	PostgresTransactionId,
-	UserId,
-} from "../../primitives"
+import { HazelChannelId, HazelOrganizationId, PostgresTransactionId, UserId } from "../../primitives"
 import { AlertDestinationType, MAX_EMAIL_RECIPIENTS } from "../alerts"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
@@ -18,13 +12,12 @@ import {
 	V2ServiceUnavailableError,
 	V2UpstreamError,
 } from "./errors"
-import { PublicId, PublicIdPrefixes } from "./public-id"
+import { AlertDestinationPublicId } from "./resource-ids"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
 
-/** `dest_…` public ID ⇄ internal `AlertDestinationId` (raw UUID). */
-export const AlertDestinationPublicId = PublicId(PublicIdPrefixes.alertDestination, AlertDestinationId)
+export { AlertDestinationPublicId } from "./resource-ids"
 
 const NonEmptyString = Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed()))
 
@@ -44,9 +37,9 @@ const alertDestinationExample = {
 	id: "dest_oybbpTBhtSFGShMjjLiCrh",
 	object: "alert_destination",
 	name: "On-call Slack",
-	type: "slack",
+	type: "slack-bot",
 	enabled: true,
-	summary: "Slack webhook → #incidents",
+	summary: "Slack bot → #incidents",
 	channel_label: "#incidents",
 	member_user_ids: null,
 	last_tested_at: "2026-07-15T09:12:00.000Z",
@@ -69,8 +62,8 @@ export const V2AlertDestination = Schema.Struct({
 	}),
 	type: AlertDestinationType.annotate({
 		description:
-			"The delivery channel: `slack`, `slack-bot`, `pagerduty`, `webhook`, `hazel`, `hazel-oauth`, `discord`, or `email`. Immutable after creation.",
-		examples: ["slack"],
+			"The delivery channel: `slack-bot`, `pagerduty`, `webhook`, `hazel-oauth`, `discord`, or `email`. Immutable after creation.",
+		examples: ["slack-bot"],
 	}),
 	enabled: Schema.Boolean.annotate({
 		description:
@@ -80,7 +73,7 @@ export const V2AlertDestination = Schema.Struct({
 	summary: Schema.String.annotate({
 		description:
 			"Redacted, human-readable summary of the destination's configuration. Secrets (webhook URLs, integration keys, signing secrets) are write-only — they are never returned by the API.",
-		examples: ["Slack webhook → #incidents"],
+		examples: ["Slack bot → #incidents"],
 	}),
 	channel_label: Schema.NullOr(Schema.String).annotate({
 		description: "Optional display label for the target channel (Slack destinations), or `null`.",
@@ -103,7 +96,7 @@ export const V2AlertDestination = Schema.Struct({
 	identifier: "AlertDestination",
 	title: "Alert Destination",
 	description:
-		"A notification channel that alert rules deliver to (Slack, PagerDuty, generic webhook, Hazel, Discord, or workspace-member email). Channel secrets are write-only: responses carry a redacted `summary` instead.",
+		"A notification channel that alert rules deliver to (Slack bot, PagerDuty, generic webhook, Hazel OAuth, Discord, or workspace-member email). Channel secrets are write-only: responses carry a redacted `summary` instead.",
 	examples: [wireExample(alertDestinationExample)],
 })
 export type V2AlertDestination = Schema.Schema.Type<typeof V2AlertDestination>
@@ -132,22 +125,6 @@ const nameField = NonEmptyString.annotate({
 	description: "Human-readable label for the destination. Required, non-empty.",
 	examples: ["On-call Slack"],
 })
-
-const V2SlackDestinationCreateParams = Schema.Struct({
-	type: Schema.Literal("slack"),
-	name: nameField,
-	webhook_url: NonEmptyString.annotate({
-		description: "The Slack incoming-webhook URL. Write-only — never returned.",
-		examples: ["https://hooks.slack.com/services/T000/B000/XXXX"],
-	}),
-	channel_label: Schema.optionalKey(
-		NonEmptyString.annotate({
-			description: "Optional display label for the target channel, e.g. `#incidents`.",
-			examples: ["#incidents"],
-		}),
-	),
-	enabled: enabledField,
-}).annotate({ identifier: "AlertDestinationCreateSlack", title: "Slack destination" })
 
 const V2SlackBotDestinationCreateParams = Schema.Struct({
 	type: Schema.Literal("slack-bot"),
@@ -188,20 +165,6 @@ const V2WebhookDestinationCreateParams = Schema.Struct({
 	),
 	enabled: enabledField,
 }).annotate({ identifier: "AlertDestinationCreateWebhook", title: "Webhook destination" })
-
-const V2HazelDestinationCreateParams = Schema.Struct({
-	type: Schema.Literal("hazel"),
-	name: nameField,
-	webhook_url: NonEmptyString.annotate({
-		description: "The Hazel inbound-webhook URL. Write-only — never returned.",
-	}),
-	signing_secret: Schema.optionalKey(
-		Schema.String.annotate({
-			description: "Optional secret used to sign payloads. Write-only — never returned.",
-		}),
-	),
-	enabled: enabledField,
-}).annotate({ identifier: "AlertDestinationCreateHazel", title: "Hazel destination" })
 
 const V2HazelOAuthDestinationCreateParams = Schema.Struct({
 	type: Schema.Literal("hazel-oauth"),
@@ -245,11 +208,9 @@ const V2EmailDestinationCreateParams = Schema.Struct({
 }).annotate({ identifier: "AlertDestinationCreateEmail", title: "Email destination" })
 
 export const V2AlertDestinationCreateParams = Schema.Union([
-	V2SlackDestinationCreateParams,
 	V2SlackBotDestinationCreateParams,
 	V2PagerDutyDestinationCreateParams,
 	V2WebhookDestinationCreateParams,
-	V2HazelDestinationCreateParams,
 	V2HazelOAuthDestinationCreateParams,
 	V2DiscordDestinationCreateParams,
 	V2EmailDestinationCreateParams,
@@ -260,10 +221,10 @@ export const V2AlertDestinationCreateParams = Schema.Union([
 		"Request body for creating an alert destination, discriminated on `type`. Channel secrets are accepted here but never returned by any read endpoint.",
 	examples: [
 		wireExample({
-			type: "slack",
+			type: "slack-bot",
 			name: "On-call Slack",
-			webhook_url: "https://hooks.slack.com/services/T000/B000/XXXX",
-			channel_label: "#incidents",
+			channel_id: "C0789CHAN",
+			channel_name: "incidents",
 			enabled: true,
 		}),
 	],
@@ -277,13 +238,6 @@ const optionalNameField = Schema.optionalKey(
 )
 
 export const V2AlertDestinationUpdateParams = Schema.Union([
-	Schema.Struct({
-		type: Schema.Literal("slack"),
-		name: optionalNameField,
-		webhook_url: Schema.optionalKey(Schema.String),
-		channel_label: OptionalNonEmptyString,
-		enabled: Schema.optionalKey(Schema.Boolean),
-	}).annotate({ identifier: "AlertDestinationUpdateSlack", title: "Slack destination update" }),
 	Schema.Struct({
 		type: Schema.Literal("slack-bot"),
 		name: optionalNameField,
@@ -304,13 +258,6 @@ export const V2AlertDestinationUpdateParams = Schema.Union([
 		signing_secret: Schema.optionalKey(Schema.String),
 		enabled: Schema.optionalKey(Schema.Boolean),
 	}).annotate({ identifier: "AlertDestinationUpdateWebhook", title: "Webhook destination update" }),
-	Schema.Struct({
-		type: Schema.Literal("hazel"),
-		name: optionalNameField,
-		webhook_url: Schema.optionalKey(Schema.String),
-		signing_secret: Schema.optionalKey(Schema.String),
-		enabled: Schema.optionalKey(Schema.Boolean),
-	}).annotate({ identifier: "AlertDestinationUpdateHazel", title: "Hazel destination update" }),
 	Schema.Struct({
 		type: Schema.Literal("hazel-oauth"),
 		name: optionalNameField,
@@ -341,7 +288,7 @@ export const V2AlertDestinationUpdateParams = Schema.Union([
 	title: "Alert destination update parameters",
 	description:
 		"Request body for updating an alert destination. `type` must match the destination's existing (immutable) type and selects which config fields apply; omitted fields are left unchanged.",
-	examples: [wireExample({ type: "slack", enabled: false })],
+	examples: [wireExample({ type: "slack-bot", enabled: false })],
 })
 export type V2AlertDestinationUpdateParams = Schema.Schema.Type<typeof V2AlertDestinationUpdateParams>
 
@@ -496,6 +443,6 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 		OpenApi.annotations({
 			title: "Alert Destinations",
 			description:
-				"Notification channels for alert rules — Slack, PagerDuty, generic webhooks, Hazel, Discord, and workspace-member email. Create and manage destinations, then reference them from alert rules via `destination_ids`. Mutations are admin-only; channel secrets are write-only.",
+				"Notification channels for alert rules — Slack bot, PagerDuty, generic webhooks, Hazel OAuth, Discord, and workspace-member email. Create and manage destinations, then reference them from alert rules via `destination_ids`. Mutations are admin-only; channel secrets are write-only.",
 		}),
 	) {}

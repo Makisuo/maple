@@ -20,8 +20,8 @@ const signalBadgeClass: Record<string, string> = {
 	// Throughput rides the dedicated chart-throughput hue so the chip stays
 	// distinguishable from the amber p95/apdex chips (see DESIGN.md).
 	throughput: "border-[var(--chart-throughput)]/30 text-[var(--chart-throughput)]",
-	metric: "border-muted-foreground/30 text-muted-foreground",
-	query: "border-muted-foreground/30 text-muted-foreground",
+	builder_query: "border-muted-foreground/30 text-muted-foreground",
+	raw_query: "border-muted-foreground/30 text-muted-foreground",
 }
 
 export function SignalBadge({ signalType }: { signalType: string }) {

@@ -40,26 +40,14 @@ describe("provider request bodies decode against the real v2 create-param schema
 		expect(() => decodes(V2DashboardCreateParams, body)).not.toThrow()
 	})
 
-	it("alert destination create bodies (each channel type)", () => {
+	it("alert destination create bodies (declarative channel subset)", () => {
 		const bodies = [
-			_alertDestinationCreateBody({
-				type: "slack",
-				name: "On-call Slack",
-				webhook_url: "https://hooks.slack.com/services/T000/B000/XXXX",
-				channel_label: "#incidents",
-				enabled: true,
-			}),
 			_alertDestinationCreateBody({ type: "pagerduty", name: "PD", integration_key: "key" }),
 			_alertDestinationCreateBody({
 				type: "webhook",
 				name: "Hook",
 				url: "https://example.com/hooks/maple",
 				signing_secret: "shh",
-			}),
-			_alertDestinationCreateBody({
-				type: "hazel",
-				name: "Hazel",
-				webhook_url: "https://hazel.example.com/hook",
 			}),
 			_alertDestinationCreateBody({
 				type: "discord",
