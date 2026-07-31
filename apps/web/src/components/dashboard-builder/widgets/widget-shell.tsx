@@ -191,6 +191,8 @@ interface WidgetFrameProps {
 	mode: WidgetMode
 	contentClassName?: string
 	loadingSkeleton: ReactNode
+	/** Summary line under the content. Only rendered once data is ready. */
+	footer?: ReactNode
 	children: ReactNode
 }
 
@@ -200,6 +202,7 @@ export function WidgetFrame({
 	mode,
 	contentClassName,
 	loadingSkeleton,
+	footer,
 	children,
 }: WidgetFrameProps) {
 	// `WidgetShell` resolves the menu actions against context itself; `fix`
@@ -207,7 +210,12 @@ export function WidgetFrame({
 	const fix = useWidgetActions()?.fix
 
 	return (
-		<WidgetShell title={title} mode={mode} contentClassName={contentClassName}>
+		<WidgetShell
+			title={title}
+			mode={mode}
+			contentClassName={contentClassName}
+			footer={dataState.status === "ready" ? footer : undefined}
+		>
 			{dataState.status === "loading" ? (
 				loadingSkeleton
 			) : dataState.status === "error" ? (

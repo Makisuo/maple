@@ -383,7 +383,12 @@ function ChartScenarioCard({ scenario, mode }: { scenario: ChartScenario; mode: 
 function TableScenarioCard({ scenario, mode }: { scenario: WidgetScenario; mode: WidgetMode }) {
 	return (
 		<ScenarioCell label={scenario.label}>
-			<TableWidget dataState={scenario.dataState} display={scenario.display} mode={mode} />
+			<TableWidget
+				dataState={scenario.dataState}
+				display={scenario.display}
+				mode={mode}
+				rowLimit={scenario.rowLimit}
+			/>
 		</ScenarioCell>
 	)
 }

@@ -72,7 +72,12 @@ const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: Dashbo
 	return (
 		<div ref={ref} className="h-full w-full">
 			<WidgetActionsProvider widget={widget} dataState={dataState}>
-				<Visualization dataState={dataState} display={widget.display} mode={mode} />
+				<Visualization
+					dataState={dataState}
+					display={widget.display}
+					mode={mode}
+					rowLimit={widget.dataSource.transform?.limit}
+				/>
 			</WidgetActionsProvider>
 		</div>
 	)

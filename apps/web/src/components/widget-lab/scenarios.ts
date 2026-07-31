@@ -6,6 +6,8 @@ export interface WidgetScenario {
 	label: string
 	dataState: WidgetDataState
 	display: WidgetDisplayConfig
+	/** Configured row cap, for the table widget's truncation footer. */
+	rowLimit?: number
 }
 
 export interface ChartScenario extends WidgetScenario {
@@ -816,6 +818,28 @@ export const tableScenarios: WidgetScenario[] = [
 		display: { title: "Auto columns" },
 	},
 	{
+		// Sort QA: `calls` arrives as a string, the way 64-bit counts do from
+		// BYO-ClickHouse — sorting it must be numeric, not lexicographic. Row
+		// count equals `rowLimit`, so the truncation footer shows.
+		label: "Sortable — truncated, string counts",
+		dataState: ready([
+			{ service: "api-gateway", calls: "1820", p99: 245 },
+			{ service: "billing-service", calls: "240", p99: 412 },
+			{ service: "auth-service", calls: "2104", p99: 89 },
+			{ service: "order-service", calls: "642", p99: 318 },
+			{ service: "user-service", calls: "98", p99: 132 },
+		]),
+		rowLimit: 5,
+		display: {
+			title: "Top services",
+			columns: [
+				{ field: "service", header: "Service" },
+				{ field: "calls", header: "Calls", align: "right" },
+				{ field: "p99", header: "p99", unit: "duration_ms", align: "right" },
+			],
+		},
+	},
+	{
 		label: "Long string values",
 		dataState: ready([
 			{
@@ -1300,21 +1324,27 @@ export const heatmapScenarios: WidgetScenario[] = [
 		// gap. Exercises axis pruning + the hidden-count footnote.
 		label: "Long tail + dead rows/cols",
 		dataState: ready(
-			["admin-api", "artifact-scan", "kafka-consumers", "mail-dispatch", "query-gateway", "webhook-fanout"]
-				.flatMap((service, si) =>
-					hours.map((h, hi) => ({
-						x: service,
-						y: `${h}:00`,
-						// artifact-scan / mail-dispatch / webhook-fanout are silent, and
-						// the 09:00 bucket is empty for everyone.
-						value:
-							si === 1 || si === 3 || si === 5 || h === "09"
-								? 0
-								: si === 0 || si === 4
-									? 18000 + hi * 900
-									: 40 + hi * 12,
-					})),
-				),
+			[
+				"admin-api",
+				"artifact-scan",
+				"kafka-consumers",
+				"mail-dispatch",
+				"query-gateway",
+				"webhook-fanout",
+			].flatMap((service, si) =>
+				hours.map((h, hi) => ({
+					x: service,
+					y: `${h}:00`,
+					// artifact-scan / mail-dispatch / webhook-fanout are silent, and
+					// the 09:00 bucket is empty for everyone.
+					value:
+						si === 1 || si === 3 || si === 5 || h === "09"
+							? 0
+							: si === 0 || si === 4
+								? 18000 + hi * 900
+								: 40 + hi * 12,
+				})),
+			),
 		),
 		display: { title: "Spans by service", heatmap: { scaleType: "log" } },
 	},

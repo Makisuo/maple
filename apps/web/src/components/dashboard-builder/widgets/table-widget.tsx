@@ -1,14 +1,18 @@
 import { memo } from "react"
+import { cn } from "@maple/ui/lib/utils"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
+import { ArrowUpDownIcon } from "@/components/icons"
+import { useTableSort } from "@/hooks/use-table-sort"
 import { formatValueByUnit } from "@maple/ui/format"
 
 interface TableWidgetProps {
 	dataState: WidgetDataState
 	display: WidgetDisplayConfig
 	mode: WidgetMode
+	rowLimit?: number
 }
 
 /**
@@ -31,6 +35,33 @@ export function formatCellValue(value: unknown, unit?: string): string {
 	return formatValueByUnit(num, unit)
 }
 
+/**
+ * Whether a cell holds a number — including one quoted as a string, which is how
+ * 64-bit counts arrive from BYO-ClickHouse.
+ */
+function isNumericCell(value: unknown): boolean {
+	if (typeof value === "number") return true
+	return typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))
+}
+
+/**
+ * A stable key per row, so re-sorting moves rows instead of rewriting their
+ * cells in place. Derived from the first visible column — the group key in a
+ * breakdown table. Rows that repeat that value (possible in an ungrouped table)
+ * get an occurrence suffix rather than a row index: a stable sort keeps
+ * duplicates in the same relative order, so the suffix survives a re-sort.
+ */
+export function buildRowKeys(rows: ReadonlyArray<Record<string, unknown>>, field?: string): string[] {
+	const seen = new Map<string, number>()
+	return rows.map((row, i) => {
+		if (!field) return String(i)
+		const base = String(row[field])
+		const count = seen.get(base) ?? 0
+		seen.set(base, count + 1)
+		return count === 0 ? base : `${base}#${count}`
+	})
+}
+
 function getCellThresholdColor(
 	value: unknown,
 	thresholds?: Array<{ value: number; color: string }>,
@@ -46,7 +77,12 @@ function getCellThresholdColor(
 	return undefined
 }
 
-export const TableWidget = memo(function TableWidget({ dataState, display, mode }: TableWidgetProps) {
+export const TableWidget = memo(function TableWidget({
+	dataState,
+	display,
+	mode,
+	rowLimit,
+}: TableWidgetProps) {
 	const displayName = display.title || "Untitled"
 	const rows =
 		dataState.status === "ready" && Array.isArray(dataState.data)
@@ -76,12 +112,33 @@ export const TableWidget = memo(function TableWidget({ dataState, display, mode 
 				: []
 	const effectiveColumns = baseColumns.filter((col) => !col.hidden)
 
+	// Sorting is view-local: a header click never writes to the widget, so
+	// reading a dashboard can't dirty it. `initialKey: null` keeps the warehouse
+	// ordering (`ORDER BY count DESC`, or the breakdown merge) until the reader
+	// asks for something else, and `resettable` lets a third click return to it.
+	// Text columns read best A→Z on first click, numbers biggest-first. The
+	// columns are whatever the query returned, so the split is inferred from the
+	// first row rather than declared.
+	const stringFields = rows.length > 0 ? Object.keys(rows[0]).filter((f) => !isNumericCell(rows[0][f])) : []
+	const { sorted, sortKey, sortDir, handleSort } = useTableSort<Record<string, unknown>, string>(rows, {
+		initialKey: null,
+		resettable: true,
+		stringKeys: stringFields,
+	})
+
+	// The warehouse `LIMIT` picked the top-N before the rows ever reached the
+	// browser, so a client sort re-ranks a truncated set. Say so when the row
+	// count is sitting exactly on the cap.
+	const truncated = rowLimit != null && rows.length >= rowLimit
+	const rowKeys = buildRowKeys(sorted, effectiveColumns[0]?.field)
+
 	return (
 		<WidgetFrame
 			title={displayName}
 			dataState={dataState}
 			mode={mode}
 			contentClassName="flex-1 min-h-0 overflow-auto p-0"
+			footer={truncated ? `Top ${rowLimit} rows` : undefined}
 			loadingSkeleton={
 				<div className="p-3 flex flex-col gap-2">
 					{Array.from({ length: 3 }).map((_, i) => (
@@ -93,18 +150,44 @@ export const TableWidget = memo(function TableWidget({ dataState, display, mode 
 			<Table>
 				<TableHeader>
 					<TableRow>
-						{effectiveColumns.map((col) => (
-							<TableHead
-								key={col.field}
-								className="text-xs"
-								style={{
-									textAlign: col.align ?? "left",
-									width: col.width ? `${col.width}px` : undefined,
-								}}
-							>
-								{col.header}
-							</TableHead>
-						))}
+						{effectiveColumns.map((col) => {
+							const active = sortKey === col.field
+							return (
+								<TableHead
+									key={col.field}
+									className="text-xs"
+									aria-sort={
+										active ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+									}
+									style={{
+										textAlign: col.align ?? "left",
+										width: col.width ? `${col.width}px` : undefined,
+									}}
+								>
+									<button
+										type="button"
+										onClick={() => handleSort(col.field)}
+										className={cn(
+											"inline-flex max-w-full items-center gap-1 transition-colors",
+											col.align === "right" && "justify-end",
+											active
+												? "text-foreground"
+												: "text-muted-foreground hover:text-foreground",
+										)}
+									>
+										<span className="truncate">{col.header}</span>
+										<ArrowUpDownIcon
+											size={10}
+											className={cn(
+												"shrink-0 transition-opacity",
+												active ? "opacity-100" : "opacity-40",
+												active && sortDir === "asc" && "rotate-180",
+											)}
+										/>
+									</button>
+								</TableHead>
+							)
+						})}
 					</TableRow>
 				</TableHeader>
 				<TableBody>
@@ -118,8 +201,8 @@ export const TableWidget = memo(function TableWidget({ dataState, display, mode 
 							</TableCell>
 						</TableRow>
 					) : (
-						rows.map((row, i) => (
-							<TableRow key={i}>
+						sorted.map((row, i) => (
+							<TableRow key={rowKeys[i]}>
 								{effectiveColumns.map((col) => {
 									const value = row[col.field]
 									const thresholdColor = getCellThresholdColor(value, col.thresholds)
