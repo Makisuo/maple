@@ -7,11 +7,12 @@ import type { FilterOption } from "@maple/ui/components/filters/filter-section"
 
 /**
  * Distinct services that emitted logs in the selected window. This deliberately
- * uses the logs-specific facet instead of the trace-derived services facet so a
- * logs-only service remains selectable on the Logs tab.
+ * scans the same raw table and exact timestamp bounds as the rendered list, so
+ * neither partial hourly buckets nor longer-lived aggregates can add or hide a
+ * service option.
  */
 export function compileLocalLogServicesQuery(startTime: string, endTime: string) {
-	return CH.compileUnion(CH.logsFacetsQuery({}, "service"), {
+	return CH.compile(CH.logsBreakdownQuery({ groupBy: "service", limit: 500, source: "raw" }), {
 		orgId: LOCAL_ORG_ID,
 		startTime,
 		endTime,
@@ -26,9 +27,7 @@ export function useLocalLogServices(range: string | undefined) {
 			const { startTime, endTime } = boundsForRange(range)
 			const compiled = compileLocalLogServicesQuery(startTime, endTime)
 			const rows = await executeLocalCompiledQuery(compiled)
-			return rows
-				.filter((row) => row.facetType === "service" && row.serviceName)
-				.map((row) => ({ name: row.serviceName, count: Number(row.count) }))
+			return rows.filter((row) => row.name).map((row) => ({ name: row.name, count: Number(row.count) }))
 		},
 	})
 }
