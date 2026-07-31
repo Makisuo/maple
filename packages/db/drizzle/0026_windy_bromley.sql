@@ -62,6 +62,12 @@ SET
 		'legend', ''
 	),
 	"signal_type" = 'builder_query',
+	-- The legacy compiled metric plan does not contain the draft's new
+	-- multi-service/grouping semantics. Null explicitly marks it for the API's
+	-- builder-query recompilation fallback on first read/evaluation.
+	"query_spec_json" = NULL,
+	"reducer" = 'identity',
+	"sample_count_strategy" = 'metric_data_points',
 	"service_names_json" = NULL,
 	"environments_json" = NULL,
 	"group_by" = NULL

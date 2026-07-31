@@ -656,6 +656,75 @@ describe("AlertsService", () => {
 		)
 	})
 
+	it.effect("recompiles an explicitly invalidated migrated metric plan from its builder draft", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_migrated_metric_plan")
+			const userId = asUserId("user_migrated_metric_plan")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const rule = yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Migrated request rate",
+					severity: "warning",
+					enabled: true,
+					signalType: "builder_query",
+					queryBuilderDraft: {
+						id: "alert-query",
+						name: "A",
+						dataSource: "metrics",
+						signalSource: "default",
+						metricName: "http.requests",
+						metricType: "sum",
+						isMonotonic: true,
+						aggregation: "rate",
+						whereClause:
+							'service.name = "api,checkout" AND deployment.environment = "prod,staging"',
+						addOns: {
+							groupBy: true,
+							having: false,
+							orderBy: false,
+							limit: false,
+							legend: false,
+						},
+						groupBy: ["service.name"],
+					},
+					comparator: "gt",
+					threshold: 10,
+					windowMinutes: 5,
+					destinationIds: [destination.id],
+				}),
+			)
+
+			// Migration 0026 writes this null marker after replacing the legacy
+			// metric draft. A stale non-null plan must never be used.
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`update alert_rules
+					 set query_spec_json = null, reducer = 'identity', sample_count_strategy = 'metric_data_points'
+					 where id = $1`,
+					[rule.id],
+				),
+			)
+
+			const tick = yield* alerts.runSchedulerTick()
+			assert.strictEqual(tick.evaluatedCount, 1)
+			assert.strictEqual(tick.evaluationFailureCount, 0)
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows }), {
+					fetch: okFetch,
+				}),
+			),
+		)
+	})
+
 	it.effect("lowers the environment scope into a built-in signal's compiled plan", () => {
 		const testDb = createTestDb(trackedDbs)
 

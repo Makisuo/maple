@@ -18,6 +18,7 @@ describe("deriveInitialRuleDraft — template deep link", () => {
 			search: { template: "low_apdex" },
 			chartContext: undefined,
 			rulesResult: loading,
+			dashboardsResult: loading,
 		})
 
 		expect(draft.form.signalType).toBe("apdex")
@@ -34,6 +35,7 @@ describe("deriveInitialRuleDraft — template deep link", () => {
 			search: { template: "not-a-real-template" },
 			chartContext: undefined,
 			rulesResult: loading,
+			dashboardsResult: loading,
 		})
 
 		expect(draft.form.signalType).toBe("error_rate")
@@ -48,6 +50,7 @@ describe("deriveInitialRuleDraft — template deep link", () => {
 			search: { chart: "not-a-snapshot" },
 			chartContext: undefined,
 			rulesResult: loading,
+			dashboardsResult: loading,
 		})
 
 		expect(draft.form.signalType).toBe("error_rate")

@@ -4,8 +4,8 @@ import {
 	type AlertComparator,
 	type AlertDestinationType,
 	type AlertEventType,
+	type HistoricalAlertSignalType,
 	type AlertSeverity,
-	type AlertSignalType,
 } from "@maple/domain/http"
 import type { AlertDestinationRow } from "@maple/db"
 import { Clock, Duration, Effect, Match, Option, Schema } from "effect"
@@ -40,7 +40,7 @@ export interface DispatchContext {
 	readonly ruleId: string
 	readonly ruleName: string
 	readonly groupKey: string | null
-	readonly signalType: AlertSignalType
+	readonly signalType: HistoricalAlertSignalType
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
@@ -78,7 +78,7 @@ export interface ChatUrlContext {
 	readonly incidentId: string | null
 	readonly dedupeKey: string
 	readonly eventType: AlertEventType
-	readonly signalType: AlertSignalType
+	readonly signalType: HistoricalAlertSignalType
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
@@ -600,8 +600,9 @@ const renderTitleBody = (
 	destinationType: AlertDestinationType,
 	linkUrl: string,
 	chatUrl: string,
+	legacyDestinationTypes: ReadonlyArray<string> = [],
 ): { title: string; body: string } | null => {
-	const resolved = resolveTemplate(context.template, destinationType)
+	const resolved = resolveTemplate(context.template, destinationType, legacyDestinationTypes)
 	if (!hasCustomTemplate(resolved)) return null
 	try {
 		const templateCtx = buildTemplateContext(context, linkUrl, chatUrl)
@@ -687,7 +688,13 @@ export const dispatchDelivery = (
 				"slack-bot": (config) =>
 					Effect.gen(function* () {
 						const botToken = yield* deps.resolveSlackBotToken(context.destination.orgId)
-						const templated = renderTitleBody(context, "slack-bot", linkUrl, chatUrl)
+						const templated = renderTitleBody(
+							context,
+							"slack-bot",
+							linkUrl,
+							chatUrl,
+							["slack"],
+						)
 						const blocks = templated
 							? buildSlackBlocksFromTemplate(
 									templated.title,

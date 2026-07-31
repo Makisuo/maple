@@ -43,6 +43,7 @@ import {
 	AlertRulesListResponse,
 	AlertSeverity as AlertSeveritySchema,
 	AlertSignalType as AlertSignalTypeSchema,
+	HistoricalAlertSignalType as HistoricalAlertSignalTypeSchema,
 	AlertValidationError,
 	QueryBuilderQueryDraftSchema,
 	AlertNotificationTemplate,
@@ -56,6 +57,7 @@ import {
 	type QueryBuilderQueryDraftPayload,
 	type AlertSeverity,
 	type AlertSignalType,
+	type HistoricalAlertSignalType,
 	type AlertGroupBy,
 	UNGROUPED_GROUP_KEY,
 	OrgId,
@@ -197,7 +199,7 @@ interface DispatchContext {
 	readonly ruleId: AlertRuleId
 	readonly ruleName: string
 	readonly groupKey: string | null
-	readonly signalType: AlertSignalType
+	readonly signalType: HistoricalAlertSignalType
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
@@ -228,7 +230,7 @@ interface DeliveryPayloadContext {
 	readonly ruleId: AlertRuleId
 	readonly ruleName: string
 	readonly groupKey: string | null
-	readonly signalType: AlertSignalType
+	readonly signalType: HistoricalAlertSignalType
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
@@ -306,6 +308,7 @@ const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 const decodeAlertDestinationTypeSync = Schema.decodeUnknownSync(AlertDestinationTypeSchema)
 const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
 const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
+const decodeHistoricalAlertSignalTypeSync = Schema.decodeUnknownSync(HistoricalAlertSignalTypeSchema)
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
 const decodeAlertCheckStatusSync = Schema.decodeUnknownSync(AlertCheckStatusSchema)
 const decodeAlertIncidentTransitionSync = Schema.decodeUnknownSync(AlertIncidentTransitionSchema)
@@ -982,7 +985,7 @@ const rowToIncidentDocument = (row: AlertIncidentRow) =>
 		ruleId: decodeAlertRuleIdSync(row.ruleId),
 		ruleName: row.ruleName,
 		groupKey: row.groupKey,
-		signalType: decodeAlertSignalTypeSync(row.signalType),
+		signalType: decodeHistoricalAlertSignalTypeSync(row.signalType),
 		severity: decodeAlertSeveritySync(row.severity),
 		status: decodeAlertIncidentStatusSync(row.status),
 		comparator: decodeAlertComparatorSync(row.comparator),
@@ -1137,6 +1140,7 @@ export interface AlertsServiceShape {
 	) => Effect.Effect<AlertChecksSummary, AlertPersistenceError | AlertNotFoundError | AlertValidationError>
 	readonly listDeliveryEvents: (
 		orgId: OrgId,
+		options?: ListAlertDeliveryEventsOptions,
 	) => Effect.Effect<AlertDeliveryEventsListResponse, AlertPersistenceError>
 	readonly runSchedulerTick: () => Effect.Effect<
 		{
@@ -1182,6 +1186,11 @@ export interface AlertChecksSummary {
 export interface ListAlertIncidentsOptions {
 	readonly status?: AlertIncidentStatus
 	readonly ruleId?: AlertRuleId
+	readonly limit?: number
+	readonly offset?: number
+}
+
+export interface ListAlertDeliveryEventsOptions {
 	readonly limit?: number
 	readonly offset?: number
 }
@@ -1334,20 +1343,47 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				row: AlertRuleRow,
 			): Effect.fn.Return<NormalizedRule, AlertValidationError> {
 				const serviceNames = serviceNamesFromRow(row)
+				const serviceName = serviceNames.length === 1 ? serviceNames[0] : null
+				const environments = environmentsFromRow(row)
+				const groupBy = parseStoredGroupBy(row.groupBy)
+				const signalType = decodeAlertSignalTypeSync(row.signalType)
+				const comparator = decodeAlertComparatorSync(row.comparator)
+				const queryBuilderDraft = parseStoredQueryBuilderDraft(row.queryBuilderDraftJson)
+				const rawQuerySql = row.rawQuerySql ?? null
+				const rawQueryReducer =
+					row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null
+				// Migration 0026 invalidates legacy metric plans after translating them
+				// into builder drafts. Recompile only that explicit null-plan case;
+				// ordinary stored plans remain the evaluation authority.
+				const compiledPlan =
+					signalType === "builder_query" && row.querySpecJson == null
+						? yield* compileRulePlan({
+								signalType,
+								serviceName,
+								environments,
+								apdexThresholdMs: row.apdexThresholdMs,
+								queryBuilderDraft,
+								rawQuerySql,
+								rawQueryReducer,
+								comparator,
+								windowMinutes: row.windowMinutes,
+								groupBy,
+							})
+						: yield* parseCompiledPlan(row)
 				return {
 					id: decodeAlertRuleIdSync(row.id),
 					name: row.name,
 					notificationTemplate: parseStoredNotificationTemplate(row.notificationTemplateJson),
 					enabled: row.enabled,
 					severity: decodeAlertSeveritySync(row.severity),
-					serviceName: serviceNames.length === 1 ? serviceNames[0] : null,
+					serviceName,
 					serviceNames,
 					excludeServiceNames: excludeServiceNamesFromRow(row),
-					environments: environmentsFromRow(row),
+					environments,
 					tags: tagsFromRow(row),
-					groupBy: parseStoredGroupBy(row.groupBy),
-					signalType: decodeAlertSignalTypeSync(row.signalType),
-					comparator: decodeAlertComparatorSync(row.comparator),
+					groupBy,
+					signalType,
+					comparator,
 					threshold: row.threshold,
 					thresholdUpper: row.thresholdUpper,
 					windowMinutes: row.windowMinutes,
@@ -1356,14 +1392,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					consecutiveHealthyRequired: row.consecutiveHealthyRequired,
 					renotifyIntervalMinutes: row.renotifyIntervalMinutes,
 					apdexThresholdMs: row.apdexThresholdMs,
-					queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
-					rawQuerySql: row.rawQuerySql ?? null,
-					rawQueryReducer:
-						row.signalType === "raw_query"
-							? decodeQueryEngineAlertReducerSync(row.reducer)
-							: null,
+					queryBuilderDraft,
+					rawQuerySql,
+					rawQueryReducer,
 					destinationIds: yield* parseDestinationIds(row.destinationIdsJson),
-					compiledPlan: yield* parseCompiledPlan(row),
+					compiledPlan,
 					createdAt: row.createdAt.getTime(),
 					updatedAt: row.updatedAt.getTime(),
 				}
@@ -3257,7 +3290,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								timestamp: decodeIsoDateTimeStringSync(String(r.timestamp)),
 								groupKey: String(r.groupKey ?? ""),
 								status: decodeAlertCheckStatusSync(String(r.status)),
-								signalType: decodeAlertSignalTypeSync(String(r.signalType)),
+								signalType: decodeHistoricalAlertSignalTypeSync(String(r.signalType)),
 								comparator: decodeAlertComparatorSync(String(r.comparator)),
 								threshold: Number(r.threshold),
 								// thresholdUpper not yet recorded in the Tinybird alert_checks
@@ -3410,14 +3443,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 			const listDeliveryEvents = Effect.fn("AlertsService.listDeliveryEvents")(function* (
 				orgId: OrgId,
+				options: ListAlertDeliveryEventsOptions = {},
 			) {
 				const rows = yield* dbExecute((db) =>
 					db
 						.select()
 						.from(alertDeliveryEvents)
 						.where(eq(alertDeliveryEvents.orgId, orgId))
-						.orderBy(desc(alertDeliveryEvents.createdAt))
-						.limit(100),
+						.orderBy(desc(alertDeliveryEvents.createdAt), desc(alertDeliveryEvents.id))
+						.limit(options.limit ?? 100)
+						.offset(options.offset ?? 0),
 				)
 
 				const destinationRows = yield* dbExecute((db) =>
@@ -3647,7 +3682,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							ruleId: decodeAlertRuleIdSync(row.ruleId),
 							ruleName: ruleRow?.name ?? String(payloadRule?.name ?? "Alert"),
 							groupKey,
-							signalType: decodeAlertSignalTypeSync(
+							signalType: decodeHistoricalAlertSignalTypeSync(
 								incidentRow?.signalType ?? payloadRule?.signalType ?? "throughput",
 							),
 							severity: decodeAlertSeveritySync(

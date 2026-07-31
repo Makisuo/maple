@@ -2,7 +2,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { AlertDeliveryEventDocument } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import type { V2AlertDelivery } from "@maple/domain/http/v2"
-import { MapleApiV2, paginateArray, timestamp, timestampOrNull } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateOffsetQuery, timestamp, timestampOrNull } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { AlertsService } from "../../services/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
@@ -33,10 +33,12 @@ export const HttpV2AlertDeliveriesLive = HttpApiBuilder.group(MapleApiV2, "alert
 		return handlers.handle("list", ({ query }) =>
 			Effect.gen(function* () {
 				const tenant = yield* CurrentTenant.Context
-				const response = yield* alerts
-					.listDeliveryEvents(tenant.orgId)
-					.pipe(mapAlertError("delivery_list"))
-				const page = yield* paginateArray(response.events.map(toV2Delivery), query)
+				const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
+					alerts.listDeliveryEvents(tenant.orgId, { limit, offset }).pipe(
+						mapAlertError("delivery_list"),
+						Effect.map((response) => response.events.map(toV2Delivery)),
+					),
+				)
 				return { object: "list" as const, ...page }
 			}),
 		)

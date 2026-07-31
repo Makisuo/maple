@@ -34,9 +34,7 @@ export type AlertChartContext = Schema.Schema.Type<typeof AlertChartContextSchem
 
 const decodeAlertChartContext = Schema.decodeUnknownOption(AlertChartContextSchema)
 
-/**
- * Keep the encoded param under practical URL limits.
- */
+/** Keep the encoded param under practical URL limits; callers fall back to ids. */
 const MAX_ENCODED_LENGTH = 12_000
 
 export function encodeAlertChartToSearchParam(ctx: AlertChartContext): string | undefined {

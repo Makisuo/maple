@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { defaultRuleForm } from "@/lib/alerts/form-utils"
-import { createWidgetAlertPrefill } from "./widget-prefill"
+import { createWidgetAlertPrefill, resolveWidgetAlertPrefill } from "./widget-prefill"
 
 function builderQuery(overrides: Record<string, unknown> = {}) {
 	return {
@@ -156,5 +156,48 @@ describe("createWidgetAlertPrefill", () => {
 		expect(result.notices.map((notice) => notice.message).join("\n")).toContain(
 			"Metric source requires a metric name",
 		)
+	})
+})
+
+describe("resolveWidgetAlertPrefill", () => {
+	it("reloads the source widget when an oversized snapshot falls back to ids", () => {
+		const result = resolveWidgetAlertPrefill({
+			dashboards: [
+				{
+					id: "dash",
+					widgets: [
+						{
+							id: "w1",
+							dataSource: {
+								endpoint: "raw_sql_chart",
+								params: { sql: "SELECT count() AS value FROM traces WHERE $__orgFilter" },
+							},
+						},
+					],
+				},
+			],
+			dashboardId: "dash",
+			widgetId: "w1",
+			base: defaultRuleForm(),
+		})
+
+		expect(result.form.signalType).toBe("raw_query")
+		expect(result.form.rawQuerySql).toContain("$__orgFilter")
+	})
+
+	it("returns a clear notice when either fallback id is missing", () => {
+		const missingDashboard = resolveWidgetAlertPrefill({
+			dashboards: [],
+			widgetId: "w1",
+			base: defaultRuleForm(),
+		})
+		const missingWidget = resolveWidgetAlertPrefill({
+			dashboards: [],
+			dashboardId: "dash",
+			base: defaultRuleForm(),
+		})
+
+		expect(missingDashboard.notices[0]?.message).toContain("dashboard id was missing")
+		expect(missingWidget.notices[0]?.message).toContain("chart id was missing")
 	})
 })

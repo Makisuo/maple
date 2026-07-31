@@ -18,6 +18,7 @@ import {
 	type AlertDestinationType,
 	type AlertEventType,
 	type AlertSeverity,
+	type HistoricalAlertSignalType,
 	type AlertSignalType,
 	type QueryBuilderQueryDraftPayload,
 } from "@maple/domain/http"
@@ -167,7 +168,7 @@ export function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback:
 	return fallback
 }
 
-export function formatSignalValue(signalType: AlertSignalType, value: number | null): string {
+export function formatSignalValue(signalType: HistoricalAlertSignalType, value: number | null): string {
 	if (value == null || Number.isNaN(value)) return "n/a"
 
 	switch (signalType) {
@@ -179,6 +180,7 @@ export function formatSignalValue(signalType: AlertSignalType, value: number | n
 		case "apdex":
 			return value.toFixed(3)
 		case "throughput":
+		case "metric":
 		case "builder_query":
 		case "raw_query":
 			return formatNumber(value)

@@ -107,7 +107,7 @@ describe("bundled migrations", () => {
 		}
 	}, 30_000)
 
-	it("converts metric rules and removes retired destinations without runtime compatibility", async () => {
+	it("converts metric rules, invalidates stale plans, and removes retired destinations", async () => {
 		const pg = new PGlite()
 		await pg.exec(readMigrationSqlBefore("0026_windy_bromley"))
 
@@ -152,7 +152,9 @@ describe("bundled migrations", () => {
 			environments_json: unknown
 			group_by: string | null
 			destination_ids_json: string[]
-			query_spec_json: { preserved?: boolean }
+			query_spec_json: unknown
+			reducer: string
+			sample_count_strategy: string | null
 			query_builder_draft_json: {
 				whereClause: string
 				groupBy: string[]
@@ -165,7 +167,9 @@ describe("bundled migrations", () => {
 			environments_json: null,
 			group_by: null,
 			destination_ids_json: ["dest_webhook"],
-			query_spec_json: { preserved: true },
+			query_spec_json: null,
+			reducer: "identity",
+			sample_count_strategy: "metric_data_points",
 			query_builder_draft_json: {
 				whereClause: 'service.name = "api,checkout" AND deployment.environment = "prod,staging"',
 				groupBy: ["service.name"],

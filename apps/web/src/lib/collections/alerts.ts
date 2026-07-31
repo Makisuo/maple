@@ -5,6 +5,7 @@ import {
 	AlertDestinationType,
 	AlertEventType,
 	AlertGroupBy,
+	HistoricalAlertSignalType,
 	AlertIncidentDocument,
 	AlertIncidentStatus,
 	AlertNotificationTemplate,
@@ -32,6 +33,7 @@ const asDestinationType = Schema.decodeUnknownSync(AlertDestinationType)
 
 const asSeverity = Schema.decodeUnknownSync(AlertSeverity)
 const asSignalType = Schema.decodeUnknownSync(AlertSignalType)
+const asHistoricalSignalType = Schema.decodeUnknownSync(HistoricalAlertSignalType)
 const asComparator = Schema.decodeUnknownSync(AlertComparator)
 const asIncidentStatus = Schema.decodeUnknownSync(AlertIncidentStatus)
 const asEventType = Schema.decodeUnknownSync(AlertEventType)
@@ -239,7 +241,7 @@ export const rowToAlertIncidentDocument = (row: AlertIncidentRow): AlertIncident
 		ruleId: asAlertRuleId(row.rule_id),
 		ruleName: row.rule_name,
 		groupKey: row.group_key,
-		signalType: asSignalType(row.signal_type),
+		signalType: asHistoricalSignalType(row.signal_type),
 		severity: asSeverity(row.severity),
 		status: asIncidentStatus(row.status),
 		comparator: asComparator(row.comparator),

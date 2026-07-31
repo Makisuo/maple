@@ -79,6 +79,26 @@ describe("resolveTemplate", () => {
 		expect(resolveTemplate(config, "discord")).toEqual({ title: "top title", body: "top body" })
 	})
 
+	it("uses a legacy override alias after the current destination key", () => {
+		expect(resolveTemplate(config, "slack-bot", ["slack"])).toEqual({
+			title: "top title",
+			body: "slack body",
+		})
+		expect(
+			resolveTemplate(
+				{
+					...config,
+					overrides: {
+						slack: { body: "legacy body" },
+						"slack-bot": { body: "current body" },
+					},
+				},
+				"slack-bot",
+				["slack"],
+			),
+		).toEqual({ title: "top title", body: "current body" })
+	})
+
 	it("treats blank strings as unset (→ null, i.e. built-in default)", () => {
 		expect(resolveTemplate({ title: "   ", body: "" }, "slack")).toEqual({
 			title: null,

@@ -15,7 +15,11 @@ import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 type AlertsTab = "overview" | "settings"
 
 const AlertsSearch = Schema.Struct({
-	tab: Schema.optional(Schema.Literals(["overview", "settings"])),
+	/**
+	 * Accept any string so legacy deep links (`tab=monitor`, `tab=rules`) still
+	 * resolve; the component normalizes every value except settings to overview.
+	 */
+	tab: Schema.optional(Schema.String),
 	serviceName: Schema.optional(Schema.String),
 	createdBy: Schema.optional(Schema.String),
 	/** Health-summary filter over the rules list. */

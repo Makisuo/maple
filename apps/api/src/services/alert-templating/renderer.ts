@@ -87,12 +87,15 @@ const firstNonEmpty = (...values: ReadonlyArray<string | null | undefined>): str
 export const resolveTemplate = (
 	config: NotificationTemplateConfig | null | undefined,
 	destinationType: string,
+	legacyDestinationTypes: ReadonlyArray<string> = [],
 ): ResolvedTemplate => {
 	if (config == null) return { title: null, body: null }
-	const override = config.overrides?.[destinationType]
+	const overrides = [destinationType, ...legacyDestinationTypes].map(
+		(type) => config.overrides?.[type],
+	)
 	return {
-		title: firstNonEmpty(override?.title, config.title),
-		body: firstNonEmpty(override?.body, config.body),
+		title: firstNonEmpty(...overrides.map((override) => override?.title), config.title),
+		body: firstNonEmpty(...overrides.map((override) => override?.body), config.body),
 	}
 }
 

@@ -4,10 +4,19 @@ import {
 	AlertDestinationCreateRequest,
 	AlertNotificationTemplate,
 	AlertRuleUpsertRequest,
+	AlertSignalType,
+	HistoricalAlertSignalType,
 	PagerDutyAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
 } from "./alerts"
+
+describe("alert signal compatibility", () => {
+	it("keeps metric readable in history while rejecting it for new rules", () => {
+		expect(Exit.isFailure(Schema.decodeUnknownExit(AlertSignalType)("metric"))).toBe(true)
+		expect(Schema.decodeUnknownSync(HistoricalAlertSignalType)("metric")).toBe("metric")
+	})
+})
 
 describe("AlertDestinationCreateRequest", () => {
 	const encode = Schema.encodeUnknownSync(AlertDestinationCreateRequest)
