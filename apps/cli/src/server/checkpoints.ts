@@ -450,49 +450,42 @@ export const postLoopbackLocalQuery = async (port: number, sql: string): Promise
 export const checkpointQueryUrl = (host: string, port: number): string =>
 	`${serverUrl(host, port)}/local/query`
 
-const postLocalQuery = (
+const postCheckpointBackup = (
 	host: string,
 	port: number,
-	sql: string,
+	dataDir: string,
+	checkpointId: CheckpointId,
 ): Effect.Effect<unknown, LocalQueryError, HttpClient.HttpClient> => {
-	const url = checkpointQueryUrl(host, port)
+	const url = `${serverUrl(host, port)}/local/checkpoint/backup`
 	return Effect.gen(function* () {
+		const token = yield* Effect.try({
+			try: () => readFileSync(`${resolve(dataDir)}.maintenance-token`, "utf8").trim(),
+			catch: (error) => localQueryError(0, `failed to read maintenance token: ${errorMessage(error)}`),
+		})
 		const client = yield* HttpClient.HttpClient
 		const request = HttpClientRequest.post(url).pipe(
-			HttpClientRequest.bodyText(JSON.stringify({ sql }), "application/json"),
+			HttpClientRequest.setHeader("x-maple-maintenance-token", token),
+			HttpClientRequest.bodyText(JSON.stringify({ checkpointId }), "application/json"),
 		)
 		const response = yield* client
 			.execute(request)
 			.pipe(Effect.mapError((error) => localQueryError(0, errorMessage(error), errorCause(error))))
-		yield* Effect.annotateCurrentSpan("http.response.status_code", response.status)
-		const text = yield* response.text.pipe(
+		const responseText = yield* response.text.pipe(
 			Effect.mapError((error) =>
 				localQueryError(response.status, errorMessage(error), errorCause(error)),
 			),
 		)
-		if (response.status < 200 || response.status >= 300) {
-			const detail = text
-			return yield* localQueryError(response.status, detail)
-		}
+		if (response.status < 200 || response.status >= 300)
+			return yield* localQueryError(response.status, responseText)
 		return yield* Effect.try({
-			try: () => JSON.parse(text) as unknown,
+			try: () => JSON.parse(responseText) as unknown,
 			catch: (error) => localQueryError(response.status, errorMessage(error), errorCause(error)),
 		})
 	}).pipe(
 		Effect.timeout("30 seconds"),
 		Effect.catchTag("TimeoutError", () =>
-			Effect.fail(localQueryError(0, "local checkpoint query timed out after 30 seconds")),
+			Effect.fail(localQueryError(0, "local checkpoint backup timed out after 30 seconds")),
 		),
-		Effect.withSpan("CheckpointService.postLocalQuery", {
-			kind: "client",
-			attributes: {
-				"peer.service": "maple-local",
-				"http.request.method": "POST",
-				"server.address": host,
-				"server.port": port,
-				"url.full": url,
-			},
-		}),
 	)
 }
 
@@ -1511,11 +1504,7 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 				},
 				catch: createError,
 			})
-			yield* postLocalQuery(
-				options.host,
-				options.port,
-				`BACKUP DATABASE default TO Disk('default', '${snapshotBackupSqlPath(checkpointId)}')`,
-			).pipe(
+			yield* postCheckpointBackup(options.host, options.port, options.dataDir, checkpointId).pipe(
 				Effect.mapError((error) =>
 					createError(
 						isMissingBackupConfigurationError(error)

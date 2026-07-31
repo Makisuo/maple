@@ -7,10 +7,22 @@ import * as ManagedRuntime from "effect/ManagedRuntime"
 import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
 import { isLoopbackHostname } from "../lib/local-address"
-import { acquireChdb, type Chdb, ChdbError, readRawTelemetryRetentionDays } from "./chdb"
+import {
+	acquireChdb,
+	type Chdb,
+	ChdbError,
+	configureRawTelemetryRetentionDays,
+	readRawTelemetryRetentionDays,
+	rawTelemetryTtlStatements,
+} from "./chdb"
 import { buildInsertStatements } from "./inserts"
 import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch, OtlpFieldError } from "./otlp/encode"
-import { decodeLogsRequest, decodeMetricsRequest, decodeTraceRequest } from "./otlp/proto"
+import {
+	decodeLogsRequest,
+	decodeMetricsRequest,
+	decodeTraceRequest,
+	encodeExportResponse,
+} from "./otlp/proto"
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
 import { schemaFingerprint } from "./store-version"
 import {
@@ -40,6 +52,7 @@ export interface ServerOptions {
 	readonly port: number
 	readonly dataDir: string
 	readonly configFile?: string
+	readonly minimumRawTelemetryRetentionDays?: number
 	/** Serves the bundled SPA; omit to disable the UI (API-only). */
 	readonly assets?: AssetResolver
 }
@@ -189,17 +202,12 @@ async function ingest(
 			requestBytes,
 		}
 	}
-	try {
-		// Validate the entire OTLP request before its first INSERT so a metrics
-		// request spanning multiple raw tables is accepted or rejected as a unit.
-		for (const batch of batches) authority.assertBatchAllowed(batch.datasource, batch.ndjson)
-	} catch (error) {
-		return {
-			response: text(`retired telemetry: ${(error as Error).message}`, 409),
-			accepted: 0,
-			requestBytes,
-		}
-	}
+	let rejected = 0
+	batches = batches.map((batch) => {
+		const filtered = authority.filterBatch(batch.datasource, batch.ndjson)
+		rejected += filtered.rejected
+		return { ...batch, ndjson: filtered.ndjson, rowCount: filtered.accepted }
+	})
 	let accepted = 0
 	for (const batch of batches) {
 		if (batch.rowCount === 0) continue
@@ -216,7 +224,28 @@ async function ingest(
 			accepted += statement.rowCount
 		}
 	}
-	return { response: json({ accepted }), accepted, requestBytes }
+	const errorMessage = rejected > 0 ? "telemetry from permanently retired UTC days was rejected" : ""
+	if (contentType.includes("json")) {
+		const rejectedField =
+			signal === "traces"
+				? { rejectedSpans: rejected }
+				: signal === "logs"
+					? { rejectedLogRecords: rejected }
+					: { rejectedDataPoints: rejected }
+		return {
+			response: json(rejected > 0 ? { partialSuccess: { ...rejectedField, errorMessage } } : {}),
+			accepted,
+			requestBytes,
+		}
+	}
+	return {
+		response: new Response(encodeExportResponse(signal, rejected, errorMessage), {
+			status: 200,
+			headers: { "content-type": "application/x-protobuf" },
+		}),
+		accepted,
+		requestBytes,
+	}
 }
 
 /**
@@ -260,11 +289,17 @@ async function handleQuery(db: Chdb, authority: RetiredDayAuthority, req: Reques
 	}
 	let out: string
 	const started = performance.now()
+	const readOnly = /^\s*(?:SELECT|WITH|SHOW|DESCRIBE|DESC|EXPLAIN|EXISTS)\b/i.test(sql)
+	if (!readOnly && authority.hasRetiredDays()) {
+		return {
+			response: text("local SQL writes are disabled after the first UTC day is retired", 405),
+			rowCount: 0,
+			durationMs: Math.round(performance.now() - started),
+			sql,
+		}
+	}
 	try {
 		out = db.query(forceJsonEachRow(sql))
-		// `/local/query` historically permits maintenance statements. Ensure a
-		// successful non-read statement cannot persist rows in a retired UTC day.
-		if (!/^\s*(?:SELECT|WITH|SHOW|DESCRIBE|DESC|EXPLAIN|EXISTS)\b/i.test(sql)) authority.replay(db)
 	} catch (error) {
 		// 400, not 500: a failing statement is a problem with the submitted SQL,
 		// and a 5xx would make the shared warehouse executor classify it as a
@@ -490,6 +525,36 @@ const handleRetirement = async (
 	}
 }
 
+const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+/** Typed, authenticated replacement for sending BACKUP through /local/query. */
+const handleCheckpointBackup = async (db: Chdb, token: string, req: Request): Promise<Response> => {
+	if (!maintenanceTokenMatches(token, req.headers.get("x-maple-maintenance-token")))
+		return text("maintenance authorization required", 403)
+	let body: unknown
+	try {
+		body = await req.json()
+	} catch {
+		return text("invalid JSON body", 400)
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return text("invalid body", 400)
+	const record = body as Record<string, unknown>
+	if (Object.keys(record).sort().join(",") !== "checkpointId" || typeof record.checkpointId !== "string")
+		return text("invalid checkpoint fields", 400)
+	if (!CHECKPOINT_ID.test(record.checkpointId)) return text("invalid checkpoint ID", 400)
+	try {
+		db.exec(
+			`BACKUP DATABASE default TO Disk('default', 'backups/snapshots/${record.checkpointId.toLowerCase()}/backup')`,
+		)
+		return json({ checkpointId: record.checkpointId.toLowerCase() })
+	} catch (error) {
+		return text(
+			`checkpoint backup failed: ${error instanceof Error ? error.message : String(error)}`,
+			400,
+		)
+	}
+}
+
 /** The `Bun.serve` fetch handler, closed over the chDB connection. Each ingest
  *  and query request is run through `runSpan` so it leaves a trace; `/health`
  *  and `OPTIONS` are skipped (loop-prevention convention — no health-check noise). */
@@ -521,6 +586,8 @@ const makeFetch =
 				return respond(await admitted(gate, () => ingestSpan(runSpan, db, authority, "metrics", req)))
 			if (url.pathname === "/local/query")
 				return respond(await admitted(gate, () => querySpan(runSpan, db, authority, req)))
+			if (url.pathname === "/local/checkpoint/backup")
+				return respond(await admitted(gate, () => handleCheckpointBackup(db, maintenanceToken, req)))
 			if (url.pathname === "/local/retention/retire")
 				return respond(await handleRetirement(db, authority, gate, maintenanceToken, req))
 		}
@@ -537,8 +604,17 @@ export const startServer = (
 	options: ServerOptions,
 ): Effect.Effect<{ readonly port: number }, ChdbError | ServerBindError, Scope.Scope> =>
 	Effect.gen(function* () {
-		const rawTelemetryRetentionDays = yield* Effect.try({
-			try: () => readRawTelemetryRetentionDays(options.dataDir),
+		const retention = yield* Effect.try({
+			try: () => {
+				const existing = readRawTelemetryRetentionDays(options.dataDir)
+				const requested = options.minimumRawTelemetryRetentionDays
+				if (requested !== undefined) rawTelemetryTtlStatements(requested)
+				if (existing !== undefined && requested !== undefined && requested < existing)
+					throw new Error(
+						`refusing to shorten persistent raw telemetry retention from ${existing} to ${requested} days`,
+					)
+				return { existing, requested, effective: requested ?? existing }
+			},
 			catch: (error) =>
 				new ChdbError({
 					message: `failed to load persistent raw telemetry retention: ${error instanceof Error ? error.message : String(error)}`,
@@ -548,8 +624,19 @@ export const startServer = (
 			dataDir: options.dataDir,
 			schemaSql,
 			configFile: options.configFile,
-			rawTelemetryRetentionDays,
+			rawTelemetryRetentionDays: retention.effective,
 		})
+		// The ALTER statements have now been accepted by the running database.
+		// Only after that validation succeeds does a requested value become the
+		// durable configuration used by subsequent launches.
+		if (retention.requested !== undefined)
+			yield* Effect.tryPromise({
+				try: () => configureRawTelemetryRetentionDays(options.dataDir, retention.requested!),
+				catch: (error) =>
+					new ChdbError({
+						message: `failed to persist raw telemetry retention: ${error instanceof Error ? error.message : String(error)}`,
+					}),
+			})
 		const authority = yield* Effect.try({
 			try: () => {
 				const loaded = new RetiredDayAuthority(options.dataDir)

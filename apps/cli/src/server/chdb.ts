@@ -101,6 +101,7 @@ const RAW_TELEMETRY_TTL_COLUMNS = [
 ] as const
 
 export const MINIMUM_RAW_TELEMETRY_RETENTION_DAYS = 90
+export const MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS = 3_650
 
 interface RawTelemetryRetentionConfig {
 	readonly formatVersion: 1
@@ -120,10 +121,11 @@ const parseRawTelemetryRetentionDays = (value: unknown): number => {
 	if (
 		typeof days !== "number" ||
 		!Number.isSafeInteger(days) ||
-		days < MINIMUM_RAW_TELEMETRY_RETENTION_DAYS
+		days < MINIMUM_RAW_TELEMETRY_RETENTION_DAYS ||
+		days > MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS
 	)
 		throw new Error(
-			`raw telemetry retention minimum must be an integer of at least ${MINIMUM_RAW_TELEMETRY_RETENTION_DAYS} days`,
+			`raw telemetry retention minimum must be an integer from ${MINIMUM_RAW_TELEMETRY_RETENTION_DAYS} through ${MAXIMUM_RAW_TELEMETRY_RETENTION_DAYS} days`,
 		)
 	return days
 }
@@ -156,6 +158,43 @@ export const rawTelemetryTtlStatements = (days: number): ReadonlyArray<string> =
 	return RAW_TELEMETRY_TTL_COLUMNS.map(
 		([table, column]) => `ALTER TABLE ${table} MODIFY TTL toDate(${column}) + INTERVAL ${validated} DAY`,
 	)
+}
+
+const existingTtlDays = (createTableQuery: string, table: string): number => {
+	const match = /\bTTL\s+toDate\([^)]*\)\s*\+\s*(?:toIntervalDay\((\d+)\)|INTERVAL\s+(\d+)\s+DAY)/i.exec(
+		createTableQuery,
+	)
+	const value = Number(match?.[1] ?? match?.[2])
+	if (!Number.isSafeInteger(value) || value < 1)
+		throw new Error(`cannot determine existing raw telemetry TTL for ${table}`)
+	return value
+}
+
+/** Apply a floor without shortening a higher TTL already present in the schema. */
+export const applyRawTelemetryRetentionFloor = (db: Pick<Chdb, "query" | "exec">, days: number): void => {
+	const validated = parseRawTelemetryRetentionDays({ formatVersion: 1, minimumDays: days })
+	const names = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => `'${table}'`).join(", ")
+	const rows = db
+		.query(
+			`SELECT name, create_table_query FROM system.tables WHERE database = 'default' AND name IN (${names}) ORDER BY name`,
+			"JSONEachRow",
+		)
+		.split("\n")
+		.filter((line) => line.trim().length > 0)
+		.map((line) => JSON.parse(line) as { name?: unknown; create_table_query?: unknown })
+	const definitions = new Map(
+		rows.map((row) => {
+			if (typeof row.name !== "string" || typeof row.create_table_query !== "string")
+				throw new Error("invalid system.tables TTL metadata")
+			return [row.name, row.create_table_query] as const
+		}),
+	)
+	for (const [table, column] of RAW_TELEMETRY_TTL_COLUMNS) {
+		const definition = definitions.get(table)
+		if (!definition) throw new Error(`raw telemetry table is missing: ${table}`)
+		if (existingTtlDays(definition, table) >= validated) continue
+		db.exec(`ALTER TABLE ${table} MODIFY TTL toDate(${column}) + INTERVAL ${validated} DAY`)
+	}
 }
 
 /** Build the embedded ClickHouse argv. Keep table metadata loading and restore
@@ -226,8 +265,7 @@ export class Chdb {
 		if (options.bootstrapSchema !== false) {
 			db.#bootstrap(options.schemaSql)
 			if (options.rawTelemetryRetentionDays !== undefined)
-				for (const statement of rawTelemetryTtlStatements(options.rawTelemetryRetentionDays))
-					db.exec(statement)
+				applyRawTelemetryRetentionFloor(db, options.rawTelemetryRetentionDays)
 		}
 		return db
 	}

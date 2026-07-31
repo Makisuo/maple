@@ -76,6 +76,9 @@ stop_server() {
 insert_markers() {
 	local ts="${RANGE_DATE}T12:00:00"
 	query "INSERT INTO logs (OrgId, Timestamp, TimestampTime, TraceId, SpanId, TraceFlags, SeverityText, SeverityNumber, ServiceName, Body) SELECT 'local', toDateTime64('${ts}.000000000', 9, 'UTC'), toDateTime('${ts}', 'UTC'), 'trace-retention', 'span-retention', 1, 'INFO', 9, 'retention-probe', 'marker'" >/dev/null
+	# More than the default 500k shard bound proves the day-wide retirement
+	# digest stays fixed-memory while comparing a multi-shard archive.
+	query "INSERT INTO logs (OrgId, Timestamp, TimestampTime, TraceId, SpanId, TraceFlags, SeverityText, SeverityNumber, ServiceName, Body) SELECT 'local', toDateTime64('${ts}.100000000', 9, 'UTC'), toDateTime('${ts}', 'UTC'), concat('scale-trace-', toString(number)), concat('scale-span-', toString(number)), 1, 'INFO', 9, 'retention-scale', concat('scale-', toString(number)) FROM numbers(500000)" >/dev/null
 	query "INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'local', toDateTime64('${ts}.000000000', 9, 'UTC'), 'trace-retention', 'span-retention', '', '', 'marker', 'Server', 'retention-probe', 'Ok', ''" >/dev/null
 	query "INSERT INTO metrics_sum (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Value, AggregationTemporality, IsMonotonic) SELECT 'local', 'retention-probe', 'sum', toDateTime64('${ts}.000000000', 9, 'UTC'), toDateTime64('${ts}.000000000', 9, 'UTC'), 1, 2, true" >/dev/null
 	query "INSERT INTO metrics_gauge (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Value) SELECT 'local', 'retention-probe', 'gauge', toDateTime64('${ts}.000000000', 9, 'UTC'), toDateTime64('${ts}.000000000', 9, 'UTC'), 1" >/dev/null
@@ -84,7 +87,7 @@ insert_markers() {
 }
 
 assert_live_count() {
-	local expected="$1" signal column count
+	local expected="$1" signal column count signal_expected
 	for signal in "${SIGNALS[@]}"; do
 		case "$signal" in
 			logs) column="TimestampTime" ;;
@@ -92,7 +95,9 @@ assert_live_count() {
 			*) column="TimeUnix" ;;
 		esac
 		count="$(query "SELECT count() AS count FROM $signal WHERE toDate($column, 'UTC') = '$RANGE_DATE'" | jq -r '.[0].count | tonumber')"
-		[[ "$count" == "$expected" ]] || fail "$signal live count: expected $expected, got $count"
+		signal_expected="$expected"
+		[[ "$expected" == "1" && "$signal" == "logs" ]] && signal_expected="500001"
+		[[ "$count" == "$signal_expected" ]] || fail "$signal live count: expected $signal_expected, got $count"
 	done
 }
 
@@ -126,11 +131,14 @@ for signal in "${SIGNALS[@]}"; do
 		--checkpoint-id "$CHECKPOINT_ID" >"$ROOT/archive-$signal.out" 2>&1 \
 		|| fail "archive create failed for $signal: $(cat "$ROOT/archive-$signal.out")"
 done
+LOGS_GENERATION="$(jq -r '.generationId' "$ARCHIVE/logs/$RANGE_DATE/active.json")"
+[[ "$(jq '.shards | length' "$ARCHIVE/logs/$RANGE_DATE/generations/$LOGS_GENERATION/manifest.json")" -gt 1 ]] \
+	|| fail "scale archive did not produce multiple logs shards"
 
 # Replace one archived live row with a different row while preserving its count.
 # Count-only retirement would delete it; the canonical digest must refuse before
 # the retired-day ledger or any live deletion exists.
-query "ALTER TABLE logs DELETE WHERE toDate(TimestampTime, 'UTC') = '$RANGE_DATE' SETTINGS mutations_sync = 2" >/dev/null
+query "ALTER TABLE logs DELETE WHERE toDate(TimestampTime, 'UTC') = '$RANGE_DATE' AND Body = 'marker' SETTINGS mutations_sync = 2" >/dev/null
 query "INSERT INTO logs (OrgId, Timestamp, TimestampTime, ServiceName, Body) SELECT 'local', toDateTime64('${RANGE_DATE}T12:00:01.000000000', 9, 'UTC'), toDateTime('${RANGE_DATE}T12:00:01', 'UTC'), 'retention-probe', 'different-same-count-row'" >/dev/null
 if "$MAPLE" archive retire-live "$RANGE_DATE" --port "$PORT" \
 	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
@@ -167,16 +175,30 @@ fi
 grep -q "permanently retired" "$ROOT/late-rearchive.out" \
 	|| fail "retired-day rearchive did not fail for the expected reason: $(cat "$ROOT/late-rearchive.out")"
 
-# Direct SQL mutation cannot persist a retired row.
-query "INSERT INTO logs (OrgId, Timestamp, TimestampTime, ServiceName, Body) SELECT 'local', toDateTime64('${RANGE_DATE}T12:00:02.000000000', 9, 'UTC'), toDateTime('${RANGE_DATE}T12:00:02', 'UTC'), 'retention-probe', 'late-sql'" >/dev/null
+# Direct SQL mutation is rejected before execution, so neither raw data nor
+# insert-trigger materialized-view targets receive a late contribution.
+SQL_STATUS="$(curl -sS -o "$ROOT/late-sql.out" -w '%{http_code}' "http://127.0.0.1:$PORT/local/query" \
+	-H 'content-type: application/json' \
+	--data "$(jq -nc --arg sql "INSERT INTO logs (OrgId, Timestamp, TimestampTime, ServiceName, Body) SELECT 'local', toDateTime64('${RANGE_DATE}T12:00:02.000000000', 9, 'UTC'), toDateTime('${RANGE_DATE}T12:00:02', 'UTC'), 'late-sql', 'late-sql'" '{sql:$sql}')")"
+[[ "$SQL_STATUS" == "405" ]] || fail "late local SQL returned $SQL_STATUS instead of 405"
 [[ "$(query "SELECT count() AS count FROM logs WHERE toDate(TimestampTime, 'UTC') = '$RANGE_DATE'" | jq -r '.[0].count | tonumber')" == "0" ]] \
 	|| fail "local SQL recreated a retired day"
+[[ "$(query "SELECT count() AS count FROM logs_aggregates_hourly WHERE ServiceName = 'late-sql'" | jq -r '.[0].count | tonumber')" == "0" ]] \
+	|| fail "late SQL polluted logs_aggregates_hourly"
+[[ "$(query "SELECT count() AS count FROM service_usage WHERE ServiceName = 'late-sql'" | jq -r '.[0].count | tonumber')" == "0" ]] \
+	|| fail "late SQL polluted service_usage"
 
-# OTLP late telemetry is rejected before its first INSERT.
+# A mixed OTLP request partially accepts its current row and reports only the
+# retired row as rejected, per OTLP partial-success semantics.
 NANOS="$(python3 -c 'import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1]+"T12:00:03+00:00").timestamp()*1_000_000_000))' "$RANGE_DATE")"
-OTLP="$(jq -nc --arg n "$NANOS" '{resourceLogs:[{resource:{attributes:[{key:"service.name",value:{stringValue:"retention-probe"}}]},scopeLogs:[{logRecords:[{timeUnixNano:$n,body:{stringValue:"late-otlp"}}]}]}]}')"
+CURRENT_NANOS="$(python3 -c 'import time; print(time.time_ns())')"
+OTLP="$(jq -nc --arg old "$NANOS" --arg current "$CURRENT_NANOS" '{resourceLogs:[{resource:{attributes:[{key:"service.name",value:{stringValue:"retention-mixed"}}]},scopeLogs:[{logRecords:[{timeUnixNano:$old,body:{stringValue:"late-otlp"}},{timeUnixNano:$current,body:{stringValue:"current-otlp"}}]}]}]}')"
 STATUS="$(curl -sS -o "$ROOT/late-otlp.out" -w '%{http_code}' "http://127.0.0.1:$PORT/v1/logs" -H 'content-type: application/json' --data "$OTLP")"
-[[ "$STATUS" == "409" ]] || fail "late OTLP returned $STATUS instead of 409: $(cat "$ROOT/late-otlp.out")"
+[[ "$STATUS" == "200" ]] || fail "mixed OTLP returned $STATUS instead of 200: $(cat "$ROOT/late-otlp.out")"
+[[ "$(jq -r '.partialSuccess.rejectedLogRecords' "$ROOT/late-otlp.out")" == "1" ]] \
+	|| fail "mixed OTLP did not report one rejected log record"
+[[ "$(query "SELECT count() AS count FROM logs WHERE ServiceName = 'retention-mixed' AND Body = 'current-otlp'" | jq -r '.[0].count | tonumber')" == "1" ]] \
+	|| fail "mixed OTLP dropped the valid current log record"
 
 # Restore the pre-retirement checkpoint, then prove startup removes resurrected
 # rows before the listener becomes healthy.

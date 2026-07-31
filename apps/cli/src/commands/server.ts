@@ -7,7 +7,6 @@ import { openSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { SCHEMA_FINGERPRINT, startServer } from "../server/serve"
-import { configureRawTelemetryRetentionDays } from "../server/chdb"
 import {
 	checkStoreCompatible,
 	isSchemaStale,
@@ -242,6 +241,7 @@ const startDetached = (
 	offline: boolean,
 	chdbConfigFile: string | undefined,
 	onDirtyStore: DirtyStorePolicy,
+	minimumRawTelemetryRetentionDays: number | undefined,
 ): Effect.Effect<void, ServerError> =>
 	Effect.gen(function* () {
 		const logPath = logFilePath(dataDir)
@@ -258,6 +258,7 @@ const startDetached = (
 			offline,
 			chdbConfigFile,
 			onDirtyStore,
+			minimumRawTelemetryRetentionDays,
 		})
 
 		const child = yield* Effect.try({
@@ -435,12 +436,6 @@ export const start = Command.make("start", {
 			}
 
 			const requestedRetentionDays = Option.getOrUndefined(a.minimumRawTelemetryRetentionDays)
-			if (requestedRetentionDays !== undefined)
-				yield* Effect.tryPromise({
-					try: () => configureRawTelemetryRetentionDays(dataDir, requestedRetentionDays),
-					catch: (error) =>
-						new ServerError({ message: error instanceof Error ? error.message : String(error) }),
-				})
 
 			// Detached: spawn the same command without --background and exit.
 			if (a.background)
@@ -452,6 +447,7 @@ export const start = Command.make("start", {
 					a.offline,
 					Option.getOrUndefined(a.chdbConfigFile),
 					a.onDirtyStore,
+					requestedRetentionDays,
 				)
 
 			yield* Effect.sync(() =>
@@ -492,6 +488,7 @@ export const start = Command.make("start", {
 						port: a.port,
 						dataDir,
 						configFile: Option.getOrUndefined(a.chdbConfigFile),
+						minimumRawTelemetryRetentionDays: requestedRetentionDays,
 						assets,
 					}).pipe(
 						Effect.mapError((e) => new ServerError({ message: `failed to start: ${e.message}` })),

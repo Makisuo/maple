@@ -131,12 +131,16 @@ const mockDb = (options: {
 				if (described)
 					return `${JSON.stringify({ name: described.eventTimeColumn, type: "DateTime64(9)" })}\n`
 				const counted = ARCHIVE_SIGNALS.find((signal) => sql.includes(`FROM ${signal.name} WHERE`))
+				if (sql.startsWith("SELECT DISTINCT") && counted)
+					return counts.get(counted.name) === 0
+						? ""
+						: `${JSON.stringify({ rangeDate: options.date })}\n`
 				if (sql.startsWith("SELECT count()") && counted)
 					return `${JSON.stringify({ count: counts.get(counted.name) })}\n`
-				if (sql.startsWith("SELECT toString(cityHash64")) {
+				if (sql.startsWith("SELECT concat")) {
 					digestQueries++
 					if (digestQueries === 1) options.corruptDuringDigest?.()
-					return `${JSON.stringify({ d: sql.includes("file('") ? (options.archiveDigest ?? "42") : (options.liveDigest ?? "42") })}\n`
+					return `${JSON.stringify({ d: sql.includes("file('") ? (options.archiveDigest ?? "1:2:3:4") : (options.liveDigest ?? "1:2:3:4") })}\n`
 				}
 				throw new Error(`unexpected query: ${sql}`)
 			},
@@ -168,7 +172,7 @@ const writeRetiredLedger = (
 						generationId: generations[signal.name],
 						manifestSha256: "a".repeat(64),
 						archivedRowCount: 1,
-						contentDigest: "42",
+						contentDigest: "1:2:3:4",
 					})),
 				},
 			],
@@ -198,8 +202,27 @@ describe("durable retired-day authority", () => {
 						"logs",
 						`${JSON.stringify({ timestamp: `${date} 12:00:00.000000000` })}`,
 					),
-				/is retired/,
+				/retired UTC day/,
 			)
+		}))
+
+	it("filters retired rows while preserving current rows in a mixed batch", async () =>
+		fixture(async (_root, dataDir) => {
+			const date = "2026-01-01"
+			const generations = Object.fromEntries(
+				ARCHIVE_SIGNALS.map((signal) => [signal.name, randomUUID()]),
+			) as Record<ArchiveSignalName, string>
+			writeRetiredLedger(dataDir, date, generations)
+			const filtered = new RetiredDayAuthority(dataDir).filterBatch(
+				"logs",
+				[
+					JSON.stringify({ timestamp: `${date} 12:00:00.000000000`, body: "late" }),
+					JSON.stringify({ timestamp: "2026-01-04 12:00:00.000000000", body: "current" }),
+				].join("\n"),
+			)
+			strictEqual(filtered.rejected, 1)
+			strictEqual(filtered.accepted, 1)
+			strictEqual(JSON.parse(filtered.ndjson).body, "current")
 		}))
 
 	it("replays retirement after checkpoint restoration before serving", async () =>
@@ -243,7 +266,11 @@ describe("server-coordinated live retirement", () => {
 	it("refuses equal-count, different-content data before deletion", async () =>
 		fixture(async (_root, dataDir, archiveDir) => {
 			await seedCompleteDay(archiveDir, "2026-01-01")
-			const mocked = mockDb({ date: "2026-01-01", liveDigest: "41", archiveDigest: "42" })
+			const mocked = mockDb({
+				date: "2026-01-01",
+				liveDigest: "1:2:3:41",
+				archiveDigest: "1:2:3:42",
+			})
 			await rejects(
 				retireLiveDayInServer({
 					db: mocked.db,

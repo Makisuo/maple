@@ -217,8 +217,12 @@ generation, and compare a canonical day-wide content digest—not only counts.
 
 The server durably commits the retired day and its archive evidence to
 `<data-dir>.retired-days.json` before deleting any live row. That authority is
-outside the replaceable chDB directory: startup replays it before binding after
-a checkpoint restore, and OTLP ingestion rejects rows targeting a retired day.
+outside the replaceable chDB directory: startup repairs only retired dates that
+actually reappeared before binding after a checkpoint restore. OTLP ingestion
+filters retired rows while accepting current rows from the same request and
+returns an OTLP partial-success response. Once any day is retired, arbitrary
+SQL writes through `/local/query` are refused before execution, preventing
+insert-trigger materialized views from retaining a late contribution.
 A crash before the ledger commit leaves the live day intact; a crash after it is
 repaired by replay. The default `--sealing-lag-hours 24` can be increased but
 never bypassed accidentally. The command refuses to run without `--apply`.
@@ -229,7 +233,8 @@ which eligible day to retire (for example, the deployment may configure 60,
 it independently with `maple start --minimum-raw-telemetry-retention-days N`.
 That setting is durable beside the data directory, survives reset/restore, and
 can only be increased; omitting it on later launches preserves the configured
-value. `N` must be at least 90 days, and operators should keep it strictly above
+value. Maple validates the live table TTLs before persisting the request and
+never shortens a higher schema TTL. `N` must be between 90 and 3650 days, and operators should keep it strictly above
 their active rotation window so TTL cannot delete a day before archival.
 
 ### `maple archive expire <range-date> --apply`

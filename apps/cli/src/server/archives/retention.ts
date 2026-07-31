@@ -91,7 +91,8 @@ const parseSignalEvidence = (value: unknown): RetiredSignalEvidence => {
 	const manifestSha256 = requiredString(value, "manifestSha256", "retired-day signal evidence")
 	if (!SHA256.test(manifestSha256)) throw new Error("retired-day manifestSha256 must be lowercase SHA-256")
 	const contentDigest = requiredString(value, "contentDigest", "retired-day signal evidence")
-	if (!/^\d+$/.test(contentDigest)) throw new Error("retired-day contentDigest must be numeric")
+	if (!/^\d+:\d+:\d+:\d+$/.test(contentDigest))
+		throw new Error("retired-day contentDigest must be a canonical bounded multiset digest")
 	return {
 		signal: signal as ArchiveSignalName,
 		generationId: validateArchiveId(
@@ -182,14 +183,20 @@ const eventDateKey: Readonly<Record<string, string>> = {
 export class RetiredDayAuthority {
 	readonly #dataDir: string
 	#ledger: RetiredDayLedger
+	#dates: Set<string>
 
 	constructor(dataDir: string) {
 		this.#dataDir = dataDir
 		this.#ledger = readRetiredDayLedger(dataDir)
+		this.#dates = new Set(this.#ledger.retiredDays.map((day) => day.rangeDate))
 	}
 
 	isRetired(rangeDate: string): boolean {
-		return this.#ledger.retiredDays.some((day) => day.rangeDate === rangeDate)
+		return this.#dates.has(rangeDate)
+	}
+
+	hasRetiredDays(): boolean {
+		return this.#dates.size > 0
 	}
 
 	record(rangeDate: string): RetiredDayRecord | undefined {
@@ -197,8 +204,19 @@ export class RetiredDayAuthority {
 	}
 
 	assertBatchAllowed(datasource: string, ndjson: string): void {
+		const filtered = this.filterBatch(datasource, ndjson)
+		if (filtered.rejected > 0)
+			throw new Error(`telemetry batch contains ${filtered.rejected} row(s) from a retired UTC day`)
+	}
+
+	filterBatch(
+		datasource: string,
+		ndjson: string,
+	): { readonly ndjson: string; readonly accepted: number; readonly rejected: number } {
 		const key = eventDateKey[datasource]
 		if (!key) throw new Error(`unknown raw telemetry datasource: ${datasource}`)
+		const accepted: string[] = []
+		let rejected = 0
 		for (const line of ndjson.split("\n")) {
 			if (line.length === 0) continue
 			const row = JSON.parse(line) as Record<string, unknown>
@@ -206,8 +224,10 @@ export class RetiredDayAuthority {
 			if (typeof timestamp !== "string" || !/^\d{4}-\d{2}-\d{2} /.test(timestamp))
 				throw new Error(`encoded ${datasource} row has no canonical UTC timestamp`)
 			const rangeDate = timestamp.slice(0, 10)
-			if (this.isRetired(rangeDate)) throw new Error(`telemetry UTC day ${rangeDate} is retired`)
+			if (this.isRetired(rangeDate)) rejected++
+			else accepted.push(line)
 		}
+		return { ndjson: accepted.join("\n"), accepted: accepted.length, rejected }
 	}
 
 	async commit(record: RetiredDayRecord): Promise<void> {
@@ -224,10 +244,16 @@ export class RetiredDayAuthority {
 		const next = parseRetiredDayLedger({ formatVersion: LEDGER_FORMAT_VERSION, retiredDays })
 		await durableJson(retiredDayLedgerPath(this.#dataDir), next)
 		this.#ledger = next
+		this.#dates.add(parsed.rangeDate)
 	}
 
 	replay(db: Db): void {
-		for (const day of this.#ledger.retiredDays) removeUtcDay(db, day.rangeDate)
+		removeRetiredDays(db, [...this.#dates])
+	}
+
+	replayDay(db: Db, rangeDate: string): void {
+		if (!this.isRetired(rangeDate)) throw new Error(`UTC day ${rangeDate} is not retired`)
+		removeUtcDay(db, rangeDate)
 	}
 }
 
@@ -255,6 +281,37 @@ const removeUtcDay = (db: Db, rangeDate: string): void => {
 		)
 		if (liveCount(db, signal.name, signal.eventTimeColumn, rangeDate) !== 0)
 			throw new Error(`retired UTC day remains in ${signal.name}/${rangeDate}`)
+	}
+}
+
+const sqlDates = (dates: readonly string[]): string => dates.map((date) => `'${date}'`).join(", ")
+
+/** Startup repair is bounded by table count, not ledger length. */
+const removeRetiredDays = (db: Db, dates: readonly string[]): void => {
+	if (dates.length === 0) return
+	const allDates = sqlDates(dates)
+	for (const signal of ARCHIVE_SIGNALS) {
+		const rows = db.query(
+			`SELECT DISTINCT toString(toDate(${signal.eventTimeColumn}, 'UTC')) AS rangeDate FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}, 'UTC') IN (${allDates})`,
+			"JSONEachRow",
+		)
+		const present = rows
+			.split("\n")
+			.filter((line) => line.trim().length > 0)
+			.map((line) => (JSON.parse(line) as { rangeDate?: unknown }).rangeDate)
+			.filter((date): date is string => typeof date === "string" && dates.includes(date))
+		if (present.length === 0) continue
+		db.exec(
+			`ALTER TABLE ${signal.name} DELETE WHERE toDate(${signal.eventTimeColumn}, 'UTC') IN (${sqlDates(present)}) SETTINGS mutations_sync = 2`,
+		)
+		const remaining = parseCount(
+			db.query(
+				`SELECT count() AS count FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}, 'UTC') IN (${sqlDates(present)})`,
+				"JSONEachRow",
+			),
+			`${signal.name}/retired-days`,
+		)
+		if (remaining !== 0) throw new Error(`retired UTC days remain in ${signal.name}`)
 	}
 }
 
@@ -306,7 +363,7 @@ export const retireLiveDayInServer = async (options: {
 	)
 	const committed = options.authority.record(rangeDate)
 	if (committed) {
-		options.authority.replay(options.db)
+		options.authority.replayDay(options.db, rangeDate)
 		return committed
 	}
 

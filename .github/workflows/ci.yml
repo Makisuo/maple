@@ -250,6 +250,7 @@ jobs:
                   apps/cli/test/native-archive-calibrate-probe.sh
                   apps/cli/test/native-archive-gc-probe.sh
                   apps/cli/test/native-archive-merge-probe.sh
+                  apps/cli/test/native-retention-probe.sh
 
             # Syntax-check the POSIX installers against the actual /bin/sh they claim.
             - name: sh -n
@@ -343,6 +344,11 @@ jobs:
                     - probe: gc
                       script: native-archive-gc-probe.sh
                       tmp: maple-native-archive-gc
+                      keep_root: "1"
+                      duckdb: true
+                    - probe: retention
+                      script: native-retention-probe.sh
+                      tmp: maple-native-retention
                       keep_root: "1"
                       duckdb: true
         steps:
