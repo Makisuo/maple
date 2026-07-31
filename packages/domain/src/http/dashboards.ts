@@ -11,6 +11,7 @@ import {
 	UserId,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "./widget-types"
 
 const TimeRangeSchema = Schema.Union([
 	Schema.Struct({
@@ -180,8 +181,8 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 	// Heatmap-specific
 	heatmap: Schema.optional(
 		Schema.Struct({
-			colorScale: Schema.optional(Schema.Literals(["viridis", "magma", "cividis", "blues", "reds"])),
-			scaleType: Schema.optional(Schema.Literals(["linear", "log"])),
+			colorScale: Schema.optional(Schema.Literals(HEATMAP_COLOR_SCALES)),
+			scaleType: Schema.optional(Schema.Literals(HEATMAP_SCALE_TYPES)),
 		}),
 	),
 

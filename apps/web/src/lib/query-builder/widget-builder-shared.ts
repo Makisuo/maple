@@ -11,6 +11,7 @@ import {
 import type { ListColumnDraft, ListDataSource } from "@/components/dashboard-builder/config/list-config-panel"
 import type { ValueUnit, VisualizationType, WidgetDataSource } from "@/components/dashboard-builder/types"
 import type { LegendPosition } from "@/components/dashboard-builder/config/settings-fields"
+import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 import {
 	normalizeKey,
 	parseBoolean,
@@ -61,8 +62,8 @@ export interface QueryBuilderWidgetState {
 	listColumns: ListColumnDraft[]
 	listRootOnly: boolean
 	// Heatmap-specific
-	heatmapColorScale: "viridis" | "magma" | "cividis" | "blues" | "reds"
-	heatmapScaleType: "linear" | "log"
+	heatmapColorScale: HeatmapColorScale
+	heatmapScaleType: HeatmapScaleType
 	// Markdown-specific: the note body. Static — never hits the warehouse.
 	markdownContent: string
 }

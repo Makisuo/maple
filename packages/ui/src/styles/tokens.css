@@ -78,6 +78,58 @@
 	--service-14: oklch(0.56 0.16 260); /* Indigo */
 	--service-15: oklch(0.56 0.13 210); /* Cyan */
 	--service-16: oklch(0.52 0.1 230); /* Slate */
+
+	/* Heatmap sequential ramps — five stops each, interpolated in OKLCH by the
+	   chart via color-mix(). Three rules hold for every ramp, in both themes:
+
+	   1. Stop 0 clears the GROUT below, not the card. An earlier pass anchored it
+	      to --card and then drew the grid backing at the same lightness, so a
+	      minimum-value cell and an empty one rendered identically. The floor is
+	      what makes the coldest data legible; keep ΔL from --heatmap-grout above
+	      ~0.04 (light) / ~0.13 (dark) if these are ever retuned.
+	   2. Lightness is strictly monotone with ΔL >= 0.10 per segment, so value
+	      order survives grayscale and colour-blindness. Light runs .93 -> .43,
+	      dark runs .32 -> .85 — evenly spaced, no short first step.
+	   3. Chroma starts low (a tint, so the cold end carries no hue artifact),
+	      peaks at stop 3, and relaxes at stop 4 where extreme lightness squeezes
+	      the sRGB gamut.
+
+	   Light theme runs light -> dark; dark theme runs dark -> light. That means
+	   the scientific ramps are lightness-inverted here relative to matplotlib
+	   (high viridis = deep indigo, not pale yellow) — deliberate, so "hot" always
+	   contrasts against the canvas rather than dissolving into it. */
+	--heatmap-grout: oklch(0.88 0.004 286);
+	--heatmap-amber-0: oklch(0.93 0.03 78);
+	--heatmap-amber-1: oklch(0.82 0.085 70);
+	--heatmap-amber-2: oklch(0.7 0.135 60);
+	--heatmap-amber-3: oklch(0.57 0.155 48);
+	--heatmap-amber-4: oklch(0.43 0.125 38);
+	--heatmap-blues-0: oklch(0.93 0.028 242);
+	--heatmap-blues-1: oklch(0.82 0.07 245);
+	--heatmap-blues-2: oklch(0.7 0.12 248);
+	--heatmap-blues-3: oklch(0.57 0.155 253);
+	--heatmap-blues-4: oklch(0.43 0.165 258);
+	--heatmap-reds-0: oklch(0.93 0.03 28);
+	--heatmap-reds-1: oklch(0.82 0.075 28);
+	--heatmap-reds-2: oklch(0.7 0.14 28);
+	--heatmap-reds-3: oklch(0.57 0.19 27);
+	--heatmap-reds-4: oklch(0.43 0.165 25);
+	--heatmap-viridis-0: oklch(0.93 0.045 115);
+	--heatmap-viridis-1: oklch(0.82 0.11 132);
+	--heatmap-viridis-2: oklch(0.7 0.1 175);
+	--heatmap-viridis-3: oklch(0.57 0.095 225);
+	--heatmap-viridis-4: oklch(0.43 0.11 280);
+	--heatmap-magma-0: oklch(0.93 0.035 85);
+	--heatmap-magma-1: oklch(0.82 0.09 55);
+	--heatmap-magma-2: oklch(0.7 0.15 20);
+	--heatmap-magma-3: oklch(0.57 0.17 350);
+	--heatmap-magma-4: oklch(0.43 0.14 315);
+	--heatmap-cividis-0: oklch(0.93 0.045 95);
+	--heatmap-cividis-1: oklch(0.82 0.085 95);
+	--heatmap-cividis-2: oklch(0.7 0.04 120);
+	--heatmap-cividis-3: oklch(0.57 0.05 245);
+	--heatmap-cividis-4: oklch(0.43 0.06 258);
+
 	--destructive-foreground: var(--color-red-700);
 	--info: var(--color-blue-500);
 	--info-foreground: var(--color-blue-700);
@@ -165,6 +217,43 @@
 	--service-14: oklch(0.64 0.16 260); /* Indigo */
 	--service-15: oklch(0.65 0.13 210); /* Cyan */
 	--service-16: oklch(0.6 0.1 230); /* Slate */
+
+	/* Heatmap ramps, dark. Card is oklch(0.224 0.009 75) and the grout sits below
+	   it at 0.175, so every stop 0 clears its own backing by ΔL 0.145 — the gap
+	   between cells reads as a drawn line rather than a rounding error.
+	   See the :root block for the rules. */
+	--heatmap-grout: oklch(0.175 0.008 62);
+	--heatmap-amber-0: oklch(0.32 0.035 70);
+	--heatmap-amber-1: oklch(0.45 0.075 65);
+	--heatmap-amber-2: oklch(0.58 0.115 60);
+	--heatmap-amber-3: oklch(0.71 0.15 57);
+	--heatmap-amber-4: oklch(0.85 0.13 78);
+	--heatmap-blues-0: oklch(0.32 0.04 255);
+	--heatmap-blues-1: oklch(0.45 0.08 252);
+	--heatmap-blues-2: oklch(0.58 0.12 250);
+	--heatmap-blues-3: oklch(0.71 0.15 248);
+	--heatmap-blues-4: oklch(0.85 0.11 238);
+	--heatmap-reds-0: oklch(0.32 0.045 28);
+	--heatmap-reds-1: oklch(0.45 0.09 28);
+	--heatmap-reds-2: oklch(0.58 0.14 28);
+	--heatmap-reds-3: oklch(0.71 0.185 30);
+	--heatmap-reds-4: oklch(0.85 0.135 45);
+	--heatmap-viridis-0: oklch(0.32 0.055 285);
+	--heatmap-viridis-1: oklch(0.45 0.095 265);
+	--heatmap-viridis-2: oklch(0.58 0.09 200);
+	--heatmap-viridis-3: oklch(0.71 0.135 150);
+	--heatmap-viridis-4: oklch(0.85 0.17 112);
+	--heatmap-magma-0: oklch(0.32 0.06 300);
+	--heatmap-magma-1: oklch(0.45 0.12 312);
+	--heatmap-magma-2: oklch(0.58 0.175 350);
+	--heatmap-magma-3: oklch(0.71 0.16 35);
+	--heatmap-magma-4: oklch(0.85 0.115 80);
+	--heatmap-cividis-0: oklch(0.32 0.045 262);
+	--heatmap-cividis-1: oklch(0.45 0.055 250);
+	--heatmap-cividis-2: oklch(0.58 0.03 130);
+	--heatmap-cividis-3: oklch(0.71 0.075 95);
+	--heatmap-cividis-4: oklch(0.85 0.13 95);
+
 	--destructive-foreground: var(--color-red-400);
 	--info: var(--color-blue-500);
 	--info-foreground: var(--color-blue-400);

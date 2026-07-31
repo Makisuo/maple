@@ -1,5 +1,6 @@
 import type { WidgetDataState, WidgetDisplayConfig } from "@/components/dashboard-builder/types"
 import { chartRegistry } from "@maple/ui/components/charts/registry"
+import { HEATMAP_COLOR_SCALES } from "@maple/domain/http"
 
 export interface WidgetScenario {
 	label: string
@@ -1250,16 +1251,15 @@ const denseHeatmap = hours.flatMap((h, hi) =>
 
 const sparseHeatmap = denseHeatmap.filter((_, i) => i % 3 === 0)
 
-const colorScales: Array<"viridis" | "magma" | "cividis" | "blues" | "reds"> = [
-	"viridis",
-	"magma",
-	"cividis",
-	"blues",
-	"reds",
-]
-
 export const heatmapScenarios: WidgetScenario[] = [
-	...colorScales.map(
+	{
+		// No `heatmap` config at all — exercises the amber default that an
+		// unconfigured widget lands on.
+		label: "Dense — default (no config)",
+		dataState: ready(denseHeatmap),
+		display: { title: "Latency × hour" },
+	},
+	...HEATMAP_COLOR_SCALES.map(
 		(scale): WidgetScenario => ({
 			label: `Dense — ${scale}`,
 			dataState: ready(denseHeatmap),
@@ -1293,6 +1293,30 @@ export const heatmapScenarios: WidgetScenario[] = [
 			),
 		),
 		display: { title: "Errors vs OK over time", heatmap: { colorScale: "blues" } },
+	},
+	{
+		// The shape real service grids arrive in: a handful of services carry
+		// everything, several report nothing at all, and one bucket is an ingest
+		// gap. Exercises axis pruning + the hidden-count footnote.
+		label: "Long tail + dead rows/cols",
+		dataState: ready(
+			["admin-api", "artifact-scan", "kafka-consumers", "mail-dispatch", "query-gateway", "webhook-fanout"]
+				.flatMap((service, si) =>
+					hours.map((h, hi) => ({
+						x: service,
+						y: `${h}:00`,
+						// artifact-scan / mail-dispatch / webhook-fanout are silent, and
+						// the 09:00 bucket is empty for everyone.
+						value:
+							si === 1 || si === 3 || si === 5 || h === "09"
+								? 0
+								: si === 0 || si === 4
+									? 18000 + hi * 900
+									: 40 + hi * 12,
+					})),
+				),
+		),
+		display: { title: "Spans by service", heatmap: { scaleType: "log" } },
 	},
 	{
 		label: "Loading",

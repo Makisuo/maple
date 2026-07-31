@@ -1,4 +1,5 @@
 import type React from "react"
+import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 
 export type ChartLegendMode = "visible" | "hidden" | "right"
 export type ChartTooltipMode = "visible" | "hidden"
@@ -69,8 +70,8 @@ export interface BaseChartProps {
 		logScaleY?: boolean
 	}
 	heatmap?: {
-		colorScale?: "viridis" | "magma" | "cividis" | "blues" | "reds"
-		scaleType?: "linear" | "log"
+		colorScale?: HeatmapColorScale
+		scaleType?: HeatmapScaleType
 	}
 	funnel?: {
 		showStepPercent?: boolean

@@ -16,6 +16,7 @@ import {
 	DashboardVariableName,
 	DashboardVersionChangeKind,
 } from "../dashboards"
+import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "../widget-types"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ConflictError, V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
@@ -216,8 +217,8 @@ export const V2WidgetDisplay = Schema.Struct({
 	),
 	heatmap: optional(
 		Schema.Struct({
-			colorScale: optional(Schema.Literals(["viridis", "magma", "cividis", "blues", "reds"])),
-			scaleType: optional(Schema.Literals(["linear", "log"])),
+			colorScale: optional(Schema.Literals(HEATMAP_COLOR_SCALES)),
+			scaleType: optional(Schema.Literals(HEATMAP_SCALE_TYPES)),
 		}).pipe(Schema.encodeKeys({ colorScale: "color_scale", scaleType: "scale_type" })),
 	),
 	gauge: optional(

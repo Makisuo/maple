@@ -5,6 +5,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Textarea } from "@maple/ui/components/ui/textarea"
 import { cn } from "@maple/ui/utils"
+import { HEATMAP_COLOR_SCALES, type HeatmapColorScale } from "@maple/domain/http"
 import type { ValueUnit } from "@/components/dashboard-builder/types"
 import { WidgetBuilderForm } from "@/atoms/widget-query-builder-atoms"
 import { useAtom } from "@/lib/effect-atom"
@@ -216,8 +217,22 @@ function Curve() {
 	)
 }
 
-const HEATMAP_COLOR_SCALES = ["blues", "reds", "viridis", "magma", "cividis"] as const
 const titleCase = (value: string) => value[0]!.toUpperCase() + value.slice(1)
+
+/** The ramp itself, so picking a palette is a visual choice rather than a word. */
+function RampSwatch({ scale }: { scale: HeatmapColorScale }) {
+	return (
+		<span className="flex shrink-0 gap-px">
+			{[0, 1, 2, 3, 4].map((stop) => (
+				<span
+					key={stop}
+					className="size-2 rounded-[2px]"
+					style={{ backgroundColor: `var(--heatmap-${scale}-${stop})` }}
+				/>
+			))}
+		</span>
+	)
+}
 
 function HeatmapColors() {
 	const { state, set } = useSettings()
@@ -232,12 +247,18 @@ function HeatmapColors() {
 					}
 				>
 					<SelectTrigger className="w-full">
-						<SelectValue />
+						<span className="flex items-center gap-2">
+							<RampSwatch scale={state.heatmapColorScale} />
+							<SelectValue />
+						</span>
 					</SelectTrigger>
 					<SelectContent>
 						{HEATMAP_COLOR_SCALES.map((scale) => (
 							<SelectItem key={scale} value={scale}>
-								{titleCase(scale)}
+								<span className="flex items-center gap-2">
+									<RampSwatch scale={scale} />
+									{titleCase(scale)}
+								</span>
 							</SelectItem>
 						))}
 					</SelectContent>

@@ -336,3 +336,22 @@ export const rawSqlDisplayTypeFor = (visualization: string, chartId?: string): R
 	}
 	return widgetTypeByVisualization(visualization)?.rawSqlDisplayType ?? "line"
 }
+
+/**
+ * The heatmap widget's sequential colour ramps. The actual OKLCH stops live in
+ * `packages/ui/src/styles/tokens.css` as `--heatmap-<name>-0..4` (theme-aware —
+ * each ramp starts clear of `--heatmap-grout` and climbs to a saturated hot end,
+ * so it inverts between light and dark).
+ *
+ * This list is the single source of truth: the persisted schemas
+ * (`dashboards.ts`, `v2/dashboards.ts`), the chart's prop type, the builder
+ * state and the settings Select all derive from it. `amber` leads because it is
+ * the default — it's Maple's brand hue, so an unconfigured heatmap reads as ours.
+ */
+export const HEATMAP_COLOR_SCALES = ["amber", "blues", "reds", "viridis", "magma", "cividis"] as const
+
+export type HeatmapColorScale = (typeof HEATMAP_COLOR_SCALES)[number]
+
+export const HEATMAP_SCALE_TYPES = ["linear", "log"] as const
+
+export type HeatmapScaleType = (typeof HEATMAP_SCALE_TYPES)[number]
