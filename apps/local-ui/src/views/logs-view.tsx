@@ -6,7 +6,7 @@ import { Spinner } from "@maple/ui/components/ui/spinner"
 import { pickImportantAttributes } from "@maple/ui/lib/log-attributes"
 import { getSeverityColor } from "@maple/ui/lib/severity"
 import { useLocalLogs, useLocalLogSeverities } from "../hooks/use-local-logs"
-import { useLocalServices } from "../hooks/use-local-services"
+import { useLocalLogServices } from "../hooks/use-local-log-services"
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE } from "../lib/time"
 import { normalizeLog, type LocalLog } from "../lib/log-shape"
@@ -38,7 +38,7 @@ export function LogsView() {
 	const severity = query.get("severity") || undefined
 	const search = query.get("q") || undefined
 
-	const services = useLocalServices(range)
+	const services = useLocalLogServices(range)
 	const severities = useLocalLogSeverities(range)
 	const { data, isPending, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
 		useLocalLogs({ service, severity, search, range })
