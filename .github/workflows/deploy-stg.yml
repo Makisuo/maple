@@ -50,19 +50,20 @@ jobs:
             - name: Install dependencies
               run: bun install --frozen-lockfile
 
+            # BEFORE migrate: installs default privileges granting PUBLIC on every
+            # table created from here on, so a new or rebuilt table can never land
+            # owner-only and leave a consumer with "permission denied for table …".
+            # Default privileges only apply to objects created after they are set,
+            # hence the ordering. See packages/db/scripts/ensure-privileges.ts.
+            - name: Ensure database privileges
+              run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:ensure-privileges
+
             # Schema migrations run against the PlanetScale branch over the
             # DIRECT port (5432, never the PSBouncer/Hyperdrive poolers — DDL
             # through a transaction pooler misbehaves). MAPLE_PG_URL is the
             # single Infisical secret (direct 5432, admin role).
             - name: Run database migrations
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:migrate
-
-            # Re-grant table/sequence privileges to the runtime role after every
-            # migrate — table-rebuild migrations DROP+CREATE tables, which strips
-            # grants and leaves the deployed worker with "permission denied for
-            # table …" on every tick. See packages/db/scripts/grant-runtime-role.ts.
-            - name: Grant runtime role privileges
-              run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:grant
 
             - name: Deploy STG stack with Alchemy
               run: bun run alchemy:deploy:stg
