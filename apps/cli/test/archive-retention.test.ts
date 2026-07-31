@@ -1,11 +1,19 @@
 import { describe, it } from "@effect/vitest"
-import { rejects, strictEqual } from "node:assert"
+import { rejects, strictEqual, throws } from "node:assert"
 import { createHash, randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { expireArchiveDay, retireLiveDay } from "../src/server/archives/retention"
-import { ARCHIVE_SIGNALS } from "../src/server/archives/signals"
+import {
+	assertSealedUtcDay,
+	expireArchiveDay,
+	parseRetiredDayLedger,
+	readRetiredDayLedger,
+	retiredDayLedgerPath,
+	RetiredDayAuthority,
+	retireLiveDayInServer,
+} from "../src/server/archives/retention"
+import { ARCHIVE_SIGNALS, type ArchiveSignalName } from "../src/server/archives/signals"
 import {
 	activePointerPath,
 	generationManifestPath,
@@ -16,14 +24,17 @@ import {
 import { rebuildCatalog } from "../src/server/archives/listing"
 import type { ArchiveGenerationManifest } from "../src/server/archives/manifest"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
-import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { RequestQuiescenceGate, SCHEMA_FINGERPRINT } from "../src/server/serve"
 
-const seed = (archiveDir: string, signal: string, date: string): string => {
+const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex")
+
+const seed = (archiveDir: string, signal: ArchiveSignalName, date: string): string => {
 	const generationId = randomUUID()
 	const shardDir = shardsRoot(archiveDir, signal, date, generationId)
 	mkdirSync(shardDir, { recursive: true })
 	const shard = join(shardDir, "00.parquet")
 	writeFileSync(shard, "PAR1")
+	const eventTimeColumn = ARCHIVE_SIGNALS.find((candidate) => candidate.name === signal)!.eventTimeColumn
 	const manifest: ArchiveGenerationManifest = {
 		formatVersion: 3,
 		generationId,
@@ -53,9 +64,9 @@ const seed = (archiveDir: string, signal: string, date: string): string => {
 				rowCount: 1,
 				minEventTimeUnixNano: `${BigInt(Date.parse(`${date}T00:00:00.000Z`)) * 1_000_000n}`,
 				maxEventTimeUnixNano: `${BigInt(Date.parse(`${date}T00:30:00.000Z`)) * 1_000_000n}`,
-				sha256: createHash("sha256").update("PAR1").digest("hex"),
+				sha256: sha256("PAR1"),
 				bytes: statSync(shard).size,
-				columns: ["Timestamp"],
+				columns: [eventTimeColumn],
 				complexDigest: "1",
 				complexDigestAlgorithm: "cityhash64-multiset-v3",
 			},
@@ -72,130 +83,293 @@ const seed = (archiveDir: string, signal: string, date: string): string => {
 	return generationId
 }
 
-const fixture = async (run: (dataDir: string, archiveDir: string) => Promise<void>): Promise<void> => {
+const fixture = async (
+	run: (root: string, dataDir: string, archiveDir: string, scratchRoot: string) => Promise<void>,
+): Promise<void> => {
 	const root = mkdtempSync(join(tmpdir(), "maple-retention-"))
 	const dataDir = join(root, "data")
 	const archiveDir = join(root, "archive")
+	const scratchRoot = join(root, "scratch")
 	mkdirSync(dataDir)
 	mkdirSync(archiveDir)
+	mkdirSync(scratchRoot)
 	try {
-		await run(dataDir, archiveDir)
+		await run(root, dataDir, archiveDir, scratchRoot)
 	} finally {
 		rmSync(root, { recursive: true, force: true })
 	}
 }
 
-describe("archive active-day expiration", () => {
-	it("expires one complete day across all six signals", async () =>
-		fixture(async (dataDir, archiveDir) => {
-			const date = "2026-01-01"
-			for (const signal of ARCHIVE_SIGNALS) seed(archiveDir, signal.name, date)
-			for (const signal of ARCHIVE_SIGNALS) await rebuildCatalog(archiveDir, signal.name)
-			await expireArchiveDay(dataDir, archiveDir, date)
-			for (const signal of ARCHIVE_SIGNALS)
-				strictEqual(existsSync(rangeRoot(archiveDir, signal.name, date)), false)
-		}))
+const seedCompleteDay = async (
+	archiveDir: string,
+	date: string,
+): Promise<Record<ArchiveSignalName, string>> => {
+	const generations = Object.fromEntries(
+		ARCHIVE_SIGNALS.map((signal) => [signal.name, seed(archiveDir, signal.name, date)]),
+	) as Record<ArchiveSignalName, string>
+	for (const signal of ARCHIVE_SIGNALS) await rebuildCatalog(archiveDir, signal.name)
+	return generations
+}
 
-	it("fails closed when any signal is missing", async () =>
-		fixture(async (dataDir, archiveDir) => {
-			const date = "2026-01-01"
-			for (const signal of ARCHIVE_SIGNALS.slice(1)) seed(archiveDir, signal.name, date)
-			for (const signal of ARCHIVE_SIGNALS.slice(1)) await rebuildCatalog(archiveDir, signal.name)
-			await rejects(expireArchiveDay(dataDir, archiveDir, date), /lacks one active logs generation/)
-			strictEqual(existsSync(rangeRoot(archiveDir, "traces", date)), true)
-		}))
+const mockDb = (options: {
+	readonly date: string
+	readonly liveDigest?: string
+	readonly archiveDigest?: string
+	readonly corruptDuringDigest?: () => void
+}) => {
+	const counts = new Map(ARCHIVE_SIGNALS.map((signal) => [signal.name, 1]))
+	const execs: string[] = []
+	let digestQueries = 0
+	return {
+		counts,
+		execs,
+		db: {
+			query(sql: string): string {
+				const described = ARCHIVE_SIGNALS.find(
+					(signal) => sql === `DESCRIBE ${signal.name} FORMAT JSONEachRow`,
+				)
+				if (described)
+					return `${JSON.stringify({ name: described.eventTimeColumn, type: "DateTime64(9)" })}\n`
+				const counted = ARCHIVE_SIGNALS.find((signal) => sql.includes(`FROM ${signal.name} WHERE`))
+				if (sql.startsWith("SELECT count()") && counted)
+					return `${JSON.stringify({ count: counts.get(counted.name) })}\n`
+				if (sql.startsWith("SELECT toString(cityHash64")) {
+					digestQueries++
+					if (digestQueries === 1) options.corruptDuringDigest?.()
+					return `${JSON.stringify({ d: sql.includes("file('") ? (options.archiveDigest ?? "42") : (options.liveDigest ?? "42") })}\n`
+				}
+				throw new Error(`unexpected query: ${sql}`)
+			},
+			exec(sql: string): void {
+				execs.push(sql)
+				const signal = ARCHIVE_SIGNALS.find((candidate) => sql.includes(`TABLE ${candidate.name} `))
+				if (!signal) throw new Error(`unexpected exec: ${sql}`)
+				counts.set(signal.name, 0)
+			},
+		},
+	}
+}
 
-	it("resumes after a range was tombstoned but not journaled complete", async () =>
-		fixture(async (dataDir, archiveDir) => {
+const writeRetiredLedger = (
+	dataDir: string,
+	date: string,
+	generations: Record<ArchiveSignalName, string>,
+): void => {
+	writeFileSync(
+		retiredDayLedgerPath(dataDir),
+		`${JSON.stringify({
+			formatVersion: 1,
+			retiredDays: [
+				{
+					rangeDate: date,
+					retiredAt: "2026-01-03T00:00:00.000Z",
+					signals: ARCHIVE_SIGNALS.map((signal) => ({
+						signal: signal.name,
+						generationId: generations[signal.name],
+						manifestSha256: "a".repeat(64),
+						archivedRowCount: 1,
+						contentDigest: "42",
+					})),
+				},
+			],
+		})}\n`,
+	)
+}
+
+describe("durable retired-day authority", () => {
+	it("rejects malformed or non-canonical ledgers", () => {
+		throws(
+			() => parseRetiredDayLedger({ formatVersion: 1, retiredDays: [], extra: true }),
+			/unknown field extra/,
+		)
+	})
+
+	it("rejects late OTLP rows before insertion", async () =>
+		fixture(async (_root, dataDir) => {
 			const date = "2026-01-01"
-			const archivedGenerations: Record<string, string> = {}
-			for (const signal of ARCHIVE_SIGNALS)
-				archivedGenerations[signal.name] = seed(archiveDir, signal.name, date)
-			for (const signal of ARCHIVE_SIGNALS) await rebuildCatalog(archiveDir, signal.name)
-			const tombParent = join(archiveDir, ".retention", "expired", date)
-			mkdirSync(tombParent, { recursive: true })
-			writeFileSync(
-				join(archiveDir, ".retention", "expire.json"),
-				`${JSON.stringify({ formatVersion: 1, operationId: randomUUID(), rangeDate: date, completedSignals: [], archivedGenerations })}\n`,
+			const generations = Object.fromEntries(
+				ARCHIVE_SIGNALS.map((signal) => [signal.name, randomUUID()]),
+			) as Record<ArchiveSignalName, string>
+			writeRetiredLedger(dataDir, date, generations)
+			const authority = new RetiredDayAuthority(dataDir)
+			await rejects(
+				async () =>
+					authority.assertBatchAllowed(
+						"logs",
+						`${JSON.stringify({ timestamp: `${date} 12:00:00.000000000` })}`,
+					),
+				/is retired/,
 			)
-			renameSync(rangeRoot(archiveDir, "logs", date), join(tombParent, "logs"))
-			await expireArchiveDay(dataDir, archiveDir, date)
-			for (const signal of ARCHIVE_SIGNALS)
-				strictEqual(existsSync(rangeRoot(archiveDir, signal.name, date)), false)
+		}))
+
+	it("replays retirement after checkpoint restoration before serving", async () =>
+		fixture(async (_root, dataDir) => {
+			const date = "2026-01-01"
+			const generations = Object.fromEntries(
+				ARCHIVE_SIGNALS.map((signal) => [signal.name, randomUUID()]),
+			) as Record<ArchiveSignalName, string>
+			writeRetiredLedger(dataDir, date, generations)
+			const mocked = mockDb({ date })
+			new RetiredDayAuthority(dataDir).replay(mocked.db)
+			for (const signal of ARCHIVE_SIGNALS) strictEqual(mocked.counts.get(signal.name), 0)
+			strictEqual(
+				mocked.execs.every((sql) => sql.includes("toDate(") && sql.includes("'UTC'")),
+				true,
+			)
 		}))
 })
 
-describe("verified live-day retirement", () => {
-	it("drops all raw partitions only after live/archive counts match", async () =>
-		fixture(async (dataDir, archiveDir) => {
-			const date = "2026-01-01"
-			for (const signal of ARCHIVE_SIGNALS) seed(archiveDir, signal.name, date)
-			for (const signal of ARCHIVE_SIGNALS) await rebuildCatalog(archiveDir, signal.name)
-			const counts = new Map(ARCHIVE_SIGNALS.map((s) => [s.name, 1]))
-			const query = async (_port: number, sql: string): Promise<unknown> => {
-				const table = ARCHIVE_SIGNALS.find(
-					(s) => sql.includes(`TABLE ${s.name}`) || sql.includes(`FROM ${s.name}`),
-				)?.name
-				if (!table) throw new Error("unknown table")
-				if (sql.startsWith("ALTER TABLE")) {
-					counts.set(table, 0)
-					return []
-				}
-				return [{ count: counts.get(table) }]
-			}
-			await retireLiveDay({ dataDir, archiveDir, rangeDate: date, port: 4418, query })
-			for (const signal of ARCHIVE_SIGNALS) strictEqual(counts.get(signal.name), 0)
+describe("server-coordinated live retirement", () => {
+	it("commits authority before exact UTC deletion", async () =>
+		fixture(async (_root, dataDir, archiveDir) => {
+			await seedCompleteDay(archiveDir, "2026-01-01")
+			const mocked = mockDb({ date: "2026-01-01" })
+			await retireLiveDayInServer({
+				db: mocked.db,
+				authority: new RetiredDayAuthority(dataDir),
+				archiveDir,
+				rangeDate: "2026-01-01",
+				now: Date.parse("2026-01-03T00:00:00.000Z"),
+			})
+			strictEqual(readRetiredDayLedger(dataDir).retiredDays.length, 1)
+			strictEqual(existsSync(join(dataDir, "retention")), false)
+			strictEqual(mocked.execs.length, ARCHIVE_SIGNALS.length)
+			strictEqual(
+				mocked.execs.every((sql) => sql.includes("DELETE WHERE") && !sql.includes("DROP PARTITION")),
+				true,
+			)
 		}))
 
-	it("fails closed before dropping live data when an archived shard is corrupt", async () =>
-		fixture(async (dataDir, archiveDir) => {
-			const date = "2026-01-01"
-			const generations = new Map<string, string>()
-			for (const signal of ARCHIVE_SIGNALS)
-				generations.set(signal.name, seed(archiveDir, signal.name, date))
-			for (const signal of ARCHIVE_SIGNALS) await rebuildCatalog(archiveDir, signal.name)
-			writeFileSync(
-				join(shardsRoot(archiveDir, "logs", date, generations.get("logs")!), "00.parquet"),
-				"NOPE",
-			)
-			let queryCalls = 0
-			const query = async (): Promise<unknown> => {
-				queryCalls++
-				return [{ count: 1 }]
-			}
+	it("refuses equal-count, different-content data before deletion", async () =>
+		fixture(async (_root, dataDir, archiveDir) => {
+			await seedCompleteDay(archiveDir, "2026-01-01")
+			const mocked = mockDb({ date: "2026-01-01", liveDigest: "41", archiveDigest: "42" })
 			await rejects(
-				retireLiveDay({ dataDir, archiveDir, rangeDate: date, port: 4418, query }),
+				retireLiveDayInServer({
+					db: mocked.db,
+					authority: new RetiredDayAuthority(dataDir),
+					archiveDir,
+					rangeDate: "2026-01-01",
+					now: Date.parse("2026-01-03T00:00:00.000Z"),
+				}),
+				/content digest mismatch/,
+			)
+			strictEqual(mocked.execs.length, 0)
+			strictEqual(existsSync(retiredDayLedgerPath(dataDir)), false)
+		}))
+
+	it("re-hashes shards after evidence collection and before commit", async () =>
+		fixture(async (_root, dataDir, archiveDir) => {
+			const generations = await seedCompleteDay(archiveDir, "2026-01-01")
+			const shard = join(shardsRoot(archiveDir, "logs", "2026-01-01", generations.logs), "00.parquet")
+			const mocked = mockDb({
+				date: "2026-01-01",
+				corruptDuringDigest: () => writeFileSync(shard, "NOPE"),
+			})
+			await rejects(
+				retireLiveDayInServer({
+					db: mocked.db,
+					authority: new RetiredDayAuthority(dataDir),
+					archiveDir,
+					rangeDate: "2026-01-01",
+					now: Date.parse("2026-01-03T00:00:00.000Z"),
+				}),
 				/SHA-256 mismatch/,
 			)
-			strictEqual(queryCalls, 0)
+			strictEqual(mocked.execs.length, 0)
 		}))
 
-	it("resumes when one partition was dropped before progress was journaled", async () =>
-		fixture(async (dataDir, archiveDir) => {
+	it("enforces an explicit UTC sealing lag", () => {
+		strictEqual(assertSealedUtcDay("2026-01-01", 24, Date.parse("2026-01-03T00:00:00Z")), "2026-01-01")
+		throws(() => assertSealedUtcDay("2026-01-01", 24, Date.parse("2026-01-02T23:59:59Z")), /not sealed/)
+	})
+})
+
+describe("request quiescence", () => {
+	it("closes admission and drains already accepted work", async () => {
+		const gate = new RequestQuiescenceGate()
+		const leave = gate.enter()!
+		let ran = false
+		const exclusive = gate.exclusive(async () => {
+			ran = true
+		})
+		strictEqual(gate.enter(), null)
+		strictEqual(ran, false)
+		leave()
+		await exclusive
+		strictEqual(ran, true)
+		strictEqual(typeof gate.enter(), "function")
+	})
+})
+
+describe("archive expiration", () => {
+	it("expires only an already-retired complete day", async () =>
+		fixture(async (_root, dataDir, archiveDir, scratchRoot) => {
 			const date = "2026-01-01"
-			const archivedGenerations: Record<string, string> = {}
+			const generations = await seedCompleteDay(archiveDir, date)
+			writeRetiredLedger(dataDir, date, generations)
+			await expireArchiveDay({ dataDir, archiveDir, scratchRoot, rangeDate: date })
 			for (const signal of ARCHIVE_SIGNALS)
-				archivedGenerations[signal.name] = seed(archiveDir, signal.name, date)
-			for (const signal of ARCHIVE_SIGNALS) await rebuildCatalog(archiveDir, signal.name)
-			const archivedCounts = Object.fromEntries(ARCHIVE_SIGNALS.map((s) => [s.name, 1]))
-			mkdirSync(join(dataDir, "retention"), { recursive: true })
-			writeFileSync(
-				join(dataDir, "retention", "retire-live.json"),
-				`${JSON.stringify({ formatVersion: 1, operationId: randomUUID(), rangeDate: date, completedSignals: [], archivedCounts, archivedGenerations })}\n`,
+				strictEqual(existsSync(rangeRoot(archiveDir, signal.name, date)), false)
+		}))
+
+	it("refuses to delete the only archive copy of a live day", async () =>
+		fixture(async (_root, dataDir, archiveDir, scratchRoot) => {
+			const date = "2026-01-01"
+			await seedCompleteDay(archiveDir, date)
+			await rejects(
+				expireArchiveDay({ dataDir, archiveDir, scratchRoot, rangeDate: date }),
+				/is not retired/,
 			)
-			const counts = new Map(ARCHIVE_SIGNALS.map((s) => [s.name, s.name === "logs" ? 0 : 1]))
-			const query = async (_port: number, sql: string): Promise<unknown> => {
-				const table = ARCHIVE_SIGNALS.find(
-					(s) => sql.includes(`TABLE ${s.name}`) || sql.includes(`FROM ${s.name}`),
-				)?.name
-				if (!table) throw new Error("unknown table")
-				if (sql.startsWith("ALTER TABLE")) {
-					counts.set(table, 0)
-					return []
-				}
-				return [{ count: counts.get(table) }]
-			}
-			await retireLiveDay({ dataDir, archiveDir, rangeDate: date, port: 4418, query })
-			for (const signal of ARCHIVE_SIGNALS) strictEqual(counts.get(signal.name), 0)
+			strictEqual(existsSync(rangeRoot(archiveDir, "logs", date)), true)
+		}))
+
+	it("resumes absence only after a durable per-signal removal intent", async () =>
+		fixture(async (_root, dataDir, archiveDir, scratchRoot) => {
+			const date = "2026-01-01"
+			const generations = await seedCompleteDay(archiveDir, date)
+			writeRetiredLedger(dataDir, date, generations)
+			const journalDir = join(archiveDir, ".retention")
+			mkdirSync(journalDir, { recursive: true })
+			writeFileSync(
+				join(journalDir, "expire.json"),
+				`${JSON.stringify({
+					formatVersion: 3,
+					operationId: randomUUID(),
+					rangeDate: date,
+					completedSignals: [],
+					removingSignal: "logs",
+					archivedGenerations: generations,
+				})}\n`,
+			)
+			rmSync(rangeRoot(archiveDir, "logs", date), { recursive: true })
+			await expireArchiveDay({ dataDir, archiveDir, scratchRoot, rangeDate: date })
+			for (const signal of ARCHIVE_SIGNALS)
+				strictEqual(existsSync(rangeRoot(archiveDir, signal.name, date)), false)
+		}))
+
+	it("rejects altered progress that skips a canonical signal", async () =>
+		fixture(async (_root, dataDir, archiveDir, scratchRoot) => {
+			const date = "2026-01-01"
+			const generations = await seedCompleteDay(archiveDir, date)
+			writeRetiredLedger(dataDir, date, generations)
+			const journalDir = join(archiveDir, ".retention")
+			mkdirSync(journalDir, { recursive: true })
+			writeFileSync(
+				join(journalDir, "expire.json"),
+				`${JSON.stringify({
+					formatVersion: 3,
+					operationId: randomUUID(),
+					rangeDate: date,
+					completedSignals: ["traces"],
+					removingSignal: null,
+					archivedGenerations: generations,
+				})}\n`,
+			)
+			await rejects(
+				expireArchiveDay({ dataDir, archiveDir, scratchRoot, rangeDate: date }),
+				/canonical completed prefix/,
+			)
+			strictEqual(existsSync(rangeRoot(archiveDir, "logs", date)), true)
 		}))
 })

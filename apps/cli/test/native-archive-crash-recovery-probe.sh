@@ -45,7 +45,7 @@ declare -a FAILURES=()
 # ---- store + checkpoint setup (one per boundary, so each is independent) ----
 ROOT=""
 SERVER_PID=""
-RANGE_DATE="$(date -u +%Y-%m-%d)"
+RANGE_DATE="$(date -u -d '1 day ago' +%F 2>/dev/null || date -u -v-1d +%F)"
 SIGNAL="traces"
 
 cleanup() {

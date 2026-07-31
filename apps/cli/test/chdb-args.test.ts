@@ -1,6 +1,14 @@
 import { describe, it } from "@effect/vitest"
-import { deepStrictEqual, strictEqual, throws } from "node:assert"
-import { chdbArgv, rawTelemetryTtlStatements } from "../src/server/chdb"
+import { deepStrictEqual, rejects, strictEqual, throws } from "node:assert"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import {
+	chdbArgv,
+	configureRawTelemetryRetentionDays,
+	rawTelemetryTtlStatements,
+	readRawTelemetryRetentionDays,
+} from "../src/server/chdb"
 
 describe("embedded chDB arguments", () => {
 	it("waits for metadata and serializes table loading and restore work", () => {
@@ -29,19 +37,29 @@ describe("embedded chDB arguments", () => {
 	})
 })
 
-describe("rawTelemetryTtlStatements", () => {
-	it("builds one bounded TTL override for every raw telemetry table", () => {
-		const statements = rawTelemetryTtlStatements(120)
-		strictEqual(statements.length, 6)
-		strictEqual(statements[0], "ALTER TABLE logs MODIFY TTL toDate(TimestampTime) + INTERVAL 120 DAY")
+describe("persistent raw telemetry retention floor", () => {
+	it("requires at least the longest built-in TTL", () => {
+		throws(() => rawTelemetryTtlStatements(89), /at least 90 days/)
+		strictEqual(rawTelemetryTtlStatements(120).length, 6)
 		strictEqual(
-			statements[5],
-			"ALTER TABLE metrics_exponential_histogram MODIFY TTL toDate(TimeUnix) + INTERVAL 120 DAY",
+			rawTelemetryTtlStatements(120)[0],
+			"ALTER TABLE logs MODIFY TTL toDate(TimestampTime) + INTERVAL 120 DAY",
 		)
 	})
 
-	it("rejects unsafe retention values", () => {
-		throws(() => rawTelemetryTtlStatements(0), /positive integer/)
-		throws(() => rawTelemetryTtlStatements(1.5), /positive integer/)
+	it("persists across launches and refuses a later shortening", async () => {
+		const root = mkdtempSync(join(tmpdir(), "maple-retention-config-"))
+		const dataDir = join(root, "data")
+		try {
+			strictEqual(readRawTelemetryRetentionDays(dataDir), undefined)
+			await configureRawTelemetryRetentionDays(dataDir, 120)
+			strictEqual(readRawTelemetryRetentionDays(dataDir), 120)
+			await configureRawTelemetryRetentionDays(dataDir, 180)
+			strictEqual(readRawTelemetryRetentionDays(dataDir), 180)
+			await rejects(configureRawTelemetryRetentionDays(dataDir, 120), /refusing to shorten/)
+			strictEqual(readRawTelemetryRetentionDays(dataDir), 180)
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
 	})
 })

@@ -7,6 +7,7 @@ import { openSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { SCHEMA_FINGERPRINT, startServer } from "../server/serve"
+import { configureRawTelemetryRetentionDays } from "../server/chdb"
 import {
 	checkStoreCompatible,
 	isSchemaStale,
@@ -169,10 +170,10 @@ const chdbConfigFileFlag = Flag.optional(
 	),
 )
 
-const rawTelemetryRetentionDaysFlag = Flag.optional(
-	Flag.integer("raw-telemetry-retention-days").pipe(
+const minimumRawTelemetryRetentionDaysFlag = Flag.optional(
+	Flag.integer("minimum-raw-telemetry-retention-days").pipe(
 		Flag.withDescription(
-			"Override raw-table TTLs in days for coordinated archive rotation (default: preserve schema TTLs)",
+			"Persist a monotonic raw-table retention floor (minimum 90 days; survives reset and restore)",
 		),
 	),
 )
@@ -240,7 +241,6 @@ const startDetached = (
 	dataDir: string,
 	offline: boolean,
 	chdbConfigFile: string | undefined,
-	rawTelemetryRetentionDays: number | undefined,
 	onDirtyStore: DirtyStorePolicy,
 ): Effect.Effect<void, ServerError> =>
 	Effect.gen(function* () {
@@ -257,7 +257,6 @@ const startDetached = (
 			dataDir,
 			offline,
 			chdbConfigFile,
-			rawTelemetryRetentionDays,
 			onDirtyStore,
 		})
 
@@ -313,7 +312,7 @@ export const start = Command.make("start", {
 	port,
 	dataDir: dataDirFlag,
 	chdbConfigFile: chdbConfigFileFlag,
-	rawTelemetryRetentionDays: rawTelemetryRetentionDaysFlag,
+	minimumRawTelemetryRetentionDays: minimumRawTelemetryRetentionDaysFlag,
 	background: backgroundFlag,
 	offline: offlineFlag,
 	reset: resetFlag,
@@ -435,6 +434,14 @@ export const start = Command.make("start", {
 				})
 			}
 
+			const requestedRetentionDays = Option.getOrUndefined(a.minimumRawTelemetryRetentionDays)
+			if (requestedRetentionDays !== undefined)
+				yield* Effect.tryPromise({
+					try: () => configureRawTelemetryRetentionDays(dataDir, requestedRetentionDays),
+					catch: (error) =>
+						new ServerError({ message: error instanceof Error ? error.message : String(error) }),
+				})
+
 			// Detached: spawn the same command without --background and exit.
 			if (a.background)
 				return yield* startDetached(
@@ -444,7 +451,6 @@ export const start = Command.make("start", {
 					dataDir,
 					a.offline,
 					Option.getOrUndefined(a.chdbConfigFile),
-					Option.getOrUndefined(a.rawTelemetryRetentionDays),
 					a.onDirtyStore,
 				)
 
@@ -486,7 +492,6 @@ export const start = Command.make("start", {
 						port: a.port,
 						dataDir,
 						configFile: Option.getOrUndefined(a.chdbConfigFile),
-						rawTelemetryRetentionDays: Option.getOrUndefined(a.rawTelemetryRetentionDays),
 						assets,
 					}).pipe(
 						Effect.mapError((e) => new ServerError({ message: `failed to start: ${e.message}` })),

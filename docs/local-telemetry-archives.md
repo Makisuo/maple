@@ -210,24 +210,34 @@ recovering from a truncated or missing catalog without rescanning Parquet bytes.
 
 ### `maple archive retire-live <range-date> --apply`
 
-Remove one UTC day from all six live raw telemetry tables only after Maple proves
-that every signal has exactly one active archive generation and that each live
-row count matches its archived row count. The operation holds the maintenance
-lock and journals progress at `<data-dir>/retention/retire-live.json`, so reruns
-resume an interrupted partition-by-partition retirement without dropping an
-unverified day.
+Remove one sealed UTC day from all six live raw telemetry tables. The CLI first
+reconciles interrupted archive work, then asks the running server to close
+ingest/query admission, drain accepted requests, re-hash the frozen active
+generation, and compare a canonical day-wide content digest—not only counts.
 
-The command is destructive and refuses to run without `--apply`. Operators whose
-active-data window exceeds Maple's schema TTLs must also start the server with an
-explicit TTL backstop beyond that window, for example
-`maple start --raw-telemetry-retention-days 120`. Omitting that server flag
-preserves Maple's normal per-signal schema TTLs.
+The server durably commits the retired day and its archive evidence to
+`<data-dir>.retired-days.json` before deleting any live row. That authority is
+outside the replaceable chDB directory: startup replays it before binding after
+a checkpoint restore, and OTLP ingestion rejects rows targeting a retired day.
+A crash before the ledger commit leaves the live day intact; a crash after it is
+repaired by replay. The default `--sealing-lag-hours 24` can be increased but
+never bypassed accidentally. The command refuses to run without `--apply`.
+
+The command does not hard-code an active-data window. Scheduling policy chooses
+which eligible day to retire (for example, the deployment may configure 60,
+90, or 120 days). If the policy relies on database TTL as a backstop, configure
+it independently with `maple start --minimum-raw-telemetry-retention-days N`.
+That setting is durable beside the data directory, survives reset/restore, and
+can only be increased; omitting it on later launches preserves the configured
+value. `N` must be at least 90 days, and operators should keep it strictly above
+their active rotation window so TTL cannot delete a day before archival.
 
 ### `maple archive expire <range-date> --apply`
 
-Delete one complete archived UTC day across all six signals. Maple freezes the
-selected generation IDs, tombstone-renames each signal range before removal,
-rebuilds each catalog, and journals progress at
+Delete one complete, already-retired archived UTC day across all six signals.
+Maple first reconciles interrupted archive work, freezes the generation IDs,
+re-hashes each generation before its destructive step, tombstone-renames each
+signal range before removal, rebuilds each catalog, and journals progress at
 `<archive-dir>/.retention/expire.json`. A rerun resumes only the exact frozen day
 and generations. The command refuses to run without `--apply`.
 
@@ -723,7 +733,7 @@ idempotently confirms an already-absent target.
 | **Supersession**                                        | Same as late telemetry: the newest generation becomes active; superseded ones remain on disk until `archive gc` reclaims them.                                                  |
 | **Interrupted create**                                  | Reconciles automatically on the next `create`, or via `archive reconcile`. Pre-publication output moves to retained quarantine; post-publication repairs pointer and catalog.   |
 | **Interrupted GC**                                      | Resumes the frozen target set; a half-removed tombstone is finished, an already-absent target is confirmed. Out-of-order mutation fails closed.                                 |
-| **Interrupted live retirement**                         | Resumes the journaled signal set; each remaining live partition must still match the frozen archive evidence before it can be dropped.                                          |
+| **Interrupted live retirement**                         | Before ledger commit, all live rows remain. After commit, startup replays the authoritative retired day before binding and finishes exact UTC deletion.                         |
 | **Interrupted archive expiration**                      | Resumes the frozen day and generation IDs; a tombstoned range is removed and its catalog rebuilt before progress advances.                                                      |
 | **Interrupted calibration**                             | The derived-pin and owned-dir reconciliation releases the pin and removes the sample; the record is preserved until cleanup is proven.                                          |
 | **Insufficient memory budget**                          | Calibration reports `low` confidence (or no recommendation) rather than presenting synthetic precision.                                                                         |

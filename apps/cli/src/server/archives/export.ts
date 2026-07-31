@@ -176,7 +176,10 @@ export interface SourceColumn {
  * shard's reopened schema is compared against this to prove the schema
  * round-tripped — not just that it has "some" columns.
  */
-export const captureSourceSchema = (db: Chdb, signal: ArchiveSignal): ReadonlyArray<SourceColumn> => {
+export const captureSourceSchema = (
+	db: Pick<Chdb, "query">,
+	signal: ArchiveSignal,
+): ReadonlyArray<SourceColumn> => {
 	const rows = readRows(db.query(`DESCRIBE ${signal.name} FORMAT JSONEachRow`, "JSONEachRow"))
 	const cols = rows.map((r) => ({ name: String(r.name), type: String(r.type) }))
 	if (cols.length === 0) throw new Error(`source table ${signal.name} has no columns`)
@@ -350,9 +353,22 @@ const normalizeValueForHash = (name: string, type: string): string => {
  * WHERE predicate already applied where needed). The sort is inside chDB; no
  * rows are materialized in JavaScript.
  */
-const multisetDigestSql = (sourceSchema: ReadonlyArray<SourceColumn>, sliceFrom: string): string => {
+export const multisetDigestSql = (sourceSchema: ReadonlyArray<SourceColumn>, sliceFrom: string): string => {
 	const args = perRowHashArgs(sourceSchema)
 	return `SELECT toString(cityHash64(groupArray(h))) AS d FROM (SELECT cityHash64(${args}) AS h FROM ${sliceFrom} ORDER BY h)`
+}
+
+/** Compute the canonical order-independent digest used by archive validation. */
+export const computeMultisetDigest = (
+	db: Pick<Chdb, "query">,
+	sourceSchema: ReadonlyArray<SourceColumn>,
+	sliceFrom: string,
+): string => {
+	const rows = readRows(db.query(multisetDigestSql(sourceSchema, sliceFrom), "JSONEachRow"))
+	const digest = rows[0]?.d
+	if (typeof digest !== "string" || !/^\d+$/.test(digest))
+		throw new Error(`invalid multiset digest result: ${String(digest)}`)
+	return digest
 }
 
 /**

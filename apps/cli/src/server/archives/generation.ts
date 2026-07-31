@@ -41,7 +41,7 @@ import {
 	newArchiveGenerationId,
 	nextMidnightUtc,
 	rangeRoot,
-	validateRangeDate,
+	validateSealedRangeDate,
 } from "./paths"
 import { type ArchiveSignal, archiveSignal } from "./signals"
 import { COMPLEX_DIGEST_ALGORITHM, exportSignalShards, type WrittenShard } from "./export"
@@ -336,7 +336,14 @@ export const createArchiveGeneration = async (
 	faults: ArchiveGenerationFaults = {},
 	loadedTuningConfig: LoadedTuningConfig | null = null,
 ): Promise<ArchiveGenerationResult> => {
-	validateRangeDate(rangeDate)
+	validateSealedRangeDate(rangeDate)
+	// This invariant belongs at the mutation boundary, not only in the CLI:
+	// callers must never supersede durable retirement evidence with a new
+	// empty/partial archive generation.
+	const { readRetiredDayLedger } = await import("./retention")
+	if (readRetiredDayLedger(dataDir).retiredDays.some((day) => day.rangeDate === rangeDate)) {
+		throw new Error(`refusing archive create: UTC day ${rangeDate} is permanently retired`)
+	}
 	assertArchiveRootSeparate(archiveDir, dataDir)
 	if (resolve(archiveDir) !== resolve(tuning.archiveDir)) {
 		throw new Error(
