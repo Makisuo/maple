@@ -27,9 +27,12 @@ import {
 	ChartTooltipContent,
 } from "@maple/ui/components/ui/chart"
 import { formatBucketLabel } from "@maple/ui/lib/format"
+import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/utils"
-import { SERIES_COLORS } from "./chart-colors"
+
+/** The single-series signal line and its area fill — one fixed accent, never hashed. */
+const SIGNAL_COLOR = "var(--chart-1)"
 
 /**
  * THE alert rule chart — shared by the create form's live hero and the rule
@@ -271,16 +274,21 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 		[axisContext],
 	)
 
+	// Keyed by group name, so a group keeps its color when a wider time range
+	// (or a different sort) changes which other groups are on screen — and it
+	// matches that service's ServiceDot everywhere else in the product.
+	const seriesColors = React.useMemo(() => resolveSeriesColors(seriesKeys), [seriesKeys])
+
 	const chartConfig: ChartConfig = React.useMemo(() => {
 		const config: ChartConfig = {}
-		seriesKeys.forEach((key, i) => {
+		for (const key of seriesKeys) {
 			config[key] = {
 				label: isMultiSeries ? key : "Observed",
-				color: SERIES_COLORS[i % SERIES_COLORS.length]!,
+				color: seriesColors.get(key),
 			}
-		})
+		}
 		return config
-	}, [seriesKeys, isMultiSeries])
+	}, [seriesKeys, isMultiSeries, seriesColors])
 
 	const yDomain = React.useMemo<[number, number]>(() => {
 		let maxVal = threshold
@@ -415,13 +423,13 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 									stopColor="var(--destructive)"
 									stopOpacity={0.08}
 								/>
-								<stop offset={splitOffset} stopColor={SERIES_COLORS[0]} stopOpacity={0.12} />
-								<stop offset={1} stopColor={SERIES_COLORS[0]} stopOpacity={0.02} />
+								<stop offset={splitOffset} stopColor={SIGNAL_COLOR} stopOpacity={0.12} />
+								<stop offset={1} stopColor={SIGNAL_COLOR} stopOpacity={0.02} />
 							</>
 						) : breachBelow ? (
 							<>
-								<stop offset={0} stopColor={SERIES_COLORS[0]} stopOpacity={0.12} />
-								<stop offset={splitOffset} stopColor={SERIES_COLORS[0]} stopOpacity={0.05} />
+								<stop offset={0} stopColor={SIGNAL_COLOR} stopOpacity={0.12} />
+								<stop offset={splitOffset} stopColor={SIGNAL_COLOR} stopOpacity={0.05} />
 								<stop
 									offset={splitOffset}
 									stopColor="var(--destructive)"
@@ -431,8 +439,8 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 							</>
 						) : (
 							<>
-								<stop offset={0.05} stopColor={SERIES_COLORS[0]} stopOpacity={0.45} />
-								<stop offset={0.95} stopColor={SERIES_COLORS[0]} stopOpacity={0.04} />
+								<stop offset={0.05} stopColor={SIGNAL_COLOR} stopOpacity={0.45} />
+								<stop offset={0.95} stopColor={SIGNAL_COLOR} stopOpacity={0.04} />
 							</>
 						)}
 					</linearGradient>
@@ -585,12 +593,12 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 				)}
 
 				{isMultiSeries ? (
-					seriesKeys.map((key, i) => (
+					seriesKeys.map((key) => (
 						<Line
 							key={key}
 							type="monotone"
 							dataKey={key}
-							stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
+							stroke={seriesColors.get(key)}
 							strokeWidth={1.5}
 							dot={false}
 							// Skipped/no-data windows stay visible as gaps — connecting
@@ -603,7 +611,7 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 					<Area
 						type="monotone"
 						dataKey={SINGLE_KEY}
-						stroke={SERIES_COLORS[0]}
+						stroke={SIGNAL_COLOR}
 						strokeWidth={2}
 						fill="url(#alert-signal-fill)"
 						connectNulls={source !== "preview"}

@@ -4,7 +4,7 @@ import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { funnelSampleData } from "../_shared/sample-data"
-import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
+import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import { useContainerSize } from "../../../hooks/use-container-size"
 
 interface Row {
@@ -120,9 +120,10 @@ export function QueryBuilderFunnelChart({ data, className, unit, funnel }: BaseC
 		const max = rows.reduce((acc, r) => Math.max(acc, r.value), 0)
 		const first = rows[0]?.value ?? 0
 		if (max <= 0) return [] as Stage[]
+		const colors = resolveSeriesColors(rows.map((row) => row.name))
 		return rows.map((row, idx): Stage => {
 			const prev = rows[idx - 1]?.value
-			const color = resolveSeriesColor(row.name, idx)
+			const color = colors.get(row.name) ?? ""
 			return {
 				...row,
 				color,

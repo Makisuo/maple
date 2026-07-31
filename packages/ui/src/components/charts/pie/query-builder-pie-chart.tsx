@@ -4,7 +4,7 @@ import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { pieSampleData } from "../_shared/sample-data"
-import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
+import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import { bucketCategorical, MAX_CATEGORICAL, OTHER_COLOR, OTHER_LABEL } from "../_shared/bucket-series"
 
 interface Row {
@@ -145,12 +145,17 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 		const sum = bucketed.reduce((acc, r) => acc + r.value, 0)
 		if (sum <= 0) return { slices: [] as Slice[], total: 0 }
 		let cursor = 0
-		const out: Slice[] = bucketed.map((row, idx) => {
+		// Resolved by name, so a slice keeps its color even though `bucketCategorical`
+		// re-sorts largest-first. "Other" is a bucket, not an identity.
+		const colors = resolveSeriesColors(
+			bucketed.map((row) => row.name).filter((name) => name !== OTHER_LABEL),
+		)
+		const out: Slice[] = bucketed.map((row) => {
 			const pct = row.value / sum
 			const startA = cursor * 2 * Math.PI
 			cursor += pct
 			const endA = cursor * 2 * Math.PI
-			const color = row.name === OTHER_LABEL ? OTHER_COLOR : resolveSeriesColor(row.name, idx)
+			const color = row.name === OTHER_LABEL ? OTHER_COLOR : (colors.get(row.name) ?? OTHER_COLOR)
 			return { ...row, pct, color, startA, endA }
 		})
 		return { slices: out, total: sum }

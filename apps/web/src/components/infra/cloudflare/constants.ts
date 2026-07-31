@@ -22,10 +22,13 @@ export function errorRateClass(rate: number): string {
 }
 
 /**
- * The list charts plot at most `COLOR_PALETTE.length` zones; the remainder
+ * The list charts plot at most {@link MAX_ZONE_SERIES} zones; the remainder
  * pools into one "Other zones" series in this muted color (same ramp as the
- * deliberately-uncached cache statuses below).
+ * deliberately-uncached cache statuses below). The cap is legibility — a
+ * stacked area of more than a handful of zones reads as mush — not palette
+ * size; zone colors come from the shared identity hash.
  */
+export const MAX_ZONE_SERIES = 6
 export const OTHER_ZONES_SERIES = "Other zones"
 export const OTHER_ZONES_COLOR = "color-mix(in oklab, var(--muted-foreground) 45%, transparent)"
 
