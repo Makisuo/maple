@@ -10,7 +10,7 @@ import {
 	ProviderLogo,
 	type DestinationProvider,
 } from "@/components/alerts/destination-provider"
-import { ArrowRightIcon, CircleInfoIcon, HazelIcon, LoaderIcon } from "@/components/icons"
+import { ArrowRightIcon, CircleInfoIcon, HazelIcon, LoaderIcon, MagnifierIcon } from "@/components/icons"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { v2ErrorInfo } from "@/lib/error-messages"
@@ -20,7 +20,7 @@ import type { HazelChannelsListResponse } from "@maple/domain/http"
 import type { V2SlackChannelList } from "@maple/domain/http/v2"
 import { Exit, Option } from "effect"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "@maple/ui/components/ui/button"
 import {
 	Dialog,
@@ -47,6 +47,7 @@ import {
 	ComboboxInput,
 	ComboboxItem,
 	ComboboxList,
+	ComboboxStatus,
 } from "@maple/ui/components/ui/combobox"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Avatar, AvatarFallback, AvatarImage } from "@maple/ui/components/ui/avatar"
@@ -531,6 +532,13 @@ function HazelOAuthFields({
 }
 
 /**
+ * Rows the channel popup will mount at once. Base UI applies this cap *after*
+ * filtering, so every channel stays reachable by typing while a workspace with
+ * thousands of them doesn't mount thousands of DOM nodes on open.
+ */
+const CHANNEL_RENDER_LIMIT = 100
+
+/**
  * Slack (bot) destination fields. Requires the org-level Slack app install (the
  * bot token is resolved from the org's workspace at dispatch — no per-destination
  * secret). When the app isn't installed we point the user at the integrations
@@ -585,6 +593,12 @@ function SlackBotFields({
 	const channels = Result.builder(channelsResult)
 		.onSuccess((c) => [...c.channels])
 		.orElse(() => previousChannels ?? ([] as V2SlackChannelList["channels"][number][]))
+	// The workspace has more channels than the API's page-capped walk could reach,
+	// so the list below is a prefix — say so rather than letting a missing channel
+	// read as "the bot can't see it".
+	const channelsTruncated = Result.builder(channelsResult)
+		.onSuccess((c) => c.truncated)
+		.orElse(() => false)
 	const channelsLoading = installed && channelsResult.waiting
 
 	// `GET /v2/integrations/slack/channels` is admin-gated (`requireAdmin`), so a
@@ -601,6 +615,15 @@ function SlackBotFields({
 	// A 403 is never worth a Retry button, with or without a stale list to fall
 	// back on. Everything else keeps the retryable error line.
 	const channelsFailed = Result.isFailure(channelsResult) && !channelsPermissionDenied
+
+	// Base UI filters off `items` + `itemToStringLabel`; without `items` the input
+	// is a decoration that narrows nothing. Ids are the item values, and `byId`
+	// backs both the label function and the row renderer.
+	const { channelIds, byId } = useMemo(() => {
+		const map = new Map<string, V2SlackChannelList["channels"][number]>()
+		for (const channel of channels) map.set(channel.id, channel)
+		return { channelIds: channels.map((c) => c.id), byId: map }
+	}, [channels])
 
 	const statusPending = Result.isInitial(statusResult) && status === null
 	const statusFailed = Result.isFailure(statusResult) && status === null
@@ -674,14 +697,34 @@ function SlackBotFields({
 	}
 
 	const label = (id: string): string => {
-		const channel = channels.find((c) => c.id === id)
+		const channel = byId.get(id)
 		// Unknown id (stale/stored channel not in the fetched list): prefer the
 		// stored name, but never render an empty label — show the raw id.
 		if (!channel) return form.slackChannelName ? `#${form.slackChannelName}` : id
 		return channel.is_private ? `#${channel.name} (private)` : `#${channel.name}`
 	}
 
-	const selectedChannel = channels.find((c) => c.id === form.slackChannelId)
+	// Base UI hands this only the *filtered* items, capped at `limit` below.
+	const renderChannel = (id: string) => {
+		const channel = byId.get(id)
+		return (
+			<ComboboxItem key={id} value={id}>
+				<span className="flex items-center gap-2">
+					<span className="truncate">#{channel?.name ?? id}</span>
+					{/* One type size on the row; the tone carries the difference
+					    between a neutral attribute and a warning. */}
+					{channel?.is_private ? (
+						<span className="text-[11px] text-muted-foreground">private</span>
+					) : null}
+					{channel && !channel.is_member ? (
+						<span className="text-[11px] text-warning-foreground">bot not in channel</span>
+					) : null}
+				</span>
+			</ComboboxItem>
+		)
+	}
+
+	const selectedChannel = byId.get(form.slackChannelId)
 	// Editing keeps the stored channel until a new one is picked — its id isn't
 	// returned, so the form field is empty by design. Render the stored value as a
 	// value (not as placeholder gray, which reads as "nothing configured").
@@ -704,10 +747,15 @@ function SlackBotFields({
 			</div>
 			<Combobox
 				value={form.slackChannelId || null}
+				items={channelIds}
 				itemToStringLabel={(value: string) => label(value)}
+				// Search still reaches every channel — Base UI applies `limit` AFTER
+				// filtering — but a workspace with thousands of channels never mounts
+				// thousands of rows on open.
+				limit={CHANNEL_RENDER_LIMIT}
 				onValueChange={(value) => {
 					if (value == null) return
-					const channel = channels.find((c) => c.id === value)
+					const channel = byId.get(value)
 					onFormChange((current) => ({
 						...current,
 						slackChannelId: value,
@@ -721,28 +769,17 @@ function SlackBotFields({
 					// the actual prompt so the field never looks pre-filled.
 					placeholder={channelsLoading ? "Loading channels…" : "Search channels…"}
 					className="w-full"
+					startAddon={<MagnifierIcon />}
 				/>
 				<ComboboxContent>
 					<ComboboxEmpty>No matching channels.</ComboboxEmpty>
-					<ComboboxList>
-						{channels.map((channel) => (
-							<ComboboxItem key={channel.id} value={channel.id}>
-								<span className="flex items-center gap-2">
-									<span className="truncate">#{channel.name}</span>
-									{/* One type size on the row; the tone carries the difference
-									    between a neutral attribute and a warning. */}
-									{channel.is_private ? (
-										<span className="text-[11px] text-muted-foreground">private</span>
-									) : null}
-									{!channel.is_member ? (
-										<span className="text-[11px] text-warning-foreground">
-											bot not in channel
-										</span>
-									) : null}
-								</span>
-							</ComboboxItem>
-						))}
-					</ComboboxList>
+					<ComboboxList>{renderChannel}</ComboboxList>
+					{channels.length > CHANNEL_RENDER_LIMIT ? (
+						<ComboboxStatus>
+							Showing the first {CHANNEL_RENDER_LIMIT} matches of {channels.length} channels —
+							keep typing to narrow.
+						</ComboboxStatus>
+					) : null}
 				</ComboboxContent>
 			</Combobox>
 			{channelsFailed ? (
@@ -755,6 +792,14 @@ function SlackBotFields({
 			) : channels.length === 0 && !channelsLoading ? (
 				<p className="text-[11px] text-muted-foreground">
 					No channels returned. Make sure the Maple bot has been added to at least one channel.
+				</p>
+			) : channelsTruncated ? (
+				// Deliberately no "do X to fix it": the walk is page-capped, so a
+				// channel past the cap stays out of reach whatever the user does in
+				// Slack. Saying the list is incomplete beats implying it's complete.
+				<p className="text-[11px] text-muted-foreground">
+					This workspace has more channels than Maple can list in one go, so some aren&apos;t
+					shown here.
 				</p>
 			) : null}
 			<p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">

@@ -1124,12 +1124,14 @@ describe("SlackIntegrationService", () => {
 				}),
 			)
 			const slack = yield* SlackIntegrationService
-			const channels = yield* slack.listChannels(asOrgId("org_lc"))
+			const { channels, truncated } = yield* slack.listChannels(asOrgId("org_lc"))
 			assert.deepStrictEqual(channels, [
 				{ id: "C1", name: "general", isPrivate: true, isMember: true },
 				// Missing name/is_private/is_member default to id/false/false.
 				{ id: "C2", name: "C2", isPrivate: false, isMember: false },
 			])
+			// The walk ended on Slack's own "no more pages", not on the page cap.
+			assert.isFalse(truncated)
 			assert.strictEqual(urls.length, 1)
 			const first = new URL(urls[0]!)
 			assert.isNull(first.searchParams.get("cursor"))
@@ -1167,11 +1169,12 @@ describe("SlackIntegrationService", () => {
 				}),
 			)
 			const slack = yield* SlackIntegrationService
-			const channels = yield* slack.listChannels(asOrgId("org_lc"))
+			const { channels, truncated } = yield* slack.listChannels(asOrgId("org_lc"))
 			assert.deepStrictEqual(
 				channels.map((c) => c.id),
 				["C1", "C2"],
 			)
+			assert.isFalse(truncated)
 			assert.strictEqual(urls.length, 2)
 			assert.isNull(new URL(urls[0]!).searchParams.get("cursor"))
 			assert.strictEqual(new URL(urls[1]!).searchParams.get("cursor"), "cursor-2")
@@ -1214,13 +1217,16 @@ describe("SlackIntegrationService", () => {
 				}),
 			)
 			const slack = yield* SlackIntegrationService
-			const channels = yield* slack.listChannels(asOrgId("org_lc"))
+			const { channels, truncated } = yield* slack.listChannels(asOrgId("org_lc"))
 			// The mock ALWAYS hands back a next_cursor — the walk must stop at the
-			// page cap (SLACK_MAX_CHANNEL_PAGES = 3) instead of looping forever.
-			assert.strictEqual(calls, 3)
+			// page cap (SLACK_MAX_CHANNEL_PAGES = 10) instead of looping forever,
+			// and must report the stop as truncation rather than as a full list.
+			assert.strictEqual(calls, 10)
+			assert.isTrue(truncated)
 			assert.deepStrictEqual(
 				channels.map((c) => c.id),
-				["C-page-0", "C-page-1", "C-page-2"],
+				// Sorted by name; every page's channel defaults its name to its id.
+				Array.from({ length: 10 }, (_, page) => `C-page-${page}`),
 			)
 		}).pipe(
 			Effect.provide(
@@ -1234,6 +1240,46 @@ describe("SlackIntegrationService", () => {
 							response_metadata: { next_cursor: "more" },
 						})
 					}),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels sorts bot-member channels first, then alphabetically", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc_sort",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const { channels } = yield* slack.listChannels(asOrgId("org_lc"))
+			assert.deepStrictEqual(
+				channels.map((c) => c.name),
+				// Joined channels first (alerts, zebra), then the rest (ops, sw-1).
+				["alerts", "zebra", "ops", "sw-1"],
+			)
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, () =>
+						jsonResponse({
+							ok: true,
+							channels: [
+								{ id: "C1", name: "sw-1", is_member: false },
+								{ id: "C2", name: "zebra", is_member: true },
+								{ id: "C3", name: "ops", is_member: false },
+								{ id: "C4", name: "alerts", is_member: true },
+							],
+						}),
+					),
 				),
 			),
 		)
