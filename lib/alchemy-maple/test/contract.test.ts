@@ -40,7 +40,7 @@ describe("provider request bodies decode against the real v2 create-param schema
 		expect(() => decodes(V2DashboardCreateParams, body)).not.toThrow()
 	})
 
-	it("alert destination create bodies (each channel type)", () => {
+	it("alert destination create bodies (declarative channel subset)", () => {
 		const bodies = [
 			_alertDestinationCreateBody({ type: "pagerduty", name: "PD", integration_key: "key" }),
 			_alertDestinationCreateBody({

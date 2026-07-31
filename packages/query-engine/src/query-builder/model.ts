@@ -457,7 +457,6 @@ interface MetricsFilterAccumulator {
 	metricName: string
 	metricType: QueryBuilderMetricType
 	serviceName?: string
-	serviceNames?: string[]
 	environments?: string[]
 	groupByAttributeKey?: string
 	groupByResourceAttributeKey?: string
@@ -514,15 +513,7 @@ function applyMetricsClause(
 	}
 
 	return Match.value(key).pipe(
-		Match.when("service.name", () => {
-			const serviceNames = splitCsv(clause.value)
-			if (serviceNames.length > 1) {
-				const { serviceName: _serviceName, ...rest } = filters
-				return { ...rest, serviceNames }
-			}
-			const { serviceNames: _serviceNames, ...rest } = filters
-			return { ...rest, serviceName: serviceNames[0] ?? clause.value }
-		}),
+		Match.when("service.name", () => ({ ...filters, serviceName: clause.value })),
 		Match.when("deployment.environment", () => ({
 			...filters,
 			environments: splitCsv(clause.value),
@@ -1163,10 +1154,7 @@ export function formatFiltersAsWhereClause(params: Record<string, unknown>): str
 
 	const clauses: string[] = []
 
-	if (Array.isArray(filters.serviceNames) && filters.serviceNames.length > 0) {
-		const val = filters.serviceNames.filter((item): item is string => typeof item === "string").join(",")
-		if (val) clauses.push(`service.name = "${val}"`)
-	} else if (typeof filters.serviceName === "string" && filters.serviceName.trim()) {
+	if (typeof filters.serviceName === "string" && filters.serviceName.trim()) {
 		clauses.push(`service.name = "${filters.serviceName.trim()}"`)
 	}
 

@@ -22,7 +22,7 @@ interface NotificationTemplateOverride {
 /**
  * Raw, user-supplied template config as stored on the rule / snapshotted into a
  * delivery payload. `overrides` is keyed by destination type
- * (`slack`/`discord`/…); unset fields fall back override → top-level → default.
+ * (`slack-bot`/`discord`/…); unset fields fall back override → top-level → default.
  */
 export interface NotificationTemplateConfig {
 	readonly title?: string | null
@@ -87,15 +87,12 @@ const firstNonEmpty = (...values: ReadonlyArray<string | null | undefined>): str
 export const resolveTemplate = (
 	config: NotificationTemplateConfig | null | undefined,
 	destinationType: string,
-	legacyDestinationTypes: ReadonlyArray<string> = [],
 ): ResolvedTemplate => {
 	if (config == null) return { title: null, body: null }
-	const overrides = [destinationType, ...legacyDestinationTypes].map(
-		(type) => config.overrides?.[type],
-	)
+	const override = config.overrides?.[destinationType]
 	return {
-		title: firstNonEmpty(...overrides.map((override) => override?.title), config.title),
-		body: firstNonEmpty(...overrides.map((override) => override?.body), config.body),
+		title: firstNonEmpty(override?.title, config.title),
+		body: firstNonEmpty(override?.body, config.body),
 	}
 }
 

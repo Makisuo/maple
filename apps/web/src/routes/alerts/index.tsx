@@ -16,8 +16,8 @@ type AlertsTab = "overview" | "settings"
 
 const AlertsSearch = Schema.Struct({
 	/**
-	 * Accept any string so legacy deep links (`tab=monitor`, `tab=rules`) still
-	 * resolve; the component normalizes every value except settings to overview.
+	 * Accepts any string so legacy deep links (`tab=monitor`, `tab=rules`) keep
+	 * resolving — anything that isn't "settings" lands on the overview.
 	 */
 	tab: Schema.optional(Schema.String),
 	serviceName: Schema.optional(Schema.String),

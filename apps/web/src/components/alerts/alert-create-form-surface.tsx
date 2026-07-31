@@ -310,17 +310,20 @@ function makeSuggestedName(form: RuleFormState): string | null {
 		form.signalType === "builder_query" && form.queryBuilderDraft.addOns?.groupBy
 			? (form.queryBuilderDraft.groupBy ?? [])
 			: []
-	const scope =
-		form.serviceNames.length === 1
+	const queryOwnsScope = form.signalType === "builder_query" || form.signalType === "raw_query"
+	const scope = queryOwnsScope
+		? queryGroupBy.length > 0
+			? `per ${queryGroupBy.join(" · ")}`
+			: null
+		: form.serviceNames.length === 1
 			? form.serviceNames[0]!
 			: form.serviceNames.length > 1
 				? `${form.serviceNames.length} services`
-				: queryGroupBy.length > 0
-					? `per ${queryGroupBy.join(" · ")}`
-					: form.groupBy.length > 0
-						? `per ${form.groupBy.join(" · ")}`
-						: null
-	const env = form.environments.length > 0 ? form.environments.join(" · ") : null
+				: form.groupBy.length > 0
+					? `per ${form.groupBy.join(" · ")}`
+					: null
+	const env =
+		!queryOwnsScope && form.environments.length > 0 ? form.environments.join(" · ") : null
 	const suffix = [scope, env].filter((part) => part !== null).join(" · ")
 	return suffix.length > 0 ? `${base} — ${suffix}` : base
 }

@@ -74,8 +74,8 @@ export function WidgetActionsProvider({ widget, dataState, children }: WidgetAct
 			dashboardId && alertable
 				? () => {
 						// Carry the live widget (optimistic builder state) so the alert
-						// page prefills without racing dashboard autosave. The ids remain
-						// as the lookup fallback when the snapshot exceeds URL limits.
+						// page prefills without racing the dashboard autosave; the
+						// id pair stays as the lookup fallback for oversized payloads.
 						const chart = encodeAlertChartToSearchParam({
 							dashboardId,
 							widget: {

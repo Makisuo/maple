@@ -48,20 +48,6 @@ export const AlertSignalType = Schema.Literals([
 })
 export type AlertSignalType = Schema.Schema.Type<typeof AlertSignalType>
 
-/**
- * Signal values that may still exist in immutable alert history or queued
- * delivery payloads. New and updated rules intentionally use
- * {@link AlertSignalType}, which excludes the retired `metric` rule shape.
- */
-export const HistoricalAlertSignalType = Schema.Union([
-	AlertSignalType,
-	Schema.Literal("metric"),
-]).annotate({
-	identifier: "@maple/HistoricalAlertSignalType",
-	title: "Historical Alert Signal Type",
-})
-export type HistoricalAlertSignalType = Schema.Schema.Type<typeof HistoricalAlertSignalType>
-
 export const AlertGroupByDimension = Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()).annotate({
 	identifier: "@maple/AlertGroupByDimension",
 	title: "Alert Group By Dimension",
@@ -600,7 +586,7 @@ export class AlertIncidentDocument extends Schema.Class<AlertIncidentDocument>("
 	ruleId: AlertRuleId,
 	ruleName: Schema.String,
 	groupKey: Schema.NullOr(Schema.String),
-	signalType: HistoricalAlertSignalType,
+	signalType: AlertSignalType,
 	severity: AlertSeverity,
 	status: AlertIncidentStatus,
 	comparator: AlertComparator,
@@ -726,7 +712,7 @@ export class AlertCheckDocument extends Schema.Class<AlertCheckDocument>("AlertC
 	timestamp: IsoDateTimeString,
 	groupKey: Schema.String,
 	status: AlertCheckStatus,
-	signalType: HistoricalAlertSignalType,
+	signalType: AlertSignalType,
 	comparator: AlertComparator,
 	threshold: Schema.Number,
 	thresholdUpper: Schema.NullOr(Schema.Number),

@@ -5,7 +5,7 @@ import {
 	AlertEventType,
 	AlertIncidentStatus,
 	AlertSeverity,
-	HistoricalAlertSignalType,
+	AlertSignalType,
 } from "../alerts"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
@@ -56,7 +56,7 @@ export const V2AlertIncident = Schema.Struct({
 	group_key: Schema.NullOr(Schema.String).annotate({
 		description: "The breaching group for grouped rules, or `null` for ungrouped rules.",
 	}),
-	signal_type: HistoricalAlertSignalType.annotate({
+	signal_type: AlertSignalType.annotate({
 		description: "The signal the rule measures.",
 		examples: ["error_rate"],
 	}),

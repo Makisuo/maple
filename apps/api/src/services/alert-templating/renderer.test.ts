@@ -64,43 +64,23 @@ describe("resolveTemplate", () => {
 	const config: NotificationTemplateConfig = {
 		title: "top title",
 		body: "top body",
-		overrides: { slack: { body: "slack body" } },
+		overrides: { "slack-bot": { body: "slack body" } },
 	}
 
 	it("returns nulls for a null config", () => {
-		expect(resolveTemplate(null, "slack")).toEqual({ title: null, body: null })
+		expect(resolveTemplate(null, "slack-bot")).toEqual({ title: null, body: null })
 	})
 
 	it("applies per-destination override over the top-level field", () => {
-		expect(resolveTemplate(config, "slack")).toEqual({ title: "top title", body: "slack body" })
+		expect(resolveTemplate(config, "slack-bot")).toEqual({ title: "top title", body: "slack body" })
 	})
 
 	it("falls back to the top-level field when no override for that destination", () => {
 		expect(resolveTemplate(config, "discord")).toEqual({ title: "top title", body: "top body" })
 	})
 
-	it("uses a legacy override alias after the current destination key", () => {
-		expect(resolveTemplate(config, "slack-bot", ["slack"])).toEqual({
-			title: "top title",
-			body: "slack body",
-		})
-		expect(
-			resolveTemplate(
-				{
-					...config,
-					overrides: {
-						slack: { body: "legacy body" },
-						"slack-bot": { body: "current body" },
-					},
-				},
-				"slack-bot",
-				["slack"],
-			),
-		).toEqual({ title: "top title", body: "current body" })
-	})
-
 	it("treats blank strings as unset (→ null, i.e. built-in default)", () => {
-		expect(resolveTemplate({ title: "   ", body: "" }, "slack")).toEqual({
+		expect(resolveTemplate({ title: "   ", body: "" }, "slack-bot")).toEqual({
 			title: null,
 			body: null,
 		})

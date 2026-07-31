@@ -426,37 +426,6 @@ describe("dispatchDelivery", () => {
 		}),
 	)
 
-	it.effect("slack-bot: applies stored legacy slack template overrides", () =>
-		Effect.gen(function* () {
-			let postedBody = ""
-			const fetchFn: typeof fetch = async (_input, init) => {
-				postedBody = String(init?.body)
-				return new Response(JSON.stringify({ ok: true, ts: "1700000000.000200" }), {
-					status: 200,
-				})
-			}
-
-			yield* dispatchDelivery(
-				{
-					...slackBotContext,
-					template: {
-						body: "top-level body",
-						overrides: { slack: { body: "legacy Slack body" } },
-					},
-				},
-				"{}",
-				fetchFn,
-				5_000,
-				LINK,
-				CHAT,
-				slackTokenDeps(),
-			)
-
-			assert.include(postedBody, "legacy Slack body")
-			assert.notInclude(postedBody, "top-level body")
-		}),
-	)
-
 	it.effect("slack-bot: surfaces a not_in_channel logical error with an actionable message", () =>
 		Effect.gen(function* () {
 			const fetchFn: typeof fetch = async () =>

@@ -192,16 +192,15 @@ describe("metrics resource.* support", () => {
 		expect(filters?.serviceName).toBe("api")
 	})
 
-	it("lowers a comma-separated service scope to serviceNames", () => {
+	it("lowers deployment environments into the metrics filter", () => {
 		const { warnings, filters } = metricsFiltersOf({
-			whereClause: 'service.name = "api,checkout"',
+			whereClause: 'deployment.environment = "production,staging"',
 		})
 		expect(warnings).toEqual([])
-		expect(filters?.serviceNames).toEqual(["api", "checkout"])
-		expect(filters).not.toHaveProperty("serviceName")
+		expect(filters?.environments).toEqual(["production", "staging"])
 	})
 
-	it("warns (blocking) when the 5 resource-filter cap is exceeded", () => {
+	it("warns when the 5 resource-filter cap is exceeded", () => {
 		const clause = ["a", "b", "c", "d", "e", "f"].map((k) => `resource.${k} = "1"`).join(" AND ")
 		const { warnings, filters } = metricsFiltersOf({ whereClause: clause })
 		expect(filters?.resourceAttributeFilters).toHaveLength(5)

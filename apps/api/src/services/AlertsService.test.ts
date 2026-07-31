@@ -656,75 +656,6 @@ describe("AlertsService", () => {
 		)
 	})
 
-	it.effect("recompiles an explicitly invalidated migrated metric plan from its builder draft", () => {
-		const testDb = createTestDb(trackedDbs)
-
-		return Effect.gen(function* () {
-			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
-			const alerts = yield* AlertsService
-			const orgId = asOrgId("org_migrated_metric_plan")
-			const userId = asUserId("user_migrated_metric_plan")
-			const destination = yield* createWebhookDestination(alerts, orgId, userId)
-			const rule = yield* alerts.createRule(
-				orgId,
-				userId,
-				adminRoles,
-				new AlertRuleUpsertRequest({
-					name: "Migrated request rate",
-					severity: "warning",
-					enabled: true,
-					signalType: "builder_query",
-					queryBuilderDraft: {
-						id: "alert-query",
-						name: "A",
-						dataSource: "metrics",
-						signalSource: "default",
-						metricName: "http.requests",
-						metricType: "sum",
-						isMonotonic: true,
-						aggregation: "rate",
-						whereClause:
-							'service.name = "api,checkout" AND deployment.environment = "prod,staging"',
-						addOns: {
-							groupBy: true,
-							having: false,
-							orderBy: false,
-							limit: false,
-							legend: false,
-						},
-						groupBy: ["service.name"],
-					},
-					comparator: "gt",
-					threshold: 10,
-					windowMinutes: 5,
-					destinationIds: [destination.id],
-				}),
-			)
-
-			// Migration 0026 writes this null marker after replacing the legacy
-			// metric draft. A stale non-null plan must never be used.
-			yield* Effect.promise(() =>
-				executeSql(
-					testDb,
-					`update alert_rules
-					 set query_spec_json = null, reducer = 'identity', sample_count_strategy = 'metric_data_points'
-					 where id = $1`,
-					[rule.id],
-				),
-			)
-
-			const tick = yield* alerts.runSchedulerTick()
-			assert.strictEqual(tick.evaluatedCount, 1)
-			assert.strictEqual(tick.evaluationFailureCount, 0)
-		}).pipe(
-			Effect.provide(
-				makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows }), {
-					fetch: okFetch,
-				}),
-			),
-		)
-	})
-
 	it.effect("lowers the environment scope into a built-in signal's compiled plan", () => {
 		const testDb = createTestDb(trackedDbs)
 
@@ -765,57 +696,6 @@ describe("AlertsService", () => {
 
 			const rules = yield* alerts.listRules(orgId)
 			assert.deepStrictEqual([...(rules.rules[0]?.environments ?? [])], ["production", "staging"])
-		}).pipe(
-			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
-		)
-	})
-
-	it.effect("lowers a metrics query-builder draft into the compiled plan", () => {
-		const testDb = createTestDb(trackedDbs)
-
-		return Effect.gen(function* () {
-			const alerts = yield* AlertsService
-			const orgId = asOrgId("org_env_metric")
-			const userId = asUserId("user_env_metric")
-			const destination = yield* createWebhookDestination(alerts, orgId, userId)
-			yield* alerts.createRule(
-				orgId,
-				userId,
-				adminRoles,
-				new AlertRuleUpsertRequest({
-					name: "Queue depth (prod)",
-					severity: "warning",
-					signalType: "builder_query",
-					queryBuilderDraft: {
-						id: "alert-query",
-						name: "A",
-						dataSource: "metrics",
-						aggregation: "avg",
-						metricName: "queue.depth",
-						metricType: "gauge",
-						whereClause: 'deployment.environment = "production"',
-						groupBy: [],
-					},
-					comparator: "gt",
-					threshold: 100,
-					windowMinutes: 5,
-					destinationIds: [destination.id],
-				}),
-			)
-
-			const row = yield* Effect.promise(() =>
-				queryFirstRow<{ querySpecJson: unknown }>(
-					testDb,
-					`select query_spec_json as "querySpecJson" from alert_rules limit 1`,
-				),
-			)
-
-			const spec = row?.querySpecJson as {
-				source: string
-				filters: { metricName: string; environments: ReadonlyArray<string> }
-			}
-			assert.strictEqual(spec.source, "metrics")
-			assert.deepStrictEqual(spec.filters.environments, ["production"])
 		}).pipe(
 			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
 		)
@@ -1829,69 +1709,52 @@ describe("AlertsService", () => {
 		})
 	})
 
-	it.effect("rejects metrics alerts with multiple attr groupBy dimensions", () => {
+	it.effect("accepts a builder query when lowering emits a warning", () => {
 		const testDb = createTestDb(trackedDbs)
 
 		return Effect.gen(function* () {
-			const exit = yield* Effect.gen(function* () {
-				const alerts = yield* AlertsService
-				const orgId = asOrgId("org_metrics_group_validation")
-				const userId = asUserId("user_metrics_group_validation")
-				const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_builder_warning")
+			const userId = asUserId("user_builder_warning")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
 
-				return yield* alerts.createRule(
-					orgId,
-					userId,
-					adminRoles,
-					new AlertRuleUpsertRequest({
-						name: "Grouped metrics alert",
-						severity: "warning",
-						enabled: true,
-						signalType: "builder_query",
-						queryBuilderDraft: {
-							id: "alert-query",
-							name: "A",
-							dataSource: "metrics",
-							aggregation: "avg",
-							metricName: "http.server.request.duration",
-							metricType: "histogram",
-							whereClause: "",
-							addOns: {
-								groupBy: true,
-								having: false,
-								orderBy: false,
-								limit: false,
-								legend: false,
-							},
-							groupBy: ["attr.http.method", "attr.http.route"],
+			const rule = yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Grouped metrics alert",
+					severity: "warning",
+					signalType: "builder_query",
+					queryBuilderDraft: {
+						id: "alert-query",
+						name: "A",
+						dataSource: "metrics",
+						aggregation: "avg",
+						metricName: "http.server.request.duration",
+						metricType: "histogram",
+						whereClause: "",
+						addOns: {
+							groupBy: true,
+							having: false,
+							orderBy: false,
+							limit: false,
+							legend: false,
 						},
-						comparator: "gt",
-						threshold: 100,
-						windowMinutes: 5,
-						minimumSampleCount: 1,
-						consecutiveBreachesRequired: 1,
-						consecutiveHealthyRequired: 1,
-						renotifyIntervalMinutes: 30,
-						destinationIds: [destination.id],
-					}),
-				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows })),
-					),
-				)
-				.pipe(Effect.exit)
-
-			const failure = getError(exit)
-
-			assert.isTrue(Exit.isFailure(exit))
-			assert.instanceOf(failure, AlertValidationError)
-			assert.strictEqual(
-				failure.message,
-				"Metrics queries support a single attr.* group by; ignoring attr.http.route",
+						groupBy: ["attr.http.method", "attr.http.route"],
+					},
+					comparator: "gt",
+					threshold: 100,
+					windowMinutes: 5,
+					destinationIds: [destination.id],
+				}),
 			)
-		})
+
+			assert.strictEqual(rule.signalType, "builder_query")
+			assert.deepStrictEqual(rule.queryBuilderDraft?.groupBy, ["attr.http.method", "attr.http.route"])
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows }))),
+		)
 	})
 
 	const VALID_PD_KEY = "e93facc04764012d7bfb002500d5d1a6" // 32 hex chars

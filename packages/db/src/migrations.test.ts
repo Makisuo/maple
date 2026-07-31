@@ -107,7 +107,7 @@ describe("bundled migrations", () => {
 		}
 	}, 30_000)
 
-	it("converts metric rules, invalidates stale plans, and removes retired destinations", async () => {
+	it("deletes metric rules and removes retired destinations", async () => {
 		const pg = new PGlite()
 		await pg.exec(readMigrationSqlBefore("0026_windy_bromley"))
 
@@ -129,8 +129,8 @@ describe("bundled migrations", () => {
 				created_at, updated_at, created_by, updated_by
 			) VALUES
 				(
-					'rule_multi', 'org_1', 'Multi-service metric', 'warning',
-					'["api", "checkout"]', '["prod", "staging"]', 'metric',
+					'rule_metric', 'org_1', 'Legacy metric', 'warning',
+					'["api"]', '["prod"]', 'metric',
 					'gt', 10, 5, 'http.requests', 'sum', 'rate',
 					'["dest_slack", "dest_webhook"]', '{"preserved": true}', 'max', 'skip',
 					$1, $1, 'user_1', 'user_1'
@@ -143,39 +143,41 @@ describe("bundled migrations", () => {
 				)`,
 			[now],
 		)
+		await pg.query(
+			`INSERT INTO alert_rule_states (org_id, rule_id, group_key, updated_at)
+			 VALUES ('org_1', 'rule_metric', '__total__', $1)`,
+			[now],
+		)
+		await pg.query(
+			`INSERT INTO alert_incidents (
+				id, org_id, rule_id, incident_key, rule_name, signal_type, severity, status,
+				comparator, threshold, first_triggered_at, last_triggered_at, dedupe_key,
+				created_at, updated_at
+			) VALUES (
+				'inc_metric', 'org_1', 'rule_metric', 'metric-incident', 'Legacy metric',
+				'metric', 'warning', 'open', 'gt', 10, $1, $1, 'metric-dedupe', $1, $1
+			)`,
+			[now],
+		)
+		await pg.query(
+			`INSERT INTO alert_delivery_events (
+				id, org_id, incident_id, rule_id, destination_id, delivery_key, event_type,
+				attempt_number, status, scheduled_at, payload_json, created_at, updated_at
+			) VALUES (
+				'delivery_metric', 'org_1', 'inc_metric', 'rule_metric', 'dest_webhook',
+				'metric-delivery', 'trigger', 1, 'queued', $1, '{}', $1, $1
+			)`,
+			[now],
+		)
 
 		await pg.exec(readFileSync(resolve(migrationsDir(), "0026_windy_bromley.sql"), "utf8"))
 
-		const migrated = await pg.query<{
-			signal_type: string
-			service_names_json: unknown
-			environments_json: unknown
-			group_by: string | null
-			destination_ids_json: string[]
-			query_spec_json: unknown
-			reducer: string
-			sample_count_strategy: string | null
-			query_builder_draft_json: {
-				whereClause: string
-				groupBy: string[]
-				addOns: { groupBy: boolean }
-			}
-		}>("SELECT * FROM alert_rules WHERE id = 'rule_multi'")
-		expect(migrated.rows[0]).toMatchObject({
-			signal_type: "builder_query",
-			service_names_json: null,
-			environments_json: null,
-			group_by: null,
-			destination_ids_json: ["dest_webhook"],
-			query_spec_json: null,
-			reducer: "identity",
-			sample_count_strategy: "metric_data_points",
-			query_builder_draft_json: {
-				whereClause: 'service.name = "api,checkout" AND deployment.environment = "prod,staging"',
-				groupBy: ["service.name"],
-				addOns: { groupBy: true },
-			},
-		})
+		for (const table of ["alert_delivery_events", "alert_incidents", "alert_rule_states", "alert_rules"]) {
+			const deleted = await pg.query<{ count: number }>(
+				`SELECT count(*)::int AS count FROM ${table} WHERE ${table === "alert_rules" ? "id" : "rule_id"} = 'rule_metric'`,
+			)
+			expect(deleted.rows[0]?.count, `${table} metric rows`).toBe(0)
+		}
 
 		const orphaned = await pg.query<{ enabled: boolean; destination_ids_json: string[] }>(
 			"SELECT enabled, destination_ids_json FROM alert_rules WHERE id = 'rule_orphaned'",

@@ -39,9 +39,10 @@ type InitialRuleDraft = {
 	editingRule: AlertRuleDocument | null
 	showTemplatesInitially: boolean
 	/**
-	 * The draft is a placeholder while the real rule or dashboard source is
-	 * loading. The form must not be shown yet — `form` is a blank default that
-	 * would read as "Create alert rule" until the fetch resolves.
+	 * The draft is a placeholder while the real rule (or its dashboard source) is
+	 * still loading. The form must not be shown yet — `form` is a blank default
+	 * that would read as "Create alert rule" until the fetch resolves and the
+	 * `key` change remounts it with the actual values.
 	 */
 	loading?: boolean
 }
@@ -53,6 +54,10 @@ export function AlertCreatePageContent() {
 		() => (search.chart ? decodeAlertChartFromSearchParam(search.chart) : undefined),
 		[search.chart],
 	)
+
+	// The dashboards list is only needed for the legacy id-lookup fallback —
+	// when the navigation carried a decodable widget snapshot, prefill is
+	// synchronous and the fetch (plus its loading remount) is skipped entirely.
 	const needsDashboards =
 		!search.ruleId && chartContext == null && Boolean(search.dashboardId || search.widgetId)
 
@@ -108,8 +113,10 @@ export function AlertCreatePageContent() {
 }
 
 /**
- * Placeholder shown while an existing rule or dashboard widget source loads.
- * It mirrors the real surface so resolving the fetch swaps into the right shape.
+ * Placeholder shown while an existing rule (or a dashboard widget's prefill
+ * source) loads. Mirrors the real surface's chrome — same breadcrumb, same
+ * title, same two-column grid — so resolving the fetch swaps content into a
+ * page that is already the right shape.
  */
 function AlertRuleFormSkeleton({ editing }: { editing: boolean }) {
 	return (
@@ -150,7 +157,12 @@ export function deriveInitialRuleDraft({
 	search: AlertCreateSearchValue
 	chartContext: AlertChartContext | undefined
 	rulesResult: Result.Result<{ rules: readonly AlertRuleDocument[] }, unknown>
-	dashboardsResult: Result.Result<{ dashboards: readonly Dashboard[] }, unknown>
+	dashboardsResult: Result.Result<
+		{
+			dashboards: readonly Dashboard[]
+		},
+		unknown
+	>
 }): InitialRuleDraft {
 	const base = defaultRuleForm(search.serviceName)
 
@@ -189,8 +201,9 @@ export function deriveInitialRuleDraft({
 		}
 	}
 
-	// Snapshot carried through navigation — synchronous and immune to the
-	// dashboard autosave race. Invalid snapshots fall through to id lookup.
+	// Snapshot carried through navigation — synchronous prefill, no dashboards
+	// fetch, immune to the autosave race. Garbage/oversized params decode to
+	// undefined and fall through to the id-lookup path below.
 	if (chartContext) {
 		const result = createWidgetAlertPrefill(chartContext.widget, base)
 		return {
@@ -254,21 +267,6 @@ export function deriveInitialRuleDraft({
 			editingRule: null,
 			showTemplatesInitially: false,
 			loading: true,
-		}
-	}
-
-	if (search.chart) {
-		return {
-			key: "invalid-chart-snapshot",
-			form: base,
-			prefillNotices: [
-				{
-					severity: "warning",
-					message: "The source chart snapshot was invalid. Starting from a blank alert.",
-				},
-			],
-			editingRule: null,
-			showTemplatesInitially: false,
 		}
 	}
 

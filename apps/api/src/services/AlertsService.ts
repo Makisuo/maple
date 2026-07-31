@@ -43,7 +43,6 @@ import {
 	AlertRulesListResponse,
 	AlertSeverity as AlertSeveritySchema,
 	AlertSignalType as AlertSignalTypeSchema,
-	HistoricalAlertSignalType as HistoricalAlertSignalTypeSchema,
 	AlertValidationError,
 	QueryBuilderQueryDraftSchema,
 	AlertNotificationTemplate,
@@ -57,7 +56,6 @@ import {
 	type QueryBuilderQueryDraftPayload,
 	type AlertSeverity,
 	type AlertSignalType,
-	type HistoricalAlertSignalType,
 	type AlertGroupBy,
 	UNGROUPED_GROUP_KEY,
 	OrgId,
@@ -107,7 +105,6 @@ import { probeLiveness } from "../lib/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import type { TenantContext } from "./AuthService"
 import {
-	decryptAes256Gcm,
 	encryptAes256Gcm,
 	parseBase64Aes256GcmKey,
 	type EncryptedValue,
@@ -119,6 +116,8 @@ import {
 	dispatchDelivery as dispatchDeliveryImpl,
 	formatComparator,
 	PAGERDUTY_ROUTING_KEY_PATTERN,
+	type DispatchContext as DeliveryDispatchContext,
+	type DispatchResult,
 	verifyPagerDutyRoutingKey,
 } from "./AlertDeliveryDispatch"
 import { EmailService } from "../lib/EmailService"
@@ -133,7 +132,7 @@ import { validateExternalUrl } from "../lib/url-validator"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import {
 	DestinationPublicConfigSchema,
-	SecretConfigFromJson,
+	hydrateDestinationRow,
 	type DestinationPublicConfig,
 	type DestinationSecretConfig,
 	type EnrichedDestinationSecretConfig,
@@ -191,57 +190,21 @@ interface EvaluatedRule {
 	readonly derivedFromNoData: boolean
 }
 
-interface DispatchContext {
-	readonly deliveryKey: string
-	readonly destination: AlertDestinationRow
-	readonly publicConfig: DestinationPublicConfig
-	readonly secretConfig: EnrichedDestinationSecretConfig
+type DispatchContext = Omit<
+	DeliveryDispatchContext,
+	"ruleId" | "incidentId" | "incidentStatus" | "sentAtMs"
+> & {
 	readonly ruleId: AlertRuleId
-	readonly ruleName: string
-	readonly groupKey: string | null
-	readonly signalType: HistoricalAlertSignalType
-	readonly severity: AlertSeverity
-	readonly comparator: AlertComparator
-	readonly threshold: number
-	readonly thresholdUpper: number | null
-	readonly eventType: AlertEventTypeValue
 	readonly incidentId: AlertIncidentId | null
 	readonly incidentStatus: Schema.Schema.Type<typeof AlertIncidentStatus>
-	readonly dedupeKey: string
-	readonly windowMinutes: number
-	readonly value: number | null
-	readonly sampleCount: number | null
 	readonly linkUrl: string
 	readonly sentAtMs: number
-	readonly template?: AlertNotificationTemplate | null
 }
 
-interface DispatchResult {
-	readonly providerMessage: string | null
-	readonly providerReference: string | null
-	readonly responseCode: number | null
-}
-
-interface DeliveryPayloadContext {
-	readonly eventType: AlertEventTypeValue
-	readonly incidentId: AlertIncidentId | null
-	readonly incidentStatus: Schema.Schema.Type<typeof AlertIncidentStatus>
-	readonly dedupeKey: string
-	readonly ruleId: AlertRuleId
-	readonly ruleName: string
-	readonly groupKey: string | null
-	readonly signalType: HistoricalAlertSignalType
-	readonly severity: AlertSeverity
-	readonly comparator: AlertComparator
-	readonly threshold: number
-	readonly thresholdUpper: number | null
-	readonly windowMinutes: number
-	readonly value: number | null
-	readonly sampleCount: number | null
-	readonly linkUrl: string
-	readonly sentAtMs: number
-	readonly template?: AlertNotificationTemplate | null
-}
+type DeliveryPayloadContext = Omit<
+	DispatchContext,
+	"deliveryKey" | "destination" | "publicConfig" | "secretConfig"
+>
 
 interface DeliveryAttemptFailure {
 	readonly message: string
@@ -308,7 +271,6 @@ const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 const decodeAlertDestinationTypeSync = Schema.decodeUnknownSync(AlertDestinationTypeSchema)
 const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
 const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
-const decodeHistoricalAlertSignalTypeSync = Schema.decodeUnknownSync(HistoricalAlertSignalTypeSchema)
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
 const decodeAlertCheckStatusSync = Schema.decodeUnknownSync(AlertCheckStatusSchema)
 const decodeAlertIncidentTransitionSync = Schema.decodeUnknownSync(AlertIncidentTransitionSchema)
@@ -551,36 +513,6 @@ const encryptSecret = (
 		makeValidationError("Failed to encrypt destination secret"),
 	)
 
-const decryptSecret = (
-	encrypted: {
-		secretCiphertext: string
-		secretIv: string
-		secretTag: string
-	},
-	encryptionKey: Buffer,
-): Effect.Effect<string, AlertValidationError> =>
-	decryptAes256Gcm(
-		{
-			ciphertext: encrypted.secretCiphertext,
-			iv: encrypted.secretIv,
-			tag: encrypted.secretTag,
-		},
-		encryptionKey,
-		() => makeValidationError("Failed to decrypt destination secret"),
-	)
-
-const parsePublicConfig = (
-	row: AlertDestinationRow,
-): Effect.Effect<DestinationPublicConfig, AlertValidationError> =>
-	Schema.decodeUnknownEffect(DestinationPublicConfigSchema)(row.configJson).pipe(
-		Effect.mapError((cause) => makeValidationError("Stored destination config is invalid", [], cause)),
-	)
-
-const parseSecretConfig = (json: string): Effect.Effect<DestinationSecretConfig, AlertValidationError> =>
-	Schema.decodeUnknownEffect(SecretConfigFromJson)(json).pipe(
-		Effect.mapError((cause) => makeValidationError("Stored destination secret is invalid", [], cause)),
-	)
-
 type StoredDeliveryPayloadType = Schema.Schema.Type<typeof StoredDeliveryPayloadSchema>
 
 const parseDeliveryPayload = (
@@ -795,12 +727,9 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 			return yield* Effect.fail(makeValidationError("builder_query alerts require a queryBuilderDraft"))
 		}
 		const built = buildTimeseriesQuerySpec(rule.queryBuilderDraft)
-		if (built.error != null || built.query == null || built.warnings.length > 0) {
+		if (built.error != null || built.query == null) {
 			return yield* Effect.fail(
-				makeValidationError(
-					built.error ?? built.warnings[0] ?? "Failed to build query builder spec",
-					[...built.warnings],
-				),
+				makeValidationError(built.error ?? "Failed to build query builder spec", [...built.warnings]),
 			)
 		}
 		// Force the evaluation window's bucket size; the draft's stepInterval is
@@ -985,7 +914,7 @@ const rowToIncidentDocument = (row: AlertIncidentRow) =>
 		ruleId: decodeAlertRuleIdSync(row.ruleId),
 		ruleName: row.ruleName,
 		groupKey: row.groupKey,
-		signalType: decodeHistoricalAlertSignalTypeSync(row.signalType),
+		signalType: decodeAlertSignalTypeSync(row.signalType),
 		severity: decodeAlertSeveritySync(row.severity),
 		status: decodeAlertIncidentStatusSync(row.status),
 		comparator: decodeAlertComparatorSync(row.comparator),
@@ -1290,9 +1219,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const hydrateDestination = Effect.fn("AlertsService.hydrateDestination")(function* (
 				row: AlertDestinationRow,
 			) {
-				const publicConfig = yield* parsePublicConfig(row)
-				const secretJson = yield* decryptSecret(row, encryptionKey)
-				const secretConfig = yield* parseSecretConfig(secretJson)
+				const { publicConfig, secretConfig } = yield* hydrateDestinationRow(row, encryptionKey, {
+					onPublicConfigInvalid: (cause) =>
+						makeValidationError("Stored destination config is invalid", [], cause),
+					onDecryptFailure: () => makeValidationError("Failed to decrypt destination secret"),
+					onSecretConfigInvalid: (cause) =>
+						makeValidationError("Stored destination secret is invalid", [], cause),
+				})
 				return {
 					row,
 					publicConfig,
@@ -1352,24 +1285,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const rawQuerySql = row.rawQuerySql ?? null
 				const rawQueryReducer =
 					row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null
-				// Migration 0026 invalidates legacy metric plans after translating them
-				// into builder drafts. Recompile only that explicit null-plan case;
-				// ordinary stored plans remain the evaluation authority.
-				const compiledPlan =
-					signalType === "builder_query" && row.querySpecJson == null
-						? yield* compileRulePlan({
-								signalType,
-								serviceName,
-								environments,
-								apdexThresholdMs: row.apdexThresholdMs,
-								queryBuilderDraft,
-								rawQuerySql,
-								rawQueryReducer,
-								comparator,
-								windowMinutes: row.windowMinutes,
-								groupBy,
-							})
-						: yield* parseCompiledPlan(row)
+				const compiledPlan = yield* parseCompiledPlan(row)
 				return {
 					id: decodeAlertRuleIdSync(row.id),
 					name: row.name,
@@ -3290,7 +3206,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								timestamp: decodeIsoDateTimeStringSync(String(r.timestamp)),
 								groupKey: String(r.groupKey ?? ""),
 								status: decodeAlertCheckStatusSync(String(r.status)),
-								signalType: decodeHistoricalAlertSignalTypeSync(String(r.signalType)),
+								signalType: decodeAlertSignalTypeSync(String(r.signalType)),
 								comparator: decodeAlertComparatorSync(String(r.comparator)),
 								threshold: Number(r.threshold),
 								// thresholdUpper not yet recorded in the Tinybird alert_checks
@@ -3682,7 +3598,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							ruleId: decodeAlertRuleIdSync(row.ruleId),
 							ruleName: ruleRow?.name ?? String(payloadRule?.name ?? "Alert"),
 							groupKey,
-							signalType: decodeHistoricalAlertSignalTypeSync(
+							signalType: decodeAlertSignalTypeSync(
 								incidentRow?.signalType ?? payloadRule?.signalType ?? "throughput",
 							),
 							severity: decodeAlertSeveritySync(

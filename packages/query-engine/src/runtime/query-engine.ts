@@ -835,6 +835,66 @@ const executeCHQuery = Effect.fnUntraced(function* <
 	return yield* annotateWarehouseError(warehouse.compiledQuery(tenant, compiled, options), context)
 })
 
+type MetricsTimeseriesSpec = Extract<QuerySpec, { readonly source: "metrics"; readonly kind: "timeseries" }>
+
+const executeMetricsTimeseriesRows = Effect.fnUntraced(function* <T extends QueryTenant>(
+	warehouse: QueryEngineWarehouse<T>,
+	tenant: T,
+	query: MetricsTimeseriesSpec,
+	range: { readonly startTime: string; readonly endTime: string; readonly bucketSeconds: number },
+	contexts: { readonly value: string; readonly rate: string },
+) {
+	const groupByAttributeKey = query.groupBy?.includes("attribute")
+		? query.filters.groupByAttributeKey
+		: undefined
+	const groupByResourceAttributeKey = query.groupBy?.includes("resource_attribute")
+		? query.filters.groupByResourceAttributeKey
+		: undefined
+	const attributeFilter = query.filters.attributeFilters?.[0]
+	const options = {
+		serviceName: query.filters.serviceName,
+		environments: query.filters.environments,
+		groupByAttributeKey,
+		groupByResourceAttributeKey,
+		attributeKey: attributeFilter?.key,
+		attributeValue: attributeFilter?.value,
+		resourceAttributeFilters: query.filters.resourceAttributeFilters,
+		groupBy: query.groupBy,
+		seriesLimit: query.seriesLimit,
+	}
+	const params = {
+		orgId: tenant.orgId,
+		metricName: query.filters.metricName,
+		...range,
+	}
+	const groupByKey = groupByAttributeKey ?? groupByResourceAttributeKey
+
+	if (query.metric === "rate" || query.metric === "increase") {
+		const rows = yield* executeCHQuery(
+			warehouse,
+			tenant,
+			CH.metricsTimeseriesRateQuery({
+				...options,
+				metricName: query.filters.metricName,
+				metricNames: query.filters.metricNames,
+				bucketSeconds: range.bucketSeconds,
+			}),
+			params,
+			contexts.rate,
+		)
+		return { kind: "rate" as const, rows, groupByKey }
+	}
+
+	const rows = yield* executeCHQuery(
+		warehouse,
+		tenant,
+		CH.metricsTimeseriesQuery({ ...options, metricType: query.filters.metricType }),
+		params,
+		contexts.value,
+	)
+	return { kind: "value" as const, rows, groupByKey }
+})
+
 /** Same as executeCHQuery but for union queries. */
 const executeCHUnionQuery = Effect.fnUntraced(function* <
 	Output extends Record<string, any>,
@@ -1253,58 +1313,25 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		}
 
 		if (request.query.source === "metrics" && request.query.kind === "timeseries") {
-			const groupByAttribute = request.query.groupBy?.includes("attribute")
-			const groupByAttributeKey = groupByAttribute
-				? request.query.filters.groupByAttributeKey
-				: undefined
-			const groupByResourceAttributeKey = request.query.groupBy?.includes("resource_attribute")
-				? request.query.filters.groupByResourceAttributeKey
-				: undefined
-			const attributeFilter = request.query.filters.attributeFilters?.[0]
-			const resourceAttributeFilters = request.query.filters.resourceAttributeFilters
+			const execution = yield* executeMetricsTimeseriesRows(
+				warehouse,
+				tenant,
+				request.query,
+				{
+					startTime: request.startTime,
+					endTime: request.endTime,
+					bucketSeconds: bucketSeconds!,
+				},
+				{ value: "metricsTimeseries", rate: "metricsRateIncrease" },
+			)
 
-			const isRateOrIncrease = request.query.metric === "rate" || request.query.metric === "increase"
-
-			if (isRateOrIncrease) {
-				const compiled = CH.compile(
-					CH.metricsTimeseriesRateQuery({
-						metricName: request.query.filters.metricName,
-						metricNames: request.query.filters.metricNames,
-						bucketSeconds: bucketSeconds!,
-						serviceName: request.query.filters.serviceName,
-						serviceNames: request.query.filters.serviceNames,
-						environments: request.query.filters.environments,
-						groupByAttributeKey,
-						groupByResourceAttributeKey,
-						attributeKey: attributeFilter?.key,
-						attributeValue: attributeFilter?.value,
-						resourceAttributeFilters,
-						groupBy: request.query.groupBy,
-						seriesLimit: request.query.seriesLimit,
-					}),
-					{
-						orgId: tenant.orgId,
-						metricName: request.query.filters.metricName,
-						startTime: request.startTime,
-						endTime: request.endTime,
-						bucketSeconds: bucketSeconds!,
-					},
-				)
-				const rateResult = yield* annotateWarehouseError(
-					warehouse.compiledQuery(tenant, compiled, {
-						profile: "aggregation",
-						context: "metricsRateIncrease",
-					}),
-					"metricsRateIncrease",
-				)
-
+			if (execution.kind === "rate") {
 				const rateValueField = request.query.metric === "rate" ? "rateValue" : "increaseValue"
-
 				const data = shapeMetricsGroupRows(
-					rateResult,
+					execution.rows,
 					(row) => Number(row[rateValueField]),
 					request.query.groupBy,
-					groupByAttributeKey ?? groupByResourceAttributeKey,
+					execution.groupByKey,
 					fillOptions,
 				)
 
@@ -1316,32 +1343,6 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					},
 				})
 			}
-
-			const result = yield* executeCHQuery(
-				warehouse,
-				tenant,
-				CH.metricsTimeseriesQuery({
-					metricType: request.query.filters.metricType,
-					serviceName: request.query.filters.serviceName,
-					serviceNames: request.query.filters.serviceNames,
-					environments: request.query.filters.environments,
-					groupByAttributeKey,
-					groupByResourceAttributeKey,
-					attributeKey: attributeFilter?.key,
-					attributeValue: attributeFilter?.value,
-					resourceAttributeFilters,
-					groupBy: request.query.groupBy,
-					seriesLimit: request.query.seriesLimit,
-				}),
-				{
-					orgId: tenant.orgId,
-					metricName: request.query.filters.metricName,
-					startTime: request.startTime,
-					endTime: request.endTime,
-					bucketSeconds: bucketSeconds!,
-				},
-				"metricsTimeseries",
-			)
 
 			const metricValueField = {
 				avg: "avgValue",
@@ -1356,17 +1357,17 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				request.query.groupBy?.includes("none") || !request.query.groupBy?.length
 					? groupTimeSeriesRows(
 							collapseMetricTimeseriesRows(
-								result as ReadonlyArray<MetricTimeseriesRow>,
+								execution.rows as ReadonlyArray<MetricTimeseriesRow>,
 								request.query.metric,
 							),
 							(row) => row.value,
 							fillOptions,
 						)
 					: shapeMetricsGroupRows(
-							result,
+							execution.rows,
 							(row) => Number(row[valueField]),
 							request.query.groupBy,
-							groupByAttributeKey ?? groupByResourceAttributeKey,
+							execution.groupByKey,
 							fillOptions,
 						)
 
@@ -1989,6 +1990,7 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 		return obs as ReadonlyArray<BucketGroupObs>
 	}
 
+
 	if (query.source === "traces") {
 		const opts = extractTracesOpts(query.filters as Record<string, unknown>)
 		const rows = yield* executeCHQuery(
@@ -2053,61 +2055,14 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 			})
 		}
 	} else {
-		const groupByAttribute = query.groupBy?.includes("attribute")
-		const groupByAttributeKey = groupByAttribute ? query.filters.groupByAttributeKey : undefined
-		const groupByResourceAttributeKey = query.groupBy?.includes("resource_attribute")
-			? query.filters.groupByResourceAttributeKey
-			: undefined
-		const attributeFilter = query.filters.attributeFilters?.[0]
-		const metricOptions = {
-			serviceName: query.filters.serviceName,
-			serviceNames: query.filters.serviceNames,
-			environments: query.filters.environments,
-			groupByAttributeKey,
-			groupByResourceAttributeKey,
-			attributeKey: attributeFilter?.key,
-			attributeValue: attributeFilter?.value,
-			resourceAttributeFilters: query.filters.resourceAttributeFilters,
-			groupBy: query.groupBy,
-			seriesLimit: query.seriesLimit,
-		}
-		const isRateOrIncrease = query.metric === "rate" || query.metric === "increase"
-		const rows = isRateOrIncrease
-			? yield* executeCHQuery(
-					warehouse,
-					tenant,
-					CH.metricsTimeseriesRateQuery({
-						...metricOptions,
-						metricName: query.filters.metricName,
-						metricNames: query.filters.metricNames,
-						bucketSeconds,
-					}),
-					{
-						orgId: tenant.orgId,
-						metricName: query.filters.metricName,
-						startTime: request.startTime,
-						endTime: request.endTime,
-						bucketSeconds,
-					},
-					"metricsRateIncreaseAlertEval",
-				)
-			: yield* executeCHQuery(
-					warehouse,
-					tenant,
-					CH.metricsTimeseriesQuery({
-						...metricOptions,
-						metricType: query.filters.metricType,
-					}),
-					{
-						orgId: tenant.orgId,
-						metricName: query.filters.metricName,
-						startTime: request.startTime,
-						endTime: request.endTime,
-						bucketSeconds,
-					},
-					"metricsAlertEval",
-				)
-		for (const row of rows) {
+		const execution = yield* executeMetricsTimeseriesRows(
+			warehouse,
+			tenant,
+			query,
+			{ startTime: request.startTime, endTime: request.endTime, bucketSeconds },
+			{ value: "metricsAlertEval", rate: "metricsRateIncreaseAlertEval" },
+		)
+		for (const row of execution.rows) {
 			const sampleCount = Number(row.dataPointCount ?? 0)
 			const value = sampleCount > 0 ? metricsAggregateValueForMetric(query.metric, row) : null
 			const groupKey = composeMetricsGroupKey(
@@ -2228,7 +2183,9 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 			// by `Date.parse`, which would read that space-separated form as local
 			// time rather than UTC.
 			bucket: normalizeBucket(
-				typeof row.bucket === "string" || row.bucket instanceof Date ? row.bucket : range.startTime,
+				typeof row.bucket === "string" || row.bucket instanceof Date
+					? row.bucket
+					: range.startTime,
 			),
 			groupKey,
 			value,
@@ -2249,7 +2206,10 @@ export const reduceAlertBuckets = (
 	obs: ReadonlyArray<BucketGroupObs>,
 	reducer: QueryEngineAlertReducer,
 ): ReadonlyArray<GroupedAlertObservation> => {
-	const byGroup = new Map<string, Array<{ value: number | null; sampleCount: number; hasData: boolean }>>()
+	const byGroup = new Map<
+		string,
+		Array<{ value: number | null; sampleCount: number; hasData: boolean }>
+	>()
 	for (const o of obs) {
 		const entry = { value: o.value, sampleCount: o.sampleCount, hasData: o.sampleCount > 0 }
 		const list = byGroup.get(o.groupKey)
@@ -2261,6 +2221,7 @@ export const reduceAlertBuckets = (
 	}
 	return reducePerGroupObservations(byGroup, reducer)
 }
+
 
 /**
  * Annotate, validate and resolve the bucket size for one alert evaluation.

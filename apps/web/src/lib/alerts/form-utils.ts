@@ -18,7 +18,6 @@ import {
 	type AlertDestinationType,
 	type AlertEventType,
 	type AlertSeverity,
-	type HistoricalAlertSignalType,
 	type AlertSignalType,
 	type QueryBuilderQueryDraftPayload,
 } from "@maple/domain/http"
@@ -32,10 +31,13 @@ import type {
 	V2AlertRuleTestParams,
 } from "@maple/domain/http/v2"
 import type { QueryEngineAlertReducer } from "@maple/query-engine"
-import type { QueryBuilderMetricType } from "@maple/query-engine/query-builder"
 import { Cause, Exit, Option, Schema } from "effect"
 import { v2ErrorInfo } from "@/lib/error-messages"
-import { buildTimeseriesQuerySpec, createQueryDraft } from "@/lib/query-builder/model"
+import {
+	buildTimeseriesQuerySpec,
+	createQueryDraft,
+	type QueryBuilderQueryDraft,
+} from "@/lib/query-builder/model"
 import { formatErrorRate, formatLatency, formatNumber } from "@maple/ui/format"
 
 const asHazelOrganizationId = Schema.decodeUnknownSync(HazelOrganizationId)
@@ -77,18 +79,12 @@ export type RuleFormState = {
 	consecutiveBreachesRequired: string
 	consecutiveHealthyRequired: string
 	renotifyIntervalMinutes: string
-	metricName: string
-	metricType: QueryBuilderMetricType
 	apdexThresholdMs: string
 	/**
-	 * Editing fields for the `builder_query` signal. They map 1:1 to a
-	 * `QueryBuilderQueryDraftPayload` — the same draft dashboard query-builder
-	 * charts use — which `buildRuleRequest` assembles at submit time.
+	 * The normalized query-builder draft. It is the sole editable query state and
+	 * is submitted verbatim after the wire payload is normalized on read.
 	 */
-	queryDataSource: "traces" | "logs" | "metrics"
-	queryAggregation: string
-	queryWhereClause: string
-	queryBuilderDraft: QueryBuilderQueryDraftPayload
+	queryBuilderDraft: QueryBuilderQueryDraft
 	/** Editing fields for the `raw_query` signal. */
 	rawQuerySql: string
 	rawQueryReducer: QueryEngineAlertReducer
@@ -168,7 +164,7 @@ export function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback:
 	return fallback
 }
 
-export function formatSignalValue(signalType: HistoricalAlertSignalType, value: number | null): string {
+export function formatSignalValue(signalType: AlertSignalType, value: number | null): string {
 	if (value == null || Number.isNaN(value)) return "n/a"
 
 	switch (signalType) {
@@ -180,7 +176,6 @@ export function formatSignalValue(signalType: HistoricalAlertSignalType, value: 
 		case "apdex":
 			return value.toFixed(3)
 		case "throughput":
-		case "metric":
 		case "builder_query":
 		case "raw_query":
 			return formatNumber(value)
@@ -216,6 +211,43 @@ function parseNonNegativeNumber(value: string, fallback: number): number {
 	return parsed
 }
 
+export function normalizeRuleQueryDraft(
+	draft: QueryBuilderQueryDraftPayload | null,
+): QueryBuilderQueryDraft {
+	const base = createQueryDraft(0)
+	if (draft == null) return base
+
+	const shared = {
+		...base,
+		...draft,
+		enabled: draft.enabled ?? base.enabled,
+		hidden: draft.hidden ?? base.hidden,
+		whereClause: draft.whereClause ?? base.whereClause,
+		stepInterval: draft.stepInterval ?? base.stepInterval,
+		orderByDirection: draft.orderByDirection ?? base.orderByDirection,
+		addOns: { ...base.addOns, ...draft.addOns },
+		groupBy: [...(draft.groupBy ?? base.groupBy)],
+		having: draft.having ?? base.having,
+		orderBy: draft.orderBy ?? base.orderBy,
+		limit: draft.limit ?? base.limit,
+		legend: draft.legend ?? base.legend,
+	}
+
+	if (draft.dataSource === "metrics") {
+		return {
+			...shared,
+			dataSource: "metrics",
+			signalSource: draft.signalSource ?? "default",
+			metricName: draft.metricName ?? "",
+			metricType: draft.metricType ?? "gauge",
+			isMonotonic: draft.isMonotonic ?? draft.metricType === "sum",
+		}
+	}
+	return draft.dataSource === "logs"
+		? { ...shared, dataSource: "logs" }
+		: { ...shared, dataSource: "traces" }
+}
+
 export function defaultRuleForm(serviceName?: string): RuleFormState {
 	const queryBuilderDraft = createQueryDraft(0)
 	return {
@@ -237,12 +269,7 @@ export function defaultRuleForm(serviceName?: string): RuleFormState {
 		consecutiveBreachesRequired: "2",
 		consecutiveHealthyRequired: "2",
 		renotifyIntervalMinutes: "30",
-		metricName: "",
-		metricType: "gauge",
 		apdexThresholdMs: "500",
-		queryDataSource: "traces",
-		queryAggregation: "count",
-		queryWhereClause: "",
 		queryBuilderDraft,
 		rawQuerySql: DEFAULT_RAW_QUERY_SQL,
 		rawQueryReducer: "identity",
@@ -253,7 +280,7 @@ export function defaultRuleForm(serviceName?: string): RuleFormState {
 }
 
 export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
-	const queryBuilderDraft = rule.queryBuilderDraft ?? createQueryDraft(0)
+	const queryBuilderDraft = normalizeRuleQueryDraft(rule.queryBuilderDraft)
 	return {
 		name: rule.name,
 		notes: rule.notes ?? "",
@@ -274,13 +301,7 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
 		consecutiveBreachesRequired: String(rule.consecutiveBreachesRequired),
 		consecutiveHealthyRequired: String(rule.consecutiveHealthyRequired),
 		renotifyIntervalMinutes: String(rule.renotifyIntervalMinutes),
-		metricName: queryBuilderDraft.dataSource === "metrics" ? (queryBuilderDraft.metricName ?? "") : "",
-		metricType:
-			queryBuilderDraft.dataSource === "metrics" ? (queryBuilderDraft.metricType ?? "gauge") : "gauge",
 		apdexThresholdMs: rule.apdexThresholdMs == null ? "500" : String(rule.apdexThresholdMs),
-		queryDataSource: rule.queryBuilderDraft?.dataSource ?? "traces",
-		queryAggregation: rule.queryBuilderDraft?.aggregation ?? "count",
-		queryWhereClause: rule.queryBuilderDraft?.whereClause ?? "",
 		queryBuilderDraft,
 		rawQuerySql: rule.rawQuerySql ?? DEFAULT_RAW_QUERY_SQL,
 		rawQueryReducer: rule.rawQueryReducer ?? "identity",
@@ -288,48 +309,6 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
 		notificationTitle: rule.notificationTemplate?.title ?? "",
 		notificationBody: rule.notificationTemplate?.body ?? "",
 	}
-}
-
-/**
- * Assemble a `QueryBuilderQueryDraftPayload` from the simple builder_query form
- * fields. This is the same draft shape dashboard query-builder charts use, so
- * the alert evaluates through the identical compiler.
- */
-export function buildQueryDraftFromForm(form: RuleFormState): QueryBuilderQueryDraftPayload {
-	if (form.signalType === "builder_query") return form.queryBuilderDraft
-
-	// Fold a single selected service into the where clause — builder_query draws
-	// all filtering from the draft, not the rule-level service scope.
-	const userWhere = form.queryWhereClause.trim()
-	const whereClause =
-		form.serviceNames.length === 1
-			? [`service.name = "${form.serviceNames[0]}"`, userWhere]
-					.filter((s) => s.length > 0)
-					.join(" AND ")
-			: userWhere
-	const base = {
-		id: "alert-query",
-		name: "A",
-		aggregation: form.queryAggregation,
-		whereClause,
-		groupBy: [...form.groupBy],
-		addOns: {
-			groupBy: form.groupBy.length > 0,
-			having: false,
-			orderBy: false,
-			limit: false,
-			legend: false,
-		},
-	}
-	if (form.queryDataSource === "metrics") {
-		return {
-			...base,
-			dataSource: "metrics",
-			metricName: form.metricName.trim(),
-			metricType: form.metricType,
-		}
-	}
-	return { ...base, dataSource: form.queryDataSource }
 }
 
 export function rawSqlHasValueColumn(sql: string): boolean {
@@ -346,7 +325,7 @@ export function rawSqlHasValueColumn(sql: string): boolean {
 export function deriveRuleQueryIssues(form: RuleFormState): string[] {
 	const issues: string[] = []
 	if (form.signalType === "builder_query") {
-		const built = buildTimeseriesQuerySpec(buildQueryDraftFromForm(form))
+		const built = buildTimeseriesQuerySpec(form.queryBuilderDraft)
 		if (built.error != null || built.query == null) {
 			issues.push(`Query: ${built.error ?? "failed to build query"}`)
 		}
@@ -405,7 +384,8 @@ export function buildRuleCreateParamsV2(form: RuleFormState): V2AlertRuleCreateP
 		consecutive_healthy_required: parsePositiveNumber(form.consecutiveHealthyRequired, 2),
 		renotify_interval_minutes: parsePositiveNumber(form.renotifyIntervalMinutes, 30),
 		apdex_threshold_ms: signalType === "apdex" ? parsePositiveNumber(form.apdexThresholdMs, 500) : null,
-		query_builder_draft: signalType === "builder_query" ? buildQueryDraftFromForm(form) : null,
+		query_builder_draft:
+			signalType === "builder_query" ? Object.fromEntries(Object.entries(form.queryBuilderDraft)) : null,
 		raw_query_sql: signalType === "raw_query" ? form.rawQuerySql.trim() || null : null,
 		raw_query_reducer: signalType === "raw_query" ? form.rawQueryReducer : null,
 		// Dedupe so the same destination is never persisted twice (e.g. when editing a

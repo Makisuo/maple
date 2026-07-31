@@ -5,16 +5,14 @@ import {
 	AlertNotificationTemplate,
 	AlertRuleUpsertRequest,
 	AlertSignalType,
-	HistoricalAlertSignalType,
 	PagerDutyAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
 } from "./alerts"
 
 describe("alert signal compatibility", () => {
-	it("keeps metric readable in history while rejecting it for new rules", () => {
+	it("rejects the retired metric signal", () => {
 		expect(Exit.isFailure(Schema.decodeUnknownExit(AlertSignalType)("metric"))).toBe(true)
-		expect(Schema.decodeUnknownSync(HistoricalAlertSignalType)("metric")).toBe("metric")
 	})
 })
 

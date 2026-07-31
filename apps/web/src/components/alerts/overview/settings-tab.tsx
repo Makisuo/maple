@@ -2,7 +2,7 @@ import { Exit, Option } from "effect"
 import { Fragment, useState, type Dispatch, type SetStateAction } from "react"
 import { toast } from "sonner"
 
-import type { AlertDeliveryEventDocument, AlertDestinationDocument } from "@maple/domain/http"
+import type { AlertDestinationDocument } from "@maple/domain/http"
 
 import { DestinationCard } from "@/components/alerts/destination-card"
 import { DestinationDialog } from "@/components/alerts/destination-dialog"
@@ -197,7 +197,7 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 		.onSuccess((response) => [...response.destinations] as AlertDestinationDocument[])
 		.orElse(() => [])
 	const deliveryEvents = Result.builder(deliveryEventsResult)
-		.onSuccess((response) => response.data.map(v2DeliveryToDocument) as AlertDeliveryEventDocument[])
+		.onSuccess((response) => response.data.map(v2DeliveryToDocument))
 		.orElse(() => [])
 	const deliveryEventGroups = groupDeliveryEventsByDay(deliveryEvents)
 

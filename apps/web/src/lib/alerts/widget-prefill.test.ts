@@ -92,7 +92,7 @@ describe("createWidgetAlertPrefill", () => {
 		)
 
 		expect(result.form.signalType).toBe("builder_query")
-		expect(result.form.queryWhereClause).toBe('service.name = "checkout"')
+		expect(result.form.queryBuilderDraft.whereClause).toBe('service.name = "checkout"')
 		expect(result.form.name).toBe("Alert - Traffic")
 		expect(result.notices.map((notice) => notice.message).join("\n")).toContain("2 visible queries")
 	})
@@ -152,7 +152,7 @@ describe("createWidgetAlertPrefill", () => {
 			defaultRuleForm(),
 		)
 
-		expect(result.form.queryDataSource).toBe("metrics")
+		expect(result.form.queryBuilderDraft.dataSource).toBe("metrics")
 		expect(result.notices.map((notice) => notice.message).join("\n")).toContain(
 			"Metric source requires a metric name",
 		)
@@ -160,44 +160,49 @@ describe("createWidgetAlertPrefill", () => {
 })
 
 describe("resolveWidgetAlertPrefill", () => {
-	it("reloads the source widget when an oversized snapshot falls back to ids", () => {
+	it("returns a blank alert with a notice when the dashboard id is missing", () => {
 		const result = resolveWidgetAlertPrefill({
-			dashboards: [
-				{
-					id: "dash",
-					widgets: [
-						{
-							id: "w1",
-							dataSource: {
-								endpoint: "raw_sql_chart",
-								params: { sql: "SELECT count() AS value FROM traces WHERE $__orgFilter" },
-							},
-						},
-					],
-				},
-			],
-			dashboardId: "dash",
+			dashboards: [{ id: "dash", widgets: [] }],
 			widgetId: "w1",
 			base: defaultRuleForm(),
 		})
 
-		expect(result.form.signalType).toBe("raw_query")
-		expect(result.form.rawQuerySql).toContain("$__orgFilter")
+		expect(result.form.signalType).toBe("error_rate")
+		expect(result.notices[0]?.message).toContain("dashboard id was missing")
 	})
 
-	it("returns a clear notice when either fallback id is missing", () => {
-		const missingDashboard = resolveWidgetAlertPrefill({
-			dashboards: [],
-			widgetId: "w1",
-			base: defaultRuleForm(),
-		})
-		const missingWidget = resolveWidgetAlertPrefill({
-			dashboards: [],
+	it("returns a blank alert with a notice when the widget id is missing", () => {
+		const result = resolveWidgetAlertPrefill({
+			dashboards: [{ id: "dash", widgets: [] }],
 			dashboardId: "dash",
 			base: defaultRuleForm(),
 		})
 
-		expect(missingDashboard.notices[0]?.message).toContain("dashboard id was missing")
-		expect(missingWidget.notices[0]?.message).toContain("chart id was missing")
+		expect(result.form.signalType).toBe("error_rate")
+		expect(result.notices[0]?.message).toContain("chart id was missing")
+	})
+
+	it("returns a blank alert with a notice when the dashboard is missing", () => {
+		const result = resolveWidgetAlertPrefill({
+			dashboards: [],
+			dashboardId: "missing",
+			widgetId: "w1",
+			base: defaultRuleForm(),
+		})
+
+		expect(result.form.signalType).toBe("error_rate")
+		expect(result.notices[0]?.message).toContain("dashboard could not be found")
+	})
+
+	it("returns a blank alert with a notice when the widget is missing", () => {
+		const result = resolveWidgetAlertPrefill({
+			dashboards: [{ id: "dash", widgets: [] }],
+			dashboardId: "dash",
+			widgetId: "missing",
+			base: defaultRuleForm(),
+		})
+
+		expect(result.form.signalType).toBe("error_rate")
+		expect(result.notices[0]?.message).toContain("source chart could not be found")
 	})
 })

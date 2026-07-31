@@ -274,10 +274,6 @@ describe("v2 alerts over HTTP", () => {
 		expect(incidents.status).toBe(200)
 		expect(incidents.body).toMatchObject({ object: "list", data: [] })
 
-		const deliveries = await harness.request("GET", "/v2/alerts/deliveries", key.secret)
-		expect(deliveries.status).toBe(200)
-		expect(deliveries.body).toMatchObject({ object: "list", data: [], has_more: false })
-
 		// A destination referenced by a rule cannot be deleted.
 		const conflicted = await harness.request("DELETE", `/v2/alerts/destinations/${destId}`, key.secret)
 		expect(conflicted.status).toBe(409)
@@ -298,35 +294,6 @@ describe("v2 alerts over HTTP", () => {
 		const missing = await harness.request("GET", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(missing.status).toBe(404)
 		expect(missing.body.error).toMatchObject({ type: "not_found_error", code: "alert_rule_not_found" })
-
-		await harness.dispose()
-	})
-
-	it("reads retained metric incidents after metric rule migration", async () => {
-		const harness = makeHarness()
-		const key = await harness.bootstrapKey(["alerts:write"])
-		await createWebhookAndRule(harness, key.secret)
-
-		await executeSql(
-			harness.testDb,
-			`insert into alert_incidents (
-				id, org_id, rule_id, incident_key, rule_name, group_key, signal_type,
-				severity, status, comparator, threshold, first_triggered_at,
-				last_triggered_at, dedupe_key, created_at, updated_at
-			)
-			select
-				'00000000-0000-4000-8000-000000000901', org_id, id,
-				'legacy-metric-incident', name, null, 'metric', 'critical', 'resolved',
-				'gt', 10, timestamp '2026-07-01 00:00:00+00',
-				timestamp '2026-07-01 00:05:00+00', 'legacy-metric-dedupe',
-				timestamp '2026-07-01 00:00:00+00', timestamp '2026-07-01 00:05:00+00'
-			from alert_rules where org_id = 'org_alerts_e2e' limit 1`,
-		)
-
-		const incidents = await harness.request("GET", "/v2/alerts/incidents", key.secret)
-		expect(incidents.status).toBe(200)
-		expect(incidents.body.data).toHaveLength(1)
-		expect(incidents.body.data[0].signal_type).toBe("metric")
 
 		await harness.dispose()
 	})
@@ -358,12 +325,26 @@ describe("v2 alerts over HTTP", () => {
 				select id from alert_destinations where org_id = 'org_alerts_e2e' limit 1
 			) as destinations`,
 		)
+		await executeSql(
+			harness.testDb,
+			`insert into alert_delivery_events (
+				id, org_id, rule_id, destination_id, delivery_key, event_type,
+				attempt_number, status, scheduled_at, payload_json, created_at, updated_at
+			) values (
+				'00000000-0000-4000-9000-000000000001', 'org_other',
+				'00000000-0000-4000-9000-000000000002', '00000000-0000-4000-9000-000000000003',
+				'foreign-delivery', 'trigger', 1, 'success', timestamp '2026-08-01 12:00:00+00',
+				'{}'::jsonb, timestamp '2026-08-01 12:00:00+00', timestamp '2026-08-01 12:00:00+00'
+			)`,
+		)
 
 		const first = await harness.request("GET", "/v2/alerts/deliveries?limit=60", key.secret)
 		expect(first.status).toBe(200)
 		expect(first.body.data).toHaveLength(60)
 		expect(first.body.has_more).toBe(true)
 		expect(first.body.next_cursor).toEqual(expect.any(String))
+		expect(first.body.data[0].id).toMatch(/^evt_/)
+		expect(first.body.data[0].scheduled_at > first.body.data[1].scheduled_at).toBe(true)
 
 		const second = await harness.request(
 			"GET",
@@ -375,6 +356,9 @@ describe("v2 alerts over HTTP", () => {
 		expect(second.body.has_more).toBe(false)
 		expect(second.body.next_cursor).toBeNull()
 		expect(new Set([...first.body.data, ...second.body.data].map((item) => item.id)).size).toBe(105)
+		expect([...first.body.data, ...second.body.data].some((item) => item.delivery_key === "foreign-delivery")).toBe(
+			false,
+		)
 
 		await harness.dispose()
 	})

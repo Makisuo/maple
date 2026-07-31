@@ -23,6 +23,7 @@ import {
 	BracketsCurlyIcon,
 	ChartLineIcon,
 	ChevronDownIcon,
+	CircleWarningIcon,
 	CirclePercentageIcon,
 	FireIcon,
 	PulseIcon,
@@ -37,6 +38,7 @@ import {
 } from "@/lib/alerts/form-utils"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import {
+	buildTimeseriesQuerySpec,
 	resetAggregationForMetricType,
 	resetQueryForDataSource,
 	type QueryBuilderDataSource,
@@ -531,24 +533,6 @@ type MetricRow = {
 	isMonotonic: boolean
 }
 
-function applyQueryDraftToForm(
-	current: RuleFormState,
-	queryBuilderDraft: QueryBuilderQueryDraft,
-): RuleFormState {
-	return {
-		...current,
-		signalType: "builder_query",
-		queryBuilderDraft,
-		queryDataSource: queryBuilderDraft.dataSource,
-		queryAggregation: queryBuilderDraft.aggregation,
-		queryWhereClause: queryBuilderDraft.whereClause,
-		metricName:
-			queryBuilderDraft.dataSource === "metrics" ? queryBuilderDraft.metricName : current.metricName,
-		metricType:
-			queryBuilderDraft.dataSource === "metrics" ? queryBuilderDraft.metricType : current.metricType,
-	}
-}
-
 function useAlertMetricSelectionOptions(query: QueryBuilderQueryDraft) {
 	const [metricSearch, setMetricSearch] = useState("")
 	const deferredMetricSearch = useDeferredValue(metricSearch)
@@ -594,50 +578,66 @@ function useAlertMetricSelectionOptions(query: QueryBuilderQueryDraft) {
 }
 
 function AlertQueryPanel({ form, onChange, autocompleteValues }: SignalAndThresholdSectionProps) {
-	const query = form.queryBuilderDraft as QueryBuilderQueryDraft
+	const query = form.queryBuilderDraft
+	const warnings = useMemo(() => buildTimeseriesQuerySpec(query).warnings, [query])
 	const { metricSelectionOptions, setMetricSearch } = useAlertMetricSelectionOptions(query)
 
 	const updateQuery = (updater: (query: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => {
-		onChange((current) =>
-			applyQueryDraftToForm(current, updater(current.queryBuilderDraft as QueryBuilderQueryDraft)),
-		)
+		onChange((current) => ({
+			...current,
+			queryBuilderDraft: updater(current.queryBuilderDraft),
+		}))
 	}
 
 	return (
-		<QueryPanel
-			query={query}
-			index={0}
-			canRemove={false}
-			metricSelectionOptions={metricSelectionOptions}
-			onMetricSearch={setMetricSearch}
-			autocompleteValues={autocompleteValues}
-			onUpdate={updateQuery}
-			onAggregationChange={(aggregation) => updateQuery((current) => ({ ...current, aggregation }))}
-			onMetricSelectionChange={(selection) =>
-				updateQuery((current) =>
-					current.dataSource === "metrics"
-						? {
-								...current,
-								metricName: selection.metricName,
-								metricType: selection.metricType,
-								isMonotonic: selection.isMonotonic,
-								aggregation: resetAggregationForMetricType(
-									current.aggregation,
-									selection.metricType,
-									selection.isMonotonic,
-								),
-							}
-						: current,
-				)
-			}
-			onClone={() => {}}
-			onRemove={() => {}}
-			onDataSourceChange={(dataSource: QueryBuilderDataSource) =>
-				updateQuery((current) => resetQueryForDataSource(current, dataSource))
-			}
-			showHeaderActions={false}
-			showVisibilityToggle={false}
-		/>
+		<div className="space-y-2">
+			<QueryPanel
+				query={query}
+				index={0}
+				canRemove={false}
+				metricSelectionOptions={metricSelectionOptions}
+				onMetricSearch={setMetricSearch}
+				autocompleteValues={autocompleteValues}
+				onUpdate={updateQuery}
+				onAggregationChange={(aggregation) =>
+					updateQuery((current) => ({ ...current, aggregation }))
+				}
+				onMetricSelectionChange={(selection) =>
+					updateQuery((current) =>
+						current.dataSource === "metrics"
+							? {
+									...current,
+									metricName: selection.metricName,
+									metricType: selection.metricType,
+									isMonotonic: selection.isMonotonic,
+									aggregation: resetAggregationForMetricType(
+										current.aggregation,
+										selection.metricType,
+										selection.isMonotonic,
+									),
+								}
+							: current,
+					)
+				}
+				onClone={() => {}}
+				onRemove={() => {}}
+				onDataSourceChange={(dataSource: QueryBuilderDataSource) =>
+					updateQuery((current) => resetQueryForDataSource(current, dataSource))
+				}
+				showHeaderActions={false}
+				showVisibilityToggle={false}
+			/>
+			{warnings.length > 0 && (
+				<div className="flex gap-2 border border-warning/30 bg-warning/10 p-2 text-xs text-warning-foreground">
+					<CircleWarningIcon size={14} className="mt-0.5 shrink-0" />
+					<ul className="space-y-1">
+						{warnings.map((warning) => (
+							<li key={warning}>{warning}</li>
+						))}
+					</ul>
+				</div>
+			)}
+		</div>
 	)
 }
 

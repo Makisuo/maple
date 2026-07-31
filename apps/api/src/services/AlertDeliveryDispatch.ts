@@ -4,7 +4,7 @@ import {
 	type AlertComparator,
 	type AlertDestinationType,
 	type AlertEventType,
-	type HistoricalAlertSignalType,
+	type AlertSignalType,
 	type AlertSeverity,
 } from "@maple/domain/http"
 import type { AlertDestinationRow } from "@maple/db"
@@ -40,7 +40,7 @@ export interface DispatchContext {
 	readonly ruleId: string
 	readonly ruleName: string
 	readonly groupKey: string | null
-	readonly signalType: HistoricalAlertSignalType
+	readonly signalType: AlertSignalType
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
@@ -78,7 +78,7 @@ export interface ChatUrlContext {
 	readonly incidentId: string | null
 	readonly dedupeKey: string
 	readonly eventType: AlertEventType
-	readonly signalType: HistoricalAlertSignalType
+	readonly signalType: AlertSignalType
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
@@ -600,9 +600,8 @@ const renderTitleBody = (
 	destinationType: AlertDestinationType,
 	linkUrl: string,
 	chatUrl: string,
-	legacyDestinationTypes: ReadonlyArray<string> = [],
 ): { title: string; body: string } | null => {
-	const resolved = resolveTemplate(context.template, destinationType, legacyDestinationTypes)
+	const resolved = resolveTemplate(context.template, destinationType)
 	if (!hasCustomTemplate(resolved)) return null
 	try {
 		const templateCtx = buildTemplateContext(context, linkUrl, chatUrl)
@@ -688,13 +687,7 @@ export const dispatchDelivery = (
 				"slack-bot": (config) =>
 					Effect.gen(function* () {
 						const botToken = yield* deps.resolveSlackBotToken(context.destination.orgId)
-						const templated = renderTitleBody(
-							context,
-							"slack-bot",
-							linkUrl,
-							chatUrl,
-							["slack"],
-						)
+						const templated = renderTitleBody(context, "slack-bot", linkUrl, chatUrl)
 						const blocks = templated
 							? buildSlackBlocksFromTemplate(
 									templated.title,
