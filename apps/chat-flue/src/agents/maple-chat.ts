@@ -1,13 +1,14 @@
-import { defineAgent, type AgentRouteHandler, type McpServerConnection } from "@flue/runtime"
+"use agent"
+
+import { useAgentStart, useModel, useTool, type AgentProps } from "@flue/runtime"
+import type { InternalMcpToolDescriptor } from "@maple/domain/internal-rpc"
 import { applyApprovalGates } from "../lib/approval.ts"
-import { instanceIdFromAgentPath } from "../lib/auth.ts"
-import type { ChatFlueEnv } from "../lib/env.ts"
-import { connectMapleMcp, MCP_DEFAULT_TIMEOUT_MS } from "../lib/mcp.ts"
+import { buildMapleTools, fetchMapleToolDescriptors, MCP_DEFAULT_TIMEOUT_MS } from "../lib/mcp.ts"
 import { buildSystemPrompt, modeFromInstanceId } from "../lib/modes.ts"
 import { investigationIdFromInstanceId, orgIdFromInstanceId } from "../lib/org.ts"
 import { buildSubmitDiagnosisTool } from "../lib/submit-diagnosis.ts"
 import { emitTelemetryLog } from "../lib/telemetry.ts"
-import { enterSpan } from "../lib/tracing.ts"
+import { telemetryEnv } from "../lib/telemetry-env.ts"
 
 /**
  * Default Workers AI model. EXPERIMENT: trying Z.ai's `@cf/zai-org/glm-5.2`.
@@ -23,114 +24,78 @@ import { enterSpan } from "../lib/tracing.ts"
 const DEFAULT_MODEL = "cloudflare/@cf/zai-org/glm-5.2"
 
 /**
- * The addressable Maple chat agent on Cloudflare Workers AI, with tools sourced
- * live from Maple's MCP server (`apps/api` `/mcp`). Mode (default / alert /
- * widget-fix / dashboard-builder) is derived from the instance id.
- *
- * Addressed from the browser as
- *   client.agents.send("maple-chat", "<orgId>:<tabId>", { message })
- *
- * Still open: propose-then-apply approval wrapping for mutating tools (Phase 1b),
- * the context-payload delivery channel (Phase 2), and a full OTel bridge.
+ * Bindings, resolved once per isolate. An agent function renders synchronously
+ * (and re-renders before every model call), so env cannot be awaited inside it.
  */
+const env = await telemetryEnv()
 
 /**
- * Exposes the agent over HTTP: `POST /agents/maple-chat/:id` (prompt) and
- * `GET /agents/maple-chat/:id` (event stream) — the surface the `@flue/sdk`
- * browser client talks to. Without this export the agent is reachable only via
- * `dispatch()`.
+ * The Maple tool registry, cached per isolate.
  *
- * AuthN + per-instance authZ run as Hono middleware on `/agents/*` in `app.ts`
- * (verify the caller's token + match its org to this instance id), so this
- * per-agent handler stays a pass-through.
+ * The registry is deployment-static — `listMcpTools` is a pure constant on the
+ * API side — so one fetch per isolate serves every turn, instead of the
+ * per-interaction round-trip the v1 agent factory paid (the leading "chat takes
+ * ages to start" suspect). Priming happens in `useAgentStart`, which runs on
+ * every delivery before the model reads it.
  */
-export const route: AgentRouteHandler = async (c, next) => {
-	// Only the prompt submission (POST) is wrapped in a `chat.turn` span. The GET
-	// event-stream is a long-poll that holds open ~30s by design; spanning it would
-	// swamp the data with idle-transport durations and bury the actual model latency.
-	if (c.req.method !== "POST") return next()
+let descriptorCache: readonly InternalMcpToolDescriptor[] | undefined
 
-	const env = c.env as unknown as ChatFlueEnv
-	const instanceId = instanceIdFromAgentPath(new URL(c.req.url).pathname)
-	const mode = instanceId ? modeFromInstanceId(instanceId) : "default"
-	const turnOrgId = instanceId ? orgIdFromInstanceId(instanceId) : undefined
+/**
+ * The addressable Maple chat agent on Cloudflare Workers AI, with tools sourced
+ * from Maple's MCP registry over the `MAPLE_API_RPC` service binding. Mode
+ * (default / alert / widget-fix / dashboard-builder) is derived from the
+ * instance id.
+ *
+ * Addressed from the browser as `POST /agents/maple-chat/<orgId>:<tabId>` —
+ * mounted in `app.ts` with `createAgentRouter(MapleChat)`, which is also where
+ * AuthN + per-instance authZ live.
+ *
+ * `agentName` pins the durable identity to `maple-chat`, which the Cloudflare
+ * target folds into the Durable Object class `FlueMapleChatAgent` and binding
+ * `FLUE_MAPLE_CHAT_AGENT` — the same names Flue 1 deployed, so existing
+ * conversations keep their storage. Do not rename it.
+ */
+export function MapleChat({ id }: AgentProps) {
+	const orgId = orgIdFromInstanceId(id)
 
-	// `enterSpan` nests by async context: the per-interaction agent factory (and its
-	// `chat.mcp_connect` child) plus the model `AI.run` fetch all run inside `next()`,
-	// so they attach under this span — finally attributing today's anonymous fetches.
-	return enterSpan("chat.turn", async (span) => {
-		span.setAttribute("maple.chat.mode", mode)
-		span.setAttribute("gen_ai.request.model", env.MAPLE_CHAT_MODEL ?? DEFAULT_MODEL)
-		if (turnOrgId) span.setAttribute("orgId", turnOrgId)
-		return next()
-	})
-}
+	useModel(env.MAPLE_CHAT_MODEL ?? DEFAULT_MODEL)
 
-export default defineAgent<ChatFlueEnv>(async (ctx) => {
-	const orgId = orgIdFromInstanceId(ctx.id)
-
-	// Mode is derived from the instance id's tab-id prefix (alert- / widget-fix- /
-	// dashboard-builder-). The rich per-conversation context payloads
-	// (alertContext, widgetFixContext, pageContext) are supplied by the web client
-	// — wiring that delivery channel (custom app.ts route vs. message preamble) is
-	// the Phase 2 frontend integration point; until then the base prompt for the
-	// mode is used.
-	const mode = modeFromInstanceId(ctx.id)
-	const instructions = buildSystemPrompt({ mode })
-
-	// Connect to Maple's MCP server (all tools). We tolerate connection failures so
-	// the agent still answers on Workers AI when the API RPC binding
-	// isn't wired yet. The initializer runs per interaction and we don't `close()`
-	// here because tool calls need the connection live for the whole turn —
-	// connection lifecycle/pooling is a follow-up.
-	let tools: McpServerConnection["tools"] = []
-	if (orgId) {
+	// Prime the registry off the render path. Tolerant of failure so the agent
+	// still answers on Workers AI when the API RPC binding isn't wired up: a
+	// throw here would fail the submission before the model ever runs.
+	useAgentStart(async () => {
+		if (descriptorCache || !orgId) return
 		try {
-			// `chat.mcp_connect` makes the per-interaction MCP connect (the leading
-			// "takes ages to start" suspect — no pooling, 12s timeout) a first-class,
-			// queryable span, and turns the previously-silent failure path into a
-			// span with status `Error` + `error.type`/`error.message` and
-			// `maple.mcp.connected=false`.
-			const maple = await enterSpan("chat.mcp_connect", async (span) => {
-				span.setAttribute("orgId", orgId)
-				span.setAttribute("maple.mcp.timeout_ms", MCP_DEFAULT_TIMEOUT_MS)
-				try {
-					const connection = await connectMapleMcp(ctx.env, orgId)
-					span.setAttribute("maple.mcp.connected", true)
-					span.setAttribute("maple.mcp.tool_count", connection.tools.length)
-					return connection
-				} catch (error) {
-					span.setAttribute("maple.mcp.connected", false)
-					span.setError(
-						error instanceof Error ? error.name : "UnknownError",
-						error instanceof Error ? error.message : String(error),
-					)
-					throw error
-				}
-			})
-			// Propose-then-apply: mutating tools return a proposal the UI approves
-			// (Flue has no native human-in-the-loop interrupt).
-			tools = applyApprovalGates(maple.tools)
-
-			// Investigate mode: the autonomous diagnostic pass is the session's
-			// first turn, capped off by a (non-gated) `submit_diagnosis` call that
-			// persists the structured report. The id rides in the instance id, so
-			// the agent never chooses which investigation it writes.
-			const investigationId = investigationIdFromInstanceId(ctx.id)
-			if (investigationId) {
-				tools = [...tools, buildSubmitDiagnosisTool(ctx.env, orgId, investigationId)]
-			}
+			descriptorCache = await fetchMapleToolDescriptors(env, MCP_DEFAULT_TIMEOUT_MS)
 		} catch (error) {
 			emitTelemetryLog("error", "chat.mcp_connect_failed", {
 				"error.type": error instanceof Error ? error.name : "UnknownError",
 				"error.message": error instanceof Error ? error.message : String(error),
 			})
 		}
+	})
+
+	if (orgId && descriptorCache) {
+		// Propose-then-apply: mutating tools return a proposal the UI approves.
+		// Flue 2 still has no human-in-the-loop interrupt — a tool either returns
+		// or throws — so the gate stays a tool wrapper.
+		for (const tool of applyApprovalGates(buildMapleTools(env, orgId, descriptorCache))) {
+			useTool(tool)
+		}
+
+		// Investigate mode: the autonomous diagnostic pass is the session's first
+		// turn, capped off by a (non-gated) `submit_diagnosis` call that persists
+		// the structured report. The id rides in the instance id, so the agent
+		// never chooses which investigation it writes.
+		const investigationId = investigationIdFromInstanceId(id)
+		if (investigationId) useTool(buildSubmitDiagnosisTool(env, orgId, investigationId))
 	}
 
-	return {
-		model: ctx.env.MAPLE_CHAT_MODEL ?? DEFAULT_MODEL,
-		instructions,
-		tools,
-	}
-})
+	// Mode is derived from the instance id's tab-id prefix (alert- / widget-fix- /
+	// dashboard-builder-). The rich per-conversation context payloads
+	// (alertContext, widgetFixContext, pageContext) arrive from the web client as
+	// a first-message preamble.
+	return buildSystemPrompt({ mode: modeFromInstanceId(id) })
+}
+
+MapleChat.agentName = "maple-chat"

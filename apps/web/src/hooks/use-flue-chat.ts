@@ -1,14 +1,13 @@
-import { useCallback } from "react"
-import { useFlueAgent, useFlueClient, type AgentStatus, type FailedSend } from "@flue/react"
+import { useCallback, useMemo } from "react"
+import { useFlueAgent, type AgentStatus, type FailedSend } from "@flue/react"
 import type { ChatStatus, UIMessage } from "@/components/ai-elements/types"
+import { createChatConversationClient } from "@/components/chat/chat-conversation-client"
 import {
 	buildContextPreamble,
 	wrapContextPreamble,
 	type ChatContext,
 } from "@/components/chat/context-preamble"
 import { useMapleOrganizationId } from "./use-maple-organization"
-
-const AGENT_NAME = "maple-chat"
 
 export interface UseFlueChatOptions {
 	tabId: string
@@ -65,9 +64,14 @@ const toChatStatus = (status: AgentStatus): ChatStatus => {
  */
 export function useFlueChat({ tabId, context }: UseFlueChatOptions): UseFlueChatResult {
 	const orgId = useMapleOrganizationId()
-	const client = useFlueClient()
 	const conversationId = orgId ? `${orgId}:${tabId}` : undefined
-	const agent = useFlueAgent({ name: AGENT_NAME, id: conversationId })
+	// One client per conversation (Flue 2 has no deployment-wide client). Memoized
+	// on the id because a new instance replaces the live session.
+	const client = useMemo(
+		() => (conversationId ? createChatConversationClient(conversationId) : undefined),
+		[conversationId],
+	)
+	const agent = useFlueAgent({ client })
 
 	const isLoading = agent.status === "submitted" || agent.status === "streaming"
 
@@ -84,12 +88,11 @@ export function useFlueChat({ tabId, context }: UseFlueChatOptions): UseFlueChat
 	)
 
 	const stop = useCallback(() => {
-		if (!conversationId) return
-		void client.agents.abort(AGENT_NAME, conversationId).catch(() => {
+		void client?.abort().catch(() => {
 			// Best-effort cancel: the turn settles on its own if the abort never
 			// lands, and a toast per failed cancel would be noise.
 		})
-	}, [client, conversationId])
+	}, [client])
 
 	return {
 		messages: agent.messages,

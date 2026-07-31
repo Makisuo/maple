@@ -1,8 +1,9 @@
 {
-	// Source wrangler config. `flue build --target cloudflare` reads this and
-	// emits the deployable config to `dist/<name>/wrangler.json` (with Flue's
-	// generated entrypoint + Durable Object bindings). Deploy the GENERATED one,
-	// never this source file.
+	// Source wrangler config. The `@flue/vite` plugin reads this and emits the
+	// deployable config to `.flue-vite.wrangler.jsonc` (with Flue's generated
+	// entrypoint + Durable Object bindings). Deploy the GENERATED one, never this
+	// source file. Never hand-author `FLUE_*` DO bindings here — the plugin owns
+	// them and rejects a conflicting authored binding. Migrations stay ours.
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "maple-chat-flue",
 	"compatibility_date": "2026-06-01",
@@ -11,14 +12,25 @@
 	"ai": {
 		"binding": "AI",
 	},
-	// Flue-generated Durable Object classes. `FlueRegistry` is always present;
-	// `FlueMapleChatAgent` is generated from `src/agents/maple-chat.ts` and
-	// `FlueTriageWorkflow` from `src/workflows/triage.ts`.
+	// Flue-generated Durable Object classes, one per agent:
+	// `Flue<PascalCase(identity)>Agent`, bound as `FLUE_<SNAKE_UPPER(identity)>_AGENT`.
 	// Append-only once deployed: never rewrite a deployed migration tag.
+	//
+	// v2 (Flue 2) drops the central registry and the workflow runtime. The chat
+	// agent's identity is still `maple-chat`, which folds to the SAME class name
+	// `FlueMapleChatAgent` v1 deployed — so it is deliberately absent below:
+	// renaming or re-declaring it would discard every existing conversation.
+	// Triage stopped being a workflow and became an agent, so its old DO class is
+	// deleted and a new one provisioned (headless, no history worth keeping).
 	"migrations": [
 		{
 			"tag": "v1",
 			"new_sqlite_classes": ["FlueRegistry", "FlueMapleChatAgent", "FlueTriageWorkflow"],
+		},
+		{
+			"tag": "v2",
+			"deleted_classes": ["FlueRegistry", "FlueTriageWorkflow"],
+			"new_sqlite_classes": ["FlueTriageAgent"],
 		},
 	],
 	"services": [{ "binding": "MAPLE_API_RPC", "service": "maple-api" }],

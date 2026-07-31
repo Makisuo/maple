@@ -1,8 +1,8 @@
 import type { AlertContext } from "./alert-context"
 
 /**
- * Alert context delivery for the Flue chat backend. Flue's `agents.send`
- * carries only a message string, so the attached-alert context is folded into a
+ * Alert context delivery for the Flue chat backend. A Flue send carries only a
+ * message string, so the attached-alert context is folded into a
  * preamble on the conversation's FIRST message. Mobile stores the user's plain
  * text locally and only prepends this block to what's sent to the agent, so the
  * preamble never shows in the user's bubble. Ported from the legacy agent's

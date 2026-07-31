@@ -56,13 +56,13 @@ for the failure signatures.
 ```bash
 bun run test        # vitest
 bun run typecheck
-bun run build       # flue build --target cloudflare
+bun run build       # vite build (@flue/vite + @cloudflare/vite-plugin)
 ```
 
 ## Deploying
 
 Alchemy owns the deploy (`alchemy.run.ts`, wired into the root `alchemy.run.ts`). It runs
-`flue build` and uploads the prebuilt worker from `dist/maple_chat_flue/` with bindings it
+`vite build` and uploads the prebuilt worker from `dist/maple_chat_flue/` with bindings it
 declares itself — the generated `wrangler.json` and `.dev.vars` are not read. The `deploy`
 script is a Flue-native fallback.
 

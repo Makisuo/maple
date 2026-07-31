@@ -35,8 +35,8 @@ export const buildSubmitDiagnosisTool = (
 			"Record your structured diagnosis for THIS investigation. Call it exactly once, after you have gathered evidence, with your final assessment (summary, suspectedCause, severityAssessment, affectedScope, evidence, suggestedActions, confidence). It persists the report and renders it for the user. After calling it, stop unless the user asks a follow-up question.",
 		input: AiTriageResultSchema,
 		output: undefined,
-		run: async ({ input }): Promise<DiagnosisMarker> => {
-			await mapleApiRpc(env).submitDiagnosis({ orgId, investigationId, report: input })
-			return { status: DIAGNOSIS_STATUS, report: input }
+		run: async ({ data }) => {
+			await mapleApiRpc(env).submitDiagnosis({ orgId, investigationId, report: data })
+			return { output: { status: DIAGNOSIS_STATUS, report: data } satisfies DiagnosisMarker }
 		},
-	}) as ToolDefinition
+	})

@@ -2,13 +2,12 @@
  * Project chat-flue's Worker vars out of the repo-root `.env.local` into
  * `apps/chat-flue/.dev.vars`.
  *
- * Why a script rather than a flag: on the Cloudflare target `flue dev` hands the
+ * Why a script rather than a flag: on the Cloudflare target `vite dev` hands the
  * Worker to `@cloudflare/vite-plugin`, and Worker vars come from `.dev.vars` next
- * to the generated wrangler config (the Cloudflare convention). `flue dev --env
- * <path>` does NOT reach them — the CLI restores the env file before starting the
- * dev server, so it only affects config resolution. Every other Worker in this
- * repo reads `.env.local` via `wrangler dev --env-file`; this keeps chat-flue on
- * the same single source instead of a second copy of the same secrets.
+ * to the generated wrangler config (the Cloudflare convention) — there is no flag
+ * that points the plugin at a different env file. Every other Worker in this repo
+ * reads `.env.local` via `wrangler dev --env-file`; this keeps chat-flue on the
+ * same single source instead of a second copy of the same secrets.
  *
  * Deliberately a whitelist: `--env-file` hands a Worker *every* key in the file
  * (R2, Tinybird, the GitHub app private key), and that shouldn't spread here.

@@ -45,15 +45,19 @@ export interface CreateChatFlueWorkerOptions {
  * Deploy the Flue chat worker (`apps/chat-flue`) via alchemy, consistent with
  * the rest of the stack.
  *
- * Flue builds its own Cloudflare entrypoint + Durable Object classes, so a
- * `Command.Build` runs `flue build` first (memoized on the app's source files,
- * skipped on destroy), then the Worker deploys the prebuilt bundle with
- * `bundle: false` (alchemy uploads `index.js` + the code-split `assets/*.js`
- * modules as-is). Alchemy owns the bindings here — the generated
- * `dist/.../wrangler.json` vars and `.dev.vars` are NOT read (only `.js`/`.mjs`
- * are uploaded), so no local secret leaks into the deploy. Keep the DO binding
- * NAMES and class names in sync with the generated
- * `dist/maple_chat_flue/wrangler.json`.
+ * Flue generates the Cloudflare entrypoint + one Durable Object class per agent,
+ * so a `Command.Build` runs the Vite build first (memoized on the app's source
+ * files, skipped on destroy), then the Worker deploys the prebuilt bundle with
+ * `bundle: false` (alchemy uploads the worker entry + code-split modules as-is).
+ * Alchemy owns the bindings here — the generated `.flue-vite.wrangler.jsonc` vars
+ * and `.dev.vars` are NOT read (only `.js`/`.mjs` are uploaded), so no local
+ * secret leaks into the deploy. Keep the DO binding NAMES and class names in sync
+ * with the generated config and with `wrangler.jsonc`'s migrations.
+ *
+ * Flue 2 note: `flue build` is gone — the build is `vite build` with the
+ * `@flue/vite` + `@cloudflare/vite-plugin` pair. The output layout is unchanged
+ * (`dist/maple_chat_flue/index.js` + `assets/*.js`), so this deploy path carries
+ * over as-is.
  *
  * Manual fallback (Flue-native): `cd apps/chat-flue && bun run build &&
  * wrangler deploy --config dist/maple_chat_flue/wrangler.json`.
@@ -73,18 +77,21 @@ export const createChatFlueWorker = ({
 			outdir: path.join("dist", "maple_chat_flue"),
 		})
 
-		// Flue-generated Durable Objects. Binding names come from the `env` keys
-		// below and class names must match the exports of the built `index.js`.
-		// v2 provisions new DO classes as SQLite-backed by default (the v1
-		// `sqlite: true` prop is gone).
+		// Flue-generated Durable Objects, one per `'use agent'` export. Binding
+		// names come from the `env` keys below and class names must match the
+		// exports of the built worker entry:
+		//   identity `maple-chat` → class FlueMapleChatAgent, FLUE_MAPLE_CHAT_AGENT
+		//   identity `triage`     → class FlueTriageAgent,     FLUE_TRIAGE_AGENT
+		//
+		// `FlueMapleChatAgent` deliberately keeps its v1 name: the class holds every
+		// existing conversation's SQLite storage, and renaming it would discard them.
+		// `FlueRegistry` and `FlueTriageWorkflow` no longer exist in Flue 2 — their
+		// `deleted_classes` migration lives in `wrangler.jsonc`.
 		const chatAgent = Cloudflare.DurableObject("flue-maple-chat-agent", {
 			className: "FlueMapleChatAgent",
 		})
-		const triageWorkflow = Cloudflare.DurableObject("flue-triage-workflow", {
-			className: "FlueTriageWorkflow",
-		})
-		const registry = Cloudflare.DurableObject("flue-registry", {
-			className: "FlueRegistry",
+		const triageAgent = Cloudflare.DurableObject("flue-triage-agent", {
+			className: "FlueTriageAgent",
 		})
 
 		const worker = yield* Cloudflare.Worker("chat-flue", {
@@ -121,8 +128,7 @@ export const createChatFlueWorker = ({
 				// permission for this resource.
 				AI: Cloudflare.AI.Gateway("chat-flue-ai"),
 				FLUE_MAPLE_CHAT_AGENT: chatAgent,
-				FLUE_TRIAGE_WORKFLOW: triageWorkflow,
-				FLUE_REGISTRY: registry,
+				FLUE_TRIAGE_AGENT: triageAgent,
 				MAPLE_API_RPC: mapleApiRpc,
 				INTERNAL_SERVICE_TOKEN: Redacted.make(requireEnv("INTERNAL_SERVICE_TOKEN")),
 				// OpenTelemetry → Maple ingest. Provide the internal-org ingest key so

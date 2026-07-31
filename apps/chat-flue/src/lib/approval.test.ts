@@ -2,6 +2,7 @@ import { defineTool, type ToolDefinition } from "@flue/runtime"
 import * as v from "valibot"
 import { describe, expect, it } from "vitest"
 import { applyApprovalGates, MUTATING_TOOL_NAMES, parseToolProposal, PROPOSAL_STATUS } from "./approval.ts"
+import { runTool } from "./test-tool-context.ts"
 
 const INPUT = v.object({ dashboard_id: v.optional(v.string()), widget_id: v.optional(v.string()) })
 
@@ -12,11 +13,9 @@ const fakeTool = (name: string, run: () => string = () => "real-result"): ToolDe
 		input: INPUT,
 		output: undefined,
 		run: () => run(),
-	}) as ToolDefinition
+	})
 
-/** Invoke a tool the way the runtime does, without its validation wrapper. */
-const call = async (tool: ToolDefinition, input: Record<string, unknown>) =>
-	await tool.run({ input, signal: undefined })
+const call = runTool
 
 describe("MUTATING_TOOL_NAMES", () => {
 	it("covers dashboard/alert/issue mutations and excludes read tools", () => {

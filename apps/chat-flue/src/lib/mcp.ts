@@ -1,8 +1,24 @@
-import { defineTool, type JsonValue, type McpServerConnection, type ToolDefinition } from "@flue/runtime"
-import type { InternalMcpToolResult } from "@maple/domain/internal-rpc"
+import { defineTool, type JsonValue, type ToolDefinition } from "@flue/runtime"
+import type { InternalMcpToolDescriptor, InternalMcpToolResult } from "@maple/domain/internal-rpc"
 import type { ChatFlueEnv } from "./env.ts"
 import { mapleApiRpc } from "./api-rpc.ts"
 import { jsonSchemaToValibot } from "./json-schema-to-valibot.ts"
+
+/**
+ * A resolved set of Maple tools, adapted from the API's RPC registry.
+ *
+ * Flue 2 dropped `McpServerConnection` along with its own MCP server plumbing —
+ * `useMcpConnection()` now owns that path. We stay on the hand-rolled adapter
+ * because Flue's MCP adapter flattens a tool result into ONE string, which would
+ * re-inline the `__maple_ui` payload into the model's context window (the exact
+ * regression {@link splitToolResult} exists to avoid) and route tool calls over
+ * HTTP instead of the `MAPLE_API_RPC` service binding.
+ */
+export interface MapleToolConnection {
+	readonly name: string
+	readonly tools: readonly ToolDefinition[]
+	readonly close: () => Promise<void>
+}
 
 /** Prefix retained for parity with Flue's MCP HTTP adapter. */
 const MCP_PREFIX = "mcp__maple__"
@@ -101,18 +117,36 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, operation:
 }
 
 /**
+ * Read the tool registry from the API.
+ *
+ * Split out from {@link buildMapleTools} because the two have very different
+ * lifetimes: the registry is deployment-static (`listMcpTools` is a pure
+ * constant on the API side — it takes no org and does no I/O of its own), while
+ * the tools built from it close over one org. A Flue 2 agent renders
+ * SYNCHRONOUSLY, so the async half has to happen off the render path — see
+ * `useAgentStart` in `src/agents/maple-chat.ts`.
+ */
+export const fetchMapleToolDescriptors = async (
+	env: ChatFlueEnv,
+	timeoutMs: number = MCP_DEFAULT_TIMEOUT_MS,
+): Promise<readonly InternalMcpToolDescriptor[]> =>
+	withTimeout(mapleApiRpc(env).listMcpTools(), timeoutMs, "listMcpTools")
+
+/**
  * Adapt API Worker RPC descriptors into ordinary Flue tools. The service binding
  * itself authenticates the Worker-to-Worker hop; org scope is explicit and
  * validated again by the API boundary.
+ *
+ * Synchronous on purpose: an agent render may call it.
  */
-export const connectMapleMcp = async (
+export const buildMapleTools = (
 	env: ChatFlueEnv,
 	orgId: string,
+	descriptors: readonly InternalMcpToolDescriptor[],
 	options: ConnectMapleMcpOptions = {},
-): Promise<McpServerConnection> => {
+): readonly ToolDefinition[] => {
 	const timeoutMs = options.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS
 	const api = mapleApiRpc(env)
-	const descriptors = await withTimeout(api.listMcpTools(), timeoutMs, "listMcpTools")
 	const seen = new Set<string>()
 	const tools: ToolDefinition[] = descriptors.map((descriptor) => {
 		const name = `${MCP_PREFIX}${sanitizeToolNamePart(descriptor.name)}`
@@ -124,23 +158,34 @@ export const connectMapleMcp = async (
 			description: `MCP tool "${descriptor.name}" from server "maple". ${descriptor.description}`,
 			input: jsonSchemaToValibot(descriptor.inputSchema),
 			output: undefined,
-			run: async ({ input, signal }): Promise<MapleToolOutput> => {
+			run: async ({ data, signal }) => {
 				if (signal?.aborted) throw new Error("Operation aborted")
 				const result = await withTimeout(
-					api.callMcpTool({ orgId, name: descriptor.name, input }),
+					api.callMcpTool({ orgId, name: descriptor.name, input: data }),
 					timeoutMs,
 					`callMcpTool(${descriptor.name})`,
 				)
 				const output = splitToolResult(result)
 				if (result.isError) throw new Error(output.text)
-				return output
+				return { output }
 			},
-		}) as ToolDefinition
+		})
 	})
 
-	return {
-		name: "maple",
-		tools: options.allowlist ? filterMcpTools(tools, options.allowlist) : tools,
-		close: async () => undefined,
-	}
+	return options.allowlist ? filterMcpTools(tools, options.allowlist) : tools
 }
+
+/**
+ * Fetch-and-build in one await, for the headless callers that can afford it
+ * (the triage agent's start hook). The chat agent uses the two halves directly
+ * so its render stays synchronous.
+ */
+export const connectMapleMcp = async (
+	env: ChatFlueEnv,
+	orgId: string,
+	options: ConnectMapleMcpOptions = {},
+): Promise<MapleToolConnection> => ({
+	name: "maple",
+	tools: buildMapleTools(env, orgId, await fetchMapleToolDescriptors(env, options.timeoutMs), options),
+	close: async () => undefined,
+})

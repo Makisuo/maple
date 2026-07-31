@@ -5,7 +5,7 @@
  * Investigates a freshly opened incident (error or anomaly) and persists a
  * structured triage result onto `ai_triage_runs` (+ the error-issue timeline).
  *
- * The LLM investigation itself runs on the Flue `triage` workflow (Cloudflare
+ * The LLM investigation itself runs on the Flue `triage` agent (Cloudflare
  * Workers AI + the read-only Maple MCP tools), reached over the `CHAT_FLUE`
  * service binding. This workflow stays the durable orchestrator: it owns the
  * incident lifecycle (gate/claim, D1 persistence, issue severity + timeline,
@@ -13,7 +13,7 @@
  *
  * Step layout:
  *   1. gate-and-claim — replay guard, chat-flue binding check
- *   2. run-agent      — invoke the Flue triage workflow (one durable I/O-bound
+ *   2. run-agent      — drive the Flue triage agent (one durable I/O-bound
  *                       step) and map its structured result
  *   3. persist        — run row + issue timeline + usage tracking
  */
@@ -68,13 +68,26 @@ interface InvokeTriageInput {
 	readonly context: Record<string, unknown>
 }
 
+/** Data-part name the triage agent publishes its report under. */
+const TRIAGE_RESULT_PART = "triage_result"
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
 /**
- * Run the Flue `triage` workflow to completion over the `CHAT_FLUE` service
- * binding and return its terminal result. The binding routes by name (not host)
- * so `baseUrl` is a placeholder; auth is the internal-service token the
- * chat-flue `/workflows/*` guard expects (`Bearer maple_svc_<token>`).
+ * Run the Flue `triage` agent to completion over the `CHAT_FLUE` service binding
+ * and return its terminal result. The binding routes by name (not host) so the
+ * origin is a placeholder; auth is the internal-service token the chat-flue
+ * `/agents/triage/*` guard expects (`Bearer maple_svc_<token>`).
+ *
+ * Flue 2 deleted workflows, so the shape changed. The incident payload is now
+ * instance-creation data (validated by the agent's `initialData` schema before
+ * anything durable is admitted), the report arrives as the `triage_result` data
+ * part, and model/token facts ride on the reply's metadata. The conversation id
+ * is the incident id, which also makes a repeat dispatch for the same incident
+ * idempotent rather than starting a second investigation.
  */
-const invokeTriageWorkflow = async ({
+const invokeTriageAgent = async ({
 	env,
 	orgId,
 	incidentKind,
@@ -84,31 +97,44 @@ const invokeTriageWorkflow = async ({
 	const binding = env.CHAT_FLUE
 	if (!isChatFlueBinding(binding)) throw new Error("chat_flue_unavailable")
 
-	const client = createFlueClient({
-		baseUrl: CHAT_FLUE_ORIGIN,
+	const conversation = createFlueClient({
+		url: `${CHAT_FLUE_ORIGIN}/agents/triage/${encodeURIComponent(incidentId)}`,
 		fetch: binding.fetch.bind(binding),
 		token: `maple_svc_${env.INTERNAL_SERVICE_TOKEN ?? ""}`,
 	})
 
-	const response = await client.workflows.invoke("triage", {
-		input: { orgId, incidentKind, incidentId, context },
-		wait: "result",
+	const admission = await conversation.send({
+		message: {
+			kind: "user",
+			body: "Investigate this incident and submit your structured triage report.",
+		},
+		initialData: { orgId, incidentKind, incidentId, context },
+		// This call sits inside a retryable workflow step, so a retry must converge
+		// on the original submission rather than paying for a second investigation.
+		// The key is derived from the incident, which is what the step is keyed on.
+		idempotencyKey: `triage:${incidentId}`,
 	})
+	const reply = await conversation.read(admission)
 
-	const inner = response.result as
-		| {
-				result?: unknown
-				model?: { provider: string; id: string }
-				usage?: { input?: number; output?: number }
-		  }
-		| null
-		| undefined
-	if (!inner || inner.result === undefined) throw new Error("flue_triage_no_result")
+	// `data` is keyed by part name, each in emit order; the agent writes exactly
+	// one report and terminates the turn on it.
+	const [report] = reply.data[TRIAGE_RESULT_PART] ?? []
+	if (report === undefined) throw new Error("flue_triage_no_result")
+
+	const metadata = isRecord(reply.metadata) ? reply.metadata : {}
+	const model = isRecord(metadata.model) ? metadata.model : {}
+	const usage = isRecord(metadata.usage) ? metadata.usage : {}
 
 	return {
-		result: inner.result,
-		model: inner.model ?? { provider: "cloudflare", id: "unknown" },
-		usage: { input: inner.usage?.input ?? 0, output: inner.usage?.output ?? 0 },
+		result: report,
+		model: {
+			provider: typeof model.provider === "string" ? model.provider : "cloudflare",
+			id: typeof model.id === "string" ? model.id : "unknown",
+		},
+		usage: {
+			input: typeof usage.input === "number" ? usage.input : 0,
+			output: typeof usage.output === "number" ? usage.output : 0,
+		},
 	}
 }
 
@@ -220,7 +246,7 @@ export interface AiTriageRunDeps {
 	 * path without crossing the `CHAT_FLUE` service binding. Production invokes
 	 * the deployed Flue `triage` workflow.
 	 */
-	readonly invokeTriage?: typeof invokeTriageWorkflow
+	readonly invokeTriage?: typeof invokeTriageAgent
 	/** Test seam: fixed clock for timestamp assertions. Production uses Date.now. */
 	readonly now?: () => number
 }
@@ -253,7 +279,7 @@ async function runAiTriageWithDb(
 ): Promise<AiTriageWorkflowResult> {
 	const { orgId, incidentKind, incidentId, issueId } = event.payload
 	const runId = decodeRunId(event.payload.runId)
-	const invokeTriage = deps.invokeTriage ?? invokeTriageWorkflow
+	const invokeTriage = deps.invokeTriage ?? invokeTriageAgent
 	const clock = deps.now ?? Date.now
 
 	/**

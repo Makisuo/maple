@@ -117,7 +117,7 @@ export function ChatConversation({
 		})
 
 	// Per-conversation context, folded into the first message preamble by the
-	// adapter (Flue's `agents.send` carries only a message string). Skipped
+	// adapter (a Flue send carries only a message string). Skipped
 	// entirely when the backend seeded the conversation itself — repeating the
 	// subject would spend the model's window on context it already has.
 	const context = useMemo<ChatContext | undefined>(() => {

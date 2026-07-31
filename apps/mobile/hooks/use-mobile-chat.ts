@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "@clerk/expo"
+import { useFlueAgent } from "@flue/react"
 import type { UIMessage } from "../lib/chat-types"
 import type { AlertContext } from "../lib/alert-context"
 import {
@@ -9,9 +10,8 @@ import {
 	titleFromFirstUserText,
 	upsertThread,
 } from "../lib/chat-threads"
-import { streamChat } from "../lib/chat-stream"
 import { makeFlueChatClient } from "../lib/flue-chat-client"
-import { FLUE_AGENT_NAME, scopedAgentName } from "../lib/flue-chat-url"
+import { toMobileMessages } from "../lib/flue-message-mapping"
 import { buildAlertPreamble } from "../lib/context-preamble"
 
 type Status = "idle" | "submitted" | "streaming" | "error"
@@ -21,265 +21,120 @@ interface UseMobileChatOptions {
 	alertContext?: AlertContext
 }
 
-interface ToolPart {
-	type: string
-	toolCallId: string
-	toolName?: string
-	state: "input-streaming" | "input-available" | "output-available" | "output-error"
-	input?: unknown
-	output?: unknown
-	errorText?: string
+/** Flue's `connecting` has no composer equivalent — treat it as ready. */
+const toStatus = (status: string): Status =>
+	status === "submitted" || status === "streaming" || status === "error" ? status : "idle"
+
+/**
+ * `ToolUIPart["type"]` is a widened `string` (it carries `tool-<name>`), so the
+ * part union cannot discriminate on `type` — narrow on the property instead.
+ */
+const firstUserText = (messages: readonly UIMessage[]): string => {
+	for (const message of messages) {
+		if (message.role !== "user") continue
+		for (const part of message.parts) {
+			if ("text" in part) return part.text
+		}
+	}
+	return ""
 }
 
-function makeId(prefix: string): string {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-}
-
+/**
+ * Mobile chat over the Flue conversation client.
+ *
+ * Flue 2 serves a MATERIALIZED conversation rather than a delta stream, so the
+ * transcript is server-owned: `useFlueAgent` replays history on mount and keeps
+ * it live, which retired the hand-rolled reducer (assistant-bubble bookkeeping,
+ * text-delta accumulation, tool-part patching) this hook used to carry.
+ *
+ * The local message cache survives for one job only: seeding the transcript
+ * before the network answers, and feeding the offline thread list
+ * (title/preview/timestamp). It is no longer the source of truth.
+ */
 export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) {
 	const { orgId, getToken } = useAuth()
-	const client = useMemo(() => makeFlueChatClient(getToken), [getToken])
-	const [messages, setMessages] = useState<UIMessage[]>([])
-	const [status, setStatus] = useState<Status>("idle")
-	const [error, setError] = useState<string | null>(null)
-	const [hydrated, setHydrated] = useState(false)
-	const activeStream = useRef<{ abort: () => void } | null>(null)
-	const assistantIdRef = useRef<string | null>(null)
-	// Tracks whether the conversation already has messages, so `sendMessage`
-	// attaches the alert preamble only to a brand-new thread's first turn without
-	// taking `messages` as a dependency (which would rebuild it on every delta).
-	const hasMessagesRef = useRef(false)
-	useEffect(() => {
-		hasMessagesRef.current = messages.length > 0
-	}, [messages.length])
+	const client = useMemo(
+		() => (orgId ? makeFlueChatClient(orgId, threadId, getToken) : undefined),
+		[orgId, threadId, getToken],
+	)
+	const agent = useFlueAgent({ client })
+
+	const [cached, setCached] = useState<UIMessage[]>([])
+	const [cacheLoaded, setCacheLoaded] = useState(false)
+	const [sendError, setSendError] = useState<string | null>(null)
 
 	useEffect(() => {
 		let cancelled = false
 		void loadMessages(threadId).then((persisted) => {
 			if (cancelled) return
-			setMessages(persisted)
-			setHydrated(true)
+			setCached(persisted)
+			setCacheLoaded(true)
 		})
 		return () => {
 			cancelled = true
-			activeStream.current?.abort()
 		}
 	}, [threadId])
 
-	const persist = useCallback(
-		(next: UIMessage[]) => {
-			void saveMessages(threadId, next)
-		},
-		[threadId],
-	)
+	const messages = useMemo(() => toMobileMessages(agent.messages), [agent.messages])
 
-	const updateSummary = useCallback(
-		(firstUserText: string, lastMessage: UIMessage | undefined) => {
-			void upsertThread({
-				threadId,
-				title: titleFromFirstUserText(firstUserText),
-				lastMessagePreview: previewFromMessage(lastMessage),
-				lastMessageAt: Date.now(),
-				alertContext,
-			})
-		},
-		[threadId, alertContext],
-	)
+	// Show the cache only until the durable history lands, so a reconnect never
+	// flashes stale content over the live transcript.
+	const visible = agent.historyReady ? messages : cached
+	const hydrated = agent.historyReady || cacheLoaded
+
+	// Mirror the server transcript into the cache + thread summary once it settles.
+	const status = toStatus(agent.status)
+	const settled = agent.historyReady && status === "idle"
+	const lastMirrored = useRef<string | null>(null)
+	useEffect(() => {
+		if (!settled || messages.length === 0) return
+		const fingerprint = `${messages.length}:${messages[messages.length - 1]?.id ?? ""}`
+		if (lastMirrored.current === fingerprint) return
+		lastMirrored.current = fingerprint
+		void saveMessages(threadId, messages)
+		void upsertThread({
+			threadId,
+			title: titleFromFirstUserText(firstUserText(messages)),
+			lastMessagePreview: previewFromMessage(messages[messages.length - 1]),
+			lastMessageAt: Date.now(),
+			alertContext,
+		})
+	}, [settled, messages, threadId, alertContext])
 
 	const sendMessage = useCallback(
 		(text: string) => {
-			if (!orgId) {
-				setError("No organization — sign in first")
+			if (!client) {
+				setSendError("No organization — sign in first")
 				return
 			}
 			const userText = text.trim()
 			if (!userText) return
 			if (status === "submitted" || status === "streaming") return
 
-			setError(null)
-			const userMsg: UIMessage = {
-				id: makeId("user"),
-				role: "user",
-				parts: [{ type: "text", text: userText } as UIMessage["parts"][number]],
-			}
+			setSendError(null)
 
-			setMessages((prev) => {
-				const next = [...prev, userMsg]
-				persist(next)
-				const firstUserText =
-					(
-						next.find((m) => m.role === "user")?.parts.find((p) => p.type === "text") as
-							| { type: "text"; text: string }
-							| undefined
-					)?.text ?? userText
-				updateSummary(firstUserText, userMsg)
-				return next
-			})
-			setStatus("submitted")
-
-			assistantIdRef.current = null
-
-			// Alert context is folded into the FIRST message of a fresh thread; the
-			// stored user bubble keeps the plain text, only the sent string carries it.
-			const isFirst = !hasMessagesRef.current
+			// Alert context is folded into the FIRST message of a fresh thread. Flue
+			// records the submitted prompt verbatim, so the preamble is visible in the
+			// transcript — same tradeoff the web client makes.
+			const isFirst = agent.messages.length === 0
 			const preamble = isFirst && alertContext ? buildAlertPreamble(alertContext) : ""
-			const outgoing = preamble ? `${preamble}\n\n---\n\n${userText}` : userText
-
-			const stream = streamChat({
-				client,
-				agentName: FLUE_AGENT_NAME,
-				instanceId: scopedAgentName(orgId, threadId),
-				message: outgoing,
-				callbacks: {
-					onAssistantStart: (id) => {
-						const assistantId = id || makeId("asst")
-						assistantIdRef.current = assistantId
-						setMessages((prev) => [
-							...prev,
-							{ id: assistantId, role: "assistant", parts: [] } as UIMessage,
-						])
-						setStatus("streaming")
-					},
-					onTextDelta: (_idx, delta) => {
-						if (!assistantIdRef.current) {
-							assistantIdRef.current = makeId("asst")
-							setMessages((prev) => [
-								...prev,
-								{
-									id: assistantIdRef.current as string,
-									role: "assistant",
-									parts: [{ type: "text", text: delta } as UIMessage["parts"][number]],
-								} as UIMessage,
-							])
-							setStatus("streaming")
-							return
-						}
-						setMessages((prev) => updateLastAssistant(prev, (msg) => appendTextDelta(msg, delta)))
-					},
-					onToolInputStart: (toolCallId, toolName) => {
-						setMessages((prev) =>
-							updateLastAssistant(prev, (msg) =>
-								addOrUpdateToolPart(msg, toolCallId, toolName, "input-streaming"),
-							),
-						)
-					},
-					onToolInputAvailable: (toolCallId, toolName, input) => {
-						setMessages((prev) =>
-							updateLastAssistant(prev, (msg) =>
-								addOrUpdateToolPart(msg, toolCallId, toolName, "input-available", { input }),
-							),
-						)
-					},
-					onToolOutputAvailable: (toolCallId, output) => {
-						setMessages((prev) =>
-							updateLastAssistant(prev, (msg) =>
-								addOrUpdateToolPart(msg, toolCallId, undefined, "output-available", {
-									output,
-								}),
-							),
-						)
-					},
-					onToolError: (toolCallId, errorText) => {
-						setMessages((prev) =>
-							updateLastAssistant(prev, (msg) =>
-								addOrUpdateToolPart(msg, toolCallId, undefined, "output-error", {
-									errorText,
-								}),
-							),
-						)
-					},
-					onError: (errText) => {
-						setError(errText)
-						setStatus("error")
-					},
-					onDone: () => {
-						setStatus((s) => (s === "error" ? s : "idle"))
-						activeStream.current = null
-						setMessages((prev) => {
-							persist(prev)
-							const last = prev[prev.length - 1]
-							void upsertThread({
-								threadId,
-								title: titleFromFirstUserText(userText),
-								lastMessagePreview: previewFromMessage(last),
-								lastMessageAt: Date.now(),
-								alertContext,
-							})
-							return prev
-						})
-					},
-				},
-			})
-			activeStream.current = stream
+			void agent.sendMessage(preamble ? `${preamble}\n\n---\n\n${userText}` : userText)
 		},
-		[orgId, status, threadId, alertContext, client, persist, updateSummary],
+		[client, status, agent, alertContext],
 	)
 
 	const stop = useCallback(() => {
-		activeStream.current?.abort()
-		activeStream.current = null
-		setStatus("idle")
-	}, [])
+		void client?.abort().catch(() => {
+			// Best-effort cancel: the turn settles on its own if the abort never lands.
+		})
+	}, [client])
 
-	return { messages, status, error, hydrated, sendMessage, stop }
-}
-
-function updateLastAssistant(messages: UIMessage[], updater: (msg: UIMessage) => UIMessage): UIMessage[] {
-	for (let i = messages.length - 1; i >= 0; i -= 1) {
-		const m = messages[i]
-		if (m.role === "assistant") {
-			const next = [...messages]
-			next[i] = updater(m)
-			return next
-		}
+	return {
+		messages: visible,
+		status,
+		error: sendError ?? agent.error?.message ?? null,
+		hydrated,
+		sendMessage,
+		stop,
 	}
-	return messages
-}
-
-function appendTextDelta(msg: UIMessage, delta: string): UIMessage {
-	const parts = [...msg.parts]
-	const last = parts[parts.length - 1] as { type: string; text?: string } | undefined
-	if (last && last.type === "text") {
-		parts[parts.length - 1] = {
-			...last,
-			text: (last.text ?? "") + delta,
-		} as UIMessage["parts"][number]
-	} else {
-		parts.push({ type: "text", text: delta } as UIMessage["parts"][number])
-	}
-	return { ...msg, parts }
-}
-
-function addOrUpdateToolPart(
-	msg: UIMessage,
-	toolCallId: string,
-	toolName: string | undefined,
-	state: ToolPart["state"],
-	patch?: Partial<ToolPart>,
-): UIMessage {
-	const parts = [...msg.parts] as Array<UIMessage["parts"][number]>
-	const idx = parts.findIndex((p) => {
-		const asTool = p as unknown as ToolPart
-		return asTool.toolCallId === toolCallId
-	})
-	if (idx >= 0) {
-		const existing = parts[idx] as unknown as ToolPart
-		const next: ToolPart = {
-			...existing,
-			toolName: toolName ?? existing.toolName,
-			state,
-			...patch,
-		}
-		parts[idx] = next as unknown as UIMessage["parts"][number]
-	} else {
-		const partType = toolName ? `tool-${toolName}` : "dynamic-tool"
-		const tool: ToolPart = {
-			type: partType,
-			toolCallId,
-			toolName,
-			state,
-			...patch,
-		}
-		parts.push(tool as unknown as UIMessage["parts"][number])
-	}
-	return { ...msg, parts }
 }

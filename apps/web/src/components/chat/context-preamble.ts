@@ -8,8 +8,8 @@ import type { AutoContext, PageContextPayload } from "./auto-contexts"
  * chat backend.
  *
  * The legacy chat agent received this context out-of-band in the request `body`
- * and merged it into the system prompt. Flue's `agents.send` carries only a
- * message string, so we fold the same structured blocks into a preamble on the
+ * and merged it into the system prompt. A Flue send carries only a message
+ * string, so we fold the same structured blocks into a preamble on the
  * conversation's FIRST message instead. The blocks are wrapped in sentinel
  * markers so the renderer can strip them from the user's visible bubble while
  * the model still receives them (see {@link wrapContextPreamble} /

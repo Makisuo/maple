@@ -89,10 +89,12 @@ export const applyApprovalGates = (tools: readonly ToolDefinition[]): ToolDefini
 			// The real tool's output schema describes the mutation's result, which a
 			// proposal never produces — validating against it would reject the marker.
 			output: undefined,
-			run: (context): ToolProposal => ({
-				status: PROPOSAL_STATUS,
-				tool: baseToolName(tool.name),
-				input: toJsonValue("input" in context ? context.input : undefined),
+			run: (context) => ({
+				output: {
+					status: PROPOSAL_STATUS,
+					tool: baseToolName(tool.name),
+					input: toJsonValue("data" in context ? context.data : undefined),
+				} satisfies ToolProposal,
 			}),
-		}) as ToolDefinition
+		})
 	})

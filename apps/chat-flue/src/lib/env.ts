@@ -1,4 +1,4 @@
-import type { CloudflareAIBinding } from "@flue/runtime/cloudflare"
+import type { CloudflareAIBinding } from "@flue/runtime/cloudflare/workers-ai"
 
 /** Bindings + vars available to the Flue chat worker. */
 export interface ChatFlueEnv {

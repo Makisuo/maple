@@ -26,13 +26,7 @@
 			"entry": ["alchemy.run.ts"]
 		},
 		"apps/chat-flue": {
-			"entry": [
-				"src/app.ts",
-				"src/agents/*.ts",
-				"src/workflows/*.ts",
-				"flue.config.ts",
-				"alchemy.run.ts"
-			],
+			"entry": ["src/app.ts", "src/agents/*.ts", "flue.config.ts", "vite.config.ts", "alchemy.run.ts"],
 			"ignoreDependencies": ["agents", "cloudflare"]
 		},
 		"apps/local-ui": {

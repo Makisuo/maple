@@ -307,7 +307,7 @@ When something goes wrong, the `investigations.error` column names it:
 > agent instance the API never seeded, and the transcript stays empty forever. Unset it,
 > or set it to your Clerk org id, when working on chat.
 
-The **Node target** (`flue dev --target node`) has neither the `AI` binding nor
+The **Node target** (`vite dev` with `target: 'node'`) has neither the `AI` binding nor
 `MAPLE_API_RPC`, so tools and `submit_diagnosis` cannot work — it is not usable for
 investigations.
 
@@ -341,7 +341,7 @@ procs:
         shell: bun dev
         cwd: apps/scraper
     chat-flue:
-        shell: bun flue dev --target node --env ../../.env.local
+        shell: bun run dev:app
         cwd: apps/chat-flue
 ```
 

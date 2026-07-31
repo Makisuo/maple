@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { ChatFlueEnv } from "./env.ts"
 import { mapleApiRpc } from "./api-rpc.ts"
 import { buildSubmitDiagnosisTool, DIAGNOSIS_STATUS } from "./submit-diagnosis.ts"
+import { runTool } from "./test-tool-context.ts"
 
 const report = {
 	summary: "Checkout latency doubled after deploy.",
@@ -56,7 +57,7 @@ describe("Maple API Worker RPC", () => {
 			},
 		})
 		const tool = buildSubmitDiagnosisTool(env, "org_1", "00000000-0000-4000-8000-000000000001")
-		const result = await tool.run({ input: report, signal: undefined })
+		const result = await runTool(tool, report)
 
 		expect(calls).toEqual([
 			{

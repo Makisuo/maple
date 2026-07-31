@@ -2,6 +2,7 @@ import * as v from "valibot"
 import { describe, expect, it } from "vitest"
 import type { ChatFlueEnv } from "./env.ts"
 import { baseToolName, connectMapleMcp, filterMcpTools } from "./mcp.ts"
+import { runTool } from "./test-tool-context.ts"
 import { buildTriageContextMessage, TRIAGE_TOOL_NAMES } from "./triage-prompt.ts"
 import { AiTriageResultSchema } from "./triage-result.ts"
 
@@ -78,11 +79,7 @@ describe("mcp tool filtering", () => {
 		}
 		const connection = await connectMapleMcp(env, "org_1")
 		expect(connection.tools.map((tool) => tool.name)).toEqual(["mcp__maple__search_traces"])
-		expect(await connection.tools[0]!.run({ input: { service: "checkout" }, signal: undefined })).toEqual(
-			{
-				text: "ok",
-			},
-		)
+		expect(await runTool(connection.tools[0]!, { service: "checkout" })).toEqual({ text: "ok" })
 		expect(calls).toEqual([
 			{
 				orgId: "org_1",
