@@ -57,7 +57,7 @@
 		"typescript": "catalog:tooling",
 		"vitest": "catalog:",
 		"vitest-evals": "^0.4.0",
-		"wrangler": "^4.41.0"
+		"wrangler": "^4.118.0"
 	},
 	"portless": {
 		"name": "api",

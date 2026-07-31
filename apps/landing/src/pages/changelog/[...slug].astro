@@ -67,7 +67,7 @@ const backLink =
     "inline-flex items-center gap-1.5 font-mono text-xs text-fg-muted transition-colors hover:text-primary";
 ---
 
-<Layout title={pageTitle} description={description} image={cover} ogType="article" alternates={["en"]}>
+<Layout title={pageTitle} description={description} image={cover} ogType="article" alternates={["en"]} mdHref={`/changelog/${release.id}.md`}>
     <link
         slot="head"
         rel="alternate"
