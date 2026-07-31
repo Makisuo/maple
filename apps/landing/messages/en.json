@@ -699,6 +699,7 @@
 	"nav_docs": "Docs",
 	"nav_local": "Local",
 	"nav_blog": "Blog",
+	"nav_changelog": "Changelog",
 	"footer_learn": "Learn",
 	"footer_what_is_observability": "What is observability?",
 	"footer_best_tools": "Best open-source tools",

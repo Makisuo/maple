@@ -81,6 +81,9 @@ const absoluteImage = image.startsWith("http")
         <meta name="twitter:description" content={description} />
         <meta name="twitter:image" content={absoluteImage} />
         <meta name="generator" content={Astro.generator} />
+        <!-- Per-page head tags (feed discovery, preloads). Default-empty, so
+             callers that don't fill it are unaffected. -->
+        <slot name="head" />
         <script
             is:inline
             src="https://analytics.ahrefs.com/analytics.js"

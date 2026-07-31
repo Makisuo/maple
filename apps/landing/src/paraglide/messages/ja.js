@@ -5183,6 +5183,14 @@ export const nav_blog = () => `ブログ`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_changelog = () => `変更履歴`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const footer_learn = () => `学ぶ`
 
 

@@ -1,0 +1,242 @@
+---
+/**
+ * One monthly release. Long documents — 15 sections for July — so the sticky
+ * TOC from the blog article template earns its place here.
+ *
+ * The breaking-change prose stays in the markdown body where it was written;
+ * `data.breaking` only raises the marker, so there is one source of truth for
+ * what actually broke.
+ */
+import { render } from "astro:content";
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import Footer from "../../components/Footer.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import { getSortedReleases } from "../../lib/changelog";
+import { formatDate, isoDate, readingTime } from "../../lib/blog";
+
+export async function getStaticPaths() {
+    const releases = await getSortedReleases();
+    return releases.map((release, i) => ({
+        params: { slug: release.id },
+        props: {
+            release,
+            // Sorted newest-first, so the *next* index is the older release.
+            newer: releases[i - 1] ?? null,
+            older: releases[i + 1] ?? null,
+        },
+    }));
+}
+
+const { release, newer, older } = Astro.props;
+const { title, description, date, breaking, cover, coverAlt } = release.data;
+const { Content, headings } = await render(release);
+
+const minutes = readingTime(release.body);
+const toc = headings.filter((h) => h.depth === 2);
+const hasToc = toc.length > 0;
+
+const pageTitle = `${title} — Maple changelog`;
+const canonicalUrl = Astro.site ? new URL(`/changelog/${release.id}`, Astro.site).toString() : undefined;
+
+const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    headline: `Maple ${title}`,
+    description,
+    datePublished: isoDate(date),
+    dateModified: isoDate(date),
+    ...(cover && Astro.site ? { image: new URL(cover, Astro.site).toString() } : {}),
+    author: { "@type": "Organization", name: "Maple" },
+    publisher: {
+        "@type": "Organization",
+        name: "Maple",
+        logo: { "@type": "ImageObject", url: "https://maple.dev/logo192.png" },
+    },
+    isPartOf: {
+        "@type": "CollectionPage",
+        name: "Maple changelog",
+        url: "https://maple.dev/changelog",
+    },
+    ...(canonicalUrl ? { mainEntityOfPage: canonicalUrl } : {}),
+};
+
+const key = "font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted";
+const backLink =
+    "inline-flex items-center gap-1.5 font-mono text-xs text-fg-muted transition-colors hover:text-primary";
+---
+
+<Layout title={pageTitle} description={description} image={cover} ogType="article" alternates={["en"]}>
+    <link
+        slot="head"
+        rel="alternate"
+        type="application/rss+xml"
+        title="Maple changelog"
+        href="/changelog/rss.xml"
+    />
+    <SeoHead title={pageTitle} description={description} />
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+    <Nav />
+
+    <article class="relative pt-[19px]">
+        <div class="mx-auto max-w-6xl px-6 pt-20 md:pt-24">
+            <div class:list={["lg:grid lg:gap-16", hasToc && "lg:grid-cols-[minmax(0,1fr)_13rem]"]}>
+                {/* ── Main column ── */}
+                <div class="min-w-0">
+                    <a href="/changelog" class={backLink}>
+                        <span aria-hidden="true">←</span> all releases
+                    </a>
+
+                    <div
+                        class="mt-[22px] flex flex-wrap items-center gap-2 font-mono text-xs tabular-nums tracking-[0.02em] text-fg-muted"
+                    >
+                        {breaking && (
+                            <span
+                                class="border border-primary/40 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.16em] text-primary"
+                            >
+                                breaking
+                            </span>
+                        )}
+                        <time datetime={isoDate(date)}>{formatDate(date)}</time>
+                        <span aria-hidden="true" class="opacity-50">·</span>
+                        <span>{minutes} min read</span>
+                    </div>
+
+                    <h1
+                        class="mt-3.5 font-display text-[clamp(32px,5vw,52px)] font-semibold leading-[1.04] tracking-[-0.03em] text-balance text-foreground"
+                    >
+                        {title}
+                    </h1>
+                    <p class="mt-5 max-w-[68ch] text-[15px] leading-[1.7] text-pretty text-fg-muted">
+                        {description}
+                    </p>
+
+                    {cover && (
+                        <div
+                            class="mt-10 aspect-[1200/630] overflow-hidden border border-border bg-bg-deep md:mt-12"
+                        >
+                            <img
+                                src={cover}
+                                alt={coverAlt ?? ""}
+                                width="1200"
+                                height="630"
+                                loading="eager"
+                                decoding="async"
+                                class="h-full w-full object-cover"
+                            />
+                        </div>
+                    )}
+
+                    <div class="docs-content mt-12 border-t border-border pt-10 md:mt-14">
+                        <Content />
+                    </div>
+
+                    {/* ── Prev / next release ── */}
+                    {(newer || older) && (
+                        <nav
+                            aria-label="Other releases"
+                            class="mt-14 grid grid-cols-1 gap-px border border-border bg-border sm:grid-cols-2"
+                        >
+                            {older ? (
+                                <a
+                                    href={`/changelog/${older.id}`}
+                                    class="group bg-bg px-4 py-4 transition-colors hover:bg-bg-elevated md:px-5"
+                                >
+                                    <span class={key}>← older</span>
+                                    <span
+                                        class="mt-1.5 block text-[13px] font-medium text-foreground group-hover:text-primary"
+                                    >
+                                        {older.data.title}
+                                    </span>
+                                </a>
+                            ) : (
+                                <span class="bg-bg px-4 py-4 md:px-5">
+                                    <span class={key}>← older</span>
+                                    <span class="mt-1.5 block text-[13px] text-fg-muted/60">
+                                        The first published release
+                                    </span>
+                                </span>
+                            )}
+                            {newer && (
+                                <a
+                                    href={`/changelog/${newer.id}`}
+                                    class="group bg-bg px-4 py-4 transition-colors hover:bg-bg-elevated sm:text-right md:px-5"
+                                >
+                                    <span class={key}>newer →</span>
+                                    <span
+                                        class="mt-1.5 block text-[13px] font-medium text-foreground group-hover:text-primary"
+                                    >
+                                        {newer.data.title}
+                                    </span>
+                                </a>
+                            )}
+                        </nav>
+                    )}
+
+                    <div class="mt-10 border-t border-border pt-5">
+                        <a href="/changelog" class={backLink}>
+                            <span aria-hidden="true">←</span> back to all releases
+                        </a>
+                    </div>
+                </div>
+
+                {/* ── In this release (sticky TOC) ── */}
+                {hasToc && (
+                    <aside class="hidden lg:block">
+                        <nav aria-label="In this release" class="sticky top-28">
+                            <p class="mb-3 font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted">
+                                In this release
+                            </p>
+                            <ul class="space-y-2.5 border-l border-border">
+                                {toc.map((h) => (
+                                    <li>
+                                        <a
+                                            href={`#${h.slug}`}
+                                            data-toc-link
+                                            class="-ml-px block border-l border-transparent pl-3.5 text-[13px] leading-snug text-fg-muted transition-colors hover:text-foreground data-[active=true]:border-primary data-[active=true]:text-foreground"
+                                        >
+                                            {h.text}
+                                        </a>
+                                    </li>
+                                ))}
+                            </ul>
+                        </nav>
+                    </aside>
+                )}
+            </div>
+        </div>
+    </article>
+
+    <BottomCTA />
+    <Footer />
+
+    {hasToc && (
+        <script is:inline>
+            (() => {
+                const links = Array.from(document.querySelectorAll("[data-toc-link]"));
+                if (!links.length) return;
+                const byId = new Map(links.map((l) => [decodeURIComponent(l.getAttribute("href").slice(1)), l]));
+                const heads = Array.from(document.querySelectorAll(".docs-content h2[id]"));
+                if (!heads.length) return;
+                const setActive = (id) => {
+                    links.forEach((l) => l.removeAttribute("data-active"));
+                    const a = byId.get(id);
+                    if (a) a.setAttribute("data-active", "true");
+                };
+                const obs = new IntersectionObserver(
+                    (entries) => {
+                        const visible = entries.filter((e) => e.isIntersecting);
+                        if (visible.length) {
+                            visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+                            setActive(visible[0].target.id);
+                        }
+                    },
+                    { rootMargin: "-80px 0px -70% 0px", threshold: 0 },
+                );
+                heads.forEach((h) => obs.observe(h));
+                setActive(heads[0].id);
+            })();
+        </script>
+    )}
+</Layout>

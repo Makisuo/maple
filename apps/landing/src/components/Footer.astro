@@ -52,6 +52,8 @@ const stars = await getGitHubStars();
                     <li><a href={l("/local")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.nav_local()}</a></li>
                     <li><a href="/docs" class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.nav_docs()}</a></li>
                     <li><a href="/blog" class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.nav_blog()}</a></li>
+                    <!-- English-only, like /docs and /blog above: bare href, not l(). -->
+                    <li><a href="/changelog" class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.nav_changelog()}</a></li>
                 </ul>
             </div>
 
