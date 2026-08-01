@@ -4,5 +4,5 @@
 	"printWidth": 110,
 	"useTabs": true,
 	"tabWidth": 4,
-	"ignorePatterns": [".context", "deploy", "skills"],
+	"ignorePatterns": [".context", "deploy", "skills", "packages/llm"],
 }

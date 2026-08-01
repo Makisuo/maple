@@ -90,6 +90,10 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   for TanStack Router `validateSearch`. `Schema.optionalKey()` for JSON-decoded HTTP/domain schemas;
   `Schema.optional()` only where `undefined` is a real JS value (search params, MCP tool params).
 - **Effect:** source is vendored at `.context/effect/` (subtree of Effect-TS/effect-smol).
+- **LLM core:** `packages/llm` (`@maple/llm`) is a vendored copy of `anomalyco/opencode`'s
+  `packages/llm`, pinned by SHA in `packages/llm/UPSTREAM.json` and re-synced with
+  `bun run llm:sync`. Don't reformat it and don't put Maple behaviour inside it — see
+  `packages/llm/MAPLE.md`.
 - **Span status codes:** Title case — `"Ok"`, `"Error"`, `"Unset"`.
 - **UI:** shadcn/Base UI + Tailwind 4 (`npx shadcn@latest add <component>`), Recharts, Nucleo icons.
   Find an icon in the local Nucleo DB, then port it into `apps/web/src/components/icons/` by copying

@@ -34,6 +34,8 @@
 		"clickhouse:schema:check": "bun run ./scripts/generate-clickhouse-schema.ts --check && bun run ./scripts/generate-clickhouse-schema-sql.ts --check && bun run ./scripts/generate-clickhouse-insert-mappings.ts --check && bun run ./scripts/lint-clickhouse-schema.ts",
 		"clickhouse:schema:lint": "bun run ./scripts/lint-clickhouse-schema.ts",
 		"check:tokens": "bun run ./scripts/check-token-drift.ts",
+		"llm:sync": "bun run ./scripts/sync-llm-upstream.ts",
+		"llm:sync:check": "bun run ./scripts/sync-llm-upstream.ts --check",
 		"knip": "knip",
 		"knip:fix": "knip --fix --allow-remove-files",
 		"typecheck": "turbo typecheck && tsc -p tsconfig.alchemy.json"
