@@ -133,6 +133,16 @@ const nullableString = (value: unknown, label: string): string | null => {
 	return value
 }
 
+/** ClickHouse emits UInt64 cursor values as decimal strings in JSONEachRow.
+ * Keep the journal representation textual, but reject anything that could
+ * change the meaning of the numeric SQL comparisons when interpolated. */
+const uint64String = (value: unknown, label: string): string | null => {
+	if (value === null) return null
+	if (typeof value !== "string" || !/^\d+$/.test(value))
+		throw new Error(`${label} must be an unsigned decimal string or null`)
+	return value
+}
+
 const nonNegativeInteger = (value: unknown, label: string): number => {
 	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
 		throw new Error(`${label} must be a non-negative integer`)
@@ -185,8 +195,8 @@ const decodeCopyProgress = (value: unknown, label: string): CopyProgress => {
 		rows: nonNegativeInteger(progress.rows, `${label}.rows`),
 		bytes: nonNegativeInteger(progress.bytes, `${label}.bytes`),
 		lastTimestamp: nullableString(progress.lastTimestamp, `${label}.lastTimestamp`),
-		lastHash: nullableString(progress.lastHash, `${label}.lastHash`),
-		lastTieBreak: nullableString(progress.lastTieBreak, `${label}.lastTieBreak`),
+		lastHash: uint64String(progress.lastHash, `${label}.lastHash`),
+		lastTieBreak: uint64String(progress.lastTieBreak, `${label}.lastTieBreak`),
 		duplicateCount: nonNegativeInteger(progress.duplicateCount, `${label}.duplicateCount`),
 		duplicateGroupExhausted: progress.duplicateGroupExhausted,
 	}
@@ -225,11 +235,11 @@ const decodePendingBatch = (value: unknown, label: string): PendingBatch => {
 		rowCount,
 		byteLength: nonNegativeInteger(pending.byteLength, `${label}.byteLength`),
 		firstTimestamp: nullableString(pending.firstTimestamp, `${label}.firstTimestamp`),
-		firstHash: nullableString(pending.firstHash, `${label}.firstHash`),
-		firstTieBreak: nullableString(pending.firstTieBreak, `${label}.firstTieBreak`),
+		firstHash: uint64String(pending.firstHash, `${label}.firstHash`),
+		firstTieBreak: uint64String(pending.firstTieBreak, `${label}.firstTieBreak`),
 		lastTimestamp: nullableString(pending.lastTimestamp, `${label}.lastTimestamp`),
-		lastHash: nullableString(pending.lastHash, `${label}.lastHash`),
-		lastTieBreak: nullableString(pending.lastTieBreak, `${label}.lastTieBreak`),
+		lastHash: uint64String(pending.lastHash, `${label}.lastHash`),
+		lastTieBreak: uint64String(pending.lastTieBreak, `${label}.lastTieBreak`),
 		lastKeyCount: nonNegativeInteger(pending.lastKeyCount, `${label}.lastKeyCount`),
 		lastKeyExhausted: pending.lastKeyExhausted,
 		signature: pending.signature,

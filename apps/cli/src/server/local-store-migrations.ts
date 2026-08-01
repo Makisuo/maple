@@ -2,7 +2,7 @@
 //
 // The coordinator owns process safety, journaling, chain progression, staging,
 // and promotion. Transition-specific table names, transforms, verification,
-// and recovery live in compile-time migration modules.
+// and recovery live in statically registered, typed migration modules.
 
 import { randomUUID } from "node:crypto"
 import { existsSync, readFileSync, statfsSync } from "node:fs"
@@ -543,21 +543,45 @@ const parseJournal = (value: unknown): MigrationJournal => {
 	}
 	assertJournalChainInvariants(journal)
 	for (const [index, step] of journal.chain.entries()) {
-		if ((step.status === "verified" || step.status === "completed") && step.state === undefined)
-			throw new Error(`migration journal step ${index} is ${step.status} but has no persisted state`)
+		if (step.status === "verified" || step.status === "completed") {
+			if (step.state === undefined)
+				throw new Error(
+					`migration journal step ${index} is ${step.status} but has no persisted state`,
+				)
+			if (step.progress === undefined)
+				throw new Error(
+					`migration journal step ${index} is ${step.status} but has no persisted progress`,
+				)
+		}
 	}
 	return journal
 }
 
-export const readMigrationJournal = async (dataDir: string): Promise<MigrationJournal | null> => {
+/** Read and validate only the coordinator-owned journal envelope. This path is
+ * intentionally independent of the executable module registry so target-only
+ * abandonment remains available when a newer build cannot bind a historical
+ * module or its persisted state is corrupt. */
+export const readMigrationJournalStructure = async (dataDir: string): Promise<MigrationJournal | null> => {
 	try {
-		const journal = parseJournal(
-			JSON.parse(await readFile(migrationJournalPath(dataDir), "utf8")) as unknown,
+		return parseJournal(JSON.parse(await readFile(migrationJournalPath(dataDir), "utf8")) as unknown)
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+		throw new Error(
+			`cannot read local migration journal: ${error instanceof Error ? error.message : String(error)}`,
 		)
+	}
+}
+
+/** Read a journal for resume or promotion. Unlike structural quarantine, this
+ * path must bind every step to the executable module and decode its persisted
+ * state before any lifecycle handler can run. */
+export const readMigrationJournal = async (dataDir: string): Promise<MigrationJournal | null> => {
+	const journal = await readMigrationJournalStructure(dataDir)
+	if (journal === null) return null
+	try {
 		validateJournalModuleState(journal, localStoreMigrations)
 		return journal
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
 		throw new Error(
 			`cannot read local migration journal: ${error instanceof Error ? error.message : String(error)}`,
 		)
@@ -777,14 +801,13 @@ export const abandonLocalStoreMigrationPreservingSource = async (dataDir: string
 	assertNoLiveServer(resolvedDataDir)
 	return withMigrationMaintenanceLock(resolvedDataDir, randomUUID(), async () => {
 		const journalPath = migrationJournalPath(resolvedDataDir)
-		const journal = await readMigrationJournal(resolvedDataDir)
+		const journal = await readMigrationJournalStructure(resolvedDataDir)
 		if (journal === null || !isMigrationIncomplete(journal.phase)) return null
 		if (journal.phase === "promotion-started")
 			throw new Error(
 				"cannot abandon a migration after promotion started; resume promotion or use the explicit store reset path after inspection",
 			)
 		assertJournalPaths(resolvedDataDir, journal)
-		journalModules(journal, localStoreMigrations)
 		await assertRealDirectory(resolvedDataDir, "active source data")
 		await assertRealFile(storeMarkerPath(resolvedDataDir), "active source marker")
 		if (isStoreDirty(resolvedDataDir))
@@ -1120,12 +1143,18 @@ export const executeMigrationModule = async (
 		) => Promise<void>
 	},
 ): Promise<{ readonly state: unknown; readonly progress: unknown }> => {
-	let state: unknown =
-		step.status === "verified" || step.status === "completed"
-			? migration.decodeState(step.state)
-			: step.state === undefined
-				? undefined
-				: migration.decodeState(step.state)
+	if (step.status === "verified" || step.status === "completed") {
+		if (step.state === undefined)
+			throw new Error(`${migration.id} ${step.status} step has no recoverable persisted state`)
+		const state = migration.decodeState(step.state)
+		const progress = migration.decodeProgress(step.progress)
+		if (progress === undefined)
+			throw new Error(`${migration.id} ${step.status} step has no recoverable persisted progress`)
+		// Verification has already passed. The only remaining work is the
+		// coordinator-owned marker commit, so no module lifecycle handler may run.
+		return { state, progress }
+	}
+	let state: unknown = step.state === undefined ? undefined : migration.decodeState(step.state)
 	let progress: unknown = migration.decodeProgress(step.progress)
 	if (step.status === "pending") {
 		state = await migration.preflight(context)
@@ -1160,14 +1189,12 @@ export const executeMigrationModule = async (
 		await context.saveStep({ state })
 		await options.onPhase?.("target-created")
 	}
-	if (step.status !== "verified" && step.status !== "completed") {
-		await options.onPhase?.("copying")
-		progress = await migration.apply(context, state, progress)
-		if (progress === undefined) throw new Error(`${migration.id} apply returned no persisted progress`)
-		await context.saveStep({ progress })
-		await migration.verify(context, state, progress)
-		await options.onPhase?.("copy-verified")
-	}
+	await options.onPhase?.("copying")
+	progress = await migration.apply(context, state, progress)
+	if (progress === undefined) throw new Error(`${migration.id} apply returned no persisted progress`)
+	await context.saveStep({ progress })
+	await migration.verify(context, state, progress)
+	await options.onPhase?.("copy-verified")
 	return { state, progress }
 }
 

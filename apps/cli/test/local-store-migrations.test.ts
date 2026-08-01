@@ -22,6 +22,7 @@ import {
 	migrationRootPath,
 	planMigration,
 	readMigrationJournal,
+	readMigrationJournalStructure,
 	resolveMigrationChain,
 	runLocalStoreMigration,
 	promoteLocalStoreMigration,
@@ -207,11 +208,16 @@ describe("local migration registry", () => {
 				return {}
 			},
 		}
-		const verifiedStep = { ...context.step, status: "verified" as const, state: { state: "prepared" } }
+		const verifiedStep = {
+			...context.step,
+			status: "verified" as const,
+			state: { state: "prepared" },
+			progress: { rows: 1 },
+		}
 		await executeMigrationModule(verifiedModule, { ...context, step: verifiedStep }, verifiedStep, {
 			prepareTarget: true,
 		})
-		expect(verifiedEvents).toEqual(["recover"])
+		expect(verifiedEvents).toEqual([])
 	})
 
 	it("exposes retention-aware dispositions and rollback limits", () => {
@@ -270,6 +276,7 @@ describe("durable migration recovery", () => {
 					to: LOCAL_SCHEMA_V1,
 					status: "running",
 					state: { module: legacyToCurrentModule.id, version: 1 },
+					progress: { sourceInventory: {}, copied: {} },
 				},
 			],
 			currentStepIndex: 0,
@@ -289,12 +296,22 @@ describe("durable migration recovery", () => {
 			createdAt: "2026-01-01T00:00:00.000Z",
 		}
 		try {
-			const { state: _verifiedState, ...verifiedWithoutState } = base.chain[0]!
+			const {
+				state: _verifiedState,
+				progress: _verifiedProgress,
+				...verifiedWithoutStateAndProgress
+			} = base.chain[0]!
+			const { progress: _missingProgress, ...verifiedWithoutProgress } = base.chain[0]!
 			await durableJson(migrationJournalPath(dataDir), {
 				...base,
-				chain: [{ ...verifiedWithoutState, status: "verified" }],
+				chain: [{ ...verifiedWithoutStateAndProgress, status: "verified" }],
 			})
 			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/no persisted state/)
+			await durableJson(migrationJournalPath(dataDir), {
+				...base,
+				chain: [{ ...verifiedWithoutProgress, status: "verified" }],
+			})
+			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/no persisted progress/)
 			await durableJson(migrationJournalPath(dataDir), {
 				...base,
 				chain: [{ ...base.chain[0]!, progress: { sourceInventory: [], copied: {} } }],
@@ -325,6 +342,7 @@ describe("durable migration recovery", () => {
 					to: LOCAL_SCHEMA_V1,
 					status: "completed",
 					state: { module: "local-0000-to-0001-raw-replay", version: 1 },
+					progress: { sourceInventory: {}, copied: {} },
 				},
 			],
 			currentStepIndex: 1,
@@ -510,7 +528,7 @@ describe("durable migration recovery", () => {
 			await durableJson(migrationJournalPath(dataDir), journal)
 			const completed = await executeMigrationChain(dataDir, journal, [first, second])
 			if (resumeSecondStep) {
-				expect(events).toEqual(["fixture-v1-v2:recover"])
+				expect(events).toEqual([])
 			} else {
 				expect(events).toEqual([
 					"fixture-v0-v1:preflight:separate",
@@ -562,6 +580,7 @@ describe("durable migration recovery", () => {
 					to: LOCAL_SCHEMA_V1,
 					status: "running",
 					state: { module: legacyToCurrentModule.id, version: 1 },
+					progress: { sourceInventory: {}, copied: {} },
 				},
 			],
 			currentStepIndex: 0,
@@ -614,6 +633,68 @@ describe("durable migration recovery", () => {
 			await expect(abandonLocalStoreMigrationPreservingSource(dataDir)).rejects.toThrow(
 				/promotion started/,
 			)
+		} finally {
+			await rm(root, { recursive: true, force: true })
+		}
+	})
+
+	it("quarantines a structurally safe target without binding its old module", async () => {
+		const root = await mkdtemp(join(tmpdir(), "maple-migration-abandon-unbound-"))
+		const dataDir = join(root, "data")
+		const migrationId = "fixture-unbound-abandon"
+		const targetDataDir = join(migrationRootPath(dataDir, migrationId), "target", "data")
+		const journal: MigrationJournal = {
+			formatVersion: 2,
+			migrationId,
+			phase: "copying",
+			chain: [
+				{
+					id: "removed-module",
+					moduleVersion: 99,
+					from: LEGACY_LOCAL_SCHEMA,
+					to: LOCAL_SCHEMA_V1,
+					status: "running",
+					state: { corrupt: true },
+					progress: { corrupt: true },
+				},
+			],
+			currentStepIndex: 0,
+			sourceDataDir: dataDir,
+			sourceStoreId: "source-id",
+			sourceChdb: CURRENT_LOCAL_SCHEMA.chdb,
+			sourceFingerprint: LEGACY_LOCAL_SCHEMA.fingerprint,
+			sourceDigest: LEGACY_LOCAL_SCHEMA.digest,
+			sourceVersion: LEGACY_LOCAL_SCHEMA.version,
+			targetDataDir,
+			targetStoreId: "target-id",
+			targetChdb: LOCAL_SCHEMA_V1.chdb,
+			targetFingerprint: LOCAL_SCHEMA_V1.fingerprint,
+			targetDigest: LOCAL_SCHEMA_V1.digest,
+			targetVersion: LOCAL_SCHEMA_V1.version,
+			cutoffAt: "2026-01-01T00:00:00.000Z",
+			createdAt: "2026-01-01T00:00:00.000Z",
+		}
+		try {
+			await mkdir(join(dataDir, "store"), { recursive: true })
+			await durableJson(storeMarkerPath(dataDir), {
+				chdb: CURRENT_LOCAL_SCHEMA.chdb,
+				maple: "test",
+				createdAt: journal.createdAt,
+				schema: LEGACY_SCHEMA_FINGERPRINT,
+			})
+			await mkdir(targetDataDir, { recursive: true })
+			await ensureStoreMarkerDurable(targetDataDir, LOCAL_SCHEMA_V1, "test", journal.createdAt, {
+				activation: "staging",
+				storeId: journal.targetStoreId,
+			})
+			await durableJson(migrationJournalPath(dataDir), journal)
+			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/not available/)
+			expect(await readMigrationJournalStructure(dataDir)).toMatchObject({ migrationId })
+
+			const quarantine = await abandonLocalStoreMigrationPreservingSource(dataDir)
+			expect(quarantine).not.toBeNull()
+			expect(await Bun.file(join(quarantine!, "journal.json")).exists()).toBe(true)
+			expect(await Bun.file(storeMarkerPath(dataDir)).exists()).toBe(true)
 		} finally {
 			await rm(root, { recursive: true, force: true })
 		}
@@ -695,5 +776,23 @@ describe("legacy raw replay cursor", () => {
 				duplicateGroupExhausted: true,
 			}),
 		).toEqual({ comparison: ">", offset: 0 })
+	})
+
+	it("rejects non-numeric persisted cursor values", () => {
+		const progress = {
+			sourceInventory: {},
+			copied: {
+				logs: {
+					rows: 0,
+					bytes: 0,
+					lastTimestamp: null,
+					lastHash: "1 OR 1=1",
+					lastTieBreak: "2",
+					duplicateCount: 0,
+					duplicateGroupExhausted: false,
+				},
+			},
+		}
+		expect(() => legacyToCurrentModule.decodeProgress(progress)).toThrow(/lastHash/)
 	})
 })

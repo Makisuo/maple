@@ -236,9 +236,13 @@ advertised as restorable by the new schema; create a fresh checkpoint after
 promotion. Every persisted module state and progress value is decoded by its
 own migration module before resume, and malformed journal topology fails
 closed. A step marked `verified` is commit-pending: recovery may rewrite its
-staging marker, but never reruns its mutating target preparation.
+staging marker, but no module lifecycle handler runs again, including
+`recover()`. Verified and completed steps must retain both decoded state and
+progress. Target-only abandonment validates the coordinator-owned journal
+structure and filesystem proofs without requiring the historical executable
+module or its state decoder to remain available.
 
-Migration edges are compile-time modules registered in
+Migration edges are statically registered typed modules in
 `apps/cli/src/server/local-store-migrations/`. The coordinator owns locking,
 journaling, chain progression, staging, and promotion. Each module owns its
 frozen schema identities, target preparation, transforms, semantic
@@ -257,12 +261,15 @@ entries in CI, and requires every historical identity to reach the current one
 through registered migration edges. Changing a schema digest or manifest
 therefore requires a new versioned entry and executable edge together.
 
-The Linux native probe `apps/cli/test/native-local-store-migration.sh` creates
-and populates a source with the bundled Maple/chDB, applies the legacy marker,
-runs the public migration command, and reopens the promoted store in a fresh
-process. It reports `SKIP` when no native `libchdb` is available (for example,
-on a development machine without the platform bundle); the Linux CI bundle
-runs it alongside the checkpoint smoke test.
+The Linux native probe `apps/cli/test/native-local-store-migration.sh` uses a
+native chDB setup helper to create a stopped historical raw-table fixture,
+applies the legacy marker, runs the public migration command, checks rebuilt
+service-namespace and database aggregates, and reopens the promoted store in
+a fresh process. It reports `SKIP` when no native `libchdb` is available (for
+example, on a development machine without the platform bundle); the Linux CI
+bundle runs it alongside the checkpoint smoke test. The fixture covers the
+authoritative v0 raw tables; retained derived objects remain rollback-only
+rather than being treated as migrated history.
 
 Every start also checks the opened physical schema against the generated local
 schema manifest, including objects, columns/types/defaults/codecs, engines,

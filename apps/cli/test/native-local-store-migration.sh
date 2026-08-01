@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Native end-to-end local-store migration probe.
 #
-# The source is created and populated by the compiled Maple + libchdb bundle,
-# then its historical v0 marker is restored to model the fingerprint-only
-# legacy store. The migration itself opens source and target through native
-# chDB, verifies all six raw tables, promotes the target, and reopens the
-# promoted store in a fresh Maple process.
+# A Bun setup helper creates a stopped native source from historical v0 raw-table
+# DDL, then its fingerprint-only legacy marker is installed. The migration
+# itself opens source and target through native chDB, verifies all six raw
+# tables, promotes the target, checks rebuilt DB/namespace aggregates, and
+# reopens the promoted store in a fresh Maple process.
 set -euo pipefail
 
 BUNDLE_DIR="${1:?usage: native-local-store-migration.sh <bundle-dir> [port]}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 MAPLE="$BUNDLE_DIR/maple"
 LIBCHDB="${MAPLE_LIBCHDB:-$BUNDLE_DIR/libchdb.so}"
 PORT="${2:-45241}"
@@ -83,14 +84,7 @@ printf '%s\n' \
 	'</clickhouse>' >"$CONFIG"
 chmod 600 "$CONFIG"
 
-start_server
-query "INSERT INTO logs (OrgId, Timestamp, TimestampTime, TraceId, SpanId, TraceFlags, SeverityText, SeverityNumber, ServiceName, Body) SELECT 'native-migration', now64(9), now(), 'trace-native', 'span-native', 1, 'INFO', 9, 'native-migration', 'legacy source'" >/dev/null
-query "INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'native-migration', now64(9), 'trace-native', 'span-native', '', '', 'native migration', 'Server', 'native-migration', 'Ok', ''" >/dev/null
-query "INSERT INTO metrics_sum (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Value, AggregationTemporality, IsMonotonic) SELECT 'native-migration', 'native-migration', 'sum-native', now64(9), now64(9), 1, 2, true" >/dev/null
-query "INSERT INTO metrics_gauge (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Value) SELECT 'native-migration', 'native-migration', 'gauge-native', now64(9), now64(9), 1" >/dev/null
-query "INSERT INTO metrics_histogram (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Count, Sum, BucketCounts, ExplicitBounds, AggregationTemporality) SELECT 'native-migration', 'native-migration', 'hist-native', now64(9), now64(9), 1, 1, [1], [1.0], 2" >/dev/null
-query "INSERT INTO metrics_exponential_histogram (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Count, Sum, Scale, ZeroCount, PositiveOffset, PositiveBucketCounts, NegativeOffset, NegativeBucketCounts, AggregationTemporality) SELECT 'native-migration', 'native-migration', 'exp-native', now64(9), now64(9), 1, 1, 0, 0, 0, [1], 0, [], 2" >/dev/null
-stop_server
+MAPLE_LIBCHDB="$LIBCHDB" bun "$REPO_ROOT/apps/cli/test/native-local-store-migration-fixture.ts" "$DATA" "$CONFIG"
 
 # Replace the newly-created active v2 marker with the historical v1 marker.
 # The physical source was created by native chDB; the marker is the only
@@ -112,11 +106,19 @@ jq -e '.formatVersion == 2 and .activation == "active" and .schemaVersion == 1 a
 start_server
 for table in logs traces metrics_sum metrics_gauge metrics_histogram metrics_exponential_histogram; do
 	count="$(query "SELECT count() AS count FROM $table WHERE ServiceName = 'native-migration'" | jq -r '.[0].count | tonumber')"
-	[[ "$count" == "1" ]] || fail "$table count after native migration: expected 1, got $count"
+	expected="1"
+	[[ "$table" == "traces" ]] && expected="2"
+	[[ "$count" == "$expected" ]] || fail "$table count after native migration: expected $expected, got $count"
 done
+trace_count="$(query "SELECT sum(TraceCount) AS count FROM service_usage WHERE OrgId = 'native-migration' AND ServiceName = 'native-migration'" | jq -r '.[0].count | tonumber')"
+[[ "$trace_count" == "2" ]] || fail "service usage trace count after native migration: expected 2, got $trace_count"
+namespace_count="$(query "SELECT count() AS count FROM service_overview_spans WHERE OrgId = 'native-migration' AND ServiceName = 'native-migration' AND ServiceNamespace = 'payments'" | jq -r '.[0].count | tonumber')"
+[[ "$namespace_count" == "1" ]] || fail "service namespace aggregate after native migration: expected 1, got $namespace_count"
+db_edge_count="$(query "SELECT count() AS count FROM service_map_db_edges_hourly WHERE OrgId = 'native-migration' AND ServiceName = 'native-migration' AND DbSystem = 'postgresql' AND DbNamespace = 'orders'" | jq -r '.[0].count | tonumber')"
+[[ "$db_edge_count" == "1" ]] || fail "database aggregate after native migration: expected 1, got $db_edge_count"
 stop_server
 
 rollback="$(sed -n 's/^.*rollback *//p' "$ROOT/migrate.out" | tail -1)"
 [[ -n "$rollback" && -d "$rollback" ]] || fail "native migration did not retain a rollback source"
 [[ -f "$(dirname "$rollback")/maple-store-version.json" ]] || fail "native rollback marker was not retained"
-echo "PASS: native local-store migration, fresh reopen, and rollback retention"
+echo "PASS: native historical raw-store migration, rebuilt aggregates, fresh reopen, and rollback retention"
