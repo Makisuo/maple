@@ -164,9 +164,22 @@ a build-time constant, so a Vite restart is needed after changing it.
    With `ELECTRIC_URL` unset the proxy returns 503 and the synced lists fail to load.
 6. Validate initial per-org snapshot sizes before deploying a new synced table.
 
-## PR previews (per-PR Electric Cloud environment)
+## PR previews (no Electric source — dormant since 2026-08)
 
-PR previews provision an ephemeral Electric Cloud **environment** `pr-<n>` + a
+**PR previews no longer have an Electric source.** They stopped provisioning a
+PlanetScale branch (see `resolveDatabaseMode` in
+`packages/infra/src/cloudflare/stage.ts`), and with no Postgres to replicate from
+there is nothing for Electric to point at. `apps/electric-sync/alchemy.run.ts`
+therefore withholds `ELECTRIC_URL`/`ELECTRIC_SOURCE_ID`/`ELECTRIC_SECRET` on the
+`pr` stage — deliberately, so a preview can never inherit the shared `dev`
+credentials and proxy its shapes at another stage's data. The sync worker deploys
+unconfigured, returns 503, and the web app falls back to its effect-atom fetches.
+
+The `down`/`sweep` paths below still run: they reap environments left over from
+PRs opened before the cutover (each still holds a plan max-databases slot). The
+`up` path described here is dormant and documents the reverse path.
+
+The former lifecycle: an ephemeral Electric Cloud **environment** `pr-<n>` + a
 Postgres **source** per PR, mirroring the PlanetScale/Tinybird branch lifecycle.
 `scripts/electric-pr-branch.ts` (`up`/`down <pr-number>`, driven from
 `.github/workflows/deploy-pr-preview.yml`) uses `@electric-sql/cli`
@@ -183,8 +196,9 @@ the electric-sync worker by alchemy). On close it deletes the environment
 (cascades the source). Steps are gated on `ELECTRIC_API_TOKEN`, so previews stay
 green (and the worker 503s) until the token lands in Infisical.
 
-- The web build always reads through the sync path — provisioning the source is
-  what makes it work in previews.
+- The web build always reads through the sync path, so with no source provisioned
+  a preview's synced lists fall back to their effect-atom fetches. Provisioning
+  the source is what would make live sync work in previews again.
 - **Publication:** the migrate step runs `0009` (creates
   `electric_publication_default`) before the source is created. The script passes
   `--manual-table-publishing` by default (prod parity; Electric reads that
