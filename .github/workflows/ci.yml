@@ -17,20 +17,22 @@ jobs:
     # Which jobs are worth running for this diff. Every filter carries the `base`
     # anchor, so a lockfile/turbo/tsconfig/workflow change re-enables everything.
     #
-    # On push to main every output is forced true: paths-filter compares against the
-    # previous commit on push events, which is the wrong base for a merge commit, and
-    # main should get the full suite regardless.
+    # Push events filter too. paths-filter compares `github.event.before..github.sha`
+    # there, which spans the whole push — correct for squash-merges, for direct
+    # pushes to main, and for the `Merge branch 'main'` commits this history carries.
+    # A main push therefore gets exactly the guarantee a PR gets. This used to force
+    # every output true on push, which cost ~40% of CI's monthly runner spend re-running
+    # the full suite for diffs that could not have affected it.
     changes:
         name: Detect changes
         runs-on: blacksmith-4vcpu-ubuntu-2404
         timeout-minutes: 5
         outputs:
-            ts: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ts == 'true' }}
-            cli: ${{ github.event_name != 'pull_request' || steps.filter.outputs.cli == 'true' }}
-            web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' }}
-            clickhouse: ${{ github.event_name != 'pull_request' || steps.filter.outputs.clickhouse == 'true' }}
-            shell: ${{ github.event_name != 'pull_request' || steps.filter.outputs.shell == 'true' }}
-            slack: ${{ github.event_name != 'pull_request' || steps.filter.outputs.slack == 'true' }}
+            ts: ${{ steps.filter.outputs.ts == 'true' }}
+            cli: ${{ steps.filter.outputs.cli == 'true' }}
+            web: ${{ steps.filter.outputs.web == 'true' }}
+            clickhouse: ${{ steps.filter.outputs.clickhouse == 'true' }}
+            slack: ${{ steps.filter.outputs.slack == 'true' }}
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -84,6 +86,30 @@ jobs:
                         # MCP tool lands on the API side without being mirrored here,
                         # so apps/api has to re-trigger this job. Do not narrow.
                         - 'apps/api/**'
+
+            # Shell linting lives here rather than in its own job: it needs only the
+            # checkout this job already has — no bun, no mise, no install — so a
+            # dedicated runner was ~90% setup for ~4s of work. shellcheck is
+            # preinstalled on the runner image.
+            - name: shellcheck
+              if: ${{ steps.filter.outputs.shell == 'true' }}
+              run: >-
+                  shellcheck scripts/install.sh scripts/uninstall.sh scripts/build-local-binary.sh
+                  apps/cli/test/native-checkpoint-smoke.sh
+                  apps/cli/test/native-archive-smoke.sh
+                  apps/cli/test/native-archive-crash-recovery-probe.sh
+                  apps/cli/test/native-archive-adversarial-probe.sh
+                  apps/cli/test/native-archive-calibrate-crash-probe.sh
+                  apps/cli/test/native-archive-calibrate-probe.sh
+                  apps/cli/test/native-archive-gc-probe.sh
+                  apps/cli/test/native-archive-merge-probe.sh
+
+            # Syntax-check the POSIX installers against the actual /bin/sh they claim.
+            - name: sh -n
+              if: ${{ steps.filter.outputs.shell == 'true' }}
+              run: |
+                  sh -n scripts/install.sh
+                  sh -n scripts/uninstall.sh
 
     typescript:
         name: TypeScript
@@ -150,9 +176,13 @@ jobs:
             # apps/slack-agent is deliberately outside the bun workspace (it
             # self-deploys to Railway, not Cloudflare), so the root install and
             # the `bun turbo` job above never reach it — it needs its own.
+            # Its own lockfile means its own disk key; and as the only job that
+            # installs it, its own writer.
             - uses: ./.github/actions/bun-install
               with:
                   working-directory: apps/slack-agent
+                  disk-key: node-modules-slack-agent
+                  commit: on-change
 
             - run: bun run typecheck
               working-directory: apps/slack-agent
@@ -163,19 +193,18 @@ jobs:
             - run: bun test
               working-directory: apps/slack-agent
 
+    # Single version, not a matrix. Two legs cost ~380s of setup each to run ~50s of
+    # actual work, so the second version was ~88% overhead. Pinned to the same tag as
+    # docker-compose.development.yml so local dev and CI verify the same server.
     clickhouse-schema-e2e:
-        name: ClickHouse schema E2E (${{ matrix.clickhouse }})
+        name: ClickHouse schema E2E
         needs: changes
         if: ${{ needs.changes.outputs.clickhouse == 'true' }}
         runs-on: blacksmith-4vcpu-ubuntu-2404
         timeout-minutes: 20
-        strategy:
-            fail-fast: false
-            matrix:
-                clickhouse: ["24.8", "26.2"]
         services:
             clickhouse:
-                image: clickhouse/clickhouse-server:${{ matrix.clickhouse }}
+                image: clickhouse/clickhouse-server:26.2
                 env:
                     CLICKHOUSE_USER: maple
                     CLICKHOUSE_PASSWORD: maple
@@ -225,37 +254,15 @@ jobs:
 
             - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
 
+            # Sole writer of the root node_modules sticky disk. This job carries it
+            # because it is the only one with no `needs: changes` gate, so it always
+            # runs — the disk therefore always has exactly one committer, and never
+            # zero. Every other job mounts the same key read-only (commit: false).
             - uses: ./.github/actions/bun-install
+              with:
+                  commit: on-change
 
             - run: bun knip
-
-    shell:
-        name: Shell
-        needs: changes
-        if: ${{ needs.changes.outputs.shell == 'true' }}
-        runs-on: blacksmith-4vcpu-ubuntu-2404
-        timeout-minutes: 5
-        steps:
-            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-            # shellcheck is preinstalled on the ubuntu-latest runner image.
-            - name: shellcheck
-              run: >-
-                  shellcheck scripts/install.sh scripts/uninstall.sh scripts/build-local-binary.sh
-                  apps/cli/test/native-checkpoint-smoke.sh
-                  apps/cli/test/native-archive-smoke.sh
-                  apps/cli/test/native-archive-crash-recovery-probe.sh
-                  apps/cli/test/native-archive-adversarial-probe.sh
-                  apps/cli/test/native-archive-calibrate-crash-probe.sh
-                  apps/cli/test/native-archive-calibrate-probe.sh
-                  apps/cli/test/native-archive-gc-probe.sh
-                  apps/cli/test/native-archive-merge-probe.sh
-
-            # Syntax-check the POSIX installers against the actual /bin/sh they claim.
-            - name: sh -n
-              run: |
-                  sh -n scripts/install.sh
-                  sh -n scripts/uninstall.sh
 
     local-checkpoint-native:
         name: Local checkpoint native
@@ -468,7 +475,6 @@ jobs:
             - slack-agent
             - clickhouse-schema-e2e
             - knip
-            - shell
             - local-checkpoint-native
             - local-archive-native
             - service-map-perf
