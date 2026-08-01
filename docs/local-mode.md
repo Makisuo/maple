@@ -168,11 +168,14 @@ chDB's single-writer requirement.
 The on-disk store at `~/.maple/data` is guarded by two sentinels beside it
 (`apps/cli/src/server/store-version.ts`):
 
-- **`maple-store-version.json`** — the chDB version that bootstrapped the store.
-  A different chDB build can't be trusted to reload another's persisted
-  materialized views (it may crash the C++ runtime natively, which JS can't
-  catch), so `maple start` **refuses up front** when the version differs.
-  Recover with `maple start --reset`.
+- **`maple-store-version.json`** — the chDB version and versioned Maple schema
+  identity that bootstrapped the store. A different chDB build can't be trusted
+  to reload another's persisted materialized views (it may crash the C++ runtime
+  natively, which JS can't catch), so `maple start` **refuses up front** when the
+  version differs. Current markers also carry a stable store id, immutable
+  creation provenance, a full schema digest, and an `active`/`staging` state.
+  Recover a store with an unsupported schema using `maple start --reset` only
+  when losing its live telemetry is acceptable.
 - **`maple-store-open`** — a clean-shutdown sentinel (not a concurrency lock; the
   PID file already guards that). It's written right after chDB opens and removed
   as the last step of a clean close. If `maple start` finds it still present over
@@ -181,6 +184,48 @@ The on-disk store at `~/.maple/data` is guarded by two sentinels beside it
   risk the crash, `maple start` **auto-wipes the store and bootstraps fresh**,
   printing a warning. Local telemetry data is **not recoverable** after an
   unclean kill of chDB; re-ingest to repopulate.
+
+### Versioned local-store migrations
+
+`maple start` never mutates a populated store in place when its schema identity
+is stale. Inspect a supported path before choosing it:
+
+```bash
+maple schema status
+maple schema plan
+maple schema migrate --dry-run
+maple schema migrate --yes
+```
+
+The supported legacy path is a stopped, side-by-side rebuild. It records a
+cutoff, copies the six authoritative raw telemetry tables with explicit column
+lists and bounded resumable batches, and replays the current materialized views
+from rows inside each table's retention horizon. Source/target inventories
+(row count, time bounds, and order-independent hashes) are compared before
+promotion. The source is retained under `.maple-migrations/<id>/source/data` as
+a pre-cutover rollback and inspection point; it is never deleted automatically.
+Promotion is a durable multi-step rename within one filesystem. A source
+directory mounted on another filesystem is rejected before cutover with an
+`EXDEV`-safe retry message; the staged target and source remain available.
+
+The migration journal beside the data directory is durable and fail-closed.
+Startup refuses to open an unfinished transaction until `maple schema migrate
+--yes` resumes it. `maple start --reset` or `maple reset --yes` can explicitly
+abandon such a transaction, but preserves the journal under an
+`maple-store-migration-abandoned-*` name for inspection. Existing checkpoints
+remain attached to the retained source and are not advertised as restorable by
+the new schema; create a fresh checkpoint after promotion.
+
+Every start also checks the opened physical schema against the generated local
+schema manifest, including objects, columns/types/defaults/codecs, engines,
+keys, TTLs, skipping indexes (with a DDL fallback on older chDB builds), and
+materialized-view definitions.
+This catches out-of-band or partially applied DDL even when a marker's bundle
+digest looks current.
+If a future migration needs a different chDB reader, its module must provide a
+version-matched reader, a prior Maple binary/export path, or an explicit
+unsupported boundary; the current binary never guesses by opening an
+incompatible source.
 
 ## The `/local/query` contract
 
