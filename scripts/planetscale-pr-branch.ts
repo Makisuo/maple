@@ -3,6 +3,13 @@
  * Per-PR PlanetScale Postgres branch lifecycle for the PR-preview deploy.
  * Sibling of scripts/tinybird-pr-branch.ts with the same up/down contract.
  *
+ * ⚠️ `up`/`down` are DORMANT since 2026-08: PR previews deploy with no
+ * application database (`resolveDatabaseMode` → "none" for `pr`, see
+ * packages/infra/src/cloudflare/stage.ts), so the deploy workflow no longer
+ * calls them. Only `sweep` still runs on a schedule, as a residual safety net.
+ * Restoring per-PR databases means flipping that resolver and re-adding the
+ * steps described in the comment in .github/workflows/deploy-pr-preview.yml.
+ *
  *   bun scripts/planetscale-pr-branch.ts up    <pr-number>
  *   bun scripts/planetscale-pr-branch.ts down  <pr-number>
  *   bun scripts/planetscale-pr-branch.ts sweep

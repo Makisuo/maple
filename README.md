@@ -110,10 +110,11 @@ single `Alchemy.Stack("maple", …)` whose program composes per-app factories:
 
 Stage grammar is `prd` / `stg` / `pr-<number>` / dev names, resolved via
 `@maple/infra/cloudflare` (`parseMapleStage`, `resolveMapleDomains`, `resolveWorkerName`,
-`resolveHyperdriveName`, `resolveHyperdriveRefId`). stg/prd bind the dashboard-managed
-Hyperdrive by config ID (`resolveHyperdriveRefId`) — origin credentials never touch a
-deploy and `MAPLE_PG_URL` is only needed for pr/dev stages, whose per-branch Hyperdrive
-alchemy manages itself.
+`resolveHyperdriveName`, `resolveHyperdriveRefId`, `resolveDatabaseMode`). stg/prd bind the
+dashboard-managed Hyperdrive by config ID (`resolveHyperdriveRefId`) — origin credentials
+never touch a deploy. `MAPLE_PG_URL` is only needed for dev stages, whose Hyperdrive alchemy
+manages itself. PR previews bind **no database at all** (`resolveDatabaseMode` → `"none"`):
+DB-backed routes 500, everything else in the preview works.
 
 Run locally:
 
