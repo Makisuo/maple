@@ -1,11 +1,22 @@
 name: Deploy PR Preview (Cloudflare via Alchemy)
 
+# PREVIEW DEPLOYS ARE DISABLED (2026-08, cost). Only the `closed` event still
+# fires, so this workflow now does teardown ONLY: it tears down the stacks of
+# PRs that were deployed before the cutover and never deploys a new one. The
+# deploy-side steps below are kept intact and simply never run.
+#
+# To re-enable, restore the full trigger list:
+#     types: [opened, synchronize, reopened, closed]
+# Previews will then deploy without an application database — see the comment
+# further down and `resolveDatabaseMode` in packages/infra/src/cloudflare/stage.ts.
+#
+# While disabled, cleanup-preview-orphans.yml stays the backstop: its 6-hourly
+# sweeps reap any preview worker, queue, Tinybird branch or Hyperdrive config
+# whose PR closes without a teardown run (GitHub creates no `closed` run for a
+# PR that conflicts with its base branch).
 on:
     pull_request:
         types:
-            - opened
-            - synchronize
-            - reopened
             - closed
 
 concurrency:

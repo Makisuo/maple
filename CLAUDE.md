@@ -71,8 +71,12 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   `DatabasePgliteLive` (tests/local; `createTestDb()` in `apps/api/src/lib/test-pglite.ts`).
 - Migrations: `bun run --cwd packages/db db:generate`; CI applies them against the branch's DIRECT
   port 5432 (never a pooler) before `alchemy deploy`. PGlite applies them at layer build.
-- **PR previews have no application database** (since 2026-08 — PS-DEV branches billed
-  continuously and ate the Hyperdrive config cap). `resolveDatabaseMode` in
+- **PR preview deploys are disabled** (2026-08, cost). `deploy-pr-preview.yml` triggers on the
+  `closed` event only, so it tears down pre-cutover stacks and never deploys a new one; restore
+  `types: [opened, synchronize, reopened, closed]` to re-enable.
+- **PR previews have no application database** either (PS-DEV branches billed continuously and
+  ate the Hyperdrive config cap) — this is the state previews return to when re-enabled.
+  `resolveDatabaseMode` in
   `packages/infra/src/cloudflare/stage.ts` returns `"none"` for `pr`, so no `MAPLE_DB` is bound
   and `DatabasePgLive` fails every query with a `DatabaseError` — DB-backed routes 500, the rest
   of the preview works. To restore: return `"managed"` for `pr` and re-add the PlanetScale +
