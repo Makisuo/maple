@@ -102,8 +102,8 @@ export const inspectPhysicalSchema = (db: Chdb): PhysicalSchema => {
 	}
 }
 
-export const assertCurrentPhysicalSchema = (db: Chdb): void => {
-	const mismatches = comparePhysicalSchema(LOCAL_SCHEMA_MANIFEST, inspectPhysicalSchema(db))
+export const assertPhysicalSchema = (db: Chdb, expected: typeof LOCAL_SCHEMA_MANIFEST): void => {
+	const mismatches = comparePhysicalSchema(expected, inspectPhysicalSchema(db))
 	if (mismatches.length > 0) {
 		throw new Error(
 			`physical local schema does not match the bundled schema: ${mismatches
@@ -113,3 +113,5 @@ export const assertCurrentPhysicalSchema = (db: Chdb): void => {
 		)
 	}
 }
+
+export const assertCurrentPhysicalSchema = (db: Chdb): void => assertPhysicalSchema(db, LOCAL_SCHEMA_MANIFEST)

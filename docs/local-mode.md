@@ -199,8 +199,8 @@ maple schema migrate --yes
 
 The supported legacy path is a stopped, side-by-side rebuild. It records a
 cutoff, copies the six authoritative raw telemetry tables with explicit column
-lists and bounded resumable batches, and replays the current materialized views
-from rows inside each table's retention horizon. Source/target inventories
+lists and bounded resumable batches, and replays the v1 materialized views from
+rows inside each table's retention horizon. Source/target inventories
 (row count, time bounds, and order-independent hashes) are compared before
 promotion. The source is retained under `.maple-migrations/<id>/source/data` as
 a pre-cutover rollback and inspection point; it is never deleted automatically.
@@ -209,12 +209,31 @@ directory mounted on another filesystem is rejected before cutover with an
 `EXDEV`-safe retry message; the staged target and source remain available.
 
 The migration journal beside the data directory is durable and fail-closed.
-Startup refuses to open an unfinished transaction until `maple schema migrate
---yes` resumes it. `maple start --reset` or `maple reset --yes` can explicitly
-abandon such a transaction, but preserves the journal under an
-`maple-store-migration-abandoned-*` name for inspection. Existing checkpoints
-remain attached to the retained source and are not advertised as restorable by
-the new schema; create a fresh checkpoint after promotion.
+Each journal records the complete selected chain, current module step, frozen
+source/target identities, typed module state, and resumable progress. A
+migration connection writes `maple-store-open` before native connect/bootstrap
+and clears it only after a clean close; a dirty source is never silently
+reopened. Startup refuses to open an unfinished transaction until `maple
+schema migrate --yes` resumes it. Promotion recovery runs from the journal
+before ordinary active-marker compatibility checks, including the crash window
+where the active marker is still `staging`.
+
+After successful promotion, the canonical journal is archived under the
+migration root as `journal.json`, so a completed v0 → v1 transaction cannot
+short-circuit a later v1 → v2 migration. `maple start --reset` or `maple reset
+--yes` can explicitly abandon an incomplete transaction, but preserves the
+journal under an `maple-store-migration-abandoned-*` name for inspection.
+Existing checkpoints remain attached to the retained source and are not
+advertised as restorable by the new schema; create a fresh checkpoint after
+promotion.
+
+Migration edges are compile-time modules registered in
+`apps/cli/src/server/local-store-migrations/`. The coordinator owns locking,
+journaling, chain progression, staging, and promotion. Each module owns its
+frozen schema identities, target preparation, transforms, semantic
+verification, and typed recovery state. Adding a later edge should add a new
+module and registry entry; the coordinator must not gain transition-specific
+table names or branches.
 
 Every start also checks the opened physical schema against the generated local
 schema manifest, including objects, columns/types/defaults/codecs, engines,

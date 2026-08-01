@@ -1,4 +1,5 @@
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
+import schemaV1Sql from "./schema/local-schema-v1.sql" with { type: "text" }
 import { schemaDigest as digestSchema, schemaFingerprint as fingerprintSchema } from "./store-version"
 import { buildLocalSchemaManifest, type LocalSchemaManifest } from "./schema-manifest"
 import { LOCAL_SCHEMA_VERSION } from "./local-schema-version"
@@ -30,6 +31,11 @@ export const SCHEMA_FINGERPRINT = fingerprintSchema(schemaSql)
 export const SCHEMA_DIGEST = digestSchema(schemaSql)
 export const LOCAL_SCHEMA_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaSql)
 export const LOCAL_SCHEMA_MANIFEST_DIGEST = LOCAL_SCHEMA_MANIFEST.digest
+/** Immutable v1 DDL/manifest snapshot used by the v0 -> v1 module even after
+ * the generated current schema advances. */
+export const LOCAL_SCHEMA_V1_SQL = schemaV1Sql
+export const LOCAL_SCHEMA_V1_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV1Sql)
+export const LOCAL_SCHEMA_V1_MANIFEST_DIGEST = LOCAL_SCHEMA_V1_MANIFEST.digest
 /** Generated compatibility gate for structural DDL. When this changes, the
  * local schema version and migration decision must change in the same commit.
  * Cosmetic SQL comments/whitespace do not alter this manifest digest. */
@@ -45,14 +51,28 @@ export interface LocalSchemaIdentity {
 	readonly projectRevision?: string
 }
 
-export const CURRENT_LOCAL_SCHEMA: LocalSchemaIdentity = {
+/**
+ * The v1 identity is deliberately frozen. Historical migration edges must
+ * never point at CURRENT_LOCAL_SCHEMA: when v2 ships, v0 -> v1 must still
+ * construct and verify v1 rather than silently changing its destination.
+ */
+export const LOCAL_SCHEMA_V1: LocalSchemaIdentity = Object.freeze({
+	version: 1,
+	fingerprint: fingerprintSchema(schemaV1Sql),
+	digest: digestSchema(schemaV1Sql),
+	manifestDigest: LOCAL_SCHEMA_V1_MANIFEST_DIGEST,
+	chdb: CHDB_VERSION,
+	projectRevision: CURRENT_SCHEMA_PROJECT_REVISION,
+})
+
+export const CURRENT_LOCAL_SCHEMA: LocalSchemaIdentity = Object.freeze({
 	version: LOCAL_SCHEMA_VERSION,
 	fingerprint: SCHEMA_FINGERPRINT,
 	digest: SCHEMA_DIGEST,
 	manifestDigest: LOCAL_SCHEMA_MANIFEST_DIGEST,
 	chdb: CHDB_VERSION,
 	projectRevision: CURRENT_SCHEMA_PROJECT_REVISION,
-}
+})
 
 export const LEGACY_LOCAL_SCHEMA: LocalSchemaIdentity = {
 	version: LEGACY_LOCAL_SCHEMA_VERSION,

@@ -1,0 +1,733 @@
+import { createHash } from "node:crypto"
+import {
+	LOCAL_SCHEMA_V1_MANIFEST,
+	LOCAL_SCHEMA_V1_SQL,
+	LEGACY_LOCAL_SCHEMA,
+	LOCAL_SCHEMA_V1,
+} from "../schema-identity"
+import { assertPhysicalSchema } from "../schema-physical"
+import type { LocalSchemaColumn } from "../schema-manifest"
+import type {
+	LocalStoreMigrationModule,
+	MigrationModuleContext,
+	MigrationOperation,
+	StateDispositionEntry,
+} from "../local-store-migration-module"
+
+export const LEGACY_RAW_TABLES = [
+	{ name: "logs", timeColumn: "TimestampTime", retentionDays: 30, batchRows: 25, batchBytes: 256 * 1024 },
+	{ name: "traces", timeColumn: "Timestamp", retentionDays: 30, batchRows: 100, batchBytes: 512 * 1024 },
+	{
+		name: "metrics_sum",
+		timeColumn: "TimeUnix",
+		retentionDays: 90,
+		batchRows: 500,
+		batchBytes: 1024 * 1024,
+	},
+	{
+		name: "metrics_gauge",
+		timeColumn: "TimeUnix",
+		retentionDays: 90,
+		batchRows: 500,
+		batchBytes: 1024 * 1024,
+	},
+	{
+		name: "metrics_histogram",
+		timeColumn: "TimeUnix",
+		retentionDays: 90,
+		batchRows: 250,
+		batchBytes: 1024 * 1024,
+	},
+	{
+		name: "metrics_exponential_histogram",
+		timeColumn: "TimeUnix",
+		retentionDays: 90,
+		batchRows: 250,
+		batchBytes: 1024 * 1024,
+	},
+] as const
+
+type LegacyRawTable = (typeof LEGACY_RAW_TABLES)[number]
+
+const RAW_TABLE_NAMES = new Set<string>(LEGACY_RAW_TABLES.map((table) => table.name))
+const OPERATIONAL_TABLE_NAMES = new Set([
+	"alert_checks",
+	"session_events",
+	"session_replay_events",
+	"session_replays",
+])
+
+export interface TableInventory {
+	readonly table: string
+	readonly rowCount: string
+	readonly retentionStartAt: string
+	readonly minTime: string | null
+	readonly maxTime: string | null
+	readonly hashSum: string
+	readonly hashXor: string
+}
+
+export interface CopyProgress {
+	readonly rows: number
+	readonly bytes: number
+	readonly lastTimestamp: string | null
+	readonly lastHash: string | null
+	readonly lastTieBreak: string | null
+	/** Cumulative ordinal consumed within the final composite-key group. */
+	readonly duplicateCount: number
+	readonly duplicateGroupExhausted: boolean
+}
+
+export interface PendingBatch {
+	readonly table: string
+	readonly rowCount: number
+	readonly byteLength: number
+	readonly firstTimestamp: string | null
+	readonly firstHash: string | null
+	readonly firstTieBreak: string | null
+	readonly lastTimestamp: string | null
+	readonly lastHash: string | null
+	readonly lastTieBreak: string | null
+	readonly lastKeyCount: number
+	readonly lastKeyExhausted: boolean
+	readonly signature: string
+}
+
+export interface LegacyModuleState {
+	readonly module: "local-0000-to-0001-raw-replay"
+	readonly version: 1
+}
+
+export interface RawReplayProgress {
+	readonly sourceInventory: Readonly<Record<string, TableInventory>>
+	readonly copied: Readonly<Record<string, CopyProgress>>
+	readonly pendingBatch?: PendingBatch
+}
+
+const emptyCopyProgress = (): CopyProgress => ({
+	rows: 0,
+	bytes: 0,
+	lastTimestamp: null,
+	lastHash: null,
+	lastTieBreak: null,
+	duplicateCount: 0,
+	duplicateGroupExhausted: false,
+})
+
+const asProgress = (value: unknown): RawReplayProgress => {
+	if (typeof value !== "object" || value === null || Array.isArray(value))
+		return { sourceInventory: {}, copied: {} }
+	const record = value as Record<string, unknown>
+	const copied =
+		typeof record.copied === "object" && record.copied !== null && !Array.isArray(record.copied)
+			? (record.copied as Record<string, CopyProgress>)
+			: {}
+	return {
+		sourceInventory:
+			typeof record.sourceInventory === "object" &&
+			record.sourceInventory !== null &&
+			!Array.isArray(record.sourceInventory)
+				? (record.sourceInventory as Record<string, TableInventory>)
+				: {},
+		copied,
+		...(record.pendingBatch === undefined ? {} : { pendingBatch: record.pendingBatch as PendingBatch }),
+	}
+}
+
+const parseJsonEachRow = <A>(value: string): A[] =>
+	value
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0)
+		.map((line) => JSON.parse(line) as A)
+
+const identifier = (value: string): string => {
+	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) throw new Error(`unsafe ClickHouse identifier: ${value}`)
+	return `\`${value}\``
+}
+
+const sqlString = (value: string): string => `'${value.replace(/'/g, "''")}'`
+const timestampLiteral = (value: string): string => `parseDateTime64BestEffort(${sqlString(value)}, 9, 'UTC')`
+
+const retentionStartAt = (cutoffAt: string, retentionDays: number): string => {
+	const cutoff = Date.parse(cutoffAt)
+	if (!Number.isFinite(cutoff)) throw new Error(`invalid migration cutoff: ${cutoffAt}`)
+	return new Date(cutoff - retentionDays * 24 * 60 * 60 * 1000).toISOString()
+}
+
+const numberString = (value: unknown): string => String(value)
+
+const querySource = (context: MigrationModuleContext, sql: string): Promise<string> =>
+	context.openSource((db) => db.query(sql), { schemaSql: LOCAL_SCHEMA_V1_SQL, bootstrapSchema: false })
+
+const queryTarget = (context: MigrationModuleContext, sql: string): Promise<string> =>
+	context.openTarget((db) => db.query(sql), { schemaSql: LOCAL_SCHEMA_V1_SQL, bootstrapSchema: false })
+
+const executeTarget = (context: MigrationModuleContext, sql: string): Promise<void> =>
+	context.openTarget((db) => db.exec(sql), { schemaSql: LOCAL_SCHEMA_V1_SQL, bootstrapSchema: false })
+
+interface ColumnRow {
+	name: string
+	type: string
+	position: number
+	default_kind: string
+	default_expression: string
+	compression_codec: string
+}
+
+const tableColumns = async (
+	context: MigrationModuleContext,
+	side: "source" | "target",
+	table: string,
+): Promise<ReadonlyArray<LocalSchemaColumn>> => {
+	const query = `SELECT name, type, position, default_kind, default_expression, compression_codec FROM system.columns WHERE database = 'default' AND table = ${sqlString(table)} ORDER BY position`
+	const rows = parseJsonEachRow<ColumnRow>(
+		await (side === "source" ? querySource(context, query) : queryTarget(context, query)),
+	)
+	return rows.map((row) => ({
+		name: row.name,
+		type: row.type,
+		...(!row.default_kind ? {} : { defaultKind: row.default_kind }),
+		...(!row.default_expression ? {} : { defaultExpression: row.default_expression }),
+		...(!row.compression_codec || row.compression_codec === "NONE"
+			? {}
+			: { codec: row.compression_codec }),
+	}))
+}
+
+const tableExists = async (context: MigrationModuleContext, side: "source" | "target", table: string) => {
+	const rows = parseJsonEachRow<{ name: string }>(
+		await (side === "source"
+			? querySource(
+					context,
+					`SELECT name FROM system.tables WHERE database = 'default' AND name = ${sqlString(table)}`,
+				)
+			: queryTarget(
+					context,
+					`SELECT name FROM system.tables WHERE database = 'default' AND name = ${sqlString(table)}`,
+				)),
+	)
+	return rows.length > 0
+}
+
+const assertKnownSourceObjects = async (context: MigrationModuleContext): Promise<void> => {
+	const known = new Set(LOCAL_SCHEMA_V1_MANIFEST.objects.map((object) => object.name))
+	const rows = parseJsonEachRow<{ name: string }>(
+		await querySource(context, "SELECT name FROM system.tables WHERE database = 'default' ORDER BY name"),
+	)
+	for (const row of rows) {
+		if (!known.has(row.name))
+			throw new Error(
+				`source contains an unknown local-store object: ${row.name}; migration is unsupported`,
+			)
+	}
+}
+
+const normalizeType = (value: string): string =>
+	value
+		.replace(/\s+/g, " ")
+		.replace(/\s*,\s*/g, ", ")
+		.trim()
+
+const ensureSourceTargetColumns = async (
+	context: MigrationModuleContext,
+	table: LegacyRawTable,
+): Promise<ReadonlyArray<LocalSchemaColumn>> => {
+	const sourceColumns = await tableColumns(context, "source", table.name)
+	const targetColumns = await tableColumns(context, "target", table.name)
+	const targetByName = new Map(targetColumns.map((column) => [column.name, column]))
+	for (const source of sourceColumns) {
+		if (source.name.startsWith("__maple_"))
+			throw new Error(`${table.name}.${source.name} uses a reserved migration column name`)
+		const target = targetByName.get(source.name)
+		if (!target || normalizeType(target.type) !== normalizeType(source.type))
+			throw new Error(`${table.name}.${source.name} is not type-compatible with the target`)
+	}
+	const sourceNames = new Set(sourceColumns.map((column) => column.name))
+	for (const target of targetColumns) {
+		if (!sourceNames.has(target.name) && target.defaultKind === undefined) {
+			throw new Error(
+				`${table.name}.${target.name} is new in the target and has no declared default or transform`,
+			)
+		}
+	}
+	return sourceColumns
+}
+
+const inventory = async (
+	context: MigrationModuleContext,
+	side: "source" | "target",
+	table: LegacyRawTable,
+	columns: ReadonlyArray<LocalSchemaColumn>,
+	cutoffAt: string,
+): Promise<TableInventory> => {
+	const lowerBound = retentionStartAt(cutoffAt, table.retentionDays)
+	const names = columns.map((column) => identifier(column.name)).join(", ")
+	const hash = `cityHash64(toString(tuple(${names})))`
+	const sql = `SELECT count() AS rowCount, min(${identifier(table.timeColumn)}) AS minTime, max(${identifier(table.timeColumn)}) AS maxTime, sum(${hash}) AS hashSum, groupBitXor(${hash}) AS hashXor FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(lowerBound)} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(cutoffAt)}`
+	const rows = parseJsonEachRow<{
+		rowCount: string | number
+		minTime: string | null
+		maxTime: string | null
+		hashSum: string | number
+		hashXor: string | number
+	}>(side === "source" ? await querySource(context, sql) : await queryTarget(context, sql))
+	const row = rows[0]
+	if (!row) throw new Error(`inventory query returned no row for ${table.name}`)
+	return {
+		table: table.name,
+		rowCount: numberString(row.rowCount),
+		retentionStartAt: lowerBound,
+		minTime: row.minTime === null ? null : String(row.minTime),
+		maxTime: row.maxTime === null ? null : String(row.maxTime),
+		hashSum: numberString(row.hashSum),
+		hashXor: numberString(row.hashXor),
+	}
+}
+
+const inventoriesEqual = (a: TableInventory, b: TableInventory): boolean =>
+	a.table === b.table &&
+	a.rowCount === b.rowCount &&
+	a.retentionStartAt === b.retentionStartAt &&
+	a.minTime === b.minTime &&
+	a.maxTime === b.maxTime &&
+	a.hashSum === b.hashSum &&
+	a.hashXor === b.hashXor
+
+const tableTotalRowCount = async (
+	context: MigrationModuleContext,
+	side: "source" | "target",
+	table: string,
+): Promise<string> => {
+	const sql = `SELECT count() AS rowCount FROM ${identifier(table)}`
+	const rows = parseJsonEachRow<{ rowCount: string | number }>(
+		side === "source" ? await querySource(context, sql) : await queryTarget(context, sql),
+	)
+	if (!rows[0]) throw new Error(`row-count query returned no row for ${table}`)
+	return numberString(rows[0].rowCount)
+}
+
+const keyOf = (row: Record<string, unknown>): string =>
+	`${String(row.__maple_timestamp ?? "")}\0${String(row.__maple_hash ?? "")}\0${String(row.__maple_tie_break ?? "")}`
+
+const copyProgressFor = (progress: RawReplayProgress, table: string): CopyProgress =>
+	progress.copied[table] ?? emptyCopyProgress()
+
+const batchSignature = (table: string, rows: ReadonlyArray<Record<string, unknown>>): string =>
+	createHash("sha256")
+		.update(
+			`${table}:${rows.length}:${JSON.stringify(rows[0] ?? null)}:${JSON.stringify(rows[rows.length - 1] ?? null)}`,
+		)
+		.digest("hex")
+
+/** Keep the cursor ordinal cumulative when an equal composite-key group spans
+ * multiple row- or byte-bounded batches. Resetting this to the local batch
+ * count would make the next query replay the same indistinguishable rows. */
+export const advanceDuplicateKeyProgress = (
+	previous: CopyProgress,
+	previousKey: string | null,
+	lastKey: string,
+	selectedLastKeyCount: number,
+): Pick<CopyProgress, "duplicateCount" | "duplicateGroupExhausted"> => ({
+	duplicateCount:
+		previousKey === lastKey && !previous.duplicateGroupExhausted
+			? previous.duplicateCount + selectedLastKeyCount
+			: selectedLastKeyCount,
+	duplicateGroupExhausted: false,
+})
+
+/** Describe the continuation for a composite-key group. While the group is
+ * still open, OFFSET skips the cumulative ordinal already copied; once the
+ * group is exhausted, a strict cursor moves to the next distinct key. The
+ * offset is essential when one equal-key group is larger than a row/byte
+ * batch: fetching only LIMIT rows and filtering them in JavaScript would
+ * return an empty batch and stop the replay early. */
+export const duplicateCursorContinuation = (
+	progress: Pick<
+		CopyProgress,
+		"lastTimestamp" | "lastHash" | "lastTieBreak" | "duplicateCount" | "duplicateGroupExhausted"
+	>,
+): { readonly comparison: ">=" | ">"; readonly offset: number } => ({
+	comparison: progress.duplicateGroupExhausted ? ">" : ">=",
+	offset:
+		progress.lastTimestamp !== null &&
+		progress.lastHash !== null &&
+		progress.lastTieBreak !== null &&
+		!progress.duplicateGroupExhausted
+			? progress.duplicateCount
+			: 0,
+})
+
+const duplicateGroupCount = async (
+	context: MigrationModuleContext,
+	table: LegacyRawTable,
+	columns: ReadonlyArray<LocalSchemaColumn>,
+	progress: CopyProgress,
+): Promise<number> => {
+	if (
+		progress.lastTimestamp === null ||
+		progress.lastHash === null ||
+		progress.lastTieBreak === null ||
+		progress.duplicateGroupExhausted
+	)
+		return 0
+	const names = columns.map((column) => identifier(column.name)).join(", ")
+	const hash = `cityHash64(toString(tuple(${names})))`
+	const tie = `sipHash64(toString(tuple(${names})))`
+	const sql = `SELECT count() AS rowCount FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} = ${timestampLiteral(progress.lastTimestamp)} AND ${hash} = ${progress.lastHash} AND ${tie} = ${progress.lastTieBreak}`
+	const rows = parseJsonEachRow<{ rowCount: string | number }>(await querySource(context, sql))
+	return rows[0] === undefined ? 0 : Number(rows[0].rowCount)
+}
+
+const copyTable = async (
+	context: MigrationModuleContext,
+	table: LegacyRawTable,
+	columns: ReadonlyArray<LocalSchemaColumn>,
+	initial: RawReplayProgress,
+): Promise<RawReplayProgress> => {
+	let current = initial
+	let progress = copyProgressFor(current, table.name)
+	const columnList = columns.map((column) => identifier(column.name)).join(", ")
+	const hashExpression = `cityHash64(toString(tuple(${columnList})))`
+	const tieBreakExpression = `sipHash64(toString(tuple(${columnList})))`
+	while (true) {
+		if (progress.duplicateCount > 0 && !progress.duplicateGroupExhausted) {
+			const groupCount = await duplicateGroupCount(context, table, columns, progress)
+			if (progress.duplicateCount >= groupCount) {
+				progress = { ...progress, duplicateGroupExhausted: true }
+				current = { ...current, copied: { ...current.copied, [table.name]: progress } }
+				await context.saveStep({ progress: current })
+				continue
+			}
+		}
+		const continuation = duplicateCursorContinuation(progress)
+		const cursor =
+			progress.lastTimestamp === null || progress.lastHash === null || progress.lastTieBreak === null
+				? ""
+				: `AND (${identifier(table.timeColumn)} > ${timestampLiteral(progress.lastTimestamp)} OR (${identifier(table.timeColumn)} = ${timestampLiteral(progress.lastTimestamp)} AND (${hashExpression} > ${progress.lastHash} OR (${hashExpression} = ${progress.lastHash} AND ${tieBreakExpression} ${continuation.comparison} ${progress.lastTieBreak}))))`
+		const offset = continuation.offset === 0 ? "" : ` OFFSET ${continuation.offset}`
+		const output = await querySource(
+			context,
+			`SELECT ${columnList}, ${identifier(table.timeColumn)} AS __maple_timestamp, ${hashExpression} AS __maple_hash, ${tieBreakExpression} AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${identifier(table.timeColumn)}, __maple_hash, __maple_tie_break LIMIT ${table.batchRows}${offset}`,
+		)
+		const rawRows = parseJsonEachRow<Record<string, unknown>>(output)
+		let rows = rawRows
+		if (rows.length === 0) break
+		const candidates = rows.map((row) => {
+			const copy = { ...row }
+			delete copy.__maple_timestamp
+			delete copy.__maple_hash
+			delete copy.__maple_tie_break
+			return { row, copy, encoded: JSON.stringify(copy) }
+		})
+		const selected: typeof candidates = []
+		let byteLength = 0
+		for (const candidate of candidates) {
+			const candidateBytes = Buffer.byteLength(candidate.encoded)
+			if (selected.length > 0 && byteLength + candidateBytes + 1 > table.batchBytes) break
+			selected.push(candidate)
+			byteLength += candidateBytes + (selected.length === 1 ? 0 : 1)
+		}
+		if (selected.length === 0) throw new Error(`could not form a bounded batch for ${table.name}`)
+		rows = selected.map((candidate) => candidate.row)
+		const payload = selected.map((candidate) => candidate.copy)
+		const first = rows[0]!
+		const last = rows[rows.length - 1]!
+		const lastKey = keyOf(last)
+		const selectedLastKeyCount = rows.filter((row) => keyOf(row) === lastKey).length
+		const priorKey =
+			progress.lastTimestamp === null || progress.lastHash === null || progress.lastTieBreak === null
+				? null
+				: `${progress.lastTimestamp}\0${progress.lastHash}\0${progress.lastTieBreak}`
+		const { duplicateCount: lastKeyCount, duplicateGroupExhausted: lastKeyExhausted } =
+			advanceDuplicateKeyProgress(progress, priorKey, lastKey, selectedLastKeyCount)
+		const pending: PendingBatch = {
+			table: table.name,
+			rowCount: payload.length,
+			byteLength,
+			firstTimestamp: first.__maple_timestamp === undefined ? null : String(first.__maple_timestamp),
+			firstHash: first.__maple_hash === undefined ? null : String(first.__maple_hash),
+			firstTieBreak: first.__maple_tie_break === undefined ? null : String(first.__maple_tie_break),
+			lastTimestamp: last.__maple_timestamp === undefined ? null : String(last.__maple_timestamp),
+			lastHash: last.__maple_hash === undefined ? null : String(last.__maple_hash),
+			lastTieBreak: last.__maple_tie_break === undefined ? null : String(last.__maple_tie_break),
+			lastKeyCount,
+			lastKeyExhausted,
+			signature: batchSignature(table.name, payload),
+		}
+		current = { ...current, pendingBatch: pending }
+		await context.saveStep({ progress: current })
+		await executeTarget(
+			context,
+			`INSERT INTO ${identifier(table.name)} (${columnList}) FORMAT JSONEachRow\n${selected.map((candidate) => candidate.encoded).join("\n")}`,
+		)
+		progress = {
+			rows: progress.rows + payload.length,
+			bytes: progress.bytes + byteLength,
+			lastTimestamp: pending.lastTimestamp,
+			lastHash: pending.lastHash,
+			lastTieBreak: pending.lastTieBreak,
+			duplicateCount: pending.lastKeyCount,
+			duplicateGroupExhausted: pending.lastKeyExhausted,
+		}
+		current = {
+			...current,
+			copied: { ...current.copied, [table.name]: progress },
+			pendingBatch: undefined,
+		}
+		await context.saveStep({ progress: current })
+	}
+	return current
+}
+
+const recoverPendingBatch = async (
+	context: MigrationModuleContext,
+	progress: RawReplayProgress,
+): Promise<RawReplayProgress> => {
+	const pending = progress.pendingBatch
+	if (!pending) return progress
+	const table = LEGACY_RAW_TABLES.find((candidate) => candidate.name === pending.table)
+	if (!table) throw new Error(`journal contains an unknown pending table: ${pending.table}`)
+	const columns = await tableColumns(context, "target", table.name)
+	const current = await inventory(context, "target", table, columns, context.cutoffAt)
+	const previous = copyProgressFor(progress, table.name)
+	const targetRows = Number(current.rowCount)
+	if (targetRows === previous.rows) return { ...progress, pendingBatch: undefined }
+	if (targetRows === previous.rows + pending.rowCount) {
+		return {
+			...progress,
+			copied: {
+				...progress.copied,
+				[table.name]: {
+					rows: previous.rows + pending.rowCount,
+					bytes: previous.bytes + pending.byteLength,
+					lastTimestamp: pending.lastTimestamp,
+					lastHash: pending.lastHash,
+					lastTieBreak: pending.lastTieBreak,
+					duplicateCount: pending.lastKeyCount,
+					duplicateGroupExhausted: pending.lastKeyExhausted,
+				},
+			},
+			pendingBatch: undefined,
+		}
+	}
+	throw new Error("pending migration batch has ambiguous target state; refusing to guess or duplicate rows")
+}
+
+const derivedDisposition = (name: string): StateDispositionEntry => ({
+	name,
+	classification: "derived",
+	disposition: "rebuild-within-retention-horizon",
+	preservationInterval:
+		"within the retention horizon of the raw source tables; older aggregate-only rows remain under legacy semantics",
+	guarantee:
+		"recomputed from retained raw telemetry; aggregate-only history stays with the retained legacy source and is not given a fabricated new dimension",
+})
+
+const knownDispositions: ReadonlyArray<StateDispositionEntry> = [
+	...LEGACY_RAW_TABLES.map((table) => ({
+		name: table.name,
+		classification: "authoritative" as const,
+		disposition: "preserve-exact" as const,
+		preservationInterval: `[cutoff - ${table.retentionDays} days, cutoff]`,
+		sourceRetentionDays: table.retentionDays,
+		targetRetentionDays: table.retentionDays,
+		guarantee:
+			"all source columns and rows inside this table's configured retention horizon are copied explicitly after exact type compatibility checks; rows older than the interval remain in the retained source",
+	})),
+	...["alert_checks", "session_events", "session_replay_events", "session_replays"].map((name) => ({
+		name,
+		classification: "operational" as const,
+		disposition: "retain-as-legacy-rollback-only" as const,
+		preservationInterval: "entire retained source store",
+		guarantee:
+			"not copied into the new target; the old store remains available for rollback and inspection",
+	})),
+	...[...LOCAL_SCHEMA_V1_MANIFEST.objects]
+		.filter(
+			(object) =>
+				!RAW_TABLE_NAMES.has(object.name) &&
+				!OPERATIONAL_TABLE_NAMES.has(object.name) &&
+				object.kind === "table",
+		)
+		.map((object) => derivedDisposition(object.name)),
+	...[...LOCAL_SCHEMA_V1_MANIFEST.objects]
+		.filter((object) => object.kind !== "table")
+		.map((object) => ({
+			name: object.name,
+			classification: "derived" as const,
+			disposition: "rebuild-complete" as const,
+			preservationInterval:
+				"within the retention horizon of the raw source tables; older aggregate-only rows remain under legacy semantics",
+			guarantee: "recreated by the v1 target schema and repopulated by retained raw replay",
+		})),
+	{
+		name: "checkpoint tree",
+		classification: "operational",
+		disposition: "retain-as-legacy-rollback-only",
+		preservationInterval: "entire retained checkpoint tree",
+		guarantee:
+			"moves with the retained source; current-schema restore does not claim these fingerprint-bound checkpoints are compatible",
+	},
+	{
+		name: "archive manifests and calibration",
+		classification: "operational",
+		disposition: "preserve-exact",
+		preservationInterval: "external archive root",
+		guarantee:
+			"the external ~/.maple/archive tree is not rewritten by local-store migration; its own schema and fingerprint checks remain authoritative",
+	},
+	{
+		name: "source marker and store identity",
+		classification: "operational",
+		disposition: "retain-as-legacy-rollback-only",
+		preservationInterval: "pre-cutover source",
+		guarantee: "the source marker and stable store id are retained beside the rollback directory",
+	},
+	{
+		name: "active-store selection",
+		classification: "operational",
+		disposition: "preserve-exact",
+		preservationInterval: "promotion commit",
+		guarantee:
+			"the configured data path remains the active path; selection changes only after target verification and the promotion journal is durable",
+	},
+	{
+		name: "open sentinel, PID, and maintenance lock",
+		classification: "ephemeral",
+		disposition: "invalidate",
+		preservationInterval: "migration operation",
+		guarantee:
+			"the source must be stopped and clean; no live-process or open-sentinel state is copied to the target, and the shared lock is released normally",
+	},
+	{
+		name: "migration journal",
+		classification: "operational",
+		disposition: "preserve-exact",
+		preservationInterval: "planned through promoted",
+		guarantee:
+			"durably records identities, cutoff, current module step, typed module state, progress, verification, and promotion recovery state",
+	},
+] as const
+
+const operations: ReadonlyArray<MigrationOperation> = [
+	{
+		id: "preflight",
+		description:
+			"Validate the stopped source, chDB identity, raw-table columns, capacity, and migration cutoff",
+		requiresQuiescence: true,
+		phase: "preflight-complete",
+	},
+	{
+		id: "bootstrap-target",
+		description: "Create a fresh v1-schema target and mark it staged",
+		requiresQuiescence: true,
+		phase: "target-created",
+	},
+	{
+		id: "replay-raw-telemetry",
+		description: "Copy the six authoritative raw tables with bounded, resumable JSONEachRow batches",
+		requiresQuiescence: true,
+		phase: "copying",
+	},
+	{
+		id: "verify-and-promote",
+		description:
+			"Recheck source inventories, verify the v1 physical schema, then promote and retain the source",
+		requiresQuiescence: true,
+		phase: "copy-verified",
+	},
+]
+
+const legacyPreflight = async (context: MigrationModuleContext): Promise<LegacyModuleState> => {
+	await context.ensureCapacity()
+	await assertKnownSourceObjects(context)
+	for (const table of LEGACY_RAW_TABLES) {
+		if (!(await tableExists(context, "source", table.name)))
+			throw new Error(`source authoritative table is missing: ${table.name}`)
+	}
+	return { module: "local-0000-to-0001-raw-replay", version: 1 } as const
+}
+
+const legacyPrepareTarget = async (
+	context: MigrationModuleContext,
+	state: LegacyModuleState,
+): Promise<LegacyModuleState> => {
+	await context.openTarget((db) => assertPhysicalSchema(db, LOCAL_SCHEMA_V1_MANIFEST), {
+		schemaSql: LOCAL_SCHEMA_V1_SQL,
+		bootstrapSchema: true,
+	})
+	return state
+}
+
+const legacyApply = async (
+	context: MigrationModuleContext,
+	_state: LegacyModuleState,
+	progressValue: RawReplayProgress | undefined,
+): Promise<RawReplayProgress> => {
+	let progress = asProgress(progressValue)
+	for (const table of LEGACY_RAW_TABLES) {
+		const columns = await ensureSourceTargetColumns(context, table)
+		if (!progress.sourceInventory[table.name]) {
+			progress = {
+				...progress,
+				sourceInventory: {
+					...progress.sourceInventory,
+					[table.name]: await inventory(context, "source", table, columns, context.cutoffAt),
+				},
+			}
+			await context.saveStep({ progress })
+		}
+		progress = await copyTable(context, table, columns, progress)
+	}
+	return progress
+}
+
+const legacyVerify = async (
+	context: MigrationModuleContext,
+	_state: LegacyModuleState,
+	progressValue: RawReplayProgress,
+): Promise<void> => {
+	const progress = asProgress(progressValue)
+	for (const table of LEGACY_RAW_TABLES) {
+		const columns = await tableColumns(context, "source", table.name)
+		const before = progress.sourceInventory[table.name]
+		if (!before) throw new Error(`source inventory is missing for ${table.name}`)
+		const after = await inventory(context, "source", table, columns, context.cutoffAt)
+		if (!inventoriesEqual(before, after))
+			throw new Error(`source changed during migration: ${table.name}; promotion refused`)
+		const targetInventory = await inventory(context, "target", table, columns, context.cutoffAt)
+		if (!inventoriesEqual(before, targetInventory))
+			throw new Error(`target verification failed for ${table.name}`)
+		if ((await tableTotalRowCount(context, "target", table.name)) !== targetInventory.rowCount)
+			throw new Error(`target contains rows outside the migration interval for ${table.name}`)
+	}
+	await context.openTarget((db) => assertPhysicalSchema(db, LOCAL_SCHEMA_V1_MANIFEST), {
+		schemaSql: LOCAL_SCHEMA_V1_SQL,
+		bootstrapSchema: false,
+	})
+}
+
+const legacyRecover = async (
+	context: MigrationModuleContext,
+	state: LegacyModuleState | undefined,
+	progressValue: RawReplayProgress | undefined,
+): Promise<{ readonly state?: LegacyModuleState; readonly progress?: RawReplayProgress }> => ({
+	state,
+	progress: await recoverPendingBatch(context, asProgress(progressValue)),
+})
+
+export const legacyToCurrentModule: LocalStoreMigrationModule<LegacyModuleState, RawReplayProgress> = {
+	id: "local-0000-to-0001-raw-replay",
+	moduleVersion: 1,
+	description: "Rebuild the v1 local store from the known fingerprint-only legacy store",
+	from: LEGACY_LOCAL_SCHEMA,
+	to: LOCAL_SCHEMA_V1,
+	operations,
+	dispositions: knownDispositions,
+	preflight: legacyPreflight,
+	prepareTarget: legacyPrepareTarget,
+	apply: legacyApply,
+	verify: legacyVerify,
+	recover: legacyRecover,
+}

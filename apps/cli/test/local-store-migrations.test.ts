@@ -6,24 +6,34 @@ import {
 	LEGACY_LOCAL_SCHEMA,
 	LEGACY_SCHEMA_FINGERPRINT,
 	LOCAL_SCHEMA_MANIFEST,
+	LOCAL_SCHEMA_V1,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
 import {
 	abandonLocalStoreMigration,
+	executeMigrationModule,
 	identityFromMarker,
+	legacyToCurrentModule,
 	migrationJournalPath,
+	migrationHistoryPath,
 	planMigration,
-	reconcileLocalStorePromotion,
 	readMigrationJournal,
 	resolveMigrationChain,
+	runLocalStoreMigration,
 	validateMigrationRegistry,
 	type LocalStoreMigration,
+	type MigrationModuleContext,
 	type MigrationJournal,
 } from "../src/server/local-store-migrations"
 import { comparePhysicalSchema, type LocalSchemaManifest } from "../src/server/schema-manifest"
 import { ensureStoreMarkerDurable, readMarker, storeMarkerPath } from "../src/server/store-version"
 import { durableJson } from "../src/server/durable-files"
+import {
+	advanceDuplicateKeyProgress,
+	duplicateCursorContinuation,
+	type CopyProgress,
+} from "../src/server/local-store-migrations/legacy-to-current"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -52,7 +62,9 @@ describe("local migration registry", () => {
 	it("resolves the known fingerprint-only legacy store to current", () => {
 		const chain = resolveMigrationChain(LEGACY_LOCAL_SCHEMA, CURRENT_LOCAL_SCHEMA)
 		expect(chain.map((migration) => migration.id)).toEqual(["local-0000-to-0001-raw-replay"])
-		expect(chain[0]?.fromFingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
+		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
+		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
+		expect(typeof chain[0]?.apply).toBe("function")
 	})
 
 	it("recognizes legacy and current markers without treating the fingerprint as physical proof", () => {
@@ -98,15 +110,75 @@ describe("local migration registry", () => {
 			id: "duplicate",
 			moduleVersion: 1,
 			description: "duplicate",
-			fromVersion: 0,
-			toVersion: 1,
-			toFingerprint: SCHEMA_FINGERPRINT,
+			from: LEGACY_LOCAL_SCHEMA,
+			to: LOCAL_SCHEMA_V1,
 			operations: [{ id: "x", description: "x", requiresQuiescence: true, phase: "copying" }],
 			dispositions: [],
+			preflight: async () => undefined,
+			prepareTarget: async (_context, state) => state,
+			apply: async (_context, _state, progress) => progress,
+			verify: async () => undefined,
+			recover: async () => ({}),
 		}
 		expect(() =>
 			validateMigrationRegistry([{ ...duplicate }, { ...duplicate, id: "duplicate-2" }]),
 		).toThrow(/ambiguous/)
+	})
+
+	it("supports a later executable edge without changing the registry coordinator", async () => {
+		const events: string[] = []
+		const v2: LocalStoreMigration = {
+			id: "local-0001-to-0002-fixture",
+			moduleVersion: 1,
+			description: "fixture-only second edge",
+			from: LOCAL_SCHEMA_V1,
+			to: { ...LOCAL_SCHEMA_V1, version: 2, fingerprint: "2222222222222222", digest: "2".repeat(64) },
+			operations: [{ id: "fixture", description: "fixture transform", requiresQuiescence: true }],
+			dispositions: [],
+			preflight: async () => {
+				events.push("preflight")
+				return { state: "prepared" }
+			},
+			prepareTarget: async (_context, state) => {
+				events.push("prepareTarget")
+				return state
+			},
+			apply: async (_context, _state, _progress) => {
+				events.push("apply")
+				return { rows: 1 }
+			},
+			verify: async () => {
+				events.push("verify")
+			},
+			recover: async () => ({}),
+		}
+		const chain = resolveMigrationChain(LEGACY_LOCAL_SCHEMA, v2.to, [legacyToCurrentModule, v2])
+		expect(chain.map((migration) => migration.id)).toEqual([
+			"local-0000-to-0001-raw-replay",
+			"local-0001-to-0002-fixture",
+		])
+		expect(validateMigrationRegistry([legacyToCurrentModule, v2])).toHaveLength(2)
+		const context = {
+			dataDir: "/tmp/source",
+			sourceDataDir: "/tmp/source",
+			targetDataDir: "/tmp/target",
+			source: LOCAL_SCHEMA_V1,
+			target: v2.to,
+			cutoffAt: "2026-01-01T00:00:00.000Z",
+			step: {
+				id: v2.id,
+				moduleVersion: v2.moduleVersion,
+				from: v2.from,
+				to: v2.to,
+				status: "pending" as const,
+			},
+			openSource: async () => undefined,
+			openTarget: async () => undefined,
+			ensureCapacity: async () => undefined,
+			saveStep: async () => undefined,
+		} as unknown as MigrationModuleContext
+		await executeMigrationModule(v2, context, context.step, { prepareTarget: true })
+		expect(events).toEqual(["preflight", "prepareTarget", "apply", "verify"])
 	})
 
 	it("exposes retention-aware dispositions and rollback limits", () => {
@@ -159,10 +231,19 @@ describe("durable migration recovery", () => {
 		const targetDataDir = join(migrationRoot, "target", "data")
 		const targetStoreId = "target-store-recovery"
 		const journal: MigrationJournal = {
-			formatVersion: 1,
+			formatVersion: 2,
 			migrationId,
-			moduleDigest: "a".repeat(64),
 			phase: "promotion-started",
+			chain: [
+				{
+					id: migrationId.slice(0, migrationId.lastIndexOf("-recovery")),
+					moduleVersion: 1,
+					from: LEGACY_LOCAL_SCHEMA,
+					to: LOCAL_SCHEMA_V1,
+					status: "completed",
+				},
+			],
+			currentStepIndex: 1,
 			sourceDataDir: dataDir,
 			sourceStoreId: "source-store",
 			sourceChdb: CURRENT_LOCAL_SCHEMA.chdb,
@@ -172,8 +253,8 @@ describe("durable migration recovery", () => {
 			targetDataDir,
 			targetStoreId,
 			targetChdb: CURRENT_LOCAL_SCHEMA.chdb,
-			targetFingerprint: SCHEMA_FINGERPRINT,
-			targetDigest: SCHEMA_DIGEST,
+			targetFingerprint: LOCAL_SCHEMA_V1.fingerprint,
+			targetDigest: LOCAL_SCHEMA_V1.digest,
 			targetVersion: 1,
 			cutoffAt: "2026-01-01T00:00:00.000Z",
 			createdAt: "2026-01-01T00:00:00.000Z",
@@ -181,6 +262,12 @@ describe("durable migration recovery", () => {
 		try {
 			await mkdir(join(dataDir, "store"), { recursive: true })
 			await mkdir(sourceDataDir, { recursive: true })
+			await durableJson(storeMarkerPath(sourceDataDir), {
+				chdb: CURRENT_LOCAL_SCHEMA.chdb,
+				maple: "test",
+				createdAt: journal.createdAt,
+				schema: LEGACY_SCHEMA_FINGERPRINT,
+			})
 			await ensureStoreMarkerDurable(dataDir, CURRENT_LOCAL_SCHEMA, "test", journal.createdAt, {
 				activation: "staging",
 				storeId: targetStoreId,
@@ -195,8 +282,14 @@ describe("durable migration recovery", () => {
 			// instead of reset. The target data has already been promoted; only the
 			// final active marker write was interrupted.
 			await durableJson(migrationJournalPath(dataDir), journal)
-			const recovered = await reconcileLocalStorePromotion(dataDir, journal)
+			const preview = await runLocalStoreMigration({ dataDir, dryRun: true })
+			expect("chain" in preview && preview.chain.map((step) => step.id)).toEqual([
+				"local-0000-to-0001-raw-replay",
+			])
+			const recovered = await runLocalStoreMigration({ dataDir })
 			expect(recovered.phase).toBe("promoted")
+			expect(await readMigrationJournal(dataDir)).toBeNull()
+			expect(await Bun.file(migrationHistoryPath(dataDir, migrationId)).exists()).toBe(true)
 			expect(readMarker(dataDir)).toMatchObject({
 				formatVersion: 2,
 				storeId: targetStoreId,
@@ -244,5 +337,44 @@ describe("physical-schema comparison", () => {
 				"unexpected index idx_unexpected",
 			]),
 		)
+	})
+})
+
+describe("legacy raw replay cursor", () => {
+	it("keeps a cumulative ordinal across row- and byte-bounded equal-key batches", () => {
+		const initial: CopyProgress = {
+			rows: 0,
+			bytes: 0,
+			lastTimestamp: null,
+			lastHash: null,
+			lastTieBreak: null,
+			duplicateCount: 0,
+			duplicateGroupExhausted: false,
+		}
+		const first = advanceDuplicateKeyProgress(initial, null, "same-key", 2)
+		const second = advanceDuplicateKeyProgress({ ...initial, ...first }, "same-key", "same-key", 2)
+		expect(first.duplicateCount).toBe(2)
+		expect(second.duplicateCount).toBe(4)
+		const nextKey = advanceDuplicateKeyProgress({ ...initial, ...second }, "same-key", "next-key", 1)
+		expect(nextKey.duplicateCount).toBe(1)
+		expect(
+			duplicateCursorContinuation({
+				...initial,
+				lastTimestamp: "2026-01-01T00:00:00.000Z",
+				lastHash: "42",
+				lastTieBreak: "84",
+				duplicateCount: 25,
+			}),
+		).toEqual({ comparison: ">=", offset: 25 })
+		expect(
+			duplicateCursorContinuation({
+				...initial,
+				lastTimestamp: "2026-01-01T00:00:00.000Z",
+				lastHash: "42",
+				lastTieBreak: "84",
+				duplicateCount: 25,
+				duplicateGroupExhausted: true,
+			}),
+		).toEqual({ comparison: ">", offset: 0 })
 	})
 })

@@ -86,6 +86,13 @@ export const markStoreOpen = (dataDir: string): void => {
 	writeFileSync(storeOpenMarkerPath(dataDir), `${process.pid}\n`, { mode: 0o600 })
 }
 
+/** Durable variant used by migration connections. A migration may open a
+ * store many times and must leave evidence even if the process dies during
+ * chDB connect/bootstrap, before the connection can be closed normally. */
+export const markStoreOpenDurable = async (dataDir: string): Promise<void> => {
+	await durableWrite(storeOpenMarkerPath(dataDir), `${process.pid}\n`)
+}
+
 /** Clear the clean-shutdown sentinel. Best effort: a missing marker is fine. */
 export const markStoreClosed = (dataDir: string): void => {
 	try {
@@ -270,7 +277,19 @@ export const ensureStoreMarkerDurable = async (
 ): Promise<StoreMarkerV2> => {
 	const existing = readMarker(dataDir)
 	if (existing?.formatVersion === STORE_MARKER_FORMAT_VERSION) {
-		if (existing.activation === "staging" && options.activation !== "active") {
+		if (options.storeId !== undefined && existing.storeId !== options.storeId) {
+			throw new Error(
+				`store marker identity mismatch: expected store ${options.storeId}, found ${existing.storeId}`,
+			)
+		}
+		if (
+			existing.activation === "staging" &&
+			options.activation !== "active" &&
+			existing.storeId === (options.storeId ?? existing.storeId) &&
+			existing.schemaVersion === identity.version &&
+			existing.schemaDigest === identity.digest &&
+			existing.schema === identity.fingerprint
+		) {
 			return existing
 		}
 		const updated: StoreMarkerV2 = {
