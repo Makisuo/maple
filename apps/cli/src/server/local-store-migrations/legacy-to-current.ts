@@ -114,25 +114,159 @@ const emptyCopyProgress = (): CopyProgress => ({
 	duplicateGroupExhausted: false,
 })
 
-const asProgress = (value: unknown): RawReplayProgress => {
-	if (typeof value !== "object" || value === null || Array.isArray(value))
-		return { sourceInventory: {}, copied: {} }
-	const record = value as Record<string, unknown>
-	const copied =
-		typeof record.copied === "object" && record.copied !== null && !Array.isArray(record.copied)
-			? (record.copied as Record<string, CopyProgress>)
-			: {}
-	return {
-		sourceInventory:
-			typeof record.sourceInventory === "object" &&
-			record.sourceInventory !== null &&
-			!Array.isArray(record.sourceInventory)
-				? (record.sourceInventory as Record<string, TableInventory>)
-				: {},
-		copied,
-		...(record.pendingBatch === undefined ? {} : { pendingBatch: record.pendingBatch as PendingBatch }),
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
+const record = (value: unknown, label: string): Record<string, unknown> => {
+	if (!isRecord(value)) throw new Error(`${label} must be an object`)
+	return value
+}
+
+const nonEmptyString = (value: unknown, label: string): string => {
+	if (typeof value !== "string" || value.length === 0)
+		throw new Error(`${label} must be a non-empty string`)
+	return value
+}
+
+const nullableString = (value: unknown, label: string): string | null => {
+	if (value !== null && typeof value !== "string") throw new Error(`${label} must be a string or null`)
+	return value
+}
+
+const nonNegativeInteger = (value: unknown, label: string): number => {
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+		throw new Error(`${label} must be a non-negative integer`)
+	return value
+}
+
+const exactKeys = (value: Record<string, unknown>, allowed: ReadonlyArray<string>, label: string): void => {
+	const allowedKeys = new Set(allowed)
+	for (const key of Object.keys(value)) {
+		if (!allowedKeys.has(key)) throw new Error(`${label} contains unknown field ${key}`)
 	}
 }
+
+const decodeTableInventory = (value: unknown, label: string): TableInventory => {
+	const inventory = record(value, label)
+	exactKeys(
+		inventory,
+		["table", "rowCount", "retentionStartAt", "minTime", "maxTime", "hashSum", "hashXor"],
+		label,
+	)
+	return {
+		table: nonEmptyString(inventory.table, `${label}.table`),
+		rowCount: nonEmptyString(inventory.rowCount, `${label}.rowCount`),
+		retentionStartAt: nonEmptyString(inventory.retentionStartAt, `${label}.retentionStartAt`),
+		minTime: nullableString(inventory.minTime, `${label}.minTime`),
+		maxTime: nullableString(inventory.maxTime, `${label}.maxTime`),
+		hashSum: nonEmptyString(inventory.hashSum, `${label}.hashSum`),
+		hashXor: nonEmptyString(inventory.hashXor, `${label}.hashXor`),
+	}
+}
+
+const decodeCopyProgress = (value: unknown, label: string): CopyProgress => {
+	const progress = record(value, label)
+	exactKeys(
+		progress,
+		[
+			"rows",
+			"bytes",
+			"lastTimestamp",
+			"lastHash",
+			"lastTieBreak",
+			"duplicateCount",
+			"duplicateGroupExhausted",
+		],
+		label,
+	)
+	if (typeof progress.duplicateGroupExhausted !== "boolean")
+		throw new Error(`${label}.duplicateGroupExhausted must be a boolean`)
+	return {
+		rows: nonNegativeInteger(progress.rows, `${label}.rows`),
+		bytes: nonNegativeInteger(progress.bytes, `${label}.bytes`),
+		lastTimestamp: nullableString(progress.lastTimestamp, `${label}.lastTimestamp`),
+		lastHash: nullableString(progress.lastHash, `${label}.lastHash`),
+		lastTieBreak: nullableString(progress.lastTieBreak, `${label}.lastTieBreak`),
+		duplicateCount: nonNegativeInteger(progress.duplicateCount, `${label}.duplicateCount`),
+		duplicateGroupExhausted: progress.duplicateGroupExhausted,
+	}
+}
+
+const decodePendingBatch = (value: unknown, label: string): PendingBatch => {
+	const pending = record(value, label)
+	exactKeys(
+		pending,
+		[
+			"table",
+			"rowCount",
+			"byteLength",
+			"firstTimestamp",
+			"firstHash",
+			"firstTieBreak",
+			"lastTimestamp",
+			"lastHash",
+			"lastTieBreak",
+			"lastKeyCount",
+			"lastKeyExhausted",
+			"signature",
+		],
+		label,
+	)
+	const table = nonEmptyString(pending.table, `${label}.table`)
+	if (!RAW_TABLE_NAMES.has(table)) throw new Error(`${label}.table is not a registered raw table`)
+	if (typeof pending.lastKeyExhausted !== "boolean")
+		throw new Error(`${label}.lastKeyExhausted must be a boolean`)
+	if (typeof pending.signature !== "string" || !/^[0-9a-f]{64}$/i.test(pending.signature))
+		throw new Error(`${label}.signature must be a SHA-256 hex digest`)
+	const rowCount = nonNegativeInteger(pending.rowCount, `${label}.rowCount`)
+	if (rowCount === 0) throw new Error(`${label}.rowCount must be positive`)
+	return {
+		table,
+		rowCount,
+		byteLength: nonNegativeInteger(pending.byteLength, `${label}.byteLength`),
+		firstTimestamp: nullableString(pending.firstTimestamp, `${label}.firstTimestamp`),
+		firstHash: nullableString(pending.firstHash, `${label}.firstHash`),
+		firstTieBreak: nullableString(pending.firstTieBreak, `${label}.firstTieBreak`),
+		lastTimestamp: nullableString(pending.lastTimestamp, `${label}.lastTimestamp`),
+		lastHash: nullableString(pending.lastHash, `${label}.lastHash`),
+		lastTieBreak: nullableString(pending.lastTieBreak, `${label}.lastTieBreak`),
+		lastKeyCount: nonNegativeInteger(pending.lastKeyCount, `${label}.lastKeyCount`),
+		lastKeyExhausted: pending.lastKeyExhausted,
+		signature: pending.signature,
+	}
+}
+
+const decodeRawReplayProgress = (value: unknown): RawReplayProgress => {
+	const progress = record(value, "legacy raw replay progress")
+	exactKeys(progress, ["sourceInventory", "copied", "pendingBatch"], "legacy raw replay progress")
+	const sourceInventoryRecord = record(progress.sourceInventory, "legacy raw replay sourceInventory")
+	const copiedRecord = record(progress.copied, "legacy raw replay copied")
+	const sourceInventory: Record<string, TableInventory> = {}
+	for (const [table, inventory] of Object.entries(sourceInventoryRecord)) {
+		if (!RAW_TABLE_NAMES.has(table))
+			throw new Error(`legacy raw replay sourceInventory has unknown table ${table}`)
+		const decoded = decodeTableInventory(inventory, `legacy raw replay sourceInventory.${table}`)
+		if (decoded.table !== table)
+			throw new Error(`legacy raw replay sourceInventory.${table}.table does not match its key`)
+		sourceInventory[table] = decoded
+	}
+	const copied: Record<string, CopyProgress> = {}
+	for (const [table, progressValue] of Object.entries(copiedRecord)) {
+		if (!RAW_TABLE_NAMES.has(table))
+			throw new Error(`legacy raw replay copied has unknown table ${table}`)
+		copied[table] = decodeCopyProgress(progressValue, `legacy raw replay copied.${table}`)
+	}
+	return {
+		sourceInventory,
+		copied,
+		...(progress.pendingBatch === undefined
+			? {}
+			: { pendingBatch: decodePendingBatch(progress.pendingBatch, "legacy raw replay pendingBatch") }),
+	}
+}
+
+const asProgress = (value: RawReplayProgress | undefined): RawReplayProgress =>
+	value ?? { sourceInventory: {}, copied: {} }
 
 const parseJsonEachRow = <A>(value: string): A[] =>
 	value
@@ -313,11 +447,19 @@ const keyOf = (row: Record<string, unknown>): string =>
 const copyProgressFor = (progress: RawReplayProgress, table: string): CopyProgress =>
 	progress.copied[table] ?? emptyCopyProgress()
 
+const canonicalJson = (value: unknown): string => {
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
+	if (isRecord(value))
+		return `{${Object.keys(value)
+			.sort()
+			.map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+			.join(",")}}`
+	return JSON.stringify(value)
+}
+
 const batchSignature = (table: string, rows: ReadonlyArray<Record<string, unknown>>): string =>
 	createHash("sha256")
-		.update(
-			`${table}:${rows.length}:${JSON.stringify(rows[0] ?? null)}:${JSON.stringify(rows[rows.length - 1] ?? null)}`,
-		)
+		.update(`${table}\n${rows.length}\n${rows.map(canonicalJson).join("\n")}`)
 		.digest("hex")
 
 /** Keep the cursor ordinal cumulative when an equal composite-key group spans
@@ -488,12 +630,46 @@ const recoverPendingBatch = async (
 	if (!pending) return progress
 	const table = LEGACY_RAW_TABLES.find((candidate) => candidate.name === pending.table)
 	if (!table) throw new Error(`journal contains an unknown pending table: ${pending.table}`)
-	const columns = await tableColumns(context, "target", table.name)
+	const columns = await ensureSourceTargetColumns(context, table)
 	const current = await inventory(context, "target", table, columns, context.cutoffAt)
 	const previous = copyProgressFor(progress, table.name)
 	const targetRows = Number(current.rowCount)
 	if (targetRows === previous.rows) return { ...progress, pendingBatch: undefined }
 	if (targetRows === previous.rows + pending.rowCount) {
+		const columnList = columns.map((column) => identifier(column.name)).join(", ")
+		const hashExpression = `cityHash64(toString(tuple(${columnList})))`
+		const tieBreakExpression = `sipHash64(toString(tuple(${columnList})))`
+		const continuation = duplicateCursorContinuation(previous)
+		const cursor =
+			previous.lastTimestamp === null || previous.lastHash === null || previous.lastTieBreak === null
+				? ""
+				: `AND (${identifier(table.timeColumn)} > ${timestampLiteral(previous.lastTimestamp)} OR (${identifier(table.timeColumn)} = ${timestampLiteral(previous.lastTimestamp)} AND (${hashExpression} > ${previous.lastHash} OR (${hashExpression} = ${previous.lastHash} AND ${tieBreakExpression} ${continuation.comparison} ${previous.lastTieBreak}))))`
+		const offset = continuation.offset === 0 ? "" : ` OFFSET ${continuation.offset}`
+		const inserted = parseJsonEachRow<Record<string, unknown>>(
+			await queryTarget(
+				context,
+				`SELECT ${columnList}, ${identifier(table.timeColumn)} AS __maple_timestamp, ${hashExpression} AS __maple_hash, ${tieBreakExpression} AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${identifier(table.timeColumn)}, __maple_hash, __maple_tie_break LIMIT ${pending.rowCount}${offset}`,
+			),
+		)
+		if (inserted.length !== pending.rowCount)
+			throw new Error("pending migration batch row count changed while recovering; refusing to guess")
+		const payload = inserted.map((row) => {
+			const copy = { ...row }
+			delete copy.__maple_timestamp
+			delete copy.__maple_hash
+			delete copy.__maple_tie_break
+			return copy
+		})
+		const first = inserted[0]!
+		const last = inserted[inserted.length - 1]!
+		const firstKey = keyOf(first)
+		const lastKey = keyOf(last)
+		const expectedFirstKey = `${pending.firstTimestamp ?? ""}\0${pending.firstHash ?? ""}\0${pending.firstTieBreak ?? ""}`
+		const expectedLastKey = `${pending.lastTimestamp ?? ""}\0${pending.lastHash ?? ""}\0${pending.lastTieBreak ?? ""}`
+		if (firstKey !== expectedFirstKey || lastKey !== expectedLastKey)
+			throw new Error("pending migration batch key range changed while recovering; refusing to guess")
+		if (batchSignature(table.name, payload) !== pending.signature)
+			throw new Error("pending migration batch signature does not match target rows; refusing to guess")
 		return {
 			...progress,
 			copied: {
@@ -649,6 +825,17 @@ const legacyPreflight = async (context: MigrationModuleContext): Promise<LegacyM
 	return { module: "local-0000-to-0001-raw-replay", version: 1 } as const
 }
 
+const decodeLegacyState = (value: unknown): LegacyModuleState => {
+	const state = record(value, "legacy raw replay state")
+	exactKeys(state, ["module", "version"], "legacy raw replay state")
+	if (state.module !== "local-0000-to-0001-raw-replay" || state.version !== 1)
+		throw new Error("legacy raw replay state has an unsupported module or version")
+	return { module: "local-0000-to-0001-raw-replay", version: 1 }
+}
+
+const decodeLegacyProgress = (value: unknown): RawReplayProgress | undefined =>
+	value === undefined ? undefined : decodeRawReplayProgress(value)
+
 const legacyPrepareTarget = async (
 	context: MigrationModuleContext,
 	state: LegacyModuleState,
@@ -725,6 +912,8 @@ export const legacyToCurrentModule: LocalStoreMigrationModule<LegacyModuleState,
 	to: LOCAL_SCHEMA_V1,
 	operations,
 	dispositions: knownDispositions,
+	decodeState: decodeLegacyState,
+	decodeProgress: decodeLegacyProgress,
 	preflight: legacyPreflight,
 	prepareTarget: legacyPrepareTarget,
 	apply: legacyApply,

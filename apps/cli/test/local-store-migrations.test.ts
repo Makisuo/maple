@@ -12,15 +12,19 @@ import {
 } from "../src/server/schema-identity"
 import {
 	abandonLocalStoreMigration,
+	abandonLocalStoreMigrationPreservingSource,
 	executeMigrationModule,
+	executeMigrationChain,
 	identityFromMarker,
 	legacyToCurrentModule,
 	migrationJournalPath,
 	migrationHistoryPath,
+	migrationRootPath,
 	planMigration,
 	readMigrationJournal,
 	resolveMigrationChain,
 	runLocalStoreMigration,
+	promoteLocalStoreMigration,
 	validateMigrationRegistry,
 	type LocalStoreMigration,
 	type MigrationModuleContext,
@@ -114,6 +118,8 @@ describe("local migration registry", () => {
 			to: LOCAL_SCHEMA_V1,
 			operations: [{ id: "x", description: "x", requiresQuiescence: true, phase: "copying" }],
 			dispositions: [],
+			decodeState: (value) => value,
+			decodeProgress: (value) => value,
 			preflight: async () => undefined,
 			prepareTarget: async (_context, state) => state,
 			apply: async (_context, _state, progress) => progress,
@@ -135,6 +141,8 @@ describe("local migration registry", () => {
 			to: { ...LOCAL_SCHEMA_V1, version: 2, fingerprint: "2222222222222222", digest: "2".repeat(64) },
 			operations: [{ id: "fixture", description: "fixture transform", requiresQuiescence: true }],
 			dispositions: [],
+			decodeState: (value) => value,
+			decodeProgress: (value) => value,
 			preflight: async () => {
 				events.push("preflight")
 				return { state: "prepared" }
@@ -179,6 +187,31 @@ describe("local migration registry", () => {
 		} as unknown as MigrationModuleContext
 		await executeMigrationModule(v2, context, context.step, { prepareTarget: true })
 		expect(events).toEqual(["preflight", "prepareTarget", "apply", "verify"])
+
+		const verifiedEvents: string[] = []
+		const verifiedModule: LocalStoreMigration = {
+			...v2,
+			prepareTarget: async () => {
+				verifiedEvents.push("prepareTarget")
+				return { state: "unexpected" }
+			},
+			apply: async () => {
+				verifiedEvents.push("apply")
+				return { rows: 2 }
+			},
+			verify: async () => {
+				verifiedEvents.push("verify")
+			},
+			recover: async () => {
+				verifiedEvents.push("recover")
+				return {}
+			},
+		}
+		const verifiedStep = { ...context.step, status: "verified" as const, state: { state: "prepared" } }
+		await executeMigrationModule(verifiedModule, { ...context, step: verifiedStep }, verifiedStep, {
+			prepareTarget: true,
+		})
+		expect(verifiedEvents).toEqual(["recover"])
 	})
 
 	it("exposes retention-aware dispositions and rollback limits", () => {
@@ -222,6 +255,56 @@ describe("marker v2 durability", () => {
 })
 
 describe("durable migration recovery", () => {
+	it("fails closed on malformed journal topology and typed progress", async () => {
+		const root = await mkdtemp(join(tmpdir(), "maple-migration-journal-invariants-"))
+		const dataDir = join(root, "data")
+		const base: MigrationJournal = {
+			formatVersion: 2,
+			migrationId: "journal-invariant",
+			phase: "copying",
+			chain: [
+				{
+					id: legacyToCurrentModule.id,
+					moduleVersion: legacyToCurrentModule.moduleVersion,
+					from: LEGACY_LOCAL_SCHEMA,
+					to: LOCAL_SCHEMA_V1,
+					status: "running",
+					state: { module: legacyToCurrentModule.id, version: 1 },
+				},
+			],
+			currentStepIndex: 0,
+			sourceDataDir: dataDir,
+			sourceStoreId: "source",
+			sourceChdb: LEGACY_LOCAL_SCHEMA.chdb,
+			sourceFingerprint: LEGACY_LOCAL_SCHEMA.fingerprint,
+			sourceDigest: LEGACY_LOCAL_SCHEMA.digest,
+			sourceVersion: LEGACY_LOCAL_SCHEMA.version,
+			targetDataDir: join(root, ".maple-migrations", "journal-invariant", "target", "data"),
+			targetStoreId: "target",
+			targetChdb: LOCAL_SCHEMA_V1.chdb,
+			targetFingerprint: LOCAL_SCHEMA_V1.fingerprint,
+			targetDigest: LOCAL_SCHEMA_V1.digest,
+			targetVersion: LOCAL_SCHEMA_V1.version,
+			cutoffAt: "2026-01-01T00:00:00.000Z",
+			createdAt: "2026-01-01T00:00:00.000Z",
+		}
+		try {
+			const { state: _verifiedState, ...verifiedWithoutState } = base.chain[0]!
+			await durableJson(migrationJournalPath(dataDir), {
+				...base,
+				chain: [{ ...verifiedWithoutState, status: "verified" }],
+			})
+			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/no persisted state/)
+			await durableJson(migrationJournalPath(dataDir), {
+				...base,
+				chain: [{ ...base.chain[0]!, progress: { sourceInventory: [], copied: {} } }],
+			})
+			await expect(readMigrationJournal(dataDir)).rejects.toThrow(/sourceInventory must be an object/)
+		} finally {
+			await rm(root, { recursive: true, force: true })
+		}
+	})
+
 	it("preserves an abandoned transaction and finishes an interrupted promotion", async () => {
 		const root = await mkdtemp(join(tmpdir(), "maple-migration-recovery-"))
 		const dataDir = join(root, "data")
@@ -241,6 +324,7 @@ describe("durable migration recovery", () => {
 					from: LEGACY_LOCAL_SCHEMA,
 					to: LOCAL_SCHEMA_V1,
 					status: "completed",
+					state: { module: "local-0000-to-0001-raw-replay", version: 1 },
 				},
 			],
 			currentStepIndex: 1,
@@ -295,6 +379,241 @@ describe("durable migration recovery", () => {
 				storeId: targetStoreId,
 				activation: "active",
 			})
+		} finally {
+			await rm(root, { recursive: true, force: true })
+		}
+	})
+
+	it("runs a genuine two-step coordinator chain, resumes a verified step, and promotes once", async () => {
+		const root = await mkdtemp(join(tmpdir(), "maple-migration-chain-"))
+		const v2 = {
+			...LOCAL_SCHEMA_V1,
+			version: 2,
+			fingerprint: "2222222222222222",
+			digest: "2".repeat(64),
+		} as const
+		const makeFixtureModule = (
+			id: string,
+			from: typeof LEGACY_LOCAL_SCHEMA | typeof LOCAL_SCHEMA_V1,
+			to: typeof LOCAL_SCHEMA_V1 | typeof v2,
+			events: string[],
+		): LocalStoreMigration => ({
+			id,
+			moduleVersion: 1,
+			description: `fixture ${id}`,
+			from,
+			to,
+			operations: [{ id: `${id}-operation`, description: id, requiresQuiescence: true }],
+			dispositions: [],
+			decodeState: (value) => {
+				if (
+					typeof value !== "object" ||
+					value === null ||
+					Array.isArray(value) ||
+					(value as Record<string, unknown>).module !== id ||
+					(value as Record<string, unknown>).version !== 1
+				)
+					throw new Error(`${id} state is invalid`)
+				return value
+			},
+			decodeProgress: (value) => {
+				if (value === undefined) return undefined
+				if (typeof value !== "object" || value === null || Array.isArray(value))
+					throw new Error(`${id} progress is invalid`)
+				return value
+			},
+			preflight: async (context) => {
+				events.push(
+					`${id}:preflight:${context.sourceDataDir === context.targetDataDir ? "shared" : "separate"}`,
+				)
+				return { module: id, version: 1 }
+			},
+			prepareTarget: async (context, state) => {
+				events.push(`${id}:prepareTarget`)
+				await mkdir(context.targetDataDir, { recursive: true })
+				return state
+			},
+			apply: async (_context, _state, _progress) => {
+				events.push(`${id}:apply`)
+				return { rows: 1 }
+			},
+			verify: async () => {
+				events.push(`${id}:verify`)
+			},
+			recover: async () => {
+				events.push(`${id}:recover`)
+				return {}
+			},
+		})
+
+		const runScenario = async (scenarioRoot: string, resumeSecondStep: boolean): Promise<string[]> => {
+			const dataDir = join(scenarioRoot, "data")
+			const migrationId = resumeSecondStep ? "fixture-resume" : "fixture-two-step"
+			const targetDataDir = join(migrationRootPath(dataDir, migrationId), "target", "data")
+			const events: string[] = []
+			const first = makeFixtureModule("fixture-v0-v1", LEGACY_LOCAL_SCHEMA, LOCAL_SCHEMA_V1, events)
+			const second = makeFixtureModule("fixture-v1-v2", LOCAL_SCHEMA_V1, v2, events)
+			const journal: MigrationJournal = {
+				formatVersion: 2,
+				migrationId,
+				phase: resumeSecondStep ? "copy-verified" : "planned",
+				chain: [
+					{
+						id: first.id,
+						moduleVersion: 1,
+						from: first.from,
+						to: first.to,
+						status: resumeSecondStep ? "completed" : "pending",
+						...(resumeSecondStep ? { state: { module: first.id, version: 1 } } : {}),
+					},
+					{
+						id: second.id,
+						moduleVersion: 1,
+						from: second.from,
+						to: second.to,
+						status: resumeSecondStep ? "verified" : "pending",
+						...(resumeSecondStep
+							? { state: { module: second.id, version: 1 }, progress: { rows: 1 } }
+							: {}),
+					},
+				],
+				currentStepIndex: resumeSecondStep ? 1 : 0,
+				sourceDataDir: dataDir,
+				sourceStoreId: `${migrationId}-source`,
+				sourceChdb: CURRENT_LOCAL_SCHEMA.chdb,
+				sourceFingerprint: LEGACY_LOCAL_SCHEMA.fingerprint,
+				sourceDigest: LEGACY_LOCAL_SCHEMA.digest,
+				sourceVersion: LEGACY_LOCAL_SCHEMA.version,
+				targetDataDir,
+				targetStoreId: `${migrationId}-target`,
+				targetChdb: v2.chdb,
+				targetFingerprint: v2.fingerprint,
+				targetDigest: v2.digest,
+				targetVersion: v2.version,
+				cutoffAt: "2026-01-01T00:00:00.000Z",
+				createdAt: "2026-01-01T00:00:00.000Z",
+			}
+			await mkdir(join(dataDir, "store"), { recursive: true })
+			await durableJson(storeMarkerPath(dataDir), {
+				chdb: CURRENT_LOCAL_SCHEMA.chdb,
+				maple: "test",
+				createdAt: journal.createdAt,
+				schema: LEGACY_SCHEMA_FINGERPRINT,
+			})
+			if (resumeSecondStep) {
+				await mkdir(targetDataDir, { recursive: true })
+				await ensureStoreMarkerDurable(targetDataDir, LOCAL_SCHEMA_V1, "test", journal.createdAt, {
+					activation: "staging",
+					storeId: journal.targetStoreId,
+				})
+			}
+			await durableJson(migrationJournalPath(dataDir), journal)
+			const completed = await executeMigrationChain(dataDir, journal, [first, second])
+			if (resumeSecondStep) {
+				expect(events).toEqual(["fixture-v1-v2:recover"])
+			} else {
+				expect(events).toEqual([
+					"fixture-v0-v1:preflight:separate",
+					"fixture-v0-v1:prepareTarget",
+					"fixture-v0-v1:apply",
+					"fixture-v0-v1:verify",
+					"fixture-v1-v2:preflight:shared",
+					"fixture-v1-v2:prepareTarget",
+					"fixture-v1-v2:apply",
+					"fixture-v1-v2:verify",
+				])
+			}
+			expect(completed.currentStepIndex).toBe(2)
+			expect(completed.chain.every((step) => step.status === "completed")).toBe(true)
+			const result = await promoteLocalStoreMigration(dataDir, completed)
+			expect(result.phase).toBe("promoted")
+			expect(readMarker(dataDir)).toMatchObject({
+				formatVersion: 2,
+				storeId: journal.targetStoreId,
+				schemaVersion: 2,
+				activation: "active",
+			})
+			expect(await Bun.file(migrationHistoryPath(dataDir, migrationId)).exists()).toBe(true)
+			return events
+		}
+
+		try {
+			await runScenario(join(root, "normal"), false)
+			await runScenario(join(root, "resume"), true)
+		} finally {
+			await rm(root, { recursive: true, force: true })
+		}
+	})
+
+	it("quarantines only a staged target and rejects promotion-started abandonment", async () => {
+		const root = await mkdtemp(join(tmpdir(), "maple-migration-abandon-target-"))
+		const dataDir = join(root, "data")
+		const migrationId = "fixture-target-abandon"
+		const targetDataDir = join(migrationRootPath(dataDir, migrationId), "target", "data")
+		const journal: MigrationJournal = {
+			formatVersion: 2,
+			migrationId,
+			phase: "copying",
+			chain: [
+				{
+					id: legacyToCurrentModule.id,
+					moduleVersion: legacyToCurrentModule.moduleVersion,
+					from: LEGACY_LOCAL_SCHEMA,
+					to: LOCAL_SCHEMA_V1,
+					status: "running",
+					state: { module: legacyToCurrentModule.id, version: 1 },
+				},
+			],
+			currentStepIndex: 0,
+			sourceDataDir: dataDir,
+			sourceStoreId: "source-id",
+			sourceChdb: CURRENT_LOCAL_SCHEMA.chdb,
+			sourceFingerprint: LEGACY_LOCAL_SCHEMA.fingerprint,
+			sourceDigest: LEGACY_LOCAL_SCHEMA.digest,
+			sourceVersion: LEGACY_LOCAL_SCHEMA.version,
+			targetDataDir,
+			targetStoreId: "target-id",
+			targetChdb: LOCAL_SCHEMA_V1.chdb,
+			targetFingerprint: LOCAL_SCHEMA_V1.fingerprint,
+			targetDigest: LOCAL_SCHEMA_V1.digest,
+			targetVersion: LOCAL_SCHEMA_V1.version,
+			cutoffAt: "2026-01-01T00:00:00.000Z",
+			createdAt: "2026-01-01T00:00:00.000Z",
+		}
+		try {
+			await mkdir(join(dataDir, "store"), { recursive: true })
+			await durableJson(storeMarkerPath(dataDir), {
+				chdb: CURRENT_LOCAL_SCHEMA.chdb,
+				maple: "test",
+				createdAt: journal.createdAt,
+				schema: LEGACY_SCHEMA_FINGERPRINT,
+			})
+			await mkdir(targetDataDir, { recursive: true })
+			await ensureStoreMarkerDurable(targetDataDir, LOCAL_SCHEMA_V1, "test", journal.createdAt, {
+				activation: "staging",
+				storeId: journal.targetStoreId,
+			})
+			await durableJson(migrationJournalPath(dataDir), journal)
+			const quarantine = await abandonLocalStoreMigrationPreservingSource(dataDir)
+			expect(quarantine).not.toBeNull()
+			expect(await Bun.file(migrationJournalPath(dataDir)).exists()).toBe(false)
+			expect(await Bun.file(storeMarkerPath(dataDir)).exists()).toBe(true)
+			expect(await Bun.file(join(dataDir, "store", "placeholder")).exists()).toBe(false)
+			expect(await Bun.file(join(quarantine!, "journal.json")).exists()).toBe(true)
+			expect(
+				await Bun.file(join(quarantine!, "target", "data", "../maple-store-version.json")).exists(),
+			).toBe(true)
+
+			const promotionJournal = {
+				...journal,
+				phase: "promotion-started" as const,
+				currentStepIndex: 1,
+				chain: journal.chain.map((step) => ({ ...step, status: "completed" as const })),
+			}
+			await durableJson(migrationJournalPath(dataDir), promotionJournal)
+			await expect(abandonLocalStoreMigrationPreservingSource(dataDir)).rejects.toThrow(
+				/promotion started/,
+			)
 		} finally {
 			await rm(root, { recursive: true, force: true })
 		}

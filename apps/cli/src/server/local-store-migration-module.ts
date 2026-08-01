@@ -100,6 +100,11 @@ export interface LocalStoreMigrationModule<State = unknown, Progress = unknown> 
 	readonly to: Readonly<LocalSchemaIdentity>
 	readonly operations: ReadonlyArray<MigrationOperation>
 	readonly dispositions: ReadonlyArray<StateDispositionEntry>
+	/** Decode values restored from the untrusted JSON journal before handing them
+	 * to executable module code. A decoder must reject malformed or unknown
+	 * state rather than manufacturing defaults. */
+	decodeState(value: unknown): State
+	decodeProgress(value: unknown): Progress | undefined
 	preflight(context: MigrationModuleContext): Promise<State>
 	prepareTarget(context: MigrationModuleContext, state: State): Promise<State>
 	apply(context: MigrationModuleContext, state: State, progress: Progress | undefined): Promise<Progress>

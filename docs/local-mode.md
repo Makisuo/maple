@@ -195,6 +195,8 @@ maple schema status
 maple schema plan
 maple schema migrate --dry-run
 maple schema migrate --yes
+# If a pre-promotion target is dirty or incomplete:
+maple schema abandon --yes
 ```
 
 The supported legacy path is a stopped, side-by-side rebuild. It records a
@@ -214,9 +216,15 @@ source/target identities, typed module state, and resumable progress. A
 migration connection writes `maple-store-open` before native connect/bootstrap
 and clears it only after a clean close; a dirty source is never silently
 reopened. Startup refuses to open an unfinished transaction until `maple
-schema migrate --yes` resumes it. Promotion recovery runs from the journal
-before ordinary active-marker compatibility checks, including the crash window
-where the active marker is still `staging`.
+schema migrate --yes` resumes it. If the failure is before promotion, `maple
+schema abandon --yes` validates the journal and source marker, then moves only
+the journal-owned target and journal into a recoverable `.abandoned-*`
+quarantine. The active source, its marker, checkpoints, and any retained
+rollback source are left in place. A `promotion-started` journal is never
+abandoned by this command because it may already contain a cutover; resume it
+or use the explicit reset path after inspection. Promotion recovery runs from
+the journal before ordinary active-marker compatibility checks, including the
+crash window where the active marker is still `staging`.
 
 After successful promotion, the canonical journal is archived under the
 migration root as `journal.json`, so a completed v0 → v1 transaction cannot
@@ -225,7 +233,10 @@ short-circuit a later v1 → v2 migration. `maple start --reset` or `maple reset
 journal under an `maple-store-migration-abandoned-*` name for inspection.
 Existing checkpoints remain attached to the retained source and are not
 advertised as restorable by the new schema; create a fresh checkpoint after
-promotion.
+promotion. Every persisted module state and progress value is decoded by its
+own migration module before resume, and malformed journal topology fails
+closed. A step marked `verified` is commit-pending: recovery may rewrite its
+staging marker, but never reruns its mutating target preparation.
 
 Migration edges are compile-time modules registered in
 `apps/cli/src/server/local-store-migrations/`. The coordinator owns locking,
@@ -233,7 +244,25 @@ journaling, chain progression, staging, and promotion. Each module owns its
 frozen schema identities, target preparation, transforms, semantic
 verification, and typed recovery state. Adding a later edge should add a new
 module and registry entry; the coordinator must not gain transition-specific
-table names or branches.
+table names or branches. Later modules receive the previous staged target as
+their `sourceDataDir` and the same staged store as `targetDataDir`, so their
+transforms must be explicitly safe for this shared in-place topology. The
+coordinator test seam exercises a two-edge chain, a resumed verified edge, and
+one final promotion.
+
+Structural identities live in the append-only history at
+`apps/cli/src/server/local-schema-history.ts`. The schema gate checks the
+current identity against the history tip, preserves the base branch's prior
+entries in CI, and requires every historical identity to reach the current one
+through registered migration edges. Changing a schema digest or manifest
+therefore requires a new versioned entry and executable edge together.
+
+The Linux native probe `apps/cli/test/native-local-store-migration.sh` creates
+and populates a source with the bundled Maple/chDB, applies the legacy marker,
+runs the public migration command, and reopens the promoted store in a fresh
+process. It reports `SKIP` when no native `libchdb` is available (for example,
+on a development machine without the platform bundle); the Linux CI bundle
+runs it alongside the checkpoint smoke test.
 
 Every start also checks the opened physical schema against the generated local
 schema manifest, including objects, columns/types/defaults/codecs, engines,

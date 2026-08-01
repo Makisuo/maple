@@ -7,6 +7,7 @@ import { bold, dim, green, amber } from "../lib/style"
 import {
 	formatMigrationPlan,
 	identityFromMarker,
+	abandonLocalStoreMigrationPreservingSource,
 	migrationStatus,
 	planMigration,
 	runLocalStoreMigration,
@@ -32,6 +33,12 @@ const dataDirFlag = Flag.optional(
 const yesFlag = Flag.boolean("yes").pipe(
 	Flag.withAlias("y"),
 	Flag.withDescription("Confirm the migration and its stated preservation envelope"),
+	Flag.withDefault(false),
+)
+
+const abandonYesFlag = Flag.boolean("yes").pipe(
+	Flag.withAlias("y"),
+	Flag.withDescription("Confirm quarantining the staged target while preserving the active source"),
 	Flag.withDefault(false),
 )
 
@@ -178,7 +185,41 @@ export const schemaMigrate = Command.make("migrate", {
 	),
 )
 
+export const schemaAbandon = Command.make("abandon", {
+	dataDir: dataDirFlag,
+	yes: abandonYesFlag,
+}).pipe(
+	Command.withDescription("Quarantine an unfinished staged target while preserving the active source"),
+	Command.withHandler(
+		Effect.fnUntraced(function* (args) {
+			const dataDir = resolvedDataDir(args.dataDir)
+			if (!args.yes) {
+				yield* Effect.sync(() =>
+					process.stderr.write(
+						`${amber("Target not abandoned.")} This moves only the journal-owned staged target into a recoverable quarantine and preserves the active source, checkpoints, and rollback data. Re-run with ${bold("maple schema abandon --yes")} to confirm.\n`,
+					),
+				)
+				return
+			}
+			const quarantine = yield* Effect.tryPromise({
+				try: () => abandonLocalStoreMigrationPreservingSource(dataDir),
+				catch: (error) =>
+					new SchemaCommandError({
+						message: error instanceof Error ? error.message : String(error),
+					}),
+			})
+			yield* Effect.sync(() =>
+				process.stdout.write(
+					quarantine === null
+						? `${dim("No unfinished staged migration was found.")}\n`
+						: `${green("✓")} staged target quarantined\n  ${dim("quarantine")} ${quarantine}\n  ${dim("source")}    ${dataDir}\n`,
+				),
+			)
+		}),
+	),
+)
+
 export const schema = Command.make("schema").pipe(
 	Command.withDescription("Inspect and migrate the local chDB schema"),
-	Command.withSubcommands([schemaStatus, schemaPlan, schemaMigrate]),
+	Command.withSubcommands([schemaStatus, schemaPlan, schemaMigrate, schemaAbandon]),
 )

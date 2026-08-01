@@ -3,7 +3,10 @@ import schemaV1Sql from "./schema/local-schema-v1.sql" with { type: "text" }
 import { schemaDigest as digestSchema, schemaFingerprint as fingerprintSchema } from "./store-version"
 import { buildLocalSchemaManifest, type LocalSchemaManifest } from "./schema-manifest"
 import { LOCAL_SCHEMA_VERSION } from "./local-schema-version"
+import { LOCAL_SCHEMA_HISTORY } from "./local-schema-history"
 import { CHDB_VERSION } from "../version"
+
+export { LOCAL_SCHEMA_HISTORY } from "./local-schema-history"
 
 /**
  * Local-store schema version.
@@ -36,11 +39,11 @@ export const LOCAL_SCHEMA_MANIFEST_DIGEST = LOCAL_SCHEMA_MANIFEST.digest
 export const LOCAL_SCHEMA_V1_SQL = schemaV1Sql
 export const LOCAL_SCHEMA_V1_MANIFEST: LocalSchemaManifest = buildLocalSchemaManifest(schemaV1Sql)
 export const LOCAL_SCHEMA_V1_MANIFEST_DIGEST = LOCAL_SCHEMA_V1_MANIFEST.digest
-/** Generated compatibility gate for structural DDL. When this changes, the
- * local schema version and migration decision must change in the same commit.
- * Cosmetic SQL comments/whitespace do not alter this manifest digest. */
+/** Compatibility alias for callers that used the old gate constant. The value
+ * is sourced from the append-only literal history, not from the current
+ * manifest, so updating a schema without appending its identity still fails. */
 export const EXPECTED_LOCAL_SCHEMA_MANIFEST_DIGEST =
-	"24a7e52d4ae31f479db97c091d0db5c32bdf8e018e04ed00abcd53124b1f9de3"
+	LOCAL_SCHEMA_HISTORY[LOCAL_SCHEMA_HISTORY.length - 1]!.manifestDigest
 
 export interface LocalSchemaIdentity {
 	readonly version: number
@@ -57,12 +60,12 @@ export interface LocalSchemaIdentity {
  * construct and verify v1 rather than silently changing its destination.
  */
 export const LOCAL_SCHEMA_V1: LocalSchemaIdentity = Object.freeze({
-	version: 1,
-	fingerprint: fingerprintSchema(schemaV1Sql),
-	digest: digestSchema(schemaV1Sql),
-	manifestDigest: LOCAL_SCHEMA_V1_MANIFEST_DIGEST,
+	version: LOCAL_SCHEMA_HISTORY[1]!.version,
+	fingerprint: LOCAL_SCHEMA_HISTORY[1]!.fingerprint,
+	digest: LOCAL_SCHEMA_HISTORY[1]!.digest,
+	manifestDigest: LOCAL_SCHEMA_HISTORY[1]!.manifestDigest,
 	chdb: CHDB_VERSION,
-	projectRevision: CURRENT_SCHEMA_PROJECT_REVISION,
+	projectRevision: LOCAL_SCHEMA_HISTORY[1]!.projectRevision,
 })
 
 export const CURRENT_LOCAL_SCHEMA: LocalSchemaIdentity = Object.freeze({
