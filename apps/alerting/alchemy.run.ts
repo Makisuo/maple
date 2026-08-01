@@ -71,7 +71,10 @@ export const createAlertingWorker = ({ stage, mapleDb, chatFlue }: CreateAlertin
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
 			url: false,
-			crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *", "0 9 * * *"],
+			// `0 9 * * *` (the onboarding drip) was retired when that sequence moved to
+			// maple-portal's campaign system. Removing it here is what stops the two
+			// from both sending during cutover.
+			crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *"],
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
