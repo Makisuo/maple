@@ -496,7 +496,36 @@ describe("tracesTimeseriesQuery", () => {
 			attributeFilters: [{ key: "http.route", mode: "exists" }],
 		})
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("mapContains(SpanAttributes, 'http.route')")
+		// A missing Map key reads back as '', so `exists` must also exclude empty
+		// values — otherwise breakdowns keep a "(no value)" bucket.
+		expect(sql).toContain(
+			"mapContains(SpanAttributes, 'http.route') AND SpanAttributes['http.route'] != ''",
+		)
+	})
+
+	it("filters by attribute filters (exists) across HTTP semconv aliases", () => {
+		const q = tracesTimeseriesQuery({
+			metric: "count",
+			needsSampling: false,
+			attributeFilters: [{ key: "http.status_code", mode: "exists" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain(
+			"(mapContains(SpanAttributes, 'http.status_code') OR mapContains(SpanAttributes, 'http.response.status_code')) AND if(SpanAttributes['http.status_code'] != '', SpanAttributes['http.status_code'], SpanAttributes['http.response.status_code']) != ''",
+		)
+	})
+
+	it("filters by attribute filters (!exists) as the complement of exists", () => {
+		const q = tracesTimeseriesQuery({
+			metric: "count",
+			needsSampling: false,
+			attributeFilters: [{ key: "http.route", mode: "exists", negated: true }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		// Absent *or* empty — the exact negation of the positive predicate.
+		expect(sql).toContain(
+			"NOT ((mapContains(SpanAttributes, 'http.route') AND SpanAttributes['http.route'] != ''))",
+		)
 	})
 
 	it("filters by attribute filters (contains)", () => {
