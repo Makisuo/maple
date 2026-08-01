@@ -4,6 +4,7 @@ import { OrgId } from "@maple/domain"
 import type { TimeseriesPoint } from "../query-engine"
 import {
 	BucketCacheService,
+	coalesceMissingRanges,
 	findMissingRanges,
 	generateFingerprint,
 	mergeAndDeduplicateBuckets,
@@ -78,6 +79,77 @@ describe("findMissingRanges", () => {
 	it("handles unaligned end inside a gap", () => {
 		const missing = findMissingRanges([], 0, MIN + 15_000, MIN, FAR_FUTURE_FLUX)
 		expect(missing).toEqual([{ range: { startMs: 0, endMs: MIN + 15_000 }, cachable: true }])
+	})
+})
+
+describe("coalesceMissingRanges", () => {
+	it("returns nothing for a fully covered range", () => {
+		expect(coalesceMissingRanges([])).toEqual([])
+	})
+
+	it("passes a single range through unchanged", () => {
+		const missing = findMissingRanges([], 0, 10 * MIN, MIN, FAR_FUTURE_FLUX)
+		expect(coalesceMissingRanges(missing)).toEqual(missing)
+	})
+
+	it("collapses head + tail gaps into one query spanning the cached middle", () => {
+		const buckets = [bucket(2 * MIN, 3 * MIN), bucket(3 * MIN, 4 * MIN)]
+		const missing = findMissingRanges(buckets, 0, 6 * MIN, MIN, FAR_FUTURE_FLUX)
+		expect(missing).toHaveLength(2)
+		expect(coalesceMissingRanges(missing)).toEqual([
+			{ range: { startMs: 0, endMs: 6 * MIN }, cachable: true },
+		])
+	})
+
+	it("keeps the cachable range and the live tail separate", () => {
+		const buckets = [bucket(0, MIN), bucket(MIN, 2 * MIN)]
+		const flux = 3 * MIN
+		const missing = findMissingRanges(buckets, 0, 4 * MIN, MIN, flux)
+		expect(coalesceMissingRanges(missing)).toEqual([
+			{ range: { startMs: 2 * MIN, endMs: 3 * MIN }, cachable: true },
+			{ range: { startMs: 3 * MIN, endMs: 4 * MIN }, cachable: false },
+		])
+	})
+
+	it("never emits more than two ranges, however fragmented the gaps", () => {
+		// Alternating cached/uncached buckets across a long window — the shape
+		// that produced the ~2.9-queries-per-request fan-out in prod.
+		const buckets = Array.from({ length: 10 }, (_, i) =>
+			bucket(2 * i * MIN, (2 * i + 1) * MIN),
+		)
+		const flux = 15 * MIN
+		const missing = findMissingRanges(buckets, 0, 20 * MIN, MIN, flux)
+		expect(missing.length).toBeGreaterThan(2)
+
+		const coalesced = coalesceMissingRanges(missing)
+		expect(coalesced).toHaveLength(2)
+		expect(coalesced.filter((r) => r.cachable)).toHaveLength(1)
+		expect(coalesced.filter((r) => !r.cachable)).toHaveLength(1)
+	})
+
+	it("keeps every cachable range strictly below the flux boundary", () => {
+		const buckets = [bucket(0, MIN), bucket(5 * MIN, 6 * MIN)]
+		const flux = 7 * MIN
+		const missing = findMissingRanges(buckets, 0, 10 * MIN, MIN, flux)
+		for (const { range, cachable } of coalesceMissingRanges(missing)) {
+			if (cachable) expect(range.endMs).toBeLessThanOrEqual(flux)
+			else expect(range.startMs).toBeGreaterThanOrEqual(flux)
+		}
+	})
+
+	it("covers every original gap within the coalesced spans", () => {
+		const buckets = [bucket(MIN, 2 * MIN), bucket(4 * MIN, 5 * MIN), bucket(7 * MIN, 8 * MIN)]
+		const missing = findMissingRanges(buckets, 0, 10 * MIN, MIN, FAR_FUTURE_FLUX)
+		const coalesced = coalesceMissingRanges(missing)
+		for (const gap of missing) {
+			const covering = coalesced.find(
+				(span) =>
+					span.cachable === gap.cachable &&
+					span.range.startMs <= gap.range.startMs &&
+					span.range.endMs >= gap.range.endMs,
+			)
+			expect(covering).toBeDefined()
+		}
 	})
 })
 
@@ -243,6 +315,47 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.deepStrictEqual(computeCalls[1], { startMs: 3 * MIN, endMs: 4 * MIN })
 			assert.strictEqual(second.missingRangeCount, 1)
 			assert.strictEqual(second.points.length, 3)
+		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+	})
+
+	it.live("issues one warehouse query when the cached buckets are fragmented", () => {
+		// Regression guard for the fan-out that made the cache net-negative in
+		// prod: a partially-cached window used to dispatch one query per gap, so
+		// warehouse load stayed flat no matter how much was cached.
+		const base = {
+			orgId,
+			query: { source: "traces", kind: "timeseries", fragmented: true },
+			bucketSeconds: 60,
+		}
+
+		const computeCalls: Array<{ startMs: number; endMs: number }> = []
+		const compute = ({ startMs, endMs }: { startMs: number; endMs: number }) => {
+			computeCalls.push({ startMs, endMs })
+			const out: TimeseriesPoint[] = []
+			for (let t = startMs; t < endMs; t += MIN) {
+				out.push(point(new Date(t).toISOString(), { v: t }))
+			}
+			return Effect.succeed(out)
+		}
+
+		return Effect.gen(function* () {
+			const svc = yield* BucketCacheService
+
+			// Warm two disjoint slices, leaving holes at [1m,2m) and [3m,6m).
+			yield* svc.getOrComputeBuckets({ ...base, startMs: 0, endMs: MIN }, compute)
+			yield* svc.getOrComputeBuckets({ ...base, startMs: 2 * MIN, endMs: 3 * MIN }, compute)
+			computeCalls.length = 0
+
+			const outcome = yield* svc.getOrComputeBuckets({ ...base, startMs: 0, endMs: 6 * MIN }, compute)
+
+			// Multiple gaps, but they collapse into a single warehouse query.
+			assert.isTrue(outcome.missingRangeCount > 1)
+			assert.strictEqual(outcome.warehouseQueryCount, 1)
+			assert.strictEqual(computeCalls.length, 1)
+			assert.deepStrictEqual(computeCalls[0], { startMs: MIN, endMs: 6 * MIN })
+
+			// Over-fetching the cached middle must not corrupt the result set.
+			assert.strictEqual(outcome.points.length, 6)
 		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
 	})
 
