@@ -50,6 +50,7 @@ import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.
 import { HttpOrganizationsLive } from "./routes/organizations.http"
 import { PlanetScaleWebhookRouter } from "./routes/planetscale-webhook.http"
 import { SlackCallbackRouter, SlackInternalRouter } from "./routes/slack-integration.http"
+import { ChatSessionsRouter } from "./routes/chat-sessions.http"
 import { PrometheusScrapeProxyRouter } from "./routes/prometheus-scrape-proxy.http"
 import { ScraperInternalRouter } from "./routes/scraper-internal.http"
 import { VcsWebhookRouter } from "./routes/vcs-webhook.http"
@@ -361,6 +362,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
 	ApiV2Routes,
+	ChatSessionsRouter,
 	IntegrationsCallbackRouter,
 	SlackCallbackRouter,
 	SlackInternalRouter,

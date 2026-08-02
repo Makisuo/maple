@@ -119,6 +119,11 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			runId: string
 		}>(resolveWorkerName("ai-triage", stage), { className: "AiTriageWorkflow" })
 
+		// Durable chat transcripts, one Durable Object per "<orgId>:<tabId>". Replaces the three
+		// Flue DOs that lived in apps/chat-flue. v2 provisions new DO classes as SQLite-backed by
+		// default. Class is exported from src/worker.ts.
+		const chatSession = Cloudflare.DurableObject("chat-session", { className: "ChatSession" })
+
 		// Vendor-agnostic VCS sync queue (commit backfill + webhook deltas). The same
 		// `api` worker is both producer (binding) and consumer (Queues.Consumer
 		// below). Local dev is wired separately in wrangler.jsonc so miniflare runs
@@ -161,6 +166,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				// NOTE: the deploy token needs the account-level "AI Gateway: Edit" permission
 				// for this resource.
 				AI: Cloudflare.AI.Gateway("maple-api-ai"),
+				CHAT_SESSION: chatSession,
 				MCP_SESSIONS: mcpSessions,
 				VCS_SYNC_QUEUE: vcsSyncQueue,
 				VCS_SYNC_QUEUE_NAME: vcsSyncQueueName,

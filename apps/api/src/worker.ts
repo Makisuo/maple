@@ -307,6 +307,10 @@ const handle = async (
 // so this static export keeps module-scope evaluation light (startup-CPU budget).
 export { ClickHouseSchemaApplyWorkflow } from "./workflows/ClickHouseSchemaApplyWorkflow"
 export { AiTriageWorkflow } from "./workflows/AiTriageWorkflow"
+// The durable chat transcript. Safe to export at module scope despite the 10021 startup-CPU
+// constraint: `ChatSession` imports only types from `@maple/domain/chat-session`, so it pulls
+// none of the app service graph in with it.
+export { ChatSession } from "./chat/ChatSession"
 
 // VCS sync queue consumer. Dynamic-imported (same startup-CPU-budget discipline
 // as the route graph above) to keep module-scope evaluation light.
