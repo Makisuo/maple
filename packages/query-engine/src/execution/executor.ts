@@ -597,6 +597,7 @@ WHERE name = 'enable_full_text_index'`,
 					new WarehouseSchemaDriftError({
 						pipeName: payload.pipeName,
 						message: error.message,
+						kind: "decode",
 						cause: error,
 					}),
 			),
@@ -650,11 +651,22 @@ WHERE name = 'enable_full_text_index'`,
 	): SqlQueryOptions | undefined =>
 		compiled.routing === "ingest" ? { ...options, route: "ingest" } : options
 
+	// Every compiled query runs under a cost profile: an omitted `profile` used to
+	// mean "no SETTINGS clause at all" (no server-side memory/time budget, flat
+	// 30s client cap), which ~20 call sites hit by accident. Default to
+	// "aggregation" like the QuerySpec lowering does; "unbounded" stays the
+	// explicit opt-out.
+	const withDefaultProfile = (options?: SqlQueryOptions): SqlQueryOptions => ({
+		...options,
+		profile: options?.profile ?? "aggregation",
+	})
+
 	const executeCompiledQuery = Effect.fn("WarehouseQueryService.executeCompiledQuery")(function* <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
-		options?: SqlQueryOptions,
+		rawOptions?: SqlQueryOptions,
 	) {
+		const options = withDefaultProfile(rawOptions)
 		const capabilities =
 			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
@@ -669,8 +681,9 @@ WHERE name = 'enable_full_text_index'`,
 			Effect.mapError(
 				(error) =>
 					new WarehouseSchemaDriftError({
-						pipeName: "compiledQuery",
+						pipeName: options.context ?? "compiledQuery",
 						message: error.message,
+						kind: "decode",
 						cause: error,
 					}),
 			),
@@ -692,8 +705,9 @@ WHERE name = 'enable_full_text_index'`,
 	const compiledQueryFirst = Effect.fn("WarehouseQueryService.compiledQueryFirst")(function* <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
-		options?: SqlQueryOptions,
+		rawOptions?: SqlQueryOptions,
 	) {
+		const options = withDefaultProfile(rawOptions)
 		const capabilities =
 			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
@@ -708,8 +722,9 @@ WHERE name = 'enable_full_text_index'`,
 			Effect.mapError(
 				(error) =>
 					new WarehouseSchemaDriftError({
-						pipeName: "compiledQueryFirst",
+						pipeName: options.context ?? "compiledQueryFirst",
 						message: error.message,
+						kind: "decode",
 						cause: error,
 					}),
 			),

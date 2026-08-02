@@ -642,7 +642,7 @@ describe("v2 telemetry reads over HTTP", () => {
 		await harness.dispose()
 	})
 
-	it("sanitizes warehouse failures as operation-specific 503 errors", async () => {
+	it("sanitizes warehouse failures without collapsing them to a 503", async () => {
 		const failure = new WarehouseQueryError({
 			message: "SECRET_CLICKHOUSE_DIAGNOSTIC",
 			pipeName: "traceSummaries",
@@ -656,8 +656,11 @@ describe("v2 telemetry reads over HTTP", () => {
 			start_time: START,
 			end_time: END,
 		})
-		expect(response.status).toBe(503)
-		expect(response.body.error.code).toBe("trace_search_unavailable")
+		// A generic query fault is a 502 with a stable per-tag code (503 is
+		// reserved for genuinely retryable outages) — and the raw ClickHouse
+		// diagnostic must never cross the public API boundary.
+		expect(response.status).toBe(502)
+		expect(response.body.error.code).toBe("warehouse_query_failed")
 		expect(JSON.stringify(response.body)).not.toContain("SECRET_CLICKHOUSE_DIAGNOSTIC")
 		await harness.dispose()
 	})

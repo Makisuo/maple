@@ -41,21 +41,22 @@ To add a query: define it in `packages/query-engine/src/ch/queries/*.ts` with
 
 ```typescript
 const compiled = CH.compile(CH.myQuery({ limit: 50 }), { orgId, startTime, endTime })
-const rows =
-	yield *
-	warehouse
-		.sqlQuery(tenant, compiled.sql, { profile: "list", context: "myQuery" })
-		.pipe(Effect.mapError(mapTinybirdError))
-const typedRows = compiled.castRows(rows)
+const rows = yield* warehouse.compiledQuery(tenant, compiled, { profile: "list", context: "myQuery" })
 ```
+
+`compiledQuery` runs the SQL and decodes rows through the query's `rowSchema` (if declared);
+`profile` defaults to `"aggregation"` when omitted (`"unbounded"` is the explicit opt-out). There is
+no `castRows` — a cast that looked type-safe hid wire-format drift.
 
 - Every query **must** filter `OrgId` (`$.OrgId.eq(param.string("orgId"))`) — enforced at runtime.
 - `context` labels the `executeSql` span (`query.context`), which also carries `db.query.text`,
   `db.query.fingerprint`, `db.duration_ms`, `result.rowCount`, `orgId`, `query.profile`.
-- **64-bit ints arrive as strings on BYO-ClickHouse** (`count`/`sum`/`uniqExact`), as numbers on
-  managed Tinybird. If the value flows into a `Schema.Number`, pass a `rowSchema` built with
-  `CH.CHNumber` as `CH.compile(q, params, { rowSchema })` — otherwise BYO-CH orgs get a bare 500.
-  See `packages/query-engine/src/ch/queries/service-map.ts`.
+- **64-bit ints arrive as numbers on every backend**: ClickHouse-protocol clients pin
+  `output_format_json_quote_64bit_integers=0` (`BackendDialect.unquote64BitIntegers`), matching the
+  Tinybird SDK. Two rules remain: (1) identity UInt64s (hashes/ids) must be `toString()`-wrapped in
+  the SELECT — values above 2^53 corrupt as JS numbers; the SQL-catalog e2e sweep enforces this.
+  (2) `rowSchema`s still use `CH.CHNumber`, never `Schema.Number`, so a gateway/readonly cluster
+  that refuses the setting (quoted wire) keeps decoding.
 - `packages/domain/src/tinybird/endpoints.ts` is **type-only** — no `defineEndpoint()` calls.
 
 ## Application database (PlanetScale Postgres)

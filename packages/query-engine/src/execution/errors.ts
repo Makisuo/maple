@@ -1,4 +1,6 @@
 import {
+	cleanErrorMessage,
+	extractUpstreamStatus,
 	WarehouseAuthError,
 	WarehouseClientError,
 	WarehouseConfigError,
@@ -9,6 +11,11 @@ import {
 	WarehouseUpstreamError,
 } from "@maple/domain/http"
 import { detectQuotaSetting } from "../profiles"
+
+// The message sanitizer and status sniffer moved to `@maple/domain/http`
+// (warehouse-error-meta) so the web formatter shares one implementation;
+// re-exported here for existing consumers/tests.
+export { cleanErrorMessage, extractUpstreamStatus }
 
 /**
  * Every warehouse error `mapWarehouseError` can produce. Precondition failures
@@ -52,26 +59,6 @@ const getClickHouseErrorDetails = (error: unknown): ClickHouseErrorDetails => {
 		code: optionalString(error.code),
 		type: typeof error.type === "string" ? error.type : undefined,
 	}
-}
-
-export const cleanErrorMessage = (raw: string): string => {
-	let cleaned = raw
-	const htmlIndex = cleaned.search(/<\s*(html|head|body|center|h1|hr|title)\b/i)
-	if (htmlIndex >= 0) cleaned = cleaned.slice(0, htmlIndex)
-	cleaned = cleaned
-		.replace(/<[^>]+>/g, " ")
-		.replace(/\s+/g, " ")
-		.trim()
-	if (cleaned.endsWith(":")) cleaned = cleaned.slice(0, -1).trim()
-	return cleaned || raw.slice(0, 200)
-}
-
-const extractUpstreamStatus = (message: string): number | undefined => {
-	const match = message.match(/(?:status|HTTP status|response status code)[:\s]+(\d{3})/i)
-	if (match) return Number(match[1])
-	const titleMatch = message.match(/\b(\d{3})\s+(?:error|service temporarily unavailable)\b/i)
-	if (titleMatch) return Number(titleMatch[1])
-	return undefined
 }
 
 /** Fields shared by every warehouse error, built once per classification. */

@@ -147,7 +147,7 @@ const testConfig = () =>
  * Typed warehouse stub. The scheduled tick is the only consumer that reaches
  * the warehouse in these tests, so the stub feeds synthetic `errorIssuesScan`
  * rows (shaped like `ErrorIssuesOutput`) through the compiled query's own
- * `castRows`, and returns empty results for every other compiled query.
+ * `decodeRows`, and returns empty results for every other compiled query.
  */
 const makeWarehouseStub = (
 	scanRows: () => ReadonlyArray<Record<string, unknown>> = () => [],
@@ -158,22 +158,22 @@ const makeWarehouseStub = (
 	sqlQuery: () => Effect.succeed([]),
 	rawSqlQuery: () => Effect.succeed([]),
 	compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
-		Effect.sync(() => {
+		Effect.suspend(() => {
 			if (options?.context === "errorIssuesScan") {
 				onScan?.()
-				return compiled.castRows(scanRows())
+				return Effect.orDie(compiled.decodeRows(scanRows()))
 			}
 			// listIssues' deployment-environment filter (shaped like ErrorFingerprintsOutput).
 			if (options?.context === "errorIssueEnvFingerprints") {
-				return compiled.castRows(fingerprintRows?.() ?? [])
+				return Effect.orDie(compiled.decodeRows(fingerprintRows?.() ?? []))
 			}
 			// Active-org discovery reads the same data the scan does, so model that
 			// consistency: surface the org iff it currently has error rows.
 			if (options?.context === "errorActiveOrgsDiscovery") {
 				const orgId = (tenant as { orgId?: string }).orgId ?? ""
-				return compiled.castRows(scanRows().length > 0 ? [{ orgId }] : [])
+				return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
 			}
-			return compiled.castRows([])
+			return Effect.orDie(compiled.decodeRows([]))
 		}),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected warehouse query")),
 	ingest: () => Effect.void,
@@ -264,16 +264,16 @@ const makeGatingLayer = (opts: {
 			if (options?.context === "errorActiveOrgsDiscovery") {
 				if (opts.failDiscovery) return Effect.die(new Error("discovery down"))
 				const orgId = (tenant as { orgId?: string }).orgId ?? ""
-				return Effect.sync(() => compiled.castRows(scanRows().length > 0 ? [{ orgId }] : []))
+				return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
 			}
 			if (options?.context === "errorIssuesScan") {
 				const orgId = (tenant as { orgId?: string }).orgId ?? ""
-				return Effect.sync(() => {
+				return Effect.suspend(() => {
 					opts.scanned?.add(orgId)
-					return compiled.castRows(scanRows())
+					return Effect.orDie(compiled.decodeRows(scanRows()))
 				})
 			}
-			return Effect.sync(() => compiled.castRows([]))
+			return Effect.orDie(compiled.decodeRows([]))
 		},
 		compiledQueryFirst: () => Effect.die(new Error("unexpected warehouse query")),
 		ingest: () => Effect.void,

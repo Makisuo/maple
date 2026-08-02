@@ -21,6 +21,7 @@ import { computeBucketSeconds, MAX_QUERY_RANGE_SECONDS } from "@maple/query-engi
 import { Effect, Encoding, Option, Result, Schema } from "effect"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
 import { QueryEngineService } from "../../services/QueryEngineService"
+import { warehouseToV2 } from "./warehouse-error-map"
 
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
@@ -61,7 +62,7 @@ const MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24
 const MAX_SUMMARY_RANGE_SECONDS = 60 * 60 * 24 * 365
 const MAX_TIMESERIES_BUCKETS = 1_500
 
-const mapWarehouseError = (operation: string) => () => dependencyUnavailable(`${operation}_unavailable`)
+const mapWarehouseError = warehouseToV2
 
 const toWarehouseDateTime = (value: string, param: string) => {
 	const ms = Date.parse(value)
