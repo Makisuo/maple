@@ -6,7 +6,6 @@ import * as Effect from "effect/Effect"
 import { formatMapleStage, parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createMapleApi } from "./apps/api/alchemy.run.ts"
-import { createChatFlueWorker } from "./apps/chat-flue/alchemy.run.ts"
 import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
 import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
 import { createLocalUiWorker } from "./apps/local-ui/alchemy.run.ts"
@@ -90,28 +89,16 @@ export default Alchemy.Stack(
 		const shared = yield* createProductionSharedResources(stage)
 
 		const apiUrl = resolveUrl(domains.api, "MAPLE_API_BASE_URL")
-		const chatUrl = resolveUrl(domains.chat, "MAPLE_CHAT_BASE_URL")
 		const electricSyncUrl = resolveUrl(domains.sync, "MAPLE_ELECTRIC_SYNC_URL")
 		// ingest is not deployed via alchemy; for non-custom-domain stages, fall
 		// back to a caller-supplied env var or the public Maple ingest endpoint.
 		const ingestUrl = resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev")
 
-		// Deploy the API RPC surface before switching chat-flue to it. The reverse
-		// CHAT_FLUE binding is attached after chat deploys, which breaks the resource
-		// cycle without an HTTP fallback or a placeholder Worker.
+		// Chat and AI triage run inside the api worker (ChatSession Durable Object),
+		// so there is no separate chat worker to sequence against any more.
 		const { worker: api, db: mapleDb } = yield* createMapleApi({
 			stage,
 			domains,
-		})
-		const chatFlue = yield* createChatFlueWorker({
-			stage,
-			domains,
-			mapleApiRpc: api,
-			logsDestination: shared.logsDestination,
-			tracesDestination: shared.tracesDestination,
-		})
-		yield* api.bind("CHAT_FLUE", {
-			bindings: [{ type: "service", name: "CHAT_FLUE", service: chatFlue.workerName }],
 		})
 
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
@@ -123,7 +110,6 @@ export default Alchemy.Stack(
 			domains,
 			apiUrl,
 			ingestUrl,
-			flueChatUrl: chatUrl,
 			electricSyncUrl,
 		})
 
@@ -145,13 +131,11 @@ export default Alchemy.Stack(
 			stage,
 			domains,
 			mapleDb,
-			chatFlue,
 		})
 
 		const summary = {
 			stage: formatMapleStage(stage),
 			apiUrl,
-			chatUrl,
 			ingestUrl,
 			electricSyncUrl,
 			webUrl: domains.web ? `https://${domains.web}` : "",
@@ -168,7 +152,6 @@ export default Alchemy.Stack(
 					`${[
 						`web_url=${summary.webUrl}`,
 						`api_url=${summary.apiUrl}`,
-						`chat_url=${summary.chatUrl}`,
 						`sync_url=${summary.electricSyncUrl}`,
 						`landing_url=${summary.landingUrl}`,
 					].join("\n")}\n`,

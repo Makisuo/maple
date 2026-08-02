@@ -5,7 +5,7 @@ import { Option, Schema } from "effect"
  * Investigate-mode emits the structured report through the local `submit_diagnosis`
  * tool, whose output is this marker (NOT a proposal — it has already been
  * persisted server-side). The web renders it as the inline report card. Mirrors
- * the shape returned by `apps/chat-flue/src/lib/submit-diagnosis.ts`.
+ * the shape the `submit_diagnosis` tool returns in `apps/api/src/chat/agent.ts`.
  */
 export interface DiagnosisMarker {
 	status: "diagnosis"

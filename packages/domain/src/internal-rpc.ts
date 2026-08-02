@@ -17,7 +17,7 @@ export class CallMcpToolRpcRequest extends Schema.Class<CallMcpToolRpcRequest>("
 	input: Schema.Unknown,
 }) {}
 
-/** Runtime-validated structured diagnosis submitted by chat-flue. */
+/** Runtime-validated structured diagnosis submitted by an investigation agent's `submit_diagnosis`. */
 export class SubmitDiagnosisRpcRequest extends Schema.Class<SubmitDiagnosisRpcRequest>(
 	"SubmitDiagnosisRpcRequest",
 )({

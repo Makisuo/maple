@@ -23,9 +23,9 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { layerWorkersAi } from "./WorkersAiHttpClient"
 
 /**
- * Default triage/chat model. Matches what `apps/chat-flue` runs today
- * (`cloudflare/@cf/moonshotai/kimi-k2.6`) minus the Flue `provider/` prefix, so switching the
- * backend does not silently change the model at the same time.
+ * Default triage/chat model. Carried over unchanged from the pre-`@maple/llm` chat backend
+ * (`cloudflare/@cf/moonshotai/kimi-k2.6`, minus that runtime's `provider/` prefix), so the
+ * backend swap did not silently change the model at the same time.
  */
 export const DEFAULT_WORKERS_AI_MODEL = "@cf/moonshotai/kimi-k2.6"
 

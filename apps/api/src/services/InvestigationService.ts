@@ -671,7 +671,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			})
 
 			/**
-			 * The chat-flue `submit_diagnosis` write path. Persists the structured
+			 * The `submit_diagnosis` write path. Persists the structured
 			 * report onto the investigation row, then applies the incident-side
 			 * effects (severity + issue timeline) and tracks token usage — all
 			 * idempotent on the investigation id so a re-diagnosis or retry can't

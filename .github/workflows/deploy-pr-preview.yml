@@ -157,7 +157,6 @@ jobs:
                   DESTROY_OUTCOME: ${{ steps.destroy.outcome }}
                   WEB_URL: ${{ steps.deploy.outputs.web_url }}
                   API_URL: ${{ steps.deploy.outputs.api_url }}
-                  CHAT_URL: ${{ steps.deploy.outputs.chat_url }}
                   SYNC_URL: ${{ steps.deploy.outputs.sync_url }}
                   COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
                   COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.pull_request.head.sha }}
@@ -195,7 +194,6 @@ jobs:
                       echo "| :-- | :-- |"
                       printf '| Web | [%s](%s) |\n' "${WEB_URL#https://}" "$WEB_URL"
                       printf '| API | [%s](%s) |\n' "${API_URL#https://}" "$API_URL"
-                      printf '| Chat | [%s](%s) |\n' "${CHAT_URL#https://}" "$CHAT_URL"
                       printf '| Electric Sync | [%s](%s) |\n' "${SYNC_URL#https://}" "$SYNC_URL"
                       echo
                       printf 'Deployed from [`%s`](%s) · [View workflow run](%s)\n' "$short_sha" "$COMMIT_URL" "$RUN_URL"

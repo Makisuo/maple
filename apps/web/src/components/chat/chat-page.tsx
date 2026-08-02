@@ -11,7 +11,6 @@ import { useAppHotkey } from "@/hooks/use-app-hotkey"
 import { useChatTabs, type ChatTab } from "@/hooks/use-chat-tabs"
 import { ChatSidebar } from "./chat-sidebar"
 import { ChatConversation } from "./chat-conversation"
-import { FlueClientProvider } from "./flue-client-provider"
 import { investigationTabId, investigationTabTitle, type InvestigationContext } from "./investigation-context"
 import { widgetFixTabId, widgetFixTabTitle, type WidgetFixContext } from "./widget-fix-context"
 import { useMapleOrganizationId } from "@/hooks/use-maple-organization"
@@ -39,21 +38,17 @@ export function ChatPage({
 }: ChatPageProps) {
 	const orgId = useMapleOrganizationId()
 	if (!orgId) return null
-	return (
-		<FlueClientProvider>
-			{sharedTabId ? (
-				<SharedChatView tabId={sharedTabId} title={sharedTitle} focusMessageId={focusMessageId} />
-			) : (
-				<ChatPageInner
-					orgId={orgId}
-					urlTabId={urlTabId}
-					mode={mode}
-					investigationContext={investigationContext}
-					widgetFixContext={widgetFixContext}
-					focusMessageId={focusMessageId}
-				/>
-			)}
-		</FlueClientProvider>
+	return sharedTabId ? (
+		<SharedChatView tabId={sharedTabId} title={sharedTitle} focusMessageId={focusMessageId} />
+	) : (
+		<ChatPageInner
+			orgId={orgId}
+			urlTabId={urlTabId}
+			mode={mode}
+			investigationContext={investigationContext}
+			widgetFixContext={widgetFixContext}
+			focusMessageId={focusMessageId}
+		/>
 	)
 }
 

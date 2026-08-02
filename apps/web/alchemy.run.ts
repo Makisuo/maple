@@ -15,7 +15,6 @@ export interface CreateMapleWebOptions {
 	domains: MapleDomains
 	apiUrl: string
 	ingestUrl: string
-	flueChatUrl: string
 	electricSyncUrl: string
 }
 
@@ -30,7 +29,6 @@ export const createMapleWeb = ({
 	domains,
 	apiUrl,
 	ingestUrl,
-	flueChatUrl,
 	electricSyncUrl,
 }: CreateMapleWebOptions) =>
 	Effect.gen(function* () {
@@ -41,7 +39,6 @@ export const createMapleWeb = ({
 			env: {
 				VITE_API_BASE_URL: apiUrl,
 				VITE_INGEST_URL: ingestUrl,
-				VITE_FLUE_CHAT_URL: flueChatUrl,
 				VITE_ELECTRIC_SYNC_URL: electricSyncUrl,
 				VITE_MAPLE_AUTH_MODE:
 					process.env.VITE_MAPLE_AUTH_MODE?.trim() ||

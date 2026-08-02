@@ -157,9 +157,9 @@ export class AiTriageService extends Context.Service<AiTriageService, AiTriageSe
 				const nowMs = yield* Clock.currentTimeMillis
 				const existing = yield* loadSettingsRow(orgId)
 
-				// Triage runs on the chat-flue Flue workflow (Cloudflare Workers AI) since
-				// the Flue cutover — it no longer needs a per-org OpenRouter key, so
-				// enabling it is unconditional.
+				// Triage runs in this worker on Maple's managed AI (Cloudflare Workers AI
+				// via the `AI` binding) — it needs no per-org OpenRouter key, so enabling
+				// it is unconditional.
 				const nextEnabled =
 					request.enabled === undefined ? (existing?.enabled ?? false) : request.enabled
 
@@ -365,8 +365,8 @@ export class AiTriageService extends Context.Service<AiTriageService, AiTriageSe
 					})
 					const nowMs = yield* Clock.currentTimeMillis
 
-					// No OpenRouter-key gate since the Flue cutover — triage runs on
-					// chat-flue (Cloudflare Workers AI).
+					// No OpenRouter-key gate — triage runs on Maple's managed AI
+					// (Cloudflare Workers AI).
 					const { issueId, context } = yield* buildContext(orgId, request)
 
 					// Manual re-run: replace any prior run for this incident.

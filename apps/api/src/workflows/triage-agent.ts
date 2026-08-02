@@ -21,10 +21,9 @@
  */
 import type { AiTriageIncidentKind } from "@maple/domain/http"
 import { AiTriageResult } from "@maple/domain/http"
-import type { LlmCallError } from "@maple/domain/llm"
 import { LLM, LLMEvent, Message, ToolResultPart, type LLMRequest, type Model, type Usage } from "@maple/llm"
 import { Tool, ToolFailure, ToolRuntime, toDefinitions, type Tools } from "@maple/llm"
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
 import { toLlmCallError } from "@/lib/Llm"
 import { callMcpTool } from "@/mcp/dispatcher"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
@@ -90,7 +89,7 @@ const toolResultText = (result: { content: ReadonlyArray<{ text: string }> }): s
  * The tenant is provided per call rather than ambiently so the loop can never widen its own scope:
  * every tool executes under exactly the org the workflow was enqueued for.
  */
-export const buildTriageTools = (tenant: TenantContext): Tools =>
+const buildTriageTools = (tenant: TenantContext): Tools =>
 	Object.fromEntries(
 		mapleToolDefinitions
 			.filter((definition) => TRIAGE_TOOL_NAMES.has(definition.name))
@@ -216,7 +215,3 @@ export const runTriageAgent = Effect.fn("ai_triage.investigate")(function* (inpu
 const FINAL_INSTRUCTION =
 	"Stop investigating. Using only the evidence you gathered above, produce your structured triage result now."
 
-/** Re-exported for the workflow's persistence step, which stores the result as a JSON string. */
-export const encodeTriageResult = Schema.encodeUnknownSync(AiTriageResult)
-
-export type TriageAgentError = LlmCallError

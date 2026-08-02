@@ -3,7 +3,7 @@ import { Schema } from "effect"
 import { Authorization } from "./current-tenant"
 
 /**
- * Apply an approval-gated AI chat proposal. The Flue chat backend uses
+ * Apply an approval-gated AI chat proposal. The chat backend uses
  * propose-then-apply: a mutating tool returns a `{ status: "proposed", tool,
  * input }` marker instead of mutating, and the web client applies the real
  * change here on approve. This endpoint re-runs the named MCP mutation tool

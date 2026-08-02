@@ -38,7 +38,7 @@ export interface CreateMapleApiOptions {
 	domains: MapleDomains
 }
 
-/** Alchemy resource type carried across the chat-flue service binding. */
+/** Alchemy resource type for the API Worker, carrying its internal RPC surface. */
 export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcShape>
 
 export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
@@ -119,9 +119,8 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			runId: string
 		}>(resolveWorkerName("ai-triage", stage), { className: "AiTriageWorkflow" })
 
-		// Durable chat transcripts, one Durable Object per "<orgId>:<tabId>". Replaces the three
-		// Flue DOs that lived in apps/chat-flue. v2 provisions new DO classes as SQLite-backed by
-		// default. Class is exported from src/worker.ts.
+		// Durable chat transcripts, one Durable Object per "<orgId>:<tabId>". v2 provisions new
+		// DO classes as SQLite-backed by default. Class is exported from src/worker.ts.
 		const chatSession = Cloudflare.DurableObject("chat-session", { className: "ChatSession" })
 
 		// Vendor-agnostic VCS sync queue (commit backfill + webhook deltas). The same

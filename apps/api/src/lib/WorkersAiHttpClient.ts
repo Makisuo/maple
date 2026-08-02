@@ -5,15 +5,14 @@
  * `@maple/llm`'s `CloudflareWorkersAI` provider posts an OpenAI-compatible chat body to
  * `https://api.cloudflare.com/client/v4/accounts/{id}/ai/v1/chat/completions` with an API token.
  * That is a *different billing and rate-limit path* from `env.AI.run(...)`, which is keyless and
- * draws on the account's included neuron allocation — the path Maple's triage runs on today via
- * `apps/chat-flue`. The `Ai` binding exposes no `fetch`, so intercepting at the `HttpClient` seam
+ * draws on the account's included neuron allocation — the path Maple's chat and triage run on.
+ * The `Ai` binding exposes no `fetch`, so intercepting at the `HttpClient` seam
  * is the only way to keep the vendored provider *and* the binding.
  *
  * The translation is a pass-through. `env.AI.run(model, inputs, { returnRawResponse: true })` takes
  * the same OpenAI-compatible payload the provider already builds — `messages`, `tools`,
  * `tool_choice`, `stream`, `stream_options`, `max_tokens`, `temperature` — and answers with a raw
  * OpenAI-format SSE `Response`. Only the `model` field moves, from the body to the first argument.
- * (This is exactly the call `@flue/runtime` makes today; see its `cloudflare/internal.mjs`.)
  *
  * Requests that are not Workers AI chat completions fall through to the wrapped client untouched.
  */
@@ -36,7 +35,7 @@ export const isWorkersAiBinding = (value: unknown): value is WorkersAiBinding =>
  * Matches the chat-completions path of the Workers AI REST surface — both the direct
  * `.../accounts/{id}/ai/v1/chat/completions` form and an AI Gateway `.../compat/chat/completions`.
  */
-export const isWorkersAiChatUrl = (url: string): boolean => {
+const isWorkersAiChatUrl = (url: string): boolean => {
 	try {
 		const { pathname } = new URL(url)
 		return (

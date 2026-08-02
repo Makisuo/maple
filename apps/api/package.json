@@ -30,7 +30,6 @@
 		"@clickhouse/client-web": "catalog:clickhouse",
 		"@distilled.cloud/cloudflare": "0.30.1",
 		"@effect/platform-bun": "catalog:effect",
-		"@flue/sdk": "1.0.0-beta.9",
 		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/auth": "workspace:*",
 		"@maple/db": "workspace:*",

@@ -137,7 +137,8 @@ const ALCHEMY_RPC_ERROR_TAG = "~alchemy/rpc/error" as const
 
 // Alchemy's schemaless RPC error envelope is deliberately tiny. Keeping this
 // encoder local avoids pulling its full Worker bridge into an already large API
-// bundle; chat-flue's `toRpcAsync` decodes this exact public wire shape.
+// bundle; alchemy's `toRpcAsync` on the caller side decodes this exact public
+// wire shape.
 const encodeRpcError = (error: unknown): unknown => {
 	if (error == null || typeof error !== "object") return error
 	const object = error as Record<string, unknown>
