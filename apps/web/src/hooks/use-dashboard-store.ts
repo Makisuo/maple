@@ -34,8 +34,8 @@ import type {
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
 import { persistenceErrorAtom } from "@/atoms/dashboard-store-atoms"
+import { CANONICAL_COLS } from "@/components/dashboard-builder/canvas/grid-breakpoints"
 
-const GRID_COLS = 12
 const asDashboardId = Schema.decodeUnknownSync(DashboardId)
 const asIsoDateTimeString = Schema.decodeUnknownSync(IsoDateTimeString)
 
@@ -67,7 +67,7 @@ function findNextPosition(widgets: DashboardWidget[], newWidth: number): { x: nu
 	const bottomRowWidgets = widgets.filter((w) => w.layout.y === maxY)
 	const rightEdge = Math.max(...bottomRowWidgets.map((w) => w.layout.x + w.layout.w))
 
-	if (rightEdge + newWidth <= GRID_COLS) {
+	if (rightEdge + newWidth <= CANONICAL_COLS) {
 		return { x: rightEdge, y: maxY }
 	}
 
@@ -426,7 +426,7 @@ function makeWidgetMutators(deps: {
 				const w = widget.layout.w
 				const h = widget.layout.h
 
-				if (currentX + w > GRID_COLS) {
+				if (currentX + w > CANONICAL_COLS) {
 					currentX = 0
 					currentY += rowHeight
 					rowHeight = 0

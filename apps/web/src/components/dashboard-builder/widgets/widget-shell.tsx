@@ -77,11 +77,19 @@ export function WidgetShell({
 	const timeRangeLabel = timeRangeOverride ? widgetTimeRangeLabel(timeRangeOverride) : null
 
 	return (
-		<Card className="h-full flex flex-col">
+		// `@container/widget` is the size anchor for every widget body. Tiles are
+		// sized by the grid, not the viewport — the nav sidebar collapse swings the
+		// canvas ~208px and the grid drops to 6 or 1 columns on narrow screens — so
+		// internals gate on the card's own width, never on `md:`/`lg:`.
+		<Card className="@container/widget h-full flex flex-col">
 			<CardHeader className="py-2.5">
 				<div className="flex min-w-0 items-center gap-2">
 					{isEditable && (
-						<div className="widget-drag-handle cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground">
+						// Hidden when the canvas is showing a generated (non-authored)
+						// layout — see `is-layout-locked` in dashboard-canvas. Outside a
+						// canvas (widget lab, previews) the group never matches, so the
+						// grip renders as before.
+						<div className="widget-drag-handle cursor-grab text-muted-foreground group-[.is-layout-locked]/canvas:hidden hover:text-foreground active:cursor-grabbing">
 							<GripDotsIcon size={14} />
 						</div>
 					)}
@@ -111,7 +119,10 @@ export function WidgetShell({
 							const visible = legendItems.slice(0, MAX_HEADER_ITEMS)
 							const overflow = legendItems.length - visible.length
 							return (
-								<div className="flex min-w-0 flex-1 items-center justify-end gap-x-3 overflow-hidden">
+								// Below ~380px the title alone fills the header row, so
+								// the legend is dropped entirely rather than squeezed to
+								// a row of unreadable truncated stubs.
+								<div className="hidden min-w-0 flex-1 items-center justify-end gap-x-3 overflow-hidden @min-[380px]/widget:flex">
 									{visible.map((item) => (
 										<span
 											key={item.key}

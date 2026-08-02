@@ -192,7 +192,7 @@ function DashboardViewPage() {
 				<DashboardLayout.Body>
 					<DashboardLayout.Content>
 						<DashboardLayout.Scroll>
-							<div className="flex flex-col items-center gap-3 py-24">
+							<div className="flex flex-col items-center gap-3 px-4 py-24 text-center">
 								<p className="text-sm font-medium text-foreground">Dashboard not found</p>
 								<p className="text-xs text-muted-foreground">
 									No dashboard with id{" "}
@@ -286,7 +286,7 @@ function DashboardViewPage() {
 												onRestored={() => setPreviewed(null)}
 											/>
 										) : activeDashboard.widgets.length === 0 && mode === "view" ? (
-											<div className="flex flex-col items-center justify-center py-24 gap-4">
+											<div className="flex flex-col items-center justify-center gap-4 px-4 py-24 text-center">
 												<div className="flex gap-2">
 													<div className="size-8 rounded bg-primary/15" />
 													<div className="size-8 rounded bg-primary/10" />
