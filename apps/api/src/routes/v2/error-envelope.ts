@@ -1,6 +1,7 @@
-import { Array as Arr, Effect, Layer, Option, Schema, SchemaIssue } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { apiError, invalidRequest, V2SchemaErrors, V2UnexpectedErrors } from "@maple/domain/http/v2"
+import { describeSchemaIssue } from "../schema-error-detail"
 
 class V2RouteExecutionDefect extends Schema.TaggedErrorClass<V2RouteExecutionDefect>()(
 	"@maple/api/routes/v2/V2RouteExecutionDefect",
@@ -12,36 +13,41 @@ class V2RouteExecutionDefect extends Schema.TaggedErrorClass<V2RouteExecutionDef
 	},
 ) {}
 
-const formatSchemaIssue = SchemaIssue.makeFormatterStandardSchemaV1()
-
 /**
  * Request-decode failures (params/query/payload) under /v2 are rewritten into
  * the v2 error envelope — `{ "error": { "type": "invalid_request_error",
  * "code": "parameter_invalid", "message": … } }` — instead of the runtime's
  * default empty 400 (see docs/api-v2.md#errors).
+ *
+ * `param` carries the full JSON path (`widgets[3].display.fill_nulls`), not
+ * just its first segment, and the message names the enclosing widget when the
+ * path points inside a `widgets[]` array — the envelope holds one error, so a
+ * document with several bad fields reports the first and counts the rest.
  */
 const V2SchemaErrorTransformLive = HttpApiMiddleware.layerSchemaErrorTransform(
 	V2SchemaErrors,
 	(schemaError) =>
-		Effect.sync(() => formatSchemaIssue(schemaError.cause.issue)).pipe(
-			Effect.flatMap(({ issues }) => {
-				const issue = Arr.head(issues)
-				const firstPath = Option.flatMap(issue, ({ path }) =>
-					Option.flatMap(Option.fromNullishOr(path), Arr.head),
+		Effect.suspend(() => {
+			const details = describeSchemaIssue(schemaError.cause.issue)
+			const first = details[0]
+			if (first === undefined) {
+				return Effect.fail(
+					invalidRequest("parameter_invalid", `Invalid request ${schemaError.kind.toLowerCase()}.`),
 				)
-				const param = Option.getOrUndefined(
-					Option.filter(
-						firstPath,
-						(value) => typeof value === "string" || typeof value === "number",
-					).pipe(Option.map(String)),
-				)
-				const message = Option.getOrElse(
-					Option.map(issue, ({ message }) => message),
-					() => `Invalid request ${schemaError.kind.toLowerCase()}.`,
-				)
-				return Effect.fail(invalidRequest("parameter_invalid", message, param))
-			}),
-		),
+			}
+			const remaining = details.length - 1
+			const suffix =
+				remaining === 0
+					? ""
+					: ` (and ${remaining} other invalid ${remaining === 1 ? "field" : "fields"})`
+			return Effect.fail(
+				invalidRequest(
+					"parameter_invalid",
+					`${first.line}${suffix}`,
+					first.path === "" ? undefined : first.path,
+				),
+			)
+		}),
 )
 
 export const V2UnexpectedErrorsLive = Layer.succeed(

@@ -36,7 +36,7 @@ import {
 import { V2SchemaErrorsLive } from "./routes/v2/error-envelope"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpChatLive } from "./routes/chat.http"
-import { HttpDashboardsLive } from "./routes/dashboards.http"
+import { HttpDashboardSchemaErrorsLive, HttpDashboardsLive } from "./routes/dashboards.http"
 import { HttpDemoLive } from "./routes/demo.http"
 import { HttpDigestLive } from "./routes/digest.http"
 import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "./routes/integrations.http"
@@ -308,6 +308,7 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
 	Layer.provide(HttpErrorsLive),
 	Layer.provide(HttpDashboardsLive),
+	Layer.provide(HttpDashboardSchemaErrorsLive),
 	Layer.provide(HttpDemoLive),
 	Layer.provide(HttpDigestLive),
 	Layer.provide(HttpIngestAttributeMappingsLive),
