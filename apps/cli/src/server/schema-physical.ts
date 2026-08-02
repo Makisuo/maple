@@ -102,8 +102,36 @@ export const inspectPhysicalSchema = (db: Chdb): PhysicalSchema => {
 	}
 }
 
+/** Render a view body through ClickHouse's own parser. The bundled DDL is
+ * source text while `create_table_query` is ClickHouse's rewrite of it —
+ * database-qualified, backticked, and re-rendered — so the two are only
+ * comparable once both have been through the same formatter. Returns
+ * `undefined` when the body does not parse, which the comparison reports as a
+ * mismatch rather than silently passing. */
+const formatViewBody = (db: Chdb): ((sql: string) => string | undefined) => {
+	const cache = new Map<string, string | undefined>()
+	return (sql: string): string | undefined => {
+		const cached = cache.get(sql)
+		if (cached !== undefined || cache.has(sql)) return cached
+		let formatted: string | undefined
+		try {
+			const rows = parseJsonEachRow<{ formatted: string }>(
+				db.query(`SELECT formatQuery($maple_fmt$${sql}$maple_fmt$) AS formatted FORMAT JSONEachRow`),
+			)
+			// The local store is always the `default` database, and ClickHouse
+			// qualifies every source table with it on the way back out. Drop the
+			// qualifier so `FROM logs` and `FROM default.logs` compare equal.
+			formatted = rows[0]?.formatted?.replace(/(?:\bdefault|`default`)\./g, "")
+		} catch {
+			formatted = undefined
+		}
+		cache.set(sql, formatted)
+		return formatted
+	}
+}
+
 export const assertPhysicalSchema = (db: Chdb, expected: typeof LOCAL_SCHEMA_MANIFEST): void => {
-	const mismatches = comparePhysicalSchema(expected, inspectPhysicalSchema(db))
+	const mismatches = comparePhysicalSchema(expected, inspectPhysicalSchema(db), formatViewBody(db))
 	if (mismatches.length > 0) {
 		throw new Error(
 			`physical local schema does not match the bundled schema: ${mismatches

@@ -251,12 +251,44 @@ const normalizeComparable = (value: string | undefined): string | undefined =>
 				return normalized
 			})()
 
+/** Compare two column expressions. ClickHouse re-renders what it stores —
+ * parenthesising sub-expressions and rewriting float literals (`1.0` -> `1.`) —
+ * so a bundled DEFAULT and the reported one differ textually while meaning the
+ * same thing. With a parser available both sides are rendered before
+ * comparison; without one this degrades to whitespace normalization. */
+const compareExpression = (
+	actual: string | undefined,
+	expected: string | undefined,
+	normalizeSql?: (sql: string) => string | undefined,
+): boolean => {
+	if (compareColumnAttribute(actual, expected)) return true
+	if (normalizeSql === undefined || actual === undefined || expected === undefined) return false
+	const renderedActual = normalizeSql(`SELECT ${actual}`)
+	const renderedExpected = normalizeSql(`SELECT ${expected}`)
+	return renderedActual !== undefined && renderedActual === renderedExpected
+}
+
+/** Extract a view body — everything from the `AS` that introduces the query.
+ * The bundled DDL and the definition ClickHouse reports back differ in database
+ * qualification and in the injected column list, so only the query itself can
+ * be compared across the two representations. */
+export const viewBody = (definition: string): string | undefined => {
+	const match = definition.match(/\bAS\s+(?=WITH\b|SELECT\b|\()/i)
+	return match?.index === undefined ? undefined : definition.slice(match.index + match[0].length)
+}
+
 /** Compare a bundled structural manifest with an inspected chDB schema. This
  * is deliberately data-only so migration and startup can share the same
- * fail-closed gate and unit tests do not require native libchdb. */
+ * fail-closed gate and unit tests do not require native libchdb.
+ *
+ * `normalizeSql` renders a view body through a parser so the bundled
+ * source text and ClickHouse's own rewritten text become comparable. Without
+ * one, materialized-view bodies are only checked for parity after generic
+ * whitespace normalization, which the two representations rarely satisfy. */
 export const comparePhysicalSchema = (
 	expected: LocalSchemaManifest,
 	actual: PhysicalSchema,
+	normalizeSql?: (sql: string) => string | undefined,
 ): ReadonlyArray<PhysicalSchemaMismatch> => {
 	const actualByName = new Map(actual.objects.map((object) => [object.name, object]))
 	const mismatches: PhysicalSchemaMismatch[] = []
@@ -292,7 +324,7 @@ export const comparePhysicalSchema = (
 						reason: `column ${column.name} default kind differs`,
 					})
 				}
-				if (!compareColumnAttribute(actual.defaultExpression, column.defaultExpression)) {
+				if (!compareExpression(actual.defaultExpression, column.defaultExpression, normalizeSql)) {
 					mismatches.push({
 						object: desired.name,
 						reason: `column ${column.name} default expression differs`,
@@ -339,13 +371,37 @@ export const comparePhysicalSchema = (
 			}
 		}
 		if (desired.kind === "materialized_view" && found.definition !== undefined) {
-			const expectedBody = desired.definition
-				.split(/\bAS\b/i)
-				.slice(1)
-				.join(" AS ")
-			const actualDefinition = normalizedDefinition(found.definition)
-			if (expectedBody.length > 0 && !actualDefinition.includes(normalizedDefinition(expectedBody))) {
-				mismatches.push({ object: desired.name, reason: "materialized-view definition differs" })
+			const expectedBody = viewBody(desired.definition)
+			const actualBody = viewBody(found.definition)
+			if (expectedBody !== undefined && expectedBody.length > 0) {
+				if (actualBody === undefined) {
+					mismatches.push({
+						object: desired.name,
+						reason: "materialized-view has no readable body",
+					})
+				} else if (normalizeSql === undefined) {
+					// No parser available: fall back to whitespace-normalized containment,
+					// which only catches gross drift.
+					if (!normalizedDefinition(actualBody).includes(normalizedDefinition(expectedBody)))
+						mismatches.push({
+							object: desired.name,
+							reason: "materialized-view definition differs",
+						})
+				} else {
+					const wanted = normalizeSql(expectedBody)
+					const got = normalizeSql(actualBody)
+					if (wanted === undefined || got === undefined) {
+						mismatches.push({
+							object: desired.name,
+							reason: "materialized-view definition could not be parsed for comparison",
+						})
+					} else if (wanted !== got) {
+						mismatches.push({
+							object: desired.name,
+							reason: "materialized-view definition differs",
+						})
+					}
+				}
 			}
 		}
 	}

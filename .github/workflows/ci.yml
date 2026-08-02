@@ -150,9 +150,6 @@ jobs:
                   git fetch --no-tags --depth=1 origin \
                     "+refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
 
-            - name: Validate generated ClickHouse and local-store schemas
-              run: bun run clickhouse:schema:check
-
             # Turbo's local cache is per-runner and dies with the job, so without this
             # every run was `Cached: 0 cached, 59 total`. `github.sha` in the primary key
             # never hits, which is deliberate: it forces a save on every run so the cache
@@ -165,6 +162,15 @@ jobs:
                   restore-keys: |
                       turbo-v1-${{ runner.os }}-${{ github.job }}-
                       turbo-v1-${{ runner.os }}-
+
+            # The schema generators import packages/domain, which resolves
+            # @maple-dev/clickhouse-builder through its built dist — so the DSL has to
+            # exist before the check runs, exactly as in clickhouse-schema-e2e.
+            - name: Build ClickHouse query DSL
+              run: bun turbo build --filter=@maple-dev/clickhouse-builder
+
+            - name: Validate generated ClickHouse and local-store schemas
+              run: bun run clickhouse:schema:check
 
             # Shared design tokens live in packages/ui/src/styles/tokens.css;
             # fails if an app re-declares one (landing ↔ web drift guard).
