@@ -11,6 +11,7 @@ describe("embedded chDB arguments", () => {
 			"--tables_loader_foreground_pool_size=1",
 			"--tables_loader_background_pool_size=1",
 			"--restore_threads=1",
+			"--output_format_json_quote_64bit_integers=0",
 			"--path=/tmp/maple-data",
 		])
 	})
@@ -23,6 +24,7 @@ describe("embedded chDB arguments", () => {
 			"--tables_loader_foreground_pool_size=1",
 			"--tables_loader_background_pool_size=1",
 			"--restore_threads=1",
+			"--output_format_json_quote_64bit_integers=0",
 			"--path=/tmp/maple-data",
 			"--config-file=/tmp/backups.xml",
 		])
