@@ -3,38 +3,32 @@
 // tab visibility. `@maple-dev/browser` layers OTel tracing on top; the Effect
 // client SDK loads this lazily (rrweb rides in a code-split chunk) when its
 // `replay` option is on.
-import { buildSessionMetaRow } from "./meta-row"
-import { getSession, nextMetaVersion } from "./session"
-import { getObservedTraceIds, publishSessionSink } from "./sink"
-import { startEventCapture, type EventCapture } from "./replay/events"
-import { startRecording, type Recorder } from "./replay/record"
+//
+// Everything about the lifecycle itself — heartbeat, visibility/pagehide
+// wiring, idle rotation, metadata rows — lives in `./session-lifecycle`, shared
+// with the metadata-only path. This module is the recorded configuration of it.
+import { type EventCapture, startEventCapture } from "./replay/events"
+import { type Recorder, startRecording } from "./replay/record"
 import { postSessionMeta, type ReplayEngineConfig } from "./replay/transport"
+import {
+	type SessionLifecycleHandle,
+	type SessionLifecycleOptions,
+	startSessionLifecycle,
+} from "./session-lifecycle"
+import { getObservedTraceIds, publishSessionSink } from "./sink"
 
 export { setActiveTraceIdProvider } from "./replay/events"
 
-export interface ReplaySessionOptions {
+export interface ReplaySessionOptions extends SessionLifecycleOptions {
 	readonly endpoint: string
 	readonly ingestKey: string
-	readonly serviceName: string
-	readonly environment?: string | undefined
-	readonly serviceVersion?: string | undefined
 	readonly maskAllInputs: boolean
 	readonly maskAllText: boolean
-	/** Consulted when metadata rows are posted, so `identify()` works late. */
-	readonly getUserId?: (() => string | undefined) | undefined
+	/** Notifies consumers that the session id used for span linking changed. */
+	readonly onSessionChange?: ((sessionId: string) => void) | undefined
 }
 
-export interface ReplaySessionHandle {
-	readonly sessionId: string
-	readonly shutdown: () => Promise<void>
-}
-
-/** Session tallies, read off the recorder/capture when an `ended` row is posted. */
-interface SessionCounts {
-	readonly clickCount: number
-	readonly pageViews: number
-	readonly errorCount: number
-}
+export type ReplaySessionHandle = SessionLifecycleHandle
 
 /**
  * Start recording the current browser session. Publishes the session sink,
@@ -56,107 +50,57 @@ export function startReplaySession(options: ReplaySessionOptions): ReplaySession
 		maskAllText: options.maskAllText,
 	}
 
-	const session = getSession()
-	let currentSessionId = session.id
-	let currentStartedAt = new Date(session.startedAt)
-	publishSessionSink(currentSessionId)
-
 	let recorder: Recorder | undefined
 	let events: EventCapture | undefined
-	let stopped = false
+	let publishedSessionId: string | undefined
 
-	const postMeta = (status: "active" | "ended", counts: SessionCounts | null, keepalive = false) =>
-		postSessionMeta(
-			engineConfig,
-			buildSessionMetaRow({
-				sessionId: currentSessionId,
-				startedAt: currentStartedAt,
-				version: nextMetaVersion(),
-				status,
-				serviceName: options.serviceName,
-				userId: options.getUserId?.(),
-				environment: options.environment,
-				serviceVersion: options.serviceVersion,
-				clickCount: counts?.clickCount ?? 0,
-				pageViews: counts?.pageViews ?? 0,
-				errorCount: counts?.errorCount ?? 0,
-				traceIds: status === "ended" ? getObservedTraceIds() : undefined,
-				// This path *is* the recorder — every row it posts has rrweb chunks.
-				recorded: true,
-			}),
-			keepalive,
-		)
-
-	const start = (): void => {
-		recorder = startRecording(engineConfig, currentSessionId)
-		// Distilled events (console/network/error/nav/clicks) ride along.
-		events = startEventCapture(engineConfig, currentSessionId)
-		void postMeta("active", null)
+	const publish = (sessionId: string): void => {
+		if (publishedSessionId === sessionId) return
+		publishedSessionId = sessionId
+		publishSessionSink(sessionId)
 	}
 
-	// Tab going away (maybe temporarily): flush everything with keepalive, post
-	// the ended row, stop capture. Re-entrant — resume() restarts capture when
-	// the tab becomes visible again, so a long-lived tab keeps recording across
-	// tab switches instead of going silent until a reload.
-	const suspend = (): void => {
-		if (!recorder || !events) return
-		void recorder.flush(true)
-		void events.flush(true)
-		void postMeta(
-			"ended",
-			{
-				clickCount: recorder.getClickCount(),
-				pageViews: events.getPageViews(),
-				errorCount: events.getErrorCount(),
+	return startSessionLifecycle(
+		{ ...options, getTraceIds: getObservedTraceIds },
+		{
+			// This path *is* the recorder — every row it posts has rrweb chunks.
+			recorded: true,
+			post: (row, keepalive) => {
+				void postSessionMeta(engineConfig, row, keepalive)
 			},
-			true,
-		)
-		// flush() snapshots its buffer synchronously before awaiting, so stopping
-		// immediately after is safe and clears the rrweb subscription + timer.
-		recorder.stop()
-		events.stop()
-		recorder = undefined
-		events = undefined
-	}
-
-	// Tab visible again: the session may have rotated while hidden past the
-	// idle window — re-resolve, republish the sink under the new id, restart.
-	const resume = (): void => {
-		if (stopped || recorder) return
-		const next = getSession()
-		if (next.id !== currentSessionId) {
-			currentSessionId = next.id
-			currentStartedAt = new Date(next.startedAt)
-			publishSessionSink(currentSessionId)
-		}
-		start()
-	}
-
-	const onVisibilityChange = (): void => {
-		if (document.visibilityState === "hidden") suspend()
-		else resume()
-	}
-	// `visibilitychange → hidden` is the reliable "leaving" signal on mobile;
-	// pagehide covers desktop tab close / navigation. A bfcache restore fires
-	// `visibilitychange → visible`, which resumes capture.
-	const onPageHide = (): void => suspend()
-
-	start()
-	document.addEventListener("visibilitychange", onVisibilityChange)
-	window.addEventListener("pagehide", onPageHide)
-
-	return {
-		sessionId: currentSessionId,
-		shutdown: async () => {
-			stopped = true
-			document.removeEventListener("visibilitychange", onVisibilityChange)
-			window.removeEventListener("pagehide", onPageHide)
-			if (recorder) await recorder.flush(true)
-			if (events) await events.flush(true)
-			recorder?.stop()
-			events?.stop()
-			recorder = undefined
-			events = undefined
+			// rrweb sees mouse interactions the distilled capture may mask away, so
+			// the recorder is the better click source while it is running.
+			clicksSinceStart: () => recorder?.getClickCount() ?? 0,
+			onStart: (record) => {
+				publish(record.id)
+				recorder = startRecording(engineConfig, record.id)
+				// Distilled events (console/network/error/clicks) ride along.
+				// Navigation is observed by the sink, which runs whether or not replay
+				// is sampled.
+				events = startEventCapture(engineConfig, record.id)
+			},
+			onSuspend: ({ flush, keepalive }) => {
+				const stoppingRecorder = recorder
+				const stoppingEvents = events
+				recorder = undefined
+				events = undefined
+				const flushed = flush
+					? Promise.all([
+							stoppingRecorder?.flush(keepalive),
+							stoppingEvents?.flush(keepalive),
+						]).then(() => {})
+					: undefined
+				// flush() snapshots its buffer synchronously before awaiting, so
+				// stopping immediately after is safe — and stopping before the await
+				// is what makes a consent revoke detach every producer at once.
+				stoppingRecorder?.stop()
+				stoppingEvents?.stop()
+				return flushed
+			},
+			onSessionChange: (sessionId) => {
+				publish(sessionId)
+				options.onSessionChange?.(sessionId)
+			},
 		},
-	}
+	)
 }

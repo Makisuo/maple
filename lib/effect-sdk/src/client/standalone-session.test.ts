@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { getActiveSink } from "@maple/browser-session"
 import { Effect } from "effect"
 import { afterEach, beforeEach, expect, vi } from "vitest"
 import { make } from "./flushable.js"
@@ -99,6 +100,80 @@ describe("standalone session emission (client)", () => {
 
 		await new Promise((resolve) => setTimeout(resolve, 0))
 		expect(metaPosts[0].row.user_id).toBe("")
+	})
+
+	it("keeps persisted click/error totals and adds live capture deltas", async () => {
+		const { metaPosts, restore: r } = setupFetch()
+		restore = r
+		const store = stubWindow()
+		store.set(
+			"maple.session",
+			JSON.stringify({
+				id: "persisted-session",
+				startedAt: Date.now(),
+				lastActivityAt: Date.now(),
+				chunkSeq: 0,
+				metaVersion: 0,
+				visitorIsNew: false,
+				clickCount: 7,
+				errorCount: 3,
+				pageViews: 2,
+			}),
+		)
+
+		const telemetry = make(baseConfig)
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		const active = metaPosts.find((post) => post.row.session_id === "persisted-session")!
+		expect(active.row.click_count).toBe(7)
+		expect(active.row.error_count).toBe(3)
+
+		getActiveSink()?.emit({ type: "click" })
+		getActiveSink()?.emit({ type: "error", message: "boom" })
+		await telemetry.dispose()
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		const ended = metaPosts.filter((post) => post.row.status === "ended").at(-1)!
+		expect(ended.row.click_count).toBe(8)
+		expect(ended.row.error_count).toBe(4)
+	})
+
+	// Two client runtimes overlap on a page whenever a runtime is rebuilt before
+	// the outgoing one's async release finishes — React StrictMode double-mounts
+	// and HMR remounts both do it. The metadata session is a page-level
+	// singleton, so both runtimes end up holding it: tearing the first one down
+	// must not end the session the second is still using.
+	it("keeps the session alive while a second client runtime still holds it", async () => {
+		const { metaPosts, restore: r } = setupFetch()
+		restore = r
+		stubWindow()
+
+		const first = make(baseConfig)
+		const second = make(baseConfig)
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		// One shared session, not one per runtime.
+		expect(metaPosts.filter((post) => post.row.status === "active").length).toBe(1)
+
+		await first.dispose()
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(metaPosts.filter((post) => post.row.status === "ended").length).toBe(0)
+
+		await second.dispose()
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(metaPosts.filter((post) => post.row.status === "ended").length).toBe(1)
+	})
+
+	it("treats a repeated dispose of the same runtime as a no-op", async () => {
+		const { metaPosts, restore: r } = setupFetch()
+		restore = r
+		stubWindow()
+
+		const telemetry = make(baseConfig)
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		await telemetry.dispose()
+		await telemetry.dispose()
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		expect(metaPosts.filter((post) => post.row.status === "ended").length).toBe(1)
 	})
 
 	it("posts nothing when the @maple-dev/browser sink owns the session", async () => {

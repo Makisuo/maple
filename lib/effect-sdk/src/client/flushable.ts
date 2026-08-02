@@ -26,6 +26,7 @@
 // Traces, logs, and Effect metric snapshots are flushed together.
 // ---------------------------------------------------------------------------
 
+import { hasConsent, onConsentChange } from "@maple/browser-session"
 import { Layer, Redacted } from "effect"
 import {
 	buildResolved,
@@ -39,8 +40,9 @@ import {
 import { type LogBuffer, makeLogBuffer } from "../shared/flushable-logger.js"
 import { makeMetricBuffer } from "../shared/flushable-metrics.js"
 import { makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
-import { withSessionLink } from "./session-link.js"
 import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
+import { withSessionLink } from "./session-link.js"
+import type { PrivacyOptions } from "./track.js"
 
 /** Default auto-flush cadence (ms), matching `Otlp.layerJson`'s 5s export interval. */
 const DEFAULT_AUTO_FLUSH_MS = 5_000
@@ -106,6 +108,13 @@ export interface MapleClientFlushableConfig {
 	 * sampleRate 1 and inputs masked — set `{ enabled: false }` to opt out.
 	 */
 	readonly replay?: ClientReplayConfig | undefined
+	/**
+	 * Consent gating, persistent-visitor-id storage, and whether `identify()`'s
+	 * email reaches the warehouse. Defaults capture everything except where a
+	 * browser signals otherwise: Global Privacy Control suppresses the
+	 * persistent visitor id (capture itself continues, anonymously).
+	 */
+	readonly privacy?: PrivacyOptions | undefined
 }
 
 export interface FlushableTelemetry {
@@ -173,7 +182,7 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 	]
 	const anticipatedIdentifiers =
 		anticipatedErrorIdentifiers.length > 0 ? new Set(anticipatedErrorIdentifiers) : undefined
-	startClientSession({
+	const clientSession = startClientSession({
 		endpoint: config.endpoint,
 		ingestKey: config.ingestKey,
 		serviceName: config.serviceName,
@@ -181,14 +190,24 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 		serviceVersion: config.serviceVersion,
 		replay: config.replay,
 		emitSessionMeta: config.emitSessionMeta,
+		privacy: config.privacy,
 	})
 
 	const spans: SpanBuffer = makeSpanBuffer({
 		dropSpan,
 		anticipatedErrorIdentifiers: anticipatedIdentifiers,
 	})
-	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
+	const logs: LogBuffer = makeLogBuffer({
+		excludeLogSpans: config.excludeLogSpans,
+	})
 	const metrics = makeMetricBuffer()
+	const setCaptureAllowed = (allowed: boolean): void => {
+		spans.setDisabled(!allowed)
+		logs.setDisabled(!allowed)
+		metrics.setDisabled(!allowed)
+	}
+	setCaptureAllowed(hasConsent())
+	const stopConsentListener = config.privacy?.requireConsent ? onConsentChange(setCaptureAllowed) : () => {}
 	// `withSessionLink` overrides only the Tracer reference, keeping the logger.
 	const layer = withSessionLink(Layer.mergeAll(spans.tracerLayer, logs.loggerLayer, metrics.layer))
 
@@ -217,6 +236,12 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 	let noOpLogged = false
 
 	const flush = makeSerializedFlush(async (): Promise<void> => {
+		if (!hasConsent()) {
+			spans.drain()
+			logs.drain()
+			metrics.drain()
+			return
+		}
 		await runFlush({
 			resolved,
 			spans,
@@ -274,7 +299,9 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 			globalThis.removeEventListener("pagehide", onPageHide)
 			globalThis.removeEventListener("visibilitychange", onVisibilityChange)
 		}
+		stopConsentListener()
 		await flush()
+		await clientSession.stop()
 	}
 
 	return { layer, flush, dispose }

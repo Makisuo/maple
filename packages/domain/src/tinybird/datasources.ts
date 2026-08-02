@@ -1,4 +1,4 @@
-import { defineDatasource, t, engine, column, type InferRow } from "@tinybirdco/sdk"
+import { column, defineDatasource, engine, type InferRow, t } from "@tinybirdco/sdk"
 
 const attributeItemsExpr = (mapColumn: string): string =>
 	`arrayMap((k, v) -> concat(k, char(31), v), mapKeys(${mapColumn}), mapValues(${mapColumn}))`
@@ -26,7 +26,9 @@ export const logs = defineDatasource("logs", {
 			jsonPath: "$.service_name",
 		}),
 		Body: column(t.string(), { jsonPath: "$.body" }),
-		ResourceSchemaUrl: column(t.string(), { jsonPath: "$.resource_schema_url" }),
+		ResourceSchemaUrl: column(t.string(), {
+			jsonPath: "$.resource_schema_url",
+		}),
 		ResourceAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.resource_attributes",
 		}),
@@ -179,7 +181,9 @@ export const traces = defineDatasource("traces", {
 		ServiceName: column(t.string().lowCardinality(), {
 			jsonPath: "$.service_name",
 		}),
-		ResourceSchemaUrl: column(t.string(), { jsonPath: "$.resource_schema_url" }),
+		ResourceSchemaUrl: column(t.string(), {
+			jsonPath: "$.resource_schema_url",
+		}),
 		ResourceAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.resource_attributes",
 		}),
@@ -958,19 +962,27 @@ export const metricsSum = defineDatasource("metrics_sum", {
 		ResourceAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.resource_attributes",
 		}),
-		ResourceSchemaUrl: column(t.string(), { jsonPath: "$.resource_schema_url" }),
+		ResourceSchemaUrl: column(t.string(), {
+			jsonPath: "$.resource_schema_url",
+		}),
 		ScopeName: column(t.string(), { jsonPath: "$.scope_name" }),
 		ScopeVersion: column(t.string(), { jsonPath: "$.scope_version" }),
 		ScopeAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.scope_attributes",
 		}),
 		ScopeSchemaUrl: column(t.string(), { jsonPath: "$.scope_schema_url" }),
-		ServiceName: column(t.string().lowCardinality(), { jsonPath: "$.service_name" }),
+		ServiceName: column(t.string().lowCardinality(), {
+			jsonPath: "$.service_name",
+		}),
 		MetricName: column(t.string().lowCardinality(), {
 			jsonPath: "$.metric_name",
 		}),
-		MetricDescription: column(t.string().lowCardinality(), { jsonPath: "$.metric_description" }),
-		MetricUnit: column(t.string().lowCardinality(), { jsonPath: "$.metric_unit" }),
+		MetricDescription: column(t.string().lowCardinality(), {
+			jsonPath: "$.metric_description",
+		}),
+		MetricUnit: column(t.string().lowCardinality(), {
+			jsonPath: "$.metric_unit",
+		}),
 		Attributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.metric_attributes",
 		}),
@@ -1019,19 +1031,27 @@ export const metricsGauge = defineDatasource("metrics_gauge", {
 		ResourceAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.resource_attributes",
 		}),
-		ResourceSchemaUrl: column(t.string(), { jsonPath: "$.resource_schema_url" }),
+		ResourceSchemaUrl: column(t.string(), {
+			jsonPath: "$.resource_schema_url",
+		}),
 		ScopeName: column(t.string(), { jsonPath: "$.scope_name" }),
 		ScopeVersion: column(t.string(), { jsonPath: "$.scope_version" }),
 		ScopeAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.scope_attributes",
 		}),
 		ScopeSchemaUrl: column(t.string(), { jsonPath: "$.scope_schema_url" }),
-		ServiceName: column(t.string().lowCardinality(), { jsonPath: "$.service_name" }),
+		ServiceName: column(t.string().lowCardinality(), {
+			jsonPath: "$.service_name",
+		}),
 		MetricName: column(t.string().lowCardinality(), {
 			jsonPath: "$.metric_name",
 		}),
-		MetricDescription: column(t.string().lowCardinality(), { jsonPath: "$.metric_description" }),
-		MetricUnit: column(t.string().lowCardinality(), { jsonPath: "$.metric_unit" }),
+		MetricDescription: column(t.string().lowCardinality(), {
+			jsonPath: "$.metric_description",
+		}),
+		MetricUnit: column(t.string().lowCardinality(), {
+			jsonPath: "$.metric_unit",
+		}),
 		Attributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.metric_attributes",
 		}),
@@ -1076,19 +1096,27 @@ export const metricsHistogram = defineDatasource("metrics_histogram", {
 		ResourceAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.resource_attributes",
 		}),
-		ResourceSchemaUrl: column(t.string(), { jsonPath: "$.resource_schema_url" }),
+		ResourceSchemaUrl: column(t.string(), {
+			jsonPath: "$.resource_schema_url",
+		}),
 		ScopeName: column(t.string(), { jsonPath: "$.scope_name" }),
 		ScopeVersion: column(t.string(), { jsonPath: "$.scope_version" }),
 		ScopeAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.scope_attributes",
 		}),
 		ScopeSchemaUrl: column(t.string(), { jsonPath: "$.scope_schema_url" }),
-		ServiceName: column(t.string().lowCardinality(), { jsonPath: "$.service_name" }),
+		ServiceName: column(t.string().lowCardinality(), {
+			jsonPath: "$.service_name",
+		}),
 		MetricName: column(t.string().lowCardinality(), {
 			jsonPath: "$.metric_name",
 		}),
-		MetricDescription: column(t.string().lowCardinality(), { jsonPath: "$.metric_description" }),
-		MetricUnit: column(t.string().lowCardinality(), { jsonPath: "$.metric_unit" }),
+		MetricDescription: column(t.string().lowCardinality(), {
+			jsonPath: "$.metric_description",
+		}),
+		MetricUnit: column(t.string().lowCardinality(), {
+			jsonPath: "$.metric_unit",
+		}),
 		Attributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.metric_attributes",
 		}),
@@ -1154,14 +1182,18 @@ export const metricsExponentialHistogram = defineDatasource("metrics_exponential
 			jsonPath: "$.scope_attributes",
 		}),
 		ScopeSchemaUrl: column(t.string(), { jsonPath: "$.scope_schema_url" }),
-		ServiceName: column(t.string().lowCardinality(), { jsonPath: "$.service_name" }),
+		ServiceName: column(t.string().lowCardinality(), {
+			jsonPath: "$.service_name",
+		}),
 		MetricName: column(t.string().lowCardinality(), {
 			jsonPath: "$.metric_name",
 		}),
 		MetricDescription: column(t.string().lowCardinality(), {
 			jsonPath: "$.metric_description",
 		}),
-		MetricUnit: column(t.string().lowCardinality(), { jsonPath: "$.metric_unit" }),
+		MetricUnit: column(t.string().lowCardinality(), {
+			jsonPath: "$.metric_unit",
+		}),
 		Attributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.metric_attributes",
 		}),
@@ -1607,6 +1639,10 @@ export type LogsAggregatesHourlyRow = InferRow<typeof logsAggregatesHourly>
  * page hide / unload (`Version=2`, `Status='ended'`, final `EndTime`/`DurationMs`).
  * ReplacingMergeTree keyed by Version keeps the latest, so consumers should
  * read with `FINAL` (or dedupe `LIMIT 1 BY (OrgId, SessionId) ORDER BY Version DESC`).
+ * The SDK also heartbeats an `active` row while the tab is visible, and writes
+ * `PageViews`/`ClickCount`/`ErrorCount`/`ExitPath`/`LastActivityAt` on *every*
+ * row (not just the ended one) — otherwise a tab killed without an unload beacon
+ * leaves only the v1 row's zeroes, and bounce rate reads 100%.
  *
  * The rrweb event payloads live in `sessionReplayEvents` (one row per chunk,
  * payload inline in ClickHouse — there is no R2 blob store); this table only
@@ -1632,23 +1668,132 @@ export const sessionReplays = defineDatasource("session_replays", {
 		UserId: column(t.string(), { jsonPath: "$.user_id" }),
 		UrlInitial: column(t.string(), { jsonPath: "$.url_initial" }),
 		UserAgent: column(t.string(), { jsonPath: "$.user_agent" }),
-		BrowserName: column(t.string().lowCardinality(), { jsonPath: "$.browser_name" }),
+		BrowserName: column(t.string().lowCardinality(), {
+			jsonPath: "$.browser_name",
+		}),
 		OsName: column(t.string().lowCardinality(), { jsonPath: "$.os_name" }),
-		DeviceType: column(t.string().lowCardinality(), { jsonPath: "$.device_type" }),
-		// Server-derived (Cf-IPCountry); the SDK never sends it, so default to ''
-		// rather than quarantine the row under strict type checking.
-		Country: column(t.string().lowCardinality().default(""), { jsonPath: "$.country" }),
-		ServiceName: column(t.string().lowCardinality(), { jsonPath: "$.service_name" }),
+		DeviceType: column(t.string().lowCardinality(), {
+			jsonPath: "$.device_type",
+		}),
+		// Server-derived at the ingest gateway from the Cf-IPCountry header — the
+		// client's value (if any) is overwritten, so it can never be spoofed. Empty
+		// when the gateway is not behind a trusted proxy (local dev, self-hosted),
+		// hence the default: an absent value must not quarantine the row.
+		Country: column(t.string().lowCardinality().default(""), {
+			jsonPath: "$.country",
+		}),
+		ServiceName: column(t.string().lowCardinality(), {
+			jsonPath: "$.service_name",
+		}),
 		PageViews: column(t.uint32().default(0), { jsonPath: "$.page_views" }),
 		ClickCount: column(t.uint32().default(0), { jsonPath: "$.click_count" }),
 		ErrorCount: column(t.uint32().default(0), { jsonPath: "$.error_count" }),
 		// Only present on the ended (v2) row — the active (v1) row omits it, so
 		// default to [] to keep the in-progress row out of quarantine.
-		TraceIds: column(t.array(t.string()).default([]), { jsonPath: "$.trace_ids[:]" }),
+		TraceIds: column(t.array(t.string()).default([]), {
+			jsonPath: "$.trace_ids[:]",
+		}),
 		ResourceAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.resource_attributes",
 		}),
 		Version: column(t.uint32(), { jsonPath: "$.version" }),
+
+		// ---------------------------------------------------------------------
+		// Analytics dimensions (added in migration 0011).
+		//
+		// Two rules govern everything below:
+		//
+		// 1. Every column carries a DEFAULT. Tinybird quarantines a row that omits
+		//    a non-defaulted column, so defaults are what let an older SDK keep
+		//    writing after this schema ships (and unknown JSON keys are ignored in
+		//    the other direction). Never add one without a default.
+		// 2. ReplacingMergeTree replaces the WHOLE row, not field-by-field. If the
+		//    ended (v2) row omits VisitorId/Referrer/Utm*, the merge destroys them
+		//    and all attribution is lost. `buildSessionMetaRow` must emit these in
+		//    its shared base object, never inside the `status === "ended"` branch.
+		//
+		// LowCardinality is applied only where distinct-values-per-part is small
+		// and repeats on nearly every row (that is what makes GROUP BY cheap).
+		// VisitorId/UserEmail/GroupId/Referrer/UtmTerm/UtmContent/paths are
+		// near-unique per row, where an LC dictionary is strictly worse.
+
+		/** Persistent per-browser id (localStorage). `uniq(VisitorId)` = unique visitors. */
+		VisitorId: column(t.string().default(""), { jsonPath: "$.visitor_id" }),
+		/**
+		 * 1 when the visitor id was minted on this page load. The client is the only
+		 * place that knows this: a `WHERE VisitorId IN (earlier window)` self-join is
+		 * both a second full scan and wrong past the 30-day TTL, which drops the very
+		 * history the join needs.
+		 */
+		VisitorIsNew: column(t.uint8().default(0), {
+			jsonPath: "$.visitor_is_new",
+		}),
+
+		UserEmail: column(t.string().default(""), { jsonPath: "$.user_email" }),
+		UserName: column(t.string().default(""), { jsonPath: "$.user_name" }),
+		/** Company/team/tenant the user belongs to — the grouping dimension. */
+		GroupId: column(t.string().default(""), { jsonPath: "$.group_id" }),
+		GroupName: column(t.string().default(""), { jsonPath: "$.group_name" }),
+		/** Open-ended identity traits (plan, role, …). Keys are arbitrary, so plain String. */
+		UserTraits: column(t.map(t.string(), t.string()).defaultExpr("map()"), {
+			jsonPath: "$.user_traits",
+		}),
+
+		/** Full `document.referrer`. Often empty — see ReferrerHost. */
+		Referrer: column(t.string().default(""), { jsonPath: "$.referrer" }),
+		/**
+		 * Normalized referrer host, derived at the gateway (lowercased, `www.`
+		 * stripped) so there is exactly one normalization implementation. `''` means
+		 * direct **or** internal **or** referrer-policy-suppressed — the default
+		 * `strict-origin-when-cross-origin` policy hides a lot of real referrers, so
+		 * this bucket is not "direct traffic". UTM is the reliable acquisition signal.
+		 */
+		ReferrerHost: column(t.string().lowCardinality().default(""), {
+			jsonPath: "$.referrer_host",
+		}),
+
+		UtmSource: column(t.string().lowCardinality().default(""), {
+			jsonPath: "$.utm_source",
+		}),
+		UtmMedium: column(t.string().lowCardinality().default(""), {
+			jsonPath: "$.utm_medium",
+		}),
+		UtmCampaign: column(t.string().lowCardinality().default(""), {
+			jsonPath: "$.utm_campaign",
+		}),
+		// Search keywords / ad creative ids — near-unique, so no dictionary.
+		UtmTerm: column(t.string().default(""), { jsonPath: "$.utm_term" }),
+		UtmContent: column(t.string().default(""), { jsonPath: "$.utm_content" }),
+
+		/** `location.host` — separates apex/app/marketing traffic under one org. */
+		Host: column(t.string().lowCardinality().default(""), {
+			jsonPath: "$.host",
+		}),
+		/**
+		 * Entry/exit pathname. **Pathname only** — no query string or hash, which are
+		 * the most common accidental PII carriers. Plain String because any app with
+		 * `/orders/:uuid` has unbounded paths; ZSTD dedups the repeats well.
+		 *
+		 * Note `UrlInitial` above is a misnomer inherited from the original schema:
+		 * the SDK sets it from `location.href` at post time, so it tracks the *latest*
+		 * URL, not the entry one. `EntryPath` is the real entry page.
+		 */
+		EntryPath: column(t.string().default(""), { jsonPath: "$.entry_path" }),
+		ExitPath: column(t.string().default(""), { jsonPath: "$.exit_path" }),
+
+		Language: column(t.string().lowCardinality().default(""), {
+			jsonPath: "$.language",
+		}),
+
+		/**
+		 * Last activity observed, refreshed by the SDK heartbeat on every row. A tab
+		 * killed without an unload beacon never posts an ended row, so `EndTime` is
+		 * null and `DurationMs` unknown; `LastActivityAt - StartTime` recovers a
+		 * usable duration for those sessions.
+		 */
+		LastActivityAt: column(t.dateTime64(9).nullable(), {
+			jsonPath: "$.last_activity_at",
+		}),
 	},
 	engine: engine.replacingMergeTree({
 		partitionKey: "toDate(StartTime)",
@@ -1726,16 +1871,27 @@ export const sessionEvents = defineDatasource("session_events", {
 		Type: column(t.string().lowCardinality(), { jsonPath: "$.type" }),
 		Url: column(t.string().default(""), { jsonPath: "$.url" }),
 		TraceId: column(t.string().default(""), { jsonPath: "$.trace_id" }),
-		Level: column(t.string().lowCardinality().default(""), { jsonPath: "$.level" }),
+		Level: column(t.string().lowCardinality().default(""), {
+			jsonPath: "$.level",
+		}),
 		Message: column(t.string().default(""), { jsonPath: "$.message" }),
-		TargetSelector: column(t.string().default(""), { jsonPath: "$.target_selector" }),
+		TargetSelector: column(t.string().default(""), {
+			jsonPath: "$.target_selector",
+		}),
 		TargetText: column(t.string().default(""), { jsonPath: "$.target_text" }),
-		NetMethod: column(t.string().lowCardinality().default(""), { jsonPath: "$.net_method" }),
+		NetMethod: column(t.string().lowCardinality().default(""), {
+			jsonPath: "$.net_method",
+		}),
 		NetUrl: column(t.string().default(""), { jsonPath: "$.net_url" }),
 		NetStatus: column(t.uint16().default(0), { jsonPath: "$.net_status" }),
-		NetDurationMs: column(t.uint32().default(0), { jsonPath: "$.net_duration_ms" }),
+		NetDurationMs: column(t.uint32().default(0), {
+			jsonPath: "$.net_duration_ms",
+		}),
 		ErrorStack: column(t.string().default(""), { jsonPath: "$.error_stack" }),
-		Attributes: column(t.map(t.string().lowCardinality(), t.string()), {
+		// Plain String keys, not LowCardinality: `track(name, props)` lets the
+		// customer's app choose them, so a per-event unique key would churn a
+		// shared dictionary. Same reasoning as `session_replays.UserTraits`.
+		Attributes: column(t.map(t.string(), t.string()), {
 			jsonPath: "$.attributes",
 		}),
 	},
@@ -1744,6 +1900,18 @@ export const sessionEvents = defineDatasource("session_events", {
 		sortingKey: ["OrgId", "SessionId", "Timestamp", "Seq"],
 		ttl: "toDate(Timestamp) + INTERVAL 30 DAY",
 	}),
+	indexes: [
+		{
+			// `Type` is not in the sorting key, so the "top custom events" query
+			// would otherwise scan every session's whole transcript. Declared here
+			// rather than only in migration 0011 because this datasource — not the
+			// migration — is the schema managed orgs actually run.
+			name: "idx_type",
+			expr: "Type",
+			type: "set(16)",
+			granularity: 4,
+		},
+	],
 })
 
 export type SessionEventsRow = InferRow<typeof sessionEvents>
