@@ -114,9 +114,7 @@ describe("coalesceMissingRanges", () => {
 	it("never emits more than two ranges, however fragmented the gaps", () => {
 		// Alternating cached/uncached buckets across a long window — the shape
 		// that produced the ~2.9-queries-per-request fan-out in prod.
-		const buckets = Array.from({ length: 10 }, (_, i) =>
-			bucket(2 * i * MIN, (2 * i + 1) * MIN),
-		)
+		const buckets = Array.from({ length: 10 }, (_, i) => bucket(2 * i * MIN, (2 * i + 1) * MIN))
 		const flux = 15 * MIN
 		const missing = findMissingRanges(buckets, 0, 20 * MIN, MIN, flux)
 		expect(missing.length).toBeGreaterThan(2)
