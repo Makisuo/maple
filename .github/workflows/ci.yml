@@ -75,6 +75,15 @@ jobs:
                         - 'apps/api/src/lib/**'
                         - 'packages/db/**'
                         - 'scripts/*clickhouse*'
+                        # The migrations this job replays, and the datasource
+                        # definitions the generated DDL is derived from. Without
+                        # these a PR that adds a migration only triggers the job
+                        # if it incidentally touches `base` (e.g. bun.lock) —
+                        # which is exactly how a schema change can merge without
+                        # ever being replayed against a real ClickHouse.
+                        - 'packages/domain/src/clickhouse/**'
+                        - 'packages/domain/src/tinybird/**'
+                        - 'packages/domain/src/generated/**'
                       shell:
                         - *base
                         - 'scripts/*.sh'

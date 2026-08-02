@@ -298,13 +298,7 @@ const POD_FACET_PROBE_METRIC = "k8s.pod.cpu.usage" as const
  * to compute) hides a pod that pinned at 100% for four minutes of a twelve-hour
  * window behind pods that idle slightly higher.
  */
-export type PodSortKey =
-	| "saturation"
-	| "cpuUsage"
-	| "cpuLimitPct"
-	| "memoryLimitPct"
-	| "podName"
-	| "lastSeen"
+export type PodSortKey = "saturation" | "cpuUsage" | "cpuLimitPct" | "memoryLimitPct" | "podName" | "lastSeen"
 
 export type SortDirection = "asc" | "desc"
 
@@ -380,7 +374,7 @@ export interface ListPodsOutput {
 	readonly saturation: number
 }
 
-const workloadAttrKey =(kind: "deployment" | "statefulset" | "daemonset") =>
+const workloadAttrKey = (kind: "deployment" | "statefulset" | "daemonset") =>
 	kind === "deployment"
 		? "k8s.deployment.name"
 		: kind === "statefulset"
@@ -558,15 +552,13 @@ export interface ListPodsSummaryOutput {
 }
 
 /** Counts arrive as strings on BYO-ClickHouse, so decode rather than trust JSON. */
-export const ListPodsSummaryOutputSchema: CompiledQueryRowSchema<ListPodsSummaryOutput> =
-	Schema.Struct({
-		totalPods: CHNumber,
-		saturatedPods: CHNumber,
-		elevatedPods: CHNumber,
-		unboundedPods: CHNumber,
-		stalePods: CHNumber,
-	})
-
+export const ListPodsSummaryOutputSchema: CompiledQueryRowSchema<ListPodsSummaryOutput> = Schema.Struct({
+	totalPods: CHNumber,
+	saturatedPods: CHNumber,
+	elevatedPods: CHNumber,
+	unboundedPods: CHNumber,
+	stalePods: CHNumber,
+})
 
 /**
  * One row of fleet-shape counts for the browse summary band.

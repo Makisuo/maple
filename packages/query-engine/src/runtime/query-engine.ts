@@ -1990,7 +1990,6 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 		return obs as ReadonlyArray<BucketGroupObs>
 	}
 
-
 	if (query.source === "traces") {
 		const opts = extractTracesOpts(query.filters as Record<string, unknown>)
 		const rows = yield* executeCHQuery(
@@ -2187,9 +2186,7 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 			// by `Date.parse`, which would read that space-separated form as local
 			// time rather than UTC.
 			bucket: normalizeBucket(
-				typeof row.bucket === "string" || row.bucket instanceof Date
-					? row.bucket
-					: range.startTime,
+				typeof row.bucket === "string" || row.bucket instanceof Date ? row.bucket : range.startTime,
 			),
 			groupKey,
 			value,
@@ -2210,10 +2207,7 @@ export const reduceAlertBuckets = (
 	obs: ReadonlyArray<BucketGroupObs>,
 	reducer: QueryEngineAlertReducer,
 ): ReadonlyArray<GroupedAlertObservation> => {
-	const byGroup = new Map<
-		string,
-		Array<{ value: number | null; sampleCount: number; hasData: boolean }>
-	>()
+	const byGroup = new Map<string, Array<{ value: number | null; sampleCount: number; hasData: boolean }>>()
 	for (const o of obs) {
 		const entry = { value: o.value, sampleCount: o.sampleCount, hasData: o.sampleCount > 0 }
 		const list = byGroup.get(o.groupKey)
@@ -2225,7 +2219,6 @@ export const reduceAlertBuckets = (
 	}
 	return reducePerGroupObservations(byGroup, reducer)
 }
-
 
 /**
  * Annotate, validate and resolve the bucket size for one alert evaluation.
