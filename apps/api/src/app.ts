@@ -200,6 +200,10 @@ const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
 
 const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(Env.layer))
 
+// Hoisted above the services that start autonomous investigations: they need
+// `InvestigationService.submitDiagnosis` to hand the chat turn its `submit_diagnosis` tool.
+const InvestigationServiceLive = InvestigationService.layer.pipe(Layer.provideMerge(CoreServicesLive))
+
 const AlertsServiceLive = AlertsService.layer.pipe(
 	Layer.provideMerge(
 		Layer.mergeAll(
@@ -208,6 +212,7 @@ const AlertsServiceLive = AlertsService.layer.pipe(
 			AlertRuntime.layer,
 			EmailServiceLive,
 			OrgMembersServiceLive,
+			InvestigationServiceLive,
 		),
 	),
 )
@@ -230,6 +235,7 @@ const ErrorsServiceLive = ErrorsService.layer.pipe(
 			WarehouseQueryServiceLive,
 			EdgeCacheServiceLive,
 			NotificationDispatcherLive,
+			InvestigationServiceLive,
 		),
 	),
 )
@@ -244,12 +250,17 @@ const SetupAuditServiceLive = SetupAuditService.layer.pipe(Layer.provideMerge(Wa
 // AnomalyDetectionService reads it via Effect.serviceOption, so it degrades
 // gracefully when absent and is provided at worker scope where needed.
 const AnomalyDetectionServiceLive = AnomalyDetectionService.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive, EdgeCacheServiceLive)),
+	Layer.provideMerge(
+		Layer.mergeAll(
+			CoreServicesLive,
+			WarehouseQueryServiceLive,
+			EdgeCacheServiceLive,
+			InvestigationServiceLive,
+		),
+	),
 )
 
 const AiTriageServiceLive = AiTriageService.layer.pipe(Layer.provideMerge(CoreServicesLive))
-
-const InvestigationServiceLive = InvestigationService.layer.pipe(Layer.provideMerge(CoreServicesLive))
 
 const DigestServiceLive = DigestService.layer.pipe(
 	Layer.provideMerge(

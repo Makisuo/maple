@@ -17,48 +17,18 @@
  */
 import {
 	ChatHistoryResponse,
-	ChatMessage,
 	ChatSendRequest,
 	ChatSendResponse,
 	orgIdFromChatSessionId,
 	type ChatEvent,
-	type ChatEventInput,
 } from "@maple/domain/chat-session"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
-import { Message } from "@maple/llm"
 import { Effect, Option, Schema, Stream } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { runChatTurn, type ChatTurnEvent } from "@/chat/agent"
-import { resolveTriageModel } from "@/lib/Llm"
+import { chatSessionStub, runChatSessionTurn } from "@/chat/session"
+import { InvestigationService } from "@/services/InvestigationService"
 import type { TenantContext } from "@/lib/tenant-context"
 import { resolveHttpMcpTenant } from "@/mcp/lib/query-warehouse"
-
-/** The Durable Object RPC surface this router drives. Mirrors `@/chat/ChatSession`. */
-interface ChatSessionStub {
-	readonly cursor: () => Promise<number>
-	readonly running: () => Promise<boolean>
-	readonly history: () => Promise<ReadonlyArray<ChatMessage>>
-	readonly since: (cursor: number) => Promise<ReadonlyArray<ChatEvent>>
-	readonly tail: (cursor: number) => Promise<ReadonlyArray<ChatEvent>>
-	readonly append: (event: ChatEventInput) => Promise<number>
-	readonly beginTurn: (
-		messageId: string,
-		text: string,
-	) => Promise<{ cursor: number; messageId: string } | undefined>
-	readonly endTurn: () => Promise<void>
-	readonly abort: (messageId: string) => Promise<void>
-}
-
-interface ChatSessionNamespace {
-	readonly idFromName: (name: string) => unknown
-	readonly get: (id: unknown) => ChatSessionStub
-}
-
-const isNamespace = (value: unknown): value is ChatSessionNamespace =>
-	typeof value === "object" &&
-	value !== null &&
-	typeof (value as { get?: unknown }).get === "function" &&
-	typeof (value as { idFromName?: unknown }).idFromName === "function"
 
 const json = (body: unknown, status = 200) =>
 	HttpServerResponse.text(JSON.stringify(body), {
@@ -105,19 +75,15 @@ const resolveSession = Effect.fn("chat.resolveSession")(function* (
 	}
 
 	const env = yield* WorkerEnvironment
-	const namespace = env.CHAT_SESSION
-	if (!isNamespace(namespace)) {
-		return { ok: false, failure: problem("Chat sessions are not configured on this deployment", 503) } as const
+	const stub = chatSessionStub(env, sessionId)
+	if (!stub) {
+		return {
+			ok: false,
+			failure: problem("Chat sessions are not configured on this deployment", 503),
+		} as const
 	}
 
-	return {
-		ok: true,
-		sessionId,
-		tenant,
-		env,
-		stub: namespace.get(namespace.idFromName(sessionId)),
-		url,
-	} as const
+	return { ok: true, sessionId, tenant, env, stub, url } as const
 })
 
 const cursorParam = (url: URL): number => {
@@ -173,8 +139,18 @@ export const ChatSessionsRouter = HttpRouter.use((router) =>
 				// the turn, so losing it loses nothing.
 			// `forkDetach`, not a scoped fork: the turn must outlive this request. v4 has no
 				// `forkDaemon`; `forkDetach` is the detached-lifetime equivalent.
+				// `InvestigationService` is resolved here rather than inside the turn so the turn
+				// module stays free of the service graph — see the note on `SubmitDiagnosis`.
+				const investigations = yield* InvestigationService
 				yield* Effect.forkDetach(
-					runTurn(resolved.sessionId, resolved.tenant, resolved.env, resolved.stub, messageId),
+					runChatSessionTurn({
+						sessionId: resolved.sessionId,
+						tenant: resolved.tenant,
+						env: resolved.env,
+						stub: resolved.stub,
+						messageId,
+						submitDiagnosis: investigations.submitDiagnosis,
+					}),
 				)
 
 				return json(encodeSend(new ChatSendResponse({ cursor: claimed.cursor, messageId })), 202)
@@ -228,60 +204,3 @@ export const ChatSessionsRouter = HttpRouter.use((router) =>
 		)
 	}),
 )
-
-/**
- * Drive one turn, appending each event to the session as it is produced.
- *
- * Events go to the DO rather than straight to the client for two reasons: the transcript has to
- * survive a reload, and the submitting request is not the one reading the stream. `endTurn` runs in
- * an ensuring block so a defect cannot strand the session with `running = 1` and wedge the
- * composer for every tab on the conversation.
- */
-const runTurn = (
-	sessionId: string,
-	tenant: TenantContext,
-	env: Record<string, unknown>,
-	stub: ChatSessionStub,
-	messageId: string,
-) =>
-	Effect.gen(function* () {
-		const history = yield* Effect.promise(() => stub.history())
-		const messages = yield* Effect.sync(() => toLlmMessages(history))
-		yield* runChatTurn({
-			sessionId,
-			tenant,
-			model: resolveTriageModel(env),
-			messages,
-			messageId,
-		}).pipe(
-			Stream.runForEach((event: ChatTurnEvent) => Effect.promise(() => stub.append(event))),
-		)
-	}).pipe(
-		Effect.catchCause((cause) =>
-			Effect.promise(() =>
-				stub.append({
-					type: "turn-end",
-					messageId,
-					reason: "error",
-					error: String(cause),
-				}),
-			).pipe(Effect.asVoid),
-		),
-		Effect.ensuring(Effect.promise(() => stub.endTurn())),
-		Effect.withSpan("chat.turn", { attributes: { orgId: tenant.orgId, "maple.chat.session": sessionId } }),
-	)
-
-/**
- * Project the durable transcript into `@maple/llm` messages.
- *
- * Tool calls are deliberately NOT replayed as tool messages: a rehydrated conversation needs the
- * *conclusions*, not a second copy of every tool payload, and replaying tool results without their
- * matching provider-native call ids is what makes providers reject a continuation. The assistant's
- * text is what carries forward.
- */
-const toLlmMessages = (history: ReadonlyArray<ChatMessage>) =>
-	history
-		.filter((message) => message.text.trim() !== "")
-		.map((message) =>
-			message.role === "user" ? Message.user(message.text) : Message.assistant(message.text),
-		)

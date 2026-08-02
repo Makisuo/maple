@@ -11,6 +11,7 @@ import { actors, alertIncidents, errorIssues, errorIssueEvents, type ErrorIssueR
 import { and, eq, sql } from "drizzle-orm"
 import { Cause, Clock, Effect, Option, Redacted, Schema } from "effect"
 import { Database } from "./DatabaseLive"
+import type { SubmitDiagnosis } from "@/chat/agent"
 import { maybeEnqueueTriage } from "./ai-triage-enqueue"
 import { SYSTEM_ALERTS_AGENT_NAME } from "./system-actors"
 
@@ -52,9 +53,11 @@ export interface UpsertAlertIssueInput {
 	readonly incidentId: AlertIncidentId
 	readonly serviceName: string
 	readonly timestamp: number
-	/** Raw CHAT_FLUE service binding off the worker env (may be undefined). */
+	/** Raw CHAT_SESSION Durable Object namespace off the worker env (may be undefined). */
 	readonly agentBinding: unknown
-	readonly internalServiceToken: Option.Option<Redacted.Redacted<string>>
+	/** Full worker env, used to resolve the model an autonomous investigation turn runs on. */
+	readonly workerEnv?: Record<string, unknown>
+	readonly submitDiagnosis: SubmitDiagnosis
 }
 
 export interface UpsertAlertIssueResult {
@@ -297,7 +300,8 @@ export const upsertAlertIssue: (
 				issueId,
 			},
 			agentBinding: input.agentBinding,
-			internalServiceToken: input.internalServiceToken,
+			workerEnv: input.workerEnv,
+			submitDiagnosis: input.submitDiagnosis,
 		})
 
 		return { issueId, action }

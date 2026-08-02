@@ -36,23 +36,32 @@ const makeLayer = () => {
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const ORG = asOrgId("org_enqueue_test")
 
-const fakeBinding = (status = 202) => {
-	const created: Array<{ url: string; method: string; authorization: string | null; body: unknown }> = []
+/**
+ * Stub `CHAT_SESSION` Durable Object namespace. Starting an autonomous turn is now a DO call plus
+ * a detached fiber rather than an HTTP POST to the chat-flue Worker, so what a test observes is the
+ * `beginTurn` call, not a `Request`.
+ */
+const fakeBinding = (options?: { readonly busy?: boolean }) => {
+	const created: Array<{ sessionId: string; messageId: string; text: string }> = []
 	return {
 		created,
 		binding: {
-			fetch: async (request: Request) => {
-				created.push({
-					url: request.url,
-					method: request.method,
-					authorization: request.headers.get("authorization"),
-					body: await request.json(),
-				})
-				return new Response(null, { status })
-			},
+			idFromName: (name: string) => name,
+			get: (sessionId: string) => ({
+				history: async () => [],
+				beginTurn: async (messageId: string, text: string) => {
+					created.push({ sessionId, messageId, text })
+					return options?.busy === true ? undefined : { cursor: 0, messageId }
+				},
+				append: async () => 1,
+				endTurn: async () => undefined,
+			}),
 		},
 	}
 }
+
+/** No test here lets a turn reach `submit_diagnosis`; failing loudly beats a silent no-op. */
+const submitDiagnosis = () => Effect.die(new Error("submit_diagnosis is not expected in these tests"))
 
 const enableSettings = Effect.gen(function* () {
 	const database = yield* Database
@@ -73,7 +82,7 @@ const baseInput = (binding: unknown, incidentId: string) => ({
 	incidentId,
 	context: { kind: "error" },
 	agentBinding: binding,
-	internalServiceToken: Option.some(Redacted.make("test-internal-token")),
+	submitDiagnosis,
 })
 
 describe("maybeEnqueueTriage", () => {
@@ -94,12 +103,9 @@ describe("maybeEnqueueTriage", () => {
 			const first = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
 			assert.isTrue(first.enqueued)
 			assert.lengthOf(created, 1)
-			assert.include(created[0]?.url ?? "", `inv-${first.investigationId}`)
-			assert.strictEqual(created[0]?.method, "POST")
-			assert.strictEqual(created[0]?.authorization, "Bearer maple_svc_test-internal-token")
-			const body = created[0]?.body as { readonly message?: string }
-			assert.include(body.message ?? "", '"incidentId":"incident-1"')
-			assert.include(body.message ?? "", '"snapshot"')
+			assert.include(created[0]?.sessionId ?? "", `inv-${first.investigationId}`)
+			assert.include(created[0]?.text ?? "", '"incidentId":"incident-1"')
+			assert.include(created[0]?.text ?? "", '"snapshot"')
 
 			const second = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
 			assert.isFalse(second.enqueued)
@@ -142,17 +148,17 @@ describe("maybeEnqueueTriage", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	)
 
-	it.effect("marks the run failed and reports `error` when workflow creation fails", () =>
+	/**
+	 * The old "agent returned HTTP 4xx / the fetch threw" outcomes are gone with the Worker hop.
+	 * The one pre-turn failure that survives is a session that already has a turn in flight.
+	 */
+	it.effect("marks the run failed and reports `error` when the session is already busy", () =>
 		Effect.gen(function* () {
 			yield* enableSettings
 			const database = yield* Database
-			const failingBinding = {
-				fetch: async () => {
-					throw new Error("agent boom")
-				},
-			}
+			const { binding } = fakeBinding({ busy: true })
 
-			const result = yield* maybeEnqueueTriage(baseInput(failingBinding, "incident-1"))
+			const result = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
 			assert.isFalse(result.enqueued)
 			assert.strictEqual(result.reason, "error")
 
@@ -162,25 +168,6 @@ describe("maybeEnqueueTriage", () => {
 			assert.lengthOf(rows, 1)
 			assert.strictEqual(rows[0]?.status, "failed")
 			assert.include(rows[0]?.error ?? "", "start_failed")
-		}).pipe(Effect.provide(makeLayer())),
-	)
-
-	it.effect("marks terminal agent rejections as non-retryable", () =>
-		Effect.gen(function* () {
-			yield* enableSettings
-			const database = yield* Database
-			const { binding } = fakeBinding(401)
-
-			const result = yield* maybeEnqueueTriage(baseInput(binding, "incident-1"))
-			assert.isFalse(result.enqueued)
-			assert.strictEqual(result.reason, "rejected")
-
-			const rows = yield* database.execute((db) =>
-				db.select().from(investigations).where(eq(investigations.orgId, ORG)),
-			)
-			assert.strictEqual(rows[0]?.status, "failed")
-			assert.include(rows[0]?.error ?? "", "start_rejected")
-			assert.notInclude(rows[0]?.error ?? "", "retry")
 		}).pipe(Effect.provide(makeLayer())),
 	)
 

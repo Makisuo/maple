@@ -37,6 +37,7 @@ import type { SqlQueryOptions, WarehouseQueryServiceShape } from "../lib/Warehou
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { describeCause, ErrorsService, isBusyDatabaseError, makePersistenceError } from "./ErrorsService"
 import { NotificationDispatcher } from "./NotificationDispatcher"
+import { InvestigationService } from "./InvestigationService"
 
 describe("makePersistenceError", () => {
 	it("omits the cause key when the source has no cause", () => {
@@ -192,6 +193,12 @@ const makeErrorsLayer = (
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const databaseLive = testDb.layer
+	// Held only so the service can hand an autonomous investigation turn its `submit_diagnosis`
+	// tool; no test here starts one. The real layer is cheap — it depends on nothing beyond Env
+	// and the database already wired above.
+	const investigationsLive = InvestigationService.layer.pipe(
+		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
+	)
 	const dispatcherStub = Layer.succeed(
 		NotificationDispatcher,
 		dispatcher ?? {
@@ -206,6 +213,7 @@ const makeErrorsLayer = (
 				Layer.succeed(WarehouseQueryService, makeWarehouseStub(scanRows, onScan, fingerprintRows)),
 				Layer.succeed(EdgeCacheService, makeEdgeCacheService(edgeBackend ?? makeMemoryBackend())),
 				dispatcherStub,
+				investigationsLive,
 			),
 		),
 		Layer.provideMerge(databaseLive),
@@ -251,6 +259,12 @@ const makeGatingLayer = (opts: {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const databaseLive = testDb.layer
+	// Held only so the service can hand an autonomous investigation turn its `submit_diagnosis`
+	// tool; no test here starts one. The real layer is cheap — it depends on nothing beyond Env
+	// and the database already wired above.
+	const investigationsLive = InvestigationService.layer.pipe(
+		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
+	)
 	const dispatcherStub = Layer.succeed(NotificationDispatcher, {
 		dispatch: () => Effect.succeed({ delivered: 0, failed: 0 }),
 	})
@@ -289,6 +303,7 @@ const makeGatingLayer = (opts: {
 				Layer.succeed(WarehouseQueryService, warehouseStub),
 				Layer.succeed(EdgeCacheService, makeEdgeCacheService(makeMemoryBackend())),
 				dispatcherStub,
+				investigationsLive,
 			),
 		),
 		Layer.provideMerge(databaseLive),

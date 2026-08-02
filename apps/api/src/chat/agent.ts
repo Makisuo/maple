@@ -15,10 +15,16 @@
  * `POST /api/chat/apply` still exists and is still how the approved mutation runs — it is the
  * user's action, authenticated as the user, which is exactly where it belongs.
  */
-import { chatModeFromSessionId, type ChatEvent } from "@maple/domain/chat-session"
+import {
+	chatModeFromSessionId,
+	investigationIdFromChatSessionId,
+	type ChatEvent,
+} from "@maple/domain/chat-session"
+import { AiTriageResult, SubmitDiagnosisRequest } from "@maple/domain/http"
+import { InvestigationId } from "@maple/domain/primitives"
 import { LLM, LLMEvent, LLMResponse, Message, ToolResultPart, type LLMRequest, type Model } from "@maple/llm"
 import { Tool, ToolFailure, ToolRuntime, toDefinitions, type Tools } from "@maple/llm"
-import { Effect, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import { toLlmCallError } from "@/lib/Llm"
 import type { TenantContext } from "@/lib/tenant-context"
 import { callMcpTool } from "@/mcp/dispatcher"
@@ -26,6 +32,8 @@ import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { MUTATING_TOOL_NAMES } from "@/mcp/tools/mutating"
 import { mapleToolDefinitions, toInputSchema } from "@/mcp/tools/registry"
 import { buildSystemPrompt } from "./modes"
+
+const decodeInvestigationId = Schema.decodeUnknownSync(InvestigationId)
 
 /** Hard cap on assistant turns per submission. */
 const MAX_STEPS = 10
@@ -60,6 +68,66 @@ export interface ChatTurnInput {
 	/** The full transcript so far, oldest first, already including the new user message. */
 	readonly messages: ReadonlyArray<Message>
 	readonly messageId: string
+	/**
+	 * Investigate-mode sessions get a `submit_diagnosis` tool. It is supplied rather than built
+	 * here because it needs `InvestigationService`, which would otherwise drag the service graph
+	 * into this module's imports.
+	 */
+	readonly extraTools?: Tools
+}
+
+/**
+ * The `submit_diagnosis` tool for an investigate-mode session (`"<orgId>:inv-<id>"`).
+ *
+ * The agent calls it exactly once at the end of its autonomous pass and its arguments ARE the
+ * structured report — `AiTriageResult` directly, not the Valibot mirror `apps/chat-flue` had to
+ * keep in sync by hand.
+ *
+ * Deliberately not approval-gated: it is the structured-output channel, not a user-facing
+ * mutation. The investigation id and org ride from the session id, so the agent never chooses
+ * which investigation it writes.
+ *
+ * `submitDiagnosis` arrives as a callback rather than being resolved from `InvestigationService`
+ * here: that service is itself what starts an investigation's autonomous turn, so resolving it
+ * through the Effect requirements channel would make `InvestigationService` require itself.
+ */
+export type SubmitDiagnosis = (
+	orgId: TenantContext["orgId"],
+	investigationId: InvestigationId,
+	request: SubmitDiagnosisRequest,
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+) => Effect.Effect<unknown, unknown, any>
+
+export const buildSubmitDiagnosisTool = (
+	sessionId: string,
+	tenant: TenantContext,
+	submitDiagnosis: SubmitDiagnosis,
+): Tools => {
+	const tools: Tools = {}
+	const investigationId = investigationIdFromChatSessionId(sessionId)
+	if (!investigationId) return tools
+	tools.submit_diagnosis = Tool.make({
+		description:
+			"Record your structured diagnosis for THIS investigation. Call it exactly once, " +
+			"after you have gathered evidence, with your final assessment. It persists the report " +
+			"and renders it for the user. After calling it, stop unless the user asks a follow-up.",
+		parameters: AiTriageResult,
+		success: Schema.String,
+		execute: (report) =>
+			withRuntimeServices(
+				submitDiagnosis(
+					tenant.orgId,
+					decodeInvestigationId(investigationId),
+					new SubmitDiagnosisRequest({ report }),
+				).pipe(
+					Effect.as("Diagnosis recorded."),
+					Effect.catchCause((cause) =>
+						Effect.fail(new ToolFailure({ message: `submit_diagnosis failed: ${String(cause)}` })),
+					),
+				),
+			),
+	})
+	return tools
 }
 
 /** All Maple tools, with mutating ones flagged. Read-only tools execute; gated ones never do. */
@@ -127,7 +195,7 @@ export type ChatTurnEvent = WithoutSeq<Exclude<ChatEvent, { type: "user-message"
 export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> =>
 	Stream.unwrap(
 		Effect.sync(() => {
-			const tools = buildChatTools(input.tenant)
+			const tools = { ...buildChatTools(input.tenant), ...(input.extraTools ?? {}) }
 			const system = buildSystemPrompt({ mode: chatModeFromSessionId(input.sessionId) })
 			const request = LLM.request({
 				id: input.messageId,

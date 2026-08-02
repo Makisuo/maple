@@ -9,7 +9,7 @@ import {
 	InvestigationIncidentSubject,
 	InvestigationId,
 	InvestigationNotFoundError,
-	InvestigationRejectedError,
+	InvestigationUnavailableError,
 	OrgId,
 	SubmitDiagnosisRequest,
 } from "@maple/domain/http"
@@ -188,16 +188,31 @@ describe("InvestigationService", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	)
 
-	it.effect("starts an autonomous turn with the configured token and preserved context", () => {
-		const requests: Request[] = []
-		const harness = makeHarness({
-			CHAT_FLUE: {
-				fetch: async (request: Request) => {
-					requests.push(request)
-					return new Response(null, { status: 202 })
+	/**
+	 * Stub `CHAT_SESSION` namespace. The autonomous turn now claims the turn on the ChatSession
+	 * Durable Object in process instead of POSTing back to chat-flue over a service binding, so the
+	 * observable contract is `beginTurn(messageId, message)` rather than an HTTP request.
+	 */
+	const chatSessionHarness = (options?: { readonly busy?: boolean }) => {
+		const beginTurns: Array<{ messageId: string; text: string }> = []
+		const namespace = {
+			idFromName: (name: string) => name,
+			get: () => ({
+				history: async () => [],
+				beginTurn: async (messageId: string, text: string) => {
+					beginTurns.push({ messageId, text })
+					return options?.busy === true ? undefined : { cursor: 0, messageId }
 				},
-			},
-		})
+				append: async () => 1,
+				endTurn: async () => undefined,
+			}),
+		}
+		return { beginTurns, env: { CHAT_SESSION: namespace } }
+	}
+
+	it.effect("starts an autonomous turn carrying the preserved context", () => {
+		const chat = chatSessionHarness()
+		const harness = makeHarness(chat.env)
 		return Effect.gen(function* () {
 			const service = yield* InvestigationService
 			const started = yield* service.createAndStartInvestigation(
@@ -207,15 +222,9 @@ describe("InvestigationService", () => {
 				{ automatic: false },
 			)
 			assert.strictEqual(started.status, "investigating")
-			assert.lengthOf(requests, 1)
-			assert.strictEqual(requests[0]?.method, "POST")
-			assert.strictEqual(
-				requests[0]?.headers.get("authorization"),
-				"Bearer maple_svc_test-internal-token",
-			)
-			const body = (yield* Effect.promise(() => requests[0]!.json())) as { message: string }
-			assert.include(body.message, '"incidentId":"err_autonomous_start"')
-			assert.include(body.message, '"snapshot"')
+			assert.lengthOf(chat.beginTurns, 1)
+			assert.include(chat.beginTurns[0]!.text, '"incidentId":"err_autonomous_start"')
+			assert.include(chat.beginTurns[0]!.text, '"snapshot"')
 
 			const database = yield* Database
 			const databaseRows = yield* database.execute((db) =>
@@ -225,21 +234,33 @@ describe("InvestigationService", () => {
 		}).pipe(Effect.provide(harness.layer))
 	})
 
-	it.effect("surfaces terminal agent rejection separately from retryable unavailability", () => {
-		const harness = makeHarness({
-			CHAT_FLUE: {
-				fetch: async () => new Response(null, { status: 401 }),
-			},
-		})
+	it.effect("fails retryably when the chat session binding is missing", () => {
+		const harness = makeHarness({})
 		return Effect.gen(function* () {
 			const service = yield* InvestigationService
 			const error = yield* Effect.flip(
-				service.createAndStartInvestigation(ORG, null, incidentRequest("err_rejected_start"), {
+				service.createAndStartInvestigation(ORG, null, incidentRequest("err_no_binding"), {
 					automatic: false,
 				}),
 			)
-			assert.instanceOf(error, InvestigationRejectedError)
-			assert.strictEqual(error.status, 401)
+			assert.instanceOf(error, InvestigationUnavailableError)
+			assert.strictEqual(error.reason, "agent_unavailable")
+			assert.isTrue(error.retryable)
+		}).pipe(Effect.provide(harness.layer))
+	})
+
+	it.effect("fails retryably when a turn is already in flight for the session", () => {
+		const chat = chatSessionHarness({ busy: true })
+		const harness = makeHarness(chat.env)
+		return Effect.gen(function* () {
+			const service = yield* InvestigationService
+			const error = yield* Effect.flip(
+				service.createAndStartInvestigation(ORG, null, incidentRequest("err_busy"), {
+					automatic: false,
+				}),
+			)
+			assert.instanceOf(error, InvestigationUnavailableError)
+			assert.isTrue(error.retryable)
 		}).pipe(Effect.provide(harness.layer))
 	})
 

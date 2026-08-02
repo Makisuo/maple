@@ -10,8 +10,8 @@ import {
 	upsertThread,
 } from "../lib/chat-threads"
 import { streamChat } from "../lib/chat-stream"
-import { makeFlueChatClient } from "../lib/flue-chat-client"
-import { FLUE_AGENT_NAME, scopedAgentName } from "../lib/flue-chat-url"
+import { makeMapleChatClient } from "../lib/chat-client"
+import { makeChatSessionId } from "../lib/chat-protocol"
 import { buildAlertPreamble } from "../lib/context-preamble"
 
 type Status = "idle" | "submitted" | "streaming" | "error"
@@ -37,7 +37,7 @@ function makeId(prefix: string): string {
 
 export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) {
 	const { orgId, getToken } = useAuth()
-	const client = useMemo(() => makeFlueChatClient(getToken), [getToken])
+	const client = useMemo(() => makeMapleChatClient(getToken), [getToken])
 	const [messages, setMessages] = useState<UIMessage[]>([])
 	const [status, setStatus] = useState<Status>("idle")
 	const [error, setError] = useState<string | null>(null)
@@ -126,8 +126,7 @@ export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) 
 
 			const stream = streamChat({
 				client,
-				agentName: FLUE_AGENT_NAME,
-				instanceId: scopedAgentName(orgId, threadId),
+				sessionId: makeChatSessionId(orgId, threadId),
 				message: outgoing,
 				callbacks: {
 					onAssistantStart: (id) => {

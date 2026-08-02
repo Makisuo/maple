@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import type { FailedSend } from "@flue/react"
 import { Exit } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { toast } from "sonner"
 import { useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { useFlueChat } from "@/hooks/use-flue-chat"
+import { useMapleChat, type FailedSend } from "@/hooks/use-maple-chat"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
 import {
 	investigationNoun,
@@ -143,7 +142,7 @@ export function ChatConversation({
 	}, [subjectSeededByServer, mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
 
 	const { messages, status, isLoading, historyReady, failedSends, sendMessage, stop, canStop } =
-		useFlueChat({ tabId, context })
+		useMapleChat({ tabId, context })
 	const diagnosisMessageId = useMemo(() => findDiagnosisMessageId(messages), [messages])
 
 	// Apply an approved proposal via Maple's authenticated API (propose-then-apply).
@@ -330,7 +329,7 @@ function InvestigationLead({ ctx }: { ctx: InvestigationContext }) {
 }
 
 /**
- * A send that never reached the server. `@flue/react` keeps the optimistic
+ * A send that never reached the server. `useMapleChat` keeps the optimistic
  * message in the transcript rather than dropping it, so the only thing missing is
  * a way to try again.
  */

@@ -32,6 +32,7 @@ import { OrgMembersError, OrgMembersService, type OrgMember } from "./OrgMembers
 import { QueryEngineService } from "./QueryEngineService"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../lib/test-pglite"
 import { decryptAes256Gcm } from "../lib/Crypto"
+import { InvestigationService } from "./InvestigationService"
 
 const trackedDbs: TestDb[] = []
 
@@ -187,6 +188,12 @@ const makeLayer = (
 	const configLive = makeConfig()
 	const envLive = Env.layer.pipe(Layer.provide(configLive))
 	const databaseLive = testDb.layer
+	// Held only so the service can hand an autonomous investigation turn its `submit_diagnosis`
+	// tool; no test here starts one. The real layer is cheap — it depends on nothing beyond Env
+	// and the database already wired above.
+	const investigationsLive = InvestigationService.layer.pipe(
+		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
+	)
 	const warehouseLive = Layer.succeed(WarehouseQueryService, warehouseStub)
 	const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 	const bucketCacheLive = BucketCacheService.layer.pipe(Layer.provide(edgeCacheLive))
@@ -216,6 +223,7 @@ const makeLayer = (
 				hazelOAuthLive,
 				emailLive,
 				orgMembersLive,
+				investigationsLive,
 			),
 		),
 	)

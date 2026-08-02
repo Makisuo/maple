@@ -19,9 +19,10 @@ import {
 	type SubmitDiagnosisRequest,
 	type UserId,
 } from "@maple/domain/http"
-import { ErrorIssueEventId, ErrorIssueId, InvestigationId } from "@maple/domain/primitives"
+import { ErrorIssueEventId, ErrorIssueId, InvestigationId, UserId as UserIdSchema } from "@maple/domain/primitives"
 import { wrapChatContext } from "@maple/domain/chat-preamble"
-import { CHAT_FLUE_ORIGIN } from "@/lib/chat-flue-origin"
+import { chatSessionStub, runChatSessionTurn } from "@/chat/session"
+import type { TenantContext } from "@/lib/tenant-context"
 import { aiTriageSettings, errorIssueEvents, investigations, type InvestigationRow } from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm"
@@ -138,6 +139,9 @@ export interface InvestigationServiceShape {
 		request: SubmitDiagnosisRequest,
 	) => Effect.Effect<InvestigationDocument, InvestigationPersistenceError | InvestigationNotFoundError>
 }
+
+/** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
+const internalServiceUserId = Schema.decodeUnknownSync(UserIdSchema)("internal-service")
 
 export class InvestigationService extends Context.Service<InvestigationService, InvestigationServiceShape>()(
 	"@maple/api/services/InvestigationService",
@@ -327,22 +331,6 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				}
 			})
 
-			const agentBinding = () => {
-				const raw = Option.getOrUndefined(workerEnv) as
-					| {
-							readonly CHAT_FLUE?: unknown
-					  }
-					| undefined
-				const binding = raw?.CHAT_FLUE
-				if (
-					typeof binding !== "object" ||
-					binding === null ||
-					typeof (binding as { fetch?: unknown }).fetch !== "function"
-				) {
-					return undefined
-				}
-				return { fetch: (binding as { fetch: typeof fetch }).fetch.bind(binding) }
-			}
 
 			const markStartFailed = Effect.fnUntraced(function* (
 				orgId: OrgId,
@@ -358,13 +346,24 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				).pipe(Effect.asVoid)
 			})
 
+			/**
+			 * Kick off the investigation's autonomous first turn.
+			 *
+			 * This used to POST `/agents/maple-chat/<orgId>:inv-<id>` back out over the `CHAT_FLUE`
+			 * service binding with an internal service token — a Worker-to-Worker round trip that
+			 * existed only because the agent lived in another Worker. The agent runs here now, so
+			 * this claims the turn on the `ChatSession` Durable Object and forks the runner, the
+			 * same path `POST /api/chat/sessions/:id/messages` takes.
+			 */
 			const sendAutonomousTurn = Effect.fnUntraced(function* (
 				orgId: OrgId,
 				doc: InvestigationDocument,
 				nowMs: number,
 			) {
-				const agent = agentBinding()
-				if (!agent) {
+				const env = Option.getOrUndefined(workerEnv)
+				const sessionId = `${orgId}:inv-${doc.id}`
+				const stub = env ? chatSessionStub(env, sessionId) : undefined
+				if (!stub) {
 					yield* markStartFailed(
 						orgId,
 						doc.id,
@@ -380,27 +379,9 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					)
 				}
 
-				const token = Option.getOrUndefined(env.INTERNAL_SERVICE_TOKEN)
-				if (token === undefined) {
-					yield* markStartFailed(
-						orgId,
-						doc.id,
-						"agent_unavailable: the internal service token is not configured",
-						nowMs,
-					)
-					return yield* Effect.fail(
-						new InvestigationUnavailableError({
-							message: "The investigation agent is not configured.",
-							reason: "agent_unavailable",
-							retryable: false,
-						}),
-					)
-				}
-
-				const instanceId = `${orgId}:inv-${doc.id}`
-				// Fenced in full: this prompt is machine-written, and the transcript now
-				// replays user turns to everyone who opens the investigation. Unfenced it
-				// renders as a wall of JSON attributed to whoever started the thread.
+				// Fenced in full: this prompt is machine-written, and the transcript replays user
+				// turns to everyone who opens the investigation. Unfenced it renders as a wall of
+				// JSON attributed to whoever started the thread.
 				const message = wrapChatContext(
 					[
 						"Begin the autonomous investigation now.",
@@ -409,76 +390,39 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					].join("\n\n"),
 					"",
 				)
-				const response = yield* Effect.tryPromise({
-					try: (signal) =>
-						agent.fetch(
-							new Request(
-								`${CHAT_FLUE_ORIGIN}/agents/maple-chat/${encodeURIComponent(instanceId)}`,
-								{
-									method: "POST",
-									headers: {
-										authorization: `Bearer maple_svc_${Redacted.value(token)}`,
-										"content-type": "application/json",
-									},
-									body: JSON.stringify({ message }),
-									signal,
-								},
-							),
-						),
-					catch: (cause) =>
-						new InvestigationUnavailableError({
-							message:
-								cause instanceof Error ? cause.message : "Unable to start investigation.",
-							reason: "start_failed",
-							retryable: true,
-						}),
-				}).pipe(
-					Effect.timeoutOrElse({
-						duration: Duration.seconds(15),
-						orElse: () =>
-							Effect.fail(
-								new InvestigationUnavailableError({
-									message: "The investigation agent timed out after 15 seconds.",
-									reason: "start_failed",
-									retryable: true,
-								}),
-							),
-					}),
-					Effect.tapError(() =>
-						markStartFailed(
-							orgId,
-							doc.id,
-							"start_failed: the investigation agent could not be reached; retry",
-							nowMs,
-						),
-					),
-				)
-				if (!response.ok) {
-					const retryable = response.status === 429 || response.status >= 500
-					yield* markStartFailed(
-						orgId,
-						doc.id,
-						retryable
-							? `start_failed: agent returned HTTP ${response.status}; retry`
-							: `start_rejected: agent returned HTTP ${response.status}`,
-						nowMs,
-					)
-					if (!retryable) {
-						return yield* Effect.fail(
-							new InvestigationRejectedError({
-								message: `The investigation agent rejected the start request (${response.status}).`,
-								status: response.status,
-							}),
-						)
-					}
+
+				const messageId = crypto.randomUUID()
+				const claimed = yield* Effect.promise(() => stub.beginTurn(messageId, message))
+				if (!claimed) {
+					// A turn is already running for this session, which for an investigation means
+					// the pass is already under way. Treat it as retryable rather than a hard
+					// failure: the caller's restart path will see the running row next time.
 					return yield* Effect.fail(
 						new InvestigationUnavailableError({
-							message: `The investigation agent rejected the start request (${response.status}).`,
+							message: "This investigation already has a turn in flight.",
 							reason: "start_failed",
 							retryable: true,
 						}),
 					)
 				}
+
+				const tenant: TenantContext = {
+					orgId,
+					userId: internalServiceUserId,
+					roles: [],
+					authMode: "self_hosted",
+				}
+			yield* Effect.forkDetach(
+					runChatSessionTurn({
+						sessionId,
+						tenant,
+						env: env ?? {},
+						stub,
+						messageId,
+						submitDiagnosis,
+					}),
+				)
+
 				yield* Effect.annotateCurrentSpan({
 					"maple.investigation.start_result": "started",
 					"maple.investigation.id": doc.id,
