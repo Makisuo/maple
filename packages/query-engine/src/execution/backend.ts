@@ -50,6 +50,17 @@ export interface WarehouseBackendDialect {
 	readonly dbSystemName: "tinybird" | "clickhouse"
 	/** Logical destination used by the service-map `peer.service` edge. */
 	readonly peerService: string
+	/**
+	 * ClickHouse JSON formats quote 64-bit integers by default
+	 * (`output_format_json_quote_64bit_integers=1`), so `count()`/`sum()`/
+	 * `uniqExact()` arrive as strings on ClickHouse-protocol backends while the
+	 * Tinybird SDK returns numbers. Setting the flag to 0 restores wire parity so
+	 * every query decodes identically on both — magnitudes above 2^53 lose
+	 * precision either way (the existing managed-Tinybird contract); identity
+	 * UInt64s (hashes/ids) must be `toString()`-wrapped in the SELECT, which the
+	 * SQL-catalog e2e sweep enforces.
+	 */
+	readonly unquote64BitIntegers: boolean
 }
 
 /** Single source of truth for per-backend behavior. */
@@ -61,6 +72,8 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		normalizeSqlForClient: false,
 		dbSystemName: "tinybird",
 		peerService: "tinybird",
+		// The SDK's /v0/sql JSON already returns 64-bit ints as numbers.
+		unquote64BitIntegers: false,
 	},
 	"tinybird-gateway": {
 		driver: "clickhouse-web",
@@ -69,6 +82,7 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		normalizeSqlForClient: true,
 		dbSystemName: "clickhouse",
 		peerService: "clickhouse",
+		unquote64BitIntegers: true,
 	},
 	clickhouse: {
 		driver: "clickhouse-web",
@@ -77,6 +91,7 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		normalizeSqlForClient: true,
 		dbSystemName: "clickhouse",
 		peerService: "clickhouse",
+		unquote64BitIntegers: true,
 	},
 	chdb: {
 		driver: "clickhouse-web",
@@ -85,5 +100,6 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		normalizeSqlForClient: true,
 		dbSystemName: "clickhouse",
 		peerService: "chdb",
+		unquote64BitIntegers: true,
 	},
 }

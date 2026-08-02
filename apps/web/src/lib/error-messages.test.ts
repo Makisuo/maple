@@ -1,5 +1,6 @@
 import { HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { describe, expect, it } from "vitest"
+import { WAREHOUSE_ERROR_TAGS } from "@maple/domain"
 import { formatBackendError } from "./error-messages"
 
 describe("formatBackendError", () => {
@@ -117,6 +118,35 @@ describe("formatBackendError", () => {
 		})
 		expect(result.title).toBe("Database schema is out of date")
 		expect(result.description).toContain("schema apply")
+	})
+
+	it("formats decode-kind WarehouseSchemaDriftError without the schema-apply hint", () => {
+		const result = formatBackendError({
+			_tag: "@maple/http/errors/WarehouseSchemaDriftError",
+			message: "Compiled query row 0 did not match its declared output schema",
+			kind: "decode",
+			pipe: "serviceOverview",
+		})
+		expect(result.description).not.toContain("schema apply")
+		expect(result.description).toContain("Maple bug")
+	})
+
+	it("formats WarehouseMalformedQueryError as a Maple bug, not a database problem", () => {
+		const result = formatBackendError({
+			_tag: "@maple/http/errors/WarehouseMalformedQueryError",
+			message: "NO_COMMON_TYPE: There is no supertype for types UInt64, Float64",
+			pipe: "traces_timeseries",
+		})
+		expect(result.title).toBe("This chart hit a bug in Maple")
+		expect(result.description).toContain("our fault")
+		expect(result.description).not.toContain("schema apply")
+	})
+
+	it("gives every warehouse tag a specific title", () => {
+		for (const tag of WAREHOUSE_ERROR_TAGS) {
+			const result = formatBackendError({ _tag: tag, message: "boom" })
+			expect(result.title, tag).not.toBe("Something went wrong")
+		}
 	})
 
 	it("formats WarehouseValidationError as an invalid query", () => {

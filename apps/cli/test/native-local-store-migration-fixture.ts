@@ -231,7 +231,11 @@ const sharedAttributes =
 	"map('db.system', 'postgresql', 'db.namespace', 'orders', 'db.operation.name', 'SELECT', 'db.query.text', 'SELECT * FROM orders')"
 const insertStatements = [
 	"INSERT INTO logs (OrgId, Timestamp, TimestampTime, TraceId, SpanId, TraceFlags, SeverityText, SeverityNumber, ServiceName, Body) SELECT 'native-migration', now64(9), now(), 'trace-native-log', 'span-native-log', 1, 'INFO', 9, 'native-migration', 'legacy source'",
-	`INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, ResourceAttributes, SpanAttributes, StatusCode, StatusMessage) SELECT 'native-migration', now64(9), 'trace-native-db', 'span-native-db', '', '', 'SELECT orders', 'Client', 'native-migration', ${sharedResourceAttributes}, ${sharedAttributes}, 'Ok', ''`,
+	// The DB call is a CHILD Client span on purpose: with an empty ParentSpanId it
+	// would count as an entry span (`service_overview_spans_mv` is `SpanKind IN
+	// ('Server','Consumer') OR ParentSpanId = ''`) and the probe's namespace
+	// aggregate expectation of exactly one entry span would read 2.
+	`INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, ResourceAttributes, SpanAttributes, StatusCode, StatusMessage) SELECT 'native-migration', now64(9), 'trace-native-db', 'span-native-db', 'span-native-parent', '', 'SELECT orders', 'Client', 'native-migration', ${sharedResourceAttributes}, ${sharedAttributes}, 'Ok', ''`,
 	`INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, ResourceAttributes, SpanAttributes, StatusCode, StatusMessage) SELECT 'native-migration', now64(9), 'trace-native-server', 'span-native-server', '', '', 'GET /orders', 'Server', 'native-migration', ${sharedResourceAttributes}, map(), 'Ok', ''`,
 	"INSERT INTO metrics_sum (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Value, AggregationTemporality, IsMonotonic) SELECT 'native-migration', 'native-migration', 'sum-native', now64(9), now64(9), 1, 2, true",
 	"INSERT INTO metrics_gauge (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Value) SELECT 'native-migration', 'native-migration', 'gauge-native', now64(9), now64(9), 1",

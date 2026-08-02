@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { expectTypeOf } from "expect-type"
+import type { Effect } from "effect"
 import * as CH from "./index"
 import type { InferQueryOutput } from "./query"
 import type { InferUnionOutput } from "./union"
@@ -327,9 +328,9 @@ const compiled = CH.compile(compileTarget, {})
 
 expectTypeOf(compiled).toMatchTypeOf<CompiledQuery<{ readonly id: string; readonly age: number }>>()
 
-// castRows returns correctly typed array
-expectTypeOf(compiled.castRows([])).toEqualTypeOf<
-	ReadonlyArray<{ readonly id: string; readonly age: number }>
+// decodeRows resolves to the correctly typed array
+expectTypeOf(compiled.decodeRows([])).toMatchTypeOf<
+	Effect.Effect<ReadonlyArray<{ readonly id: string; readonly age: number }>, unknown>
 >()
 
 // ---------------------------------------------------------------------------

@@ -127,30 +127,49 @@ export const describeQuery = async (
 }
 
 /**
- * ClickHouse's `FORMAT JSON` renders 64-bit integers as JSON *strings* so they
- * survive the round trip intact. Managed Tinybird hands back numbers, so a query
- * whose row schema uses a bare `Schema.Number` works there and 500s for every
- * BYO-ClickHouse org. `CH.CHNumber` accepts both.
+ * ClickHouse's JSON formats render 64-bit integers as JSON *strings* by default
+ * so they survive the round trip intact. The production read paths pin
+ * `output_format_json_quote_64bit_integers=0` for wire parity with the Tinybird
+ * SDK (see `BackendDialect.unquote64BitIntegers`), but a row schema must still
+ * accept BOTH shapes — the setting is a per-request knob that a restricted
+ * gateway or `readonly=1` BYO cluster can refuse. `CH.CHNumber` accepts both.
  */
 export const isSixtyFourBitInt = (type: string): boolean => /\b(?:U?Int64|U?Int128|U?Int256)\b/.test(type)
 
-/** A row shaped like `FORMAT JSON` output for the described columns. */
-export const syntheticRow = (columns: ReadonlyArray<DescribedColumn>): Record<string, unknown> => {
+/**
+ * A row shaped like JSON-format output for the described columns.
+ * `quote64Bit: true` models the ClickHouse default wire shape (64-bit ints as
+ * strings); `false` models the unquoted shape the production client pins.
+ */
+export const syntheticRow = (
+	columns: ReadonlyArray<DescribedColumn>,
+	opts: { readonly quote64Bit: boolean } = { quote64Bit: true },
+): Record<string, unknown> => {
 	const row: Record<string, unknown> = {}
 	for (const column of columns) {
-		row[column.name] = sampleValue(column.type)
+		row[column.name] = sampleValue(column.type, opts.quote64Bit)
 	}
 	return row
 }
 
-const sampleValue = (type: string): unknown => {
+const sampleValue = (type: string, quote64Bit: boolean): unknown => {
 	const inner = type.replace(/^(?:Nullable|LowCardinality)\((.*)\)$/, "$1")
 	if (inner.startsWith("Array(")) return []
 	if (inner.startsWith("Map(")) return {}
 	if (inner.startsWith("Tuple(")) return []
-	// The whole point: 64-bit ints come over the wire quoted.
-	if (isSixtyFourBitInt(inner)) return "1"
+	// The whole point: 64-bit ints can come over the wire quoted or not.
+	if (isSixtyFourBitInt(inner)) return quote64Bit ? "1" : 1
 	if (/^(?:U?Int|Float|Decimal|Bool)/.test(inner)) return 1
 	if (/^(?:Date|DateTime)/.test(inner)) return "2026-01-01 00:00:00"
 	return ""
 }
+
+/**
+ * 64-bit output columns that carry *identity* (hashes, ids, fingerprints) must
+ * be `toString()`-wrapped in the SELECT: with the unquoted wire format a value
+ * above 2^53 would be silently corrupted by JS number parsing. Magnitude
+ * columns (counts, sums, quantiles) are exempt — precision loss at that scale
+ * is the long-standing managed-Tinybird contract.
+ */
+export const looksLikeIdentityColumn = (name: string): boolean =>
+	/hash|fingerprint/i.test(name) || /(?:_id|Id)$/.test(name) || /^id$/i.test(name)

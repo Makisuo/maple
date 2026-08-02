@@ -66,10 +66,16 @@ export class WarehouseClientError extends Schema.TaggedErrorClass<WarehouseClien
  * A BYO ClickHouse cluster is missing a column or has the wrong type for one
  * Maple expects; remediated by running schema apply on the cluster. The MCP
  * layer enriches this with an actionable hint.
+ *
+ * `kind` splits two failure modes that need opposite advice: `"cluster"`
+ * (absent = cluster, for wire compatibility) means the cluster itself rejected
+ * the query — run schema apply; `"decode"` means the cluster answered but the
+ * rows failed Maple's own row schema — schema apply cannot fix that and the
+ * presenter must not suggest it.
  */
 export class WarehouseSchemaDriftError extends Schema.TaggedErrorClass<WarehouseSchemaDriftError>()(
 	"@maple/http/errors/WarehouseSchemaDriftError",
-	warehouseErrorBaseFields,
+	{ ...warehouseErrorBaseFields, kind: Schema.optional(Schema.Literals(["cluster", "decode"])) },
 	{ httpApiStatus: 502 },
 ) {}
 
