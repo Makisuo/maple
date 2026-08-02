@@ -392,8 +392,11 @@ jobs:
                   mkdir -p "$TMPDIR"
                   apps/cli/test/native-local-store-migration.sh "$GITHUB_WORKSPACE/dist"
 
+            # failure() alone skips the upload when a step-level timeout or a
+            # concurrency cancel kills the probe mid-hang — precisely the runs
+            # whose evidence matters most.
             - name: Upload checkpoint failure evidence
-              if: ${{ failure() }}
+              if: ${{ failure() || cancelled() }}
               uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
               with:
                   name: native-checkpoint-failure-${{ github.run_id }}
