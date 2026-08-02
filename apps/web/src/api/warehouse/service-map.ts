@@ -15,6 +15,7 @@ import { summarizeSampling } from "@/lib/sampling"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 import { transformExternalEdge } from "@/api/warehouse/service-external-edges"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 export interface ServiceEdge {
 	sourceService: string
 	targetService: string
@@ -141,8 +142,10 @@ function transformEdge(row: Record<string, unknown>, durationSeconds: number): S
 }
 
 const defaultTimeRange = (nowMillis: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMillis - 24 * 60 * 60 * 1000), endTime: fmt(nowMillis) }
+	return {
+		startTime: formatWarehouseDateTime(nowMillis - 24 * 60 * 60 * 1000),
+		endTime: formatWarehouseDateTime(nowMillis),
+	}
 }
 
 export const getServiceMap = Effect.fn("QueryEngine.getServiceMap")(function* ({

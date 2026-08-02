@@ -15,7 +15,12 @@ import {
 	type V2Span,
 	type V2TraceSummary,
 } from "@maple/domain/http/v2"
-import { CH, QueryEngineExecuteRequest } from "@maple/query-engine"
+import {
+	CH,
+	QueryEngineExecuteRequest,
+	formatWarehouseDateTime,
+	formatWarehouseDateTimeMs,
+} from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import {
 	computeBucketSeconds,
@@ -76,7 +81,7 @@ const toWarehouseDateTime = (value: string, param: string) => {
 	const ms = Date.parse(value)
 	return Number.isNaN(ms)
 		? Effect.fail(invalidRequest("parameter_invalid", `Invalid ISO-8601 timestamp for ${param}.`, param))
-		: Effect.succeed(new Date(ms).toISOString().replace("T", " ").replace(/Z$/, ""))
+		: Effect.succeed(formatWarehouseDateTimeMs(ms))
 }
 
 const parseWindow = (
@@ -117,12 +122,11 @@ const chToIso = (value: string): Timestamp => {
 	return timestamp(Number.isNaN(ms) ? value : new Date(ms).toISOString())
 }
 
-const warehouseDate = (ms: number) => new Date(ms).toISOString().replace("T", " ").replace(/Z$/, "")
 const partitionWindow = (value: string) => {
 	const ms = Date.parse(value.includes("T") ? value : `${value.replace(" ", "T")}Z`)
 	return {
-		startTime: warehouseDate(ms - PARTITION_HINT_RADIUS_MS),
-		endTime: warehouseDate(ms + PARTITION_HINT_RADIUS_MS),
+		startTime: formatWarehouseDateTimeMs(ms - PARTITION_HINT_RADIUS_MS),
+		endTime: formatWarehouseDateTimeMs(ms + PARTITION_HINT_RADIUS_MS),
 	}
 }
 
@@ -154,7 +158,7 @@ const expandTimestamp = (value: string) => {
 	if (match === null) return value
 	const epochSeconds = Number.parseInt(match[1]!, 36)
 	if (!Number.isSafeInteger(epochSeconds)) return value
-	const seconds = new Date(epochSeconds * 1000).toISOString().slice(0, 19).replace("T", " ")
+	const seconds = formatWarehouseDateTime(epochSeconds * 1000)
 	return `${seconds}${match[2] ?? ""}`
 }
 const compactHexId = (value: string) => {

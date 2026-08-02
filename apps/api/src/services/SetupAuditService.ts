@@ -24,7 +24,7 @@ import {
 	type WarehouseAuditInputs,
 	runSetupAudit,
 } from "@maple/domain/setup-audit"
-import { CH } from "@maple/query-engine"
+import { CH, formatWarehouseDateTime } from "@maple/query-engine"
 import { CHNumber } from "@maple/query-engine/ch"
 import { and, eq, sql } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Schema } from "effect"
@@ -69,8 +69,6 @@ const serviceUsageRowSchema = Schema.Struct({
 	totalHistogramMetricCount: CHNumber,
 	totalExpHistogramMetricCount: CHNumber,
 })
-
-const fmtWarehouseTime = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
 
 const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQueryService> = Effect.gen(
 	function* () {
@@ -367,9 +365,9 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 			const childStart = childEnd - TRACE_WINDOW_MINUTES * 60_000
 			const window = {
 				orgId: tenant.orgId,
-				childStart: fmtWarehouseTime(childStart),
-				childEnd: fmtWarehouseTime(childEnd),
-				parentStart: fmtWarehouseTime(childStart - TRACE_PARENT_LOOKBACK_MINUTES * 60_000),
+				childStart: formatWarehouseDateTime(childStart),
+				childEnd: formatWarehouseDateTime(childEnd),
+				parentStart: formatWarehouseDateTime(childStart - TRACE_PARENT_LOOKBACK_MINUTES * 60_000),
 				traceSampleModulus: CH.auditTraceSampleModulus(spanCountOverLookback),
 			}
 
@@ -409,13 +407,13 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 			const now = yield* Clock.currentTimeMillis
 			const window = {
 				orgId: tenant.orgId,
-				startTime: fmtWarehouseTime(now - LOOKBACK_HOURS * 60 * 60 * 1000),
-				endTime: fmtWarehouseTime(now),
+				startTime: formatWarehouseDateTime(now - LOOKBACK_HOURS * 60 * 60 * 1000),
+				endTime: formatWarehouseDateTime(now),
 			}
 			const logWindow = {
 				orgId: tenant.orgId,
-				startTime: fmtWarehouseTime(now - CH.AUDIT_LOG_CORRELATION_MAX_HOURS * 60 * 60 * 1000),
-				endTime: fmtWarehouseTime(now),
+				startTime: formatWarehouseDateTime(now - CH.AUDIT_LOG_CORRELATION_MAX_HOURS * 60 * 60 * 1000),
+				endTime: formatWarehouseDateTime(now),
 			}
 
 			const run = <A>(

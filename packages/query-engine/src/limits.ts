@@ -9,7 +9,12 @@
 //
 // Pure — no drivers, no Effect — so this module is safe to re-export from the
 // package root barrel and import from the web bundle.
+//
+// The relative-shorthand *grammar* lives in `./datetime` alongside the rest of
+// the date math; this module only decides what is too wide.
 // ---------------------------------------------------------------------------
+
+import { relativeRangeSeconds } from "./datetime"
 
 /** Widest window any query kind may span. */
 export const MAX_QUERY_RANGE_SECONDS = 60 * 60 * 24 * 31
@@ -74,47 +79,6 @@ export function formatRangeSeconds(seconds: number): string {
 	}
 	const minutes = Math.round(seconds / 60)
 	return `${minutes} minute${minutes === 1 ? "" : "s"}`
-}
-
-// ---------------------------------------------------------------------------
-// Relative range shorthand
-//
-// The dashboard time picker persists relative ranges as shorthand strings
-// ("15m", "24h", "7d", "3mo", "today"). The web app has always been able to
-// resolve these; the API could not, which is why the MCP dashboard tools fell
-// back to a hardcoded whitelist. Parsing the duration here lets both sides
-// validate the same grammar against the same ceilings.
-// ---------------------------------------------------------------------------
-
-const RELATIVE_RANGE_PATTERN = /^(\d+)(mo|m|h|d|w)$/
-
-const UNIT_SECONDS: Record<string, number> = {
-	m: 60,
-	h: SECONDS_PER_HOUR,
-	d: SECONDS_PER_DAY,
-	w: SECONDS_PER_DAY * 7,
-	// Calendar months vary; 30 days is the conventional approximation and is
-	// only ever used to compare against a ceiling, never to build query bounds.
-	mo: SECONDS_PER_DAY * 30,
-}
-
-/**
- * Duration in seconds for a relative range shorthand, or `null` when the string
- * isn't valid shorthand. `"today"` is elapsed-time-dependent and reports its
- * worst case (24h) so validation stays deterministic.
- */
-export function relativeRangeSeconds(shorthand: string): number | null {
-	const trimmed = shorthand.trim().toLowerCase()
-	if (trimmed === "today") return SECONDS_PER_DAY
-
-	const match = RELATIVE_RANGE_PATTERN.exec(trimmed)
-	if (!match) return null
-
-	const amount = Number.parseInt(match[1], 10)
-	const unitSeconds = UNIT_SECONDS[match[2]]
-	if (!Number.isFinite(amount) || amount <= 0 || unitSeconds === undefined) return null
-
-	return amount * unitSeconds
 }
 
 export interface RelativeRangeValidation {

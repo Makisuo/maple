@@ -6,6 +6,7 @@ import { printResult } from "../lib/output"
 import { resolveRangeChecked, type Range } from "../core/time"
 import * as Ops from "../core/operations"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 const spanName = Flag.optional(Flag.string("span-name").pipe(Flag.withDescription("Filter by span name")))
 const errorsOnly = Flag.boolean("errors").pipe(
 	Flag.withDescription("Only include errored spans"),
@@ -82,7 +83,6 @@ export const breakdown = Command.make("breakdown", {
 )
 
 const win = 30 * 60 * 1000
-const fmtUTC = (ms: number): string => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
 
 export const compare = Command.make("compare", {
 	around: Flag.optional(
@@ -109,8 +109,11 @@ export const compare = Command.make("compare", {
 					yield* Console.error("--around must be a UTC timestamp 'YYYY-MM-DD HH:mm:ss'")
 					return
 				}
-				current = { startTime: fmtUTC(t), endTime: fmtUTC(t + win) }
-				previous = { startTime: fmtUTC(t - win), endTime: fmtUTC(t) }
+				current = { startTime: formatWarehouseDateTime(t), endTime: formatWarehouseDateTime(t + win) }
+				previous = {
+					startTime: formatWarehouseDateTime(t - win),
+					endTime: formatWarehouseDateTime(t),
+				}
 			} else {
 				const cs = Option.getOrUndefined(a.currentStart)
 				const ce = Option.getOrUndefined(a.currentEnd)

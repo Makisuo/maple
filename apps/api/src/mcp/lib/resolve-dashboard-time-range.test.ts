@@ -53,7 +53,16 @@ describe("resolveDashboardTimeRange", () => {
 	it('resolves "today", which the picker can persist but this used to reject', () => {
 		const resolved = resolveDashboardTimeRange({ type: "relative", value: "today" })
 		expect(resolved).not.toBeNull()
-		expect(resolved!.startTime).toMatch(/ 00:00:00$/)
+
+		// Start-of-day is the *local* calendar day, matching the web picker. On a
+		// Worker local is UTC so this renders as 00:00:00, but the assertion is
+		// written against the runtime's zone so it holds on a developer machine
+		// with a UTC offset too.
+		const localMidnight = new Date()
+		localMidnight.setHours(0, 0, 0, 0)
+		expect(resolved!.startTime).toBe(
+			new Date(localMidnight.getTime()).toISOString().replace("T", " ").slice(0, 19),
+		)
 	})
 
 	it("returns null for shorthand it cannot parse", () => {

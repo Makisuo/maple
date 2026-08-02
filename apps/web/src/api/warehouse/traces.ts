@@ -1,5 +1,10 @@
 import { Clock, Effect, Schema } from "effect"
-import { QueryEngineExecuteRequest, TracesFacetDimension, type AttributeFilter } from "@maple/query-engine"
+import {
+	QueryEngineExecuteRequest,
+	TracesFacetDimension,
+	type AttributeFilter,
+	formatWarehouseDateTime,
+} from "@maple/query-engine"
 import { TraceId, SpanId } from "@maple/domain"
 import {
 	DeploymentEnvironment,
@@ -670,8 +675,10 @@ export function getSpanAttributeKeys({ data }: { data: GetSpanAttributeKeysInput
 }
 
 const defaultTimeRange = (nowMillis: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMillis - 24 * 60 * 60 * 1000), endTime: fmt(nowMillis) }
+	return {
+		startTime: formatWarehouseDateTime(nowMillis - 24 * 60 * 60 * 1000),
+		endTime: formatWarehouseDateTime(nowMillis),
+	}
 }
 
 const getSpanAttributeKeysEffect = Effect.fn("QueryEngine.getSpanAttributeKeys")(function* ({

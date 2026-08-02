@@ -64,9 +64,9 @@ export {
 	MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS,
 	formatRangeSeconds,
 	maxRangeSecondsForKind,
-	relativeRangeSeconds,
 	validateRelativeRange,
 } from "../limits"
+export { relativeRangeSeconds, resolveRelativeRange, resolveRelativeRangeToWarehouse } from "../datetime"
 
 /** Minimal tenant surface the lowering needs — only the org scope. */
 export interface QueryTenant {

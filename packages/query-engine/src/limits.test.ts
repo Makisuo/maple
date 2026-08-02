@@ -5,9 +5,9 @@ import {
 	MAX_QUERY_RANGE_SECONDS,
 	formatRangeSeconds,
 	maxRangeSecondsForKind,
-	relativeRangeSeconds,
 	validateRelativeRange,
 } from "./limits"
+import { relativeRangeSeconds } from "./datetime"
 
 describe("maxRangeSecondsForKind", () => {
 	it("gives charts a far wider ceiling than lists", () => {

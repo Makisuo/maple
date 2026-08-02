@@ -1,26 +1,10 @@
-import * as DateTime from "effect/DateTime"
-import { MAX_QUERY_RANGE_SECONDS, validateRelativeRange } from "@maple/query-engine"
-
-const formatUtc = (dt: DateTime.DateTime): string => DateTime.formatIso(dt).replace("T", " ").slice(0, 19)
-
-const RELATIVE_PATTERN = /^(\d+)(mo|m|h|d|w)$/
-
-type RelativeUnit = "m" | "h" | "d" | "w" | "mo"
-
-const subtractRelative = (now: DateTime.DateTime, amount: number, unit: RelativeUnit): DateTime.DateTime => {
-	switch (unit) {
-		case "m":
-			return DateTime.subtract(now, { minutes: amount })
-		case "h":
-			return DateTime.subtract(now, { hours: amount })
-		case "d":
-			return DateTime.subtract(now, { days: amount })
-		case "w":
-			return DateTime.subtract(now, { weeks: amount })
-		case "mo":
-			return DateTime.subtract(now, { days: amount * 30 })
-	}
-}
+import {
+	MAX_QUERY_RANGE_SECONDS,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+	resolveRelativeRangeToWarehouse,
+	validateRelativeRange,
+} from "@maple/query-engine"
 
 export interface ResolvedTimeRange {
 	startTime: string
@@ -57,40 +41,19 @@ export type DashboardTimeRangeInput =
  */
 export function resolveDashboardTimeRange(timeRange: DashboardTimeRangeInput): ResolvedTimeRange | null {
 	if (timeRange.type === "absolute") {
-		const start = DateTime.make(timeRange.startTime)
-		const end = DateTime.make(timeRange.endTime)
-		if (start._tag === "None" || end._tag === "None") return null
+		// `parseWarehouseDateTime`, not `Date.parse`: a stored bound may be the
+		// tz-less `YYYY-MM-DD HH:MM:SS` shape, which `Date.parse` reads as local
+		// time and silently shifts by the runtime's UTC offset.
+		const startMs = parseWarehouseDateTime(timeRange.startTime)
+		const endMs = parseWarehouseDateTime(timeRange.endTime)
+		if (Number.isNaN(startMs) || Number.isNaN(endMs)) return null
 		return {
-			startTime: formatUtc(start.value),
-			endTime: formatUtc(end.value),
+			startTime: formatWarehouseDateTime(startMs),
+			endTime: formatWarehouseDateTime(endMs),
 		}
 	}
 
-	const trimmed = timeRange.value.trim().toLowerCase()
-	if (!trimmed) return null
-
-	// The time picker can persist "today"; without this the API resolved those
-	// dashboards to null and silently fell back to a default window.
-	if (trimmed === "today") {
-		const now = DateTime.nowUnsafe()
-		return {
-			startTime: formatUtc(DateTime.startOf(now, "day")),
-			endTime: formatUtc(now),
-		}
-	}
-
-	const match = trimmed.match(RELATIVE_PATTERN)
-	if (!match) return null
-
-	const amount = Number.parseInt(match[1], 10)
-	if (!Number.isFinite(amount) || amount <= 0) return null
-
-	const unit = match[2] as RelativeUnit
-	const now = DateTime.nowUnsafe()
-	const start = subtractRelative(now, amount, unit)
-
-	return {
-		startTime: formatUtc(start),
-		endTime: formatUtc(now),
-	}
+	// Relative shorthand — including "today" — is resolved by the shared grammar,
+	// so this no longer approximates a month as 30 days the way it used to.
+	return resolveRelativeRangeToWarehouse(timeRange.value)
 }
