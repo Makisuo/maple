@@ -17,6 +17,7 @@ import { ScopeSection } from "@/components/alerts/scope-section"
 import { SignalAndThresholdSection } from "@/components/alerts/signal-and-threshold-section"
 import { WidgetPrefillNoticeBanner } from "@/components/alerts/widget-prefill-notice-banner"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { trackProduct } from "@/lib/analytics"
 import { useAlertRulePreview } from "@/hooks/use-alert-rule-preview"
 import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
 import {
@@ -118,6 +119,7 @@ export function AlertCreateFormSurface({
 
 		if (Exit.isSuccess(result)) {
 			toastManager.add({ title: editingRule ? "Rule updated" : "Rule created", type: "success" })
+			if (!editingRule) trackProduct("alert_rule_created", { signal: ruleForm.signalType })
 			navigate({ to: "/alerts" })
 		} else {
 			toastManager.add({ title: getExitErrorMessage(result, "Failed to save rule"), type: "error" })

@@ -16,11 +16,25 @@
  *   dropping data from users who never intended to opt out. Apps can turn it on.
  */
 
+import { configureVisitorCookie } from "./visitor"
+
 export interface PrivacyOptions {
 	/** Capture nothing until `setConsent(true)`. Default false. */
 	readonly requireConsent?: boolean
 	/** Store a persistent visitor id. Default true. */
 	readonly persistVisitorId?: boolean
+	/**
+	 * Scope the visitor-id cookie to the registered domain so a marketing site
+	 * and an app on sibling subdomains resolve to the same visitor. Default true.
+	 * Set false to keep the cookie host-only.
+	 */
+	readonly crossSubdomainCookie?: boolean
+	/**
+	 * Explicit cookie `Domain=` (without the leading dot), e.g. `"example.com"`.
+	 * Defaults to the broadest domain the browser accepts, discovered by probing.
+	 * `""` forces a host-only cookie.
+	 */
+	readonly cookieDomain?: string
 	/** Send `identify()`'s email through to the warehouse. Default true. */
 	readonly captureUserEmail?: boolean
 	/** Treat `navigator.doNotTrack` like GPC. Default false. */
@@ -92,6 +106,10 @@ export function configurePrivacy(options: PrivacyOptions | undefined): void {
 	const previous = hasConsent()
 	state.requireConsent = state.requireConsent || (options?.requireConsent ?? false)
 	state.respectDoNotTrack = state.respectDoNotTrack || (options?.respectDoNotTrack ?? false)
+	configureVisitorCookie({
+		crossSubdomainCookie: options?.crossSubdomainCookie,
+		cookieDomain: options?.cookieDomain,
+	})
 	updateEffectiveConsent(previous)
 }
 

@@ -15,6 +15,7 @@ import { MagnifierIcon } from "@maple/ui/components/icons/magnifier"
 import Fuse, { type IFuseOptions } from "fuse.js"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { SearchDoc } from "../../lib/docs-search"
+import { trackLanding } from "../../lib/telemetry"
 
 /** Flat browse order — mirrors the sidebar group order (DocsSidebar.astro). */
 const GROUP_ORDER = [
@@ -109,12 +110,22 @@ export default function DocsSearch() {
 
 	// `openRef` mirrors `open` so the mount-only key listener reads fresh state.
 	const openRef = useRef(false)
+	// Same reason: the close handler needs the final query, and it is created once.
+	const queryRef = useRef("")
 	const setPaletteOpen = useCallback(
 		(next: boolean) => {
 			openRef.current = next
 			setOpen(next)
-			if (next) ensureIndex()
-			else setQuery("")
+			if (next) {
+				ensureIndex()
+				return
+			}
+			// Emitted on close rather than per keystroke: what's worth knowing is
+			// what someone searched for, not every prefix they typed on the way.
+			const searched = queryRef.current.trim()
+			if (searched) trackLanding("docs_search", { query: searched.slice(0, 120) })
+			queryRef.current = ""
+			setQuery("")
 		},
 		[ensureIndex],
 	)
@@ -176,7 +187,10 @@ export default function DocsSearch() {
 							inline={false}
 							filter={null}
 							value={query}
-							onValueChange={(value: string) => setQuery(value)}
+							onValueChange={(value: string) => {
+								queryRef.current = value
+								setQuery(value)
+							}}
 						>
 							<CommandInput placeholder="Search the docs…" />
 							<CommandList>

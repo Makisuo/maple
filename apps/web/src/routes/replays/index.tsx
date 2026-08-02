@@ -26,6 +26,8 @@ const replaysSearchSchema = Schema.Struct({
 	country: Schema.optional(Schema.String),
 	deviceType: Schema.optional(Schema.String),
 	userId: Schema.optional(Schema.String),
+	/** Scope to one browser — spans signed-out marketing and signed-in app sessions. */
+	visitorId: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
 	// Session-time range filters, in whole seconds (human-friendly URLs). Mapped
 	// to ms before hitting the warehouse. Union accepts a JS-set number or a
@@ -61,6 +63,7 @@ function ReplaysPage() {
 			country: search.country,
 			deviceType: search.deviceType,
 			userId: search.userId,
+			visitorId: search.visitorId,
 			hasErrors: search.hasErrors,
 			search: search.q,
 			// URL params are whole seconds; the warehouse filters in ms.
@@ -77,6 +80,7 @@ function ReplaysPage() {
 			search.country,
 			search.deviceType,
 			search.userId,
+			search.visitorId,
 			search.hasErrors,
 			search.q,
 			search.durationMin,
@@ -103,6 +107,10 @@ function ReplaysPage() {
 
 	const handleUserFilter = (value: string | undefined) => {
 		navigate({ search: (prev) => ({ ...prev, userId: value }) })
+	}
+
+	const handleVisitorFilter = (value: string | undefined) => {
+		navigate({ search: (prev) => ({ ...prev, visitorId: value }) })
 	}
 
 	const sessions = allData
@@ -176,6 +184,15 @@ function ReplaysPage() {
 									userId={search.userId}
 									count={sessions.length}
 									onClear={() => handleUserFilter(undefined)}
+								/>
+							)}
+							{search.visitorId && (
+								<ActiveUserFilter
+									userId={search.visitorId}
+									count={sessions.length}
+									label="Sessions from visitor"
+									clearLabel="Clear visitor filter"
+									onClear={() => handleVisitorFilter(undefined)}
 								/>
 							)}
 							{Result.builder(firstPageResult)

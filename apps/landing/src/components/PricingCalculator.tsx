@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useRef } from "react"
+import { trackLanding } from "../lib/telemetry"
 
 export type Competitor = "datadog" | "grafana" | "new-relic" | "dash0"
 
@@ -317,6 +318,16 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 	const savings = competitorCost.total - mapleCost.total
 	const savingsPct = competitorCost.total > 0 ? Math.round((savings / competitorCost.total) * 100) : 0
 
+	// A range input fires onChange per tick of the drag, so the event is emitted
+	// once the slider settles — one row per adjustment, not one per pixel.
+	const settleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+	const trackSliderSettled = (key: string, value: number) => {
+		if (settleTimer.current) clearTimeout(settleTimer.current)
+		settleTimer.current = setTimeout(() => {
+			trackLanding("pricing_calculator_changed", { competitor, slider: key, value })
+		}, 800)
+	}
+
 	return (
 		<div>
 			{/* Sliders */}
@@ -329,7 +340,10 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 						key={slider.key}
 						config={slider}
 						value={values[slider.key]}
-						onChange={(v) => setValues((prev) => ({ ...prev, [slider.key]: v }))}
+						onChange={(v) => {
+							setValues((prev) => ({ ...prev, [slider.key]: v }))
+							trackSliderSettled(slider.key, v)
+						}}
 					/>
 				))}
 			</div>

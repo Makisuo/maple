@@ -147,6 +147,33 @@ import { Maple } from "@maple-dev/effect-sdk/client"
 yield * Maple.clearIdentity
 ```
 
+- **Identify with the full identity**, not just an id — email, name, and the company/team the Sessions UI groups by. Each call replaces the identity rather than merging it (merging would leak a signed-out user's email into whoever signs in next on a shared device).
+
+```typescript
+identify({
+	id: user.id,
+	email: user.email,
+	groupId: org.id,
+	groupName: org.name,
+	traits: { plan: "pro" },
+})
+```
+
+- **Custom events** with `track(name, props)` — recorded as a `session_events` row with `Type='custom'`, so a product event reads inline in the session transcript next to the clicks and requests around it. Calls made before the client finishes starting are queued.
+
+```typescript
+import { track } from "@maple-dev/effect-sdk/client"
+
+track("checkout_completed", { plan: "pro", seats: 12 })
+
+// or, inside an Effect program:
+yield * Maple.track("checkout_completed", { plan: "pro" })
+```
+
+- **Cross-subdomain visitors.** The persistent visitor id lives in localStorage _and_ a cookie scoped to your registered domain, so a marketing site on `example.com` and the app on `app.example.com` resolve to the same `VisitorId` — that is what links an anonymous pre-signup visit to the account it becomes. Session ids stay per-origin. Scope it with `privacy: { crossSubdomainCookie, cookieDomain }`.
+
+- **Consent.** `privacy: { requireConsent: true }` holds all capture until `setConsent(true)`; Global Privacy Control is honored by default and suppresses the persistent visitor id.
+
 If `@maple-dev/browser` is also on the page, it owns the session and this SDK's replay/emission stands down automatically — exactly one recorder runs, and spans link to that session via the shared sink. Use one or the other for replay, not both.
 
 ## Manual flush

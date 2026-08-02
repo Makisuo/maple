@@ -20,6 +20,9 @@ const baseRow = {
 	durationMs: null,
 	status: "ended",
 	userId: null,
+	visitorId: "b0f2b0c6-8a9f-4a1f-9a0e-2b4f9e2f1a77",
+	utmSource: "",
+	entryPath: "/",
 	urlInitial: "https://app.maple.dev/",
 	browserName: "Chrome",
 	osName: "macOS",
@@ -73,6 +76,7 @@ const baseEvent = {
 	netStatus: 0,
 	netDurationMs: 0,
 	errorStack: "",
+	attributes: "{}",
 }
 
 describe("SessionEventItem.traceId", () => {

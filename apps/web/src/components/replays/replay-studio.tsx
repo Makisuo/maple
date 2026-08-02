@@ -48,6 +48,18 @@ interface ReplayStudioSession {
 	/** JSON-encoded `session_replays.ResourceAttributes`; carries the SDK's
 	 *  `maple.session.recorded` marker. Omitted on the preview fixture. */
 	readonly resourceAttributes?: string | null
+	// Analytics dimensions, passed straight through to the rail's Session tab.
+	// All optional: the preview fixture and pre-migration-0011 sessions have none.
+	readonly visitorId?: string | null
+	readonly visitorIsNew?: boolean
+	readonly groupName?: string | null
+	readonly userEmail?: string | null
+	readonly entryPath?: string | null
+	readonly exitPath?: string | null
+	readonly referrerHost?: string | null
+	readonly utmSource?: string | null
+	readonly utmMedium?: string | null
+	readonly utmCampaign?: string | null
 }
 
 /** Placeholder-data bundle for the preview route — bypasses every warehouse fetch. */

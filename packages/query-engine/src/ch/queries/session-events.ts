@@ -46,6 +46,8 @@ export interface SessionTranscriptOutput {
 	readonly netStatus: number
 	readonly netDurationMs: number
 	readonly errorStack: string
+	/** `Map(String, String)` serialized as JSON — a custom event's `track()` props. */
+	readonly attributes: string
 }
 
 export interface SessionTranscriptOpts {
@@ -80,6 +82,10 @@ export function sessionTranscriptQuery(opts: SessionTranscriptOpts = {}) {
 			netStatus: $.NetStatus,
 			netDurationMs: $.NetDurationMs,
 			errorStack: $.ErrorStack,
+			// Custom events (`track(name, props)`) carry the name in Message and the
+			// props here, so without this column a product event reads as a bare
+			// label with nothing attached.
+			attributes: CH.toJSONString($.Attributes),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),

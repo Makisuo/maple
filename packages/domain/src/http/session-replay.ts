@@ -31,6 +31,8 @@ export class ListReplaysRequest extends Schema.Class<ListReplaysRequest>("ListRe
 	// Plain string (not the branded UserId) — matches the other optional filters and
 	// avoids brand validation rejecting partial input the client constructs JS-side.
 	userId: Schema.optional(Schema.String),
+	/** Every session from one browser — how a marketing visit links to a signup. */
+	visitorId: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Boolean),
 	search: Schema.optional(Schema.String),
 	cursor: Schema.optional(Schema.String),
@@ -53,6 +55,12 @@ export const SessionReplayListItem = Schema.Struct({
 	durationMs: Schema.NullOr(Schema.Number),
 	status: Schema.String,
 	userId: Schema.NullOr(UserId),
+	/** Persistent per-browser id — equal across a visitor's marketing and app sessions. */
+	visitorId: Schema.String,
+	/** Acquisition source captured at session start; `""` when there was none. */
+	utmSource: Schema.String,
+	/** Entry pathname (no query/hash). Note `urlInitial` is the *latest* URL. */
+	entryPath: Schema.String,
 	urlInitial: Schema.String,
 	browserName: Schema.String,
 	osName: Schema.String,
@@ -144,6 +152,30 @@ export class GetReplayResponse extends Schema.Class<GetReplayResponse>("GetRepla
 			errorCount: Schema.Number,
 			traceIds: Schema.Array(TraceId),
 			resourceAttributes: Schema.String,
+			// Analytics dimensions (migration 0011). `visitorId` is the cross-surface
+			// join key; the rest answer "who was this and where did they come from".
+			visitorId: Schema.String,
+			visitorIsNew: Schema.Boolean,
+			userEmail: Schema.String,
+			userName: Schema.String,
+			groupId: Schema.String,
+			groupName: Schema.String,
+			/** `identify()` traits, JSON-encoded `Record<string, string>`. */
+			userTraits: Schema.String,
+			referrer: Schema.String,
+			/** Gateway-normalized referrer host; `""` is direct *or* suppressed. */
+			referrerHost: Schema.String,
+			utmSource: Schema.String,
+			utmMedium: Schema.String,
+			utmCampaign: Schema.String,
+			utmTerm: Schema.String,
+			utmContent: Schema.String,
+			host: Schema.String,
+			entryPath: Schema.String,
+			exitPath: Schema.String,
+			language: Schema.String,
+			/** Heartbeat-refreshed; recovers duration when the tab died without an unload. */
+			lastActivityAt: Schema.NullOr(Schema.String),
 			// Active/idle breakdown from session_events gaps (null when the session
 			// has no distilled events). active + idle ≈ event span ≤ durationMs.
 			activeTimeMs: Schema.NullOr(Schema.Number),
@@ -257,6 +289,8 @@ export const SessionEventItem = Schema.Struct({
 	netStatus: Schema.Number,
 	netDurationMs: Schema.Number,
 	errorStack: Schema.String,
+	/** `track()` props for a `custom` event, JSON-encoded `Record<string, string>`. */
+	attributes: Schema.String,
 })
 
 export class SessionTranscriptResponse extends Schema.Class<SessionTranscriptResponse>(

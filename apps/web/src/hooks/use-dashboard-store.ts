@@ -12,6 +12,7 @@ import {
 import type { DashboardRefreshIntervalSeconds } from "@maple/domain/http"
 import type { V2DashboardMutation } from "@maple/domain/http/v2"
 import { useLiveQuery } from "@tanstack/react-db"
+import { trackProduct } from "@/lib/analytics"
 import { runMapleApiV2 } from "@/lib/collections/api-runner"
 import { rowToDashboard, v2DashboardToDashboard } from "@/lib/collections/dashboards"
 import { useCollectionLoadFailed } from "@/lib/collections/collection-load"
@@ -658,6 +659,10 @@ export function useDashboardMutations() {
 			})
 
 			const dashboard = v2DashboardToDashboard(result)
+			// Every creation path lands here — blank, imported, or graduated from a
+			// metric — so the activation event is recorded once. A blank dashboard is
+			// the zero-widget case.
+			trackProduct("dashboard_created", { widgets: portable.widgets.length })
 			if (result.txid !== undefined) {
 				await collection.utils.awaitTxId(Number(result.txid)).catch(() => undefined)
 			}

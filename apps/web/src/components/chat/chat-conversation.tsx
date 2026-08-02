@@ -34,6 +34,7 @@ import {
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
 import { StatusMarker } from "@/components/ai-elements/status-marker"
 import { Button } from "@maple/ui/components/ui/button"
+import { trackProduct } from "@/lib/analytics"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { AiTriageResult } from "@maple/domain/http"
 
@@ -193,6 +194,10 @@ export function ChatConversation({
 		if (messages.length === 0 && onFirstMessage) {
 			onFirstMessage(tabId, text.trim().slice(0, 40))
 		}
+		// The message text stays out of the event — the transcript already has it,
+		// and a prompt is the last thing that should be duplicated into a
+		// LowCardinality-adjacent analytics column.
+		trackProduct("chat_message_sent", { turn: messages.length === 0 ? "first" : "followup" })
 		sendMessage(text.trim())
 	}
 

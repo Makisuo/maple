@@ -100,6 +100,12 @@ const absoluteImage = image.startsWith("http")
             src="https://analytics.ahrefs.com/analytics.js"
             data-key="VKnjG071OvfESS7TIl25eA"
             async></script>
+        <!-- Maple's own SDK, dogfooded. Bundled (not is:inline) so it can import
+             the package; deferred by Astro, so it never blocks first paint. -->
+        <script>
+            import { startLandingTelemetry } from "../lib/telemetry";
+            startLandingTelemetry();
+        </script>
         <title>{title}</title>
     </head>
     <body class="min-h-screen antialiased">
