@@ -99,32 +99,55 @@ const parseHistorySource = (source: string) => {
 }
 
 const baseRef = process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : "origin/main"
-try {
-	const baseSource = execFileSync("git", ["show", `${baseRef}:${historyPath}`], {
-		encoding: "utf8",
-		stdio: ["ignore", "pipe", "ignore"],
-	})
-	const baseHistory = parseHistorySource(baseSource)
-	if (baseSource.includes("LOCAL_SCHEMA_HISTORY") && baseHistory.length === 0)
-		fail("could not parse the base branch's local schema identity history")
-	const currentHistory = LOCAL_SCHEMA_HISTORY.map((entry) => ({ ...entry }))
-	if (
-		baseHistory.length > currentHistory.length ||
-		JSON.stringify(currentHistory.slice(0, baseHistory.length)) !== JSON.stringify(baseHistory)
-	)
-		fail(
-			"local schema identity history is not append-only; existing base identities must remain unchanged",
+const baseRefExists = ((): boolean => {
+	try {
+		execFileSync("git", ["rev-parse", "--verify", "--quiet", `${baseRef}^{commit}`], {
+			stdio: ["ignore", "ignore", "ignore"],
+		})
+		return true
+	} catch {
+		return false
+	}
+})()
+// `git show <missing-ref>:<path>` and `git show <ref>:<missing-path>` both exit
+// 128, so without this the append-only comparison would silently no-op whenever
+// the base ref was never fetched — the exact case the gate exists to catch. On a
+// PR the workflow fetches it explicitly, so its absence there is a real failure;
+// a push build or a local run has no base to compare against and only warns.
+if (!baseRefExists) {
+	if (process.env.GITHUB_BASE_REF)
+		fail(`${baseRef} is not available; fetch the base branch before running this gate`)
+	console.warn(`skipping the append-only history comparison: ${baseRef} is not available`)
+}
+
+if (baseRefExists) {
+	try {
+		const baseSource = execFileSync("git", ["show", `${baseRef}:${historyPath}`], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		})
+		const baseHistory = parseHistorySource(baseSource)
+		if (baseSource.includes("LOCAL_SCHEMA_HISTORY") && baseHistory.length === 0)
+			fail("could not parse the base branch's local schema identity history")
+		const currentHistory = LOCAL_SCHEMA_HISTORY.map((entry) => ({ ...entry }))
+		if (
+			baseHistory.length > currentHistory.length ||
+			JSON.stringify(currentHistory.slice(0, baseHistory.length)) !== JSON.stringify(baseHistory)
 		)
-} catch (error) {
-	// The first commit that introduces the history has no base file. A later CI
-	// run with a base history file takes the strict prefix-comparison path above.
-	if (
-		typeof error !== "object" ||
-		error === null ||
-		!("status" in error) ||
-		(error as { readonly status?: unknown }).status !== 128
-	)
-		throw error
+			fail(
+				"local schema identity history is not append-only; existing base identities must remain unchanged",
+			)
+	} catch (error) {
+		// The base ref exists, so a 128 here means the first commit that introduces the
+		// history has no base file. A later run takes the strict prefix path above.
+		if (
+			typeof error !== "object" ||
+			error === null ||
+			!("status" in error) ||
+			(error as { readonly status?: unknown }).status !== 128
+		)
+			throw error
+	}
 }
 
 console.log(

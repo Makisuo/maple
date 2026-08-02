@@ -105,6 +105,7 @@ jobs:
               run: >-
                   shellcheck scripts/install.sh scripts/uninstall.sh scripts/build-local-binary.sh
                   apps/cli/test/native-checkpoint-smoke.sh
+                  apps/cli/test/native-local-store-migration.sh
                   apps/cli/test/native-archive-smoke.sh
                   apps/cli/test/native-archive-crash-recovery-probe.sh
                   apps/cli/test/native-archive-adversarial-probe.sh
@@ -138,9 +139,16 @@ jobs:
 
             - uses: ./.github/actions/bun-install
 
-            - name: Check append-only local schema history
+            # The append-only schema-history gate below reads the base branch's
+            # history file through `git show origin/<base>:...`. checkout leaves a
+            # narrow refspec behind, so name the destination explicitly — a plain
+            # `git fetch origin <branch>` can leave refs/remotes/origin/<branch>
+            # absent, which the gate would read as "no base history yet".
+            - name: Fetch base branch for the append-only schema gate
               if: ${{ github.event_name == 'pull_request' }}
-              run: git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+              run: |
+                  git fetch --no-tags --depth=1 origin \
+                    "+refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
 
             - name: Validate generated ClickHouse and local-store schemas
               run: bun run clickhouse:schema:check
@@ -279,35 +287,6 @@ jobs:
                   commit: on-change
 
             - run: bun knip
-
-    shell:
-        name: Shell
-        needs: changes
-        if: ${{ needs.changes.outputs.shell == 'true' }}
-        runs-on: blacksmith-4vcpu-ubuntu-2404
-        timeout-minutes: 5
-        steps:
-            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-            # shellcheck is preinstalled on the ubuntu-latest runner image.
-            - name: shellcheck
-              run: >-
-                  shellcheck scripts/install.sh scripts/uninstall.sh scripts/build-local-binary.sh
-                  apps/cli/test/native-checkpoint-smoke.sh
-                  apps/cli/test/native-local-store-migration.sh
-                  apps/cli/test/native-archive-smoke.sh
-                  apps/cli/test/native-archive-crash-recovery-probe.sh
-                  apps/cli/test/native-archive-adversarial-probe.sh
-                  apps/cli/test/native-archive-calibrate-crash-probe.sh
-                  apps/cli/test/native-archive-calibrate-probe.sh
-                  apps/cli/test/native-archive-gc-probe.sh
-                  apps/cli/test/native-archive-merge-probe.sh
-
-            # Syntax-check the POSIX installers against the actual /bin/sh they claim.
-            - name: sh -n
-              run: |
-                  sh -n scripts/install.sh
-                  sh -n scripts/uninstall.sh
 
     local-checkpoint-native:
         name: Local checkpoint native
