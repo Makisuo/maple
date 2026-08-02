@@ -4,6 +4,7 @@ import { useLiveQuery } from "@tanstack/react-db"
 import { Effect } from "effect"
 import { useCallback, useMemo } from "react"
 import { rowToV2ApiKey } from "@/lib/collections/api-keys"
+import { useCollectionLoadFailed } from "@/lib/collections/collection-load"
 import {
 	getOrgCollections,
 	useActiveOrgId,
@@ -46,7 +47,11 @@ export function useApiKeysList(): {
 		[collection],
 	)
 	const keys = useMemo(() => (rows ?? []).map(rowToV2ApiKey), [rows])
-	return { keys, isLoading: isLoading && keys.length === 0, isError }
+	const pending = isLoading && keys.length === 0
+	// A live query never times out on its own; without this a dead sync endpoint
+	// leaves the API-keys settings page on a skeleton indefinitely.
+	const syncFailed = useCollectionLoadFailed(collection.id, pending)
+	return { keys, isLoading: pending && !syncFailed, isError: isError || syncFailed }
 }
 
 /**
