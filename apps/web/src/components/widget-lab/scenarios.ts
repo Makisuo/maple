@@ -1101,6 +1101,18 @@ export const funnelScenarios: WidgetScenario[] = [
 		},
 	},
 	{
+		// `false` suppresses BOTH percentage labels — it used to leave the
+		// "% of first" one on screen, so a widget that asked for no percentages
+		// still showed them.
+		label: "Percentages off",
+		dataState: ready(funnelStages),
+		display: {
+			title: "Signup conversion",
+			unit: "number",
+			funnel: { showStepPercent: false },
+		},
+	},
+	{
 		label: "6 stages",
 		dataState: ready(funnelManyStages),
 		display: {
@@ -1159,6 +1171,113 @@ export const funnelScenarios: WidgetScenario[] = [
 		label: "Empty",
 		dataState: emptyState,
 		display: { title: "Signup conversion" },
+	},
+]
+
+// ---------------------------------------------------------------------------
+// Horizontal bar (ranked)
+// ---------------------------------------------------------------------------
+
+/**
+ * The case that motivated the panel: the top rows are near-identical, which a
+ * funnel labels "100% / 100% / 100% / 100%". As shares of the total they read
+ * 24% / 24% / 24% / 11%.
+ */
+const hbarTopOperations = [
+	{ name: "RedisClient.beginMutation", value: 87_200_000 },
+	{ name: "UserAttributesCache.beginMutation", value: 86_400_000 },
+	{ name: "RedisClient.endMutation", value: 85_900_000 },
+	{ name: "ArtifactCache.get", value: 39_000_000 },
+	{ name: "SessionStore.load", value: 14_600_000 },
+]
+
+export const hbarScenarios: WidgetScenario[] = [
+	{
+		label: "Top operations (% of total)",
+		dataState: ready(hbarTopOperations),
+		display: { title: "Busiest Operations", unit: "number" },
+	},
+	{
+		label: "Unsorted input (chart ranks it)",
+		dataState: ready([
+			{ name: "checkout", value: 120 },
+			{ name: "search", value: 940 },
+			{ name: "cart", value: 410 },
+		]),
+		display: { title: "Requests by route", unit: "number" },
+	},
+	{
+		label: "Long labels + long tail",
+		dataState: ready([
+			{ name: "com.acme.platform.identity.SessionRefreshHandler.handle", value: 9_400_000 },
+			{ name: "com.acme.platform.billing.UsageAggregator.flushWindow", value: 610_000 },
+			{ name: "com.acme.platform.search.QueryPlanner.plan", value: 4_200 },
+			{ name: "com.acme.platform.audit.EventWriter.append", value: 90 },
+		]),
+		display: { title: "Spans by operation", unit: "number" },
+	},
+	{
+		label: "Duration unit",
+		dataState: ready([
+			{ name: "POST /checkout", value: 1_284 },
+			{ name: "GET /search", value: 612 },
+			{ name: "GET /cart", value: 240 },
+		]),
+		display: { title: "P95 by route", unit: "duration_ms" },
+	},
+	{
+		// Rows must cap inside the card with "+N more", never spill (MAP-49).
+		label: "30 rows (overflow cap)",
+		dataState: ready(
+			Array.from({ length: 30 }, (_, i) => ({
+				name: `operation-${i + 1}`,
+				value: Math.round(12_840 / (i + 1)),
+			})),
+		),
+		display: { title: "Busiest Operations", unit: "number" },
+	},
+	{
+		// A single dominant row makes every other share round to 0% — "<0.1%"
+		// has to read as "tiny", not as "no data".
+		label: "One dominant row",
+		dataState: ready([
+			{ name: "cache.get", value: 9_800_000 },
+			{ name: "cache.set", value: 4_000 },
+			{ name: "cache.evict", value: 60 },
+		]),
+		display: { title: "Cache operations", unit: "number" },
+	},
+	{
+		label: "Zero rows + missing labels",
+		dataState: ready([
+			{ name: "api", value: 4820 },
+			{ name: undefined, value: 940 },
+			{ name: "worker", value: 0 },
+		]),
+		display: { title: "Spans by service", unit: "number" },
+	},
+	{
+		// A mis-wired hbar fed timeseries rows must aggregate per series, not
+		// draw one "—" row per bucket.
+		label: "Timeseries-shaped input",
+		dataState: ready(
+			Array.from({ length: 12 }, (_, i) => ({
+				bucket: new Date(new Date("2026-01-01T00:00:00Z").getTime() + i * 3_600_000).toISOString(),
+				A: 125,
+				B: 40,
+			})),
+		),
+		display: { title: "Spans by service", unit: "number" },
+	},
+	{
+		label: "Loading",
+		dataState: loadingState,
+		display: { title: "Busiest Operations" },
+	},
+	{
+		label: "Empty",
+		dataState: emptyState,
+		display: { title: "Busiest Operations" },
 	},
 ]
 

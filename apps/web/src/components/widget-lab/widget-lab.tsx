@@ -11,6 +11,7 @@ import { formatValue, getThresholdColor } from "@/components/dashboard-builder/w
 import {
 	ChartWidget,
 	FunnelWidget,
+	HbarWidget,
 	HeatmapWidget,
 	HistogramWidget,
 	PieWidget,
@@ -36,6 +37,7 @@ import {
 	listScenarios,
 	pieScenarios,
 	funnelScenarios,
+	hbarScenarios,
 	histogramScenarios,
 	heatmapScenarios,
 	markdownScenarios,
@@ -114,6 +116,7 @@ const NAV_ITEMS: Array<{ id: string; label: string }> = [
 	{ id: "list", label: "List" },
 	{ id: "pie", label: "Pie" },
 	{ id: "funnel", label: "Funnel" },
+	{ id: "hbar", label: "Horizontal Bar" },
 	{ id: "histogram", label: "Histogram" },
 	{ id: "heatmap", label: "Heatmap" },
 	{ id: "markdown", label: "Markdown" },
@@ -268,6 +271,16 @@ export function WidgetLab() {
 								</Section>
 
 								<Section
+									id="hbar"
+									title="Horizontal Bar"
+									description="Ranked categories, each a share of the total. Polish: long labels, value column alignment, overflow cap, near-identical top rows (the case a funnel mislabels as 100%)."
+								>
+									{hbarScenarios.map((s, i) => (
+										<HbarScenarioCard key={`hbar-${i}`} scenario={s} mode={mode} />
+									))}
+								</Section>
+
+								<Section
 									id="histogram"
 									title="Histogram"
 									description="Bucketed value distribution. Polish: log Y scale, narrow buckets, bell vs long-tail shapes."
@@ -413,6 +426,14 @@ function FunnelScenarioCard({ scenario, mode }: { scenario: WidgetScenario; mode
 	return (
 		<ScenarioCell label={scenario.label}>
 			<FunnelWidget dataState={scenario.dataState} display={scenario.display} mode={mode} />
+		</ScenarioCell>
+	)
+}
+
+function HbarScenarioCard({ scenario, mode }: { scenario: WidgetScenario; mode: WidgetMode }) {
+	return (
+		<ScenarioCell label={scenario.label}>
+			<HbarWidget dataState={scenario.dataState} display={scenario.display} mode={mode} />
 		</ScenarioCell>
 	)
 }

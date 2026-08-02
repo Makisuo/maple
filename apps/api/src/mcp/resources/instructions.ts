@@ -191,6 +191,16 @@ The renderer is opinionated about column names. Get these wrong and the chart sh
   LIMIT 8
   \`\`\`
 
+- **hbar** — SELECT a \`name\` (string category label) column plus a numeric column (first numeric wins as the value). Rows are sorted by value and drawn as horizontal bars; each shows its value and its share of the **total**. This is the panel for any ranked "top N by volume" question — prefer it over \`funnel\`, which implies sequential stages and labels each bar as a share of the largest one. Cap to ≤ ~10 rows.
+  \`\`\`sql
+  SELECT SpanName AS name, count() AS value
+  FROM service_overview_spans
+  WHERE $__orgFilter AND $__timeFilter(Timestamp)
+  GROUP BY name
+  ORDER BY value DESC
+  LIMIT 10
+  \`\`\`
+
 - **heatmap** — SELECT three columns aliased \`x\`, \`y\`, \`value\`. Cast \`x\`/\`y\` to strings if they're numeric (the renderer treats them as labels).
   \`\`\`sql
   SELECT ServiceName AS x,

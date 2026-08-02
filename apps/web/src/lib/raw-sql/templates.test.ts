@@ -18,14 +18,24 @@ describe("visualizationToDisplayType", () => {
 	})
 
 	it("maps each breakdown visualization to its own display type", () => {
-		for (const panel of ["pie", "histogram", "heatmap", "funnel"] as const) {
+		for (const panel of ["pie", "histogram", "heatmap", "funnel", "hbar"] as const) {
 			const { visualization, chartId } = fromPanelType(panel)
 			expect(visualizationToDisplayType(visualization, chartId), panel).toBe(panel)
 		}
 	})
 
 	it("has a template for every display type a panel type can produce", () => {
-		for (const panel of ["line", "bar", "area", "stat", "gauge", "table", "pie", "funnel"] as const) {
+		for (const panel of [
+			"line",
+			"bar",
+			"area",
+			"stat",
+			"gauge",
+			"table",
+			"pie",
+			"funnel",
+			"hbar",
+		] as const) {
 			const { visualization, chartId } = fromPanelType(panel)
 			const displayType = visualizationToDisplayType(visualization, chartId)
 			expect(RAW_SQL_TEMPLATES[displayType], panel).toBeTruthy()

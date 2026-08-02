@@ -5,7 +5,13 @@ import type {
 	WidgetTypeDefinition,
 } from "@/components/dashboard-builder/widgets/widget-type-registry"
 import { areaWidgetType, barWidgetType, lineWidgetType } from "./chart"
-import { funnelWidgetType, heatmapWidgetType, histogramWidgetType, pieWidgetType } from "./breakdown"
+import {
+	funnelWidgetType,
+	hbarWidgetType,
+	heatmapWidgetType,
+	histogramWidgetType,
+	pieWidgetType,
+} from "./breakdown"
 import { gaugeWidgetType } from "./gauge"
 import { listWidgetType } from "./list"
 import { markdownWidgetType } from "./markdown"
@@ -24,6 +30,7 @@ import { tableWidgetType } from "./table"
 export const widgetTypes: Record<PanelType, WidgetTypeDefinition> = {
 	line: lineWidgetType,
 	bar: barWidgetType,
+	hbar: hbarWidgetType,
 	area: areaWidgetType,
 	stat: statWidgetType,
 	gauge: gaugeWidgetType,
@@ -40,6 +47,7 @@ export const widgetTypes: Record<PanelType, WidgetTypeDefinition> = {
 export const widgetTypeList: ReadonlyArray<WidgetTypeDefinition> = [
 	lineWidgetType,
 	barWidgetType,
+	hbarWidgetType,
 	areaWidgetType,
 	pieWidgetType,
 	statWidgetType,

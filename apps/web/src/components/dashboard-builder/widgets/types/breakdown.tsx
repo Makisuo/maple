@@ -1,15 +1,23 @@
 import { WIDGET_TYPES } from "@maple/domain/http"
 
-import { ArrowTrendDownIcon, ChartBarIcon, CirclePercentageIcon, LayersIcon } from "@/components/icons"
+import {
+	ArrowTrendDownIcon,
+	ChartBarHorizontalIcon,
+	ChartBarIcon,
+	CirclePercentageIcon,
+	LayersIcon,
+} from "@/components/icons"
 import { WidgetSettings } from "@/components/dashboard-builder/config/settings-fields"
 import {
 	FunnelWidget,
+	HbarWidget,
 	HeatmapWidget,
 	HistogramWidget,
 	PieWidget,
 } from "@/components/dashboard-builder/widgets/make-chart-widget"
 import {
 	funnelPresets,
+	hbarPresets,
 	heatmapPresets,
 	histogramPresets,
 	piePresets,
@@ -28,7 +36,7 @@ import type { WidgetDataSource } from "@/components/dashboard-builder/types"
 import { chartPresetPreview } from "@/components/dashboard-builder/widgets/types/preset-preview"
 
 // ---------------------------------------------------------------------------
-// Categorical charts: pie, histogram, heatmap, funnel.
+// Categorical charts: pie, histogram, heatmap, funnel, horizontal bar.
 //
 // They read one row per category from the breakdown endpoint, not one row per
 // time bucket from the timeseries endpoint. Sending them to the wrong endpoint
@@ -71,6 +79,23 @@ export const funnelWidgetType: WidgetTypeDefinition = {
 	ConfigPanel: () => <WidgetSettings.QueryOptions />,
 	presets: funnelPresets,
 	PresetPreview: chartPresetPreview("query-builder-funnel"),
+	buildDataSource: breakdownDataSource,
+	buildDisplay: ({ base }) => base,
+}
+
+/**
+ * The ranked "top N by volume" panel, and the one a funnel was standing in for.
+ * Same breakdown rows as a funnel; the difference is in the reading — sorted by
+ * value, each row a share of the total rather than of the biggest row.
+ */
+export const hbarWidgetType: WidgetTypeDefinition = {
+	meta: WIDGET_TYPES.hbar,
+	icon: ChartBarHorizontalIcon,
+	Renderer: HbarWidget,
+	queryEditor: "builder",
+	ConfigPanel: () => <WidgetSettings.QueryOptions />,
+	presets: hbarPresets,
+	PresetPreview: chartPresetPreview("query-builder-hbar"),
 	buildDataSource: breakdownDataSource,
 	buildDisplay: ({ base }) => base,
 }
