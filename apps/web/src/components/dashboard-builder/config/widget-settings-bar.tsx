@@ -26,6 +26,7 @@ export function WidgetSettingsBar({ sourceMode = "builder" }: { sourceMode?: "bu
 				</p>
 				<WidgetSettings.Name />
 				<WidgetSettings.Description />
+				<WidgetSettings.TimeRange />
 				<WidgetSettings.Divider />
 				<WidgetSettings.TypePicker />
 				<ConfigPanel />

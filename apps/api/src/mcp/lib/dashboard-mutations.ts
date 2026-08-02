@@ -5,6 +5,7 @@ import {
 	DashboardId,
 	DashboardWidgetSchema,
 	IsoDateTimeString,
+	TimeRangeSchema,
 	WidgetDataSourceSchema,
 	WidgetDisplayConfigSchema,
 	WidgetLayoutSchema,
@@ -27,6 +28,7 @@ const WidgetFromJson = Schema.fromJsonString(DashboardWidgetSchema)
 const DataSourceFromJson = Schema.fromJsonString(WidgetDataSourceSchema)
 const DisplayFromJson = Schema.fromJsonString(WidgetDisplayConfigSchema)
 const LayoutFromJson = Schema.fromJsonString(WidgetLayoutSchema)
+const TimeRangeFromJson = Schema.fromJsonString(TimeRangeSchema)
 
 const jsonDecodeError = (field: string, tool: string) => (error: unknown) =>
 	new McpQueryError({
@@ -53,6 +55,11 @@ export const decodeDisplayJson = (json: string, tool: string) =>
 export const decodeLayoutJson = (json: string, tool: string) =>
 	Schema.decodeUnknownEffect(LayoutFromJson)(json).pipe(
 		Effect.mapError(jsonDecodeError("layout_json", tool)),
+	)
+
+export const decodeTimeRangeJson = (json: string, tool: string) =>
+	Schema.decodeUnknownEffect(TimeRangeFromJson)(json).pipe(
+		Effect.mapError(jsonDecodeError("time_range_json", tool)),
 	)
 
 export const generateWidgetId = (): string => randomUUID()

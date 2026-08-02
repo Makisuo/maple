@@ -182,6 +182,58 @@ describe("v2 dashboards over HTTP", () => {
 		await harness.dispose()
 	})
 
+	// A widget may pin its own window; the field is optional, snake_cased on the
+	// wire, and must survive a round-trip without leaking onto unpinned widgets.
+	it("round-trips a per-widget time range", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+
+		const widget = (id: string, timeRange?: unknown) => ({
+			id,
+			visualization: "stat",
+			data_source: { endpoint: "custom_query_builder_timeseries" },
+			display: { title: id },
+			layout: { x: 0, y: 0, w: 3, h: 3 },
+			...(timeRange !== undefined ? { time_range: timeRange } : {}),
+		})
+
+		const created = await harness.request("POST", "/v2/dashboards", key.secret, {
+			name: "Mixed ranges",
+			time_range: { type: "relative", value: "7d" },
+			widgets: [widget("pinned", { type: "relative", value: "30m" }), widget("follows")],
+		})
+		expect(created.status).toBe(200)
+		expect(created.body.widgets[0].time_range).toEqual({ type: "relative", value: "30m" })
+		expect("time_range" in created.body.widgets[1]).toBe(false)
+		expect("timeRange" in created.body.widgets[0]).toBe(false)
+
+		const id: string = created.body.id
+		const patched = await harness.request("PATCH", `/v2/dashboards/${id}`, key.secret, {
+			widgets: [
+				widget("pinned", {
+					type: "absolute",
+					start_time: "2026-07-15T00:00:00.000Z",
+					end_time: "2026-07-16T00:00:00.000Z",
+				}),
+			],
+		})
+		expect(patched.status).toBe(200)
+		expect(patched.body.widgets[0].time_range).toEqual({
+			type: "absolute",
+			start_time: "2026-07-15T00:00:00.000Z",
+			end_time: "2026-07-16T00:00:00.000Z",
+		})
+
+		// Re-sending the widget without the field is how an override is removed.
+		const cleared = await harness.request("PATCH", `/v2/dashboards/${id}`, key.secret, {
+			widgets: [widget("pinned")],
+		})
+		expect(cleared.status).toBe(200)
+		expect("time_range" in cleared.body.widgets[0]).toBe(false)
+
+		await harness.dispose()
+	})
+
 	it("enforces dashboard read/write scopes", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey(["dashboards:read"])

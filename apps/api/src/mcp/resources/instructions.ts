@@ -96,6 +96,9 @@ Valid aggregates: \`sum | first | count | avg | max | min\`. **No \`last\`.** Wi
 \`\`\`
 \`baseNames\` matches each hidden query's \`legend || name\`. Otherwise the auxiliary series render at full scale and skew percent-axis charts.
 
+### Per-widget time range (rare)
+A widget follows the dashboard's time range unless it carries its own optional top-level \`timeRange\`, in the dashboard's shape: \`{"type":"relative","value":"30m"}\` or \`{"type":"absolute","startTime":"...","endTime":"..."}\` (ISO 8601). Omit it for almost every widget — pin one only when the window is part of what the tile means ("active in the last 30 minutes" on a 7-day board). A relative override rebases against "now" on each refresh; the widget header labels the pinned range; dashboard variables still apply. \`add_dashboard_widget\` takes it as \`time_range_json\`; the widget-JSON tools take it inline — and since \`update_dashboard_widget\` replaces the whole widget, omitting \`timeRange\` there REMOVES an existing override.
+
 ### Batch rebuild
 \`replace_dashboard_widgets\` replaces a dashboard's ENTIRE widget list in one atomic, validated write — \`widgets_json\` is a JSON array of widget objects (same shape as \`widgets[]\` from \`get_dashboard\`); per-widget \`id\`/\`layout\` are optional (auto-generated/auto-placed). Every widget is validated before anything persists, so one bad widget aborts the whole batch. Prefer it over many incremental calls or a corruption-prone full \`dashboard_json\` replace.
 

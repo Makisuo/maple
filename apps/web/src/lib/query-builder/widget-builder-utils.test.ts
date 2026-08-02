@@ -30,6 +30,7 @@ function makeState(): QueryBuilderWidgetState {
 		visualization: "chart",
 		title: "",
 		description: "",
+		timeRange: null,
 		chartId: "query-builder-line",
 		stacked: false,
 		curveType: "linear",

@@ -9,6 +9,7 @@ import {
 	DotsVerticalIcon,
 	ChatBubbleSparkleIcon,
 	BellIcon,
+	ClockIcon,
 } from "@/components/icons"
 
 import { Card, CardContent, CardHeader, CardTitle, CardAction } from "@maple/ui/components/ui/card"
@@ -23,6 +24,10 @@ import {
 import type { WidgetMode, WidgetDataState } from "@/components/dashboard-builder/types"
 import { useWidgetActions } from "@/components/dashboard-builder/widgets/widget-actions-context"
 import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
+import {
+	useWidgetTimeRangeOverride,
+	widgetTimeRangeLabel,
+} from "@/components/dashboard-builder/widgets/widget-time-range-context"
 import { interpolateDisplayText } from "@/lib/dashboard-variables/interpolate"
 
 interface WidgetShellProps {
@@ -65,6 +70,12 @@ export function WidgetShell({
 	const variablesContext = useDashboardVariablesOptional()
 	const displayTitle = variablesContext ? interpolateDisplayText(title, variablesContext.values) : title
 
+	// A tile pinned to its own window says so in the header. Without the label a
+	// reader has no way to tell that one card on a 7-day board is showing the
+	// last 30 minutes.
+	const timeRangeOverride = useWidgetTimeRangeOverride()
+	const timeRangeLabel = timeRangeOverride ? widgetTimeRangeLabel(timeRangeOverride) : null
+
 	return (
 		<Card className="h-full flex flex-col">
 			<CardHeader className="py-2.5">
@@ -77,6 +88,15 @@ export function WidgetShell({
 					<CardTitle className="min-w-0 truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 						{displayTitle}
 					</CardTitle>
+					{timeRangeLabel && (
+						<span
+							className="flex shrink-0 items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+							title={`This widget uses its own time range (${timeRangeLabel}) instead of the dashboard's`}
+						>
+							<ClockIcon size={10} />
+							{timeRangeLabel}
+						</span>
+					)}
 					{headerValue != null && (
 						<div className="ml-auto shrink-0 font-mono font-semibold text-xs tabular-nums">
 							{headerValue}

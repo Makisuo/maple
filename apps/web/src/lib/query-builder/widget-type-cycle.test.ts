@@ -53,6 +53,7 @@ function makeState(overrides: Partial<QueryBuilderWidgetState> = {}): QueryBuild
 		visualization: "chart",
 		title: "",
 		description: "",
+		timeRange: null,
 		chartId: "query-builder-line",
 		stacked: false,
 		curveType: "linear",

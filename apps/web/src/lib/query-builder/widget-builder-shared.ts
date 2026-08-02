@@ -9,7 +9,12 @@ import {
 	type QueryBuilderQueryDraft,
 } from "@/lib/query-builder/model"
 import type { ListColumnDraft, ListDataSource } from "@/components/dashboard-builder/config/list-config-panel"
-import type { ValueUnit, VisualizationType, WidgetDataSource } from "@/components/dashboard-builder/types"
+import type {
+	TimeRange,
+	ValueUnit,
+	VisualizationType,
+	WidgetDataSource,
+} from "@/components/dashboard-builder/types"
 import type { LegendPosition } from "@/components/dashboard-builder/config/settings-fields"
 import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 import {
@@ -34,6 +39,11 @@ export interface QueryBuilderWidgetState {
 	visualization: VisualizationType
 	title: string
 	description: string
+	/**
+	 * The widget's own time range, or `null` to follow the dashboard's — the
+	 * default, and what every widget carried before overrides existed.
+	 */
+	timeRange: TimeRange | null
 	chartId: string
 	stacked: boolean
 	curveType: "linear" | "monotone"

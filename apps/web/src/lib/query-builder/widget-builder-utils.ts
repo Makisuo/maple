@@ -97,6 +97,7 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		visualization: normalized.visualization,
 		title: widget.display.title ?? "",
 		description: widget.display.description ?? "",
+		timeRange: widget.timeRange ?? null,
 		chartId: normalized.chartId ?? "query-builder-line",
 		stacked: widget.display.stacked ?? false,
 		curveType: widget.display.curveType ?? "linear",

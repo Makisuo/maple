@@ -139,6 +139,41 @@ Valid `aggregate` values: `"sum" | "first" | "count" | "avg" | "max" | "min"`. *
 
 `display.thresholds` color the arc (the highest threshold ≤ the value wins) and place tick marks. `gauge.min`/`max` default to `0`/`100`. Arc color falls back to `var(--chart-1)` when no threshold matches.
 
+## Per-widget time range (`timeRange`)
+
+Widgets follow the dashboard's time range unless they carry their own `timeRange` — an optional
+top-level field on the widget, beside `display` and `layout`, in the same shape as the dashboard's:
+
+```json
+{
+  "id": "w0",
+  "visualization": "stat",
+  "timeRange": { "type": "relative", "value": "30m" },
+  "dataSource": { ... },
+  "display": { "title": "Active trains", "unit": "number" },
+  "layout": { "x": 0, "y": 0, "w": 3, "h": 3 }
+}
+```
+
+Absolute form: `{ "type": "absolute", "startTime": "2026-08-01T00:00:00Z", "endTime": "2026-08-02T00:00:00Z" }`.
+Relative `value` is the usual shorthand (`30m`, `6h`, `7d`, `2w`, `3mo`).
+
+- **Omit it for almost every widget.** The whole point of a dashboard time picker is that the
+  board moves as one; a pinned tile is for cases where the window is part of what the tile
+  *means* — "active in the last 30 minutes" on a board scoped to the last 7 days, or a 24h
+  trend sitting beside a 7d comparison.
+- A relative override rebases against "now" on every dashboard refresh, exactly like the board's
+  own relative range. An absolute override never moves.
+- The widget header renders a small clock label with the pinned range, so a reader can see the
+  tile isn't on the board's range.
+- Dashboard **variables** still apply normally — the override replaces the time window only.
+- `update_dashboard_widget` replaces the whole widget: **leaving `timeRange` out of the JSON
+  removes an existing override.** Re-send it to keep it.
+- `add_dashboard_widget` takes it as the separate `time_range_json` parameter (the widget-JSON
+  tools take it inline).
+- `inspect_chart_data` and the auto-validation summary evaluate a pinned widget on *its* window
+  and report `source: "widget"` in the time range they used.
+
 ## Threshold lines on time-series charts
 
 `display.thresholds` also works on `chart` widgets — each entry draws a dashed horizontal `ReferenceLine` across line/area/bar charts, with an optional `label`. Reuse it to mark SLO/alert boundaries.
@@ -223,4 +258,6 @@ incremental `add_dashboard_widget` calls and the corruption-prone full `dashboar
 - [ ] `display.unit` is set (and matches the aggregation — `duration_ms`, `percent`, etc.).
 - [ ] Stat widgets include `dataSource.transform.reduceToValue`.
 - [ ] Formula charts with hidden queries include `dataSource.transform.hideSeries.baseNames`.
+- [ ] No `timeRange` on the widget unless the tile genuinely means a different window than the
+      board — and if you're updating a pinned widget, the `timeRange` is still in the JSON.
 - [ ] After submitting, read the auto-validation summary; verify `suspicious`/`broken` widgets with `inspect_chart_data` or by loading the dashboard.

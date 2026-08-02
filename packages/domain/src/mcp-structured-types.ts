@@ -623,7 +623,7 @@ export interface WidgetInspectionSummary {
 	timeRange?: {
 		startTime: string
 		endTime: string
-		source: "override" | "dashboard" | "fallback"
+		source: "override" | "widget" | "dashboard" | "fallback"
 	}
 }
 
@@ -640,7 +640,7 @@ export interface InspectChartDataData {
 	timeRange: {
 		startTime: string
 		endTime: string
-		source: "override" | "dashboard" | "fallback"
+		source: "override" | "widget" | "dashboard" | "fallback"
 	}
 	queries: InspectChartQueryResult[]
 	verdict: InspectChartVerdict
