@@ -2,8 +2,9 @@ import { memo } from "react"
 import { Link } from "@tanstack/react-router"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
+import { cn } from "@maple/ui/lib/utils"
 import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
-import { formatCellValue } from "@/components/dashboard-builder/widgets/table-widget"
+import { columnVisibilityClass, formatCellValue } from "@/components/dashboard-builder/widgets/table-widget"
 import { resolveFieldPath } from "@/lib/resolve-field-path"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
 
@@ -60,10 +61,10 @@ export const ListWidget = memo(function ListWidget({ dataState, display, mode }:
 			<Table>
 				<TableHeader>
 					<TableRow>
-						{effectiveColumns.map((col) => (
+						{effectiveColumns.map((col, colIndex) => (
 							<TableHead
 								key={col.field}
-								className="text-xs"
+								className={cn("text-xs", columnVisibilityClass(colIndex))}
 								style={{
 									textAlign: col.align ?? "left",
 									width: col.width ? `${col.width}px` : undefined,
@@ -87,7 +88,7 @@ export const ListWidget = memo(function ListWidget({ dataState, display, mode }:
 					) : (
 						rows.map((row, i) => (
 							<TableRow key={i}>
-								{effectiveColumns.map((col) => {
+								{effectiveColumns.map((col, colIndex) => {
 									const value = resolveFieldPath(row, col.field)
 									const displayValue = Array.isArray(value)
 										? value.join(", ")
@@ -129,7 +130,7 @@ export const ListWidget = memo(function ListWidget({ dataState, display, mode }:
 									return (
 										<TableCell
 											key={col.field}
-											className="text-xs"
+											className={cn("text-xs", columnVisibilityClass(colIndex))}
 											style={{ textAlign: col.align ?? "left" }}
 										>
 											{content}

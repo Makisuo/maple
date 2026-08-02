@@ -4,7 +4,6 @@
 // HttpSpanLabel, format/colors libs) already come from @maple/ui.
 
 import { useState } from "react"
-import { toast } from "sonner"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { SeverityBadge } from "@maple/ui/components/logs/severity-badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -21,11 +20,10 @@ import {
 	CircleWarningIcon,
 	ChevronDownIcon,
 	ChevronUpIcon,
-	CopyIcon,
 	CodeIcon,
 } from "@maple/ui/components/icons"
 import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@maple/ui/components/attributes"
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { getCacheInfo, cacheResultStyles } from "@maple/ui/lib/cache"
 import { getServiceColor } from "@maple/ui/lib/colors"
 import { formatDuration } from "@maple/ui/format"
@@ -256,29 +254,21 @@ interface ErrorSectionProps {
 }
 
 function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSectionProps) {
-	const clipboard = useClipboard()
 	const [expanded, setExpanded] = useState(false)
 	const isLong = message.length > 120 || message.includes("\n")
-
-	const handleCopyPrompt = () => {
-		clipboard.copy(formatErrorPrompt({ message, serviceName, operation: spanName, attributes }))
-		toast.success("Copied error prompt to clipboard")
-	}
 
 	return (
 		<Alert variant="error" className="mx-3 my-2 rounded-md border-destructive/30">
 			<CircleWarningIcon size={14} />
 			<AlertTitle className="flex items-center justify-between">
 				<span>Error</span>
-				<Button
-					variant="ghost"
-					size="sm"
+				<CopyButton
+					value={() => formatErrorPrompt({ message, serviceName, operation: spanName, attributes })}
+					label="Error prompt"
+					idleLabel="Copy as prompt"
+					iconSize={10}
 					className="h-5 px-1.5 text-[10px] text-destructive hover:bg-destructive/10 hover:text-destructive/80"
-					onClick={handleCopyPrompt}
-				>
-					<CopyIcon size={10} className="mr-1" />
-					Copy as prompt
-				</Button>
+				/>
 			</AlertTitle>
 			<AlertDescription>
 				{isLong ? (

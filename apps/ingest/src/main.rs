@@ -38,6 +38,9 @@ use maple_ingest::otel::{
     record_stage_error, rejection_loses_data, resolve_config_internal_span, ResourceConfig,
 };
 use maple_ingest::otlp_json;
+use maple_ingest::session_analytics::{
+    derive_referrer_host, sanitize_session_event, sanitize_session_meta,
+};
 use maple_ingest::telemetry::{
     AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget, ClickHouseTargetProvider,
     DatasourceNames, ExportDestination, MappingOperation, MappingSourceContext, PipelineError,
@@ -120,6 +123,15 @@ struct AppConfig {
     /// Ceiling on the total decompressed rrweb payload a single replay session
     /// may accumulate. 0 disables the cap. See `ReplaySessionBudget`.
     replay_max_session_bytes: u64,
+    /// Whether `Cf-IPCountry` on an inbound request can be believed.
+    ///
+    /// Off by default, and that default is the safe one: this gateway is a
+    /// Railway container, so it is reachable directly on its
+    /// `*.up.railway.app` origin and any client can set the header itself.
+    /// Enable it only on deployments where every path to the process is
+    /// terminated by Cloudflare. Off simply writes `''`, which is what the
+    /// column held before this existed — it cannot regress anything.
+    trust_proxy_geo: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -405,6 +417,14 @@ impl AppConfig {
             1024 * 1024 * 1024,
         )?;
 
+        // Default off — see the field doc. Set it on services that are only
+        // reachable through Cloudflare.
+        let trust_proxy_geo = parse_bool(
+            "MAPLE_INGEST_TRUST_PROXY_GEO",
+            std::env::var("MAPLE_INGEST_TRUST_PROXY_GEO").ok(),
+            false,
+        )?;
+
         Ok(Self {
             port,
             otlp_grpc_port,
@@ -426,6 +446,7 @@ impl AppConfig {
             ingest_key_cache_ttl_secs,
             org_routing_cache_ttl_secs,
             replay_max_session_bytes,
+            trust_proxy_geo,
         })
     }
 }
@@ -2121,6 +2142,37 @@ fn is_safe_replay_id(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
+/// Two-letter ISO country for a session, derived from `Cf-IPCountry`.
+///
+/// Server-derived on purpose: the client never gets a say, so `Country` cannot
+/// be spoofed into a competitor's dashboard. The strict shape check also bounds
+/// the `LowCardinality(String)` dictionary to ~250 values no matter what
+/// arrives — an unbounded dictionary on that column would degrade every query
+/// on the table for that org.
+///
+/// Returns `""` (the column default) when geo is untrusted, absent, or
+/// unrecognized. Cloudflare's `XX` (unknown) and `T1` (Tor exit) are mapped to
+/// `""` as well: they are not countries, and leaving them in makes every
+/// breakdown carry two junk buckets.
+///
+/// The client IP is deliberately never read or stored — country is all we take.
+fn derive_country(headers: &HeaderMap, trust_proxy_geo: bool) -> String {
+    if !trust_proxy_geo {
+        return String::new();
+    }
+    let Some(raw) = replay_header(headers, "cf-ipcountry") else {
+        return String::new();
+    };
+    if raw.len() != 2 || !raw.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return String::new();
+    }
+    let code = raw.to_ascii_uppercase();
+    if code == "XX" || code == "T1" {
+        return String::new();
+    }
+    code
+}
+
 /// Auth shared by both replay endpoints. `Ok(None)` is the sentinel token —
 /// silently dropped like the OTLP path.
 async fn resolve_replay_key(
@@ -2245,6 +2297,7 @@ async fn handle_replay_meta_inner(
     // and re-posts a start row for the same SessionId, so reloads can slightly
     // over-count — consistent with the at-least-once metering used for the
     // logs/traces/metrics signals.
+    let country = derive_country(headers, state.config.trust_proxy_geo);
     let mut rows: Vec<Vec<u8>> = Vec::new();
     let mut session_starts: u64 = 0;
     for line in body.split(|&b| b == b'\n') {
@@ -2260,6 +2313,34 @@ async fn handle_replay_meta_inner(
             "org_id".to_string(),
             serde_json::Value::String(org_id.clone()),
         );
+        // Server-derived fields, forced alongside org_id so the three stay
+        // visibly paired: whatever the client sent is overwritten, including
+        // with an empty string. Both the active and ended rows get them, which
+        // matters because ReplacingMergeTree replaces the whole row — a country
+        // present only on v1 would be erased by the v2 merge.
+        obj.insert(
+            "country".to_string(),
+            serde_json::Value::String(country.clone()),
+        );
+        let referrer = obj
+            .get("referrer")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let current_host = obj
+            .get("host")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let referrer_host = derive_referrer_host(&referrer, &current_host);
+        obj.insert(
+            "referrer_host".to_string(),
+            serde_json::Value::String(referrer_host),
+        );
+        // Everything else on this row is client-supplied, including six
+        // LowCardinality columns. Clamp before it reaches the warehouse — the
+        // SDK's own trimming ships in customer JavaScript.
+        sanitize_session_meta(obj);
         if obj.get("version").and_then(|v| v.as_u64()) == Some(1) {
             session_starts += 1;
         }
@@ -2323,6 +2404,7 @@ async fn handle_session_events(
         "maple.org_id" = tracing::field::Empty,
         "maple.ingest.clickhouse_ready" = tracing::field::Empty,
         "maple.ingest.destination" = tracing::field::Empty,
+        "maple.session_events.dropped" = tracing::field::Empty,
     );
     let span_handle = span.clone();
     match handle_session_events_inner(&state, &headers, body)
@@ -2367,11 +2449,13 @@ async fn handle_session_events_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
-    // Spend pause only, no entitlement check: distilled session events are not
-    // metered to Autumn, so gating them on a balance they never decrement would
-    // be incoherent. The customer's own pause is different — they asked us to
-    // stop writing their data, and honouring that only on the metadata endpoint
-    // would keep storing the bulk of the session anyway.
+    // Same two gates as the metadata endpoint, in the same order. Session events
+    // are not separately metered — `browser_sessions` remains the billed unit,
+    // and introducing a `browser_events` meter is a pricing decision, not a
+    // schema one — but they must still be entitlement-gated: an out-of-quota org
+    // whose metadata rows are rejected while its event stream keeps writing is
+    // the incoherent half of the old design, and it only widens now that custom
+    // events are a promoted feature.
     if org_id != SENTINEL_ORG_ID {
         if let Some(error) = spend_limit_rejection(
             &org_id,
@@ -2379,6 +2463,11 @@ async fn handle_session_events_inner(
             &resolved_key.paused_features,
             BROWSER_SESSIONS_FEATURE_ID,
         ) {
+            return Err(error);
+        }
+        if let Some(error) =
+            entitlement_rejection(state, &org_id, BROWSER_SESSIONS_FEATURE_ID).await
+        {
             return Err(error);
         }
     }
@@ -2392,6 +2481,7 @@ async fn handle_session_events_inner(
     // NDJSON: one distilled session-event object per line. As with replay
     // metadata, org_id is taken from the authenticated key, never the body.
     let mut rows: Vec<Vec<u8>> = Vec::new();
+    let mut dropped: u64 = 0;
     for line in body.split(|&b| b == b'\n') {
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
@@ -2401,6 +2491,14 @@ async fn handle_session_events_inner(
         let obj = value
             .as_object_mut()
             .ok_or_else(|| ApiError::bad_request("session event must be a JSON object"))?;
+        // Unknown `Type` values and oversized message/attribute payloads would
+        // bloat this table's LowCardinality dictionaries, which degrades every
+        // query on it for that org. Drop or clamp the row rather than failing
+        // the batch — see `sanitize_session_event`.
+        if !sanitize_session_event(obj) {
+            dropped += 1;
+            continue;
+        }
         obj.insert(
             "org_id".to_string(),
             serde_json::Value::String(org_id.clone()),
@@ -2408,6 +2506,15 @@ async fn handle_session_events_inner(
         rows.push(
             serde_json::to_vec(&value)
                 .map_err(|e| ApiError::bad_request(format!("failed to re-serialize event: {e}")))?,
+        );
+    }
+
+    if dropped > 0 {
+        Span::current().record("maple.session_events.dropped", dropped);
+        warn!(
+            org_id = %org_id,
+            dropped,
+            "dropped session events with an unrecognized type"
         );
     }
 
@@ -4286,6 +4393,49 @@ impl AttributeMappingResolver {
     }
 }
 
+/// The schema revision this binary needs an org's ClickHouse to be at, as a
+/// number. Non-numeric (legacy hash) revisions parse to 0, which is older than
+/// every real migration — the same "not ready" answer they get today.
+fn required_schema_revision() -> i32 {
+    CLICKHOUSE_SCHEMA_VERSION.parse().unwrap_or(0)
+}
+
+/// Is an org's stamped schema revision new enough for this binary to write to?
+///
+/// Deliberately `>=` rather than `==`. Migrations only ever add columns or widen
+/// types, and every INSERT names its columns explicitly, so an older binary
+/// writing into a newer schema is safe — the columns it doesn't know about take
+/// their DEFAULT. Equality instead made *any* skew a routing change: between
+/// stamping an org at the new revision and rolling out the matching binary, the
+/// org fell back to Tinybird and its own ClickHouse silently missed that window.
+/// With `>=` the org keeps writing to its own cluster throughout the rollout.
+///
+/// The comparison is numeric on purpose: these are stored as text, and as text
+/// "12" sorts before "9", so a string `>=` would strand every org.
+fn schema_revision_is_compatible(stamped: &str) -> bool {
+    schema_revision_at_least(stamped, required_schema_revision())
+}
+
+/// The comparison itself, with `needed` passed in so it is testable without
+/// depending on whatever revision this binary happens to be pinned to.
+fn schema_revision_at_least(stamped: &str, needed: i32) -> bool {
+    stamped.parse::<i32>().unwrap_or(-1) >= needed
+}
+
+/// SQL predicate matching `schema_revision_is_compatible`, for the routing
+/// queries. Kept next to it so the two can never drift — if they disagree,
+/// routing sends frames down the ClickHouse path that the target resolver then
+/// refuses, and the export worker drops the batch.
+///
+/// `CASE` rather than `regex AND cast`: legacy revisions were content hashes,
+/// and `'2967fa9b'::int` raises rather than returning false. Postgres does not
+/// promise to evaluate `AND` left-to-right — it may reorder on cost, and a
+/// regex match costs more than a cast — so the guard has to be `CASE`, which
+/// *is* defined to short-circuit. Getting this wrong fails the whole query,
+/// which would take down every ingest-key lookup, not just one org's routing.
+const SCHEMA_REVISION_COMPATIBLE_SQL: &str =
+    "(CASE WHEN s.schema_version ~ '^[0-9]+$' THEN s.schema_version::int ELSE -1 END >= $1)";
+
 #[async_trait::async_trait]
 impl ClickHouseTargetProvider for ClickHouseTargetResolver {
     async fn resolve_clickhouse_target(
@@ -4299,7 +4449,7 @@ impl ClickHouseTargetProvider for ClickHouseTargetResolver {
         let Some(row) = self.store.fetch_clickhouse_target(org_id).await? else {
             return Ok(None);
         };
-        if row.schema_version != CLICKHOUSE_SCHEMA_VERSION {
+        if !schema_revision_is_compatible(&row.schema_version) {
             return Ok(None);
         }
 
@@ -4438,11 +4588,11 @@ impl KeyStore for PostgresKeyStore {
     ) -> Result<Option<KeyRow>, String> {
         // hash_column is a compile-time constant chosen by the resolver, never
         // user input — safe to interpolate.
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let sql = format!(
             "SELECT k.org_id, \
                     COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                    COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
+                    COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
                     COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
                     COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
              FROM org_ingest_keys k \
@@ -4473,21 +4623,21 @@ impl KeyStore for PostgresKeyStore {
         connector_id: &str,
         secret_hash: &str,
     ) -> Result<Option<ConnectorRow>, String> {
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let client = self.client().await?;
+        let sql = format!(
+            "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
+                    COALESCE(s.sync_status = 'connected', false) AS self_managed, \
+                    COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
+                    COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
+                    COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
+             FROM cloudflare_logpush_connectors c \
+             LEFT JOIN org_clickhouse_settings s ON s.org_id = c.org_id \
+             LEFT JOIN org_spend_limits l ON l.org_id = c.org_id \
+             WHERE c.id = $2 AND c.secret_hash = $3 AND c.enabled = true LIMIT 1"
+        );
         let rows = client
-            .query(
-                "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
-                        COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                        COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
-                        COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
-                        COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{}')::text[] AS paused_features \
-                 FROM cloudflare_logpush_connectors c \
-                 LEFT JOIN org_clickhouse_settings s ON s.org_id = c.org_id \
-                 LEFT JOIN org_spend_limits l ON l.org_id = c.org_id \
-                 WHERE c.id = $2 AND c.secret_hash = $3 AND c.enabled = true LIMIT 1",
-                &[&revision, &connector_id, &secret_hash],
-            )
+            .query(&sql, &[&revision, &connector_id, &secret_hash])
             .instrument(postgres_client_span("fetch_connector"))
             .await
             .map_err(|error| format!("postgres fetch_connector failed: {error}"))?;
@@ -4560,14 +4710,16 @@ impl KeyStore for PostgresKeyStore {
         &self,
         org_id: &str,
     ) -> Result<Option<ClickHouseTargetRow>, String> {
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let client = self.client().await?;
         let rows = client
             .query(
                 "SELECT ch_url, ch_user, ch_password_ciphertext, ch_password_iv, ch_password_tag, \
                         ch_database, schema_version \
                  FROM org_clickhouse_settings \
-                 WHERE org_id = $1 AND sync_status = 'connected' AND schema_version = $2 LIMIT 1",
+                 WHERE org_id = $1 AND sync_status = 'connected' \
+                   AND CASE WHEN schema_version ~ '^[0-9]+$' \
+                            THEN schema_version::int ELSE -1 END >= $2 LIMIT 1",
                 &[&org_id, &revision],
             )
             .instrument(postgres_client_span("fetch_clickhouse_target"))
@@ -4588,7 +4740,7 @@ impl KeyStore for PostgresKeyStore {
     }
 
     async fn fetch_org_routing(&self, org_id: &str) -> Result<Option<OrgRouting>, String> {
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let client = self.client().await?;
         let rows = client
             .query(
@@ -4596,13 +4748,15 @@ impl KeyStore for PostgresKeyStore {
                 // org_clickhouse_settings: an org can have spend limits and no
                 // BYO-ClickHouse config, and the old FROM would return no row at
                 // all for it — reading as "never paused".
-                "SELECT COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                        COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
-                        COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
-                        COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{}')::text[] AS paused_features \
-                 FROM (SELECT $2::text AS org_id) o \
-                 LEFT JOIN org_clickhouse_settings s ON s.org_id = o.org_id \
-                 LEFT JOIN org_spend_limits l ON l.org_id = o.org_id LIMIT 1",
+                &format!(
+                    "SELECT COALESCE(s.sync_status = 'connected', false) AS self_managed, \
+                            COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
+                            COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
+                            COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
+                     FROM (SELECT $2::text AS org_id) o \
+                     LEFT JOIN org_clickhouse_settings s ON s.org_id = o.org_id \
+                     LEFT JOIN org_spend_limits l ON l.org_id = o.org_id LIMIT 1"
+                ),
                 &[&revision, &org_id],
             )
             .instrument(postgres_client_span("fetch_org_routing"))
@@ -5406,6 +5560,36 @@ mod tests {
         ));
     }
 
+    fn geo_headers(country: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-ipcountry", country.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn country_is_empty_unless_the_proxy_is_trusted() {
+        // The gateway is reachable directly on its Railway origin, so an
+        // untrusted deployment must ignore the header entirely rather than let
+        // a client label its own traffic.
+        assert_eq!(derive_country(&geo_headers("DE"), false), "");
+        assert_eq!(derive_country(&HeaderMap::new(), true), "");
+    }
+
+    #[test]
+    fn country_normalizes_and_rejects_non_countries() {
+        assert_eq!(derive_country(&geo_headers("de"), true), "DE");
+        assert_eq!(derive_country(&geo_headers(" us "), true), "US");
+        // Cloudflare's unknown/Tor sentinels are not countries — keeping them
+        // would put two junk buckets in every breakdown.
+        assert_eq!(derive_country(&geo_headers("XX"), true), "");
+        assert_eq!(derive_country(&geo_headers("T1"), true), "");
+        // Anything off-shape is dropped, which is what bounds the LowCardinality
+        // dictionary to ~250 values.
+        assert_eq!(derive_country(&geo_headers("DE; DROP"), true), "");
+        assert_eq!(derive_country(&geo_headers("DEU"), true), "");
+        assert_eq!(derive_country(&geo_headers("1"), true), "");
+    }
+
     #[test]
     fn tinybird_destination_keeps_forward_mode_on_forward_path() {
         assert!(!uses_native_pipeline_for(
@@ -5793,6 +5977,7 @@ mod tests {
                 ingest_key_cache_ttl_secs: 60,
                 org_routing_cache_ttl_secs: 5,
                 replay_max_session_bytes: 1024 * 1024 * 1024,
+                trust_proxy_geo: false,
             },
             http_client,
             telemetry_pipeline: Some(telemetry_pipeline),
@@ -6599,6 +6784,36 @@ mod tests {
         )
         .expect("fixture decrypts");
         assert_eq!(plaintext, "ch-secret-123");
+    }
+
+    #[test]
+    fn schema_revision_accepts_newer_schemas_and_rejects_older_ones() {
+        let needed = required_schema_revision();
+        assert!(needed > 0, "generated SCHEMA_VERSION should be numeric");
+
+        // Exactly current, and ahead of this binary: both writable. The second
+        // is the rollout window — an org stamped at the new revision before the
+        // matching binary ships keeps writing to its own ClickHouse instead of
+        // silently falling back to Tinybird.
+        assert!(schema_revision_is_compatible(&needed.to_string()));
+        assert!(schema_revision_is_compatible(&(needed + 1).to_string()));
+
+        // Behind this binary: the columns genuinely are not there yet.
+        assert!(!schema_revision_is_compatible(&(needed - 1).to_string()));
+
+        // Legacy content-hash revisions are not comparable — treated as older.
+        assert!(!schema_revision_is_compatible("old-revision"));
+        assert!(!schema_revision_is_compatible(""));
+    }
+
+    #[test]
+    fn schema_revision_compares_numerically_not_lexicographically() {
+        // Revisions are stored as text, where "12" sorts *before* "9". A string
+        // comparison would call an org at revision 12 "behind" revision 9 and
+        // strand every org the moment the count reached double digits.
+        assert!(schema_revision_at_least("12", 9), "12 is ahead of 9");
+        assert!(!schema_revision_at_least("9", 12), "9 is behind 12");
+        assert!(schema_revision_at_least("100", 99), "100 is ahead of 99");
     }
 
     #[tokio::test]

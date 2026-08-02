@@ -27,6 +27,8 @@ import {
 	buildProjectedMapExpr,
 	canUseServiceOverviewMv,
 	canUseTracesAggregatesMv,
+	inclusionCondition,
+	inclusionValues,
 	serviceOverviewWhereConditions,
 	tracesAggregatesWhereConditions,
 	tracesBaseWhereConditions,
@@ -35,6 +37,26 @@ import {
 
 // ---------------------------------------------------------------------------
 // Metric SELECT expressions
+//
+// COUNT SEMANTICS — read this before touching `count`.
+//
+// `count` is the **sample-weighted estimate of how many spans actually
+// happened**, never the number of rows we happened to store: every row
+// contributes its `SampleRate` (a multiplier >= 1.0, DEFAULT 1.0 for unsampled
+// spans — see `SAMPLE_RATE_EXPR` in @maple/domain's datasources).
+//
+// This is forced, not chosen. `traces_aggregates_hourly` — which serves every
+// hourly+ trace timeseries — only stores `WeightedCount`; the raw row count is
+// not recoverable from it. A "stored rows" definition would therefore be
+// unimplementable on the rollup routes, whereas the weighted one is
+// implementable everywhere (raw `traces` and `service_overview_spans` both
+// carry `SampleRate`). It is also the definition the rest of the product
+// already uses for throughput: `resolveThroughput` in the web app prefers
+// `estimatedSpanCount` over `count`, and the service map / service overview /
+// service operations queries all report `sum(SampleRate)`.
+//
+// Consequence: the number is sampling-config-independent. Turning head sampling
+// on must not make a dashboard's "spans" number drop.
 // ---------------------------------------------------------------------------
 
 /**
@@ -68,21 +90,40 @@ function metricSelectExprs(
 				apdexScore: CH.lit(0),
 			}
 
+	// Per-span weighted sum: each row contributes `SampleRate` (>= 1.0). Matches
+	// `sum(WeightedCount)` on `traces_aggregates_hourly`, so both routes answer
+	// the same question. See the COUNT SEMANTICS note above.
+	const weightedCount = CH.sum($.SampleRate)
+
 	return {
-		count: CH.count(),
+		count: weightedCount,
+		// Rows actually observed, unweighted. Not a user-facing metric — it is the
+		// statistical-confidence input behind an alert rule's `minimumSampleCount`,
+		// which must not be inflated by extrapolation.
+		spanCount: CH.count(),
 		avgDuration: needs.has("avg_duration") ? CH.avg($.Duration).div(1000000) : CH.lit(0),
 		p50Duration: needs.has("quantiles") ? CH.quantile(0.5)($.Duration).div(1000000) : CH.lit(0),
 		p95Duration: needs.has("quantiles") ? CH.quantile(0.95)($.Duration).div(1000000) : CH.lit(0),
 		p99Duration: needs.has("quantiles") ? CH.quantile(0.99)($.Duration).div(1000000) : CH.lit(0),
+		// Weighted on both sides of the ratio, matching
+		// `sum(WeightedErrorCount) / sum(WeightedCount)` on the hourly rollup.
+		// Leaving the numerator raw while `count` is weighted would make
+		// `count * errorRate` disagree with any error count on the same widget.
 		errorRate: needs.has("error_rate")
-			? CH.if_(CH.count().gt(0), CH.countIf($.StatusCode.eq("Error")).div(CH.count()), CH.lit(0))
+			? CH.if_(
+					weightedCount.gt(0),
+					CH.sumIf($.SampleRate, $.StatusCode.eq("Error")).div(weightedCount),
+					CH.lit(0),
+				)
 			: CH.lit(0),
+		// Apdex intentionally stays on raw `count()` (inside `apdexExprs`): it is a
+		// self-consistent ratio of raw satisfied/tolerating/total, and the hourly
+		// rollup carries no weighted apdex buckets to match against anyway.
 		...apdex,
-		// Per-span weighted sum: each row contributes `SampleRate` (>= 1.0).
-		// Replaces the old `sampledSpanCount * dominantWeight + unsampledSpanCount`
-		// approximation, which mis-estimated buckets with mixed sampling rates
-		// because `anyIf` picked one arbitrary threshold and applied it to all.
-		estimatedSpanCount: needsSampling ? CH.sum($.SampleRate) : CH.lit(0),
+		// Retained as a distinct output column because `@maple/domain`'s series
+		// keys and the web app's `resolveThroughput` still read it; it is now by
+		// construction equal to `count` whenever it is emitted.
+		estimatedSpanCount: needsSampling ? weightedCount : CH.lit(0),
 	}
 }
 
@@ -282,7 +323,10 @@ export interface TracesTimeseriesOpts extends TracesQueryOpts {
 export interface TracesTimeseriesOutput {
 	readonly bucket: string
 	readonly groupName: string
+	/** Sample-weighted estimate of spans that happened. See COUNT SEMANTICS. */
 	readonly count: number
+	/** Raw rows observed. Confidence input for alerting, not a display metric. */
+	readonly spanCount: number
 	readonly avgDuration: number
 	readonly p50Duration: number
 	readonly p95Duration: number
@@ -301,6 +345,7 @@ const TRACES_TS_COLUMNS: ColumnDefs = {
 	bucket: T.string,
 	groupName: T.string,
 	count: T.float64,
+	spanCount: T.float64,
 	avgDuration: T.float64,
 	p50Duration: T.float64,
 	p95Duration: T.float64,
@@ -312,13 +357,21 @@ const TRACES_TS_COLUMNS: ColumnDefs = {
 	estimatedSpanCount: T.float64,
 }
 
-export function tracesTimeseriesQuery(
-	opts: TracesTimeseriesOpts,
-): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
-	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
-	const canUseAnnualServiceOverview =
+/**
+ * Whether a timeseries request can be served by the one-year service-overview
+ * rollup (raw partial edge hours + `service_overview_hourly` interior) instead
+ * of scanning `traces`.
+ *
+ * Exported because it names a distinct SQL *route*: the SQL it selects is
+ * structurally unlike every other branch of `tracesTimeseriesQuery`, so the
+ * catalog sweep in `sql-catalog.ts` asserts a fixture exercises it both ways.
+ * A route with no fixture is a route no test has ever executed — which is
+ * exactly how a `NO_COMMON_TYPE` shipped to prod here.
+ */
+export function canUseAnnualServiceOverview(opts: TracesTimeseriesOpts): boolean {
+	return (
 		opts.allMetrics === true &&
-		apdexThresholdMs === 500 &&
+		(opts.apdexThresholdMs ?? 500) === 500 &&
 		opts.rootOnly === true &&
 		(opts.bucketSeconds ?? 0) >= 3600 &&
 		(opts.groupBy == null || opts.groupBy.length === 0) &&
@@ -331,8 +384,15 @@ export function tracesTimeseriesQuery(
 		!opts.attributeFilters?.length &&
 		!opts.resourceAttributeFilters?.length &&
 		!Object.values(opts.matchModes ?? {}).includes("contains")
+	)
+}
 
-	if (canUseAnnualServiceOverview) {
+export function tracesTimeseriesQuery(
+	opts: TracesTimeseriesOpts,
+): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
+	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
+
+	if (canUseAnnualServiceOverview(opts)) {
 		const startHour = "toStartOfHour(toDateTime(__PARAM_startTime__))"
 		const endHour = "toStartOfHour(toDateTime(__PARAM_endTime__))"
 		const firstFullHour = `if(toDateTime(__PARAM_startTime__) = ${startHour}, ${startHour}, ${startHour} + INTERVAL 1 HOUR)`
@@ -392,29 +452,45 @@ export function tracesTimeseriesQuery(
 
 		const annual = fromUnion(unionAll(rawEdges, hourlyInterior), "service_metric_windows")
 			.select(($) => {
-				const total = CH.sum($.bCount)
+				// `rawTotal` is the stored-row count; it stays the apdex denominator
+				// because the satisfied/tolerating numerators are raw counts too.
+				const rawTotal = CH.sum($.bCount)
+				// `service_overview_hourly.EstimatedSpanCount` post-dates the table, so
+				// buckets written before it carry 0 — fall back to the raw count rather
+				// than reporting a hole. Mirrors `resolveThroughput` in the web app.
+				// The `toFloat64` is load-bearing: `if()` needs a supertype for both
+				// arms, and ClickHouse refuses Float64/UInt64 ("no floating point type
+				// that can exactly represent all required integers") — the whole query
+				// 500s without it.
+				const weightedTotal = CH.rawExpr<number>(
+					"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount)))",
+				)
 				const satisfied = CH.sum($.bSatisfiedCount)
 				const tolerating = CH.sum($.bToleratingCount)
 				const quantiles = "quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles)"
 				return {
 					bucket: $.bucket,
 					groupName: CH.lit("all"),
-					count: total,
+					count: weightedTotal,
+					spanCount: rawTotal,
 					avgDuration: CH.rawExpr<number>(
 						"if(sum(bCount) > 0, sum(bDurationSum) / sum(bCount) / 1000000, 0)",
 					),
 					p50Duration: CH.rawExpr<number>(`arrayElement(${quantiles}, 1) / 1000000`),
 					p95Duration: CH.rawExpr<number>(`arrayElement(${quantiles}, 2) / 1000000`),
 					p99Duration: CH.rawExpr<number>(`arrayElement(${quantiles}, 3) / 1000000`),
+					// Raw ratio: `service_overview_hourly` stores no weighted error count.
+					// Unbiased as long as errored and non-errored spans share a sampling
+					// rate, which head sampling (trace-level) guarantees.
 					errorRate: CH.rawExpr<number>("if(sum(bCount) > 0, sum(bErrorCount) / sum(bCount), 0)"),
 					satisfiedCount: satisfied,
 					toleratingCount: tolerating,
 					apdexScore: CH.if_(
-						total.gt(0),
-						CH.round_(satisfied.div(total).add(tolerating.mul(0.5).div(total)), 4),
+						rawTotal.gt(0),
+						CH.round_(satisfied.div(rawTotal).add(tolerating.mul(0.5).div(rawTotal)), 4),
 						CH.lit(0),
 					),
-					estimatedSpanCount: CH.sum($.bEstimatedSpanCount),
+					estimatedSpanCount: weightedTotal,
 				}
 			})
 			.groupBy("bucket", "groupName")
@@ -432,30 +508,106 @@ export function tracesTimeseriesQuery(
 		canUseTracesAggregatesMv(opts, opts.groupBy, opts.bucketSeconds)
 	) {
 		const needs = new Set(METRIC_NEEDS[opts.metric])
-		const weightedCount = CH.rawExpr<number>("sum(WeightedCount)")
-		const weightedQuantiles = "quantilesTDigestWeightedMerge(0.5, 0.95, 0.99)(DurationQuantiles)"
-		const aggregates = from(TracesAggregatesHourly)
+		const wantsQuantiles = needs.has("quantiles")
+
+		// The MV is keyed on whole hours, but dashboard ranges are relative
+		// ("now - 24h") and practically never land on an hour boundary. Reading it
+		// with `Hour BETWEEN startTime AND endTime` drops the partial head hour
+		// entirely and takes the trailing hour whole, so an hourly chart silently
+		// under-reported a row-level breakdown of the identical window by up to an
+		// hour of traffic. Instead: raw `traces` covers the two partial edge hours,
+		// the MV covers the whole-hour interior, and the two tile the window
+		// exactly. Same shape as the annual service-overview branch above.
+		const startHour = "toStartOfHour(toDateTime(__PARAM_startTime__))"
+		const endHour = "toStartOfHour(toDateTime(__PARAM_endTime__))"
+		const firstFullHour = `if(toDateTime(__PARAM_startTime__) = ${startHour}, ${startHour}, ${startHour} + INTERVAL 1 HOUR)`
+
+		// The union's branches must agree on aggregate-state types, so the raw side
+		// emits `quantilesTDigestWeightedState(…)(Duration, toUInt32(…))` to match
+		// the MV column's `AggregateFunction(quantilesTDigestWeighted(...), UInt64,
+		// UInt32)`, and the MV side re-emits state via `-MergeState`. When the
+		// metric needs no quantiles both branches emit `''` instead — still the
+		// same type on both sides, and no t-digest work.
+		const rawQuantileState = wantsQuantiles
+			? "quantilesTDigestWeightedState(0.5, 0.95, 0.99)(Duration, toUInt32(greatest(SampleRate, 1.0)))"
+			: "''"
+		const mvQuantileState = wantsQuantiles
+			? "quantilesTDigestWeightedMergeState(0.5, 0.95, 0.99)(DurationQuantiles)"
+			: "''"
+
+		const spanNames = inclusionValues(opts.spanName, opts.spanNames)
+		const rawEdges = from(Traces)
+			.select(($) => ({
+				bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
+				groupName: buildGroupNameExpr($, opts.groupBy, undefined),
+				bWeightedCount: CH.sum($.SampleRate),
+				// `toFloat64` is load-bearing: the MV side of this column is
+				// `sum(WeightedCount)` (Float64), and ClickHouse refuses a UNION of
+				// UInt64 with Float64 outright ("there is no supertype ... because
+				// some of them are integers and some are floating point").
+				bSpanCount: CH.rawExpr<number>("toFloat64(count())"),
+				bWeightedDurationSum: CH.sum(CH.rawExpr<number>("toFloat64(Duration) * SampleRate")),
+				bWeightedErrorCount: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
+				bDurationQuantiles: CH.rawExpr<string>(rawQuantileState),
+			}))
+			.where(($) => [
+				// Span-name matching is narrowed to the MV's spelling: the raw table
+				// also matches the *display* name ("GET /api/users"), which
+				// `traces_aggregates_hourly` cannot store. Leaving that OR in would
+				// make the edge hours select rows the interior hours could not,
+				// which is the same class of bug this union exists to close.
+				...tracesBaseWhereConditions($, { ...opts, spanName: undefined, spanNames: undefined }),
+				CH.when(spanNames, (v: readonly string[]) =>
+					opts.matchModes?.spanName === "contains" && v.length === 1
+						? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!)).gt(0)
+						: inclusionCondition($.SpanName, v),
+				),
+				CH.rawCond(`(Timestamp < ${firstFullHour} OR Timestamp >= ${endHour})`),
+			])
+			.groupBy("bucket", "groupName")
+
+		const hourlyInterior = from(TracesAggregatesHourly)
 			.select(($) => ({
 				bucket: CH.toStartOfInterval($.Hour, param.int("bucketSeconds")),
 				groupName: buildAggregatesGroupNameExpr($, opts.groupBy),
+				bWeightedCount: CH.sum($.WeightedCount),
+				// The MV stores no raw row count, so the weighted value stands in for
+				// it on interior hours. An hourly alert rule routed here therefore
+				// evaluates `minimumSampleCount` against a partly-estimated sample
+				// count; sub-hour rules stay on row-level tables and get the true one.
+				bSpanCount: CH.sum($.WeightedCount),
+				bWeightedDurationSum: CH.sum($.WeightedDurationSum),
+				bWeightedErrorCount: CH.sum($.WeightedErrorCount),
+				bDurationQuantiles: CH.rawExpr<string>(mvQuantileState),
+			}))
+			.where(($) => tracesAggregatesWhereConditions($, opts, { gte: firstFullHour, lt: endHour }))
+			.groupBy("bucket", "groupName")
+
+		const weightedCount = CH.rawExpr<number>("sum(bWeightedCount)")
+		const weightedQuantiles = "quantilesTDigestWeightedMerge(0.5, 0.95, 0.99)(bDurationQuantiles)"
+		const aggregates = fromUnion(unionAll(rawEdges, hourlyInterior), "traces_metric_windows")
+			.select(($) => ({
+				bucket: $.bucket,
+				groupName: $.groupName,
 				count: weightedCount,
+				spanCount: CH.sum($.bSpanCount),
 				avgDuration: needs.has("avg_duration")
 					? CH.rawExpr<number>(
-							"if(sum(WeightedCount) > 0, sum(WeightedDurationSum) / sum(WeightedCount) / 1000000, 0)",
+							"if(sum(bWeightedCount) > 0, sum(bWeightedDurationSum) / sum(bWeightedCount) / 1000000, 0)",
 						)
 					: CH.lit(0),
-				p50Duration: needs.has("quantiles")
+				p50Duration: wantsQuantiles
 					? CH.rawExpr<number>(`arrayElement(${weightedQuantiles}, 1) / 1000000`)
 					: CH.lit(0),
-				p95Duration: needs.has("quantiles")
+				p95Duration: wantsQuantiles
 					? CH.rawExpr<number>(`arrayElement(${weightedQuantiles}, 2) / 1000000`)
 					: CH.lit(0),
-				p99Duration: needs.has("quantiles")
+				p99Duration: wantsQuantiles
 					? CH.rawExpr<number>(`arrayElement(${weightedQuantiles}, 3) / 1000000`)
 					: CH.lit(0),
 				errorRate: needs.has("error_rate")
 					? CH.rawExpr<number>(
-							"if(sum(WeightedCount) > 0, sum(WeightedErrorCount) / sum(WeightedCount), 0)",
+							"if(sum(bWeightedCount) > 0, sum(bWeightedErrorCount) / sum(bWeightedCount), 0)",
 						)
 					: CH.lit(0),
 				satisfiedCount: CH.lit(0),
@@ -463,7 +615,6 @@ export function tracesTimeseriesQuery(
 				apdexScore: CH.lit(0),
 				estimatedSpanCount: opts.needsSampling ? weightedCount : CH.lit(0),
 			}))
-			.where(($) => tracesAggregatesWhereConditions($, opts))
 			.groupBy("bucket", "groupName")
 			.orderBy(["bucket", "asc"], ["groupName", "asc"])
 		return finalizeTimeseries(aggregates, TRACES_TS_COLUMNS, "count", opts) as unknown as CHQuery<
@@ -528,7 +679,9 @@ export interface TracesBreakdownOpts extends TracesQueryOpts {
 
 export interface TracesBreakdownOutput {
 	readonly name: string
+	/** Sample-weighted estimate of spans that happened. See COUNT SEMANTICS. */
 	readonly count: number
+	readonly spanCount: number
 	readonly avgDuration: number
 	readonly p50Duration: number
 	readonly p95Duration: number

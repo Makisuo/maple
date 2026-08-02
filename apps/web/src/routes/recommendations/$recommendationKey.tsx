@@ -29,15 +29,13 @@ import { cn } from "@maple/ui/lib/utils"
 import {
 	ArrowRotateAnticlockwiseIcon,
 	BoltIcon,
-	CheckIcon,
 	CircleCheckIcon,
 	CircleXmarkIcon,
 	CodeIcon,
-	CopyIcon,
 	PulseIcon,
 	XmarkIcon,
 } from "@/components/icons"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { DetailRail } from "@/components/common/detail-rail"
 
 /** This rail runs a narrower label column than the shared default. */
@@ -388,10 +386,7 @@ function CautionCallout({ issue, isApplyable }: { issue: V2Recommendation; isApp
 
 /** The exact ingest mapping Apply creates — the analog of the reference page's SQL block. */
 function MappingBlock({ issue, isLive }: { issue: V2Recommendation; isLive: boolean }) {
-	const { copied, copy } = useCopyToClipboard("Mapping")
 	const snippet = `WHEN span attribute \`${issue.source_key}\` is present\nCOPY → \`${issue.canonical_key}\``
-
-	const onCopy = () => copy(snippet)
 
 	return (
 		<section>
@@ -401,15 +396,7 @@ function MappingBlock({ issue, isLive }: { issue: V2Recommendation; isLive: bool
 					<span className="text-xs text-muted-foreground">
 						{isLive ? "This mapping is live" : "Ingest attribute mapping"}
 					</span>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						onClick={onCopy}
-						aria-label="Copy mapping"
-						title="Copy"
-					>
-						{copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-					</Button>
+					<CopyButton value={snippet} label="Mapping" size="icon-sm" tooltip />
 				</div>
 				<div className="space-y-1.5 px-4 py-3 font-mono text-[13px] leading-relaxed">
 					<div className="flex items-baseline gap-3">

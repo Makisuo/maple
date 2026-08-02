@@ -1,12 +1,16 @@
+"use client"
+
 import type { ReactNode } from "react"
 
 import type { VariantProps } from "class-variance-authority"
-import { badgeVariants } from "@maple/ui/components/ui/badge"
-import { Tooltip, TooltipTrigger, TooltipPopup } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/utils"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
-interface CopyableBadgeProps {
+import { useCopy } from "../../hooks/use-copy"
+import { cn } from "../../lib/utils"
+import { badgeVariants } from "./badge"
+import { copyTooltipText } from "./copy-button"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./tooltip"
+
+export interface CopyableBadgeProps {
 	/** The full value written to the clipboard (may differ from the displayed children). */
 	value: string
 	/** What the badge displays — defaults to the value. */
@@ -26,19 +30,21 @@ export function CopyableBadge({
 	size = "default",
 	className,
 }: CopyableBadgeProps) {
-	const { copied, copy } = useCopyToClipboard(label)
+	// The badge *is* the affordance — there's no room for a status glyph, so the
+	// tooltip carries the feedback (hence `useCopy` rather than `CopyButton`).
+	const { copy, status } = useCopy({ label })
 
 	return (
 		<Tooltip>
 			<TooltipTrigger
 				render={<button type="button" />}
-				onClick={() => copy(value)}
+				onClick={() => void copy(value)}
 				aria-label={`Copy ${label}`}
 				className={cn(badgeVariants({ variant, size }), "max-w-full", className)}
 			>
 				{children ?? value}
 			</TooltipTrigger>
-			<TooltipPopup>{copied ? "Copied!" : `Click to copy ${label}`}</TooltipPopup>
+			<TooltipPopup>{copyTooltipText(status, label)}</TooltipPopup>
 		</Tooltip>
 	)
 }

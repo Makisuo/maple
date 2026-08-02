@@ -1,74 +1,164 @@
-import { trace } from "@opentelemetry/api"
-import { getSession, publishSessionSink } from "@maple/browser-session"
 import {
+	clearPendingEvents,
+	clearSessionSink,
+	configurePrivacy,
+	getActiveSink,
+	getObservedTraceIds,
+	getSession,
+	hasConsent,
+	type IdentifyInput,
+	mayPersistIdentifier,
+	normalizeIdentity,
+	onConsentChange,
+	publishSessionSink,
+	rotateSession,
+	setVisitorTracking,
+	startEventSink,
+	startMetadataSession,
+	type MetadataSessionHandle,
+	type SessionEventSink,
+} from "@maple/browser-session"
+import {
+	type ReplaySessionHandle,
 	setActiveTraceIdProvider,
 	startReplaySession,
-	type ReplaySessionHandle,
 } from "@maple/browser-session/replay"
-import { type MapleBrowserConfig, type ResolvedConfig, normalizeUserId, resolveConfig } from "./config"
+import { trace } from "@opentelemetry/api"
+import { type MapleBrowserConfig, type ResolvedConfig, resolveConfig } from "./config"
 import { setupTracing } from "./tracing"
 
 export interface MapleBrowserHandle {
+	/** Empty until consent is granted when `requireConsent` is enabled. */
 	readonly sessionId: string
-	/** Tear down tracing + replay (flushing the final chunk). */
+	/** Tear down tracing + session capture, flushing the final buffers. */
 	readonly shutdown: () => Promise<void>
 }
 
+interface BrowserRuntime {
+	readonly initialSessionId: string
+	readonly sink: SessionEventSink
+	readonly replay?: ReplaySessionHandle | undefined
+	readonly metadata?: MetadataSessionHandle | undefined
+}
+
 let active: MapleBrowserHandle | undefined
-// Same object the replay engine's `getUserId` reads, so `identify()` mutations
-// are seen by the ended-metadata rows posted on suspend/unload.
+// Same object the session lifecycle's `getIdentity` reads, so `identify()`
+// mutations are seen by later metadata rows.
 let activeConfig: ResolvedConfig | undefined
 
 /**
- * Initialize Maple browser telemetry: OTel tracing + (sampled) rrweb session
- * replay, both tagged with one shared session id so a trace can link to its
- * replay and vice versa. Idempotent — repeated calls return the live handle.
- *
- * The replay lifecycle (suspend on tab-hidden, resume on visible, session
- * metadata rows) lives in `@maple/browser-session` and is shared with the
- * Effect client SDK's `replay` option.
+ * Initialize Maple browser telemetry. With consent gating enabled the returned
+ * handle remains live while denied: granting starts capture, revoking detaches
+ * it without flushing, and a later grant starts cleanly again.
  */
 export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 	if (active) return active
 	if (typeof window === "undefined") {
-		// SSR / non-browser: no-op handle so isomorphic apps can call init freely.
 		return { sessionId: "", shutdown: () => Promise.resolve() }
 	}
 
 	const config = resolveConfig(rawConfig)
 	activeConfig = config
-
-	// Resolve + publish the session up front so external tracers (Effect client
-	// SDK) link spans to it even when replay is disabled or unsampled.
-	const session = getSession()
-	publishSessionSink(session.id)
-
-	// Distilled session events tag themselves with the active OTel trace id.
+	configurePrivacy(config)
+	if (!hasConsent()) clearPendingEvents()
 	setActiveTraceIdProvider(() => trace.getActiveSpan()?.spanContext().traceId)
 
-	const shutdownTracing = config.tracingEnabled ? setupTracing(config, session.id) : undefined
-
 	const recordReplay = config.replayEnabled && Math.random() < config.replaySampleRate
-	let replay: ReplaySessionHandle | undefined
-	if (recordReplay) {
-		replay = startReplaySession({
+	let runtime: BrowserRuntime | undefined
+	let stopped = false
+	let rotateOnNextStart = false
+	let shutdownTracing: (() => Promise<void>) | undefined
+
+	const startRuntime = (): void => {
+		if (stopped || runtime || !hasConsent()) return
+		setVisitorTracking(config.persistVisitorId && mayPersistIdentifier())
+		const session = (rotateOnNextStart ? rotateSession() : undefined) ?? getSession()
+		rotateOnNextStart = false
+		publishSessionSink(session.id)
+		const sink = startEventSink(
+			{
+				endpoint: config.endpoint,
+				ingestKey: config.ingestKey,
+				maskAllInputs: config.maskAllInputs,
+				maskAllText: config.maskAllText,
+			},
+			session.id,
+		)
+		if (config.tracingEnabled && !shutdownTracing) shutdownTracing = setupTracing(config)
+		const shared = {
 			endpoint: config.endpoint,
 			ingestKey: config.ingestKey,
 			serviceName: config.serviceName,
 			environment: config.environment,
 			serviceVersion: config.serviceVersion,
-			maskAllInputs: config.maskAllInputs,
-			maskAllText: config.maskAllText,
-			getUserId: () => activeConfig?.userId,
-		})
+			getIdentity: () => activeConfig?.identity,
+			captureUserEmail: config.captureUserEmail,
+		}
+		// The replay path publishes the sink and sources trace ids itself — the
+		// Effect SDK drives it with neither wired — so only the metadata path takes
+		// them from here. Passing both would republish the sink twice per rotation.
+		const replay = recordReplay
+			? startReplaySession({
+					...shared,
+					maskAllInputs: config.maskAllInputs,
+					maskAllText: config.maskAllText,
+				})
+			: undefined
+		const metadata = replay
+			? undefined
+			: startMetadataSession({
+					...shared,
+					getTraceIds: getObservedTraceIds,
+					onSessionChange: publishSessionSink,
+				})
+		runtime = { initialSessionId: session.id, sink, replay, metadata }
 	}
 
+	const stopRuntime = async (flush: boolean): Promise<void> => {
+		const previous = runtime
+		runtime = undefined
+		if (!previous) return
+		const replayShutdown = previous.replay?.shutdown({ flush })
+		const metadataShutdown = previous.metadata?.shutdown({ flush })
+		const currentSessionId = previous.replay?.sessionId ?? previous.metadata?.sessionId
+		const liveSink = getActiveSink()
+		const sink =
+			liveSink && currentSessionId && liveSink.sessionId === currentSessionId ? liveSink : previous.sink
+		if (flush) await sink.flush(true)
+		sink.stop()
+		if (sink !== previous.sink) previous.sink.stop()
+		clearSessionSink(currentSessionId ?? previous.initialSessionId)
+		await Promise.all([replayShutdown, metadataShutdown])
+	}
+
+	startRuntime()
+	const stopConsentListener = config.requireConsent
+		? onConsentChange((allowed) => {
+				if (allowed) {
+					startRuntime()
+					return
+				}
+				rotateOnNextStart = runtime !== undefined
+				clearPendingEvents()
+				setVisitorTracking(false)
+				void stopRuntime(false)
+			})
+		: () => {}
+
 	const handle: MapleBrowserHandle = {
-		sessionId: session.id,
+		get sessionId() {
+			return (
+				runtime?.replay?.sessionId ?? runtime?.metadata?.sessionId ?? runtime?.initialSessionId ?? ""
+			)
+		},
 		shutdown: async () => {
-			await replay?.shutdown()
-			replay = undefined
+			if (stopped) return
+			stopped = true
+			stopConsentListener()
+			await stopRuntime(true)
 			await shutdownTracing?.()
+			shutdownTracing = undefined
+			setActiveTraceIdProvider(() => undefined)
 			active = undefined
 			activeConfig = undefined
 		},
@@ -78,12 +168,22 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 }
 
 /**
- * Attach, replace, or clear the user id on the active session. Idempotent and
- * safe to call on every render. Future browser-created spans read this value
- * when they start, and future session metadata rows read it when they post.
+ * Attach, replace, or clear the end-user identity on the active session.
+ * Idempotent and safe to call on every render. Future browser-created spans
+ * read the id when they start, and future session metadata rows read the whole
+ * identity when they post.
+ *
+ * Accepts a bare user id or the full object:
+ *
+ * ```ts
+ * MapleBrowser.identify("user_123")
+ * MapleBrowser.identify({ id: "user_123", email: "a@b.com", groupId: "org_1", groupName: "Acme" })
+ * ```
+ *
+ * Each call replaces the identity rather than merging — merging would leak a
+ * signed-out user's email into whoever signs in next on a shared device.
  */
-export function identify(userId?: string | null): void {
-	if (typeof window === "undefined") return
-	if (!activeConfig) return
-	activeConfig.userId = normalizeUserId(userId)
+export function identify(input?: IdentifyInput): void {
+	if (typeof window === "undefined" || !activeConfig) return
+	activeConfig.identity = normalizeIdentity(input)
 }

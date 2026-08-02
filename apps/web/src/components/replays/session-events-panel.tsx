@@ -6,6 +6,7 @@ import {
 	getSessionTranscriptResultAtom,
 	getSessionTraceSummariesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { parseAttributes } from "@maple/ui/lib/span-tree"
@@ -15,7 +16,6 @@ import { formatClock, formatSessionDuration, type ReplayPartitionWindow } from "
 import { useReplayPlayer } from "./replay-player-context"
 import { parseChTimestampMs } from "./replay-timeline"
 import type { SessionTraceSummary } from "./replay-editor-timeline"
-import { CopyButton } from "./session-detail-parts"
 
 export type EventRow = {
 	readonly timestamp: string
@@ -578,7 +578,7 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 							<Value mono className="truncate">
 								{session.serviceName}
 							</Value>
-							<CopyButton value={session.serviceName} label="Copy service name" />
+							<CopyButton value={session.serviceName} label="Service name" iconSize={12} className="size-5" toast={false} />
 						</span>
 					</DetailRail.Row>
 				)}
@@ -587,7 +587,7 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 						<Value mono className="truncate">
 							{sessionId.slice(0, 12)}…
 						</Value>
-						<CopyButton value={sessionId} label="Copy session id" />
+						<CopyButton value={sessionId} label="Session ID" iconSize={12} className="size-5" toast={false} />
 					</span>
 				</DetailRail.Row>
 				{session.recorded !== undefined && (

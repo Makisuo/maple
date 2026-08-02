@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Toaster, toast } from "sonner"
+import { Toaster } from "sonner"
 import { cn } from "@maple/ui/utils"
 import { AttributesProvider } from "@maple/ui/components/attributes"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -27,10 +27,6 @@ import { IngestStatus } from "./components/ingest-status"
 import { DisconnectedState } from "./components/view-states"
 import { useLocalConnection } from "./hooks/use-local-connection"
 import { highlightJson } from "./lib/highlight"
-
-// Stable references so the AttributesProvider context value keeps its identity
-// across renders (otherwise every CopyableValue consumer re-renders).
-const notifyCopied = (message?: string) => toast.success(message ?? "Copied to clipboard")
 
 type Route =
 	| { name: "traces" }
@@ -97,7 +93,7 @@ export function App() {
 	}
 
 	return (
-		<AttributesProvider notifyCopied={notifyCopied} highlightJson={highlightJson}>
+		<AttributesProvider highlightJson={highlightJson}>
 			<div className="flex h-screen flex-col bg-background text-foreground">
 				<header className="flex shrink-0 items-center gap-1 border-b px-4 py-2">
 					<span className="mr-3 flex items-center gap-1.5 font-display text-sm font-semibold">

@@ -79,6 +79,11 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 
 	const chartPresentation = widget.display.chartPresentation
 	const legendRaw = chartPresentation?.legend
+	// A pie with no legend is a ring of anonymous colours, so it falls back to the
+	// side table (matching `PieWidget`'s own render default) instead of the
+	// hidden-by-default every time-series chart wants. Only the *absent* case
+	// differs — an explicit persisted legend always wins.
+	const legendFallback: LegendPosition = panelType === "pie" ? "right" : "hidden"
 	const legendPosition: LegendPosition =
 		legendRaw === "hidden"
 			? "hidden"
@@ -86,12 +91,13 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 				? "right"
 				: legendRaw === "visible"
 					? "bottom"
-					: "hidden"
+					: legendFallback
 
 	const shared: QueryBuilderWidgetState = {
 		visualization: normalized.visualization,
 		title: widget.display.title ?? "",
 		description: widget.display.description ?? "",
+		timeRange: widget.timeRange ?? null,
 		chartId: normalized.chartId ?? "query-builder-line",
 		stacked: widget.display.stacked ?? false,
 		curveType: widget.display.curveType ?? "linear",

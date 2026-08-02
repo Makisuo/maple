@@ -45,8 +45,8 @@ import { join } from "node:path"
 
 describe("current local schema identity", () => {
 	it("matches the generated revision and the known issue-297 fingerprint", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("06ac009495b54395")
-		expect(SCHEMA_DIGEST).toBe("06ac009495b543953779fb91ed3ac1692607d274c34fab4b169bd5674ef8220a")
+		expect(SCHEMA_FINGERPRINT).toBe("718581a523cbf01c")
+		expect(SCHEMA_DIGEST).toBe("718581a523cbf01c216bf930cc3ffca72921c387c926c3c2c0cf1861b00c4ceb")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)

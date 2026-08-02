@@ -5,6 +5,7 @@ import {
 	DashboardId,
 	DashboardWidgetSchema,
 	IsoDateTimeString,
+	TimeRangeSchema,
 	WidgetDataSourceSchema,
 	WidgetDisplayConfigSchema,
 	WidgetLayoutSchema,
@@ -27,6 +28,7 @@ const WidgetFromJson = Schema.fromJsonString(DashboardWidgetSchema)
 const DataSourceFromJson = Schema.fromJsonString(WidgetDataSourceSchema)
 const DisplayFromJson = Schema.fromJsonString(WidgetDisplayConfigSchema)
 const LayoutFromJson = Schema.fromJsonString(WidgetLayoutSchema)
+const TimeRangeFromJson = Schema.fromJsonString(TimeRangeSchema)
 
 const jsonDecodeError = (field: string, tool: string) => (error: unknown) =>
 	new McpQueryError({
@@ -55,6 +57,11 @@ export const decodeLayoutJson = (json: string, tool: string) =>
 		Effect.mapError(jsonDecodeError("layout_json", tool)),
 	)
 
+export const decodeTimeRangeJson = (json: string, tool: string) =>
+	Schema.decodeUnknownEffect(TimeRangeFromJson)(json).pipe(
+		Effect.mapError(jsonDecodeError("time_range_json", tool)),
+	)
+
 export const generateWidgetId = (): string => randomUUID()
 
 /**
@@ -69,7 +76,7 @@ export const defaultSizeForVisualization = (visualization: string): { w: number;
 
 /**
  * Port of `findNextPosition` from
- * `apps/web/src/hooks/use-dashboard-store.ts:32-54`. Keeps auto-layout
+ * `findNextPosition` in `apps/web/src/hooks/use-dashboard-store.ts`. Keeps auto-layout
  * behavior identical between UI-added and MCP-added widgets.
  */
 export const findNextWidgetPosition = (

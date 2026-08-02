@@ -29,7 +29,7 @@ export function registerReplaceDashboardWidgetsTool(server: McpToolRegistrar) {
 				"ID of the dashboard whose widgets to replace (use list_dashboards to find IDs)",
 			),
 			widgets_json: requiredStringParam(
-				"JSON array of widget objects: [{ id?, visualization, dataSource, display, layout? }, ...]. `id` and `layout` are optional (auto-generated/auto-placed). This REPLACES the entire widget list.",
+				'JSON array of widget objects: [{ id?, visualization, dataSource, display, layout?, timeRange? }, ...]. `id` and `layout` are optional (auto-generated/auto-placed). `timeRange` pins one widget to its own window (`{"type":"relative","value":"30m"}` or `{"type":"absolute","startTime":"...","endTime":"..."}`); omit it and the widget follows the dashboard range, which is right for almost every widget. This REPLACES the entire widget list.',
 			),
 		}),
 		Effect.fn("McpTool.replaceDashboardWidgets")(function* ({ dashboard_id, widgets_json }) {

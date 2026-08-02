@@ -100,7 +100,7 @@ MAPLE_LIBCHDB="$LIBCHDB" "$MAPLE" schema migrate --data-dir "$DATA" --yes >"$ROO
 }
 grep -q "local store migrated" "$ROOT/migrate.out" || fail "native migration did not report promotion"
 [[ -f "$ROOT/maple-store-version.json" ]] || fail "active marker disappeared after native promotion"
-jq -e '.formatVersion == 2 and .activation == "active" and .schemaVersion == 1 and .schema == "06ac009495b54395"' \
+jq -e '.formatVersion == 2 and .activation == "active" and .schemaVersion == 1 and .schema == "718581a523cbf01c"' \
 	"$ROOT/maple-store-version.json" >/dev/null || fail "native migration wrote the wrong active identity"
 
 start_server

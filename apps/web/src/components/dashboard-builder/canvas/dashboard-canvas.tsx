@@ -1,13 +1,31 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { GridLayout, useContainerWidth, verticalCompactor } from "react-grid-layout"
+import { GridLayout, noCompactor, verticalCompactor } from "react-grid-layout"
 import type { Layout } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
+import { useContainerSize } from "@maple/ui/hooks/use-container-size"
+import { cn } from "@maple/ui/utils"
 
+import {
+	GRID_ROW_HEIGHT,
+	projectLayout,
+	tierForWidth,
+} from "@/components/dashboard-builder/canvas/grid-breakpoints"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
 import { WidgetActionsProvider } from "@/components/dashboard-builder/widgets/widget-actions-context"
+import { WidgetTimeRangeProvider } from "@/components/dashboard-builder/widgets/widget-time-range-context"
 import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
 import { useWidgetData } from "@/hooks/use-widget-data"
+
+/** Same widgets in the same boxes, ignoring order. */
+function sameLayout(a: Layout, b: Layout): boolean {
+	if (a.length !== b.length) return false
+	const byId = new Map(b.map((item) => [item.i, item]))
+	return a.every((item) => {
+		const other = byId.get(item.i)
+		return other !== undefined && other.x === item.x && other.y === item.y && other.w === item.w && other.h === item.h
+	})
+}
 
 interface DashboardCanvasProps {
 	widgets: DashboardWidget[]
@@ -71,54 +89,57 @@ const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: Dashbo
 
 	return (
 		<div ref={ref} className="h-full w-full">
-			<WidgetActionsProvider widget={widget} dataState={dataState}>
-				<Visualization
-					dataState={dataState}
-					display={widget.display}
-					mode={mode}
-					rowLimit={widget.dataSource.transform?.limit}
-				/>
-			</WidgetActionsProvider>
+			<WidgetTimeRangeProvider timeRange={widget.timeRange}>
+				<WidgetActionsProvider widget={widget} dataState={dataState}>
+					<Visualization
+						dataState={dataState}
+						display={widget.display}
+						mode={mode}
+						rowLimit={widget.dataSource.transform?.limit}
+					/>
+				</WidgetActionsProvider>
+			</WidgetTimeRangeProvider>
 		</div>
 	)
 })
 
 export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasProps) {
 	const { mode, updateWidgetLayouts } = useDashboardActions()
-	const { width, containerRef, mounted } = useContainerWidth()
-	const editable = mode === "edit" && !readOnly
+	// Deliberately not react-grid-layout's own `useContainerWidth`: it seeds
+	// width at a hardcoded 1280 and its ResizeObserver was observed failing to
+	// correct that here, so the grid laid every tile out for a 1280px canvas and
+	// overflowed the real ~1150px one. `useContainerSize` reads the box
+	// synchronously before observing, which is exactly the case that broke.
+	const containerRef = useRef<HTMLDivElement>(null)
+	const { width: measuredWidth } = useContainerSize(containerRef)
+	// Rounded so subpixel container widths don't re-lay-out the whole grid.
+	const width = Math.round(measuredWidth)
+	const measured = width > 0
 
-	const layouts: Layout = useMemo(
-		() =>
-			widgets.map((w) => ({
-				i: w.id,
-				x: w.layout.x,
-				y: w.layout.y,
-				w: w.layout.w,
-				h: w.layout.h,
-				minW: w.layout.minW ?? 2,
-				minH: w.layout.minH ?? 2,
-				...(w.layout.maxW != null ? { maxW: w.layout.maxW } : {}),
-				...(w.layout.maxH != null ? { maxH: w.layout.maxH } : {}),
-			})),
-		[widgets],
-	)
+	// Only the canonical tier's layout is authored and persisted; narrower ones
+	// are projected from it at render time. Editing there would write a
+	// phone-shaped layout over the real one, so drag, resize and persistence are
+	// all gated on `tier.canonical`.
+	const tier = tierForWidth(width)
+	const editable = mode === "edit" && !readOnly && tier.canonical
 
-	// react-grid-layout fires onLayoutChange once on mount with the
-	// post-compaction layout. That first call is not a real user edit, so
-	// we drop it to avoid a spurious upsert that invalidates the dashboards
-	// list and cascades a re-render of every widget.
-	const initialLayoutSeenRef = useRef(false)
+	const layout = useMemo(() => projectLayout(widgets, tier), [widgets, tier])
 
+	// react-grid-layout fires onLayoutChange with the post-compaction layout
+	// after every re-layout, not just on user edits — a tier crossing produces
+	// one, and an upsert from a plain window resize would invalidate the
+	// dashboards list and cascade a re-render of every widget.
+	//
+	// Comparing against the layout we handed the grid is what separates the two,
+	// rather than counting callbacks: this version of react-grid-layout does not
+	// fire on mount, so a "drop the first call per tier" rule swallows the user's
+	// first real edit instead of the re-layout it was aiming at.
 	const handleLayoutChange = useCallback(
-		(layout: Layout) => {
+		(next: Layout) => {
 			if (!editable) return
-			if (!initialLayoutSeenRef.current) {
-				initialLayoutSeenRef.current = true
-				return
-			}
+			if (sameLayout(next, layout)) return
 			updateWidgetLayouts(
-				layout.map((l) => ({
+				next.map((l) => ({
 					i: l.i,
 					x: l.x,
 					y: l.y,
@@ -127,19 +148,28 @@ export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasPr
 				})),
 			)
 		},
-		[editable, updateWidgetLayouts],
+		[editable, layout, updateWidgetLayouts],
 	)
 
 	return (
-		<div ref={containerRef}>
-			{mounted && (
+		// `is-layout-locked` lets WidgetShell hide its drag grip when the grid is
+		// showing a generated layout — a grip that can't be dragged reads as a
+		// bug. Widget-level actions (configure, clone, delete) stay available;
+		// only the arrangement is locked.
+		<div ref={containerRef} className={cn("group/canvas", !tier.canonical && "is-layout-locked")}>
+			{mode === "edit" && !readOnly && !tier.canonical && (
+				<p className="mb-3 text-xs text-muted-foreground">
+					Showing a layout adapted to this width. Widen the window to rearrange widgets.
+				</p>
+			)}
+			{measured && (
 				<GridLayout
 					width={width}
-					layout={layouts}
+					layout={layout}
 					gridConfig={{
-						cols: 12,
-						rowHeight: 60,
-						margin: [12, 12] as [number, number],
+						cols: tier.cols,
+						rowHeight: GRID_ROW_HEIGHT,
+						margin: tier.margin,
 					}}
 					dragConfig={{
 						enabled: editable,
@@ -151,7 +181,10 @@ export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasPr
 						enabled: editable,
 						handles: ["se"],
 					}}
-					compactor={verticalCompactor}
+					// Derived tiers ship exact row-packed positions; letting the
+					// vertical compactor run would float short tiles up into the
+					// gaps beside taller neighbours and break the rows apart.
+					compactor={tier.canonical ? verticalCompactor : noCompactor}
 					onLayoutChange={handleLayoutChange}
 				>
 					{widgets.map((widget) => (

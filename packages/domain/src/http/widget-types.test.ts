@@ -18,7 +18,7 @@ describe("defaultWidgetHeight", () => {
 	})
 
 	it("treats every unrecognized visualization as a chart", () => {
-		for (const visualization of ["gauge", "pie", "heatmap", "funnel", ""]) {
+		for (const visualization of ["gauge", "pie", "heatmap", "funnel", "hbar", ""]) {
 			expect(defaultWidgetHeight(visualization).h).toBe(6)
 		}
 	})
@@ -158,6 +158,7 @@ describe("MCP_VISUALIZATIONS", () => {
 			"chart",
 			"funnel",
 			"gauge",
+			"hbar",
 			"heatmap",
 			"histogram",
 			"list",

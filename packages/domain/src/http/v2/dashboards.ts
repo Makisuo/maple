@@ -264,7 +264,10 @@ export const V2DashboardWidget = Schema.Struct({
 	dataSource: V2WidgetDataSource,
 	display: V2WidgetDisplay,
 	layout: V2WidgetLayout,
-}).pipe(Schema.encodeKeys({ dataSource: "data_source" }))
+	// Optional per-widget window. Omit it — the overwhelmingly common case — and
+	// the widget follows the dashboard's `time_range`.
+	timeRange: optional(V2TimeRange),
+}).pipe(Schema.encodeKeys({ dataSource: "data_source", timeRange: "time_range" }))
 
 const V2DashboardVariableSource = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("facet"), facet: DashboardQueryVariableFacet }),

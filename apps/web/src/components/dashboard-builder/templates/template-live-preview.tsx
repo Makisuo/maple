@@ -1,18 +1,21 @@
-import { memo, useDeferredValue, useMemo, useState } from "react"
+import { memo, useDeferredValue, useMemo, useRef, useState } from "react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/utils"
+import { useContainerSize } from "@maple/ui/hooks/use-container-size"
 import type { V2DashboardTemplate } from "@maple/domain/http/v2"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { DashboardTimeRangeWrapper } from "@/components/dashboard-builder/dashboard-providers"
 import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
+import { WidgetTimeRangeProvider } from "@/components/dashboard-builder/widgets/widget-time-range-context"
 import type { DashboardWidget, TimeRange } from "@/components/dashboard-builder/types"
 import { useWidgetData } from "@/hooks/use-widget-data"
 import { CircleWarningIcon } from "@/components/icons"
 
+import { CANONICAL_COLS, colsForWidth } from "@/components/dashboard-builder/canvas/grid-breakpoints"
+
 /** The 12-column grid every template lays its widgets out on. */
-const GRID_COLUMNS = 12
 
 /**
  * Pixels per layout row unit. Templates are authored for a full dashboard, so
@@ -80,7 +83,13 @@ const heightFor = (widget: DashboardWidget): number =>
  * is the same shape the widget builder's live preview uses; `useWidgetData`
  * needs nothing but a surrounding `DashboardTimeRangeWrapper`.
  */
-const PreviewWidget = memo(function PreviewWidget({ widget }: { widget: DashboardWidget }) {
+const PreviewWidget = memo(function PreviewWidget({
+	widget,
+	cols,
+}: {
+	widget: DashboardWidget
+	cols: number
+}) {
 	const { dataState } = useWidgetData(widget)
 	const Visualization = visualizationFor(widget.visualization)
 
@@ -90,14 +99,39 @@ const PreviewWidget = memo(function PreviewWidget({ widget }: { widget: Dashboar
 		<div
 			className="min-w-0"
 			style={{
-				gridColumn: `span ${Math.min(widget.layout.w, GRID_COLUMNS)}`,
+				gridColumn: `span ${Math.min(widget.layout.w, cols)}`,
 				height: heightFor(widget),
 			}}
 		>
-			<Visualization dataState={dataState} display={widget.display} mode="view" />
+			<WidgetTimeRangeProvider timeRange={widget.timeRange}>
+				<Visualization dataState={dataState} display={widget.display} mode="view" />
+			</WidgetTimeRangeProvider>
 		</div>
 	)
 })
+
+/**
+ * This preview is a plain CSS grid rather than a react-grid-layout instance, so
+ * it can't inherit the canvas's generated breakpoint layouts. It resolves the
+ * column count itself from the same `GRID_BREAKPOINTS` table, so a template
+ * previewed on a phone collapses the same way the real dashboard will — a
+ * 12-column preview inside a 375px dialog is unreadable.
+ */
+function PreviewGrid({ widgets }: { widgets: DashboardWidget[] }) {
+	const ref = useRef<HTMLDivElement>(null)
+	const { width } = useContainerSize(ref)
+	// Before the first measurement, assume the full grid: templates are usually
+	// previewed on a desktop, so this is the no-flash default.
+	const cols = width > 0 ? colsForWidth(width) : CANONICAL_COLS
+
+	return (
+		<div ref={ref} className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+			{widgets.map((widget) => (
+				<PreviewWidget key={widget.id} widget={widget} cols={cols} />
+			))}
+		</div>
+	)
+}
 
 /**
  * The shape most templates open with — a row of stats over a pair of charts —
@@ -107,7 +141,7 @@ const PreviewWidget = memo(function PreviewWidget({ widget }: { widget: Dashboar
 function PreviewSkeleton() {
 	const statHeight = MIN_HEIGHT.stat
 	return (
-		<div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${GRID_COLUMNS}, 1fr)` }}>
+		<div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${CANONICAL_COLS}, 1fr)` }}>
 			<Skeleton className="col-span-4 rounded-md" style={{ height: statHeight }} />
 			<Skeleton className="col-span-4 rounded-md" style={{ height: statHeight }} />
 			<Skeleton className="col-span-4 rounded-md" style={{ height: statHeight }} />
@@ -180,14 +214,7 @@ export function TemplateLivePreview({ template, parameters, className }: Templat
 			return (
 				<div className={cn("flex flex-col gap-2", className)}>
 					<DashboardTimeRangeWrapper initialTimeRange={preview.timeRange as TimeRange}>
-						<div
-							className="grid gap-2"
-							style={{ gridTemplateColumns: `repeat(${GRID_COLUMNS}, 1fr)` }}
-						>
-							{shown.map((widget) => (
-								<PreviewWidget key={widget.id} widget={widget} />
-							))}
-						</div>
+						<PreviewGrid widgets={shown} />
 					</DashboardTimeRangeWrapper>
 					{hidden > 0 && (
 						<p className="text-muted-foreground text-xs">

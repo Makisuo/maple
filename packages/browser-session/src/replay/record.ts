@@ -67,9 +67,6 @@ export function startRecording(config: ReplayEngineConfig, sessionId: string): R
 
 	const flush = async (keepalive = false): Promise<void> => {
 		if (parts.length === 0) return
-		// A recording that's still emitting is activity — keep the session alive so
-		// it isn't rotated out from under us mid-stream.
-		markActivity()
 		const body = `[${parts.join(",")}]`
 		const isCheckpoint = bufferHasCheckpoint
 		const eventCount = parts.length
@@ -92,6 +89,12 @@ export function startRecording(config: ReplayEngineConfig, sessionId: string): R
 
 	const stop = record({
 		emit: (event: unknown, isCheckpoint?: boolean) => {
+			// Resolve idle rotation at event time, not when a timer later flushes.
+			// The rotation listener stops this recorder and starts a new one; this
+			// first event is intentionally left to the distilled sink rather than
+			// being written under the expired replay id.
+			const active = markActivity()
+			if (active && active.id !== sessionId) return
 			const e = event as RrwebEvent
 			const isFullSnapshot = isCheckpoint === true || e.type === FULL_SNAPSHOT
 			if (

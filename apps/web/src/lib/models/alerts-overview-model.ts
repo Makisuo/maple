@@ -31,7 +31,12 @@ import {
 	rowToAlertRuleDocument,
 } from "@/lib/collections/alerts"
 import { getOrgCollections } from "@/lib/collections/org-collections"
-import { collectionFailureMessage, makeOrgCollectionsKey, orgIdOf } from "@/lib/models/org-collections-key"
+import {
+	collectionFailureMessage,
+	makeOrgCollectionsKey,
+	orgCollectionStuckOptions,
+	orgIdOf,
+} from "@/lib/models/org-collections-key"
 import { v2DeliveryToDocument } from "@/lib/alerts/form-utils"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
@@ -218,17 +223,23 @@ export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("m
 	make: () =>
 		Effect.gen(function* () {
 			const orgKey = yield* makeOrgCollectionsKey
+			// `orgCollectionStuckOptions` on every one: without a bounded load an
+			// unreachable sync endpoint parks each store in `loading` and the hub
+			// renders skeletons forever instead of its error state.
 			const rules = yield* Db.fromCollectionByKey(
 				orgKey,
 				(key) => getOrgCollections(orgIdOf(key)).alertRules,
+				orgCollectionStuckOptions,
 			)
 			const states = yield* Db.fromCollectionByKey(
 				orgKey,
 				(key) => getOrgCollections(orgIdOf(key)).alertRuleStates,
+				orgCollectionStuckOptions,
 			)
 			const incidents = yield* Db.fromCollectionByKey(
 				orgKey,
 				(key) => getOrgCollections(orgIdOf(key)).alertIncidents,
+				orgCollectionStuckOptions,
 			)
 
 			// Delivery events stay a capped HTTP read (no Electric shape) — refetched

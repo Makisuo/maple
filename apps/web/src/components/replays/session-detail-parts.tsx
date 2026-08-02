@@ -1,8 +1,8 @@
 import * as React from "react"
 import { motion, useReducedMotion } from "motion/react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { GlobeIcon, ClockIcon, CopyIcon, CheckIcon } from "@/components/icons"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { GlobeIcon, ClockIcon } from "@/components/icons"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { formatRelativeFrom } from "@maple/ui/time-format"
 import { formatSessionDuration, gradientFor, hostFromUrl } from "./replay-format"
 import { parseChTimestampMs } from "./replay-timeline"
@@ -23,23 +23,6 @@ export function Reveal({ children, delay = 0 }: { children: React.ReactNode; del
 		>
 			{children}
 		</motion.div>
-	)
-}
-
-export function CopyButton({ value, label }: { value: string; label?: string }) {
-	// Silent: the inline check icon is the feedback.
-	const { copied, copy } = useCopyToClipboard(label ?? "Value", { silent: true })
-
-	return (
-		<button
-			type="button"
-			onClick={() => copy(value)}
-			aria-label={label ?? "Copy"}
-			title={copied ? "Copied" : (label ?? "Copy")}
-			className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-		>
-			{copied ? <CheckIcon className="size-3 text-success" /> : <CopyIcon className="size-3" />}
-		</button>
 	)
 }
 
@@ -118,7 +101,7 @@ export function SessionIdentityBar({
 				)}
 				<span className="hidden shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground xl:inline-flex">
 					{sessionId.slice(0, 8)}
-					<CopyButton value={sessionId} label="Copy session id" />
+					<CopyButton value={sessionId} label="Session ID" iconSize={12} className="size-5" toast={false} />
 				</span>
 			</div>
 			<div className="flex shrink-0 items-center gap-3">

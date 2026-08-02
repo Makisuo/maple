@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { toast } from "sonner"
+import { useCopy } from "@maple/ui/hooks/use-copy"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@maple/ui/components/ui/sidebar"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@maple/ui/components/ui/sheet"
@@ -109,13 +109,14 @@ function ChatPageInner({
 	}, [])
 
 	// Build a read-only share link for the conversation and copy it to the clipboard.
-	const handleShare = useCallback((tab: ChatTab) => {
-		if (typeof window === "undefined") return
-		navigator.clipboard
-			.writeText(shareUrl(tab))
-			.then(() => toast.success("Share link copied to clipboard"))
-			.catch(() => toast.error("Failed to copy share link"))
-	}, [])
+	const shareCopy = useCopy({ label: "Share link" })
+	const handleShare = useCallback(
+		(tab: ChatTab) => {
+			if (typeof window === "undefined") return
+			void shareCopy.copy(shareUrl(tab))
+		},
+		[shareCopy],
+	)
 
 	// state → URL: reflect the current tab in the URL via history.replaceState so
 	// refresh / bookmark works without re-rendering the route tree (using TanStack

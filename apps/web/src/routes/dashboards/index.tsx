@@ -5,12 +5,12 @@ import { toast } from "sonner"
 
 import { Unitflow, View } from "@maple/unitflow/react"
 import { Button } from "@maple/ui/components/ui/button"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
 
 import { DashboardList, type DashboardScope } from "@/components/dashboard-builder/list/dashboard-list"
 import { headerSummary } from "@/components/dashboard-builder/list/dashboard-summary"
 import { DashboardListSkeleton } from "@/components/dashboard-builder/loading-skeletons"
+import { SyncDegradedBanner, SyncUnavailable } from "@/components/common/sync-unavailable"
 import {
 	downloadPortableDashboard,
 	isPersesDashboardJson,
@@ -23,6 +23,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { isDashboardSortOption, type DashboardSortOption } from "@/atoms/dashboard-preferences-atoms"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useDashboardMutations } from "@/hooks/use-dashboard-store"
+import { retryOrgCollections } from "@/lib/collections/org-collections"
 import { DashboardsListModel } from "@/lib/models/dashboards-list-model"
 import { unitflowRuntime } from "@/lib/models/runtime"
 
@@ -284,17 +285,11 @@ function PageShell({
 
 function ListLoadError() {
 	return (
-		<Empty className="py-12">
-			<EmptyHeader>
-				<EmptyMedia variant="icon">
-					<CircleWarningIcon size={18} />
-				</EmptyMedia>
-				<EmptyTitle>Couldn’t load dashboards</EmptyTitle>
-				<EmptyDescription>
-					The sync stream dropped. Your dashboards are safe — this is a read problem.
-				</EmptyDescription>
-			</EmptyHeader>
-		</Empty>
+		<SyncUnavailable
+			title="Couldn’t load dashboards"
+			description="The sync stream dropped and the list couldn’t be read over HTTP either. Your dashboards are safe — this is a read problem."
+			onRetry={retryOrgCollections}
+		/>
 	)
 }
 
@@ -321,7 +316,12 @@ const ModelPage = View.make(
 				actions={props.actions}
 				persistenceError={props.persistenceError}
 			>
-				<DashboardList dashboards={list.dashboards} {...props.list} />
+				{list.degraded && <SyncDegradedBanner onRetry={retryOrgCollections} />}
+				<DashboardList
+					dashboards={list.dashboards}
+					{...props.list}
+					readOnly={props.list.readOnly || list.degraded}
+				/>
 			</PageShell>
 		)
 	},

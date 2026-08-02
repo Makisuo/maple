@@ -23,6 +23,13 @@ const QueryBuilderBreakdownInputSchema = Schema.Struct({
 	startTime: dateTimeString,
 	endTime: dateTimeString,
 	queries: Schema.mutable(Schema.Array(QueryBuilderQueryDraftSchema)),
+	/**
+	 * Rows to fetch per query when the author set no explicit limit add-on.
+	 * A panel that collapses its long tail into an "Other" bucket asks for more
+	 * rows than it draws, so that bucket is a real sum rather than absent; one
+	 * that plots every row it receives omits this and keeps the warehouse default.
+	 */
+	defaultLimit: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
 })
 
 export type QueryBuilderBreakdownInput = Schema.Schema.Type<typeof QueryBuilderBreakdownInputSchema>
@@ -39,8 +46,9 @@ const executeBreakdownQuery = Effect.fn("QueryEngine.executeBreakdownQuery")(fun
 	startTime: string,
 	endTime: string,
 	query: QueryBuilderBreakdownInput["queries"][number],
+	defaultLimit: number | undefined,
 ) {
-	const built = buildBreakdownQuerySpec(query)
+	const built = buildBreakdownQuerySpec(query, { defaultLimit })
 
 	if (!built.query) {
 		return {
@@ -180,7 +188,7 @@ const getQueryBuilderBreakdownEffect = Effect.fn("QueryEngine.getQueryBuilderBre
 
 	const results = yield* Effect.forEach(
 		enabledQueries,
-		(query) => executeBreakdownQuery(input.startTime, input.endTime, query),
+		(query) => executeBreakdownQuery(input.startTime, input.endTime, query, input.defaultLimit),
 		{ concurrency: enabledQueries.length },
 	)
 
