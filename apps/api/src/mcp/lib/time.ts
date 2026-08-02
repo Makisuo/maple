@@ -1,9 +1,9 @@
-import * as DateTime from "effect/DateTime"
-import { Option } from "effect"
 import {
 	MAX_DISCOVERY_RANGE_SECONDS,
 	MAX_LIST_RANGE_SECONDS,
 	MAX_LOG_PATTERN_RANGE_SECONDS,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
 } from "@maple/query-engine"
 
 // Tool-facing caps, expressed in hours to match `ResolveTimeRangeOptions`. The
@@ -17,49 +17,28 @@ export const MCP_DISCOVERY_MAX_HOURS = MAX_DISCOVERY_RANGE_SECONDS / 3600
 /** Log-pattern clustering — scans raw message bodies. */
 export const MCP_LOG_PATTERN_MAX_HOURS = MAX_LOG_PATTERN_RANGE_SECONDS / 3600
 
-const formatUtc = (dt: DateTime.DateTime): string => DateTime.formatIso(dt).replace("T", " ").slice(0, 19)
-
-const alreadyNormalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
-
 /**
  * Normalizes a time string to the `YYYY-MM-DD HH:mm:ss` UTC format expected
  * by Tinybird's `DateTime()` SQL function.
  *
  * Handles ISO 8601 (with T, Z, timezone offsets, milliseconds) and the
- * already-correct `YYYY-MM-DD HH:mm:ss` format. Returns the original string
- * unchanged if parsing fails.
+ * already-correct `YYYY-MM-DD HH:mm:ss` format — which the shared parser reads
+ * as UTC rather than local. Returns the input trimmed if it can't be parsed.
  */
 export function normalizeTime(input: string): string {
 	const trimmed = input.trim()
-	if (alreadyNormalized.test(trimmed)) return trimmed
-
-	const parsed = DateTime.make(trimmed)
-	if (Option.isSome(parsed)) return formatUtc(parsed.value)
-
-	return trimmed
+	const ms = parseWarehouseDateTime(trimmed)
+	return Number.isNaN(ms) ? trimmed : formatWarehouseDateTime(ms)
 }
 
 const DEFAULT_HOURS = 6
 
 function defaultTimeRange(hours = DEFAULT_HOURS) {
-	const now = DateTime.nowUnsafe()
-	const start = DateTime.subtract(now, { hours })
+	const nowMs = Date.now()
 	return {
-		startTime: formatUtc(start),
-		endTime: formatUtc(now),
+		startTime: formatWarehouseDateTime(nowMs - hours * 3_600_000),
+		endTime: formatWarehouseDateTime(nowMs),
 	}
-}
-
-const NORMALIZED_UTC = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/
-
-function toEpochMs(normalized: string): number | undefined {
-	const m = NORMALIZED_UTC.exec(normalized)
-	if (!m) return undefined
-	return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]))
-}
-
-function fromEpochMs(ms: number): string {
-	return new Date(ms).toISOString().replace("T", " ").slice(0, 19)
 }
 
 export interface ResolveTimeRangeOptions {
@@ -103,10 +82,9 @@ export function resolveTimeRange(
 	const st = startTime ? normalizeTime(startTime) : defaults.startTime
 	const et = endTime ? normalizeTime(endTime) : defaults.endTime
 
-	const stMs = toEpochMs(st)
-	const etMs = toEpochMs(et)
-	const requestedHours =
-		stMs !== undefined && etMs !== undefined ? (etMs - stMs) / (3600 * 1000) : undefined
+	const stMs = parseWarehouseDateTime(st)
+	const etMs = parseWarehouseDateTime(et)
+	const requestedHours = Number.isNaN(stMs) || Number.isNaN(etMs) ? undefined : (etMs - stMs) / 3_600_000
 
 	const exceeded =
 		maxHours !== undefined && maxHours > 0 && requestedHours !== undefined && requestedHours > maxHours

@@ -4,6 +4,7 @@ import {
 	type QueryEngineExecuteResponse,
 	type QuerySpec,
 	type TracesMetric,
+	formatWarehouseDateTime,
 } from "@maple/query-engine"
 import { Clock, Effect, Schema } from "effect"
 
@@ -850,9 +851,8 @@ const getServiceDetailOverviewEffect = Effect.fn("QueryEngine.getServiceDetailOv
 	const input = yield* decodeInput(GetCustomChartServiceDetailInputSchema, data, "getServiceDetailOverview")
 
 	const nowMs = yield* Clock.currentTimeMillis
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	const startTime = input.startTime ?? fmt(nowMs - 24 * 60 * 60 * 1000)
-	const endTime = input.endTime ?? fmt(nowMs)
+	const startTime = input.startTime ?? formatWarehouseDateTime(nowMs - 24 * 60 * 60 * 1000)
+	const endTime = input.endTime ?? formatWarehouseDateTime(nowMs)
 	const bucketSeconds = computeBucketSeconds(startTime, endTime)
 
 	const timeseriesRequest = makeAllMetricsTimeseriesRequest({

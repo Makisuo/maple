@@ -1,3 +1,4 @@
+import { formatWarehouseDateTime } from "@maple/query-engine"
 /**
  * Derive a warehouse query window around a single trace timestamp.
  *
@@ -14,8 +15,6 @@
  */
 const DEFAULT_HALF_WIDTH_HOURS = 1
 
-const tinybirdDateTime = (d: Date): string => d.toISOString().replace("T", " ").slice(0, 19)
-
 export function computeTraceTimeWindow(
 	timestamp: string | undefined,
 	halfWidthHours = DEFAULT_HALF_WIDTH_HOURS,
@@ -26,7 +25,7 @@ export function computeTraceTimeWindow(
 	if (Number.isNaN(t.getTime())) return undefined
 	const halfWidthMs = halfWidthHours * 60 * 60 * 1000
 	return {
-		startTime: tinybirdDateTime(new Date(t.getTime() - halfWidthMs)),
-		endTime: tinybirdDateTime(new Date(t.getTime() + halfWidthMs)),
+		startTime: formatWarehouseDateTime(t.getTime() - halfWidthMs),
+		endTime: formatWarehouseDateTime(t.getTime() + halfWidthMs),
 	}
 }

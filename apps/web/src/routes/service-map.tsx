@@ -16,6 +16,7 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { LONG_RANGE_PRESET_OPTIONS } from "@/lib/time-utils"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 // `__all__` is the sentinel for the "All Environments" option. Storing it in the
 // URL (rather than clearing the param) keeps an explicit all-environments choice
 // sticky, distinct from "no choice → default to production".
@@ -59,10 +60,12 @@ function ServiceMapContent() {
 	// a fixed range keeps this a single cached facets request independent of the
 	// map's own time range. Matches the dashboard's facets probe.
 	const facetsRange = useMemo(() => {
-		const fmt = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19)
 		const end = new Date()
 		const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
-		return { startTime: fmt(start), endTime: fmt(end) }
+		return {
+			startTime: formatWarehouseDateTime(start.getTime()),
+			endTime: formatWarehouseDateTime(end.getTime()),
+		}
 	}, [])
 	const facetsAtom = getServicesFacetsResultAtom({ data: facetsRange })
 	const facetsResult = useRetainedRefreshableResultValue(facetsAtom)

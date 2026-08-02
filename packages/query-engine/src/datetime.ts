@@ -47,9 +47,147 @@ export function parseWarehouseDateTime(value: string): number {
  * Format epoch milliseconds as the tz-less second-precision
  * `YYYY-MM-DD HH:MM:SS` shape ClickHouse/Tinybird DateTime params expect
  * (UTC wall clock, space separator, no fractional part).
+ *
+ * This is the canonical formatter. It previously existed as ~50 local copies
+ * named `fmt`, `fmtUTC`, `tinybirdDateTime`, `toTinybirdDateTime`,
+ * `fmtWarehouseTime`, `msToWarehouseDateTime`, `warehouseDate`,
+ * `formatForTinybird`, and `toWarehouseDateTime` — all identical.
  */
 export function formatWarehouseDateTime(epochMs: number): string {
 	return new Date(epochMs).toISOString().replace("T", " ").slice(0, 19)
+}
+
+/**
+ * Millisecond-precision variant: `YYYY-MM-DD HH:MM:SS.mmm`.
+ *
+ * A minority of callers deliberately keep the fractional part (DateTime64
+ * columns, replay fixtures whose ordering is sub-second). Distinct from
+ * `formatWarehouseDateTime` because truncating those to whole seconds
+ * collapses events that must stay ordered.
+ */
+export function formatWarehouseDateTimeMs(epochMs: number): string {
+	return new Date(epochMs).toISOString().replace("T", " ").replace(/Z$/, "")
+}
+
+// ---------------------------------------------------------------------------
+// Relative range shorthand — single source of truth
+//
+// The time picker persists relative ranges as shorthand ("15m", "7d", "3mo",
+// "today"). This grammar used to exist three times over — in the web app (on
+// date-fns), in the MCP dashboard resolver (on Effect DateTime, approximating a
+// month as 30 days), and in the query engine's own limits module — which is how
+// `mo` came to mean different spans depending on which one you asked.
+//
+// Month and day arithmetic is done on **local** calendar components, matching
+// date-fns' `subMonths`/`startOfDay`. In the browser that is the viewer's
+// calendar (unchanged behaviour); on a Worker, local is UTC, which is the only
+// sensible reading server-side. One implementation serves both.
+// ---------------------------------------------------------------------------
+
+const RELATIVE_RANGE_PATTERN = /^(\d+)(mo|m|h|d|w)$/
+
+const MS: Record<string, number> = {
+	m: 60_000,
+	h: 3_600_000,
+	d: 86_400_000,
+	w: 604_800_000,
+}
+
+/**
+ * Shift `date` by whole calendar months, clamping the day-of-month to the
+ * target month's length (31 Mar − 1mo → 28 Feb, never 3 Mar). Mirrors
+ * date-fns' `subMonths` so the web app's behaviour is preserved exactly.
+ */
+function addCalendarMonths(date: Date, months: number): Date {
+	const shifted = new Date(date.getTime())
+	const day = shifted.getDate()
+	// Park on the 1st before changing month, so the month set can't overflow.
+	shifted.setDate(1)
+	shifted.setMonth(shifted.getMonth() + months)
+	const daysInTargetMonth = new Date(shifted.getFullYear(), shifted.getMonth() + 1, 0).getDate()
+	shifted.setDate(Math.min(day, daysInTargetMonth))
+	return shifted
+}
+
+/** Local midnight for the day containing `date`. Mirrors date-fns' `startOfDay`. */
+function startOfLocalDay(date: Date): Date {
+	const start = new Date(date.getTime())
+	start.setHours(0, 0, 0, 0)
+	return start
+}
+
+/**
+ * Duration in seconds for a relative shorthand, or `null` when the string isn't
+ * valid shorthand.
+ *
+ * Approximate by construction — a month is counted as 30 days and `"today"` as
+ * its 24-hour worst case — because this exists to compare a shorthand against a
+ * fixed ceiling, where a deterministic answer matters more than a calendar-exact
+ * one. Use `resolveRelativeRange` to build actual query bounds.
+ */
+export function relativeRangeSeconds(shorthand: string): number | null {
+	const trimmed = shorthand.trim().toLowerCase()
+	if (trimmed === "today") return 86_400
+
+	const match = RELATIVE_RANGE_PATTERN.exec(trimmed)
+	if (!match) return null
+
+	const amount = Number.parseInt(match[1], 10)
+	if (!Number.isFinite(amount) || amount <= 0) return null
+
+	const unit = match[2]
+	const unitMs = unit === "mo" ? 30 * 86_400_000 : MS[unit]
+	if (unitMs === undefined) return null
+
+	return (amount * unitMs) / 1000
+}
+
+/**
+ * Resolve a relative shorthand to an absolute epoch-ms window ending at `nowMs`.
+ * Returns `null` for anything the grammar doesn't accept, so callers can fall
+ * back or report an error rather than silently querying a default window.
+ */
+export function resolveRelativeRange(
+	shorthand: string,
+	nowMs: number = Date.now(),
+): { startMs: number; endMs: number } | null {
+	const trimmed = shorthand.trim().toLowerCase()
+	const now = new Date(nowMs)
+
+	if (trimmed === "today") {
+		return { startMs: startOfLocalDay(now).getTime(), endMs: nowMs }
+	}
+
+	const match = RELATIVE_RANGE_PATTERN.exec(trimmed)
+	if (!match) return null
+
+	const amount = Number.parseInt(match[1], 10)
+	if (!Number.isFinite(amount) || amount <= 0) return null
+
+	const unit = match[2]
+	if (unit === "mo") {
+		return { startMs: addCalendarMonths(now, -amount).getTime(), endMs: nowMs }
+	}
+
+	const unitMs = MS[unit]
+	if (unitMs === undefined) return null
+	return { startMs: nowMs - amount * unitMs, endMs: nowMs }
+}
+
+/**
+ * `resolveRelativeRange` rendered straight into warehouse DateTime strings —
+ * the shape every query path actually wants.
+ */
+export function resolveRelativeRangeToWarehouse(
+	shorthand: string,
+	nowMs: number = Date.now(),
+): { startTime: string; endTime: string } | null {
+	const resolved = resolveRelativeRange(shorthand, nowMs)
+	if (!resolved) return null
+	return {
+		startTime: formatWarehouseDateTime(resolved.startMs),
+		endTime: formatWarehouseDateTime(resolved.endMs),
+	}
 }
 
 // ---------------------------------------------------------------------------

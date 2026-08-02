@@ -12,6 +12,7 @@ import { EventType, IncrementalSource, MouseInteractions } from "@rrweb/types"
 import type { SessionTraceSummary } from "./replay-editor-timeline"
 import type { EventRow } from "./session-events-panel"
 
+import { formatWarehouseDateTimeMs } from "@maple/query-engine"
 // rrweb-snapshot NodeType (not re-exported from @rrweb/types).
 const NodeType = { Document: 0, DocumentType: 1, Element: 2, Text: 3 } as const
 
@@ -19,8 +20,7 @@ const NodeType = { Document: 0, DocumentType: 1, Element: 2, Text: 3 } as const
 const BASE_EPOCH_MS = Date.now() - 5 * 60 * 1000
 const ts = (offsetMs: number) => BASE_EPOCH_MS + offsetMs
 /** Epoch → ClickHouse DateTime64 string (UTC, space-separated) for warehouse-shaped rows. */
-const ch = (offsetMs: number) =>
-	new Date(BASE_EPOCH_MS + offsetMs).toISOString().replace("T", " ").replace("Z", "")
+const ch = (offsetMs: number) => formatWarehouseDateTimeMs(BASE_EPOCH_MS + offsetMs)
 
 const VIEWPORT = { width: 1280, height: 720 }
 const INITIAL_URL = "https://app.acme.dev/dashboard"

@@ -6,9 +6,10 @@
 
 import { formatRelativeFrom } from "@maple/ui/time-format"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 /** Format an epoch-ms instant as a ClickHouse DateTime string (UTC, second precision). */
 export function toClickHouseDateTime(epochMs: number): string {
-	return new Date(epochMs).toISOString().replace("T", " ").slice(0, 19)
+	return formatWarehouseDateTime(epochMs)
 }
 
 export interface TimeBounds {

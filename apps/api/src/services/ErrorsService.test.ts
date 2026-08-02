@@ -38,6 +38,7 @@ import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { describeCause, ErrorsService, isBusyDatabaseError, makePersistenceError } from "./ErrorsService"
 import { NotificationDispatcher } from "./NotificationDispatcher"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 describe("makePersistenceError", () => {
 	it("omits the cause key when the source has no cause", () => {
 		const err = makePersistenceError(new Error("boom"))
@@ -738,8 +739,6 @@ const RETENTION_TICK_MS = 1_750_003_200_000
 const TICK_MS = RETENTION_TICK_MS + 120_000
 
 /** Same format the tick itself sends to the warehouse ("YYYY-MM-DD HH:MM:SS", UTC). */
-const toWarehouseDateTime = (epochMs: number) =>
-	new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
 
 /** Real error fingerprints are decimal UInt64 strings from ClickHouse. */
 const SCAN_FINGERPRINT = "12345678901234567890"
@@ -753,8 +752,8 @@ const scanRow = (overrides: Record<string, unknown> = {}): Record<string, unknow
 	topFrame: "checkout/handler.ts:42",
 	count: 3,
 	affectedServicesCount: 1,
-	firstSeen: toWarehouseDateTime(TICK_MS - 60_000),
-	lastSeen: toWarehouseDateTime(TICK_MS - 1_000),
+	firstSeen: formatWarehouseDateTime(TICK_MS - 60_000),
+	lastSeen: formatWarehouseDateTime(TICK_MS - 1_000),
 	...overrides,
 })
 
@@ -1034,8 +1033,8 @@ describe("ErrorsService.runTick", () => {
 			const reopenMs = TICK_MS + 32 * 60_000
 			rows = [
 				scanRow({
-					firstSeen: toWarehouseDateTime(reopenMs - 60_000),
-					lastSeen: toWarehouseDateTime(reopenMs - 1_000),
+					firstSeen: formatWarehouseDateTime(reopenMs - 60_000),
+					lastSeen: formatWarehouseDateTime(reopenMs - 1_000),
 				}),
 			]
 			yield* TestClock.setTime(reopenMs)

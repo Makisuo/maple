@@ -5,6 +5,7 @@ import { WarehouseExecutor } from "./WarehouseExecutor"
 import type { InspectTraceOutput, SpanNode } from "./types"
 import { toLogEntry } from "./row-mappers"
 
+import { formatWarehouseDateTime } from "../datetime"
 const SKIP_ATTR_PREFIXES = ["http.request.header.", "http.response.header.", "signoz."]
 const SKIP_ATTR_KEYS = HashSet.fromIterable([
 	"http.request.method",
@@ -74,8 +75,6 @@ export interface InspectTraceOptions {
 const DEFAULT_RANGE_HOURS = 1
 const DEFAULT_LOOKBACK_HOURS = 24
 
-const tinybirdDateTime = (d: Date): string => d.toISOString().replace("T", " ").slice(0, 19)
-
 export const inspectTrace = Effect.fn("Observability.inspectTrace")(function* (
 	traceId: string,
 	options?: InspectTraceOptions,
@@ -89,15 +88,15 @@ export const inspectTrace = Effect.fn("Observability.inspectTrace")(function* (
 		? (() => {
 				const halfWidthMs = (options.rangeHours ?? DEFAULT_RANGE_HOURS) * 60 * 60 * 1000
 				return {
-					start_time: tinybirdDateTime(new Date(options.timestampHint.getTime() - halfWidthMs)),
-					end_time: tinybirdDateTime(new Date(options.timestampHint.getTime() + halfWidthMs)),
+					start_time: formatWarehouseDateTime(options.timestampHint.getTime() - halfWidthMs),
+					end_time: formatWarehouseDateTime(options.timestampHint.getTime() + halfWidthMs),
 				}
 			})()
 		: (() => {
 				const lookbackMs = (options?.defaultLookbackHours ?? DEFAULT_LOOKBACK_HOURS) * 60 * 60 * 1000
 				return {
-					start_time: tinybirdDateTime(new Date(nowMs - lookbackMs)),
-					end_time: tinybirdDateTime(new Date(nowMs)),
+					start_time: formatWarehouseDateTime(nowMs - lookbackMs),
+					end_time: formatWarehouseDateTime(nowMs),
 				}
 			})()
 
