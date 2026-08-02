@@ -140,6 +140,26 @@ const v2DashboardToDashboard = (value: V2DashboardMutation): Dashboard => ({
 	updatedAt: value.updatedAt,
 })
 
+// The one place plain UI time ranges become the schema's branded ISO strings.
+const toDocumentTimeRange = (timeRange: TimeRange) =>
+	timeRange.type === "absolute"
+		? {
+				type: "absolute" as const,
+				startTime: asIsoDateTimeString(timeRange.startTime),
+				endTime: asIsoDateTimeString(timeRange.endTime),
+			}
+		: timeRange
+
+/** Widgets pinned to their own range carry ISO strings that need the same branding. */
+const toDocumentWidgets = (widgets: Dashboard["widgets"]): DashboardDocument["widgets"] =>
+	widgets.map((widget) => {
+		// Destructured rather than spread-and-overwrite: `timeRange` is `optionalKey`
+		// on the document, so an unpinned widget has to reach it without the key at
+		// all — a present `undefined` fails the encode.
+		const { timeRange, ...rest } = widget
+		return timeRange ? { ...rest, timeRange: toDocumentTimeRange(timeRange) } : rest
+	})
+
 function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 	// `description`/`tags`/`variables` are `Schema.optionalKey` on `DashboardDocument`;
 	// the Schema.Class constructor rejects a present `undefined`. The web `Dashboard`
@@ -155,14 +175,8 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 		...(tags !== undefined && { tags }),
 		...(variables !== undefined && { variables }),
 		...(refreshIntervalSeconds !== undefined && { refreshIntervalSeconds }),
-		timeRange:
-			dashboard.timeRange.type === "absolute"
-				? {
-						type: "absolute",
-						startTime: asIsoDateTimeString(dashboard.timeRange.startTime),
-						endTime: asIsoDateTimeString(dashboard.timeRange.endTime),
-					}
-				: dashboard.timeRange,
+		widgets: toDocumentWidgets(dashboard.widgets),
+		timeRange: toDocumentTimeRange(dashboard.timeRange),
 	})
 }
 
@@ -181,15 +195,8 @@ function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDash
 		...(tags !== undefined && { tags: [...tags] }),
 		...(variables !== undefined && { variables: jsonClone(variables) }),
 		...(refreshIntervalSeconds !== undefined && { refreshIntervalSeconds }),
-		widgets: jsonClone(dashboard.widgets),
-		timeRange:
-			dashboard.timeRange.type === "absolute"
-				? {
-						type: "absolute",
-						startTime: asIsoDateTimeString(dashboard.timeRange.startTime),
-						endTime: asIsoDateTimeString(dashboard.timeRange.endTime),
-					}
-				: dashboard.timeRange,
+		widgets: toDocumentWidgets(jsonClone(dashboard.widgets)),
+		timeRange: toDocumentTimeRange(dashboard.timeRange),
 	})
 }
 
@@ -395,13 +402,21 @@ function makeWidgetMutators(deps: {
 	const updateWidget = (
 		dashboardId: string,
 		widgetId: string,
-		updates: Partial<Pick<DashboardWidget, "visualization" | "dataSource" | "display" | "layout">>,
+		updates: Partial<
+			Pick<DashboardWidget, "visualization" | "dataSource" | "display" | "layout" | "timeRange">
+		>,
 	) => {
 		return mutateDashboard(dashboardId, (dashboard) => ({
 			...dashboard,
-			widgets: dashboard.widgets.map((widget) =>
-				widget.id === widgetId ? { ...widget, ...updates } : widget,
-			),
+			widgets: dashboard.widgets.map((widget) => {
+				if (widget.id !== widgetId) return widget
+				const next = { ...widget, ...updates }
+				// `timeRange: undefined` means "follow the dashboard again". The key
+				// has to go, not sit there holding `undefined` — the widget schema
+				// declares it `optionalKey`, which won't encode an explicit undefined.
+				if (next.timeRange === undefined) delete next.timeRange
+				return next
+			}),
 			updatedAt: new Date().toISOString(),
 		}))
 	}

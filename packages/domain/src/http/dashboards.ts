@@ -13,7 +13,7 @@ import {
 import { Authorization } from "./current-tenant"
 import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "./widget-types"
 
-const TimeRangeSchema = Schema.Union([
+export const TimeRangeSchema = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("relative"),
 		value: Schema.String,
@@ -24,6 +24,7 @@ const TimeRangeSchema = Schema.Union([
 		endTime: IsoDateTimeString,
 	}),
 ])
+export type TimeRange = typeof TimeRangeSchema.Type
 
 const UnknownRecord = Schema.Record(Schema.String, Schema.Unknown)
 const StringRecord = Schema.Record(Schema.String, Schema.String)
@@ -220,6 +221,14 @@ export const DashboardWidgetSchema = Schema.Struct({
 	dataSource: WidgetDataSourceSchema,
 	display: WidgetDisplayConfigSchema,
 	layout: WidgetLayoutSchema,
+	// Per-widget time range. Absent (the common case) means "follow the
+	// dashboard's range" — the tile re-queries whenever the board's picker moves.
+	// When set, the tile is pinned to its own window regardless of the board's,
+	// which is how a "last 30 minutes" health stat lives on a 7-day board. The
+	// override only replaces the time window: dashboard variables still
+	// interpolate normally, and the board's auto-refresh still rebases a relative
+	// override against "now".
+	timeRange: Schema.optionalKey(TimeRangeSchema),
 })
 
 // ---------------------------------------------------------------------------

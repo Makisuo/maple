@@ -13,6 +13,7 @@ import {
 	decodeDataSourceJson,
 	decodeDisplayJson,
 	decodeLayoutJson,
+	decodeTimeRangeJson,
 	defaultSizeForVisualization,
 	findNextWidgetPosition,
 	generateWidgetId,
@@ -67,6 +68,9 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 			widget_id: optionalStringParam(
 				"Optional stable id for the new widget. If omitted a UUID is generated.",
 			),
+			time_range_json: optionalStringParam(
+				'Optional JSON string pinning this widget to its own time range instead of the dashboard\'s: `{"type":"relative","value":"30m"}` or `{"type":"absolute","startTime":"...","endTime":"..."}` (ISO 8601). Omit it and the widget follows the dashboard range, which is what almost every widget should do — use it only when the tile genuinely means a different window (an "active in the last 30 minutes" stat on a 7-day board). The widget header labels the override so readers can see it.',
+			),
 		}),
 		Effect.fn("McpTool.addDashboardWidget")(function* ({
 			dashboard_id,
@@ -78,6 +82,7 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 			display_json,
 			layout_json,
 			widget_id,
+			time_range_json,
 		}) {
 			if (!KNOWN_VISUALIZATIONS.includes(visualization)) {
 				return validationError(
@@ -129,6 +134,7 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 			}
 
 			const explicitLayout = layout_json ? yield* decodeLayoutJson(layout_json, TOOL) : undefined
+			const timeRange = time_range_json ? yield* decodeTimeRangeJson(time_range_json, TOOL) : undefined
 
 			const newId = widget_id && widget_id.length > 0 ? widget_id : generateWidgetId()
 
@@ -157,6 +163,9 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 						dataSource,
 						display,
 						layout,
+						// Absent unless asked for: the key must not exist at all, so the
+						// widget reads as "follows the dashboard range".
+						...(timeRange ? { timeRange } : {}),
 					}
 
 					return [...existingWidgets, widget]
@@ -186,6 +195,11 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 				`Dashboard: ${dashboard.name} (${dashboard.id})`,
 				`Widget ID: ${newId}`,
 				`Visualization: ${visualization}`,
+				...(timeRange
+					? [
+							`Time range: pinned to ${timeRange.type === "relative" ? `last ${timeRange.value}` : `${timeRange.startTime} → ${timeRange.endTime}`} (not the dashboard's)`,
+						]
+					: []),
 				`Layout: x=${added?.layout.x ?? "?"} y=${added?.layout.y ?? "?"} w=${added?.layout.w ?? "?"} h=${added?.layout.h ?? "?"}`,
 				`Total widgets: ${dashboard.widgets.length}`,
 			]

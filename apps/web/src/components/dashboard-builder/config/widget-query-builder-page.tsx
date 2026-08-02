@@ -14,10 +14,12 @@ import {
 } from "@/components/dashboard-builder/config/raw-sql-editor-panel"
 import type {
 	DashboardWidget,
+	TimeRange,
 	VisualizationType,
 	WidgetDataSource,
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
+import { WidgetTimeRangeProvider } from "@/components/dashboard-builder/widgets/widget-time-range-context"
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useWidgetData } from "@/hooks/use-widget-data"
@@ -48,6 +50,8 @@ interface WidgetQueryBuilderPageProps {
 		visualization: VisualizationType
 		dataSource: WidgetDataSource
 		display: WidgetDisplayConfig
+		/** `undefined` clears any override: the widget follows the dashboard again. */
+		timeRange: TimeRange | undefined
 	}) => void
 }
 
@@ -58,7 +62,14 @@ const WidgetPreview = React.memo(function WidgetPreview({ widget }: { widget: Da
 	const { dataState } = useWidgetData(widget)
 	const Visualization = visualizationFor(widget.visualization)
 
-	return <Visualization dataState={dataState} display={widget.display} mode="view" />
+	// Same provider the canvas wraps a tile in, so the preview's secondary
+	// fetches and its "own time range" header badge behave as they will once
+	// saved.
+	return (
+		<WidgetTimeRangeProvider timeRange={widget.timeRange}>
+			<Visualization dataState={dataState} display={widget.display} mode="view" />
+		</WidgetTimeRangeProvider>
+	)
 })
 
 type SourceMode = "builder" | "rawSql"
@@ -165,9 +176,13 @@ export function WidgetQueryBuilderPage({
 	const [rawSqlPreviewDraft, setRawSqlPreviewDraft] = React.useState<RawSqlDraft>(initialRawSqlDraft)
 
 	const previewWidget = React.useMemo(() => {
+		// The override applies live from the editing state — it costs nothing to
+		// re-resolve and a pinned window you can't see until you save is a trap.
+		const timeRange = state.timeRange ?? undefined
 		if (mode === "rawSql") {
 			return {
 				...widget,
+				timeRange,
 				visualization: state.visualization,
 				dataSource: buildRawSqlDataSource(
 					widget,
@@ -193,6 +208,7 @@ export function WidgetQueryBuilderPage({
 		}
 		return {
 			...widget,
+			timeRange,
 			visualization: state.visualization,
 			dataSource: buildWidgetDataSource(widget, previewState, previewSeriesOptions),
 			display: buildWidgetDisplay(widget, previewState),
@@ -214,6 +230,7 @@ export function WidgetQueryBuilderPage({
 				visualization: state.visualization,
 				dataSource: buildRawSqlDataSource(widget, rawSqlDraft, state.visualization, state.chartId),
 				display: buildWidgetDisplay(widget, state),
+				timeRange: state.timeRange ?? undefined,
 			})
 			return
 		}
@@ -222,6 +239,7 @@ export function WidgetQueryBuilderPage({
 			visualization: state.visualization,
 			dataSource: buildWidgetDataSource(widget, state, seriesFieldOptions),
 			display: buildWidgetDisplay(widget, state),
+			timeRange: state.timeRange ?? undefined,
 		})
 	}
 

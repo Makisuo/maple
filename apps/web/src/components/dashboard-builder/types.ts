@@ -113,8 +113,17 @@ export type WidgetDataState =
 
 // --- Dashboard Widget ---
 
-export type DashboardWidget = Omit<DeepMutable<typeof DashboardWidgetSchema.Type>, "dataSource"> & {
+// `timeRange` is re-typed for the same reason `Dashboard["timeRange"]` is: the
+// schema brands its ISO strings, and every producer in the UI (the time-range
+// picker, the builder form) deals in plain strings. Branding happens once, at
+// the store's document boundary.
+export type DashboardWidget = Omit<
+	DeepMutable<typeof DashboardWidgetSchema.Type>,
+	"dataSource" | "timeRange"
+> & {
 	dataSource: WidgetDataSource
+	/** Absent means the widget follows the dashboard's range. */
+	timeRange?: TimeRange
 }
 
 // --- Dashboard Variables ---

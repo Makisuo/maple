@@ -95,6 +95,19 @@ const toInternalTimeRange = (
 				endTime: asIsoDateTime(range.endTime),
 			}
 
+/**
+ * A widget may pin its own window; its ISO strings need the same branding the
+ * dashboard-level range gets. Destructured rather than spread-and-overwrite so
+ * an unpinned widget arrives without the `optionalKey` at all.
+ */
+const toInternalWidgets = (
+	widgets: NonNullable<V2DashboardCreateParams["widgets"]>,
+): DashboardDocument["widgets"] =>
+	widgets.map((widget) => {
+		const { timeRange, ...rest } = widget
+		return timeRange ? { ...rest, timeRange: toInternalTimeRange(timeRange) } : rest
+	})
+
 const toPortable = (payload: V2DashboardCreateParams): PortableDashboardDocument =>
 	new PortableDashboardDocument({
 		name: payload.name,
@@ -106,7 +119,7 @@ const toPortable = (payload: V2DashboardCreateParams): PortableDashboardDocument
 			payload.timeRange === undefined
 				? { type: "relative", value: "12h" }
 				: toInternalTimeRange(payload.timeRange),
-		widgets: payload.widgets ?? [],
+		widgets: toInternalWidgets(payload.widgets ?? []),
 		...(payload.variables !== undefined ? { variables: payload.variables } : {}),
 		...(payload.refreshIntervalSeconds !== undefined && payload.refreshIntervalSeconds !== null
 			? { refreshIntervalSeconds: payload.refreshIntervalSeconds }
@@ -136,7 +149,7 @@ const applyUpdate = (
 		...(tags !== undefined ? { tags } : {}),
 		timeRange:
 			payload.timeRange === undefined ? current.timeRange : toInternalTimeRange(payload.timeRange),
-		widgets: payload.widgets ?? current.widgets,
+		widgets: payload.widgets ? toInternalWidgets(payload.widgets) : current.widgets,
 		...(variables !== undefined ? { variables } : {}),
 		...(refreshIntervalSeconds !== undefined ? { refreshIntervalSeconds } : {}),
 		createdAt: current.createdAt,

@@ -7,6 +7,7 @@ import { useMountEffect } from "@/hooks/use-mount-effect"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { DashboardTimeRangeWrapper } from "@/components/dashboard-builder/dashboard-providers"
 import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
+import { WidgetTimeRangeProvider } from "@/components/dashboard-builder/widgets/widget-time-range-context"
 import type { DashboardWidget, TimeRange } from "@/components/dashboard-builder/types"
 import { useWidgetData } from "@/hooks/use-widget-data"
 import { CircleWarningIcon } from "@/components/icons"
@@ -94,7 +95,9 @@ const PreviewWidget = memo(function PreviewWidget({ widget }: { widget: Dashboar
 				height: heightFor(widget),
 			}}
 		>
-			<Visualization dataState={dataState} display={widget.display} mode="view" />
+			<WidgetTimeRangeProvider timeRange={widget.timeRange}>
+				<Visualization dataState={dataState} display={widget.display} mode="view" />
+			</WidgetTimeRangeProvider>
 		</div>
 	)
 })
