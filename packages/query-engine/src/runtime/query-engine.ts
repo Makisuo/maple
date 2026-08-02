@@ -2015,7 +2015,11 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 			"tracesAlertEval",
 		)
 		for (const row of rows) {
-			const sampleCount = Number(row.count ?? 0)
+			// `count` is a sample-weighted estimate; `minimumSampleCount` is a
+			// confidence guard and must see rows actually observed. They differ only
+			// under sampling, and only the hourly rollup (which stores no raw count)
+			// falls back to the estimate.
+			const sampleCount = Number(row.spanCount ?? row.count ?? 0)
 			const value = sampleCount > 0 ? tracesAggregateValueForMetric(query.metric, row) : null
 			obs.push({
 				bucket: normalizeBucket(row.bucket),
