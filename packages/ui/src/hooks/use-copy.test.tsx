@@ -1,13 +1,7 @@
-// @vitest-environment jsdom
-
-// `useCopy` lives in `@maple/ui`, but that package's vitest suite is pure-logic
-// with no DOM renderer. apps/web already has jsdom + @testing-library wired, so
-// the hook's behavior is covered from here.
-
 import { act, cleanup, render } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "sonner"
-import { useCopy, type CopyAPI, type UseCopyOptions } from "@maple/ui/hooks/use-copy"
+import { useCopy, type CopyAPI, type UseCopyOptions } from "./use-copy"
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
@@ -21,7 +15,12 @@ function Probe({ options, onReady }: { options?: UseCopyOptions; onReady: (api: 
 function mount(options?: UseCopyOptions) {
 	let latest!: CopyAPI
 	const view = render(<Probe options={options} onReady={(api) => (latest = api)} />)
-	return { get api() { return latest }, view }
+	return {
+		get api() {
+			return latest
+		},
+		view,
+	}
 }
 
 let writeText: ReturnType<typeof vi.fn>
@@ -75,6 +74,24 @@ describe("useCopy", () => {
 		expect(probe.api.status).toBe("error")
 		expect(probe.api.copied).toBe(false)
 		expect(onError).toHaveBeenCalledOnce()
+	})
+
+	it("succeeds through the execCommand fallback when the clipboard API rejects", async () => {
+		// The path that only ever runs on insecure origins and embedded contexts —
+		// i.e. never in a developer's browser, so it needs a test more than the
+		// happy path does.
+		const onCopy = vi.fn()
+		writeText.mockRejectedValue(new Error("denied"))
+		Object.defineProperty(document, "execCommand", { configurable: true, value: () => true })
+		const probe = mount({ label: "Trace ID", onCopy })
+
+		await act(async () => {
+			expect(await probe.api.copy("maple")).toBe(true)
+		})
+		expect(probe.api.status).toBe("copied")
+		expect(onCopy).toHaveBeenCalledWith("maple")
+		expect(toast.success).toHaveBeenCalledWith("Trace ID copied")
+		expect(toast.error).not.toHaveBeenCalled()
 	})
 
 	it("treats an empty value as an error rather than a silent success", async () => {

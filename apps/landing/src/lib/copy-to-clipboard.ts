@@ -1,43 +1,17 @@
 /**
- * Shared copy-to-clipboard wiring for the landing site's install snippets.
+ * Copy-to-clipboard *binding* for the landing site's install snippets.
  *
  * The landing site is Astro with no React islands, so it can't use
  * `@maple/ui`'s `CopyButton` — but it should still behave the same way: the
  * button says it copies, so it copies; the label reverts after a beat; and a
- * blocked clipboard says so rather than silently claiming success.
+ * blocked clipboard says so rather than silently claiming success. Only the DOM
+ * binding is local; the write itself is `@maple/ui`'s, so the insecure-origin
+ * fallback has one implementation across the product and the marketing site.
  */
 
+import { writeClipboardText } from "@maple/ui/lib/clipboard"
+
 const RESET_MS = 1600
-
-/** Writes `text`, falling back to a hidden textarea on insecure origins. */
-export async function writeToClipboard(text: string): Promise<boolean> {
-	if (!text) return false
-
-	try {
-		if (navigator.clipboard?.writeText) {
-			await navigator.clipboard.writeText(text)
-			return true
-		}
-	} catch {
-		// fall through to the legacy path
-	}
-
-	const area = document.createElement("textarea")
-	area.value = text
-	area.setAttribute("readonly", "")
-	area.style.position = "fixed"
-	area.style.opacity = "0"
-	document.body.appendChild(area)
-	area.select()
-	let ok = false
-	try {
-		ok = document.execCommand("copy")
-	} catch {
-		ok = false
-	}
-	document.body.removeChild(area)
-	return ok
-}
 
 export interface CopyButtonOptions {
 	/** Container holding `[data-copy]` elements. Defaults to the whole document. */
@@ -88,7 +62,7 @@ export function bindCopyButtons({
 		let timer: ReturnType<typeof setTimeout> | undefined
 
 		button.addEventListener("click", async () => {
-			const ok = await writeToClipboard(text)
+			const ok = await writeClipboardText(text)
 			label.textContent = ok ? copiedLabel : errorLabel
 			button.classList.toggle(doneClass, ok)
 

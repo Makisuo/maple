@@ -6,6 +6,7 @@ import {
 	getSessionTranscriptResultAtom,
 	getSessionTraceSummariesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { parseAttributes } from "@maple/ui/lib/span-tree"
@@ -15,7 +16,6 @@ import { formatClock, formatSessionDuration, type ReplayPartitionWindow } from "
 import { useReplayPlayer } from "./replay-player-context"
 import { parseChTimestampMs } from "./replay-timeline"
 import type { SessionTraceSummary } from "./replay-editor-timeline"
-import { CopyButton } from "./session-detail-parts"
 
 export type EventRow = {
 	readonly timestamp: string

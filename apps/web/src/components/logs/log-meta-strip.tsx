@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router"
-import { ClockIcon, ExternalLinkIcon, PulseIcon } from "@/components/icons"
+import { ClockIcon, ExternalLinkIcon, LinkIcon, PulseIcon } from "@/components/icons"
 
 import { CopyableValue } from "@/components/attributes"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
@@ -69,7 +69,7 @@ export function LogMetaStrip({ log, timeZone, showOpenFullPage = true }: LogMeta
 				<CopyButton
 					value={() => `${window.location.origin}/logs/${encodeLogKey(log)}`}
 					label="Shareable link"
-					glyph="link"
+					idleIcon={LinkIcon}
 					iconSize={13}
 					tooltip
 				/>

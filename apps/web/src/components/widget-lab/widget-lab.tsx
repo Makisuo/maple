@@ -4,6 +4,7 @@ import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { CopyableValue } from "@maple/ui/components/attributes"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { LinkIcon } from "@/components/icons"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import type { WidgetMode } from "@/components/dashboard-builder/types"
 
@@ -112,7 +113,7 @@ function CopyScenarios() {
 		},
 		{
 			label: "link glyph",
-			node: <CopyButton value="https://maple.dev" label="Link" glyph="link" tooltip />,
+			node: <CopyButton value="https://maple.dev" label="Link" idleIcon={LinkIcon} tooltip />,
 		},
 		{
 			label: "with label / outline",
