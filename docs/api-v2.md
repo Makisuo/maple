@@ -44,7 +44,7 @@ POST   /v2/traces/search         complex reads are POST .../search
 
 Every v2 object has a prefixed public ID (`key_4CzLmR…`, `dash_…`, `alrt_…`). Public IDs are opaque; internally they are a reversible base58 encoding of the internal ID, computed at the API boundary (`packages/domain/src/http/v2/public-id.ts` — the prefix registry lives there and is the single source of truth). No database migration: rows keep their raw UUIDs / internal strings.
 
-Prefixes: `key` (API key), `ingk` (ingest key), `dash` (dashboard), `dbv` (dashboard version), `dtpl` (dashboard template), `alrt` (alert rule), `dest` (alert destination), `inc` (alert incident), `einc` (error incident), `iss` (error issue), `inv` (investigation), `anom` (anomaly incident), `scrp` (scrape target), `rec` (recommendation), `amap` (attribute mapping), `srep` (session replay), and `log` (synthetic log identity); `evt` and `we` are reserved for events/webhooks.
+Prefixes: `key` (API key), `ingk` (ingest key), `dash` (dashboard), `dbv` (dashboard version), `dtpl` (dashboard template), `alrt` (alert rule), `dest` (alert destination), `inc` (alert incident), `evt` (alert delivery event), `einc` (error incident), `iss` (error issue), `inv` (investigation), `anom` (anomaly incident), `scrp` (scrape target), `rec` (recommendation), `amap` (attribute mapping), `srep` (session replay), and `log` (synthetic log identity); `we` is reserved for webhooks.
 
 Exception: Clerk-issued `org_…` / `user_…` IDs are already prefixed public IDs and pass through unchanged.
 
@@ -91,7 +91,7 @@ Every error response body is exactly:
 
 - `type` is closed: `invalid_request_error` (400), `authentication_error` (401), `permission_error` (403), `not_found_error` (404), `conflict_error` (409), `rate_limit_error` (429), `api_error` (5xx).
 - `code` is a stable machine-readable string (`api_key_not_found`, `alert_destination_in_use`, `api_key_lookup_unavailable`, `insufficient_scope`, `parameter_invalid`, …). Resource and dependency failures identify the affected resource and operation. Codes are append-only.
-- `param` names the offending parameter when applicable; `doc_url` may link to reference docs.
+- `param` names the offending parameter when applicable; `doc_url` may link to reference docs. On a request-decode failure it carries the full JSON path of the bad value (`widgets[3].display.chart_presentation.fill_nulls`), and for a path inside a `widgets[]` array the `message` also names the enclosing widget's `id`.
 - No internal tags or stack traces ever appear on the wire.
 - Expected internal failures use operation-specific tagged errors. Unexpected defects are logged with the group and operation, then returned as a sanitized `api_error` / `internal_error`; dependency messages are never copied to public 5xx responses.
 
@@ -138,29 +138,30 @@ Stripe-style `expand[]` is deliberately omitted: responses embed the small, alwa
 
 Implemented in phases; the pilot (`api_keys`) ships first and proves every convention.
 
-| Resource                             | Endpoints                                                                                        | Backing v1 group / service               |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------ | ---------------------------------------- |
-| `api_keys` ✅ pilot                  | list/create/retrieve/roll/revoke, `scopes` param                                                 | `apiKeys` / `ApiKeysService`             |
-| `ingest_keys` ✅                     | retrieve, `POST …/public/roll`, `POST …/private/roll`                                            | `ingestKeys`                             |
+| Resource                             | Endpoints                                                                                          | Backing service                          |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `api_keys` ✅ pilot                  | list/create/retrieve/roll/revoke, `scopes` param                                                   | `apiKeys` / `ApiKeysService`             |
+| `ingest_keys` ✅                     | retrieve, `POST …/public/roll`, `POST …/private/roll`                                              | `ingestKeys`                             |
 | `dashboards` ✅                      | CRUD + `versions` (list/retrieve/restore) + `templates` (list/preview/instantiate) + Perses import | `dashboards`                             |
-| `alerts/rules` ✅                    | CRUD + `test` + `preview` + `checks`                                                             | `alerts`                                 |
-| `alerts/destinations` ✅             | CRUD + `test`                                                                                    | `alerts`                                 |
-| `alerts/incidents` ✅                | list/retrieve                                                                                    | `alerts`                                 |
-| `error_issues` 🟡                    | list/retrieve ✅; `events`, `comments`, `transitions`, `assignee`, `severity` deferred           | `errors`                                 |
-| `investigations` ✅                  | list/retrieve/create/status                                                                      | `investigations`                         |
-| `anomalies` ✅                       | incidents list/retrieve/timeseries/resolve/link-issue + `PATCH` settings                         | `anomalies`                              |
-| `instrumentation/recommendations` ✅ | list + dismiss/reopen                                                                            | `recommendationIssues`                   |
-| `instrumentation/audit` ✅           | retrieve (singleton report, recomputed per request)                                              | `SetupAuditService`                      |
-| `scrape_targets` ✅                  | CRUD + `probe` + `checks`                                                                        | `scrapeTargets`                          |
-| `attribute_mappings` ✅              | CRUD                                                                                             | `ingestAttributeMappings`                |
-| `integrations/slack` ✅              | status + admin-only install/uninstall/`channels` (channel ids for `slack-bot` destinations)      | `SlackIntegrationService`                |
-| `session_replays` ✅                 | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred) | `sessionReplays`                         |
-| `organization` 🟡                    | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred           | `organizations`, `orgClickHouseSettings` |
-| `traces` ✅                          | search/timeseries/breakdown + direct trace/span reads                                            | `queryEngine`, `observability`           |
-| `logs` ✅                            | search/timeseries/breakdown + direct log reads                                                   | `queryEngine`                            |
-| `metrics` ✅                         | catalog + timeseries/breakdown                                                                   | `queryEngine`                            |
-| `services` ✅                        | `GET /v2/services`, `GET /v2/services/{name}`                                                    | `queryEngine`                            |
-| `service_map` ✅                     | `GET /v2/service_map`                                                                            | `queryEngine`                            |
+| `alerts/rules` ✅                    | CRUD + `test` + `preview` + `checks`                                                               | `AlertsService`                          |
+| `alerts/destinations` ✅             | CRUD + `test`                                                                                      | `AlertsService`                          |
+| `alerts/incidents` ✅                | list/retrieve                                                                                      | `AlertsService`                          |
+| `alerts/deliveries` ✅               | list delivery attempts                                                                             | `AlertsService`                          |
+| `error_issues` 🟡                    | list/retrieve ✅; `events`, `comments`, `transitions`, `assignee`, `severity` deferred             | `errors`                                 |
+| `investigations` ✅                  | list/retrieve/create/status                                                                        | `investigations`                         |
+| `anomalies` ✅                       | incidents list/retrieve/timeseries/resolve/link-issue + `PATCH` settings                           | `anomalies`                              |
+| `instrumentation/recommendations` ✅ | list + dismiss/reopen                                                                              | `recommendationIssues`                   |
+| `instrumentation/audit` ✅           | retrieve (singleton report, recomputed per request)                                                | `SetupAuditService`                      |
+| `scrape_targets` ✅                  | CRUD + `probe` + `checks`                                                                          | `scrapeTargets`                          |
+| `attribute_mappings` ✅              | CRUD                                                                                               | `ingestAttributeMappings`                |
+| `integrations/slack` ✅              | status + admin-only install/uninstall/`channels` (channel ids for `slack-bot` destinations)        | `SlackIntegrationService`                |
+| `session_replays` ✅                 | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred)   | `sessionReplays`                         |
+| `organization` 🟡                    | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred             | `organizations`, `orgClickHouseSettings` |
+| `traces` ✅                          | search/timeseries/breakdown + direct trace/span reads                                              | `queryEngine`, `observability`           |
+| `logs` ✅                            | search/timeseries/breakdown + direct log reads                                                     | `queryEngine`                            |
+| `metrics` ✅                         | catalog + timeseries/breakdown                                                                     | `queryEngine`                            |
+| `services` ✅                        | `GET /v2/services`, `GET /v2/services/{name}`                                                      | `queryEngine`                            |
+| `service_map` ✅                     | `GET /v2/service_map`                                                                              | `queryEngine`                            |
 
 The long tail of ~40 query-engine RPC endpoints (facets, infra hosts/pods/nodes/workloads, Cloudflare/PlanetScale infra) starts in the internal RPC tier and is promoted into `/v2` individually as shapes stabilize.
 

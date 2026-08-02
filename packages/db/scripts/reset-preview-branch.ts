@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
 /**
+ * DORMANT since 2026-08 — PR previews no longer provision a PlanetScale branch
+ * (see `resolveDatabaseMode` in packages/infra/src/cloudflare/stage.ts). Kept
+ * intact as the reverse path; nothing calls it while `pr` maps to `"none"`.
+ *
  * In-place SQL reset of a PlanetScale PR-preview branch — the fast path of
  * `scripts/planetscale-pr-branch.ts up`.
  *
@@ -54,7 +58,7 @@ const fail = (message: string): never => {
 /**
  * Role/publication names are interpolated as quoted identifiers (they cannot be
  * bind parameters), so whitelist a conservative charset — same rationale as
- * grant-runtime-role.ts. PlanetScale roles are dotted; `.` is literal inside
+ * ensure-privileges.ts. PlanetScale roles are dotted; `.` is literal inside
  * double quotes.
  */
 const IDENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_$.-]*$/

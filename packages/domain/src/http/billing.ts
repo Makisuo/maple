@@ -1,6 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { Authorization } from "./current-tenant"
+import { WarehouseQueryError } from "./warehouse-errors"
 
 // Typed Maple contract in front of the `autumn-js/backend` proxy. The handlers
 // (apps/api/src/routes/billing.http.ts) still call `autumnHandler` internally, so
@@ -10,46 +11,11 @@ import { Authorization } from "./current-tenant"
 // shape addition can't fail decoding and 500 the endpoint (excess keys are
 // dropped by `Schema.Struct`/`Schema.Class` decoding).
 
-// ---- Customer (getOrCreateCustomer) ----
-
-export class BillingBalance extends Schema.Class<BillingBalance>("BillingBalance")({
-	granted: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	usage: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	remaining: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	unlimited: Schema.optionalKey(Schema.Boolean),
-	overageAllowed: Schema.optionalKey(Schema.Boolean),
-}) {}
-
-export class BillingSubscriptionPlan extends Schema.Class<BillingSubscriptionPlan>("BillingSubscriptionPlan")(
-	{
-		name: Schema.optionalKey(Schema.NullOr(Schema.String)),
-		archived: Schema.optionalKey(Schema.Boolean),
-	},
-) {}
-
-export class BillingSubscription extends Schema.Class<BillingSubscription>("BillingSubscription")({
-	planId: Schema.String,
-	// getOrCreateCustomer does NOT expand the plan, so this is usually absent —
-	// legacy detection compares planId against the live catalog instead.
-	plan: Schema.optionalKey(Schema.NullOr(BillingSubscriptionPlan)),
-	status: Schema.String,
-	addOn: Schema.optionalKey(Schema.Boolean),
-	autoEnable: Schema.optionalKey(Schema.Boolean),
-	pastDue: Schema.optionalKey(Schema.Boolean),
-	trialEndsAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	currentPeriodStart: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	currentPeriodEnd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	quantity: Schema.optionalKey(Schema.Number),
-}) {}
-
-export class BillingCustomer extends Schema.Class<BillingCustomer>("BillingCustomer")({
-	id: Schema.String,
-	subscriptions: Schema.Array(BillingSubscription),
-	balances: Schema.optionalKey(Schema.Record(Schema.String, BillingBalance)),
-	flags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
-}) {}
-
-// ---- Plan catalog (listPlans) ----
+// ---- Plan shapes shared by the catalog and the customer's own plan ----
+//
+// Declared first because `BillingSubscriptionPlan` (the customer's expanded plan)
+// is built from them, and a Schema.Class evaluates its fields at module init —
+// referencing a class declared further down would throw at import time.
 
 export class CatalogPlanItemPrice extends Schema.Class<CatalogPlanItemPrice>("CatalogPlanItemPrice")({
 	amount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
@@ -74,6 +40,62 @@ export class CatalogPlanPrice extends Schema.Class<CatalogPlanPrice>("CatalogPla
 	amount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 	interval: Schema.optionalKey(Schema.NullOr(Schema.String)),
 }) {}
+
+// ---- Customer (getOrCreateCustomer) ----
+
+export class BillingBalance extends Schema.Class<BillingBalance>("BillingBalance")({
+	granted: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	usage: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	remaining: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	unlimited: Schema.optionalKey(Schema.Boolean),
+	overageAllowed: Schema.optionalKey(Schema.Boolean),
+}) {}
+
+/**
+ * The customer's OWN plan, as returned by `getOrCreateCustomer` with
+ * `expand: ["subscriptions.plan"]`.
+ *
+ * This is the authority on what the customer pays. The public catalog
+ * (`listPlans`) only describes what is *for sale*, so for a custom-priced or
+ * grandfathered plan its prices are somebody else's — pricing anything from the
+ * catalog when this is present shows the customer a bill that isn't theirs.
+ *
+ * Shares `CatalogPlanItem` / `CatalogPlanPrice`: same shape, same units.
+ */
+export class BillingSubscriptionPlan extends Schema.Class<BillingSubscriptionPlan>("BillingSubscriptionPlan")(
+	{
+		id: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		name: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		archived: Schema.optionalKey(Schema.Boolean),
+		price: Schema.optionalKey(Schema.NullOr(CatalogPlanPrice)),
+		// Absent unless expanded, so every consumer has to tolerate its absence.
+		items: Schema.optionalKey(Schema.NullOr(Schema.Array(CatalogPlanItem))),
+	},
+) {}
+
+export class BillingSubscription extends Schema.Class<BillingSubscription>("BillingSubscription")({
+	planId: Schema.String,
+	// Present when the caller expands `subscriptions.plan` (the customer read
+	// does). Legacy detection still compares planId against the live catalog.
+	plan: Schema.optionalKey(Schema.NullOr(BillingSubscriptionPlan)),
+	status: Schema.String,
+	addOn: Schema.optionalKey(Schema.Boolean),
+	autoEnable: Schema.optionalKey(Schema.Boolean),
+	pastDue: Schema.optionalKey(Schema.Boolean),
+	trialEndsAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	currentPeriodStart: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	currentPeriodEnd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	quantity: Schema.optionalKey(Schema.Number),
+}) {}
+
+export class BillingCustomer extends Schema.Class<BillingCustomer>("BillingCustomer")({
+	id: Schema.String,
+	subscriptions: Schema.Array(BillingSubscription),
+	balances: Schema.optionalKey(Schema.Record(Schema.String, BillingBalance)),
+	flags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+}) {}
+
+// ---- Plan catalog (listPlans) ----
 
 export class CatalogPlanEligibility extends Schema.Class<CatalogPlanEligibility>("CatalogPlanEligibility")({
 	status: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -139,6 +161,84 @@ const BillingUsageQuery = Schema.Struct({
 	featureId: Schema.Array(Schema.String),
 	range: Schema.String,
 })
+
+// ---- Daily spend series (warehouse-backed) ----
+
+/**
+ * One UTC day of billable volume. Units match how the ingest gateway meters to
+ * Autumn — decimal GB for the byte signals, a raw count for sessions — so the
+ * client can price a day with the catalog's overage rates and land on the same
+ * dollars as the invoice.
+ */
+export class DailyVolume extends Schema.Class<DailyVolume>("DailyVolume")({
+	/** `YYYY-MM-DD`, UTC. */
+	date: Schema.String,
+	logsGB: Schema.Number,
+	tracesGB: Schema.Number,
+	metricsGB: Schema.Number,
+	browserSessions: Schema.Number,
+}) {}
+
+export class DailySpendResponse extends Schema.Class<DailySpendResponse>("DailySpendResponse")({
+	/** Ascending by date, gap-filled across the whole cycle so day N is index N. */
+	days: Schema.Array(DailyVolume),
+	/** Cycle bounds the series covers, epoch ms. */
+	cycleStart: Schema.Number,
+	cycleEnd: Schema.Number,
+}) {}
+
+// ---- Spend limits (Postgres-backed) ----
+
+export const SpendEnforcementMode = Schema.Literals(["notify", "pause"])
+export type SpendEnforcementMode = typeof SpendEnforcementMode.Type
+
+export class SpendLimits extends Schema.Class<SpendLimits>("SpendLimits")({
+	/** Null = no ceiling configured; per-feature caps may still apply. */
+	monthlyLimitCents: Schema.NullOr(Schema.Number),
+	enforcementMode: SpendEnforcementMode,
+	alertThresholdPercents: Schema.Array(Schema.Number),
+	/** Keyed by Autumn featureId; null = no cap, overage billed at the plan rate. */
+	featureCaps: Schema.Record(Schema.String, Schema.NullOr(Schema.Number)),
+
+	// Derived evaluation state, written by the spend-limit cron. Read-only here:
+	// the client renders breach/pause state, it never asserts it.
+	lastEvaluatedAt: Schema.NullOr(Schema.Number),
+	evaluatedSpendCents: Schema.NullOr(Schema.Number),
+	breachedAt: Schema.NullOr(Schema.Number),
+	pausedAt: Schema.NullOr(Schema.Number),
+	/** Features paused by their own cap — a logs cap never stops traces. */
+	pausedFeatures: Schema.Array(Schema.String),
+}) {}
+
+/**
+ * Full replace of the editable fields — the billing page edits this as one card
+ * (limit + thresholds + mode + caps), so a partial patch would let two
+ * concurrent saves interleave into a state neither user chose.
+ */
+export class UpdateSpendLimitsRequest extends Schema.Class<UpdateSpendLimitsRequest>(
+	"UpdateSpendLimitsRequest",
+)({
+	monthlyLimitCents: Schema.NullOr(Schema.Number),
+	enforcementMode: SpendEnforcementMode,
+	alertThresholdPercents: Schema.Array(Schema.Number),
+	featureCaps: Schema.Record(Schema.String, Schema.NullOr(Schema.Number)),
+}) {}
+
+export class SpendLimitValidationError extends Schema.TaggedErrorClass<SpendLimitValidationError>()(
+	"@maple/http/errors/SpendLimitValidationError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 400 },
+) {}
+
+export class SpendLimitPersistenceError extends Schema.TaggedErrorClass<SpendLimitPersistenceError>()(
+	"@maple/http/errors/SpendLimitPersistenceError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 500 },
+) {}
 
 // ---- Mutations (attach / previewAttach / openCustomerPortal) ----
 
@@ -211,6 +311,28 @@ export class BillingApiGroup extends HttpApiGroup.make("billing")
 		HttpApiEndpoint.get("listInvoices", "/invoices", {
 			success: BillingInvoicesResponse,
 			error: BillingUpstreamError,
+		}),
+	)
+	// Warehouse-backed, unlike every other read in this group: Autumn only knows
+	// cycle totals, so the daily shape behind the spend chart comes from
+	// `service_usage` + `session_replays`.
+	.add(
+		HttpApiEndpoint.get("getDailySpend", "/daily-spend", {
+			success: DailySpendResponse,
+			error: [BillingUpstreamError, WarehouseQueryError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("getSpendLimits", "/spend-limits", {
+			success: SpendLimits,
+			error: SpendLimitPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.put("updateSpendLimits", "/spend-limits", {
+			payload: UpdateSpendLimitsRequest,
+			success: SpendLimits,
+			error: [SpendLimitValidationError, SpendLimitPersistenceError],
 		}),
 	)
 	.add(

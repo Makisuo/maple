@@ -517,6 +517,14 @@ export const start = Command.make("start", {
 	),
 )
 
+/**
+ * How long `maple stop` waits for the server to exit after SIGTERM, and how
+ * often it checks. Sized against the server's own shutdown cost — see the note
+ * in the poll loop below.
+ */
+const STOP_TIMEOUT_MS = 15_000
+const STOP_POLL_MS = 100
+
 export const stop = Command.make("stop", { dataDir: dataDirFlag }).pipe(
 	Command.withDescription("Stop a running `maple start` server"),
 	Command.withHandler(
@@ -542,10 +550,18 @@ export const stop = Command.make("stop", { dataDir: dataDirFlag }).pipe(
 				process.stderr.write(dim(`◌ stopping maple (PID ${pid})`))
 			})
 
-			// Wait up to 5s for it to exit.
-			for (let i = 0; i < 50; i++) {
-				yield* Effect.sleep("100 millis")
-				yield* Effect.sync(() => process.stderr.write(dim(".")))
+			// The budget has to exceed what a clean shutdown actually costs, not what
+			// it feels like it should cost: the exiting server flushes telemetry with
+			// its own 3s bound (`shutdownTimeout` in core/telemetry.ts) and then
+			// closes chDB. That lands around 3.5s on a warm laptop, so the old 5s cap
+			// left well under two seconds of headroom and a loaded CI runner blew
+			// straight through it — the native checkpoint smoke test failed on a
+			// server that was shutting down entirely correctly.
+			for (let elapsed = 0; elapsed < STOP_TIMEOUT_MS; elapsed += STOP_POLL_MS) {
+				yield* Effect.sleep(`${STOP_POLL_MS} millis`)
+				// One dot per half-second regardless of the poll rate, so a longer
+				// budget doesn't turn into a wall of dots.
+				if (elapsed % 500 === 0) yield* Effect.sync(() => process.stderr.write(dim(".")))
 				if (!isProcessAlive(pid)) {
 					yield* fs.remove(pidPath, { force: true }).pipe(Effect.ignore)
 					yield* Effect.sync(() => process.stderr.write(`${green("✓")} maple stopped\n`))
@@ -553,7 +569,7 @@ export const stop = Command.make("stop", { dataDir: dataDirFlag }).pipe(
 				}
 			}
 			return yield* new ServerError({
-				message: `\nmaple did not stop within 5s — force-kill with \`kill -9 ${pid}\``,
+				message: `\nmaple did not stop within ${STOP_TIMEOUT_MS / 1000}s — force-kill with \`kill -9 ${pid}\``,
 			})
 		}),
 	),

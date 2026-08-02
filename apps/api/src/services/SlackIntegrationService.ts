@@ -12,6 +12,7 @@ import {
 	type SlackBotResolution,
 } from "@maple/domain/http"
 import { slackWorkspaces, type SlackWorkspaceRow } from "@maple/db"
+import { EdgeCacheService } from "@maple/query-engine/caching"
 import { and, desc, eq, isNotNull, isNull, ne, or } from "drizzle-orm"
 import { Array as Arr, Clock, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
@@ -33,7 +34,16 @@ const SLACK_OAUTH_ACCESS_URL = "https://slack.com/api/oauth.v2.access"
 const SLACK_OAUTH_REVOKE_URL = "https://slack.com/api/auth.revoke"
 const SLACK_CONVERSATIONS_LIST_URL = "https://slack.com/api/conversations.list"
 const SLACK_AUTH_TEST_URL = "https://slack.com/api/auth.test"
-const SLACK_MAX_CHANNEL_PAGES = 3
+/**
+ * `conversations.list` pages at 200 (Slack's own recommendation — larger pages
+ * time out on a combined `public_channel,private_channel` type filter), so this
+ * bounds the walk at ~2000 channels. Workspaces above that get a `truncated`
+ * flag rather than a silently short list; see {@link collectChannelPages}.
+ */
+const SLACK_MAX_CHANNEL_PAGES = 10
+/** Per-org `conversations.list` cache. Invalidated on install/uninstall. */
+const SLACK_CHANNELS_CACHE_BUCKET = "slack-channels"
+const SLACK_CHANNELS_CACHE_TTL_SECONDS = 300
 
 /** Why a workspace binding was revoked without going through `uninstall`. */
 export type SlackRevocationReason = "app_uninstalled" | "tokens_revoked" | "reconciliation"
@@ -213,6 +223,12 @@ export interface SlackChannelSummary {
 	readonly isMember: boolean
 }
 
+export interface SlackChannelList {
+	readonly channels: ReadonlyArray<SlackChannelSummary>
+	/** Slack still had a cursor when the page-capped walk stopped. */
+	readonly truncated: boolean
+}
+
 // --- Service ----------------------------------------------------------------
 
 export interface SlackIntegrationServiceShape {
@@ -235,10 +251,15 @@ export interface SlackIntegrationServiceShape {
 	readonly uninstall: (
 		orgId: OrgId,
 	) => Effect.Effect<{ readonly uninstalled: boolean }, IntegrationsPersistenceError>
+	/**
+	 * The workspace's channels, bot-member first then alphabetical. `truncated`
+	 * is true when the workspace has more channels than the page-capped walk can
+	 * reach — the list is a prefix, not the whole inventory.
+	 */
 	readonly listChannels: (
 		orgId: OrgId,
 	) => Effect.Effect<
-		ReadonlyArray<SlackChannelSummary>,
+		SlackChannelList,
 		IntegrationsNotConnectedError | IntegrationsUpstreamError | IntegrationsPersistenceError
 	>
 	readonly resolveForBot: (
@@ -340,6 +361,17 @@ const make: Effect.Effect<
 			slackSecretAad(row.orgId, row.teamId, column),
 		)
 	}
+
+	/**
+	 * Drop the cached channel list for an org (see {@link listChannels}).
+	 * Best-effort — `invalidate` swallows backend failures — so callers can fire
+	 * it without widening their error channel.
+	 */
+	const invalidateChannelsCache = Effect.fnUntraced(function* (orgId: OrgId) {
+		const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
+		if (Option.isNone(edgeCache)) return
+		yield* edgeCache.value.invalidate({ bucket: SLACK_CHANNELS_CACHE_BUCKET, key: orgId })
+	})
 
 	const requireOAuthClient = Effect.gen(function* () {
 		const clientId = Option.getOrUndefined(env.SLACK_CLIENT_ID)
@@ -633,7 +665,11 @@ const make: Effect.Effect<
 				db.transaction(async (tx) => {
 					const revokedOthers = await tx
 						.update(slackWorkspaces)
-						.set({ revokedAt: new Date(now), revokedReason: "superseded", updatedAt: new Date(now) })
+						.set({
+							revokedAt: new Date(now),
+							revokedReason: "superseded",
+							updatedAt: new Date(now),
+						})
 						.where(
 							and(
 								eq(slackWorkspaces.orgId, orgId),
@@ -708,6 +744,10 @@ const make: Effect.Effect<
 			return Option.isSome(keyId) ? apiKeys.revoke(orgId, keyId.value).pipe(Effect.ignore) : Effect.void
 		})
 
+		// A fresh install (or a re-auth into a different workspace) makes any warm
+		// channel list wrong — it belongs to the binding we just replaced.
+		yield* invalidateChannelsCache(orgId)
+
 		// "Updated" = the org re-authorized its own still-active binding (the
 		// permissions-refresh flow) rather than connecting from scratch.
 		const updated = priorRow !== undefined && priorRow.orgId === orgId && priorRow.revokedAt === null
@@ -763,8 +803,7 @@ const make: Effect.Effect<
 			installedAt: null,
 			disconnectedReason: remoteReason,
 			disconnectedTeamName: remoteReason !== null ? (lastRevoked?.teamName ?? null) : null,
-			disconnectedAt:
-				remoteReason !== null ? (lastRevoked?.revokedAt?.getTime() ?? null) : null,
+			disconnectedAt: remoteReason !== null ? (lastRevoked?.revokedAt?.getTime() ?? null) : null,
 			missingScopes: [],
 		} satisfies SlackInstallStatus
 	})
@@ -852,6 +891,9 @@ const make: Effect.Effect<
 				)
 				.pipe(Effect.mapError(toPersistenceError))
 			if (updated.length > 0) {
+				// The org's channel inventory dies with the binding — leaving a warm
+				// entry would keep serving a workspace we can no longer post to.
+				yield* invalidateChannelsCache(orgId)
 				yield* Effect.logInfo("Slack workspace uninstalled", { orgId, teamId: row.teamId })
 				return { uninstalled: true }
 			}
@@ -927,18 +969,35 @@ const make: Effect.Effect<
 
 	/**
 	 * Cursor-driven page walk, capped at {@link SLACK_MAX_CHANNEL_PAGES} pages.
+	 * `truncated` distinguishes "Slack ran out of channels" from "we ran out of
+	 * pages" so callers can say the list is incomplete instead of implying the
+	 * workspace has exactly this many channels.
 	 */
 	const collectChannelPages = Effect.fnUntraced(function* (botToken: string) {
 		const collected: Array<SlackChannelSummary> = []
 		let cursor = Option.none<string>()
+		let truncated = false
 		for (let page = 0; page < SLACK_MAX_CHANNEL_PAGES; page++) {
 			const { channels, next } = yield* fetchChannelPage(botToken, cursor)
 			collected.push(...channels)
 			if (Option.isNone(next)) break
 			cursor = next
+			// A cursor still in hand on the last allowed page means Slack has more.
+			truncated = page === SLACK_MAX_CHANNEL_PAGES - 1
 		}
-		return collected
+		return { channels: collected, truncated }
 	})
+
+	/**
+	 * Bot-member channels first, then alphabetical within each half. Only the
+	 * member half can be posted to without an `/invite`, and in a workspace with
+	 * hundreds of channels that handful is what makes the unfiltered list useful.
+	 * Sorted here so every consumer inherits the order.
+	 */
+	const sortChannels = (channels: ReadonlyArray<SlackChannelSummary>): Array<SlackChannelSummary> =>
+		[...channels].sort((a, b) =>
+			a.isMember === b.isMember ? a.name.localeCompare(b.name) : a.isMember ? -1 : 1,
+		)
 
 	const listChannels = Effect.fn("SlackIntegrationService.listChannels")(function* (orgId: OrgId) {
 		yield* Effect.annotateCurrentSpan({ orgId })
@@ -953,7 +1012,31 @@ const make: Effect.Effect<
 			)
 		}
 		const botToken = yield* decryptRowSecret(rowOption.value, "bot_token")
-		return yield* collectChannelPages(botToken)
+		const walk = collectChannelPages(botToken).pipe(
+			Effect.map((result) => ({ channels: sortChannels(result.channels), truncated: result.truncated })),
+		)
+		// Up to ten sequential Slack round-trips on a cold walk. The endpoint is
+		// admin-gated and only fires when the destination dialog opens, so a short
+		// shared entry turns "every dialog open" into "once per org per 5 minutes".
+		// Optional dependency: tests and any host without the layer just walk.
+		// Note `getOrCompute` deliberately does not single-flight (see edge-cache.ts),
+		// so concurrent cold misses each walk — acceptable at this call volume.
+		const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
+		if (Option.isNone(edgeCache)) return yield* walk
+		const cached = yield* edgeCache.value.getOrCompute(
+			{
+				bucket: SLACK_CHANNELS_CACHE_BUCKET,
+				key: orgId,
+				ttlSeconds: SLACK_CHANNELS_CACHE_TTL_SECONDS,
+			},
+			walk,
+		)
+		yield* Effect.annotateCurrentSpan({
+			"cache.hit": cached.hit,
+			"result.rowCount": cached.value.channels.length,
+			"slack.channels.truncated": cached.value.truncated,
+		})
+		return cached.value
 	})
 
 	const resolveForBot = Effect.fn("SlackIntegrationService.resolveForBot")(function* (teamId: string) {

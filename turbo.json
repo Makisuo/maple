@@ -8,8 +8,14 @@
 			"dependsOn": ["^build"],
 			"outputs": ["dist/**", ".output/**"]
 		},
+		// Deliberately NOT `^typecheck`. Every package's typecheck is `tsc --noEmit`,
+		// which emits nothing a downstream task can consume, and no tsconfig here uses
+		// composite/references — so `^typecheck` was ordering-only and serialized a
+		// topological wave across ~26 packages. `^build` is the real edge: it produces
+		// the .d.mts for the four dist-pointing packages (effect-sdk, clickhouse-builder,
+		// alchemy-maple, browser). Re-add `^typecheck` only if TS project references land.
 		"typecheck": {
-			"dependsOn": ["^typecheck", "^build"]
+			"dependsOn": ["^build"]
 		},
 		"test": {
 			"dependsOn": ["^build"],

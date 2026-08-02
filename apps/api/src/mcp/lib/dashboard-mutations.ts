@@ -5,10 +5,12 @@ import {
 	DashboardId,
 	DashboardWidgetSchema,
 	IsoDateTimeString,
+	TimeRangeSchema,
 	WidgetDataSourceSchema,
 	WidgetDisplayConfigSchema,
 	WidgetLayoutSchema,
-	defaultWidgetHeight,
+	defaultWidgetLayout,
+	widgetTypeByVisualization,
 } from "@maple/domain/http"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
@@ -26,6 +28,7 @@ const WidgetFromJson = Schema.fromJsonString(DashboardWidgetSchema)
 const DataSourceFromJson = Schema.fromJsonString(WidgetDataSourceSchema)
 const DisplayFromJson = Schema.fromJsonString(WidgetDisplayConfigSchema)
 const LayoutFromJson = Schema.fromJsonString(WidgetLayoutSchema)
+const TimeRangeFromJson = Schema.fromJsonString(TimeRangeSchema)
 
 const jsonDecodeError = (field: string, tool: string) => (error: unknown) =>
 	new McpQueryError({
@@ -54,29 +57,21 @@ export const decodeLayoutJson = (json: string, tool: string) =>
 		Effect.mapError(jsonDecodeError("layout_json", tool)),
 	)
 
+export const decodeTimeRangeJson = (json: string, tool: string) =>
+	Schema.decodeUnknownEffect(TimeRangeFromJson)(json).pipe(
+		Effect.mapError(jsonDecodeError("time_range_json", tool)),
+	)
+
 export const generateWidgetId = (): string => randomUUID()
 
 /**
- * Default grid size per visualization type. Mirrors the web store so
- * auto-placed widgets match what the "Add widget" UI would produce; the height
- * comes from `defaultWidgetHeight` so the two can't drift apart.
+ * Default grid size per visualization type — the same table the web store reads,
+ * so an MCP-added widget matches what the "Add widget" UI would produce. A gauge
+ * is the one deliberate difference: agents get the narrow tile.
  */
 export const defaultSizeForVisualization = (visualization: string): { w: number; h: number } => {
-	const { h } = defaultWidgetHeight(visualization)
-	switch (visualization) {
-		// Deliberately taller than the `h: 2` stat tiles the templates use — a
-		// hand-added stat gets room for a sparkline. Reconciling the two is a
-		// separate change.
-		case "stat":
-			return { w: 3, h: 4 }
-		case "gauge":
-			return { w: 3, h }
-		case "table":
-		case "list":
-			return { w: 6, h }
-		default:
-			return { w: 4, h }
-	}
+	const { w, h } = defaultWidgetLayout(visualization)
+	return { w: widgetTypeByVisualization(visualization)?.mcpWidth ?? w, h }
 }
 
 /**

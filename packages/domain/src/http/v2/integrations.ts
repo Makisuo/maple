@@ -173,17 +173,24 @@ export const V2SlackChannelList = Schema.Struct({
 		description: 'The object type — always `"slack_integration.channel_list"`.',
 	}),
 	channels: Schema.Array(V2SlackChannel).annotate({
-		description: "The channels the installed bot can see, most recently listed first.",
+		description:
+			"The channels the installed bot can see, ordered with the channels the bot has joined (`is_member`) first, then alphabetically by name within each half.",
+	}),
+	truncated: Schema.Boolean.annotate({
+		description:
+			"Whether the workspace has more channels than this response could reach. `true` means `channels` is a prefix of the inventory, not the whole of it — the bot must be invited to a missing channel for it to appear.",
+		examples: [false],
 	}),
 }).annotate({
 	identifier: "SlackChannelList",
 	title: "Slack channel list",
 	description:
-		'The channels visible to the installed Slack bot. Note: unlike every other v2 collection this response is **not** the standard `{ object: "list", data, has_more, next_cursor }` envelope — Maple walks Slack\'s `conversations.list` cursors server-side and returns the whole bounded set in one response, so there is nothing to paginate and it stays a bespoke `{ object, channels }` shape.',
+		'The channels visible to the installed Slack bot. Note: unlike every other v2 collection this response is **not** the standard `{ object: "list", data, has_more, next_cursor }` envelope — Maple walks Slack\'s `conversations.list` cursors server-side and returns the set in one response, so there is no cursor for a client to follow. The walk is page-capped; `truncated` reports whether it hit that cap.',
 	examples: [
 		wireExample({
 			object: "slack_integration.channel_list",
 			channels: [{ id: "C0789CHAN", name: "incidents", is_private: false, is_member: true }],
+			truncated: false,
 		}),
 	],
 })

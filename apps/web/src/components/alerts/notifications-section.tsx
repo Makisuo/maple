@@ -88,7 +88,7 @@ export function NotificationsSection({
 							search={{ tab: "settings" }}
 							className="underline underline-offset-4 hover:text-foreground"
 						>
-							Create one in Settings
+							Create one in Destinations
 						</Link>{" "}
 						before saving.
 					</p>

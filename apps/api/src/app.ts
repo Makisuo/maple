@@ -6,10 +6,10 @@ import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { McpLive } from "./mcp/app"
 import { HttpBillingLive, HttpBillingPublicLive } from "./routes/billing.http"
 import { HttpAiTriageLive } from "./routes/ai-triage.http"
-import { HttpAlertsLive } from "./routes/alerts.http"
 import { HttpAnomaliesLive } from "./routes/anomalies.http"
 import { HttpErrorsLive } from "./routes/errors.http"
 import { HttpApiKeysLive } from "./routes/api-keys.http"
+import { HttpV2AlertDeliveriesLive } from "./routes/v2/alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "./routes/v2/alert-destinations.http"
 import { HttpV2AlertIncidentsLive } from "./routes/v2/alert-incidents.http"
 import { HttpV2AlertRulesLive } from "./routes/v2/alert-rules.http"
@@ -36,7 +36,7 @@ import {
 import { V2SchemaErrorsLive } from "./routes/v2/error-envelope"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpChatLive } from "./routes/chat.http"
-import { HttpDashboardsLive } from "./routes/dashboards.http"
+import { HttpDashboardSchemaErrorsLive, HttpDashboardsLive } from "./routes/dashboards.http"
 import { HttpDemoLive } from "./routes/demo.http"
 import { HttpDigestLive } from "./routes/digest.http"
 import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "./routes/integrations.http"
@@ -77,8 +77,10 @@ import { ApiAuthorizationV2Layer } from "./services/ApiAuthorizationV2Layer"
 import { CloudflareAnalyticsService } from "./services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "./services/CloudflareOAuthService"
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService"
+import { DailySpendService } from "./services/DailySpendService"
 import { DemoService } from "./services/DemoService"
 import { DigestService } from "./services/DigestService"
+import { SpendLimitsService } from "./services/SpendLimitsService"
 import { OnboardingService } from "./services/OnboardingService"
 import { EmailService } from "./lib/EmailService"
 import { OrgMembersService } from "./services/OrgMembersService"
@@ -165,6 +167,7 @@ const CoreServicesLive = Layer.mergeAll(
 	),
 	PlanetScaleService.layer.pipe(Layer.provide(PlanetScaleOAuthLive)),
 	IngestAttributeMappingService.layer,
+	SpendLimitsService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
 
 const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provideMerge(CoreServicesLive))
@@ -273,8 +276,13 @@ const VcsServicesLive = Layer.mergeAll(
 	VcsSourceService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
 ).pipe(Layer.provideMerge(InfraLive))
 
+// The spend chart's warehouse series. The Postgres-backed spend guardrails ride
+// along in CoreServicesLive with the other config services.
+const DailySpendServiceLive = DailySpendService.layer.pipe(Layer.provideMerge(WarehouseQueryServiceLive))
+
 export const MainLive = Layer.mergeAll(
 	CoreServicesLive,
+	DailySpendServiceLive,
 	CloudflareAnalyticsServiceLive,
 	WarehouseQueryServiceLive,
 	EdgeCacheServiceLive,
@@ -298,9 +306,9 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(Layer.mergeAll(HttpAiTriageLive, HttpAnomaliesLive, HttpChatLive, HttpInvestigationsLive)),
 	Layer.provide(HttpApiKeysLive),
 	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
-	Layer.provide(HttpAlertsLive),
 	Layer.provide(HttpErrorsLive),
 	Layer.provide(HttpDashboardsLive),
+	Layer.provide(HttpDashboardSchemaErrorsLive),
 	Layer.provide(HttpDemoLive),
 	Layer.provide(HttpDigestLive),
 	Layer.provide(HttpIngestAttributeMappingsLive),
@@ -326,6 +334,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.mergeAll(
 			HttpV2ApiKeysLive,
 			HttpV2DashboardsLive,
+			HttpV2AlertDeliveriesLive,
 			HttpV2AlertRulesLive,
 			HttpV2AlertDestinationsLive,
 			HttpV2AlertIncidentsLive,

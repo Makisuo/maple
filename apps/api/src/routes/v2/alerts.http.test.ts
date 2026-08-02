@@ -8,7 +8,7 @@ import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/cachin
 import { CacheBackendLive } from "../../lib/CacheBackendLive"
 import { EmailService } from "../../lib/EmailService"
 import { Env } from "../../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "../../lib/test-pglite"
 import type { WarehouseQueryServiceShape } from "../../lib/WarehouseQueryService"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
 import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
@@ -154,6 +154,7 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 	return {
 		bootstrapKey,
 		request,
+		testDb,
 		dispose: async () => {
 			await disposeHandler()
 			await runtime.dispose()
@@ -162,6 +163,27 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 }
 
 describe("v2 alerts over HTTP", () => {
+	const createWebhookAndRule = async (
+		harness: ReturnType<typeof makeHarness>,
+		token: string,
+	) => {
+		const destination = await harness.request("POST", "/v2/alerts/destinations", token, {
+			type: "webhook",
+			name: "Ops hook",
+			url: "https://example.com/hooks/maple",
+		})
+		const rule = await harness.request("POST", "/v2/alerts/rules", token, {
+			name: "Checkout error rate",
+			severity: "critical",
+			signal_type: "error_rate",
+			comparator: "gt",
+			threshold: 0.05,
+			window_minutes: 5,
+			destination_ids: [destination.body.id],
+		})
+		return { destination, rule }
+	}
+
 	it("supports destination + rule CRUD with v2 wire conventions", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey(["alerts:write"])
@@ -276,6 +298,71 @@ describe("v2 alerts over HTTP", () => {
 		await harness.dispose()
 	})
 
+	it("paginates delivery history beyond the first 100 rows", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+		await createWebhookAndRule(harness, key.secret)
+
+		await executeSql(
+			harness.testDb,
+			`insert into alert_delivery_events (
+				id, org_id, rule_id, destination_id, delivery_key, event_type,
+				attempt_number, status, scheduled_at, payload_json, created_at, updated_at
+			)
+			select
+				'00000000-0000-4000-8000-' || lpad(series::text, 12, '0'),
+				rules.org_id, rules.id, destinations.id, 'delivery-' || series,
+				'trigger', 1, 'success',
+				timestamp '2026-07-31 12:00:00+00' - series * interval '1 second',
+				'{}'::jsonb,
+				timestamp '2026-07-31 12:00:00+00' - series * interval '1 second',
+				timestamp '2026-07-31 12:00:00+00' - series * interval '1 second'
+			from generate_series(1, 105) as series
+			cross join lateral (
+				select id, org_id from alert_rules where org_id = 'org_alerts_e2e' limit 1
+			) as rules
+			cross join lateral (
+				select id from alert_destinations where org_id = 'org_alerts_e2e' limit 1
+			) as destinations`,
+		)
+		await executeSql(
+			harness.testDb,
+			`insert into alert_delivery_events (
+				id, org_id, rule_id, destination_id, delivery_key, event_type,
+				attempt_number, status, scheduled_at, payload_json, created_at, updated_at
+			) values (
+				'00000000-0000-4000-9000-000000000001', 'org_other',
+				'00000000-0000-4000-9000-000000000002', '00000000-0000-4000-9000-000000000003',
+				'foreign-delivery', 'trigger', 1, 'success', timestamp '2026-08-01 12:00:00+00',
+				'{}'::jsonb, timestamp '2026-08-01 12:00:00+00', timestamp '2026-08-01 12:00:00+00'
+			)`,
+		)
+
+		const first = await harness.request("GET", "/v2/alerts/deliveries?limit=60", key.secret)
+		expect(first.status).toBe(200)
+		expect(first.body.data).toHaveLength(60)
+		expect(first.body.has_more).toBe(true)
+		expect(first.body.next_cursor).toEqual(expect.any(String))
+		expect(first.body.data[0].id).toMatch(/^evt_/)
+		expect(first.body.data[0].scheduled_at > first.body.data[1].scheduled_at).toBe(true)
+
+		const second = await harness.request(
+			"GET",
+			`/v2/alerts/deliveries?limit=60&cursor=${encodeURIComponent(first.body.next_cursor)}`,
+			key.secret,
+		)
+		expect(second.status).toBe(200)
+		expect(second.body.data).toHaveLength(45)
+		expect(second.body.has_more).toBe(false)
+		expect(second.body.next_cursor).toBeNull()
+		expect(new Set([...first.body.data, ...second.body.data].map((item) => item.id)).size).toBe(105)
+		expect([...first.body.data, ...second.body.data].some((item) => item.delivery_key === "foreign-delivery")).toBe(
+			false,
+		)
+
+		await harness.dispose()
+	})
+
 	it("clears stored raw SQL when a rule switches to a structured signal", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey(["alerts:write"])
@@ -329,7 +416,7 @@ describe("v2 alerts over HTTP", () => {
 		await harness.dispose()
 	})
 
-	it("blocks raw SQL preview for alerts:read keys without querying the warehouse", async () => {
+	it("blocks raw SQL preview for non-admin keys without querying the warehouse", async () => {
 		let warehouseCalls = 0
 		const harness = makeHarness({
 			...warehouseStub,
@@ -338,6 +425,9 @@ describe("v2 alerts over HTTP", () => {
 				return Effect.succeed([{ value: 42 }])
 			},
 		})
+		// Preview needs only `alerts:read`, but replaying a raw_query rule executes
+		// user-authored ClickHouse — the same capability creating one requires. A
+		// read-only key must not get there via preview.
 		const key = await harness.bootstrapKey(["alerts:read"])
 		const response = await harness.request("POST", "/v2/alerts/rules/preview", key.secret, {
 			rule: {
@@ -355,9 +445,36 @@ describe("v2 alerts over HTTP", () => {
 			start_time: "2026-01-01T00:00:00.000Z",
 			end_time: "2026-01-01T00:30:00.000Z",
 		})
-		expect(response.status).toBe(400)
-		expect(JSON.stringify(response.body)).toContain("cannot be previewed")
+		expect(response.status).toBe(403)
 		expect(warehouseCalls).toBe(0)
+		await harness.dispose()
+	})
+
+	it("previews a raw SQL alert for alerts:write keys", async () => {
+		const harness = makeHarness({
+			...warehouseStub,
+			rawSqlQuery: () => Effect.succeed([{ value: 42, samples: 20 }]),
+		})
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const response = await harness.request("POST", "/v2/alerts/rules/preview", key.secret, {
+			rule: {
+				name: "Raw preview",
+				severity: "warning",
+				signal_type: "raw_query",
+				raw_query_sql:
+					"SELECT count() AS value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+				raw_query_reducer: "max",
+				comparator: "gt",
+				threshold: 10,
+				window_minutes: 5,
+				destination_ids: [],
+			},
+			start_time: "2026-01-01T00:00:00.000Z",
+			end_time: "2026-01-01T00:30:00.000Z",
+		})
+		expect(response.status).toBe(200)
+		expect(response.body.object).toBe("alert_rule.preview")
+		expect(response.body.series.length).toBeGreaterThan(0)
 		await harness.dispose()
 	})
 

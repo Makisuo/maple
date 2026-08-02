@@ -114,6 +114,9 @@ const createDashboardDocument = (portableDashboard: PortableDashboardDocument, n
 		}),
 		...(portableDashboard.tags !== undefined && { tags: portableDashboard.tags }),
 		...(portableDashboard.variables !== undefined && { variables: portableDashboard.variables }),
+		...(portableDashboard.refreshIntervalSeconds !== undefined && {
+			refreshIntervalSeconds: portableDashboard.refreshIntervalSeconds,
+		}),
 		timeRange: portableDashboard.timeRange,
 		widgets: portableDashboard.widgets,
 		createdAt: decodeIsoDateTimeStringSync(now),

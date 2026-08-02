@@ -1,7 +1,13 @@
 import { createMaplePgClient } from "@maple/db/client"
 import { Hyperdrive } from "@maple/effect-cloudflare/hyperdrive-connection"
 import { Effect, Layer } from "effect"
-import { Database, type DatabaseClient, type DatabaseShape, executeWithSpan } from "./DatabaseLive"
+import {
+	Database,
+	type DatabaseClient,
+	DatabaseError,
+	type DatabaseShape,
+	executeWithSpan,
+} from "./DatabaseLive"
 
 const MAPLE_DB = Hyperdrive("MAPLE_DB")
 
@@ -15,7 +21,21 @@ const makePgDatabase = Effect.gen(function* () {
 	const conn = yield* Hyperdrive.bind(MAPLE_DB)
 	const binding = yield* conn.raw
 	if (!binding) {
-		return yield* Effect.die(new Error("Missing worker Hyperdrive binding: MAPLE_DB"))
+		// Stages deployed without an application database (PR previews since
+		// 2026-08 — see resolveDatabaseMode in packages/infra). Dying here would
+		// abort construction of the ENTIRE isolate layer graph (layerPg is
+		// provideMerge'd into the handler in worker.ts), 504-ing every route
+		// including /health. Failing per `execute` keeps DB-free routes serving
+		// and turns DB-backed ones into ordinary 500s.
+		return Database.of({
+			execute: () =>
+				Effect.fail(
+					new DatabaseError({
+						message: "No application database on this stage (MAPLE_DB binding absent)",
+						cause: undefined,
+					}),
+				),
+		} satisfies DatabaseShape)
 	}
 
 	const connectionString = binding.connectionString

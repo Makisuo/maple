@@ -8,11 +8,13 @@
 // ---------------------------------------------------------------------------
 
 import type {
+	DashboardRefreshIntervalSeconds,
 	DashboardVariableSchema,
 	DashboardWidgetSchema,
 	WidgetDataSourceSchema,
 	WidgetDisplayConfigSchema,
 	WidgetLayoutSchema,
+	WidgetVisualization,
 } from "@maple/domain/http"
 
 // The domain schemas decode to deeply-readonly types; web widgets are mutable
@@ -91,18 +93,17 @@ export type WidgetLayout = DeepMutable<typeof WidgetLayoutSchema.Type>
 
 // --- Visualization ---
 
-export type VisualizationType =
-	| "chart"
-	| "stat"
-	| "gauge"
-	| "table"
-	| "list"
-	| "pie"
-	| "histogram"
-	| "heatmap"
-	| "funnel"
-	| "markdown"
-	| (string & {})
+/**
+ * The persisted `visualization` values this build knows how to render. Derived
+ * from the shared widget-type table, so it can't drift from the registry.
+ *
+ * Closed on purpose — the old `| (string & {})` escape hatch defeated
+ * exhaustiveness checking everywhere. Documents can still carry an unknown
+ * string (an older client reading a newer dashboard); `widgetTypeFor` handles
+ * that at the one boundary where it happens, rather than every type position
+ * pretending it might.
+ */
+export type VisualizationType = WidgetVisualization
 export type WidgetMode = "view" | "edit"
 type WidgetErrorKind = "decode" | "runtime"
 export type WidgetDataState =
@@ -112,8 +113,17 @@ export type WidgetDataState =
 
 // --- Dashboard Widget ---
 
-export type DashboardWidget = Omit<DeepMutable<typeof DashboardWidgetSchema.Type>, "dataSource"> & {
+// `timeRange` is re-typed for the same reason `Dashboard["timeRange"]` is: the
+// schema brands its ISO strings, and every producer in the UI (the time-range
+// picker, the builder form) deals in plain strings. Branding happens once, at
+// the store's document boundary.
+export type DashboardWidget = Omit<
+	DeepMutable<typeof DashboardWidgetSchema.Type>,
+	"dataSource" | "timeRange"
+> & {
 	dataSource: WidgetDataSource
+	/** Absent means the widget follows the dashboard's range. */
+	timeRange?: TimeRange
 }
 
 // --- Dashboard Variables ---
@@ -130,6 +140,8 @@ export interface Dashboard {
 	timeRange: TimeRange
 	widgets: DashboardWidget[]
 	variables?: DashboardVariable[]
+	/** Auto-refresh cadence in seconds. Absent or `0` means off. */
+	refreshIntervalSeconds?: DashboardRefreshIntervalSeconds
 	createdAt: string
 	updatedAt: string
 }

@@ -7,15 +7,19 @@ import {
 	DashboardId,
 	IsoDateTimeString,
 	PortableDashboardDocument,
-	defaultWidgetHeight,
+	defaultWidgetLayout,
 } from "@maple/domain/http"
+import type { DashboardRefreshIntervalSeconds } from "@maple/domain/http"
 import type { V2DashboardMutation } from "@maple/domain/http/v2"
 import { useLiveQuery } from "@tanstack/react-db"
 import { runMapleApiV2 } from "@/lib/collections/api-runner"
-import { rowToDashboard } from "@/lib/collections/dashboards"
+import { rowToDashboard, v2DashboardToDashboard } from "@/lib/collections/dashboards"
+import { useCollectionLoadFailed } from "@/lib/collections/collection-load"
+import { useDashboardsFallback } from "@/lib/collections/dashboards-fallback"
 import {
 	getOrgCollections,
 	handleCollectionStuck,
+	retryOrgCollections,
 	useActiveOrgId,
 	useCollectionsGeneration,
 } from "@/lib/collections/org-collections"
@@ -124,24 +128,32 @@ function isConcurrencyConflict(failure: Exit.Exit<unknown, unknown>): boolean {
 	})
 }
 
-const v2DashboardToDashboard = (value: V2DashboardMutation): Dashboard => ({
-	id: value.id,
-	name: value.name,
-	...(value.description !== null ? { description: value.description } : {}),
-	tags: [...value.tags],
-	timeRange: value.timeRange,
-	widgets: [...value.widgets] as Dashboard["widgets"],
-	variables: [...value.variables] as Dashboard["variables"],
-	createdAt: value.createdAt,
-	updatedAt: value.updatedAt,
-})
+// The one place plain UI time ranges become the schema's branded ISO strings.
+const toDocumentTimeRange = (timeRange: TimeRange) =>
+	timeRange.type === "absolute"
+		? {
+				type: "absolute" as const,
+				startTime: asIsoDateTimeString(timeRange.startTime),
+				endTime: asIsoDateTimeString(timeRange.endTime),
+			}
+		: timeRange
+
+/** Widgets pinned to their own range carry ISO strings that need the same branding. */
+const toDocumentWidgets = (widgets: Dashboard["widgets"]): DashboardDocument["widgets"] =>
+	widgets.map((widget) => {
+		// Destructured rather than spread-and-overwrite: `timeRange` is `optionalKey`
+		// on the document, so an unpinned widget has to reach it without the key at
+		// all — a present `undefined` fails the encode.
+		const { timeRange, ...rest } = widget
+		return timeRange ? { ...rest, timeRange: toDocumentTimeRange(timeRange) } : rest
+	})
 
 function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 	// `description`/`tags`/`variables` are `Schema.optionalKey` on `DashboardDocument`;
 	// the Schema.Class constructor rejects a present `undefined`. The web `Dashboard`
 	// carries them as optional and `ensureDashboard` stamps an explicit
 	// `tags: undefined`, so destructure them out of the spread and re-add only when set.
-	const { description, tags, variables, ...rest } = dashboard
+	const { description, tags, variables, refreshIntervalSeconds, ...rest } = dashboard
 	return new DashboardDocument({
 		...rest,
 		id: asDashboardId(dashboard.id),
@@ -150,14 +162,9 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 		...(description !== undefined && { description }),
 		...(tags !== undefined && { tags }),
 		...(variables !== undefined && { variables }),
-		timeRange:
-			dashboard.timeRange.type === "absolute"
-				? {
-						type: "absolute",
-						startTime: asIsoDateTimeString(dashboard.timeRange.startTime),
-						endTime: asIsoDateTimeString(dashboard.timeRange.endTime),
-					}
-				: dashboard.timeRange,
+		...(refreshIntervalSeconds !== undefined && { refreshIntervalSeconds }),
+		widgets: toDocumentWidgets(dashboard.widgets),
+		timeRange: toDocumentTimeRange(dashboard.timeRange),
 	})
 }
 
@@ -169,21 +176,15 @@ const jsonClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDashboardDocument {
 	// See `toDashboardDocument`: omit the optionalKey `description`/`tags`/`variables`
 	// rather than forwarding a present `undefined`, which the Schema.Class constructor rejects.
-	const { description, tags, variables, ...rest } = dashboard
+	const { description, tags, variables, refreshIntervalSeconds, ...rest } = dashboard
 	return new PortableDashboardDocument({
 		...rest,
 		...(description !== undefined && { description }),
 		...(tags !== undefined && { tags: [...tags] }),
 		...(variables !== undefined && { variables: jsonClone(variables) }),
-		widgets: jsonClone(dashboard.widgets),
-		timeRange:
-			dashboard.timeRange.type === "absolute"
-				? {
-						type: "absolute",
-						startTime: asIsoDateTimeString(dashboard.timeRange.startTime),
-						endTime: asIsoDateTimeString(dashboard.timeRange.endTime),
-					}
-				: dashboard.timeRange,
+		...(refreshIntervalSeconds !== undefined && { refreshIntervalSeconds }),
+		widgets: toDocumentWidgets(jsonClone(dashboard.widgets)),
+		timeRange: toDocumentTimeRange(dashboard.timeRange),
 	})
 }
 
@@ -225,6 +226,20 @@ function makeWidgetMutators(deps: {
 		}))
 	}
 
+	// `0` is the off sentinel and is stored as-is rather than deleting the key, so
+	// "explicitly off" survives a round-trip and reads differently in the version
+	// history from "never configured".
+	const updateDashboardRefreshInterval = (
+		id: string,
+		refreshIntervalSeconds: DashboardRefreshIntervalSeconds,
+	) => {
+		void mutateDashboard(id, (dashboard) => ({
+			...dashboard,
+			refreshIntervalSeconds,
+			updatedAt: new Date().toISOString(),
+		}))
+	}
+
 	const addWidget = (
 		dashboardId: string,
 		visualization: VisualizationType,
@@ -235,15 +250,7 @@ function makeWidgetMutators(deps: {
 			throw new Error("Dashboards are read-only")
 		}
 
-		const { h, minH } = defaultWidgetHeight(visualization)
-		const layoutDefaults =
-			visualization === "stat"
-				? // Deliberately taller than the `h: 2` stat tiles the templates use — a
-					// hand-added stat gets room for a sparkline.
-					{ w: 3, h: 4, minW: 2, minH }
-				: visualization === "table" || visualization === "list"
-					? { w: 6, h, minW: 3, minH }
-					: { w: 4, h, minW: 2, minH }
+		const layoutDefaults = defaultWidgetLayout(visualization)
 
 		// Build the widget synchronously from the current dashboard so we can
 		// return it to the caller. `mutateDashboard`'s updater runs asynchronously
@@ -383,13 +390,21 @@ function makeWidgetMutators(deps: {
 	const updateWidget = (
 		dashboardId: string,
 		widgetId: string,
-		updates: Partial<Pick<DashboardWidget, "visualization" | "dataSource" | "display" | "layout">>,
+		updates: Partial<
+			Pick<DashboardWidget, "visualization" | "dataSource" | "display" | "layout" | "timeRange">
+		>,
 	) => {
 		return mutateDashboard(dashboardId, (dashboard) => ({
 			...dashboard,
-			widgets: dashboard.widgets.map((widget) =>
-				widget.id === widgetId ? { ...widget, ...updates } : widget,
-			),
+			widgets: dashboard.widgets.map((widget) => {
+				if (widget.id !== widgetId) return widget
+				const next = { ...widget, ...updates }
+				// `timeRange: undefined` means "follow the dashboard again". The key
+				// has to go, not sit there holding `undefined` — the widget schema
+				// declares it `optionalKey`, which won't encode an explicit undefined.
+				if (next.timeRange === undefined) delete next.timeRange
+				return next
+			}),
 			updatedAt: new Date().toISOString(),
 		}))
 	}
@@ -432,6 +447,7 @@ function makeWidgetMutators(deps: {
 		updateDashboard,
 		updateDashboardTimeRange,
 		updateDashboardVariables,
+		updateDashboardRefreshInterval,
 		addWidget,
 		cloneWidget,
 		removeWidget,
@@ -471,11 +487,26 @@ export function useDashboardMutationSync() {
 	return { prepareForMutation, reconcileTxid }
 }
 
+/** What {@link useDashboardsRead} hands its consumers. */
+export interface DashboardsRead {
+	readonly dashboards: ReadonlyArray<Dashboard>
+	readonly isLoading: boolean
+	readonly isError: boolean
+	/**
+	 * True when `dashboards` is the plain-HTTP snapshot rather than live sync:
+	 * the rows are correct as of the fetch but will not update, so editing
+	 * affordances should be treated as unavailable.
+	 */
+	readonly degraded: boolean
+	/** Recreates the shape streams with a fresh budget — the retry affordance. */
+	readonly retry: () => void
+}
+
 // The read half of the ElectricSQL-backed dashboard store: a live query over
 // the org's synced collection, mapped to the web `Dashboard` shape. Global
 // chrome (sidebar, command palette) uses this directly — it needs the list but
 // none of the mutators.
-export function useDashboardsRead() {
+export function useDashboardsRead(): DashboardsRead {
 	const collection = useDashboardsCollection()
 
 	const {
@@ -484,14 +515,35 @@ export function useDashboardsRead() {
 		isError,
 	} = useLiveQuery((q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"), [collection])
 
-	const dashboards = useMemo(
+	const synced = useMemo(
 		() => (rows ?? []).map(rowToDashboard).filter((d): d is Dashboard => d !== null),
 		[rows],
 	)
 
-	const isLoading = liveLoading && dashboards.length === 0
+	const stillLoading = liveLoading && synced.length === 0
 
-	return { dashboards, isLoading, isError }
+	// The bounded load a live query has no notion of. Without it an unreachable
+	// sync endpoint keeps `liveLoading` true forever and every consumer of this
+	// hook renders a skeleton that never resolves.
+	const syncFailed = useCollectionLoadFailed(collection.id, stillLoading)
+	const fallback = useDashboardsFallback(syncFailed)
+
+	// Live rows always win. The HTTP snapshot only stands in while sync is down,
+	// and once it has loaded it keeps standing in across heal attempts rather than
+	// blinking back to a skeleton every time a retry re-enters `loading`.
+	const degraded = synced.length === 0 && fallback.status === "ready"
+	// `idle` counts as pending for one commit: `useSyncExternalStore` fires the
+	// fetch from `subscribe`, i.e. after the render that first saw the failure.
+	const fallbackPending = fallback.status === "loading" || (syncFailed && fallback.status === "idle")
+	const failed = isError || fallback.status === "failed" || (syncFailed && !fallbackPending)
+
+	return {
+		dashboards: degraded ? fallback.dashboards : synced,
+		isLoading: !degraded && !failed && (stillLoading || fallbackPending),
+		isError: failed && !degraded,
+		degraded,
+		retry: retryOrgCollections,
+	}
 }
 
 // The write half: create/import/delete plus the per-dashboard widget mutators,
@@ -687,5 +739,9 @@ export function useDashboardMutations() {
 // dashboard detail route, the widget route, the toolbar). `persistenceErrorAtom`
 // is module-level shared state, so the split halves stay coherent.
 export function useDashboardStore() {
-	return { ...useDashboardsRead(), ...useDashboardMutations() }
+	const read = useDashboardsRead()
+	const mutations = useDashboardMutations()
+	// A degraded (HTTP-snapshot) read has no live sync to reconcile a write
+	// against, so editing stays off until the shape stream is back.
+	return { ...read, ...mutations, readOnly: read.degraded || mutations.readOnly }
 }

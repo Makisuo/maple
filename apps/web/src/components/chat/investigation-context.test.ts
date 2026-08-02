@@ -76,9 +76,7 @@ describe("investigationSuggestions", () => {
 	})
 
 	it("keeps every suggestion short enough for a one-line chip", () => {
-		const suggestions = investigationSuggestions(
-			alert({ signalType: "p99_latency", scope: PARAGRAPH }),
-		)
+		const suggestions = investigationSuggestions(alert({ signalType: "p99_latency", scope: PARAGRAPH }))
 		for (const suggestion of suggestions) {
 			expect(suggestion.length).toBeLessThanOrEqual(72)
 		}

@@ -1,5 +1,5 @@
 import { DashboardDocument, DashboardId } from "@maple/domain/http"
-import type { V2DashboardUpdateParams } from "@maple/domain/http/v2"
+import type { V2Dashboard, V2DashboardUpdateParams } from "@maple/domain/http/v2"
 import { Effect, Schema } from "effect"
 import type { Dashboard } from "@/components/dashboard-builder/types"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
@@ -81,6 +81,27 @@ export const rowToDashboard = (row: DashboardRow): Dashboard | null => {
 }
 
 /**
+ * Widens a v2 API dashboard into the mutable web {@link Dashboard} shape. The
+ * `V2DashboardMutation` returned by writes is structurally a `V2Dashboard` plus
+ * an optional `txid`, so both wire shapes go through this one converter — the
+ * write path (create/import) and the HTTP list fallback.
+ */
+export const v2DashboardToDashboard = (value: V2Dashboard): Dashboard => ({
+	id: value.id,
+	name: value.name,
+	...(value.description !== null ? { description: value.description } : {}),
+	tags: [...value.tags],
+	timeRange: value.timeRange,
+	widgets: [...value.widgets] as Dashboard["widgets"],
+	variables: [...value.variables] as Dashboard["variables"],
+	...(value.refreshIntervalSeconds !== null
+		? { refreshIntervalSeconds: value.refreshIntervalSeconds }
+		: {}),
+	createdAt: value.createdAt,
+	updatedAt: value.updatedAt,
+})
+
+/**
  * Builds the v2 PATCH payload from a row's optimistic `payload_json`. The stored
  * payload never carries `txid` (the API strips it), so nothing to omit here.
  */
@@ -93,6 +114,7 @@ const rowToUpdateRequest = (row: DashboardRow): V2DashboardUpdateParams => {
 		timeRange: dashboard.timeRange,
 		widgets: dashboard.widgets,
 		variables: dashboard.variables ?? [],
+		refreshIntervalSeconds: dashboard.refreshIntervalSeconds ?? null,
 	}
 }
 

@@ -14,10 +14,10 @@ import type {
 	CloudflareZoneStatusBucket,
 } from "@/api/warehouse/cloudflare-infra"
 import { formatLatency, formatNumber } from "@maple/ui/format"
+import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import {
 	CHART_EMPTY_MESSAGE,
 	CHART_GRID_DASH,
-	COLOR_PALETTE,
 	makeBucketLabeler,
 	transformRows,
 } from "../chart-utils"
@@ -107,19 +107,23 @@ export function StackedBreakdownChart({
 	}, [rows, order])
 
 	// Fixed vocabularies (status class, cache status) map a color to a meaning. Everything else
-	// walks the palette by rank, so the top series are distinguishable instead of all sharing one
-	// fallback hue — which is what made a high-cardinality stack read as a single solid block.
+	// hashes its name into the shared identity palette, so a path/country/host keeps its color
+	// across windows and stays distinguishable instead of collapsing into one fallback hue.
 	const paletteByName = useMemo(() => {
+		const identities = series.filter(
+			(name) => colors[name] == null && name !== BREAKDOWN_OTHER_KEY,
+		)
+		const identityColors = resolveSeriesColors(identities)
 		const map = new Map<string, string>()
-		series.forEach((name, idx) => {
+		for (const name of series) {
 			map.set(
 				name,
 				colors[name] ??
 					(name === BREAKDOWN_OTHER_KEY
 						? OTHER_ZONES_COLOR
-						: COLOR_PALETTE[idx % COLOR_PALETTE.length]!),
+						: (identityColors.get(name) ?? OTHER_ZONES_COLOR)),
 			)
-		})
+		}
 		return map
 	}, [series, colors])
 

@@ -10,8 +10,8 @@ import {
 } from "@maple/ui/components/ui/input-group"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import { Button } from "@maple/ui/components/ui/button"
-import { CheckIcon, CopyIcon, PlusIcon } from "@/components/icons"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { PlusIcon } from "@/components/icons"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { mcpUrl } from "@/lib/services/common/mcp-url"
 import { McpToolsList } from "@/components/mcp/mcp-tools-list"
 import { CreateApiKeyDialog } from "@/components/settings/create-api-key-dialog"
@@ -49,7 +49,6 @@ const CONFIG_FILE_HINTS: Record<string, string> = {
 }
 
 export function McpSection() {
-	const { copied: endpointCopied, copy: copyEndpoint } = useCopyToClipboard("MCP endpoint")
 	const [createDialogOpen, setCreateDialogOpen] = useState(false)
 	const [createdSecret, setCreatedSecret] = useState<string | null>(null)
 	const [configTab, setConfigTab] = useState("claude-code")
@@ -71,17 +70,11 @@ export function McpSection() {
 							className="font-mono text-xs tracking-wide select-all"
 						/>
 						<InputGroupAddon align="inline-end">
-							<InputGroupButton
-								onClick={() => copyEndpoint(mcpEndpoint)}
-								aria-label="Copy endpoint to clipboard"
-								title={endpointCopied ? "Copied!" : "Copy"}
-							>
-								{endpointCopied ? (
-									<CheckIcon size={14} className="text-severity-info" />
-								) : (
-									<CopyIcon size={14} />
-								)}
-							</InputGroupButton>
+							<CopyButton
+								value={mcpEndpoint}
+								label="MCP endpoint"
+								render={<InputGroupButton />}
+							/>
 						</InputGroupAddon>
 					</InputGroup>
 					<div className="flex flex-wrap items-center gap-2">

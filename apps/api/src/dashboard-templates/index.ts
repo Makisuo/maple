@@ -1,3 +1,4 @@
+import { widgetTypeByVisualization } from "@maple/domain/http"
 import type { DashboardTemplateId, DashboardTemplatePreviewKind } from "@maple/domain/http"
 import { blankTemplate } from "./application/blank"
 import { errorTrackingTemplate } from "./application/error-tracking"
@@ -62,22 +63,21 @@ export function getTemplateById(id: DashboardTemplateId): TemplateDefinition | u
 	return TEMPLATE_BY_ID.get(id)
 }
 
+/**
+ * Panel type of a template widget, for the thumbnail. `chartId` disambiguates the
+ * three panel types that share `visualization: "chart"`; everything else maps
+ * straight through the shared widget-type table, so a gauge no longer reports
+ * itself as a table.
+ */
 function previewKindForWidget(visualization: string, chartId: unknown): DashboardTemplatePreviewKind {
-	switch (visualization) {
-		case "chart": {
-			if (typeof chartId === "string") {
-				if (chartId.endsWith("-area")) return "area"
-				if (chartId.endsWith("-bar")) return "bar"
-			}
-			return "line"
+	if (visualization === "chart") {
+		if (typeof chartId === "string") {
+			if (chartId.endsWith("-area")) return "area"
+			if (chartId.endsWith("-bar")) return "bar"
 		}
-		case "stat":
-			return "stat"
-		case "list":
-			return "list"
-		default:
-			return "table"
+		return "line"
 	}
+	return widgetTypeByVisualization(visualization)?.panelType ?? "line"
 }
 
 export function buildTemplatePreview(template: TemplateDefinition): TemplatePreviewWidget[] {

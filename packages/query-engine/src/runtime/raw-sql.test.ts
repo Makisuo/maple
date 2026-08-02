@@ -141,6 +141,25 @@ describe("prepareRawSql", () => {
 		}),
 	)
 
+	it.effect("expands $__timeGroup into a bucketing expression", () =>
+		Effect.gen(function* () {
+			const result = yield* prepareOk(
+				"SELECT $__timeGroup(Timestamp) AS bucket, count() AS value FROM Logs WHERE $__orgFilter AND $__timeFilter(Timestamp) GROUP BY bucket",
+			)
+			assert.include(result.sql, "toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS bucket")
+			assert.notInclude(result.sql, "$__timeGroup")
+		}),
+	)
+
+	it.effect("rejects a non-identifier $__timeGroup argument", () =>
+		Effect.gen(function* () {
+			const error = yield* prepareFail(
+				"SELECT $__timeGroup(1 OR 1=1) AS bucket FROM Logs WHERE $__orgFilter",
+			)
+			assert.strictEqual(error.code, "InvalidMacro")
+		}),
+	)
+
 	it.effect("escapes the org literal before validation", () =>
 		Effect.gen(function* () {
 			const result = yield* prepareRawSql({

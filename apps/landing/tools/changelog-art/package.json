@@ -1,0 +1,1 @@
+{ "name": "changelog-art", "private": true, "type": "module", "dependencies": { "@paper-design/shaders": "0.0.78" } }

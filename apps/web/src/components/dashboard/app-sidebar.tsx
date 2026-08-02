@@ -278,7 +278,9 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 							<DropdownMenuLabel>{item.title}</DropdownMenuLabel>
 							{subItems.map((sub) => (
 								<DropdownMenuItem key={sub.title} render={<Link to={sub.href} />}>
-									{sub.icon ? <sub.icon size={16} style={{ color: sub.iconColor }} /> : null}
+									{sub.icon ? (
+										<sub.icon size={16} style={{ color: sub.iconColor }} />
+									) : null}
 									{sub.title}
 								</DropdownMenuItem>
 							))}
@@ -331,7 +333,11 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 					<span className="flex shrink-0 items-center gap-1.5 text-muted-foreground group-data-[collapsible=icon]:hidden">
 						{preview.map((sub) =>
 							sub.icon ? (
-								<sub.icon className="size-3" key={sub.title} style={{ color: sub.iconColor }} />
+								<sub.icon
+									className="size-3"
+									key={sub.title}
+									style={{ color: sub.iconColor }}
+								/>
 							) : null,
 						)}
 					</span>
@@ -363,7 +369,9 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 								isActive={sub.href === activeSubHref}
 								render={<Link to={sub.href} />}
 							>
-								{sub.icon ? <sub.icon className="size-3.5" style={{ color: sub.iconColor }} /> : null}
+								{sub.icon ? (
+									<sub.icon className="size-3.5" style={{ color: sub.iconColor }} />
+								) : null}
 								<span>{sub.title}</span>
 							</SidebarMenuSubButton>
 						</SidebarMenuSubItem>

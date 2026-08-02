@@ -5183,6 +5183,14 @@ export const nav_blog = () => `Blog`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_changelog = () => `Changelog`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const footer_learn = () => `Learn`
 
 

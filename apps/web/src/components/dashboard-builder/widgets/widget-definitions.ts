@@ -5,6 +5,7 @@ import {
 	XmarkIcon,
 	GridIcon,
 	ChartBarIcon,
+	ChartBarHorizontalIcon,
 	ChartLineIcon,
 	type IconComponent,
 } from "@/components/icons"
@@ -455,6 +456,65 @@ export const funnelPresets: WidgetPresetDefinition[] = [
 			chartId: "query-builder-funnel",
 			unit: "number",
 			funnel: { showStepPercent: false },
+		},
+	},
+]
+
+export const hbarPresets: WidgetPresetDefinition[] = [
+	{
+		id: "hbar-top-operations",
+		name: "Busiest Operations",
+		description: "Top span names by volume, each as a share of the total",
+		icon: ChartBarHorizontalIcon,
+		visualization: "hbar",
+		dataSource: {
+			endpoint: "custom_query_builder_breakdown",
+			params: {
+				queries: [
+					buildBreakdownQuery(0, {
+						dataSource: "traces",
+						whereClause: "",
+						aggregation: "count",
+						groupBy: ["span.name"],
+					}),
+				],
+				formulas: [],
+				comparison: { mode: "none", includePercentChange: false },
+				debug: false,
+			},
+		},
+		display: {
+			title: "Busiest Operations",
+			chartId: "query-builder-hbar",
+			unit: "number",
+		},
+	},
+	{
+		id: "hbar-spans-by-service",
+		name: "Spans by Service",
+		description: "Span volume per service, ranked",
+		icon: PulseIcon,
+		visualization: "hbar",
+		dataSource: {
+			endpoint: "custom_query_builder_breakdown",
+			params: {
+				queries: [
+					buildBreakdownQuery(0, {
+						dataSource: "traces",
+						whereClause: "",
+						aggregation: "count",
+						groupBy: ["service.name"],
+					}),
+				],
+				formulas: [],
+				comparison: { mode: "none", includePercentChange: false },
+				debug: false,
+			},
+		},
+		display: {
+			title: "Spans by Service",
+			chartId: "query-builder-hbar",
+			unit: "number",
 		},
 	},
 ]

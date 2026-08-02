@@ -44,7 +44,7 @@ interface DatabaseRow {
 }
 
 const headerCells = (sort?: {
-	sortKey: SortKey
+	sortKey: SortKey | null
 	sortDir: "asc" | "desc"
 	handleSort: (k: SortKey) => void
 }) => (

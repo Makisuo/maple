@@ -70,6 +70,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"DELETE /v2/dashboards/{id}",
 			"DELETE /v2/integrations/slack",
 			"DELETE /v2/scrape_targets/{id}",
+			"GET /v2/alerts/deliveries",
 			"GET /v2/alerts/destinations",
 			"GET /v2/alerts/destinations/{id}",
 			"GET /v2/alerts/incidents",

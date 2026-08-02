@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
 /**
+ * DORMANT since 2026-08 — PR previews no longer provision a PlanetScale branch
+ * (see `resolveDatabaseMode` in packages/infra/src/cloudflare/stage.ts). Kept
+ * intact as the reverse path; nothing calls it while `pr` maps to `"none"`.
+ *
  * Hand every object this deploy created on the PR-preview branch to `postgres`
  * — the step that makes the NEXT deploy's in-place reset possible.
  *

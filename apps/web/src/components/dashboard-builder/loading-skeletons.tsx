@@ -67,79 +67,65 @@ export function DashboardViewSkeleton() {
 }
 
 /**
- * Mini ghost mosaics for the list-card preview strip — varied per card so the
- * grid doesn't look stamped from one mold. Percent-based rects mirror
- * `DashboardPreview`'s absolute tile layout.
+ * Per-row widths for the list ghost. Varying them keeps the placeholder from
+ * reading as a table of identical bars, and the pairs match the row's real
+ * name / description rhythm.
  */
-const PREVIEW_MOSAICS: ReadonlyArray<
-	ReadonlyArray<{ left: string; top: string; width: string; height: string }>
-> = [
-	[
-		{ left: "0%", top: "0%", width: "48%", height: "46%" },
-		{ left: "52%", top: "0%", width: "48%", height: "46%" },
-		{ left: "0%", top: "54%", width: "100%", height: "46%" },
-	],
-	[
-		{ left: "0%", top: "0%", width: "31%", height: "46%" },
-		{ left: "35%", top: "0%", width: "31%", height: "46%" },
-		{ left: "70%", top: "0%", width: "30%", height: "46%" },
-		{ left: "0%", top: "54%", width: "66%", height: "46%" },
-		{ left: "70%", top: "54%", width: "30%", height: "46%" },
-	],
-	[
-		{ left: "0%", top: "0%", width: "100%", height: "46%" },
-		{ left: "0%", top: "54%", width: "48%", height: "46%" },
-		{ left: "52%", top: "54%", width: "48%", height: "46%" },
-	],
-	[
-		{ left: "0%", top: "0%", width: "66%", height: "100%" },
-		{ left: "70%", top: "0%", width: "30%", height: "46%" },
-		{ left: "70%", top: "54%", width: "30%", height: "46%" },
-	],
-]
+const GHOST_ROWS = [
+	{ name: "w-44", description: "w-80", reads: "w-24" },
+	{ name: "w-32", description: "w-64", reads: "w-16" },
+	{ name: "w-52", description: "w-96", reads: "w-28" },
+	{ name: "w-36", description: "w-72", reads: "w-20" },
+	{ name: "w-40", description: "w-56", reads: "w-24" },
+	{ name: "w-28", description: "w-88", reads: "w-16" },
+] as const
 
-const LIST_TITLE_WIDTHS = ["w-32", "w-24", "w-40", "w-28", "w-36", "w-24"] as const
-
-function GhostDashboardCard({ index }: { index: number }) {
-	const mosaic = PREVIEW_MOSAICS[index % PREVIEW_MOSAICS.length]
+/** One ghost row on the same lane grid as `DashboardRow`, so nothing shifts. */
+function GhostDashboardRow({ index }: { index: number }) {
+	const row = GHOST_ROWS[index % GHOST_ROWS.length]
 	return (
 		<div
-			className="flex flex-col overflow-hidden rounded-md ring-1 ring-border bg-card animate-tile-in motion-reduce:animate-none"
+			className="flex h-13 items-center border-b border-border last:border-b-0 animate-tile-in motion-reduce:animate-none"
 			style={tileDelay(index)}
 		>
-			<div className="h-[100px] w-full border-b border-border bg-background p-3">
-				<div className="relative h-full w-full">
-					{mosaic.map((rect, i) => (
-						<div
-							key={i}
-							className="absolute rounded-sm bg-muted animate-pulse motion-reduce:animate-none"
-							style={{ ...rect, animationDelay: `${-(index + i) * 0.15}s` }}
-						/>
-					))}
-				</div>
+			<span className="w-0.5 shrink-0" />
+			<Skeleton className="ml-3 size-5.5 shrink-0 rounded-sm" />
+			<div className="flex min-w-0 grow flex-col gap-1.5 px-3">
+				<Skeleton className={`h-3 ${row.name}`} />
+				<Skeleton className={`h-2.5 ${row.description} opacity-60`} />
 			</div>
-			<div className="flex flex-col gap-2 p-4">
-				<Skeleton className={`h-4 ${LIST_TITLE_WIDTHS[index % LIST_TITLE_WIDTHS.length]}`} />
-				<Skeleton className="h-3 w-36" />
+			<div className="hidden w-40 shrink-0 flex-col items-end gap-1.5 sm:flex">
+				<Skeleton className="h-2.5 w-16" />
+				<Skeleton className={`h-2.5 ${row.reads} opacity-60`} />
+			</div>
+			<div className="flex w-24 shrink-0 justify-end">
+				<Skeleton className="h-2.5 w-12 opacity-60" />
+			</div>
+			<div className="flex shrink-0 items-center gap-1.5 pr-2 pl-3">
+				<Skeleton className="size-3.5 shrink-0 rounded-sm opacity-50" />
+				<Skeleton className="size-3.5 shrink-0 rounded-sm opacity-50" />
 			</div>
 		</div>
 	)
 }
 
-/** Toolbar + card-grid ghost for the `/dashboards` list. */
+/** Toolbar + row-list ghost for the `/dashboards` list. */
 export function DashboardListSkeleton() {
 	return (
 		<StatusRegion label="Loading dashboards">
 			<div aria-hidden>
-				<div className="mb-4 flex items-center gap-2">
-					<Skeleton className="h-8 w-40" />
-					<Skeleton className="h-8 w-24" />
+				<div className="flex flex-wrap items-center gap-2 pb-3">
+					<Skeleton className="h-8 grow sm:max-w-70" />
+					<Skeleton className="h-8 w-32 shrink-0" />
+					<Skeleton className="h-8 w-16 shrink-0" />
+					<Skeleton className="h-8 w-36 shrink-0" />
 				</div>
-				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-					{[0, 1, 2, 3, 4, 5].map((i) => (
-						<GhostDashboardCard key={i} index={i} />
-					))}
+				<div className="flex items-center gap-2 pb-2">
+					<Skeleton className="h-2.5 w-24" />
 				</div>
+				{[0, 1, 2, 3, 4, 5].map((i) => (
+					<GhostDashboardRow key={i} index={i} />
+				))}
 			</div>
 		</StatusRegion>
 	)

@@ -209,7 +209,6 @@ const queryEngineStub = {
 		)
 	},
 	evaluate: () => Effect.die(new Error("not used")),
-	evaluateRawSql: () => Effect.die(new Error("not used")),
 	evaluateSeries: () => Effect.die(new Error("not used")),
 	cachedDirect: (_tenant, _route, _payload, effect) => effect,
 } satisfies QueryEngineServiceShape

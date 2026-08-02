@@ -14,7 +14,7 @@ import {
 	RoleName,
 } from "@maple/domain/http"
 import { API_KEY_PREFIX, apiKeys, generateApiKey, hashApiKey, parseIngestKeyLookupHmacKey } from "@maple/db"
-import { and, desc, eq } from "drizzle-orm"
+import { and, desc, eq, isNull, lt, or } from "drizzle-orm"
 import { Clock, Effect, Layer, Option, Redacted, Schema, Context } from "effect"
 import { Database } from "../lib/DatabaseLive"
 import { readTxid, txidColumn } from "../lib/electric-txid"
@@ -369,16 +369,53 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			} satisfies ResolvedApiKey)
 		})
 
+		// Every API-key-authenticated request used to fire an unconditional
+		// `UPDATE api_keys SET last_used_at = now()`. `api_keys` is Electric-synced
+		// (electric_publication_default) and carries `last_used_at` in the browser
+		// shape projection, so each of those writes decoded to a replication event
+		// shipped out of PlanetScale and fanned out to every open tab in the org.
+		//
+		// Two gates, both needed:
+		//   * the per-isolate memo skips the round trip entirely on a warm isolate;
+		//   * the SQL predicate makes the write a *zero-row* UPDATE on a cold one,
+		//     and Postgres writes no WAL tuple for a row it never touched. Without
+		//     it, isolate churn would put us straight back to a write per request.
+		//
+		// The Map is built per service instance rather than at module scope for the
+		// reason spelled out in ScrapeTargetsService — module scope would share one
+		// memo across every database in a process, which breaks tests that build a
+		// fresh PGlite per case.
+		const LAST_USED_HEARTBEAT_MS = 5 * 60_000
+		const lastUsedTouchMemo = new Map<string, number>()
+
 		const touchLastUsed = Effect.fn("ApiKeysService.touchLastUsed")(function* (keyId: ApiKeyId) {
 			const now = yield* Clock.currentTimeMillis
+
+			const touchedAt = lastUsedTouchMemo.get(keyId)
+			if (touchedAt !== undefined && touchedAt > now - LAST_USED_HEARTBEAT_MS) {
+				yield* Effect.annotateCurrentSpan("apiKey.lastUsedMemoHit", true)
+				return
+			}
+			yield* Effect.annotateCurrentSpan("apiKey.lastUsedMemoHit", false)
+
 			yield* database
 				.execute((db) =>
 					db
 						.update(apiKeys)
 						.set({ lastUsedAt: new Date(now) })
-						.where(eq(apiKeys.id, keyId)),
+						.where(
+							and(
+								eq(apiKeys.id, keyId),
+								or(
+									isNull(apiKeys.lastUsedAt),
+									lt(apiKeys.lastUsedAt, new Date(now - LAST_USED_HEARTBEAT_MS)),
+								),
+							),
+						),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
+
+			lastUsedTouchMemo.set(keyId, now)
 		})
 
 		const resolveByBearer = Effect.fn("ApiKeysService.resolveByBearer")(function* (

@@ -31,8 +31,13 @@ import {
 	rowToAlertRuleDocument,
 } from "@/lib/collections/alerts"
 import { getOrgCollections } from "@/lib/collections/org-collections"
-import { collectionFailureMessage, makeOrgCollectionsKey, orgIdOf } from "@/lib/models/org-collections-key"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import {
+	collectionFailureMessage,
+	makeOrgCollectionsKey,
+	orgCollectionStuckOptions,
+	orgIdOf,
+} from "@/lib/models/org-collections-key"
+import { v2DeliveryToDocument } from "@/lib/alerts/form-utils"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -218,29 +223,36 @@ export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("m
 	make: () =>
 		Effect.gen(function* () {
 			const orgKey = yield* makeOrgCollectionsKey
+			// `orgCollectionStuckOptions` on every one: without a bounded load an
+			// unreachable sync endpoint parks each store in `loading` and the hub
+			// renders skeletons forever instead of its error state.
 			const rules = yield* Db.fromCollectionByKey(
 				orgKey,
 				(key) => getOrgCollections(orgIdOf(key)).alertRules,
+				orgCollectionStuckOptions,
 			)
 			const states = yield* Db.fromCollectionByKey(
 				orgKey,
 				(key) => getOrgCollections(orgIdOf(key)).alertRuleStates,
+				orgCollectionStuckOptions,
 			)
 			const incidents = yield* Db.fromCollectionByKey(
 				orgKey,
 				(key) => getOrgCollections(orgIdOf(key)).alertIncidents,
+				orgCollectionStuckOptions,
 			)
 
-			// Delivery events stay an HTTP read (no Electric shape) — refetched on
-			// org/generation change via the dependency store, manually via `refresh`.
-			// TODO(v2): also the last v1 alerts endpoint the web app calls — no v2
-			// equivalent exists; the follow-up is an alert_delivery_events Electric shape.
+			// Delivery events stay a capped HTTP read (no Electric shape) — refetched
+			// on org/generation change via the dependency store, manually via `refresh`.
 			const deliveryEvents = yield* Query.make({
 				stores: { orgKey },
 				handler: () =>
 					Effect.gen(function* () {
-						const client = yield* MapleApiAtomClient
-						return yield* client.alerts.listDeliveryEvents()
+						const client = yield* MapleApiV2AtomClient
+						const response = yield* client.alertDeliveries.list({
+							query: { limit: 100 },
+						})
+						return { events: response.data.map(v2DeliveryToDocument) }
 					}),
 			})
 

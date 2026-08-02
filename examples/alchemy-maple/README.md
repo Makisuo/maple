@@ -6,7 +6,7 @@ A Cloudflare Worker and the Maple resources that observe it, in one stack — vi
 |                                    |                                                                            |
 | ---------------------------------- | -------------------------------------------------------------------------- |
 | [`src/Api.ts`](src/Api.ts)         | The Worker: Alchemy's Effect-native style, instrumented with the Maple SDK |
-| [`alchemy.run.ts`](alchemy.run.ts) | A Slack destination, two alert rules, a dashboard, a scoped API key        |
+| [`alchemy.run.ts`](alchemy.run.ts) | A PagerDuty destination, two alert rules, a dashboard, a scoped API key    |
 
 ## The seam
 
@@ -35,7 +35,7 @@ bun run --cwd ../../lib/alchemy-maple build && bun run --cwd ../../lib/effect-sd
 ```
 
 ```bash
-MAPLE_API_KEY=maple_ak_… CLOUDFLARE_ACCOUNT_ID=… SLACK_WEBHOOK_URL=https://hooks.slack.com/… bun alchemy deploy
+MAPLE_API_KEY=maple_ak_… CLOUDFLARE_ACCOUNT_ID=… PAGERDUTY_ROUTING_KEY=… bun alchemy deploy
 ```
 
 Needs an org-admin `maple_ak_…` key (alert rules and API keys require one); set `MAPLE_API_URL` to

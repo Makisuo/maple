@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/u
 import { CircleWarningIcon, ConnectionIcon } from "@maple/ui/components/icons"
 import { LOCAL_OTLP_ENDPOINT, localApiBase } from "../lib/constants"
 import { DOCS_CLI_REFERENCE, DOCS_LOCAL_MODE_INSTALL, INSTALL_METHODS } from "../lib/links"
-import { CopyableField } from "./copyable-field"
+import { CopyableField } from "@maple/ui/components/ui/copyable-field"
 
 export function EmptyState({ icon, title, hint }: { icon?: ReactNode; title: string; hint?: ReactNode }) {
 	return (

@@ -4,9 +4,11 @@ import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { Effect, Schedule, Schema } from "effect"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
+import { useWidgetTimeRangeOverride } from "@/components/dashboard-builder/widgets/widget-time-range-context"
+import { resolveTimeRange } from "@/atoms/dashboard-time-range-atoms"
 import { getServerFunction } from "@/components/dashboard-builder/data-source-registry"
 import { hasUnresolvedVariableRefs, interpolateWidgetParams } from "@/lib/dashboard-variables/interpolate"
-import type { DashboardWidget, WidgetDataSource } from "@/components/dashboard-builder/types"
+import type { DashboardWidget, TimeRange, WidgetDataSource } from "@/components/dashboard-builder/types"
 
 /**
  * The structural shape a data source must satisfy to be fetched. Both the
@@ -347,10 +349,31 @@ export function useWidgetDataSource(
 	 * visibility (lazy-load) so off-screen tiles don't fire queries on mount.
 	 */
 	enabled = true,
+	/**
+	 * Pins this fetch to a window of its own instead of the dashboard's. Callers
+	 * that already hold the widget pass `widget.timeRange`; nested fetches inside
+	 * a widget (a stat's sparkline) inherit it from context instead.
+	 */
+	timeRangeOverride?: TimeRange,
 ) {
 	const {
-		state: { resolvedTimeRange },
+		state: { resolvedTimeRange: dashboardTimeRange },
 	} = useDashboardTimeRange()
+	const contextOverride = useWidgetTimeRangeOverride()
+	const override = timeRangeOverride ?? contextOverride ?? undefined
+	const overrideKey = override ? encodeKey(override) : null
+
+	const resolvedTimeRange = useMemo(
+		() => (override ? resolveTimeRange(override) : dashboardTimeRange),
+		// Keyed on the serialized override, not its identity: the dashboard object
+		// is rebuilt on every optimistic write, and re-resolving an unchanged
+		// override would hand every pinned tile fresh params and refetch it.
+		// `dashboardTimeRange` stays in the deps so a manual reload or auto-refresh
+		// (which gives it a new identity) rebases a relative override against "now"
+		// as well.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[overrideKey, dashboardTimeRange],
+	)
 	const variablesContext = useDashboardVariablesOptional()
 
 	const isStatic = dataSource?.endpoint === "markdown_static"
@@ -361,7 +384,9 @@ export function useWidgetDataSource(
 		: isStatic
 			? null
 			: !resolvedTimeRange
-				? "Unable to resolve dashboard time range"
+				? override
+					? "Unable to resolve this widget's time range"
+					: "Unable to resolve dashboard time range"
 				: !hasServerFn
 					? `Unknown data source endpoint: ${dataSource.endpoint}`
 					: null
@@ -451,7 +476,7 @@ export function useWidgetDataSource(
 }
 
 export function useWidgetData(widget: DashboardWidget, enabled = true) {
-	return useWidgetDataSource(widget.dataSource, enabled)
+	return useWidgetDataSource(widget.dataSource, enabled, widget.timeRange)
 }
 
 export const __testables = {

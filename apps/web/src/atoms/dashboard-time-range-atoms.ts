@@ -8,7 +8,7 @@ type ResolvedTimeRange = { startTime: string; endTime: string }
 
 const DEFAULT_RELATIVE_FALLBACK = "1h"
 
-function resolveTimeRange(timeRange: TimeRange): ResolvedTimeRange | null {
+export function resolveTimeRange(timeRange: TimeRange): ResolvedTimeRange | null {
 	if (timeRange.type === "absolute") {
 		return { startTime: timeRange.startTime, endTime: timeRange.endTime }
 	}

@@ -20,12 +20,20 @@ export interface WidgetActions {
 const WidgetActionsContext = createContext<WidgetActions | null>(null)
 
 /**
- * Returns the widget actions provided by the nearest `WidgetActionsProvider`,
- * or `null` when rendered outside one (e.g. the widget lab, which passes
- * explicit action props instead).
+ * Returns the widget actions provided by the nearest provider, or `null` when
+ * rendered outside one (the template preview, which has no actions at all).
  */
 export function useWidgetActions(): WidgetActions | null {
 	return use(WidgetActionsContext)
+}
+
+/**
+ * Supplies an explicit action set, for callers that render widgets outside a
+ * dashboard — the widget lab, whose actions are console stubs. Widget renderers
+ * take no action props; this is how you give them any.
+ */
+export function WidgetActionsScope({ actions, children }: { actions: WidgetActions; children: ReactNode }) {
+	return <WidgetActionsContext value={actions}>{children}</WidgetActionsContext>
 }
 
 interface WidgetActionsProviderProps {

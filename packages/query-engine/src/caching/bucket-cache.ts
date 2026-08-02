@@ -197,6 +197,48 @@ export const findMissingRanges = (
 	return missing
 }
 
+/**
+ * Collapse a gap list into at most one range per cachability class, so a cache
+ * miss costs at most two warehouse queries instead of one per gap.
+ *
+ * Prod telemetry showed the per-gap fan-out averaging ~2.9 warehouse queries
+ * per request *regardless of cache coverage* — a request with 90% of its
+ * buckets cached issued as many queries as a cold one, so the cache paid its
+ * read cost and never collected the win. Coalescing is what makes coverage
+ * translate into avoided work.
+ *
+ * Safety: `findMissingRanges` splits every gap at the flux boundary, so all
+ * cachable gaps lie entirely below it and all non-cachable gaps entirely
+ * above. Taking `min(start)..max(end)` within a class therefore cannot drag a
+ * bucket across the boundary, and the "never write back the live tail" rule
+ * still holds.
+ *
+ * The coalesced range spans interior gaps that were already cached, so those
+ * buckets get refetched. That is intentional: one wider scan over a
+ * sort-key-aligned range beats N round trips, and the refetched buckets simply
+ * win the merge in `mergeAndDeduplicateBuckets` with equivalent data.
+ */
+export const coalesceMissingRanges = (
+	missing: ReadonlyArray<MissingRange>,
+): ReadonlyArray<MissingRange> => {
+	const spans = new Map<boolean, { startMs: number; endMs: number }>()
+	for (const { range, cachable } of missing) {
+		const span = spans.get(cachable)
+		if (span) {
+			span.startMs = Math.min(span.startMs, range.startMs)
+			span.endMs = Math.max(span.endMs, range.endMs)
+		} else {
+			spans.set(cachable, { startMs: range.startMs, endMs: range.endMs })
+		}
+	}
+	// Settled range before the live tail, so the write-back path sees the
+	// cachable result first.
+	return [true, false].flatMap((cachable) => {
+		const span = spans.get(cachable)
+		return span ? [{ range: { startMs: span.startMs, endMs: span.endMs }, cachable }] : []
+	})
+}
+
 // --- Bucket merging ------------------------------------------------------
 
 /**
@@ -510,10 +552,11 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 						bucketMs,
 						fluxBoundaryMs,
 					)
-					const freshByRange = yield* Effect.forEach(missing, (item) => computeRange(item.range), {
+					const fillRanges = coalesceMissingRanges(missing)
+					const freshByRange = yield* Effect.forEach(fillRanges, (item) => computeRange(item.range), {
 						concurrency: fillConcurrency,
 					})
-					const rangeResults = missing.map((item, index) => ({
+					const rangeResults = fillRanges.map((item, index) => ({
 						item,
 						points: freshByRange[index]!,
 					}))
@@ -597,7 +640,7 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 						bucketsHit,
 						bucketsMissed,
 						missingRangeCount: missing.length,
-						warehouseQueryCount: missing.length,
+						warehouseQueryCount: fillRanges.length,
 						segmentsHit: countStatus("hit"),
 						segmentsMissed: countStatus("miss"),
 						segmentsTimedOut: countStatus("timeout"),

@@ -25,7 +25,13 @@ LIBCHDB="${MAPLE_LIBCHDB:-$BUNDLE_DIR/libchdb.so}"
 PORT="${2:-45401}"
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 WORKER="$REPO/apps/cli/test/probes/archive-gc-worker.ts"
-RANGE_DATE="2026-06-29"
+# MUST stay inside the traces TTL (`toDate(Timestamp) + INTERVAL 30 DAY` in
+# local-schema.sql) — see native-archive-merge-probe.sh. A hardcoded date silently
+# stopped exercising anything once it aged past the window: the fixture expired on
+# write, every generation archived an empty table, and the probe surfaced that as
+# an unbound-variable crash rather than a failed assertion.
+# `date -u -d` is GNU (CI), `date -u -v` is BSD (local macOS).
+RANGE_DATE="$(date -u -d '1 day ago' +%F 2>/dev/null || date -u -v-1d +%F)"
 SIGNAL="traces"
 
 command -v duckdb >/dev/null 2>&1 || { echo "FAIL: duckdb required" >&2; exit 1; }
@@ -215,7 +221,7 @@ verify_after_reconcile() {
 	active_count=$( [ -d "$active_dir" ] && find "$active_dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ' || echo 0 )
 	[ "$active_count" = "0" ] || errs="$errs active-op=$active_count"
 	# The active generation is DuckDB-queryable with the exact marker count.
-	local paths_csv f count_duck=""
+	local paths_csv="" f count_duck=""
 	for f in "$gens_dir"/*/shards/*.parquet; do
 		[ -f "$f" ] || continue
 		paths_csv="${paths_csv:+$paths_csv,}\"$f\""

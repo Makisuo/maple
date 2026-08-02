@@ -111,8 +111,6 @@ export function signalLabel(signalType: string): string {
 			return "Apdex"
 		case "throughput":
 			return "throughput"
-		case "metric":
-			return "metric"
 		default:
 			return signalType
 	}
@@ -171,14 +169,6 @@ export function alertPromptSuggestions(alert: AlertContext): string[] {
 			`Error rate vs latency correlation in ${group}`,
 		]
 	}
-	if (sig === "metric") {
-		return [
-			`Raw metric values for ${group} last ${windowM}m`,
-			`Compare this metric to the past week`,
-			`Chart this metric for ${group} over 6h`,
-		]
-	}
-
 	return [`Diagnose ${group}`, `Recent errors in ${group}`, `Slowest traces in ${group}`]
 }
 

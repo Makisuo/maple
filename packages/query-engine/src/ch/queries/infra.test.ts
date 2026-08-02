@@ -5,6 +5,7 @@ import {
 	listHostsQuery,
 	hostDetailSummaryQuery,
 	listPodsQuery,
+	listPodsSummaryQuery,
 	podDetailSummaryQuery,
 	podGaugeTimeseriesQuery,
 	podFacetsQuery,
@@ -58,9 +59,36 @@ describe("listPodsQuery", () => {
 		expect(sql).toContain("k8s.pod.memory_limit_utilization")
 		expect(sql).toContain("k8s.pod.cpu_request_utilization")
 		expect(sql).toContain("k8s.pod.memory_request_utilization")
-		expect(sql).toContain("LIMIT 200")
+		expect(sql).toContain("LIMIT 50")
 		expect(sql).toContain("FORMAT JSON")
 		expect(sql).not.toMatch(/__PARAM_\w+__/)
+	})
+
+	it("defaults to worst-first: peak saturation, then peak CPU for unlimited pods", () => {
+		const { sql } = compileCH(listPodsQuery({}), baseParams)
+		expect(sql).toContain(
+			"greatest(maxIf(Value, MetricName = 'k8s.pod.cpu_limit_utilization'), maxIf(Value, MetricName = 'k8s.pod.memory_limit_utilization')) AS saturation",
+		)
+		expect(sql).toContain("ORDER BY saturation DESC, cpuUsagePeak DESC, podName ASC")
+		expect(sql).not.toContain("ORDER BY lastSeen")
+	})
+
+	it("selects peaks alongside averages so a row can show avg → peak", () => {
+		const { sql } = compileCH(listPodsQuery({}), baseParams)
+		expect(sql).toContain("avgIf(Value, MetricName = 'k8s.pod.cpu.usage') AS cpuUsage")
+		expect(sql).toContain("maxIf(Value, MetricName = 'k8s.pod.cpu.usage') AS cpuUsagePeak")
+	})
+
+	it("honours an explicit sort key and never drops the tiebreak", () => {
+		const { sql } = compileCH(listPodsQuery({ sortBy: "cpuUsage", sortDir: "asc" }), baseParams)
+		expect(sql).toContain("ORDER BY cpuUsage ASC, cpuUsagePeak DESC, podName ASC")
+	})
+
+	it("does not repeat the sort key in the tiebreak", () => {
+		const { sql } = compileCH(listPodsQuery({ sortBy: "podName" }), baseParams)
+		// podName defaults to ascending and must appear exactly once.
+		expect(sql).toContain("ORDER BY podName ASC, cpuUsagePeak DESC")
+		expect(sql.match(/podName (ASC|DESC)/g)).toHaveLength(1)
 	})
 
 	it("applies search and single-node legacy filters", () => {
@@ -131,6 +159,60 @@ describe("listPodsQuery", () => {
 		const { sql } = compileCH(listPodsQuery({ limit: 50, offset: 25 }), baseParams)
 		expect(sql).toContain("LIMIT 50")
 		expect(sql).toContain("OFFSET 25")
+	})
+
+	// Scopes filter on aggregates, which a WHERE over raw rows cannot express.
+	it("filters the saturated scope outside the grouping", () => {
+		const { sql } = compileCH(listPodsQuery({ scope: "saturated" }), baseParams)
+		expect(sql).toContain("GROUP BY podName) AS pods")
+		expect(sql).toContain("WHERE saturation >= 0.9")
+	})
+
+	it("treats a pod with no limit metrics as unbounded, not as healthy", () => {
+		const { sql } = compileCH(listPodsQuery({ scope: "unbounded" }), baseParams)
+		expect(sql).toContain("WHERE (saturation = 0 AND cpuUsagePeak > 0)")
+	})
+
+	it("scopes stale pods relative to the window end, not wall-clock now", () => {
+		const { sql } = compileCH(listPodsQuery({ scope: "stale" }), baseParams)
+		expect(sql).toContain("WHERE lastSeen < '2024-01-02 00:00:00' - INTERVAL 300 SECOND")
+		expect(sql).not.toMatch(/__PARAM_\w+__/)
+	})
+
+	it("emits no scope predicate when none is asked for", () => {
+		const { sql } = compileCH(listPodsQuery({}), baseParams)
+		expect(sql).not.toContain("saturation >= 0.9")
+		expect(sql).not.toContain("cpuUsagePeak > 0")
+	})
+})
+
+describe("listPodsSummaryQuery", () => {
+	it("aggregates per pod first so the band counts are exact, not HLL estimates", () => {
+		const { sql } = compileCH(listPodsSummaryQuery({}), baseParams)
+		expect(sql).toContain("GROUP BY podName")
+		expect(sql).toContain("count() AS totalPods")
+		expect(sql).toContain("countIf(saturation >= 0.9) AS saturatedPods")
+		expect(sql).toContain("countIf((saturation >= 0.6 AND saturation < 0.9)) AS elevatedPods")
+		expect(sql).not.toContain("uniq(")
+		expect(sql).not.toMatch(/__PARAM_\w+__/)
+	})
+
+	it("counts unbounded pods as burning CPU with no limit samples at all", () => {
+		const { sql } = compileCH(listPodsSummaryQuery({}), baseParams)
+		expect(sql).toContain("countIf((limitSamples = 0 AND cpuUsagePeak > 0)) AS unboundedPods")
+	})
+
+	// The browse band deliberately passes only the *scope* (cluster/env) so it can
+	// show what the row filters excluded, but the query itself accepts the full
+	// filter set so callers that do want an exact match can ask for one.
+	it("accepts the same filter set as the list", () => {
+		const { sql } = compileCH(
+			listPodsSummaryQuery({ namespaces: ["payments"], search: "api" }),
+			baseParams,
+		)
+		expect(sql).toContain("'payments'")
+		expect(sql).toContain("'api'")
+		expect(sql).toContain("OrgId = 'org_1'")
 	})
 })
 

@@ -71,7 +71,13 @@ const crossLinks = [
 ];
 ---
 
-<Layout title={title} description={description} ogType="article" alternates={feature.locales}>
+<Layout
+	title={title}
+	description={description}
+	ogType="article"
+	alternates={feature.locales}
+	mdHref={locale === "en" ? `/features/${feature.slug}.md` : undefined}
+>
 	<SeoHead title={title} description={description} />
 	<Nav />
 

@@ -21,17 +21,16 @@ import {
 	AlertWarningIcon,
 	ArrowPathIcon,
 	ArrowRightIcon,
-	CheckIcon,
-	CopyIcon,
 	EyeIcon,
 	PaperPlaneIcon,
 	PulseIcon,
 } from "@/components/icons"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { CopyIndicator } from "@maple/ui/components/ui/copy-button"
+import { useCopy } from "@maple/ui/hooks/use-copy"
 import { formatNumber } from "@maple/ui/format"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import { maskKey } from "@/components/ingest/copyable-field"
+import { maskKey } from "@maple/ui/components/ui/copyable-field"
 import { ConnectInstructions, FrameworkPicker, useGuidedFramework } from "@/components/ingest/guided-setup"
 import {
 	sendTestEvent,
@@ -123,8 +122,8 @@ interface CredentialRowProps {
 	description?: string
 	isVisible?: boolean
 	onToggleVisibility?: () => void
-	isCopied: boolean
-	onCopy: () => void
+	/** Clipboard payload; defaults to `value` (which may be masked for display). */
+	copyValue?: string
 	onRegenerate?: () => void
 	disabled?: boolean
 }
@@ -138,11 +137,15 @@ function CredentialRow({
 	description,
 	isVisible = false,
 	onToggleVisibility,
-	isCopied,
-	onCopy,
+	copyValue,
 	onRegenerate,
 	disabled = false,
 }: CredentialRowProps) {
+	// One copy state drives both affordances — the inline value and the trailing
+	// button — so they can never disagree about what was just copied.
+	const { copy, status } = useCopy({ label })
+	const onCopy = () => void copy(copyValue ?? value)
+
 	return (
 		<div className="flex items-center gap-3 border-t px-4 py-3">
 			<span className="w-[120px] shrink-0 text-sm">{label}</span>
@@ -152,18 +155,18 @@ function CredentialRow({
 					type="button"
 					onClick={onCopy}
 					disabled={disabled}
-					title={isCopied ? "Copied!" : "Click to copy"}
+					title={status === "copied" ? "Copied!" : "Click to copy"}
 					className="group/value text-muted-foreground hover:text-foreground flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 font-mono text-xs tracking-wide transition-colors"
 				>
 					<span className="truncate">{masked && !isVisible ? maskKey(value) : value}</span>
-					{isCopied ? (
-						<CheckIcon size={12} className="text-severity-info shrink-0" />
-					) : (
-						<CopyIcon
-							size={12}
-							className="shrink-0 opacity-0 transition-opacity group-hover/value:opacity-60"
-						/>
-					)}
+					<CopyIndicator
+						status={status}
+						size={12}
+						className={cn(
+							"transition-opacity group-hover/value:opacity-100",
+							status === "idle" && "opacity-0",
+						)}
+					/>
 				</button>
 				{description && (
 					<span className="text-muted-foreground/75 text-[11px] leading-3.5">{description}</span>
@@ -189,15 +192,11 @@ function CredentialRow({
 					variant="outline"
 					size="icon-sm"
 					onClick={onCopy}
-					aria-label={`Copy ${label.toLowerCase()} to clipboard`}
-					title={isCopied ? "Copied!" : "Copy"}
+					aria-label={`Copy ${label}`}
+					title={status === "copied" ? "Copied!" : "Copy"}
 					disabled={disabled}
 				>
-					{isCopied ? (
-						<CheckIcon size={13} className="text-severity-info" />
-					) : (
-						<CopyIcon size={13} className="text-muted-foreground" />
-					)}
+					<CopyIndicator status={status} size={13} />
 				</Button>
 				{onRegenerate && (
 					<Button
@@ -219,9 +218,6 @@ function CredentialRow({
 export function IngestionSection() {
 	const [publicKeyVisible, setPublicKeyVisible] = useState(false)
 	const [privateKeyVisible, setPrivateKeyVisible] = useState(false)
-	const publicKeyCopy = useCopyToClipboard("Ingest key")
-	const privateKeyCopy = useCopyToClipboard("Ingest key")
-	const endpointCopy = useCopyToClipboard("Ingest endpoint")
 	const [regenerateDialogOpen, setRegenerateDialogOpen] = useState(false)
 	const [regenerateKeyType, setRegenerateKeyType] = useState<"public" | "private" | null>(null)
 	const [submittingKeyType, setSubmittingKeyType] = useState<"public" | "private" | null>(null)
@@ -244,13 +240,6 @@ export function IngestionSection() {
 		() => !Result.isSuccess(keysResult) || submittingKeyType !== null,
 		[keysResult, submittingKeyType],
 	)
-
-	function handleCopy(keyType: "public" | "private") {
-		if (!Result.isSuccess(keysResult)) return
-
-		const key = keyType === "public" ? keysResult.value.public_key : keysResult.value.private_key
-		;(keyType === "public" ? publicKeyCopy : privateKeyCopy).copy(key)
-	}
 
 	function openRegenerateDialog(keyType: "public" | "private") {
 		setRegenerateKeyType(keyType)
@@ -315,21 +304,18 @@ export function IngestionSection() {
 						badge="HTTP"
 						badgeClass="text-muted-foreground"
 						value={ingestUrl}
-						isCopied={endpointCopy.copied}
-						onCopy={() => endpointCopy.copy(ingestUrl)}
-					/>
+						/>
 					<CredentialRow
 						label="Public key"
 						badge="Client"
 						badgeClass="text-info"
 						value={publicKey}
+						copyValue={Result.isSuccess(keysResult) ? keysResult.value.public_key : ""}
 						masked
 						description="For browser and client-side telemetry SDKs"
 						isVisible={publicKeyVisible}
 						onToggleVisibility={() => setPublicKeyVisible((v) => !v)}
-						isCopied={publicKeyCopy.copied}
-						onCopy={() => handleCopy("public")}
-						onRegenerate={() => openRegenerateDialog("public")}
+							onRegenerate={() => openRegenerateDialog("public")}
 						disabled={isBusy}
 					/>
 					<CredentialRow
@@ -337,13 +323,12 @@ export function IngestionSection() {
 						badge="Server"
 						badgeClass="text-warning"
 						value={privateKey}
+						copyValue={Result.isSuccess(keysResult) ? keysResult.value.private_key : ""}
 						masked
 						description="For server-side ingestion and backend services"
 						isVisible={privateKeyVisible}
 						onToggleVisibility={() => setPrivateKeyVisible((v) => !v)}
-						isCopied={privateKeyCopy.copied}
-						onCopy={() => handleCopy("private")}
-						onRegenerate={() => openRegenerateDialog("private")}
+							onRegenerate={() => openRegenerateDialog("private")}
 						disabled={isBusy}
 					/>
 				</div>

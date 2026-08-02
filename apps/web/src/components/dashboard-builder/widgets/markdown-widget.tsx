@@ -8,10 +8,6 @@ interface MarkdownWidgetProps {
 	dataState?: WidgetDataState
 	display: WidgetDisplayConfig
 	mode: WidgetMode
-	onRemove?: () => void
-	onClone?: () => void
-	onConfigure?: () => void
-	onFix?: () => void
 }
 
 const HEADING_RE = /^(#{1,6})\s+(.*)$/
@@ -160,22 +156,13 @@ function renderMarkdown(content: string): React.ReactNode {
 	return blocks
 }
 
-export const MarkdownWidget = memo(function MarkdownWidget({
-	display,
-	mode,
-	onRemove,
-	onClone,
-	onConfigure,
-}: MarkdownWidgetProps) {
+export const MarkdownWidget = memo(function MarkdownWidget({ display, mode }: MarkdownWidgetProps) {
 	const content = display.markdown?.content ?? ""
 
 	return (
 		<WidgetShell
 			title={display.title || "Note"}
 			mode={mode}
-			onRemove={onRemove}
-			onClone={onClone}
-			onConfigure={onConfigure}
 			contentClassName="flex-1 min-h-0 overflow-auto p-3"
 		>
 			{content.trim() === "" ? (

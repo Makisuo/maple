@@ -3,7 +3,7 @@ import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
-import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
+import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import type { BaseChartProps } from "../_shared/chart-types"
 import { QueryBuilderLegend, responsiveLegendHeight } from "../_shared/query-builder-legend"
 import { useTimeseriesSeriesPresentation } from "../_shared/use-series-presentation"
@@ -128,10 +128,11 @@ export function QueryBuilderAreaChart({
 	)
 
 	const chartConfig = React.useMemo(() => {
-		const base = seriesDefinitions.reduce((config, definition, index) => {
+		const colors = resolveSeriesColors(seriesDefinitions.map((d) => d.rawKey))
+		const base = seriesDefinitions.reduce((config, definition) => {
 			config[definition.chartKey] = {
 				label: definition.rawKey,
-				color: resolveSeriesColor(definition.rawKey, index),
+				color: colors.get(definition.rawKey),
 			}
 			return config
 		}, {} as ChartConfig)
@@ -217,27 +218,31 @@ export function QueryBuilderAreaChart({
 			>
 				<AreaChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
 					<defs>
-						{seriesDefinitions.map((definition) => (
-							<linearGradient
-								key={definition.chartKey}
-								id={`fill-${definition.chartKey}`}
-								x1="0"
-								y1="0"
-								x2="0"
-								y2="1"
-							>
-								<stop
-									offset="5%"
-									stopColor={`var(--color-${definition.chartKey})`}
-									stopOpacity={0.8}
-								/>
-								<stop
-									offset="95%"
-									stopColor={`var(--color-${definition.chartKey})`}
-									stopOpacity={0.1}
-								/>
-							</linearGradient>
-						))}
+						{/* Stacked bands use flat fills instead: a vertical gradient is computed in
+						    plot space, not band space, so a band high in the stack would render as
+						    the faint tail of its own gradient regardless of its thickness. */}
+						{!stacked &&
+							seriesDefinitions.map((definition) => (
+								<linearGradient
+									key={definition.chartKey}
+									id={`fill-${definition.chartKey}`}
+									x1="0"
+									y1="0"
+									x2="0"
+									y2="1"
+								>
+									<stop
+										offset="5%"
+										stopColor={`var(--color-${definition.chartKey})`}
+										stopOpacity={0.8}
+									/>
+									<stop
+										offset="95%"
+										stopColor={`var(--color-${definition.chartKey})`}
+										stopOpacity={0.1}
+									/>
+								</linearGradient>
+							))}
 						{hasIncomplete &&
 							seriesDefinitions.map((definition) => (
 								<linearGradient
@@ -368,9 +373,17 @@ export function QueryBuilderAreaChart({
 							key={definition.chartKey}
 							type={curveType ?? "linear"}
 							dataKey={definition.chartKey}
-							stroke={`var(--color-${definition.chartKey})`}
-							fill={`url(#fill-${definition.chartKey})`}
-							strokeWidth={2}
+							// Stacked bands carry no stroke: whichever series lands on top would
+							// otherwise outline the entire stack in its own color, even when its
+							// band is a sub-pixel sliver. Layers separate by fill color instead.
+							stroke={stacked ? "none" : `var(--color-${definition.chartKey})`}
+							fill={
+								stacked
+									? `var(--color-${definition.chartKey})`
+									: `url(#fill-${definition.chartKey})`
+							}
+							fillOpacity={stacked ? 0.55 : undefined}
+							strokeWidth={stacked ? 0 : 2}
 							dot={
 								renderDots
 									? {
@@ -409,13 +422,18 @@ export function QueryBuilderAreaChart({
 								dataKey={`${definition.chartKey}_incomplete`}
 								stroke={`var(--color-${definition.chartKey})`}
 								fill={`url(#fill-${definition.chartKey}_incomplete)`}
-								strokeWidth={2}
+								strokeWidth={stacked ? 1 : 2}
 								strokeDasharray="4 4"
 								dot={false}
 								connectNulls
 								legendType="none"
 								hide={hiddenSeries.has(definition.chartKey)}
 								isAnimationActive={false}
+								// Own stack: the incomplete series is null outside the tail, so this
+								// reproduces the main stack's geometry there and sits at zero
+								// elsewhere. Without a stackId the dashed tail would float at each
+								// series' absolute value instead of its stacked position.
+								{...(stacked ? { stackId: "b" } : {})}
 							/>
 						))}
 				</AreaChart>

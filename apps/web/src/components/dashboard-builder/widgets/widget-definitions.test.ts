@@ -3,6 +3,7 @@ import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 import { buildBreakdownQuerySpec, buildListQuerySpec } from "@/lib/query-builder/model"
 import {
 	funnelPresets,
+	hbarPresets,
 	heatmapPresets,
 	histogramPresets,
 	listPresets,
@@ -22,6 +23,7 @@ const allPresets: WidgetPresetDefinition[] = [
 	...listPresets,
 	...piePresets,
 	...funnelPresets,
+	...hbarPresets,
 	...histogramPresets,
 	...heatmapPresets,
 	...tablePresets,
@@ -64,6 +66,19 @@ describe("widget preset query specs", () => {
 		expect(heatmap).toBeDefined()
 		const legends = presetQueries(heatmap!).map((q) => q.legend)
 		expect(legends).toEqual(["Errors", "OK"])
+	})
+
+	// The panel exists because a ranked breakdown is not a funnel. A preset that
+	// forgot its group-by would lower to a single bar and quietly become one.
+	it("every horizontal-bar preset groups by a category", () => {
+		expect(hbarPresets.length).toBeGreaterThan(0)
+		for (const preset of hbarPresets) {
+			expect(preset.dataSource.endpoint, preset.id).toBe("custom_query_builder_breakdown")
+			for (const query of presetQueries(preset)) {
+				expect(query.addOns?.groupBy, preset.id).toBe(true)
+				expect(query.groupBy?.length ?? 0, preset.id).toBeGreaterThan(0)
+			}
+		}
 	})
 
 	it("histogram duration preset queries raw durations, not a category breakdown", () => {

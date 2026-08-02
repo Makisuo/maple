@@ -71,7 +71,13 @@ const crossLinks = [
 ];
 ---
 
-<Layout title={title} description={description} ogType="article" alternates={useCase.locales}>
+<Layout
+	title={title}
+	description={description}
+	ogType="article"
+	alternates={useCase.locales}
+	mdHref={locale === "en" ? `/use-cases/${useCase.slug}.md` : undefined}
+>
 	<SeoHead title={title} description={description} />
 	<Nav />
 

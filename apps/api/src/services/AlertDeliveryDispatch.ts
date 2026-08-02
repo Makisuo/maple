@@ -4,8 +4,8 @@ import {
 	type AlertComparator,
 	type AlertDestinationType,
 	type AlertEventType,
-	type AlertSeverity,
 	type AlertSignalType,
+	type AlertSeverity,
 } from "@maple/domain/http"
 import type { AlertDestinationRow } from "@maple/db"
 import { Clock, Duration, Effect, Match, Option, Schema } from "effect"
@@ -684,56 +684,10 @@ export const dispatchDelivery = (
 	Effect.gen(function* () {
 		return yield* Match.value(context.secretConfig).pipe(
 			Match.discriminatorsExhaustive("type")({
-				slack: (config) =>
-					Effect.gen(function* () {
-						const templated = renderTitleBody(context, "slack", linkUrl, chatUrl)
-						const blocks = templated
-							? buildSlackBlocksFromTemplate(
-									templated.title,
-									templated.body,
-									context,
-									linkUrl,
-									chatUrl,
-								)
-							: buildSlackBlocks(context, linkUrl, chatUrl)
-						const response = yield* runTimedFetch("slack", "Slack", fetchFn, timeoutMs, () =>
-							safeFetch(config.webhookUrl, {
-								method: "POST",
-								headers: { "content-type": "application/json" },
-								body: JSON.stringify({
-									// No top-level `text`: alongside attachments (and no top-level
-									// blocks) Slack renders it as a duplicate line above the color
-									// bar. `fallback` carries the notification-preview one-liner.
-									attachments: [
-										{
-											color: slackAttachmentColor(context.eventType, context.severity),
-											fallback: templated?.title ?? buildSlackFallbackText(context),
-											blocks,
-										},
-									],
-								}),
-								fetchFn,
-							}),
-						)
-						if (!response.ok) {
-							const detail = yield* readErrorBody(response)
-							return yield* Effect.fail(
-								makeDeliveryError(
-									`Slack delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
-									"slack",
-								),
-							)
-						}
-						return {
-							providerMessage: "Delivered to Slack",
-							providerReference: null,
-							responseCode: response.status,
-						} as DispatchResult
-					}),
 				"slack-bot": (config) =>
 					Effect.gen(function* () {
 						const botToken = yield* deps.resolveSlackBotToken(context.destination.orgId)
-						const templated = renderTitleBody(context, "slack", linkUrl, chatUrl)
+						const templated = renderTitleBody(context, "slack-bot", linkUrl, chatUrl)
 						const blocks = templated
 							? buildSlackBlocksFromTemplate(
 									templated.title,
@@ -900,41 +854,6 @@ export const dispatchDelivery = (
 						}
 						return {
 							providerMessage: "Delivered to webhook",
-							providerReference: context.dedupeKey,
-							responseCode: response.status,
-						} as DispatchResult
-					}),
-				hazel: (config) =>
-					Effect.gen(function* () {
-						const headers: Record<string, string> = {
-							"content-type": "application/json",
-							"x-maple-event-type": context.eventType,
-							"x-maple-delivery-key": context.deliveryKey,
-						}
-						if (config.signingSecret) {
-							headers["x-maple-signature"] = createHmac("sha256", config.signingSecret)
-								.update(payloadJson)
-								.digest("hex")
-						}
-						const response = yield* runTimedFetch("hazel", "Hazel", fetchFn, timeoutMs, () =>
-							safeFetch(config.webhookUrl, {
-								method: "POST",
-								headers,
-								body: payloadJson,
-								fetchFn,
-							}),
-						)
-						if (!response.ok) {
-							const detail = yield* readErrorBody(response)
-							return yield* Effect.fail(
-								makeDeliveryError(
-									`Hazel delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
-									"hazel",
-								),
-							)
-						}
-						return {
-							providerMessage: "Delivered to Hazel",
 							providerReference: context.dedupeKey,
 							responseCode: response.status,
 						} as DispatchResult

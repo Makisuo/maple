@@ -1,0 +1,24 @@
+# Cloudflare Workers Assets header rules (copied verbatim into dist/).
+#
+# The markdown twins and llms.txt are served straight off the asset layer, so
+# their headers come from Cloudflare's extension sniffing rather than from the
+# Response our endpoints build — those are discarded when Astro writes the file
+# at build time. This is the only place their headers can be set.
+#
+# `text/markdown` is the correct type and what agents match on, but it is not a
+# type browsers are obliged to display: Chromium renders it, Safari and Firefox
+# treat an unfamiliar MIME as a download. `Content-Disposition: inline` is the
+# explicit "show this, don't save it" instruction. Resend sends the same header
+# on its own llms.txt.
+
+/*.md
+  Content-Disposition: inline
+  X-Content-Type-Options: nosniff
+
+/llms.txt
+  Content-Disposition: inline
+  X-Content-Type-Options: nosniff
+
+/llms-full.txt
+  Content-Disposition: inline
+  X-Content-Type-Options: nosniff
