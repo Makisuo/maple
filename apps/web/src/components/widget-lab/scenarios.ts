@@ -224,6 +224,34 @@ export const gaugeScenarios: WidgetScenario[] = [
 		},
 	},
 	{
+		// The SLO shape: thresholds crowded into the top few percent of the range,
+		// so 95/99/100 all land within ~13° of the arc's end. Only the bounds get
+		// labels; 95 and 99 keep their ticks.
+		label: "Crowded thresholds (SLO)",
+		dataState: ready(99.4),
+		display: {
+			title: "Today's health",
+			unit: "percent_100",
+			gauge: { min: 0, max: 100 },
+			thresholds: [
+				{ value: 0, color: "var(--color-red-500)" },
+				{ value: 95, color: "var(--color-amber-500)" },
+				{ value: 99, color: "var(--color-emerald-500)" },
+			],
+		},
+	},
+	{
+		// Widest labels the dial can produce — checks nothing clips at the arc ends.
+		label: "Wide labels at the arc ends",
+		dataState: ready(720),
+		display: {
+			title: "p99 latency",
+			unit: "duration_ms",
+			gauge: { min: 0, max: 1000 },
+			thresholds: [{ value: 250, color: "var(--color-amber-500)" }],
+		},
+	},
+	{
 		label: "Loading",
 		dataState: loadingState,
 		display: { title: "Error rate", unit: "percent", gauge: { min: 0, max: 10 } },
@@ -508,7 +536,66 @@ const singlePointSeries: Record<string, unknown>[] = [
 	{ bucket: "2026-01-01T00:00:00Z", "demo-api": 42, "demo-worker": 17 },
 ]
 
+/**
+ * A healthy series whose final bucket is the current, still-filling interval.
+ *
+ * Buckets are anchored to wall-clock "now" because that is how the widget
+ * actually detects the in-progress bucket — `query-builder-timeseries` sends no
+ * `partial` flag, so `markIncompleteSegments` falls back to comparing each
+ * bucket's end against the clock. A fixed 2026-01-01 timestamp is entirely in
+ * the past and would exercise nothing.
+ */
+function makeTrailingBucketSeries(lastBucket: { api: number; worker: number } | null) {
+	const hour = 3_600_000
+	const currentBucketStart = Math.floor(Date.now() / hour) * hour
+	return Array.from({ length: 13 }, (_, i) => {
+		const isCurrent = i === 12
+		return {
+			bucket: new Date(currentBucketStart - (12 - i) * hour).toISOString(),
+			"demo-api": isCurrent ? (lastBucket?.api ?? 0) : 900 + Math.round(180 * Math.sin(i / 2)),
+			"demo-worker": isCurrent
+				? (lastBucket?.worker ?? 0)
+				: 420 + Math.round(90 * Math.cos(i / 3)),
+		}
+	})
+}
+
+/** The current bucket came back with nothing — drawn as-is it cliffs to zero. */
+const trailingEmptyBucketSeries: Record<string, unknown>[] = makeTrailingBucketSeries(null)
+
+/** Same shape, but the current bucket did report — it stays, dashed. */
+const trailingPartialBucketSeries: Record<string, unknown>[] = makeTrailingBucketSeries({
+	api: 240,
+	worker: 110,
+})
+
 export const stressScenarios: ChartScenario[] = [
+	{
+		label: "Area — trailing empty bucket (no cliff)",
+		chartId: "query-builder-area",
+		chartName: "Area",
+		category: "area",
+		dataState: ready(trailingEmptyBucketSeries),
+		display: {
+			title: "Span throughput (current bucket empty)",
+			chartId: "query-builder-area",
+			unit: "number",
+			chartPresentation: { legend: "visible", seriesStats: false },
+		},
+	},
+	{
+		label: "Area — trailing partial bucket (dashed)",
+		chartId: "query-builder-area",
+		chartName: "Area",
+		category: "area",
+		dataState: ready(trailingPartialBucketSeries),
+		display: {
+			title: "Span throughput (current bucket reporting)",
+			chartId: "query-builder-area",
+			unit: "number",
+			chartPresentation: { legend: "visible", seriesStats: false },
+		},
+	},
 	{
 		label: "Line — 25 series (compact legend)",
 		chartId: "query-builder-line",
@@ -1046,6 +1133,24 @@ export const pieScenarios: WidgetScenario[] = [
 		display: {
 			title: "Traffic by service",
 			pie: { donut: true, showLabels: true, showPercent: true },
+		},
+	},
+	{
+		label: "Table legend (Value + %)",
+		dataState: ready(pieMany),
+		display: {
+			title: "Traffic by service",
+			chartPresentation: { legend: "right" },
+			pie: {},
+		},
+	},
+	{
+		label: "Table legend — long tail (+N others)",
+		dataState: ready(makePieSlices(50)),
+		display: {
+			title: "Traffic by service (50 groups)",
+			chartPresentation: { legend: "right" },
+			pie: { donut: true },
 		},
 	},
 	{

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createFormulaDraft, createQueryDraft } from "@/lib/query-builder/model"
+import { BREAKDOWN_TAIL_LIMIT, createFormulaDraft, createQueryDraft } from "@/lib/query-builder/model"
 import {
 	buildWidgetDataSource,
 	buildWidgetDisplay,
@@ -221,17 +221,38 @@ describe("funnel/heatmap endpoint routing (MAP-49)", () => {
 	})
 
 	it("sends breakdown params the endpoint schema accepts, and nothing more", () => {
-		// QueryBuilderBreakdownInputSchema accepts only startTime/endTime/queries.
-		// An extra key (formulas, comparison, debug) fails the request decode and
-		// leaves the widget stuck on its loading skeleton, so this is a contract
-		// test, not a style preference.
+		// QueryBuilderBreakdownInputSchema accepts only startTime/endTime/queries
+		// and the optional defaultLimit. An extra key (formulas, comparison, debug)
+		// fails the request decode and leaves the widget stuck on its loading
+		// skeleton, so this is a contract test, not a style preference.
 		const state = {
 			...makeState(),
 			visualization: "pie" as const,
 			formulas: [createFormulaDraft(0, ["A", "B"])],
 		}
 		const dataSource = buildWidgetDataSource(makeWidget(), state, ["A", "B"])
-		expect(Object.keys(dataSource.params ?? {})).toEqual(["queries"])
+		expect(Object.keys(dataSource.params ?? {})).toEqual(["queries", "defaultLimit"])
+	})
+
+	it("asks for the long tail on a pie, and only on a pie", () => {
+		// The pie is the only breakdown panel that collapses its tail into "Other",
+		// so it is the only one that fetches past what it draws. Handing 50 rows to
+		// a funnel turns a 10-stage funnel into a truncated list.
+		const pie = buildWidgetDataSource(
+			makeWidget(),
+			{ ...makeState(), visualization: "pie" as const },
+			["A", "B"],
+		)
+		expect(pie.params?.defaultLimit).toBe(BREAKDOWN_TAIL_LIMIT)
+
+		for (const visualization of ["funnel", "heatmap", "histogram"] as const) {
+			const dataSource = buildWidgetDataSource(
+				makeWidget(),
+				{ ...makeState(), visualization },
+				["A", "B"],
+			)
+			expect(dataSource.params?.defaultLimit).toBeUndefined()
+		}
 	})
 })
 

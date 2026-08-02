@@ -20,6 +20,12 @@ export const MAX_BAR_SERIES = 12
 export interface CategoricalRow {
 	name: string
 	value: number
+	/**
+	 * How many source categories this row stands for. Only set on the aggregated
+	 * `"Other"` row, so a legend can say *how much* it is hiding ("Other · 39
+	 * groups") instead of leaving the reader to assume the chart is everything.
+	 */
+	collapsedCount?: number
 }
 
 /**
@@ -39,7 +45,7 @@ export function bucketCategorical(
 	const head = sorted.slice(0, max - 1)
 	const tail = sorted.slice(max - 1)
 	const otherValue = tail.reduce((sum, r) => sum + r.value, 0)
-	return [...head, { name: OTHER_LABEL, value: otherValue }]
+	return [...head, { name: OTHER_LABEL, value: otherValue, collapsedCount: tail.length }]
 }
 
 export interface BucketedTimeseries<Row> {
