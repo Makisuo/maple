@@ -25,6 +25,7 @@ export { CHNumber } from "./schema"
 // Queries — Traces
 export {
 	tracesTimeseriesQuery,
+	canUseAnnualServiceOverview,
 	tracesBreakdownQuery,
 	tracesListQuery,
 	tracesRootListQuery,

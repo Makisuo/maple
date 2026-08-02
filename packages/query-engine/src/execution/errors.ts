@@ -2,6 +2,7 @@ import {
 	WarehouseAuthError,
 	WarehouseClientError,
 	WarehouseConfigError,
+	WarehouseMalformedQueryError,
 	WarehouseQueryError,
 	WarehouseQuotaExceededError,
 	WarehouseSchemaDriftError,
@@ -21,6 +22,7 @@ export type WarehouseSqlError =
 	| WarehouseConfigError
 	| WarehouseClientError
 	| WarehouseSchemaDriftError
+	| WarehouseMalformedQueryError
 	| WarehouseQuotaExceededError
 
 type ClickHouseErrorDetails = {
@@ -81,11 +83,21 @@ type ClassifiedBase = {
 	readonly clickhouseType: string | undefined
 }
 
+/**
+ * Who wrote the SQL that failed. The same ClickHouse error means different
+ * things depending on the answer: a type mismatch in SQL Maple generated is our
+ * bug, the identical message from the raw-SQL widget or the `run_sql` MCP tool
+ * is the author's typo and they need to see the database's own explanation.
+ */
+export type SqlAuthorship = "maple" | "caller"
+
 type ClassificationRule = {
 	readonly status?: (status: number) => boolean
 	readonly types?: ReadonlySet<string>
 	readonly pattern?: RegExp
 	readonly extra?: (error: unknown) => boolean
+	/** Restricts the rule to SQL with this authorship. Unset means either. */
+	readonly authoredBy?: SqlAuthorship
 	/** Construct the tagged error for this rule. `upstreamStatus` is only used by the rules that carry it. */
 	readonly make: (base: ClassifiedBase, upstreamStatus: number | undefined) => WarehouseSqlError
 }
@@ -132,6 +144,36 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 		make: (base) => new WarehouseClientError(base),
 	},
 	{
+		// The analyzer refused SQL that Maple itself generated: mismatched `if()`
+		// arms or UNION branches (NO_COMMON_TYPE), a function applied to the wrong
+		// type, the wrong argument count. These are Maple bugs — identical for
+		// every org, on every cluster, unaffected by retry or by schema apply — so
+		// they get their own tag to be alertable and to keep the UI from blaming
+		// the customer's database. Ordered before the schema-drift rule, which is
+		// the same shape of complaint but a customer-side cause.
+		//
+		// `authoredBy: "maple"` is what makes the type list safe. Every error here
+		// is also an ordinary hand-written-SQL mistake — comparing a String to a
+		// number, calling a function with two arguments instead of three — and the
+		// raw_sql widget and `run_sql` MCP tool run caller-authored SQL through
+		// this same classifier. Blaming ourselves for those would swallow the
+		// database's explanation and page on-call for someone else's typo.
+		authoredBy: "maple",
+		types: new Set([
+			"NO_COMMON_TYPE",
+			"ILLEGAL_TYPE_OF_ARGUMENT",
+			"ILLEGAL_AGGREGATION",
+			"NUMBER_OF_ARGUMENTS_DOESNT_MATCH",
+			"TYPE_MISMATCH",
+			"SYNTAX_ERROR",
+			"UNKNOWN_FUNCTION",
+			"AMBIGUOUS_COLUMN_NAME",
+		]),
+		pattern:
+			/There is no supertype|Illegal type .* of argument|Number of arguments doesn't match|Syntax error/i,
+		make: (base) => new WarehouseMalformedQueryError(base),
+	},
+	{
 		// CH error types raised when a column or function reference doesn't exist in
 		// the cluster's schema. For BYO-ClickHouse customers this is almost always
 		// schema drift between Maple's expected schema and what the cluster has —
@@ -156,7 +198,18 @@ export const toWarehouseQueryError = (pipe: string, error: unknown) =>
 		cause: error,
 	})
 
-export const mapWarehouseError = (pipe: string, error: unknown): WarehouseSqlError => {
+/**
+ * Classify a warehouse failure into a tagged error.
+ *
+ * `authoredBy` defaults to `"caller"`: the conservative reading. A wrong
+ * "this is a bug in Maple" is worse than a generic message, so a call site has
+ * to opt in by declaring the SQL was machine-generated.
+ */
+export const mapWarehouseError = (
+	pipe: string,
+	error: unknown,
+	authoredBy: SqlAuthorship = "caller",
+): WarehouseSqlError => {
 	const { message: rawMessage, code, type } = getClickHouseErrorDetails(error)
 	const message = cleanErrorMessage(rawMessage)
 	const base: ClassifiedBase = {
@@ -174,6 +227,7 @@ export const mapWarehouseError = (pipe: string, error: unknown): WarehouseSqlErr
 
 	const upstreamStatus = extractUpstreamStatus(rawMessage)
 	for (const rule of CLASSIFICATION_RULES) {
+		if (rule.authoredBy !== undefined && rule.authoredBy !== authoredBy) continue
 		const matches =
 			(rule.status !== undefined && upstreamStatus !== undefined && rule.status(upstreamStatus)) ||
 			(rule.types !== undefined && type !== undefined && rule.types.has(type)) ||

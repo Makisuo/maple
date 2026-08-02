@@ -357,13 +357,21 @@ const TRACES_TS_COLUMNS: ColumnDefs = {
 	estimatedSpanCount: T.float64,
 }
 
-export function tracesTimeseriesQuery(
-	opts: TracesTimeseriesOpts,
-): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
-	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
-	const canUseAnnualServiceOverview =
+/**
+ * Whether a timeseries request can be served by the one-year service-overview
+ * rollup (raw partial edge hours + `service_overview_hourly` interior) instead
+ * of scanning `traces`.
+ *
+ * Exported because it names a distinct SQL *route*: the SQL it selects is
+ * structurally unlike every other branch of `tracesTimeseriesQuery`, so the
+ * catalog sweep in `sql-catalog.ts` asserts a fixture exercises it both ways.
+ * A route with no fixture is a route no test has ever executed — which is
+ * exactly how a `NO_COMMON_TYPE` shipped to prod here.
+ */
+export function canUseAnnualServiceOverview(opts: TracesTimeseriesOpts): boolean {
+	return (
 		opts.allMetrics === true &&
-		apdexThresholdMs === 500 &&
+		(opts.apdexThresholdMs ?? 500) === 500 &&
 		opts.rootOnly === true &&
 		(opts.bucketSeconds ?? 0) >= 3600 &&
 		(opts.groupBy == null || opts.groupBy.length === 0) &&
@@ -376,8 +384,15 @@ export function tracesTimeseriesQuery(
 		!opts.attributeFilters?.length &&
 		!opts.resourceAttributeFilters?.length &&
 		!Object.values(opts.matchModes ?? {}).includes("contains")
+	)
+}
 
-	if (canUseAnnualServiceOverview) {
+export function tracesTimeseriesQuery(
+	opts: TracesTimeseriesOpts,
+): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
+	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
+
+	if (canUseAnnualServiceOverview(opts)) {
 		const startHour = "toStartOfHour(toDateTime(__PARAM_startTime__))"
 		const endHour = "toStartOfHour(toDateTime(__PARAM_endTime__))"
 		const firstFullHour = `if(toDateTime(__PARAM_startTime__) = ${startHour}, ${startHour}, ${startHour} + INTERVAL 1 HOUR)`
