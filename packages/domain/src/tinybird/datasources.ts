@@ -1900,6 +1900,19 @@ export const sessionEvents = defineDatasource("session_events", {
 		sortingKey: ["OrgId", "SessionId", "Timestamp", "Seq"],
 		ttl: "toDate(Timestamp) + INTERVAL 30 DAY",
 	}),
+	// Widening the `Attributes` keys off LowCardinality is an incompatible
+	// change to Tinybird, which refuses the deployment without an explicit
+	// forward query. This is the managed-warehouse counterpart of ClickHouse
+	// migration 0012: the migration issues `MODIFY COLUMN` against a BYO
+	// cluster, whereas Tinybird rebuilds the table and replays live rows
+	// through this SELECT. Every other column is carried forward untouched;
+	// only the map is re-typed, and the cast preserves values because
+	// `LowCardinality(String)` keys are already strings.
+	forwardQuery: `SELECT
+		OrgId, SessionId, Timestamp, Seq, Type, Url, TraceId, Level, Message,
+		TargetSelector, TargetText, NetMethod, NetUrl, NetStatus, NetDurationMs,
+		ErrorStack,
+		CAST(Attributes, 'Map(String, String)') AS Attributes`,
 	indexes: [
 		{
 			// `Type` is not in the sorting key, so the "top custom events" query
