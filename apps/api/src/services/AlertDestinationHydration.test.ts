@@ -113,7 +113,7 @@ describe("hydrateDestinationRow", () => {
 		const id = asDestinationId("00000000-0000-4000-8000-000000000002")
 		const secretConfig: DestinationSecretConfig = {
 			type: "slack-bot",
-			channelId: "C0789CHAN",
+			channelId: "C123",
 			channelName: "alerts",
 		}
 		return Effect.gen(function* () {

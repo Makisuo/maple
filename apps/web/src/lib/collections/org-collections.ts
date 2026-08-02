@@ -1,3 +1,4 @@
+import { COLLECTION_SYNC_FAILED_EVENT } from "@maple/effect-db/electric"
 import { Effect } from "effect"
 import { useSyncExternalStore } from "react"
 import { mapleRuntime } from "@/lib/registry"
@@ -63,8 +64,69 @@ export const recreateOrgCollections = (): void => {
 	generation += 1
 	const previous = current
 	current = null
+	// The rebuilt collections reuse their `<shape>:<org>` ids, so a stale failure
+	// mark would make a freshly minted stream look dead before it has fetched once.
+	clearSyncFailures()
 	if (previous) scheduleOrgCollectionsCleanup(previous)
 	for (const listener of generationListeners) listener()
+}
+
+// ---------------------------------------------------------------------------
+// Terminal sync failures
+// ---------------------------------------------------------------------------
+//
+// `collection:sync-failed` (from @maple/effect-db) means a shape stream spent its
+// whole backoff budget and STOPPED — nothing will refetch it until the collection
+// is recreated. That is the difference between "still loading" and "will never
+// load", and without it a dead sync endpoint is indistinguishable from a slow one:
+// the collection sits in `loading` and the page renders a skeleton forever.
+//
+// Consumers read `isCollectionSyncFailed(collection.id)` to render a real error
+// immediately, and call `retryOrgCollections()` for the retry affordance.
+
+const failedCollectionIds = new Set<string>()
+const syncFailureListeners = new Set<() => void>()
+
+const notifySyncFailure = (): void => {
+	for (const listener of syncFailureListeners) listener()
+}
+
+const clearSyncFailures = (): void => {
+	if (failedCollectionIds.size === 0) return
+	failedCollectionIds.clear()
+	notifySyncFailure()
+}
+
+export const subscribeSyncFailure = (listener: () => void): (() => void) => {
+	syncFailureListeners.add(listener)
+	return () => syncFailureListeners.delete(listener)
+}
+
+/** Whether this collection's stream gave up for good (id is `<shape>:<orgId>`). */
+export const isCollectionSyncFailed = (collectionId: string): boolean => failedCollectionIds.has(collectionId)
+
+/** Records a terminally stopped stream. Exported for tests. */
+export const handleCollectionSyncFailed = (event: Event): void => {
+	const collectionId = (event as CustomEvent<{ collectionId?: string }>).detail?.collectionId
+	if (collectionId === undefined || failedCollectionIds.has(collectionId)) return
+	failedCollectionIds.add(collectionId)
+	mapleRuntime.runFork(
+		Effect.logError(
+			"Electric shape stream stopped retrying; collection will not load until retried",
+		).pipe(Effect.annotateLogs({ collectionId })),
+	)
+	notifySyncFailure()
+}
+
+/**
+ * The user-facing retry: clears the bounded heal budget and every failure mark,
+ * then recreates the collections so each shape stream starts over with a full
+ * backoff budget. This is the ONLY way out once both budgets are spent — short of
+ * a page reload, which is what users otherwise resort to.
+ */
+export const retryOrgCollections = (): void => {
+	resetSchemaHealBudget()
+	recreateOrgCollections()
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +335,7 @@ export const getOrgCollections = (orgId: string): OrgCollections => {
 if (typeof window !== "undefined") {
 	window.addEventListener("collection:schema-error", handleSchemaError)
 	window.addEventListener("collection:auth-error", handleCollectionAuthError)
+	window.addEventListener(COLLECTION_SYNC_FAILED_EVENT, handleCollectionSyncFailed)
 }
 
 /** Reactive active-org id (null when signed out / org-less). Mode-agnostic — both Clerk and self-hosted auth publish via setActiveOrgId. */

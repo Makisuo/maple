@@ -38,15 +38,13 @@ interface UpdateAlertRuleParams {
 	window_minutes?: number
 	destination_ids?: string
 	service_names?: string
+	environments?: string
 	enabled?: boolean
 	group_by?: string
 	minimum_sample_count?: number
 	consecutive_breaches?: number
 	consecutive_healthy?: number
 	renotify_interval_minutes?: number
-	metric_name?: string
-	metric_type?: string
-	metric_aggregation?: string
 	apdex_threshold_ms?: number
 	query_builder_draft?: string
 	raw_query_sql?: string
@@ -72,6 +70,7 @@ function buildUpdatedRequest(
 		severity: current.severity,
 		serviceNames: [...current.serviceNames],
 		excludeServiceNames: [...current.excludeServiceNames],
+		environments: [...current.environments],
 		tags: [...current.tags],
 		groupBy: current.groupBy ? [...current.groupBy] : null,
 		signalType: current.signalType,
@@ -83,9 +82,6 @@ function buildUpdatedRequest(
 		consecutiveBreachesRequired: current.consecutiveBreachesRequired,
 		consecutiveHealthyRequired: current.consecutiveHealthyRequired,
 		renotifyIntervalMinutes: current.renotifyIntervalMinutes,
-		metricName: current.metricName,
-		metricType: current.metricType,
-		metricAggregation: current.metricAggregation,
 		apdexThresholdMs: current.apdexThresholdMs,
 		queryBuilderDraft: current.queryBuilderDraft,
 		rawQuerySql: current.rawQuerySql,
@@ -102,6 +98,7 @@ function buildUpdatedRequest(
 	if (params.enabled !== undefined) request.enabled = params.enabled
 	if (params.destination_ids !== undefined) request.destinationIds = splitCsv(params.destination_ids)
 	if (params.service_names !== undefined) request.serviceNames = splitCsv(params.service_names)
+	if (params.environments !== undefined) request.environments = splitCsv(params.environments)
 	if (params.group_by !== undefined) request.groupBy = splitCsv(params.group_by)
 	if (params.minimum_sample_count !== undefined) request.minimumSampleCount = params.minimum_sample_count
 	if (params.consecutive_breaches !== undefined)
@@ -110,9 +107,6 @@ function buildUpdatedRequest(
 		request.consecutiveHealthyRequired = params.consecutive_healthy
 	if (params.renotify_interval_minutes !== undefined)
 		request.renotifyIntervalMinutes = params.renotify_interval_minutes
-	if (params.metric_name !== undefined) request.metricName = params.metric_name
-	if (params.metric_type !== undefined) request.metricType = params.metric_type
-	if (params.metric_aggregation !== undefined) request.metricAggregation = params.metric_aggregation
 	if (params.apdex_threshold_ms !== undefined) request.apdexThresholdMs = params.apdex_threshold_ms
 	if (params.raw_query_sql !== undefined) request.rawQuerySql = params.raw_query_sql
 	if (params.raw_query_reducer !== undefined) request.rawQueryReducer = params.raw_query_reducer
@@ -157,12 +151,15 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 			service_names: optionalStringParam(
 				"Comma-separated service names to scope the alert to (replaces the current scope)",
 			),
+			environments: optionalStringParam(
+				"Comma-separated deployment environments to scope the alert to (replaces the current scope; pass '' for all environments). Ignored for builder_query / raw_query.",
+			),
 			enabled: optionalBooleanParam("Whether the rule is enabled"),
 			destination_ids: optionalStringParam(
 				"Comma-separated destination IDs to notify (replaces the current destinations; use list_alert_rules to find IDs)",
 			),
 			signal_type: optionalStringParam(
-				"Signal type: error_rate, p95_latency, p99_latency, apdex, throughput, metric, builder_query, raw_query",
+				"Signal type: error_rate, p95_latency, p99_latency, apdex, throughput, builder_query, raw_query. Use builder_query with a metrics draft for custom metrics.",
 			),
 			comparator: optionalStringParam("Comparison operator: gt (>), gte (>=), lt (<), lte (<=)"),
 			group_by: optionalStringParam(
@@ -173,13 +170,6 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 			consecutive_breaches: optionalNumberParam("Consecutive breaches before alerting"),
 			consecutive_healthy: optionalNumberParam("Consecutive healthy evaluations before resolving"),
 			renotify_interval_minutes: optionalNumberParam("Re-notification interval in minutes"),
-			metric_name: optionalStringParam("Metric name (for signal_type=metric)"),
-			metric_type: optionalStringParam(
-				"Metric type: sum, gauge, histogram, exponential_histogram (for signal_type=metric)",
-			),
-			metric_aggregation: optionalStringParam(
-				"Metric aggregation: avg, min, max, sum, count (for signal_type=metric)",
-			),
 			apdex_threshold_ms: optionalNumberParam(
 				"Apdex threshold in milliseconds (for signal_type=apdex)",
 			),
@@ -301,6 +291,9 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 			if (rule.serviceNames.length > 0) {
 				lines.splice(3, 0, `Service Names: ${rule.serviceNames.join(", ")}`)
 			}
+			if (rule.environments.length > 0) {
+				lines.push(`Environments: ${rule.environments.join(", ")}`)
+			}
 
 			return {
 				content: createDualContent(lines.join("\n"), {
@@ -312,6 +305,7 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 							enabled: rule.enabled,
 							severity: rule.severity,
 							serviceNames: [...rule.serviceNames],
+							environments: [...rule.environments],
 							signalType: rule.signalType,
 							comparator: rule.comparator,
 							threshold: rule.threshold,

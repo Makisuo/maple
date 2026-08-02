@@ -2,7 +2,6 @@ import { HttpApi, OpenApi } from "effect/unstable/httpapi"
 import { AiTriageApiGroup } from "./ai-triage"
 import { AnomaliesApiGroup } from "./anomalies"
 import { ApiKeysApiGroup } from "./api-keys"
-import { AlertsApiGroup } from "./alerts"
 import { AuthApiGroup, AuthPublicApiGroup } from "./auth"
 import { BillingApiGroup, BillingPublicApiGroup } from "./billing"
 import { ChatApiGroup } from "./chat"
@@ -29,7 +28,6 @@ export class MapleApi extends HttpApi.make("MapleApi")
 	.add(AiTriageApiGroup)
 	.add(AnomaliesApiGroup)
 	.add(ApiKeysApiGroup)
-	.add(AlertsApiGroup)
 	.add(BillingApiGroup)
 	.add(BillingPublicApiGroup)
 	.add(ChatApiGroup)

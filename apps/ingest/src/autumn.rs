@@ -55,6 +55,29 @@ impl AutumnTracker {
 
 type AccumulatorKey = (String, &'static str); // (org_id, feature_id)
 
+/// Usage accumulated for one `(org_id, feature_id)` since the last successful
+/// flush, together with the idempotency key that identifies it to Autumn.
+///
+/// The key is minted once, when the entry is created, and reused for every
+/// retry of that entry. That is the whole point: a flush whose response is lost
+/// (timeout, reset, 5xx after commit) leaves the entry in the accumulator to be
+/// re-sent, and only a stable key lets Autumn recognize the retry instead of
+/// billing it twice. It is dropped with the entry on success, so usage that
+/// arrives afterwards starts a new entry under a new key.
+struct PendingUsage {
+    value: f64,
+    idempotency_key: String,
+}
+
+impl PendingUsage {
+    fn new() -> Self {
+        Self {
+            value: 0.0,
+            idempotency_key: Uuid::new_v4().to_string(),
+        }
+    }
+}
+
 async fn flush_loop(
     mut rx: mpsc::UnboundedReceiver<UsageEvent>,
     secret_key: String,
@@ -62,7 +85,7 @@ async fn flush_loop(
     flush_interval: Duration,
 ) {
     let client = Client::new();
-    let mut accumulator: HashMap<AccumulatorKey, f64> = HashMap::new();
+    let mut accumulator: HashMap<AccumulatorKey, PendingUsage> = HashMap::new();
     let mut consecutive_failures: u64 = 0;
     let critical_threshold: u64 = (300 / flush_interval.as_secs().max(1)).max(1);
 
@@ -80,19 +103,19 @@ async fn flush_loop(
                 let mut all_ok = true;
 
                 // Collect entries to flush
-                let entries: Vec<(AccumulatorKey, f64)> = accumulator
+                let entries: Vec<(AccumulatorKey, f64, String)> = accumulator
                     .iter()
-                    .map(|(k, v)| (k.clone(), *v))
+                    .map(|(k, v)| (k.clone(), v.value, v.idempotency_key.clone()))
                     .collect();
 
                 let mut flushed_keys: Vec<AccumulatorKey> = Vec::new();
 
-                for ((org_id, feature_id), value) in &entries {
+                for ((org_id, feature_id), value, idempotency_key) in &entries {
                     let body = TrackRequest {
                         customer_id: org_id,
                         feature_id,
                         value: *value,
-                        idempotency_key: Uuid::new_v4().to_string(),
+                        idempotency_key: idempotency_key.clone(),
                     };
 
                     let span = tracing::info_span!(
@@ -153,7 +176,7 @@ async fn flush_loop(
                     metrics::autumn_flush("error", flush_duration.as_secs_f64());
 
                     if consecutive_failures >= critical_threshold {
-                        let total_pending_gb: f64 = accumulator.values().sum();
+                        let total_pending_gb: f64 = accumulator.values().map(|v| v.value).sum();
                         error!(
                             consecutive_failures,
                             pending_entries = accumulator.len(),
@@ -166,16 +189,17 @@ async fn flush_loop(
                 // Update pending gauge. Note: this now sums mixed units across
                 // features (GB for logs/traces/metrics, counts for browser_sessions);
                 // the metric name is kept as-is to avoid breaking existing dashboards.
-                let total_pending: f64 = accumulator.values().sum();
+                let total_pending: f64 = accumulator.values().map(|v| v.value).sum();
                 metrics::autumn_pending_gb(total_pending);
             }
 
             event = rx.recv() => {
                 match event {
                     Some(event) => {
-                        *accumulator
+                        accumulator
                             .entry((event.org_id, event.feature_id))
-                            .or_insert(0.0) += event.value;
+                            .or_insert_with(PendingUsage::new)
+                            .value += event.value;
                     }
                     None => {
                         // Channel closed, do a final flush attempt
@@ -198,17 +222,21 @@ async fn flush_all(
     client: &Client,
     secret_key: &str,
     api_url: &str,
-    accumulator: &mut HashMap<AccumulatorKey, f64>,
+    accumulator: &mut HashMap<AccumulatorKey, PendingUsage>,
 ) {
-    let entries: Vec<(AccumulatorKey, f64)> =
-        accumulator.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    let entries: Vec<(AccumulatorKey, f64, String)> = accumulator
+        .iter()
+        .map(|(k, v)| (k.clone(), v.value, v.idempotency_key.clone()))
+        .collect();
 
-    for ((org_id, feature_id), value) in &entries {
+    for ((org_id, feature_id), value, idempotency_key) in &entries {
         let body = TrackRequest {
             customer_id: org_id,
             feature_id,
+            // Same key the interval flush would have used, so a shutdown that
+            // races an in-flight retry does not bill the entry twice.
             value: *value,
-            idempotency_key: Uuid::new_v4().to_string(),
+            idempotency_key: idempotency_key.clone(),
         };
 
         let span = tracing::info_span!(
@@ -261,9 +289,10 @@ pub struct AutumnEntitlements {
     client: Client,
     secret_key: String,
     api_url: String,
-    // Keyed by `"{org_id}:{feature_id}"`. Holds both confirmed decisions and
-    // fail-open allows; a single TTL keeps it simple and mirrors the other moka
-    // resolver caches in the gateway.
+    // Keyed by `"{org_id}:{feature_id}"`. Holds *confirmed* decisions only.
+    // Fail-open allows are deliberately not cached: caching them would let one
+    // failed check suppress enforcement for a whole TTL window, turning a
+    // momentary Autumn blip into minutes of unmetered ingest.
     cache: Cache<String, bool>,
 }
 
@@ -305,12 +334,23 @@ impl AutumnEntitlements {
         }
         tracing::Span::current().record("maple.ingest.cache_hit", false);
 
-        let allowed = self.fetch_allowed(org_id, feature_id).await;
-        self.cache.insert(cache_key, allowed).await;
-        allowed
+        match self.fetch_allowed(org_id, feature_id).await {
+            Some(allowed) => {
+                self.cache.insert(cache_key, allowed).await;
+                allowed
+            }
+            // No confirmed decision. Fail open for this request, but don't
+            // remember it — the next request re-checks, so enforcement resumes
+            // as soon as Autumn does rather than a TTL later.
+            None => true,
+        }
     }
 
-    async fn fetch_allowed(&self, org_id: &str, feature_id: &str) -> bool {
+    /// `Some(decision)` when Autumn gave us an answer we understand, `None` when
+    /// it did not — transport failure, non-2xx, unreadable or non-JSON body, or
+    /// a shape `decide_allowed` doesn't recognize. The caller fails open on
+    /// `None`; only `Some` is cacheable.
+    async fn fetch_allowed(&self, org_id: &str, feature_id: &str) -> Option<bool> {
         let body = CheckRequest {
             customer_id: org_id,
             feature_id,
@@ -342,7 +382,7 @@ impl AutumnEntitlements {
                     status = %resp.status(),
                     "Autumn check returned non-success; failing open"
                 );
-                return true;
+                return None;
             }
             Err(err) => {
                 warn!(
@@ -351,7 +391,7 @@ impl AutumnEntitlements {
                     error = %err,
                     "Autumn check request failed; failing open"
                 );
-                return true;
+                return None;
             }
         };
 
@@ -370,7 +410,7 @@ impl AutumnEntitlements {
                     error = %err,
                     "Failed to read Autumn check response body; failing open"
                 );
-                return true;
+                return None;
             }
         };
 
@@ -384,24 +424,22 @@ impl AutumnEntitlements {
                     body = %truncate_for_log(&text),
                     "Autumn check response is not JSON; failing open"
                 );
-                return true;
+                return None;
             }
         };
 
-        match decide_allowed(&value) {
-            Some(decision) => decision,
-            None => {
-                // Valid JSON we didn't recognize. Fail open, but log the body so
-                // the real shape is visible and we can adapt decide_allowed.
-                warn!(
-                    org_id,
-                    feature_id,
-                    body = %truncate_for_log(&text),
-                    "Unrecognized Autumn check response shape; failing open"
-                );
-                true
-            }
+        let decision = decide_allowed(&value);
+        if decision.is_none() {
+            // Valid JSON we didn't recognize. Fail open, but log the body so
+            // the real shape is visible and we can adapt decide_allowed.
+            warn!(
+                org_id,
+                feature_id,
+                body = %truncate_for_log(&text),
+                "Unrecognized Autumn check response shape; failing open"
+            );
         }
+        decision
     }
 }
 
@@ -482,6 +520,10 @@ fn decide_allowed(value: &serde_json::Value) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::extract::State;
+    use axum::http::StatusCode;
+    use axum::routing::post;
+    use axum::Router;
 
     fn decide(json: &str) -> Option<bool> {
         let value = serde_json::from_str::<serde_json::Value>(json).expect("valid json");
@@ -614,5 +656,100 @@ mod tests {
             60,
         );
         assert!(entitlements.is_allowed("org_123", "logs").await);
+    }
+
+    #[tokio::test]
+    async fn fail_open_decisions_are_not_cached() {
+        // A fail-open allow must not be remembered: caching it would let one
+        // failed check suppress enforcement for the whole TTL.
+        let entitlements = AutumnEntitlements::new(
+            Client::new(),
+            "sk_test".to_string(),
+            "http://127.0.0.1:1",
+            3600,
+        );
+        assert!(entitlements.is_allowed("org_123", "logs").await);
+        entitlements.cache.run_pending_tasks().await;
+        assert_eq!(
+            entitlements.cache.get("org_123:logs").await,
+            None,
+            "fail-open allow must not be cached"
+        );
+    }
+
+    // --- Idempotency: one key per accumulated entry, stable across retries. ---
+
+    /// Stand-in for Autumn's `/v1/track`. Records every body it receives and
+    /// answers with `status`, so a test can drive the flush loop through a
+    /// failure and inspect what the retry sent.
+    async fn record_track(
+        State((tx, status)): State<(
+            tokio::sync::mpsc::UnboundedSender<serde_json::Value>,
+            StatusCode,
+        )>,
+        body: String,
+    ) -> StatusCode {
+        let _ = tx.send(serde_json::from_str(&body).unwrap());
+        status
+    }
+
+    async fn spawn_autumn_stub(
+        status: StatusCode,
+    ) -> (
+        String,
+        tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/v1/track", post(record_track))
+            .with_state((tx, status));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{addr}"), rx)
+    }
+
+    #[tokio::test]
+    async fn a_failed_flush_retries_under_the_same_idempotency_key() {
+        // The bug this pins: a per-attempt key means Autumn cannot recognize the
+        // retry of a track it already committed, and bills the usage twice.
+        let (api_url, mut rx) = spawn_autumn_stub(StatusCode::INTERNAL_SERVER_ERROR).await;
+        let tracker = AutumnTracker::spawn("sk_test".to_string(), &api_url, 1);
+        tracker.track("org_retry", "logs", 1.5);
+
+        let first = rx.recv().await.expect("first flush attempt");
+        let second = rx.recv().await.expect("retry after the 500");
+
+        assert_eq!(
+            first["idempotency_key"], second["idempotency_key"],
+            "retry must reuse the key so Autumn can dedupe it"
+        );
+        // The entry survived the failure intact, so the retry re-sends the same
+        // accumulated value rather than a fragment of it.
+        assert_eq!(first["value"], second["value"]);
+        assert_eq!(first["customer_id"], "org_retry");
+        assert_eq!(first["feature_id"], "logs");
+    }
+
+    #[tokio::test]
+    async fn usage_after_a_successful_flush_gets_a_fresh_key() {
+        // The other half: once an entry is acknowledged it is gone, so later
+        // usage for the same (org, feature) must not reuse its key — Autumn
+        // would dedupe it away and we'd under-bill.
+        let (api_url, mut rx) = spawn_autumn_stub(StatusCode::OK).await;
+        let tracker = AutumnTracker::spawn("sk_test".to_string(), &api_url, 1);
+
+        tracker.track("org_fresh", "traces", 2.0);
+        let first = rx.recv().await.expect("first flush");
+        tracker.track("org_fresh", "traces", 3.0);
+        let second = rx.recv().await.expect("second flush");
+
+        assert_ne!(first["idempotency_key"], second["idempotency_key"]);
+        assert_eq!(first["value"], 2.0);
+        assert_eq!(second["value"], 3.0);
     }
 }

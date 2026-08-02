@@ -221,10 +221,11 @@ describe("tracesTimeseriesQuery", () => {
 		const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("SELECT")
-		// With no span-level filters/groupBy, routes to the MV.
-		expect(sql).toContain("FROM service_overview_spans")
+		// Without rootOnly the query means "all spans", which the entry-point-only
+		// MV cannot answer — it reads raw traces.
+		expect(sql).toContain("FROM traces")
 		expect(sql).toContain("OrgId = 'org_123'")
-		expect(sql).toContain("count() AS count")
+		expect(sql).toContain("sum(SampleRate) AS count")
 		expect(sql).toContain("INTERVAL 3600 SECOND")
 		expect(sql).toContain("GROUP BY bucket, groupName")
 		expect(sql).toContain("ORDER BY bucket ASC, groupName ASC")
@@ -267,10 +268,10 @@ describe("tracesTimeseriesQuery", () => {
 		expect(sql).toContain("quantile(0.99)(Duration) / 1000000 AS p99Duration")
 	})
 
-	it("builds error_rate timeseries", () => {
+	it("builds error_rate timeseries weighted on both sides of the ratio", () => {
 		const q = tracesTimeseriesQuery({ metric: "error_rate", needsSampling: false })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("countIf(StatusCode = 'Error') / count(), 0) AS errorRate")
+		expect(sql).toContain("sumIf(SampleRate, StatusCode = 'Error') / sum(SampleRate), 0) AS errorRate")
 	})
 
 	it("emits sum(SampleRate) when needsSampling is true", () => {
@@ -348,14 +349,27 @@ describe("tracesTimeseriesQuery", () => {
 		expect(sql).toContain("UNION ALL")
 		expect(sql).toContain("Timestamp < if(toDateTime('2024-01-01 00:00:00')")
 		expect(sql).toContain("Hour < toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
-		expect(sql).toContain("sum(bEstimatedSpanCount) AS estimatedSpanCount")
+		// Weighted estimate, with a raw-count fallback for buckets written before
+		// `EstimatedSpanCount` existed. `count` reports the same expression. Both
+		// `if()` arms must unify to Float64 — ClickHouse rejects a Float64/UInt64
+		// pair outright, so dropping the `toFloat64` breaks the query at runtime.
+		expect(sql).toContain(
+			"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count",
+		)
+		expect(sql).toContain(
+			"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount",
+		)
 		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles)")
 	})
 
-	it("routes default (no filters) to service_overview_spans_mv", () => {
-		const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false })
-		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("FROM service_overview_spans")
+	// `service_overview_spans` stores only entry-point spans (Server/Consumer OR
+	// root). Routing an all-spans query there silently swaps the population, which
+	// is how one dashboard showed two answers to the same question.
+	it("keeps non-rootOnly queries off service_overview_spans_mv", () => {
+		const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, bucketSeconds: 300 })
+		const { sql } = compileCH(q, { ...baseParams, bucketSeconds: 300 })
+		expect(sql).not.toContain("FROM service_overview_spans")
+		expect(sql).toContain("FROM traces")
 	})
 
 	it("routes eligible hourly trace timeseries to traces_aggregates_hourly", () => {
@@ -368,7 +382,13 @@ describe("tracesTimeseriesQuery", () => {
 		})
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM traces_aggregates_hourly")
-		expect(sql).toContain("quantilesTDigestWeightedMerge(0.5, 0.95, 0.99)(DurationQuantiles)")
+		// Whole-hour interior state is re-emitted for the union, then merged once
+		// in the outer query alongside the raw partial-hour edges.
+		expect(sql).toContain("quantilesTDigestWeightedMergeState(0.5, 0.95, 0.99)(DurationQuantiles)")
+		expect(sql).toContain(
+			"quantilesTDigestWeightedState(0.5, 0.95, 0.99)(Duration, toUInt32(greatest(SampleRate, 1.0)))",
+		)
+		expect(sql).toContain("quantilesTDigestWeightedMerge(0.5, 0.95, 0.99)(bDurationQuantiles)")
 		expect(sql).toContain("IsEntryPoint = 1")
 		expect(sql).not.toContain("FROM service_overview_spans")
 	})
@@ -453,15 +473,15 @@ describe("tracesTimeseriesQuery", () => {
 		expect(sql).toContain("StatusCode = 'Error'")
 	})
 
-	it("filters by environments (MV path uses pre-extracted DeploymentEnv)", () => {
+	it("filters by environments (raw path reads the ResourceAttributes map)", () => {
 		const q = tracesTimeseriesQuery({
 			metric: "count",
 			needsSampling: false,
 			environments: ["production", "staging"],
 		})
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("FROM service_overview_spans")
-		expect(sql).toContain("DeploymentEnv IN ('production', 'staging')")
+		expect(sql).toContain("FROM traces")
+		expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
 	})
 
 	it("filters by environments with rootOnly (MV path uses pre-extracted DeploymentEnv)", () => {
@@ -496,7 +516,36 @@ describe("tracesTimeseriesQuery", () => {
 			attributeFilters: [{ key: "http.route", mode: "exists" }],
 		})
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("mapContains(SpanAttributes, 'http.route')")
+		// A missing Map key reads back as '', so `exists` must also exclude empty
+		// values — otherwise breakdowns keep a "(no value)" bucket.
+		expect(sql).toContain(
+			"mapContains(SpanAttributes, 'http.route') AND SpanAttributes['http.route'] != ''",
+		)
+	})
+
+	it("filters by attribute filters (exists) across HTTP semconv aliases", () => {
+		const q = tracesTimeseriesQuery({
+			metric: "count",
+			needsSampling: false,
+			attributeFilters: [{ key: "http.status_code", mode: "exists" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain(
+			"(mapContains(SpanAttributes, 'http.status_code') OR mapContains(SpanAttributes, 'http.response.status_code')) AND if(SpanAttributes['http.status_code'] != '', SpanAttributes['http.status_code'], SpanAttributes['http.response.status_code']) != ''",
+		)
+	})
+
+	it("filters by attribute filters (!exists) as the complement of exists", () => {
+		const q = tracesTimeseriesQuery({
+			metric: "count",
+			needsSampling: false,
+			attributeFilters: [{ key: "http.route", mode: "exists", negated: true }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		// Absent *or* empty — the exact negation of the positive predicate.
+		expect(sql).toContain(
+			"NOT ((mapContains(SpanAttributes, 'http.route') AND SpanAttributes['http.route'] != ''))",
+		)
 	})
 
 	it("filters by attribute filters (contains)", () => {
@@ -602,10 +651,10 @@ describe("tracesBreakdownQuery", () => {
 		const q = tracesBreakdownQuery({ metric: "count", groupBy: "service" })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("SELECT")
-		expect(sql).toContain("FROM service_overview_spans")
-		expect(sql).not.toContain("FROM traces")
+		expect(sql).toContain("FROM traces")
+		expect(sql).not.toContain("FROM service_overview_spans")
 		expect(sql).toContain("ServiceName AS name")
-		expect(sql).toContain("count() AS count")
+		expect(sql).toContain("sum(SampleRate) AS count")
 		expect(sql).toContain("GROUP BY name")
 		expect(sql).toContain("ORDER BY count DESC")
 		expect(sql).toContain("LIMIT 10")
@@ -623,8 +672,15 @@ describe("tracesBreakdownQuery", () => {
 	it("groups by status_code", () => {
 		const q = tracesBreakdownQuery({ metric: "count", groupBy: "status_code" })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).toContain("FROM traces")
 		expect(sql).toContain("StatusCode AS name")
+	})
+
+	it("routes rootOnly breakdowns to service_overview_spans_mv", () => {
+		const q = tracesBreakdownQuery({ metric: "count", groupBy: "service", rootOnly: true })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).toContain("sum(SampleRate) AS count")
 	})
 
 	it("groups by http_method", () => {
@@ -682,7 +738,7 @@ describe("tracesBreakdownQuery", () => {
 			errorsOnly: true,
 		})
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).toContain("FROM traces")
 		expect(sql).toContain("ServiceName = 'api'")
 		expect(sql).toContain("StatusCode = 'Error'")
 	})
@@ -691,6 +747,7 @@ describe("tracesBreakdownQuery", () => {
 		const q = tracesBreakdownQuery({
 			metric: "count",
 			groupBy: "service",
+			rootOnly: true,
 			environments: ["prod"],
 		})
 		const { sql } = compileCH(q, baseParams)
@@ -747,6 +804,45 @@ describe("tracesListQuery", () => {
 		const q = tracesListQuery({ serviceName: "api" })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("ServiceName = 'api'")
+	})
+
+	it("emits IN for multiple services", () => {
+		const q = tracesListQuery({ serviceNames: ["api", "checkout", "billing"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ServiceName IN ('api', 'checkout', 'billing')")
+		// Regression: the sidebar is multi-select, but the query layer used to take
+		// only `services[0]`, so ticking three services filtered by one.
+		expect(sql).not.toContain("ServiceName = 'api'")
+	})
+
+	it("keeps plain equality for a single service in the array spelling", () => {
+		const q = tracesListQuery({ serviceNames: ["api"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ServiceName = 'api'")
+	})
+
+	it("lets serviceNames win over the scalar serviceName", () => {
+		const q = tracesListQuery({ serviceName: "api", serviceNames: ["checkout", "billing"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ServiceName IN ('checkout', 'billing')")
+		expect(sql).not.toContain("ServiceName = 'api'")
+	})
+
+	it("emits IN against both raw and display span names for multiple spanNames", () => {
+		const q = tracesListQuery({ spanNames: ["GET /a", "GET /b"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("SpanName IN ('GET /a', 'GET /b')")
+		// Display-name aware, same as the single-value path.
+		expect(sql).toContain("replaceOne(SpanName, 'http.server ', '')")
+	})
+
+	it("emits IN for a multi-value http attribute filter", () => {
+		const q = tracesListQuery({
+			attributeFilters: [{ key: "http.method", values: ["GET", "POST"], mode: "in" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		// Coalesced across the http.method / http.request.method semconv aliases.
+		expect(sql).toMatch(/IN \('GET', 'POST'\)/)
 	})
 
 	it("uses traces table when rootOnly (MV disabled)", () => {

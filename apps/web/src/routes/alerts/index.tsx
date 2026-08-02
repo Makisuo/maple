@@ -61,7 +61,8 @@ function AlertsPage() {
 		>
 			<TabsList variant="underline">
 				<TabsTrigger value="overview">Overview</TabsTrigger>
-				<TabsTrigger value="settings">Settings</TabsTrigger>
+				{/* The URL value stays `settings` so existing links keep resolving. */}
+				<TabsTrigger value="settings">Destinations</TabsTrigger>
 			</TabsList>
 		</Tabs>
 	)

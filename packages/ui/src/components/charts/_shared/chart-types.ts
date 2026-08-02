@@ -1,4 +1,5 @@
 import type React from "react"
+import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
 
 export type ChartLegendMode = "visible" | "hidden" | "right"
 export type ChartTooltipMode = "visible" | "hidden"
@@ -69,15 +70,27 @@ export interface BaseChartProps {
 		logScaleY?: boolean
 	}
 	heatmap?: {
-		colorScale?: "viridis" | "magma" | "cividis" | "blues" | "reds"
-		scaleType?: "linear" | "log"
+		colorScale?: HeatmapColorScale
+		scaleType?: HeatmapScaleType
 	}
 	funnel?: {
+		/**
+		 * Percentage labels on each stage. Unset shows the share of the first
+		 * stage; `true` adds the step-to-step conversion; `false` suppresses both.
+		 */
 		showStepPercent?: boolean
 	}
 }
 
-export type ChartCategory = "bar" | "area" | "line" | "pie" | "histogram" | "heatmap" | "funnel"
+export type ChartCategory =
+	| "bar"
+	| "hbar"
+	| "area"
+	| "line"
+	| "pie"
+	| "histogram"
+	| "heatmap"
+	| "funnel"
 
 export interface ChartRegistryEntry {
 	id: string

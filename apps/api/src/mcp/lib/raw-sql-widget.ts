@@ -1,41 +1,19 @@
+import { rawSqlDisplayTypeFor } from "@maple/domain/http"
 import type { RawSqlDisplayType, WidgetDataSourceSchema } from "@maple/domain/http"
 
 // ---------------------------------------------------------------------------
 // MCP-side mirror of the web's raw-SQL widget builder so agents can create
 // raw-SQL widgets without hand-crafting the dataSource JSON.
 //
-// Keep this in lockstep with:
-//   - apps/web/src/lib/raw-sql/templates.ts             (visualizationToDisplayType)
-//   - apps/web/src/components/dashboard-builder/config/
-//       widget-query-builder-page.tsx                   (buildRawSqlDataSource)
-//
-// Duplicating ~20 lines avoids the API depending on the web app.
+// The visualization → display-type mapping used to be duplicated here and in
+// apps/web/src/lib/raw-sql/templates.ts. Both now read `rawSqlDisplayTypeFor`
+// from the shared widget-type table, so only `buildRawSqlDataSource` (which
+// mirrors widget-query-builder-page.tsx) still has a web-side twin.
 // ---------------------------------------------------------------------------
 
 type WidgetDataSource = typeof WidgetDataSourceSchema.Type
 
-export function visualizationToDisplayType(visualization: string, chartId?: string): RawSqlDisplayType {
-	switch (visualization) {
-		case "table":
-			return "table"
-		case "stat":
-		// Gauge widgets consume the same scalar shape as stat widgets.
-		case "gauge":
-			return "stat"
-		case "pie":
-			return "pie"
-		case "histogram":
-			return "histogram"
-		case "heatmap":
-			return "heatmap"
-		case "funnel":
-			return "funnel"
-		default:
-			if (chartId?.includes("bar")) return "bar"
-			if (chartId?.includes("area")) return "area"
-			return "line"
-	}
-}
+export { rawSqlDisplayTypeFor as visualizationToDisplayType }
 
 export function buildRawSqlDataSource(args: {
 	visualization: string

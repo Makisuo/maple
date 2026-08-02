@@ -182,5 +182,3 @@ export function IssueSidebar({
 		</div>
 	)
 }
-
-

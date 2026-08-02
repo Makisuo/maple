@@ -648,6 +648,161 @@ describe("AlertsService", () => {
 			assert.strictEqual(spec.metric, "error_rate")
 			assert.deepStrictEqual(spec.groupBy, ["none"])
 			assert.strictEqual(spec.filters.serviceName, "checkout")
+			// No environment scope selected → the filter must be absent entirely, not
+			// an empty array (which the CH lowering would still treat as "no rows").
+			assert.isUndefined((spec.filters as { environments?: unknown }).environments)
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
+		)
+	})
+
+	it.effect("holds the scheduler claim outside alert_rules and heartbeats the rule row", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_claim_lock")
+			const userId = asUserId("user_claim_lock")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+
+			const claimAt = () =>
+				Effect.promise(() =>
+					queryFirstRow<{ lastScheduledAt: Date | null }>(
+						testDb,
+						`select last_scheduled_at as "lastScheduledAt" from alert_rule_claims limit 1`,
+					),
+				)
+			const ruleScheduledAt = () =>
+				Effect.promise(() =>
+					queryFirstRow<{ lastScheduledAt: Date | null }>(
+						testDb,
+						`select last_scheduled_at as "lastScheduledAt" from alert_rules limit 1`,
+					),
+				)
+
+			yield* alerts.runSchedulerTick()
+			const claimFirst = yield* claimAt()
+			const ruleFirst = yield* ruleScheduledAt()
+
+			// One minute on: the claim must advance (it is the actual per-tick lock)
+			// while alert_rules must NOT, because it is Electric-synced and every write
+			// to it is replicated out of PlanetScale. That divergence is the whole point
+			// of splitting the lock out — if these two move together, the WAL churn the
+			// split was meant to remove is back.
+			yield* TestClock.adjust(Duration.minutes(1))
+			yield* alerts.runSchedulerTick()
+			const claimSecond = yield* claimAt()
+			const ruleSecond = yield* ruleScheduledAt()
+
+			// Past the 5-minute heartbeat the rule row catches up, so the column stays
+			// meaningful for the API and the web diagnosis panel.
+			yield* TestClock.adjust(Duration.minutes(6))
+			yield* alerts.runSchedulerTick()
+			const ruleThird = yield* ruleScheduledAt()
+
+			assert.isOk(claimFirst?.lastScheduledAt, "claim row is created on the first tick")
+			assert.isAbove(
+				claimSecond!.lastScheduledAt!.getTime(),
+				claimFirst!.lastScheduledAt!.getTime(),
+				"claim advances every tick",
+			)
+			assert.strictEqual(
+				ruleSecond?.lastScheduledAt?.getTime(),
+				ruleFirst?.lastScheduledAt?.getTime(),
+				"alert_rules is not rewritten inside the heartbeat window",
+			)
+			assert.isAbove(
+				ruleThird!.lastScheduledAt!.getTime(),
+				ruleFirst!.lastScheduledAt!.getTime(),
+				"alert_rules catches up once the heartbeat window elapses",
+			)
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
+		)
+	})
+
+	it.effect("lowers the environment scope into a built-in signal's compiled plan", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_env_scope")
+			const userId = asUserId("user_env_scope")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Checkout error rate (prod)",
+					severity: "critical",
+					serviceNames: ["checkout"],
+					// Duplicates and whitespace are normalized away on write.
+					environments: ["production", " staging ", "production"],
+					signalType: "error_rate",
+					comparator: "gt",
+					threshold: 5,
+					windowMinutes: 5,
+					destinationIds: [destination.id],
+				}),
+			)
+
+			const row = yield* Effect.promise(() =>
+				queryFirstRow<{ querySpecJson: unknown; environmentsJson: unknown }>(
+					testDb,
+					`select query_spec_json as "querySpecJson", environments_json as "environmentsJson"
+					 from alert_rules limit 1`,
+				),
+			)
+
+			assert.deepStrictEqual(row?.environmentsJson, ["production", "staging"])
+			const spec = row?.querySpecJson as { filters: { environments: ReadonlyArray<string> } }
+			assert.deepStrictEqual(spec.filters.environments, ["production", "staging"])
+
+			const rules = yield* alerts.listRules(orgId)
+			assert.deepStrictEqual([...(rules.rules[0]?.environments ?? [])], ["production", "staging"])
+		}).pipe(
+			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
+		)
+	})
+
+	it.effect("drops the environment scope for builder_query rules", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_env_builder")
+			const userId = asUserId("user_env_builder")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			// A builder_query draft already expresses environment in its where clause;
+			// a second rule-level predicate would silently AND onto the user's query.
+			const rule = yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Custom query",
+					severity: "warning",
+					environments: ["production"],
+					signalType: "builder_query",
+					queryBuilderDraft: {
+						id: "alert-query",
+						name: "A",
+						dataSource: "traces",
+						aggregation: "count",
+						whereClause: "",
+						groupBy: [],
+					},
+					comparator: "gt",
+					threshold: 10,
+					windowMinutes: 5,
+					destinationIds: [destination.id],
+				}),
+			)
+
+			assert.deepStrictEqual([...rule.environments], [])
 		}).pipe(
 			Effect.provide(makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
 		)
@@ -1621,53 +1776,54 @@ describe("AlertsService", () => {
 		})
 	})
 
-	it.effect("rejects metrics alerts with multiple attr groupBy dimensions", () => {
+	it.effect("accepts a builder query when lowering emits a warning", () => {
 		const testDb = createTestDb(trackedDbs)
 
 		return Effect.gen(function* () {
-			const exit = yield* Effect.gen(function* () {
-				const alerts = yield* AlertsService
-				const orgId = asOrgId("org_metrics_group_validation")
-				const userId = asUserId("user_metrics_group_validation")
-				const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_builder_warning")
+			const userId = asUserId("user_builder_warning")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
 
-				return yield* alerts.createRule(
-					orgId,
-					userId,
-					adminRoles,
-					new AlertRuleUpsertRequest({
-						name: "Grouped metrics alert",
-						severity: "warning",
-						enabled: true,
-						groupBy: ["attr.http.method", "attr.http.route"],
-						signalType: "metric",
-						comparator: "gt",
-						threshold: 100,
-						windowMinutes: 5,
-						minimumSampleCount: 1,
-						consecutiveBreachesRequired: 1,
-						consecutiveHealthyRequired: 1,
-						renotifyIntervalMinutes: 30,
+			const rule = yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Grouped metrics alert",
+					severity: "warning",
+					signalType: "builder_query",
+					queryBuilderDraft: {
+						id: "alert-query",
+						name: "A",
+						dataSource: "metrics",
+						aggregation: "avg",
 						metricName: "http.server.request.duration",
 						metricType: "histogram",
-						metricAggregation: "avg",
-						destinationIds: [destination.id],
-					}),
-				)
-			})
-				.pipe(
-					Effect.provide(
-						makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows })),
-					),
-				)
-				.pipe(Effect.exit)
+						whereClause: "",
+						addOns: {
+							groupBy: true,
+							having: false,
+							orderBy: false,
+							limit: false,
+							legend: false,
+						},
+						groupBy: ["attr.http.method", "attr.http.route"],
+					},
+					comparator: "gt",
+					threshold: 100,
+					windowMinutes: 5,
+					destinationIds: [destination.id],
+				}),
+			)
 
-			const failure = getError(exit)
-
-			assert.isTrue(Exit.isFailure(exit))
-			assert.instanceOf(failure, AlertValidationError)
-			assert.strictEqual(failure.message, "Metrics alerts support at most one attr.* groupBy dimension")
-		})
+			assert.strictEqual(rule.signalType, "builder_query")
+			assert.deepStrictEqual(rule.queryBuilderDraft?.groupBy, ["attr.http.method", "attr.http.route"])
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows })),
+			),
+		)
 	})
 
 	const VALID_PD_KEY = "e93facc04764012d7bfb002500d5d1a6" // 32 hex chars
@@ -2905,7 +3061,7 @@ describe("AlertsService.previewRule", () => {
 				endTime: "2026-01-01T00:30:00.000Z",
 			})
 
-			const response = yield* alerts.previewRule(orgId, request)
+			const response = yield* alerts.previewRule(orgId, adminRoles, request)
 
 			assert.strictEqual(response.bucketSeconds, 300)
 			assert.strictEqual(response.windowMinutes, 5)
@@ -2964,7 +3120,7 @@ describe("AlertsService.previewRule", () => {
 				endTime: "2026-01-01T00:32:30.000Z",
 			})
 
-			const response = yield* alerts.previewRule(orgId, request)
+			const response = yield* alerts.previewRule(orgId, adminRoles, request)
 
 			assert.lengthOf(response.series, 1)
 			const points = response.series[0]!.points
@@ -2986,7 +3142,7 @@ describe("AlertsService.previewRule", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 
-	it.effect("rejects raw-SQL previews before warehouse execution", () => {
+	it.effect("previews a raw-SQL rule through the same path as every other kind", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = { rawQueryRows: [{ value: 42, samples: 20 }] }
 
@@ -3016,11 +3172,13 @@ describe("AlertsService.previewRule", () => {
 				endTime: "2026-01-01T00:30:00.000Z",
 			})
 
-			const exit = yield* alerts.previewRule(orgId, request).pipe(Effect.exit)
-			assert.isTrue(Exit.isFailure(exit))
-			const failure = getError(exit)
-			assert.instanceOf(failure, AlertValidationError)
-			assert.include((failure as AlertValidationError).message, "cannot be previewed")
+			// Raw SQL used to be rejected here even though the UI offers the chart.
+			// It is now just another evaluate source, so the preview renders.
+			const preview = yield* alerts.previewRule(orgId, adminRoles, request)
+			assert.isAbove(preview.series.length, 0)
+			const points = preview.series[0]?.points ?? []
+			assert.isAbove(points.length, 0)
+			assert.isTrue(points.some((p) => p.value === 42))
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 })
@@ -3045,9 +3203,7 @@ describe("retired destination types", () => {
 			})
 			const rule = yield* createErrorRateRule(alerts, orgId, userId, legacy.id)
 			yield* Effect.promise(() =>
-				executeSql(testDb, "update alert_destinations set type = 'slack' where id = $1", [
-					legacy.id,
-				]),
+				executeSql(testDb, "update alert_destinations set type = 'slack' where id = $1", [legacy.id]),
 			)
 			yield* Effect.promise(() =>
 				insertDeliveryEventRow(testDb, {

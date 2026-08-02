@@ -85,6 +85,11 @@ export const V2SlackIntegrationStatus = Schema.Struct({
 		description:
 			"When the remote disconnect was recorded, or `null` when `disconnected_reason` is `null`.",
 	}),
+	missing_scopes: Schema.Array(Schema.String).annotate({
+		description:
+			"Bot scopes Maple now requires that the current installation has not granted. Non-empty means the app should be reconnected (a fresh OAuth install over the existing one) to pick up the new permissions — the bot keeps its channel memberships. Always empty when not installed.",
+		examples: [["reactions:write"]],
+	}),
 }).annotate({
 	identifier: "SlackIntegration",
 	title: "Slack integration status",
@@ -100,6 +105,7 @@ export const V2SlackIntegrationStatus = Schema.Struct({
 			disconnected_reason: null,
 			disconnected_team_name: null,
 			disconnected_at: null,
+			missing_scopes: [],
 		}),
 	],
 })
@@ -167,17 +173,24 @@ export const V2SlackChannelList = Schema.Struct({
 		description: 'The object type — always `"slack_integration.channel_list"`.',
 	}),
 	channels: Schema.Array(V2SlackChannel).annotate({
-		description: "The channels the installed bot can see, most recently listed first.",
+		description:
+			"The channels the installed bot can see, ordered with the channels the bot has joined (`is_member`) first, then alphabetically by name within each half.",
+	}),
+	truncated: Schema.Boolean.annotate({
+		description:
+			"Whether the workspace has more channels than this response could reach. `true` means `channels` is a prefix of the inventory, not the whole of it — the bot must be invited to a missing channel for it to appear.",
+		examples: [false],
 	}),
 }).annotate({
 	identifier: "SlackChannelList",
 	title: "Slack channel list",
 	description:
-		'The channels visible to the installed Slack bot. Note: unlike every other v2 collection this response is **not** the standard `{ object: "list", data, has_more, next_cursor }` envelope — Maple walks Slack\'s `conversations.list` cursors server-side and returns the whole bounded set in one response, so there is nothing to paginate and it stays a bespoke `{ object, channels }` shape.',
+		'The channels visible to the installed Slack bot. Note: unlike every other v2 collection this response is **not** the standard `{ object: "list", data, has_more, next_cursor }` envelope — Maple walks Slack\'s `conversations.list` cursors server-side and returns the set in one response, so there is no cursor for a client to follow. The walk is page-capped; `truncated` reports whether it hit that cap.',
 	examples: [
 		wireExample({
 			object: "slack_integration.channel_list",
 			channels: [{ id: "C0789CHAN", name: "incidents", is_private: false, is_member: true }],
+			truncated: false,
 		}),
 	],
 })
@@ -210,7 +223,7 @@ export class V2SlackIntegrationsApiGroup extends HttpApiGroup.make("slackIntegra
 				identifier: "installSlackIntegration",
 				summary: "Begin a Slack installation",
 				description:
-					"Returns a Slack OAuth authorize URL to redirect the user to. Requires an org-admin role and the `integrations:write` scope.",
+					"Returns a Slack OAuth authorize URL to redirect the user to. Also the way to reconnect an existing installation (e.g. to grant newly required scopes): re-approving updates the installation in place without removing the bot from its channels. Requires an org-admin role and the `integrations:write` scope.",
 			}),
 		),
 	)

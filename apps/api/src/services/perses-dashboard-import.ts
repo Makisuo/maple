@@ -4,7 +4,8 @@ import {
 	DashboardWidgetSchema,
 	PortableDashboardDocument,
 	type RawSqlDisplayType,
-	defaultWidgetHeight,
+	defaultWidgetLayout,
+	widgetTypeByPersesKind,
 } from "@maple/domain/http"
 
 type UnknownRecord = Record<string, unknown>
@@ -90,59 +91,16 @@ function getPanelPlugin(panel: unknown) {
 	}
 }
 
-function defaultVisualizationForPanelKind(kind: string | undefined): string {
-	switch (kind) {
-		case "StatChart":
-			return "stat"
-		case "GaugeChart":
-			return "gauge"
-		case "Table":
-		case "LogsTable":
-		case "TimeSeriesTable":
-			return "table"
-		case "PieChart":
-			return "pie"
-		case "Histogram":
-		case "HistogramChart":
-			return "histogram"
-		case "HeatMap":
-		case "HeatMapChart":
-		case "Heatmap":
-			return "heatmap"
-		case "Markdown":
-			return "markdown"
-		case "BarChart":
-		case "TimeSeriesChart":
-		default:
-			return "chart"
-	}
-}
+// Perses panel `kind` → Maple panel type lives in the shared widget-type table
+// (`persesKinds`), so adding a widget kind can't leave the importer behind.
+// Unknown kinds fall back to a line chart, as they always have.
 
-function displayTypeForPanelKind(kind: string | undefined): RawSqlDisplayType {
-	switch (kind) {
-		case "BarChart":
-			return "bar"
-		case "StatChart":
-		case "GaugeChart":
-			return "stat"
-		case "Table":
-		case "LogsTable":
-		case "TimeSeriesTable":
-			return "table"
-		case "PieChart":
-			return "pie"
-		case "Histogram":
-		case "HistogramChart":
-			return "histogram"
-		case "HeatMap":
-		case "HeatMapChart":
-		case "Heatmap":
-			return "heatmap"
-		case "TimeSeriesChart":
-		default:
-			return "line"
-	}
-}
+const defaultVisualizationForPanelKind = (kind: string | undefined): string =>
+	widgetTypeByPersesKind(kind).visualization
+
+const displayTypeForPanelKind = (kind: string | undefined): RawSqlDisplayType =>
+	// Notes carry no SQL rendering; the caller only reaches this for query panels.
+	widgetTypeByPersesKind(kind).rawSqlDisplayType ?? "line"
 
 function displayForPanel(args: {
 	kind: string | undefined
@@ -200,10 +158,15 @@ function displayForPanel(args: {
 	}
 }
 
+/**
+ * Heights and minimums come from the shared widget-type table. The width does
+ * not: a Perses panel with no `gridLayout` entry is a full-row panel in its
+ * source dashboard, so everything but a stat imports at the half-width `w: 6`
+ * rather than the `w: 4` the web store hands a click-added widget.
+ */
 function defaultLayoutForVisualization(visualization: string) {
-	const { h, minH } = defaultWidgetHeight(visualization)
-	// Stats keep the taller hand-added height, matching the web store.
-	if (visualization === "stat") return { w: 3, h: 4, minW: 2, minH }
+	const { w, h, minW, minH } = defaultWidgetLayout(visualization)
+	if (visualization === "stat") return { w, h, minW, minH }
 	return { w: 6, h, minW: 3, minH }
 }
 

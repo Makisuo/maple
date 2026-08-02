@@ -33,6 +33,7 @@ const ruleRow: AlertRuleRow = {
 	severity: "warning",
 	service_names_json: ["checkout", "api"],
 	exclude_service_names_json: null,
+	environments_json: ["production"],
 	tags_json: ["prod"],
 	signal_type: "error_rate",
 	comparator: "gt",
@@ -43,9 +44,6 @@ const ruleRow: AlertRuleRow = {
 	consecutive_breaches_required: 2,
 	consecutive_healthy_required: 2,
 	renotify_interval_minutes: 30,
-	metric_name: null,
-	metric_type: null,
-	metric_aggregation: null,
 	apdex_threshold_ms: null,
 	query_builder_draft_json: null,
 	raw_query_sql: null,
@@ -194,7 +192,7 @@ describe("rowToAlertDestinationDocument", () => {
 		enabled: true,
 		// Only the public config the browser renders — no secrets (those live in
 		// the excluded encrypted columns, which the shape never projects).
-		config_json: { summary: "#ops", channelLabel: "#ops" },
+		config_json: { summary: "Slack channel #ops", channelLabel: "#ops" },
 		last_tested_at: "2026-07-04T00:00:00.000Z",
 		last_test_error: null,
 		created_at: "2026-06-01T00:00:00.000Z",
@@ -207,7 +205,7 @@ describe("rowToAlertDestinationDocument", () => {
 		assert.strictEqual(doc.name, "Ops Slack")
 		assert.strictEqual(doc.type, "slack-bot")
 		assert.strictEqual(doc.enabled, true)
-		assert.strictEqual(doc.summary, "#ops")
+		assert.strictEqual(doc.summary, "Slack channel #ops")
 		assert.strictEqual(doc.channelLabel, "#ops")
 		assert.strictEqual(doc.lastTestedAt, "2026-07-04T00:00:00.000Z")
 		assert.strictEqual(doc.lastTestError, null)

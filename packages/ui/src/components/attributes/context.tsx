@@ -6,11 +6,9 @@ import * as React from "react"
  * Cross-cutting configuration for the shared attribute renderers
  * (`CopyableValue`, `CollapsibleJsonValue`, `AttributesTable`, `LogAttributeChip`).
  *
- * Both are optional so `@maple/ui` stays free of app-level deps (sonner,
- * sugar-high). Apps wire them once at the root via `AttributesProvider`:
- *   - `notifyCopied` surfaces copy feedback (e.g. a toast). Called after the
- *     value lands on the clipboard; the optional message lets callers customize
- *     it (the chip copies `key=value` and passes `Copied <key>`).
+ * Both are optional so `@maple/ui` stays free of app-level deps (sugar-high).
+ * Copy feedback is no longer injected here — `useCopy` owns it. Apps wire the
+ * rest once at the root via `AttributesProvider`:
  *   - `highlightJson` turns a JSON string into highlighted HTML. When omitted,
  *     JSON renders as plain pre-formatted text.
  *   - `renderValue` lets apps enrich specific keys (e.g. wrap a commit-SHA in a
@@ -19,7 +17,6 @@ import * as React from "react"
  *     never passed through — they always use the collapsible renderer.
  */
 export interface AttributesConfig {
-	notifyCopied?: (message?: string) => void
 	highlightJson?: (json: string) => string
 	renderValue?: (attrKey: string, value: string) => React.ReactNode | null | undefined
 }
@@ -28,13 +25,12 @@ const AttributesConfigContext = React.createContext<AttributesConfig>({})
 
 export function AttributesProvider({
 	children,
-	notifyCopied,
 	highlightJson,
 	renderValue,
 }: AttributesConfig & { children: React.ReactNode }) {
 	const value = React.useMemo<AttributesConfig>(
-		() => ({ notifyCopied, highlightJson, renderValue }),
-		[notifyCopied, highlightJson, renderValue],
+		() => ({ highlightJson, renderValue }),
+		[highlightJson, renderValue],
 	)
 	return <AttributesConfigContext value={value}>{children}</AttributesConfigContext>
 }

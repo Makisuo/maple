@@ -69,6 +69,11 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 			if (rule.excludeServiceNames.length > 0) {
 				lines.push(`Exclude: ${rule.excludeServiceNames.join(", ")}`)
 			}
+			lines.push(
+				rule.environments.length > 0
+					? `Environments: ${rule.environments.join(", ")}`
+					: `Environments: All environments`,
+			)
 			if (rule.groupBy && rule.groupBy.length > 0) {
 				lines.push(`Group By: ${rule.groupBy.join(", ")}`)
 			}
@@ -83,14 +88,6 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 			lines.push(``)
 
 			// Signal-specific fields
-			if (rule.metricName || rule.metricType || rule.metricAggregation) {
-				lines.push(`### Metric Configuration`)
-				if (rule.metricName) lines.push(`Metric Name: ${rule.metricName}`)
-				if (rule.metricType) lines.push(`Metric Type: ${rule.metricType}`)
-				if (rule.metricAggregation) lines.push(`Metric Aggregation: ${rule.metricAggregation}`)
-				lines.push(``)
-			}
-
 			if (rule.apdexThresholdMs) {
 				lines.push(`### Apdex Configuration`)
 				lines.push(`Apdex Threshold: ${rule.apdexThresholdMs}ms`)
@@ -156,6 +153,7 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 							severity: rule.severity,
 							serviceNames: [...rule.serviceNames],
 							excludeServiceNames: [...rule.excludeServiceNames],
+							environments: [...rule.environments],
 							groupBy: rule.groupBy ? [...rule.groupBy] : null,
 							signalType: rule.signalType,
 							comparator: rule.comparator,
@@ -165,9 +163,6 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 							consecutiveBreachesRequired: rule.consecutiveBreachesRequired,
 							consecutiveHealthyRequired: rule.consecutiveHealthyRequired,
 							renotifyIntervalMinutes: rule.renotifyIntervalMinutes,
-							metricName: rule.metricName,
-							metricType: rule.metricType,
-							metricAggregation: rule.metricAggregation,
 							apdexThresholdMs: rule.apdexThresholdMs,
 							queryBuilderDraft: rule.queryBuilderDraft,
 							rawQuerySql: rule.rawQuerySql,

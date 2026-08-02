@@ -16,9 +16,11 @@ interface Props {
     headings: Array<{ depth: number; slug: string; text: string }>;
     currentSlug: string;
     image?: string;
+    /** Path of this page's markdown twin — see the same prop on Layout.astro. */
+    mdHref?: string;
 }
 
-const { title, description, headings, currentSlug, image = "/og-docs.png" } = Astro.props;
+const { title, description, headings, currentSlug, image = "/og-docs.png", mdHref } = Astro.props;
 const stars = await getGitHubStars();
 
 const pageTitle = currentSlug ? `${title} — Maple Docs` : "Maple Docs";
@@ -37,6 +39,9 @@ const absoluteImage = image.startsWith("http") ? image : new URL(image, Astro.si
         <meta name="theme-color" content="#272219" />
         <meta name="robots" content="index,follow" />
         <link rel="canonical" href={canonicalUrl} />
+        {mdHref && (
+            <link rel="alternate" type="text/markdown" href={new URL(mdHref, Astro.site).toString()} />
+        )}
         <meta property="og:type" content="article" />
         <meta property="og:site_name" content="Maple" />
         <meta property="og:locale" content="en_US" />

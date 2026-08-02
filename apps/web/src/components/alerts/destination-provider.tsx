@@ -85,7 +85,7 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		accent: SLACK_ACCENT,
 		accentBg: SLACK_ACCENT_BG,
 		accentText: SLACK_ACCENT_TEXT,
-		// 14.0:1 on #4A154B (light), 4.65:1 on #AD51A7 (dark).
+		// 14.0:1 light / 4.65:1 dark.
 		accentOn: INK_ON_DARK_ACCENT,
 		fallbackIcon: ({ size = 22, className }) => <SlackIcon size={size} className={className} />,
 		docsUrl: "https://maple.dev/docs/integrations/slack",
@@ -120,19 +120,6 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		accentOn: INK_ON_BRIGHT_ACCENT,
 		fallbackIcon: ({ size = 22, className }) => <CodeIcon size={size} className={className} />,
 	},
-	hazel: {
-		type: "hazel",
-		label: "Hazel (webhook)",
-		description: "Legacy webhook integration — paste the URL Hazel issues you.",
-		accent: "#F46F0F",
-		accentBg: "rgba(244,111,15,0.16)",
-		accentText: HAZEL_ACCENT_TEXT,
-		// White on Hazel's orange is 2.95:1; #1E1B17 is 5.82:1.
-		accentOn: INK_ON_BRIGHT_ACCENT,
-		fallbackIcon: ({ size = 22, className }) => <HazelIcon size={size} className={className} />,
-		docsUrl: "https://hazel.sh/docs/integrations/maple",
-		docsLabel: "Hazel integration guide",
-	},
 	"hazel-oauth": {
 		type: "hazel-oauth",
 		label: "Hazel",
@@ -140,7 +127,7 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		accent: "#F46F0F",
 		accentBg: "rgba(244,111,15,0.16)",
 		accentText: HAZEL_ACCENT_TEXT,
-		// Same orange as the webhook row — 2.95:1 white, 5.82:1 on #1E1B17.
+		// 2.95:1 white, 5.82:1 on #1E1B17.
 		accentOn: INK_ON_BRIGHT_ACCENT,
 		fallbackIcon: ({ size = 22, className }) => <HazelIcon size={size} className={className} />,
 		docsUrl: "https://hazel.sh/docs/integrations/maple",
@@ -201,7 +188,6 @@ export const DESTINATION_TYPES: ReadonlyArray<AlertDestinationType> = [
 	"pagerduty",
 	"webhook",
 	"hazel-oauth",
-	"hazel",
 ]
 
 interface ProviderLogoProps {

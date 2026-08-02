@@ -37,11 +37,6 @@ const DestinationSecretConfigSchema = Schema.Union([
 		signingSecret: Schema.NullOr(Schema.String),
 	}),
 	Schema.Struct({
-		type: Schema.Literal("hazel"),
-		webhookUrl: Schema.String,
-		signingSecret: Schema.NullOr(Schema.String),
-	}),
-	Schema.Struct({
 		type: Schema.Literal("hazel-oauth"),
 		hazelOrganizationId: Schema.String,
 		hazelOrganizationName: Schema.String,
@@ -83,20 +78,23 @@ export interface HydratedDestination {
 
 const parsePublicConfig = <E>(
 	row: AlertDestinationRow,
-	onError: () => E,
+	onError: (cause: unknown) => E,
 ): Effect.Effect<DestinationPublicConfig, E> =>
 	Schema.decodeUnknownEffect(DestinationPublicConfigSchema)(row.configJson).pipe(Effect.mapError(onError))
 
-const parseSecretConfig = <E>(json: string, onError: () => E): Effect.Effect<DestinationSecretConfig, E> =>
+const parseSecretConfig = <E>(
+	json: string,
+	onError: (cause: unknown) => E,
+): Effect.Effect<DestinationSecretConfig, E> =>
 	Schema.decodeUnknownEffect(SecretConfigFromJson)(json).pipe(Effect.mapError(onError))
 
 export const hydrateDestinationRow = <E>(
 	row: AlertDestinationRow,
 	encryptionKey: Buffer,
 	errors: {
-		onPublicConfigInvalid: () => E
+		onPublicConfigInvalid: (cause: unknown) => E
 		onDecryptFailure: () => E
-		onSecretConfigInvalid: () => E
+		onSecretConfigInvalid: (cause: unknown) => E
 	},
 ): Effect.Effect<HydratedDestination, E> =>
 	Effect.gen(function* () {

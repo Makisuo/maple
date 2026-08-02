@@ -1,12 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import {
-	AlertDestinationId,
-	HazelChannelId,
-	HazelOrganizationId,
-	PostgresTransactionId,
-	UserId,
-} from "../../primitives"
+import { HazelChannelId, HazelOrganizationId, PostgresTransactionId, UserId } from "../../primitives"
 import { AlertDestinationType, MAX_EMAIL_RECIPIENTS } from "../alerts"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
@@ -18,13 +12,12 @@ import {
 	V2ServiceUnavailableError,
 	V2UpstreamError,
 } from "./errors"
-import { PublicId, PublicIdPrefixes } from "./public-id"
+import { AlertDestinationPublicId } from "./resource-ids"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
 
-/** `dest_…` public ID ⇄ internal `AlertDestinationId` (raw UUID). */
-export const AlertDestinationPublicId = PublicId(PublicIdPrefixes.alertDestination, AlertDestinationId)
+export { AlertDestinationPublicId } from "./resource-ids"
 
 const NonEmptyString = Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed()))
 
@@ -69,7 +62,7 @@ export const V2AlertDestination = Schema.Struct({
 	}),
 	type: AlertDestinationType.annotate({
 		description:
-			"The delivery channel: `slack-bot`, `pagerduty`, `webhook`, `hazel`, `hazel-oauth`, `discord`, or `email`. Immutable after creation.",
+			"The delivery channel: `slack-bot`, `pagerduty`, `webhook`, `hazel-oauth`, `discord`, or `email`. Immutable after creation.",
 		examples: ["slack-bot"],
 	}),
 	enabled: Schema.Boolean.annotate({
@@ -103,7 +96,7 @@ export const V2AlertDestination = Schema.Struct({
 	identifier: "AlertDestination",
 	title: "Alert Destination",
 	description:
-		"A notification channel that alert rules deliver to (Slack, PagerDuty, generic webhook, Hazel, Discord, or workspace-member email). Channel secrets are write-only: responses carry a redacted `summary` instead.",
+		"A notification channel that alert rules deliver to (Slack bot, PagerDuty, generic webhook, Hazel OAuth, Discord, or workspace-member email). Channel secrets are write-only: responses carry a redacted `summary` instead.",
 	examples: [wireExample(alertDestinationExample)],
 })
 export type V2AlertDestination = Schema.Schema.Type<typeof V2AlertDestination>
@@ -173,20 +166,6 @@ const V2WebhookDestinationCreateParams = Schema.Struct({
 	enabled: enabledField,
 }).annotate({ identifier: "AlertDestinationCreateWebhook", title: "Webhook destination" })
 
-const V2HazelDestinationCreateParams = Schema.Struct({
-	type: Schema.Literal("hazel"),
-	name: nameField,
-	webhook_url: NonEmptyString.annotate({
-		description: "The Hazel inbound-webhook URL. Write-only — never returned.",
-	}),
-	signing_secret: Schema.optionalKey(
-		Schema.String.annotate({
-			description: "Optional secret used to sign payloads. Write-only — never returned.",
-		}),
-	),
-	enabled: enabledField,
-}).annotate({ identifier: "AlertDestinationCreateHazel", title: "Hazel destination" })
-
 const V2HazelOAuthDestinationCreateParams = Schema.Struct({
 	type: Schema.Literal("hazel-oauth"),
 	name: nameField,
@@ -232,7 +211,6 @@ export const V2AlertDestinationCreateParams = Schema.Union([
 	V2SlackBotDestinationCreateParams,
 	V2PagerDutyDestinationCreateParams,
 	V2WebhookDestinationCreateParams,
-	V2HazelDestinationCreateParams,
 	V2HazelOAuthDestinationCreateParams,
 	V2DiscordDestinationCreateParams,
 	V2EmailDestinationCreateParams,
@@ -280,13 +258,6 @@ export const V2AlertDestinationUpdateParams = Schema.Union([
 		signing_secret: Schema.optionalKey(Schema.String),
 		enabled: Schema.optionalKey(Schema.Boolean),
 	}).annotate({ identifier: "AlertDestinationUpdateWebhook", title: "Webhook destination update" }),
-	Schema.Struct({
-		type: Schema.Literal("hazel"),
-		name: optionalNameField,
-		webhook_url: Schema.optionalKey(Schema.String),
-		signing_secret: Schema.optionalKey(Schema.String),
-		enabled: Schema.optionalKey(Schema.Boolean),
-	}).annotate({ identifier: "AlertDestinationUpdateHazel", title: "Hazel destination update" }),
 	Schema.Struct({
 		type: Schema.Literal("hazel-oauth"),
 		name: optionalNameField,
@@ -472,6 +443,6 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 		OpenApi.annotations({
 			title: "Alert Destinations",
 			description:
-				"Notification channels for alert rules — Slack (bot), PagerDuty, generic webhooks, Hazel, Discord, and workspace-member email. Create and manage destinations, then reference them from alert rules via `destination_ids`. Mutations are admin-only; channel secrets are write-only.",
+				"Notification channels for alert rules — Slack bot, PagerDuty, generic webhooks, Hazel OAuth, Discord, and workspace-member email. Create and manage destinations, then reference them from alert rules via `destination_ids`. Mutations are admin-only; channel secrets are write-only.",
 		}),
 	) {}

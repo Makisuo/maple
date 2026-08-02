@@ -34,7 +34,6 @@ const isPreviewQueryReady = (form: RuleFormState): boolean => {
 	if (isRangeComparator(form.comparator) && !Number.isFinite(Number(form.thresholdUpper))) {
 		return false
 	}
-	if (form.signalType === "metric" && form.metricName.trim().length === 0) return false
 	if (form.signalType === "raw_query") {
 		const sql = form.rawQuerySql.trim()
 		if (sql.length === 0 || !sql.includes("$__orgFilter")) return false

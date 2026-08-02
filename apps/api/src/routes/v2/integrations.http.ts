@@ -18,7 +18,7 @@ import {
 import { Array as Arr, Effect, Option } from "effect"
 import { requireAdmin } from "../../lib/auth"
 import { Env } from "../../lib/Env"
-import type { SlackChannelSummary, SlackInstallStatus } from "../../services/SlackIntegrationService"
+import type { SlackChannelList, SlackInstallStatus } from "../../services/SlackIntegrationService"
 import { SLACK_CALLBACK_PATH, SlackIntegrationService } from "../../services/SlackIntegrationService"
 
 /**
@@ -98,16 +98,18 @@ const toStatus = (status: SlackInstallStatus): V2SlackIntegrationStatus => ({
 	disconnected_reason: status.disconnectedReason,
 	disconnected_team_name: status.disconnectedTeamName,
 	disconnected_at: isoTimestampOrNull(status.disconnectedAt),
+	missing_scopes: status.missingScopes,
 })
 
-const toChannelList = (channels: ReadonlyArray<SlackChannelSummary>): V2SlackChannelList => ({
+const toChannelList = (list: SlackChannelList): V2SlackChannelList => ({
 	object: "slack_integration.channel_list",
-	channels: Arr.map(channels, (channel) => ({
+	channels: Arr.map(list.channels, (channel) => ({
 		id: channel.id,
 		name: channel.name,
 		is_private: channel.isPrivate,
 		is_member: channel.isMember,
 	})),
+	truncated: list.truncated,
 })
 
 export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "slackIntegration", (handlers) =>
@@ -209,7 +211,7 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 							"Only org admins can list Slack channels",
 						),
 					)
-					const channels = yield* slack.listChannels(tenant.orgId).pipe(
+					const list = yield* slack.listChannels(tenant.orgId).pipe(
 						Effect.catchTags({
 							"@maple/http/errors/IntegrationsNotConnectedError": (error) =>
 								Effect.fail(notFound(error.message)),
@@ -219,7 +221,7 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 								Effect.fail(serviceUnavailable(error.message)),
 						}),
 					)
-					return toChannelList(channels)
+					return toChannelList(list)
 				}),
 			)
 	}),

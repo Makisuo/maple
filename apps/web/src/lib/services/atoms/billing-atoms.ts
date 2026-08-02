@@ -8,6 +8,7 @@ export const BILLING_CUSTOMER_KEY = "billingCustomer"
 export const BILLING_PLANS_KEY = "billingPlans"
 export const BILLING_USAGE_KEY = "billingUsage"
 export const BILLING_INVOICES_KEY = "billingInvoices"
+export const BILLING_SPEND_LIMITS_KEY = "billingSpendLimits"
 
 // Read atoms. Transient token-settle 401s are retried by the shared client
 // (atom-client.ts scopes a 401 retry to /api/billing/*), and effect-atom
@@ -32,7 +33,19 @@ export const billingInvoicesAtom = MapleApiAtomClient.query("billing", "listInvo
 	reactivityKeys: [BILLING_INVOICES_KEY],
 })
 
+// Warehouse-backed daily volume behind the spend chart. Shares the customer's
+// reactivity key: the series is scoped to the subscription's cycle, so a plan
+// change re-fetches it.
+export const billingDailySpendAtom = MapleApiAtomClient.query("billing", "getDailySpend", {
+	reactivityKeys: [BILLING_CUSTOMER_KEY],
+})
+
+export const spendLimitsAtom = MapleApiAtomClient.query("billing", "getSpendLimits", {
+	reactivityKeys: [BILLING_SPEND_LIMITS_KEY],
+})
+
 // Mutations.
 export const attachMutation = MapleApiAtomClient.mutation("billing", "attach")
 export const previewAttachMutation = MapleApiAtomClient.mutation("billing", "previewAttach")
 export const openCustomerPortalMutation = MapleApiAtomClient.mutation("billing", "openCustomerPortal")
+export const updateSpendLimitsMutation = MapleApiAtomClient.mutation("billing", "updateSpendLimits")

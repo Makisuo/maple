@@ -15,9 +15,9 @@
  *   providers: Maple.providers(),
  * }, Effect.gen(function* () {
  *   const oncall = yield* Maple.AlertDestination("oncall", {
- *     type: "discord",
- *     name: "On-call Discord",
- *     webhook_url: process.env.DISCORD_WEBHOOK_URL!,
+ *     type: "pagerduty",
+ *     name: "On-call PagerDuty",
+ *     integration_key: process.env.PAGERDUTY_ROUTING_KEY!,
  *   })
  *   yield* Maple.AlertRule("checkout-errors", {
  *     name: "Checkout error rate",

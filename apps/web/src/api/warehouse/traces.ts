@@ -47,17 +47,30 @@ const ListTracesInputSchema = Schema.Struct({
 		Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(1000)),
 	),
 	offset: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-	service: Schema.optional(ServiceName),
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
+	// Every inclusion facet is multi-select in the sidebar, so each is an array
+	// here and compiles to `IN (...)`. Ticking three services used to reach
+	// ClickHouse as `= <first>`, silently dropping the other two.
+	services: Schema.optional(Schema.Array(ServiceName)),
+	spanNames: Schema.optional(Schema.Array(SpanName)),
+	httpMethods: Schema.optional(Schema.Array(Schema.String)),
+	httpStatusCodes: Schema.optional(Schema.Array(Schema.String)),
+	deploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
+	namespaces: Schema.optional(Schema.Array(ServiceNamespace)),
+	// Singular aliases, folded into the arrays by `oneOrMany`. Saved dashboard
+	// widgets store their `dataSource.params` verbatim, so a dashboard created
+	// before this change still sends `service: "api-gw"` — dropping these keys
+	// would silently stop it filtering.
+	service: Schema.optional(ServiceName),
 	spanName: Schema.optional(SpanName),
-	hasError: Schema.optional(Schema.Boolean),
-	minDurationMs: Schema.optional(Schema.Number),
-	maxDurationMs: Schema.optional(Schema.Number),
 	httpMethod: Schema.optional(Schema.String),
 	httpStatusCode: Schema.optional(Schema.String),
 	deploymentEnv: Schema.optional(DeploymentEnvironment),
 	namespace: Schema.optional(ServiceNamespace),
+	hasError: Schema.optional(Schema.Boolean),
+	minDurationMs: Schema.optional(Schema.Number),
+	maxDurationMs: Schema.optional(Schema.Number),
 	attributeFilters: Schema.optional(Schema.Array(AttributeFilterInput)),
 	resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilterInput)),
 	rootOnly: Schema.optional(Schema.Boolean),
@@ -121,15 +134,38 @@ export interface TracesResponse {
 	}
 }
 
+/** Fold the singular alias and the array spelling of a facet into one list. */
+function oneOrMany<T extends string>(
+	list: readonly T[] | undefined,
+	scalar: T | undefined,
+): readonly T[] | undefined {
+	if (list?.length) return list
+	if (scalar) return [scalar]
+	return undefined
+}
+
+/**
+ * HTTP method / status live in `SpanAttributes`, not as filter fields, so a
+ * multi-select becomes one `in` attribute filter rather than N `equals` (which
+ * would AND together and match nothing). A single value stays `equals` so the
+ * bloom/text index prefilters in `buildAttrFilterCondition` still apply.
+ */
+function httpAttributeFilter(key: string, values: readonly string[] | undefined): AttributeFilter | null {
+	if (!values?.length) return null
+	if (values.length === 1) return { key, value: values[0], mode: "equals" }
+	return { key, values: [...values], mode: "in" }
+}
+
 function buildAttributeFilters(input: ListTracesDecoded): AttributeFilter[] {
 	const filters: AttributeFilter[] = []
 
-	if (input.httpMethod) {
-		filters.push({ key: "http.method", value: input.httpMethod, mode: "equals" })
-	}
-	if (input.httpStatusCode) {
-		filters.push({ key: "http.status_code", value: input.httpStatusCode, mode: "equals" })
-	}
+	const method = httpAttributeFilter("http.method", oneOrMany(input.httpMethods, input.httpMethod))
+	if (method) filters.push(method)
+	const status = httpAttributeFilter(
+		"http.status_code",
+		oneOrMany(input.httpStatusCodes, input.httpStatusCode),
+	)
+	if (status) filters.push(status)
 	if (input.attributeFilters) {
 		for (const af of input.attributeFilters) {
 			filters.push({
@@ -232,7 +268,7 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 
 	const rootOnly = input.rootOnly ?? true
 
-	if (input.service) yield* Effect.annotateCurrentSpan("service", input.service)
+	if (input.services?.length) yield* Effect.annotateCurrentSpan("services", input.services.join(","))
 	yield* Effect.annotateCurrentSpan("rootOnly", rootOnly)
 	yield* Effect.annotateCurrentSpan("limit", limit)
 
@@ -249,12 +285,12 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 			// SpanAttributes / ResourceAttributes maps — large win on wide traces.
 			columns: LIST_PROJECTED_COLUMNS,
 			filters: {
-				serviceName: input.service,
-				spanName: input.spanName,
+				serviceNames: oneOrMany(input.services, input.service),
+				spanNames: oneOrMany(input.spanNames, input.spanName),
 				rootSpansOnly: rootOnly,
 				errorsOnly: input.hasError,
-				environments: input.deploymentEnv ? [input.deploymentEnv] : undefined,
-				namespaces: input.namespace ? [input.namespace] : undefined,
+				environments: oneOrMany(input.deploymentEnvs, input.deploymentEnv),
+				namespaces: oneOrMany(input.namespaces, input.namespace),
 				minDurationMs: input.minDurationMs,
 				maxDurationMs: input.maxDurationMs,
 				matchModes: Object.keys(matchModes).length > 0 ? matchModes : undefined,
@@ -440,15 +476,25 @@ export interface TracesFacetsResponse {
 const GetTracesFacetsInputSchema = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
+	services: Schema.optional(Schema.Array(ServiceName)),
+	spanNames: Schema.optional(Schema.Array(SpanName)),
+	httpMethods: Schema.optional(Schema.Array(Schema.String)),
+	httpStatusCodes: Schema.optional(Schema.Array(Schema.String)),
+	deploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
+	namespaces: Schema.optional(Schema.Array(ServiceNamespace)),
+	// Singular aliases, folded into the arrays by `oneOrMany`. Saved dashboard
+	// widgets store their `dataSource.params` verbatim, so a dashboard created
+	// before this change still sends `service: "api-gw"` — dropping these keys
+	// would silently stop it filtering.
 	service: Schema.optional(ServiceName),
 	spanName: Schema.optional(SpanName),
-	hasError: Schema.optional(Schema.Boolean),
-	minDurationMs: Schema.optional(Schema.Number),
-	maxDurationMs: Schema.optional(Schema.Number),
 	httpMethod: Schema.optional(Schema.String),
 	httpStatusCode: Schema.optional(Schema.String),
 	deploymentEnv: Schema.optional(DeploymentEnvironment),
 	namespace: Schema.optional(ServiceNamespace),
+	hasError: Schema.optional(Schema.Boolean),
+	minDurationMs: Schema.optional(Schema.Number),
+	maxDurationMs: Schema.optional(Schema.Number),
 	attributeFilters: Schema.optional(Schema.Array(AttributeFilterInput)),
 	resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilterInput)),
 	serviceMatchMode: ContainsMatchMode,
@@ -470,13 +516,13 @@ function buildTracesFiltersFromInput(input: GetTracesFacetsDecoded) {
 	if (input.namespaceMatchMode === "contains") matchModes.serviceNamespace = "contains"
 
 	return {
-		serviceName: input.service,
-		spanName: input.spanName,
+		serviceNames: oneOrMany(input.services, input.service),
+		spanNames: oneOrMany(input.spanNames, input.spanName),
 		errorsOnly: input.hasError,
 		minDurationMs: input.minDurationMs,
 		maxDurationMs: input.maxDurationMs,
-		environments: input.deploymentEnv ? [input.deploymentEnv] : undefined,
-		namespaces: input.namespace ? [input.namespace] : undefined,
+		environments: oneOrMany(input.deploymentEnvs, input.deploymentEnv),
+		namespaces: oneOrMany(input.namespaces, input.namespace),
 		matchModes: Object.keys(matchModes).length > 0 ? matchModes : undefined,
 		attributeFilters: attributeFilters.length > 0 ? attributeFilters : undefined,
 		resourceAttributeFilters: resourceAttributeFilters.length > 0 ? resourceAttributeFilters : undefined,
@@ -494,7 +540,7 @@ const getTracesFacetsEffect = Effect.fn("QueryEngine.getTracesFacets")(function*
 }) {
 	const input = yield* decodeInput(GetTracesFacetsInputSchema, data ?? {}, "getTracesFacets")
 
-	if (input.service) yield* Effect.annotateCurrentSpan("service", input.service)
+	if (input.services?.length) yield* Effect.annotateCurrentSpan("services", input.services.join(","))
 
 	const filters = buildTracesFiltersFromInput(input)
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)

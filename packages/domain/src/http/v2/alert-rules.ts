@@ -7,8 +7,6 @@ import {
 	AlertComparator,
 	AlertEvaluationStatus,
 	AlertIncidentTransition,
-	AlertMetricAggregation,
-	AlertMetricType,
 	AlertNotificationTemplate,
 	AlertSeverity,
 	AlertSignalType,
@@ -64,6 +62,7 @@ const alertRuleExample = {
 	severity: "critical",
 	service_names: ["checkout"],
 	exclude_service_names: [],
+	environments: ["production"],
 	tags: ["payments"],
 	group_by: null,
 	signal_type: "error_rate",
@@ -75,9 +74,6 @@ const alertRuleExample = {
 	consecutive_breaches_required: 2,
 	consecutive_healthy_required: 3,
 	renotify_interval_minutes: 60,
-	metric_name: null,
-	metric_type: null,
-	metric_aggregation: null,
 	apdex_threshold_ms: null,
 	query_builder_draft: null,
 	raw_query_sql: null,
@@ -127,6 +123,11 @@ export const V2AlertRule = Schema.Struct({
 	exclude_service_names: Schema.Array(Schema.String).annotate({
 		description: "Services excluded from evaluation.",
 	}),
+	environments: Schema.Array(Schema.String).annotate({
+		description:
+			"Deployment environments the rule is scoped to. Empty for all environments. Always empty for `builder_query` / `raw_query`, whose queries carry their own filters.",
+		examples: [["production"]],
+	}),
 	tags: Schema.Array(Schema.String).annotate({
 		description: "Free-form tags used to group and filter rules.",
 		examples: [["payments"]],
@@ -137,7 +138,7 @@ export const V2AlertRule = Schema.Struct({
 	}),
 	signal_type: AlertSignalType.annotate({
 		description:
-			"What the rule measures: `error_rate`, `p95_latency`, `p99_latency`, `apdex`, `throughput`, `metric`, `builder_query`, or `raw_query`.",
+			"What the rule measures: `error_rate`, `p95_latency`, `p99_latency`, `apdex`, `throughput`, `builder_query`, or `raw_query`. Metrics use `builder_query` with a metrics draft.",
 		examples: ["error_rate"],
 	}),
 	comparator: AlertComparator.annotate({
@@ -172,17 +173,6 @@ export const V2AlertRule = Schema.Struct({
 	renotify_interval_minutes: PositiveInt.annotate({
 		description: "How often an open incident re-notifies its destinations, in minutes.",
 		examples: [60],
-	}),
-	metric_name: Schema.NullOr(Schema.String).annotate({
-		description: "For `metric` rules: the metric to evaluate. `null` for other signal types.",
-	}),
-	metric_type: Schema.NullOr(AlertMetricType).annotate({
-		description:
-			"For `metric` rules: the metric's type (`sum`, `gauge`, `histogram`, `exponential_histogram`).",
-	}),
-	metric_aggregation: Schema.NullOr(AlertMetricAggregation).annotate({
-		description:
-			"For `metric` rules: how samples aggregate in the window (`avg`, `min`, `max`, `sum`, `count`).",
 	}),
 	apdex_threshold_ms: Schema.NullOr(PositiveFloat).annotate({
 		description: "For `apdex` rules: the satisfied-latency threshold in milliseconds.",
@@ -221,7 +211,7 @@ export const V2AlertRule = Schema.Struct({
 	identifier: "AlertRule",
 	title: "Alert Rule",
 	description:
-		"A monitor that evaluates a signal (error rate, latency, Apdex, throughput, a metric, a query-builder query, or raw SQL) over a rolling window and opens incidents when the threshold condition holds for enough consecutive checks. Notifications are delivered to the referenced alert destinations.",
+		"A monitor that evaluates a built-in signal, query-builder query, or raw SQL over a rolling window and opens incidents when the threshold condition holds for enough consecutive checks. Metrics use the same query-builder path as metric charts. Notifications are delivered to the referenced alert destinations.",
 	examples: [wireExample(alertRuleExample)],
 })
 export type V2AlertRule = Schema.Schema.Type<typeof V2AlertRule>
@@ -283,6 +273,13 @@ const createParamsFields = {
 	}),
 	service_names: Schema.optionalKey(Schema.Array(Schema.String)),
 	exclude_service_names: Schema.optionalKey(Schema.Array(Schema.String)),
+	environments: Schema.optionalKey(
+		Schema.Array(Schema.String).annotate({
+			description:
+				"Deployment environments to scope the rule to. Omit or pass `[]` for all environments.",
+			examples: [["production"]],
+		}),
+	),
 	tags: Schema.optionalKey(RuleTags),
 	group_by: Schema.optionalKey(Schema.NullOr(GroupBy)),
 	signal_type: AlertSignalType.annotate({
@@ -307,9 +304,6 @@ const createParamsFields = {
 	consecutive_breaches_required: Schema.optionalKey(PositiveInt),
 	consecutive_healthy_required: Schema.optionalKey(PositiveInt),
 	renotify_interval_minutes: Schema.optionalKey(PositiveInt),
-	metric_name: Schema.optionalKey(Schema.NullOr(Schema.String)),
-	metric_type: Schema.optionalKey(Schema.NullOr(AlertMetricType)),
-	metric_aggregation: Schema.optionalKey(Schema.NullOr(AlertMetricAggregation)),
 	apdex_threshold_ms: Schema.optionalKey(Schema.NullOr(PositiveFloat)),
 	query_builder_draft: Schema.optionalKey(Schema.NullOr(QueryBuilderDraftPassthrough)),
 	raw_query_sql: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -323,7 +317,7 @@ export const V2AlertRuleCreateParams = Schema.Struct(createParamsFields).annotat
 	identifier: "AlertRuleCreateParams",
 	title: "Alert rule create parameters",
 	description:
-		"Request body for creating an alert rule. Signal-specific fields (`metric_*`, `apdex_threshold_ms`, `query_builder_draft`, `raw_query_*`) are required by their respective `signal_type` and validated server-side.",
+		"Request body for creating an alert rule. Signal-specific fields (`apdex_threshold_ms`, `query_builder_draft`, `raw_query_*`) are required by their respective `signal_type` and validated server-side.",
 	examples: [
 		wireExample({
 			name: "Checkout error rate",
@@ -353,6 +347,7 @@ export const V2AlertRuleUpdateParams = Schema.Struct({
 	enabled: createParamsFields.enabled,
 	service_names: createParamsFields.service_names,
 	exclude_service_names: createParamsFields.exclude_service_names,
+	environments: createParamsFields.environments,
 	tags: createParamsFields.tags,
 	group_by: createParamsFields.group_by,
 	threshold_upper: createParamsFields.threshold_upper,
@@ -360,9 +355,6 @@ export const V2AlertRuleUpdateParams = Schema.Struct({
 	consecutive_breaches_required: createParamsFields.consecutive_breaches_required,
 	consecutive_healthy_required: createParamsFields.consecutive_healthy_required,
 	renotify_interval_minutes: createParamsFields.renotify_interval_minutes,
-	metric_name: createParamsFields.metric_name,
-	metric_type: createParamsFields.metric_type,
-	metric_aggregation: createParamsFields.metric_aggregation,
 	apdex_threshold_ms: createParamsFields.apdex_threshold_ms,
 	query_builder_draft: createParamsFields.query_builder_draft,
 	raw_query_sql: createParamsFields.raw_query_sql,

@@ -184,6 +184,7 @@ describe("v2 slack integration over HTTP", () => {
 					disconnectedReason: null,
 					disconnectedTeamName: null,
 					disconnectedAt: null,
+					missingScopes: ["reactions:write"],
 				}),
 		})
 		const key = await harness.bootstrapAdminKey()
@@ -200,6 +201,7 @@ describe("v2 slack integration over HTTP", () => {
 			disconnected_reason: null,
 			disconnected_team_name: null,
 			disconnected_at: null,
+			missing_scopes: ["reactions:write"],
 		})
 		// snake_case only — no camelCase leakage from the service shape.
 		expect("teamId" in body).toBe(false)
@@ -218,6 +220,7 @@ describe("v2 slack integration over HTTP", () => {
 					disconnectedReason: "app_uninstalled" as const,
 					disconnectedTeamName: "Acme",
 					disconnectedAt: Date.parse("2026-07-20T08:30:00.000Z"),
+					missingScopes: [],
 				}),
 		})
 		const key = await harness.bootstrapAdminKey()
@@ -234,6 +237,7 @@ describe("v2 slack integration over HTTP", () => {
 			disconnected_reason: "app_uninstalled",
 			disconnected_team_name: "Acme",
 			disconnected_at: "2026-07-20T08:30:00.000Z",
+			missing_scopes: [],
 		})
 		await harness.dispose()
 	})
@@ -405,10 +409,13 @@ describe("v2 slack integration over HTTP", () => {
 	it("returns the bespoke channel-list envelope with snake_case channel flags", async () => {
 		const harness = makeHarness({
 			listChannels: () =>
-				Effect.succeed([
-					{ id: "C0789CHAN", name: "incidents", isPrivate: false, isMember: true },
-					{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: false },
-				]),
+				Effect.succeed({
+					channels: [
+						{ id: "C0789CHAN", name: "incidents", isPrivate: false, isMember: true },
+						{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: false },
+					],
+					truncated: false,
+				}),
 		})
 		const key = await harness.bootstrapAdminKey()
 
@@ -421,7 +428,26 @@ describe("v2 slack integration over HTTP", () => {
 				{ id: "C0789CHAN", name: "incidents", is_private: false, is_member: true },
 				{ id: "C0790PRIV", name: "sre-private", is_private: true, is_member: false },
 			],
+			truncated: false,
 		})
+		await harness.dispose()
+	})
+
+	it("reports a page-capped walk as truncated on the wire", async () => {
+		const harness = makeHarness({
+			listChannels: () =>
+				Effect.succeed({
+					channels: [{ id: "C0789CHAN", name: "incidents", isPrivate: false, isMember: true }],
+					truncated: true,
+				}),
+		})
+		const key = await harness.bootstrapAdminKey()
+
+		const { status, body } = await harness.request("GET", "/v2/integrations/slack/channels", key.secret)
+		expect(status).toBe(200)
+		// The client renders an "incomplete list" note off this flag, so it must
+		// survive the wire mapping rather than defaulting to false.
+		expect(body.truncated).toBe(true)
 		await harness.dispose()
 	})
 
@@ -431,7 +457,12 @@ describe("v2 slack integration over HTTP", () => {
 			listChannels: () =>
 				Effect.sync(() => {
 					called = true
-					return [{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: true }]
+					return {
+						channels: [
+							{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: true },
+						],
+						truncated: false,
+					}
 				}),
 		})
 		const member = await harness.bootstrapMemberKey()
@@ -465,6 +496,7 @@ describe("v2 slack integration over HTTP", () => {
 					disconnectedReason: null,
 					disconnectedTeamName: null,
 					disconnectedAt: null,
+					missingScopes: [],
 				}),
 		})
 		const member = await harness.bootstrapMemberKey()
@@ -539,6 +571,7 @@ describe("v2 slack integration over HTTP", () => {
 					disconnectedReason: null,
 					disconnectedTeamName: null,
 					disconnectedAt: null,
+					missingScopes: [],
 				}),
 			startInstall: () => Effect.succeed({ url: "https://slack.com/oauth/v2/authorize" }),
 		})

@@ -1,5 +1,10 @@
-import { describe, expect, mock, test } from "bun:test"
+import { afterEach, describe, expect, mock, test } from "bun:test"
 import { acknowledgeIncomingMessage, parseAckReactionTarget, type AckReactionDeps } from "./ack-reaction.js"
+import { clearAckedTriggeringMessages, lookupAckedTriggeringMessage } from "./reaction.js"
+
+afterEach(() => {
+	clearAckedTriggeringMessages()
+})
 
 const mentionBody = (overrides: Record<string, unknown> = {}) =>
 	JSON.stringify({
@@ -44,6 +49,15 @@ describe("parseAckReactionTarget", () => {
 			teamId: "T1",
 			channelId: "D1",
 			messageTs: "1700000000.000200",
+		})
+	})
+
+	test("carries the enclosing thread's root ts for thread follow-ups", () => {
+		expect(parseAckReactionTarget(mentionBody({ thread_ts: "1699999999.000001" }))).toEqual({
+			teamId: "T1",
+			channelId: "C1",
+			messageTs: "1700000000.000100",
+			threadTs: "1699999999.000001",
 		})
 	})
 
@@ -137,5 +151,16 @@ describe("acknowledgeIncomingMessage", () => {
 			addReaction: mock(() => Promise.resolve()),
 		}
 		await expect(acknowledgeIncomingMessage(mentionBody(), deps)).resolves.toBeUndefined()
+	})
+
+	test("registers the triggering message for add_reaction even when the ack fails", async () => {
+		const deps: AckReactionDeps = {
+			resolveBotToken: mock(() => Promise.resolve("xoxb-1")),
+			addReaction: mock(() => Promise.reject(new Error("boom"))),
+		}
+		await acknowledgeIncomingMessage(mentionBody({ thread_ts: "1699999999.000001" }), deps)
+		expect(
+			lookupAckedTriggeringMessage({ teamId: "T1", channelId: "C1", threadTs: "1699999999.000001" }),
+		).toBe("1700000000.000100")
 	})
 })

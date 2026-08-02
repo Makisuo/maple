@@ -162,7 +162,10 @@ export function SessionsList({
 								{/* Errored sessions get a left accent so they can be picked out
 								    while scanning — the strongest "watch this one first" signal. */}
 								{hasErrors && (
-									<span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-destructive" />
+									<span
+										aria-hidden
+										className="absolute inset-y-0 left-0 w-[3px] bg-destructive"
+									/>
 								)}
 
 								<div
@@ -245,8 +248,9 @@ export function SessionsList({
 											</span>
 										)}
 									<span className="truncate text-xs text-muted-foreground">
-										{session.pageViews || 1} page{(session.pageViews || 1) === 1 ? "" : "s"} ·{" "}
-										{session.clickCount} click{session.clickCount === 1 ? "" : "s"}
+										{session.pageViews || 1} page
+										{(session.pageViews || 1) === 1 ? "" : "s"} · {session.clickCount}{" "}
+										click{session.clickCount === 1 ? "" : "s"}
 									</span>
 								</div>
 

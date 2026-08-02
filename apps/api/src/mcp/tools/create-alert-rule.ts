@@ -79,15 +79,13 @@ interface CreateAlertRuleParams {
 	destination_ids: string
 	template?: string
 	service_names?: string
+	environments?: string
 	enabled?: boolean
 	group_by?: string
 	minimum_sample_count?: number
 	consecutive_breaches?: number
 	consecutive_healthy?: number
 	renotify_interval_minutes?: number
-	metric_name?: string
-	metric_type?: string
-	metric_aggregation?: string
 	apdex_threshold_ms?: number
 	query_builder_draft?: string
 	raw_query_sql?: string
@@ -138,14 +136,6 @@ function buildAlertRuleRequest(
 	// or, for builder_query, parses the draft JSON. Non-special signal types
 	// (error_rate, p95_latency, …) fall through with no extra checks.
 	const signalValidation = Match.value(signalType).pipe(
-		Match.when("metric", (): { error: string } | { draft?: unknown } => {
-			if (!params.metric_name || !params.metric_type || !params.metric_aggregation) {
-				return {
-					error: 'signal_type=metric requires metric_name, metric_type, and metric_aggregation. Use list_metrics to discover available metrics.\n\nExample:\n  signal_type="metric" metric_name="http.server.duration" metric_type="histogram" metric_aggregation="avg"',
-				}
-			}
-			return {}
-		}),
 		Match.when("apdex", (): { error: string } | { draft?: unknown } => {
 			if (!params.apdex_threshold_ms && !templateDefaults.apdexThresholdMs) {
 				return {
@@ -202,6 +192,7 @@ function buildAlertRuleRequest(
 
 	if (params.enabled !== undefined) request.enabled = params.enabled
 	if (params.service_names) request.serviceNames = splitCsv(params.service_names)
+	if (params.environments) request.environments = splitCsv(params.environments)
 	if (params.group_by) {
 		const dimensions = String(params.group_by)
 			.split(",")
@@ -216,11 +207,6 @@ function buildAlertRuleRequest(
 		request.consecutiveHealthyRequired = params.consecutive_healthy
 	if (params.renotify_interval_minutes !== undefined)
 		request.renotifyIntervalMinutes = params.renotify_interval_minutes
-
-	// Metric-specific fields
-	if (params.metric_name) request.metricName = params.metric_name
-	if (params.metric_type) request.metricType = params.metric_type
-	if (params.metric_aggregation) request.metricAggregation = params.metric_aggregation
 
 	// Apdex-specific fields
 	if (params.apdex_threshold_ms !== undefined) request.apdexThresholdMs = params.apdex_threshold_ms
@@ -272,10 +258,13 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			),
 			window_minutes: optionalNumberParam("Evaluation window in minutes (default: 5)"),
 			service_names: optionalStringParam("Comma-separated service names to scope the alert to"),
+			environments: optionalStringParam(
+				"Comma-separated deployment environments to scope the alert to (e.g. 'production'). Omit for all environments. Ignored for builder_query / raw_query, which filter inside their own query.",
+			),
 			enabled: optionalBooleanParam("Whether the rule is enabled (default: true)"),
 			// Custom-mode params (used when template is 'custom' or omitted)
 			signal_type: optionalStringParam(
-				"Signal type (for custom): error_rate, p95_latency, p99_latency, apdex, throughput, metric, builder_query, raw_query",
+				"Signal type (for custom): error_rate, p95_latency, p99_latency, apdex, throughput, builder_query, raw_query. Use builder_query with a metrics draft for custom metrics.",
 			),
 			comparator: optionalStringParam(
 				"Comparison operator (for custom): gt (>), gte (>=), lt (<), lte (<=)",
@@ -290,13 +279,6 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			),
 			renotify_interval_minutes: optionalNumberParam(
 				"Re-notification interval in minutes (default: 60)",
-			),
-			metric_name: optionalStringParam("Metric name (required when signal_type=metric)"),
-			metric_type: optionalStringParam(
-				"Metric type: sum, gauge, histogram, exponential_histogram (required when signal_type=metric)",
-			),
-			metric_aggregation: optionalStringParam(
-				"Metric aggregation: avg, min, max, sum, count (required when signal_type=metric)",
 			),
 			apdex_threshold_ms: optionalNumberParam(
 				"Apdex threshold in milliseconds (required when signal_type=apdex)",
@@ -396,6 +378,9 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			if (rule.serviceNames.length > 0) {
 				lines.splice(3, 0, `Service Names: ${rule.serviceNames.join(", ")}`)
 			}
+			if (rule.environments.length > 0) {
+				lines.push(`Environments: ${rule.environments.join(", ")}`)
+			}
 
 			return {
 				content: createDualContent(lines.join("\n"), {
@@ -407,6 +392,7 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 							enabled: rule.enabled,
 							severity: rule.severity,
 							serviceNames: [...rule.serviceNames],
+							environments: [...rule.environments],
 							signalType: rule.signalType,
 							comparator: rule.comparator,
 							threshold: rule.threshold,

@@ -1,6 +1,6 @@
 import type { BillingCustomer, BillingUsage, CatalogPlan } from "@maple/domain/http"
 
-import { isActivePlanSubscription } from "@maple/domain/billing"
+import { isActivePlanSubscription, resolveSubscriptionPlan, type PlanLike } from "@maple/domain/billing"
 import { formatCurrency } from "./currency"
 import { formatCount, formatUsage } from "./usage"
 
@@ -73,41 +73,47 @@ export function estimateCycleCost({
 	const lines: CostLine[] = []
 	let partial = false
 
-	// Base subscription price(s): the active plan plus any active add-ons.
-	let basePlan: CatalogPlan | undefined
+	// Base subscription price(s): the active plan plus any active add-ons, priced
+	// from the customer's OWN plan when it was expanded — a custom-priced customer
+	// must not be itemized at catalog rates.
+	let basePlan: PlanLike | null = null
 	for (const sub of activeSubs) {
-		const plan = catalog.find((p) => p.id === sub.planId)
+		const plan = resolveSubscriptionPlan(sub, catalog)
 		if (!plan) {
-			// Legacy/grandfathered plan not in the current catalog: we don't know its
-			// price or rates, so the estimate is a lower bound.
+			// Neither expanded nor in the catalog: we don't know its price or rates,
+			// so the estimate is a lower bound.
 			partial = true
 			continue
 		}
-		if (!plan.addOn) basePlan = plan
+		const isAddOn = sub.addOn === true
+		if (!isAddOn) basePlan = plan
 		const amount = plan.price?.amount
 		if (amount == null) {
 			// Free/auto-enable plans have no price object — a $0 base isn't partial.
-			if (!plan.autoEnable) partial = true
+			if (!sub.autoEnable) partial = true
 			continue
 		}
 		const quantity = sub.quantity != null && sub.quantity > 1 ? sub.quantity : 1
 		lines.push({
-			key: `base:${plan.id}`,
-			label: plan.addOn ? `${plan.name} add-on` : `${plan.name} plan`,
+			key: `base:${plan.id ?? sub.planId}`,
+			label: isAddOn ? `${plan.name} add-on` : `${plan.name} plan`,
 			detail: plan.price?.interval ? `Base price / ${plan.price.interval}` : "Base price",
 			amount: amount * quantity,
 		})
 	}
 
-	// Per-feature overage, priced from the active plan's catalog items. Included
+	// Per-feature overage, priced from the governing plan's items. Included
 	// amounts come from the customer's balances (the same source the usage meters
 	// read) so the dollars here always agree with the meters above.
 	const balances = customer.balances
 	for (const featureId of METERED_FEATURES) {
 		const balance = balances?.[featureId]
 		if (balance?.unlimited) continue
+		// Hard-capped: the excess never reached us, so there is nothing to bill and
+		// nothing unknown. Not a partial estimate.
+		if (balance?.overageAllowed === false) continue
 
-		const item = basePlan?.items.find((i) => i.featureId === featureId)
+		const item = basePlan?.items?.find((i) => i.featureId === featureId)
 		const included = balance?.granted ?? item?.included ?? null
 		const used = usage?.[featureId]?.sum ?? 0
 		if (included == null) continue
@@ -116,8 +122,8 @@ export function estimateCycleCost({
 
 		const rate = item?.price?.amount
 		if (rate == null) {
-			// Overage exists but we have no rate for it (legacy plan or a feature
-			// missing from the catalog) — flag the estimate as a lower bound.
+			// Overage exists but we have no rate for it (unpriceable plan, or a
+			// feature missing from it) — flag the estimate as a lower bound.
 			partial = true
 			continue
 		}

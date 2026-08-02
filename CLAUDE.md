@@ -61,7 +61,7 @@ const typedRows = compiled.castRows(rows)
 ## Application database (PlanetScale Postgres)
 
 Relational state (issues, alert rules, dashboards, org config, keys) is Drizzle/`pgTable` in
-`packages/db/src/schema/`, one PS branch per stage (`main`=prd, `stg`, `pr-<n>`), reached from
+`packages/db/src/schema/`, one PS branch per deployed stage (`main`=prd, `stg`), reached from
 Workers via the Hyperdrive binding `MAPLE_DB`.
 
 - App code keeps epoch-ms numbers and converts at the drizzle boundary (`new Date(ms)` writing,
@@ -71,8 +71,16 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   `DatabasePgliteLive` (tests/local; `createTestDb()` in `apps/api/src/lib/test-pglite.ts`).
 - Migrations: `bun run --cwd packages/db db:generate`; CI applies them against the branch's DIRECT
   port 5432 (never a pooler) before `alchemy deploy`. PGlite applies them at layer build.
-- PR previews: `scripts/planetscale-pr-branch.ts up|down <n>`; deleting the branch on PR close is
-  mandatory (billing + Hyperdrive config cap).
+- **PR preview deploys are disabled** (2026-08, cost). `deploy-pr-preview.yml` triggers on the
+  `closed` event only, so it tears down pre-cutover stacks and never deploys a new one; restore
+  `types: [opened, synchronize, reopened, closed]` to re-enable.
+- **PR previews have no application database** either (PS-DEV branches billed continuously and
+  ate the Hyperdrive config cap) — this is the state previews return to when re-enabled.
+  `resolveDatabaseMode` in
+  `packages/infra/src/cloudflare/stage.ts` returns `"none"` for `pr`, so no `MAPLE_DB` is bound
+  and `DatabasePgLive` fails every query with a `DatabaseError` — DB-backed routes 500, the rest
+  of the preview works. To restore: return `"managed"` for `pr` and re-add the PlanetScale +
+  Electric steps to `.github/workflows/deploy-pr-preview.yml` (the scripts are kept, dormant).
 - The ingest gateway resolves ingest keys from the same Postgres via PSBouncer (6432, no Hyperdrive).
 
 ## Conventions

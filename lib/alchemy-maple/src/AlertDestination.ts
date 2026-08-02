@@ -26,7 +26,6 @@ interface DestinationBaseProps {
 export type AlertDestinationProps =
 	| (DestinationBaseProps & { type: "pagerduty"; integration_key: SecretInput })
 	| (DestinationBaseProps & { type: "webhook"; url: string; signing_secret?: SecretInput })
-	| (DestinationBaseProps & { type: "hazel"; webhook_url: SecretInput; signing_secret?: SecretInput })
 	| (DestinationBaseProps & { type: "discord"; webhook_url: SecretInput })
 	| (DestinationBaseProps & { type: "email"; member_user_ids: string[] })
 
@@ -45,8 +44,9 @@ export type AlertDestination = Resource<
 >
 
 /**
- * A notification channel (PagerDuty, webhook, Hazel, Discord, or
- * workspace-member email) that `Maple.AlertRule`s deliver to.
+ * A notification channel (PagerDuty, webhook, Discord, or workspace-member
+ * email) that `Maple.AlertRule`s deliver to. Slack and Hazel destinations use
+ * their installed integrations and are managed in Maple.
  *
  * @example
  * ```typescript
@@ -93,10 +93,6 @@ const desiredBody = (props: AlertDestinationProps): Record<string, unknown> => {
 			break
 		case "webhook":
 			body.url = props.url
-			if (props.signing_secret !== undefined) body.signing_secret = unwrap(props.signing_secret)
-			break
-		case "hazel":
-			body.webhook_url = unwrap(props.webhook_url)
 			if (props.signing_secret !== undefined) body.signing_secret = unwrap(props.signing_secret)
 			break
 		case "discord":

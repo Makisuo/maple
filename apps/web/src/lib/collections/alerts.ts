@@ -7,8 +7,6 @@ import {
 	AlertGroupBy,
 	AlertIncidentDocument,
 	AlertIncidentStatus,
-	AlertMetricAggregation,
-	AlertMetricType,
 	AlertNotificationTemplate,
 	AlertRuleDocument,
 	AlertRuleId,
@@ -41,8 +39,6 @@ const decodeDestinationType = Schema.decodeUnknownOption(AlertDestinationType)
 const asSeverity = Schema.decodeUnknownSync(AlertSeverity)
 const asSignalType = Schema.decodeUnknownSync(AlertSignalType)
 const asComparator = Schema.decodeUnknownSync(AlertComparator)
-const asMetricType = Schema.decodeUnknownSync(AlertMetricType)
-const asMetricAggregation = Schema.decodeUnknownSync(AlertMetricAggregation)
 const asIncidentStatus = Schema.decodeUnknownSync(AlertIncidentStatus)
 const asEventType = Schema.decodeUnknownSync(AlertEventType)
 const asReducer = Schema.decodeUnknownSync(QueryEngineAlertReducer)
@@ -83,6 +79,7 @@ export const AlertRuleRowSchema = Schema.Struct({
 	severity: Schema.String,
 	service_names_json: Schema.NullOr(Schema.Unknown),
 	exclude_service_names_json: Schema.NullOr(Schema.Unknown),
+	environments_json: Schema.NullOr(Schema.Unknown),
 	tags_json: Schema.NullOr(Schema.Unknown),
 	signal_type: Schema.String,
 	comparator: Schema.String,
@@ -93,9 +90,6 @@ export const AlertRuleRowSchema = Schema.Struct({
 	consecutive_breaches_required: Schema.Number,
 	consecutive_healthy_required: Schema.Number,
 	renotify_interval_minutes: Schema.Number,
-	metric_name: Schema.NullOr(Schema.String),
-	metric_type: Schema.NullOr(Schema.String),
-	metric_aggregation: Schema.NullOr(Schema.String),
 	apdex_threshold_ms: Schema.NullOr(Schema.Number),
 	query_builder_draft_json: Schema.NullOr(Schema.Unknown),
 	raw_query_sql: Schema.NullOr(Schema.String),
@@ -210,6 +204,7 @@ export const rowToAlertRuleDocument = (
 		severity: asSeverity(row.severity),
 		serviceNames: [...safeParseStringArray(row.service_names_json)],
 		excludeServiceNames: [...safeParseStringArray(row.exclude_service_names_json)],
+		environments: [...safeParseStringArray(row.environments_json)],
 		tags: [...safeParseStringArray(row.tags_json)],
 		groupBy: row.group_by == null ? null : decodeGroupByFromJson(row.group_by),
 		signalType: asSignalType(row.signal_type),
@@ -221,10 +216,6 @@ export const rowToAlertRuleDocument = (
 		consecutiveBreachesRequired: row.consecutive_breaches_required,
 		consecutiveHealthyRequired: row.consecutive_healthy_required,
 		renotifyIntervalMinutes: row.renotify_interval_minutes,
-		metricName: row.metric_name,
-		metricType: row.metric_type != null ? asMetricType(row.metric_type) : null,
-		metricAggregation:
-			row.metric_aggregation != null ? asMetricAggregation(row.metric_aggregation) : null,
 		apdexThresholdMs: row.apdex_threshold_ms,
 		queryBuilderDraft:
 			row.query_builder_draft_json == null
@@ -352,9 +343,7 @@ const decodeDestinationPublicConfig = Schema.decodeUnknownOption(AlertDestinatio
  * Returns `null` for a row whose `type` is no longer a supported destination;
  * callers skip it, exactly as the server's `listDestinations` does.
  */
-export const rowToAlertDestinationDocument = (
-	row: AlertDestinationRow,
-): AlertDestinationDocument | null => {
+export const rowToAlertDestinationDocument = (row: AlertDestinationRow): AlertDestinationDocument | null => {
 	const publicConfig = Option.getOrElse(
 		decodeDestinationPublicConfig(row.config_json),
 		(): Schema.Schema.Type<typeof AlertDestinationPublicConfig> => ({

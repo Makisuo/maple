@@ -4,7 +4,6 @@ import {
 	CurrentTenant,
 	DiscordAlertDestinationConfig,
 	EmailAlertDestinationConfig,
-	HazelAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
 	PagerDutyAlertDestinationConfig,
 	SlackBotAlertDestinationConfig,
@@ -66,14 +65,6 @@ const toCreateRequest = (params: V2AlertDestinationCreateParams) => {
 				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
 				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
 			})
-		case "hazel":
-			return new HazelAlertDestinationConfig({
-				type: "hazel",
-				name: params.name,
-				webhookUrl: params.webhook_url,
-				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
-				...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
-			})
 		case "hazel-oauth":
 			return new HazelOAuthAlertDestinationConfig({
 				type: "hazel-oauth",
@@ -128,13 +119,6 @@ const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinati
 				type: "webhook",
 				...shared,
 				...(params.url !== undefined ? { url: params.url } : {}),
-				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
-			}
-		case "hazel":
-			return {
-				type: "hazel",
-				...shared,
-				...(params.webhook_url !== undefined ? { webhookUrl: params.webhook_url } : {}),
 				...(params.signing_secret !== undefined ? { signingSecret: params.signing_secret } : {}),
 			}
 		case "hazel-oauth":

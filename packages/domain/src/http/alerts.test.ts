@@ -4,9 +4,17 @@ import {
 	AlertDestinationCreateRequest,
 	AlertNotificationTemplate,
 	AlertRuleUpsertRequest,
+	AlertSignalType,
 	PagerDutyAlertDestinationConfig,
+	SlackBotAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
 } from "./alerts"
+
+describe("alert signal compatibility", () => {
+	it("rejects the retired metric signal", () => {
+		expect(Exit.isFailure(Schema.decodeUnknownExit(AlertSignalType)("metric"))).toBe(true)
+	})
+})
 
 describe("AlertDestinationCreateRequest", () => {
 	const encode = Schema.encodeUnknownSync(AlertDestinationCreateRequest)
@@ -16,6 +24,26 @@ describe("AlertDestinationCreateRequest", () => {
 	// side and produces the plain wire-format object on the output side.
 	// These tests assert the encoded wire shape matches what HTTP clients
 	// see on the wire.
+	it("encodes slack bot destination instances to the plain wire shape", () => {
+		expect(
+			encode(
+				new SlackBotAlertDestinationConfig({
+					type: "slack-bot",
+					name: "Ops Slack",
+					enabled: true,
+					channelId: "C123",
+					channelName: "ops-alerts",
+				}),
+			),
+		).toEqual({
+			type: "slack-bot",
+			name: "Ops Slack",
+			enabled: true,
+			channelId: "C123",
+			channelName: "ops-alerts",
+		})
+	})
+
 	it("encodes pagerduty and webhook destination instances to the plain wire shape", () => {
 		expect(
 			encode(
@@ -57,6 +85,25 @@ describe("AlertDestinationCreateRequest", () => {
 
 	// Decode goes the other direction: plain wire-format objects in, class
 	// instances out. The union discriminates on `type`.
+	it("decodes a slack bot wire object into a SlackBotAlertDestinationConfig instance", () => {
+		const decoded = decode({
+			type: "slack-bot",
+			name: "Ops Slack",
+			enabled: true,
+			channelId: "C123",
+			channelName: "ops-alerts",
+		})
+
+		expect(decoded).toBeInstanceOf(SlackBotAlertDestinationConfig)
+		expect(decoded).toMatchObject({
+			type: "slack-bot",
+			name: "Ops Slack",
+			enabled: true,
+			channelId: "C123",
+			channelName: "ops-alerts",
+		})
+	})
+
 	it("decodes a pagerduty wire object into a PagerDutyAlertDestinationConfig instance", () => {
 		const decoded = decode({
 			type: "pagerduty",
@@ -107,6 +154,17 @@ describe("AlertDestinationCreateRequest", () => {
 			name: "Webhook",
 			enabled: true,
 			signingSecret: "secret",
+		})
+
+		expect(Exit.isFailure(result)).toBe(true)
+	})
+
+	it("fails to decode a slack bot destination missing the required channelId", () => {
+		const result = decodeExit({
+			type: "slack-bot",
+			name: "Ops Slack",
+			enabled: true,
+			channelName: "ops-alerts",
 		})
 
 		expect(Exit.isFailure(result)).toBe(true)

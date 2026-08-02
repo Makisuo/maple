@@ -1064,6 +1064,23 @@ export class FleetUtilizationTimeseriesResponse extends Schema.Class<FleetUtiliz
 
 const WorkloadKindLiteral = Schema.Literals(["deployment", "statefulset", "daemonset"])
 
+/**
+ * `saturation` is the peak of CPU-vs-limit or memory-vs-limit over the window,
+ * and the default. Sorting on averages hid pods that briefly pinned at 100%.
+ */
+const PodSortKeyLiteral = Schema.Literals([
+	"saturation",
+	"cpuUsage",
+	"cpuLimitPct",
+	"memoryLimitPct",
+	"podName",
+	"lastSeen",
+])
+const SortDirectionLiteral = Schema.Literals(["asc", "desc"])
+
+/** One-click fleet scopes from the browse summary band. */
+const PodScopeLiteral = Schema.Literals(["saturated", "elevated", "unbounded", "stale"])
+
 export class ListPodsRequest extends Schema.Class<ListPodsRequest>("ListPodsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -1080,6 +1097,9 @@ export class ListPodsRequest extends Schema.Class<ListPodsRequest>("ListPodsRequ
 	computeTypes: Schema.optional(StringArray),
 	workloadKind: Schema.optional(WorkloadKindLiteral),
 	workloadName: Schema.optional(Schema.String),
+	scope: Schema.optional(PodScopeLiteral),
+	sortBy: Schema.optional(PodSortKeyLiteral),
+	sortDir: Schema.optional(SortDirectionLiteral),
 	limit: Schema.optional(Schema.Number),
 	offset: Schema.optional(Schema.Number),
 }) {}
@@ -1103,10 +1123,36 @@ const PodRow = Schema.Struct({
 	memoryLimitPct: Schema.Number,
 	cpuRequestPct: Schema.Number,
 	memoryRequestPct: Schema.Number,
+	cpuUsagePeak: Schema.Number,
+	cpuLimitPctPeak: Schema.Number,
+	memoryLimitPctPeak: Schema.Number,
+	saturation: Schema.Number,
 })
 
 export class ListPodsResponse extends Schema.Class<ListPodsResponse>("ListPodsResponse")({
 	data: Schema.Array(PodRow),
+	/**
+	 * Total pods matching the filters, before limit/offset. The list is paged, so
+	 * `data.length` only says how many rows came back — without this the UI cannot
+	 * tell the difference between "118 pods" and "the first page of 1,284".
+	 */
+	totalCount: Schema.Number,
+}) {}
+
+export class PodsSummaryRequest extends Schema.Class<PodsSummaryRequest>("PodsSummaryRequest")({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	namespaces: Schema.optional(StringArray),
+	clusters: Schema.optional(StringArray),
+	environments: Schema.optional(StringArray),
+}) {}
+
+export class PodsSummaryResponse extends Schema.Class<PodsSummaryResponse>("PodsSummaryResponse")({
+	totalPods: Schema.Number,
+	saturatedPods: Schema.Number,
+	elevatedPods: Schema.Number,
+	unboundedPods: Schema.Number,
+	stalePods: Schema.Number,
 }) {}
 
 export class PodFacetsRequest extends Schema.Class<PodFacetsRequest>("PodFacetsRequest")({
@@ -1509,6 +1555,7 @@ export const RawSqlDisplayType = Schema.Literals([
 	"histogram",
 	"heatmap",
 	"funnel",
+	"hbar",
 ])
 export type RawSqlDisplayType = Schema.Schema.Type<typeof RawSqlDisplayType>
 
@@ -1934,6 +1981,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("listPods", "/list-pods", {
 			payload: ListPodsRequest,
 			success: ListPodsResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("podsSummary", "/pods-summary", {
+			payload: PodsSummaryRequest,
+			success: PodsSummaryResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

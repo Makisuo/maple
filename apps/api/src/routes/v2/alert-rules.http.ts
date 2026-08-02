@@ -16,7 +16,15 @@ import type {
 	V2AlertRuleUpdateParams,
 	V2InvalidRequestError,
 } from "@maple/domain/http/v2"
-import { MapleApiV2, invalidRequest, paginateArray, resourceNotFound, timestamp } from "@maple/domain/http/v2"
+import {
+	MapleApiV2,
+	invalidRequest,
+	paginateArray,
+	resourceNotFound,
+	scopeAllows,
+	timestamp,
+} from "@maple/domain/http/v2"
+import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
 import { AlertsService } from "../../services/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
@@ -65,6 +73,7 @@ const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 	severity: doc.severity,
 	service_names: doc.serviceNames,
 	exclude_service_names: doc.excludeServiceNames,
+	environments: doc.environments,
 	tags: doc.tags,
 	group_by: doc.groupBy,
 	signal_type: doc.signalType,
@@ -76,9 +85,6 @@ const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 	consecutive_breaches_required: doc.consecutiveBreachesRequired,
 	consecutive_healthy_required: doc.consecutiveHealthyRequired,
 	renotify_interval_minutes: doc.renotifyIntervalMinutes,
-	metric_name: doc.metricName,
-	metric_type: doc.metricType,
-	metric_aggregation: doc.metricAggregation,
 	apdex_threshold_ms: doc.apdexThresholdMs,
 	query_builder_draft: doc.queryBuilderDraft,
 	raw_query_sql: doc.rawQuerySql,
@@ -164,6 +170,7 @@ const toUpsertRequest = (
 			...(params.exclude_service_names !== undefined
 				? { excludeServiceNames: params.exclude_service_names }
 				: {}),
+			...(params.environments !== undefined ? { environments: params.environments } : {}),
 			...(params.tags !== undefined ? { tags: params.tags } : {}),
 			...(params.group_by !== undefined ? { groupBy: params.group_by } : {}),
 			...(params.threshold_upper !== undefined ? { thresholdUpper: params.threshold_upper } : {}),
@@ -179,11 +186,6 @@ const toUpsertRequest = (
 			...(params.renotify_interval_minutes !== undefined
 				? { renotifyIntervalMinutes: params.renotify_interval_minutes }
 				: {}),
-			...(params.metric_name !== undefined ? { metricName: params.metric_name } : {}),
-			...(params.metric_type !== undefined ? { metricType: params.metric_type } : {}),
-			...(params.metric_aggregation !== undefined
-				? { metricAggregation: params.metric_aggregation }
-				: {}),
 			...(params.apdex_threshold_ms !== undefined
 				? { apdexThresholdMs: params.apdex_threshold_ms }
 				: {}),
@@ -194,7 +196,7 @@ const toUpsertRequest = (
 	})
 
 /**
- * PATCH semantics over the v1 full-upsert `updateRule`: overlay the fields
+ * PATCH semantics over the domain full-upsert `updateRule`: overlay the fields
  * present in the patch onto the rule's current state. Read-merge-write — no
  * version check, mirroring the dashboard's behavior.
  */
@@ -241,6 +243,7 @@ const mergeUpsertRequest = (
 			severity: patch.severity ?? doc.severity,
 			serviceNames: patch.service_names ?? doc.serviceNames,
 			excludeServiceNames: patch.exclude_service_names ?? doc.excludeServiceNames,
+			environments: patch.environments ?? doc.environments,
 			tags: patch.tags ?? doc.tags,
 			groupBy: patch.group_by !== undefined ? patch.group_by : doc.groupBy,
 			signalType,
@@ -253,10 +256,6 @@ const mergeUpsertRequest = (
 				patch.consecutive_breaches_required ?? doc.consecutiveBreachesRequired,
 			consecutiveHealthyRequired: patch.consecutive_healthy_required ?? doc.consecutiveHealthyRequired,
 			renotifyIntervalMinutes: patch.renotify_interval_minutes ?? doc.renotifyIntervalMinutes,
-			metricName: patch.metric_name !== undefined ? patch.metric_name : doc.metricName,
-			metricType: patch.metric_type !== undefined ? patch.metric_type : doc.metricType,
-			metricAggregation:
-				patch.metric_aggregation !== undefined ? patch.metric_aggregation : doc.metricAggregation,
 			apdexThresholdMs:
 				patch.apdex_threshold_ms !== undefined ? patch.apdex_threshold_ms : doc.apdexThresholdMs,
 			queryBuilderDraft,
@@ -378,9 +377,24 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const rule = yield* toUpsertRequest(payload.rule)
+					// Preview is otherwise an `alerts:read` endpoint, but replaying a
+					// raw_query rule executes user-authored ClickHouse against the org's
+					// warehouse — the capability creating one requires. API keys carry
+					// root roles, so scope (not role) is what separates a read-only key
+					// here; the role check inside previewRule covers the session path.
+					if (
+						payload.rule.signal_type === "raw_query" &&
+						!scopeAllows(tenant.scopes, { family: "alerts", access: "write" })
+					) {
+						return yield* new AlertForbiddenError({
+							message:
+								'Previewing a raw SQL alert requires the "alerts:write" scope, because it executes your query against the warehouse.',
+						}).pipe(mapAlertError("rule_preview"))
+					}
 					const preview = yield* alerts
 						.previewRule(
 							tenant.orgId,
+							tenant.roles,
 							new AlertRulePreviewRequest({
 								rule,
 								startTime: decodeIsoDateTime(payload.start_time),

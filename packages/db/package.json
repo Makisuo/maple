@@ -16,7 +16,7 @@
 		"db:migrate": "drizzle-kit migrate --config ./drizzle.config.ts",
 		"db:push": "drizzle-kit push --config ./drizzle.config.ts",
 		"db:studio": "drizzle-kit studio --config ./drizzle.config.ts",
-		"db:grant": "bun scripts/grant-runtime-role.ts",
+		"db:ensure-privileges": "bun scripts/ensure-privileges.ts",
 		"db:reset-preview": "bun scripts/reset-preview-branch.ts",
 		"db:normalize-preview": "bun scripts/normalize-preview-ownership.ts",
 		"ps:apply-schema": "bun scripts/planetscale-apply-schema.ts"

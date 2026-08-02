@@ -143,25 +143,10 @@ const stats = [
 </section>
 
 <script>
+	import { bindCopyButtons } from "../../lib/copy-to-clipboard";
 	// Progressive enhancement: wire copy buttons. Without JS the command is still
 	// fully visible and selectable — the button just does nothing.
-	for (const cmd of document.querySelectorAll<HTMLElement>(".lph__install[data-copy]")) {
-		const btn = cmd.querySelector<HTMLButtonElement>(".lph__copy");
-		const text = cmd.dataset.copy ?? "";
-		btn?.addEventListener("click", async () => {
-			try {
-				await navigator.clipboard.writeText(text);
-				btn.textContent = "copied";
-				btn.classList.add("is-done");
-				setTimeout(() => {
-					btn.textContent = "copy";
-					btn.classList.remove("is-done");
-				}, 1400);
-			} catch {
-				/* clipboard blocked — no-op */
-			}
-		});
-	}
+	bindCopyButtons({ hostSelector: ".lph__install[data-copy]", buttonSelector: ".lph__copy" });
 </script>
 
 <style>

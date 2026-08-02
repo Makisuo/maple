@@ -5183,6 +5183,14 @@ export const nav_blog = () => `블로그`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_changelog = () => `변경 내역`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const footer_learn = () => `알아보기`
 
 

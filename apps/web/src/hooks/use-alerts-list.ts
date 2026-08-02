@@ -12,6 +12,7 @@ import {
 	rowToAlertIncidentDocument,
 	rowToAlertRuleDocument,
 } from "@/lib/collections/alerts"
+import { useCollectionLoadFailed } from "@/lib/collections/collection-load"
 import {
 	getOrgCollections,
 	useActiveOrgId,
@@ -44,6 +45,16 @@ export interface AlertDestinationsListHook {
 
 const noop = () => {}
 
+/**
+ * The failure every one of these hooks reports when its shape stream never
+ * arrives. A live query has no bounded load of its own, so without this an
+ * unreachable sync endpoint keeps `isLoading` true forever and the alerts pages
+ * render skeletons that never resolve.
+ */
+const SYNC_UNAVAILABLE: ListError = {
+	message: "Live sync is unavailable, so alerts couldn’t be loaded. Reload to try again.",
+}
+
 export function useAlertRulesList(): AlertRulesListHook {
 	const orgKey = useActiveOrgId() ?? "pending"
 	const generation = useCollectionsGeneration()
@@ -66,12 +77,16 @@ export function useAlertRulesList(): AlertRulesListHook {
 	)
 	const { data: stateRows } = useLiveQuery((q) => q.from({ s: statesCollection }), [statesCollection])
 
+	const pending = rulesLoading && (ruleRows?.length ?? 0) === 0
+	const syncFailed = useCollectionLoadFailed(rulesCollection.id, pending)
+
 	const result = useMemo<Result.Result<AlertRulesListResponse, ListError>>(() => {
-		if (rulesLoading && (ruleRows?.length ?? 0) === 0) return Result.initial(true)
+		if (syncFailed) return Result.fail(SYNC_UNAVAILABLE)
+		if (pending) return Result.initial(true)
 		const statesByRuleId = buildRuleStatesByRuleId(stateRows ?? [])
 		const rules = (ruleRows ?? []).map((row) => rowToAlertRuleDocument(row, statesByRuleId))
 		return Result.success(new AlertRulesListResponse({ rules }))
-	}, [ruleRows, stateRows, rulesLoading])
+	}, [ruleRows, stateRows, pending, syncFailed])
 
 	return { result, refresh: noop }
 }
@@ -90,11 +105,15 @@ export function useAlertIncidentsList(): AlertIncidentsListHook {
 		[collection],
 	)
 
+	const pending = isLoading && (rows?.length ?? 0) === 0
+	const syncFailed = useCollectionLoadFailed(collection.id, pending)
+
 	const result = useMemo<Result.Result<AlertIncidentsListResponse, ListError>>(() => {
-		if (isLoading && (rows?.length ?? 0) === 0) return Result.initial(true)
+		if (syncFailed) return Result.fail(SYNC_UNAVAILABLE)
+		if (pending) return Result.initial(true)
 		const incidents = (rows ?? []).map(rowToAlertIncidentDocument)
 		return Result.success(new AlertIncidentsListResponse({ incidents }))
-	}, [rows, isLoading])
+	}, [rows, pending, syncFailed])
 
 	return { result, refresh: noop }
 }
@@ -114,8 +133,12 @@ export function useAlertDestinationsList(): AlertDestinationsListHook {
 		[collection],
 	)
 
+	const pending = isLoading && (rows?.length ?? 0) === 0
+	const syncFailed = useCollectionLoadFailed(collection.id, pending)
+
 	const result = useMemo<Result.Result<AlertDestinationsListResponse, ListError>>(() => {
-		if (isLoading && (rows?.length ?? 0) === 0) return Result.initial(true)
+		if (syncFailed) return Result.fail(SYNC_UNAVAILABLE)
+		if (pending) return Result.initial(true)
 		// `rowToAlertDestinationDocument` returns null for a row whose type is no
 		// longer supported; those are skipped instead of crashing the render.
 		const destinations = (rows ?? []).flatMap((row) => {
@@ -123,7 +146,7 @@ export function useAlertDestinationsList(): AlertDestinationsListHook {
 			return document === null ? [] : [document]
 		})
 		return Result.success(new AlertDestinationsListResponse({ destinations }))
-	}, [rows, isLoading])
+	}, [rows, pending, syncFailed])
 
 	return { result, refresh: noop }
 }

@@ -1,4 +1,5 @@
 import path from "node:path"
+import type { Output } from "alchemy"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
@@ -38,8 +39,12 @@ export interface CreateAlertingWorkerOptions {
 	 * error/anomaly/alert ticks all start investigations when an incident opens,
 	 * and `maybeEnqueueTriage` needs this binding to reach the agent — without it
 	 * every run is written straight to `failed` with `agent_unavailable`.
+	 *
+	 * `workerName` is an `Output` because it comes from a not-yet-applied worker
+	 * resource; the service binding below resolves it at apply time. Declaring it
+	 * as a bare `string` did not match what createChatFlueWorker actually returns.
 	 */
-	chatFlue: { workerName: string }
+	chatFlue: { workerName: string | Output<string> }
 }
 
 export const createAlertingWorker = ({ stage, mapleDb, chatFlue }: CreateAlertingWorkerOptions) =>
@@ -66,7 +71,10 @@ export const createAlertingWorker = ({ stage, mapleDb, chatFlue }: CreateAlertin
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
 			url: false,
-			crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *", "0 9 * * *"],
+			// `0 9 * * *` (the onboarding drip) was retired when that sequence moved to
+			// maple-portal's campaign system. Removing it here is what stops the two
+			// from both sending during cutover.
+			crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *"],
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
@@ -100,7 +108,13 @@ export const createAlertingWorker = ({ stage, mapleDb, chatFlue }: CreateAlertin
 				MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",
 				EMAIL_FROM: process.env.EMAIL_FROM?.trim() || "Maple <notifications@noreply.maple.dev>",
 				...optionalPlain("MAPLE_ENDPOINT"),
-				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
+				// Derived from the stage, deliberately NOT `optionalPlain` — that helper
+				// lets `process.env` win over the fallback, so a stray
+				// MAPLE_ENVIRONMENT=production in a pr-N deploy environment would open
+				// both email gates at once (the worker's scheduled() early-return and
+				// EmailService.emailAllowed both derive from this one value), leaving
+				// the prd-only EMAIL binding as the sole guard.
+				MAPLE_ENVIRONMENT: resolveDeploymentEnvironment(stage),
 				// Non-prod stages skip all crons (they share live org data via the prod
 				// DB); set to "1" on a stage to deliberately exercise crons there.
 				...optionalPlain("MAPLE_ALERTING_ALLOW_NONPROD"),

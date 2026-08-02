@@ -23,7 +23,7 @@ export function registerUpdateDashboardWidgetTool(server: McpToolRegistrar) {
 				"ID of the widget to replace (use get_dashboard to see existing widget ids)",
 			),
 			widget_json: requiredStringParam(
-				"Full JSON for the replacement widget: { id, visualization, dataSource, display, layout }. Any `id` field inside this JSON is ignored in favor of widget_id.",
+				'Full JSON for the replacement widget: { id, visualization, dataSource, display, layout, timeRange? }. Any `id` field inside this JSON is ignored in favor of widget_id. `timeRange` pins the widget to its own window (`{"type":"relative","value":"30m"}` or `{"type":"absolute","startTime":"...","endTime":"..."}`); omitting it means "follow the dashboard\'s range", so leaving it out of an update REMOVES an existing override.',
 			),
 		}),
 		Effect.fn("McpTool.updateDashboardWidget")(function* ({ dashboard_id, widget_id, widget_json }) {

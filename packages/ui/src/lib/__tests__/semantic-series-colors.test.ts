@@ -1,37 +1,81 @@
 import { describe, expect, it } from "vitest"
 
-import { getSeriesColorByIndex, getSemanticSeriesColor, resolveSeriesColor } from "../semantic-series-colors"
+import { getServiceColor } from "../colors"
+import { getSemanticSeriesColor, resolveSeriesColors } from "../semantic-series-colors"
 
-describe("getSeriesColorByIndex", () => {
-	it("uses the named --chart vars for the first five series", () => {
-		expect(getSeriesColorByIndex(0)).toBe("var(--chart-1)")
-		expect(getSeriesColorByIndex(4)).toBe("var(--chart-5)")
+describe("getSemanticSeriesColor", () => {
+	it("resolves every HTTP status class, including 1xx", () => {
+		const classes = ["1xx", "2xx", "3xx", "4xx", "5xx"]
+		for (const key of classes) {
+			expect(getSemanticSeriesColor(key), key).toMatch(/^oklch\(/)
+		}
+		// Each class is visually distinct — 1xx must not read as 2xx green or 3xx blue.
+		const colors = classes.map((key) => getSemanticSeriesColor(key))
+		expect(new Set(colors).size).toBe(classes.length)
 	})
 
-	it("synthesizes distinct OKLCH colors beyond the named palette", () => {
-		const colors = Array.from({ length: 60 }, (_, i) => getSeriesColorByIndex(i))
-		// Every index yields a non-empty color string.
-		expect(colors.every((c) => typeof c === "string" && c.length > 0)).toBe(true)
-		// Generated colors (index >= 5) are unique — no wrap-around collisions.
-		const generated = colors.slice(5)
-		expect(new Set(generated).size).toBe(generated.length)
-		expect(generated[0].startsWith("oklch(")).toBe(true)
+	it("resolves individual 1xx codes", () => {
+		expect(getSemanticSeriesColor("101")).toMatch(/^oklch\(/)
 	})
 
-	it("clamps negative / fractional indices", () => {
-		expect(getSeriesColorByIndex(-3)).toBe("var(--chart-1)")
-		expect(getSeriesColorByIndex(2.7)).toBe("var(--chart-3)")
+	it("resolves latency percentiles to their chart tokens", () => {
+		expect(getSemanticSeriesColor("p50")).toBe("var(--chart-p50)")
+		expect(getSemanticSeriesColor("p95")).toBe("var(--chart-p95)")
+		expect(getSemanticSeriesColor("p99")).toBe("var(--chart-p99)")
 	})
 })
 
-describe("resolveSeriesColor", () => {
-	it("prefers a semantic color when the name matches a known pattern", () => {
-		// "error" maps to the error severity var regardless of index.
-		expect(resolveSeriesColor("error", 7)).toBe(getSemanticSeriesColor("error"))
+describe("resolveSeriesColors", () => {
+	it("keeps a series' color when the set of series changes", () => {
+		// The bug this exists to prevent: widening the time range pulls in more
+		// services, and every color used to shift by one.
+		const narrow = resolveSeriesColors(["api", "web"])
+		const wide = resolveSeriesColors(["api", "web", "worker", "cron", "billing"])
+		expect(wide.get("api")).toBe(narrow.get("api"))
+		expect(wide.get("web")).toBe(narrow.get("web"))
 	})
 
-	it("falls back to the per-index color for unknown names", () => {
-		expect(resolveSeriesColor("checkout-service", 0)).toBe("var(--chart-1)")
-		expect(resolveSeriesColor("checkout-service", 9)).toBe(getSeriesColorByIndex(9))
+	it("ignores the order the series arrive in", () => {
+		const names = ["api", "web", "worker", "cron"]
+		const forward = resolveSeriesColors(names)
+		const reversed = resolveSeriesColors([...names].reverse())
+		for (const name of names) expect(reversed.get(name)).toBe(forward.get(name))
+	})
+
+	it("matches the service color used by ServiceDot and the service map", () => {
+		const colors = resolveSeriesColors(["checkout-service", "cart-service"])
+		expect(colors.get("checkout-service")).toBe(getServiceColor("checkout-service"))
+		expect(colors.get("cart-service")).toBe(getServiceColor("cart-service"))
+	})
+
+	it("gives semantic names their meaningful color without consuming a slot", () => {
+		const withSemantic = resolveSeriesColors(["error", "api", "web"])
+		const without = resolveSeriesColors(["api", "web"])
+		expect(withSemantic.get("error")).toBe(getSemanticSeriesColor("error"))
+		expect(withSemantic.get("api")).toBe(without.get("api"))
+		expect(withSemantic.get("web")).toBe(without.get("web"))
+	})
+
+	it("uses the default chart color for a generic placeholder series", () => {
+		expect(resolveSeriesColors(["value"]).get("value")).toBe("var(--chart-1)")
+		expect(resolveSeriesColors(["all"]).get("all")).toBe("var(--chart-1)")
+	})
+
+	it("hashes a lone real series instead of defaulting it", () => {
+		// A group-by that returns one service at 1h and three at 24h must not
+		// recolor that service when the others appear.
+		expect(resolveSeriesColors(["api"]).get("api")).toBe(getServiceColor("api"))
+	})
+
+	it("never assigns two series in one chart the same color", () => {
+		const names = Array.from({ length: 40 }, (_, i) => `service-${i}`)
+		const colors = resolveSeriesColors(names)
+		expect(colors.size).toBe(names.length)
+		expect(new Set(colors.values()).size).toBe(names.length)
+	})
+
+	it("resolves duplicate names once", () => {
+		const colors = resolveSeriesColors(["api", "api", "web"])
+		expect(colors.size).toBe(2)
 	})
 })

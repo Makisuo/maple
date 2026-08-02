@@ -9,6 +9,7 @@ import {
 	DotsVerticalIcon,
 	ChatBubbleSparkleIcon,
 	BellIcon,
+	ClockIcon,
 } from "@/components/icons"
 
 import { Card, CardContent, CardHeader, CardTitle, CardAction } from "@maple/ui/components/ui/card"
@@ -23,21 +24,15 @@ import {
 import type { WidgetMode, WidgetDataState } from "@/components/dashboard-builder/types"
 import { useWidgetActions } from "@/components/dashboard-builder/widgets/widget-actions-context"
 import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
+import {
+	useWidgetTimeRangeOverride,
+	widgetTimeRangeLabel,
+} from "@/components/dashboard-builder/widgets/widget-time-range-context"
 import { interpolateDisplayText } from "@/lib/dashboard-variables/interpolate"
 
 interface WidgetShellProps {
 	title: string
 	mode: WidgetMode
-	/**
-	 * Action callbacks. When omitted, they fall back to the nearest
-	 * `WidgetActionsProvider`; explicit props override context (used by the
-	 * widget lab, which renders widgets outside a dashboard provider).
-	 */
-	onRemove?: () => void
-	onClone?: () => void
-	onConfigure?: () => void
-	/** When set, a "Create alert" menu item is shown (in edit and view mode). */
-	onCreateAlert?: () => void
 	/** Headline stat rendered at the top-right of the card header. */
 	headerValue?: ReactNode
 	/** Summary stat rendered below the card content. */
@@ -49,20 +44,19 @@ interface WidgetShellProps {
 export function WidgetShell({
 	title,
 	mode,
-	onRemove,
-	onClone,
-	onConfigure,
-	onCreateAlert,
 	headerValue,
 	footer,
 	contentClassName,
 	children,
 }: WidgetShellProps) {
+	// Actions come from context only. They used to be optional props forwarded
+	// verbatim through every renderer, which meant a five-prop tail on all ten
+	// widget components that no dashboard call site ever passed.
 	const ctx = useWidgetActions()
-	const remove = onRemove ?? ctx?.remove
-	const clone = onClone ?? ctx?.clone
-	const configure = onConfigure ?? ctx?.configure
-	const createAlert = onCreateAlert ?? ctx?.createAlert
+	const remove = ctx?.remove
+	const clone = ctx?.clone
+	const configure = ctx?.configure
+	const createAlert = ctx?.createAlert
 	const isEditable = mode === "edit"
 	// The menu is also shown in view mode when "Create alert" is available, so
 	// alerts can be spun off a chart without entering dashboard edit mode.
@@ -76,6 +70,12 @@ export function WidgetShell({
 	const variablesContext = useDashboardVariablesOptional()
 	const displayTitle = variablesContext ? interpolateDisplayText(title, variablesContext.values) : title
 
+	// A tile pinned to its own window says so in the header. Without the label a
+	// reader has no way to tell that one card on a 7-day board is showing the
+	// last 30 minutes.
+	const timeRangeOverride = useWidgetTimeRangeOverride()
+	const timeRangeLabel = timeRangeOverride ? widgetTimeRangeLabel(timeRangeOverride) : null
+
 	return (
 		<Card className="h-full flex flex-col">
 			<CardHeader className="py-2.5">
@@ -88,6 +88,15 @@ export function WidgetShell({
 					<CardTitle className="min-w-0 truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 						{displayTitle}
 					</CardTitle>
+					{timeRangeLabel && (
+						<span
+							className="flex shrink-0 items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+							title={`This widget uses its own time range (${timeRangeLabel}) instead of the dashboard's`}
+						>
+							<ClockIcon size={10} />
+							{timeRangeLabel}
+						</span>
+					)}
 					{headerValue != null && (
 						<div className="ml-auto shrink-0 font-mono font-semibold text-xs tabular-nums">
 							{headerValue}
@@ -200,18 +209,10 @@ interface WidgetFrameProps {
 	title: string
 	dataState: WidgetDataState
 	mode: WidgetMode
-	/**
-	 * Action callbacks. When omitted, they fall back to the nearest
-	 * `WidgetActionsProvider`; explicit props override context (used by the
-	 * widget lab, which renders widgets outside a dashboard provider).
-	 */
-	onRemove?: () => void
-	onClone?: () => void
-	onConfigure?: () => void
-	onCreateAlert?: () => void
-	onFix?: () => void
 	contentClassName?: string
 	loadingSkeleton: ReactNode
+	/** Summary line under the content. Only rendered once data is ready. */
+	footer?: ReactNode
 	children: ReactNode
 }
 
@@ -219,29 +220,21 @@ export function WidgetFrame({
 	title,
 	dataState,
 	mode,
-	onRemove,
-	onClone,
-	onConfigure,
-	onCreateAlert,
-	onFix,
 	contentClassName,
 	loadingSkeleton,
+	footer,
 	children,
 }: WidgetFrameProps) {
 	// `WidgetShell` resolves the menu actions against context itself; `fix`
 	// drives the inline error CTA below, so it is resolved here too.
-	const ctx = useWidgetActions()
-	const fix = onFix ?? ctx?.fix
+	const fix = useWidgetActions()?.fix
 
 	return (
 		<WidgetShell
 			title={title}
 			mode={mode}
-			onRemove={onRemove}
-			onClone={onClone}
-			onConfigure={onConfigure}
-			onCreateAlert={onCreateAlert}
 			contentClassName={contentClassName}
+			footer={dataState.status === "ready" ? footer : undefined}
 		>
 			{dataState.status === "loading" ? (
 				loadingSkeleton

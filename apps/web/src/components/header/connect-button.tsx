@@ -13,15 +13,13 @@ import { Separator } from "@maple/ui/components/ui/separator"
 import {
 	ArrowRightIcon,
 	ChatBubbleSparkleIcon,
-	CheckIcon,
 	ConnectionIcon,
-	CopyIcon,
 } from "@/components/icons"
-import { CopyableField } from "@/components/ingest/copyable-field"
+import { CopyableField } from "@maple/ui/components/ui/copyable-field"
 import { ConnectCredentials } from "@/components/ingest/connect-credentials"
 import { ConnectionStatusPill } from "@/components/ingest/connection-status"
 import { useIngestConnection } from "@/components/ingest/use-ingest-connection"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { mcpUrl } from "@/lib/services/common/mcp-url"
 
 const ONBOARD_SKILL_COMMAND = "bunx skills add Makisuo/maple/skills/maple-onboard"
@@ -102,8 +100,6 @@ function ConnectPanel() {
 }
 
 function McpCard() {
-	const { copied, copy } = useCopyToClipboard("MCP endpoint")
-
 	return (
 		<div className="group overflow-hidden rounded-lg border bg-muted/30 transition-colors hover:border-foreground/20">
 			<Link
@@ -134,15 +130,12 @@ function McpCard() {
 				<code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
 					{MCP_ENDPOINT}
 				</code>
-				<Button
-					variant="ghost"
-					size="icon"
-					className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-					onClick={() => copy(MCP_ENDPOINT)}
-					aria-label="Copy MCP endpoint"
-				>
-					{copied ? <CheckIcon size={13} className="text-severity-info" /> : <CopyIcon size={13} />}
-				</Button>
+				<CopyButton
+					value={MCP_ENDPOINT}
+					label="MCP endpoint"
+					iconSize={13}
+					className="size-6 shrink-0"
+				/>
 			</div>
 		</div>
 	)

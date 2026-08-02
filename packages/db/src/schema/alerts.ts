@@ -57,6 +57,13 @@ export const alertRules = pgTable(
 		severity: text("severity").notNull(),
 		serviceNamesJson: jsonb("service_names_json").$type<ReadonlyArray<string>>(),
 		excludeServiceNamesJson: jsonb("exclude_service_names_json").$type<ReadonlyArray<string>>(),
+		/**
+		 * Deployment environments the rule is scoped to. Null/empty means every
+		 * environment. Applies to the built-in trace signals;
+		 * `builder_query` / `raw_query` carry their own
+		 * filters, so it is always empty for those.
+		 */
+		environmentsJson: jsonb("environments_json").$type<ReadonlyArray<string>>(),
 		/** JSON-encoded `string[]` of free-form tags used to group and filter rules. */
 		tagsJson: jsonb("tags_json").$type<ReadonlyArray<string>>(),
 		signalType: text("signal_type").notNull(),
@@ -68,9 +75,6 @@ export const alertRules = pgTable(
 		consecutiveBreachesRequired: integer("consecutive_breaches_required").notNull().default(2),
 		consecutiveHealthyRequired: integer("consecutive_healthy_required").notNull().default(2),
 		renotifyIntervalMinutes: integer("renotify_interval_minutes").notNull().default(30),
-		metricName: text("metric_name"),
-		metricType: text("metric_type"),
-		metricAggregation: text("metric_aggregation"),
 		apdexThresholdMs: doublePrecision("apdex_threshold_ms"),
 		queryBuilderDraftJson: jsonb("query_builder_draft_json").$type<unknown>(),
 		rawQuerySql: text("raw_query_sql"),
@@ -91,6 +95,32 @@ export const alertRules = pgTable(
 		index("alert_rules_org_enabled_idx").on(table.orgId, table.enabled),
 		uniqueIndex("alert_rules_org_name_idx").on(table.orgId, table.name),
 	],
+)
+
+/**
+ * Scheduler claim lock — deliberately NOT a member of `electric_publication_default`.
+ *
+ * The alerting cron CAS-claims every enabled rule once a minute. That claim used to
+ * be an `UPDATE alert_rules SET last_scheduled_at`, which is the worst possible table
+ * to touch that often: `alert_rules` is the widest control-plane table (eight jsonb
+ * columns plus `raw_query_sql`), it is Electric-synced, and it carried
+ * `REPLICA IDENTITY FULL` — so each claim wrote the entire old row *and* the new row
+ * into the WAL, shipped both out of PlanetScale to Electric Cloud, and fanned the row
+ * out to every connected browser as a shape delta.
+ *
+ * Holding the lock in its own narrow, unpublished table keeps the per-minute write out
+ * of the replication stream entirely. Electric runs with
+ * ELECTRIC_MANUAL_TABLE_PUBLISHING=true (see 0009_electric_publication.sql), so a new
+ * table is unpublished unless a migration explicitly adds it — do not add this one.
+ */
+export const alertRuleClaims = pgTable(
+	"alert_rule_claims",
+	{
+		ruleId: text("rule_id").$type<AlertRuleId>().notNull().primaryKey(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		lastScheduledAt: timestamp("last_scheduled_at", { withTimezone: true, mode: "date" }).notNull(),
+	},
+	(table) => [index("alert_rule_claims_org_idx").on(table.orgId)],
 )
 
 export const alertRuleStates = pgTable(

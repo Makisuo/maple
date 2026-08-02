@@ -42,4 +42,9 @@ Disallow:
 User-agent: CCBot
 Disallow:
 
+# Machine-readable copy of the site: every page has a markdown twin at
+# <path>.md, indexed at /llms.txt. Content negotiation works too —
+# `Accept: text/markdown` on any page URL returns the same source.
+# https://maple.dev/llms.txt
+
 Sitemap: https://maple.dev/sitemap-index.xml

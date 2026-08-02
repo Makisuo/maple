@@ -1,4 +1,4 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import {
 	DashboardId,
@@ -11,8 +11,9 @@ import {
 	UserId,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "./widget-types"
 
-const TimeRangeSchema = Schema.Union([
+export const TimeRangeSchema = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("relative"),
 		value: Schema.String,
@@ -23,6 +24,7 @@ const TimeRangeSchema = Schema.Union([
 		endTime: IsoDateTimeString,
 	}),
 ])
+export type TimeRange = typeof TimeRangeSchema.Type
 
 const UnknownRecord = Schema.Record(Schema.String, Schema.Unknown)
 const StringRecord = Schema.Record(Schema.String, Schema.String)
@@ -180,8 +182,8 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 	// Heatmap-specific
 	heatmap: Schema.optional(
 		Schema.Struct({
-			colorScale: Schema.optional(Schema.Literals(["viridis", "magma", "cividis", "blues", "reds"])),
-			scaleType: Schema.optional(Schema.Literals(["linear", "log"])),
+			colorScale: Schema.optional(Schema.Literals(HEATMAP_COLOR_SCALES)),
+			scaleType: Schema.optional(Schema.Literals(HEATMAP_SCALE_TYPES)),
 		}),
 	),
 
@@ -213,37 +215,20 @@ export const WidgetLayoutSchema = Schema.Struct({
 	maxH: Schema.optional(Schema.Number),
 })
 
-/**
- * Grid rows a widget occupies by default, and the smallest it may be resized to.
- *
- * The dashboard canvas is a 12-column grid with `rowHeight: 60` and a 12px
- * gutter, so a tile's pixel height is `h * 60 + (h - 1) * 12` — charts at `h: 6`
- * render 420px tall. Every place that auto-places a widget (the "Add widget"
- * store, the MCP tools, the portable-dashboard importer, the Perses importer)
- * reads its height from here so the numbers can't drift apart again. Widths stay
- * with the caller: full-bleed `w: 12` from `create_dashboard` and `w: 4` from the
- * web store are deliberate, per-context choices.
- */
-export const defaultWidgetHeight = (visualization: string): { h: number; minH: number } => {
-	switch (visualization) {
-		case "stat":
-			return { h: 2, minH: 2 }
-		case "table":
-		case "list":
-		case "markdown":
-			return { h: 5, minH: 3 }
-		default:
-			// chart, gauge, pie, heatmap, … — a timeseries needs the vertical room.
-			return { h: 6, minH: 2 }
-	}
-}
-
 export const DashboardWidgetSchema = Schema.Struct({
 	id: Schema.String,
 	visualization: Schema.String,
 	dataSource: WidgetDataSourceSchema,
 	display: WidgetDisplayConfigSchema,
 	layout: WidgetLayoutSchema,
+	// Per-widget time range. Absent (the common case) means "follow the
+	// dashboard's range" — the tile re-queries whenever the board's picker moves.
+	// When set, the tile is pinned to its own window regardless of the board's,
+	// which is how a "last 30 minutes" health stat lives on a 7-day board. The
+	// override only replaces the time window: dashboard variables still
+	// interpolate normally, and the board's auto-refresh still rebases a relative
+	// override against "now".
+	timeRange: Schema.optionalKey(TimeRangeSchema),
 })
 
 // ---------------------------------------------------------------------------
@@ -256,6 +241,17 @@ export const DashboardVariableName = Schema.String.check(
 	Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]*$/),
 ).annotate({ identifier: "@maple/DashboardVariableName", title: "Dashboard Variable Name" })
 export type DashboardVariableName = Schema.Schema.Type<typeof DashboardVariableName>
+
+/**
+ * Auto-refresh cadence in seconds; `0` or absent means off. A closed literal set
+ * rather than a free number so a hand-edited document (or `?refresh=`) can't ask
+ * the browser to re-query every 100ms.
+ */
+export const DashboardRefreshIntervalSeconds = Schema.Literals([0, 5, 10, 30, 60, 300, 900]).annotate({
+	identifier: "@maple/DashboardRefreshIntervalSeconds",
+	title: "Dashboard Refresh Interval Seconds",
+})
+export type DashboardRefreshIntervalSeconds = typeof DashboardRefreshIntervalSeconds.Type
 
 export const DashboardQueryVariableFacet = Schema.Literals([
 	"service",
@@ -319,6 +315,7 @@ export class PortableDashboardDocument extends Schema.Class<PortableDashboardDoc
 	timeRange: TimeRangeSchema,
 	widgets: Schema.Array(DashboardWidgetSchema),
 	variables: Schema.optionalKey(Schema.Array(DashboardVariableSchema)),
+	refreshIntervalSeconds: Schema.optionalKey(DashboardRefreshIntervalSeconds),
 }) {}
 
 export class DashboardDocument extends Schema.Class<DashboardDocument>("DashboardDocument")({
@@ -329,6 +326,7 @@ export class DashboardDocument extends Schema.Class<DashboardDocument>("Dashboar
 	timeRange: TimeRangeSchema,
 	widgets: Schema.Array(DashboardWidgetSchema),
 	variables: Schema.optionalKey(Schema.Array(DashboardVariableSchema)),
+	refreshIntervalSeconds: Schema.optionalKey(DashboardRefreshIntervalSeconds),
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
 	// Postgres transaction id of the write that produced this response, present
@@ -386,6 +384,7 @@ export const DashboardVersionChangeKind = Schema.Literals([
 	"tags_changed",
 	"time_range_changed",
 	"variables_changed",
+	"refresh_interval_changed",
 	"widget_added",
 	"widget_removed",
 	"widget_updated",
@@ -473,6 +472,21 @@ export class DashboardValidationError extends Schema.TaggedErrorClass<DashboardV
 	{ httpApiStatus: 400 },
 ) {}
 
+/**
+ * Rewrites request-decode failures on the dashboards group into a
+ * `DashboardValidationError` carrying the JSON path, the enclosing widget id
+ * and the expected-vs-received message for every offending field.
+ *
+ * Without it the runtime answers a schema failure with a bare empty 400, so the
+ * only way to find one bad key in a 14-widget document is to bisect it. The
+ * error class is already in every endpoint's error list, so attaching this
+ * widens no client contract.
+ */
+export class DashboardSchemaErrors extends HttpApiMiddleware.Service<DashboardSchemaErrors>()(
+	"DashboardSchemaErrors",
+	{ error: DashboardValidationError },
+) {}
+
 export class DashboardConcurrencyError extends Schema.TaggedErrorClass<DashboardConcurrencyError>()(
 	"@maple/http/errors/DashboardConcurrencyError",
 	{
@@ -496,7 +510,26 @@ export class DashboardTemplateParameter extends Schema.Class<DashboardTemplatePa
 	placeholder: Schema.optionalKey(Schema.String),
 }) {}
 
-export const DashboardTemplatePreviewKind = Schema.Literals(["line", "area", "bar", "stat", "table", "list"])
+/**
+ * Panel type of a widget in a template thumbnail. Mirrors `PanelType` in
+ * `./widget-types` — spelled out here because the API surface is a wire schema,
+ * not a derived one, so widening it stays a deliberate, reviewable edit.
+ */
+export const DashboardTemplatePreviewKind = Schema.Literals([
+	"line",
+	"area",
+	"bar",
+	"stat",
+	"gauge",
+	"table",
+	"list",
+	"pie",
+	"histogram",
+	"heatmap",
+	"funnel",
+	"hbar",
+	"markdown",
+])
 export type DashboardTemplatePreviewKind = typeof DashboardTemplatePreviewKind.Type
 
 export class DashboardTemplatePreviewWidget extends Schema.Class<DashboardTemplatePreviewWidget>(
@@ -674,4 +707,5 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		}),
 	)
 	.prefix("/api/dashboards")
-	.middleware(Authorization) {}
+	.middleware(Authorization)
+	.middleware(DashboardSchemaErrors) {}

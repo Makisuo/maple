@@ -10,11 +10,18 @@ name: Cleanup Preview Orphans
 #     (e.g. #211/#214 closed with the pre-#215 skip-chain and orphaned).
 #   - A deploy landing after close (delayed event / re-run) can recreate the
 #     branch right after teardown deleted it (e.g. #180).
-# PS-DEV branches bill for time used, so orphans cost real money every hour.
-# The same failure modes leak Electric Cloud `pr-<n>` environments (each holds
-# a PlanetScale replication slot + a plan max-databases slot) and Tinybird
-# `pr_<n>` branches (they share compute with production), so all three
-# lifecycle scripts run their `sweep` subcommand here.
+# These failure modes leak Tinybird `pr_<n>` branches (they share compute with
+# production), Cloudflare workers/queues, and `maple-db-pr-*` Hyperdrive configs
+# (capped at 25 per account), so each lifecycle script runs its `sweep`
+# subcommand here.
+#
+# The PlanetScale and Electric sweeps are RESIDUAL as of 2026-08: PR previews no
+# longer provision a PlanetScale branch or an Electric source at all (see the
+# comment in deploy-pr-preview.yml and `resolveDatabaseMode` in
+# packages/infra/src/cloudflare/stage.ts). They stay as a safety net for anything
+# left over from before the cutover, and would come straight back into force if
+# per-PR databases are ever restored. The Hyperdrive sweep is now what reaps the
+# `maple-db-pr-*` configs those previews left behind.
 #
 # Caveat: sweep maps `pr-<n>` resource names to THIS repo's PR numbers
 # (GITHUB_REPOSITORY). If the PlanetScale database / Electric project /
@@ -23,7 +30,8 @@ name: Cleanup Preview Orphans
 
 on:
     schedule:
-        # Every 6 hours — orphaned PS-DEV branches bill continuously.
+        # Every 6 hours — orphaned Tinybird branches share production compute
+        # and orphaned Hyperdrive configs eat the 25-per-account cap.
         - cron: "17 */6 * * *"
     workflow_dispatch:
 
@@ -39,6 +47,7 @@ concurrency:
 jobs:
     sweep:
         runs-on: blacksmith-4vcpu-ubuntu-2404
+        timeout-minutes: 20
         # ⚠️ STOPGAP. This job borrows `pr-preview` purely to shape its Infisical
         # OIDC subject — it deploys nothing and reads no environment secrets.
         #
@@ -89,9 +98,9 @@ jobs:
               if: ${{ env.PLANETSCALE_SERVICE_TOKEN != '' }}
               uses: planetscale/setup-pscale-action@v1
 
-            # Mirrors the deploy workflow's gating: until the Infisical `dev`
-            # environment carries the PlanetScale service token, the sweep SKIPs
-            # cleanly instead of failing on every schedule tick.
+            # Residual net: previews no longer create `pr-<n>` branches, so this
+            # should find nothing. Gated on the service token, so it SKIPs cleanly
+            # rather than failing on every schedule tick when the token is absent.
             - name: Sweep orphaned PlanetScale PR branches
               if: ${{ env.PLANETSCALE_SERVICE_TOKEN != '' }}
               env:

@@ -27,11 +27,10 @@ export default Alchemy.Stack(
 		const api = yield* Api
 
 		// Where alerts go. Channel secrets are write-only server-side.
-		const oncall = yield* Maple.AlertDestination("oncall-discord", {
-			type: "discord",
-			name: "On-call Discord",
-			webhook_url:
-				process.env.DISCORD_WEBHOOK_URL ?? "https://discord.com/api/webhooks/CHANGE/ME_PLEASE",
+		const oncall = yield* Maple.AlertDestination("oncall-pagerduty", {
+			type: "pagerduty",
+			name: "On-call PagerDuty",
+			integration_key: process.env.PAGERDUTY_ROUTING_KEY ?? "CHANGE_ME",
 		})
 
 		// Alerts on the service name the Worker reports as — `SERVICE_NAME` is the

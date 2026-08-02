@@ -7,7 +7,7 @@ order: 0
 
 A **notification destination** is where Maple delivers an alert when one of your rules fires. Add destinations once, then attach them to any number of alert rules — when a rule trips, Maple sends a `trigger`; when it recovers, a `resolve`.
 
-Destinations live under **Alerts** in the Maple dashboard. Open the **Destinations** section, click **Add destination**, pick a provider, and paste its credentials. Credentials are encrypted at rest and never returned to the browser after they're saved.
+Destinations live under **Alerts → Settings** in the Maple dashboard. Open the destinations section, click **Add destination**, and pick a provider. Provider credentials are encrypted at rest and never returned to the browser after they're saved.
 
 ## Sending a test
 
@@ -17,13 +17,12 @@ If a test fails, Maple surfaces the provider's own rejection reason in the toast
 
 ## Slack
 
-Post alerts to a Slack channel through the Maple Slack app — there is no webhook to create or rotate.
+Install Maple's Slack app, then choose the channel where alerts should be delivered. Maple uses the
+installed bot connection; incoming-webhook destinations are not supported.
 
-1. In the Maple dashboard, open **Integrations → Slack** and click **Connect** to install the Maple app into your Slack workspace.
-2. Back under **Alerts → Destinations**, click **Add destination** and pick **Slack**.
-3. Choose the channel the bot should post to. For private channels, invite the Maple app to the channel first.
-
-Listing the workspace's channels is limited to org admins; other members can still create destinations once an admin has picked a channel.
+1. Open **Alerts → Settings** and choose **Add destination → Slack**.
+2. Install or reconnect the Maple Slack app when prompted.
+3. Pick a channel and save the destination.
 
 ## PagerDuty
 
@@ -65,4 +64,5 @@ POST a signed JSON payload to any HTTP endpoint you control — useful for custo
 
 ## Hazel
 
-Connect [Hazel](https://hazel.sh/docs/integrations/maple) via OAuth and pick a workspace channel to route alerts into, or paste a Hazel-issued webhook URL directly. See Hazel's [Maple integration guide](https://hazel.sh/docs/integrations/maple).
+Connect [Hazel](https://hazel.sh/docs/integrations/maple) through OAuth and pick a workspace channel
+to route alerts into. See Hazel's [Maple integration guide](https://hazel.sh/docs/integrations/maple).

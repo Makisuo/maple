@@ -60,6 +60,12 @@ export const summarizeDashboardChange = (
 		detail = detail ?? "Variables updated"
 	}
 
+	if ((prev.refreshIntervalSeconds ?? 0) !== (next.refreshIntervalSeconds ?? 0)) {
+		kinds.add("refresh_interval_changed")
+		const seconds = next.refreshIntervalSeconds ?? 0
+		detail = detail ?? (seconds === 0 ? "Auto-refresh turned off" : `Auto-refresh set to ${seconds}s`)
+	}
+
 	const prevById = new Map(prev.widgets.map((w) => [w.id, w] as const))
 	const nextById = new Map(next.widgets.map((w) => [w.id, w] as const))
 

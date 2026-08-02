@@ -113,7 +113,13 @@ export function buildAttrFilterCondition(
 
 	const positive = ((): CH.Condition => {
 		if (af.mode === "exists") {
-			const exact = anyMapContains(mapExpr, keys)
+			// ClickHouse `Map` lookups return the value type's default (`''`) for a
+			// missing key, and instrumentation also writes genuinely empty values.
+			// `mapContains` alone therefore let `''` rows through, so an `exists`
+			// filter still produced a "(no value)" bucket in breakdowns — exactly
+			// what the user was filtering out. Require a non-empty value too, which
+			// makes `!exists` (the `NOT (...)` wrapper below) mean "absent or empty".
+			const exact = anyMapContains(mapExpr, keys).and(colExpr.neq(""))
 			if (af.negated || indexMode === "none") return exact
 			let candidate = CH.has(CH.mapKeys(mapExpr), CH.lit(keys[0]!))
 			for (let i = 1; i < keys.length; i++) {
@@ -123,6 +129,17 @@ export function buildAttrFilterCondition(
 		}
 		if (af.mode === "contains") {
 			return CH.positionCaseInsensitive(colExpr, CH.lit(value)).gt(0)
+		}
+		if (af.mode === "in") {
+			// No index prefilter: bloom/text candidates are per-value, so an OR of N
+			// of them plus the exact IN reads more granules than the IN alone once N
+			// grows. The IN over the coalesced alias expression is already exact.
+			const values = af.values ?? []
+			// `x IN ()` is a ClickHouse syntax error, and an empty candidate set
+			// matches nothing by definition — emit a constant-false predicate so a
+			// `negated` empty filter still correctly excludes nothing.
+			if (values.length === 0) return CH.rawCond("0")
+			return CH.inList(colExpr, values)
 		}
 		if (af.mode === "gt") {
 			return CH.toFloat64OrZero(colExpr).gt(Number(value))

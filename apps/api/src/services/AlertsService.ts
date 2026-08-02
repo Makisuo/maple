@@ -8,7 +8,7 @@ import {
 } from "@maple/query-engine"
 import * as CH from "@maple/query-engine/ch"
 import { buildTimeseriesQuerySpec, resolveGroupBy } from "@maple/query-engine/query-builder"
-import { prepareRawSql } from "@maple/query-engine/runtime"
+import { prepareRawSql, type AlertBucketSource } from "@maple/query-engine/runtime"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -31,8 +31,6 @@ import {
 	AlertIncidentsListResponse,
 	AlertIncidentStatus,
 	AlertIncidentTransition as AlertIncidentTransitionSchema,
-	AlertMetricAggregation as AlertMetricAggregationSchema,
-	AlertMetricType as AlertMetricTypeSchema,
 	AlertNotFoundError,
 	AlertPersistenceError,
 	AlertRuleDeleteResponse,
@@ -54,13 +52,12 @@ import {
 	type AlertDestinationType,
 	type AlertDestinationUpdateRequest,
 	type AlertEventType as AlertEventTypeValue,
-	type AlertMetricAggregation as AlertMetricAggregationValue,
-	type AlertMetricType,
 	type AlertRuleUpsertRequest,
 	type QueryBuilderQueryDraftPayload,
 	type AlertSeverity,
 	type AlertSignalType,
 	type AlertGroupBy,
+	UNGROUPED_GROUP_KEY,
 	OrgId,
 	type AlertRuleId,
 	type AlertDestinationId,
@@ -80,6 +77,7 @@ import {
 	type AlertDestinationRow,
 	alertIncidents,
 	type AlertIncidentRow,
+	alertRuleClaims,
 	alertRules,
 	type AlertRuleRow,
 	alertRuleStates,
@@ -107,12 +105,7 @@ import { upsertAlertIssue } from "../lib/issue-hub"
 import { probeLiveness } from "../lib/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import type { TenantContext } from "./AuthService"
-import {
-	decryptAes256Gcm,
-	encryptAes256Gcm,
-	parseBase64Aes256GcmKey,
-	type EncryptedValue,
-} from "../lib/Crypto"
+import { encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "../lib/Crypto"
 import { Database, type DatabaseClient } from "../lib/DatabaseLive"
 import { readTxid, txidColumn } from "../lib/electric-txid"
 import {
@@ -120,6 +113,8 @@ import {
 	dispatchDelivery as dispatchDeliveryImpl,
 	formatComparator,
 	PAGERDUTY_ROUTING_KEY_PATTERN,
+	type DispatchContext as DeliveryDispatchContext,
+	type DispatchResult,
 	verifyPagerDutyRoutingKey,
 } from "./AlertDeliveryDispatch"
 import { EmailService } from "../lib/EmailService"
@@ -134,7 +129,7 @@ import { validateExternalUrl } from "../lib/url-validator"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import {
 	DestinationPublicConfigSchema,
-	SecretConfigFromJson,
+	hydrateDestinationRow,
 	type DestinationPublicConfig,
 	type DestinationSecretConfig,
 	type EnrichedDestinationSecretConfig,
@@ -151,6 +146,8 @@ interface NormalizedRule {
 	readonly serviceName: string | null
 	readonly serviceNames: ReadonlyArray<string>
 	readonly excludeServiceNames: ReadonlyArray<string>
+	/** Deployment environments the rule is scoped to. Empty means all. */
+	readonly environments: ReadonlyArray<string>
 	readonly tags: ReadonlyArray<string>
 	readonly groupBy: AlertGroupBy | null
 	readonly signalType: AlertSignalType
@@ -162,9 +159,6 @@ interface NormalizedRule {
 	readonly consecutiveBreachesRequired: number
 	readonly consecutiveHealthyRequired: number
 	readonly renotifyIntervalMinutes: number
-	readonly metricName: string | null
-	readonly metricType: AlertMetricType | null
-	readonly metricAggregation: AlertMetricAggregationValue | null
 	readonly apdexThresholdMs: number | null
 	readonly queryBuilderDraft: QueryBuilderQueryDraftPayload | null
 	readonly rawQuerySql: string | null
@@ -193,57 +187,21 @@ interface EvaluatedRule {
 	readonly derivedFromNoData: boolean
 }
 
-interface DispatchContext {
-	readonly deliveryKey: string
-	readonly destination: AlertDestinationRow
-	readonly publicConfig: DestinationPublicConfig
-	readonly secretConfig: EnrichedDestinationSecretConfig
+type DispatchContext = Omit<
+	DeliveryDispatchContext,
+	"ruleId" | "incidentId" | "incidentStatus" | "sentAtMs"
+> & {
 	readonly ruleId: AlertRuleId
-	readonly ruleName: string
-	readonly groupKey: string | null
-	readonly signalType: AlertSignalType
-	readonly severity: AlertSeverity
-	readonly comparator: AlertComparator
-	readonly threshold: number
-	readonly thresholdUpper: number | null
-	readonly eventType: AlertEventTypeValue
 	readonly incidentId: AlertIncidentId | null
 	readonly incidentStatus: Schema.Schema.Type<typeof AlertIncidentStatus>
-	readonly dedupeKey: string
-	readonly windowMinutes: number
-	readonly value: number | null
-	readonly sampleCount: number | null
 	readonly linkUrl: string
 	readonly sentAtMs: number
-	readonly template?: AlertNotificationTemplate | null
 }
 
-interface DispatchResult {
-	readonly providerMessage: string | null
-	readonly providerReference: string | null
-	readonly responseCode: number | null
-}
-
-interface DeliveryPayloadContext {
-	readonly eventType: AlertEventTypeValue
-	readonly incidentId: AlertIncidentId | null
-	readonly incidentStatus: Schema.Schema.Type<typeof AlertIncidentStatus>
-	readonly dedupeKey: string
-	readonly ruleId: AlertRuleId
-	readonly ruleName: string
-	readonly groupKey: string | null
-	readonly signalType: AlertSignalType
-	readonly severity: AlertSeverity
-	readonly comparator: AlertComparator
-	readonly threshold: number
-	readonly thresholdUpper: number | null
-	readonly windowMinutes: number
-	readonly value: number | null
-	readonly sampleCount: number | null
-	readonly linkUrl: string
-	readonly sentAtMs: number
-	readonly template?: AlertNotificationTemplate | null
-}
+type DeliveryPayloadContext = Omit<
+	DispatchContext,
+	"deliveryKey" | "destination" | "publicConfig" | "secretConfig"
+>
 
 interface DeliveryAttemptFailure {
 	readonly message: string
@@ -321,8 +279,6 @@ const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
 const decodeAlertCheckStatusSync = Schema.decodeUnknownSync(AlertCheckStatusSchema)
 const decodeAlertIncidentTransitionSync = Schema.decodeUnknownSync(AlertIncidentTransitionSchema)
-const decodeAlertMetricTypeSync = Schema.decodeUnknownSync(AlertMetricTypeSchema)
-const decodeAlertMetricAggregationSync = Schema.decodeUnknownSync(AlertMetricAggregationSchema)
 const decodeAlertIncidentStatusSync = Schema.decodeUnknownSync(AlertIncidentStatus)
 const decodeAlertEventTypeSync = Schema.decodeUnknownSync(AlertEventTypeSchema)
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.errorIssueId)
@@ -356,12 +312,34 @@ const planGroupingTokens = (
 const isGroupedPlan = (plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>): boolean =>
 	plan.kind === "raw_sql" || planGroupingTokens(plan) != null
 
+/**
+ * Turn a compiled plan into the query engine's evaluate source. This is the only
+ * place the plan's `kind` is inspected on the evaluation path — everything
+ * downstream (`evaluate`, `evaluateSeries`, preview, testRule) takes the source
+ * and never branches on the rule kind again.
+ */
+const planEvaluateSource = (
+	plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>,
+	windowMinutes: number,
+): Effect.Effect<AlertBucketSource, AlertValidationError> => {
+	if (plan.kind === "raw_sql") {
+		if (plan.rawSql == null) {
+			return Effect.fail(makeValidationError("Compiled alert plan is missing its SQL query"))
+		}
+		return Effect.succeed({ kind: "raw_sql", sql: plan.rawSql, windowMinutes })
+	}
+	if (plan.query == null || plan.sampleCountStrategy == null) {
+		return Effect.fail(makeValidationError("Compiled alert plan is missing its query spec"))
+	}
+	return Effect.succeed({ kind: "spec", query: plan.query })
+}
+
 const resolveServiceLinkName = (
 	rule: Pick<NormalizedRule, "serviceNames" | "groupBy">,
 	groupKey: string | null,
 ): string | null => {
 	if (rule.serviceNames.length === 1) return rule.serviceNames[0] ?? null
-	if (groupKey != null && groupKey !== "all" && isServiceGroupBy(rule.groupBy)) {
+	if (groupKey != null && groupKey !== UNGROUPED_GROUP_KEY && isServiceGroupBy(rule.groupBy)) {
 		return groupKey
 	}
 	return null
@@ -540,36 +518,6 @@ const encryptSecret = (
 		makeValidationError("Failed to encrypt destination secret"),
 	)
 
-const decryptSecret = (
-	encrypted: {
-		secretCiphertext: string
-		secretIv: string
-		secretTag: string
-	},
-	encryptionKey: Buffer,
-): Effect.Effect<string, AlertValidationError> =>
-	decryptAes256Gcm(
-		{
-			ciphertext: encrypted.secretCiphertext,
-			iv: encrypted.secretIv,
-			tag: encrypted.secretTag,
-		},
-		encryptionKey,
-		() => makeValidationError("Failed to decrypt destination secret"),
-	)
-
-const parsePublicConfig = (
-	row: AlertDestinationRow,
-): Effect.Effect<DestinationPublicConfig, AlertValidationError> =>
-	Schema.decodeUnknownEffect(DestinationPublicConfigSchema)(row.configJson).pipe(
-		Effect.mapError((cause) => makeValidationError("Stored destination config is invalid", [], cause)),
-	)
-
-const parseSecretConfig = (json: string): Effect.Effect<DestinationSecretConfig, AlertValidationError> =>
-	Schema.decodeUnknownEffect(SecretConfigFromJson)(json).pipe(
-		Effect.mapError((cause) => makeValidationError("Stored destination secret is invalid", [], cause)),
-	)
-
 type StoredDeliveryPayloadType = Schema.Schema.Type<typeof StoredDeliveryPayloadSchema>
 
 const parseDeliveryPayload = (
@@ -603,10 +551,6 @@ const buildPublicConfig = (
 			}),
 			webhook: (r) => ({
 				summary: summarizeWebhookUrl(r.url),
-				channelLabel: null,
-			}),
-			hazel: (r) => ({
-				summary: summarizeWebhookUrl(r.webhookUrl),
 				channelLabel: null,
 			}),
 			"hazel-oauth": (r) => ({
@@ -647,11 +591,6 @@ const buildSecretConfig = (
 				url: r.url.trim(),
 				signingSecret: normalizeOptionalString(r.signingSecret),
 			}),
-			hazel: (r) => ({
-				type: "hazel" as const,
-				webhookUrl: r.webhookUrl.trim(),
-				signingSecret: normalizeOptionalString(r.signingSecret),
-			}),
 			discord: (r) => ({
 				type: "discord" as const,
 				webhookUrl: r.webhookUrl.trim(),
@@ -671,9 +610,7 @@ const safeParseStringArray = (value: unknown): ReadonlyArray<string> =>
 const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (rule: {
 	readonly signalType: AlertSignalType
 	readonly serviceName: string | null
-	readonly metricName: string | null
-	readonly metricType: AlertMetricType | null
-	readonly metricAggregation: AlertMetricAggregationValue | null
+	readonly environments: ReadonlyArray<string>
 	readonly apdexThresholdMs: number | null
 	readonly queryBuilderDraft: QueryBuilderQueryDraftPayload | null
 	readonly rawQuerySql: string | null
@@ -683,7 +620,14 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 	readonly groupBy: AlertGroupBy | null
 }): Effect.fn.Return<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> {
 	const bucketSeconds = Math.max(rule.windowMinutes * 60, 60)
-	const baseTraceFilters = rule.serviceName == null ? undefined : { serviceName: rule.serviceName }
+	// Rule-level scope shared by the trace built-ins.
+	// `environments` is empty for builder_query / raw_query — those carry their
+	// own filters — so it never reaches those branches.
+	const envFilter = rule.environments.length > 0 ? { environments: rule.environments } : {}
+	const baseTraceFilters = {
+		...(rule.serviceName == null ? {} : { serviceName: rule.serviceName }),
+		...envFilter,
+	}
 
 	const noDataBehavior: QueryEngineNoDataBehavior =
 		rule.signalType === "throughput" && ["lt", "lte"].includes(rule.comparator) ? "zero" : "skip"
@@ -781,34 +725,6 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 			filters,
 		})
 		sampleCountStrategy = "trace_count"
-	} else if (rule.signalType === "metric") {
-		if (rule.metricName == null || rule.metricType == null || rule.metricAggregation == null) {
-			return yield* Effect.fail(
-				makeValidationError("metric alerts require metricName, metricType, and metricAggregation"),
-			)
-		}
-		const groupResolved = yield* resolveRuleGroupBy("metrics")
-		const filters: Record<string, unknown> = {
-			metricName: rule.metricName,
-			metricType: rule.metricType,
-			...(rule.serviceName == null ? {} : { serviceName: rule.serviceName }),
-		}
-		if (groupResolved && groupResolved.attributeKeys.length > 0) {
-			// Metrics group-by-attribute is single-key today; pick the first.
-			filters.groupByAttributeKey = groupResolved.attributeKeys[0]
-		}
-		if (groupResolved && groupResolved.resourceAttributeKeys.length > 0) {
-			filters.groupByResourceAttributeKey = groupResolved.resourceAttributeKeys[0]
-		}
-		query = decodeQuerySpecSync({
-			kind: "timeseries",
-			source: "metrics",
-			metric: rule.metricAggregation,
-			groupBy: groupResolved ? [...groupResolved.tokens] : ["none"],
-			bucketSeconds,
-			filters,
-		})
-		sampleCountStrategy = "metric_data_points"
 	} else if (rule.signalType === "builder_query") {
 		// Reuse the exact compiler that dashboard query-builder charts use, so
 		// an alert and a chart built from the same draft evaluate identically.
@@ -951,6 +867,9 @@ const serviceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
 const excludeServiceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
 	row.excludeServiceNamesJson ? safeParseStringArray(row.excludeServiceNamesJson) : []
 
+const environmentsFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
+	row.environmentsJson ? safeParseStringArray(row.environmentsJson) : []
+
 const tagsFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
 	row.tagsJson ? safeParseStringArray(row.tagsJson) : []
 
@@ -992,6 +911,7 @@ const rowToRuleDocument = (
 		severity: decodeAlertSeveritySync(row.severity),
 		serviceNames: [...serviceNames],
 		excludeServiceNames: [...excludeServiceNamesFromRow(row)],
+		environments: [...environmentsFromRow(row)],
 		tags: [...tagsFromRow(row)],
 		groupBy: parseStoredGroupBy(row.groupBy),
 		signalType: decodeAlertSignalTypeSync(row.signalType),
@@ -1003,10 +923,6 @@ const rowToRuleDocument = (
 		consecutiveBreachesRequired: row.consecutiveBreachesRequired,
 		consecutiveHealthyRequired: row.consecutiveHealthyRequired,
 		renotifyIntervalMinutes: row.renotifyIntervalMinutes,
-		metricName: row.metricName,
-		metricType: row.metricType != null ? decodeAlertMetricTypeSync(row.metricType) : null,
-		metricAggregation:
-			row.metricAggregation != null ? decodeAlertMetricAggregationSync(row.metricAggregation) : null,
 		apdexThresholdMs: row.apdexThresholdMs,
 		queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
 		rawQuerySql: row.signalType === "raw_query" ? (row.rawQuerySql ?? null) : null,
@@ -1140,12 +1056,22 @@ export interface AlertsServiceShape {
 		| AlertDeliveryError
 		| WarehouseError
 	>
+	/**
+	 * `roles` gates raw-SQL previews only: preview itself needs just `alerts:read`,
+	 * but replaying a raw_query rule executes user-authored ClickHouse, which is
+	 * the org-admin capability `createRule`/`testRule` already require.
+	 */
 	readonly previewRule: (
 		orgId: OrgId,
+		roles: ReadonlyArray<RoleName>,
 		request: AlertRulePreviewRequest,
 	) => Effect.Effect<
 		AlertRulePreviewResponse,
-		AlertValidationError | AlertDeliveryError | AlertPersistenceError | WarehouseError
+		| AlertValidationError
+		| AlertForbiddenError
+		| AlertDeliveryError
+		| AlertPersistenceError
+		| WarehouseError
 	>
 	readonly listIncidents: (
 		orgId: OrgId,
@@ -1178,6 +1104,7 @@ export interface AlertsServiceShape {
 	) => Effect.Effect<AlertChecksSummary, AlertPersistenceError | AlertNotFoundError | AlertValidationError>
 	readonly listDeliveryEvents: (
 		orgId: OrgId,
+		options?: ListAlertDeliveryEventsOptions,
 	) => Effect.Effect<AlertDeliveryEventsListResponse, AlertPersistenceError>
 	readonly runSchedulerTick: () => Effect.Effect<
 		{
@@ -1223,6 +1150,11 @@ export interface AlertChecksSummary {
 export interface ListAlertIncidentsOptions {
 	readonly status?: AlertIncidentStatus
 	readonly ruleId?: AlertRuleId
+	readonly limit?: number
+	readonly offset?: number
+}
+
+export interface ListAlertDeliveryEventsOptions {
 	readonly limit?: number
 	readonly offset?: number
 }
@@ -1322,9 +1254,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const hydrateDestination = Effect.fn("AlertsService.hydrateDestination")(function* (
 				row: AlertDestinationRow,
 			) {
-				const publicConfig = yield* parsePublicConfig(row)
-				const secretJson = yield* decryptSecret(row, encryptionKey)
-				const secretConfig = yield* parseSecretConfig(secretJson)
+				const { publicConfig, secretConfig } = yield* hydrateDestinationRow(row, encryptionKey, {
+					onPublicConfigInvalid: (cause) =>
+						makeValidationError("Stored destination config is invalid", [], cause),
+					onDecryptFailure: () => makeValidationError("Failed to decrypt destination secret"),
+					onSecretConfigInvalid: (cause) =>
+						makeValidationError("Stored destination secret is invalid", [], cause),
+				})
 				return {
 					row,
 					publicConfig,
@@ -1375,19 +1311,30 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				row: AlertRuleRow,
 			): Effect.fn.Return<NormalizedRule, AlertValidationError> {
 				const serviceNames = serviceNamesFromRow(row)
+				const serviceName = serviceNames.length === 1 ? serviceNames[0] : null
+				const environments = environmentsFromRow(row)
+				const groupBy = parseStoredGroupBy(row.groupBy)
+				const signalType = decodeAlertSignalTypeSync(row.signalType)
+				const comparator = decodeAlertComparatorSync(row.comparator)
+				const queryBuilderDraft = parseStoredQueryBuilderDraft(row.queryBuilderDraftJson)
+				const rawQuerySql = row.rawQuerySql ?? null
+				const rawQueryReducer =
+					row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null
+				const compiledPlan = yield* parseCompiledPlan(row)
 				return {
 					id: decodeAlertRuleIdSync(row.id),
 					name: row.name,
 					notificationTemplate: parseStoredNotificationTemplate(row.notificationTemplateJson),
 					enabled: row.enabled,
 					severity: decodeAlertSeveritySync(row.severity),
-					serviceName: serviceNames.length === 1 ? serviceNames[0] : null,
+					serviceName,
 					serviceNames,
 					excludeServiceNames: excludeServiceNamesFromRow(row),
+					environments,
 					tags: tagsFromRow(row),
-					groupBy: parseStoredGroupBy(row.groupBy),
-					signalType: decodeAlertSignalTypeSync(row.signalType),
-					comparator: decodeAlertComparatorSync(row.comparator),
+					groupBy,
+					signalType,
+					comparator,
 					threshold: row.threshold,
 					thresholdUpper: row.thresholdUpper,
 					windowMinutes: row.windowMinutes,
@@ -1395,21 +1342,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					consecutiveBreachesRequired: row.consecutiveBreachesRequired,
 					consecutiveHealthyRequired: row.consecutiveHealthyRequired,
 					renotifyIntervalMinutes: row.renotifyIntervalMinutes,
-					metricName: row.metricName,
-					metricType: row.metricType != null ? decodeAlertMetricTypeSync(row.metricType) : null,
-					metricAggregation:
-						row.metricAggregation != null
-							? decodeAlertMetricAggregationSync(row.metricAggregation)
-							: null,
 					apdexThresholdMs: row.apdexThresholdMs,
-					queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
-					rawQuerySql: row.rawQuerySql ?? null,
-					rawQueryReducer:
-						row.signalType === "raw_query"
-							? decodeQueryEngineAlertReducerSync(row.reducer)
-							: null,
+					queryBuilderDraft,
+					rawQuerySql,
+					rawQueryReducer,
 					destinationIds: yield* parseDestinationIds(row.destinationIdsJson),
-					compiledPlan: yield* parseCompiledPlan(row),
+					compiledPlan,
 					createdAt: row.createdAt.getTime(),
 					updatedAt: row.updatedAt.getTime(),
 				}
@@ -1433,8 +1371,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const excludeServiceNames = request.excludeServiceNames
 					? request.excludeServiceNames.map((s) => s.trim()).filter((s) => s.length > 0)
 					: []
+				// builder_query / raw_query express environment scope inside their own
+				// query, so the rule-level filter is dropped for them rather than
+				// silently AND-ing a second, invisible predicate onto the user's query.
+				const queryOwnsScope =
+					request.signalType === "builder_query" || request.signalType === "raw_query"
+				const environments =
+					request.environments && !queryOwnsScope
+						? [...new Set(request.environments.map((s) => s.trim()).filter((s) => s.length > 0))]
+						: []
 				const tags = normalizeTags(request.tags)
-				const metricName = normalizeOptionalString(request.metricName)
 				const groupBy = request.groupBy ?? null
 				// Dedupe while preserving selection order — a destination listed twice still
 				// notifies once, so we persist each id at most once. This is the authoritative
@@ -1458,13 +1404,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}
 				} else if (request.thresholdUpper != null) {
 					details.push("thresholdUpper is only supported for between / not_between comparators")
-				}
-				if (request.signalType === "metric") {
-					if (!metricName) details.push("metricName is required for metric alerts")
-					if (!request.metricType) details.push("metricType is required for metric alerts")
-					if (!request.metricAggregation) {
-						details.push("metricAggregation is required for metric alerts")
-					}
 				}
 				if (request.signalType === "builder_query") {
 					if (!request.queryBuilderDraft) {
@@ -1491,16 +1430,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					if (request.rawQueryReducer != null) {
 						details.push("rawQueryReducer is only supported for raw_query alerts")
 					}
-				}
-				const allowsMetricFields = request.signalType === "metric"
-				if (!allowsMetricFields && request.metricType) {
-					details.push("metricType is only supported for metric alerts")
-				}
-				if (!allowsMetricFields && metricName) {
-					details.push("metricName is only supported for metric alerts")
-				}
-				if (request.signalType !== "metric" && request.metricAggregation) {
-					details.push("metricAggregation is only supported for metric alerts")
 				}
 				if (groupBy != null && serviceNames.length > 0) {
 					details.push("groupBy is only supported when no service is specified")
@@ -1542,6 +1471,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					serviceName,
 					serviceNames,
 					excludeServiceNames,
+					environments,
 					tags,
 					groupBy,
 					signalType: request.signalType,
@@ -1553,9 +1483,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					consecutiveBreachesRequired: request.consecutiveBreachesRequired ?? 2,
 					consecutiveHealthyRequired: request.consecutiveHealthyRequired ?? 2,
 					renotifyIntervalMinutes: request.renotifyIntervalMinutes ?? 30,
-					metricName,
-					metricType: request.metricType ?? null,
-					metricAggregation: request.metricAggregation ?? null,
 					apdexThresholdMs:
 						request.apdexThresholdMs ?? (request.signalType === "apdex" ? 500 : null),
 					queryBuilderDraft: request.queryBuilderDraft ?? null,
@@ -1673,11 +1600,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				)
 
 			/**
-			 * Evaluate the alert rule and return one outcome per group. For
-			 * ungrouped rules the array always has length 1 with `groupKey = "all"`.
-			 * For grouped rules every distinct value (or composite value, when
-			 * multiple dimensions are picked) becomes its own entry that is
-			 * processed and dedup'd independently downstream.
+			 * Evaluate the alert rule and return one outcome per group.
+			 *
+			 * This is the single boundary between the query engine's group-key
+			 * vocabulary and storage's. The engine emits a generic `"all"` for an
+			 * ungrouped result; every returned `groupKey` here is already in storage
+			 * vocabulary — `UNGROUPED_GROUP_KEY` for an ungrouped plan, a real group
+			 * name otherwise — so no caller re-derives it. For grouped rules every
+			 * distinct value (or composite value, when multiple dimensions are
+			 * picked) becomes its own entry, processed and dedup'd independently
+			 * downstream.
 			 */
 			const evaluateRule = Effect.fn("AlertsService.evaluateRule")(function* (
 				orgId: OrgId,
@@ -1689,37 +1621,21 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const endMs = yield* now
 				const startMs = endMs - rule.windowMinutes * 60_000
 				const plan = rule.compiledPlan
-				let observations: ReadonlyArray<GroupedAlertObservation>
-				if (plan.kind === "raw_sql") {
-					observations = yield* queryEngine
-						.evaluateRawSql(systemTenant(orgId), {
-							startTime: toTinybirdDateTime(startMs),
-							endTime: toTinybirdDateTime(endMs),
-							sql: plan.rawSql ?? "",
-							reducer: plan.reducer,
-							windowMinutes: rule.windowMinutes,
-						})
-						.pipe(catchQueryEngineErrors)
-				} else {
-					if (plan.query == null || plan.sampleCountStrategy == null) {
-						return yield* Effect.fail(
-							makeValidationError("Compiled alert plan is missing its query spec"),
-						)
-					}
-					observations = yield* queryEngine
-						.evaluate(systemTenant(orgId), {
-							startTime: toTinybirdDateTime(startMs),
-							endTime: toTinybirdDateTime(endMs),
-							query: plan.query,
-							reducer: plan.reducer,
-							sampleCountStrategy: plan.sampleCountStrategy,
-						})
-						.pipe(catchQueryEngineErrors)
-				}
+				const source = yield* planEvaluateSource(plan, rule.windowMinutes)
+				const observations: ReadonlyArray<GroupedAlertObservation> = yield* queryEngine
+					.evaluate(systemTenant(orgId), {
+						startTime: toTinybirdDateTime(startMs),
+						endTime: toTinybirdDateTime(endMs),
+						source,
+						reducer: plan.reducer,
+						sampleCountStrategy: plan.sampleCountStrategy,
+					})
+					.pipe(catchQueryEngineErrors)
 
+				const grouped = isGroupedPlan(plan)
 				return observations.map((obs) => ({
 					evaluation: applyEvaluationLogic(rule, obs),
-					groupKey: obs.groupKey,
+					groupKey: grouped ? obs.groupKey : UNGROUPED_GROUP_KEY,
 				}))
 			})
 
@@ -1740,10 +1656,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						threshold: rule.threshold,
 						thresholdUpper: rule.thresholdUpper,
 						comparator: rule.comparator,
-						reason:
-							rule.signalType === "metric"
-								? "No metric data in the selected window"
-								: "No data in the selected window",
+						reason: "No data in the selected window",
 						// Inert: `skipped` never resolves an incident, so this branch
 						// short-circuits before any status is derived from a synthesized value.
 						derivedFromNoData: false,
@@ -2132,8 +2045,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// persist them. The dispatcher will later POST to whatever we store.
 				if (request.type === "webhook") {
 					yield* validateDestinationUrl(request.url, "url")
-				} else if (request.type === "hazel") {
-					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
 				} else if (request.type === "discord") {
 					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
 				}
@@ -2228,12 +2139,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				if (request.type === "webhook" && request.url != null && request.url.trim().length > 0) {
 					yield* validateDestinationUrl(request.url, "url")
 				} else if (
-					request.type === "hazel" &&
-					request.webhookUrl != null &&
-					request.webhookUrl.trim().length > 0
-				) {
-					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
-				} else if (
 					request.type === "discord" &&
 					request.webhookUrl != null &&
 					request.webhookUrl.trim().length > 0
@@ -2303,30 +2208,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									signingSecret:
 										r.signingSecret === undefined
 											? hydrated.secretConfig.type === "webhook"
-												? hydrated.secretConfig.signingSecret
-												: null
-											: normalizeOptionalString(r.signingSecret),
-								} satisfies DestinationSecretConfig,
-							}),
-						hazel: (r) =>
-							Effect.succeed({
-								nextPublicConfig: {
-									summary:
-										r.webhookUrl != null && r.webhookUrl.trim().length > 0
-											? summarizeWebhookUrl(r.webhookUrl)
-											: hydrated.publicConfig.summary,
-									channelLabel: null,
-								} satisfies DestinationPublicConfig,
-								nextSecretConfig: {
-									type: "hazel" as const,
-									webhookUrl:
-										normalizeOptionalString(r.webhookUrl) ??
-										(hydrated.secretConfig.type === "hazel"
-											? hydrated.secretConfig.webhookUrl
-											: ""),
-									signingSecret:
-										r.signingSecret === undefined
-											? hydrated.secretConfig.type === "hazel"
 												? hydrated.secretConfig.signingSecret
 												: null
 											: normalizeOptionalString(r.signingSecret),
@@ -2629,6 +2510,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					serviceNamesJson: normalized.serviceNames.length > 0 ? normalized.serviceNames : null,
 					excludeServiceNamesJson:
 						normalized.excludeServiceNames.length > 0 ? normalized.excludeServiceNames : null,
+					environmentsJson: normalized.environments.length > 0 ? normalized.environments : null,
 					tagsJson: normalized.tags.length > 0 ? normalized.tags : null,
 					groupBy: normalized.groupBy != null ? JSON.stringify(normalized.groupBy) : null,
 					signalType: normalized.signalType,
@@ -2640,9 +2522,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					consecutiveBreachesRequired: normalized.consecutiveBreachesRequired,
 					consecutiveHealthyRequired: normalized.consecutiveHealthyRequired,
 					renotifyIntervalMinutes: normalized.renotifyIntervalMinutes,
-					metricName: normalized.metricName,
-					metricType: normalized.metricType,
-					metricAggregation: normalized.metricAggregation,
 					apdexThresholdMs: normalized.apdexThresholdMs,
 					queryBuilderDraftJson: normalized.queryBuilderDraft ?? null,
 					rawQuerySql: normalized.rawQuerySql,
@@ -2826,6 +2705,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						await tx
 							.delete(alertRuleStates)
 							.where(and(eq(alertRuleStates.orgId, orgId), eq(alertRuleStates.ruleId, ruleId)))
+						await tx.delete(alertRuleClaims).where(eq(alertRuleClaims.ruleId, ruleId))
 						return tx
 							.delete(alertRules)
 							.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
@@ -2977,15 +2857,25 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			 */
 			const previewRule = Effect.fn("AlertsService.previewRule")(function* (
 				orgId: OrgId,
+				roles: ReadonlyArray<RoleName>,
 				request: AlertRulePreviewRequest,
 			): Effect.fn.Return<
 				AlertRulePreviewResponse,
-				AlertValidationError | AlertDeliveryError | AlertPersistenceError | WarehouseError
+				| AlertValidationError
+				| AlertForbiddenError
+				| AlertDeliveryError
+				| AlertPersistenceError
+				| WarehouseError
 			> {
 				const normalized = yield* normalizeRule(orgId, request.rule, { forPreview: true })
 				const plan = normalized.compiledPlan
+
+				// Preview only needs `alerts:read`, but a raw-SQL rule executes
+				// user-authored ClickHouse against the org's warehouse — the same
+				// capability `createRule`/`testRule` gate behind org-admin. Previewing
+				// one must not be a cheaper route to that than creating it.
 				if (plan.kind === "raw_sql") {
-					return yield* Effect.fail(makeValidationError("Raw SQL alerts cannot be previewed"))
+					yield* requireAdmin(roles)
 				}
 
 				const windowMs = normalized.windowMinutes * 60_000
@@ -3055,11 +2945,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					buckets.set(bucketMs, obs)
 				}
 
-				if (plan.query == null || plan.sampleCountStrategy == null) {
-					return yield* Effect.fail(
-						makeValidationError("Compiled alert plan is missing its query spec"),
-					)
-				}
 				if (normalized.serviceNames.length > 1) {
 					// Mirror the scheduler's multi-service mode: independent per-service
 					// plans, groupKey = service name.
@@ -3071,17 +2956,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									...normalized,
 									serviceName: svcName,
 								})
-								if (
-									perServicePlan.query == null ||
-									perServicePlan.sampleCountStrategy == null
-								) {
-									return
-								}
+								const perServiceSource = yield* planEvaluateSource(
+									perServicePlan,
+									normalized.windowMinutes,
+								)
 								const observations = yield* queryEngine
 									.evaluateSeries(systemTenant(orgId), {
 										startTime: toTinybirdDateTime(startMs),
 										endTime: toTinybirdDateTime(queryEndMs),
-										query: perServicePlan.query,
+										source: perServiceSource,
 										reducer: perServicePlan.reducer,
 										sampleCountStrategy: perServicePlan.sampleCountStrategy,
 									})
@@ -3097,19 +2980,24 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						{ concurrency: 5 },
 					)
 				} else {
+					const source = yield* planEvaluateSource(plan, normalized.windowMinutes)
 					const observations = yield* queryEngine
 						.evaluateSeries(systemTenant(orgId), {
 							startTime: toTinybirdDateTime(startMs),
 							endTime: toTinybirdDateTime(queryEndMs),
-							query: plan.query,
+							source,
 							reducer: plan.reducer,
 							sampleCountStrategy: plan.sampleCountStrategy,
 						})
 						.pipe(catchQueryEngineErrors)
 					const excludeSet = new Set(normalized.excludeServiceNames)
+					// Preview must key its series exactly as the scheduler stores them,
+					// or the preview chart and the tracking chart disagree on the
+					// ungrouped series' name.
+					const grouped = isGroupedPlan(plan)
 					for (const obs of observations) {
 						if (excludeSet.has(obs.groupKey)) continue
-						record(obs.groupKey, Date.parse(obs.bucket), {
+						record(grouped ? obs.groupKey : UNGROUPED_GROUP_KEY, Date.parse(obs.bucket), {
 							value: obs.value,
 							sampleCount: obs.sampleCount,
 							hasData: obs.sampleCount > 0,
@@ -3117,14 +3005,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}
 				}
 
-				// Ungrouped rules always observe *something* per tick ("all"), so chart
-				// a series even when the whole range is empty.
+				// Ungrouped rules always observe *something* per tick, so chart a series
+				// even when the whole range is empty.
 				if (
 					obsByGroup.size === 0 &&
 					!isGroupedPlan(normalized.compiledPlan) &&
 					normalized.serviceNames.length <= 1
 				) {
-					obsByGroup.set("all", new Map())
+					obsByGroup.set(UNGROUPED_GROUP_KEY, new Map())
 				}
 
 				const NO_DATA: PreviewObs = { value: null, sampleCount: 0, hasData: false }
@@ -3512,14 +3400,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 			const listDeliveryEvents = Effect.fn("AlertsService.listDeliveryEvents")(function* (
 				orgId: OrgId,
+				options: ListAlertDeliveryEventsOptions = {},
 			) {
 				const rows = yield* dbExecute((db) =>
 					db
 						.select()
 						.from(alertDeliveryEvents)
 						.where(eq(alertDeliveryEvents.orgId, orgId))
-						.orderBy(desc(alertDeliveryEvents.createdAt))
-						.limit(100),
+						.orderBy(desc(alertDeliveryEvents.createdAt), desc(alertDeliveryEvents.id))
+						.limit(options.limit ?? 100)
+						.offset(options.offset ?? 0),
 				)
 
 				const destinationRows = yield* dbExecute((db) =>
@@ -3925,9 +3815,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						))[0] ?? null
 
 					// Look up the open incident for this group via the unique
-					// (orgId, ruleId, status, groupKey) combination. The legacy
-					// serviceName-based filter is gone — composite group keys make
-					// serviceName ambiguous, and we now persist groupKey directly.
+					// (orgId, ruleId, status, groupKey) combination. Composite group
+					// keys make serviceName ambiguous, so groupKey is authoritative.
 					const openIncident =
 						(yield* dbExecute((db) =>
 							db
@@ -4495,7 +4384,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					normalized,
 					"Auto-resolved: rule configuration changed",
 				)
-				const staleGroupKeys = Arr.map(toResolve, (i) => i.groupKey ?? "__total__")
+				const staleGroupKeys = Arr.map(toResolve, (i) => i.groupKey ?? UNGROUPED_GROUP_KEY)
 
 				// Serialized per rule via the claim lock + idempotent writes
 				// (incident status update converges; delivery events onConflictDoNothing).
@@ -4577,7 +4466,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 					const orphaned = Arr.filter(
 						openIncidents,
-						(i) => !HashSet.has(evaluatedGroups, i.groupKey ?? "__total__"),
+						(i) => !HashSet.has(evaluatedGroups, i.groupKey ?? UNGROUPED_GROUP_KEY),
 					)
 
 					if (orphaned.length === 0) return
@@ -4621,7 +4510,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 					// Serialized per rule via claim lock + idempotent writes.
 					yield* Effect.forEach(orphaned, (incident) => {
-						const groupKey = incident.groupKey ?? "__total__"
+						const groupKey = incident.groupKey ?? UNGROUPED_GROUP_KEY
 						return Effect.gen(function* () {
 							yield* dbExecute((db) =>
 								db
@@ -4673,7 +4562,42 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			// shape stays quiet; lastEvaluatedAt is refreshed at most this often.
 			const STATE_HEARTBEAT_MS = 5 * 60_000
 
-			const claimRule = (ruleId: AlertRuleId, timestamp: number) =>
+			// `alert_rules.last_scheduled_at` is still exposed on the API and read by the
+			// web diagnosis panel, but it is only refreshed this often — the per-minute
+			// claim itself lives in the unpublished `alert_rule_claims` table so it never
+			// enters Electric's replication stream. Mirrors STATE_HEARTBEAT_MS above.
+			const SCHEDULER_HEARTBEAT_MS = 5 * 60_000
+
+			/**
+			 * CAS the per-rule scheduler lock. Winning the claim returns one row; losing
+			 * returns zero, so callers can keep using `claimed.length === 0` to bail.
+			 *
+			 * The `INSERT` arm covers the first tick for a rule (replacing the old
+			 * `isNull(lastScheduledAt)` branch); `setWhere` makes a loser's conflict
+			 * update a no-op so `RETURNING` stays empty.
+			 */
+			const claimRule = (orgId: OrgId, ruleId: AlertRuleId, timestamp: number) =>
+				dbExecute((db) =>
+					db
+						.insert(alertRuleClaims)
+						.values({ ruleId, orgId, lastScheduledAt: new Date(timestamp) })
+						.onConflictDoUpdate({
+							target: alertRuleClaims.ruleId,
+							set: { lastScheduledAt: new Date(timestamp) },
+							setWhere: lt(
+								alertRuleClaims.lastScheduledAt,
+								new Date(timestamp - SCHEDULER_LOCK_TTL_MS),
+							),
+						})
+						.returning({ id: alertRuleClaims.ruleId }),
+				)
+
+			/**
+			 * Coarse heartbeat for the user-visible `alert_rules.last_scheduled_at`.
+			 * Gated in SQL so it touches zero rows — and so writes no WAL tuple — on the
+			 * ~4 of every 5 ticks that fall inside the heartbeat window.
+			 */
+			const touchRuleScheduledAt = (ruleId: AlertRuleId, timestamp: number) =>
 				dbExecute((db) =>
 					db
 						.update(alertRules)
@@ -4685,12 +4609,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									isNull(alertRules.lastScheduledAt),
 									lt(
 										alertRules.lastScheduledAt,
-										new Date(timestamp - SCHEDULER_LOCK_TTL_MS),
+										new Date(timestamp - SCHEDULER_HEARTBEAT_MS),
 									),
 								),
 							),
-						)
-						.returning({ id: alertRules.id }),
+						),
 				)
 
 			const recordEvaluationStatus = (evaluation: EvaluatedRule) =>
@@ -4757,7 +4680,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						checks.push({
 							OrgId: row.orgId,
 							RuleId: row.id,
-							GroupKey: "__total__",
+							GroupKey: UNGROUPED_GROUP_KEY,
 							Timestamp: toIngestDateTime64(failedAt),
 							Status: "error",
 							SignalType: row.signalType,
@@ -4797,7 +4720,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										and(
 											eq(alertRuleStates.orgId, row.orgId),
 											eq(alertRuleStates.ruleId, row.id),
-											eq(alertRuleStates.groupKey, "__total__"),
+											eq(alertRuleStates.groupKey, UNGROUPED_GROUP_KEY),
 										),
 									)
 									.limit(1),
@@ -4814,7 +4737,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								.values({
 									orgId: row.orgId,
 									ruleId: row.id,
-									groupKey: "__total__",
+									groupKey: UNGROUPED_GROUP_KEY,
 									consecutiveBreaches: 0,
 									consecutiveHealthy: 0,
 									lastStatus: null,
@@ -4852,8 +4775,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					(row) =>
 						Effect.gen(function* () {
 							const timestamp = yield* now
-							const claimed = yield* claimRule(row.id, timestamp)
+							const claimed = yield* claimRule(row.orgId, row.id, timestamp)
 							if (claimed.length === 0) return
+
+							yield* touchRuleScheduledAt(row.id, timestamp).pipe(Effect.ignore)
 
 							yield* Effect.gen(function* () {
 								const ruleStart = yield* now
@@ -4901,11 +4826,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									return
 								}
 
-								// Uniform grouped/ungrouped path. The engine always returns one
-								// observation per group — a single "all" observation (with a
-								// no-data fallback) when the compiled plan is ungrouped — so both
-								// shapes flow through the same loop; ungrouped rules keep their
-								// historical "__total__" storage key at this boundary.
+								// Uniform grouped/ungrouped path. `evaluateRule` returns one
+								// outcome per group already keyed in storage vocabulary — a single
+								// UNGROUPED_GROUP_KEY entry (with a no-data fallback) when the
+								// compiled plan is ungrouped — so both shapes flow through the
+								// same loop with no key translation here.
 								const grouped = isGroupedPlan(normalized.compiledPlan)
 								const results = yield* evaluateRule(row.orgId, normalized)
 								const excludeSet = HashSet.fromIterable(normalized.excludeServiceNames)
@@ -4920,7 +4845,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											row,
 											normalized,
 											evaluation,
-											grouped ? groupKey : "__total__",
+											groupKey,
 											timestamp,
 											pendingChecks,
 											issueBudget,
@@ -4928,9 +4853,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									}),
 								)
 
-								const evaluatedGroups = grouped
-									? HashSet.fromIterable(Arr.map(eligible, (r) => r.groupKey))
-									: HashSet.fromIterable(["__total__"])
+								const evaluatedGroups = HashSet.fromIterable(
+									Arr.map(eligible, (r) => r.groupKey),
+								)
 								yield* resolveOrphanedGroupIncidents(
 									row.orgId,
 									normalized.id,
@@ -4940,8 +4865,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								)
 
 								// Self-heal state rows whose key shape contradicts the rule's
-								// groupedness: a grouped rule can never legitimately own a
-								// "__total__" row (left behind when this rule evaluated ungrouped,
+								// groupedness: a grouped rule can never legitimately own an
+								// ungrouped row (left behind when this rule evaluated ungrouped,
 								// or by recordEvaluationFailure), and vice versa. Orphan resolution
 								// above only deletes incident-backed rows. Zero rows touched in
 								// steady state, so the Electric shape stays quiet.
@@ -4953,8 +4878,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 												eq(alertRuleStates.orgId, row.orgId),
 												eq(alertRuleStates.ruleId, row.id),
 												grouped
-													? eq(alertRuleStates.groupKey, "__total__")
-													: ne(alertRuleStates.groupKey, "__total__"),
+													? eq(alertRuleStates.groupKey, UNGROUPED_GROUP_KEY)
+													: ne(alertRuleStates.groupKey, UNGROUPED_GROUP_KEY),
 											),
 										),
 								)

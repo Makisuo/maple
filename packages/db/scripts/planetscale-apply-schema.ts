@@ -18,7 +18,7 @@
  */
 import { spawnSync } from "node:child_process"
 import { resolve } from "node:path"
-import { applyRuntimeGrants } from "./grant-runtime-role"
+import { ensureRuntimePrivileges } from "./ensure-privileges"
 import { fail, resolveDatabase, withBranchConnection } from "./planetscale-connection"
 
 const branch = process.argv[2]?.trim()
@@ -28,15 +28,19 @@ if (!branch) {
 
 const packageDir = resolve(import.meta.dir, "..")
 
-// The runtime app role (the role the deployed worker authenticates as through
-// its Hyperdrive binding) differs from the ephemeral migration role used here,
-// and table-rebuild migrations strip its grants — so re-grant it after migrate.
-// Required for prod (`main`); a clear warning + skip for branches that don't set
-// it, so non-prod schema-applies don't fail.
-const runtimeRole = process.env.MAPLE_PG_RUNTIME_ROLE?.trim()
-
 await withBranchConnection(branch as string, async (connectionUrl) => {
-	console.log(`→ Applying schema to ${resolveDatabase()}/${branch} via drizzle-kit migrate\n`)
+	// BEFORE migrate, not after: this installs default privileges, which only
+	// apply to objects created after they are set. A fresh `CREATE TABLE` carries
+	// OWNER privileges only and a table-rebuild migration DROPs grants outright,
+	// so without this the ingest gateway — the one consumer that reads through
+	// PUBLIC rather than by inheriting `postgres` — hits "permission denied for
+	// table …" on anything the migration creates. That is the 2026-07-29 outage:
+	// `org_spend_limits` landed owner-only, the gateway's startup probe joins it,
+	// the probe failed, the process exited, Railway burned its 5 restart retries,
+	// and ingest was down 21.7h for every org.
+	await ensureRuntimePrivileges(connectionUrl)
+
+	console.log(`\n→ Applying schema to ${resolveDatabase()}/${branch} via drizzle-kit migrate\n`)
 	const proc = spawnSync("bun", ["run", "db:migrate"], {
 		cwd: packageDir,
 		env: { ...process.env, DATABASE_URL: connectionUrl },
@@ -46,14 +50,4 @@ await withBranchConnection(branch as string, async (connectionUrl) => {
 		fail("drizzle-kit migrate failed")
 	}
 	console.log(`\n✓ Schema applied to ${resolveDatabase()}/${branch}`)
-
-	if (runtimeRole) {
-		console.log(`\n→ Re-granting runtime privileges to "${runtimeRole}"\n`)
-		await applyRuntimeGrants(connectionUrl, runtimeRole)
-	} else {
-		console.warn(
-			"\n⚠ MAPLE_PG_RUNTIME_ROLE not set — SKIPPING runtime grants. The app role may hit " +
-				'"permission denied for table …" after a table rebuild. Set it to the prod Hyperdrive role.',
-		)
-	}
 })

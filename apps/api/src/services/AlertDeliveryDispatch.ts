@@ -4,8 +4,8 @@ import {
 	type AlertComparator,
 	type AlertDestinationType,
 	type AlertEventType,
-	type AlertSeverity,
 	type AlertSignalType,
+	type AlertSeverity,
 } from "@maple/domain/http"
 import type { AlertDestinationRow } from "@maple/db"
 import { Clock, Duration, Effect, Match, Option, Schema } from "effect"
@@ -590,12 +590,6 @@ export const verifyPagerDutyRoutingKey = (
 	)
 
 /**
- * Resolve + render the effective title/body for a destination. Returns `null`
- * when the rule has no custom template (caller falls back to the hardcoded
- * formatter) or when rendering fails for any reason — templating must never
- * block delivery.
- */
-/**
  * The key a rule's notification-template `overrides` map is keyed by. It mostly
  * mirrors `AlertDestinationType`, but `"slack"` is deliberately retained as the
  * *dialect* for Slack deliveries even though the legacy `slack` webhook
@@ -604,6 +598,12 @@ export const verifyPagerDutyRoutingKey = (
  */
 type TemplateDialect = AlertDestinationType | "slack"
 
+/**
+ * Resolve + render the effective title/body for a destination. Returns `null`
+ * when the rule has no custom template (caller falls back to the hardcoded
+ * formatter) or when rendering fails for any reason — templating must never
+ * block delivery.
+ */
 const renderTitleBody = (
 	context: TemplateRenderContext,
 	dialect: TemplateDialect,
@@ -696,7 +696,7 @@ export const dispatchDelivery = (
 				"slack-bot": (config) =>
 					Effect.gen(function* () {
 						const botToken = yield* deps.resolveSlackBotToken(context.destination.orgId)
-						const templated = renderTitleBody(context, "slack", linkUrl, chatUrl)
+						const templated = renderTitleBody(context, "slack-bot", linkUrl, chatUrl)
 						const blocks = templated
 							? buildSlackBlocksFromTemplate(
 									templated.title,
@@ -863,41 +863,6 @@ export const dispatchDelivery = (
 						}
 						return {
 							providerMessage: "Delivered to webhook",
-							providerReference: context.dedupeKey,
-							responseCode: response.status,
-						} as DispatchResult
-					}),
-				hazel: (config) =>
-					Effect.gen(function* () {
-						const headers: Record<string, string> = {
-							"content-type": "application/json",
-							"x-maple-event-type": context.eventType,
-							"x-maple-delivery-key": context.deliveryKey,
-						}
-						if (config.signingSecret) {
-							headers["x-maple-signature"] = createHmac("sha256", config.signingSecret)
-								.update(payloadJson)
-								.digest("hex")
-						}
-						const response = yield* runTimedFetch("hazel", "Hazel", fetchFn, timeoutMs, () =>
-							safeFetch(config.webhookUrl, {
-								method: "POST",
-								headers,
-								body: payloadJson,
-								fetchFn,
-							}),
-						)
-						if (!response.ok) {
-							const detail = yield* readErrorBody(response)
-							return yield* Effect.fail(
-								makeDeliveryError(
-									`Hazel delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
-									"hazel",
-								),
-							)
-						}
-						return {
-							providerMessage: "Delivered to Hazel",
 							providerReference: context.dedupeKey,
 							responseCode: response.status,
 						} as DispatchResult

@@ -1,4 +1,5 @@
 import { resolveBotToken } from "./maple.js"
+import { ACK_REACTION_NAME, addReactionViaSlack, registerAckedTriggeringMessage } from "./reaction.js"
 
 /**
  * Immediate "received" acknowledgement: reacts with :eyes: on the triggering
@@ -19,9 +20,12 @@ import { resolveBotToken } from "./maple.js"
  *     no subtype except `file_share` — mirrors eve's own DM dispatch filter).
  *
  * Requires the Slack app's `reactions:write` scope.
+ *
+ * Each qualifying message is also registered in lib/reaction.ts's
+ * triggering-message registry, so the agent's `add_reaction` tool can later
+ * swap this ack for a contextual emoji on the exact message that triggered
+ * the turn.
  */
-
-const ACK_REACTION_NAME = "eyes"
 
 /** Injectable dependencies so tests never touch the network. */
 export interface AckReactionDeps {
@@ -44,6 +48,8 @@ export interface AckReactionTarget {
 	readonly teamId?: string
 	readonly channelId: string
 	readonly messageTs: string
+	/** The enclosing thread's root ts; absent for top-level messages. */
+	readonly threadTs?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,10 +89,12 @@ export function parseAckReactionTarget(rawBody: string): AckReactionTarget | nul
 		return null
 	}
 
+	const threadTs = typeof event.thread_ts === "string" && event.thread_ts.length > 0 ? event.thread_ts : undefined
 	return {
 		teamId: typeof parsed.team_id === "string" ? parsed.team_id : undefined,
 		channelId,
 		messageTs: ts,
+		...(threadTs ? { threadTs } : {}),
 	}
 }
 
@@ -102,6 +110,10 @@ export async function acknowledgeIncomingMessage(
 	try {
 		const target = parseAckReactionTarget(rawBody)
 		if (!target) return
+		// Registered before the reaction call: the `add_reaction` tool needs the
+		// triggering message's ts even when this ack itself fails (its remove of
+		// a never-added `:eyes:` is tolerated downstream).
+		registerAckedTriggeringMessage(target)
 		const botToken = await deps.resolveBotToken({ teamId: target.teamId })
 		await deps.addReaction({
 			botToken,
@@ -114,34 +126,3 @@ export async function acknowledgeIncomingMessage(
 	}
 }
 
-/**
- * `reactions.add` via the Slack Web API. `already_reacted` is success: Slack
- * retries webhook delivery, and the second attempt finding the reaction in
- * place is exactly the desired end state.
- */
-export async function addReactionViaSlack(options: {
-	readonly botToken: string
-	readonly channelId: string
-	readonly timestamp: string
-	readonly name: string
-}): Promise<void> {
-	const res = await fetch("https://slack.com/api/reactions.add", {
-		method: "POST",
-		headers: {
-			authorization: `Bearer ${options.botToken}`,
-			"content-type": "application/json; charset=utf-8",
-		},
-		body: JSON.stringify({
-			channel: options.channelId,
-			timestamp: options.timestamp,
-			name: options.name,
-		}),
-	})
-	if (!res.ok) {
-		throw new Error(`Slack reactions.add failed: HTTP ${res.status}`)
-	}
-	const payload = (await res.json()) as { ok: boolean; error?: string }
-	if (!payload.ok && payload.error !== "already_reacted") {
-		throw new Error(`Slack reactions.add failed: ${payload.error ?? "unknown_error"}`)
-	}
-}

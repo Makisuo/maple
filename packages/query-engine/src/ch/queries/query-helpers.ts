@@ -94,6 +94,9 @@ interface TracesMatchModes {
 export interface TracesBaseWhereOpts {
 	serviceName?: string
 	spanName?: string
+	/** Multi-value spelling; wins over the scalar field when non-empty. */
+	serviceNames?: readonly string[]
+	spanNames?: readonly string[]
 	statusCode?: "Ok" | "Error" | "Unset"
 	rootOnly?: boolean
 	errorsOnly?: boolean
@@ -110,6 +113,35 @@ export interface TracesBaseWhereOpts {
 	excludedEnvironments?: readonly string[]
 	excludedNamespaces?: readonly string[]
 	attributeIndexMode?: AttributeIndexMode
+}
+
+/**
+ * Collapse the scalar and array spellings of an inclusion filter into one list.
+ *
+ * The scalar field is the original spelling and is still what the dashboard DSL,
+ * MCP tools and alert rules emit; the array is what the traces UI sends once the
+ * user ticks more than one facet value. The array wins when non-empty.
+ *
+ * Returns `undefined` for "no filter" so callers can keep using `CH.when`.
+ */
+export function inclusionValues(
+	scalar: string | undefined,
+	list: readonly string[] | undefined,
+): readonly string[] | undefined {
+	if (list?.length) return list
+	if (scalar) return [scalar]
+	return undefined
+}
+
+/**
+ * `col = 'x'` for a single value, `col IN (...)` for several.
+ *
+ * Keeping equality as its own form matters beyond aesthetics: single-value is
+ * the overwhelmingly common case, and `=` is what the captured `db.query.text`
+ * span attribute and every query fingerprint carried before multi-select.
+ */
+export function inclusionCondition(col: CH.Expr<string>, values: readonly string[]): CH.Condition {
+	return values.length === 1 ? col.eq(values[0]!) : CH.inList(col, values)
 }
 
 /**
@@ -154,16 +186,18 @@ export function tracesBaseWhereConditions(
 	opts: TracesBaseWhereOpts,
 ): Array<CH.Condition | undefined> {
 	const mm = opts.matchModes
+	const services = inclusionValues(opts.serviceName, opts.serviceNames)
+	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
 		$.Timestamp.gte(param.dateTime("startTime")),
 		$.Timestamp.lte(param.dateTime("endTime")),
-		CH.when(opts.serviceName, (v: string) =>
-			mm?.serviceName === "contains"
-				? CH.positionCaseInsensitive($.ServiceName, CH.lit(v)).gt(0)
-				: $.ServiceName.eq(v),
+		CH.when(services, (v: readonly string[]) =>
+			mm?.serviceName === "contains" && v.length === 1
+				? CH.positionCaseInsensitive($.ServiceName, CH.lit(v[0]!)).gt(0)
+				: inclusionCondition($.ServiceName, v),
 		),
-		CH.when(opts.spanName, (v: string) => {
+		CH.when(spanNames, (v: readonly string[]) => {
 			// The "Root Span" facet and trace_list_mv expose the *display* name
 			// ("GET /api/users"); the raw traces table stores "http.server GET".
 			// Match either spelling so a facet click actually selects rows.
@@ -172,11 +206,11 @@ export function tracesBaseWhereConditions(
 				$.SpanAttributes.get("http.route"),
 				$.SpanAttributes.get("url.path"),
 			)
-			return mm?.spanName === "contains"
-				? CH.positionCaseInsensitive($.SpanName, CH.lit(v))
+			return mm?.spanName === "contains" && v.length === 1
+				? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!))
 						.gt(0)
-						.or(CH.positionCaseInsensitive(display, CH.lit(v)).gt(0))
-				: $.SpanName.eq(v).or(display.eq(v))
+						.or(CH.positionCaseInsensitive(display, CH.lit(v[0]!)).gt(0))
+				: inclusionCondition($.SpanName, v).or(inclusionCondition(display, v))
 		}),
 		CH.when(opts.statusCode, (v: string) => $.StatusCode.eq(v)),
 		CH.whenTrue(!!opts.rootOnly, () => $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq(""))),
@@ -271,7 +305,17 @@ export function tracesBaseWhereConditions(
 
 /** Returns true iff the opts + groupBy can be served by service_overview_spans_mv. */
 export function canUseServiceOverviewMv(opts: TracesBaseWhereOpts, groupBy?: readonly string[]): boolean {
-	if (opts.spanName) return false
+	// The MV is *lossy*: it stores only entry-point spans (Server/Consumer OR
+	// root). That set is equivalent to the raw table only when the query itself
+	// asks for entry points via `rootOnly`. Routing a non-rootOnly query here
+	// silently swaps the population — the query says "all spans" and gets
+	// "entry spans", which is how one dashboard could show a breakdown by
+	// service (MV-routed, entry spans) next to a breakdown by span name
+	// (raw-routed, all spans) with a 20x gap between their totals.
+	if (!opts.rootOnly) return false
+	// The MV has no SpanName column, so neither spelling of the span-name filter
+	// can be served from it.
+	if (opts.spanName || opts.spanNames?.length) return false
 	if (opts.excludedSpanNames?.length) return false
 	if (opts.attributeFilters?.length) return false
 	if (opts.resourceAttributeFilters?.length) return false
@@ -286,21 +330,23 @@ export function canUseServiceOverviewMv(opts: TracesBaseWhereOpts, groupBy?: rea
 /**
  * Build the WHERE conditions for queries against service_overview_spans.
  * Mirrors the subset of tracesBaseWhereConditions that the MV can serve.
- * `rootOnly` is a no-op here: the MV already pre-filters to entry-point spans.
+ * `rootOnly` is a no-op here: the MV already pre-filters to entry-point spans,
+ * and `canUseServiceOverviewMv` only routes rootOnly queries to it.
  */
 export function serviceOverviewWhereConditions(
 	$: ColumnAccessor<typeof ServiceOverviewSpans.columns>,
 	opts: TracesBaseWhereOpts,
 ): Array<CH.Condition | undefined> {
 	const mm = opts.matchModes
+	const services = inclusionValues(opts.serviceName, opts.serviceNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
 		$.Timestamp.gte(param.dateTime("startTime")),
 		$.Timestamp.lte(param.dateTime("endTime")),
-		CH.when(opts.serviceName, (v: string) =>
-			mm?.serviceName === "contains"
-				? CH.positionCaseInsensitive($.ServiceName, CH.lit(v)).gt(0)
-				: $.ServiceName.eq(v),
+		CH.when(services, (v: readonly string[]) =>
+			mm?.serviceName === "contains" && v.length === 1
+				? CH.positionCaseInsensitive($.ServiceName, CH.lit(v[0]!)).gt(0)
+				: inclusionCondition($.ServiceName, v),
 		),
 		errorsOnlyCondition($.StatusCode, opts.errorsOnly),
 	]
@@ -381,25 +427,35 @@ export function canUseTracesAggregatesMv(
 	return true
 }
 
-/** Build WHERE conditions for queries against traces_aggregates_hourly. */
+/**
+ * Build WHERE conditions for queries against traces_aggregates_hourly.
+ *
+ * `hourBounds` overrides the default `[startTime, endTime]` window with raw SQL
+ * expressions. Callers that union this MV with raw partial-hour edges pass the
+ * whole-hour interior (`[firstFullHour, endHour)`) so the two halves tile the
+ * requested window exactly instead of overlapping or leaving a gap.
+ */
 export function tracesAggregatesWhereConditions(
 	$: ColumnAccessor<typeof TracesAggregatesHourly.columns>,
 	opts: TracesBaseWhereOpts,
+	hourBounds?: { readonly gte: string; readonly lt: string },
 ): Array<CH.Condition | undefined> {
 	const mm = opts.matchModes
+	const services = inclusionValues(opts.serviceName, opts.serviceNames)
+	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		$.Hour.gte(param.dateTime("startTime")),
-		$.Hour.lte(param.dateTime("endTime")),
-		CH.when(opts.serviceName, (v: string) =>
-			mm?.serviceName === "contains"
-				? CH.positionCaseInsensitive($.ServiceName, CH.lit(v)).gt(0)
-				: $.ServiceName.eq(v),
+		hourBounds ? $.Hour.gte(CH.rawExpr<string>(hourBounds.gte)) : $.Hour.gte(param.dateTime("startTime")),
+		hourBounds ? $.Hour.lt(CH.rawExpr<string>(hourBounds.lt)) : $.Hour.lte(param.dateTime("endTime")),
+		CH.when(services, (v: readonly string[]) =>
+			mm?.serviceName === "contains" && v.length === 1
+				? CH.positionCaseInsensitive($.ServiceName, CH.lit(v[0]!)).gt(0)
+				: inclusionCondition($.ServiceName, v),
 		),
-		CH.when(opts.spanName, (v: string) =>
-			mm?.spanName === "contains"
-				? CH.positionCaseInsensitive($.SpanName, CH.lit(v)).gt(0)
-				: $.SpanName.eq(v),
+		CH.when(spanNames, (v: readonly string[]) =>
+			mm?.spanName === "contains" && v.length === 1
+				? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!)).gt(0)
+				: inclusionCondition($.SpanName, v),
 		),
 		CH.whenTrue(!!opts.rootOnly, () => $.IsEntryPoint.eq(1)),
 		errorsOnlyCondition($.StatusCode, opts.errorsOnly),

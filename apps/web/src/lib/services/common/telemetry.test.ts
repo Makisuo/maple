@@ -78,9 +78,7 @@ describe("tracedFetch", () => {
 		const abortError = new DOMException("signal is aborted without reason", "AbortError")
 		vi.spyOn(globalThis, "fetch").mockRejectedValue(abortError)
 
-		await expect(tracedFetch("electric-sync", "https://api.test/api/sync/shape")).rejects.toBe(
-			abortError,
-		)
+		await expect(tracedFetch("electric-sync", "https://api.test/api/sync/shape")).rejects.toBe(abortError)
 	})
 
 	it("still rejects on a genuine network failure", async () => {

@@ -10,14 +10,14 @@ import {
 	buildEvaluateCacheKey,
 	cacheTtlForQueryKind,
 	computeBucketSeconds,
-	computeEvaluateBuckets,
-	decodeEvalPoints,
+	computeAlertBuckets,
+	decodeEvalSeries,
+	encodeEvalPoints,
 	makeQueryEngineEvaluate,
-	makeQueryEngineEvaluateRawSql,
 	makeQueryEngineEvaluateSeries,
 	makeQueryEngineExecute,
 	msToTinybirdDateTime,
-	reducePerGroupObservations,
+	reduceAlertBuckets,
 	resolveDirectRouteCachePolicy,
 	toEpochMs,
 	validateEvaluate,
@@ -26,10 +26,11 @@ import {
 	type GroupedAlertObservation,
 	type DirectRouteCachePolicyInput,
 	type QueryEngineDirectError,
-	type QueryEngineRawSqlEvaluateRequest,
+	type AlertEvaluateRequest,
 	type QueryEngineRouteError,
 	type TimeRangeBounds,
 } from "@maple/query-engine/runtime"
+import type { QuerySpec } from "@maple/query-engine"
 import type { TenantContext } from "./AuthService"
 import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
@@ -48,23 +49,16 @@ export interface QueryEngineServiceShape {
 		request: QueryEngineExecuteRequest,
 	) => Effect.Effect<QueryEngineExecuteResponse, QueryEngineRouteError>
 	/**
-	 * Evaluate an alert query and return one observation per group. When the
-	 * spec has no group-by (or `groupBy = ["none"]`) the result is a length-1
-	 * array with `groupKey = "all"`. The reducer collapses each group's bucket
-	 * series down to a scalar value.
+	 * Evaluate an alert query and return one observation per group. Takes any
+	 * alert source — a structured spec or user-authored ClickHouse SQL (which is
+	 * macro-expanded via `$__orgFilter` / `$__timeFilter` / `$__timeGroup` before
+	 * execution) — so callers never branch on the rule kind. When the source has
+	 * no grouping the result is a length-1 array with `groupKey = "all"`; the
+	 * reducer collapses each group's bucket series down to a scalar.
 	 */
 	readonly evaluate: (
 		tenant: TenantContext,
-		request: QueryEngineEvaluateRequest,
-	) => Effect.Effect<ReadonlyArray<GroupedAlertObservation>, QueryEngineRouteError>
-	/**
-	 * Evaluate a raw-SQL alert query. The user SQL is macro-expanded (`$__orgFilter`,
-	 * `$__timeFilter`, …) and executed; rows are grouped by an optional `group`
-	 * column and the `value` column is collapsed per group with the reducer.
-	 */
-	readonly evaluateRawSql: (
-		tenant: TenantContext,
-		request: QueryEngineRawSqlEvaluateRequest,
+		request: AlertEvaluateRequest,
 	) => Effect.Effect<ReadonlyArray<GroupedAlertObservation>, QueryEngineRouteError>
 	/**
 	 * Evaluate an alert query and return the per-(bucket, group) observations
@@ -74,7 +68,7 @@ export interface QueryEngineServiceShape {
 	 */
 	readonly evaluateSeries: (
 		tenant: TenantContext,
-		request: QueryEngineEvaluateRequest,
+		request: AlertEvaluateRequest,
 	) => Effect.Effect<ReadonlyArray<BucketGroupObs>, QueryEngineRouteError>
 	/**
 	 * Edge-cache a direct-route query keyed by `(orgId, routeName, payload)`.
@@ -99,7 +93,6 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 			const bucketCache = yield* BucketCacheService
 			const executeImpl = makeQueryEngineExecute(warehouse)
 			const evaluateImpl = makeQueryEngineEvaluate(warehouse)
-			const evaluateRawSqlImpl = makeQueryEngineEvaluateRawSql(warehouse)
 			const evaluateSeriesImpl = makeQueryEngineEvaluateSeries(warehouse)
 			// Off by default. Live measurement showed routing alert evaluation
 			// through the bucket cache is a NET REGRESSION: each eval fans out into
@@ -263,18 +256,18 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 			// rules over the same query+window share buckets.
 			const bucketCachedEvaluate = Effect.fn("QueryEngineService.bucketCachedEvaluate")(function* (
 				tenant: TenantContext,
-				request: QueryEngineEvaluateRequest,
+				request: AlertEvaluateRequest & { readonly source: { kind: "spec"; query: QuerySpec } },
 				bucketSeconds: number,
 				range: { readonly startMs: number; readonly endMs: number },
 			) {
 				yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
-				yield* Effect.annotateCurrentSpan("query.source", request.query.source)
+				yield* Effect.annotateCurrentSpan("query.source", request.source.query.source)
 				yield* Effect.annotateCurrentSpan("query.reducer", request.reducer)
 
 				// Pin bucketSeconds + an `__eval` discriminator so evaluate points
 				// (which encode value + sampleCount) never collide with dashboard
 				// execute points (value only) under the shared cache namespace.
-				const pinnedQuery = { ...request.query, bucketSeconds }
+				const pinnedQuery = { ...request.source.query, bucketSeconds }
 
 				const outcome = yield* bucketCache.getOrComputeBuckets(
 					{
@@ -285,16 +278,16 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 						endMs: range.endMs,
 					},
 					({ startMs, endMs }) =>
-						computeEvaluateBuckets(
+						computeAlertBuckets(
 							warehouse,
 							tenant,
 							{
-								query: request.query,
+								source: request.source,
 								startTime: msToTinybirdDateTime(startMs),
 								endTime: msToTinybirdDateTime(endMs),
 							},
 							bucketSeconds,
-						),
+						).pipe(Effect.map(encodeEvalPoints)),
 				)
 
 				yield* Metric.update(QueryEngineMetrics.bucketCacheBucketsHit, outcome.bucketsHit)
@@ -314,31 +307,29 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				yield* Effect.annotateCurrentSpan("cache.bucketsMissed", outcome.bucketsMissed)
 				yield* Effect.annotateCurrentSpan("cache.missingRangeCount", outcome.missingRangeCount)
 
-				const byGroup = decodeEvalPoints(outcome.points)
-				if (byGroup.size === 0) {
-					byGroup.set("all", [{ value: null, sampleCount: 0, hasData: false }])
-				}
-				const result = reducePerGroupObservations(byGroup, request.reducer)
+				const result = reduceAlertBuckets(decodeEvalSeries(outcome.points), request.reducer)
 				yield* Effect.annotateCurrentSpan("result.groupCount", result.length)
 				return result
 			})
 
 			const cachedEvaluate = Effect.fn("QueryEngineService.cachedEvaluate")(function* (
 				tenant: TenantContext,
-				request: QueryEngineEvaluateRequest,
+				request: AlertEvaluateRequest,
 			) {
 				return yield* withTimeout(
 					Effect.gen(function* () {
-						const source = request.query.source
+						// Raw SQL is never bucket-cached: its rows are user-defined, so the
+						// cache cannot reason about which ranges are safely re-fetchable.
+						const spec = request.source.kind === "spec" ? request.source.query : null
 						const bucketable =
-							request.query.kind === "timeseries" &&
-							(source === "traces" || source === "logs" || source === "metrics")
+							spec != null &&
+							spec.kind === "timeseries" &&
+							(spec.source === "traces" || spec.source === "logs" || spec.source === "metrics")
 
 						if (evalBucketCacheEnabled && bucketCache.enabled && bucketable) {
 							const startMs = toEpochMs(request.startTime)
 							const endMs = toEpochMs(request.endTime)
-							const bucketSeconds =
-								request.query.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
+							const bucketSeconds = spec.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
 							if (
 								Number.isFinite(startMs) &&
 								Number.isFinite(endMs) &&
@@ -348,10 +339,12 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 								// Validate up front: the bucket path bypasses evaluateImpl,
 								// whose generator is what otherwise runs validateEvaluate.
 								yield* validateEvaluate(request)
-								return yield* bucketCachedEvaluate(tenant, request, bucketSeconds, {
-									startMs,
-									endMs,
-								})
+								return yield* bucketCachedEvaluate(
+									tenant,
+									{ ...request, source: { kind: "spec", query: spec } },
+									bucketSeconds,
+									{ startMs, endMs },
+								)
 							}
 						}
 
@@ -419,14 +412,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 			// dashboard scoped to query-engine spans. This ordering also lets the span
 			// record the `QueryEngineTimeoutError` (504, so `Error` status) instead of
 			// closing interrupt-only as `Ok` — which is the point of marking timeouts.
-			const evaluateRawSql = (tenant: TenantContext, request: QueryEngineRawSqlEvaluateRequest) =>
-				withTimeout(evaluateRawSqlImpl(tenant, request)).pipe(
-					Effect.withSpan("QueryEngineService.evaluateRawSql", {
-						attributes: { orgId: tenant.orgId },
-					}),
-				)
-
-			const evaluateSeries = (tenant: TenantContext, request: QueryEngineEvaluateRequest) =>
+			const evaluateSeries = (tenant: TenantContext, request: AlertEvaluateRequest) =>
 				withTimeout(evaluateSeriesImpl(tenant, request)).pipe(
 					Effect.withSpan("QueryEngineService.evaluateSeries", {
 						attributes: { orgId: tenant.orgId },
@@ -436,7 +422,6 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 			return {
 				execute,
 				evaluate: cachedEvaluate,
-				evaluateRawSql,
 				evaluateSeries,
 				cachedDirect,
 			} satisfies QueryEngineServiceShape

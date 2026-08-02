@@ -1,4 +1,3 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { QueryEngineAlertReducer, QueryEngineNoDataBehavior } from "../query-engine"
 import {
@@ -14,15 +13,12 @@ import {
 	RoleName,
 	UserId,
 } from "../primitives"
-import { Authorization } from "./current-tenant"
 import { QueryBuilderQueryDraftSchema } from "./query-engine"
-import { warehouseHttpErrors } from "./warehouse"
 
 export const AlertDestinationType = Schema.Literals([
 	"slack-bot",
 	"pagerduty",
 	"webhook",
-	"hazel",
 	"hazel-oauth",
 	"discord",
 	"email",
@@ -44,7 +40,6 @@ export const AlertSignalType = Schema.Literals([
 	"p99_latency",
 	"apdex",
 	"throughput",
-	"metric",
 	"builder_query",
 	"raw_query",
 ]).annotate({
@@ -90,22 +85,18 @@ export type AlertComparator = Schema.Schema.Type<typeof AlertComparator>
 export const isRangeComparator = (c: AlertComparator): c is "between" | "not_between" =>
 	c === "between" || c === "not_between"
 
-export const AlertMetricType = Schema.Literals([
-	"sum",
-	"gauge",
-	"histogram",
-	"exponential_histogram",
-]).annotate({
-	identifier: "@maple/AlertMetricType",
-	title: "Alert Metric Type",
-})
-export type AlertMetricType = Schema.Schema.Type<typeof AlertMetricType>
-
-export const AlertMetricAggregation = Schema.Literals(["avg", "min", "max", "sum", "count"]).annotate({
-	identifier: "@maple/AlertMetricAggregation",
-	title: "Alert Metric Aggregation",
-})
-export type AlertMetricAggregation = Schema.Schema.Type<typeof AlertMetricAggregation>
+/**
+ * The group key an *ungrouped* rule stores its state, incidents and check rows
+ * under. It is part of the public surface — the v2 wire, the ClickHouse
+ * `alert_checks.GroupKey` column and the Electric-synced web collection all
+ * carry it — so it can never be renamed.
+ *
+ * The query engine has its own generic vocabulary for the same idea (`"all"`),
+ * which is deliberately not this constant: `AlertsService.evaluateRule` is the
+ * single boundary that translates, so `"all"` never escapes into storage and no
+ * other call site re-derives the key.
+ */
+export const UNGROUPED_GROUP_KEY = "__total__"
 
 export const AlertIncidentStatus = Schema.Literals(["open", "resolved"]).annotate({
 	identifier: "@maple/AlertIncidentStatus",
@@ -193,16 +184,6 @@ export class WebhookAlertDestinationConfig extends Schema.Class<WebhookAlertDest
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
-export class HazelAlertDestinationConfig extends Schema.Class<HazelAlertDestinationConfig>(
-	"HazelAlertDestinationConfig",
-)({
-	type: Schema.Literal("hazel"),
-	name: ChannelLabel,
-	webhookUrl: NonEmptyString,
-	signingSecret: Schema.optionalKey(Schema.String),
-	enabled: Schema.optionalKey(Schema.Boolean),
-}) {}
-
 export class HazelOAuthAlertDestinationConfig extends Schema.Class<HazelOAuthAlertDestinationConfig>(
 	"HazelOAuthAlertDestinationConfig",
 )({
@@ -250,7 +231,6 @@ export const AlertDestinationCreateRequest = Schema.Union([
 	SlackBotAlertDestinationConfig,
 	PagerDutyAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
-	HazelAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
 	DiscordAlertDestinationConfig,
 	EmailAlertDestinationConfig,
@@ -279,15 +259,6 @@ export class UpdateWebhookAlertDestinationConfig extends Schema.Class<UpdateWebh
 )({
 	name: OptionalNonEmptyString,
 	url: Schema.optionalKey(Schema.String),
-	signingSecret: Schema.optionalKey(Schema.String),
-	enabled: Schema.optionalKey(Schema.Boolean),
-}) {}
-
-export class UpdateHazelAlertDestinationConfig extends Schema.Class<UpdateHazelAlertDestinationConfig>(
-	"UpdateHazelAlertDestinationConfig",
-)({
-	name: OptionalNonEmptyString,
-	webhookUrl: Schema.optionalKey(Schema.String),
 	signingSecret: Schema.optionalKey(Schema.String),
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
@@ -332,10 +303,6 @@ export const AlertDestinationUpdateRequest = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("webhook"),
 		...UpdateWebhookAlertDestinationConfig.fields,
-	}),
-	Schema.Struct({
-		type: Schema.Literal("hazel"),
-		...UpdateHazelAlertDestinationConfig.fields,
 	}),
 	Schema.Struct({
 		type: Schema.Literal("hazel-oauth"),
@@ -461,6 +428,12 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
 	severity: AlertSeverity,
 	serviceNames: Schema.Array(Schema.String),
 	excludeServiceNames: Schema.Array(Schema.String),
+	/**
+	 * Deployment environments the rule is scoped to. Empty means every
+	 * environment. Ignored for `builder_query` / `raw_query`, whose queries carry
+	 * their own filters.
+	 */
+	environments: Schema.Array(Schema.String),
 	/** Free-form tags used to group and filter rules in the alerts list. */
 	tags: Schema.Array(Schema.String),
 	groupBy: Schema.NullOr(AlertGroupBy),
@@ -473,9 +446,6 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
 	consecutiveBreachesRequired: PositiveInt,
 	consecutiveHealthyRequired: PositiveInt,
 	renotifyIntervalMinutes: PositiveInt,
-	metricName: Schema.NullOr(Schema.String),
-	metricType: Schema.NullOr(AlertMetricType),
-	metricAggregation: Schema.NullOr(AlertMetricAggregation),
 	apdexThresholdMs: Schema.NullOr(PositiveFloat),
 	queryBuilderDraft: Schema.NullOr(QueryBuilderQueryDraftSchema),
 	rawQuerySql: Schema.NullOr(Schema.String),
@@ -506,6 +476,7 @@ export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>
 	severity: AlertSeverity,
 	serviceNames: Schema.optionalKey(Schema.Array(Schema.String)),
 	excludeServiceNames: Schema.optionalKey(Schema.Array(Schema.String)),
+	environments: Schema.optionalKey(Schema.Array(Schema.String)),
 	tags: Schema.optionalKey(RuleTags),
 	groupBy: Schema.optionalKey(Schema.NullOr(AlertGroupBy)),
 	signalType: AlertSignalType,
@@ -517,9 +488,6 @@ export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>
 	consecutiveBreachesRequired: Schema.optionalKey(PositiveInt),
 	consecutiveHealthyRequired: Schema.optionalKey(PositiveInt),
 	renotifyIntervalMinutes: Schema.optionalKey(PositiveInt),
-	metricName: Schema.optionalKey(Schema.NullOr(Schema.String)),
-	metricType: Schema.optionalKey(Schema.NullOr(AlertMetricType)),
-	metricAggregation: Schema.optionalKey(Schema.NullOr(AlertMetricAggregation)),
 	apdexThresholdMs: Schema.optionalKey(Schema.NullOr(PositiveFloat)),
 	queryBuilderDraft: Schema.optionalKey(Schema.NullOr(QueryBuilderQueryDraftSchema)),
 	rawQuerySql: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -778,142 +746,3 @@ export const ListRuleChecksQuery = Schema.Struct({
 		Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 2000 })),
 	),
 })
-
-export class AlertsApiGroup extends HttpApiGroup.make("alerts")
-	.add(
-		HttpApiEndpoint.get("listDestinations", "/destinations", {
-			success: AlertDestinationsListResponse,
-			error: AlertPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("createDestination", "/destinations", {
-			payload: AlertDestinationCreateRequest,
-			success: AlertDestinationDocument,
-			error: [AlertForbiddenError, AlertValidationError, AlertPersistenceError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.patch("updateDestination", "/destinations/:destinationId", {
-			params: {
-				destinationId: AlertDestinationId,
-			},
-			payload: AlertDestinationUpdateRequest,
-			success: AlertDestinationDocument,
-			error: [AlertForbiddenError, AlertValidationError, AlertPersistenceError, AlertNotFoundError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.delete("deleteDestination", "/destinations/:destinationId", {
-			params: {
-				destinationId: AlertDestinationId,
-			},
-			success: AlertDestinationDeleteResponse,
-			error: [
-				AlertForbiddenError,
-				AlertPersistenceError,
-				AlertNotFoundError,
-				AlertDestinationInUseError,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("testDestination", "/destinations/:destinationId/test", {
-			params: {
-				destinationId: AlertDestinationId,
-			},
-			success: AlertDestinationTestResponse,
-			error: [
-				AlertForbiddenError,
-				AlertValidationError,
-				AlertPersistenceError,
-				AlertNotFoundError,
-				AlertDeliveryError,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("listRules", "/rules", {
-			success: AlertRulesListResponse,
-			error: AlertPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("createRule", "/rules", {
-			payload: AlertRuleUpsertRequest,
-			success: AlertRuleDocument,
-			error: [AlertForbiddenError, AlertValidationError, AlertPersistenceError, AlertNotFoundError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.patch("updateRule", "/rules/:ruleId", {
-			params: {
-				ruleId: AlertRuleId,
-			},
-			payload: AlertRuleUpsertRequest,
-			success: AlertRuleDocument,
-			error: [AlertForbiddenError, AlertValidationError, AlertPersistenceError, AlertNotFoundError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.delete("deleteRule", "/rules/:ruleId", {
-			params: {
-				ruleId: AlertRuleId,
-			},
-			success: AlertRuleDeleteResponse,
-			error: [AlertForbiddenError, AlertPersistenceError, AlertNotFoundError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("testRule", "/rules/test", {
-			payload: AlertRuleTestRequest,
-			success: AlertEvaluationResult,
-			error: [
-				AlertForbiddenError,
-				AlertValidationError,
-				AlertPersistenceError,
-				AlertNotFoundError,
-				AlertDeliveryError,
-				...warehouseHttpErrors,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("previewRule", "/rules/preview", {
-			payload: AlertRulePreviewRequest,
-			success: AlertRulePreviewResponse,
-			// No AlertForbiddenError: preview is read-only (unlike testRule, which can
-			// send notifications), so it is not admin-gated.
-			error: [
-				AlertValidationError,
-				AlertPersistenceError,
-				AlertNotFoundError,
-				AlertDeliveryError,
-				...warehouseHttpErrors,
-			],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("listIncidents", "/incidents", {
-			success: AlertIncidentsListResponse,
-			error: AlertPersistenceError,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("listRuleChecks", "/rules/:ruleId/checks", {
-			params: {
-				ruleId: AlertRuleId,
-			},
-			query: ListRuleChecksQuery,
-			success: AlertChecksListResponse,
-			error: [AlertPersistenceError, AlertNotFoundError],
-		}),
-	)
-	.add(
-		HttpApiEndpoint.get("listDeliveryEvents", "/delivery-events", {
-			success: AlertDeliveryEventsListResponse,
-			error: AlertPersistenceError,
-		}),
-	)
-	.prefix("/api/alerts")
-	.middleware(Authorization) {}
