@@ -5,8 +5,8 @@
 // These define the ClickHouse table schemas used by the query DSL.
 // ---------------------------------------------------------------------------
 
-import * as T from "@maple-dev/clickhouse-builder/types"
 import { table } from "@maple-dev/clickhouse-builder"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 export const Traces = table("traces", {
 	OrgId: T.string,
@@ -500,6 +500,42 @@ export const SessionReplays = table("session_replays", {
 	TraceIds: T.array(T.string),
 	ResourceAttributes: T.map(T.string, T.string),
 	Version: T.uint32,
+	// Analytics dimensions (migration 0011). Hand-mirrored from
+	// packages/domain/src/tinybird/datasources.ts; `tables.test.ts` asserts the
+	// mirror against the generated warehouse DDL, so drift fails the build instead
+	// of surfacing as a runtime "unknown column".
+	//
+	// Persistent per-browser id: uniq(VisitorId) = unique visitors. VisitorIsNew
+	// is client-asserted because a self-join against earlier sessions is both a
+	// second full scan and wrong past the 30-day TTL.
+	VisitorId: T.string,
+	VisitorIsNew: T.uint8,
+	UserEmail: T.string,
+	UserName: T.string,
+	GroupId: T.string,
+	GroupName: T.string,
+	// Trait keys are arbitrary customer-defined dimensions, so the warehouse map
+	// deliberately uses plain String keys rather than a shared LC dictionary.
+	UserTraits: T.map(T.string, T.string),
+	Referrer: T.string,
+	// Gateway-normalized (lowercased, `www.` stripped). '' = direct, internal, or
+	// suppressed by Referrer-Policy — not the same thing as "direct traffic".
+	ReferrerHost: T.string,
+	UtmSource: T.string,
+	UtmMedium: T.string,
+	UtmCampaign: T.string,
+	UtmTerm: T.string,
+	UtmContent: T.string,
+	Host: T.string,
+	// Pathname only, no query string or hash. Note UrlInitial above is a misnomer
+	// — the SDK sets it from location.href at post time, so it tracks the latest
+	// URL; EntryPath is the real entry page.
+	EntryPath: T.string,
+	ExitPath: T.string,
+	Language: T.string,
+	// Heartbeat-refreshed. Recovers duration for sessions killed without an
+	// unload beacon, where EndTime is null.
+	LastActivityAt: T.nullable(T.dateTime64),
 })
 
 export const SessionReplayEvents = table("session_replay_events", {
@@ -527,7 +563,9 @@ export const SessionEvents = table("session_events", {
 	Timestamp: T.dateTime64,
 	// Monotonic per-session ordering tiebreaker (events can share a ms timestamp).
 	Seq: T.uint32,
-	// "navigation" | "click" | "input" | "console" | "network" | "error"
+	// "navigation" | "click" | "input" | "console" | "network" | "error" | "custom"
+	// "custom" rows come from the SDK's track(name, props): Message = event name,
+	// Attributes = props. The gateway enforces this allowlist.
 	Type: T.string,
 	Url: T.string,
 	// OTel trace id active when the event fired (links network/error → traces).
