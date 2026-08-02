@@ -41,6 +41,7 @@ Rules:
 - Keys are normalized to lowercase by the parser.
 - Quoted values use double quotes.
 - **There is no `IS NULL` / `IS NOT NULL`.** To require an attribute be present, use `<key> exists`; to require it absent, `<key> !exists`. This is the single most common mistake.
+- **`exists` means present *and* non-empty.** Attributes live in ClickHouse `Map` columns where a missing key reads back as `''`, and instrumentation sometimes writes an empty value, so `exists` lowers to `mapContains(...) AND value != ''`. `!exists` is its exact complement — absent *or* empty. Pairing `exists` with a `groupBy` on the same key is therefore enough to keep a "(no value)" bucket out of the breakdown.
 - **Attribute filters work directly.** On `dataSource: "traces"` you can filter by any span/resource attribute — `query.context = "tracesList"`, `error.type != "Timeout"`, `db.system = "clickhouse"`. Bare keys outside the small structured allowlist (`service.name`, `span.name`, `deployment.environment`, `deployment.commit_sha`, `root_only`, `has_error`) are auto-treated as span attributes; you can also write them explicitly as `attr.<key>` / `resource.<key>`. Cap: 5 `attr.*` + 5 `resource.*` filters per query.
 - **Unhonored clauses are now rejected at write time.** `add_dashboard_widget` / `update_dashboard_widget` / `replace_dashboard_widgets` run the builder before persisting and FAIL (nothing saved) if a clause can't be honored — e.g. exceeding the attr cap, or an unsupported logs/metrics filter key. (This used to be a silent drop.)
 

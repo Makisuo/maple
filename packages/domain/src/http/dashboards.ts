@@ -1,4 +1,4 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import {
 	DashboardId,
@@ -472,6 +472,21 @@ export class DashboardValidationError extends Schema.TaggedErrorClass<DashboardV
 	{ httpApiStatus: 400 },
 ) {}
 
+/**
+ * Rewrites request-decode failures on the dashboards group into a
+ * `DashboardValidationError` carrying the JSON path, the enclosing widget id
+ * and the expected-vs-received message for every offending field.
+ *
+ * Without it the runtime answers a schema failure with a bare empty 400, so the
+ * only way to find one bad key in a 14-widget document is to bisect it. The
+ * error class is already in every endpoint's error list, so attaching this
+ * widens no client contract.
+ */
+export class DashboardSchemaErrors extends HttpApiMiddleware.Service<DashboardSchemaErrors>()(
+	"DashboardSchemaErrors",
+	{ error: DashboardValidationError },
+) {}
+
 export class DashboardConcurrencyError extends Schema.TaggedErrorClass<DashboardConcurrencyError>()(
 	"@maple/http/errors/DashboardConcurrencyError",
 	{
@@ -691,4 +706,5 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		}),
 	)
 	.prefix("/api/dashboards")
-	.middleware(Authorization) {}
+	.middleware(Authorization)
+	.middleware(DashboardSchemaErrors) {}

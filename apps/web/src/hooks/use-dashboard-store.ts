@@ -13,10 +13,13 @@ import type { DashboardRefreshIntervalSeconds } from "@maple/domain/http"
 import type { V2DashboardMutation } from "@maple/domain/http/v2"
 import { useLiveQuery } from "@tanstack/react-db"
 import { runMapleApiV2 } from "@/lib/collections/api-runner"
-import { rowToDashboard } from "@/lib/collections/dashboards"
+import { rowToDashboard, v2DashboardToDashboard } from "@/lib/collections/dashboards"
+import { useCollectionLoadFailed } from "@/lib/collections/collection-load"
+import { useDashboardsFallback } from "@/lib/collections/dashboards-fallback"
 import {
 	getOrgCollections,
 	handleCollectionStuck,
+	retryOrgCollections,
 	useActiveOrgId,
 	useCollectionsGeneration,
 } from "@/lib/collections/org-collections"
@@ -124,21 +127,6 @@ function isConcurrencyConflict(failure: Exit.Exit<unknown, unknown>): boolean {
 		onSome: (error) => error instanceof DashboardConcurrencyError,
 	})
 }
-
-const v2DashboardToDashboard = (value: V2DashboardMutation): Dashboard => ({
-	id: value.id,
-	name: value.name,
-	...(value.description !== null ? { description: value.description } : {}),
-	tags: [...value.tags],
-	timeRange: value.timeRange,
-	widgets: [...value.widgets] as Dashboard["widgets"],
-	variables: [...value.variables] as Dashboard["variables"],
-	...(value.refreshIntervalSeconds !== null
-		? { refreshIntervalSeconds: value.refreshIntervalSeconds }
-		: {}),
-	createdAt: value.createdAt,
-	updatedAt: value.updatedAt,
-})
 
 // The one place plain UI time ranges become the schema's branded ISO strings.
 const toDocumentTimeRange = (timeRange: TimeRange) =>
@@ -499,11 +487,26 @@ export function useDashboardMutationSync() {
 	return { prepareForMutation, reconcileTxid }
 }
 
+/** What {@link useDashboardsRead} hands its consumers. */
+export interface DashboardsRead {
+	readonly dashboards: ReadonlyArray<Dashboard>
+	readonly isLoading: boolean
+	readonly isError: boolean
+	/**
+	 * True when `dashboards` is the plain-HTTP snapshot rather than live sync:
+	 * the rows are correct as of the fetch but will not update, so editing
+	 * affordances should be treated as unavailable.
+	 */
+	readonly degraded: boolean
+	/** Recreates the shape streams with a fresh budget — the retry affordance. */
+	readonly retry: () => void
+}
+
 // The read half of the ElectricSQL-backed dashboard store: a live query over
 // the org's synced collection, mapped to the web `Dashboard` shape. Global
 // chrome (sidebar, command palette) uses this directly — it needs the list but
 // none of the mutators.
-export function useDashboardsRead() {
+export function useDashboardsRead(): DashboardsRead {
 	const collection = useDashboardsCollection()
 
 	const {
@@ -512,14 +515,35 @@ export function useDashboardsRead() {
 		isError,
 	} = useLiveQuery((q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"), [collection])
 
-	const dashboards = useMemo(
+	const synced = useMemo(
 		() => (rows ?? []).map(rowToDashboard).filter((d): d is Dashboard => d !== null),
 		[rows],
 	)
 
-	const isLoading = liveLoading && dashboards.length === 0
+	const stillLoading = liveLoading && synced.length === 0
 
-	return { dashboards, isLoading, isError }
+	// The bounded load a live query has no notion of. Without it an unreachable
+	// sync endpoint keeps `liveLoading` true forever and every consumer of this
+	// hook renders a skeleton that never resolves.
+	const syncFailed = useCollectionLoadFailed(collection.id, stillLoading)
+	const fallback = useDashboardsFallback(syncFailed)
+
+	// Live rows always win. The HTTP snapshot only stands in while sync is down,
+	// and once it has loaded it keeps standing in across heal attempts rather than
+	// blinking back to a skeleton every time a retry re-enters `loading`.
+	const degraded = synced.length === 0 && fallback.status === "ready"
+	// `idle` counts as pending for one commit: `useSyncExternalStore` fires the
+	// fetch from `subscribe`, i.e. after the render that first saw the failure.
+	const fallbackPending = fallback.status === "loading" || (syncFailed && fallback.status === "idle")
+	const failed = isError || fallback.status === "failed" || (syncFailed && !fallbackPending)
+
+	return {
+		dashboards: degraded ? fallback.dashboards : synced,
+		isLoading: !degraded && !failed && (stillLoading || fallbackPending),
+		isError: failed && !degraded,
+		degraded,
+		retry: retryOrgCollections,
+	}
 }
 
 // The write half: create/import/delete plus the per-dashboard widget mutators,
@@ -715,5 +739,9 @@ export function useDashboardMutations() {
 // dashboard detail route, the widget route, the toolbar). `persistenceErrorAtom`
 // is module-level shared state, so the split halves stay coherent.
 export function useDashboardStore() {
-	return { ...useDashboardsRead(), ...useDashboardMutations() }
+	const read = useDashboardsRead()
+	const mutations = useDashboardMutations()
+	// A degraded (HTTP-snapshot) read has no live sync to reconcile a write
+	// against, so editing stays off until the shape stream is back.
+	return { ...read, ...mutations, readOnly: read.degraded || mutations.readOnly }
 }

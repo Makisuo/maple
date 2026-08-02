@@ -331,4 +331,35 @@ describe("v2 dashboards over HTTP", () => {
 
 		await harness.dispose()
 	})
+
+	it("points an invalid widget field at its widget id and full path", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+
+		const response = await harness.request("POST", "/v2/dashboards", key.secret, {
+			name: "Operations",
+			time_range: { type: "relative", value: "12h" },
+			widgets: [
+				{
+					id: "error-rate",
+					visualization: "line",
+					data_source: { endpoint: "traces_timeseries", params: {} },
+					// `fill_nulls` is `number | false`; `true` is not a member.
+					display: { title: "error-rate", chart_presentation: { fill_nulls: true } },
+					layout: { x: 0, y: 0, w: 6, h: 4 },
+				},
+			],
+		})
+
+		expect(response.status).toBe(400)
+		expect(response.body.error.type).toBe("invalid_request_error")
+		expect(response.body.error.code).toBe("parameter_invalid")
+		// `param` is the whole path, not just its first segment.
+		expect(response.body.error.param).toContain("widgets[0]")
+		expect(response.body.error.param).toContain("fill_nulls")
+		expect(response.body.error.message).toContain('widget "error-rate"')
+		expect(response.body.error.message).toContain("true")
+
+		await harness.dispose()
+	})
 })
