@@ -351,7 +351,12 @@ jobs:
               uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
               with:
                   name: native-checkpoint-failure-${{ github.run_id }}
-                  path: ${{ runner.temp }}/maple-native-checkpoint
+                  # Both probes' roots: the migration probe used to fail without
+                  # leaving any evidence because only the checkpoint dir was
+                  # collected.
+                  path: |
+                      ${{ runner.temp }}/maple-native-checkpoint
+                      ${{ runner.temp }}/maple-native-migration
                   if-no-files-found: ignore
 
     local-archive-native:
