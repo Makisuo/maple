@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { toast as sonner } from "sonner"
+import { toastManager } from "../components/ui/toast"
 
 import { writeClipboardFallback } from "../lib/clipboard"
 import { useClipboard } from "./use-clipboard"
@@ -113,8 +113,17 @@ export function useCopy({
 		if (!ok) failed?.(reason)
 
 		if (notify) {
-			if (ok) sonner.success(message ?? (name ? `${name} copied` : "Copied to clipboard"))
-			else sonner.error(name ? `Failed to copy ${name.toLowerCase()}` : "Failed to copy")
+			if (ok) {
+				toastManager.add({
+					title: message ?? (name ? `${name} copied` : "Copied to clipboard"),
+					type: "success",
+				})
+			} else {
+				toastManager.add({
+					title: name ? `Failed to copy ${name.toLowerCase()}` : "Failed to copy",
+					type: "error",
+				})
+			}
 		}
 
 		if (!mounted.current) return ok

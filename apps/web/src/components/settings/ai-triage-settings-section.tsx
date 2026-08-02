@@ -1,7 +1,7 @@
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { useState } from "react"
 import { Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -50,9 +50,9 @@ export function AiTriageSettingsSection({ isAdmin, hasEntitlement }: AiTriageSet
 		})
 		setIsSaving(false)
 		if (Exit.isSuccess(result)) {
-			toast.success(successMessage)
+			toastManager.add({ title: successMessage, type: "success" })
 		} else {
-			toast.error("Failed to update AI triage settings.")
+			toastManager.add({ title: "Failed to update AI triage settings.", type: "error" })
 		}
 	}
 

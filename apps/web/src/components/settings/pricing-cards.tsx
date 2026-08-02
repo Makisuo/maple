@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import type { CatalogPlan, CatalogPlanItem } from "@maple/domain/http"
 
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
@@ -268,7 +268,7 @@ export function PricingCards() {
 				})
 			} catch (err) {
 				const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
-				toast.error(message)
+				toastManager.add({ title: message, type: "error" })
 			} finally {
 				setLoadingPlanId(null)
 			}
@@ -285,11 +285,11 @@ export function PricingCards() {
 				return
 			}
 
-			toast.success("Plan updated successfully.")
+			toastManager.add({ title: "Plan updated successfully.", type: "success" })
 			refreshCustomer()
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
-			toast.error(message)
+			toastManager.add({ title: message, type: "error" })
 		} finally {
 			setLoadingPlanId(null)
 		}
@@ -304,12 +304,12 @@ export function PricingCards() {
 				window.location.href = result.paymentUrl
 				return
 			}
-			toast.success("Plan updated successfully.")
+			toastManager.add({ title: "Plan updated successfully.", type: "success" })
 			refreshCustomer()
 			setConfirmDialog(null)
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
-			toast.error(message)
+			toastManager.add({ title: message, type: "error" })
 		} finally {
 			setIsAttaching(false)
 		}

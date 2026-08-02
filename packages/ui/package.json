@@ -30,7 +30,6 @@
 		"react-day-picker": "^10.0.1",
 		"react-resizable-panels": "^4.9.0",
 		"recharts": "catalog:ui",
-		"sonner": "^2.0.7",
 		"tailwind-merge": "catalog:tailwind"
 	},
 	"devDependencies": {

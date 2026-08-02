@@ -1,6 +1,6 @@
 import { Exit, Option } from "effect"
 import { Fragment, useState, type Dispatch, type SetStateAction } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import type { AlertDestinationDocument } from "@maple/domain/http"
 
@@ -100,10 +100,16 @@ export function useDestinationManager(): DestinationManager {
 				})
 
 		if (Exit.isSuccess(result)) {
-			toast.success(editing ? "Destination updated" : "Destination created")
+			toastManager.add({
+				title: editing ? "Destination updated" : "Destination created",
+				type: "success",
+			})
 			setDialogOpen(false)
 		} else {
-			toast.error(getExitErrorMessage(result, "Failed to save destination"))
+			toastManager.add({
+				title: getExitErrorMessage(result, "Failed to save destination"),
+				type: "error",
+			})
 		}
 		setSaving(false)
 	}
@@ -116,12 +122,15 @@ export function useDestinationManager(): DestinationManager {
 		})
 		if (Exit.isSuccess(result)) {
 			if (result.value.success) {
-				toast.success(result.value.message)
+				toastManager.add({ title: result.value.message, type: "success" })
 			} else {
-				toast.error(result.value.message)
+				toastManager.add({ title: result.value.message, type: "error" })
 			}
 		} else {
-			toast.error(getExitErrorMessage(result, "Failed to send test notification"))
+			toastManager.add({
+				title: getExitErrorMessage(result, "Failed to send test notification"),
+				type: "error",
+			})
 		}
 		setTestingId(null)
 	}
@@ -136,7 +145,10 @@ export function useDestinationManager(): DestinationManager {
 			reactivityKeys: ["alertDestinations"],
 		})
 		if (!Exit.isSuccess(result)) {
-			toast.error(getExitErrorMessage(result, "Failed to update destination"))
+			toastManager.add({
+				title: getExitErrorMessage(result, "Failed to update destination"),
+				type: "error",
+			})
 		}
 	}
 
@@ -147,16 +159,19 @@ export function useDestinationManager(): DestinationManager {
 			reactivityKeys: ["alertDestinations", "alertRules"],
 		})
 		if (Exit.isSuccess(result)) {
-			toast.success("Destination deleted")
+			toastManager.add({ title: "Destination deleted", type: "success" })
 		} else {
 			// A destination still referenced by rules deletes with a 409
 			// conflict_error whose message already names the referencing rules.
 			const failure = Option.getOrUndefined(Exit.findErrorOption(result))
 			const v2 = v2ErrorInfo(failure)
 			if (v2 !== null && v2.type === "conflict_error") {
-				toast.error(v2.message)
+				toastManager.add({ title: v2.message, type: "error" })
 			} else {
-				toast.error(getExitErrorMessage(result, "Failed to delete destination"))
+				toastManager.add({
+					title: getExitErrorMessage(result, "Failed to delete destination"),
+					type: "error",
+				})
 			}
 		}
 		setDeletingId(null)

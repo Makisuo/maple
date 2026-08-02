@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type { FailedSend } from "@flue/react"
 import { Exit } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useFlueChat } from "@/hooks/use-flue-chat"
@@ -163,13 +163,13 @@ export function ChatConversation({
 		const exit = await applyProposal({ payload: makeChatApplyPayload(tool, input) })
 		if (Exit.isSuccess(exit)) {
 			if (exit.value.isError) {
-				toast.error(exit.value.content || `Couldn't apply ${tool}`)
+				toastManager.add({ title: exit.value.content || `Couldn't apply ${tool}`, type: "error" })
 				return
 			}
 			resolveApproval(toolCallId, "applied")
-			toast.success("Change applied")
+			toastManager.add({ title: "Change applied", type: "success" })
 		} else {
-			toast.error(`Failed to apply ${tool}`)
+			toastManager.add({ title: `Failed to apply ${tool}`, type: "error" })
 		}
 	}
 

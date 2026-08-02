@@ -13,7 +13,7 @@ import {
 } from "@maple/ui/components/ui/alert-dialog"
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { ErrorState } from "@/components/common/error-state"
 import { LoaderIcon, SlackIcon, SlackMonoIcon } from "@/components/icons"
@@ -184,7 +184,10 @@ export function SlackIntegrationCard() {
 			return
 		}
 		setBusy(null)
-		toast.error(getExitErrorMessage(result, "Failed to start the Slack install"))
+		toastManager.add({
+			title: getExitErrorMessage(result, "Failed to start the Slack install"),
+			type: "error",
+		})
 	}
 
 	async function handleUninstall() {
@@ -193,9 +196,12 @@ export function SlackIntegrationCard() {
 		setBusy(null)
 		setConfirmOpen(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("Slack disconnected")
+			toastManager.add({ title: "Slack disconnected", type: "success" })
 		} else {
-			toast.error(getExitErrorMessage(result, "Failed to disconnect Slack"))
+			toastManager.add({
+				title: getExitErrorMessage(result, "Failed to disconnect Slack"),
+				type: "error",
+			})
 		}
 	}
 

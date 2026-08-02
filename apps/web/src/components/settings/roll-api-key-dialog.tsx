@@ -2,7 +2,7 @@ import { useAtomSet } from "@/lib/effect-atom"
 import { useState } from "react"
 import { Exit } from "effect"
 import type { V2ApiKey } from "@maple/domain/http/v2"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -46,7 +46,7 @@ export function RollApiKeyDialog({ open, onOpenChange, apiKey, onRolled }: RollA
 			void reconcileTxid(result.value.txid)
 		} else {
 			const { title, description } = formatBackendError(result)
-			toast.error(title, { description })
+			toastManager.add({ title, description, type: "error" })
 		}
 		setIsRolling(false)
 	}

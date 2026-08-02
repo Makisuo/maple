@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { copyTooltipText, CopyButton } from "./copy-button"
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
+vi.mock("./toast", () => ({ toastManager: { add: vi.fn() } }))
 
 let writeText: ReturnType<typeof vi.fn>
 

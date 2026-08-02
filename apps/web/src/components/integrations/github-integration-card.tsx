@@ -21,7 +21,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatRelativeFrom } from "@maple/ui/time-format"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import {
 	ArrowRotateClockwiseIcon,
@@ -153,9 +153,9 @@ export function GithubIntegrationCard() {
 		const result = await disconnect({ reactivityKeys: ["githubIntegrationStatus"] })
 		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("GitHub disconnected")
+			toastManager.add({ title: "GitHub disconnected", type: "success" })
 		} else {
-			toast.error("Failed to disconnect GitHub")
+			toastManager.add({ title: "Failed to disconnect GitHub", type: "error" })
 		}
 	}
 
@@ -168,9 +168,9 @@ export function GithubIntegrationCard() {
 		})
 		setDeletingRepoId(null)
 		if (Exit.isSuccess(result)) {
-			toast.success(`Deleted ${repo.fullName} from Maple`)
+			toastManager.add({ title: `Deleted ${repo.fullName} from Maple`, type: "success" })
 		} else {
-			toast.error(`Failed to delete ${repo.fullName}`)
+			toastManager.add({ title: `Failed to delete ${repo.fullName}`, type: "error" })
 		}
 	}
 
@@ -182,13 +182,16 @@ export function GithubIntegrationCard() {
 		})
 		if (Exit.isSuccess(result)) {
 			if (result.value.backfillQueued) {
-				toast.success(`Now tracking ${trackedBranch} — re-syncing commits…`)
+				toastManager.add({
+					title: `Now tracking ${trackedBranch} — re-syncing commits…`,
+					type: "success",
+				})
 				// Poll through the gap between enqueue and the worker flipping the repo to "backfilling".
 				setForcePoll(true)
 				refreshStatus()
 			}
 		} else {
-			toast.error("Failed to change tracked branch")
+			toastManager.add({ title: "Failed to change tracked branch", type: "error" })
 			// Surface failure so the selector can revert its optimistic state.
 			throw new Error("Failed to change tracked branch")
 		}

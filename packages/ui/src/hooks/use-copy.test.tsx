@@ -1,9 +1,9 @@
 import { act, cleanup, render } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { toast } from "sonner"
+import { toastManager } from "../components/ui/toast"
 import { useCopy, type CopyAPI, type UseCopyOptions } from "./use-copy"
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
+vi.mock("../components/ui/toast", () => ({ toastManager: { add: vi.fn() } }))
 
 function Probe({ options, onReady }: { options?: UseCopyOptions; onReady: (api: CopyAPI) => void }) {
 	const api = useCopy(options)
@@ -26,7 +26,7 @@ function mount(options?: UseCopyOptions) {
 let writeText: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
-	// The sonner mock is module-level, so its call log outlives `restoreAllMocks`.
+	// The toast mock is module-level, so its call log outlives `restoreAllMocks`.
 	vi.clearAllMocks()
 	vi.useFakeTimers()
 	writeText = vi.fn().mockResolvedValue(undefined)
@@ -90,8 +90,8 @@ describe("useCopy", () => {
 		})
 		expect(probe.api.status).toBe("copied")
 		expect(onCopy).toHaveBeenCalledWith("maple")
-		expect(toast.success).toHaveBeenCalledWith("Trace ID copied")
-		expect(toast.error).not.toHaveBeenCalled()
+		expect(toastManager.add).toHaveBeenCalledWith({ title: "Trace ID copied", type: "success" })
+		expect(toastManager.add).not.toHaveBeenCalledWith(expect.objectContaining({ type: "error" }))
 	})
 
 	it("treats an empty value as an error rather than a silent success", async () => {
@@ -130,7 +130,7 @@ describe("useCopy", () => {
 		await act(async () => {
 			await probe.api.copy("abc")
 		})
-		expect(toast.success).not.toHaveBeenCalled()
+		expect(toastManager.add).not.toHaveBeenCalled()
 	})
 
 	it("toasts on both outcomes by default", async () => {
@@ -139,13 +139,13 @@ describe("useCopy", () => {
 		await act(async () => {
 			await probe.api.copy("abc")
 		})
-		expect(toast.success).toHaveBeenCalledWith("Trace ID copied")
+		expect(toastManager.add).toHaveBeenCalledWith({ title: "Trace ID copied", type: "success" })
 
 		writeText.mockRejectedValue(new Error("denied"))
 		await act(async () => {
 			await probe.api.copy("abc")
 		})
-		expect(toast.error).toHaveBeenCalledWith("Failed to copy trace id")
+		expect(toastManager.add).toHaveBeenCalledWith({ title: "Failed to copy trace id", type: "error" })
 	})
 
 	it("falls back to a generic toast when no label is given", async () => {
@@ -154,7 +154,7 @@ describe("useCopy", () => {
 		await act(async () => {
 			await probe.api.copy("abc")
 		})
-		expect(toast.success).toHaveBeenCalledWith("Copied to clipboard")
+		expect(toastManager.add).toHaveBeenCalledWith({ title: "Copied to clipboard", type: "success" })
 	})
 
 	it("`reset` clears the state immediately", async () => {

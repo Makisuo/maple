@@ -196,7 +196,6 @@
         "effect": "catalog:effect",
         "react": "catalog:react",
         "react-dom": "catalog:react",
-        "sonner": "^2.0.7",
         "sugar-high": "^1.2.1",
       },
       "devDependencies": {
@@ -325,7 +324,6 @@
         "react-dom": "catalog:react",
         "react-grid-layout": "^2.2.3",
         "recharts": "catalog:ui",
-        "sonner": "^2.0.7",
         "streamdown": "^2.5.0",
         "sugar-high": "^1.2.1",
         "tailwindcss": "catalog:tailwind",
@@ -657,7 +655,6 @@
         "react-day-picker": "^10.0.1",
         "react-resizable-panels": "^4.9.0",
         "recharts": "catalog:ui",
-        "sonner": "^2.0.7",
         "tailwind-merge": "catalog:tailwind",
       },
       "devDependencies": {
@@ -4775,8 +4772,6 @@
     "socket.io-parser": ["socket.io-parser@4.2.7", "", { "dependencies": { "@socket.io/component-emitter": "~3.1.0", "debug": "~4.4.1" } }, "sha512-IH/iSeO9T6gz1KkFleGDWkG9N3dl4jXVYUtMhIqH10Md0ttMer8nUNWiP1DKuNrybD2xBrixLJdCC9J6ECoYkg=="],
 
     "solid-js": ["solid-js@1.6.12", "", { "dependencies": { "csstype": "^3.1.0" } }, "sha512-JFqRobfG3q5r1l4RYVOAukk6+FWtHpXGIjgh/GEsHKweN/kK+iHOtzUALE6+P5t/jIcSNeGiVitX8gmJg+cYvQ=="],
-
-    "sonner": ["sonner@2.0.7", "", { "peerDependencies": { "react": "^18.0.0 || ^19.0.0 || ^19.0.0-rc", "react-dom": "^18.0.0 || ^19.0.0 || ^19.0.0-rc" } }, "sha512-W6ZN4p58k8aDKA4XPcx2hpIQXBRAgyiWVkYhT7CvK6D3iAu7xjvVyhQHg2/iaKJZ1XVJ4r7XuwGL+WGEK37i9w=="],
 
     "sorted-btree": ["sorted-btree@1.8.1", "", {}, "sha512-395+XIP+wqNn3USkFSrNz7G3Ss/MXlZEqesxvzCRFwL14h6e8LukDHdLBePn5pwbm5OQ9vGu8mDyz2lLDIqamQ=="],
 

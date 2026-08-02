@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit } from "effect"
 import { useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import type { V2Recommendation } from "@maple/domain/http/v2"
 
@@ -159,11 +159,14 @@ function RecommendationDetailPage() {
 			},
 		})
 		if (Exit.isSuccess(result)) {
-			toast.success(`Mapping created — ${target.source_key} → ${canonicalKey}`)
+			toastManager.add({
+				title: `Mapping created — ${target.source_key} → ${canonicalKey}`,
+				type: "success",
+			})
 			refreshIssues()
 			refreshMappings()
 		} else {
-			toast.error("Failed to create mapping")
+			toastManager.add({ title: "Failed to create mapping", type: "error" })
 		}
 		setBusy(null)
 	}
@@ -172,7 +175,7 @@ function RecommendationDetailPage() {
 		setBusy("dismiss")
 		const result = await dismissMutation({ params: { id: target.id } })
 		if (Exit.isSuccess(result)) refreshIssues()
-		else toast.error("Failed to dismiss recommendation")
+		else toastManager.add({ title: "Failed to dismiss recommendation", type: "error" })
 		setBusy(null)
 	}
 
@@ -180,7 +183,7 @@ function RecommendationDetailPage() {
 		setBusy("reopen")
 		const result = await reopenMutation({ params: { id: target.id } })
 		if (Exit.isSuccess(result)) refreshIssues()
-		else toast.error("Failed to reopen recommendation")
+		else toastManager.add({ title: "Failed to reopen recommendation", type: "error" })
 		setBusy(null)
 	}
 

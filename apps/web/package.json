@@ -62,7 +62,6 @@
 		"react-dom": "catalog:react",
 		"react-grid-layout": "^2.2.3",
 		"recharts": "catalog:ui",
-		"sonner": "^2.0.7",
 		"streamdown": "^2.5.0",
 		"sugar-high": "^1.2.1",
 		"tailwindcss": "catalog:tailwind",
