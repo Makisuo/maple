@@ -10,9 +10,9 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
-import { BellIcon, CheckIcon, GridSquareCirclePlusIcon, LinkIcon } from "@/components/icons"
+import { BellIcon, GridSquareCirclePlusIcon } from "@/components/icons"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { encodeAlertChartToSearchParam } from "@/lib/alerts/widget-chart-param"
 import type { WidgetDataSource } from "@/components/dashboard-builder/types"
 import type { MetricsQueryDraft } from "@/lib/query-builder/model"
@@ -37,8 +37,6 @@ interface MetricGraduationActionsProps {
 export function MetricGraduationActions({ draft }: MetricGraduationActionsProps) {
 	const navigate = useNavigate()
 	const [dialogOpen, setDialogOpen] = React.useState(false)
-	// Silent: the button swaps to a check icon, so a toast would double up.
-	const { copied, copy } = useCopyToClipboard("Link", { silent: true })
 
 	const handleCreateAlert = () => {
 		const chart = encodeAlertChartToSearchParam({
@@ -53,8 +51,6 @@ export function MetricGraduationActions({ draft }: MetricGraduationActionsProps)
 		void navigate({ to: "/alerts/create", search: chart ? { chart } : {} })
 	}
 
-	const handleCopyLink = () => copy(window.location.href)
-
 	return (
 		<div className="flex items-center gap-2">
 			<Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
@@ -65,10 +61,14 @@ export function MetricGraduationActions({ draft }: MetricGraduationActionsProps)
 				<BellIcon size={14} />
 				Create alert
 			</Button>
-			<Button variant="outline" size="sm" onClick={handleCopyLink}>
-				{copied ? <CheckIcon size={14} /> : <LinkIcon size={14} />}
-				{copied ? "Copied" : "Copy link"}
-			</Button>
+			<CopyButton
+				value={() => window.location.href}
+				label="Link"
+				idleLabel="Copy link"
+				glyph="link"
+				toast={false}
+				variant="outline"
+			/>
 
 			<AddToDashboardDialog open={dialogOpen} onOpenChange={setDialogOpen} draft={draft} />
 		</div>

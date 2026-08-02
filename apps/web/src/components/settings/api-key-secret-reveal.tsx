@@ -6,9 +6,9 @@ import {
 	InputGroupButton,
 	InputGroupInput,
 } from "@maple/ui/components/ui/input-group"
-import { CheckIcon, CopyIcon, EyeIcon } from "@/components/icons"
-import { maskKey } from "@/components/ingest/copyable-field"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { EyeIcon } from "@/components/icons"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
+import { maskKey } from "@maple/ui/components/ui/copyable-field"
 
 interface ApiKeySecretRevealProps {
 	secret: string
@@ -21,7 +21,6 @@ interface ApiKeySecretRevealProps {
  * dialogs so the "copy it now, you won't see it again" UX stays identical.
  */
 export function ApiKeySecretReveal({ secret }: ApiKeySecretRevealProps) {
-	const { copied, copy } = useCopyToClipboard("API key")
 	const [isVisible, setIsVisible] = useState(false)
 
 	return (
@@ -43,17 +42,7 @@ export function ApiKeySecretReveal({ secret }: ApiKeySecretRevealProps) {
 					>
 						<EyeIcon size={14} className={isVisible ? "text-foreground" : undefined} />
 					</InputGroupButton>
-					<InputGroupButton
-						onClick={() => copy(secret)}
-						aria-label="Copy API key"
-						title={copied ? "Copied!" : "Copy"}
-					>
-						{copied ? (
-							<CheckIcon size={14} className="text-severity-info" />
-						) : (
-							<CopyIcon size={14} />
-						)}
-					</InputGroupButton>
+					<CopyButton value={secret} label="API key" render={<InputGroupButton />} />
 				</InputGroupAddon>
 			</InputGroup>
 			<p className="text-muted-foreground text-xs">

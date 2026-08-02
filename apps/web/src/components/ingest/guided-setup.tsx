@@ -16,7 +16,7 @@ import { sdkSnippets, type FrameworkId } from "@/components/quick-start/sdk-snip
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { useQuickStart } from "@/hooks/use-quick-start"
 import type { RoleOption } from "@/atoms/quick-start-atoms"
-import { CopyableField } from "./copyable-field"
+import { CopyableField } from "@maple/ui/components/ui/copyable-field"
 
 const frameworkIconMap: Record<FrameworkId, React.ComponentType<{ size?: number; className?: string }>> = {
 	nextjs: NextjsIcon,

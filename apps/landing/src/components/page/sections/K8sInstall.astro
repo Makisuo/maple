@@ -96,23 +96,12 @@ const installSteps = [
 </section>
 
 <script>
-	// The button says it copies, so it copies. Label reverts after 1.6s; on
-	// failure it says so rather than silently claiming success.
-	for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
-		const label = button.querySelector<HTMLElement>("[data-copy-label]");
-		if (!label) continue;
-		const original = label.textContent ?? "";
-
-		button.addEventListener("click", async () => {
-			try {
-				await navigator.clipboard.writeText(button.dataset.copy ?? "");
-				label.textContent = "Copied";
-			} catch {
-				label.textContent = "Press ⌘C";
-			}
-			setTimeout(() => {
-				label.textContent = original;
-			}, 1600);
-		});
-	}
+	import { bindCopyButtons } from "../../../lib/copy-to-clipboard";
+	bindCopyButtons({
+		hostSelector: "[data-copy]",
+		buttonSelector: "[data-copy]",
+		labelSelector: "[data-copy-label]",
+		copiedLabel: "Copied",
+		errorLabel: "Press ⌘C",
+	});
 </script>

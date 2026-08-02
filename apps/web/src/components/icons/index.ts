@@ -29,6 +29,7 @@ export {
 	FireIcon,
 	GlobeIcon,
 	LineHeightIcon,
+	LinkIcon,
 	LoaderIcon,
 	MagnifierIcon,
 	MenuIcon,
@@ -101,7 +102,6 @@ export { KubernetesIcon } from "./kubernetes"
 export { LanguageIcon } from "./language"
 export { LayoutLeftIcon } from "./layout-left"
 export { LayoutRightIcon } from "./layout-right"
-export { LinkIcon } from "./link"
 export { LogoutIcon } from "./logout"
 export { MagnifierCheckIcon } from "./magnifier-check"
 export { MaximizeIcon } from "./maximize"

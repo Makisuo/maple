@@ -578,7 +578,7 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 							<Value mono className="truncate">
 								{session.serviceName}
 							</Value>
-							<CopyButton value={session.serviceName} label="Copy service name" />
+							<CopyButton value={session.serviceName} label="Service name" iconSize={12} className="size-5" toast={false} />
 						</span>
 					</DetailRail.Row>
 				)}
@@ -587,7 +587,7 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 						<Value mono className="truncate">
 							{sessionId.slice(0, 12)}…
 						</Value>
-						<CopyButton value={sessionId} label="Copy session id" />
+						<CopyButton value={sessionId} label="Session ID" iconSize={12} className="size-5" toast={false} />
 					</span>
 				</DetailRail.Row>
 				{session.recorded !== undefined && (

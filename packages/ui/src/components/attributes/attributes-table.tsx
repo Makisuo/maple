@@ -2,38 +2,58 @@
 
 import { ChevronRightIcon } from "../icons"
 import { cn } from "../../lib/utils"
-import { useClipboard } from "../../hooks/use-clipboard"
+import { useCopy } from "../../hooks/use-copy"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "../ui/collapsible"
 import { groupAttributesByNamespace } from "../../lib/log-attributes"
 import { CollapsibleJsonValue } from "./json-value"
 import { useAttributesConfig } from "./context"
 
+/**
+ * Inline attribute text that copies itself. A real `<button>`, so it's keyboard
+ * reachable and announced.
+ *
+ * This toasts. There's no room beside inline text for a status glyph, and an
+ * attributes table holds dozens of these — a per-row `Tooltip` would be a real
+ * cost on a hot path. A `title` can't carry the feedback either: the pointer
+ * hasn't moved when you click, so the native tooltip never re-shows. The
+ * transient tint is a bonus for the row you actually clicked; the toast is what
+ * you're meant to see.
+ */
 export function CopyableValue({
 	value,
+	label,
 	children,
 	className,
 }: {
 	value: string
+	/** Names the thing in the `aria-label` and the toast, e.g. the attribute key. */
+	label?: string
 	children?: React.ReactNode
 	className?: string
 }) {
-	const clipboard = useClipboard()
-	const { notifyCopied } = useAttributesConfig()
+	const { copy, status } = useCopy({ label })
 
 	return (
-		<span
+		<button
+			type="button"
+			aria-label={`Copy ${label ?? "value"}`}
 			className={cn(
-				"cursor-pointer hover:bg-muted/50 rounded px-0.5 -mx-0.5 transition-colors",
+				"-mx-0.5 cursor-pointer rounded px-0.5 text-left transition-colors",
+				// The settled state has to win over `hover:` — you are, by definition,
+				// hovering the thing you just clicked.
+				status === "idle" && "hover:bg-muted/50",
+				status === "copied" && "bg-severity-info/20",
+				status === "error" && "bg-destructive/20",
 				className,
 			)}
-			onClick={() => {
-				clipboard.copy(value)
-				notifyCopied?.()
+			onClick={(event) => {
+				event.stopPropagation()
+				void copy(value)
 			}}
 			title="Click to copy"
 		>
 			{children ?? value}
-		</span>
+		</button>
 	)
 }
 
@@ -65,6 +85,7 @@ function AttributeRow({
 		<div className="grid grid-cols-[minmax(7rem,38%)_1fr] items-start gap-x-3 px-2 py-1 transition-colors hover:bg-muted/40">
 			<CopyableValue
 				value={attrKey}
+				label="attribute key"
 				className="font-mono text-[11px] leading-relaxed text-muted-foreground break-words"
 			>
 				{displayKey ?? attrKey}
@@ -75,7 +96,9 @@ function AttributeRow({
 				) : override != null ? (
 					override
 				) : (
-					<CopyableValue value={value}>{value}</CopyableValue>
+					<CopyableValue value={value} label={attrKey}>
+						{value}
+					</CopyableValue>
 				)}
 			</div>
 		</div>

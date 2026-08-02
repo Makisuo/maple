@@ -152,6 +152,7 @@ const HOMEBREW_PATH =
 </section>
 
 <script>
+	import { bindCopyButtons } from "../../lib/copy-to-clipboard";
 	for (const root of document.querySelectorAll<HTMLElement>("[data-install-tabs]")) {
 		function setActive(id: string) {
 			root.querySelectorAll<HTMLElement>("[data-tab-trigger]").forEach((btn) => {
@@ -170,23 +171,11 @@ const HOMEBREW_PATH =
 
 		// Progressive enhancement: wire copy buttons. Without JS the command is
 		// still fully visible and selectable — the button just does nothing.
-		for (const cmd of root.querySelectorAll<HTMLElement>(".it__cmd[data-copy]")) {
-			const btn = cmd.querySelector<HTMLButtonElement>(".it__copy");
-			const text = cmd.dataset.copy ?? "";
-			btn?.addEventListener("click", async () => {
-				try {
-					await navigator.clipboard.writeText(text);
-					btn.textContent = "copied";
-					btn.classList.add("is-done");
-					setTimeout(() => {
-						btn.textContent = "copy";
-						btn.classList.remove("is-done");
-					}, 1400);
-				} catch {
-					/* clipboard blocked — no-op */
-				}
-			});
-		}
+		bindCopyButtons({
+			root,
+			hostSelector: ".it__cmd[data-copy]",
+			buttonSelector: ".it__copy",
+		});
 	}
 </script>
 
