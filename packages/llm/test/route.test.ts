@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import * as OpenAIChat from "../src/protocols/openai-chat"
 import { Auth } from "../src/route"
 

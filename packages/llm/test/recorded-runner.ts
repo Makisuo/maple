@@ -1,4 +1,4 @@
-import { test, type TestOptions } from "bun:test"
+import { test } from "vitest"
 import { Effect, type Layer } from "effect"
 import { testEffect } from "./lib/effect"
 import { cassetteName, classifiedTags, matchesSelected, missingEnv, unique } from "./recorded-utils"
@@ -48,7 +48,7 @@ export const recordedEffectGroup = <
     name: string,
     caseOptions: CaseOptions,
     body: RecordedBody<A, E2, R>,
-    testOptions?: number | TestOptions,
+    testOptions?: number,
   ) => {
     const cassette = cassetteName(input.options.prefix, name, caseOptions)
     if (cassettes.has(cassette)) throw new Error(`Duplicate ${input.duplicateLabel} "${cassette}"`)
@@ -86,14 +86,14 @@ export const recordedEffectGroup = <
     ).live(name, body, testOptions)
   }
 
-  const effect = <A, E2>(name: string, body: RecordedBody<A, E2, R>, testOptions?: number | TestOptions) =>
+  const effect = <A, E2>(name: string, body: RecordedBody<A, E2, R>, testOptions?: number) =>
     run(name, {} as CaseOptions, body, testOptions)
 
   effect.with = <A, E2>(
     name: string,
     caseOptions: CaseOptions,
     body: RecordedBody<A, E2, R>,
-    testOptions?: number | TestOptions,
+    testOptions?: number,
   ) => run(name, caseOptions, body, testOptions)
 
   return { effect }

@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect } from "vitest"
 import { Effect, Schema, Stream } from "effect"
 import {
   GenerationOptions,

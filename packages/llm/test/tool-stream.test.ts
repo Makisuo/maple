@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect } from "vitest"
 import { Effect } from "effect"
 import { LLMError } from "../src/schema"
 import { ToolStream } from "../src/protocols/utils/tool-stream"

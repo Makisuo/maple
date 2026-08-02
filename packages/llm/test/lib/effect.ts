@@ -1,4 +1,4 @@
-import { test, type TestOptions } from "bun:test"
+import { test } from "vitest"
 import { Cause, Effect, Exit, Layer } from "effect"
 import type * as Scope from "effect/Scope"
 import * as TestClock from "effect/testing/TestClock"
@@ -20,22 +20,22 @@ const run = <A, E, R, E2>(value: Body<A, E, R | Scope.Scope>, layer: Layer.Layer
   }).pipe(Effect.runPromise)
 
 const make = <R, E>(testLayer: Layer.Layer<R, E>, liveLayer: Layer.Layer<R, E>) => {
-  const effect = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
+  const effect = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number) =>
     test(name, () => run(value, testLayer), opts)
 
-  effect.only = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
+  effect.only = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number) =>
     test.only(name, () => run(value, testLayer), opts)
 
-  effect.skip = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
+  effect.skip = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number) =>
     test.skip(name, () => run(value, testLayer), opts)
 
-  const live = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
+  const live = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number) =>
     test(name, () => run(value, liveLayer), opts)
 
-  live.only = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
+  live.only = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number) =>
     test.only(name, () => run(value, liveLayer), opts)
 
-  live.skip = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
+  live.skip = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number) =>
     test.skip(name, () => run(value, liveLayer), opts)
 
   return { effect, live }

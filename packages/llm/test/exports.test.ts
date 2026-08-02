@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test"
-import { LLM, LLMClient, Provider } from "@opencode-ai/llm"
-import { Route, Protocol } from "@opencode-ai/llm/route"
-import { Provider as ProviderSubpath } from "@opencode-ai/llm/provider"
+import { describe, expect, test } from "vitest"
+import { LLM, LLMClient, Provider } from "@maple/llm"
+import { Route, Protocol } from "@maple/llm/route"
+import { Provider as ProviderSubpath } from "@maple/llm/provider"
 import {
   CloudflareAIGateway,
   CloudflareWorkersAI,
@@ -9,47 +9,47 @@ import {
   OpenAICompatible,
   OpenRouter,
   XAI,
-} from "@opencode-ai/llm/providers"
-import * as GitHubCopilot from "@opencode-ai/llm/providers/github-copilot"
-import { OpenAIChat, OpenAICompatibleChat, OpenAIResponses } from "@opencode-ai/llm/protocols"
-import * as AnthropicMessages from "@opencode-ai/llm/protocols/anthropic-messages"
+} from "@maple/llm/providers"
+import * as GitHubCopilot from "@maple/llm/providers/github-copilot"
+import { OpenAIChat, OpenAICompatibleChat, OpenAIResponses } from "@maple/llm/protocols"
+import * as AnthropicMessages from "@maple/llm/protocols/anthropic-messages"
 
 describe("public exports", () => {
   test("root exposes app-facing runtime APIs", () => {
-    expect(LLM.request).toBeFunction()
-    expect(LLMClient.Service).toBeFunction()
+    expect(typeof LLM.request).toBe("function")
+    expect(typeof LLMClient.Service).toBe("function")
     expect(LLMClient.layer).toBeDefined()
-    expect(Provider.make).toBeFunction()
+    expect(typeof Provider.make).toBe("function")
     expect(ProviderSubpath.make).toBe(Provider.make)
   })
 
   test("route barrel exposes route-authoring APIs", () => {
-    expect(Route.make).toBeFunction()
-    expect(Protocol.make).toBeFunction()
+    expect(typeof Route.make).toBe("function")
+    expect(typeof Protocol.make).toBe("function")
   })
 
   test("provider barrels expose user-facing facades", () => {
-    expect(OpenAI.model).toBeFunction()
+    expect(typeof OpenAI.model).toBe("function")
     expect(OpenAI.provider.model).toBe(OpenAI.model)
     expect(OpenAI.provider.responses).toBe(OpenAI.responses)
     expect(OpenAI.provider.responsesWebSocket).toBe(OpenAI.responsesWebSocket)
-    expect(OpenAI.configure({ apiKey: "fixture" }).responses).toBeFunction()
-    expect(OpenAICompatible.deepseek.model).toBeFunction()
-    expect(CloudflareAIGateway.configure).toBeFunction()
-    expect(CloudflareAIGateway.configure({ accountId: "fixture", gatewayApiKey: "fixture" }).model).toBeFunction()
-    expect(CloudflareWorkersAI.configure).toBeFunction()
-    expect(CloudflareWorkersAI.configure({ accountId: "fixture", apiKey: "fixture" }).model).toBeFunction()
-    expect(OpenRouter.model).toBeFunction()
+    expect(typeof OpenAI.configure({ apiKey: "fixture" }).responses).toBe("function")
+    expect(typeof OpenAICompatible.deepseek.model).toBe("function")
+    expect(typeof CloudflareAIGateway.configure).toBe("function")
+    expect(typeof CloudflareAIGateway.configure({ accountId: "fixture", gatewayApiKey: "fixture" }).model).toBe("function")
+    expect(typeof CloudflareWorkersAI.configure).toBe("function")
+    expect(typeof CloudflareWorkersAI.configure({ accountId: "fixture", apiKey: "fixture" }).model).toBe("function")
+    expect(typeof OpenRouter.model).toBe("function")
     expect(OpenRouter.provider.model).toBe(OpenRouter.model)
-    expect(XAI.model).toBeFunction()
+    expect(typeof XAI.model).toBe("function")
     expect(XAI.provider.model).toBe(XAI.model)
     expect(XAI.provider.responses).toBe(XAI.responses)
     expect(XAI.provider.chat).toBe(XAI.chat)
     expect(XAI.configure({ apiKey: "fixture" }).responses("grok-4.3").route.id).toBe("openai-responses")
     expect(XAI.configure({ apiKey: "fixture" }).chat("grok-4.3").route.id).toBe("openai-compatible-chat")
-    expect(
+    expect(typeof 
       GitHubCopilot.configure({ baseURL: "https://api.githubcopilot.test", apiKey: "fixture" }).model,
-    ).toBeFunction()
+    ).toBe("function")
     expect(
       GitHubCopilot.configure({
         baseURL: "https://api.githubcopilot.test",

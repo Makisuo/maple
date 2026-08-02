@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import { isContextOverflow } from "../src"
 
 describe("provider error classification", () => {

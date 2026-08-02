@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import { Effect } from "effect"
 import { CacheHint, LLM, Message } from "../src"
 import { Auth, LLMClient } from "../src/route"

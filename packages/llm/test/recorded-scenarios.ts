@@ -1,4 +1,4 @@
-import { expect } from "bun:test"
+import { expect } from "vitest"
 import { Effect, Schema } from "effect"
 import {
   LLM,
@@ -83,9 +83,15 @@ export const goldenWeatherToolLoopRequest = (input: {
   })
 
 const RESTROOM_IMAGE_TEXT = "jiggling restroom prison"
+// Vite inlines this as a `data:image/png;base64,...` URL, so the fixture needs no filesystem access.
+// (Upstream read it with `Bun.file`.)
+const restroomImageModules = import.meta.glob<string>("./fixtures/media/restroom.png", {
+  query: "?inline",
+  import: "default",
+})
 const restroomImage = () =>
-  Effect.promise(() => Bun.file(new URL("./fixtures/media/restroom.png", import.meta.url)).bytes()).pipe(
-    Effect.map((bytes) => Buffer.from(bytes).toString("base64")),
+  Effect.promise(() => restroomImageModules["./fixtures/media/restroom.png"]!()).pipe(
+    Effect.map((dataUrl) => dataUrl.slice(dataUrl.indexOf(",") + 1)),
   )
 
 export const runWeatherToolLoop = (request: LLMRequest) =>

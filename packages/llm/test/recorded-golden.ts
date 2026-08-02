@@ -1,9 +1,8 @@
-import type { HttpRecorder } from "@opencode-ai/http-recorder"
-import { describe } from "bun:test"
+import { describe } from "vitest"
 import { Effect } from "effect"
 import type { Model } from "../src"
 import { goldenScenarioTags, goldenScenarioTitle, runGoldenScenario, type GoldenScenarioID } from "./recorded-scenarios"
-import { recordedTests } from "./recorded-test"
+import { recordedTests, type RecorderOptions } from "./recorded-test"
 import { kebab } from "./recorded-utils"
 
 type Transport = "http" | "websocket"
@@ -29,7 +28,7 @@ type TargetInput = {
   readonly prefix?: string
   readonly tags?: ReadonlyArray<string>
   readonly metadata?: Record<string, unknown>
-  readonly options?: HttpRecorder.RecorderOptions
+  readonly options?: RecorderOptions
   readonly scenarios: ReadonlyArray<ScenarioInput>
 }
 

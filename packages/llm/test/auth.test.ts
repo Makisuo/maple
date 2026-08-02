@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect } from "vitest"
 import { ConfigProvider, Effect } from "effect"
 import { Headers } from "effect/unstable/http"
 import { LLM } from "../src"

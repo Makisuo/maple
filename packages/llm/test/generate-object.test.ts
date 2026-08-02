@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import { Effect, Schema } from "effect"
 import { LLM } from "../src"
 import * as OpenAIChat from "../src/protocols/openai-chat"

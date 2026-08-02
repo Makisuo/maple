@@ -1,94 +1,55 @@
-import { NodeFileSystem } from "@effect/platform-node"
-import { HttpRecorder } from "@opencode-ai/http-recorder"
-import { HttpRecorderInternal } from "@opencode-ai/http-recorder/internal"
-import { Layer } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
-import * as path from "node:path"
-import { fileURLToPath } from "node:url"
-import { LLMClient, RequestExecutor } from "../src/route"
+import { Effect, Layer } from "effect"
+import { LLMClient, RequestExecutor, WebSocketExecutor } from "../src/route"
 import type { Service as LLMClientService } from "../src/route/client"
 import type { Service as RequestExecutorService } from "../src/route/executor"
 import type { Service as WebSocketExecutorService } from "../src/route/transport/websocket"
+import { cassetteHttpClientLayer, hasCassette } from "./lib/replay"
 import {
   recordedEffectGroup,
   type RecordedCaseOptions as RunnerCaseOptions,
   type RecordedGroupOptions,
 } from "./recorded-runner"
-import { webSocketCassetteLayer } from "./recorded-websocket"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const FIXTURES_DIR = path.resolve(__dirname, "fixtures", "recordings")
 
 type RecordedEnv = RequestExecutorService | WebSocketExecutorService | LLMClientService
 
+/**
+ * Upstream typed this as `HttpRecorder.RecorderOptions`. Maple replays cassettes rather than
+ * recording them (see `test/lib/replay.ts`), so redaction and matcher config is inert — the type is
+ * kept only so upstream's call sites in `provider/golden.recorded.test.ts` still compile verbatim.
+ */
+export type RecorderOptions = {
+  readonly metadata?: Record<string, unknown>
+  readonly redact?: Record<string, unknown>
+  readonly match?: unknown
+}
+
 type RecordedTestsOptions = RecordedGroupOptions & {
-  readonly options?: HttpRecorder.RecorderOptions
+  readonly options?: RecorderOptions
 }
 
 type RecordedCaseOptions = RunnerCaseOptions & {
-  readonly options?: HttpRecorder.RecorderOptions
+  readonly options?: RecorderOptions
 }
 
-const mergeOptions = (
-  base: HttpRecorder.RecorderOptions | undefined,
-  override: HttpRecorder.RecorderOptions | undefined,
-) => {
-  if (!base) return override
-  if (!override) return base
-  return {
-    ...base,
-    ...override,
-    metadata: base.metadata || override.metadata ? { ...base.metadata, ...override.metadata } : undefined,
-    redact:
-      base.redact || override.redact
-        ? {
-            ...base.redact,
-            ...override.redact,
-            headers: [...(base.redact?.headers ?? []), ...(override.redact?.headers ?? [])],
-            allowRequestHeaders: [
-              ...(base.redact?.allowRequestHeaders ?? []),
-              ...(override.redact?.allowRequestHeaders ?? []),
-            ],
-            allowResponseHeaders: [
-              ...(base.redact?.allowResponseHeaders ?? []),
-              ...(override.redact?.allowResponseHeaders ?? []),
-            ],
-            queryParameters: [...(base.redact?.queryParameters ?? []), ...(override.redact?.queryParameters ?? [])],
-            jsonFields: [...(base.redact?.jsonFields ?? []), ...(override.redact?.jsonFields ?? [])],
-          }
-        : undefined,
-  }
-}
+/**
+ * There are no WebSocket cassettes, so every WebSocket target skips before this layer is built.
+ * It exists to satisfy `RecordedEnv`; reaching it means a cassette was added without replay support.
+ */
+const webSocketUnsupported = Layer.succeed(
+  WebSocketExecutor.Service,
+  WebSocketExecutor.Service.of({
+    open: () => Effect.die(new Error("WebSocket cassette replay is not supported — see test/lib/replay.ts")),
+  }),
+)
 
 export const recordedTests = (options: RecordedTestsOptions) =>
   recordedEffectGroup<RecordedEnv, never, RecordedTestsOptions, RecordedCaseOptions>({
     duplicateLabel: "recorded cassette",
     options,
-    cassetteExists: (cassette) => HttpRecorderInternal.hasCassetteSync(cassette, { directory: FIXTURES_DIR }),
-    layer: ({ cassette, metadata, options, caseOptions, recording }) => {
-      const recorderOptions = mergeOptions(options.options, caseOptions.options)
-      const recorderMetadata = {
-        ...recorderOptions?.metadata,
-        ...metadata,
-      }
-      const mode = recording ? "record" : "replay"
-      const cassetteService = HttpRecorderInternal.Cassette.fileSystem({ directory: FIXTURES_DIR }).pipe(
-        Layer.provide(NodeFileSystem.layer),
-      )
-      const requestExecutor = RequestExecutor.layer.pipe(
-        Layer.provide(
-          HttpRecorderInternal.recordingLayer(cassette, {
-            mode,
-            metadata: recorderMetadata,
-            redactor: HttpRecorderInternal.Redactor.make(recorderOptions?.redact),
-            match: recorderOptions?.match,
-          }).pipe(Layer.provide(FetchHttpClient.layer)),
-        ),
-      )
-      const deps = Layer.mergeAll(
-        requestExecutor,
-        webSocketCassetteLayer(cassette, { metadata: recorderMetadata, mode }),
-      )
-      return Layer.mergeAll(deps, LLMClient.layer.pipe(Layer.provide(deps))).pipe(Layer.provide(cassetteService))
+    cassetteExists: hasCassette,
+    layer: ({ cassette }) => {
+      const requestExecutor = RequestExecutor.layer.pipe(Layer.provide(cassetteHttpClientLayer(cassette)))
+      const deps = Layer.mergeAll(requestExecutor, webSocketUnsupported)
+      return Layer.mergeAll(deps, LLMClient.layer.pipe(Layer.provide(deps)))
     },
   })
