@@ -46,6 +46,10 @@ const PUBLIC_PATHS = new Set([
 	"/sign-in",
 	"/sign-up",
 	"/org-required",
+	// Fixture-only dev surfaces. They render `scenarios.ts` / generated data and
+	// never touch a warehouse or the app database, so gating them on a session
+	// only made the widget gallery unreachable without a running API.
+	"/widget-lab",
 	"/service-map-bench",
 	"/service-detail-bench",
 	"/infra-bench",

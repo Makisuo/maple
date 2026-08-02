@@ -333,7 +333,12 @@ function Unit({ label = "Unit" }: { label?: string }) {
 	)
 }
 
-function Legend() {
+/**
+ * `seriesStats` is the Min/Max/Mean/Last table, which only time-series legends
+ * render — a categorical legend (pie) has one value per row and nothing to
+ * reduce over time, so those panels pass `seriesStats={false}`.
+ */
+function Legend({ seriesStats = true }: { seriesStats?: boolean }) {
 	const { state, set } = useSettings()
 	return (
 		<Field label="Legend">
@@ -346,23 +351,25 @@ function Legend() {
 					{ value: "hidden", label: "Hidden" },
 				]}
 			/>
-			<div className="pt-0.5">
-				<CheckboxRow
-					id="qb-series-stats"
-					label="Show Min/Max/Mean/Last stats"
-					checked={state.seriesStatsEnabled}
-					onChange={(checked) =>
-						// Stats live inside the legend, so enabling them with the legend
-						// hidden would have no visible effect — turn the legend on
-						// (bottom) in the same change.
-						set(
-							checked && state.legendPosition === "hidden"
-								? { seriesStatsEnabled: true, legendPosition: "bottom" }
-								: { seriesStatsEnabled: checked },
-						)
-					}
-				/>
-			</div>
+			{seriesStats && (
+				<div className="pt-0.5">
+					<CheckboxRow
+						id="qb-series-stats"
+						label="Show Min/Max/Mean/Last stats"
+						checked={state.seriesStatsEnabled}
+						onChange={(checked) =>
+							// Stats live inside the legend, so enabling them with the legend
+							// hidden would have no visible effect — turn the legend on
+							// (bottom) in the same change.
+							set(
+								checked && state.legendPosition === "hidden"
+									? { seriesStatsEnabled: true, legendPosition: "bottom" }
+									: { seriesStatsEnabled: checked },
+							)
+						}
+					/>
+				</div>
+			)}
 		</Field>
 	)
 }

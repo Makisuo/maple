@@ -60,10 +60,38 @@ export function markIncompleteSegments<T extends Record<string, unknown>>(
 		return { data, hasIncomplete: false, incompleteKeys: [] }
 	}
 
+	// Drop trailing incomplete buckets that carry nothing.
+	//
+	// The current interval is usually queried before any of its data has landed,
+	// so it comes back empty (or zero-filled by the merge step). Plotting it draws
+	// a line falling off a cliff to zero at the right edge, which reads as an
+	// outage that isn't happening — and `fillNulls: 0` produces the same picture,
+	// so there is no presentation setting that fixes it. A bucket we have no
+	// reading for is not a reading of zero: end the series at the last bucket that
+	// actually reported. Incomplete buckets with real (partial) data are kept and
+	// still render dashed.
+	const isEmptyRow = (row: T): boolean =>
+		valueKeys.every((key) => {
+			const value = row[key]
+			return value === null || value === undefined || value === 0
+		})
+
+	let end = data.length
+	while (end > firstIncompleteIdx && end > 1 && isEmptyRow(data[end - 1])) {
+		end--
+	}
+
+	const trimmed = end === data.length ? data : data.slice(0, end)
+	if (end <= firstIncompleteIdx) {
+		// Every incomplete bucket was empty — the series simply ends at the last
+		// complete one, with no dashed segment to draw.
+		return { data: trimmed, hasIncomplete: false, incompleteKeys: [] }
+	}
+
 	const incompleteKeys = valueKeys.map((k) => `${k}_incomplete`)
 	const bridgeIdx = firstIncompleteIdx - 1
 
-	const result = data.map((row, i) => {
+	const result = trimmed.map((row, i) => {
 		const next = { ...row } as Record<string, unknown>
 
 		if (i < firstIncompleteIdx) {
