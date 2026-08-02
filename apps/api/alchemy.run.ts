@@ -155,6 +155,12 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
+				// Workers AI (`env.AI`, the v1 `Ai()` binding), driving the AI-triage agent on
+				// `@maple/llm`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
+				// resource, which also fronts model calls with caching/rate-limits/logging.
+				// NOTE: the deploy token needs the account-level "AI Gateway: Edit" permission
+				// for this resource.
+				AI: Cloudflare.AI.Gateway("maple-api-ai"),
 				MCP_SESSIONS: mcpSessions,
 				VCS_SYNC_QUEUE: vcsSyncQueue,
 				VCS_SYNC_QUEUE_NAME: vcsSyncQueueName,

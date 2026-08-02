@@ -7,6 +7,12 @@
 	"dev": {
 		"port": 3472,
 	},
+	// Workers AI binding — the keyless, neuron-billed path the AI-triage agent runs on
+	// (`@/lib/WorkersAiHttpClient` shims `@maple/llm`'s Cloudflare provider onto `env.AI.run`).
+	// Moved here from apps/chat-flue when triage came off Flue.
+	"ai": {
+		"binding": "AI",
+	},
 	"vars": {
 		"API_V2_RATE_LIMIT_PARTITION": "local",
 		"PLANETSCALE_WEBHOOK_QUEUE_NAME": "maple-planetscale-webhooks-local",
