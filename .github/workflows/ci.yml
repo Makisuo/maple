@@ -360,22 +360,8 @@ jobs:
               timeout-minutes: 5
               run: scripts/build-local-binary.sh
 
-            # Temporary diagnosis for the migration-probe stall: `maple schema
-            # migrate` is the only code path that reconnects chDB inside one
-            # process, and this canary exercises exactly that pattern in
-            # isolation. Non-blocking so the instrumented migration probe below
-            # still produces its own evidence; read the canary's last printed
-            # line as the hang site. Remove (or keep as a libchdb-upgrade
-            # tripwire) once the migration probe is green.
-            - name: Reconnect canary (in-process chDB reopen diagnosis)
-              timeout-minutes: 5
-              continue-on-error: true
-              env:
-                  MAPLE_LIBCHDB: ${{ github.workspace }}/dist/libchdb.so
-              run: timeout --kill-after=20 240 bun apps/cli/test/native-reconnect-probe.ts
-
             - name: Run repeated checkpoint restore and fresh-process reopen smoke
-              timeout-minutes: 8
+              timeout-minutes: 4
               env:
                   KEEP_ROOT: "1"
                   TMPDIR: ${{ runner.temp }}/maple-native-checkpoint
@@ -384,7 +370,7 @@ jobs:
                   apps/cli/test/native-checkpoint-smoke.sh "$GITHUB_WORKSPACE/dist"
 
             - name: Run native local-store migration and reopen probe
-              timeout-minutes: 12
+              timeout-minutes: 4
               env:
                   KEEP_ROOT: "1"
                   TMPDIR: ${{ runner.temp }}/maple-native-migration

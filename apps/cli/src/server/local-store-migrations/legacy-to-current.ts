@@ -14,36 +14,39 @@ import type {
 	StateDispositionEntry,
 } from "../local-store-migration-module"
 
+// Batch bounds keep memory bounded and the journal resumable, but every batch
+// costs a full source open + target open (one connection per process, one
+// query per open), so bounds this size dominate real-store migration time.
 export const LEGACY_RAW_TABLES = [
-	{ name: "logs", timeColumn: "TimestampTime", retentionDays: 30, batchRows: 25, batchBytes: 256 * 1024 },
-	{ name: "traces", timeColumn: "Timestamp", retentionDays: 30, batchRows: 100, batchBytes: 512 * 1024 },
+	{ name: "logs", timeColumn: "TimestampTime", retentionDays: 30, batchRows: 2000, batchBytes: 4 * 1024 * 1024 },
+	{ name: "traces", timeColumn: "Timestamp", retentionDays: 30, batchRows: 2000, batchBytes: 4 * 1024 * 1024 },
 	{
 		name: "metrics_sum",
 		timeColumn: "TimeUnix",
 		retentionDays: 90,
-		batchRows: 500,
-		batchBytes: 1024 * 1024,
+		batchRows: 4000,
+		batchBytes: 4 * 1024 * 1024,
 	},
 	{
 		name: "metrics_gauge",
 		timeColumn: "TimeUnix",
 		retentionDays: 90,
-		batchRows: 500,
-		batchBytes: 1024 * 1024,
+		batchRows: 4000,
+		batchBytes: 4 * 1024 * 1024,
 	},
 	{
 		name: "metrics_histogram",
 		timeColumn: "TimeUnix",
 		retentionDays: 90,
-		batchRows: 250,
-		batchBytes: 1024 * 1024,
+		batchRows: 2000,
+		batchBytes: 4 * 1024 * 1024,
 	},
 	{
 		name: "metrics_exponential_histogram",
 		timeColumn: "TimeUnix",
 		retentionDays: 90,
-		batchRows: 250,
-		batchBytes: 1024 * 1024,
+		batchRows: 2000,
+		batchBytes: 4 * 1024 * 1024,
 	},
 ] as const
 
@@ -293,6 +296,22 @@ const identifier = (value: string): string => {
 const sqlString = (value: string): string => `'${value.replace(/'/g, "''")}'`
 const timestampLiteral = (value: string): string => `parseDateTime64BestEffort(${sqlString(value)}, 9, 'UTC')`
 
+/** Nanoseconds-since-epoch for a raw time column, exact for both DateTime and
+ * DateTime64(9). Cursor comparisons MUST use this integer form: the server
+ * renders DateTime64 values in its own timezone with no offset marker, so a
+ * rendered-string round trip through parseDateTime64BestEffort(..., 'UTC')
+ * shifts by the host's UTC offset — skipping rows on hosts east of UTC and
+ * re-matching the same rows forever on hosts west of it. */
+const nsExpression = (column: string): string => `toUnixTimestamp64Nano(toDateTime64(${column}, 9))`
+
+/** Journal cursor values are interpolated into SQL as bare integer literals;
+ * anything but digits (e.g. a rendered-timestamp cursor from a pre-fix
+ * journal) must fail closed here rather than parse as something else. */
+const uint64Literal = (value: string, label: string): string => {
+	if (!/^\d+$/.test(value)) throw new Error(`${label} is not an unsigned integer cursor value: ${value}`)
+	return value
+}
+
 const retentionStartAt = (cutoffAt: string, retentionDays: number): string => {
 	const cutoff = Date.parse(cutoffAt)
 	if (!Number.isFinite(cutoff)) throw new Error(`invalid migration cutoff: ${cutoffAt}`)
@@ -408,7 +427,9 @@ const inventory = async (
 	const lowerBound = retentionStartAt(cutoffAt, table.retentionDays)
 	const names = columns.map((column) => identifier(column.name)).join(", ")
 	const hash = `cityHash64(toString(tuple(${names})))`
-	const sql = `SELECT count() AS rowCount, min(${identifier(table.timeColumn)}) AS minTime, max(${identifier(table.timeColumn)}) AS maxTime, sum(${hash}) AS hashSum, groupBitXor(${hash}) AS hashXor FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(lowerBound)} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(cutoffAt)}`
+	// UInt64 aggregates leave SQL as strings: chDB emits 64-bit integers as
+	// JSON numbers, and JS Number rounding above 2^53 corrupts them.
+	const sql = `SELECT count() AS rowCount, min(${identifier(table.timeColumn)}) AS minTime, max(${identifier(table.timeColumn)}) AS maxTime, toString(sum(${hash})) AS hashSum, toString(groupBitXor(${hash})) AS hashXor FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(lowerBound)} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(cutoffAt)}`
 	const rows = parseJsonEachRow<{
 		rowCount: string | number
 		minTime: string | null
@@ -526,7 +547,7 @@ const duplicateGroupCount = async (
 	const names = columns.map((column) => identifier(column.name)).join(", ")
 	const hash = `cityHash64(toString(tuple(${names})))`
 	const tie = `sipHash64(toString(tuple(${names})))`
-	const sql = `SELECT count() AS rowCount FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} = ${timestampLiteral(progress.lastTimestamp)} AND ${hash} = ${progress.lastHash} AND ${tie} = ${progress.lastTieBreak}`
+	const sql = `SELECT count() AS rowCount FROM ${identifier(table.name)} WHERE ${nsExpression(identifier(table.timeColumn))} = ${uint64Literal(progress.lastTimestamp, "lastTimestamp")} AND ${hash} = ${uint64Literal(progress.lastHash, "lastHash")} AND ${tie} = ${uint64Literal(progress.lastTieBreak, "lastTieBreak")}`
 	const rows = parseJsonEachRow<{ rowCount: string | number }>(await querySource(context, sql))
 	return rows[0] === undefined ? 0 : Number(rows[0].rowCount)
 }
@@ -542,6 +563,7 @@ const copyTable = async (
 	const columnList = columns.map((column) => identifier(column.name)).join(", ")
 	const hashExpression = `cityHash64(toString(tuple(${columnList})))`
 	const tieBreakExpression = `sipHash64(toString(tuple(${columnList})))`
+	const timeNs = nsExpression(identifier(table.timeColumn))
 	while (true) {
 		if (progress.duplicateCount > 0 && !progress.duplicateGroupExhausted) {
 			const groupCount = await duplicateGroupCount(context, table, columns, progress)
@@ -553,14 +575,19 @@ const copyTable = async (
 			}
 		}
 		const continuation = duplicateCursorContinuation(progress)
+		// The cursor triple and the SELECTed __maple_* aliases are toString()'d
+		// UInt64s (chDB emits 64-bit ints as JSON numbers; JS rounding above 2^53
+		// once turned a rounded-down hash cursor into an infinite re-copy loop).
+		// ORDER BY stays on the raw numeric expressions — ordering the string
+		// aliases would sort lexicographically and diverge from the cursor.
 		const cursor =
 			progress.lastTimestamp === null || progress.lastHash === null || progress.lastTieBreak === null
 				? ""
-				: `AND (${identifier(table.timeColumn)} > ${timestampLiteral(progress.lastTimestamp)} OR (${identifier(table.timeColumn)} = ${timestampLiteral(progress.lastTimestamp)} AND (${hashExpression} > ${progress.lastHash} OR (${hashExpression} = ${progress.lastHash} AND ${tieBreakExpression} ${continuation.comparison} ${progress.lastTieBreak}))))`
+				: `AND (${timeNs} > ${uint64Literal(progress.lastTimestamp, "lastTimestamp")} OR (${timeNs} = ${uint64Literal(progress.lastTimestamp, "lastTimestamp")} AND (${hashExpression} > ${uint64Literal(progress.lastHash, "lastHash")} OR (${hashExpression} = ${uint64Literal(progress.lastHash, "lastHash")} AND ${tieBreakExpression} ${continuation.comparison} ${uint64Literal(progress.lastTieBreak, "lastTieBreak")}))))`
 		const offset = continuation.offset === 0 ? "" : ` OFFSET ${continuation.offset}`
 		const output = await querySource(
 			context,
-			`SELECT ${columnList}, ${identifier(table.timeColumn)} AS __maple_timestamp, ${hashExpression} AS __maple_hash, ${tieBreakExpression} AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${identifier(table.timeColumn)}, __maple_hash, __maple_tie_break LIMIT ${table.batchRows}${offset}`,
+			`SELECT ${columnList}, toString(${timeNs}) AS __maple_timestamp, toString(${hashExpression}) AS __maple_hash, toString(${tieBreakExpression}) AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${timeNs}, ${hashExpression}, ${tieBreakExpression} LIMIT ${table.batchRows}${offset}`,
 		)
 		const rawRows = parseJsonEachRow<Record<string, unknown>>(output)
 		let rows = rawRows
@@ -649,16 +676,17 @@ const recoverPendingBatch = async (
 		const columnList = columns.map((column) => identifier(column.name)).join(", ")
 		const hashExpression = `cityHash64(toString(tuple(${columnList})))`
 		const tieBreakExpression = `sipHash64(toString(tuple(${columnList})))`
+		const timeNs = nsExpression(identifier(table.timeColumn))
 		const continuation = duplicateCursorContinuation(previous)
 		const cursor =
 			previous.lastTimestamp === null || previous.lastHash === null || previous.lastTieBreak === null
 				? ""
-				: `AND (${identifier(table.timeColumn)} > ${timestampLiteral(previous.lastTimestamp)} OR (${identifier(table.timeColumn)} = ${timestampLiteral(previous.lastTimestamp)} AND (${hashExpression} > ${previous.lastHash} OR (${hashExpression} = ${previous.lastHash} AND ${tieBreakExpression} ${continuation.comparison} ${previous.lastTieBreak}))))`
+				: `AND (${timeNs} > ${uint64Literal(previous.lastTimestamp, "lastTimestamp")} OR (${timeNs} = ${uint64Literal(previous.lastTimestamp, "lastTimestamp")} AND (${hashExpression} > ${uint64Literal(previous.lastHash, "lastHash")} OR (${hashExpression} = ${uint64Literal(previous.lastHash, "lastHash")} AND ${tieBreakExpression} ${continuation.comparison} ${uint64Literal(previous.lastTieBreak, "lastTieBreak")}))))`
 		const offset = continuation.offset === 0 ? "" : ` OFFSET ${continuation.offset}`
 		const inserted = parseJsonEachRow<Record<string, unknown>>(
 			await queryTarget(
 				context,
-				`SELECT ${columnList}, ${identifier(table.timeColumn)} AS __maple_timestamp, ${hashExpression} AS __maple_hash, ${tieBreakExpression} AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${identifier(table.timeColumn)}, __maple_hash, __maple_tie_break LIMIT ${pending.rowCount}${offset}`,
+				`SELECT ${columnList}, toString(${timeNs}) AS __maple_timestamp, toString(${hashExpression}) AS __maple_hash, toString(${tieBreakExpression}) AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${timeNs}, ${hashExpression}, ${tieBreakExpression} LIMIT ${pending.rowCount}${offset}`,
 			),
 		)
 		if (inserted.length !== pending.rowCount)
