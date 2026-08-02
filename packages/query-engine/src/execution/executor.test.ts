@@ -272,6 +272,62 @@ const makeRecordingDeps = (
 		}),
 })
 
+describe("makeWarehouseExecutor compiled-query defaults", () => {
+	it.effect("defaults the profile to 'aggregation' when none is passed", () =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: clickhouseConfig, clientCacheKey: "read:org_test" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, untaggedCompiled, { context: "test" })
+			// aggregation = { maxExecutionTime: 30, maxMemoryUsage: 4GB }; previously a
+			// profile-less call emitted no SETTINGS clause at all.
+			assert.isTrue(sqls[0]?.includes("max_execution_time=30"))
+			assert.isTrue(sqls[0]?.includes("max_memory_usage=4000000000"))
+		}),
+	)
+
+	it.effect("an explicit profile still wins over the default", () =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: clickhouseConfig, clientCacheKey: "read:org_test" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, untaggedCompiled, { context: "test", profile: "list" })
+			assert.isTrue(sqls[0]?.includes("max_execution_time=15"))
+			assert.isFalse(sqls[0]?.includes("max_execution_time=30"))
+		}),
+	)
+
+	it.effect("reports the caller's context as pipeName when row decode fails", () =>
+		Effect.gen(function* () {
+			const badRowDeps: WarehouseExecutorDeps = {
+				createClient: () => ({
+					sql: async () => ({ data: [{ c: "not-a-number" }] }),
+					insert: async () => {},
+				}),
+				resolveRoute: () =>
+					Effect.succeed({
+						source: "managed" as const,
+						config: clickhouseConfig,
+						clientCacheKey: "read:org_test",
+					}),
+			}
+			const withSchema = unsafeCompiledQuery<{ readonly c: number }>({
+				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
+				rowSchema: Schema.Struct({ c: Schema.Number }),
+			})
+			const executor = makeWarehouseExecutor(badRowDeps)
+			const error = yield* executor
+				.compiledQuery(tenant, withSchema, { context: "serviceOverview" })
+				.pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/WarehouseSchemaDriftError")
+			// The real query identity, not the old constant "compiledQuery".
+			assert.strictEqual(error.pipeName, "serviceOverview")
+		}),
+	)
+})
+
 describe("makeWarehouseExecutor restricted-settings strip", () => {
 	it.effect("strips max_block_size for the managed Tinybird CH-gateway", () =>
 		Effect.gen(function* () {

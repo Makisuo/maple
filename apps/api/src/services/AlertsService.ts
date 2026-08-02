@@ -64,6 +64,7 @@ import {
 	type AlertIncidentId,
 	QueryEngineExecutionError,
 	type WarehouseError,
+	type WarehouseErrorTag,
 	QueryEngineTimeoutError,
 	QueryEngineValidationError,
 	RoleName,
@@ -100,6 +101,7 @@ import {
 	Context,
 } from "effect"
 import * as AlertingMetrics from "../lib/AlertingMetrics"
+import { warehouseHandlers } from "../lib/warehouse-error-handlers"
 import { INVESTIGATION_AGENT_BINDING } from "../lib/ai-triage-enqueue"
 import { upsertAlertIssue } from "../lib/issue-hub"
 import { probeLiveness } from "../lib/telemetry-liveness"
@@ -140,6 +142,25 @@ import {
 } from "./AlertDestinationHydration"
 import { SlackBotTokenResolver } from "./slack-bot-token"
 import { dateToMs } from "../lib/time"
+
+/**
+ * Persisted evaluation-failure category per warehouse tag (`ErrorCategory` on
+ * alert_checks rows and `failureCategory` in logs). The legacy `tinybird_*`
+ * names are kept stable on purpose — dashboards and stored rows key on them.
+ * `satisfies Record<WarehouseErrorTag, string>` makes a new warehouse error
+ * class a compile error here instead of a silently-uncategorized failure.
+ */
+const WAREHOUSE_FAILURE_CATEGORIES = {
+	"@maple/http/errors/WarehouseQueryError": "tinybird_query",
+	"@maple/http/errors/WarehouseUpstreamError": "tinybird_upstream",
+	"@maple/http/errors/WarehouseAuthError": "tinybird_auth",
+	"@maple/http/errors/WarehouseConfigError": "tinybird_config",
+	"@maple/http/errors/WarehouseClientError": "tinybird_client",
+	"@maple/http/errors/WarehouseSchemaDriftError": "tinybird_schema_drift",
+	"@maple/http/errors/WarehouseMalformedQueryError": "malformed_query",
+	"@maple/http/errors/WarehouseQuotaExceededError": "tinybird_quota",
+	"@maple/http/errors/WarehouseValidationError": "tinybird_validation",
+} satisfies Record<WarehouseErrorTag, string>
 
 interface NormalizedRule {
 	readonly id: AlertRuleId
@@ -4872,45 +4893,25 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										recordEvaluationFailure(row, error, "evaluation"),
 									"@maple/http/errors/AlertPersistenceError": (error) =>
 										recordEvaluationFailure(row, error, "unknown"),
-									"@maple/http/errors/WarehouseQuotaExceededError": (error) =>
-										recordEvaluationFailure(row, error, "tinybird_quota", {
-											quotaSetting: error.setting,
-											pipe: error.pipeName,
-										}),
-									"@maple/http/errors/WarehouseUpstreamError": (error) =>
-										recordEvaluationFailure(row, error, "tinybird_upstream", {
-											upstreamStatus: error.upstreamStatus,
-											pipe: error.pipeName,
-										}),
-									"@maple/http/errors/WarehouseAuthError": (error) =>
-										recordEvaluationFailure(row, error, "tinybird_auth", {
-											upstreamStatus: error.upstreamStatus,
-											pipe: error.pipeName,
-										}),
-									"@maple/http/errors/WarehouseConfigError": (error) =>
-										recordEvaluationFailure(row, error, "tinybird_config", {
-											pipe: error.pipeName,
-										}),
-									"@maple/http/errors/WarehouseClientError": (error) =>
-										recordEvaluationFailure(row, error, "tinybird_client", {
-											pipe: error.pipeName,
-										}),
-									"@maple/http/errors/WarehouseSchemaDriftError": (error) =>
-										recordEvaluationFailure(row, error, "tinybird_schema_drift", {
-											pipe: error.pipeName,
-										}),
-									"@maple/http/errors/WarehouseMalformedQueryError": (error) =>
-										recordEvaluationFailure(row, error, "malformed_query", {
-											pipe: error.pipeName,
-										}),
-									"@maple/http/errors/WarehouseValidationError": (error) =>
-										recordEvaluationFailure(row, error, "tinybird_validation", {
-											pipe: error.pipeName,
-										}),
-									"@maple/http/errors/WarehouseQueryError": (error) =>
-										recordEvaluationFailure(row, error, "tinybird_query", {
-											pipe: error.pipeName,
-										}),
+									...warehouseHandlers((error) =>
+										recordEvaluationFailure(
+											row,
+											error,
+											WAREHOUSE_FAILURE_CATEGORIES[error._tag],
+											{
+												pipe: error.pipeName,
+												...(error._tag ===
+												"@maple/http/errors/WarehouseQuotaExceededError"
+													? { quotaSetting: error.setting }
+													: {}),
+												...(error._tag ===
+													"@maple/http/errors/WarehouseUpstreamError" ||
+												error._tag === "@maple/http/errors/WarehouseAuthError"
+													? { upstreamStatus: error.upstreamStatus }
+													: {}),
+											},
+										),
+									),
 								}),
 							)
 						}),

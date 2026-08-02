@@ -20,12 +20,13 @@ import type {
 import { CH } from "@maple/query-engine"
 import { Effect, Option, Schema } from "effect"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
+import { warehouseToV2 } from "./warehouse-error-map"
 
 const decodeSessionId = Schema.decodeSync(SessionId)
 const decodeTraceId = Schema.decodeSync(TraceId)
 
-/** Warehouse/query-engine errors → a uniform 503 (all reads). */
-const mapWarehouseError = () => dependencyUnavailable("session_replay_query_unavailable")
+/** Warehouse errors → the proper v2 envelope (400/429/502/503 per tag). */
+const mapWarehouseError = warehouseToV2("session_replay_query")
 
 /** ISO-8601 → Tinybird `YYYY-MM-DD HH:mm:ss` (UTC), validated. */
 const toTinybird = (value: string, param: string) => {

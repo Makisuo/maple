@@ -51,12 +51,11 @@ export interface CompiledQuery<Output> {
 	 *  the query definition), so executors read it there instead of a per-org
 	 *  warehouse override. */
 	readonly routing?: "ingest"
-	/** Type-safe cast of raw query results. The cast is sound because the
-	 *  Output type is derived from the SELECT clause that produced the SQL. */
-	readonly castRows: (rows: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<Output>
 	/** Runtime decode of raw query results. Queries built from handwritten SQL
 	 *  should provide a row schema so schema drift is caught before consumers
-	 *  read fields from `Record<string, unknown>`. */
+	 *  read fields from `Record<string, unknown>`. Without a schema this is an
+	 *  identity cast — there is deliberately no separate `castRows`: a cast that
+	 *  looked type-safe hid wire-format drift (64-bit ints arriving as strings). */
 	readonly decodeRows: (
 		rows: ReadonlyArray<Record<string, unknown>>,
 	) => Effect.Effect<ReadonlyArray<Output>, CompiledQueryDecodeError>
@@ -99,7 +98,6 @@ const makeCompiledQuery = <Output>(
 	return {
 		sql,
 		...(routing === undefined ? {} : { routing }),
-		castRows: (rows) => rows as unknown as ReadonlyArray<Output>,
 		decodeRows,
 		decodeFirstRow: (rows) => {
 			const row = rows[0]

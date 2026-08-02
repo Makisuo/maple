@@ -40,6 +40,7 @@ import {
 } from "@maple/domain"
 import { baselineWarehouseCapabilities, type WarehouseCapabilities } from "./capabilities"
 import * as CH from "./ch"
+import { builderFixtures } from "./ch/builder-fixtures"
 import { compilePipeQuery } from "./ch/pipe-dispatch"
 import { fingerprintSql } from "./execution/fingerprint"
 import { makeQueryEngineExecute, type QueryEngineWarehouse, type QueryTenant } from "./runtime"
@@ -314,7 +315,7 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 export interface CatalogEntry {
 	/** Stable identifier, e.g. `pipe:list_traces:filtered:bloom`. */
 	readonly id: string
-	readonly source: "pipe" | "query-spec"
+	readonly source: "pipe" | "query-spec" | "builder"
 	readonly name: string
 	readonly label: string
 	readonly capabilityLabel: string
@@ -801,9 +802,46 @@ export function collectQuerySpecCatalog(): ReadonlyArray<CatalogEntry> {
 	return entries
 }
 
-/** The full catalog: every SQL shape reachable from either entry surface. */
+// ---------------------------------------------------------------------------
+// Builder collection (direct `warehouse.compiledQuery` call sites)
+//
+// The pipe registry + QuerySpec lowering cover only ~36 of 161 exported query
+// builders; the rest are compiled directly at call sites in apps/api and never
+// met the analyzer. `builderFixtures` (ch/builder-fixtures.ts) enumerates them
+// with production-shaped params; the e2e sweep picks these entries up with
+// zero test changes because it iterates the catalog.
+// ---------------------------------------------------------------------------
+
+export function collectBuilderCatalog(): ReadonlyArray<CatalogEntry> {
+	const entries: Array<CatalogEntry> = []
+	for (const fixture of builderFixtures) {
+		const compiled = fixture.compile()
+		// The executor dies on unresolved placeholders at runtime; a fixture with a
+		// missing compile param must fail HERE, in the unit test, not in the sweep.
+		if (compiled.sql.includes("__PARAM_")) {
+			throw new Error(
+				`SQL catalog: builder fixture ${fixture.module}/${fixture.name} (${fixture.label}) ` +
+					`left an unresolved __PARAM_ placeholder — a compile param is missing.`,
+			)
+		}
+		entries.push({
+			id: `builder:${fixture.module}:${fixture.name}:${fixture.label}`,
+			source: "builder",
+			name: fixture.name,
+			label: fixture.label,
+			capabilityLabel: "baseline",
+			route: undefined,
+			sql: compiled.sql,
+			fingerprint: fingerprintSql(compiled.sql),
+			compiled,
+		})
+	}
+	return entries
+}
+
+/** The full catalog: every SQL shape reachable from any entry surface. */
 export function collectSqlCatalog(): ReadonlyArray<CatalogEntry> {
-	return [...collectPipeCatalog(), ...collectQuerySpecCatalog()]
+	return [...collectPipeCatalog(), ...collectQuerySpecCatalog(), ...collectBuilderCatalog()]
 }
 
 /** One entry per distinct SQL shape, keeping the first fixture that produced it. */

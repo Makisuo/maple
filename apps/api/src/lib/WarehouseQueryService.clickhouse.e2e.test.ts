@@ -8,7 +8,7 @@ import { TinybirdOrgTokenService } from "../services/TinybirdOrgTokenService"
 import type { TenantContext } from "../services/AuthService"
 import { Env } from "./Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "./test-pglite"
-import { WarehouseQueryService } from "./WarehouseQueryService"
+import { WarehouseQueryService, __testables } from "./WarehouseQueryService"
 import {
 	applyRealMigrations,
 	clickhouseE2eEnabled,
@@ -276,5 +276,31 @@ describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => 
 			}).pipe(Effect.provide(layer))
 		},
 		120_000,
+	)
+
+	// Pins the wire-format parity fix itself, independent of catalog coverage:
+	// the production ClickHouse client must receive 64-bit ints as JSON numbers
+	// (output_format_json_quote_64bit_integers=0), exactly like the Tinybird SDK,
+	// so schema-less queries decode identically on both backends.
+	it(
+		"returns 64-bit integers as JSON numbers through the production client",
+		async () => {
+			const client = __testables.createClickHouseSqlClient({
+				kind: "clickhouse",
+				url: clickhouseUrl,
+				username: clickhouseUser,
+				password: clickhousePassword,
+				database,
+			})
+			// No trailing FORMAT: the client owns the output format (the executor's
+			// normalizeSqlForClient strips it on the real path).
+			const result = await client.sql("SELECT toUInt64(42) AS wide, count() AS c FROM system.one")
+			const row = result.data[0]
+			assert.isDefined(row)
+			assert.strictEqual(typeof row!.wide, "number", "UInt64 arrived as a string — the quote pin is gone")
+			assert.strictEqual(row!.wide, 42)
+			assert.strictEqual(typeof row!.c, "number")
+		},
+		60_000,
 	)
 })

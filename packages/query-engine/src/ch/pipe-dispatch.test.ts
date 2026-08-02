@@ -60,7 +60,6 @@ describe("compilePipeQuery", () => {
 				})
 				expect(result).toBeDefined()
 				expect(result!.sql).toContain("test-org")
-				expect(typeof result!.castRows).toBe("function")
 				expect(typeof result!.decodeRows).toBe("function")
 			})
 		}
@@ -145,12 +144,6 @@ describe("compilePipeQuery", () => {
 		const result = compilePipeQuery("list_traces", baseParams())
 		expect(result!.sql).toContain("2024-01-01 00:00:00")
 		expect(result!.sql).toContain("2024-01-02 00:00:00")
-	})
-
-	it("castRows passes through rows", () => {
-		const result = compilePipeQuery("list_traces", baseParams())
-		const rows = [{ traceId: "abc" }]
-		expect(result!.castRows(rows)).toEqual(rows)
 	})
 
 	it.effect("decodeRows passes through rows for DSL-backed pipes without row schemas", () =>

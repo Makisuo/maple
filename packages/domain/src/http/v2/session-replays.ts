@@ -3,7 +3,13 @@ import { Schema } from "effect"
 import { SessionId, TraceId } from "../../primitives"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
+import {
+	V2InvalidRequestError,
+	V2NotFoundError,
+	V2RateLimitError,
+	V2ServiceUnavailableError,
+	V2UpstreamError,
+} from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
@@ -294,7 +300,13 @@ export const V2SessionReplaysForTraceParams = Schema.Struct({
 })
 export type V2SessionReplaysForTraceParams = Schema.Schema.Type<typeof V2SessionReplaysForTraceParams>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+// Full warehouse outcome range — see the matching comment in ./telemetry.ts.
+const commonErrors = [
+	V2InvalidRequestError,
+	V2RateLimitError,
+	V2ServiceUnavailableError,
+	V2UpstreamError,
+] as const
 
 const SessionReplayList = ListOf(V2SessionReplayListItem).annotate({
 	identifier: "SessionReplayList",

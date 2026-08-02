@@ -87,8 +87,8 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 						context: "replaysFacets",
 					})
 					// ClickHouse serializes integer aggregates (`uniq(...)`) as JSON strings,
-					// while the Tinybird path returns numbers; castRows is a plain cast, so
-					// coerce at the edge before the Schema.Number response validates.
+					// while the Tinybird path returns numbers; this query declares no row
+					// schema, so coerce at the edge before the Schema.Number response validates.
 					const pick = (facetType: string) =>
 						rows
 							.filter((row) => row.facetType === facetType)

@@ -22,10 +22,18 @@ import {
 	clickhouseExec,
 	describeQuery,
 	isSixtyFourBitInt,
+	looksLikeIdentityColumn,
 	syntheticRow,
 	uniqueDatabase,
 	type DescribedColumn,
 } from "./clickhouse-e2e-support"
+
+/**
+ * 64-bit identity columns that predate the identity rule and are consumed as
+ * numbers on purpose. Do NOT grow this list — `toString()`-wrap the column in
+ * the SELECT instead (see `looksLikeIdentityColumn`).
+ */
+const IDENTITY_COLUMN_ALLOWLIST: ReadonlySet<string> = new Set([])
 
 const database = uniqueDatabase("maple_sql_catalog_e2e")
 
@@ -76,21 +84,45 @@ describe.skipIf(!clickhouseE2eEnabled)("SQL catalog analyzer sweep", () => {
 					.join(", ")}`,
 			)
 
-			// Second class, same round trip: a 64-bit integer column arrives as a
-			// JSON string on BYO-ClickHouse. If the query declares a row schema, it
-			// has to accept that.
 			const wideColumns = columns.filter((column) => isSixtyFourBitInt(column.type))
+
+			// Third class, same round trip: a 64-bit column that carries IDENTITY
+			// (hash/id/fingerprint) must be `toString()`-wrapped in the SELECT. The
+			// production clients pin `output_format_json_quote_64bit_integers=0` for
+			// wire parity with Tinybird, so an unquoted identity above 2^53 would be
+			// silently corrupted by JS number parsing.
+			const identityColumns = wideColumns.filter(
+				(column) =>
+					looksLikeIdentityColumn(column.name) &&
+					!IDENTITY_COLUMN_ALLOWLIST.has(`${entry.id}:${column.name}`),
+			)
+			assert.isEmpty(
+				identityColumns,
+				`${entry.id} selects identity-like 64-bit columns as integers: ${identityColumns
+					.map((column) => `${column.name} ${column.type}`)
+					.join(", ")}\n` +
+					`Wrap them in toString(...) in the SELECT so the value survives JSON as a string.`,
+			)
+
+			// Second class, same round trip: if the query declares a row schema, it
+			// has to accept BOTH 64-bit wire shapes — unquoted is what the pinned
+			// production clients receive, quoted is what a gateway/readonly cluster
+			// that refuses the setting still sends. `CH.CHNumber` accepts both;
+			// `Schema.Number` rejects the quoted shape.
 			if (wideColumns.length > 0 && entry.compiled) {
-				const row = syntheticRow(columns)
-				const decoded = await Effect.runPromise(Effect.exit(entry.compiled.decodeRows([row])))
-				if (decoded._tag === "Failure") {
-					assert.fail(
-						`${entry.id} declares a row schema that rejects ClickHouse's own JSON output.\n` +
-							`64-bit columns arrive quoted: ${wideColumns
-								.map((column) => `${column.name} ${column.type}`)
-								.join(", ")}\n` +
-							`Decode those with CH.CHNumber, not Schema.Number.\n\n${String(decoded.cause)}\n`,
-					)
+				for (const quote64Bit of [false, true]) {
+					const row = syntheticRow(columns, { quote64Bit })
+					const decoded = await Effect.runPromise(Effect.exit(entry.compiled.decodeRows([row])))
+					if (decoded._tag === "Failure") {
+						assert.fail(
+							`${entry.id} declares a row schema that rejects ClickHouse's own JSON output ` +
+								`(64-bit ints ${quote64Bit ? "quoted" : "unquoted"}).\n` +
+								`64-bit columns: ${wideColumns
+									.map((column) => `${column.name} ${column.type}`)
+									.join(", ")}\n` +
+								`Decode those with CH.CHNumber, not Schema.Number.\n\n${String(decoded.cause)}\n`,
+						)
+					}
 				}
 			}
 		}, 60_000)
