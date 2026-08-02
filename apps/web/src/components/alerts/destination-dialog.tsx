@@ -16,6 +16,7 @@ import {
 	CircleInfoIcon,
 	HazelIcon,
 	LoaderIcon,
+	MagnifierIcon,
 } from "@/components/icons"
 import {
 	CHANNEL_RESULT_LIMIT,
@@ -59,10 +60,11 @@ import {
 	ComboboxInput,
 	ComboboxItem,
 	ComboboxList,
+	ComboboxStatus,
 } from "@maple/ui/components/ui/combobox"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Avatar, AvatarFallback, AvatarImage } from "@maple/ui/components/ui/avatar"
-import { Checkbox } from "@maple/ui/components/ui/checkbox"
+import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
 import { cn } from "@maple/ui/utils"
 import { useOrganization } from "@clerk/clerk-react"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
@@ -166,72 +168,57 @@ function EmailMemberPicker({
 	form: DestinationFormState
 	onFormChange: (updater: (current: DestinationFormState) => DestinationFormState) => void
 }) {
-	const { memberships, isLoaded } = useOrganization({ memberships: { infinite: true } })
-	const members = memberships?.data ?? []
+	// pageSize is bumped well past Clerk's default of 10 so the combobox's
+	// typeahead searches the whole workspace in one page for all but the largest
+	// orgs; "Load more" in the popup footer covers the rest.
+	const { memberships, isLoaded } = useOrganization({
+		memberships: { infinite: true, pageSize: 100 },
+	})
 
-	const toggleMember = (userId: string) =>
-		onFormChange((current) => ({
-			...current,
-			memberUserIds: current.memberUserIds.includes(userId)
-				? current.memberUserIds.filter((id) => id !== userId)
-				: [...current.memberUserIds, userId],
-		}))
+	const options = (memberships?.data ?? []).flatMap((member) => {
+		const userId = member.publicUserData?.userId
+		const email = member.publicUserData?.identifier
+		if (!userId || !email) return []
+		const name = [member.publicUserData?.firstName, member.publicUserData?.lastName]
+			.filter(Boolean)
+			.join(" ")
+		return [
+			{
+				value: userId,
+				label: name || email,
+				adornment: (
+					<Avatar className="size-5">
+						<AvatarImage alt={name || email} src={member.publicUserData?.imageUrl} />
+						<AvatarFallback>{(name || email)[0]?.toUpperCase() ?? "?"}</AvatarFallback>
+					</Avatar>
+				),
+				meta: name ? email : undefined,
+			},
+		]
+	})
 
 	return (
 		<div className="space-y-1.5">
 			<Label className="text-xs">Recipients</Label>
-			<div className="max-h-56 space-y-0.5 overflow-y-auto rounded-md border border-border/60 p-1">
-				{!isLoaded && (
-					<p className="px-2 py-1.5 text-[11px] text-muted-foreground">Loading members…</p>
-				)}
-				{isLoaded && members.length === 0 && (
-					<p className="px-2 py-1.5 text-[11px] text-muted-foreground">
-						No members found in this workspace.
-					</p>
-				)}
-				{members.map((member) => {
-					const userId = member.publicUserData?.userId
-					const email = member.publicUserData?.identifier
-					if (!userId || !email) return null
-					const name = [member.publicUserData?.firstName, member.publicUserData?.lastName]
-						.filter(Boolean)
-						.join(" ")
-					const checked = form.memberUserIds.includes(userId)
-					return (
-						<label
-							key={userId}
-							className={cn(
-								"flex cursor-pointer items-center gap-2.5 rounded-sm px-2 py-1.5 hover:bg-muted/40",
-								checked && "bg-muted/40",
-							)}
+			<MultiSelectCombobox
+				emptyMessage={isLoaded ? "No members found in this workspace." : "Loading members…"}
+				footer={
+					memberships?.hasNextPage ? (
+						<Button
+							className="w-full text-xs"
+							onClick={() => memberships.fetchNext?.()}
+							size="sm"
+							variant="ghost"
 						>
-							<Checkbox checked={checked} onCheckedChange={() => toggleMember(userId)} />
-							<Avatar className="size-6">
-								<AvatarImage src={member.publicUserData?.imageUrl} alt={name || email} />
-								<AvatarFallback>{(name || email)[0]?.toUpperCase() ?? "?"}</AvatarFallback>
-							</Avatar>
-							<span className="min-w-0 flex-1">
-								<span className="block truncate text-xs font-medium">{name || email}</span>
-								{name && (
-									<span className="block truncate text-[11px] text-muted-foreground">
-										{email}
-									</span>
-								)}
-							</span>
-						</label>
-					)
-				})}
-				{memberships?.hasNextPage && (
-					<Button
-						variant="ghost"
-						size="sm"
-						className="w-full text-xs"
-						onClick={() => memberships.fetchNext?.()}
-					>
-						Load more
-					</Button>
-				)}
-			</div>
+							Load more
+						</Button>
+					) : undefined
+				}
+				onChange={(memberUserIds) => onFormChange((current) => ({ ...current, memberUserIds }))}
+				options={options}
+				placeholder={form.memberUserIds.length === 0 ? "Select members…" : "Add member..."}
+				value={form.memberUserIds}
+			/>
 			<p className="text-[11px] text-muted-foreground">
 				Alert emails go to the selected workspace members (up to {MAX_EMAIL_MEMBER_RECIPIENTS}).
 			</p>
@@ -619,6 +606,12 @@ function SlackBotFields({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 		[channelsResult],
 	)
+	// The workspace has more channels than the API's page-capped walk could reach,
+	// so the list below is a prefix — say so rather than letting a missing channel
+	// read as "the bot can't see it".
+	const channelsTruncated = Result.builder(channelsResult)
+		.onSuccess((c) => c.truncated)
+		.orElse(() => false)
 	const channelsLoading = installed && channelsResult.waiting
 
 	// The Combobox's own filtering never ran here (Base UI only filters when the
@@ -654,6 +647,15 @@ function SlackBotFields({
 	// A 403 is never worth a Retry button, with or without a stale list to fall
 	// back on. Everything else keeps the retryable error line.
 	const channelsFailed = Result.isFailure(channelsResult) && !channelsPermissionDenied
+
+	// `byId` backs both the label function and the value handler; the *visible*
+	// item ids come from `channelPickerView`, which already ranked and capped
+	// them, so Base UI is handed a finished list rather than filtering again.
+	const byId = useMemo(() => {
+		const map = new Map<string, V2SlackChannelList["channels"][number]>()
+		for (const channel of channels) map.set(channel.id, channel)
+		return map
+	}, [channels])
 
 	const statusPending = Result.isInitial(statusResult) && status === null
 	const statusFailed = Result.isFailure(statusResult) && status === null
@@ -720,33 +722,14 @@ function SlackBotFields({
 				<p className="text-xs text-muted-foreground">
 					{isEditing
 						? "Listing this workspace's Slack channels is limited to org admins, so the channel can't be changed here. Your other edits still save — ask an admin to move this destination to another channel."
-						: "Listing this workspace's Slack channels is limited to org admins, so this destination can't be finished here. Ask an admin to create it, or use a Slack webhook destination — any member can set one up."}
+						: "Listing this workspace's Slack channels is limited to org admins, so this destination can't be finished here. Ask an admin to create it for you."}
 				</p>
-				{!isEditing ? (
-					<Button
-						type="button"
-						size="sm"
-						variant="outline"
-						onClick={() =>
-							onFormChange((current) => ({
-								...defaultDestinationForm("slack"),
-								// Carry over what isn't Slack-bot-specific so switching
-								// providers doesn't discard the user's typing.
-								name: current.name,
-								enabled: current.enabled,
-							}))
-						}
-					>
-						Use a Slack webhook instead
-						<ArrowRightIcon size={14} />
-					</Button>
-				) : null}
 			</div>
 		)
 	}
 
 	const label = (id: string): string => {
-		const channel = channels.find((c) => c.id === id)
+		const channel = byId.get(id)
 		// Unknown id (stale/stored channel not in the fetched list): prefer the
 		// stored name, but never render an empty label — show the raw id.
 		if (!channel) return form.slackChannelName ? `#${form.slackChannelName}` : id
@@ -770,7 +753,8 @@ function SlackBotFields({
 				<div className="flex min-w-0 items-center gap-1.5">
 					{storedChannelName ? (
 						<span className="truncate text-[11px] text-muted-foreground">
-							Currently <span className="font-medium text-foreground">#{storedChannelName}</span>
+							Currently{" "}
+							<span className="font-medium text-foreground">#{storedChannelName}</span>
 						</span>
 					) : null}
 					{/* The list is fetched once per dialog and cached by reactivity key, so
@@ -804,7 +788,7 @@ function SlackBotFields({
 				itemToStringLabel={(value: string) => label(value)}
 				onValueChange={(value) => {
 					if (value == null) return
-					const channel = channels.find((c) => c.id === value)
+					const channel = byId.get(value)
 					onFormChange((current) => ({
 						...current,
 						slackChannelId: value,
@@ -822,6 +806,7 @@ function SlackBotFields({
 					// popup with no way out. The clear button is the way out.
 					showClear
 					className="w-full"
+					startAddon={<MagnifierIcon />}
 				/>
 				<ComboboxContent>
 					{/* "Nothing matched" and "nothing loaded yet" are different problems
@@ -860,11 +845,11 @@ function SlackBotFields({
 					    know the true match count, only that it exceeded the cap, so don't
 					    print the workspace total as if it were one. */}
 					{truncated ? (
-						<p className="shrink-0 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
+						<ComboboxStatus>
 							{searchQuery.trim().length > 0
 								? `Showing the closest ${CHANNEL_RESULT_LIMIT} matches — keep typing to narrow.`
 								: `Showing ${CHANNEL_RESULT_LIMIT} of ${channels.length} channels — type to narrow.`}
-						</p>
+						</ComboboxStatus>
 					) : null}
 				</ComboboxContent>
 			</Combobox>
@@ -877,8 +862,16 @@ function SlackBotFields({
 				</div>
 			) : channels.length === 0 && !channelsLoading ? (
 				<p className="text-[11px] text-muted-foreground">
-					No channels returned. Make sure the Maple bot has been added to at least one channel,
-					then hit Refresh.
+					No channels returned. Make sure the Maple bot has been added to at least one channel, then
+					hit Refresh.
+				</p>
+			) : channelsTruncated ? (
+				// Deliberately no "do X to fix it": the walk is page-capped, so a
+				// channel past the cap stays out of reach whatever the user does in
+				// Slack. Saying the list is incomplete beats implying it's complete.
+				<p className="text-[11px] text-muted-foreground">
+					This workspace has more channels than Maple can list in one go, so some aren&apos;t shown
+					here.
 				</p>
 			) : null}
 			<p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
@@ -976,49 +969,6 @@ export function DestinationDialog({
 									placeholder="Production paging"
 								/>
 							</div>
-
-							{form.type === "slack" && (
-								<>
-									<div className="space-y-1.5">
-										<Label htmlFor="destination-webhook" className="text-xs">
-											Slack webhook URL
-										</Label>
-										<Input
-											id="destination-webhook"
-											value={form.webhookUrl}
-											onChange={(event) =>
-												onFormChange((current) => ({
-													...current,
-													webhookUrl: event.target.value,
-												}))
-											}
-											placeholder={
-												isEditing
-													? "Leave blank to keep current webhook"
-													: "https://hooks.slack.com/services/..."
-											}
-											className="font-mono text-xs"
-										/>
-									</div>
-									<div className="space-y-1.5">
-										<Label htmlFor="destination-channel" className="text-xs">
-											Channel label
-										</Label>
-										<Input
-											id="destination-channel"
-											value={form.channelLabel}
-											onChange={(event) =>
-												onFormChange((current) => ({
-													...current,
-													channelLabel: event.target.value,
-												}))
-											}
-											placeholder="#ops-alerts"
-											className="font-mono text-xs"
-										/>
-									</div>
-								</>
-							)}
 
 							{form.type === "slack-bot" && (
 								<SlackBotFields
@@ -1164,57 +1114,6 @@ export function DestinationDialog({
 									onFormChange={onFormChange}
 									isEditing={isEditing}
 								/>
-							)}
-
-							{form.type === "hazel" && (
-								<>
-									<div className="space-y-1.5">
-										<Label htmlFor="destination-hazel-url" className="text-xs">
-											Hazel webhook URL
-										</Label>
-										<Input
-											id="destination-hazel-url"
-											value={form.hazelWebhookUrl}
-											onChange={(event) =>
-												onFormChange((current) => ({
-													...current,
-													hazelWebhookUrl: event.target.value,
-												}))
-											}
-											placeholder={
-												isEditing
-													? "Leave blank to keep current URL"
-													: "https://api.hazel.sh/webhooks/incoming/{webhookId}/{token}/maple"
-											}
-											className="font-mono text-xs"
-										/>
-										<p className="text-[11px] text-muted-foreground">
-											Create a Maple webhook in Hazel under Settings → Integrations →
-											Maple, then paste the URL here.
-										</p>
-									</div>
-									<div className="space-y-1.5">
-										<Label htmlFor="destination-hazel-secret" className="text-xs">
-											Signing secret
-										</Label>
-										<Input
-											id="destination-hazel-secret"
-											value={form.signingSecret}
-											onChange={(event) =>
-												onFormChange((current) => ({
-													...current,
-													signingSecret: event.target.value,
-												}))
-											}
-											placeholder={
-												isEditing
-													? "Leave blank to keep current secret"
-													: "Optional HMAC secret"
-											}
-											className="font-mono text-xs"
-										/>
-									</div>
-								</>
 							)}
 						</div>
 					</div>

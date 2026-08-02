@@ -1,8 +1,8 @@
 import { Button } from "@maple/ui/components/ui/button"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 import { Badge } from "@maple/ui/components/ui/badge"
-import { CheckIcon, CodeIcon, CopyIcon, KeyIcon } from "@/components/icons"
+import { CodeIcon, KeyIcon } from "@/components/icons"
 import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 
 /**
@@ -58,15 +58,6 @@ const docsUrl = `${apiBaseUrl}/v2/docs`
 const curlExample = `curl ${apiBaseUrl}/v2/alerts/rules \\
   -H "Authorization: Bearer maple_ak_..."`
 
-function CopyButton({ text, label }: { text: string; label: string }) {
-	const { copied, copy } = useCopyToClipboard(label)
-	return (
-		<Button variant="ghost" size="icon-sm" aria-label={label} onClick={() => copy(text)}>
-			{copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-		</Button>
-	)
-}
-
 export function DeveloperSection({ onNavigateToApiKeys }: { onNavigateToApiKeys: () => void }) {
 	return (
 		<div className="space-y-6">
@@ -103,7 +94,7 @@ export function DeveloperSection({ onNavigateToApiKeys }: { onNavigateToApiKeys:
 						</div>
 						<div className="bg-muted/50 flex items-center justify-between gap-2 rounded-md border px-3 py-2">
 							<code className="font-mono text-sm">{apiBaseUrl}/v2</code>
-							<CopyButton text={`${apiBaseUrl}/v2`} label="Copy base URL" />
+							<CopyButton value={`${apiBaseUrl}/v2`} label="Base URL" size="icon-sm" />
 						</div>
 					</div>
 					<div className="space-y-1.5">
@@ -112,7 +103,7 @@ export function DeveloperSection({ onNavigateToApiKeys }: { onNavigateToApiKeys:
 						</div>
 						<div className="bg-muted/50 flex items-start justify-between gap-2 rounded-md border px-3 py-2">
 							<pre className="overflow-x-auto font-mono text-sm leading-6">{curlExample}</pre>
-							<CopyButton text={curlExample} label="Copy curl example" />
+							<CopyButton value={curlExample} label="curl example" size="icon-sm" />
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Authenticate with a Bearer API key. Create one under{" "}

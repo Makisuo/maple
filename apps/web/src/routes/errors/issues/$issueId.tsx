@@ -4,6 +4,8 @@ import { Exit, Schema } from "effect"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
+import { useCopy } from "@maple/ui/hooks/use-copy"
+
 import { Button } from "@maple/ui/components/ui/button"
 import {
 	AlertDialog,
@@ -72,6 +74,7 @@ export const Route = createFileRoute("/errors/issues/$issueId")({
 
 function IssueDetailPage() {
 	const navigate = useNavigate()
+	const promptCopy = useCopy({ label: "Agent prompt" })
 	const { issueId: rawIssueId } = Route.useParams()
 	const issueId = decodeIssueId(rawIssueId)
 
@@ -433,12 +436,7 @@ function IssueDetailPage() {
 												<DropdownMenuContent align="end">
 													<DropdownMenuItem
 														onClick={() => {
-															void navigator.clipboard
-																.writeText(agentPromptFromIssue(issue))
-																.then(() =>
-																	toast.success("Agent prompt copied"),
-																)
-																.catch(() => toast.error("Copy failed"))
+															void promptCopy.copy(agentPromptFromIssue(issue))
 														}}
 													>
 														<CopyIcon className="size-3.5" />

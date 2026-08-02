@@ -6,7 +6,8 @@ import "react-grid-layout/css/styles.css"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
 import { WidgetActionsProvider } from "@/components/dashboard-builder/widgets/widget-actions-context"
-import { visualizationFor } from "@/components/dashboard-builder/widgets/visualization-registry"
+import { WidgetTimeRangeProvider } from "@/components/dashboard-builder/widgets/widget-time-range-context"
+import { visualizationFor } from "@/components/dashboard-builder/widgets/types"
 import { useWidgetData } from "@/hooks/use-widget-data"
 
 interface DashboardCanvasProps {
@@ -71,9 +72,16 @@ const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: Dashbo
 
 	return (
 		<div ref={ref} className="h-full w-full">
-			<WidgetActionsProvider widget={widget} dataState={dataState}>
-				<Visualization dataState={dataState} display={widget.display} mode={mode} />
-			</WidgetActionsProvider>
+			<WidgetTimeRangeProvider timeRange={widget.timeRange}>
+				<WidgetActionsProvider widget={widget} dataState={dataState}>
+					<Visualization
+						dataState={dataState}
+						display={widget.display}
+						mode={mode}
+						rowLimit={widget.dataSource.transform?.limit}
+					/>
+				</WidgetActionsProvider>
+			</WidgetTimeRangeProvider>
 		</div>
 	)
 })

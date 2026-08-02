@@ -24,10 +24,8 @@ interface DestinationBaseProps {
  * prop changes only.
  */
 export type AlertDestinationProps =
-	| (DestinationBaseProps & { type: "slack"; webhook_url: SecretInput; channel_label?: string })
 	| (DestinationBaseProps & { type: "pagerduty"; integration_key: SecretInput })
 	| (DestinationBaseProps & { type: "webhook"; url: string; signing_secret?: SecretInput })
-	| (DestinationBaseProps & { type: "hazel"; webhook_url: SecretInput; signing_secret?: SecretInput })
 	| (DestinationBaseProps & { type: "discord"; webhook_url: SecretInput })
 	| (DestinationBaseProps & { type: "email"; member_user_ids: string[] })
 
@@ -46,16 +44,16 @@ export type AlertDestination = Resource<
 >
 
 /**
- * A notification channel (Slack, PagerDuty, webhook, Hazel, Discord, or
- * workspace-member email) that `Maple.AlertRule`s deliver to.
+ * A notification channel (PagerDuty, webhook, Discord, or workspace-member
+ * email) that `Maple.AlertRule`s deliver to. Slack and Hazel destinations use
+ * their installed integrations and are managed in Maple.
  *
  * @example
  * ```typescript
- * const slack = yield* Maple.AlertDestination("oncall", {
- *   type: "slack",
- *   name: "On-call Slack",
- *   webhook_url: Redacted.make(process.env.SLACK_WEBHOOK_URL!),
- *   channel_label: "#incidents",
+ * const oncall = yield* Maple.AlertDestination("oncall", {
+ *   type: "pagerduty",
+ *   name: "On-call PagerDuty",
+ *   integration_key: Redacted.make(process.env.PAGERDUTY_ROUTING_KEY!),
  * })
  * ```
  */
@@ -90,19 +88,11 @@ const desiredBody = (props: AlertDestinationProps): Record<string, unknown> => {
 	const body: Record<string, unknown> = { type: props.type, name: props.name }
 	if (props.enabled !== undefined) body.enabled = props.enabled
 	switch (props.type) {
-		case "slack":
-			body.webhook_url = unwrap(props.webhook_url)
-			if (props.channel_label !== undefined) body.channel_label = props.channel_label
-			break
 		case "pagerduty":
 			body.integration_key = unwrap(props.integration_key)
 			break
 		case "webhook":
 			body.url = props.url
-			if (props.signing_secret !== undefined) body.signing_secret = unwrap(props.signing_secret)
-			break
-		case "hazel":
-			body.webhook_url = unwrap(props.webhook_url)
 			if (props.signing_secret !== undefined) body.signing_secret = unwrap(props.signing_secret)
 			break
 		case "discord":
@@ -122,12 +112,7 @@ const desiredBody = (props: AlertDestinationProps): Record<string, unknown> => {
 const drifted = (
 	props: AlertDestinationProps,
 	observed: Schema.Schema.Type<typeof WireDestination>,
-): boolean =>
-	props.name !== observed.name ||
-	(props.enabled ?? true) !== observed.enabled ||
-	(props.type === "slack" &&
-		props.channel_label !== undefined &&
-		props.channel_label !== (observed.channel_label ?? undefined))
+): boolean => props.name !== observed.name || (props.enabled ?? true) !== observed.enabled
 
 const toAttributes = (observed: Schema.Schema.Type<typeof WireDestination>) => ({
 	destinationId: observed.id,

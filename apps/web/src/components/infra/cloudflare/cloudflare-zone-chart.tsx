@@ -8,6 +8,7 @@ import {
 	type ChartConfig,
 } from "@maple/ui/components/ui/chart"
 import { cn } from "@maple/ui/lib/utils"
+import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 
 import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@maple/ui/format"
@@ -15,7 +16,6 @@ import { formatBytes, formatPercent } from "@maple/ui/format"
 import {
 	CHART_EMPTY_MESSAGE,
 	CHART_GRID_DASH,
-	COLOR_PALETTE,
 	makeBucketLabeler,
 	transformRows,
 } from "../chart-utils"
@@ -43,8 +43,8 @@ interface CloudflareZoneChartProps {
 	metric: CloudflareZoneMetric
 	/**
 	 * Zones plotted as individual lines, hottest first (at most
-	 * `COLOR_PALETTE.length` — index is the color assignment, shared with the
-	 * legend in the route). Everything else pools into "Other zones".
+	 * `MAX_ZONE_SERIES`). Colors come from the shared identity hash, so a zone
+	 * matches its legend chip in the route. Everything else pools into "Other zones".
 	 */
 	topZones: ReadonlyArray<string>
 	waiting?: boolean
@@ -116,9 +116,7 @@ export function CloudflareZoneChart({
 	// `var(--color-…)` reference — colour series directly instead of via the
 	// ChartContainer CSS variables.
 	const seriesColor = useMemo(() => {
-		const map = new Map(
-			topZones.map((name, idx) => [name, COLOR_PALETTE[idx % COLOR_PALETTE.length] ?? ""]),
-		)
+		const map = resolveSeriesColors(topZones)
 		map.set(OTHER_ZONES_SERIES, OTHER_ZONES_COLOR)
 		return map
 	}, [topZones])

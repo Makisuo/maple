@@ -205,6 +205,9 @@ describe("V2Dashboard wire format", () => {
 					source: { kind: "attribute", scope: "resource", attribute_key: "service.name" },
 				},
 			],
+			// Required with a nullable value, like `description` on this resource:
+			// `null` means auto-refresh is off, not that the field was omitted.
+			refresh_interval_seconds: null,
 			created_at: "2026-07-15T00:00:00.000Z",
 			updated_at: "2026-07-16T00:00:00.000Z",
 			txid: "81234",
@@ -212,6 +215,7 @@ describe("V2Dashboard wire format", () => {
 
 		expect(decoded.id).toBe(UUID)
 		expect(decoded.timeRange.type).toBe("absolute")
+		expect(decoded.refreshIntervalSeconds).toBeNull()
 		expect(decoded.widgets[0]?.dataSource.transform?.fieldMap).toEqual({ value: "requests" })
 		expect(decoded.widgets[0]?.dataSource.params).toEqual({
 			startTime: "now-1h",
@@ -258,9 +262,6 @@ describe("V2 alerts wire format", () => {
 		consecutive_breaches_required: 2,
 		consecutive_healthy_required: 3,
 		renotify_interval_minutes: 60,
-		metric_name: null,
-		metric_type: null,
-		metric_aggregation: null,
 		apdex_threshold_ms: null,
 		query_builder_draft: { queries: [{ signalType: "traces", attributeKey: "service.name" }] },
 		raw_query_sql: null,
@@ -306,12 +307,12 @@ describe("V2 alerts wire format", () => {
 
 	it("decodes destination create params per union arm and rejects mismatched configs", () => {
 		const slack = Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
-			type: "slack",
+			type: "slack-bot",
 			name: "On-call",
-			webhook_url: "https://hooks.slack.com/services/T/B/X",
-			channel_label: "#incidents",
+			channel_id: "C123",
+			channel_name: "incidents",
 		})
-		expect(slack.type).toBe("slack")
+		expect(slack.type).toBe("slack-bot")
 
 		const email = Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
 			type: "email",

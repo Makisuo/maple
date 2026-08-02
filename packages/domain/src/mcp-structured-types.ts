@@ -326,9 +326,6 @@ export interface AlertRuleDetailRow extends AlertRuleRow {
 	consecutiveBreachesRequired: number
 	consecutiveHealthyRequired: number
 	renotifyIntervalMinutes: number
-	metricName: string | null
-	metricType: string | null
-	metricAggregation: string | null
 	apdexThresholdMs: number | null
 	queryBuilderDraft: Record<string, unknown> | null
 	rawQuerySql: string | null
@@ -626,7 +623,7 @@ export interface WidgetInspectionSummary {
 	timeRange?: {
 		startTime: string
 		endTime: string
-		source: "override" | "dashboard" | "fallback"
+		source: "override" | "widget" | "dashboard" | "fallback"
 	}
 }
 
@@ -643,7 +640,7 @@ export interface InspectChartDataData {
 	timeRange: {
 		startTime: string
 		endTime: string
-		source: "override" | "dashboard" | "fallback"
+		source: "override" | "widget" | "dashboard" | "fallback"
 	}
 	queries: InspectChartQueryResult[]
 	verdict: InspectChartVerdict

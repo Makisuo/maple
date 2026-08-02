@@ -21,10 +21,6 @@ export const DestinationPublicConfigSchema = Schema.Struct({
 
 const DestinationSecretConfigSchema = Schema.Union([
 	Schema.Struct({
-		type: Schema.Literal("slack"),
-		webhookUrl: Schema.String,
-	}),
-	Schema.Struct({
 		type: Schema.Literal("slack-bot"),
 		// No secret token here — the bot token is resolved from the org's
 		// slack_workspaces row at dispatch time. Only the target channel is stored.
@@ -38,11 +34,6 @@ const DestinationSecretConfigSchema = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("webhook"),
 		url: Schema.String,
-		signingSecret: Schema.NullOr(Schema.String),
-	}),
-	Schema.Struct({
-		type: Schema.Literal("hazel"),
-		webhookUrl: Schema.String,
 		signingSecret: Schema.NullOr(Schema.String),
 	}),
 	Schema.Struct({
@@ -87,20 +78,23 @@ export interface HydratedDestination {
 
 const parsePublicConfig = <E>(
 	row: AlertDestinationRow,
-	onError: () => E,
+	onError: (cause: unknown) => E,
 ): Effect.Effect<DestinationPublicConfig, E> =>
 	Schema.decodeUnknownEffect(DestinationPublicConfigSchema)(row.configJson).pipe(Effect.mapError(onError))
 
-const parseSecretConfig = <E>(json: string, onError: () => E): Effect.Effect<DestinationSecretConfig, E> =>
+const parseSecretConfig = <E>(
+	json: string,
+	onError: (cause: unknown) => E,
+): Effect.Effect<DestinationSecretConfig, E> =>
 	Schema.decodeUnknownEffect(SecretConfigFromJson)(json).pipe(Effect.mapError(onError))
 
 export const hydrateDestinationRow = <E>(
 	row: AlertDestinationRow,
 	encryptionKey: Buffer,
 	errors: {
-		onPublicConfigInvalid: () => E
+		onPublicConfigInvalid: (cause: unknown) => E
 		onDecryptFailure: () => E
-		onSecretConfigInvalid: () => E
+		onSecretConfigInvalid: (cause: unknown) => E
 	},
 ): Effect.Effect<HydratedDestination, E> =>
 	Effect.gen(function* () {

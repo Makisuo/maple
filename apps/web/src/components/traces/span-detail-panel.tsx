@@ -9,9 +9,8 @@ import {
 	ServerIcon,
 	ChevronDownIcon,
 	ChevronUpIcon,
-	CopyIcon,
 } from "@/components/icons"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Alert, AlertTitle, AlertDescription } from "@maple/ui/components/ui/alert"
@@ -202,27 +201,21 @@ What could be causing this error and how can I fix it?`
 }
 
 function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSectionProps) {
-	const promptCopy = useCopyToClipboard("Error prompt")
 	const [expanded, setExpanded] = useState(false)
 	const isLong = message.length > 120 || message.includes("\n")
-
-	const handleCopyPrompt = () =>
-		promptCopy.copy(formatErrorPrompt({ message, serviceName, spanName, attributes }))
 
 	return (
 		<Alert variant="error" className="mx-3 my-2 rounded-md border-destructive/30">
 			<CircleWarningIcon size={14} />
 			<AlertTitle className="flex items-center justify-between">
 				<span>Error</span>
-				<Button
-					variant="ghost"
-					size="sm"
-					className="h-5 px-1.5 text-[10px] text-destructive hover:text-destructive/80 hover:bg-destructive/10"
-					onClick={handleCopyPrompt}
-				>
-					<CopyIcon size={10} className="mr-1" />
-					Copy as prompt
-				</Button>
+				<CopyButton
+					value={() => formatErrorPrompt({ message, serviceName, spanName, attributes })}
+					label="Error prompt"
+					idleLabel="Copy as prompt"
+					iconSize={10}
+					className="h-5 px-1.5 text-[10px] text-destructive hover:bg-destructive/10 hover:text-destructive/80"
+				/>
 			</AlertTitle>
 			<AlertDescription>
 				{isLong ? (

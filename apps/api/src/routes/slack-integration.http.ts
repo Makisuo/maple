@@ -15,7 +15,7 @@ const INTERNAL_SERVICE_PREFIX = "maple_svc_"
 const buildAppRedirect = (appBaseUrl: string, params: Record<string, string>): string => {
 	const base = appBaseUrl.replace(/\/$/, "")
 	// Land on the Slack integration card (route `/integrations`, search `integration`),
-	// carrying the `slack=connected|error` return params the card surfaces as a toast.
+	// carrying the `slack=connected|updated|error` return params the card surfaces as a toast.
 	const search = new URLSearchParams({ integration: "slack", ...params }).toString()
 	return `${base}/integrations?${search}`
 }
@@ -60,7 +60,10 @@ export const SlackCallbackRouter = HttpRouter.use((router) =>
 				),
 				Effect.map((result) =>
 					redirect({
-						slack: "connected",
+						// "updated" = an in-place re-auth of the org's active installation
+						// (the permissions-refresh flow) — the web app toasts it differently
+						// from a first-time connect.
+						slack: result.updated ? "updated" : "connected",
 						...(result.teamName ? { slack_team: result.teamName } : {}),
 					}),
 				),

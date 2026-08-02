@@ -44,7 +44,10 @@ export const buildSlackReconcileLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(Base, ApiKeysServiceLive, OAuthStateRepositoryLive)),
 	)
 
-	return SlackIntegrationServiceLive.pipe(Layer.provideMerge(telemetry.layer), Layer.provideMerge(ConfigLive))
+	return SlackIntegrationServiceLive.pipe(
+		Layer.provideMerge(telemetry.layer),
+		Layer.provideMerge(ConfigLive),
+	)
 }
 
 export const flushSlackTelemetry = (env: Record<string, unknown>) => telemetry.flush(env)
@@ -59,7 +62,9 @@ export const runSlackReconciliation = Effect.gen(function* () {
 }).pipe(
 	// tapCause lets the cause propagate so `withSpan` marks the tick as Error.
 	Effect.tapCause((cause) =>
-		Effect.logError("[Slack] reconciliation tick failed").pipe(Effect.annotateLogs({ error: String(cause) })),
+		Effect.logError("[Slack] reconciliation tick failed").pipe(
+			Effect.annotateLogs({ error: String(cause) }),
+		),
 	),
 	Effect.withSpan("SlackReconciliation.tick"),
 )

@@ -5,7 +5,7 @@ import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
 import { Env } from "../lib/Env"
-import { SlackIntegrationService } from "./SlackIntegrationService"
+import { SLACK_BOT_SCOPES, SlackIntegrationService } from "./SlackIntegrationService"
 import {
 	resolveSlackBotTokenForDispatch,
 	slackSecretAad,
@@ -796,6 +796,159 @@ describe("SlackIntegrationService", () => {
 		}).pipe(Effect.provide(databaseLayer(testDb)))
 	})
 
+	// --- In-place re-auth (permissions refresh) -------------------------------
+
+	it.effect(
+		"completeInstall over an active same-org install keeps the API key and refreshes the scope (zero-downtime re-auth)",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			return Effect.gen(function* () {
+				const slack = yield* SlackIntegrationService
+
+				const start1 = yield* slack.startInstall(asOrgId("org_re"), asUserId("user_re"), "https://cb")
+				const first = yield* slack.completeInstall("code_1", stateFromInstallUrl(start1.url))
+				assert.strictEqual(first.updated, false)
+				const before = yield* slack.resolveForBot("T-RE")
+				const firstRow = yield* Effect.promise(() =>
+					queryFirstRow<{ id: string; api_key_id: string; scope: string }>(
+						testDb,
+						"SELECT id, api_key_id, scope FROM slack_workspaces WHERE team_id = 'T-RE'",
+					),
+				)
+				assert.strictEqual(firstRow?.scope, "chat:write")
+
+				// Re-auth WITHOUT uninstalling — the scope-upgrade flow.
+				const start2 = yield* slack.startInstall(asOrgId("org_re"), asUserId("user_re"), "https://cb")
+				const second = yield* slack.completeInstall("code_2", stateFromInstallUrl(start2.url))
+				assert.strictEqual(second.updated, true)
+
+				const secondRow = yield* Effect.promise(() =>
+					queryFirstRow<{
+						id: string
+						api_key_id: string
+						scope: string
+						revoked_at: string | null
+					}>(
+						testDb,
+						"SELECT id, api_key_id, scope, revoked_at FROM slack_workspaces WHERE team_id = 'T-RE'",
+					),
+				)
+				// Same row, same API key — the Slack agent's cached credentials stay
+				// valid through the re-auth (no downtime); only the grant is refreshed.
+				assert.strictEqual(secondRow?.id, firstRow?.id)
+				assert.strictEqual(secondRow?.api_key_id, firstRow?.api_key_id)
+				assert.strictEqual(secondRow?.scope, "chat:write,reactions:write")
+				assert.isNull(secondRow?.revoked_at)
+
+				const keyRow = yield* Effect.promise(() =>
+					queryFirstRow<{ revoked: boolean }>(
+						testDb,
+						"SELECT revoked FROM api_keys WHERE id = $1",
+						[firstRow!.api_key_id],
+					),
+				)
+				assert.strictEqual(keyRow?.revoked, false)
+				// And the resolvable plaintext key is byte-for-byte the one from before.
+				const after = yield* slack.resolveForBot("T-RE")
+				assert.strictEqual(after.mapleApiKey, before.mapleApiKey)
+				assert.strictEqual(after.botToken, "xoxb-T-RE")
+
+				const status = yield* slack.getStatus(asOrgId("org_re"))
+				assert.strictEqual(status.installed, true)
+			}).pipe(
+				Effect.provide(
+					withFetch(
+						testDb,
+						slackApiFetch(OAUTH_URL, (_url, call) =>
+							jsonResponse({
+								ok: true,
+								access_token: "xoxb-T-RE",
+								token_type: "bot",
+								// The re-approval is what grants the newly required scope.
+								scope: call === 0 ? "chat:write" : "chat:write,reactions:write",
+								bot_user_id: "U0BOT",
+								team: { id: "T-RE", name: "ReAuth" },
+							}),
+						),
+					),
+				),
+			)
+		},
+	)
+
+	it.effect("completeInstall after an uninstall mints a fresh API key (no reuse of a revoked key)", () => {
+		const testDb = createTestDb(trackedDbs)
+		const teamRef = { current: { id: "T-ROT", name: "Rotate" } }
+		const revokeCalls: Array<string | null> = []
+		return Effect.gen(function* () {
+			const slack = yield* SlackIntegrationService
+
+			const start1 = yield* slack.startInstall(asOrgId("org_rot"), asUserId("user_rot"), "https://cb")
+			yield* slack.completeInstall("code_1", stateFromInstallUrl(start1.url))
+			const firstRow = yield* Effect.promise(() =>
+				queryFirstRow<{ api_key_id: string }>(
+					testDb,
+					"SELECT api_key_id FROM slack_workspaces WHERE team_id = 'T-ROT'",
+				),
+			)
+			yield* slack.uninstall(asOrgId("org_rot"))
+
+			const start2 = yield* slack.startInstall(asOrgId("org_rot"), asUserId("user_rot"), "https://cb")
+			const second = yield* slack.completeInstall("code_2", stateFromInstallUrl(start2.url))
+			// A reinstall over a revoked row is a fresh connect, not an update.
+			assert.strictEqual(second.updated, false)
+
+			const secondRow = yield* Effect.promise(() =>
+				queryFirstRow<{ api_key_id: string; revoked_at: string | null }>(
+					testDb,
+					"SELECT api_key_id, revoked_at FROM slack_workspaces WHERE team_id = 'T-ROT'",
+				),
+			)
+			assert.isNull(secondRow?.revoked_at)
+			assert.notStrictEqual(secondRow?.api_key_id, firstRow?.api_key_id)
+		}).pipe(Effect.provide(withFetch(testDb, slackInstallAndRevokeFetch(teamRef, revokeCalls))))
+	})
+
+	// --- Scope drift (getStatus.missingScopes) ---------------------------------
+
+	it.effect("getStatus reports required scopes the stored grant is missing", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			// The fixture stores scope = 'chat:write' only.
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_drift",
+					orgId: "org_drift",
+					teamId: "T-DRIFT",
+					teamName: "Drift",
+					botToken: "xoxb-drift",
+					apiKey: "maple_ak_drift",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const status = yield* slack.getStatus(asOrgId("org_drift"))
+			assert.include(status.missingScopes, "reactions:write")
+			assert.include(status.missingScopes, "app_mentions:read")
+			assert.notInclude(status.missingScopes, "chat:write")
+
+			// A grant covering everything (order/spacing-insensitive) reports no drift.
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE slack_workspaces SET scope = $1 WHERE id = 'sw_drift'", [
+					` ${SLACK_BOT_SCOPES.split(",").reverse().join(" , ")} ,extra:scope`,
+				]),
+			)
+			const full = yield* slack.getStatus(asOrgId("org_drift"))
+			assert.deepStrictEqual([...full.missingScopes], [])
+
+			// A pre-column row (NULL scope) must not nag — there is no record of the grant.
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE slack_workspaces SET scope = NULL WHERE id = 'sw_drift'"),
+			)
+			const unknown = yield* slack.getStatus(asOrgId("org_drift"))
+			assert.deepStrictEqual([...unknown.missingScopes], [])
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
 	// --- Cross-org rebind rejection -----------------------------------------
 
 	it.effect("completeInstall rejects binding a team actively installed on another org (pre-check)", () => {
@@ -1013,12 +1166,14 @@ describe("SlackIntegrationService", () => {
 				}),
 			)
 			const slack = yield* SlackIntegrationService
-			const channels = yield* slack.listChannels(asOrgId("org_lc"))
+			const { channels, truncated } = yield* slack.listChannels(asOrgId("org_lc"))
 			assert.deepStrictEqual(channels, [
 				{ id: "C1", name: "general", isPrivate: true, isMember: true },
 				// Missing name/is_private/is_member default to id/false/false.
 				{ id: "C2", name: "C2", isPrivate: false, isMember: false },
 			])
+			// The walk ended on Slack's own "no more pages", not on the page cap.
+			assert.isFalse(truncated)
 			assert.strictEqual(urls.length, 1)
 			const first = new URL(urls[0]!)
 			assert.isNull(first.searchParams.get("cursor"))
@@ -1056,11 +1211,12 @@ describe("SlackIntegrationService", () => {
 				}),
 			)
 			const slack = yield* SlackIntegrationService
-			const channels = yield* slack.listChannels(asOrgId("org_lc"))
+			const { channels, truncated } = yield* slack.listChannels(asOrgId("org_lc"))
 			assert.deepStrictEqual(
 				channels.map((c) => c.id),
 				["C1", "C2"],
 			)
+			assert.isFalse(truncated)
 			assert.strictEqual(urls.length, 2)
 			assert.isNull(new URL(urls[0]!).searchParams.get("cursor"))
 			assert.strictEqual(new URL(urls[1]!).searchParams.get("cursor"), "cursor-2")
@@ -1104,13 +1260,18 @@ describe("SlackIntegrationService", () => {
 				}),
 			)
 			const slack = yield* SlackIntegrationService
-			const channels = yield* slack.listChannels(asOrgId("org_lc"))
+			const { channels, truncated } = yield* slack.listChannels(asOrgId("org_lc"))
 			// The mock ALWAYS hands back a next_cursor — the walk must stop at the
-			// runaway guard (SLACK_MAX_CHANNEL_PAGES) instead of looping forever.
+			// runaway guard (SLACK_MAX_CHANNEL_PAGES) instead of looping forever,
+			// and must report the stop as truncation rather than as a full list.
 			assert.strictEqual(calls, SLACK_MAX_CHANNEL_PAGES)
+			assert.isTrue(truncated)
 			assert.strictEqual(channels.length, SLACK_MAX_CHANNEL_PAGES)
-			assert.strictEqual(channels[0]?.id, "C-page-0")
-			assert.strictEqual(channels.at(-1)?.id, `C-page-${SLACK_MAX_CHANNEL_PAGES - 1}`)
+			// Order-independent: `listChannels` sorts by membership then name.
+			assert.deepStrictEqual(
+				channels.map((c) => c.id).sort(),
+				Array.from({ length: SLACK_MAX_CHANNEL_PAGES }, (_, page) => `C-page-${page}`).sort(),
+			)
 			// 1000 per page (Slack's documented max) keeps a 10k-channel workspace
 			// inside the Tier 2 (~20 req/min) budget.
 			assert.strictEqual(new URL(pageUrls[0]!).searchParams.get("limit"), "1000")
@@ -1149,7 +1310,7 @@ describe("SlackIntegrationService", () => {
 			const slack = yield* SlackIntegrationService
 			// `conversations.list` is Tier 2 — a 429 must back off, not surface as an
 			// "unexpected payload" error (Slack sends an empty body with the 429).
-			const channels = yield* runInterleaved(slack.listChannels(asOrgId("org_lc")))
+			const { channels } = yield* runInterleaved(slack.listChannels(asOrgId("org_lc")))
 			assert.strictEqual(calls, 2)
 			assert.deepStrictEqual(
 				channels.map((c) => c.id),
@@ -1189,13 +1350,15 @@ describe("SlackIntegrationService", () => {
 			// than the whole walk is allowed to take. The walk must give up at the
 			// budget and hand back page 0 rather than sleeping past Cloudflare's
 			// ~100s edge cutoff on a request nobody is listening to any more.
-			const channels = yield* runInterleaved(slack.listChannels(asOrgId("org_lc")), {
+			const { channels, truncated } = yield* runInterleaved(slack.listChannels(asOrgId("org_lc")), {
 				maxSteps: Math.ceil(SLACK_CHANNEL_WALK_BUDGET_MS / 1_000) + 30,
 			})
 			assert.deepStrictEqual(
 				channels.map((c) => c.id),
 				["C1"],
 			)
+			// Giving up on the budget is truncation, not a complete list.
+			assert.isTrue(truncated)
 			// Exactly two: the successful page and the 429. A third would mean the
 			// 60s `Retry-After` had been clamped below the budget and retried —
 			// `conversations.list` is Tier 2, so 60 is the honest wait.
@@ -1278,7 +1441,7 @@ describe("SlackIntegrationService", () => {
 				}),
 			)
 			const slack = yield* SlackIntegrationService
-			const channels = yield* runInterleaved(slack.listChannels(asOrgId("org_lc")))
+			const { channels } = yield* runInterleaved(slack.listChannels(asOrgId("org_lc")))
 			assert.deepStrictEqual(
 				channels.map((c) => c.id),
 				["C1"],
@@ -1294,6 +1457,46 @@ describe("SlackIntegrationService", () => {
 							? new Response("", { status: 500 })
 							: jsonResponse({ ok: true, channels: [{ id: "C1", name: "one" }] })
 					}),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels sorts bot-member channels first, then alphabetically", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc_sort",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const { channels } = yield* slack.listChannels(asOrgId("org_lc"))
+			assert.deepStrictEqual(
+				channels.map((c) => c.name),
+				// Joined channels first (alerts, zebra), then the rest (ops, sw-1).
+				["alerts", "zebra", "ops", "sw-1"],
+			)
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, () =>
+						jsonResponse({
+							ok: true,
+							channels: [
+								{ id: "C1", name: "sw-1", is_member: false },
+								{ id: "C2", name: "zebra", is_member: true },
+								{ id: "C3", name: "ops", is_member: false },
+								{ id: "C4", name: "alerts", is_member: true },
+							],
+						}),
+					),
 				),
 			),
 		)
@@ -1440,7 +1643,11 @@ describe("SlackIntegrationService", () => {
 			const teamRef = { current: { id: "T-EVT2", name: "EvtOrg2" } }
 			return Effect.gen(function* () {
 				const slack = yield* SlackIntegrationService
-				const start = yield* slack.startInstall(asOrgId("org_evt2"), asUserId("user_evt2"), "https://cb")
+				const start = yield* slack.startInstall(
+					asOrgId("org_evt2"),
+					asUserId("user_evt2"),
+					"https://cb",
+				)
 				yield* slack.completeInstall("code_evt2", stateFromInstallUrl(start.url))
 
 				const workspace = yield* Effect.promise(() =>
@@ -1458,9 +1665,11 @@ describe("SlackIntegrationService", () => {
 				yield* slack.revokeByTeamId("T-EVT2", "tokens_revoked")
 
 				const keyRow = yield* Effect.promise(() =>
-					queryFirstRow<{ revoked: boolean }>(testDb, "SELECT revoked FROM api_keys WHERE id = $1", [
-						workspace!.api_key_id,
-					]),
+					queryFirstRow<{ revoked: boolean }>(
+						testDb,
+						"SELECT revoked FROM api_keys WHERE id = $1",
+						[workspace!.api_key_id],
+					),
 				)
 				assert.strictEqual(keyRow?.revoked, true)
 			}).pipe(
@@ -1575,9 +1784,7 @@ describe("SlackIntegrationService", () => {
 				Effect.provide(
 					withFetch(
 						testDb,
-						slackApiFetch(AUTH_TEST_URL, () =>
-							jsonResponse({ ok: false, error: "ratelimited" }),
-						),
+						slackApiFetch(AUTH_TEST_URL, () => jsonResponse({ ok: false, error: "ratelimited" })),
 					),
 				),
 			)

@@ -1,18 +1,10 @@
 // Shared helpers for the infra detail charts (host + k8s). The two chart files
 // keep their own <ChartView> (different units, container chrome, heights) but
-// share the row→series transform, palette, grid/empty conventions, and the
-// unit-aware value formatting used by tooltips, legend chips, and axes.
+// share the row→series transform, grid/empty conventions, and the unit-aware
+// value formatting used by tooltips, legend chips, and axes. Series colors come
+// from `resolveSeriesColors` — a host/pod/zone keeps its color across windows.
 
 import { formatBytesPerSecond, formatLoad, formatPercent } from "@maple/ui/format"
-
-export const COLOR_PALETTE = [
-	"var(--chart-1)",
-	"var(--chart-2)",
-	"var(--chart-3)",
-	"var(--chart-4)",
-	"var(--chart-5)",
-	"var(--chart-p50)",
-]
 
 /** Recharts grid dash — one value across every infra chart. */
 export const CHART_GRID_DASH = "3 3"

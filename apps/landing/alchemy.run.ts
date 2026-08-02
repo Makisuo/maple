@@ -35,7 +35,18 @@ export const createLandingWorker = ({
 			name: resolveWorkerName("landing", stage),
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			// The `assets` prop auto-adds the ASSETS binding `src/worker.ts` reads.
-			assets: { directory: build.outdir, hash: Output.map(build.hash, (h) => h.output ?? "") },
+			assets: {
+				directory: build.outdir,
+				hash: Output.map(build.hash, (h) => h.output ?? ""),
+				// Workers Assets serves a matching file *before* invoking the Worker,
+				// so without this `src/worker.ts` never sees a request for a real page
+				// and the `Accept: text/markdown` negotiation is dead code. Scoped to
+				// extensionless paths — the ones with a `.md` twin. Anything with a
+				// dot (hashed `/_astro/*`, images, the `.md` and `.txt` files
+				// themselves) still comes straight off the asset layer with no Worker
+				// invocation.
+				runWorkerFirst: ["/*", "!/_astro/*", "!/*.*"],
+			},
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
 			observability: {

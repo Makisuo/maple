@@ -20,13 +20,23 @@ export type { CollectionStatus } from "@tanstack/db"
 type OnErrorHandler = NonNullable<ShapeStreamOptions<unknown>["onError"]>
 
 /**
- * Default backoff configuration
+ * Default backoff configuration.
+ *
+ * `maxRetries` is deliberately FINITE. An unreachable sync endpoint (down,
+ * misconfigured `VITE_ELECTRIC_SYNC_URL`, corporate proxy) fails every shape
+ * fetch, and an unlimited budget turns that into a request loop that never ends
+ * and never tells anyone: the collection stays in `loading`, so the page renders
+ * a skeleton forever while the browser keeps dialling. Ten attempts spans
+ * ~1s+2s+4s+8s+16s+30s×4 ≈ 2.5 minutes of real recovery time — long enough to
+ * ride out a redeploy or a laptop waking from sleep — after which the stream
+ * stops and `collection:sync-failed` hands the app a definitive failure it can
+ * render (and offer a retry for) instead of an infinite spinner.
  */
 const DEFAULT_BACKOFF_CONFIG: Required<BackoffConfig> = {
 	initialDelayMs: 1000,
 	maxDelayMs: 30000,
 	multiplier: 2,
-	maxRetries: Number.POSITIVE_INFINITY,
+	maxRetries: 10,
 	jitter: true,
 	resetTimeoutMs: 60000,
 }
@@ -35,6 +45,15 @@ const DEFAULT_BACKOFF_CONFIG: Required<BackoffConfig> = {
  * Custom event name for collection error state changes
  */
 export const COLLECTION_ERROR_STATE_CHANGED_EVENT = "collection:error-state-changed"
+
+/**
+ * Custom event name announcing that a shape stream has stopped retrying for
+ * good — its backoff budget is spent and nothing further will be fetched until
+ * the collection is recreated. Unlike {@link COLLECTION_ERROR_STATE_CHANGED_EVENT}
+ * (fired on every transient error) this is terminal, so the app can render a real
+ * error state with a retry affordance instead of a skeleton that never resolves.
+ */
+export const COLLECTION_SYNC_FAILED_EVENT = "collection:sync-failed"
 
 /**
  * Dispatch an event when collection error state changes
@@ -46,6 +65,13 @@ function dispatchErrorStateChanged(collectionId: string | undefined, isError: bo
 				detail: { collectionId, isError },
 			}),
 		)
+	}
+}
+
+/** Announces a terminally stopped stream (see {@link COLLECTION_SYNC_FAILED_EVENT}). */
+function dispatchSyncFailed(collectionId: string | undefined): void {
+	if (typeof window !== "undefined") {
+		window.dispatchEvent(new CustomEvent(COLLECTION_SYNC_FAILED_EVENT, { detail: { collectionId } }))
 	}
 }
 
@@ -156,6 +182,9 @@ function createBackoffOnError(
 				retryCount,
 				cause: error,
 			})
+			// Terminal: nothing will refetch this shape until the collection is
+			// recreated, so tell the app rather than leaving it on a skeleton.
+			dispatchSyncFailed(collectionId)
 			// Return undefined to stop syncing
 			return
 		}

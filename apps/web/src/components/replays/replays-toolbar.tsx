@@ -62,10 +62,7 @@ export function ReplaysToolbar({
 					)}
 				>
 					<span
-						className={cn(
-							"size-1.5 rounded-full",
-							errorsOnly ? "bg-white" : "bg-destructive",
-						)}
+						className={cn("size-1.5 rounded-full", errorsOnly ? "bg-white" : "bg-destructive")}
 						aria-hidden
 					/>
 					<span className="tabular-nums">{errorSessions.toLocaleString()}</span> with errors

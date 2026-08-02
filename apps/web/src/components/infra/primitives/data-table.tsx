@@ -3,12 +3,16 @@
 // chip, container, and skeleton shell live here.
 
 import * as React from "react"
-import { useMemo, useState } from "react"
 import { cn } from "@maple/ui/lib/utils"
 
 import { ArrowUpDownIcon } from "@/components/icons"
 
-export type SortDir = "asc" | "desc"
+// `useTableSort` moved to @/hooks/use-table-sort when the dashboard table widget
+// started sharing it. Re-exported here so the infra tables keep one import.
+export { useTableSort } from "@/hooks/use-table-sort"
+export type { SortDir } from "@/hooks/use-table-sort"
+
+import type { SortDir } from "@/hooks/use-table-sort"
 
 /** Row-link className shared by every table row (kept here so the styling is one source). */
 export const ROW_LINK_CLASS =
@@ -22,64 +26,13 @@ export const ROW_LINK_CLASS =
 export const ROW_BUTTON_CLASS =
 	"group flex w-full items-center gap-4 border-b border-border/40 px-4 py-3 text-left transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none aria-pressed:bg-muted/40"
 
-interface UseTableSortOptions<K, Row> {
-	initialKey: K
-	initialDir?: SortDir
-	/** Keys that should default to ascending on first click (names, namespaces, …). */
-	stringKeys?: ReadonlyArray<K>
-	/**
-	 * Rows matching this always sort above the rest, in every column and direction —
-	 * for the one row that is categorically different (a production branch among
-	 * ephemeral ones). Stable sort can't express this: it only preserves order
-	 * among ties.
-	 */
-	pinned?: (row: Row) => boolean
-}
-
-export function useTableSort<Row, K extends keyof Row>(
-	rows: ReadonlyArray<Row>,
-	{ initialKey, initialDir = "desc", stringKeys, pinned }: UseTableSortOptions<K, Row>,
-) {
-	const [sortKey, setSortKey] = useState<K>(initialKey)
-	const [sortDir, setSortDir] = useState<SortDir>(initialDir)
-
-	const handleSort = (k: K) => {
-		if (k === sortKey) {
-			setSortDir((d) => (d === "asc" ? "desc" : "asc"))
-		} else {
-			setSortKey(k)
-			setSortDir(stringKeys?.includes(k) ? "asc" : "desc")
-		}
-	}
-
-	const sorted = useMemo(() => {
-		const compare = (a: Row, b: Row) => {
-			const av = a[sortKey]
-			const bv = b[sortKey]
-			if (typeof av === "number" && typeof bv === "number") {
-				return sortDir === "asc" ? av - bv : bv - av
-			}
-			const as = String(av)
-			const bs = String(bv)
-			return sortDir === "asc" ? as.localeCompare(bs) : bs.localeCompare(as)
-		}
-		if (pinned === undefined) return [...rows].sort(compare)
-		const top: Row[] = []
-		const rest: Row[] = []
-		for (const row of rows) (pinned(row) ? top : rest).push(row)
-		return [...top.sort(compare), ...rest.sort(compare)]
-	}, [rows, sortKey, sortDir, pinned])
-
-	return { sorted, sortKey, sortDir, handleSort }
-}
-
 /**
  * The three sort props a `ColumnHead` needs, as one spreadable object. Lets a
  * table declare its column list once and render it twice — interactive for the
  * table, inert for the skeleton — instead of duplicating the columns per state.
  */
 export interface SortControls<K extends string> {
-	currentKey: K
+	currentKey: K | null
 	dir: SortDir
 	onSort: (k: K) => void
 }
@@ -88,7 +41,7 @@ interface ColumnHeadProps<K extends string> {
 	label: string
 	width: string
 	sortKey?: K
-	currentKey?: K
+	currentKey?: K | null
 	dir?: SortDir
 	onSort?: (k: K) => void
 	align?: "left" | "right"

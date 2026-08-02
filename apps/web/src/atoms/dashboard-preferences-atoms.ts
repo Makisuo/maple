@@ -4,6 +4,17 @@ import { localStorageRuntime } from "@/lib/services/common/storage-runtime"
 
 export type DashboardSortOption = "updated" | "created" | "name-asc" | "name-desc" | "widgets"
 
+export const DASHBOARD_SORT_OPTIONS = [
+	"updated",
+	"created",
+	"name-asc",
+	"name-desc",
+	"widgets",
+] as const satisfies ReadonlyArray<DashboardSortOption>
+
+export const isDashboardSortOption = (value: string): value is DashboardSortOption =>
+	(DASHBOARD_SORT_OPTIONS as ReadonlyArray<string>).includes(value)
+
 export const dashboardFavoritesAtom = Atom.kvs({
 	runtime: localStorageRuntime,
 	key: "maple.dashboards.favorites",
@@ -11,11 +22,14 @@ export const dashboardFavoritesAtom = Atom.kvs({
 	defaultValue: () => [] as readonly string[],
 })
 
+/**
+ * The sort the list falls back to when the URL carries no `?sort`. Sort, search,
+ * scope and tags are all URL-owned so the view is linkable and back-navigable;
+ * this only remembers the user's preferred default across cold loads.
+ */
 export const dashboardSortAtom = Atom.kvs({
 	runtime: localStorageRuntime,
 	key: "maple.dashboards.sort",
 	schema: Schema.String,
 	defaultValue: () => "updated" as string,
 })
-
-export const dashboardTagFilterAtom = Atom.make<string | null>(null)

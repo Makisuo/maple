@@ -7,8 +7,6 @@ import {
 	AlertGroupBy,
 	AlertIncidentDocument,
 	AlertIncidentStatus,
-	AlertMetricAggregation,
-	AlertMetricType,
 	AlertNotificationTemplate,
 	AlertRuleDocument,
 	AlertRuleId,
@@ -35,8 +33,6 @@ const asDestinationType = Schema.decodeUnknownSync(AlertDestinationType)
 const asSeverity = Schema.decodeUnknownSync(AlertSeverity)
 const asSignalType = Schema.decodeUnknownSync(AlertSignalType)
 const asComparator = Schema.decodeUnknownSync(AlertComparator)
-const asMetricType = Schema.decodeUnknownSync(AlertMetricType)
-const asMetricAggregation = Schema.decodeUnknownSync(AlertMetricAggregation)
 const asIncidentStatus = Schema.decodeUnknownSync(AlertIncidentStatus)
 const asEventType = Schema.decodeUnknownSync(AlertEventType)
 const asReducer = Schema.decodeUnknownSync(QueryEngineAlertReducer)
@@ -88,9 +84,6 @@ export const AlertRuleRowSchema = Schema.Struct({
 	consecutive_breaches_required: Schema.Number,
 	consecutive_healthy_required: Schema.Number,
 	renotify_interval_minutes: Schema.Number,
-	metric_name: Schema.NullOr(Schema.String),
-	metric_type: Schema.NullOr(Schema.String),
-	metric_aggregation: Schema.NullOr(Schema.String),
 	apdex_threshold_ms: Schema.NullOr(Schema.Number),
 	query_builder_draft_json: Schema.NullOr(Schema.Unknown),
 	raw_query_sql: Schema.NullOr(Schema.String),
@@ -217,10 +210,6 @@ export const rowToAlertRuleDocument = (
 		consecutiveBreachesRequired: row.consecutive_breaches_required,
 		consecutiveHealthyRequired: row.consecutive_healthy_required,
 		renotifyIntervalMinutes: row.renotify_interval_minutes,
-		metricName: row.metric_name,
-		metricType: row.metric_type != null ? asMetricType(row.metric_type) : null,
-		metricAggregation:
-			row.metric_aggregation != null ? asMetricAggregation(row.metric_aggregation) : null,
 		apdexThresholdMs: row.apdex_threshold_ms,
 		queryBuilderDraft:
 			row.query_builder_draft_json == null

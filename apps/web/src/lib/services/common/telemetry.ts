@@ -49,52 +49,59 @@ export const tracedFetch = (
 	const method =
 		init?.method ?? (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
 
-	return runtime
-		.runPromise(
-			Effect.gen(function* () {
-				const span = yield* Effect.currentSpan
-				const headers = new Headers(
-					init?.headers ??
-						(typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined),
-				)
-				if (!headers.has("traceparent")) {
-					headers.set("traceparent", `00-${span.traceId}-${span.spanId}-01`)
-				}
-				// Settle the fetch into a value rather than the failure channel:
-				// `withSpan` derives span status from that channel, and there is no way
-				// to walk an `Error` back once the effect has failed. Cancellations
-				// therefore return normally and only real failures are re-failed below.
-				const outcome: FetchOutcome = yield* Effect.promise(() =>
-					globalThis.fetch(input, { ...init, headers }).then(
-						(response) => ({ ok: true, response }) as const,
-						(cause) => ({ ok: false, cause }) as const,
-					),
-				)
-				if (outcome.ok) {
-					yield* Effect.annotateCurrentSpan("http.response.status_code", outcome.response.status)
-					return outcome
-				}
-				if (isCancellation(outcome.cause, init?.signal)) {
-					yield* Effect.annotateCurrentSpan("maple.http.cancelled", true)
-					return outcome
-				}
-				return yield* Effect.fail(outcome.cause)
-			}).pipe(
-				Effect.withSpan("http.client", {
-					kind: "client",
-					attributes: {
-						"http.request.method": method,
-						"url.full": parsed.href,
-						"server.address": parsed.hostname,
-						"peer.service": peerService,
-					},
-				}),
-			),
-		)
-		// Cancellations resolved the effect to keep the span `Ok`, so rethrow the
-		// original rejection verbatim here — Electric's pause/resume and every other
-		// caller must see exactly the value `fetch` rejected with.
-		.then((outcome) => (outcome.ok ? outcome.response : Promise.reject(outcome.cause)))
+	return (
+		runtime
+			.runPromise(
+				Effect.gen(function* () {
+					const span = yield* Effect.currentSpan
+					const headers = new Headers(
+						init?.headers ??
+							(typeof Request !== "undefined" && input instanceof Request
+								? input.headers
+								: undefined),
+					)
+					if (!headers.has("traceparent")) {
+						headers.set("traceparent", `00-${span.traceId}-${span.spanId}-01`)
+					}
+					// Settle the fetch into a value rather than the failure channel:
+					// `withSpan` derives span status from that channel, and there is no way
+					// to walk an `Error` back once the effect has failed. Cancellations
+					// therefore return normally and only real failures are re-failed below.
+					const outcome: FetchOutcome = yield* Effect.promise(() =>
+						globalThis.fetch(input, { ...init, headers }).then(
+							(response) => ({ ok: true, response }) as const,
+							(cause) => ({ ok: false, cause }) as const,
+						),
+					)
+					if (outcome.ok) {
+						yield* Effect.annotateCurrentSpan(
+							"http.response.status_code",
+							outcome.response.status,
+						)
+						return outcome
+					}
+					if (isCancellation(outcome.cause, init?.signal)) {
+						yield* Effect.annotateCurrentSpan("maple.http.cancelled", true)
+						return outcome
+					}
+					return yield* Effect.fail(outcome.cause)
+				}).pipe(
+					Effect.withSpan("http.client", {
+						kind: "client",
+						attributes: {
+							"http.request.method": method,
+							"url.full": parsed.href,
+							"server.address": parsed.hostname,
+							"peer.service": peerService,
+						},
+					}),
+				),
+			)
+			// Cancellations resolved the effect to keep the span `Ok`, so rethrow the
+			// original rejection verbatim here — Electric's pause/resume and every other
+			// caller must see exactly the value `fetch` rejected with.
+			.then((outcome) => (outcome.ok ? outcome.response : Promise.reject(outcome.cause)))
+	)
 }
 
 export const logClientError = (

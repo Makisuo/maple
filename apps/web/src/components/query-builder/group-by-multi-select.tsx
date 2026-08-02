@@ -1,16 +1,6 @@
 import * as React from "react"
 
-import {
-	Combobox,
-	ComboboxChip,
-	ComboboxChips,
-	ComboboxChipsInput,
-	ComboboxContent,
-	ComboboxEmpty,
-	ComboboxItem,
-	ComboboxList,
-	useComboboxAnchor,
-} from "@maple/ui/components/ui/combobox"
+import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
 import { GROUP_BY_OPTIONS, type QueryBuilderDataSource } from "@/lib/query-builder/model"
 
 interface GroupByMultiSelectProps {
@@ -47,9 +37,7 @@ export function GroupByMultiSelect({
 	disabled = false,
 	className,
 }: GroupByMultiSelectProps) {
-	const anchor = useComboboxAnchor()
-
-	const { items, labelFor } = React.useMemo(() => {
+	const options = React.useMemo(() => {
 		const labelMap = new Map<string, string>()
 		for (const opt of GROUP_BY_OPTIONS[dataSource]) {
 			if (opt.value === "none") continue
@@ -58,38 +46,27 @@ export function GroupByMultiSelect({
 		for (const key of attributeKeys ?? []) {
 			labelMap.set(`attr.${key}`, `attr.${key}`)
 		}
-		return {
-			items: Array.from(labelMap.keys()),
-			labelFor: (v: string) => labelMap.get(v) ?? v,
-		}
+		// The chip keeps the raw dimension key (mono, matching how it appears in a
+		// query), while the list row shows the human-readable label.
+		return Array.from(labelMap, ([optionValue, label]) => ({
+			value: optionValue,
+			label,
+			chipLabel: optionValue,
+		}))
 	}, [dataSource, attributeKeys])
 
 	return (
-		<div className={className ?? "flex-1 min-w-[140px]"}>
-			<Combobox
-				multiple
-				items={items}
-				itemToStringLabel={labelFor}
-				value={value}
-				onValueChange={disabled ? () => {} : onChange}
-			>
-				<ComboboxChips ref={anchor} className="text-xs font-mono">
-					{value.map((key) => (
-						<ComboboxChip key={key}>{key}</ComboboxChip>
-					))}
-					<ComboboxChipsInput id={id} placeholder={value.length === 0 ? placeholder : ""} />
-				</ComboboxChips>
-				<ComboboxContent anchor={anchor}>
-					<ComboboxEmpty>No fields found.</ComboboxEmpty>
-					<ComboboxList>
-						{(item: string) => (
-							<ComboboxItem key={item} value={item} className="font-mono">
-								{labelFor(item)}
-							</ComboboxItem>
-						)}
-					</ComboboxList>
-				</ComboboxContent>
-			</Combobox>
-		</div>
+		<MultiSelectCombobox
+			chipsClassName="text-xs font-mono"
+			className={className ?? "flex-1 min-w-[140px]"}
+			disabled={disabled}
+			emptyMessage="No fields found."
+			id={id}
+			itemClassName="font-mono"
+			onChange={onChange}
+			options={options}
+			placeholder={value.length === 0 ? placeholder : ""}
+			value={value}
+		/>
 	)
 }

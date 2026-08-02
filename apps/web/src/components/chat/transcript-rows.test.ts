@@ -48,9 +48,9 @@ describe("buildTranscriptRows", () => {
 	})
 
 	it("treats prose between two bursts as a boundary", () => {
-		expect(kinds([tools("m1", 1), text("m2", "assistant", "here's what I found"), tools("m3", 1)])).toEqual(
-			["message", "message", "message"],
-		)
+		expect(
+			kinds([tools("m1", 1), text("m2", "assistant", "here's what I found"), tools("m3", 1)]),
+		).toEqual(["message", "message", "message"])
 	})
 
 	it("merges each run independently across a user turn", () => {
@@ -74,11 +74,7 @@ describe("buildTranscriptRows", () => {
 		// `Used N tools` header.
 		const diagnosis = tools("m2", 1, { status: "diagnosis", report })
 		expect(isToolOnlyMessage(diagnosis)).toBe(false)
-		expect(kinds([tools("m1", 1), diagnosis, tools("m3", 1)])).toEqual([
-			"message",
-			"message",
-			"message",
-		])
+		expect(kinds([tools("m1", 1), diagnosis, tools("m3", 1)])).toEqual(["message", "message", "message"])
 	})
 
 	it("does not merge a still-running burst differently from a settled one", () => {

@@ -2,11 +2,10 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
-import { useCallback, useMemo, useState } from "react"
+import { Fragment, useCallback, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { useAlertRuleChecks } from "@/hooks/use-alert-rule-checks"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
@@ -15,8 +14,7 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { LONG_RANGE_PRESET_OPTIONS, presetLabel, formatTimeRangeDisplay } from "@/lib/time-utils"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
-import { AlertRuleChart } from "@/components/alerts/alert-rule-chart"
-import { IncidentTimelineStrip } from "@/components/alerts/incident-timeline-strip"
+import { AlertRuleChart, SIGNAL_SOURCE_LABEL, type SignalSource } from "@/components/alerts/alert-rule-chart"
 import { AlertStatusBadge } from "@/components/alerts/alert-status-badge"
 import { AlertSeverityBadge } from "@/components/alerts/alert-severity-badge"
 import { AlertStatStrip } from "@/components/alerts/alert-stat-card"
@@ -31,6 +29,7 @@ import {
 	computeIncidentStats,
 	getExitErrorMessage,
 	v2CheckToDocument,
+	v2DeliveryToDocument,
 } from "@/lib/alerts/form-utils"
 import { RuleDiagnosisPanel } from "@/components/alerts/rule-detail/rule-diagnosis-panel"
 import { useAlertRuleStates } from "@/hooks/use-alert-rule-states"
@@ -71,6 +70,26 @@ import { runMapleApiV2 } from "@/lib/collections/api-runner"
 
 const tabValues = ["overview", "history"] as const
 type RuleDetailTab = (typeof tabValues)[number]
+
+/** Names what each chart source actually is, so the toggle isn't a guess. */
+const SIGNAL_SOURCE_DESCRIPTION: Record<SignalSource, string> = {
+	preview: "The rule's query, replayed now over the selected window.",
+	checks: "What the evaluator actually observed and stored, one point per check.",
+}
+
+function formatBucketRange(bucket: { start: number; end: number }): string {
+	const time = (ms: number) =>
+		new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+	return `${time(bucket.start)}–${time(bucket.end)}`
+}
+
+function formatBucketSpan(seconds: number): string {
+	if (seconds < 60) return `${Math.round(seconds)}s`
+	const minutes = Math.round(seconds / 60)
+	if (minutes < 60) return `${minutes}min`
+	const hours = minutes / 60
+	return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h`
+}
 
 // Shared loading/error fallbacks, so the derived lists keep one stable
 // identity until their Result actually changes.
@@ -132,10 +151,9 @@ function RuleDetailContent() {
 	const { result: incidentsResult, refresh: refreshIncidents } = useAlertIncidentsList()
 	const ruleStates = useAlertRuleStates(ruleId)
 	const { result: destinationsResult } = useAlertDestinationsList()
-	// TODO(v2): delivery events have no v2 endpoint (internal delivery-audit
-	// schema); the proper follow-up is an Electric shape for alert_delivery_events.
 	const deliveryEventsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listDeliveryEvents", {
+		MapleApiV2AtomClient.query("alertDeliveries", "list", {
+			query: { limit: 100 },
 			reactivityKeys: ["alertDeliveryEvents"],
 		}),
 	)
@@ -188,7 +206,9 @@ function RuleDetailContent() {
 	const ruleDeliveryEvents = useMemo(
 		() =>
 			Result.builder(deliveryEventsResult)
-				.onSuccess((response) => response.events.filter((event) => event.ruleId === ruleId))
+				.onSuccess((response) =>
+					response.data.map(v2DeliveryToDocument).filter((event) => event.ruleId === ruleId),
+				)
 				.orElse(() => []),
 		[deliveryEventsResult, ruleId],
 	)
@@ -265,6 +285,64 @@ function RuleDetailContent() {
 
 	const [stateFilter, setStateFilter] = useState<"all" | "open" | "resolved">("all")
 	const [checkStatusFilter, setCheckStatusFilter] = useState<CheckStatusFilter>("all")
+	// Which series the chart plots. Defaults to the replayed query — the source
+	// that can answer "is the rule still right?" — and the toggle names both.
+	const [signalSource, setSignalSource] = useState<SignalSource>("preview")
+	const [selectedBucket, setSelectedBucket] = useState<{
+		index: number
+		start: number
+		end: number
+	} | null>(null)
+	// Rows for the selected rail bucket. The page-level checks query is capped at
+	// the newest 100, so an older bucket needs its own bounded fetch — otherwise
+	// clicking a red cell from last night would show an empty table.
+	const [bucketChecks, setBucketChecks] = useState<ReadonlyArray<AlertCheckDocument>>(NO_CHECKS)
+	const [bucketLoading, setBucketLoading] = useState(false)
+	// Only the newest selection may write back — clicking along the rail issues
+	// overlapping requests that can land out of order.
+	const bucketRequest = useRef(0)
+
+	const clearBucket = useCallback(() => {
+		bucketRequest.current += 1
+		setSelectedBucket(null)
+		setBucketChecks(NO_CHECKS)
+		setBucketLoading(false)
+	}, [])
+
+	const handleSelectBucket = useCallback(
+		(index: number | null, bucket: { start: number; end: number }) => {
+			if (index == null) {
+				clearBucket()
+				return
+			}
+			const token = ++bucketRequest.current
+			setSelectedBucket({ index, ...bucket })
+			setBucketChecks(NO_CHECKS)
+			setBucketLoading(true)
+			void (async () => {
+				try {
+					const page = await runMapleApiV2((client) =>
+						client.alertRules.checks({
+							params: { id: ruleId },
+							query: {
+								since: IsoDateTimeString.make(new Date(bucket.start).toISOString()),
+								until: IsoDateTimeString.make(new Date(bucket.end).toISOString()),
+								limit: 100,
+							},
+						}),
+					)
+					if (bucketRequest.current !== token) return
+					setBucketChecks(page.data.map(v2CheckToDocument))
+				} catch {
+					if (bucketRequest.current !== token) return
+					toast.error("Checks for that bucket could not be loaded")
+				} finally {
+					if (bucketRequest.current === token) setBucketLoading(false)
+				}
+			})()
+		},
+		[clearBucket, ruleId],
+	)
 
 	const filteredIncidents = useMemo(() => {
 		if (stateFilter === "all") return ruleIncidents
@@ -340,12 +418,27 @@ function RuleDetailContent() {
 		endTime,
 	})
 
+	// Whether each source can actually be drawn — the toggle disables the ones
+	// that can't rather than letting the chart quietly substitute the other.
+	const previewAvailable = useMemo(
+		() => (preview?.series ?? []).some((s) => s.points.some((p) => p.value != null)),
+		[preview],
+	)
+	const checksAvailable = useMemo(() => chartChecks.some((c) => c.observedValue != null), [chartChecks])
+
 	// Mirror the picker's default: a custom range formats its bounds, otherwise the
 	// preset label (falling back to the same "24h" the header + data window use).
 	const rangeLabel =
 		search.startTime && search.endTime
 			? formatTimeRangeDisplay(search.startTime, search.endTime)
 			: presetLabel(search.timePreset ?? "24h")
+
+	// The rail always spans the whole window from server-side summary buckets,
+	// while the table below is capped — say so, since the two used to disagree
+	// with no explanation.
+	const railCoverage = `60 buckets · covers all of ${rangeLabel.toLowerCase()}${
+		checksPage != null ? ` · ${formatBucketSpan(checksPage.summary.bucketSeconds)} each` : ""
+	}`
 
 	if (Result.isInitial(rulesResult)) {
 		return (
@@ -463,9 +556,11 @@ function RuleDetailContent() {
 	const isFiring = openRuleIncidents.length > 0
 	const subtitle = `${signalLabels[rule.signalType]} ${comparatorLabels[rule.comparator]} ${formatSignalValue(rule.signalType, rule.threshold)} over ${rule.windowMinutes}min${rule.serviceNames?.length > 0 ? ` on ${rule.serviceNames.join(", ")}` : ""}${rule.environments?.length > 0 ? ` in ${rule.environments.join(", ")}` : ""}${rule.excludeServiceNames?.length > 0 ? ` (excl. ${rule.excludeServiceNames.join(", ")})` : ""}`
 
+	// No incident strip here: incidents are painted as bands on the chart and as
+	// the rail's own incident lane, so the header strip was a third lookalike row
+	// telling a story the chart already tells in place.
 	const stickyContent = (
-		<div className="space-y-3">
-			<IncidentTimelineStrip incidents={ruleIncidents} range={timelineRange} />
+		<div>
 			<Tabs
 				value={activeTab}
 				onValueChange={(v) => navigate({ search: (prev) => ({ ...prev, tab: v as RuleDetailTab }) })}
@@ -541,10 +636,35 @@ function RuleDetailContent() {
 									now={diagnosisNow}
 									onToggleEnabled={() => void handleToggleEnabled()}
 								/>
-								<div className="space-y-2">
-									<h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
-										{signalLabels[rule.signalType]}: {rangeLabel}
-									</h2>
+								<div className="space-y-3">
+									<div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+										<div className="space-y-1">
+											<h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+												{signalLabels[rule.signalType]}: {rangeLabel}
+											</h2>
+											<p className="text-muted-foreground text-xs">
+												{SIGNAL_SOURCE_DESCRIPTION[signalSource]}
+											</p>
+										</div>
+										<AlertSegmentedSelect<SignalSource>
+											options={[
+												{
+													value: "preview",
+													label: SIGNAL_SOURCE_LABEL.preview,
+													disabled: !previewAvailable,
+												},
+												{
+													value: "checks",
+													label: SIGNAL_SOURCE_LABEL.checks,
+													disabled: !checksAvailable,
+												},
+											]}
+											value={signalSource}
+											onChange={setSignalSource}
+											size="sm"
+											aria-label="Chart data source"
+										/>
+									</div>
 									<AlertRuleChart
 										preview={preview}
 										checks={chartChecks}
@@ -554,6 +674,10 @@ function RuleDetailContent() {
 										comparator={rule.comparator}
 										signalType={rule.signalType}
 										window={timelineRange}
+										source={signalSource}
+										railCoverage={railCoverage}
+										selectedBucket={selectedBucket?.index ?? null}
+										onSelectBucket={handleSelectBucket}
 										loading={
 											previewLoading ||
 											(rule.signalType === "raw_query" &&
@@ -783,6 +907,10 @@ function RuleDetailContent() {
 											loading={Result.isInitial(checksResult)}
 											statusFilter={checkStatusFilter}
 											setStatusFilter={setCheckStatusFilter}
+											bucket={selectedBucket}
+											bucketChecks={bucketChecks}
+											bucketLoading={bucketLoading}
+											onClearBucket={clearBucket}
 										/>
 									))}
 							</div>
@@ -1103,9 +1231,18 @@ function ChecksPanel({
 	loading,
 	statusFilter,
 	setStatusFilter,
+	bucket,
+	bucketChecks,
+	bucketLoading,
+	onClearBucket,
 }: {
 	rule: AlertRuleDocument
 	checks: ReadonlyArray<AlertCheckDocument>
+	/** Rail bucket the table is scoped to, if the user picked one. */
+	bucket: { index: number; start: number; end: number } | null
+	bucketChecks: ReadonlyArray<AlertCheckDocument>
+	bucketLoading: boolean
+	onClearBucket: () => void
 	summaryTotals:
 		| {
 				readonly total: number
@@ -1160,10 +1297,40 @@ function ChecksPanel({
 			}
 		: loadedTotals
 
+	// A rail selection replaces the row source with that bucket's own bounded
+	// fetch, so the table shows the window the user actually clicked.
+	const rowSource = bucket != null ? bucketChecks : loadedChecks
 	const filteredChecks = useMemo(() => {
-		if (statusFilter === "all") return loadedChecks
-		return loadedChecks.filter((c) => c.status === statusFilter)
-	}, [loadedChecks, statusFilter])
+		if (statusFilter === "all") return rowSource
+		return rowSource.filter((c) => c.status === statusFilter)
+	}, [rowSource, statusFilter])
+
+	// The typical spacing between evaluations, used to spot real holes in the
+	// displayed rows (a status filter hides most of them).
+	const medianGapMs = useMemo(() => {
+		const times = rowSource
+			.map((c) => new Date(c.timestamp).getTime())
+			.filter((t) => Number.isFinite(t))
+			.sort((a, b) => b - a)
+		const gaps: number[] = []
+		for (let i = 1; i < times.length; i += 1) gaps.push(times[i - 1]! - times[i]!)
+		if (gaps.length === 0) return null
+		gaps.sort((a, b) => a - b)
+		return gaps[Math.floor(gaps.length / 2)] ?? null
+	}, [rowSource])
+
+	/** Rows the filter skipped between two neighbours — surfaced, not silently dropped. */
+	const gapBefore = useCallback(
+		(index: number): number | null => {
+			if (index === 0 || medianGapMs == null || medianGapMs <= 0) return null
+			const prev = new Date(filteredChecks[index - 1]!.timestamp).getTime()
+			const current = new Date(filteredChecks[index]!.timestamp).getTime()
+			if (!Number.isFinite(prev) || !Number.isFinite(current)) return null
+			const missing = Math.round((prev - current) / medianGapMs) - 1
+			return missing >= 1 ? missing : null
+		},
+		[filteredChecks, medianGapMs],
+	)
 
 	const loadMore = useCallback(async () => {
 		if (nextCursor === null || loadingMore) return
@@ -1241,8 +1408,36 @@ function ChecksPanel({
 			/>
 
 			<div className="space-y-3">
-				<div className="flex items-center justify-between">
-					<h3 className="text-sm font-semibold">All checks</h3>
+				<div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+					<div className="space-y-1">
+						<div className="flex flex-wrap items-center gap-2">
+							<h3 className="text-sm font-semibold">All checks</h3>
+							{bucket != null && (
+								<Badge variant="secondary" className="gap-1.5 font-mono text-xs">
+									{formatBucketRange(bucket)}
+									<button
+										type="button"
+										onClick={onClearBucket}
+										aria-label="Clear bucket filter"
+										className="text-muted-foreground hover:text-foreground"
+									>
+										×
+									</button>
+								</Badge>
+							)}
+						</div>
+						{/* The rail spans the whole window; this table doesn't. Saying so
+						    is what stops the two from looking like they disagree. */}
+						<p className="text-muted-foreground text-xs">
+							{bucket != null
+								? bucketLoading
+									? "Loading this bucket's evaluations…"
+									: `${bucketChecks.length} evaluation${bucketChecks.length === 1 ? "" : "s"} in this bucket — nothing hidden.`
+								: totals.total > loadedChecks.length
+									? `Showing the latest ${loadedChecks.length} of ${totals.total} in this window — the rail above covers all of them.`
+									: `All ${totals.total} evaluation${totals.total === 1 ? "" : "s"} in this window.`}
+						</p>
+					</div>
 					<AlertSegmentedSelect<CheckStatusFilter>
 						options={[
 							{ value: "all", label: "All" },
@@ -1269,7 +1464,8 @@ function ChecksPanel({
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{filteredChecks.map((check) => {
+						{filteredChecks.map((check, rowIndex) => {
+							const skipped = gapBefore(rowIndex)
 							const state: "firing" | "ok" | "pending" =
 								check.status === "breached" || check.status === "error"
 									? "firing"
@@ -1285,94 +1481,115 @@ function ChecksPanel({
 											? "text-muted-foreground"
 											: ""
 							return (
-								<TableRow
-									key={`${check.timestamp}-${check.groupKey}`}
-									className={cn(
-										check.status === "breached" && "bg-destructive/[0.04]",
-										check.status === "error" && "bg-warning/[0.05]",
+								<Fragment key={`${check.timestamp}-${check.groupKey}`}>
+									{skipped != null && (
+										<TableRow className="hover:bg-transparent">
+											<TableCell
+												colSpan={isGrouped ? 6 : 5}
+												className="bg-muted/40 py-1.5 text-[11px] text-muted-foreground"
+											>
+												{skipped} evaluation{skipped === 1 ? "" : "s"} hidden by the
+												status filter
+											</TableCell>
+										</TableRow>
 									)}
-								>
-									<TableCell
-										className="font-mono text-xs"
-										title={`Evaluated in ${check.evaluationDurationMs}ms`}
+									<TableRow
+										className={cn(
+											check.status === "breached" && "bg-destructive/[0.04]",
+											check.status === "error" && "bg-warning/[0.05]",
+										)}
 									>
-										{new Date(check.timestamp).toLocaleString()}
-									</TableCell>
-									<TableCell>
-										<AlertStatusBadge
-											state={state}
-											label={
-												check.status === "breached"
-													? "Breached"
-													: check.status === "healthy"
-														? "Healthy"
-														: check.status === "error"
-															? "Failed"
-															: "Skipped"
-											}
-										/>
-									</TableCell>
-									<TableCell>
-										{check.status === "error" ? (
-											<span
-												className="block max-w-[320px] truncate text-destructive text-xs"
-												title={check.errorMessage ?? undefined}
-											>
-												{check.errorMessage ?? "Evaluation failed"}
-											</span>
-										) : check.observedValue == null ? (
-											<span className="text-muted-foreground">—</span>
-										) : (
-											<div className="flex items-baseline gap-2">
-												<span
-													className={cn(
-														"font-mono font-medium tabular-nums",
-														check.status === "breached" && "text-destructive",
-													)}
-												>
-													{formatSignalValue(rule.signalType, check.observedValue)}
-												</span>
-												<span className="font-mono text-xs text-muted-foreground/60 tabular-nums">
-													/ {formatSignalValue(rule.signalType, check.threshold)}
-												</span>
-												<CheckDelta
-													signalType={rule.signalType}
-													observed={check.observedValue}
-													threshold={check.threshold}
-													breached={check.status === "breached"}
-												/>
-											</div>
-										)}
-									</TableCell>
-									<TableCell className="tabular-nums text-muted-foreground">
-										{check.sampleCount}
-									</TableCell>
-									{isGrouped && (
-										<TableCell className="font-mono text-muted-foreground">
-											{check.groupKey || "all"}
+										<TableCell
+											className="font-mono text-xs"
+											title={`Evaluated in ${check.evaluationDurationMs}ms`}
+										>
+											{new Date(check.timestamp).toLocaleString()}
 										</TableCell>
-									)}
-									<TableCell>
-										{check.incidentTransition === "none" ? (
-											<span className="text-muted-foreground">–</span>
-										) : (
-											<Badge
-												variant="outline"
-												className={cn("text-xs capitalize", transitionTone)}
-											>
-												{check.incidentTransition}
-											</Badge>
+										<TableCell>
+											<AlertStatusBadge
+												state={state}
+												label={
+													check.status === "breached"
+														? "Breached"
+														: check.status === "healthy"
+															? "Healthy"
+															: check.status === "error"
+																? "Failed"
+																: "Skipped"
+												}
+											/>
+										</TableCell>
+										<TableCell>
+											{check.status === "error" ? (
+												<span
+													className="block max-w-[320px] truncate text-destructive text-xs"
+													title={check.errorMessage ?? undefined}
+												>
+													{check.errorMessage ?? "Evaluation failed"}
+												</span>
+											) : check.observedValue == null ? (
+												<span className="text-muted-foreground">—</span>
+											) : (
+												<div className="flex items-baseline gap-2">
+													<span
+														className={cn(
+															"font-mono font-medium tabular-nums",
+															check.status === "breached" && "text-destructive",
+														)}
+													>
+														{formatSignalValue(
+															rule.signalType,
+															check.observedValue,
+														)}
+													</span>
+													<span className="font-mono text-xs text-muted-foreground/60 tabular-nums">
+														/{" "}
+														{formatSignalValue(rule.signalType, check.threshold)}
+													</span>
+													<CheckDelta
+														signalType={rule.signalType}
+														observed={check.observedValue}
+														threshold={check.threshold}
+														breached={check.status === "breached"}
+													/>
+												</div>
+											)}
+										</TableCell>
+										<TableCell className="tabular-nums text-muted-foreground">
+											{check.sampleCount}
+										</TableCell>
+										{isGrouped && (
+											<TableCell className="font-mono text-muted-foreground">
+												{check.groupKey || "all"}
+											</TableCell>
 										)}
-									</TableCell>
-								</TableRow>
+										<TableCell>
+											{check.incidentTransition === "none" ? (
+												<span className="text-muted-foreground">–</span>
+											) : (
+												<Badge
+													variant="outline"
+													className={cn("text-xs capitalize", transitionTone)}
+												>
+													{check.incidentTransition}
+												</Badge>
+											)}
+										</TableCell>
+									</TableRow>
+								</Fragment>
 							)
 						})}
 					</TableBody>
 				</Table>
-				{nextCursor !== null && (
-					<div className="flex justify-center">
+				{/* A bucket selection is already complete — "load more" would only
+				    reintroduce the coverage mismatch this redesign removes. */}
+				{bucket == null && nextCursor !== null && (
+					<div className="flex items-center justify-between gap-4">
+						<span className="text-[11px] text-muted-foreground">
+							{loadedChecks.length} of {totals.total} loaded
+						</span>
 						<Button variant="outline" size="sm" disabled={loadingMore} onClick={loadMore}>
-							{loadingMore ? "Loading…" : "Load more checks"}
+							{loadingMore ? "Loading…" : "Load 100 more"}
 						</Button>
 					</div>
 				)}

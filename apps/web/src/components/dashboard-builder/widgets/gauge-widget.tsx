@@ -8,10 +8,6 @@ interface GaugeWidgetProps {
 	dataState: WidgetDataState
 	display: WidgetDisplayConfig
 	mode: WidgetMode
-	onRemove?: () => void
-	onClone?: () => void
-	onConfigure?: () => void
-	onFix?: () => void
 }
 
 // Geometry for a 270° segmented gauge drawn in a 240×212 viewBox.
@@ -20,13 +16,27 @@ const CY = 118
 const R_OUTER = 88
 const R_INNER = 58
 const R_RIM = 93
-const R_LABEL = 106
+const R_LABEL = 104
+const R_TICK_INNER = 89
+const R_TICK_OUTER = 96
 const START_ANGLE = 135
 const SWEEP = 270
 const SEGMENT_COUNT = 56
 const RIM_SEGMENT_COUNT = 96
 const GAP_RATIO = 0.32
 const VALUE_Y = 108
+/**
+ * Minimum arc separation between two rim *labels*, in degrees.
+ *
+ * Labels are horizontal and centred on their tick, so the binding case is two
+ * of them side by side near the bottom of the arc: at R_LABEL a 9px-font value
+ * like "100.0%" is ~27px wide, which is ~15° of arc. Anything closer overlaps.
+ *
+ * Thresholds bunched against a bound (0/95/99/100 on a 0–100 gauge — the whole
+ * top 5% of the range lands within 13° of the max) therefore keep their tick and
+ * drop their text, rather than stacking three unreadable numbers on each other.
+ */
+const MIN_LABEL_GAP_DEG = 16
 
 // Perceptual green → yellow → orange → red ramp swept along the arc.
 const RAMP: ReadonlyArray<readonly [number, number, number, number]> = [
@@ -72,15 +82,7 @@ function toNumber(value: unknown): number | null {
 	return Number.isFinite(num) ? num : null
 }
 
-export const GaugeWidget = memo(function GaugeWidget({
-	dataState,
-	display,
-	mode,
-	onRemove,
-	onClone,
-	onConfigure,
-	onFix,
-}: GaugeWidgetProps) {
+export const GaugeWidget = memo(function GaugeWidget({ dataState, display, mode }: GaugeWidgetProps) {
 	const glowId = useId().replace(/:/g, "")
 	const rawValue = dataState.status === "ready" ? dataState.data : undefined
 	const value = toNumber(rawValue)
@@ -119,22 +121,35 @@ export const GaugeWidget = memo(function GaugeWidget({
 		}
 	})
 
-	// Rim labels: the range bounds plus each in-range threshold value, rotated
-	// to sit tangent to the arc.
+	// Rim ticks: every in-range bound and threshold gets one, so a threshold whose
+	// text can't fit still reads as a marked position on the arc.
 	const seen = new Set<number>()
-	const labels = [min, ...(display.thresholds ?? []).map((threshold) => threshold.value), max]
-		.filter((labelValue) => {
-			if (labelValue < min || labelValue > max || seen.has(labelValue)) return false
-			seen.add(labelValue)
+	const angleFor = (tickValue: number) => START_ANGLE + ((tickValue - min) / span) * SWEEP
+	const ticks = [min, max, ...(display.thresholds ?? []).map((threshold) => threshold.value)]
+		// Bounds first so that when a threshold crowds one of them it is the
+		// threshold that loses its label — the range endpoints anchor the scale.
+		.filter((tickValue) => {
+			if (tickValue < min || tickValue > max || seen.has(tickValue)) return false
+			seen.add(tickValue)
 			return true
 		})
-		.sort((a, b) => a - b)
-		.map((labelValue) => {
-			const angle = START_ANGLE + ((labelValue - min) / span) * SWEEP
-			const point = polar(R_LABEL, angle)
-			let rotation = (angle + 90) % 360
-			if (rotation > 90 && rotation < 270) rotation -= 180
-			return { value: labelValue, x: point.x, y: point.y, rotation }
+		.map((tickValue) => ({ value: tickValue, angle: angleFor(tickValue) }))
+
+	// Label only the ticks that clear MIN_LABEL_GAP_DEG from every already-placed
+	// label. Horizontal, centred on the tick — the previous tangent rotation made
+	// crowded end-of-arc labels illegible even before they collided.
+	const placedAngles: number[] = []
+	const labels = ticks
+		.filter((tick) => {
+			if (placedAngles.some((angle) => Math.abs(angle - tick.angle) < MIN_LABEL_GAP_DEG)) {
+				return false
+			}
+			placedAngles.push(tick.angle)
+			return true
+		})
+		.map((tick) => {
+			const point = polar(R_LABEL, tick.angle)
+			return { value: tick.value, x: point.x, y: point.y }
 		})
 
 	return (
@@ -142,15 +157,14 @@ export const GaugeWidget = memo(function GaugeWidget({
 			title={display.title || "Untitled"}
 			dataState={dataState}
 			mode={mode}
-			onRemove={onRemove}
-			onClone={onClone}
-			onConfigure={onConfigure}
-			onFix={onFix}
 			contentClassName="flex-1 min-h-0 flex items-center justify-center p-2"
 			loadingSkeleton={<ChartSkeleton variant="gauge" />}
 		>
 			<svg
-				viewBox="0 0 240 212"
+				// Padded 16px either side of the 240-wide dial so a wide horizontal
+				// label at the arc's extremes ("1,000ms") isn't clipped by the
+				// viewport. CX stays the box's horizontal centre.
+				viewBox="-16 0 272 212"
 				preserveAspectRatio="xMidYMid meet"
 				className="h-full w-full"
 				role="img"
@@ -202,7 +216,26 @@ export const GaugeWidget = memo(function GaugeWidget({
 					/>
 				))}
 
-				{/* Range + threshold labels, tangent to the rim. */}
+				{/* Range + threshold ticks across the rim. */}
+				{ticks.map((tick) => {
+					const inner = polar(R_TICK_INNER, tick.angle)
+					const outer = polar(R_TICK_OUTER, tick.angle)
+					return (
+						<line
+							key={`tick-${tick.value}`}
+							x1={inner.x}
+							y1={inner.y}
+							x2={outer.x}
+							y2={outer.y}
+							stroke="var(--muted-foreground)"
+							strokeOpacity={0.55}
+							strokeWidth={1.4}
+							strokeLinecap="round"
+						/>
+					)
+				})}
+
+				{/* Range + threshold labels, horizontal, centred on their tick. */}
 				{labels.map((label) => (
 					<text
 						key={label.value}
@@ -210,7 +243,6 @@ export const GaugeWidget = memo(function GaugeWidget({
 						y={label.y}
 						textAnchor="middle"
 						dominantBaseline="central"
-						transform={`rotate(${label.rotation} ${label.x} ${label.y})`}
 						className="fill-muted-foreground"
 						style={{ fontSize: 9 }}
 					>

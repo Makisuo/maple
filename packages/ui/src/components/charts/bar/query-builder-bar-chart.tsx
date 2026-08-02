@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
-import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
+import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import type { BaseChartProps } from "../_shared/chart-types"
 import { QueryBuilderLegend, responsiveLegendHeight } from "../_shared/query-builder-legend"
 import { useTimeseriesSeriesPresentation } from "../_shared/use-series-presentation"
@@ -128,13 +128,14 @@ export function QueryBuilderBarChart({
 	)
 
 	const chartConfig = React.useMemo(() => {
-		return seriesDefinitions.reduce((config, definition, index) => {
+		// "Other" is a bucket, not an identity — keep it out of the palette.
+		const colors = resolveSeriesColors(
+			seriesDefinitions.map((d) => d.rawKey).filter((key) => key !== OTHER_LABEL),
+		)
+		return seriesDefinitions.reduce((config, definition) => {
 			config[definition.chartKey] = {
 				label: definition.rawKey,
-				color:
-					definition.rawKey === OTHER_LABEL
-						? OTHER_COLOR
-						: resolveSeriesColor(definition.rawKey, index),
+				color: definition.rawKey === OTHER_LABEL ? OTHER_COLOR : colors.get(definition.rawKey),
 			}
 			return config
 		}, {} as ChartConfig)

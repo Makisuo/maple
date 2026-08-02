@@ -3,7 +3,7 @@ import { ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import { ApiKeyNotFoundError, OrgId, UserId } from "@maple/domain/http"
 import { Env } from "../lib/Env"
 import { ApiKeysService } from "./ApiKeysService"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../lib/test-pglite"
 
 const trackedDbs: TestDb[] = []
 
@@ -116,6 +116,75 @@ describe("ApiKeysService.roll", () => {
 
 			assert.strictEqual(revoked.revoked, true)
 			assert.match(revoked.txid ?? "", /^\d+$/)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+})
+
+/**
+ * `api_keys` is Electric-synced and carries `last_used_at` in the browser shape, so an
+ * unconditional touch per request replicates a full row out of PlanetScale on every
+ * authenticated call. Both gates are asserted here because they cover different failure
+ * modes: the memo handles a warm isolate, the SQL predicate handles a cold one. Losing
+ * either silently restores per-request WAL traffic — invisible until the egress bill.
+ */
+describe("ApiKeysService.touchLastUsed", () => {
+	const readLastUsed = (testDb: TestDb, keyId: string) =>
+		Effect.promise(() =>
+			queryFirstRow<{ lastUsedAt: Date | null }>(
+				testDb,
+				`select last_used_at as "lastUsedAt" from api_keys where id = $1`,
+				[keyId],
+			),
+		)
+
+	it.effect("skips the write within the heartbeat window, on a warm and a cold isolate", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			const svc = yield* ApiKeysService
+			const orgId = asOrgId("org_touch")
+			const created = yield* svc.create(orgId, asUserId("user_touch"), {
+				name: "hot path",
+				kind: "mcp",
+			})
+
+			// `resolveByBearer` forks the touch detached, so it is driven directly here to
+			// keep the assertions off that race.
+			yield* svc.touchLastUsed(created.id)
+			const afterFirst = yield* readLastUsed(testDb, created.id)
+			assert.isOk(afterFirst?.lastUsedAt, "the first touch stamps last_used_at")
+
+			// Warm isolate: clear the column behind the service's back. A second touch on
+			// the same instance must not rewrite it — the memo should short-circuit
+			// before the query is ever issued.
+			yield* Effect.promise(() =>
+				executeSql(testDb, `update api_keys set last_used_at = null where id = $1`, [created.id]),
+			)
+			yield* svc.touchLastUsed(created.id)
+			const afterMemoized = yield* readLastUsed(testDb, created.id)
+			assert.isNull(afterMemoized?.lastUsedAt ?? null, "memo suppresses the second write")
+
+			// Cold isolate: a fresh service instance over the same database has an empty
+			// memo, so the round trip happens — but the SQL predicate must make it a
+			// zero-row UPDATE while the stored stamp is inside the heartbeat window.
+			const stamped = new Date()
+			yield* Effect.promise(() =>
+				executeSql(testDb, `update api_keys set last_used_at = $2 where id = $1`, [
+					created.id,
+					stamped,
+				]),
+			)
+			yield* Effect.gen(function* () {
+				const coldSvc = yield* ApiKeysService
+				yield* coldSvc.touchLastUsed(created.id)
+			}).pipe(Effect.provide(makeLayer(testDb)))
+
+			const afterCold = yield* readLastUsed(testDb, created.id)
+			assert.strictEqual(
+				afterCold?.lastUsedAt?.getTime(),
+				stamped.getTime(),
+				"SQL gate makes the cold-isolate touch a zero-row update",
+			)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 })

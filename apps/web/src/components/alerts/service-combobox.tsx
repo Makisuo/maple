@@ -1,83 +1,6 @@
-import { useRef, type ReactNode } from "react"
-import { cn } from "@maple/ui/utils"
-import {
-	Combobox,
-	ComboboxChips,
-	ComboboxChip,
-	ComboboxChipsInput,
-	ComboboxContent,
-	ComboboxEmpty,
-	ComboboxItem,
-	ComboboxList,
-} from "@maple/ui/components/ui/combobox"
+import { useMemo } from "react"
+import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
 import { ServiceDot } from "@maple/ui/components/service-dot"
-
-interface ChipComboboxProps {
-	/** Wired to the field's `<Label htmlFor>` so clicking the label focuses the input. */
-	id?: string
-	value: string[]
-	options: string[]
-	onChange: (values: string[]) => void
-	disabled?: boolean
-	placeholder?: string
-	/** Message shown when no option matches the typed query. */
-	emptyMessage: string
-	/** Optional leading adornment rendered inside each chip and list item. */
-	renderAdornment?: (value: string) => ReactNode
-}
-
-/**
- * Chip-based multi-select shared by the rule editor's scope fields. Keeps the
- * field mounted when `disabled` (suppressing interaction instead of unmounting)
- * so the Scope card's layout doesn't reflow as related fields toggle.
- */
-function ChipCombobox({
-	id,
-	value,
-	options,
-	onChange,
-	disabled,
-	placeholder,
-	emptyMessage,
-	renderAdornment,
-}: ChipComboboxProps) {
-	const anchor = useRef<HTMLDivElement | null>(null)
-	return (
-		<Combobox
-			multiple
-			value={value}
-			onValueChange={(values) => {
-				if (disabled) return
-				onChange(values as string[])
-			}}
-		>
-			<ComboboxChips
-				ref={anchor}
-				aria-disabled={disabled || undefined}
-				className={cn(disabled && "pointer-events-none opacity-60")}
-			>
-				{value.map((item) => (
-					<ComboboxChip key={item}>
-						{renderAdornment?.(item)}
-						{item}
-					</ComboboxChip>
-				))}
-				<ComboboxChipsInput id={id} placeholder={placeholder} disabled={disabled} />
-			</ComboboxChips>
-			<ComboboxContent anchor={anchor}>
-				<ComboboxEmpty>{emptyMessage}</ComboboxEmpty>
-				<ComboboxList>
-					{options.map((option) => (
-						<ComboboxItem key={option} value={option}>
-							{renderAdornment?.(option)}
-							{option}
-						</ComboboxItem>
-					))}
-				</ComboboxList>
-			</ComboboxContent>
-		</Combobox>
-	)
-}
 
 interface ServiceComboboxProps {
 	id?: string
@@ -101,16 +24,24 @@ export function ServiceCombobox({
 	disabled,
 	placeholder,
 }: ServiceComboboxProps) {
+	const items = useMemo(
+		() =>
+			options.map((name) => ({
+				value: name,
+				adornment: <ServiceDot className="size-1.5" serviceName={name} />,
+			})),
+		[options],
+	)
+
 	return (
-		<ChipCombobox
-			id={id}
-			value={serviceNames}
-			options={options}
-			onChange={onChange}
+		<MultiSelectCombobox
 			disabled={disabled}
-			placeholder={placeholder ?? (serviceNames.length === 0 ? "All services" : "Add service...")}
 			emptyMessage="No services found."
-			renderAdornment={(name) => <ServiceDot serviceName={name} className="size-1.5" />}
+			id={id}
+			onChange={onChange}
+			options={items}
+			placeholder={placeholder ?? (serviceNames.length === 0 ? "All services" : "Add service...")}
+			value={serviceNames}
 		/>
 	)
 }
@@ -135,15 +66,17 @@ export function EnvironmentCombobox({
 	onChange,
 	disabled,
 }: EnvironmentComboboxProps) {
+	const items = useMemo(() => options.map((name) => ({ value: name })), [options])
+
 	return (
-		<ChipCombobox
-			id={id}
-			value={environments}
-			options={options}
-			onChange={onChange}
+		<MultiSelectCombobox
 			disabled={disabled}
-			placeholder={environments.length === 0 ? "All environments" : "Add environment..."}
 			emptyMessage="No environments found."
+			id={id}
+			onChange={onChange}
+			options={items}
+			placeholder={environments.length === 0 ? "All environments" : "Add environment..."}
+			value={environments}
 		/>
 	)
 }

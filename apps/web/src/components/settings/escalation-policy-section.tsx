@@ -164,7 +164,7 @@ export function EscalationPolicySection({ isAdmin }: { isAdmin: boolean }) {
 										search={{ tab: "settings" }}
 										className="underline underline-offset-4 hover:text-foreground"
 									>
-										Create one in Alerts settings
+										Create one in Alerts → Destinations
 									</Link>{" "}
 									first.
 								</p>

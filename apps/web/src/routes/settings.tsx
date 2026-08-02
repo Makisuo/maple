@@ -144,7 +144,7 @@ function SettingsPage() {
 						{activeTab === "automation" && (
 							<AutomationSection isAdmin={isAdmin} hasEntitlement={canAccessAi} />
 						)}
-						{activeTab === "billing" && <BillingSection />}
+						{activeTab === "billing" && <BillingSection isAdmin={isAdmin} />}
 						{activeTab === "data-platform" && (
 							<OrgClickHouseSettingsSection
 								isAdmin={isAdmin}

@@ -15,7 +15,7 @@ import { Separator } from "@maple/ui/components/ui/separator"
 import { ConnectionIcon } from "@maple/ui/components/icons"
 import { LOCAL_OTLP_ENDPOINT } from "../lib/constants"
 import { DOCS_LOCAL_MODE_SEND_TELEMETRY } from "../lib/links"
-import { CopyableField } from "./copyable-field"
+import { CopyableField } from "@maple/ui/components/ui/copyable-field"
 
 export function ConnectButton() {
 	const [open, setOpen] = useState(false)

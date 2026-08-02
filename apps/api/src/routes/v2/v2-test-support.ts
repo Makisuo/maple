@@ -13,6 +13,7 @@ import { SetupAuditService } from "../../services/SetupAuditService"
 import { ApiV2RateLimiter } from "../../services/ApiV2RateLimiter"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
 import { QueryEngineService } from "../../services/QueryEngineService"
+import { HttpV2AlertDeliveriesLive } from "./alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "./alert-destinations.http"
 import { HttpV2AlertIncidentsLive } from "./alert-incidents.http"
 import { HttpV2AlertRulesLive } from "./alert-rules.http"
@@ -48,6 +49,7 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2ApiKeysLive,
 	HttpV2SlackIntegrationsLive,
 	HttpV2DashboardsLive,
+	HttpV2AlertDeliveriesLive,
 	HttpV2AlertRulesLive,
 	HttpV2AlertDestinationsLive,
 	HttpV2AlertIncidentsLive,
@@ -156,7 +158,6 @@ export const TelemetryServiceStubsLayer = Layer.mergeAll(
 	Layer.succeed(QueryEngineService, {
 		execute: die,
 		evaluate: die,
-		evaluateRawSql: die,
 		evaluateSeries: die,
 		cachedDirect: die,
 	}),

@@ -57,9 +57,7 @@ describe("verdictForServiceTotals", () => {
 	it("calls a sampler change a sampling change, not a recovery", () => {
 		// Raw spans collapse 10x while the sample-corrected count holds: the
 		// sampler was turned down, the traffic never moved.
-		const v = verdictForServiceTotals([
-			pair(totals(100, 1000), totals(1000, 1000)),
-		])
+		const v = verdictForServiceTotals([pair(totals(100, 1000), totals(1000, 1000))])
 		expect(v.dataFlowing).toBe(false)
 		expect(v.reason).toBe("sampling_changed")
 	})
@@ -88,10 +86,7 @@ describe("verdictForServiceTotals", () => {
 	})
 
 	it("fails closed if any service in the set errored", () => {
-		const v = verdictForServiceTotals([
-			pair(totals(1000), totals(1000)),
-			pair(null, null),
-		])
+		const v = verdictForServiceTotals([pair(totals(1000), totals(1000)), pair(null, null)])
 		expect(v.dataFlowing).toBe(false)
 		expect(v.reason).toBe("probe_failed")
 	})

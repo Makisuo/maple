@@ -14,13 +14,12 @@ export type AlertSegmentedOption<T extends string> = {
 
 type Size = "sm" | "default"
 
-/* A segmented control styled as a recessed *track* with a single elevated
-   *pill* that slides between segments. The pill is a Motion shared-layout
-   element (`layoutId`), so changing the selection animates the pill gliding to
-   its new slot instead of snapping a flat background on/off. We keep Base UI's
-   ToggleGroup underneath for roles + arrow-key navigation, but neutralize its
-   per-item pressed background — the sliding pill is now the only selection
-   indicator. */
+/* The shared segmented control (a recessed track with one raised pill — see
+   packages/ui toggle-group.tsx) plus a *sliding* pill: the indicator is a Motion
+   shared-layout element (`layoutId`), so changing the selection animates it
+   gliding to its new slot instead of snapping a background on and off. The track
+   and pill styling come from the shared component; this only swaps the static
+   pill for the animated one. */
 export function AlertSegmentedSelect<T extends string>({
 	options,
 	value,
@@ -44,13 +43,10 @@ export function AlertSegmentedSelect<T extends string>({
 				const next = values[0] as T | undefined
 				if (next && next !== value) onChange(next)
 			}}
-			variant="default"
+			variant="outline"
 			size={size}
 			aria-label={ariaLabel}
-			className={cn(
-				"w-fit gap-0.5 rounded-lg border border-input bg-black/[0.04] p-0.5 dark:bg-black/25",
-				className,
-			)}
+			className={className}
 		>
 			{options.map((option) => {
 				const selected = option.value === value
@@ -60,10 +56,12 @@ export function AlertSegmentedSelect<T extends string>({
 						value={option.value}
 						disabled={option.disabled}
 						aria-label={typeof option.label === "string" ? option.label : option.value}
+						// The shared segment already paints a static pill on the
+						// pressed item; suppress it so the sliding one below is the
+						// only selection indicator.
 						className={cn(
-							"relative rounded-md border-transparent bg-transparent text-muted-foreground transition-colors",
-							"hover:bg-transparent hover:text-foreground",
-							"data-pressed:bg-transparent data-pressed:text-foreground dark:data-pressed:bg-transparent",
+							"relative",
+							"data-pressed:border-transparent data-pressed:bg-transparent data-pressed:shadow-none dark:data-pressed:bg-transparent",
 						)}
 					>
 						{selected && (

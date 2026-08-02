@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Changelog poster generator</title>
+		<style>
+			body {
+				margin: 0;
+				background: #15120e;
+				color: #e9e2d6;
+				font-family: ui-monospace, monospace;
+				padding: 16px;
+			}
+			#out canvas {
+				display: block;
+				width: 640px;
+				height: 330px;
+				margin-bottom: 14px;
+				border: 1px solid #3a342b;
+			}
+			.lbl {
+				font-size: 11px;
+				letter-spacing: 0.14em;
+				text-transform: uppercase;
+				color: #8a7f72;
+				margin: 10px 0 6px;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="out"></div>
+		<script src="/bundle.js"></script>
+		<script src="/posters.js"></script>
+		<script src="/specs.js"></script>
+	</body>
+</html>

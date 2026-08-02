@@ -8,6 +8,7 @@ import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
 	formatMapleStage,
+	resolveDatabaseMode,
 	resolveDeploymentEnvironment,
 	resolveHyperdriveName,
 	resolveHyperdriveRefId,
@@ -50,42 +51,49 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 		//   live only in the Cloudflare dashboard; deploys never see them and
 		//   MAPLE_PG_URL is not required.
 		//
-		// - pr/dev stages get an alchemy-MANAGED per-branch Hyperdrive whose origin
-		//   is pushed from MAPLE_PG_URL (a standard Postgres connection string,
-		//   direct port 5432) — the same env var the CI `drizzle-kit migrate` step
-		//   + import scripts use. Cloudflare Hyperdrive needs a STRUCTURED origin
-		//   (discrete host/user/…), not a URL, so we parse it here. Schema
-		//   migrations run in CI before deploy, never at boot.
+		// - dev stages get an alchemy-MANAGED Hyperdrive whose origin is pushed
+		//   from MAPLE_PG_URL (a standard Postgres connection string, direct port
+		//   5432) — the same env var the CI `drizzle-kit migrate` step + import
+		//   scripts use. Cloudflare Hyperdrive needs a STRUCTURED origin (discrete
+		//   host/user/…), not a URL, so we parse it here. Schema migrations run in
+		//   CI before deploy, never at boot.
+		//
+		// - pr previews get NO database binding at all (resolveDatabaseMode →
+		//   "none"): PlanetScale PR branches are no longer provisioned. The worker
+		//   still boots and serves — DatabasePgLive fails per query instead of
+		//   dying — so DB-backed routes 500 while everything else works.
+		const databaseMode = resolveDatabaseMode(stage)
 		const hyperdriveRefId = resolveHyperdriveRefId(stage)
-		const mapleDb = hyperdriveRefId
-			? undefined
-			: yield* Effect.gen(function* () {
-					const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
-					return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
-						name: resolveHyperdriveName(stage),
-						origin: {
-							scheme: "postgres",
-							host: pgUrl.hostname,
-							port: Number(pgUrl.port || "5432"),
-							// Connect-time db (`postgres`, the PlanetScale cluster default),
-							// not the PS resource name.
-							database: pgUrl.pathname.replace(/^\//, "") || "postgres",
-							user: decodeURIComponent(pgUrl.username),
-							password: Redacted.make(decodeURIComponent(pgUrl.password)),
-						},
-						// Read-after-write everywhere (alert state CAS, dashboard versioning) —
-						// revisit caching once read paths that tolerate staleness are identified.
-						caching: { disabled: true },
-						dev: {
-							scheme: "postgres",
-							host: "localhost",
-							port: 5499,
-							database: "maple",
-							user: "maple",
-							password: Redacted.make("maple"),
-						},
+		const mapleDb =
+			databaseMode !== "managed"
+				? undefined
+				: yield* Effect.gen(function* () {
+						const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
+						return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
+							name: resolveHyperdriveName(stage),
+							origin: {
+								scheme: "postgres",
+								host: pgUrl.hostname,
+								port: Number(pgUrl.port || "5432"),
+								// Connect-time db (`postgres`, the PlanetScale cluster default),
+								// not the PS resource name.
+								database: pgUrl.pathname.replace(/^\//, "") || "postgres",
+								user: decodeURIComponent(pgUrl.username),
+								password: Redacted.make(decodeURIComponent(pgUrl.password)),
+							},
+							// Read-after-write everywhere (alert state CAS, dashboard versioning) —
+							// revisit caching once read paths that tolerate staleness are identified.
+							caching: { disabled: true },
+							dev: {
+								scheme: "postgres",
+								host: "localhost",
+								port: 5499,
+								database: "maple",
+								user: "maple",
+								password: Redacted.make("maple"),
+							},
+						})
 					})
-				})
 
 		const mcpSessions = yield* Cloudflare.KV.Namespace("MCP_SESSIONS", {
 			title: resolveWorkerName("mcp-sessions", stage),
@@ -143,7 +151,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			//               SlackEventsRouter (app_uninstalled/tokens_revoked), which
 			//               catches deliveries Slack never sent/retried through, or
 			//               installs that predate the webhook
-			crons: ["0 */12 * * *", "0 * * * *", "0 */6 * * *"],
+			crons: ["0 */12 * * *", "0 * * * *", "0 */6 * * *", "5 * * * *"],
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
@@ -208,7 +216,11 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				SERVICE_OPERATIONS_ROLLUP_ENABLED:
 					process.env.SERVICE_OPERATIONS_ROLLUP_ENABLED?.trim() || "false",
 				...optionalPlain("MAPLE_ENDPOINT"),
-				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
+				// Derived from the stage, deliberately NOT `optionalPlain` — that helper
+				// lets `process.env` win over the fallback, so a stray
+				// MAPLE_ENVIRONMENT=production in a pr-N deploy environment would open
+				// EmailService.emailAllowed on a stage that shares live org data.
+				MAPLE_ENVIRONMENT: resolveDeploymentEnvironment(stage),
 				...optionalPlain("COMMIT_SHA"),
 				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 				...optionalSecret("MAPLE_ROOT_PASSWORD"),

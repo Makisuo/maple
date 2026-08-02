@@ -9,15 +9,7 @@ import { cn } from "@maple/ui/utils"
  * `className="mb-0"` when the heading sits inline (e.g. in a flex row beside an
  * action button).
  */
-export function SectionHeader({
-	id,
-	label,
-	className,
-}: {
-	id: string
-	label: string
-	className?: string
-}) {
+export function SectionHeader({ id, label, className }: { id: string; label: string; className?: string }) {
 	return (
 		<h2
 			id={id}

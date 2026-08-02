@@ -537,11 +537,14 @@ export class QueryEngineEvaluateResponse extends Schema.Class<QueryEngineEvaluat
  * Compiled, evaluation-ready form of an alert rule's query.
  *
  * - `kind: "spec"` — a structured QueryEngine `QuerySpec` (built from a query
- *   builder draft or one of the canned signal types). Evaluated via
- *   `QueryEngineService.evaluate`.
- * - `kind: "raw_sql"` — user-authored ClickHouse SQL with macros. Evaluated via
- *   `QueryEngineService.evaluateRawSql`. `query`/`sampleCountStrategy` are null;
- *   the alert value comes from the `value` column convention.
+ *   builder draft or one of the canned signal types).
+ * - `kind: "raw_sql"` — user-authored ClickHouse SQL with macros.
+ *   `query`/`sampleCountStrategy` are null; the alert value comes from the
+ *   `value` column convention.
+ *
+ * Both are evaluated by the same `QueryEngineService.evaluate`: the plan is
+ * lowered to an `AlertBucketSource` (see `planEvaluateSource`), which is the
+ * only place the evaluation path inspects `kind` at all.
  */
 export class CompiledAlertQueryPlan extends Schema.Class<CompiledAlertQueryPlan>("CompiledAlertQueryPlan")({
 	kind: Schema.Literals(["spec", "raw_sql"]),

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
 import {
+	AlertDeliveryEventId,
+	AlertDestinationId,
+	AlertIncidentId,
+	AlertRuleId,
+} from "@maple/domain/http"
+import {
 	buildDestinationCreateParamsV2,
 	buildDestinationUpdateParamsV2,
 	buildRuleCreateParamsV2,
@@ -8,8 +14,10 @@ import {
 	deriveRuleQueryIssues,
 	domainThresholdToForm,
 	formThresholdToDomain,
+	normalizeRuleQueryDraft,
 	rawSqlHasValueColumn,
 	v2CheckToDocument,
+	v2DeliveryToDocument,
 	v2PreviewToResponse,
 } from "./form-utils"
 
@@ -113,6 +121,54 @@ describe("buildRuleCreateParamsV2", () => {
 	it("defaults to an empty environment scope (all environments)", () => {
 		const params = buildRuleCreateParamsV2({ ...defaultRuleForm(), name: "A" })
 		expect(params.environments).toEqual([])
+	})
+
+	it("normalizes and submits one query-builder draft", () => {
+		const queryBuilderDraft = normalizeRuleQueryDraft({
+			id: "A",
+			name: "A",
+			dataSource: "metrics",
+			aggregation: "rate",
+			metricName: "http.requests",
+			metricType: "sum",
+		})
+		const params = buildRuleCreateParamsV2({
+			...defaultRuleForm(),
+			name: "Request rate",
+			signalType: "builder_query",
+			queryBuilderDraft,
+		})
+
+		expect(queryBuilderDraft).toMatchObject({
+			dataSource: "metrics",
+			whereClause: "",
+			groupBy: ["service.name"],
+			metricName: "http.requests",
+			metricType: "sum",
+			isMonotonic: true,
+		})
+		expect(params.query_builder_draft).toEqual(queryBuilderDraft)
+	})
+
+	it("keeps query-builder warnings non-fatal", () => {
+		const form = {
+			...defaultRuleForm(),
+			name: "Requests by method",
+			signalType: "builder_query" as const,
+			queryBuilderDraft: normalizeRuleQueryDraft({
+				id: "A",
+				name: "A",
+				dataSource: "metrics",
+				aggregation: "avg",
+				metricName: "http.server.request.duration",
+				metricType: "histogram",
+				addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+				groupBy: ["attr.http.method", "attr.http.route"],
+			}),
+		}
+
+		expect(deriveRuleQueryIssues(form)).toEqual([])
+		expect(buildRuleCreateParamsV2(form).query_builder_draft).toEqual(form.queryBuilderDraft)
 	})
 })
 
@@ -267,6 +323,37 @@ describe("v2 response mappers", () => {
 			incidentId: null,
 			incidentTransition: "opened",
 			evaluationDurationMs: 412,
+		})
+	})
+
+	it("maps a v2 delivery onto the camelCase domain document", () => {
+		const document = v2DeliveryToDocument({
+			id: AlertDeliveryEventId.make("00000000-0000-4000-8000-000000000101"),
+			object: "alert_delivery",
+			incident_id: AlertIncidentId.make("00000000-0000-4000-8000-000000000102"),
+			rule_id: AlertRuleId.make("00000000-0000-4000-8000-000000000103"),
+			destination_id: AlertDestinationId.make("00000000-0000-4000-8000-000000000104"),
+			destination_name: "On-call",
+			destination_type: "webhook",
+			delivery_key: "delivery-1",
+			event_type: "trigger",
+			attempt_number: 1,
+			status: "success",
+			scheduled_at: "2026-07-15T09:10:00.000Z",
+			attempted_at: "2026-07-15T09:10:01.000Z",
+			provider_message: "ok",
+			provider_reference: "ref-1",
+			response_code: 200,
+			error_message: null,
+		})
+
+		expect(document).toMatchObject({
+			destinationName: "On-call",
+			destinationType: "webhook",
+			deliveryKey: "delivery-1",
+			eventType: "trigger",
+			status: "success",
+			responseCode: 200,
 		})
 	})
 })
