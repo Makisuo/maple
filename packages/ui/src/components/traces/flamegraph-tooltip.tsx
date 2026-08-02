@@ -1,6 +1,7 @@
 import { formatDuration } from "../../lib/format"
 import { getServiceColor, calculateSelfTime } from "../../lib/colors"
 import { getHttpInfo } from "../../lib/http"
+import { getSpanKindLabel } from "../../lib/span-kind"
 import type { SpanNode } from "../../lib/types"
 
 interface FlamegraphTooltipProps {
@@ -9,16 +10,8 @@ interface FlamegraphTooltipProps {
 	traceStartTime?: string
 }
 
-const kindLabels: Record<string, string> = {
-	SPAN_KIND_SERVER: "Server",
-	SPAN_KIND_CLIENT: "Client",
-	SPAN_KIND_PRODUCER: "Producer",
-	SPAN_KIND_CONSUMER: "Consumer",
-	SPAN_KIND_INTERNAL: "Internal",
-}
-
 export function FlamegraphTooltipContent({ span, totalDurationMs, traceStartTime }: FlamegraphTooltipProps) {
-	const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
+	const kindLabel = getSpanKindLabel(span.spanKind)
 
 	const serviceColor = getServiceColor(span.serviceName)
 	const selfTime = calculateSelfTime(span, span.children)

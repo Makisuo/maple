@@ -7,7 +7,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { formatDuration, formatNumber } from "@maple/ui/format"
 import { formatRelativeTime, toEpochMs } from "@maple/ui/time-format"
 
-import { DetailRail } from "@/components/common/detail-rail"
+import { DetailRail } from "@maple/ui/components/detail-rail"
 import { SEVERITY_LABEL, SEVERITY_TONE } from "@/components/errors/severity-badge"
 import { ConfidenceMeter } from "./confidence-meter"
 import { Result, useAtomValue } from "@/lib/effect-atom"

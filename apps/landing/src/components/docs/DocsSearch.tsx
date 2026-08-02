@@ -10,6 +10,7 @@ import {
 	CommandItem,
 	CommandList,
 } from "@maple/ui/components/ui/command"
+import { isEditableTarget } from "@maple/ui/lib/keyboard"
 import { MagnifierIcon } from "@maple/ui/components/icons/magnifier"
 import Fuse, { type IFuseOptions } from "fuse.js"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -55,12 +56,6 @@ function loadIndex() {
 			})
 	}
 	return indexPromise
-}
-
-const EDITABLE_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"])
-function isEditableTarget(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) return false
-	return EDITABLE_TAGS.has(target.tagName) || target.isContentEditable
 }
 
 function groupOrder(group: string): number {

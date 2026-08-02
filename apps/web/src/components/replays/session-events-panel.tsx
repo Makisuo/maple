@@ -10,7 +10,7 @@ import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { parseAttributes } from "@maple/ui/lib/span-tree"
-import { DetailRail } from "@/components/common/detail-rail"
+import { DetailRail } from "@maple/ui/components/detail-rail"
 import { ExternalLinkIcon } from "@/components/icons"
 import { formatClock, formatSessionDuration, type ReplayPartitionWindow } from "./replay-format"
 import { useReplayPlayer } from "./replay-player-context"
@@ -578,7 +578,13 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 							<Value mono className="truncate">
 								{session.serviceName}
 							</Value>
-							<CopyButton value={session.serviceName} label="Service name" iconSize={12} className="size-5" toast={false} />
+							<CopyButton
+								value={session.serviceName}
+								label="Service name"
+								iconSize={12}
+								className="size-5"
+								toast={false}
+							/>
 						</span>
 					</DetailRail.Row>
 				)}
@@ -587,7 +593,13 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 						<Value mono className="truncate">
 							{sessionId.slice(0, 12)}…
 						</Value>
-						<CopyButton value={sessionId} label="Session ID" iconSize={12} className="size-5" toast={false} />
+						<CopyButton
+							value={sessionId}
+							label="Session ID"
+							iconSize={12}
+							className="size-5"
+							toast={false}
+						/>
 					</span>
 				</DetailRail.Row>
 				{session.recorded !== undefined && (

@@ -1,11 +1,5 @@
 import { useState } from "react"
-import { MagnifierIcon, XmarkIcon } from "@/components/icons"
-import {
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupInput,
-} from "@maple/ui/components/ui/input-group"
+import { SearchInput } from "@maple/ui/components/ui/search-input"
 import { AttributesTable, ResourceAttributesSection } from "@/components/attributes"
 import type { Log } from "@/api/warehouse/logs"
 
@@ -26,25 +20,11 @@ export function LogAttributesPanel({ log }: LogAttributesPanelProps) {
 	return (
 		<div className="space-y-3">
 			{hasAttributes && (
-				<InputGroup>
-					<InputGroupAddon>
-						<MagnifierIcon />
-					</InputGroupAddon>
-					<InputGroupInput
-						size="sm"
-						type="text"
-						value={attrSearch}
-						onChange={(e) => setAttrSearch(e.target.value)}
-						placeholder="Search attributes..."
-					/>
-					{attrSearch && (
-						<InputGroupAddon align="inline-end">
-							<InputGroupButton aria-label="Clear search" onClick={() => setAttrSearch("")}>
-								<XmarkIcon />
-							</InputGroupButton>
-						</InputGroupAddon>
-					)}
-				</InputGroup>
+				<SearchInput
+					value={attrSearch}
+					onValueChange={setAttrSearch}
+					placeholder="Search attributes..."
+				/>
 			)}
 
 			<AttributesTable
