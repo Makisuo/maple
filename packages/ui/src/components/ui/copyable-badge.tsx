@@ -1,12 +1,16 @@
+"use client"
+
 import type { ReactNode } from "react"
 
 import type { VariantProps } from "class-variance-authority"
-import { badgeVariants } from "@maple/ui/components/ui/badge"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { useCopy } from "@maple/ui/hooks/use-copy"
-import { cn } from "@maple/ui/utils"
 
-interface CopyableBadgeProps {
+import { useCopy } from "../../hooks/use-copy"
+import { cn } from "../../lib/utils"
+import { badgeVariants } from "./badge"
+import { copyTooltipText } from "./copy-button"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./tooltip"
+
+export interface CopyableBadgeProps {
 	/** The full value written to the clipboard (may differ from the displayed children). */
 	value: string
 	/** What the badge displays — defaults to the value. */
@@ -40,13 +44,7 @@ export function CopyableBadge({
 			>
 				{children ?? value}
 			</TooltipTrigger>
-			<TooltipPopup>
-				{status === "copied"
-					? "Copied!"
-					: status === "error"
-						? "Copy failed"
-						: `Click to copy ${label}`}
-			</TooltipPopup>
+			<TooltipPopup>{copyTooltipText(status, label)}</TooltipPopup>
 		</Tooltip>
 	)
 }
