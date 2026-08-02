@@ -1,4 +1,5 @@
 import { formatNumber } from "@maple/ui/format"
+import { TableSkeleton } from "@maple/ui/components/ui/table-skeleton"
 import { formatRelativeTime } from "@maple/ui/time-format"
 import { useState } from "react"
 
@@ -7,7 +8,6 @@ import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Button } from "@maple/ui/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@maple/ui/components/ui/empty"
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { MetricTypeBadge } from "./metric-type-badge"
 import { type Metric, type ListMetricsInput } from "@/api/warehouse/metrics"
@@ -23,43 +23,36 @@ interface MetricsTableProps {
 	endTime?: string
 }
 
+const SKELETON_COLUMNS = [
+	{ header: "Metric Name", headClassName: "w-[40%]", skeleton: "w-48" },
+	{
+		header: "Type",
+		headClassName: "hidden md:table-cell w-[100px]",
+		cellClassName: "hidden md:table-cell",
+		skeleton: "w-16",
+	},
+	{
+		header: "Service",
+		headClassName: "hidden md:table-cell w-[120px]",
+		cellClassName: "hidden md:table-cell",
+		skeleton: "w-20",
+	},
+	{
+		header: "Points",
+		headClassName: "hidden md:table-cell w-[100px]",
+		cellClassName: "hidden md:table-cell",
+		skeleton: "w-12",
+	},
+	{
+		header: "Last Seen",
+		headClassName: "hidden md:table-cell w-[100px]",
+		cellClassName: "hidden md:table-cell",
+		skeleton: "w-16",
+	},
+]
+
 function LoadingState() {
-	return (
-		<div className="rounded-md border overflow-auto">
-			<Table className="table-fixed">
-				<TableHeader>
-					<TableRow>
-						<TableHead className="w-[40%]">Metric Name</TableHead>
-						<TableHead className="hidden md:table-cell w-[100px]">Type</TableHead>
-						<TableHead className="hidden md:table-cell w-[120px]">Service</TableHead>
-						<TableHead className="hidden md:table-cell w-[100px]">Points</TableHead>
-						<TableHead className="hidden md:table-cell w-[100px]">Last Seen</TableHead>
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{Array.from({ length: 10 }).map((_, i) => (
-						<TableRow key={i}>
-							<TableCell>
-								<Skeleton className="h-4 w-48" />
-							</TableCell>
-							<TableCell className="hidden md:table-cell">
-								<Skeleton className="h-4 w-16" />
-							</TableCell>
-							<TableCell className="hidden md:table-cell">
-								<Skeleton className="h-4 w-20" />
-							</TableCell>
-							<TableCell className="hidden md:table-cell">
-								<Skeleton className="h-4 w-12" />
-							</TableCell>
-							<TableCell className="hidden md:table-cell">
-								<Skeleton className="h-4 w-16" />
-							</TableCell>
-						</TableRow>
-					))}
-				</TableBody>
-			</Table>
-		</div>
-	)
+	return <TableSkeleton columns={SKELETON_COLUMNS} rows={10} tableClassName="table-fixed" />
 }
 
 const PAGE_SIZE = 100

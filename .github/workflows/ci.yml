@@ -56,13 +56,29 @@ jobs:
                         - 'scripts/**'
                         - '!apps/ingest/**'
                         - '!apps/slack-agent/**'
+                      # The workspace-dependency closure of apps/cli + apps/local-ui
+                      # (plus what alchemy:build-deps builds): cli → effect-sdk,
+                      # domain, query-engine; local-ui → infra, query-engine, ui;
+                      # domain/query-engine → clickhouse-builder; effect-sdk /
+                      # @maple-dev/browser → browser-session. The old blanket
+                      # `lib/**` + `packages/**` ran this job and all seven archive
+                      # legs for changes to packages the bundle never links (db,
+                      # auth, email, …). Update this list when those package.json
+                      # workspace deps change.
                       cli:
                         - *base
                         - 'apps/cli/**'
                         - 'apps/local-ui/**'
-                        - 'lib/**'
-                        - 'packages/**'
+                        - 'lib/effect-sdk/**'
+                        - 'lib/clickhouse-builder/**'
+                        - 'packages/domain/**'
+                        - 'packages/query-engine/**'
+                        - 'packages/infra/**'
+                        - 'packages/ui/**'
+                        - 'packages/browser/**'
+                        - 'packages/browser-session/**'
                         - 'scripts/build-local-binary.sh'
+                        - 'scripts/gen-ui-embed.ts'
                       web:
                         - *base
                         - 'apps/web/**'
@@ -327,10 +343,25 @@ jobs:
 
             - uses: ./.github/actions/bun-install
 
+            # Same rolling turbo cache as the typescript job: this is the only
+            # job that runs `turbo build` (via alchemy:build-deps inside
+            # build-local-binary.sh) with no cache restore, so those packages
+            # compiled cold on every run.
+            - name: Restore turbo cache
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: .turbo/cache
+                  key: turbo-v1-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+                  restore-keys: |
+                      turbo-v1-${{ runner.os }}-${{ github.job }}-
+                      turbo-v1-${{ runner.os }}-
+
             - name: Build native local bundle
+              timeout-minutes: 5
               run: scripts/build-local-binary.sh
 
             - name: Run repeated checkpoint restore and fresh-process reopen smoke
+              timeout-minutes: 4
               env:
                   KEEP_ROOT: "1"
                   TMPDIR: ${{ runner.temp }}/maple-native-checkpoint
@@ -339,6 +370,7 @@ jobs:
                   apps/cli/test/native-checkpoint-smoke.sh "$GITHUB_WORKSPACE/dist"
 
             - name: Run native local-store migration and reopen probe
+              timeout-minutes: 4
               env:
                   KEEP_ROOT: "1"
                   TMPDIR: ${{ runner.temp }}/maple-native-migration
@@ -346,8 +378,11 @@ jobs:
                   mkdir -p "$TMPDIR"
                   apps/cli/test/native-local-store-migration.sh "$GITHUB_WORKSPACE/dist"
 
+            # failure() alone skips the upload when a step-level timeout or a
+            # concurrency cancel kills the probe mid-hang — precisely the runs
+            # whose evidence matters most.
             - name: Upload checkpoint failure evidence
-              if: ${{ failure() }}
+              if: ${{ failure() || cancelled() }}
               uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
               with:
                   name: native-checkpoint-failure-${{ github.run_id }}

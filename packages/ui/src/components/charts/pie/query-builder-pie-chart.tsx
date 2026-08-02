@@ -2,6 +2,7 @@ import * as React from "react"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
+import { useContainerSize } from "../../../hooks/use-container-size"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { pieSampleData } from "../_shared/sample-data"
 import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
@@ -179,17 +180,8 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 
 	// Measure container.
 	const containerRef = React.useRef<HTMLDivElement | null>(null)
-	const [size, setSize] = React.useState({ w: 0, h: 0 })
-	React.useEffect(() => {
-		const el = containerRef.current
-		if (!el) return
-		const ro = new ResizeObserver((entries) => {
-			const r = entries[0]?.contentRect
-			if (r) setSize({ w: Math.floor(r.width), h: Math.floor(r.height) })
-		})
-		ro.observe(el)
-		return () => ro.disconnect()
-	}, [])
+	const containerSize = useContainerSize(containerRef)
+	const size = { w: Math.floor(containerSize.width), h: Math.floor(containerSize.height) }
 
 	// A composition breakdown is read as a ranked table, not as a colour-matching
 	// exercise: `legend: "right"` puts the slices in a sorted Value/% table beside

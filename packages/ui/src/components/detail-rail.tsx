@@ -1,6 +1,6 @@
 import type * as React from "react"
 
-import { cn } from "@maple/ui/lib/utils"
+import { cn } from "../lib/utils"
 
 /* -------------------------------------------------------------------------------------------------
  * DetailRail — the label/value rail every detail page hangs off its trailing edge.
@@ -62,4 +62,24 @@ function Row({
 	)
 }
 
-export const DetailRail = { Group, Row }
+/**
+ * Monospace metadata row for infra detail pages (node/workload/pod, host
+ * metadata) — a denser, divider-separated sibling of `Row`. Renders nothing
+ * for absent values so callers can list every candidate field unconditionally.
+ */
+function MetaRow({ label, value }: { label: string; value: string | null | undefined }) {
+	if (!value) return null
+	return (
+		<div
+			data-slot="detail-rail-meta-row"
+			className="flex items-baseline justify-between gap-3 border-b border-border/60 py-1.5 last:border-0"
+		>
+			<span className="font-mono text-[11px] text-muted-foreground">{label}</span>
+			<span className="break-all text-right font-mono text-[11px] tabular-nums text-foreground/85">
+				{value}
+			</span>
+		</div>
+	)
+}
+
+export const DetailRail = { Group, Row, MetaRow }

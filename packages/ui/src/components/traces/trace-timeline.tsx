@@ -5,6 +5,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { ChevronExpandYIcon } from "../icons"
 import { Button } from "../ui/button"
 import { getServiceColor } from "../../lib/colors"
+import { isEditableTarget } from "../../lib/keyboard"
 import { useContainerSize } from "../../hooks/use-container-size"
 import { useTraceView } from "./trace-view-context"
 import { clampViewport, useTraceTimeline } from "./use-trace-timeline"
@@ -280,10 +281,7 @@ export function TraceTimeline() {
 		(e: React.KeyboardEvent) => {
 			// Keys typed into the search input (or any editable element) must not drive the
 			// timeline — except Escape, which clears search/focus from anywhere.
-			const target = e.target as HTMLElement
-			const inEditable =
-				target !== e.currentTarget &&
-				(target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+			const inEditable = e.target !== e.currentTarget && isEditableTarget(e.target)
 			if (inEditable && e.key !== "Escape") return
 
 			// Cursor-anchored zoom + pan (Perfetto/DevTools WASD cluster). Falls back to the

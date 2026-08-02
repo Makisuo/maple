@@ -816,7 +816,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ concurrency: 3 },
 					)
 					const keyOf = (row: { database: string; branch?: string }) =>
-						byBranch ? `${row.database} ${row.branch ?? ""}` : row.database
+						byBranch ? `${row.database}\x00${row.branch ?? ""}` : row.database
 					const connectionsByKey = new Map(connectionRows.map((row) => [keyOf(row), row]))
 					const storageByKey = new Map(storageRows.map((row) => [keyOf(row), row]))
 					const seen = new Set<string>()

@@ -1,5 +1,5 @@
 import { useEffect, type RefObject } from "react"
-import { isDialogOpen, isEditableTarget } from "@/lib/keyboard"
+import { isDialogOpen, isEditableTarget } from "@maple/ui/lib/keyboard"
 
 function insertCharIntoTextarea(textarea: HTMLTextAreaElement, char: string): void {
 	const start = textarea.selectionStart ?? textarea.value.length

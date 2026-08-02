@@ -36,7 +36,7 @@ import {
 	XmarkIcon,
 } from "@/components/icons"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
-import { DetailRail } from "@/components/common/detail-rail"
+import { DetailRail } from "@maple/ui/components/detail-rail"
 
 /** This rail runs a narrower label column than the shared default. */
 const Row = (props: Omit<React.ComponentProps<typeof DetailRail.Row>, "labelWidth">) => (

@@ -115,7 +115,7 @@ printf '%s\n' \
 chmod 600 "$CONFIG"
 
 step "creating legacy v0 source store"
-bounded 300 "legacy source fixture" \
+bounded 60 "legacy source fixture" \
 	env MAPLE_LIBCHDB="$LIBCHDB" bun "$REPO_ROOT/apps/cli/test/native-local-store-migration-fixture.ts" "$DATA" "$CONFIG"
 
 # Replace the newly-created active v2 marker with the historical v1 marker.
@@ -128,7 +128,9 @@ printf '%s\n' "{\"chdb\":\"$CHDB_VERSION\",\"maple\":\"native-probe\",\"createdA
 chmod 600 "$ROOT/maple-store-version.json"
 
 step "running maple schema migrate"
-bounded 600 "maple schema migrate" \
+# 120s bound: healthy runs take ~3s; the job budget is <3 minutes, so a stall
+# has to fail the step in seconds-not-minutes with migrate.out as evidence.
+bounded 120 "maple schema migrate" \
 	env MAPLE_LIBCHDB="$LIBCHDB" "$MAPLE" schema migrate --data-dir "$DATA" --yes >"$ROOT/migrate.out" 2>&1 || {
 	cat "$ROOT/migrate.out" >&2
 	fail "native schema migration failed"

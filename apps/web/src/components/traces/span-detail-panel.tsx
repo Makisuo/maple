@@ -1,20 +1,9 @@
 import { useState, type ReactNode } from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import {
-	XmarkIcon,
-	ClockIcon,
-	CircleWarningIcon,
-	CircleInfoIcon,
-	SquareTerminalIcon,
-	ServerIcon,
-	ChevronDownIcon,
-	ChevronUpIcon,
-} from "@/components/icons"
-import { CopyButton } from "@maple/ui/components/ui/copy-button"
+import { XmarkIcon, ClockIcon, CircleInfoIcon, SquareTerminalIcon, ServerIcon } from "@/components/icons"
+import { ErrorSection } from "@maple/ui/components/error-section"
 
 import { Button } from "@maple/ui/components/ui/button"
-import { Alert, AlertTitle, AlertDescription } from "@maple/ui/components/ui/alert"
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@maple/ui/components/ui/collapsible"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
@@ -23,6 +12,7 @@ import { type Log, type LogsResponse } from "@/api/warehouse/logs"
 import { LogDetailSheet } from "@/components/logs/log-detail-sheet"
 import { formatDuration } from "@maple/ui/format"
 import { cn } from "@maple/ui/utils"
+import { getSpanKindLabel, getSpanStatusBadgeClass } from "@maple/ui/lib/span-kind"
 import { getCacheInfo, cacheResultStyles } from "@maple/ui/lib/cache"
 import { getCloudPlatform, outcomeBadgeStyle } from "@maple/ui/lib/cloud-platforms"
 import { GlobeIcon } from "@maple/ui/components/icons"
@@ -45,20 +35,6 @@ interface SpanDetailPanelProps {
 	traceStartTime: string
 	totalDurationMs: number
 	className?: string
-}
-
-const statusStyles: Record<string, string> = {
-	Ok: "bg-severity-info/15 text-severity-info border-severity-info/30",
-	Error: "bg-severity-error/15 text-severity-error border-severity-error/30",
-	Unset: "bg-muted text-muted-foreground border-border",
-}
-
-const kindLabels: Record<string, string> = {
-	SPAN_KIND_SERVER: "Server",
-	SPAN_KIND_CLIENT: "Client",
-	SPAN_KIND_PRODUCER: "Producer",
-	SPAN_KIND_CONSUMER: "Consumer",
-	SPAN_KIND_INTERNAL: "Internal",
 }
 
 /**
@@ -148,97 +124,6 @@ function LogEntry({ log, timeZone, onClick }: { log: Log; timeZone: string; onCl
 	)
 }
 
-interface ErrorSectionProps {
-	message: string
-	serviceName: string
-	spanName: string
-	attributes?: Record<string, string>
-}
-
-function formatErrorPrompt({ message, serviceName, spanName, attributes }: ErrorSectionProps): string {
-	const relevantKeys = [
-		"http.method",
-		"http.url",
-		"http.route",
-		"http.status_code",
-		"db.system.name",
-		"db.system",
-		"db.query.text",
-		"db.statement",
-		"rpc.method",
-		"rpc.service",
-		"messaging.system",
-		"messaging.operation",
-	]
-
-	const contextLines: string[] = []
-	if (attributes) {
-		for (const key of relevantKeys) {
-			if (attributes[key]) {
-				contextLines.push(`- ${key}: ${attributes[key]}`)
-			}
-		}
-	}
-
-	return `I'm debugging an error in my distributed system. Please help me understand and fix this issue.
-
-**Service:** ${serviceName}
-**Operation:** ${spanName}
-
-**Error:**
-\`\`\`
-${message}
-\`\`\`
-${
-	contextLines.length > 0
-		? `
-**Context:**
-${contextLines.join("\n")}
-`
-		: ""
-}
-What could be causing this error and how can I fix it?`
-}
-
-function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSectionProps) {
-	const [expanded, setExpanded] = useState(false)
-	const isLong = message.length > 120 || message.includes("\n")
-
-	return (
-		<Alert variant="error" className="mx-3 my-2 rounded-md border-destructive/30">
-			<CircleWarningIcon size={14} />
-			<AlertTitle className="flex items-center justify-between">
-				<span>Error</span>
-				<CopyButton
-					value={() => formatErrorPrompt({ message, serviceName, spanName, attributes })}
-					label="Error prompt"
-					idleLabel="Copy as prompt"
-					iconSize={10}
-					className="h-5 px-1.5 text-[10px] text-destructive hover:bg-destructive/10 hover:text-destructive/80"
-				/>
-			</AlertTitle>
-			<AlertDescription>
-				{isLong ? (
-					<Collapsible open={expanded} onOpenChange={setExpanded}>
-						{!expanded && <p className="font-mono text-[11px] line-clamp-2">{message}</p>}
-						<CollapsibleTrigger className="text-[10px] text-destructive hover:text-destructive/80 mt-1 flex items-center gap-1">
-							{expanded ? "Show less" : "Show full error"}
-							{expanded ? <ChevronUpIcon size={10} /> : <ChevronDownIcon size={10} />}
-						</CollapsibleTrigger>
-						<CollapsibleContent>
-							<pre className="font-mono text-[11px] whitespace-pre-wrap break-all mt-2 p-2 bg-destructive/5 rounded max-h-48 overflow-auto">
-								{message}
-							</pre>
-						</CollapsibleContent>
-					</Collapsible>
-				) : (
-					<p className="font-mono text-[11px]">{message}</p>
-				)}
-			</AlertDescription>
-		</Alert>
-	)
-}
-
 function SpanLogs({ traceId, spanId, timeZone }: { traceId: string; spanId: string; timeZone: string }) {
 	const [selectedLog, setSelectedLog] = useState<Log | null>(null)
 	const [sheetOpen, setSheetOpen] = useState(false)
@@ -309,8 +194,8 @@ export function SpanDetailPanel({
 }: SpanDetailPanelProps) {
 	const { effectiveTimezone } = useTimezonePreference()
 	const cacheInfo = getCacheInfo(span.spanAttributes)
-	const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
-	const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
+	const statusStyle = getSpanStatusBadgeClass(span.statusCode)
+	const kindLabel = getSpanKindLabel(span.spanKind)
 	const logsResult = useAtomValue(
 		span.traceId && span.spanId
 			? listLogsResultAtom({ data: { traceId: span.traceId, spanId: span.spanId, limit: 100 } })
@@ -474,9 +359,11 @@ export function SpanDetailPanel({
 			{span.statusCode === "Error" && span.statusMessage && (
 				<ErrorSection
 					message={span.statusMessage}
-					serviceName={span.serviceName}
-					spanName={span.spanName}
-					attributes={detailAttrs?.spanAttributes ?? span.spanAttributes}
+					prompt={{
+						serviceName: span.serviceName,
+						operation: span.spanName,
+						attributes: detailAttrs?.spanAttributes ?? span.spanAttributes,
+					}}
 				/>
 			)}
 

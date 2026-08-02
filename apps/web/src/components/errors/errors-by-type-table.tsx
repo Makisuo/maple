@@ -1,4 +1,5 @@
 import { formatNumber } from "@maple/ui/format"
+import { TableSkeleton } from "@maple/ui/components/ui/table-skeleton"
 import { formatRelativeTime } from "@maple/ui/time-format"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Fragment, useState } from "react"
@@ -168,43 +169,28 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
 	)
 }
 
+const SKELETON_COLUMNS = [
+	{ headClassName: "w-[32px]", skeleton: null },
+	{ header: "Error Type", skeleton: "w-64" },
+	{ header: "Count", headClassName: "w-[100px]", skeleton: "h-5 w-16" },
+	{
+		header: "Affected Services",
+		headClassName: "hidden md:table-cell w-[140px]",
+		cellClassName: "hidden md:table-cell",
+		skeleton: "w-20",
+	},
+	{
+		header: "Last Seen",
+		headClassName: "hidden md:table-cell w-[140px]",
+		cellClassName: "hidden md:table-cell",
+		skeleton: "w-24",
+	},
+]
+
 function LoadingState() {
 	return (
 		<div className="space-y-4">
-			<div className="rounded-md border overflow-auto">
-				<Table>
-					<TableHeader>
-						<TableRow>
-							<TableHead className="w-[32px]" />
-							<TableHead>Error Type</TableHead>
-							<TableHead className="w-[100px]">Count</TableHead>
-							<TableHead className="hidden md:table-cell w-[140px]">
-								Affected Services
-							</TableHead>
-							<TableHead className="hidden md:table-cell w-[140px]">Last Seen</TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{Array.from({ length: 5 }).map((_, i) => (
-							<TableRow key={i}>
-								<TableCell />
-								<TableCell>
-									<Skeleton className="h-4 w-64" />
-								</TableCell>
-								<TableCell>
-									<Skeleton className="h-5 w-16" />
-								</TableCell>
-								<TableCell className="hidden md:table-cell">
-									<Skeleton className="h-4 w-20" />
-								</TableCell>
-								<TableCell className="hidden md:table-cell">
-									<Skeleton className="h-4 w-24" />
-								</TableCell>
-							</TableRow>
-						))}
-					</TableBody>
-				</Table>
-			</div>
+			<TableSkeleton columns={SKELETON_COLUMNS} rows={5} />
 		</div>
 	)
 }

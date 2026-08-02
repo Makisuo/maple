@@ -10,6 +10,9 @@ interface HostMetadataPanelProps {
 	summary: HostDetailSummaryResponse["data"]
 }
 
+// Candidate for DetailRail.MetaRow (@maple/ui) — same mono label/value pair, but
+// this one layers on copy-on-hover and an optional tooltip. Fold in if MetaRow
+// ever grows those.
 interface RowProps {
 	label: string
 	value: string | null | undefined
