@@ -443,8 +443,12 @@ export function tracesTimeseriesQuery(
 				// `service_overview_hourly.EstimatedSpanCount` post-dates the table, so
 				// buckets written before it carry 0 — fall back to the raw count rather
 				// than reporting a hole. Mirrors `resolveThroughput` in the web app.
+				// The `toFloat64` is load-bearing: `if()` needs a supertype for both
+				// arms, and ClickHouse refuses Float64/UInt64 ("no floating point type
+				// that can exactly represent all required integers") — the whole query
+				// 500s without it.
 				const weightedTotal = CH.rawExpr<number>(
-					"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), sum(bCount))",
+					"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount)))",
 				)
 				const satisfied = CH.sum($.bSatisfiedCount)
 				const tolerating = CH.sum($.bToleratingCount)

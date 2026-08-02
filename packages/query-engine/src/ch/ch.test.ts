@@ -350,12 +350,14 @@ describe("tracesTimeseriesQuery", () => {
 		expect(sql).toContain("Timestamp < if(toDateTime('2024-01-01 00:00:00')")
 		expect(sql).toContain("Hour < toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
 		// Weighted estimate, with a raw-count fallback for buckets written before
-		// `EstimatedSpanCount` existed. `count` reports the same expression.
+		// `EstimatedSpanCount` existed. `count` reports the same expression. Both
+		// `if()` arms must unify to Float64 — ClickHouse rejects a Float64/UInt64
+		// pair outright, so dropping the `toFloat64` breaks the query at runtime.
 		expect(sql).toContain(
-			"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), sum(bCount)) AS count",
+			"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count",
 		)
 		expect(sql).toContain(
-			"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), sum(bCount)) AS estimatedSpanCount",
+			"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount",
 		)
 		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles)")
 	})
