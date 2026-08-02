@@ -4,17 +4,11 @@ import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { funnelSampleData } from "../_shared/sample-data"
+import { pickValueField, toBreakdownRows, type BreakdownRow } from "../_shared/breakdown-rows"
 import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import { useContainerSize } from "../../../hooks/use-container-size"
 
-interface Row {
-	name: string
-	/** True when the source row had no usable label. */
-	unnamed: boolean
-	value: number
-}
-
-interface Stage extends Row {
+interface Stage extends BreakdownRow {
 	color: string
 	/** Bar width as a fraction of the largest stage (0–1). */
 	widthPct: number
@@ -24,59 +18,12 @@ interface Stage extends Row {
 	pctOfPrev: number | null
 }
 
-function asFiniteNumber(value: unknown): number {
-	const parsed = typeof value === "number" ? value : Number(value)
-	return Number.isFinite(parsed) ? parsed : 0
-}
-
-function pickValueField(rows: ReadonlyArray<Record<string, unknown>>): string {
-	if (rows.length === 0) return "value"
-	const first = rows[0]
-	for (const key of Object.keys(first)) {
-		if (key === "name") continue
-		if (typeof first[key] === "number") return key
-	}
-	return "value"
-}
-
-/**
- * Normalize source rows into named stages. Guards the mis-wired case where a
- * funnel receives timeseries rows (`{bucket, seriesA, seriesB}`) instead of a
- * breakdown (`{name, value}`): rendering one "—" row per time bucket is
- * meaningless, so aggregate each numeric series across buckets into a single
- * stage instead (MAP-49).
- */
-function toRows(source: ReadonlyArray<Record<string, unknown>>, valueField: string): Row[] {
-	const first = source[0]
-	const isTimeseriesShaped = first != null && "bucket" in first && !("name" in first)
-	if (isTimeseriesShaped) {
-		const totals = new Map<string, number>()
-		for (const row of source) {
-			for (const [key, value] of Object.entries(row)) {
-				if (key === "bucket" || typeof value !== "number") continue
-				totals.set(key, (totals.get(key) ?? 0) + asFiniteNumber(value))
-			}
-		}
-		return Array.from(totals, ([name, value]) => ({ name, unnamed: false, value })).sort(
-			(a, b) => b.value - a.value,
-		)
-	}
-	return source.map((row) => {
-		const raw = row.name == null ? "" : String(row.name).trim()
-		return {
-			name: raw === "" ? "(no value)" : raw,
-			unnamed: raw === "",
-			value: asFiniteNumber(row[valueField]),
-		}
-	})
-}
-
 /**
  * Drop meaningless zero rows: a zero stage is kept only when a non-zero stage
  * follows it (a genuine funnel drop-to-zero step reads differently from a pile
  * of empty groups at the tail).
  */
-function dropTrailingZeroRows(rows: Row[]): Row[] {
+function dropTrailingZeroRows(rows: BreakdownRow[]): BreakdownRow[] {
 	let lastNonZero = -1
 	for (let i = rows.length - 1; i >= 0; i--) {
 		if (rows[i].value > 0) {
@@ -116,7 +63,7 @@ export function QueryBuilderFunnelChart({ data, className, unit, funnel }: BaseC
 	const { height } = useContainerSize(containerRef)
 
 	const stages = React.useMemo(() => {
-		const rows = dropTrailingZeroRows(toRows(source, valueField))
+		const rows = dropTrailingZeroRows(toBreakdownRows(source, valueField))
 		const max = rows.reduce((acc, r) => Math.max(acc, r.value), 0)
 		const first = rows[0]?.value ?? 0
 		if (max <= 0) return [] as Stage[]
@@ -144,6 +91,12 @@ export function QueryBuilderFunnelChart({ data, className, unit, funnel }: BaseC
 	const hiddenCount = stages.length - visibleStages.length
 
 	const [hover, setHover] = React.useState<number | null>(null)
+	// `showStepPercent` gates BOTH percentage labels, not just the step-to-step
+	// one: setting it `false` used to leave the "share of the first stage" label
+	// on screen, so a widget that explicitly asked for no percentages still got
+	// them. Unset keeps the long-standing default — share of the first stage,
+	// no step conversion — so persisted funnels render as before.
+	const showShareOfFirst = funnel?.showStepPercent !== false
 	const showStepPercent = funnel?.showStepPercent === true
 
 	if (stages.length === 0) {
@@ -188,8 +141,12 @@ export function QueryBuilderFunnelChart({ data, className, unit, funnel }: BaseC
 							</span>
 							<span className="shrink-0 tabular-nums text-muted-foreground">
 								<span className="text-foreground/90">{fmtValue(stage.value, unit)}</span>
-								<span className="px-1 text-muted-foreground/50">·</span>
-								<span>{fmtPct(stage.pctOfFirst)}</span>
+								{showShareOfFirst && (
+									<>
+										<span className="px-1 text-muted-foreground/50">·</span>
+										<span>{fmtPct(stage.pctOfFirst)}</span>
+									</>
+								)}
 								{showStepPercent && stage.pctOfPrev != null && (
 									<>
 										<span className="px-1 text-muted-foreground/50">↓</span>

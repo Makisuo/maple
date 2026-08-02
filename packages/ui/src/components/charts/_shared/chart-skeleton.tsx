@@ -145,6 +145,26 @@ function renderVariant(variant: ChartSkeletonVariant) {
 				</div>
 			)
 
+		// Ranked rows: a label stub, a bar, and a value stub — the shape the real
+		// panel draws, so the swap-in doesn't jump.
+		case "hbar":
+			return (
+				<div className="flex h-full w-full flex-col justify-center gap-1.5 p-3">
+					{[92, 78, 55, 34, 16].map((w, i) => (
+						<div key={i} className="flex items-center gap-2">
+							<div className="h-2 w-[30%] shrink-0 rounded-[2px] bg-foreground/10" />
+							<div className="h-2.5 flex-1 overflow-hidden rounded-[3px] bg-foreground/5">
+								<div
+									className="h-full rounded-[3px] bg-foreground/10 skeleton-bar"
+									style={{ width: `${w}%`, animationDelay: `${-i * 0.13}s` }}
+								/>
+							</div>
+							<div className="h-2 w-8 shrink-0 rounded-[2px] bg-foreground/10" />
+						</div>
+					))}
+				</div>
+			)
+
 		case "funnel":
 			return (
 				<div className="flex h-full w-full flex-col justify-center gap-2 p-3">

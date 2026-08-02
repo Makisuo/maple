@@ -518,6 +518,7 @@ export const DashboardTemplatePreviewKind = Schema.Literals([
 	"histogram",
 	"heatmap",
 	"funnel",
+	"hbar",
 	"markdown",
 ])
 export type DashboardTemplatePreviewKind = typeof DashboardTemplatePreviewKind.Type

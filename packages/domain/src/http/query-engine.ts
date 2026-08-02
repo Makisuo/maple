@@ -1555,6 +1555,7 @@ export const RawSqlDisplayType = Schema.Literals([
 	"histogram",
 	"heatmap",
 	"funnel",
+	"hbar",
 ])
 export type RawSqlDisplayType = Schema.Schema.Type<typeof RawSqlDisplayType>
 

@@ -114,7 +114,7 @@ function selectPanel(state: QueryBuilderWidgetState, panel: PanelType): QueryBui
 
 describe("switching panel type", () => {
 	it("covers every panel type in the registry", () => {
-		expect(ALL_PANELS).toHaveLength(12)
+		expect(ALL_PANELS).toHaveLength(13)
 		expect(Object.keys(widgetTypes).sort()).toEqual([...ALL_PANELS].sort())
 	})
 
@@ -163,7 +163,7 @@ describe("switching panel type", () => {
 
 describe("endpoint routing", () => {
 	it("sends the categorical types to the breakdown endpoint", () => {
-		for (const panel of ["pie", "funnel", "heatmap"] as const) {
+		for (const panel of ["pie", "funnel", "heatmap", "hbar"] as const) {
 			const source = buildWidgetDataSource(makeWidget(), selectPanel(makeState(), panel), ["A"])
 			expect(source.endpoint, panel).toBe("custom_query_builder_breakdown")
 			// A formula is a timeseries expression; the breakdown input schema
@@ -223,7 +223,7 @@ describe("stat sparkline", () => {
 describe("validation", () => {
 	it("requires a group-by for the categorical types", () => {
 		const ungrouped = makeState({ queries: [ungroupedQuery()] })
-		for (const panel of ["pie", "funnel", "heatmap"] as const) {
+		for (const panel of ["pie", "funnel", "heatmap", "hbar"] as const) {
 			expect(validateQueries(selectPanel(ungrouped, panel))).toMatch(/group-by/)
 			expect(validateQueries(selectPanel(makeState(), panel)), panel).toBeNull()
 		}

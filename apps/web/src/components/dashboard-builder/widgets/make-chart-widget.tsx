@@ -124,3 +124,9 @@ export const FunnelWidget = makeChartWidget({
 	displayName: "FunnelWidget",
 	defaultChartId: "query-builder-funnel",
 })
+
+export const HbarWidget = makeChartWidget({
+	displayName: "HbarWidget",
+	// Every row is labelled in the chart itself, so a legend would repeat it.
+	defaultChartId: "query-builder-hbar",
+})
