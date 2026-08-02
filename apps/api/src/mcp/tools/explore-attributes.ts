@@ -2,7 +2,7 @@ import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from 
 import { toMcpQueryError } from "../lib/map-warehouse-error"
 import { resolveTenant } from "../lib/query-warehouse"
 import { queryWarehouse } from "../lib/query-warehouse"
-import { resolveTimeRange, formatClampNote } from "../lib/time"
+import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "../lib/time"
 import { clampLimit } from "../lib/limits"
 import { formatNumber, formatTable } from "../lib/format"
 import { Array as Arr, Effect, Schema } from "effect"
@@ -35,8 +35,11 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max results (default 50)"),
 		}),
 		Effect.fn("McpTool.exploreAttributes")(function* (params) {
-			const range = resolveTimeRange(params.start_time, params.end_time, { maxHours: 24 * 30 })
+			const range = resolveTimeRange(params.start_time, params.end_time, {
+				maxHours: MCP_DISCOVERY_MAX_HOURS,
+			})
 			const { st, et } = range
+			if (range.exceeded) return rangeExceededResult(range, "explore_attributes")
 			const lim = clampLimit(params.limit, { defaultValue: 50, max: 500 })
 			const scope = (params.scope ?? "span") as "span" | "resource"
 			const tenant = yield* resolveTenant
@@ -63,7 +66,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 				const lines: string[] = [
 					`## Attribute Values: ${params.key}`,
 					`Source: ${sourceLabel}`,
-					`Time range: ${st} — ${et}${formatClampNote(range)}`,
+					`Time range: ${st} — ${et}`,
 					``,
 				]
 
@@ -117,7 +120,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 
 				const lines: string[] = [
 					`## Available Environments & Deployments`,
-					`Time range: ${st} — ${et}${formatClampNote(range)}`,
+					`Time range: ${st} — ${et}`,
 					``,
 				]
 
@@ -179,7 +182,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 			const lines: string[] = [
 				`## Attribute Keys`,
 				`Source: ${params.source} (${scope})`,
-				`Time range: ${st} — ${et}${formatClampNote(range)}`,
+				`Time range: ${st} — ${et}`,
 				``,
 			]
 

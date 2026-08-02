@@ -6,7 +6,7 @@ import {
 } from "./types"
 import { warehouseToMcpHandlers } from "../lib/map-warehouse-error"
 import { withTenantExecutor, resolveTenant } from "../lib/query-warehouse"
-import { resolveTimeRange, formatClampNote } from "../lib/time"
+import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "../lib/time"
 import { clampLimit, clampOffset } from "../lib/limits"
 import { formatTable, truncate } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
@@ -49,8 +49,11 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max results (default 25)"),
 		}),
 		Effect.fn("McpTool.searchSessions")(function* (params) {
-			const range = resolveTimeRange(params.start_time, params.end_time, { maxHours: 24 * 7 })
+			const range = resolveTimeRange(params.start_time, params.end_time, {
+				maxHours: MCP_SEARCH_MAX_HOURS,
+			})
 			const { st, et } = range
+			if (range.exceeded) return rangeExceededResult(range, "search_sessions")
 			const lim = clampLimit(params.limit, { defaultValue: 25, max: 200 })
 			const off = clampOffset(params.offset, { max: 10_000 })
 
@@ -144,7 +147,7 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 
 			const lines: string[] = [
 				`## Sessions (showing ${off + 1}–${off + sessions.length})`,
-				`Time range: ${st} — ${et}${formatClampNote(range)}`,
+				`Time range: ${st} — ${et}`,
 				``,
 				formatTable(headers, rows),
 			]

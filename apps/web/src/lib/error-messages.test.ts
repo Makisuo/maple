@@ -35,14 +35,28 @@ describe("formatBackendError", () => {
 		expect(result.description).toContain("30 seconds")
 	})
 
-	it("formats QueryEngineValidationError with details", () => {
+	it("keeps the engine's message as the title and details as the description", () => {
 		const result = formatBackendError({
 			_tag: "@maple/http/errors/QueryEngineValidationError",
-			message: "invalid",
-			details: ["startTime must be before endTime", "limit too high"],
+			message: "List query time range too large",
+			details: ["List queries support a maximum range of 7 days", "Narrow the time range"],
 		})
-		expect(result.title).toBe("Invalid query parameters")
-		expect(result.description).toBe("startTime must be before endTime; limit too high")
+		// The specific headline used to be discarded in favour of a generic
+		// "Invalid query parameters" whenever details were present.
+		expect(result.title).toBe("List query time range too large")
+		expect(result.description).toBe(
+			"List queries support a maximum range of 7 days; Narrow the time range",
+		)
+	})
+
+	it("falls back to the message as the description when there are no details", () => {
+		const result = formatBackendError({
+			_tag: "@maple/http/errors/QueryEngineValidationError",
+			message: "Invalid time range",
+			details: [],
+		})
+		expect(result.title).toBe("Invalid time range")
+		expect(result.description).toBe("Invalid time range")
 	})
 
 	it("formats QueryEngineExecutionError with causeMessage", () => {

@@ -17,7 +17,15 @@ import {
 } from "@maple/domain/http/v2"
 import { CH, QueryEngineExecuteRequest } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
-import { computeBucketSeconds, MAX_QUERY_RANGE_SECONDS } from "@maple/query-engine/runtime"
+import {
+	computeBucketSeconds,
+	formatRangeSeconds,
+	MAX_BREAKDOWN_RANGE_SECONDS,
+	MAX_LIST_RANGE_SECONDS,
+	MAX_QUERY_RANGE_SECONDS,
+	MAX_TIMESERIES_POINTS as MAX_TIMESERIES_BUCKETS,
+	MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS,
+} from "@maple/query-engine/runtime"
 import { Effect, Encoding, Option, Result, Schema } from "effect"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
 import { QueryEngineService } from "../../services/QueryEngineService"
@@ -56,11 +64,11 @@ const serviceCatalogRowSchema = Schema.Struct({
 const PARTITION_HINT_RADIUS_MS = 60 * 60 * 1000
 const PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT = 50
 const PUBLIC_BREAKDOWN_DEFAULT_LIMIT = 20
-const MAX_SEARCH_RANGE_SECONDS = 60 * 60 * 24 * 7
-const MAX_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24 * 30
-const MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24
+// Search endpoints return raw rows, so they carry the query engine's list cap.
+const MAX_SEARCH_RANGE_SECONDS = MAX_LIST_RANGE_SECONDS
+// Summary endpoints read the 365-day hourly rollups rather than raw tables, so
+// they can span far wider than any query-engine kind — no shared equivalent.
 const MAX_SUMMARY_RANGE_SECONDS = 60 * 60 * 24 * 365
-const MAX_TIMESERIES_BUCKETS = 1_500
 
 const mapWarehouseError = warehouseToV2
 
@@ -90,7 +98,7 @@ const parseWindow = (
 			return yield* Effect.fail(
 				invalidRequest(
 					"time_range_too_large",
-					`${options.rangeLabel ?? "Telemetry queries"} support a maximum time range of ${Math.floor(maxSeconds / 86_400)} days.`,
+					`${options.rangeLabel ?? "Telemetry queries"} support a maximum time range of ${formatRangeSeconds(maxSeconds)}.`,
 					"start_time",
 				),
 			)
@@ -395,7 +403,7 @@ const validateTimeseriesBucket = (
 		? Effect.fail(
 				invalidRequest(
 					"bucket_count_too_large",
-					"bucket_seconds produces more than 1,500 buckets.",
+					`bucket_seconds produces more than ${MAX_TIMESERIES_BUCKETS.toLocaleString("en-US")} buckets.`,
 					"bucket_seconds",
 				),
 			)
@@ -416,7 +424,7 @@ const validateBreakdownRange = (rangeSeconds: number, filters: unknown) => {
 	return Effect.fail(
 		invalidRequest(
 			"breakdown_filter_required",
-			"Breakdowns over 24 hours require at least one narrowing filter.",
+			`Breakdowns over ${formatRangeSeconds(MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS)} require at least one narrowing filter.`,
 			"filters",
 		),
 	)

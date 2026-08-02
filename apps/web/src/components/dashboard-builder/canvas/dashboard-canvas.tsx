@@ -23,7 +23,13 @@ function sameLayout(a: Layout, b: Layout): boolean {
 	const byId = new Map(b.map((item) => [item.i, item]))
 	return a.every((item) => {
 		const other = byId.get(item.i)
-		return other !== undefined && other.x === item.x && other.y === item.y && other.w === item.w && other.h === item.h
+		return (
+			other !== undefined &&
+			other.x === item.x &&
+			other.y === item.y &&
+			other.w === item.w &&
+			other.h === item.h
+		)
 	})
 }
 
@@ -84,13 +90,18 @@ function useInViewportSticky() {
 const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: DashboardWidget }) {
 	const { mode } = useDashboardActions()
 	const { ref, visible } = useInViewportSticky()
-	const { dataState } = useWidgetData(widget, visible)
+	const { dataState, narrowRange, narrowRangeLabel } = useWidgetData(widget, visible)
 	const Visualization = visualizationFor(widget.visualization)
 
 	return (
 		<div ref={ref} className="h-full w-full">
 			<WidgetTimeRangeProvider timeRange={widget.timeRange}>
-				<WidgetActionsProvider widget={widget} dataState={dataState}>
+				<WidgetActionsProvider
+					widget={widget}
+					dataState={dataState}
+					narrowRange={narrowRange}
+					narrowRangeLabel={narrowRangeLabel}
+				>
 					<Visualization
 						dataState={dataState}
 						display={widget.display}

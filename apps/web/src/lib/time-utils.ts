@@ -1,4 +1,5 @@
 import { subMinutes, subHours, subDays, subWeeks, subMonths, startOfDay, format } from "date-fns"
+import { relativeRangeSeconds } from "@maple/query-engine"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 // Format date for Tinybird/ClickHouse DateTime compatibility
@@ -37,7 +38,15 @@ const TIME_UNITS: Record<string, (date: Date, amount: number) => Date> = {
 	mo: subMonths,
 }
 
+/**
+ * Resolve a relative shorthand ("15m", "7d", "3mo", "today") to an absolute
+ * window. Validity is gated by the shared `relativeRangeSeconds` grammar so the
+ * ranges this app offers can never drift from the ones the API accepts; the
+ * calendar-correct conversion stays here because it needs date-fns.
+ */
 export function relativeToAbsolute(shorthand: string): { startTime: string; endTime: string } | null {
+	if (relativeRangeSeconds(shorthand) === null) return null
+
 	const trimmed = shorthand.trim().toLowerCase()
 	const now = new Date()
 
