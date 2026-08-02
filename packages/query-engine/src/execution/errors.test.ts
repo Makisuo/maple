@@ -3,6 +3,7 @@ import {
 	WarehouseAuthError,
 	WarehouseClientError,
 	WarehouseConfigError,
+	WarehouseMalformedQueryError,
 	WarehouseQueryError,
 	WarehouseQuotaExceededError,
 	WarehouseSchemaDriftError,
@@ -22,6 +23,43 @@ describe("mapWarehouseError", () => {
 			const mapped = mapWarehouseError("testPipe", { message: "out of memory", code: "241" })
 			expect(mapped).toBeInstanceOf(WarehouseQuotaExceededError)
 			expect(mapped).toMatchObject({ setting: "max_memory_usage" })
+		})
+	})
+
+	describe("malformed SQL (a Maple bug, not the customer's)", () => {
+		// Captured verbatim from the outage that motivated the SQL catalog sweep:
+		// `if(sum(Float64Col) > 0, …, sum(UInt64Col))` on the annual
+		// service-overview route, which 502'd every main chart.
+		const noCommonType =
+			"There is no supertype for types UInt64, Float64  because some of them are integers and some are floating point, but there is no floating point type, that can exactly represent all required integers: While processing if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), sum(bCount)) AS count. (NO_COMMON_TYPE)"
+
+		it("classifies NO_COMMON_TYPE by ClickHouse type", () => {
+			const mapped = mapWarehouseError("tracesAllMetricsTimeseries", {
+				message: noCommonType,
+				code: "386",
+				type: "NO_COMMON_TYPE",
+			})
+			expect(mapped).toBeInstanceOf(WarehouseMalformedQueryError)
+			expect(mapped).toMatchObject({ pipeName: "tracesAllMetricsTimeseries" })
+		})
+
+		// Tinybird's /v0/sql returns the text without a structured type field.
+		it("classifies NO_COMMON_TYPE from the message alone", () => {
+			expect(mapWarehouseError("p", noCommonType)).toBeInstanceOf(WarehouseMalformedQueryError)
+		})
+
+		it("classifies an illegal argument type", () => {
+			expect(
+				mapWarehouseError("p", { message: "boom", type: "ILLEGAL_TYPE_OF_ARGUMENT" }),
+			).toBeInstanceOf(WarehouseMalformedQueryError)
+		})
+
+		// Schema drift is the customer's cluster missing a column; it must stay
+		// distinct so its "run schema apply" remediation is not shown for our bugs.
+		it("leaves schema drift classified as drift", () => {
+			expect(
+				mapWarehouseError("p", { message: "Missing columns", type: "UNKNOWN_IDENTIFIER" }),
+			).toBeInstanceOf(WarehouseSchemaDriftError)
 		})
 	})
 

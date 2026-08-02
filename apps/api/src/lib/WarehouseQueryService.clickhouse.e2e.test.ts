@@ -1,5 +1,4 @@
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
-import { spawn } from "node:child_process"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { clickHouseVersionAtLeast } from "@maple/domain/clickhouse"
 import { OrgId, RawSqlValidationError, UserId } from "@maple/domain/http"
@@ -10,65 +9,19 @@ import type { TenantContext } from "../services/AuthService"
 import { Env } from "./Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "./test-pglite"
 import { WarehouseQueryService } from "./WarehouseQueryService"
+import {
+	applyRealMigrations,
+	clickhouseE2eEnabled,
+	clickhouseExec,
+	clickhousePassword,
+	clickhouseUrl,
+	clickhouseUser,
+	uniqueDatabase,
+} from "./clickhouse-e2e-support"
 
-const enabled = process.env.CLICKHOUSE_E2E === "1"
-const clickhouseUrl = process.env.CLICKHOUSE_E2E_URL ?? "http://127.0.0.1:8123"
-const clickhouseUser = process.env.CLICKHOUSE_E2E_USER ?? "maple"
-const clickhousePassword = process.env.CLICKHOUSE_E2E_PASSWORD ?? "maple"
-const database = `maple_raw_sql_e2e_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+const enabled = clickhouseE2eEnabled
+const database = uniqueDatabase("maple_raw_sql_e2e")
 const orgId = "org_raw_sql_e2e"
-const repoRoot = new URL("../../../..", import.meta.url).pathname
-
-const clickhouseExec = async (sql: string, targetDatabase = "default"): Promise<string> => {
-	const response = await fetch(
-		`${clickhouseUrl.replace(/\/$/, "")}/?database=${encodeURIComponent(targetDatabase)}`,
-		{
-			method: "POST",
-			redirect: "manual",
-			headers: {
-				"Content-Type": "text/plain",
-				"X-ClickHouse-User": clickhouseUser,
-				"X-ClickHouse-Key": clickhousePassword,
-				"X-ClickHouse-Database": targetDatabase,
-			},
-			body: sql,
-		},
-	)
-	const body = await response.text()
-	if (!response.ok) throw new Error(`ClickHouse ${response.status}: ${body.slice(0, 500)}`)
-	return body
-}
-
-const applyRealMigrations = async (): Promise<void> => {
-	const child = spawn(
-		"bun",
-		[
-			"run",
-			"--cwd",
-			"packages/clickhouse-cli",
-			"start",
-			"apply",
-			`--url=${clickhouseUrl}`,
-			`--user=${clickhouseUser}`,
-			`--password=${clickhousePassword}`,
-			`--database=${database}`,
-		],
-		{ cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] },
-	)
-	let stdout = ""
-	let stderr = ""
-	child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-		stdout += chunk
-	})
-	child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
-		stderr += chunk
-	})
-	const exitCode = await new Promise<number>((resolve, reject) => {
-		child.once("error", reject)
-		child.once("close", (code) => resolve(code ?? 1))
-	})
-	if (exitCode !== 0) throw new Error(`Migration CLI failed (${exitCode}): ${stderr || stdout}`)
-}
 
 const assertSearchSchemaApplied = async (): Promise<void> => {
 	const migrationRevision = (
@@ -241,7 +194,7 @@ const expand = (sql: string) =>
 describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => {
 	beforeAll(async () => {
 		await clickhouseExec(`CREATE DATABASE ${database}`)
-		await applyRealMigrations()
+		await applyRealMigrations(database)
 		await assertSearchSchemaApplied()
 		await clickhouseExec(
 			`INSERT INTO traces

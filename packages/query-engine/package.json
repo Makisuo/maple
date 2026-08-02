@@ -17,7 +17,8 @@
 		"./execution": "./src/execution/index.ts",
 		"./runtime": "./src/runtime/index.ts",
 		"./observability": "./src/observability/index.ts",
-		"./local": "./src/local.ts"
+		"./local": "./src/local.ts",
+		"./sql-catalog": "./src/sql-catalog.ts"
 	},
 	"scripts": {
 		"test": "vitest run",

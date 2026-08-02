@@ -46,6 +46,7 @@ export const warehouseToMcpHandlers = (pipe: string) => {
 		"@maple/http/errors/WarehouseConfigError": fail,
 		"@maple/http/errors/WarehouseClientError": fail,
 		"@maple/http/errors/WarehouseSchemaDriftError": fail,
+		"@maple/http/errors/WarehouseMalformedQueryError": fail,
 		"@maple/http/errors/WarehouseQuotaExceededError": fail,
 		"@maple/http/errors/WarehouseValidationError": fail,
 	}

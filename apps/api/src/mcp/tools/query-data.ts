@@ -391,6 +391,8 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 							Effect.succeed(taggedErrorResult(error._tag, error.message)),
 						"@maple/http/errors/WarehouseSchemaDriftError": (error) =>
 							Effect.succeed(taggedErrorResult(error._tag, error.message)),
+						"@maple/http/errors/WarehouseMalformedQueryError": (error) =>
+							Effect.succeed(taggedErrorResult(error._tag, error.message)),
 						"@maple/http/errors/WarehouseQuotaExceededError": (error) =>
 							Effect.succeed(taggedErrorResult(error._tag, error.message)),
 						"@maple/http/errors/WarehouseValidationError": (error) =>

@@ -95,6 +95,9 @@ const makeAlertErrorMatcher = (operation: string) => {
 			"@maple/http/errors/WarehouseConfigError": warehouseFailure,
 			"@maple/http/errors/WarehouseClientError": warehouseFailure,
 			"@maple/http/errors/WarehouseSchemaDriftError": warehouseFailure,
+			// Maple generated SQL its own warehouse refused to plan: a server fault,
+			// not the caller's, so it stays a 5xx rather than becoming a 400.
+			"@maple/http/errors/WarehouseMalformedQueryError": warehouseFailure,
 			// A quota breach is the caller exceeding cost limits (429), and a
 			// validation failure is a malformed request (400) — neither is an
 			// upstream outage.

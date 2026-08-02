@@ -2,6 +2,7 @@ import {
 	WarehouseAuthError,
 	WarehouseClientError,
 	WarehouseConfigError,
+	WarehouseMalformedQueryError,
 	WarehouseQueryError,
 	WarehouseQuotaExceededError,
 	WarehouseSchemaDriftError,
@@ -21,6 +22,7 @@ export type WarehouseSqlError =
 	| WarehouseConfigError
 	| WarehouseClientError
 	| WarehouseSchemaDriftError
+	| WarehouseMalformedQueryError
 	| WarehouseQuotaExceededError
 
 type ClickHouseErrorDetails = {
@@ -130,6 +132,31 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 			/Cannot decode .* as JSON|Unexpected token .* JSON|Stream has been already consumed|Failed to parse ClickHouse response/i,
 		extra: (error) => error instanceof SyntaxError,
 		make: (base) => new WarehouseClientError(base),
+	},
+	{
+		// The analyzer refused the SQL *we* generated: mismatched `if()` arms or
+		// UNION branches (NO_COMMON_TYPE), a function applied to the wrong type,
+		// an ambiguous alias. These are Maple bugs — identical for every org, on
+		// every cluster, and unaffected by retry or by schema apply — so they get
+		// their own tag to be alertable and to keep the UI from blaming the
+		// customer's database. Ordered before the schema-drift rule, which is the
+		// same shape of complaint but a customer-side cause.
+		//
+		// Deliberately narrow. `SYNTAX_ERROR`, `AMBIGUOUS_COLUMN_NAME` and
+		// `UNKNOWN_FUNCTION` are omitted because users write raw SQL too (the
+		// raw_sql widget, the `run_sql` MCP tool) and a typo there is *their*
+		// error — telling them "this is a bug in Maple, we have been alerted"
+		// would be a lie. What is left is the type-unification family that only
+		// a query builder produces.
+		types: new Set([
+			"NO_COMMON_TYPE",
+			"ILLEGAL_TYPE_OF_ARGUMENT",
+			"ILLEGAL_AGGREGATION",
+			"NUMBER_OF_ARGUMENTS_DOESNT_MATCH",
+			"TYPE_MISMATCH",
+		]),
+		pattern: /There is no supertype|Illegal type .* of argument/i,
+		make: (base) => new WarehouseMalformedQueryError(base),
 	},
 	{
 		// CH error types raised when a column or function reference doesn't exist in
