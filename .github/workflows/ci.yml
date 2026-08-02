@@ -56,13 +56,29 @@ jobs:
                         - 'scripts/**'
                         - '!apps/ingest/**'
                         - '!apps/slack-agent/**'
+                      # The workspace-dependency closure of apps/cli + apps/local-ui
+                      # (plus what alchemy:build-deps builds): cli → effect-sdk,
+                      # domain, query-engine; local-ui → infra, query-engine, ui;
+                      # domain/query-engine → clickhouse-builder; effect-sdk /
+                      # @maple-dev/browser → browser-session. The old blanket
+                      # `lib/**` + `packages/**` ran this job and all seven archive
+                      # legs for changes to packages the bundle never links (db,
+                      # auth, email, …). Update this list when those package.json
+                      # workspace deps change.
                       cli:
                         - *base
                         - 'apps/cli/**'
                         - 'apps/local-ui/**'
-                        - 'lib/**'
-                        - 'packages/**'
+                        - 'lib/effect-sdk/**'
+                        - 'lib/clickhouse-builder/**'
+                        - 'packages/domain/**'
+                        - 'packages/query-engine/**'
+                        - 'packages/infra/**'
+                        - 'packages/ui/**'
+                        - 'packages/browser/**'
+                        - 'packages/browser-session/**'
                         - 'scripts/build-local-binary.sh'
+                        - 'scripts/gen-ui-embed.ts'
                       web:
                         - *base
                         - 'apps/web/**'
@@ -327,10 +343,39 @@ jobs:
 
             - uses: ./.github/actions/bun-install
 
+            # Same rolling turbo cache as the typescript job: this is the only
+            # job that runs `turbo build` (via alchemy:build-deps inside
+            # build-local-binary.sh) with no cache restore, so those packages
+            # compiled cold on every run.
+            - name: Restore turbo cache
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: .turbo/cache
+                  key: turbo-v1-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+                  restore-keys: |
+                      turbo-v1-${{ runner.os }}-${{ github.job }}-
+                      turbo-v1-${{ runner.os }}-
+
             - name: Build native local bundle
+              timeout-minutes: 5
               run: scripts/build-local-binary.sh
 
+            # Temporary diagnosis for the migration-probe stall: `maple schema
+            # migrate` is the only code path that reconnects chDB inside one
+            # process, and this canary exercises exactly that pattern in
+            # isolation. Non-blocking so the instrumented migration probe below
+            # still produces its own evidence; read the canary's last printed
+            # line as the hang site. Remove (or keep as a libchdb-upgrade
+            # tripwire) once the migration probe is green.
+            - name: Reconnect canary (in-process chDB reopen diagnosis)
+              timeout-minutes: 5
+              continue-on-error: true
+              env:
+                  MAPLE_LIBCHDB: ${{ github.workspace }}/dist/libchdb.so
+              run: timeout --kill-after=20 240 bun apps/cli/test/native-reconnect-probe.ts
+
             - name: Run repeated checkpoint restore and fresh-process reopen smoke
+              timeout-minutes: 8
               env:
                   KEEP_ROOT: "1"
                   TMPDIR: ${{ runner.temp }}/maple-native-checkpoint
@@ -339,6 +384,7 @@ jobs:
                   apps/cli/test/native-checkpoint-smoke.sh "$GITHUB_WORKSPACE/dist"
 
             - name: Run native local-store migration and reopen probe
+              timeout-minutes: 12
               env:
                   KEEP_ROOT: "1"
                   TMPDIR: ${{ runner.temp }}/maple-native-migration
@@ -351,7 +397,12 @@ jobs:
               uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
               with:
                   name: native-checkpoint-failure-${{ github.run_id }}
-                  path: ${{ runner.temp }}/maple-native-checkpoint
+                  # Both probes' roots: the migration probe used to fail without
+                  # leaving any evidence because only the checkpoint dir was
+                  # collected.
+                  path: |
+                      ${{ runner.temp }}/maple-native-checkpoint
+                      ${{ runner.temp }}/maple-native-migration
                   if-no-files-found: ignore
 
     local-archive-native:

@@ -40,8 +40,29 @@ trap cleanup EXIT
 
 fail() {
 	echo "FAIL: $*" >&2
+	if [[ -f "$ROOT/migrate.out" ]]; then tail -80 "$ROOT/migrate.out" >&2 || true; fi
 	if [[ -f "$ROOT/server.log" ]]; then tail -80 "$ROOT/server.log" >&2 || true; fi
 	exit 1
+}
+
+# Every phase announces itself and runs under a wall-clock bound (when
+# `timeout` exists — Linux CI; macOS dev boxes run unbounded). Before this the
+# probe printed NOTHING until the final PASS, so a hung maple invocation ate
+# the job's whole 20-minute budget with an empty log and no evidence.
+step() { echo "probe: $*"; }
+
+bounded() {
+	local secs="$1" label="$2"
+	shift 2
+	if command -v timeout >/dev/null 2>&1; then
+		timeout --kill-after=20 "$secs" "$@" || {
+			local rc=$?
+			[[ "$rc" == 124 || "$rc" == 137 ]] && fail "$label did not finish within ${secs}s"
+			return "$rc"
+		}
+	else
+		"$@"
+	fi
 }
 
 query() {
@@ -70,7 +91,16 @@ start_server() {
 }
 
 stop_server() {
-	MAPLE_LIBCHDB="$LIBCHDB" "$MAPLE" stop --data-dir "$DATA" >/dev/null 2>&1 || true
+	bounded 60 "maple stop" env MAPLE_LIBCHDB="$LIBCHDB" "$MAPLE" stop --data-dir "$DATA" >/dev/null 2>&1 || true
+	# Bounded wait: a server that ignores the stop must not eat the job budget.
+	for _ in $(seq 1 300); do
+		kill -0 "$SERVER_PID" 2>/dev/null || break
+		sleep 0.1
+	done
+	if kill -0 "$SERVER_PID" 2>/dev/null; then
+		kill -9 "$SERVER_PID" 2>/dev/null || true
+		fail "native Maple server did not exit within 30s of maple stop"
+	fi
 	wait "$SERVER_PID" 2>/dev/null || true
 	SERVER_PID=""
 }
@@ -84,17 +114,22 @@ printf '%s\n' \
 	'</clickhouse>' >"$CONFIG"
 chmod 600 "$CONFIG"
 
-MAPLE_LIBCHDB="$LIBCHDB" bun "$REPO_ROOT/apps/cli/test/native-local-store-migration-fixture.ts" "$DATA" "$CONFIG"
+step "creating legacy v0 source store"
+bounded 300 "legacy source fixture" \
+	env MAPLE_LIBCHDB="$LIBCHDB" bun "$REPO_ROOT/apps/cli/test/native-local-store-migration-fixture.ts" "$DATA" "$CONFIG"
 
 # Replace the newly-created active v2 marker with the historical v1 marker.
 # The physical source was created by native chDB; the marker is the only
 # compatibility evidence the v0 resolver is allowed to use.
-CHDB_VERSION="$(MAPLE_LIBCHDB="$LIBCHDB" "$MAPLE" --version 2>/dev/null | sed -n 's/.*chdb \([^ ]*\).*/\1/p')"
+step "installing legacy marker"
+CHDB_VERSION="$(bounded 60 "maple --version" env MAPLE_LIBCHDB="$LIBCHDB" "$MAPLE" --version 2>/dev/null | sed -n 's/.*chdb \([^ ]*\).*/\1/p')"
 [[ -n "$CHDB_VERSION" ]] || CHDB_VERSION="v26.1.0"
 printf '%s\n' "{\"chdb\":\"$CHDB_VERSION\",\"maple\":\"native-probe\",\"createdAt\":\"unknown\",\"schema\":\"428701854f9fd30e\"}" >"$ROOT/maple-store-version.json"
 chmod 600 "$ROOT/maple-store-version.json"
 
-MAPLE_LIBCHDB="$LIBCHDB" "$MAPLE" schema migrate --data-dir "$DATA" --yes >"$ROOT/migrate.out" 2>&1 || {
+step "running maple schema migrate"
+bounded 600 "maple schema migrate" \
+	env MAPLE_LIBCHDB="$LIBCHDB" "$MAPLE" schema migrate --data-dir "$DATA" --yes >"$ROOT/migrate.out" 2>&1 || {
 	cat "$ROOT/migrate.out" >&2
 	fail "native schema migration failed"
 }
@@ -103,7 +138,9 @@ grep -q "local store migrated" "$ROOT/migrate.out" || fail "native migration did
 jq -e '.formatVersion == 2 and .activation == "active" and .schemaVersion == 1 and .schema == "718581a523cbf01c"' \
 	"$ROOT/maple-store-version.json" >/dev/null || fail "native migration wrote the wrong active identity"
 
+step "reopening promoted store in a fresh server"
 start_server
+step "verifying migrated tables"
 for table in logs traces metrics_sum metrics_gauge metrics_histogram metrics_exponential_histogram; do
 	count="$(query "SELECT count() AS count FROM $table WHERE ServiceName = 'native-migration'" | jq -r '.[0].count | tonumber')"
 	expected="1"
@@ -116,6 +153,7 @@ namespace_count="$(query "SELECT count() AS count FROM service_overview_spans WH
 [[ "$namespace_count" == "1" ]] || fail "service namespace aggregate after native migration: expected 1, got $namespace_count"
 db_edge_count="$(query "SELECT count() AS count FROM service_map_db_edges_hourly WHERE OrgId = 'native-migration' AND ServiceName = 'native-migration' AND DbSystem = 'postgresql' AND DbNamespace = 'orders'" | jq -r '.[0].count | tonumber')"
 [[ "$db_edge_count" == "1" ]] || fail "database aggregate after native migration: expected 1, got $db_edge_count"
+step "stopping server and checking rollback retention"
 stop_server
 
 rollback="$(sed -n 's/^.*rollback *//p' "$ROOT/migrate.out" | tail -1)"
