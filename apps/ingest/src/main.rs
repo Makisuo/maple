@@ -4393,6 +4393,49 @@ impl AttributeMappingResolver {
     }
 }
 
+/// The schema revision this binary needs an org's ClickHouse to be at, as a
+/// number. Non-numeric (legacy hash) revisions parse to 0, which is older than
+/// every real migration — the same "not ready" answer they get today.
+fn required_schema_revision() -> i32 {
+    CLICKHOUSE_SCHEMA_VERSION.parse().unwrap_or(0)
+}
+
+/// Is an org's stamped schema revision new enough for this binary to write to?
+///
+/// Deliberately `>=` rather than `==`. Migrations only ever add columns or widen
+/// types, and every INSERT names its columns explicitly, so an older binary
+/// writing into a newer schema is safe — the columns it doesn't know about take
+/// their DEFAULT. Equality instead made *any* skew a routing change: between
+/// stamping an org at the new revision and rolling out the matching binary, the
+/// org fell back to Tinybird and its own ClickHouse silently missed that window.
+/// With `>=` the org keeps writing to its own cluster throughout the rollout.
+///
+/// The comparison is numeric on purpose: these are stored as text, and as text
+/// "12" sorts before "9", so a string `>=` would strand every org.
+fn schema_revision_is_compatible(stamped: &str) -> bool {
+    schema_revision_at_least(stamped, required_schema_revision())
+}
+
+/// The comparison itself, with `needed` passed in so it is testable without
+/// depending on whatever revision this binary happens to be pinned to.
+fn schema_revision_at_least(stamped: &str, needed: i32) -> bool {
+    stamped.parse::<i32>().unwrap_or(-1) >= needed
+}
+
+/// SQL predicate matching `schema_revision_is_compatible`, for the routing
+/// queries. Kept next to it so the two can never drift — if they disagree,
+/// routing sends frames down the ClickHouse path that the target resolver then
+/// refuses, and the export worker drops the batch.
+///
+/// `CASE` rather than `regex AND cast`: legacy revisions were content hashes,
+/// and `'2967fa9b'::int` raises rather than returning false. Postgres does not
+/// promise to evaluate `AND` left-to-right — it may reorder on cost, and a
+/// regex match costs more than a cast — so the guard has to be `CASE`, which
+/// *is* defined to short-circuit. Getting this wrong fails the whole query,
+/// which would take down every ingest-key lookup, not just one org's routing.
+const SCHEMA_REVISION_COMPATIBLE_SQL: &str =
+    "(CASE WHEN s.schema_version ~ '^[0-9]+$' THEN s.schema_version::int ELSE -1 END >= $1)";
+
 #[async_trait::async_trait]
 impl ClickHouseTargetProvider for ClickHouseTargetResolver {
     async fn resolve_clickhouse_target(
@@ -4406,7 +4449,7 @@ impl ClickHouseTargetProvider for ClickHouseTargetResolver {
         let Some(row) = self.store.fetch_clickhouse_target(org_id).await? else {
             return Ok(None);
         };
-        if row.schema_version != CLICKHOUSE_SCHEMA_VERSION {
+        if !schema_revision_is_compatible(&row.schema_version) {
             return Ok(None);
         }
 
@@ -4545,11 +4588,11 @@ impl KeyStore for PostgresKeyStore {
     ) -> Result<Option<KeyRow>, String> {
         // hash_column is a compile-time constant chosen by the resolver, never
         // user input — safe to interpolate.
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let sql = format!(
             "SELECT k.org_id, \
                     COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                    COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
+                    COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
                     COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
                     COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
              FROM org_ingest_keys k \
@@ -4580,21 +4623,21 @@ impl KeyStore for PostgresKeyStore {
         connector_id: &str,
         secret_hash: &str,
     ) -> Result<Option<ConnectorRow>, String> {
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let client = self.client().await?;
+        let sql = format!(
+            "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
+                    COALESCE(s.sync_status = 'connected', false) AS self_managed, \
+                    COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
+                    COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
+                    COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
+             FROM cloudflare_logpush_connectors c \
+             LEFT JOIN org_clickhouse_settings s ON s.org_id = c.org_id \
+             LEFT JOIN org_spend_limits l ON l.org_id = c.org_id \
+             WHERE c.id = $2 AND c.secret_hash = $3 AND c.enabled = true LIMIT 1"
+        );
         let rows = client
-            .query(
-                "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
-                        COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                        COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
-                        COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
-                        COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{}')::text[] AS paused_features \
-                 FROM cloudflare_logpush_connectors c \
-                 LEFT JOIN org_clickhouse_settings s ON s.org_id = c.org_id \
-                 LEFT JOIN org_spend_limits l ON l.org_id = c.org_id \
-                 WHERE c.id = $2 AND c.secret_hash = $3 AND c.enabled = true LIMIT 1",
-                &[&revision, &connector_id, &secret_hash],
-            )
+            .query(&sql, &[&revision, &connector_id, &secret_hash])
             .instrument(postgres_client_span("fetch_connector"))
             .await
             .map_err(|error| format!("postgres fetch_connector failed: {error}"))?;
@@ -4667,14 +4710,16 @@ impl KeyStore for PostgresKeyStore {
         &self,
         org_id: &str,
     ) -> Result<Option<ClickHouseTargetRow>, String> {
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let client = self.client().await?;
         let rows = client
             .query(
                 "SELECT ch_url, ch_user, ch_password_ciphertext, ch_password_iv, ch_password_tag, \
                         ch_database, schema_version \
                  FROM org_clickhouse_settings \
-                 WHERE org_id = $1 AND sync_status = 'connected' AND schema_version = $2 LIMIT 1",
+                 WHERE org_id = $1 AND sync_status = 'connected' \
+                   AND CASE WHEN schema_version ~ '^[0-9]+$' \
+                            THEN schema_version::int ELSE -1 END >= $2 LIMIT 1",
                 &[&org_id, &revision],
             )
             .instrument(postgres_client_span("fetch_clickhouse_target"))
@@ -4695,7 +4740,7 @@ impl KeyStore for PostgresKeyStore {
     }
 
     async fn fetch_org_routing(&self, org_id: &str) -> Result<Option<OrgRouting>, String> {
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let client = self.client().await?;
         let rows = client
             .query(
@@ -4703,13 +4748,15 @@ impl KeyStore for PostgresKeyStore {
                 // org_clickhouse_settings: an org can have spend limits and no
                 // BYO-ClickHouse config, and the old FROM would return no row at
                 // all for it — reading as "never paused".
-                "SELECT COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                        COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
-                        COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
-                        COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{}')::text[] AS paused_features \
-                 FROM (SELECT $2::text AS org_id) o \
-                 LEFT JOIN org_clickhouse_settings s ON s.org_id = o.org_id \
-                 LEFT JOIN org_spend_limits l ON l.org_id = o.org_id LIMIT 1",
+                &format!(
+                    "SELECT COALESCE(s.sync_status = 'connected', false) AS self_managed, \
+                            COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
+                            COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
+                            COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
+                     FROM (SELECT $2::text AS org_id) o \
+                     LEFT JOIN org_clickhouse_settings s ON s.org_id = o.org_id \
+                     LEFT JOIN org_spend_limits l ON l.org_id = o.org_id LIMIT 1"
+                ),
                 &[&revision, &org_id],
             )
             .instrument(postgres_client_span("fetch_org_routing"))
@@ -6737,6 +6784,36 @@ mod tests {
         )
         .expect("fixture decrypts");
         assert_eq!(plaintext, "ch-secret-123");
+    }
+
+    #[test]
+    fn schema_revision_accepts_newer_schemas_and_rejects_older_ones() {
+        let needed = required_schema_revision();
+        assert!(needed > 0, "generated SCHEMA_VERSION should be numeric");
+
+        // Exactly current, and ahead of this binary: both writable. The second
+        // is the rollout window — an org stamped at the new revision before the
+        // matching binary ships keeps writing to its own ClickHouse instead of
+        // silently falling back to Tinybird.
+        assert!(schema_revision_is_compatible(&needed.to_string()));
+        assert!(schema_revision_is_compatible(&(needed + 1).to_string()));
+
+        // Behind this binary: the columns genuinely are not there yet.
+        assert!(!schema_revision_is_compatible(&(needed - 1).to_string()));
+
+        // Legacy content-hash revisions are not comparable — treated as older.
+        assert!(!schema_revision_is_compatible("old-revision"));
+        assert!(!schema_revision_is_compatible(""));
+    }
+
+    #[test]
+    fn schema_revision_compares_numerically_not_lexicographically() {
+        // Revisions are stored as text, where "12" sorts *before* "9". A string
+        // comparison would call an org at revision 12 "behind" revision 9 and
+        // strand every org the moment the count reached double digits.
+        assert!(schema_revision_at_least("12", 9), "12 is ahead of 9");
+        assert!(!schema_revision_at_least("9", 12), "9 is behind 12");
+        assert!(schema_revision_at_least("100", 99), "100 is ahead of 99");
     }
 
     #[tokio::test]
