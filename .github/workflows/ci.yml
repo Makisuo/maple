@@ -75,6 +75,13 @@ jobs:
                         - 'apps/api/src/lib/**'
                         - 'packages/db/**'
                         - 'scripts/*clickhouse*'
+                        # The SQL catalog sweep lives in this job, so a change to a
+                        # query definition or to the warehouse schema has to trigger
+                        # it. Without these two the PR that broke every main chart
+                        # would still skip the only job that could have caught it.
+                        - 'packages/query-engine/**'
+                        - 'packages/domain/src/clickhouse/**'
+                        - 'packages/domain/src/tinybird/**'
                         # The migrations this job replays, and the datasource
                         # definitions the generated DDL is derived from. Without
                         # these a PR that adds a migration only triggers the job
@@ -227,7 +234,7 @@ jobs:
     # actual work, so the second version was ~88% overhead. Pinned to the same tag as
     # docker-compose.development.yml so local dev and CI verify the same server.
     clickhouse-schema-e2e:
-        name: ClickHouse schema E2E
+        name: ClickHouse schema + SQL catalog E2E
         needs: changes
         if: ${{ needs.changes.outputs.clickhouse == 'true' }}
         runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -274,6 +281,19 @@ jobs:
               run: >-
                   bun run --filter=@maple/api test --
                   src/lib/WarehouseQueryService.clickhouse.e2e.test.ts
+
+            # Type-checks every SQL shape the product can emit against the real
+            # analyzer. ~80 shapes, ~2s — the unit tests only compare SQL text,
+            # which is how a NO_COMMON_TYPE reached production with CI green.
+            - name: Analyze the SQL catalog
+              env:
+                  CLICKHOUSE_E2E: "1"
+                  CLICKHOUSE_E2E_URL: http://127.0.0.1:8123
+                  CLICKHOUSE_E2E_USER: maple
+                  CLICKHOUSE_E2E_PASSWORD: maple
+              run: >-
+                  bun run --filter=@maple/api test --
+                  src/lib/sql-catalog.clickhouse.e2e.test.ts
 
     knip:
         name: Knip

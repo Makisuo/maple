@@ -183,6 +183,15 @@ export const formatBackendError = (input: unknown): FormattedError => {
 					description: `${message ?? "A column Maple expects is missing from the cluster."} Run schema apply from your ClickHouse settings.`,
 				}
 			}
+			case "@maple/http/errors/WarehouseMalformedQueryError": {
+				// Maple generated SQL the database refused to plan. Nothing the user
+				// can do — do not send them to their database settings.
+				return {
+					title: "This chart hit a bug in Maple",
+					description:
+						"Maple built a query its own database rejected. This is our fault, not a problem with your data or your cluster — we have been alerted.",
+				}
+			}
 			case "@maple/http/errors/WarehouseValidationError": {
 				return {
 					title: "Invalid query",

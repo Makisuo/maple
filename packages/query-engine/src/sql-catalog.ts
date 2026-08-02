@@ -26,12 +26,23 @@
 // executed. `assertRouteCoverage` below fails when a route is never exercised.
 // ---------------------------------------------------------------------------
 
+import { Effect } from "effect"
 import type { CompiledQuery } from "@maple-dev/clickhouse-builder"
-import { warehouseQueries, type WarehouseQueryName } from "@maple/domain"
+import {
+	DeploymentEnvironment,
+	MetricName,
+	OrgId,
+	QueryEngineExecuteRequest,
+	ServiceName,
+	warehouseQueries,
+	type QuerySpec,
+	type WarehouseQueryName,
+} from "@maple/domain"
 import { baselineWarehouseCapabilities, type WarehouseCapabilities } from "./capabilities"
 import * as CH from "./ch"
 import { compilePipeQuery } from "./ch/pipe-dispatch"
 import { fingerprintSql } from "./execution/fingerprint"
+import { makeQueryEngineExecute, type QueryEngineWarehouse, type QueryTenant } from "./runtime"
 
 // ---------------------------------------------------------------------------
 // Fixture inputs
@@ -42,6 +53,10 @@ const ORG_ID = "org_sql_catalog"
  *  edge-hour + rollup-interior union shapes both produce non-degenerate SQL. */
 const START_TIME = "2026-01-01 10:30:00"
 const END_TIME = "2026-01-03 14:15:00"
+/** Narrow window for fine-grained buckets — the lowering rejects a timeseries
+ *  whose bucket count is unreasonable, so a 60s fixture needs hours, not days. */
+const SHORT_START_TIME = "2026-01-03 10:30:00"
+const SHORT_END_TIME = "2026-01-03 14:15:00"
 
 /**
  * Capability sets that change generated SQL. `attributeIndexMode` and
@@ -85,7 +100,7 @@ export interface PipeFixture {
 }
 
 const TRACE_ID = "0af7651916cd43dd8448eb211c80319c"
-const FINGERPRINT = "a1b2c3d4e5f60718"
+const FINGERPRINT = "11640393269246331608"
 
 /**
  * At least one fixture per name in `warehouseQueries` — enforced by
@@ -118,7 +133,11 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 		params: { service: "ap", service_match_mode: "contains", span_name_match_mode: "contains" },
 		allCapabilities: true,
 	},
-	{ pipe: "span_hierarchy", label: "windowed", params: { trace_id: TRACE_ID, span_id: "00f067aa0ba902b7" } },
+	{
+		pipe: "span_hierarchy",
+		label: "windowed",
+		params: { trace_id: TRACE_ID, span_id: "00f067aa0ba902b7" },
+	},
 	{
 		pipe: "span_hierarchy",
 		label: "unwindowed",
@@ -144,25 +163,19 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "top_operations", label: "default", params: { service_name: "api", metric: "p95_duration" } },
 
 	// ----- Custom charts: the routed timeseries. -----
-	// The annual route is the one that shipped `NO_COMMON_TYPE`. It needs
-	// root_only + hourly buckets + no group-by/filters, and the negative fixtures
-	// below hold the other two branches of the same function.
+	// NB: the pipe adapter never forwards `bucket_seconds` into the query opts,
+	// so none of these can reach the annual service-overview rollup — see
+	// `pipePathReachesAnnualRoute`. The annual route lives in the QuerySpec
+	// fixtures below.
 	{
 		pipe: "custom_traces_timeseries",
-		label: "annual-service-overview",
-		route: "traces_timeseries:annual",
+		label: "root-only",
 		params: { root_only: "1", bucket_seconds: 3600 },
 	},
+	{ pipe: "custom_traces_timeseries", label: "ungrouped", params: { bucket_seconds: 3600 } },
 	{
 		pipe: "custom_traces_timeseries",
-		label: "aggregates-mv",
-		route: "traces_timeseries:aggregates-mv",
-		params: { bucket_seconds: 3600 },
-	},
-	{
-		pipe: "custom_traces_timeseries",
-		label: "raw-traces",
-		route: "traces_timeseries:raw",
+		label: "grouped-by-service",
 		params: { bucket_seconds: 60, group_by_service: "1" },
 		allCapabilities: true,
 	},
@@ -174,8 +187,7 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	},
 	{
 		pipe: "custom_traces_timeseries",
-		label: "annual-blocked-by-filter",
-		route: "traces_timeseries:raw",
+		label: "errors-only",
 		params: { root_only: "1", bucket_seconds: 3600, errors_only: "1" },
 	},
 	{ pipe: "custom_traces_breakdown", label: "by-service", params: { group_by_service: "1" } },
@@ -302,7 +314,7 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 export interface CatalogEntry {
 	/** Stable identifier, e.g. `pipe:list_traces:filtered:bloom`. */
 	readonly id: string
-	readonly source: "pipe"
+	readonly source: "pipe" | "query-spec"
 	readonly name: string
 	readonly label: string
 	readonly capabilityLabel: string
@@ -311,7 +323,9 @@ export interface CatalogEntry {
 	/** Normalized FNV-1a over literal-stripped SQL; equal fingerprints are one
 	 *  shape, so the sweep DESCRIBEs each shape once. */
 	readonly fingerprint: string
-	readonly compiled: CompiledQuery<unknown>
+	/** Present when the SQL came from a compiled DSL query. Absent for raw-SQL
+	 *  paths. `decodeRows` is what the 64-bit-int assertion exercises. */
+	readonly compiled?: CompiledQuery<unknown>
 }
 
 /**
@@ -355,10 +369,445 @@ export function collectPipeCatalog(): ReadonlyArray<CatalogEntry> {
 	return entries
 }
 
+// ---------------------------------------------------------------------------
+// QuerySpec collection (dashboards, overview charts, the metrics explorer)
+//
+// The pipe registry is only half the product. Dashboards and the overview go
+// through `QueryEngineService.execute`, and the two adapters do NOT agree:
+// `pipeParamsToTracesTimeseriesOpts` never forwards `bucketSeconds` into the
+// query opts, so `canUseAnnualServiceOverview` is unreachable from a pipe. The
+// annual route — the one that shipped `NO_COMMON_TYPE` — exists ONLY on this
+// path. A sweep built on pipes alone would have missed the outage entirely.
+// ---------------------------------------------------------------------------
+
+export interface QuerySpecFixture {
+	readonly label: string
+	readonly route?: string
+	readonly query: QuerySpec
+	readonly startTime?: string
+	readonly endTime?: string
+	readonly allCapabilities?: boolean
+}
+
+// Branded via their real constructors rather than cast — the fixtures are held
+// to the same contract as the callers they stand in for.
+const service = (name: string) => ServiceName.make(name)
+const environment = (name: string) => DeploymentEnvironment.make(name)
+const metric = (name: string) => MetricName.make(name)
+
+const TRACES_FILTERS = { serviceName: service("api"), environments: [environment("production")] } as const
+const METRICS_FILTERS = {
+	metricName: metric("http.server.request.duration"),
+	metricType: "histogram",
+	serviceName: service("api"),
+} as const
+
+export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
+	// --- traces timeseries: every branch of the routed function ---
+	{
+		label: "traces-timeseries-annual",
+		route: "traces_timeseries:annual",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 3600,
+			filters: { ...TRACES_FILTERS, rootSpansOnly: true },
+		},
+	},
+	{
+		label: "traces-timeseries-annual-daily-buckets",
+		route: "traces_timeseries:annual",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 86400,
+			filters: { rootSpansOnly: true },
+		},
+		startTime: "2025-11-01 00:00:00",
+		endTime: "2025-11-25 00:00:00",
+	},
+	{
+		label: "traces-timeseries-aggregates-mv",
+		route: "traces_timeseries:aggregates-mv",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			bucketSeconds: 3600,
+			filters: TRACES_FILTERS,
+		},
+	},
+	{
+		label: "traces-timeseries-raw",
+		route: "traces_timeseries:raw",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "p95_duration",
+			bucketSeconds: 60,
+			filters: TRACES_FILTERS,
+		},
+		startTime: SHORT_START_TIME,
+		endTime: SHORT_END_TIME,
+		allCapabilities: true,
+	},
+	{
+		label: "traces-timeseries-all-metrics-grouped",
+		route: "traces_timeseries:raw",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			allMetrics: true,
+			bucketSeconds: 3600,
+			groupBy: ["service"],
+			filters: TRACES_FILTERS,
+		},
+	},
+	{
+		label: "traces-timeseries-apdex",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "apdex",
+			apdexThresholdMs: 250,
+			bucketSeconds: 300,
+			filters: TRACES_FILTERS,
+		},
+	},
+	{
+		label: "traces-timeseries-series-cap",
+		route: "traces_timeseries:series-cap",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "count",
+			bucketSeconds: 300,
+			groupBy: ["span_name"],
+			seriesLimit: 10,
+			filters: TRACES_FILTERS,
+		},
+	},
+	{
+		label: "traces-timeseries-attribute-filtered",
+		query: {
+			kind: "timeseries",
+			source: "traces",
+			metric: "error_rate",
+			bucketSeconds: 300,
+			filters: {
+				...TRACES_FILTERS,
+				attributeFilters: [{ key: "http.method", value: "GET", mode: "equals" }],
+			},
+		},
+		allCapabilities: true,
+	},
+
+	// --- the other sources ---
+	{
+		label: "logs-timeseries",
+		query: {
+			kind: "timeseries",
+			source: "logs",
+			metric: "count",
+			bucketSeconds: 3600,
+			filters: { serviceName: service("api") },
+		},
+		allCapabilities: true,
+	},
+	{
+		label: "logs-timeseries-grouped",
+		query: {
+			kind: "timeseries",
+			source: "logs",
+			metric: "count",
+			bucketSeconds: 60,
+			groupBy: ["severity"],
+			seriesLimit: 5,
+		},
+		startTime: SHORT_START_TIME,
+		endTime: SHORT_END_TIME,
+	},
+	{
+		label: "metrics-timeseries",
+		query: {
+			kind: "timeseries",
+			source: "metrics",
+			metric: "avg",
+			bucketSeconds: 3600,
+			filters: METRICS_FILTERS,
+		},
+	},
+	{
+		label: "metrics-timeseries-rate",
+		query: {
+			kind: "timeseries",
+			source: "metrics",
+			metric: "rate",
+			bucketSeconds: 3600,
+			filters: { metricName: metric("http.server.requests"), metricType: "sum" },
+		},
+	},
+	{
+		label: "metrics-timeseries-grouped-by-attribute",
+		query: {
+			kind: "timeseries",
+			source: "metrics",
+			metric: "sum",
+			bucketSeconds: 300,
+			groupBy: ["attribute"],
+			filters: { ...METRICS_FILTERS, groupByAttributeKey: "http.route" },
+		},
+	},
+	{
+		label: "metrics-timeseries-grouped-by-resource",
+		query: {
+			kind: "timeseries",
+			source: "metrics",
+			metric: "avg",
+			bucketSeconds: 300,
+			groupBy: ["resource_attribute"],
+			filters: { ...METRICS_FILTERS, groupByResourceAttributeKey: "host.name" },
+		},
+	},
+
+	{
+		label: "traces-breakdown",
+		query: {
+			kind: "breakdown",
+			source: "traces",
+			metric: "count",
+			groupBy: "service",
+			filters: TRACES_FILTERS,
+		},
+	},
+	{
+		label: "traces-breakdown-by-attribute",
+		query: {
+			kind: "breakdown",
+			source: "traces",
+			metric: "p99_duration",
+			groupBy: "attribute",
+			filters: { ...TRACES_FILTERS, groupByAttributeKeys: ["http.route"] },
+		},
+		allCapabilities: true,
+	},
+	{
+		label: "logs-breakdown",
+		query: {
+			kind: "breakdown",
+			source: "logs",
+			metric: "count",
+			groupBy: "severity",
+			filters: { serviceName: service("api") },
+		},
+	},
+	{
+		label: "metrics-breakdown",
+		query: {
+			kind: "breakdown",
+			source: "metrics",
+			metric: "avg",
+			groupBy: "service",
+			filters: METRICS_FILTERS,
+		},
+	},
+	{
+		label: "metrics-sparklines",
+		query: {
+			kind: "sparklines",
+			source: "metrics",
+			metricType: "sum",
+			metricNames: [metric("http.server.requests"), metric("rpc.server.duration")],
+			bucketSeconds: 3600,
+		},
+	},
+
+	{
+		label: "traces-list",
+		query: { kind: "list", source: "traces", limit: 50, filters: TRACES_FILTERS },
+		allCapabilities: true,
+	},
+	// NB: `{kind: "list", source: "logs"}` is a declared QuerySpec variant that
+	// `QueryEngineService.execute` does not implement — log lists only reach the
+	// warehouse through the `list_logs` pipe, covered above.
+	{
+		label: "logs-count",
+		query: { kind: "count", source: "logs", filters: { serviceName: service("api") } },
+		allCapabilities: true,
+	},
+	{ label: "traces-stats", query: { kind: "stats", source: "traces", filters: TRACES_FILTERS } },
+
+	{
+		label: "traces-facets",
+		query: { kind: "facets", source: "traces", filters: TRACES_FILTERS },
+		allCapabilities: true,
+	},
+	{
+		label: "traces-facets-single-dimension",
+		route: "facets:single-dimension",
+		query: { kind: "facets", source: "traces", facet: "spanName", filters: TRACES_FILTERS },
+	},
+	{
+		label: "logs-facets",
+		query: { kind: "facets", source: "logs", filters: { serviceName: service("api") } },
+	},
+	{
+		label: "logs-facets-single-dimension",
+		route: "facets:single-dimension",
+		query: { kind: "facets", source: "logs", facet: "severity" },
+	},
+	{ label: "errors-facets", query: { kind: "facets", source: "errors" } },
+	{ label: "services-facets", query: { kind: "facets", source: "services" } },
+
+	{
+		label: "attribute-keys-span",
+		query: { kind: "attributeKeys", source: "traces", scope: "span" },
+		allCapabilities: true,
+	},
+	{
+		label: "attribute-keys-resource",
+		query: { kind: "attributeKeys", source: "traces", scope: "resource" },
+	},
+	{ label: "attribute-keys-logs", query: { kind: "attributeKeys", source: "logs" } },
+	{ label: "attribute-keys-metrics", query: { kind: "attributeKeys", source: "metrics" } },
+	{
+		label: "attribute-keys-metrics-scoped",
+		route: "attribute_keys:metric-scoped",
+		query: {
+			kind: "attributeKeys",
+			source: "metrics",
+			metricName: metric("http.server.requests"),
+			metricType: "sum",
+		},
+	},
+	{
+		label: "attribute-values-span",
+		query: { kind: "attributeValues", source: "traces", scope: "span", attributeKey: "http.method" },
+		allCapabilities: true,
+	},
+	{
+		label: "attribute-values-log",
+		query: { kind: "attributeValues", source: "logs", scope: "log", attributeKey: "log.level" },
+	},
+	{
+		label: "attribute-values-metrics",
+		query: { kind: "attributeValues", source: "metrics", scope: "metric", attributeKey: "http.route" },
+	},
+	{
+		label: "attribute-values-metrics-scoped",
+		route: "attribute_values:metric-scoped",
+		query: {
+			kind: "attributeValues",
+			source: "metrics",
+			scope: "metric",
+			attributeKey: "http.route",
+			metricName: metric("http.server.requests"),
+			metricType: "sum",
+		},
+	},
+]
+
+interface CapturedSql {
+	readonly sql: string
+	readonly compiled?: CompiledQuery<unknown>
+}
+
+/**
+ * A `QueryEngineWarehouse` that records SQL and returns no rows. Capture happens
+ * before result shaping, so a fixture whose downstream shaping fails on an empty
+ * result still contributes its SQL — the SQL is the artifact under test.
+ */
+function makeCapturingWarehouse(capabilities: WarehouseCapabilities): {
+	readonly warehouse: QueryEngineWarehouse<QueryTenant>
+	readonly captured: ReadonlyArray<CapturedSql>
+} {
+	const captured: Array<CapturedSql> = []
+	const empty = Effect.succeed([] as ReadonlyArray<never>)
+	const warehouse: QueryEngineWarehouse<QueryTenant> = {
+		sqlQuery: (_tenant, sql) => {
+			captured.push({ sql })
+			return empty
+		},
+		rawSqlQuery: (_tenant, sql) => {
+			captured.push({ sql })
+			return empty
+		},
+		compiledQuery: (_tenant, compiled) => {
+			captured.push({ sql: compiled.sql, compiled: compiled as CompiledQuery<unknown> })
+			return empty
+		},
+		compiledQueryWithCapabilities: (_tenant, compile) => {
+			const compiled = compile(capabilities)
+			captured.push({ sql: compiled.sql, compiled: compiled as CompiledQuery<unknown> })
+			return empty
+		},
+	}
+	return { warehouse, captured }
+}
+
+/**
+ * Drive every QuerySpec fixture through the real lowering and collect the SQL it
+ * would have executed.
+ */
+export function collectQuerySpecCatalog(): ReadonlyArray<CatalogEntry> {
+	const entries: Array<CatalogEntry> = []
+	const tenant: QueryTenant = { orgId: OrgId.make(ORG_ID) }
+
+	for (const fixture of querySpecFixtures) {
+		const variants = fixture.allCapabilities ? capabilityVariants : [capabilityVariants[0]!]
+		for (const variant of variants) {
+			const { warehouse, captured } = makeCapturingWarehouse(variant.capabilities)
+			const execute = makeQueryEngineExecute(warehouse)
+			const request = new QueryEngineExecuteRequest({
+				startTime: fixture.startTime ?? START_TIME,
+				endTime: fixture.endTime ?? END_TIME,
+				query: fixture.query,
+			})
+
+			// Shaping errors on an empty result are irrelevant — the SQL is captured
+			// before shaping. A fixture that captured nothing never reached the
+			// warehouse at all, and the validation error explains why.
+			const outcome = Effect.runSync(Effect.exit(execute(tenant, request)))
+
+			if (captured.length === 0) {
+				const reason = outcome._tag === "Failure" ? String(outcome.cause) : "no error reported"
+				throw new Error(
+					`SQL catalog: QuerySpec fixture "${fixture.label}" (${variant.label}) executed no query: ${reason}`,
+				)
+			}
+
+			captured.forEach((capture, index) => {
+				const suffix = captured.length > 1 ? `#${index + 1}` : ""
+				entries.push({
+					id: `spec:${fixture.label}${suffix}:${variant.label}`,
+					source: "query-spec",
+					name: `${fixture.query.source}.${fixture.query.kind}`,
+					label: `${fixture.label}${suffix}`,
+					capabilityLabel: variant.label,
+					route: fixture.route,
+					sql: capture.sql,
+					fingerprint: fingerprintSql(capture.sql),
+					...(capture.compiled ? { compiled: capture.compiled } : {}),
+				})
+			})
+		}
+	}
+
+	return entries
+}
+
+/** The full catalog: every SQL shape reachable from either entry surface. */
+export function collectSqlCatalog(): ReadonlyArray<CatalogEntry> {
+	return [...collectPipeCatalog(), ...collectQuerySpecCatalog()]
+}
+
 /** One entry per distinct SQL shape, keeping the first fixture that produced it. */
-export function dedupeByFingerprint(
-	entries: ReadonlyArray<CatalogEntry>,
-): ReadonlyArray<CatalogEntry> {
+export function dedupeByFingerprint(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<CatalogEntry> {
 	const seen = new Map<string, CatalogEntry>()
 	for (const entry of entries) {
 		if (!seen.has(entry.fingerprint)) seen.set(entry.fingerprint, entry)
@@ -371,9 +820,7 @@ export function dedupeByFingerprint(
 // ---------------------------------------------------------------------------
 
 /** Pipe names in `warehouseQueries` that no fixture covers. */
-export function uncoveredPipes(
-	entries: ReadonlyArray<CatalogEntry>,
-): ReadonlyArray<WarehouseQueryName> {
+export function uncoveredPipes(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<WarehouseQueryName> {
 	const covered = new Set(entries.map((entry) => entry.name))
 	return warehouseQueries.filter((name) => !covered.has(name))
 }
@@ -395,29 +842,45 @@ export function routeCoverage(): ReadonlyMap<string, { true: number; false: numb
 		coverage.set(name, current)
 	}
 
-	for (const fixture of pipeFixtures) {
-		if (fixture.pipe !== "custom_traces_timeseries") continue
-		const params = fixture.params
-		const num = (key: string) => (params[key] != null ? Number(params[key]) : undefined)
-		const groupBy: Array<string> = []
-		if (params.group_by_service != null) groupBy.push("service")
-		if (params.group_by_span_name != null) groupBy.push("span_name")
-		if (params.group_by_status_code != null) groupBy.push("status_code")
-		if (params.group_by_http_method != null) groupBy.push("http_method")
-		if (params.group_by_attributes != null) groupBy.push("attribute")
-
-		const opts: CH.TracesTimeseriesOpts = {
-			metric: "count",
-			needsSampling: true,
-			allMetrics: true,
-			groupBy,
-			bucketSeconds: num("bucket_seconds"),
-			apdexThresholdMs: num("apdex_threshold_ms") ?? 500,
-			rootOnly: params.root_only != null,
-			errorsOnly: params.errors_only != null,
-		}
-		record("canUseAnnualServiceOverview", CH.canUseAnnualServiceOverview(opts))
+	for (const fixture of querySpecFixtures) {
+		const query = fixture.query
+		if (query.source !== "traces" || query.kind !== "timeseries") continue
+		const filters = (query.filters ?? {}) as Record<string, unknown>
+		record(
+			"canUseAnnualServiceOverview",
+			CH.canUseAnnualServiceOverview({
+				metric: query.metric,
+				needsSampling: true,
+				allMetrics: query.allMetrics === true,
+				groupBy: query.groupBy as ReadonlyArray<string> | undefined,
+				bucketSeconds: query.bucketSeconds,
+				apdexThresholdMs: query.apdexThresholdMs,
+				rootOnly: filters.rootSpansOnly === true,
+				errorsOnly: filters.errorsOnly === true,
+				spanName: filters.spanName as string | undefined,
+				attributeFilters: filters.attributeFilters as never,
+				resourceAttributeFilters: filters.resourceAttributeFilters as never,
+			}),
+		)
 	}
 
 	return coverage
+}
+
+/**
+ * The pipe adapter drops `bucketSeconds` on the floor
+ * (`pipeParamsToTracesTimeseriesOpts` returns opts without it), so no pipe
+ * request can satisfy the `>= 3600` clause and the annual rollup is unreachable
+ * from the CLI/MCP surface — the same logical chart takes a different route
+ * depending on which door it came through.
+ *
+ * Asserted rather than fixed: closing it is a routing change with its own
+ * performance profile, and it deserves its own PR. This exists so that change is
+ * a deliberate one — the assertion fails the moment the adapter starts
+ * forwarding the bucket width.
+ */
+export function pipePathReachesAnnualRoute(): boolean {
+	return collectPipeCatalog().some(
+		(entry) => entry.name === "custom_traces_timeseries" && entry.sql.includes("service_overview_hourly"),
+	)
 }

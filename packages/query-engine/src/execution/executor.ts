@@ -440,7 +440,10 @@ WHERE name = 'enable_full_text_index'`,
 							code: "ResourceLimit",
 							message: error.message,
 						})
-					: mapWarehouseError(pipe, error),
+					: // `execution` decides authorship: raw SQL comes from the caller (the
+						// raw_sql widget, the `run_sql` MCP tool), so an analyzer complaint
+						// about it is their typo and must keep the database's own message.
+						mapWarehouseError(pipe, error, execution === "raw" ? "caller" : "maple"),
 		})
 		// `db.duration_ms` measures warehouse execution only — captured here, after
 		// config resolution + settings/client-cache preamble, immediately before the
@@ -752,6 +755,9 @@ WHERE name = 'enable_full_text_index'`,
 			try: () => client.insert(datasource, rows),
 			// Classify like the read path so an auth failure or quota breach on
 			// insert surfaces with its real tag instead of a generic query error.
+			// Authorship stays the default "caller": inserts are not DSL-generated
+			// SQL, and a rejection here usually means the rows are wrong, not that
+			// Maple composed a bad statement.
 			catch: (error) => mapWarehouseError(label, error),
 		}).pipe(
 			Effect.tap(() =>

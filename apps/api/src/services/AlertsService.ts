@@ -4899,6 +4899,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										recordEvaluationFailure(row, error, "tinybird_schema_drift", {
 											pipe: error.pipeName,
 										}),
+									"@maple/http/errors/WarehouseMalformedQueryError": (error) =>
+										recordEvaluationFailure(row, error, "malformed_query", {
+											pipe: error.pipeName,
+										}),
 									"@maple/http/errors/WarehouseValidationError": (error) =>
 										recordEvaluationFailure(row, error, "tinybird_validation", {
 											pipe: error.pipeName,
