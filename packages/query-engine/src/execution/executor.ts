@@ -755,7 +755,10 @@ WHERE name = 'enable_full_text_index'`,
 			try: () => client.insert(datasource, rows),
 			// Classify like the read path so an auth failure or quota breach on
 			// insert surfaces with its real tag instead of a generic query error.
-			catch: (error) => mapWarehouseError(label, error, "maple"),
+			// Authorship stays the default "caller": inserts are not DSL-generated
+			// SQL, and a rejection here usually means the rows are wrong, not that
+			// Maple composed a bad statement.
+			catch: (error) => mapWarehouseError(label, error),
 		}).pipe(
 			Effect.tap(() =>
 				Clock.currentTimeMillis.pipe(
