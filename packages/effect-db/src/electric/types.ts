@@ -71,8 +71,11 @@ export interface BackoffConfig {
 	multiplier?: number
 
 	/**
-	 * Maximum number of retries before giving up. Set to Infinity for unlimited retries.
-	 * @default Infinity
+	 * Maximum number of retries before giving up, after which the stream stops and
+	 * `collection:sync-failed` fires. Set to Infinity for unlimited retries — but
+	 * only where an infinite spinner is an acceptable outcome, since a stopped
+	 * stream is the only thing that turns "still loading" into "failed".
+	 * @default 10
 	 */
 	maxRetries?: number
 
@@ -181,7 +184,7 @@ export interface EffectElectricCollectionConfig<
 	 *
 	 * Set to `false` to disable backoff entirely.
 	 *
-	 * @default { initialDelayMs: 1000, maxDelayMs: 30000, multiplier: 2, maxRetries: Infinity, jitter: true }
+	 * @default { initialDelayMs: 1000, maxDelayMs: 30000, multiplier: 2, maxRetries: 10, jitter: true }
 	 */
 	backoff?: BackoffConfig | false
 }
