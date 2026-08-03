@@ -295,15 +295,25 @@ const make = Effect.gen(function* () {
 		const routingTenant = systemTenant(knownOrgs[0])
 		return yield* Effect.all(
 			[
-				warehouse.compiledQuery(
+				warehouse.crossOrgQuery(
 					routingTenant,
 					CH.compile(CH.activeOrgsByTracesQuery(), { startTime }),
-					{ profile: "discovery", context: "anomalyActiveOrgsTraces" },
+					{
+						profile: "discovery",
+						context: "anomalyActiveOrgsTraces",
+						justification:
+							"enumerate orgs with recent span aggregates so the anomaly tick skips idle orgs",
+					},
 				),
-				warehouse.compiledQuery(
+				warehouse.crossOrgQuery(
 					routingTenant,
 					CH.compile(CH.activeOrgsByLogsQuery(), { startTime }),
-					{ profile: "discovery", context: "anomalyActiveOrgsLogs" },
+					{
+						profile: "discovery",
+						context: "anomalyActiveOrgsLogs",
+						justification:
+							"enumerate orgs with recent log aggregates so the anomaly tick skips idle orgs",
+					},
 				),
 			],
 			{ concurrency: 2 },

@@ -22,7 +22,6 @@ const makeWarehouse = (
 	rows: ReadonlyArray<Record<string, unknown>>,
 	onCompiled: (sql: string, context: string | undefined) => void = () => undefined,
 ): QueryEngineWarehouse => ({
-	sqlQuery: () => Effect.die("unexpected sqlQuery"),
 	rawSqlQuery: () => Effect.die("unexpected rawSqlQuery"),
 	compiledQuery(_tenant, compiled, options) {
 		onCompiled(compiled.sql, options?.context)

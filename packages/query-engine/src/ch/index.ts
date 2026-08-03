@@ -187,6 +187,7 @@ export {
 export {
 	serviceOverviewQuery,
 	serviceOverviewRowSchema,
+	serviceUsageRowSchema,
 	serviceCatalogQuery,
 	serviceHealthSnapshotQuery,
 	serviceHealthSnapshotRowSchema,

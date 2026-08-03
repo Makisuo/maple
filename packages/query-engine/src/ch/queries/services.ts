@@ -126,7 +126,7 @@ export interface ServiceOverviewOutput {
 	readonly firstSeen: string
 }
 
-export const serviceOverviewRowSchema: CompiledQueryRowSchema<ServiceOverviewOutput> = Schema.Struct({
+export const serviceOverviewRowSchema = Schema.Struct({
 	serviceName: Schema.String,
 	serviceNamespace: Schema.String,
 	environment: Schema.String,
@@ -140,7 +140,7 @@ export const serviceOverviewRowSchema: CompiledQueryRowSchema<ServiceOverviewOut
 	p99LatencyMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 	firstSeen: Schema.String,
-})
+}) satisfies CompiledQueryRowSchema<ServiceOverviewOutput>
 
 export interface ServiceCatalogOpts {
 	serviceName?: string
@@ -505,6 +505,23 @@ export interface ServiceUsageOutput {
 	readonly totalExpHistogramMetricSizeBytes: number
 	readonly totalSizeBytes: number
 }
+
+export const serviceUsageRowSchema = Schema.Struct({
+	serviceName: Schema.String,
+	totalLogCount: CHNumber,
+	totalLogSizeBytes: CHNumber,
+	totalTraceCount: CHNumber,
+	totalTraceSizeBytes: CHNumber,
+	totalSumMetricCount: CHNumber,
+	totalSumMetricSizeBytes: CHNumber,
+	totalGaugeMetricCount: CHNumber,
+	totalGaugeMetricSizeBytes: CHNumber,
+	totalHistogramMetricCount: CHNumber,
+	totalHistogramMetricSizeBytes: CHNumber,
+	totalExpHistogramMetricCount: CHNumber,
+	totalExpHistogramMetricSizeBytes: CHNumber,
+	totalSizeBytes: CHNumber,
+}) satisfies CompiledQueryRowSchema<ServiceUsageOutput>
 
 export function serviceUsageQuery(opts: ServiceUsageOpts) {
 	return from(ServiceUsage)

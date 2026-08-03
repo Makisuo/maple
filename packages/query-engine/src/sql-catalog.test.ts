@@ -65,9 +65,25 @@ describe("sql catalog", () => {
 		expect(uncoveredPipes(pipeEntries)).toEqual([])
 	})
 
+	// Builders that read across every tenant on purpose. Each must declare
+	// `.crossOrg()` and run through `WarehouseQueryService.crossOrgQuery`, which
+	// records a justification on the span. This list should stay tiny — it is the
+	// complete inventory of cross-tenant reads in the product.
+	const CROSS_ORG_BUILDERS: ReadonlySet<string> = new Set([
+		"activeOrgsByErrorEventsQuery",
+		"activeOrgsByTracesQuery",
+		"activeOrgsByLogsQuery",
+	])
+
+	// The predecessor of this test asserted `entry.sql.toContain("OrgId")`, which
+	// `SELECT count() AS OrgId ...` and `WHERE OrgId = 'x' OR 1=1` both satisfy.
+	// Scope is now derived by the compiler from a top-level OrgId predicate, so
+	// this asserts the derived fact rather than the presence of a substring.
 	it("scopes every query to an org", () => {
 		for (const entry of entries) {
-			expect(entry.sql, `${entry.id} must filter OrgId`).toContain("OrgId")
+			if (entry.compiled === undefined) continue
+			const expected = CROSS_ORG_BUILDERS.has(entry.name) ? "cross-org" : "org"
+			expect(entry.compiled.tenantScope, `${entry.id} tenant scope`).toBe(expected)
 		}
 	})
 
@@ -231,9 +247,6 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 	"errors/traceTimeProbeQuery",
 
 	// todo batch ② — alerting correctness (anomaly, alert-checks, setup-audit, activity, liveness, internal)
-	"activity/activeOrgsByErrorEventsQuery",
-	"activity/activeOrgsByTracesQuery",
-	"activity/activeOrgsByLogsQuery",
 	"alert-checks/listRuleChecksQuery",
 	"alert-checks/alertCheckGroupTotalsQuery",
 	"alert-checks/alertChecksSummaryQuery",
@@ -262,24 +275,16 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 	// todo batch ③ — infra + integrations (infra, cloudflare-*, planetscale-*, service-map, rollups)
 	"infra/listHostsQuery",
 	"infra/hostDetailSummaryQuery",
-	"infra/hostGaugeTimeseriesQuery",
 	"infra/fleetUtilizationTimeseriesQuery",
 	"infra/hostNetworkTimeseriesQuery",
 	"infra/listPodsQuery",
 	"infra/listPodsSummaryQuery",
 	"infra/podDetailSummaryQuery",
-	"infra/podGaugeTimeseriesQuery",
 	"infra/listNodesQuery",
 	"infra/nodeDetailSummaryQuery",
-	"infra/nodeGaugeTimeseriesQuery",
 	"infra/listWorkloadsQuery",
 	"infra/workloadDetailSummaryQuery",
-	"infra/workloadGaugeTimeseriesQuery",
-	"infra/podFacetsQuery",
-	"infra/nodeFacetsQuery",
-	"infra/workloadFacetsQuery",
 	"cloudflare-infra-breakdowns/cloudflareZoneBreakdownTotalsSQL",
-	"cloudflare-infra-breakdowns/cloudflareZoneBreakdownTimeseriesSQL",
 	"cloudflare-infra-breakdowns/cloudflareZoneBreakdownCoverageSQL",
 	"cloudflare-infra-breakdowns/cloudflareZoneFacetsQuery",
 	"cloudflare-infra-extended/cloudflareZoneHostBreakdownSQL",
@@ -288,11 +293,8 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 	"cloudflare-infra-extended/cloudflareZoneFirewallTopSQL",
 	"cloudflare-infra-extended/cloudflareZoneDnsTimeseriesSQL",
 	"cloudflare-infra-extended/cloudflareZoneDnsBreakdownSQL",
-	"cloudflare-infra-extended/cloudflareQueueGaugesSQL",
 	"cloudflare-infra-extended/cloudflareDurableObjectCountersSQL",
 	"cloudflare-infra/cloudflareZoneCountersSQL",
-	"cloudflare-infra/cloudflareZoneLatencySQL",
-	"cloudflare-infra/cloudflareZoneTimeseriesSQL",
 	"cloudflare-infra/cloudflareZoneStatusTimeseriesSQL",
 	"cloudflare-infra/cloudflareZoneCacheTimeseriesSQL",
 	"cloudflare-infra/cloudflareZoneLatencyTimeseriesSQL",
@@ -300,10 +302,8 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 	"cloudflare-infra/cloudflareWorkerLatencySQL",
 	"cloudflare-infra/cloudflareWorkerTimeseriesSQL",
 	"cloudflare-map/cloudflareServiceCountersSQL",
-	"cloudflare-map/cloudflareServiceLatencySQL",
 	"planetscale-infra/planetscaleInfraTimeseriesSQL",
 	"planetscale-infra/planetscaleBranchInfraTimeseriesSQL",
-	"planetscale-map/planetscaleGaugesSQL",
 	"planetscale-map/planetscaleBranchGaugesSQL",
 	"planetscale-map/planetscaleStorageSQL",
 	"planetscale-map/planetscaleBranchStorageSQL",
@@ -327,13 +327,9 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 	"billing-usage/dailySignalVolumeQuery",
 	"billing-usage/dailySessionCountQuery",
 	"cloudflare-usage/cloudflareUsageStatsQuery",
-	"cloudflare-usage/cloudflareUsageQuery",
 	"logs/getLogByKeyQuery",
 	"service-operations/serviceOperationsSummaryRawQuery",
-	"service-operations/serviceOperationsSummaryQuery",
 	"service-operations/serviceOperationsTimeseriesRawQuery",
-	"service-operations/serviceOperationsTimeseriesQuery",
-	"services/serviceCatalogQuery",
 	"services/serviceHealthSnapshotQuery",
 	"services/serviceHealthBaselineQuery",
 	"services/serviceEnvironmentsQuery",
@@ -357,10 +353,9 @@ describe("builder coverage", () => {
 		for (const fixture of builderFixtures) {
 			const module = QUERY_MODULES[fixture.module]
 			expect(module, `unknown module ${fixture.module}`).toBeDefined()
-			expect(
-				typeof module?.[fixture.name],
-				`${fixture.module} does not export ${fixture.name}`,
-			).toBe("function")
+			expect(typeof module?.[fixture.name], `${fixture.module} does not export ${fixture.name}`).toBe(
+				"function",
+			)
 		}
 	})
 
