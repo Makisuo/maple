@@ -4,11 +4,6 @@
 	"type": "module",
 	"exports": {
 		"./styles/tokens.css": "./src/styles/tokens.css",
-		"./utils": "./src/lib/utils.ts",
-		"./colors": "./src/lib/colors.ts",
-		"./types": "./src/lib/types.ts",
-		"./format": "./src/lib/format.ts",
-		"./time-format": "./src/lib/time-format.ts",
 		"./lib/cloud-platforms": "./src/lib/cloud-platforms/index.ts",
 		"./*": "./src/*"
 	},

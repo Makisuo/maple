@@ -1,6 +1,6 @@
 import { cn } from "@maple/ui/lib/utils"
 import { severityLevel } from "../format"
-import { formatPercent } from "@maple/ui/format"
+import { formatPercent } from "@maple/ui/lib/format"
 import { BAR_FILL, BAR_VALUE_TONE } from "../severity-tokens"
 
 const ROWS = [

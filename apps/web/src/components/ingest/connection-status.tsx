@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Button } from "@maple/ui/components/ui/button"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { ArrowRightIcon, CircleCheckIcon, PaperPlaneIcon, PulseIcon } from "@/components/icons"
 import { sendTestEvent, type IngestConnection } from "./use-ingest-connection"
 

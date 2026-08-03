@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 
 import type { AlertIncidentDocument } from "@maple/domain/http"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 /**
  * Fixed-bucket strip of a rule's incident history over a time range: red where

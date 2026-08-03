@@ -1,4 +1,4 @@
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 export type AlertStatusState =
 	| "firing"

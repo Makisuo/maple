@@ -13,7 +13,7 @@ import {
 	widgetTypeByVisualization,
 } from "@maple/domain/http"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { McpQueryError } from "@/mcp/tools/types"
 
 const decodeDashboardId = Schema.decodeUnknownEffect(DashboardId)

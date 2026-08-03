@@ -1,8 +1,8 @@
 import { useState } from "react"
 import { CircleWarningIcon, ChevronDownIcon } from "@maple/ui/components/icons"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import { formatDuration, formatNumber } from "@maple/ui/format"
-import { cn } from "@maple/ui/utils"
+import { formatDuration, formatNumber } from "@maple/ui/lib/format"
+import { cn } from "@maple/ui/lib/utils"
 import {
 	SearchableFilterSection,
 	SingleCheckboxFilter,

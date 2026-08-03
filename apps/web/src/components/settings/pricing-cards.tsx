@@ -11,7 +11,7 @@ import { formatCurrency } from "@/lib/billing/currency"
 type Plan = CatalogPlan
 type PlanItem = CatalogPlanItem
 
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { TRIAL_DURATION_DAYS, getPlanFeatures, getPlanDescription } from "@/lib/billing/plans"
 import {
 	Card,

@@ -2,7 +2,7 @@
 // Shared constants and helpers used by the CH DSL queries.
 // ---------------------------------------------------------------------------
 
-import type { TracesMetric, AttributeFilter } from "./query-engine"
+import type { TracesMetric, AttributeFilter } from "@maple/domain/query-engine"
 import type { AttributeIndexMode } from "./capabilities"
 
 // ---------------------------------------------------------------------------

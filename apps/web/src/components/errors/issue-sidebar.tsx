@@ -4,7 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@maple/ui/lib/utils"
 
 import { PRIORITY_LABEL, PriorityBarsIcon } from "@/components/icons"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 import { ActorChip } from "./actor-chip"

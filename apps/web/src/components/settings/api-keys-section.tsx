@@ -1,4 +1,4 @@
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { useAtomSet } from "@/lib/effect-atom"
 import { useState, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"

@@ -1,4 +1,4 @@
-import { formatNumber, formatStorageBytes } from "@maple/ui/format"
+import { formatNumber, formatStorageBytes } from "@maple/ui/lib/format"
 import { Result } from "@/lib/effect-atom"
 import { FileIcon, GridSquareCirclePlusIcon, ChartLineIcon, DatabaseIcon } from "@/components/icons"
 

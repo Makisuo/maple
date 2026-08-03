@@ -1,4 +1,4 @@
-import { formatLatency, formatPercent } from "@maple/ui/format"
+import { formatLatency, formatPercent } from "@maple/ui/lib/format"
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useCallback } from "react"
 import {
 	ReactFlow,
@@ -25,8 +25,8 @@ import { formatBackendError } from "@/lib/error-messages"
 import { logClientError } from "@/lib/services/common/telemetry"
 import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts"
 
-import { cn } from "@maple/ui/utils"
-import { getServiceColor, getValueHue } from "@maple/ui/colors"
+import { cn } from "@maple/ui/lib/utils"
+import { getServiceColor, getValueHue } from "@maple/ui/lib/colors"
 import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import {
 	ChartContainer,
@@ -47,7 +47,7 @@ import {
 } from "@maple/ui/components/ui/empty"
 import { Button } from "@maple/ui/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
-import { formatBucketLabel } from "@maple/ui/format"
+import { formatBucketLabel } from "@maple/ui/lib/format"
 import {
 	ArrowRightIcon,
 	CloudflareIcon,

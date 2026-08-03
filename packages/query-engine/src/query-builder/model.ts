@@ -1,6 +1,6 @@
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
-import type { QuerySpec } from "../query-engine"
-import { normalizeKey, parseBoolean, parseWhereClause, splitCsv } from "../where-clause"
+import type { QuerySpec } from "@maple/domain/query-engine"
+import { normalizeKey, parseBoolean, parseWhereClause, splitCsv } from "@maple/domain/where-clause"
 import { Match } from "effect"
 
 export type QueryBuilderDataSource = "traces" | "logs" | "metrics"

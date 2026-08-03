@@ -5,7 +5,7 @@ import type {
 	AlertIncidentDocument,
 	AlertRuleDocument,
 } from "@maple/domain/http"
-import { formatRelativeFrom } from "@maple/ui/time-format"
+import { formatRelativeFrom } from "@maple/ui/lib/time-format"
 import type { AlertRuleStateRow } from "@/lib/collections/alerts"
 import { comparatorLabels, formatSignalValue } from "@/lib/alerts/form-utils"
 import { staleThresholdMs } from "@/lib/alerts/rule-status"

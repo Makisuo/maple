@@ -4,7 +4,7 @@ import { CopyButton } from "@maple/ui/components/ui/copy-button"
 
 import { ServerIcon } from "@/components/icons"
 import type { HostDetailSummaryResponse } from "@maple/domain/http"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 interface HostMetadataPanelProps {
 	summary: HostDetailSummaryResponse["data"]

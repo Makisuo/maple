@@ -5,7 +5,7 @@
 // traces, alerts, services, and metrics queries.
 // ---------------------------------------------------------------------------
 
-import type { AttributeFilter, MetricType } from "../../query-engine"
+import type { AttributeFilter, MetricType } from "@maple/domain/query-engine"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import type { ColumnAccessor } from "@maple-dev/clickhouse-builder"

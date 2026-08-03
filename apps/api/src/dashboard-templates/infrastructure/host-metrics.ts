@@ -7,8 +7,8 @@ import {
 	paramKey,
 	paramValue,
 	templateId,
-} from "../helpers"
-import type { TemplateDefinition, WidgetDef } from "../types"
+} from "@/dashboard-templates/helpers"
+import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 // Host identity (`host.name`) lives on ResourceAttributes — the metrics
 // query-builder reaches it via the `resource.` prefix.

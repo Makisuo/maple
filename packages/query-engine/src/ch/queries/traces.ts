@@ -4,7 +4,7 @@
 // DSL-based query definitions for traces timeseries, breakdown, and list.
 // ---------------------------------------------------------------------------
 
-import type { TracesMetric } from "../../query-engine"
+import type { TracesMetric } from "@maple/domain/query-engine"
 import { compileCH, compileFnCall } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"

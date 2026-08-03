@@ -4,7 +4,7 @@
 // strings (`'YYYY-MM-DD HH:MM:SS'`); `resolveParam` quotes them inline. chDB
 // parses the quoted string into a DateTime for the partition-pruning filters.
 
-import { formatRelativeFrom } from "@maple/ui/time-format"
+import { formatRelativeFrom } from "@maple/ui/lib/time-format"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
 /** Format an epoch-ms instant as a ClickHouse DateTime string (UTC, second precision). */

@@ -5,7 +5,7 @@
 // a raw-SQL builder for counter rate/increase (which requires CTEs).
 // ---------------------------------------------------------------------------
 
-import type { AttributeFilter, MetricType } from "../../query-engine"
+import type { AttributeFilter, MetricType } from "@maple/domain/query-engine"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import * as T from "@maple-dev/clickhouse-builder/types"
 import { param } from "@maple-dev/clickhouse-builder"

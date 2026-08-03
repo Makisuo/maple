@@ -10,7 +10,7 @@ export default defineConfig({
 	// package). The plugin's lazy path resolves that package to a declaration
 	// file it synthesized without those exports and fails with
 	// "Export 'IdentifyInput' is not defined". Eager emission resolves them from
-	// source. Same reason as lib/effect-sdk/tsdown.config.ts.
+	// source. Same reason as packages/effect-sdk/tsdown.config.ts.
 	dts: { eager: true },
 	outDir: "dist",
 })

@@ -1,4 +1,4 @@
-import type { TimeseriesPoint } from "../query-engine"
+import type { TimeseriesPoint } from "@maple/domain/query-engine"
 
 /**
  * Codec that lets the alert-`evaluate` path reuse the timeseries bucket cache

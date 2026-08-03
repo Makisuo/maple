@@ -8,8 +8,8 @@ import {
 	paramValue,
 	serviceWhereClause,
 	templateId,
-} from "../helpers"
-import type { TemplateDefinition, WidgetDef } from "../types"
+} from "@/dashboard-templates/helpers"
+import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 // Every metric here is an OTel semconv JVM metric, and all of them except `jvm.gc.duration` are
 // UpDownCounters — non-monotonic Sums, not Gauges. `metricType` picks the warehouse table, so the

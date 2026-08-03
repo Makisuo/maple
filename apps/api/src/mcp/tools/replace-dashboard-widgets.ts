@@ -1,20 +1,20 @@
 import { McpQueryError, requiredStringParam, validationError, type McpToolRegistrar } from "./types"
 import { Effect, Result, Schema } from "effect"
 import { DashboardWidgetSchema } from "@maple/domain/http"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import {
 	defaultSizeForVisualization,
 	findNextWidgetPosition,
 	generateWidgetId,
 	withDashboardMutation,
 	type DashboardWidget,
-} from "../lib/dashboard-mutations"
+} from "@/mcp/lib/dashboard-mutations"
 import {
 	collectBlockingBuilderWarnings,
 	formatValidationSummary,
 	inspectWidgetsAfterMutation,
-} from "../lib/inspect-widget"
-import { resolveTenant } from "../lib/query-warehouse"
+} from "@/mcp/lib/inspect-widget"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
 
 const TOOL = "replace_dashboard_widgets"
 

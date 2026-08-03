@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { VcsSourceService } from "@/services/vcs/VcsSourceService"
+import { VcsSourceService } from "@/services/integrations/vcs/VcsSourceService"
 import { optionalNumberParam, optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { McpQueryError, validationError } from "./types"
 

@@ -9,7 +9,7 @@ import { IssueKindBadge } from "./kind-badge"
 import { SeverityBadge } from "./severity-badge"
 import { WorkflowBadge } from "./workflow-badge"
 import type { IssueMutations } from "./use-issue-mutations"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 

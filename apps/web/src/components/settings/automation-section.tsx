@@ -16,7 +16,7 @@ import { EscalationPolicySection } from "./escalation-policy-section"
 import { SectionHeader } from "@/components/layout/section-header"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 const SEVERITIES: ReadonlyArray<IssueSeverity> = ["critical", "high", "medium", "low"]
 const CONFIDENCES: ReadonlyArray<EscalationConfidence> = ["high", "medium", "low"]

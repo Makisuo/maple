@@ -4,17 +4,17 @@ import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-clou
 import { EdgeCacheService, type EdgeCacheServiceShape } from "@maple/cache"
 import { BillingCustomer, BillingUsage, CatalogPlan, OrgId } from "@maple/domain/http"
 import { Clock, Effect, Layer, Option, Redacted, Schema } from "effect"
-import { CacheBackendLive } from "./lib/CacheBackendLive"
-import { layerPg } from "./lib/DatabasePgLive"
-import { Env } from "./lib/Env"
-import { decodeUpstream, ensureOk, makeCallAutumn, readCustomerCached } from "./lib/autumn-client"
-import { evaluateSpendLimits } from "./lib/spend-limit-evaluation"
-import { resolveCycleWindow } from "./routes/billing.http"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import { layerPg } from "@/platform/DatabasePgLive"
+import { Env } from "@/platform/Env"
+import { decodeUpstream, ensureOk, makeCallAutumn, readCustomerCached } from "@/services/billing/autumn-client"
+import { evaluateSpendLimits } from "@/services/billing/spend-limit-evaluation"
+import { resolveCycleWindow } from "@/routes/v1/billing.http"
 import {
 	SpendLimitsService,
 	type ConfiguredSpendLimits,
 	type SpendLimitsServiceShape,
-} from "./services/SpendLimitsService"
+} from "./services/billing/SpendLimitsService"
 
 // ---------------------------------------------------------------------------
 // Hourly spend-limit evaluation.

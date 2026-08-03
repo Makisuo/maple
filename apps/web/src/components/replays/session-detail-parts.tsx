@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from "motion/react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { GlobeIcon, ClockIcon } from "@/components/icons"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
-import { formatRelativeFrom } from "@maple/ui/time-format"
+import { formatRelativeFrom } from "@maple/ui/lib/time-format"
 import { formatSessionDuration, gradientFor, hostFromUrl } from "./replay-format"
 import { parseChTimestampMs } from "./replay-timeline"
 

@@ -1,5 +1,5 @@
 import type { BaseComponentProps } from "@json-render/react"
-import { formatDuration, formatErrorRate, formatNumber } from "@maple/ui/format"
+import { formatDuration, formatErrorRate, formatNumber } from "@maple/ui/lib/format"
 
 interface StatCardsProps {
 	cards: Array<{

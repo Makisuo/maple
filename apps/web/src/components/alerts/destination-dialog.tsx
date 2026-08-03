@@ -65,7 +65,7 @@ import {
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Avatar, AvatarFallback, AvatarImage } from "@maple/ui/components/ui/avatar"
 import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { useOrganization } from "@clerk/clerk-react"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 

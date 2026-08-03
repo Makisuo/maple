@@ -1,11 +1,11 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
-import { queryWarehouse, resolveTenant } from "../lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "../lib/time"
-import { clampLimit, clampOffset } from "../lib/limits"
-import { formatNumber, formatTable } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { queryWarehouse, resolveTenant } from "@/mcp/lib/query-warehouse"
+import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
+import { clampLimit, clampOffset } from "@/mcp/lib/limits"
+import { formatNumber, formatTable } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 
 export function registerListMetricsTool(server: McpToolRegistrar) {
 	server.tool(

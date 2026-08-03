@@ -1,10 +1,10 @@
 import { requiredStringParam, optionalStringParam, type McpToolRegistrar } from "./types"
-import { warehouseToMcpHandlers } from "../lib/map-warehouse-error"
-import { withTenantExecutor } from "../lib/query-warehouse"
-import { formatNextSteps } from "../lib/next-steps"
+import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
+import { withTenantExecutor } from "@/mcp/lib/query-warehouse"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, Schema, pipe } from "effect"
-import { createDualContent } from "../lib/structured-output"
-import { renderTraceOverview } from "../lib/render-trace"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { renderTraceOverview } from "@/mcp/lib/render-trace"
 import { inspectTrace, type SpanNode } from "@maple/query-engine/observability"
 
 /**

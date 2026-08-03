@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { ChartLegendSlotContext, type ChartLegendItem } from "@maple/ui/components/ui/chart"
 import {
 	GripDotsIcon,

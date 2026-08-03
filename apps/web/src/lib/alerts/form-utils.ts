@@ -38,7 +38,7 @@ import {
 	createQueryDraft,
 	type QueryBuilderQueryDraft,
 } from "@/lib/query-builder/model"
-import { formatErrorRate, formatLatency, formatNumber } from "@maple/ui/format"
+import { formatErrorRate, formatLatency, formatNumber } from "@maple/ui/lib/format"
 
 const asHazelOrganizationId = Schema.decodeUnknownSync(HazelOrganizationId)
 const asHazelChannelId = Schema.decodeUnknownSync(HazelChannelId)

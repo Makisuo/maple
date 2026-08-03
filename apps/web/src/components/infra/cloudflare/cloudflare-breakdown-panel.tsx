@@ -34,10 +34,10 @@ import {
 	cloudflareZoneBreakdownResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { ColumnHead, DataTable, useTableSort } from "../primitives/data-table"
-import { formatBytes, formatPercent } from "@maple/ui/format"
+import { formatBytes, formatPercent } from "@maple/ui/lib/format"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
 import {
 	CACHE_STATUS_COLORS,

@@ -14,7 +14,7 @@ import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 
 import { hostInfraTimeseriesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { HostInfraMetric } from "@/api/warehouse/infra"
-import { formatBytesPerSecond } from "@maple/ui/format"
+import { formatBytesPerSecond } from "@maple/ui/lib/format"
 import {
 	CHART_EMPTY_MESSAGE,
 	CHART_GRID_DASH,

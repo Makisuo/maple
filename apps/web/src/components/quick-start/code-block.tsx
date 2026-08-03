@@ -1,4 +1,4 @@
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { highlightCode } from "@/lib/sugar-high"
 

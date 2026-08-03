@@ -1,6 +1,6 @@
 import type { AlertSeverity } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 const toneBySeverity: Record<AlertSeverity, string> = {
 	warning: "border-severity-warn/30 bg-severity-warn/10 text-severity-warn",

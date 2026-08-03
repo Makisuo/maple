@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { DeploymentEnvironment, MetricName, OrgId } from "@maple/domain"
 import { Effect } from "effect"
-import type { MetricsTimeseriesQuery } from "../query-engine"
+import type { MetricsTimeseriesQuery } from "@maple/domain/query-engine"
 import {
 	makeQueryEngineEvaluateSeries,
 	type AlertEvaluateRequest,

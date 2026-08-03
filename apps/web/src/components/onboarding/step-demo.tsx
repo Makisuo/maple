@@ -18,7 +18,7 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { DemoSeedRequest } from "@maple/domain/http"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { getServiceOverviewResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 const CARDS_VARIANTS = {
 	hidden: {},

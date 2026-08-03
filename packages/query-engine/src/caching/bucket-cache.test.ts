@@ -1,7 +1,7 @@
 import { assert, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Exit, Layer, Schema } from "effect"
 import { OrgId } from "@maple/domain"
-import type { TimeseriesPoint } from "../query-engine"
+import type { TimeseriesPoint } from "@maple/domain/query-engine"
 import {
 	BucketCacheService,
 	coalesceMissingRanges,

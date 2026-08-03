@@ -69,7 +69,7 @@ jobs:
                         - *base
                         - 'apps/cli/**'
                         - 'apps/local-ui/**'
-                        - 'lib/effect-sdk/**'
+                        - 'packages/effect-sdk/**'
                         - 'lib/clickhouse-builder/**'
                         - 'packages/domain/**'
                         - 'packages/query-engine/**'
@@ -88,7 +88,7 @@ jobs:
                       clickhouse:
                         - *base
                         - 'lib/clickhouse-builder/**'
-                        - 'apps/api/src/lib/**'
+                        - 'apps/api/src/services/warehouse/**'
                         - 'packages/db/**'
                         - 'scripts/*clickhouse*'
                         # The SQL catalog sweep lives in this job, so a change to a
@@ -296,7 +296,7 @@ jobs:
                   CLICKHOUSE_E2E_PASSWORD: maple
               run: >-
                   bun run --filter=@maple/api test --
-                  src/lib/WarehouseQueryService.clickhouse.e2e.test.ts
+                  src/services/warehouse/WarehouseQueryService.clickhouse.e2e.test.ts
 
             # Type-checks every SQL shape the product can emit against the real
             # analyzer. ~80 shapes, ~2s — the unit tests only compare SQL text,
@@ -309,7 +309,7 @@ jobs:
                   CLICKHOUSE_E2E_PASSWORD: maple
               run: >-
                   bun run --filter=@maple/api test --
-                  src/lib/sql-catalog.clickhouse.e2e.test.ts
+                  src/services/warehouse/sql-catalog.clickhouse.e2e.test.ts
 
     knip:
         name: Knip

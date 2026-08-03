@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
 import { Toggle } from "@maple/ui/components/ui/toggle"

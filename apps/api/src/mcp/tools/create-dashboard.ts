@@ -1,15 +1,15 @@
 import { McpQueryError, optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import {
 	DashboardTemplateParameterKey,
 	PortableDashboardDocument,
 	defaultWidgetHeight,
 } from "@maple/domain/http"
 import { DASHBOARD_TEMPLATES, getTemplate } from "@/dashboard-templates"
-import { formatValidationSummary, inspectWidgetsAfterMutation } from "../lib/inspect-widget"
+import { formatValidationSummary, inspectWidgetsAfterMutation } from "@/mcp/lib/inspect-widget"
 import {
 	CHART_DISPLAY_AREA,
 	chartDisplayForMetric,
@@ -18,7 +18,7 @@ import {
 	makeQueryDraft,
 } from "@/dashboard-templates/helpers"
 import type { TemplateParameterValues, WidgetDef } from "@/dashboard-templates"
-import { validateDashboardTimeRange } from "../lib/resolve-dashboard-time-range"
+import { validateDashboardTimeRange } from "@/mcp/lib/resolve-dashboard-time-range"
 import { MAX_LIST_RANGE_SECONDS, MAX_QUERY_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
 
 const decodePortableDashboard = Schema.decodeUnknownEffect(PortableDashboardDocument)

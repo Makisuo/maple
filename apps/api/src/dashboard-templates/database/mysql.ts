@@ -8,8 +8,8 @@ import {
 	paramValue,
 	serviceWhereClause,
 	templateId,
-} from "../helpers"
-import type { TemplateDefinition, WidgetDef } from "../types"
+} from "@/dashboard-templates/helpers"
+import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 // The mysqlreceiver reports its level metrics — threads, buffer pool, replica lag — as
 // non-monotonic Sums (UpDownCounters), not Gauges. `metricType` picks the warehouse table, so

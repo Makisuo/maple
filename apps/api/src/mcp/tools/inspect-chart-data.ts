@@ -7,12 +7,12 @@ import {
 } from "./types"
 import { Effect, Schema } from "effect"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
-import { createDualContent } from "../lib/structured-output"
-import { inspectWidget, type InspectWidgetTimeRange, type RawSqlInspectionData } from "../lib/inspect-widget"
-import { formatTable, truncate } from "../lib/format"
-import { resolveDashboardTimeRange, type DashboardTimeRangeInput } from "../lib/resolve-dashboard-time-range"
-import { resolveTimeRange } from "../lib/time"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { inspectWidget, type InspectWidgetTimeRange, type RawSqlInspectionData } from "@/mcp/lib/inspect-widget"
+import { formatTable, truncate } from "@/mcp/lib/format"
+import { resolveDashboardTimeRange, type DashboardTimeRangeInput } from "@/mcp/lib/resolve-dashboard-time-range"
+import { resolveTimeRange } from "@/mcp/lib/time"
 import type { InspectChartDataData, InspectChartQueryResult } from "@maple/domain"
 
 function formatNumber(value: number | null): string {

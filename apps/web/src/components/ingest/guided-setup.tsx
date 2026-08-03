@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/clerk-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { CodeBlock } from "@/components/quick-start/code-block"
 import { PackageManagerCodeBlock } from "@/components/quick-start/package-manager-code-block"
 import {

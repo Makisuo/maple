@@ -13,7 +13,7 @@ import type {
 	CloudflareZoneLatencyBucket,
 	CloudflareZoneStatusBucket,
 } from "@/api/warehouse/cloudflare-infra"
-import { formatLatency, formatNumber } from "@maple/ui/format"
+import { formatLatency, formatNumber } from "@maple/ui/lib/format"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler, transformRows } from "../chart-utils"
 import { CHART_HEIGHT, ChartCard } from "../primitives/chart-card"

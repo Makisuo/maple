@@ -1,12 +1,12 @@
 import { optionalStringParam, McpQueryError, type McpToolRegistrar } from "./types"
-import { resolveTenant } from "../lib/query-warehouse"
-import { resolveTimeRange } from "../lib/time"
-import { formatNumber, formatDurationFromMs, formatPercent, formatTable } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { resolveTimeRange } from "@/mcp/lib/time"
+import { formatNumber, formatDurationFromMs, formatPercent, formatTable } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, HashSet, Order, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { serviceMap } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
+import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerServiceMapTool(server: McpToolRegistrar) {
 	server.tool(

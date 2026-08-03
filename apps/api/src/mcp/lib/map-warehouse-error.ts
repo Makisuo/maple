@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { type WarehouseError, WarehouseSchemaDriftError } from "@maple/domain"
-import { warehouseHandlers } from "@/lib/warehouse-error-handlers"
-import { McpQueryError } from "../tools/types"
+import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
+import { McpQueryError } from "@/mcp/tools/types"
 
 export { warehouseHandlers }
 

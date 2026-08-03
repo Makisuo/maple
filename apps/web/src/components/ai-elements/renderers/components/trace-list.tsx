@@ -1,7 +1,7 @@
 import type { BaseComponentProps } from "@json-render/react"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { LatencyValue } from "@maple/ui/components/latency-value"
-import { formatDuration } from "@maple/ui/format"
+import { formatDuration } from "@maple/ui/lib/format"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 
 interface TraceListProps {
