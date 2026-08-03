@@ -489,10 +489,14 @@ export function from<Name extends string, Cols extends ColumnDefs>(
 /**
  * Start a query from another query's output (type-safe subquery in FROM).
  *
+ * The alias names the derived table in SQL; it does NOT namespace the accessor.
+ * Inner columns are reached flat (`$.traceId`) — `$.sub.traceId` is undefined
+ * and throws when compiled.
+ *
  * Usage:
  *   const inner = CH.from(Traces).select($ => ({ traceId: $.TraceId }))
  *   const outer = CH.fromQuery(inner, "sub")
- *     .select($ => ({ id: $.sub.traceId })) // fully typed!
+ *     .select($ => ({ id: $.traceId })) // fully typed!
  */
 export function fromQuery<
 	InnerCols extends ColumnDefs,

@@ -95,6 +95,28 @@ const rows = await Effect.runPromise(
 don't hand-roll `rows[0] ?? null`. Both fail with `CompiledQueryDecodeError`,
 which carries the offending `rowIndex`.
 
+## Documentation
+
+Full guides live in [`docs/`](./docs/README.md):
+
+| Guide | What it covers |
+| --- | --- |
+| [Getting started](./docs/getting-started.md) | Install, define a table, build → compile → decode |
+| [Tables and column types](./docs/tables-and-types.md) | `table()`, column-type constructors, `Map`/`Array`/`Nullable` |
+| [Building queries](./docs/queries.md) | `select`, `where`, `groupBy`, `orderBy`, `limit`, immutability |
+| [Expressions and conditions](./docs/expressions.md) | Comparisons, arithmetic, optional predicates, aggregates |
+| [Joins and subqueries](./docs/joins-and-subqueries.md) | The join family, `fromQuery`, correlated subqueries |
+| [Unions and CTEs](./docs/unions-and-ctes.md) | `unionAll`, `fromUnion`, `withCTE` |
+| [Params and compilation](./docs/params-and-compilation.md) | `param.*`, how values reach the SQL, `CompiledQuery` |
+| [Decoding results](./docs/decoding-results.md) | `rowSchema`, `decodeRows`, decode errors |
+| [Tenant scoping](./docs/tenant-scoping.md) | `tenantScope`, what marks a query scoped, `crossOrg()` |
+| [Extending the DSL](./docs/extending.md) | `defineFn`, raw escape hatches, handwritten SQL |
+| [API reference](./docs/reference.md) | Full export catalog by module, plus error types |
+
+Every code block in those guides is backed by a test in
+[`src/docs-examples.test.ts`](./src/docs-examples.test.ts) that compiles the
+query and asserts the emitted SQL.
+
 ## Entry points
 
 | Import                                | Contents                                                                                                                                                                                        |
