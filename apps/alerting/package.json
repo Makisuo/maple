@@ -18,6 +18,7 @@
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260603.1",
 		"@effect/language-service": "catalog:effect",
+		"@maple/infra": "workspace:*",
 		"@types/node": "catalog:tooling",
 		"typescript": "catalog:tooling",
 		"wrangler": "^4.118.0"
