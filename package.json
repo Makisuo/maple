@@ -92,7 +92,7 @@
 		},
 		"tooling": {
 			"@types/node": "^22.10.2",
-			"typescript": "^6.0.2"
+			"typescript": "^7.0.2"
 		},
 		"ui": {
 			"@base-ui/react": "^1.6.0",

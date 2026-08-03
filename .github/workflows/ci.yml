@@ -149,10 +149,14 @@ jobs:
         needs: changes
         if: ${{ needs.changes.outputs.ts == 'true' }}
         # 8 vCPU rather than 4: with `^typecheck` gone from turbo.json this job is a
-        # wide fan of ~26 single-threaded `tsc` + ~15 vitest processes gated only by the
-        # four tsdown builds, so it scales near-linearly to 8. Blacksmith bills per
-        # vCPU-minute, so 8 cores at roughly half the wall time is ~cost-neutral. 16 is
-        # not worth it — the build critical path dominates past 8.
+        # wide fan of ~26 `tsc` + ~15 vitest processes gated only by the four tsdown
+        # builds, so it scales near-linearly to 8. Blacksmith bills per vCPU-minute, so
+        # 8 cores at roughly half the wall time is ~cost-neutral. 16 is not worth it —
+        # the build critical path dominates past 8.
+        #
+        # Since TypeScript 7 the `tsc` legs are themselves multi-threaded (~3 cores each
+        # on the big projects), so `--concurrency=10` below now oversubscribes rather
+        # than under-fills. Retune it against measured wall time before adding cores.
         runs-on: blacksmith-8vcpu-ubuntu-2404
         timeout-minutes: 20
         steps:

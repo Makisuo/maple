@@ -45,8 +45,8 @@
 		"@maple/browser-session": "workspace:*",
 		"@types/node": "catalog:tooling",
 		"effect": "catalog:effect",
-		"tsdown": "^0.21.7",
-		"typescript": "catalog:tooling",
+		"tsdown": "^0.22.14",
+		"typescript": "^6.0.3",
 		"vitest": "catalog:"
 	},
 	"peerDependencies": {

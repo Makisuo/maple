@@ -9,7 +9,8 @@
 		"lib": ["ES2023", "DOM", "DOM.Iterable"],
 		"types": ["node", "@cloudflare/workers-types"],
 		"moduleResolution": "bundler",
-		"baseUrl": ".",
+		// No `baseUrl`: TS7 removed it (TS5102). `paths` below already resolves
+		// relative to this file, so `@/*` is unaffected.
 		"ignoreDeprecations": "6.0",
 		"customConditions": ["bun"],
 		"allowImportingTsExtensions": true,
