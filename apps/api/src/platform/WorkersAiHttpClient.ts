@@ -9,10 +9,17 @@
  * The `Ai` binding exposes no `fetch`, so intercepting at the `HttpClient` seam
  * is the only way to keep the vendored provider *and* the binding.
  *
- * The translation is a pass-through. `env.AI.run(model, inputs, { returnRawResponse: true })` takes
- * the same OpenAI-compatible payload the provider already builds — `messages`, `tools`,
- * `tool_choice`, `stream`, `stream_options`, `max_tokens`, `temperature` — and answers with a raw
+ * The translation is *almost* a pass-through. `env.AI.run(model, inputs, { returnRawResponse: true })`
+ * takes the same OpenAI-compatible payload the provider already builds — `messages`, `tools`,
+ * `tool_choice`, `stream`, `stream_options`, `max_tokens`, `temperature` — and answers with an
  * OpenAI-format SSE `Response`. Only the `model` field moves, from the body to the first argument.
+ *
+ * The exception, and the reason `stripNativeTrailer` exists: after the OpenAI-shaped deltas Workers
+ * AI appends one frame of its *own* native accounting —
+ * `{"response":"","usage":{...,"neurons":260.1}}` — which is not an OpenAI chunk and which the
+ * vendored provider rejects with "Invalid ... stream event". Because it arrives last, the whole
+ * reply streams successfully and then the turn dies on the final frame. Filtering it here keeps the
+ * fix at the Maple seam, where `lib/llm/MAPLE.md` says provider-specific behaviour belongs.
  *
  * Requests that are not Workers AI chat completions fall through to the wrapped client untouched.
  */
@@ -88,6 +95,67 @@ const readJsonBody = (request: HttpClientRequest.HttpClientRequest) =>
 	})
 
 /**
+ * Whether an SSE `data:` payload is Workers AI's native accounting trailer rather than an OpenAI
+ * chunk.
+ *
+ * Deliberately narrow. It matches the trailer's exact signature — a `response` string plus a
+ * `usage` object carrying `neurons`, and no `choices`/`object` — so a real OpenAI chunk can never
+ * be mistaken for it, including the `stream_options: {include_usage: true}` chunk, which carries
+ * `choices: []` and `object: "chat.completion.chunk"`.
+ */
+const isNativeWorkersAiTrailer = (payload: string): boolean => {
+	if (payload === "[DONE]") return false
+	try {
+		const value: unknown = JSON.parse(payload)
+		if (typeof value !== "object" || value === null) return false
+		const frame = value as Record<string, unknown>
+		if ("choices" in frame || "object" in frame) return false
+		if (typeof frame.response !== "string") return false
+		const usage = frame.usage
+		return typeof usage === "object" && usage !== null && "neurons" in usage
+	} catch {
+		return false
+	}
+}
+
+/**
+ * Drop the native trailer from an SSE body, passing every other byte through unchanged.
+ *
+ * Frame-aligned rather than line-based: SSE separates events with a blank line, and rewriting at
+ * any finer granularity risks corrupting a multi-line `data:` payload.
+ */
+const stripNativeTrailer = (body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> => {
+	const decoder = new TextDecoder()
+	const encoder = new TextEncoder()
+	let buffer = ""
+
+	const emit = (frame: string, controller: TransformStreamDefaultController<Uint8Array>): void => {
+		const payload = frame
+			.split("\n")
+			.filter((line) => line.startsWith("data:"))
+			.map((line) => line.slice(5).trimStart())
+			.join("\n")
+		if (payload !== "" && isNativeWorkersAiTrailer(payload)) return
+		controller.enqueue(encoder.encode(`${frame}\n\n`))
+	}
+
+	return body.pipeThrough(
+		new TransformStream<Uint8Array, Uint8Array>({
+			transform(chunk, controller) {
+				buffer += decoder.decode(chunk, { stream: true })
+				const frames = buffer.split("\n\n")
+				buffer = frames.pop() ?? ""
+				for (const frame of frames) emit(frame, controller)
+			},
+			flush(controller) {
+				buffer += decoder.decode()
+				if (buffer.trim() !== "") emit(buffer.replace(/\n+$/, ""), controller)
+			},
+		}),
+	)
+}
+
+/**
  * Wrap `fallback` so Workers AI chat completions go through `binding` instead.
  * Without a usable `AI` binding this returns `fallback` unchanged, so a stage with no binding still
  * works through the REST endpoint as long as a Cloudflare API token is configured.
@@ -127,7 +195,15 @@ export const workersAiHttpClient = (
 					)
 				}
 				return Effect.tryPromise({
-					try: () => ai.run(model, inputs, { returnRawResponse: true, signal }),
+					try: async () => {
+						const response = await ai.run(model, inputs, { returnRawResponse: true, signal })
+						if (!response.body) return response
+						return new Response(stripNativeTrailer(response.body), {
+							status: response.status,
+							statusText: response.statusText,
+							headers: response.headers,
+						})
+					},
 					catch: (cause) =>
 						new HttpClientError.HttpClientError({
 							reason: new HttpClientError.TransportError({

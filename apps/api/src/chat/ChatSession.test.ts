@@ -6,13 +6,15 @@
  * headline one on the first run.
  */
 import { assert, beforeEach, describe, it } from "vitest"
-import { ChatTurnTenant } from "@maple/domain/chat-session"
+import { encodeChatTurnTenant, type ChatTurnTenant } from "@maple/domain/chat-session"
 import { ChatSession } from "./ChatSession"
 import { installSchedulerWait, makeFakeDurableObjectState } from "../../test/chat/fake-do-state"
 
 installSchedulerWait()
 
-const TENANT = new ChatTurnTenant({
+// Encoded, because that is what actually crosses the Durable Object boundary: RPC serializes with
+// structured clone, which refuses class instances.
+const TENANT = encodeChatTurnTenant({
 	orgId: "org_test" as ChatTurnTenant["orgId"],
 	userId: "user_test" as ChatTurnTenant["userId"],
 	roles: [],
@@ -30,7 +32,14 @@ const TENANT = new ChatTurnTenant({
 const makeSession = () => {
 	const state = makeFakeDurableObjectState()
 	const session = new ChatSession(state as unknown as DurableObjectState, {})
-	return { session, state }
+	/** The id the session minted for the in-flight turn — deliberately not the user message's. */
+	const turnId = (): string | undefined =>
+		(
+			state.storage.sql
+				.exec("SELECT running_message_id FROM session WHERE id = 1")
+				.toArray()[0] as { running_message_id: string | null } | undefined
+		)?.running_message_id ?? undefined
+	return { session, state, turnId }
 }
 
 describe("ChatSession.history", () => {
@@ -171,6 +180,34 @@ describe("ChatSession turn mutex", () => {
 		assert.isTrue(session.running())
 	})
 
+	it("gives the assistant turn an id distinct from the user message", () => {
+		const { session } = makeSession()
+		const claimed = session.beginTurn({
+			sessionId: "org_test:tab",
+			messageId: "u1",
+			text: "Say PONG",
+			tenant: TENANT,
+		})
+		// Simulate what the turn emits, using the id the session actually handed it.
+		assert.isFalse(session.holdsTurn("u1"), "the user's message id must not own the turn")
+
+		const events = session.since(0)
+		const userMessage = events.find((event) => event.type === "user-message")
+		assert.equal(userMessage?.type === "user-message" ? userMessage.id : undefined, claimed?.messageId)
+
+		// The regression, caught only end-to-end: reusing the user's id meant `openAssistant` found
+		// the *user* message, so every delta appended to the user's own bubble — "Say PONG" came
+		// back as "Say PONGPING". The unit tests missed it because they used distinct ids by hand.
+		session.append({ type: "turn-start", messageId: "u1" })
+		session.append({ type: "text-delta", messageId: "u1", text: "PING" })
+		const collided = session.history()
+		assert.equal(
+			collided.find((message) => message.role === "user")?.text,
+			"Say PONGPING",
+			"this is the shape the bug produced; the fix is that the turn never uses this id",
+		)
+	})
+
 	it("records the user message and returns the cursor BEFORE it", () => {
 		const { session } = makeSession()
 		session.append({ type: "user-message", id: "u0", text: "earlier" })
@@ -189,8 +226,9 @@ describe("ChatSession turn mutex", () => {
 	})
 
 	it("abort ends the turn against the message that actually holds it", () => {
-		const { session } = makeSession()
+		const { session, turnId } = makeSession()
 		session.beginTurn({ sessionId: "org_test:tab", messageId: "m1", text: "hi", tenant: TENANT })
+		const turn = turnId()
 
 		session.abort()
 
@@ -199,27 +237,31 @@ describe("ChatSession turn mutex", () => {
 		assert.equal(last?.type, "turn-end")
 		// The route used to pass a fresh uuid here, so the terminal event named a message that had
 		// never existed and no client ever cleared its streaming state.
-		assert.equal(last?.type === "turn-end" ? last.messageId : undefined, "m1")
+		assert.equal(last?.type === "turn-end" ? last.messageId : undefined, turn)
 		assert.equal(last?.type === "turn-end" ? last.reason : undefined, "aborted")
 	})
 
 	it("a straggler cannot release a newer turn's claim", () => {
-		const { session } = makeSession()
+		const { session, turnId } = makeSession()
 		session.beginTurn({ sessionId: "org_test:tab", messageId: "m1", text: "one", tenant: TENANT })
+		const first = turnId()!
 		session.abort()
 		session.beginTurn({ sessionId: "org_test:tab", messageId: "m2", text: "two", tenant: TENANT })
+		const second = turnId()!
 
 		// The aborted turn keeps draining and eventually calls `endTurn` for its own message.
-		session.endTurn("m1")
+		session.endTurn(first)
 
-		assert.isTrue(session.running(), "m2 still owns the turn")
-		assert.isTrue(session.holdsTurn("m2"))
-		assert.isFalse(session.holdsTurn("m1"))
+		assert.notEqual(first, second)
+		assert.isTrue(session.running(), "the second turn still owns the slot")
+		assert.isTrue(session.holdsTurn(second))
+		assert.isFalse(session.holdsTurn(first))
 	})
 
 	it("expires an abandoned claim instead of wedging the conversation forever", () => {
-		const { session, state } = makeSession()
+		const { session, state, turnId } = makeSession()
 		session.beginTurn({ sessionId: "org_test:tab", messageId: "m1", text: "hi", tenant: TENANT })
+		const turn = turnId()
 
 		// Simulate the turn vanishing (isolate eviction, a defect, a deploy mid-stream) by ageing
 		// its claim past the staleness ceiling.
@@ -240,7 +282,7 @@ describe("ChatSession turn mutex", () => {
 		// And the abandoned turn is closed out in the log, so a client isn't left streaming.
 		const abandoned = session
 			.since(0)
-			.find((event) => event.type === "turn-end" && event.messageId === "m1")
+			.find((event) => event.type === "turn-end" && event.messageId === turn)
 		assert.isDefined(abandoned)
 	})
 })

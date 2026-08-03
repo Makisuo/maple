@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
 	ChatTurnTenant,
 	chatModeFromSessionId,
+	decodeChatTurnTenant,
+	encodeChatTurnTenant,
 	decodeChatEvent,
 	decodeChatEventOrThrow,
 	decodeChatEventPayload,
@@ -118,16 +120,25 @@ describe("chat event storage codec", () => {
 })
 
 describe("ChatTurnTenant", () => {
-	it("carries the caller identity a turn runs as across the Durable Object boundary", () => {
-		// The DO has no auth context of its own: the route resolves and authorizes the real tenant,
-		// then hands down this serializable projection.
-		const tenant = new ChatTurnTenant({
+	it("crosses the Durable Object boundary as a structured-cloneable plain object", () => {
+		// Load-bearing, not pedantry: Durable Object RPC serializes with structured clone, which
+		// refuses class instances outright. As a `Schema.Class` this failed every `beginTurn` with
+		// `DataCloneError: Could not serialize object of type "ChatTurnTenant"` — while `history()`
+		// kept working, because it returns object literals. Only an end-to-end run caught it.
+		const encoded = encodeChatTurnTenant({
 			orgId: "org_1" as ChatTurnTenant["orgId"],
 			userId: "user_1" as ChatTurnTenant["userId"],
 			roles: [],
 			authMode: "self_hosted",
 		})
-		expect(tenant.orgId).toBe("org_1")
-		expect(tenant.authMode).toBe("self_hosted")
+
+		expect(Object.getPrototypeOf(encoded)).toBe(Object.prototype)
+		expect(() => structuredClone(encoded)).not.toThrow()
+		expect(structuredClone(encoded)).toEqual(encoded)
+
+		// And it round-trips back to branded values on the far side.
+		const decoded = decodeChatTurnTenant(structuredClone(encoded))
+		expect(decoded.orgId).toBe("org_1")
+		expect(decoded.authMode).toBe("self_hosted")
 	})
 })

@@ -13,7 +13,7 @@ import { AiTriageRunId, InvestigationId } from "@maple/domain/primitives"
 import { aiTriageSettings, investigations } from "@maple/db"
 import { and, eq, gte, lt, sql } from "drizzle-orm"
 import { Cause, Clock, Data, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
-import { ChatTurnTenant } from "@maple/domain/chat-session"
+import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { Database } from "@/platform/DatabaseLive"
 import { isChatSessionNamespace } from "@/chat/session"
 import { UserId } from "@maple/domain/primitives"
@@ -300,7 +300,7 @@ export const maybeEnqueueTriage: (
 					sessionId,
 					messageId,
 					text: message,
-					tenant: new ChatTurnTenant({
+					tenant: encodeChatTurnTenant({
 						orgId: input.orgId,
 						userId: internalServiceUserId,
 						roles: [],

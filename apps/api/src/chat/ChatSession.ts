@@ -35,7 +35,7 @@ import {
 	type ChatEventInput,
 	type ChatMessage,
 	type ChatToolCall,
-	type ChatTurnTenant,
+	type ChatTurnTenantEncoded,
 } from "@maple/domain/chat-session"
 
 /** SQLite row shapes. `SqlStorage.exec` requires an index signature on its row type. */
@@ -221,19 +221,24 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 		readonly sessionId: string
 		readonly messageId: string
 		readonly text: string
-		readonly tenant: ChatTurnTenant
+		readonly tenant: ChatTurnTenantEncoded
 	}): { cursor: number; messageId: string } | undefined {
 		if (this.isRunning()) return undefined
 		const cursor = this.cursor()
+		// The assistant's message needs an id of its OWN. Reusing the user's meant `history()` found
+		// the user message when opening the assistant one, so every text delta was appended to the
+		// user's own bubble — "Say PONG" came back as "Say PONGPING" — and the client folded it the
+		// same way, since it keys the optimistic user message on exactly this id.
+		const turnId = crypto.randomUUID()
 		this.sql.exec(
 			"UPDATE session SET running = 1, running_since = ?, running_message_id = ? WHERE id = 1",
 			Date.now(),
-			input.messageId,
+			turnId,
 		)
 		this.append({ type: "user-message", id: input.messageId, text: input.text })
 		// `waitUntil` on the DO's own context: the turn is now this object's work, and it outlives
 		// whatever request asked for it.
-		this.ctx.waitUntil(this.runTurn(input.sessionId, input.messageId, input.tenant))
+		this.ctx.waitUntil(this.runTurn(input.sessionId, turnId, input.tenant))
 		return { cursor, messageId: input.messageId }
 	}
 
@@ -290,7 +295,7 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 	private async runTurn(
 		sessionId: string,
 		messageId: string,
-		tenant: ChatTurnTenant,
+		tenant: ChatTurnTenantEncoded,
 	): Promise<void> {
 		try {
 			const { runChatSessionTurn } = await import("./turn-runner")

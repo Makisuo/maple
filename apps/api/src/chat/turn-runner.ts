@@ -20,7 +20,7 @@
  */
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
-import type { ChatMessage, ChatTurnTenant } from "@maple/domain/chat-session"
+import { decodeChatTurnTenant, type ChatMessage, type ChatTurnTenantEncoded } from "@maple/domain/chat-session"
 import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
 import { Message } from "@maple/llm"
 import { Effect, Layer, ManagedRuntime, Stream } from "effect"
@@ -40,23 +40,26 @@ export interface RunChatSessionTurnInput {
 	readonly sessionId: string
 	readonly env: Record<string, unknown>
 	readonly messageId: string
-	readonly tenant: ChatTurnTenant
+	readonly tenant: ChatTurnTenantEncoded
 }
 
 /**
- * Widen the wire projection back into the `apps/api` tenant type.
+ * Decode the wire projection back into the `apps/api` tenant type.
  *
- * `ChatTurnTenant` exists because the DO boundary needs a declared serializable shape; the fields
- * are the same branded primitives, so this is a shape widening (`ReadonlyArray` → array), not a
- * revalidation.
+ * The Durable Object receives a plain, structured-cloneable object (RPC refuses class instances),
+ * so the brands have to be re-established on this side before the value is used as a
+ * `TenantContext`.
  */
-const toTenantContext = (tenant: ChatTurnTenant): TenantContext => ({
-	orgId: tenant.orgId,
-	userId: tenant.userId,
-	roles: [...tenant.roles],
-	authMode: tenant.authMode,
-	...(tenant.actorId === undefined ? {} : { actorId: tenant.actorId }),
-})
+const toTenantContext = (encoded: ChatTurnTenantEncoded): TenantContext => {
+	const tenant = decodeChatTurnTenant(encoded)
+	return {
+		orgId: tenant.orgId,
+		userId: tenant.userId,
+		roles: [...tenant.roles],
+		authMode: tenant.authMode,
+		...(tenant.actorId === undefined ? {} : { actorId: tenant.actorId }),
+	}
+}
 
 /**
  * How much transcript a turn replays.

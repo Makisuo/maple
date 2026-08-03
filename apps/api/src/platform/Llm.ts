@@ -74,8 +74,15 @@ export const layerLlm = (env: LlmEnv): Layer.Layer<LLMClientService> =>
  * blow-up used to arrive as an opaque upstream failure, which is exactly the case a triage retry
  * should handle differently (shrink the transcript) from a transport blip (retry as-is).
  */
-export const toLlmCallError = (operation: string, error: LLMError): LlmCallError =>
-	new LlmCallError({
+export const toLlmCallError = (operation: string, error: LLMError): LlmCallError => {
+	// Provider output that fails to decode carries the offending frame on `reason.raw`. It is the
+	// only thing that makes provider drift diagnosable — without it the failure is just "invalid
+	// stream event" — but it is upstream text, so it goes to the log, never to the client error.
+	const raw = (error.reason as { raw?: unknown }).raw
+	if (typeof raw === "string" && raw !== "") {
+		console.error(`[llm] ${operation}: ${error.message}; frame=${raw.slice(0, 500)}`)
+	}
+	return new LlmCallError({
 		operation,
 		module: error.module,
 		method: error.method,
@@ -84,3 +91,4 @@ export const toLlmCallError = (operation: string, error: LLMError): LlmCallError
 		retryable: error.retryable,
 		contextOverflow: isContextOverflowFailure(error),
 	})
+}

@@ -260,14 +260,29 @@ export const decodeChatEventPayload = (payload: string, seq: number): ChatEvent 
  * serializable shape. The route resolves the real tenant, authorizes it against the session's org,
  * and passes this projection down; the turn re-widens it on the other side.
  */
-export class ChatTurnTenant extends Schema.Class<ChatTurnTenant>("@maple/ChatTurnTenant")({
+export const ChatTurnTenant = Schema.Struct({
 	orgId: OrgId,
 	userId: UserId,
 	roles: Schema.Array(RoleName),
 	authMode: AuthMode,
 	/** Pre-resolved agent identity, when the caller authenticated as one. */
 	actorId: Schema.optionalKey(ActorId),
-}) {}
+})
+export type ChatTurnTenant = Schema.Schema.Type<typeof ChatTurnTenant>
+
+/**
+ * The plain, structured-cloneable form that actually crosses the Durable Object boundary.
+ *
+ * This distinction is load-bearing, not pedantry. Durable Object RPC serializes with structured
+ * clone, which refuses class instances outright — a `Schema.Class` here failed every `beginTurn`
+ * with `DataCloneError: Could not serialize object of type "ChatTurnTenant"`, while `history()`
+ * kept working because it returns object literals. So the schema stays a `Struct` (whose decoded
+ * form *is* a plain object) and the crossing is typed as its encoded shape.
+ */
+export type ChatTurnTenantEncoded = (typeof ChatTurnTenant)["Encoded"]
+
+export const encodeChatTurnTenant = Schema.encodeSync(ChatTurnTenant)
+export const decodeChatTurnTenant = Schema.decodeSync(ChatTurnTenant)
 
 // ---------------------------------------------------------------------------
 // Requests

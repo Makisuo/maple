@@ -111,6 +111,58 @@ describe("workersAiHttpClient", () => {
 		assert.deepEqual(seen, ["https://api.openai.com/v1/chat/completions"])
 	})
 
+	it("strips Workers AI's native accounting trailer but keeps every OpenAI chunk", async () => {
+		// Found end-to-end, not by types: `env.AI.run` streams OpenAI-shaped deltas and then appends
+		// one frame of its OWN native accounting, which the vendored provider rejects with
+		// "Invalid ... stream event". Because it arrives last, the whole reply streams fine and then
+		// the turn dies on the final frame — every chat turn ended in `reason: "error"`.
+		const chunk = (payload: string) => `data: ${payload}\n\n`
+		const openAiDelta = JSON.stringify({
+			choices: [{ delta: { content: "PONG" }, index: 0 }],
+			object: "chat.completion.chunk",
+		})
+		// The `include_usage` chunk also carries `neurons`, so the filter must not eat it: it has
+		// `choices` and `object`, which the native trailer does not.
+		const usageChunk = JSON.stringify({
+			choices: [],
+			object: "chat.completion.chunk",
+			usage: { prompt_tokens: 10, completion_tokens: 1, neurons: 0.36 },
+		})
+		const nativeTrailer = JSON.stringify({
+			response: "",
+			usage: { prompt_tokens: 16804, completion_tokens: 36, neurons: 260.1 },
+		})
+
+		const binding = {
+			run: async () =>
+				new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							const encoder = new TextEncoder()
+							controller.enqueue(encoder.encode(chunk(openAiDelta)))
+							controller.enqueue(encoder.encode(chunk(usageChunk)))
+							controller.enqueue(encoder.encode(chunk("[DONE]")))
+							controller.enqueue(encoder.encode(chunk(nativeTrailer)))
+							controller.close()
+						},
+					}),
+				),
+		}
+		const { client } = recordingFallback()
+
+		const response = await Effect.runPromise(
+			workersAiHttpClient(client, binding).execute(
+				jsonRequest(WORKERS_AI_URL, { model: "@cf/test", messages: [] }),
+			),
+		)
+		const body = await Effect.runPromise(response.text)
+
+		assert.include(body, openAiDelta, "the content delta passes through")
+		assert.include(body, usageChunk, "the OpenAI usage chunk is NOT mistaken for the trailer")
+		assert.include(body, "[DONE]", "the terminator passes through")
+		assert.notInclude(body, "260.1", "the native trailer is dropped")
+	})
+
 	it("is a no-op without a usable binding", () => {
 		const { client } = recordingFallback()
 		// Identity, not a wrapper: a stage with no binding still reaches the REST endpoint, so long

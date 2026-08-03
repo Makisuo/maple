@@ -26,8 +26,9 @@ import {
 	ChatHistoryResponse,
 	ChatSendRequest,
 	ChatSendResponse,
-	ChatTurnTenant,
+	encodeChatTurnTenant,
 	orgIdFromChatSessionId,
+	type ChatTurnTenantEncoded,
 	type ChatEvent,
 } from "@maple/domain/chat-session"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
@@ -78,9 +79,15 @@ const sessionIdFromPath = (pathname: string): string | undefined => {
 	}
 }
 
-/** The serializable projection of the caller's identity that the Durable Object takes. */
-const toChatTurnTenant = (tenant: TenantContext): ChatTurnTenant =>
-	new ChatTurnTenant({
+/**
+ * The caller's identity, encoded for the Durable Object hop.
+ *
+ * Durable Object RPC serializes with structured clone, which refuses class instances — so what
+ * crosses has to be a plain object, not a schema instance. Encoding here (rather than handing over
+ * the branded values directly) also means the DO receives exactly the declared wire shape.
+ */
+const toChatTurnTenant = (tenant: TenantContext): ChatTurnTenantEncoded =>
+	encodeChatTurnTenant({
 		orgId: tenant.orgId,
 		userId: tenant.userId,
 		roles: tenant.roles,

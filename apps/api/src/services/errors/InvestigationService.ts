@@ -26,7 +26,7 @@ import {
 	UserId as UserIdSchema,
 } from "@maple/domain/primitives"
 import { wrapChatContext } from "@maple/domain/chat-preamble"
-import { ChatTurnTenant } from "@maple/domain/chat-session"
+import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { chatSessionStub } from "@/chat/session"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { aiTriageSettings, errorIssueEvents, investigations, type InvestigationRow } from "@maple/db"
@@ -405,7 +405,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 							sessionId,
 							messageId,
 							text: message,
-							tenant: new ChatTurnTenant({
+							tenant: encodeChatTurnTenant({
 								orgId,
 								userId: internalServiceUserId,
 								roles: [],

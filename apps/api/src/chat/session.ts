@@ -16,7 +16,7 @@ import type {
 	ChatEvent,
 	ChatEventInput,
 	ChatMessage,
-	ChatTurnTenant,
+	ChatTurnTenantEncoded,
 } from "@maple/domain/chat-session"
 
 /** The `ChatSession` Durable Object's RPC surface. Mirrors `./ChatSession.ts`. */
@@ -31,7 +31,7 @@ export interface ChatSessionStub {
 		readonly sessionId: string
 		readonly messageId: string
 		readonly text: string
-		readonly tenant: ChatTurnTenant
+		readonly tenant: ChatTurnTenantEncoded
 	}) => Promise<{ cursor: number; messageId: string } | undefined>
 	readonly holdsTurn: (messageId: string) => Promise<boolean>
 	readonly endTurn: (messageId: string) => Promise<void>
