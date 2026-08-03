@@ -22,6 +22,7 @@ import {
 } from "@maple-dev/clickhouse-builder"
 import { CHNumber } from "../schema"
 import { MetricsSum } from "../tables"
+import { ISO_Z_FORMAT, isoBucket } from "./format"
 import {
 	CF_ATTR,
 	CF_FILTERABLE,
@@ -33,7 +34,6 @@ import {
 	type CloudflareMetricsAccessor,
 } from "./cloudflare-infra-filters"
 
-const ISO_Z_FORMAT = "%Y-%m-%dT%H:%i:%S.%fZ"
 
 export type CloudflareBreakdownDimension =
 	| "path"
@@ -247,10 +247,7 @@ export function cloudflareZoneBreakdownTimeseriesSQL(
 	}
 	return from(MetricsSum)
 		.select(($) => ({
-			bucket: CH.formatDateTime(
-				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-				ISO_Z_FORMAT,
-			),
+			bucket: isoBucket($.TimeUnix),
 			key: seriesKey($),
 			requests: CH.sum($.Value),
 		}))

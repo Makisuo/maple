@@ -25,6 +25,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { from, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { ServiceUsage, SessionReplays } from "../tables"
 import { CHNumber } from "../schema"
+import { hourFloor } from "./query-helpers"
 
 const DAY_SECONDS = 86_400
 
@@ -55,7 +56,6 @@ export const dailySignalVolumeRowSchema: CompiledQueryRowSchema<DailySignalVolum
  * the customer is never billed for separately.
  */
 export function dailySignalVolumeQuery() {
-	const hourFloor = (name: string) => CH.toStartOfHour(CH.toDateTime(param.dateTime(name)))
 
 	return from(ServiceUsage)
 		.select(($) => ({

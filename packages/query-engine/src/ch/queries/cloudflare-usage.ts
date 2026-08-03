@@ -12,8 +12,8 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { from, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { CHNumber } from "../schema"
 import { MetricsSum } from "../tables"
+import { ISO_Z_FORMAT, isoBucket } from "./format"
 
-const ISO_Z_FORMAT = "%Y-%m-%dT%H:%i:%S.%fZ"
 
 /**
  * The only metric names the poller emits as monotonic request counters — the
@@ -103,10 +103,7 @@ export function cloudflareUsageQuery() {
 	return from(MetricsSum)
 		.select(($) => ({
 			serviceName: $.ServiceName,
-			bucket: CH.formatDateTime(
-				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-				ISO_Z_FORMAT,
-			),
+			bucket: isoBucket($.TimeUnix),
 			requests: CH.sum($.Value),
 			datapoints: CH.count(),
 			lastTimeUnix: CH.formatDateTime(CH.max_($.TimeUnix), ISO_Z_FORMAT),
