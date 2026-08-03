@@ -9,6 +9,8 @@ import { migration_0007_db_namespace_hyperdrive } from "./0007_db_namespace_hype
 import { migration_0008_service_operations_minutely } from "./0008_service_operations_minutely"
 import { migration_0009_one_year_service_history } from "./0009_one_year_service_history"
 import { migration_0010_search_indexes } from "./0010_search_indexes"
+import { migration_0011_session_analytics_columns } from "./0011_session_analytics_columns"
+import { migration_0012_session_event_attribute_keys } from "./0012_session_event_attribute_keys"
 
 /**
  * A migration statement is either a raw SQL string (structural DDL) or a
@@ -50,6 +52,8 @@ export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0008_service_operations_minutely,
 	migration_0009_one_year_service_history,
 	migration_0010_search_indexes,
+	migration_0011_session_analytics_columns,
+	migration_0012_session_event_attribute_keys,
 ] as const
 
 /** Highest migration `version` bundled — i.e. the schema level a fully-applied

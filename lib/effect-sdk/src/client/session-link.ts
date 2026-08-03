@@ -1,4 +1,4 @@
-import { getSessionId, readSessionSink, recordTraceId } from "@maple/browser-session"
+import { getSessionId, hasConsent, readSessionSink, recordTraceId } from "@maple/browser-session"
 import { Effect, Layer, Tracer } from "effect"
 import { noteStandaloneSpan } from "./standalone-session.js"
 import { getCurrentUserId } from "./user.js"
@@ -34,31 +34,30 @@ export const withSessionLink = <ROut, E, RIn>(base: Layer.Layer<ROut, E, RIn>) =
 					context: inner.context,
 					span(options) {
 						const span = inner.span(options)
-						const sink = readSessionSink()
-						if (sink) {
-							sink.recordTraceId(span.traceId)
-							span.attribute("session.id", sink.sessionId)
-						} else {
-							const sessionId = getSessionId()
-							if (sessionId !== undefined) {
-								span.attribute("session.id", sessionId)
-								// Feeds the standalone session's ended-row trace ids and
-								// detects idle rotation — see standalone-session.ts.
-								noteStandaloneSpan(sessionId, span.traceId)
-								// Also feed this SDK's bundled shared registry, so spans
-								// emitted before the lazily loaded replay engine publishes
-								// the sink still land on the engine's ended rows.
-								recordTraceId(span.traceId)
+						if (hasConsent()) {
+							const sink = readSessionSink()
+							if (sink) {
+								sink.recordTraceId(span.traceId)
+								span.attribute("session.id", sink.sessionId)
+							} else {
+								const sessionId = getSessionId()
+								if (sessionId !== undefined) {
+									span.attribute("session.id", sessionId)
+									// Feeds the standalone session's ended-row trace ids and
+									// detects idle rotation — see standalone-session.ts.
+									noteStandaloneSpan(sessionId, span.traceId)
+									// Also feed this SDK's bundled shared registry, so spans
+									// emitted before the lazily loaded replay engine publishes
+									// the sink still land on the engine's ended rows.
+									recordTraceId(span.traceId, sessionId)
+								}
 							}
+							// Stamp the signed-in end-user (once `identify()` has run) so
+							// traces are user-attributable, not just session-grouped.
+							// `user.id` is standard OTel semconv, used verbatim.
+							const userId = getCurrentUserId()
+							if (userId !== undefined) span.attribute("user.id", userId)
 						}
-						// Stamp the signed-in end-user (once `identify()` has run) so
-						// traces are user-attributable, not just session-grouped.
-						// Read per span at creation time, so spans started before
-						// `identify()` resolves stay anonymous — same semantics as the
-						// session starting anonymous. `user.id` is standard OTel semconv,
-						// used verbatim (no `maple.*` namespace).
-						const userId = getCurrentUserId()
-						if (userId !== undefined) span.attribute("user.id", userId)
 						return span
 					},
 				}),

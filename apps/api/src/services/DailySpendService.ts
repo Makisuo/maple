@@ -1,8 +1,9 @@
 import { DailySpendResponse, DailyVolume, WarehouseQueryError } from "@maple/domain/http"
-import { CH, parseWarehouseDateTime } from "@maple/query-engine"
+import { CH, parseWarehouseDateTime, formatWarehouseDateTime } from "@maple/query-engine"
 import { Context, Effect, Layer } from "effect"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import type { TenantContext } from "./AuthService"
+import * as Integrations from "@maple/query-engine-integrations"
 
 /**
  * The daily volume series behind the billing page's cumulative spend chart.
@@ -22,8 +23,6 @@ const DAY_MS = 86_400_000
 const BYTES_PER_BILLED_GB = 1_000_000_000
 
 /** ClickHouse datetime literal (`YYYY-MM-DD HH:MM:SS`), which is what the DSL params want. */
-const toWarehouseDateTime = (epochMs: number) =>
-	new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
 
 /** `YYYY-MM-DD` in UTC — the key the client renders and the series is indexed by. */
 export const toUtcDateKey = (epochMs: number) => new Date(epochMs).toISOString().slice(0, 10)
@@ -61,8 +60,8 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				const orgId = tenant.orgId
 				const params = {
 					orgId,
-					startTime: toWarehouseDateTime(cycle.startMs),
-					endTime: toWarehouseDateTime(cycle.endMs),
+					startTime: formatWarehouseDateTime(cycle.startMs),
+					endTime: formatWarehouseDateTime(cycle.endMs),
 				}
 
 				// Two queries rather than a UNION: the tables disagree on the bucket
@@ -71,8 +70,8 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				const signalRows = yield* warehouse
 					.compiledQuery(
 						tenant,
-						CH.compile(CH.dailySignalVolumeQuery(), params, {
-							rowSchema: CH.dailySignalVolumeRowSchema,
+						CH.compile(Integrations.dailySignalVolumeQuery(), params, {
+							rowSchema: Integrations.dailySignalVolumeRowSchema,
 						}),
 						{ profile: "list", context: "billingDailySignalVolume" },
 					)
@@ -81,8 +80,8 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				const sessionRows = yield* warehouse
 					.compiledQuery(
 						tenant,
-						CH.compile(CH.dailySessionCountQuery(), params, {
-							rowSchema: CH.dailySessionCountRowSchema,
+						CH.compile(Integrations.dailySessionCountQuery(), params, {
+							rowSchema: Integrations.dailySessionCountRowSchema,
 						}),
 						{ profile: "list", context: "billingDailySessionCount" },
 					)

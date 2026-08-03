@@ -2,7 +2,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Exit } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { memo, useEffect, useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/http"
 import { Unitflow, View } from "@maple/unitflow/react"
@@ -155,7 +155,10 @@ const AlertsOverviewContent = memo(function AlertsOverviewContent({
 		if (toggleState === lastToggleState.current) return
 		lastToggleState.current = toggleState
 		if (AsyncResult.isFailure(toggleState)) {
-			toast.error(getExitErrorMessage(Exit.failCause(toggleState.cause), "Failed to update rule"))
+			toastManager.add({
+				title: getExitErrorMessage(Exit.failCause(toggleState.cause), "Failed to update rule"),
+				type: "error",
+			})
 		}
 	}, [toggleState])
 	const isToggling = AsyncResult.isWaiting(toggleState)

@@ -1383,7 +1383,7 @@ const serviceMapChecks: ReadonlyArray<AuditCheck> = [
 			// Group by (key, casefolded value); more than one raw spelling in a group is a collision.
 			const spellings = new Map<string, Set<string>>()
 			for (const row of warehouse.peerValues) {
-				const groupKey = `${row.attributeKey} ${row.attributeValue.toLowerCase()}`
+				const groupKey = `${row.attributeKey}\x00${row.attributeValue.toLowerCase()}`
 				const bucket = spellings.get(groupKey)
 				if (bucket) bucket.add(row.attributeValue)
 				else spellings.set(groupKey, new Set([row.attributeValue]))
@@ -1392,7 +1392,7 @@ const serviceMapChecks: ReadonlyArray<AuditCheck> = [
 				.filter(([, values]) => values.size > 1)
 				.map(([groupKey, values]) => ({
 					kind: "attribute_key" as const,
-					name: groupKey.split(" ")[0] ?? "",
+					name: groupKey.split("\x00")[0] ?? "",
 					note: [...values].sort().join(" / "),
 				}))
 			return collisions.length === 0

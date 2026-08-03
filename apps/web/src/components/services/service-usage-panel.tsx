@@ -8,6 +8,7 @@ import type { ServiceUsageTotals } from "@/api/warehouse/service-usage"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { SectionCard } from "./section-card"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 interface ServiceUsagePanelProps {
 	serviceName: string
 	effectiveStartTime: string
@@ -21,11 +22,6 @@ interface ServiceUsagePanelProps {
 	envFilterActive?: boolean
 }
 
-/** Format a warehouse datetime back into the "YYYY-MM-DD HH:mm:ss" wire shape. */
-function toWarehouseString(ms: number): string {
-	return new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-}
-
 /** The previous window of equal duration ending where the current one starts. */
 function previousWindow(startTime: string, endTime: string) {
 	const start = new Date(normalizeTimestampInput(startTime)).getTime()
@@ -33,8 +29,8 @@ function previousWindow(startTime: string, endTime: string) {
 	if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return undefined
 	const duration = end - start
 	return {
-		previousStartTime: toWarehouseString(start - duration),
-		previousEndTime: toWarehouseString(start),
+		previousStartTime: formatWarehouseDateTime(start - duration),
+		previousEndTime: formatWarehouseDateTime(start),
 	}
 }
 

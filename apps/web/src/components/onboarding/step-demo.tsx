@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { motion, useReducedMotion } from "motion/react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { Exit } from "effect"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Button } from "@maple/ui/components/ui/button"
@@ -75,11 +75,14 @@ export function StepDemo({
 		setIsSeeding(false)
 
 		if (Exit.isSuccess(result)) {
-			toast.success("Demo data loaded — pick a plan to keep exploring")
+			toastManager.add({ title: "Demo data loaded — pick a plan to keep exploring", type: "success" })
 			onComplete()
 			return
 		}
-		toast.error("Couldn't load demo data — heading on so you can connect your app")
+		toastManager.add({
+			title: "Couldn't load demo data — heading on so you can connect your app",
+			type: "error",
+		})
 		onComplete()
 	}
 

@@ -44,19 +44,34 @@ export class CompiledQueryDecodeError extends Schema.TaggedErrorClass<CompiledQu
 // never need to cast manually.
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether a compiled query is confined to one tenant.
+ *
+ * `"org"` means a top-level `WHERE` predicate pins the tenant column; anything
+ * else is `"cross-org"` and reads every tenant the credentials can see.
+ * Executors are expected to refuse `"cross-org"` on their normal read path and
+ * require an explicit privileged entry point instead — which is why this is a
+ * derived fact on the compiled query rather than a convention in a doc comment.
+ */
+export type TenantScope = "org" | "cross-org"
+
 export interface CompiledQuery<Output> {
 	readonly sql: string
+	readonly tenantScope: TenantScope
+	/** Whether a `rowSchema` was supplied. Lets a catalog sweep see the queries
+	 *  that decode nothing — a missing schema is otherwise invisible, because
+	 *  `decodeRows` silently degrades to an identity cast. */
+	readonly rowSchemaDeclared: boolean
 	/** Execution-routing metadata: `"ingest"` marks a query whose datasource only
 	 *  exists in the managed ingest pipeline (declared via `.routing("ingest")` at
 	 *  the query definition), so executors read it there instead of a per-org
 	 *  warehouse override. */
 	readonly routing?: "ingest"
-	/** Type-safe cast of raw query results. The cast is sound because the
-	 *  Output type is derived from the SELECT clause that produced the SQL. */
-	readonly castRows: (rows: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<Output>
 	/** Runtime decode of raw query results. Queries built from handwritten SQL
 	 *  should provide a row schema so schema drift is caught before consumers
-	 *  read fields from `Record<string, unknown>`. */
+	 *  read fields from `Record<string, unknown>`. Without a schema this is an
+	 *  identity cast — there is deliberately no separate `castRows`: a cast that
+	 *  looked type-safe hid wire-format drift (64-bit ints arriving as strings). */
 	readonly decodeRows: (
 		rows: ReadonlyArray<Record<string, unknown>>,
 	) => Effect.Effect<ReadonlyArray<Output>, CompiledQueryDecodeError>
@@ -71,6 +86,7 @@ export type CompiledQueryRowSchema<Output> = Schema.Schema<Output>
 
 const makeCompiledQuery = <Output>(
 	sql: string,
+	tenantScope: TenantScope,
 	rowSchema?: CompiledQueryRowSchema<Output>,
 	routing?: "ingest",
 ): CompiledQuery<Output> => {
@@ -98,8 +114,9 @@ const makeCompiledQuery = <Output>(
 
 	return {
 		sql,
+		tenantScope,
+		rowSchemaDeclared: rowSchema !== undefined,
 		...(routing === undefined ? {} : { routing }),
-		castRows: (rows) => rows as unknown as ReadonlyArray<Output>,
 		decodeRows,
 		decodeFirstRow: (rows) => {
 			const row = rows[0]
@@ -125,12 +142,17 @@ const makeCompiledQuery = <Output>(
  * Explicit constructor for SQL that cannot yet be expressed through the typed
  * DSL. Prefer `compile(CH.from(...))`; use this only for deliberately
  * handwritten ClickHouse SQL and pass `rowSchema` whenever possible.
+ *
+ * `tenantScope` is required and cannot be inferred here — there is no query AST
+ * to inspect, only a string. Stating it is the point: a handwritten query that
+ * forgets its tenant predicate should fail to compile until someone has looked.
  */
 export const unsafeCompiledQuery = <Output>(args: {
 	readonly sql: string
+	readonly tenantScope: TenantScope
 	readonly rowSchema?: CompiledQueryRowSchema<Output>
 	readonly routing?: "ingest"
-}): CompiledQuery<Output> => makeCompiledQuery(args.sql, args.rowSchema, args.routing)
+}): CompiledQuery<Output> => makeCompiledQuery(args.sql, args.tenantScope, args.rowSchema, args.routing)
 
 export function compileCH<
 	Cols extends ColumnDefs,
@@ -167,16 +189,29 @@ export function compileCH<
 		.filter((c): c is NonNullable<typeof c> => c != null)
 		.map((c) => c.toFragment())
 
+	// Tenant scope is read off THIS query's top-level predicates only. A filter
+	// inside `fromQuery`/`fromUnion`/a join that the outer query doesn't repeat
+	// does not scope the result — that is precisely the shape (an inner-scoped
+	// subquery joined to an unscoped outer) this is meant to catch. The
+	// top-level list is AND-joined below, so one marked entry is sufficient.
+	const hasOwnTenantPredicate = whereConditions.some((c) => c?.scopesTenant === true)
+
 	// FROM clause
 	let fromFragment
+	// Whether the row source is itself tenant-confined. A query reading only from
+	// a scoped subquery cannot see another tenant's rows even with no WHERE of
+	// its own — that is the `SELECT sum(total) FROM (scoped UNION scoped)` shape.
+	let fromSourceScope: TenantScope = "cross-org"
 	if (state.fromQuery) {
 		// Compile the inner query lazily
 		const innerCompiled = compileCH(state.fromQuery, params, { skipFormat: true })
+		fromSourceScope = innerCompiled.tenantScope
 		fromFragment = raw(`(${innerCompiled.sql}) AS ${state.fromQueryAlias}`)
 	} else if (state.fromUnion) {
 		// Compile the inner union without an outer FORMAT — the outer query
 		// owns formatting. Strips a trailing `\nFORMAT <fmt>` defensively.
 		const innerCompiled = compileUnion(state.fromUnion, params)
+		fromSourceScope = innerCompiled.tenantScope
 		const innerSql = innerCompiled.sql.replace(/\nFORMAT \w+$/, "")
 		fromFragment = raw(`(\n${innerSql}\n) AS ${state.fromQueryAlias}`)
 	} else if (state.tableAlias) {
@@ -185,15 +220,29 @@ export function compileCH<
 		fromFragment = ident(state.tableName)
 	}
 
+	// A FROM that names a CTE inherits whatever scope the CTE was declared with.
+	// The CTE body is an opaque pre-compiled string, so the declaration is the
+	// only thing that can carry this — see `withCTE`.
+	if (!state.fromQuery && !state.fromUnion) {
+		const cte = state.ctes.find((c) => c.name === state.tableName)
+		if (cte?.tenantScope === "org") fromSourceScope = "org"
+	}
+
 	// JOINs
+	// Every joined source is another set of rows that can reach the output, so
+	// each must be tenant-confined for the join result to be. A bare table join
+	// is unconfined unless the outer query pins the tenant itself.
+	let allJoinSourcesScoped = true
 	const joins =
 		state.typedJoins.length > 0
 			? state.typedJoins.map((j) => {
 					let tableSql: string
 					if (j.innerQuery) {
 						const compiled = compileCH(j.innerQuery, params, { skipFormat: true })
+						if (compiled.tenantScope !== "org") allJoinSourcesScoped = false
 						tableSql = `(${compiled.sql})`
 					} else if (j.tableName) {
+						allJoinSourcesScoped = false
 						tableSql = j.tableName
 					} else {
 						throw new QueryBuilderError({
@@ -238,8 +287,17 @@ export function compileCH<
 		sql = sql.replaceAll(placeholder, resolved)
 	}
 
+	// Scoped when this query pins the tenant itself, or when every row source it
+	// reads from — the FROM and each join — is already confined to one tenant.
+	const tenantScope: TenantScope =
+		state.crossOrg === true
+			? "cross-org"
+			: hasOwnTenantPredicate || (fromSourceScope === "org" && allJoinSourcesScoped)
+				? "org"
+				: "cross-org"
+
 	return {
-		...makeCompiledQuery<Output>(sql, options?.rowSchema, state.routingValue),
+		...makeCompiledQuery<Output>(sql, tenantScope, options?.rowSchema, state.routingValue),
 	}
 }
 
@@ -255,9 +313,14 @@ export function compileUnion<Output extends Record<string, any>, Params extends 
 	const state = union._state
 
 	// Compile each sub-query without FORMAT
-	const subSqls = state.queries.map((q) => compileCH(q, params, { skipFormat: true }).sql)
+	const subQueries = state.queries.map((q) => compileCH(q, params, { skipFormat: true }))
 
-	let sql = subSqls.join("\nUNION ALL\n")
+	// UNION ALL is a disjunction: one unscoped branch leaks every tenant into the
+	// result regardless of how tightly the others are filtered.
+	const tenantScope: TenantScope =
+		subQueries.length > 0 && subQueries.every((q) => q.tenantScope === "org") ? "org" : "cross-org"
+
+	let sql = subQueries.map((q) => q.sql).join("\nUNION ALL\n")
 
 	// Wrap in outer SELECT if ordering/pagination is needed
 	const hasOuter =
@@ -281,7 +344,7 @@ export function compileUnion<Output extends Record<string, any>, Params extends 
 	}
 
 	return {
-		...makeCompiledQuery<Output>(sql, options?.rowSchema),
+		...makeCompiledQuery<Output>(sql, tenantScope, options?.rowSchema),
 	}
 }
 

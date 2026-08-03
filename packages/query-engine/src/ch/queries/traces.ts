@@ -22,17 +22,18 @@ import { METRIC_NEEDS } from "../../traces-shared"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import * as T from "@maple-dev/clickhouse-builder/types"
 import { finalizeTimeseries } from "./series-cap"
+import { edgeCondition, interiorBounds, interiorConditions } from "./rollup-splice"
 import {
 	apdexExprs,
 	buildProjectedMapExpr,
 	canUseServiceOverviewMv,
 	canUseTracesAggregatesMv,
-	inclusionCondition,
 	inclusionValues,
 	serviceOverviewWhereConditions,
 	tracesAggregatesWhereConditions,
 	tracesBaseWhereConditions,
 	type TracesBaseWhereOpts,
+	matchOrIn,
 } from "./query-helpers"
 
 // ---------------------------------------------------------------------------
@@ -357,13 +358,21 @@ const TRACES_TS_COLUMNS: ColumnDefs = {
 	estimatedSpanCount: T.float64,
 }
 
-export function tracesTimeseriesQuery(
-	opts: TracesTimeseriesOpts,
-): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
-	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
-	const canUseAnnualServiceOverview =
+/**
+ * Whether a timeseries request can be served by the one-year service-overview
+ * rollup (raw partial edge hours + `service_overview_hourly` interior) instead
+ * of scanning `traces`.
+ *
+ * Exported because it names a distinct SQL *route*: the SQL it selects is
+ * structurally unlike every other branch of `tracesTimeseriesQuery`, so the
+ * catalog sweep in `sql-catalog.ts` asserts a fixture exercises it both ways.
+ * A route with no fixture is a route no test has ever executed — which is
+ * exactly how a `NO_COMMON_TYPE` shipped to prod here.
+ */
+export function canUseAnnualServiceOverview(opts: TracesTimeseriesOpts): boolean {
+	return (
 		opts.allMetrics === true &&
-		apdexThresholdMs === 500 &&
+		(opts.apdexThresholdMs ?? 500) === 500 &&
 		opts.rootOnly === true &&
 		(opts.bucketSeconds ?? 0) >= 3600 &&
 		(opts.groupBy == null || opts.groupBy.length === 0) &&
@@ -376,11 +385,15 @@ export function tracesTimeseriesQuery(
 		!opts.attributeFilters?.length &&
 		!opts.resourceAttributeFilters?.length &&
 		!Object.values(opts.matchModes ?? {}).includes("contains")
+	)
+}
 
-	if (canUseAnnualServiceOverview) {
-		const startHour = "toStartOfHour(toDateTime(__PARAM_startTime__))"
-		const endHour = "toStartOfHour(toDateTime(__PARAM_endTime__))"
-		const firstFullHour = `if(toDateTime(__PARAM_startTime__) = ${startHour}, ${startHour}, ${startHour} + INTERVAL 1 HOUR)`
+export function tracesTimeseriesQuery(
+	opts: TracesTimeseriesOpts,
+): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
+	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
+
+	if (canUseAnnualServiceOverview(opts)) {
 		const rawEdges = from(ServiceOverviewSpans)
 			.select(($) => ({
 				bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
@@ -396,10 +409,7 @@ export function tracesTimeseriesQuery(
 						.and($.Duration.lt(2_000_000_000)),
 				),
 			}))
-			.where(($) => [
-				...serviceOverviewWhereConditions($, opts),
-				CH.rawCond(`(Timestamp < ${firstFullHour} OR Timestamp >= ${endHour})`),
-			])
+			.where(($) => [...serviceOverviewWhereConditions($, opts), edgeCondition("Timestamp")])
 			.groupBy("bucket")
 
 		const hourlyInterior = from(ServiceOverviewHourly)
@@ -417,8 +427,7 @@ export function tracesTimeseriesQuery(
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				$.Hour.gte(CH.rawExpr<string>(firstFullHour)),
-				$.Hour.lt(CH.rawExpr<string>(endHour)),
+				...interiorConditions($.Hour),
 				opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
 				opts.environments?.length ? CH.inList($.DeploymentEnv, opts.environments) : undefined,
 				opts.namespaces?.length ? CH.inList($.ServiceNamespace, opts.namespaces) : undefined,
@@ -503,9 +512,6 @@ export function tracesTimeseriesQuery(
 		// hour of traffic. Instead: raw `traces` covers the two partial edge hours,
 		// the MV covers the whole-hour interior, and the two tile the window
 		// exactly. Same shape as the annual service-overview branch above.
-		const startHour = "toStartOfHour(toDateTime(__PARAM_startTime__))"
-		const endHour = "toStartOfHour(toDateTime(__PARAM_endTime__))"
-		const firstFullHour = `if(toDateTime(__PARAM_startTime__) = ${startHour}, ${startHour}, ${startHour} + INTERVAL 1 HOUR)`
 
 		// The union's branches must agree on aggregate-state types, so the raw side
 		// emits `quantilesTDigestWeightedState(…)(Duration, toUInt32(…))` to match
@@ -543,11 +549,9 @@ export function tracesTimeseriesQuery(
 				// which is the same class of bug this union exists to close.
 				...tracesBaseWhereConditions($, { ...opts, spanName: undefined, spanNames: undefined }),
 				CH.when(spanNames, (v: readonly string[]) =>
-					opts.matchModes?.spanName === "contains" && v.length === 1
-						? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!)).gt(0)
-						: inclusionCondition($.SpanName, v),
+					matchOrIn($.SpanName, v, opts.matchModes?.spanName === "contains"),
 				),
-				CH.rawCond(`(Timestamp < ${firstFullHour} OR Timestamp >= ${endHour})`),
+				edgeCondition("Timestamp"),
 			])
 			.groupBy("bucket", "groupName")
 
@@ -565,7 +569,7 @@ export function tracesTimeseriesQuery(
 				bWeightedErrorCount: CH.sum($.WeightedErrorCount),
 				bDurationQuantiles: CH.rawExpr<string>(mvQuantileState),
 			}))
-			.where(($) => tracesAggregatesWhereConditions($, opts, { gte: firstFullHour, lt: endHour }))
+			.where(($) => tracesAggregatesWhereConditions($, opts, interiorBounds()))
 			.groupBy("bucket", "groupName")
 
 		const weightedCount = CH.rawExpr<number>("sum(bWeightedCount)")

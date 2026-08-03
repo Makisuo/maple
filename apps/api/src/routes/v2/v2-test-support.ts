@@ -145,7 +145,7 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 /** Inert WarehouseQueryService for harnesses that never touch warehouse-backed groups. */
 export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
 	query: die,
-	sqlQuery: die,
+	crossOrgQuery: die,
 	rawSqlQuery: die,
 	compiledQuery: die,
 	compiledQueryWithCapabilities: die,

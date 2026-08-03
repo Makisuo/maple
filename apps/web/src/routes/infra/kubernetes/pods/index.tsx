@@ -29,7 +29,7 @@ import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
-import { useDebouncedValue } from "@/hooks/use-debounced-value"
+import { useDebouncedValue } from "@maple/ui/hooks/use-debounced-value"
 import type { PodSortKey, SortDirection } from "@/api/warehouse/infra"
 
 const PAGE_SIZE = 50

@@ -9,7 +9,7 @@ import { getServiceColor } from "../../lib/colors"
 import { getCacheInfo, cacheResultStyles } from "../../lib/cache"
 import { getHttpInfo, HTTP_METHOD_COLORS } from "../../lib/http"
 import { getCloudPlatform, outcomeBadgeStyle } from "../../lib/cloud-platforms"
-import { SPAN_KIND_LABELS } from "../../lib/span-category"
+import { getSpanKindLabel, getSpanStatusBadgeClass } from "../../lib/span-kind"
 import { PixelDurationBar } from "./pixel-duration-bar"
 import { ServiceDot } from "../service-dot"
 import { countDescendants } from "./auto-collapse"
@@ -23,12 +23,6 @@ interface SpanRowProps {
 	onToggle: (span: SpanNode) => void
 	isSelected?: boolean
 	onSelect?: (span: SpanNode) => void
-}
-
-const statusStyles: Record<string, string> = {
-	Ok: "bg-severity-info/15 text-severity-info border-severity-info/30",
-	Error: "bg-severity-error/15 text-severity-error border-severity-error/30",
-	Unset: "bg-muted text-muted-foreground border-border",
 }
 
 function SpanRowImpl({
@@ -110,8 +104,8 @@ function SpanRowImpl({
 	const cacheInfo = getCacheInfo(span.spanAttributes)
 	const httpInfo = getHttpInfo(span)
 	const platform = getCloudPlatform(span.spanAttributes)
-	const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
-	const kindLabel = SPAN_KIND_LABELS[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
+	const statusStyle = getSpanStatusBadgeClass(span.statusCode)
+	const kindLabel = getSpanKindLabel(span.spanKind)
 
 	const barColor =
 		httpInfo?.statusCode && httpInfo.statusCode >= 500

@@ -13,12 +13,7 @@ import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@maple/ui/format"
 import { formatBytes, formatPercent } from "@maple/ui/format"
-import {
-	CHART_EMPTY_MESSAGE,
-	CHART_GRID_DASH,
-	makeBucketLabeler,
-	transformRows,
-} from "../chart-utils"
+import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler, transformRows } from "../chart-utils"
 import { OTHER_ZONES_COLOR, OTHER_ZONES_SERIES } from "./constants"
 
 export type CloudflareZoneMetric = "requests" | "errorRate" | "cacheHitRate" | "bytes"

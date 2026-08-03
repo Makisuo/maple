@@ -23,7 +23,6 @@ const makeMockExecutor = (
 	tracesData: ReadonlyArray<unknown>,
 ): WarehouseExecutorShape => ({
 	orgId: "org_test",
-	sqlQuery: () => Effect.succeed([] as ReadonlyArray<never>),
 	compiledQuery: (compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: (compiled) => compiled.decodeFirstRow([]).pipe(Effect.orDie),
 	query: (pipe: string, params: Record<string, unknown>) => {

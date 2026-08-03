@@ -24,8 +24,9 @@ export const GET: APIRoute = ({ props, site }) => {
 		`## ${useCase.storyTitle()}`,
 		useCase.storyLede(),
 		`Signal: ${useCase.signal}. ${useCase.constantLabel}: ${useCase.constant}.`,
-		...useCase.steps.map((step) =>
-			`### ${step.elapsed} · ${step.surface} (${step.route}) — ${step.title()}\n\n${step.body()}`,
+		...useCase.steps.map(
+			(step) =>
+				`### ${step.elapsed} · ${step.surface} (${step.route}) — ${step.title()}\n\n${step.body()}`,
 		),
 		useCase.outcomeLine(),
 		useCase.outcomeMetrics.map((metric) => `- **${metric.value}** ${metric.label()}`).join("\n"),

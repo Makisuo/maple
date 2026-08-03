@@ -52,7 +52,7 @@ GROUP BY name
 ORDER BY value DESC
 LIMIT 10`
 
-const HISTOGRAM_TEMPLATE =`SELECT Duration / 1000000 AS value
+const HISTOGRAM_TEMPLATE = `SELECT Duration / 1000000 AS value
 FROM service_overview_spans
 WHERE $__orgFilter AND $__timeFilter(Timestamp)
 LIMIT 5000`

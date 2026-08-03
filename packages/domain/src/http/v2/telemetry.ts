@@ -3,11 +3,27 @@ import { Schema } from "effect"
 import { MetricName, ServiceName, SpanId, TraceId } from "../../primitives"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
+import {
+	V2InvalidRequestError,
+	V2NotFoundError,
+	V2RateLimitError,
+	V2ServiceUnavailableError,
+	V2UpstreamError,
+} from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 
 const wireExample = <A>(example: object): A => example as A
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+// Warehouse-backed endpoints surface the full outcome range: 400 for a bad
+// request, 429 for a quota breach, 502 for an upstream/query fault, 503 for a
+// genuine outage. These used to be collapsed into one 503 (see
+// telemetry.http.ts's mapWarehouseError), which told a user with a bad time
+// range that the service was down.
+const commonErrors = [
+	V2InvalidRequestError,
+	V2RateLimitError,
+	V2ServiceUnavailableError,
+	V2UpstreamError,
+] as const
 const PositiveInteger = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
 const PositiveFinite = Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0))
 const NonNegativeFinite = Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0))

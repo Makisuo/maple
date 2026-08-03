@@ -31,6 +31,7 @@ import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 const dashboardSearchSchema = Schema.Struct({
 	environment: Schema.optional(Schema.String),
 	...TimeRangeSearchFields,
@@ -103,10 +104,12 @@ function DashboardPage() {
 	// `TinybirdDateTime` requires `YYYY-MM-DD HH:mm:ss` (no `T`, no millis), so
 	// we strip the ISO suffix instead of passing `.toISOString()` raw.
 	const facetsRange = useMemo(() => {
-		const fmt = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19)
 		const end = new Date()
 		const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
-		return { startTime: fmt(start), endTime: fmt(end) }
+		return {
+			startTime: formatWarehouseDateTime(start.getTime()),
+			endTime: formatWarehouseDateTime(end.getTime()),
+		}
 	}, [])
 
 	const facetsAtom = getServicesFacetsResultAtom({ data: facetsRange })

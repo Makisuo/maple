@@ -6,7 +6,7 @@ import {
 	OrgId,
 	RoleName,
 } from "@maple/domain/http"
-import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/query-engine/caching"
+import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import type { TableDiffEntry } from "@maple/domain/clickhouse"

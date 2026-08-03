@@ -20,6 +20,7 @@ import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-buil
 import { unionAll, type CHUnionQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
 import { CHNumber } from "../schema"
+import type { FacetOutput } from "./query-helpers"
 
 const HOSTMETRIC_NAMES = [
 	"system.cpu.utilization",
@@ -298,13 +299,7 @@ const POD_FACET_PROBE_METRIC = "k8s.pod.cpu.usage" as const
  * to compute) hides a pod that pinned at 100% for four minutes of a twelve-hour
  * window behind pods that idle slightly higher.
  */
-export type PodSortKey =
-	| "saturation"
-	| "cpuUsage"
-	| "cpuLimitPct"
-	| "memoryLimitPct"
-	| "podName"
-	| "lastSeen"
+export type PodSortKey = "saturation" | "cpuUsage" | "cpuLimitPct" | "memoryLimitPct" | "podName" | "lastSeen"
 
 export type SortDirection = "asc" | "desc"
 
@@ -380,7 +375,7 @@ export interface ListPodsOutput {
 	readonly saturation: number
 }
 
-const workloadAttrKey =(kind: "deployment" | "statefulset" | "daemonset") =>
+const workloadAttrKey = (kind: "deployment" | "statefulset" | "daemonset") =>
 	kind === "deployment"
 		? "k8s.deployment.name"
 		: kind === "statefulset"
@@ -558,15 +553,13 @@ export interface ListPodsSummaryOutput {
 }
 
 /** Counts arrive as strings on BYO-ClickHouse, so decode rather than trust JSON. */
-export const ListPodsSummaryOutputSchema: CompiledQueryRowSchema<ListPodsSummaryOutput> =
-	Schema.Struct({
-		totalPods: CHNumber,
-		saturatedPods: CHNumber,
-		elevatedPods: CHNumber,
-		unboundedPods: CHNumber,
-		stalePods: CHNumber,
-	})
-
+export const ListPodsSummaryOutputSchema: CompiledQueryRowSchema<ListPodsSummaryOutput> = Schema.Struct({
+	totalPods: CHNumber,
+	saturatedPods: CHNumber,
+	elevatedPods: CHNumber,
+	unboundedPods: CHNumber,
+	stalePods: CHNumber,
+})
 
 /**
  * One row of fleet-shape counts for the browse summary band.
@@ -1007,11 +1000,7 @@ export function workloadGaugeTimeseriesQuery(opts: WorkloadGaugeTimeseriesOpts) 
 // facet counts reflect the *current* filtered set.
 // ---------------------------------------------------------------------------
 
-export interface PodFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type PodFacetsOutput = FacetOutput
 
 const makePodFacet = (opts: ListPodsOpts, attrKey: string, facetType: string, perFacetLimit: number) =>
 	from(MetricsGauge)
@@ -1044,11 +1033,7 @@ export function podFacetsQuery(opts: ListPodsOpts = {}): CHUnionQuery<PodFacetsO
 	).format("JSON")
 }
 
-export interface NodeFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type NodeFacetsOutput = FacetOutput
 
 const makeNodeFacet = (opts: ListNodesOpts, attrKey: string, facetType: string, perFacetLimit: number) =>
 	from(MetricsGauge)
@@ -1074,11 +1059,7 @@ export function nodeFacetsQuery(opts: ListNodesOpts = {}): CHUnionQuery<NodeFace
 	).format("JSON")
 }
 
-export interface WorkloadFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type WorkloadFacetsOutput = FacetOutput
 
 const makeWorkloadFacet = (
 	opts: ListWorkloadsOpts,

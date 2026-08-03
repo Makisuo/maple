@@ -22,7 +22,8 @@ import {
 	type AlertsServiceShape,
 	interleaveAlertRulesByOrg,
 } from "./AlertsService"
-import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
+import { BucketCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import { baselineWarehouseCapabilities } from "@maple/query-engine"
 import { CacheBackendLive } from "../lib/CacheBackendLive"
 import { Env } from "../lib/Env"
@@ -1820,7 +1821,9 @@ describe("AlertsService", () => {
 			assert.strictEqual(rule.signalType, "builder_query")
 			assert.deepStrictEqual(rule.queryBuilderDraft?.groupBy, ["attr.http.method", "attr.http.route"])
 		}).pipe(
-			Effect.provide(makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows }))),
+			Effect.provide(
+				makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows })),
+			),
 		)
 	})
 

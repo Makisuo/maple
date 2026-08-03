@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { Exit } from "effect"
 import type { V2ApiKey } from "@maple/domain/http/v2"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { cn } from "@maple/ui/lib/utils"
 
 import { Button } from "@maple/ui/components/ui/button"
@@ -98,11 +98,11 @@ export function ApiKeysSection() {
 		prepareForMutation()
 		const result = await revokeMutation({ params: { id: revokingKey.id } })
 		if (Exit.isSuccess(result)) {
-			toast.success("API key revoked")
+			toastManager.add({ title: "API key revoked", type: "success" })
 			void reconcileTxid(result.value.txid)
 		} else {
 			const { title, description } = formatBackendError(result)
-			toast.error(title, { description })
+			toastManager.add({ title, description, type: "error" })
 		}
 		setIsRevoking(false)
 		setRevokeOpen(false)

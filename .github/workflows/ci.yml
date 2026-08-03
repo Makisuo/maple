@@ -56,13 +56,29 @@ jobs:
                         - 'scripts/**'
                         - '!apps/ingest/**'
                         - '!apps/slack-agent/**'
+                      # The workspace-dependency closure of apps/cli + apps/local-ui
+                      # (plus what alchemy:build-deps builds): cli → effect-sdk,
+                      # domain, query-engine; local-ui → infra, query-engine, ui;
+                      # domain/query-engine → clickhouse-builder; effect-sdk /
+                      # @maple-dev/browser → browser-session. The old blanket
+                      # `lib/**` + `packages/**` ran this job and all seven archive
+                      # legs for changes to packages the bundle never links (db,
+                      # auth, email, …). Update this list when those package.json
+                      # workspace deps change.
                       cli:
                         - *base
                         - 'apps/cli/**'
                         - 'apps/local-ui/**'
-                        - 'lib/**'
-                        - 'packages/**'
+                        - 'lib/effect-sdk/**'
+                        - 'lib/clickhouse-builder/**'
+                        - 'packages/domain/**'
+                        - 'packages/query-engine/**'
+                        - 'packages/infra/**'
+                        - 'packages/ui/**'
+                        - 'packages/browser/**'
+                        - 'packages/browser-session/**'
                         - 'scripts/build-local-binary.sh'
+                        - 'scripts/gen-ui-embed.ts'
                       web:
                         - *base
                         - 'apps/web/**'
@@ -75,6 +91,22 @@ jobs:
                         - 'apps/api/src/lib/**'
                         - 'packages/db/**'
                         - 'scripts/*clickhouse*'
+                        # The SQL catalog sweep lives in this job, so a change to a
+                        # query definition or to the warehouse schema has to trigger
+                        # it. Without these two the PR that broke every main chart
+                        # would still skip the only job that could have caught it.
+                        - 'packages/query-engine/**'
+                        - 'packages/domain/src/clickhouse/**'
+                        - 'packages/domain/src/tinybird/**'
+                        # The migrations this job replays, and the datasource
+                        # definitions the generated DDL is derived from. Without
+                        # these a PR that adds a migration only triggers the job
+                        # if it incidentally touches `base` (e.g. bun.lock) —
+                        # which is exactly how a schema change can merge without
+                        # ever being replayed against a real ClickHouse.
+                        - 'packages/domain/src/clickhouse/**'
+                        - 'packages/domain/src/tinybird/**'
+                        - 'packages/domain/src/generated/**'
                       shell:
                         - *base
                         - 'scripts/*.sh'
@@ -96,6 +128,7 @@ jobs:
               run: >-
                   shellcheck scripts/install.sh scripts/uninstall.sh scripts/build-local-binary.sh
                   apps/cli/test/native-checkpoint-smoke.sh
+                  apps/cli/test/native-local-store-migration.sh
                   apps/cli/test/native-archive-smoke.sh
                   apps/cli/test/native-archive-crash-recovery-probe.sh
                   apps/cli/test/native-archive-adversarial-probe.sh
@@ -129,6 +162,17 @@ jobs:
 
             - uses: ./.github/actions/bun-install
 
+            # The append-only schema-history gate below reads the base branch's
+            # history file through `git show origin/<base>:...`. checkout leaves a
+            # narrow refspec behind, so name the destination explicitly — a plain
+            # `git fetch origin <branch>` can leave refs/remotes/origin/<branch>
+            # absent, which the gate would read as "no base history yet".
+            - name: Fetch base branch for the append-only schema gate
+              if: ${{ github.event_name == 'pull_request' }}
+              run: |
+                  git fetch --no-tags --depth=1 origin \
+                    "+refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
+
             # Turbo's local cache is per-runner and dies with the job, so without this
             # every run was `Cached: 0 cached, 59 total`. `github.sha` in the primary key
             # never hits, which is deliberate: it forces a save on every run so the cache
@@ -141,6 +185,15 @@ jobs:
                   restore-keys: |
                       turbo-v1-${{ runner.os }}-${{ github.job }}-
                       turbo-v1-${{ runner.os }}-
+
+            # The schema generators import packages/domain, which resolves
+            # @maple-dev/clickhouse-builder through its built dist — so the DSL has to
+            # exist before the check runs, exactly as in clickhouse-schema-e2e.
+            - name: Build ClickHouse query DSL
+              run: bun turbo build --filter=@maple-dev/clickhouse-builder
+
+            - name: Validate generated ClickHouse and local-store schemas
+              run: bun run clickhouse:schema:check
 
             # Shared design tokens live in packages/ui/src/styles/tokens.css;
             # fails if an app re-declares one (landing ↔ web drift guard).
@@ -197,7 +250,7 @@ jobs:
     # actual work, so the second version was ~88% overhead. Pinned to the same tag as
     # docker-compose.development.yml so local dev and CI verify the same server.
     clickhouse-schema-e2e:
-        name: ClickHouse schema E2E
+        name: ClickHouse schema + SQL catalog E2E
         needs: changes
         if: ${{ needs.changes.outputs.clickhouse == 'true' }}
         runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -245,6 +298,19 @@ jobs:
                   bun run --filter=@maple/api test --
                   src/lib/WarehouseQueryService.clickhouse.e2e.test.ts
 
+            # Type-checks every SQL shape the product can emit against the real
+            # analyzer. ~80 shapes, ~2s — the unit tests only compare SQL text,
+            # which is how a NO_COMMON_TYPE reached production with CI green.
+            - name: Analyze the SQL catalog
+              env:
+                  CLICKHOUSE_E2E: "1"
+                  CLICKHOUSE_E2E_URL: http://127.0.0.1:8123
+                  CLICKHOUSE_E2E_USER: maple
+                  CLICKHOUSE_E2E_PASSWORD: maple
+              run: >-
+                  bun run --filter=@maple/api test --
+                  src/lib/sql-catalog.clickhouse.e2e.test.ts
+
     knip:
         name: Knip
         runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -277,10 +343,25 @@ jobs:
 
             - uses: ./.github/actions/bun-install
 
+            # Same rolling turbo cache as the typescript job: this is the only
+            # job that runs `turbo build` (via alchemy:build-deps inside
+            # build-local-binary.sh) with no cache restore, so those packages
+            # compiled cold on every run.
+            - name: Restore turbo cache
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  path: .turbo/cache
+                  key: turbo-v1-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+                  restore-keys: |
+                      turbo-v1-${{ runner.os }}-${{ github.job }}-
+                      turbo-v1-${{ runner.os }}-
+
             - name: Build native local bundle
+              timeout-minutes: 5
               run: scripts/build-local-binary.sh
 
             - name: Run repeated checkpoint restore and fresh-process reopen smoke
+              timeout-minutes: 4
               env:
                   KEEP_ROOT: "1"
                   TMPDIR: ${{ runner.temp }}/maple-native-checkpoint
@@ -288,12 +369,29 @@ jobs:
                   mkdir -p "$TMPDIR"
                   apps/cli/test/native-checkpoint-smoke.sh "$GITHUB_WORKSPACE/dist"
 
+            - name: Run native local-store migration and reopen probe
+              timeout-minutes: 4
+              env:
+                  KEEP_ROOT: "1"
+                  TMPDIR: ${{ runner.temp }}/maple-native-migration
+              run: |
+                  mkdir -p "$TMPDIR"
+                  apps/cli/test/native-local-store-migration.sh "$GITHUB_WORKSPACE/dist"
+
+            # failure() alone skips the upload when a step-level timeout or a
+            # concurrency cancel kills the probe mid-hang — precisely the runs
+            # whose evidence matters most.
             - name: Upload checkpoint failure evidence
-              if: ${{ failure() }}
+              if: ${{ failure() || cancelled() }}
               uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
               with:
                   name: native-checkpoint-failure-${{ github.run_id }}
-                  path: ${{ runner.temp }}/maple-native-checkpoint
+                  # Both probes' roots: the migration probe used to fail without
+                  # leaving any evidence because only the checkpoint dir was
+                  # collected.
+                  path: |
+                      ${{ runner.temp }}/maple-native-checkpoint
+                      ${{ runner.temp }}/maple-native-migration
                   if-no-files-found: ignore
 
     local-archive-native:

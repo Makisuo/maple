@@ -1,3 +1,4 @@
+import { formatWarehouseDateTimeMs } from "@maple/query-engine"
 /**
  * Wire shapes for the `metrics_gauge` / `metrics_sum` datasources in the
  * collector Tinybird exporter layout (see metricsGauge/metricsSum in
@@ -39,5 +40,4 @@ export interface MetricSumRow extends MetricGaugeRow {
 }
 
 /** ClickHouse DateTime64 wire format: "YYYY-MM-DD HH:MM:SS.mmm" in UTC. */
-export const fmtMetricTs = (epochMs: number) =>
-	new Date(epochMs).toISOString().replace("T", " ").replace("Z", "")
+export const fmtMetricTs = (epochMs: number) => formatWarehouseDateTimeMs(epochMs)

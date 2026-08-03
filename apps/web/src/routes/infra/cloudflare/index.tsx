@@ -227,7 +227,9 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 														<span
 															aria-hidden
 															className="size-1.5 rounded-full"
-															style={{ background: zoneSeries.colors.get(name) }}
+															style={{
+																background: zoneSeries.colors.get(name),
+															}}
 														/>
 														<span className="text-[11px] text-muted-foreground transition-colors group-hover:text-foreground">
 															{name}

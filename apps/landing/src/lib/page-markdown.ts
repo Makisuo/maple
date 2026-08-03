@@ -29,7 +29,8 @@ export const plainText = (body: string): Response =>
  * conditional section can just evaluate to `""` at the call site.
  */
 export const blocks = (...parts: (string | false | null | undefined)[]): string =>
-	parts.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+	parts
+		.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
 		.map((p) => p.trim())
 		.join("\n\n")
 
@@ -37,8 +38,7 @@ export const blocks = (...parts: (string | false | null | undefined)[]): string 
  * The header every twin opens with, so a standalone `.md` reads on its own.
  * No YAML frontmatter — Resend ships none, and it only invites parsers to choke.
  */
-export const docHeader = (title: string, description?: string): string =>
-	blocks(`# ${title}`, description)
+export const docHeader = (title: string, description?: string): string => blocks(`# ${title}`, description)
 
 /** A GitHub-flavoured table. Cells are emitted verbatim; escape pipes yourself. */
 export const table = (headers: string[], rows: string[][]): string =>

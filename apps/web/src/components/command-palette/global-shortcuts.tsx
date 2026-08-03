@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useState } from "react"
 import { useTheme } from "@maple/ui/hooks/use-theme"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import { isDialogOpen, isEditableTarget } from "@/lib/keyboard"
+import { isDialogOpen, isEditableTarget } from "@maple/ui/lib/keyboard"
 
 const CommandPalette = lazy(() =>
 	import("@/components/command-palette/command-palette").then((module) => ({

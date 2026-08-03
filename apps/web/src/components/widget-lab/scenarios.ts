@@ -37,6 +37,14 @@ const decodeErrorState: WidgetDataState = {
 	kind: "decode",
 }
 
+const rangeErrorState: WidgetDataState = {
+	status: "error",
+	title: "Range too wide for this list",
+	message:
+		"Lists show individual records, so they cover at most 7 days. Charts on this dashboard are unaffected.",
+	kind: "range",
+}
+
 const ready = <T>(data: T): WidgetDataState => ({ status: "ready", data })
 
 // ---------------------------------------------------------------------------
@@ -553,9 +561,7 @@ function makeTrailingBucketSeries(lastBucket: { api: number; worker: number } | 
 		return {
 			bucket: new Date(currentBucketStart - (12 - i) * hour).toISOString(),
 			"demo-api": isCurrent ? (lastBucket?.api ?? 0) : 900 + Math.round(180 * Math.sin(i / 2)),
-			"demo-worker": isCurrent
-				? (lastBucket?.worker ?? 0)
-				: 420 + Math.round(90 * Math.cos(i / 3)),
+			"demo-worker": isCurrent ? (lastBucket?.worker ?? 0) : 420 + Math.round(90 * Math.cos(i / 3)),
 		}
 	})
 }
@@ -1049,6 +1055,20 @@ const logRows = [
 ]
 
 export const listScenarios: WidgetScenario[] = [
+	{
+		// Muted rather than destructive: the dashboard's charts render the full
+		// window fine, only this tile's query kind can't span it.
+		label: "Range too wide",
+		dataState: rangeErrorState,
+		display: {
+			title: "Recent traces",
+			listDataSource: "traces",
+			columns: [
+				{ field: "traceId", header: "Trace" },
+				{ field: "spanName", header: "Operation" },
+			],
+		},
+	},
 	{
 		label: "Recent traces",
 		dataState: ready(traceRows),

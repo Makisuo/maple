@@ -3,9 +3,6 @@ import { motion, useReducedMotion } from "motion/react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { GlobeIcon, ClockIcon } from "@/components/icons"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
-
-// Re-exported so the replay panels keep importing their copy control from here.
-export { CopyButton }
 import { formatRelativeFrom } from "@maple/ui/time-format"
 import { formatSessionDuration, gradientFor, hostFromUrl } from "./replay-format"
 import { parseChTimestampMs } from "./replay-timeline"
@@ -104,7 +101,13 @@ export function SessionIdentityBar({
 				)}
 				<span className="hidden shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground xl:inline-flex">
 					{sessionId.slice(0, 8)}
-					<CopyButton value={sessionId} label="Session ID" iconSize={12} className="size-5" toast={false} />
+					<CopyButton
+						value={sessionId}
+						label="Session ID"
+						iconSize={12}
+						className="size-5"
+						toast={false}
+					/>
 				</span>
 			</div>
 			<div className="flex shrink-0 items-center gap-3">

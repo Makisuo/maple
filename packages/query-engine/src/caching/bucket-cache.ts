@@ -2,7 +2,7 @@ import type { OrgId } from "@maple/domain"
 import type { TimeseriesPoint } from "../query-engine"
 import { parseWarehouseDateTime } from "../datetime"
 import { Clock, Config, Context, Effect, Layer, Option } from "effect"
-import { EdgeCacheService } from "./edge-cache"
+import { EdgeCacheService } from "@maple/cache"
 
 /**
  * Inclusive start, exclusive end. Epoch milliseconds.
@@ -218,9 +218,7 @@ export const findMissingRanges = (
  * sort-key-aligned range beats N round trips, and the refetched buckets simply
  * win the merge in `mergeAndDeduplicateBuckets` with equivalent data.
  */
-export const coalesceMissingRanges = (
-	missing: ReadonlyArray<MissingRange>,
-): ReadonlyArray<MissingRange> => {
+export const coalesceMissingRanges = (missing: ReadonlyArray<MissingRange>): ReadonlyArray<MissingRange> => {
 	const spans = new Map<boolean, { startMs: number; endMs: number }>()
 	for (const { range, cachable } of missing) {
 		const span = spans.get(cachable)
@@ -553,9 +551,13 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 						fluxBoundaryMs,
 					)
 					const fillRanges = coalesceMissingRanges(missing)
-					const freshByRange = yield* Effect.forEach(fillRanges, (item) => computeRange(item.range), {
-						concurrency: fillConcurrency,
-					})
+					const freshByRange = yield* Effect.forEach(
+						fillRanges,
+						(item) => computeRange(item.range),
+						{
+							concurrency: fillConcurrency,
+						},
+					)
 					const rangeResults = fillRanges.map((item, index) => ({
 						item,
 						points: freshByRange[index]!,

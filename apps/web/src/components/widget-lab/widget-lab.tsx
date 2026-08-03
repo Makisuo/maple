@@ -4,6 +4,7 @@ import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { CopyableValue } from "@maple/ui/components/attributes"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { LinkIcon } from "@/components/icons"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import type { WidgetMode } from "@/components/dashboard-builder/types"
 
@@ -112,7 +113,7 @@ function CopyScenarios() {
 		},
 		{
 			label: "link glyph",
-			node: <CopyButton value="https://maple.dev" label="Link" glyph="link" tooltip />,
+			node: <CopyButton value="https://maple.dev" label="Link" idleIcon={LinkIcon} tooltip />,
 		},
 		{
 			label: "with label / outline",
@@ -130,7 +131,10 @@ function CopyScenarios() {
 				/>
 			),
 		},
-		{ label: "icon-sm / outline", node: <CopyButton value="key_live_x" label="API key" size="icon-sm" variant="outline" /> },
+		{
+			label: "icon-sm / outline",
+			node: <CopyButton value="key_live_x" label="API key" size="icon-sm" variant="outline" />,
+		},
 		{
 			// A resolver that throws (a circular `JSON.stringify`, say) must surface as
 			// the error state, not an uncaught click handler.
@@ -164,7 +168,15 @@ function CopyScenarios() {
 			// Everything toasts by default; this is the opt-out for surfaces where a
 			// toast per click would pile up.
 			label: "toast={false} (opt-out)",
-			node: <CopyButton value="issue_123" label="Issue ID" toast={false} idleLabel="Copy" variant="outline" />,
+			node: (
+				<CopyButton
+					value="issue_123"
+					label="Issue ID"
+					toast={false}
+					idleLabel="Copy"
+					variant="outline"
+				/>
+			),
 		},
 		{ label: "disabled", node: <CopyButton value="x" label="Nothing" disabled /> },
 		{

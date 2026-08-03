@@ -10,6 +10,7 @@ import type {
 	WarehouseUpstreamError,
 	WarehouseValidationError,
 } from "@maple/domain/http"
+import { presentWarehouseErrorPublic, type WarehouseErrorLike } from "@maple/domain/http"
 import {
 	conflict,
 	dependencyUnavailable,
@@ -64,8 +65,12 @@ const normalizeAlertResourceType = (resourceType: string) =>
 	)
 
 const makeAlertErrorMatcher = (operation: string) => {
-	const warehouseFailure = () =>
-		upstreamError(`alert_${operation}_upstream_failed`, "The alert query could not be completed.")
+	// Forward the shared per-tag copy instead of one fixed string: a missing
+	// column on the customer's cluster and a Maple SQL bug used to be
+	// indistinguishable "The alert query could not be completed." envelopes.
+	// Redacted presentation: raw ClickHouse diagnostics stay off the public API.
+	const warehouseFailure = (error: WarehouseErrorLike) =>
+		upstreamError(`alert_${operation}_upstream_failed`, presentWarehouseErrorPublic(error).description)
 	return Match.type<V2ReachableAlertError>().pipe(
 		Match.tagsExhaustive({
 			"@maple/http/errors/AlertForbiddenError": () =>
@@ -95,6 +100,11 @@ const makeAlertErrorMatcher = (operation: string) => {
 			"@maple/http/errors/WarehouseConfigError": warehouseFailure,
 			"@maple/http/errors/WarehouseClientError": warehouseFailure,
 			"@maple/http/errors/WarehouseSchemaDriftError": warehouseFailure,
+			// Maple generated SQL its own warehouse refused to plan: a server fault,
+			// not the caller's, so it stays a 5xx rather than becoming a 400 — but
+			// under its own code so on-call stops chasing the customer's warehouse.
+			"@maple/http/errors/WarehouseMalformedQueryError": (error) =>
+				upstreamError(`alert_${operation}_query_bug`, presentWarehouseErrorPublic(error).description),
 			// A quota breach is the caller exceeding cost limits (429), and a
 			// validation failure is a malformed request (400) — neither is an
 			// upstream outage.

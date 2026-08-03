@@ -6,6 +6,7 @@ import type { TenantContext } from "./AuthService"
 import { Database, type DatabaseError } from "../lib/DatabaseLive"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 
@@ -67,9 +68,6 @@ export class ServiceMapRollupService extends Context.Service<
 			authMode: "self_hosted",
 		})
 
-		const toTinybirdDateTime = (epochMs: number) =>
-			new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
-
 		const processOrg = Effect.fn("ServiceMapRollupService.processOrg")(function* (orgId: OrgId) {
 			const tenant = systemTenant(orgId)
 			const currentHourMs = Math.floor((yield* Clock.currentTimeMillis) / HOUR_MS) * HOUR_MS
@@ -81,8 +79,8 @@ export class ServiceMapRollupService extends Context.Service<
 
 			const existingCompiled = CH.serviceMapEdgesExistingHoursSQL({
 				orgId,
-				startTime: toTinybirdDateTime(oldestHourMs),
-				endTime: toTinybirdDateTime(currentHourMs),
+				startTime: formatWarehouseDateTime(oldestHourMs),
+				endTime: formatWarehouseDateTime(currentHourMs),
 			})
 			const existingRows = yield* warehouse.compiledQuery(tenant, existingCompiled, {
 				context: "serviceMapRollupExistingHours",
@@ -100,8 +98,8 @@ export class ServiceMapRollupService extends Context.Service<
 				missing,
 				(hourMs) =>
 					Effect.gen(function* () {
-						const hourStart = toTinybirdDateTime(hourMs)
-						const hourEnd = toTinybirdDateTime(hourMs + HOUR_MS)
+						const hourStart = formatWarehouseDateTime(hourMs)
+						const hourEnd = formatWarehouseDateTime(hourMs + HOUR_MS)
 
 						const rollup = CH.serviceMapEdgesRollupSQL({ orgId, hourStart, hourEnd })
 						const rows = yield* warehouse.compiledQuery(tenant, rollup, {
@@ -159,8 +157,8 @@ export class ServiceMapRollupService extends Context.Service<
 							tenant,
 							CH.serviceMapResolutionsRollupSQL({
 								orgId,
-								hourStart: toTinybirdDateTime(hourMs),
-								hourEnd: toTinybirdDateTime(hourMs + HOUR_MS),
+								hourStart: formatWarehouseDateTime(hourMs),
+								hourEnd: formatWarehouseDateTime(hourMs + HOUR_MS),
 							}),
 							{ context: "serviceMapResolutionsRepair" },
 						)

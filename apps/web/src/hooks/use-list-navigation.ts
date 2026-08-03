@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys"
 
-import { isDialogOpen } from "@/lib/keyboard"
+import { isDialogOpen } from "@maple/ui/lib/keyboard"
 
 export interface ListNavigationOptions<T extends string> {
 	/** Row ids in display order. */

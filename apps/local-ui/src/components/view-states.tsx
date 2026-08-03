@@ -136,7 +136,7 @@ function InstallCommands() {
 			</TabsList>
 			{INSTALL_METHODS.map((method) => (
 				<TabsContent key={method.id} value={method.id} className="mt-0">
-					<CopyableField label="" value={method.command} />
+					<CopyableField label="" copyLabel="Command" value={method.command} />
 				</TabsContent>
 			))}
 		</Tabs>

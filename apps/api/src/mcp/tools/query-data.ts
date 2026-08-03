@@ -26,6 +26,7 @@ import {
 	type MetricsBreakdownQuery,
 } from "@maple/query-engine"
 import { formatQueryResult } from "../lib/format-query-result"
+import { warehouseErrorText, warehouseHandlers } from "../lib/map-warehouse-error"
 import {
 	CommitSha,
 	DeploymentEnvironment,
@@ -379,22 +380,11 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 							Effect.succeed(taggedErrorResult(error._tag, error.message)),
 						"@maple/http/errors/QueryEngineTimeoutError": (error) =>
 							Effect.succeed(taggedErrorResult(error._tag, error.message)),
-						"@maple/http/errors/WarehouseQueryError": (error) =>
-							Effect.succeed(taggedErrorResult(error._tag, error.message)),
-						"@maple/http/errors/WarehouseUpstreamError": (error) =>
-							Effect.succeed(taggedErrorResult(error._tag, error.message)),
-						"@maple/http/errors/WarehouseAuthError": (error) =>
-							Effect.succeed(taggedErrorResult(error._tag, error.message)),
-						"@maple/http/errors/WarehouseConfigError": (error) =>
-							Effect.succeed(taggedErrorResult(error._tag, error.message)),
-						"@maple/http/errors/WarehouseClientError": (error) =>
-							Effect.succeed(taggedErrorResult(error._tag, error.message)),
-						"@maple/http/errors/WarehouseSchemaDriftError": (error) =>
-							Effect.succeed(taggedErrorResult(error._tag, error.message)),
-						"@maple/http/errors/WarehouseQuotaExceededError": (error) =>
-							Effect.succeed(taggedErrorResult(error._tag, error.message)),
-						"@maple/http/errors/WarehouseValidationError": (error) =>
-							Effect.succeed(taggedErrorResult(error._tag, error.message)),
+						// Shared 9-tag warehouse table; warehouseErrorText appends the
+						// schema-apply hint for schema drift, matching the other MCP tools.
+						...warehouseHandlers((error) =>
+							Effect.succeed(taggedErrorResult(error._tag, warehouseErrorText(error))),
+						),
 					}),
 				)
 

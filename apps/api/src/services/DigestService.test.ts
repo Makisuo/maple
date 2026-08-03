@@ -9,7 +9,7 @@ import { Database } from "@/lib/DatabaseLive"
 import { EmailService } from "@/lib/EmailService"
 import { Env } from "@/lib/Env"
 import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
-import { EdgeCacheService, makeEdgeCacheService, makeMemoryBackend } from "@maple/query-engine/caching"
+import { EdgeCacheService, makeEdgeCacheService, makeMemoryBackend } from "@maple/cache"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
 import { DigestService } from "./DigestService"
 

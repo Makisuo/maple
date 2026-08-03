@@ -36,6 +36,14 @@ import {
 	type WarehouseQuerySettings,
 } from "../profiles"
 import { computeBucketSeconds } from "../datetime"
+import {
+	MAX_BREAKDOWN_RANGE_SECONDS,
+	MAX_LIST_RANGE_SECONDS,
+	MAX_QUERY_RANGE_SECONDS,
+	MAX_TIMESERIES_POINTS,
+	MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS,
+	formatRangeSeconds,
+} from "../limits"
 import { attributeIndexMode, logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeExecuteRawSql } from "./raw-sql"
 import type { BucketGroupObs } from "./evaluate-bucket-codec"
@@ -44,6 +52,21 @@ import type { BucketGroupObs } from "./evaluate-bucket-codec"
 // `computeBucketSeconds` from here; the implementation now lives in the pure
 // `../datetime` module so the web app and the engine share one definition.
 export { computeBucketSeconds } from "../datetime"
+
+// Same arrangement for the range ceilings: they now live in the pure `../limits`
+// module so the MCP tools, the v2 API, and the web widget layer all bound
+// ranges against one definition instead of their own copies.
+export {
+	MAX_BREAKDOWN_RANGE_SECONDS,
+	MAX_LIST_RANGE_SECONDS,
+	MAX_QUERY_RANGE_SECONDS,
+	MAX_TIMESERIES_POINTS,
+	MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS,
+	formatRangeSeconds,
+	maxRangeSecondsForKind,
+	validateRelativeRange,
+} from "../limits"
+export { relativeRangeSeconds, resolveRelativeRange, resolveRelativeRangeToWarehouse } from "../datetime"
 
 /** Minimal tenant surface the lowering needs — only the org scope. */
 export interface QueryTenant {
@@ -57,11 +80,6 @@ export interface QueryTenant {
  * `WarehouseQueryService` and `T` is inferred as that concrete tenant.
  */
 export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
-	readonly sqlQuery: (
-		tenant: T,
-		sql: string,
-		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError>
 	readonly rawSqlQuery: (
 		tenant: T,
 		sql: string,
@@ -136,11 +154,6 @@ export type QueryEngineDirectError = QueryEngineExecutionError | QueryEngineTime
 
 export type QueryEngineRouteError = QueryEngineValidationError | QueryEngineDirectError
 
-export const MAX_QUERY_RANGE_SECONDS = 60 * 60 * 24 * 31
-const MAX_LIST_RANGE_SECONDS = 60 * 60 * 24 * 7
-const MAX_TIMESERIES_POINTS = 1_500
-const MAX_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24 * 30
-const MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24
 const QUERY_ENGINE_TIMEOUT = Duration.seconds(30)
 
 export const withTimeout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -426,7 +439,7 @@ const validateTimeRange = Effect.fn("QueryEngineService.validateTimeRange")(func
 	if (rangeSeconds > MAX_QUERY_RANGE_SECONDS) {
 		return yield* new QueryEngineValidationError({
 			message: "Time range too large",
-			details: [`Maximum supported range is ${MAX_QUERY_RANGE_SECONDS} seconds`],
+			details: [`Maximum supported range is ${formatRangeSeconds(MAX_QUERY_RANGE_SECONDS)}`],
 		})
 	}
 
@@ -522,7 +535,7 @@ const validateListQuery = Effect.fn("QueryEngineService.validateListQuery")(func
 		return yield* new QueryEngineValidationError({
 			message: "List query time range too large",
 			details: [
-				`List queries support a maximum range of 7 days`,
+				`List queries support a maximum range of ${formatRangeSeconds(MAX_LIST_RANGE_SECONDS)}`,
 				"Narrow the time range or use a timeseries/breakdown query for wider ranges",
 			],
 		})
@@ -588,7 +601,7 @@ const validateBreakdownQuery = Effect.fn("QueryEngineService.validateBreakdownQu
 		return yield* new QueryEngineValidationError({
 			message: "Breakdown query time range too large",
 			details: [
-				"Breakdown queries support a maximum range of 30 days",
+				`Breakdown queries support a maximum range of ${formatRangeSeconds(MAX_BREAKDOWN_RANGE_SECONDS)}`,
 				"Narrow the time range or use a timeseries query for wider trends",
 			],
 		})
@@ -598,7 +611,7 @@ const validateBreakdownQuery = Effect.fn("QueryEngineService.validateBreakdownQu
 		return yield* new QueryEngineValidationError({
 			message: "Breakdown query too broad without filters",
 			details: [
-				"Breakdowns spanning more than 24 hours require a serviceName, environment, or similar filter",
+				`Breakdowns spanning more than ${formatRangeSeconds(MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS)} require a serviceName, environment, or similar filter`,
 				"Add a filter or narrow the time range",
 			],
 		})
@@ -1990,7 +2003,6 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 		return obs as ReadonlyArray<BucketGroupObs>
 	}
 
-
 	if (query.source === "traces") {
 		const opts = extractTracesOpts(query.filters as Record<string, unknown>)
 		const rows = yield* executeCHQuery(
@@ -2187,9 +2199,7 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 			// by `Date.parse`, which would read that space-separated form as local
 			// time rather than UTC.
 			bucket: normalizeBucket(
-				typeof row.bucket === "string" || row.bucket instanceof Date
-					? row.bucket
-					: range.startTime,
+				typeof row.bucket === "string" || row.bucket instanceof Date ? row.bucket : range.startTime,
 			),
 			groupKey,
 			value,
@@ -2210,10 +2220,7 @@ export const reduceAlertBuckets = (
 	obs: ReadonlyArray<BucketGroupObs>,
 	reducer: QueryEngineAlertReducer,
 ): ReadonlyArray<GroupedAlertObservation> => {
-	const byGroup = new Map<
-		string,
-		Array<{ value: number | null; sampleCount: number; hasData: boolean }>
-	>()
+	const byGroup = new Map<string, Array<{ value: number | null; sampleCount: number; hasData: boolean }>>()
 	for (const o of obs) {
 		const entry = { value: o.value, sampleCount: o.sampleCount, hasData: o.sampleCount > 0 }
 		const list = byGroup.get(o.groupKey)
@@ -2225,7 +2232,6 @@ export const reduceAlertBuckets = (
 	}
 	return reducePerGroupObservations(byGroup, reducer)
 }
-
 
 /**
  * Annotate, validate and resolve the bucket size for one alert evaluation.

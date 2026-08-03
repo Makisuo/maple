@@ -15,12 +15,7 @@ import type {
 } from "@/api/warehouse/cloudflare-infra"
 import { formatLatency, formatNumber } from "@maple/ui/format"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
-import {
-	CHART_EMPTY_MESSAGE,
-	CHART_GRID_DASH,
-	makeBucketLabeler,
-	transformRows,
-} from "../chart-utils"
+import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler, transformRows } from "../chart-utils"
 import { CHART_HEIGHT, ChartCard } from "../primitives/chart-card"
 import {
 	BREAKDOWN_OTHER_KEY,
@@ -110,9 +105,7 @@ export function StackedBreakdownChart({
 	// hashes its name into the shared identity palette, so a path/country/host keeps its color
 	// across windows and stays distinguishable instead of collapsing into one fallback hue.
 	const paletteByName = useMemo(() => {
-		const identities = series.filter(
-			(name) => colors[name] == null && name !== BREAKDOWN_OTHER_KEY,
-		)
+		const identities = series.filter((name) => colors[name] == null && name !== BREAKDOWN_OTHER_KEY)
 		const identityColors = resolveSeriesColors(identities)
 		const map = new Map<string, string>()
 		for (const name of series) {

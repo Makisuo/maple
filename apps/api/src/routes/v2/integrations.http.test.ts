@@ -458,9 +458,7 @@ describe("v2 slack integration over HTTP", () => {
 				Effect.sync(() => {
 					called = true
 					return {
-						channels: [
-							{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: true },
-						],
+						channels: [{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: true }],
 						truncated: false,
 					}
 				}),

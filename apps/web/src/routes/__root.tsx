@@ -12,7 +12,7 @@ import { selectedPlanKnownAtomFor } from "@/atoms/selected-plan-atoms"
 import { useAtom } from "@/lib/effect-atom"
 import { hasSelectedPlan, isUsableCustomer } from "@/lib/billing/plan-gating"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
-import { Toaster } from "@maple/ui/components/ui/sonner"
+import { AnchoredToastProvider, ToastProvider } from "@maple/ui/components/ui/toast"
 import { AttributesProvider } from "@maple/ui/components/attributes/context"
 import { BootSplash } from "@/components/boot-splash"
 import { highlightCode } from "@/lib/sugar-high"
@@ -92,19 +92,19 @@ const AppFrame = memo(function AppFrame() {
 		captureChatReferrer(pathname)
 	}, [pathname])
 	return (
-		<AttributesProvider
-			highlightJson={highlightCode}
-			renderValue={renderAttributeValue}
-		>
-			<Outlet />
-			<Toaster />
-			{!PUBLIC_PATHS.has(pathname) && <IdleRoutePrefetch />}
-			{!PUBLIC_PATHS.has(pathname) && (
-				<>
-					<GlobalShortcuts />
-					<GlobalChatSheet />
-				</>
-			)}
+		<AttributesProvider highlightJson={highlightCode} renderValue={renderAttributeValue}>
+			<ToastProvider position="bottom-right">
+				<AnchoredToastProvider>
+					<Outlet />
+					{!PUBLIC_PATHS.has(pathname) && <IdleRoutePrefetch />}
+					{!PUBLIC_PATHS.has(pathname) && (
+						<>
+							<GlobalShortcuts />
+							<GlobalChatSheet />
+						</>
+					)}
+				</AnchoredToastProvider>
+			</ToastProvider>
 		</AttributesProvider>
 	)
 })

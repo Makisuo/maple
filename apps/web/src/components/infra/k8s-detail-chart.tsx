@@ -103,10 +103,7 @@ export function K8sMetricChartView({
 	// Series names can contain dots/slashes (container names, pod names),
 	// which are invalid in a raw `var(--color-…)` reference — colour series
 	// directly instead of via the ChartContainer CSS variables.
-	const seriesColor = useMemo(
-		() => resolveSeriesColors(series),
-		[series],
-	)
+	const seriesColor = useMemo(() => resolveSeriesColors(series), [series])
 
 	const config = useMemo<ChartConfig>(
 		() =>

@@ -85,6 +85,7 @@ import {
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
 import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
+import * as Integrations from "@maple/query-engine-integrations"
 
 // `warehouse.sqlQuery` fails with the warehouse error union (distinct tagged
 // classes per failure mode). The typed error channel threads through unchanged
@@ -99,7 +100,7 @@ const mapExecError = <A, E, R>(effect: Effect.Effect<A, E, R>, context: string):
 /**
  * Payload → query-engine filter opts. Every Cloudflare zone endpoint carries the same optional
  * filter bag, and which of them a given panel can honor depends on the metric families it reads —
- * `CH.cloudflareIgnoredFiltersFor` answers that, and the answer ships in the response so the UI can
+ * `Integrations.cloudflareIgnoredFiltersFor` answers that, and the answer ships in the response so the UI can
  * mark a panel zone-wide instead of pretending the filter applied.
  */
 const toCloudflareFilters = (payload: {
@@ -117,7 +118,7 @@ const toCloudflareFilters = (payload: {
 	readonly firewallRuleIds?: ReadonlyArray<string> | undefined
 	readonly dnsQueryNames?: ReadonlyArray<string> | undefined
 	readonly dnsResponseCodes?: ReadonlyArray<string> | undefined
-}): CH.CloudflareFilterOpts => ({
+}): Integrations.CloudflareFilterOpts => ({
 	hosts: payload.hosts,
 	cacheStatuses: payload.cacheStatuses,
 	statusClasses: payload.statusClasses,
@@ -715,11 +716,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// concurrently, then merge by ServiceName. Routed through the org's
 					// configured warehouse exactly like the metric explorer reads these
 					// same `cloudflare.*` metrics — no special ingest pin needed.
-					const countersCompiled = CH.compile(CH.cloudflareServiceCountersSQL(), params, {
-						rowSchema: CH.cloudflareServiceCountersRowSchema,
+					const countersCompiled = CH.compile(Integrations.cloudflareServiceCountersSQL(), params, {
+						rowSchema: Integrations.cloudflareServiceCountersRowSchema,
 					})
-					const latencyCompiled = CH.compile(CH.cloudflareServiceLatencySQL(), params, {
-						rowSchema: CH.cloudflareServiceLatencyRowSchema,
+					const latencyCompiled = CH.compile(Integrations.cloudflareServiceLatencySQL(), params, {
+						rowSchema: Integrations.cloudflareServiceLatencyRowSchema,
 					})
 					const [counterRows, latencyRows] = yield* Effect.all(
 						[
@@ -769,25 +770,25 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// org's configured warehouse like the metric explorer reads the same
 					// scraped `planetscale_*` metrics.
 					const gaugesCompiled = byBranch
-						? CH.compile(CH.planetscaleBranchGaugesSQL(), params, {
-								rowSchema: CH.planetscaleBranchStatsRowSchema,
+						? CH.compile(Integrations.planetscaleBranchGaugesSQL(), params, {
+								rowSchema: Integrations.planetscaleBranchStatsRowSchema,
 							})
-						: CH.compile(CH.planetscaleGaugesSQL(), params, {
-								rowSchema: CH.planetscaleDatabaseStatsRowSchema,
+						: CH.compile(Integrations.planetscaleGaugesSQL(), params, {
+								rowSchema: Integrations.planetscaleDatabaseStatsRowSchema,
 							})
 					const connectionsCompiled = byBranch
-						? CH.compile(CH.planetscaleBranchConnectionsSQL(), params, {
-								rowSchema: CH.planetscaleBranchConnectionsRowSchema,
+						? CH.compile(Integrations.planetscaleBranchConnectionsSQL(), params, {
+								rowSchema: Integrations.planetscaleBranchConnectionsRowSchema,
 							})
-						: CH.compile(CH.planetscaleConnectionsSQL(), params, {
-								rowSchema: CH.planetscaleConnectionsRowSchema,
+						: CH.compile(Integrations.planetscaleConnectionsSQL(), params, {
+								rowSchema: Integrations.planetscaleConnectionsRowSchema,
 							})
 					const storageCompiled = byBranch
-						? CH.compile(CH.planetscaleBranchStorageSQL(), params, {
-								rowSchema: CH.planetscaleBranchStorageRowSchema,
+						? CH.compile(Integrations.planetscaleBranchStorageSQL(), params, {
+								rowSchema: Integrations.planetscaleBranchStorageRowSchema,
 							})
-						: CH.compile(CH.planetscaleStorageSQL(), params, {
-								rowSchema: CH.planetscaleStorageRowSchema,
+						: CH.compile(Integrations.planetscaleStorageSQL(), params, {
+								rowSchema: Integrations.planetscaleStorageRowSchema,
 							})
 					const [gaugeRows, connectionRows, storageRows] = yield* Effect.all(
 						[
@@ -816,7 +817,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ concurrency: 3 },
 					)
 					const keyOf = (row: { database: string; branch?: string }) =>
-						byBranch ? `${row.database} ${row.branch ?? ""}` : row.database
+						byBranch ? `${row.database}\x00${row.branch ?? ""}` : row.database
 					const connectionsByKey = new Map(connectionRows.map((row) => [keyOf(row), row]))
 					const storageByKey = new Map(storageRows.map((row) => [keyOf(row), row]))
 					const seen = new Set<string>()
@@ -904,13 +905,13 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					}
 					const compiled =
 						payload.branch === undefined
-							? CH.compile(CH.planetscaleInfraTimeseriesSQL(), base, {
-									rowSchema: CH.planetscaleInfraTimeseriesRowSchema,
+							? CH.compile(Integrations.planetscaleInfraTimeseriesSQL(), base, {
+									rowSchema: Integrations.planetscaleInfraTimeseriesRowSchema,
 								})
 							: CH.compile(
-									CH.planetscaleBranchInfraTimeseriesSQL(),
+									Integrations.planetscaleBranchInfraTimeseriesSQL(),
 									{ ...base, branch: payload.branch },
-									{ rowSchema: CH.planetscaleInfraTimeseriesRowSchema },
+									{ rowSchema: Integrations.planetscaleInfraTimeseriesRowSchema },
 								)
 					const rows = yield* mapExecError(
 						warehouse.compiledQuery(tenant, compiled, {
@@ -934,11 +935,15 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// concurrently, then merge by ServiceName — same shape as
 					// serviceCloudflareStats above.
 					const filters = toCloudflareFilters(payload)
-					const countersCompiled = CH.compile(CH.cloudflareZoneCountersSQL(filters), params, {
-						rowSchema: CH.cloudflareZoneCountersRowSchema,
-					})
-					const latencyCompiled = CH.compile(CH.cloudflareZoneLatencySQL(), params, {
-						rowSchema: CH.cloudflareZoneLatencyRowSchema,
+					const countersCompiled = CH.compile(
+						Integrations.cloudflareZoneCountersSQL(filters),
+						params,
+						{
+							rowSchema: Integrations.cloudflareZoneCountersRowSchema,
+						},
+					)
+					const latencyCompiled = CH.compile(Integrations.cloudflareZoneLatencySQL(), params, {
+						rowSchema: Integrations.cloudflareZoneLatencyRowSchema,
 					})
 					const [counterRows, latencyRows] = yield* Effect.all(
 						[
@@ -981,10 +986,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						data,
 						// The latency columns are zone-wide by construction, so a dimension filter
 						// narrows the counters but never the percentiles beside them.
-						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [
-							CH.CF_METRIC.requests,
-							CH.CF_METRIC.bytes,
-							CH.CF_METRIC.visits,
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.requests,
+							Integrations.CF_METRIC.bytes,
+							Integrations.CF_METRIC.visits,
 						]),
 					})
 				}),
@@ -994,14 +999,14 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const tenant = yield* CurrentTenant.Context
 					const filters = toCloudflareFilters(payload)
 					const compiled = CH.compile(
-						CH.cloudflareZoneTimeseriesSQL(filters),
+						Integrations.cloudflareZoneTimeseriesSQL(filters),
 						{
 							orgId: tenant.orgId,
 							startTime: payload.startTime,
 							endTime: payload.endTime,
 							bucketSeconds: payload.bucketSeconds,
 						},
-						{ rowSchema: CH.cloudflareZoneTimeseriesRowSchema },
+						{ rowSchema: Integrations.cloudflareZoneTimeseriesRowSchema },
 					)
 					const rows = yield* mapExecError(
 						warehouse.compiledQuery(tenant, compiled, {
@@ -1012,7 +1017,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					)
 					return new CloudflareInfraZoneTimeseriesResponse({
 						data: rows.map((row) => ({ ...row })),
-						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [CH.CF_METRIC.requests]),
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.requests,
+						]),
 					})
 				}),
 			)
@@ -1027,15 +1034,27 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						bucketSeconds: payload.bucketSeconds,
 					}
 					const filters = toCloudflareFilters(payload)
-					const statusCompiled = CH.compile(CH.cloudflareZoneStatusTimeseriesSQL(filters), params, {
-						rowSchema: CH.cloudflareZoneStatusTimeseriesRowSchema,
-					})
-					const cacheCompiled = CH.compile(CH.cloudflareZoneCacheTimeseriesSQL(filters), params, {
-						rowSchema: CH.cloudflareZoneCacheTimeseriesRowSchema,
-					})
-					const latencyCompiled = CH.compile(CH.cloudflareZoneLatencyTimeseriesSQL(), params, {
-						rowSchema: CH.cloudflareZoneLatencyTimeseriesRowSchema,
-					})
+					const statusCompiled = CH.compile(
+						Integrations.cloudflareZoneStatusTimeseriesSQL(filters),
+						params,
+						{
+							rowSchema: Integrations.cloudflareZoneStatusTimeseriesRowSchema,
+						},
+					)
+					const cacheCompiled = CH.compile(
+						Integrations.cloudflareZoneCacheTimeseriesSQL(filters),
+						params,
+						{
+							rowSchema: Integrations.cloudflareZoneCacheTimeseriesRowSchema,
+						},
+					)
+					const latencyCompiled = CH.compile(
+						Integrations.cloudflareZoneLatencyTimeseriesSQL(),
+						params,
+						{
+							rowSchema: Integrations.cloudflareZoneLatencyTimeseriesRowSchema,
+						},
+					)
 					const [statusRows, cacheRows, latencyRows] = yield* Effect.all(
 						[
 							mapExecError(
@@ -1066,10 +1085,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						statusBuckets: statusRows.map((row) => ({ ...row })),
 						cacheBuckets: cacheRows.map((row) => ({ ...row })),
 						latencyBuckets: latencyRows.map((row) => ({ ...row })),
-						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [CH.CF_METRIC.requests]),
-						latencyIgnoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [
-							CH.CF_METRIC.edgeTtfb,
-							CH.CF_METRIC.originDuration,
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.requests,
+						]),
+						latencyIgnoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.edgeTtfb,
+							Integrations.CF_METRIC.originDuration,
 						]),
 					})
 				}),
@@ -1084,13 +1105,17 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						endTime: payload.endTime,
 					}
 					const filters = toCloudflareFilters(payload)
-					const totalsCompiled = CH.compile(CH.cloudflareZoneHostBreakdownSQL(filters), params, {
-						rowSchema: CH.cloudflareZoneHostBreakdownRowSchema,
-					})
+					const totalsCompiled = CH.compile(
+						Integrations.cloudflareZoneHostBreakdownSQL(filters),
+						params,
+						{
+							rowSchema: Integrations.cloudflareZoneHostBreakdownRowSchema,
+						},
+					)
 					const bucketsCompiled = CH.compile(
-						CH.cloudflareZoneHostTimeseriesSQL(filters),
+						Integrations.cloudflareZoneHostTimeseriesSQL(filters),
 						{ ...params, bucketSeconds: payload.bucketSeconds },
-						{ rowSchema: CH.cloudflareZoneHostTimeseriesRowSchema },
+						{ rowSchema: Integrations.cloudflareZoneHostTimeseriesRowSchema },
 					)
 					const [totalRows, bucketRows] = yield* Effect.all(
 						[
@@ -1114,7 +1139,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new CloudflareInfraZoneHostsResponse({
 						totals: totalRows.map((row) => ({ ...row })),
 						buckets: bucketRows.map((row) => ({ ...row })),
-						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [CH.CF_METRIC.requests]),
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.requests,
+						]),
 					})
 				}),
 			)
@@ -1129,13 +1156,17 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					}
 					const filters = toCloudflareFilters(payload)
 					const bucketsCompiled = CH.compile(
-						CH.cloudflareZoneFirewallTimeseriesSQL(filters),
+						Integrations.cloudflareZoneFirewallTimeseriesSQL(filters),
 						{ ...params, bucketSeconds: payload.bucketSeconds },
-						{ rowSchema: CH.cloudflareZoneFirewallTimeseriesRowSchema },
+						{ rowSchema: Integrations.cloudflareZoneFirewallTimeseriesRowSchema },
 					)
-					const topCompiled = CH.compile(CH.cloudflareZoneFirewallTopSQL(filters), params, {
-						rowSchema: CH.cloudflareZoneFirewallTopRowSchema,
-					})
+					const topCompiled = CH.compile(
+						Integrations.cloudflareZoneFirewallTopSQL(filters),
+						params,
+						{
+							rowSchema: Integrations.cloudflareZoneFirewallTopRowSchema,
+						},
+					)
 					const [bucketRows, topRows] = yield* Effect.all(
 						[
 							mapExecError(
@@ -1158,8 +1189,8 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new CloudflareInfraZoneSecurityResponse({
 						buckets: bucketRows.map((row) => ({ ...row })),
 						top: topRows.map((row) => ({ ...row })),
-						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [
-							CH.CF_METRIC.firewallEvents,
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.firewallEvents,
 						]),
 					})
 				}),
@@ -1175,13 +1206,17 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					}
 					const filters = toCloudflareFilters(payload)
 					const bucketsCompiled = CH.compile(
-						CH.cloudflareZoneDnsTimeseriesSQL(filters),
+						Integrations.cloudflareZoneDnsTimeseriesSQL(filters),
 						{ ...params, bucketSeconds: payload.bucketSeconds },
-						{ rowSchema: CH.cloudflareZoneDnsTimeseriesRowSchema },
+						{ rowSchema: Integrations.cloudflareZoneDnsTimeseriesRowSchema },
 					)
-					const namesCompiled = CH.compile(CH.cloudflareZoneDnsBreakdownSQL(filters), params, {
-						rowSchema: CH.cloudflareZoneDnsBreakdownRowSchema,
-					})
+					const namesCompiled = CH.compile(
+						Integrations.cloudflareZoneDnsBreakdownSQL(filters),
+						params,
+						{
+							rowSchema: Integrations.cloudflareZoneDnsBreakdownRowSchema,
+						},
+					)
 					const [bucketRows, nameRows] = yield* Effect.all(
 						[
 							mapExecError(
@@ -1204,7 +1239,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new CloudflareInfraZoneDnsResponse({
 						buckets: bucketRows.map((row) => ({ ...row })),
 						names: nameRows.map((row) => ({ ...row })),
-						ignoredFilters: CH.cloudflareIgnoredFiltersFor(filters, [CH.CF_METRIC.dnsQueries]),
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.dnsQueries,
+						]),
 					})
 				}),
 			)
@@ -1219,21 +1256,29 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						endTime: payload.endTime,
 					}
 					const totalsCompiled = CH.compile(
-						CH.cloudflareZoneBreakdownTotalsSQL(payload.dimension, filters, payload.limit ?? 100),
+						Integrations.cloudflareZoneBreakdownTotalsSQL(
+							payload.dimension,
+							filters,
+							payload.limit ?? 100,
+						),
 						params,
-						{ rowSchema: CH.cloudflareZoneBreakdownTotalsRowSchema },
+						{ rowSchema: Integrations.cloudflareZoneBreakdownTotalsRowSchema },
 					)
 					// Coverage is deliberately unfiltered: it answers "what did the poller collect
 					// here", which the UI needs in order to say "not collected yet" rather than
 					// "no traffic" for a window that predates the dataset.
 					const coverageCompiled = CH.compile(
-						CH.cloudflareZoneBreakdownCoverageSQL(payload.dimension),
+						Integrations.cloudflareZoneBreakdownCoverageSQL(payload.dimension),
 						params,
-						{ rowSchema: CH.cloudflareZoneBreakdownCoverageRowSchema },
+						{ rowSchema: Integrations.cloudflareZoneBreakdownCoverageRowSchema },
 					)
-					const zoneTotalCompiled = CH.compile(CH.cloudflareZoneCountersSQL(filters), params, {
-						rowSchema: CH.cloudflareZoneCountersRowSchema,
-					})
+					const zoneTotalCompiled = CH.compile(
+						Integrations.cloudflareZoneCountersSQL(filters),
+						params,
+						{
+							rowSchema: Integrations.cloudflareZoneCountersRowSchema,
+						},
+					)
 					const [totalRows, coverageRows, zoneRows] = yield* Effect.all(
 						[
 							mapExecError(
@@ -1269,23 +1314,26 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// it means the same thing as the fold, so it merges into it and leaves the slot
 					// for a real key.
 					const topKeys = totalRows
-						.filter((row) => row.key !== CH.CLOUDFLARE_BREAKDOWN_OTHER_KEY)
-						.slice(0, CH.CLOUDFLARE_BREAKDOWN_SERIES_LIMIT)
+						.filter((row) => row.key !== Integrations.CLOUDFLARE_BREAKDOWN_OTHER_KEY)
+						.slice(0, Integrations.CLOUDFLARE_BREAKDOWN_SERIES_LIMIT)
 						.map((row) => row.key)
-					const bucketRows: ReadonlyArray<CH.CloudflareZoneBreakdownTimeseriesOutput> =
+					const bucketRows: ReadonlyArray<Integrations.CloudflareZoneBreakdownTimeseriesOutput> =
 						topKeys.length === 0
 							? []
 							: yield* mapExecError(
 									warehouse.compiledQuery(
 										tenant,
 										CH.compile(
-											CH.cloudflareZoneBreakdownTimeseriesSQL(
+											Integrations.cloudflareZoneBreakdownTimeseriesSQL(
 												payload.dimension,
 												filters,
 												topKeys,
 											),
 											{ ...params, bucketSeconds: payload.bucketSeconds },
-											{ rowSchema: CH.cloudflareZoneBreakdownTimeseriesRowSchema },
+											{
+												rowSchema:
+													Integrations.cloudflareZoneBreakdownTimeseriesRowSchema,
+											},
 										),
 										{
 											profile: "aggregation",
@@ -1310,9 +1358,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							coverage?.coverageStart != null && coverage.coverageStart !== ""
 								? coverage.coverageStart
 								: null,
-						ignoredFilters: CH.cloudflareIgnoredFiltersFor(
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(
 							filters,
-							CH.cloudflareBreakdownMetrics(payload.dimension),
+							Integrations.cloudflareBreakdownMetrics(payload.dimension),
 						),
 					})
 				}),
@@ -1321,7 +1369,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const compiled = CH.compileUnion(
-						CH.cloudflareZoneFacetsQuery(toCloudflareFilters(payload)),
+						Integrations.cloudflareZoneFacetsQuery(toCloudflareFilters(payload)),
 						{
 							orgId: tenant.orgId,
 							serviceName: payload.serviceName,
@@ -1392,11 +1440,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						startTime: payload.startTime,
 						endTime: payload.endTime,
 					}
-					const queuesCompiled = CH.compile(CH.cloudflareQueueGaugesSQL(), params, {
-						rowSchema: CH.cloudflareQueueGaugesRowSchema,
+					const queuesCompiled = CH.compile(Integrations.cloudflareQueueGaugesSQL(), params, {
+						rowSchema: Integrations.cloudflareQueueGaugesRowSchema,
 					})
-					const doCompiled = CH.compile(CH.cloudflareDurableObjectCountersSQL(), params, {
-						rowSchema: CH.cloudflareDurableObjectCountersRowSchema,
+					const doCompiled = CH.compile(Integrations.cloudflareDurableObjectCountersSQL(), params, {
+						rowSchema: Integrations.cloudflareDurableObjectCountersRowSchema,
 					})
 					const [queueRows, doRows] = yield* Effect.all(
 						[
@@ -1431,11 +1479,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						startTime: payload.startTime,
 						endTime: payload.endTime,
 					}
-					const countersCompiled = CH.compile(CH.cloudflareWorkerCountersSQL(), params, {
-						rowSchema: CH.cloudflareWorkerCountersRowSchema,
+					const countersCompiled = CH.compile(Integrations.cloudflareWorkerCountersSQL(), params, {
+						rowSchema: Integrations.cloudflareWorkerCountersRowSchema,
 					})
-					const latencyCompiled = CH.compile(CH.cloudflareWorkerLatencySQL(), params, {
-						rowSchema: CH.cloudflareWorkerLatencyRowSchema,
+					const latencyCompiled = CH.compile(Integrations.cloudflareWorkerLatencySQL(), params, {
+						rowSchema: Integrations.cloudflareWorkerLatencyRowSchema,
 					})
 					const [counterRows, latencyRows] = yield* Effect.all(
 						[
@@ -1477,14 +1525,14 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const compiled = CH.compile(
-						CH.cloudflareWorkerTimeseriesSQL(),
+						Integrations.cloudflareWorkerTimeseriesSQL(),
 						{
 							orgId: tenant.orgId,
 							startTime: payload.startTime,
 							endTime: payload.endTime,
 							bucketSeconds: payload.bucketSeconds,
 						},
-						{ rowSchema: CH.cloudflareWorkerTimeseriesRowSchema },
+						{ rowSchema: Integrations.cloudflareWorkerTimeseriesRowSchema },
 					)
 					const rows = yield* mapExecError(
 						warehouse.compiledQuery(tenant, compiled, {

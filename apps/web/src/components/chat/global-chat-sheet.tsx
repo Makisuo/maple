@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState } from "react"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { useMapleOrganizationId } from "@/hooks/use-maple-organization"
-import { isDialogOpen, isEditableTarget } from "@/lib/keyboard"
+import { isDialogOpen, isEditableTarget } from "@maple/ui/lib/keyboard"
 
 const OPEN_CHAT_EVENT = "maple:open-chat-sheet"
 
