@@ -31,7 +31,9 @@ That single call:
   ingest (`POST /v1/traces`);
 - records the session with rrweb, chunking events (~5s / 100KB windows),
   gzipping them with the native `CompressionStream`, and uploading to
-  `POST /v1/sessionReplays/blob`;
+  `POST /v1/sessionReplays/blob`. rrweb ships in a lazy code-split chunk loaded
+  only once a session is sampled in, so a `sampleRate` below 1 costs the
+  unsampled visitors nothing beyond the ~8 kB gzipped base SDK;
 - writes session metadata at start (`active`) and on page hide (`ended`),
   including the trace ids observed during the session.
 
