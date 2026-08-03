@@ -34,6 +34,7 @@ import {
 	tracesAggregatesWhereConditions,
 	tracesBaseWhereConditions,
 	type TracesBaseWhereOpts,
+	matchOrIn,
 } from "./query-helpers"
 
 // ---------------------------------------------------------------------------
@@ -552,9 +553,7 @@ export function tracesTimeseriesQuery(
 				// which is the same class of bug this union exists to close.
 				...tracesBaseWhereConditions($, { ...opts, spanName: undefined, spanNames: undefined }),
 				CH.when(spanNames, (v: readonly string[]) =>
-					opts.matchModes?.spanName === "contains" && v.length === 1
-						? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!)).gt(0)
-						: inclusionCondition($.SpanName, v),
+					matchOrIn($.SpanName, v, opts.matchModes?.spanName === "contains"),
 				),
 				edgeCondition("Timestamp"),
 			])

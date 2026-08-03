@@ -18,14 +18,13 @@ import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import { ServiceOverviewHourly, ServiceOverviewSpans, ServiceUsage, TracesAggregatesHourly } from "../tables"
 import { CHNumber } from "../schema"
-import { apdexExprs, serviceOverviewWhereConditions } from "./query-helpers"
+import { apdexExprs, serviceOverviewWhereConditions , hourFloor, type FacetOutput} from "./query-helpers"
 import { edgeCondition, interiorConditions } from "./rollup-splice"
 
 // ---------------------------------------------------------------------------
 // Service overview
 // ---------------------------------------------------------------------------
 
-const hourFloor = (name: string) => CH.toStartOfHour(CH.toDateTime(param.dateTime(name)))
 const SERVICE_RAW_DURATION_STATE = "quantilesTDigestState(0.5, 0.95, 0.99)(Duration)"
 const SERVICE_ROLLUP_DURATION_STATE = "quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles)"
 
@@ -578,7 +577,6 @@ export interface ServiceUsageWithPreviousOutput extends ServiceUsageOutput {
  * delta chips consume.
  */
 export function serviceUsageWithPreviousQuery(opts: ServiceUsageOpts) {
-	const hourFloor = (p: string) => CH.toStartOfHour(CH.toDateTime(param.dateTime(p)))
 	const inCurrent = ($: ColumnAccessor<typeof ServiceUsage.columns>) =>
 		$.Hour.gte(hourFloor("startTime")).and($.Hour.lte(hourFloor("endTime")))
 	const inPrevious = ($: ColumnAccessor<typeof ServiceUsage.columns>) =>
@@ -635,11 +633,7 @@ export function serviceUsageWithPreviousQuery(opts: ServiceUsageOpts) {
 // Services facets (UNION ALL — environment + commit_sha facets)
 // ---------------------------------------------------------------------------
 
-export interface ServicesFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type ServicesFacetsOutput = FacetOutput
 
 // NOTE: kept as a 4-way UNION ALL on purpose. A single-scan rewrite (ARRAY JOIN
 // of (facetType, value) pairs, or GROUP BY GROUPING SETS) reads ~3× fewer rows

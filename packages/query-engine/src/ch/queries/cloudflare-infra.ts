@@ -19,6 +19,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { from, param, type ColumnAccessor, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { CHNumber } from "../schema"
 import { MetricsGauge, MetricsSum } from "../tables"
+import { avgWhere, isoBucket } from "./format"
 import {
 	CF_FILTERABLE,
 	CF_METRIC,
@@ -26,7 +27,6 @@ import {
 	type CloudflareFilterOpts,
 } from "./cloudflare-infra-filters"
 
-const ISO_Z_FORMAT = "%Y-%m-%dT%H:%i:%S.%fZ"
 
 /** Counter metrics the poller emits for zone HTTP analytics (all in `metrics_sum`). */
 const ZONE_COUNTER_METRIC_NAMES = [
@@ -59,8 +59,6 @@ const CACHE_SERVED_STATUSES = ["hit", "stale", "revalidated", "updating"] as con
 // `avgIf` over a metric with no matching rows is NaN, which serializes to
 // JSON `null` and would break row decoding — so guard each with
 // `if(countIf > 0, avgIf, 0)`. (Same guard as cloudflare-map.ts.)
-const avgWhere = (value: CH.Expr<number>, cond: CH.Condition) =>
-	CH.if_(CH.countIf(cond).gt(0), CH.avgIf(value, cond), CH.lit(0))
 
 // ---------------------------------------------------------------------------
 // Zones
@@ -225,10 +223,7 @@ export function cloudflareZoneTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 	return from(MetricsSum)
 		.select(($) => ({
 			serviceName: $.ServiceName,
-			bucket: CH.formatDateTime(
-				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-				ISO_Z_FORMAT,
-			),
+			bucket: isoBucket($.TimeUnix),
 			...zoneCounterColumns($),
 		}))
 		.where(($) => [
@@ -308,10 +303,7 @@ export const cloudflareZoneLatencyTimeseriesRowSchema: CompiledQueryRowSchema<Cl
 export function cloudflareZoneStatusTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 	return from(MetricsSum)
 		.select(($) => ({
-			bucket: CH.formatDateTime(
-				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-				ISO_Z_FORMAT,
-			),
+			bucket: isoBucket($.TimeUnix),
 			statusClass: $.Attributes.get("http.status_class"),
 			requests: CH.sum($.Value),
 		}))
@@ -332,10 +324,7 @@ export function cloudflareZoneStatusTimeseriesSQL(opts: CloudflareFilterOpts = {
 export function cloudflareZoneCacheTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 	return from(MetricsSum)
 		.select(($) => ({
-			bucket: CH.formatDateTime(
-				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-				ISO_Z_FORMAT,
-			),
+			bucket: isoBucket($.TimeUnix),
 			cacheStatus: $.Attributes.get("cache.status"),
 			requests: CH.sum($.Value),
 		}))
@@ -364,10 +353,7 @@ export function cloudflareZoneLatencyTimeseriesSQL() {
 			avgWhere($.Value, $.MetricName.eq(metricName).and($.Attributes.get("quantile").eq(quantile)))
 	return from(MetricsGauge)
 		.select(($) => ({
-			bucket: CH.formatDateTime(
-				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-				ISO_Z_FORMAT,
-			),
+			bucket: isoBucket($.TimeUnix),
 			ttfbP50Ms: quantileAvg("cloudflare.http.edge.ttfb", "0.5")($),
 			ttfbP95Ms: quantileAvg("cloudflare.http.edge.ttfb", "0.95")($),
 			ttfbP99Ms: quantileAvg("cloudflare.http.edge.ttfb", "0.99")($),
@@ -508,10 +494,7 @@ export function cloudflareWorkerTimeseriesSQL() {
 	return from(MetricsSum)
 		.select(($) => ({
 			serviceName: $.ServiceName,
-			bucket: CH.formatDateTime(
-				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-				ISO_Z_FORMAT,
-			),
+			bucket: isoBucket($.TimeUnix),
 			requests: CH.sumIf($.Value, $.MetricName.eq("cloudflare.worker.requests")),
 			errors: CH.sumIf($.Value, $.MetricName.eq("cloudflare.worker.errors")),
 		}))

@@ -19,6 +19,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { from, param, type ColumnAccessor, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { CHNumber } from "../schema"
 import { MetricsGauge, MetricsSum } from "../tables"
+import { avgWhere, isoBucket } from "./format"
 import {
 	CF_FILTERABLE,
 	CF_METRIC,
@@ -27,11 +28,8 @@ import {
 	type CloudflareFilterOpts,
 } from "./cloudflare-infra-filters"
 
-const ISO_Z_FORMAT = "%Y-%m-%dT%H:%i:%S.%fZ"
 
 // Same NaN guard as cloudflare-infra.ts.
-const avgWhere = (value: CH.Expr<number>, cond: CH.Condition) =>
-	CH.if_(CH.countIf(cond).gt(0), CH.avgIf(value, cond), CH.lit(0))
 
 // ---------------------------------------------------------------------------
 // Per-host HTTP breakdown (single zone)
@@ -109,10 +107,7 @@ export function cloudflareZoneHostBreakdownSQL(opts: CloudflareFilterOpts = {}) 
 export function cloudflareZoneHostTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 	return from(MetricsSum)
 		.select(($) => ({
-			bucket: CH.formatDateTime(
-				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-				ISO_Z_FORMAT,
-			),
+			bucket: isoBucket($.TimeUnix),
 			host: cloudflareHostAttr($),
 			requests: CH.sum($.Value),
 		}))
@@ -168,10 +163,7 @@ export const cloudflareZoneFirewallTopRowSchema: CompiledQueryRowSchema<Cloudfla
 export function cloudflareZoneFirewallTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 	return from(MetricsSum)
 		.select(($) => ({
-			bucket: CH.formatDateTime(
-				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-				ISO_Z_FORMAT,
-			),
+			bucket: isoBucket($.TimeUnix),
 			action: $.Attributes.get("firewall.action"),
 			events: CH.sum($.Value),
 		}))
@@ -248,10 +240,7 @@ export const cloudflareZoneDnsBreakdownRowSchema: CompiledQueryRowSchema<Cloudfl
 export function cloudflareZoneDnsTimeseriesSQL(opts: CloudflareFilterOpts = {}) {
 	return from(MetricsSum)
 		.select(($) => ({
-			bucket: CH.formatDateTime(
-				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-				ISO_Z_FORMAT,
-			),
+			bucket: isoBucket($.TimeUnix),
 			responseCode: $.Attributes.get("dns.response_code"),
 			queries: CH.sum($.Value),
 		}))

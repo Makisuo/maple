@@ -37,8 +37,8 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, ServicePlatformsHourly } from "../tables"
+import { CHNumber } from "../schema"
 
-const CHNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
 
 export interface ServiceWorkloadsOpts {
 	services: ReadonlyArray<string>

@@ -20,6 +20,7 @@ import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-buil
 import { unionAll, type CHUnionQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
 import { CHNumber } from "../schema"
+import type { FacetOutput } from "./query-helpers"
 
 const HOSTMETRIC_NAMES = [
 	"system.cpu.utilization",
@@ -999,11 +1000,7 @@ export function workloadGaugeTimeseriesQuery(opts: WorkloadGaugeTimeseriesOpts) 
 // facet counts reflect the *current* filtered set.
 // ---------------------------------------------------------------------------
 
-export interface PodFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type PodFacetsOutput = FacetOutput
 
 const makePodFacet = (opts: ListPodsOpts, attrKey: string, facetType: string, perFacetLimit: number) =>
 	from(MetricsGauge)
@@ -1036,11 +1033,7 @@ export function podFacetsQuery(opts: ListPodsOpts = {}): CHUnionQuery<PodFacetsO
 	).format("JSON")
 }
 
-export interface NodeFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type NodeFacetsOutput = FacetOutput
 
 const makeNodeFacet = (opts: ListNodesOpts, attrKey: string, facetType: string, perFacetLimit: number) =>
 	from(MetricsGauge)
@@ -1066,11 +1059,7 @@ export function nodeFacetsQuery(opts: ListNodesOpts = {}): CHUnionQuery<NodeFace
 	).format("JSON")
 }
 
-export interface WorkloadFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type WorkloadFacetsOutput = FacetOutput
 
 const makeWorkloadFacet = (
 	opts: ListWorkloadsOpts,
