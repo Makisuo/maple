@@ -4,7 +4,7 @@ import { OrgId } from "@maple/domain"
 import { Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { TinybirdOrgTokenService } from "./TinybirdOrgTokenService"
-import { Env } from "@/lib/Env"
+import { Env } from "@/platform/Env"
 
 const SIGNING_KEY = "explicit-test-signing-key"
 const asOrgId = Schema.decodeUnknownSync(OrgId)

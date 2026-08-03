@@ -33,7 +33,7 @@ import {
 } from "@maple/db"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { Array as Arr, Clock, Context, Effect, Layer, Option, Schema } from "effect"
-import { Database, type DatabaseError } from "@/lib/DatabaseLive"
+import { Database, type DatabaseError } from "@/platform/DatabaseLive"
 
 // Postgres caps bind parameters at 65535. Chunk unbounded `inArray(...)` filters
 // and bulk inserts so a large installation (every repo/commit at once) stays well

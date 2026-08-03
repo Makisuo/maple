@@ -30,12 +30,12 @@ import {
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
-import { Database, DatabaseError, type DatabaseClient } from "@/lib/DatabaseLive"
+import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
 import {
 	AI_TRIAGE_WORKFLOW_BINDING,
 	isAiTriageWorkflowBinding,
 	newAiTriageRunId,
-} from "@/lib/ai-triage-enqueue"
+} from "@/services/errors/ai-triage-enqueue"
 
 const decodeIsoSync = Schema.decodeUnknownSync(AiTriageRunDocument.fields.createdAt)
 const decodeResultSync = Schema.decodeUnknownSync(AiTriageResult)

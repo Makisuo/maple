@@ -13,8 +13,8 @@ import {
 	RoleName,
 	UserId,
 } from "@maple/domain/http"
-import type { WarehouseQueryServiceShape } from "@/lib/WarehouseQueryService"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import {
 	AlertRuntime,
 	type AlertRuntimeShape,
@@ -25,14 +25,14 @@ import {
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService } from "@maple/cache"
 import { baselineWarehouseCapabilities } from "@maple/query-engine"
-import { CacheBackendLive } from "@/lib/CacheBackendLive"
-import { Env } from "@/lib/Env"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import { Env } from "@/platform/Env"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
-import { EmailService } from "@/lib/EmailService"
+import { EmailService } from "@/platform/EmailService"
 import { OrgMembersError, OrgMembersService, type OrgMember } from "@/services/org/OrgMembersService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
-import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/lib/test-pglite"
-import { decryptAes256Gcm } from "@/lib/Crypto"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
+import { decryptAes256Gcm } from "@/platform/Crypto"
 
 const trackedDbs: TestDb[] = []
 

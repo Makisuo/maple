@@ -1,7 +1,7 @@
 import { createClerkClient } from "@clerk/backend"
 import type { OrgId } from "@maple/domain/http"
 import { Context, Data, Effect, Layer, Option, Redacted } from "effect"
-import { Env } from "@/lib/Env"
+import { Env } from "@/platform/Env"
 
 export class OrgMembersError extends Data.TaggedError("@maple/api/services/OrgMembersError")<{
 	readonly message: string

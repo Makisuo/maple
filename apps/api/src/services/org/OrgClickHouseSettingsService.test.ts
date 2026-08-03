@@ -10,9 +10,9 @@ import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import type { TableDiffEntry } from "@maple/domain/clickhouse"
-import { Env } from "@/lib/Env"
-import { encryptAes256Gcm } from "@/lib/Crypto"
-import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/lib/test-pglite"
+import { Env } from "@/platform/Env"
+import { encryptAes256Gcm } from "@/platform/Crypto"
+import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
 import {
 	type ClickHouseExecConfig,
 	execClickHouse,

@@ -3,9 +3,9 @@ import { ConfigProvider, Effect, Fiber, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
-import { Env } from "@/lib/Env"
+import { Env } from "@/platform/Env"
 import { PlanetScaleOAuthService } from "./PlanetScaleOAuthService"
-import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/lib/test-pglite"
+import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 
 const trackedDbs: TestDb[] = []
 

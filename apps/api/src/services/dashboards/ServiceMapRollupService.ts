@@ -3,8 +3,8 @@ import { orgIngestKeys } from "@maple/db"
 import * as CH from "@maple/query-engine/ch"
 import { Clock, Cause, Context, Effect, Layer, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
-import { Database, type DatabaseError } from "@/lib/DatabaseLive"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { Database, type DatabaseError } from "@/platform/DatabaseLive"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)

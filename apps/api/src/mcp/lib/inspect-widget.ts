@@ -1,6 +1,6 @@
 import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import {
 	QuerySpec,
 	type QueryEngineResult,
@@ -35,7 +35,7 @@ import type {
 	WidgetInspectionSummary,
 	WidgetInspectionVerdict,
 } from "@maple/domain"
-import type { TenantContext } from "@/lib/tenant-context"
+import type { TenantContext } from "@/services/auth/tenant-context"
 
 const TIMESERIES_ENDPOINT = "custom_query_builder_timeseries"
 const BREAKDOWN_ENDPOINT = "custom_query_builder_breakdown"

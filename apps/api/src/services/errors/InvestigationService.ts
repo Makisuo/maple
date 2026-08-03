@@ -21,15 +21,15 @@ import {
 } from "@maple/domain/http"
 import { ErrorIssueEventId, ErrorIssueId, InvestigationId } from "@maple/domain/primitives"
 import { wrapChatContext } from "@maple/domain/chat-preamble"
-import { CHAT_FLUE_ORIGIN } from "@/lib/chat-flue-origin"
+import { CHAT_FLUE_ORIGIN } from "@/http/chat-flue-origin"
 import { aiTriageSettings, errorIssueEvents, investigations, type InvestigationRow } from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm"
 import { Cause, Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
-import { trackTokenUsage } from "@/lib/autumn-tracker"
-import { applyTriageSeverity } from "@/lib/issue-severity"
-import { Database, DatabaseError, type DatabaseClient } from "@/lib/DatabaseLive"
-import { Env } from "@/lib/Env"
+import { trackTokenUsage } from "@/services/billing/autumn-tracker"
+import { applyTriageSeverity } from "@/services/errors/issue-severity"
+import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
+import { Env } from "@/platform/Env"
 
 const decodeIdSync = Schema.decodeUnknownSync(InvestigationId)
 const decodeSubjectSync = Schema.decodeUnknownSync(InvestigationSubject)

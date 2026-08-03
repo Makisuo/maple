@@ -29,8 +29,8 @@ import { CHNumber } from "@maple/query-engine/ch"
 import { and, eq, sql } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
-import { Database, type DatabaseError } from "@/lib/DatabaseLive"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { Database, type DatabaseError } from "@/platform/DatabaseLive"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import * as Integrations from "@maple/query-engine-integrations"
 
 /** Telemetry lookback for the warehouse-backed checks — matches the recommendations reconcile. */

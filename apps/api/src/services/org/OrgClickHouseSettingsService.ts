@@ -38,11 +38,11 @@ import {
 	encryptAes256Gcm,
 	parseBase64Aes256GcmKey,
 	type EncryptedValue,
-} from "@/lib/Crypto"
-import { Database } from "@/lib/DatabaseLive"
-import { Env } from "@/lib/Env"
-import { dateToMs } from "@/lib/time"
-import { validateExternalUrl } from "@/lib/url-validator"
+} from "@/platform/Crypto"
+import { Database } from "@/platform/DatabaseLive"
+import { Env } from "@/platform/Env"
+import { dateToMs } from "@/platform/time"
+import { validateExternalUrl } from "@/http/url-validator"
 
 /**
  * Resolved per-org backend config, returned to the runtime SQL layer.

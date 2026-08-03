@@ -70,11 +70,11 @@ import {
 	type CloudflareGraphqlError,
 	type CloudflareHyperdriveConfig,
 	type CloudflareZone,
-} from "@/lib/CloudflareApi"
-import { Database, type DatabaseClient } from "@/lib/DatabaseLive"
-import { Env } from "@/lib/Env"
-import { dateToMs } from "@/lib/time"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+} from "@/services/integrations/CloudflareApi"
+import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
+import { Env } from "@/platform/Env"
+import { dateToMs } from "@/platform/time"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { CloudflareOAuthService } from "@/services/auth/CloudflareOAuthService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"

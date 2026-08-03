@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto"
-import { fmtMetricTs, type MetricGaugeRow, type MetricSumRow } from "@/lib/metric-rows"
+import { fmtMetricTs, type MetricGaugeRow, type MetricSumRow } from "@/services/warehouse/metric-rows"
 
 const SERVICES = ["demo-api", "demo-frontend", "demo-worker", "demo-db"] as const
 type DemoServiceName = (typeof SERVICES)[number]

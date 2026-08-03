@@ -36,15 +36,15 @@ import {
 import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import { CH, parseWarehouseDateTime, formatWarehouseDateTime } from "@maple/query-engine"
 import { EdgeCacheService } from "@maple/cache"
-import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "@/lib/warehouse-org-quarantine"
+import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "@/services/warehouse/warehouse-org-quarantine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
-import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "@/lib/ai-triage-enqueue"
+import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { Database, DatabaseError, type DatabaseClient } from "@/lib/DatabaseLive"
-import { Env } from "@/lib/Env"
-import { dateToMs, msToDate } from "@/lib/time"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
+import { Env } from "@/platform/Env"
+import { dateToMs, msToDate } from "@/platform/time"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import {
 	ERROR_SPIKE_MIN_COUNT,
 	evaluateErrorSpike,

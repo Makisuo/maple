@@ -25,10 +25,10 @@ import {
 	encryptAes256Gcm,
 	parseBase64Aes256GcmKey,
 	type EncryptedValue,
-} from "@/lib/Crypto"
-import type { DatabaseClient, DatabaseShape } from "@/lib/DatabaseLive"
-import type { EnvShape } from "@/lib/Env"
-import { msToDate } from "@/lib/time"
+} from "@/platform/Crypto"
+import type { DatabaseClient, DatabaseShape } from "@/platform/DatabaseLive"
+import type { EnvShape } from "@/platform/Env"
+import { msToDate } from "@/platform/time"
 
 export const OAUTH_STATE_TTL_MS = 10 * 60_000 // 10 minutes
 export const OAUTH_REFRESH_LEEWAY_MS = 60_000 // refresh when the access token is within 1 minute of expiry

@@ -1,8 +1,8 @@
 import type { MessageBatch } from "@cloudflare/workers-types"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { Database, DatabaseError } from "./lib/DatabaseLive"
-import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "./lib/test-pglite"
+import { Database, DatabaseError } from "@/platform/DatabaseLive"
+import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { processPlanetScaleWebhookBatch } from "./planetscale-webhook-runtime"
 import type { PlanetScaleWebhookJob } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
 

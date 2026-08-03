@@ -24,7 +24,7 @@ import {
 } from "@maple/domain/http/v2"
 import type { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { requireAdmin } from "@/lib/auth"
+import { requireAdmin } from "@/services/auth/auth"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
 

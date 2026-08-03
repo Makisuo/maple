@@ -87,7 +87,7 @@ const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpAp
 // under the far larger per-request CPU budget.
 const buildHandler = async () => {
 	const { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } = await import("./app")
-	const { layerPg } = await import("./lib/DatabasePgLive")
+	const { layerPg } = await import("@/platform/DatabasePgLive")
 	return HttpRouter.toWebHandler(
 		AllRoutes.pipe(
 			Layer.provideMerge(MainLive),
@@ -116,7 +116,7 @@ const getHandler = () => (handlerPromise ??= buildHandler())
 // stays behind a dynamic import, preserving the worker's startup-CPU budget.
 const buildRpcRuntime = async (env: Record<string, unknown>) => {
 	const { MainLive } = await import("./app")
-	const { layerPg } = await import("./lib/DatabasePgLive")
+	const { layerPg } = await import("@/platform/DatabasePgLive")
 	return ManagedRuntime.make(
 		MainLive.pipe(
 			Layer.provideMerge(WorkerPlatformLive),
@@ -372,7 +372,7 @@ const handleScheduled = async (
 ): Promise<void> => {
 	if (event.cron === SCRAPE_RETENTION_CRON) {
 		const { buildScrapeRetentionLayer, flushVcsTelemetry } = await import("./vcs-sync-runtime")
-		const { runScrapeCheckRetention } = await import("./lib/scrape-check-retention")
+		const { runScrapeCheckRetention } = await import("@/services/integrations/scrape-check-retention")
 		try {
 			await runScheduledEffect(buildScrapeRetentionLayer(env), runScrapeCheckRetention, ctx, {
 				onInterrupt: "graceful",

@@ -6,7 +6,7 @@ import {
 	VcsCommitShaInvalidError,
 } from "@maple/domain/http"
 import { Effect, Layer } from "effect"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { GithubAppClient } from "@/services/integrations/vcs/vendor/github/GithubAppClient"
 import { GithubHttp, type GithubHttpShape } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 import { GithubProvider } from "@/services/integrations/vcs/vendor/github/GithubProvider"

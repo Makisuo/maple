@@ -22,17 +22,17 @@ import {
 import { scrapeTargetChecks, scrapeTargets, type ScrapeTargetCheckRow } from "@maple/db"
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm"
 import { Cause, Clock, Context, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
-import { encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "@/lib/Crypto"
-import { Database } from "@/lib/DatabaseLive"
-import { Env } from "@/lib/Env"
+import { encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "@/platform/Crypto"
+import { Database } from "@/platform/DatabaseLive"
+import { Env } from "@/platform/Env"
 import {
 	BasicCredentialsSchema,
 	BearerCredentialsSchema,
 	buildScrapeAuthHeaders,
 	catchOAuthTokenFailure,
 	TokenCredentialsSchema,
-} from "@/lib/scrape-auth"
-import { safeFetch, validateExternalUrl } from "@/lib/url-validator"
+} from "@/services/auth/scrape-auth"
+import { safeFetch, validateExternalUrl } from "@/http/url-validator"
 import { decodeDiscoveryConfig, DiscoveryConfigSchema } from "./planetscale/discovery-config"
 import { PlanetScaleDiscoveryService, planetScaleDiscoveryUrl } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "@/services/auth/PlanetScaleOAuthService"

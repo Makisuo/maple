@@ -5,7 +5,7 @@ import { dependencyUnavailable, MapleApiV2, permissionError } from "@maple/domai
 import type { V2IngestKeys } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
-import { requireAdmin } from "@/lib/auth"
+import { requireAdmin } from "@/services/auth/auth"
 
 const adminOnly = (action: string) => () =>
 	permissionError("insufficient_permissions", `Only org admins can ${action} ingest keys`)

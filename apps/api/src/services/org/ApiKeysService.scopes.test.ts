@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { OrgId, UserId } from "@maple/domain/http"
 import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
-import { Env } from "@/lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "./ApiKeysService"
 
 const createdDbs: TestDb[] = []

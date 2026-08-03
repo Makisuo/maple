@@ -16,7 +16,7 @@ import {
 	type VcsSyncJob,
 } from "@maple/domain/http"
 import { Clock, Context, Effect, Layer, Option } from "effect"
-import { Env } from "@/lib/Env"
+import { Env } from "@/platform/Env"
 import { OAuthStateRepository } from "@/services/auth/OAuthStateRepository"
 import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
 import { BACKFILL_WINDOW_MS } from "@/services/integrations/vcs/VcsSyncService"

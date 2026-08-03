@@ -34,8 +34,8 @@ import type { QuerySpec } from "@maple/query-engine"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService } from "@maple/cache"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
-import * as QueryEngineMetrics from "@/lib/QueryEngineMetrics"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import * as QueryEngineMetrics from "@/observability/QueryEngineMetrics"
 
 // ---------------------------------------------------------------------------
 // QueryEngineService — caching + orchestration. The pure lowering (validation,

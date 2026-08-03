@@ -26,9 +26,9 @@ import {
 } from "@maple/db"
 import { and, asc, eq, inArray } from "drizzle-orm"
 import { Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
-import { Database, type DatabaseClient, DatabaseError } from "@/lib/DatabaseLive"
-import { Env } from "@/lib/Env"
-import { evaluateEscalationPolicy } from "@/lib/escalation-policy"
+import { Database, type DatabaseClient, DatabaseError } from "@/platform/DatabaseLive"
+import { Env } from "@/platform/Env"
+import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
 import { NotificationDispatcher, type NotificationRequest } from "./NotificationDispatcher"
 
 const ESCALATIONS_PER_TICK = 50

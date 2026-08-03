@@ -21,9 +21,9 @@ import {
 	encryptAes256Gcm,
 	parseBase64Aes256GcmKey,
 	type EncryptedValue,
-} from "@/lib/Crypto"
-import { Database, type DatabaseError } from "@/lib/DatabaseLive"
-import { Env } from "@/lib/Env"
+} from "@/platform/Crypto"
+import { Database, type DatabaseError } from "@/platform/DatabaseLive"
+import { Env } from "@/platform/Env"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { OAuthStateRepository } from "@/services/auth/OAuthStateRepository"
 import { loadActiveWorkspaceByOrg, slackSecretAad, type SlackSecretColumn } from "./slack-bot-token"

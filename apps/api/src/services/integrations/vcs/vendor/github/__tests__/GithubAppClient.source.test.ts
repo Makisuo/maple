@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { generateKeyPairSync } from "node:crypto"
 import { ConfigProvider, Effect, Layer } from "effect"
-import { Env } from "@/lib/Env"
+import { Env } from "@/platform/Env"
 import { GithubAppClient } from "@/services/integrations/vcs/vendor/github/GithubAppClient"
 import { GithubHttp, type GithubHttpShape } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 

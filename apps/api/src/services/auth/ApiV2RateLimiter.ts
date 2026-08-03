@@ -1,6 +1,6 @@
 import type { ApiKeyId } from "@maple/domain/http"
 import { Context, Effect, Layer, Schema } from "effect"
-import { WorkerEnvironment } from "@/lib/WorkerEnvironment"
+import { WorkerEnvironment } from "@/platform/WorkerEnvironment"
 
 export const API_V2_RATE_LIMIT_BINDING = "API_V2_RATE_LIMITER"
 export const API_V2_RATE_LIMIT_PARTITION = "API_V2_RATE_LIMIT_PARTITION"

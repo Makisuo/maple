@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ApiKeyId } from "@maple/domain/http"
 import { Effect, Layer, Schema } from "effect"
-import { WorkerEnvironment } from "@/lib/WorkerEnvironment"
+import { WorkerEnvironment } from "@/platform/WorkerEnvironment"
 import {
 	API_V2_RATE_LIMIT_BINDING,
 	API_V2_RATE_LIMIT_PARTITION,

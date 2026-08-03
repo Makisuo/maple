@@ -1,6 +1,6 @@
 import { McpQueryError, optionalStringParam, type McpToolRegistrar } from "./types"
 import { queryWarehouse } from "@/mcp/lib/query-warehouse"
-import { getSpamPatternsParam } from "@/lib/spam-patterns"
+import { getSpamPatternsParam } from "@/services/errors/spam-patterns"
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { formatPercent, formatDurationFromMs, formatNumber, formatTable } from "@/mcp/lib/format"
 import { Array as Arr, Effect, Schema } from "effect"

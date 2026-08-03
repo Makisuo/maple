@@ -3,7 +3,7 @@ import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Effect, Layer, Schema } from "effect"
-import { layerPg } from "./lib/DatabasePgLive"
+import { layerPg } from "@/platform/DatabasePgLive"
 import { classifyPlanetScaleEvent, upsertPlanetScaleIssue } from "./services/integrations/planetscale/webhook-events"
 import { PlanetScaleWebhookJob } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
 

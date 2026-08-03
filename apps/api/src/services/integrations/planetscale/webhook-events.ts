@@ -4,7 +4,7 @@ import { ActorId, ErrorIssueEventId, ErrorIssueId } from "@maple/domain/primitiv
 import { actors, errorIssues, errorIssueEvents, type ErrorIssueRow } from "@maple/db"
 import { and, eq, sql } from "drizzle-orm"
 import { Clock, Effect, Schema } from "effect"
-import { Database, type DatabaseError } from "@/lib/DatabaseLive"
+import { Database, type DatabaseError } from "@/platform/DatabaseLive"
 
 /**
  * PlanetScale webhook event handling: signature verification, payload decode,

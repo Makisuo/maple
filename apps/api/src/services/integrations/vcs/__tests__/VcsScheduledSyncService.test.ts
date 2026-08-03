@@ -1,7 +1,7 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { VcsQueueError, type OrgId, type VcsSyncJob } from "@maple/domain/http"
 import { Effect, Exit, Layer } from "effect"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
 import { VcsScheduledSyncService } from "@/services/integrations/vcs/VcsScheduledSyncService"
 import {

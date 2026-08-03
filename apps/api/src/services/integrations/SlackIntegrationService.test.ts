@@ -4,7 +4,7 @@ import { ConfigProvider, Effect, Fiber, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
-import { Env } from "@/lib/Env"
+import { Env } from "@/platform/Env"
 import { SLACK_BOT_SCOPES, SlackIntegrationService } from "./SlackIntegrationService"
 import {
 	resolveSlackBotTokenForDispatch,
@@ -14,8 +14,8 @@ import {
 } from "./slack-bot-token"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { OAuthStateRepository } from "@/services/auth/OAuthStateRepository"
-import { Database } from "@/lib/DatabaseLive"
-import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/lib/test-pglite"
+import { Database } from "@/platform/DatabaseLive"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 
 const ENCRYPTION_KEY = Buffer.alloc(32, 7)
 const ENCRYPTION_KEY_B64 = ENCRYPTION_KEY.toString("base64")

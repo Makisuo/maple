@@ -3,9 +3,9 @@ import { alertDestinations } from "@maple/db"
 import { AlertDestinationId, OrgId } from "@maple/domain/http"
 import { eq } from "drizzle-orm"
 import { Effect, Schema } from "effect"
-import { encryptAes256Gcm } from "@/lib/Crypto"
-import { Database } from "@/lib/DatabaseLive"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
+import { encryptAes256Gcm } from "@/platform/Crypto"
+import { Database } from "@/platform/DatabaseLive"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { hydrateDestinationRow, type DestinationSecretConfig } from "./AlertDestinationHydration"
 
 /*

@@ -15,7 +15,7 @@
  * Note: the gateway strips any client-supplied `org_id` / `maple_org_id` and re-sets it from the
  * resolved ingest key, so leaving `maple_org_id` in `resource_attributes` is harmless.
  */
-import type { MetricAttrs, MetricGaugeRow, MetricSumRow } from "@/lib/metric-rows"
+import type { MetricAttrs, MetricGaugeRow, MetricSumRow } from "@/services/warehouse/metric-rows"
 
 interface OtlpKeyValue {
 	readonly key: string

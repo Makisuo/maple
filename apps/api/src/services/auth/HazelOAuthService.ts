@@ -13,9 +13,9 @@ import {
 import { oauthAuthStates } from "@maple/db"
 import { Clock, Context, Effect, Layer, Option, Redacted, Ref, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { Env, type EnvShape } from "@/lib/Env"
-import { Database } from "@/lib/DatabaseLive"
-import { msToDate } from "@/lib/time"
+import { Env, type EnvShape } from "@/platform/Env"
+import { Database } from "@/platform/DatabaseLive"
+import { msToDate } from "@/platform/time"
 import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS, toUpstreamError } from "./oauth/connection-helpers"
 
 const HAZEL_PROVIDER = "hazel"

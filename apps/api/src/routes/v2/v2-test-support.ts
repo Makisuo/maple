@@ -11,7 +11,7 @@ import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsServi
 import { SlackIntegrationService } from "@/services/integrations/SlackIntegrationService"
 import { SetupAuditService } from "@/services/org/SetupAuditService"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { HttpV2AlertDeliveriesLive } from "./alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "./alert-destinations.http"

@@ -11,8 +11,8 @@ import {
 	UserId,
 } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { Env } from "@/lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"

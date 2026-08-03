@@ -16,8 +16,8 @@ import {
 	upstreamError,
 } from "@maple/domain/http/v2"
 import { Array as Arr, Effect, Option } from "effect"
-import { requireAdmin } from "@/lib/auth"
-import { Env } from "@/lib/Env"
+import { requireAdmin } from "@/services/auth/auth"
+import { Env } from "@/platform/Env"
 import type { SlackChannelList, SlackInstallStatus } from "@/services/integrations/SlackIntegrationService"
 import { SLACK_CALLBACK_PATH, SlackIntegrationService } from "@/services/integrations/SlackIntegrationService"
 

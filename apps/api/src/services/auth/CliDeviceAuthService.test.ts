@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { OrgId, RoleName, UserId } from "@maple/domain/http"
 import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
-import { Env } from "@/lib/Env"
-import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/lib/test-pglite"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { CliDeviceAuthService } from "./CliDeviceAuthService"
 

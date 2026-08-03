@@ -18,9 +18,9 @@ import { errorIssues, errorIssueEvents, investigations } from "@maple/db"
 import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { eq } from "drizzle-orm"
-import { Env } from "@/lib/Env"
-import { Database } from "@/lib/DatabaseLive"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
+import { Env } from "@/platform/Env"
+import { Database } from "@/platform/DatabaseLive"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { InvestigationService } from "./InvestigationService"
 
 const createdDbs: TestDb[] = []

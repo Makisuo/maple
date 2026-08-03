@@ -12,7 +12,7 @@ import {
 	VcsWebhookSignatureError,
 } from "@maple/domain/http"
 import { Clock, Effect, Exit, Layer, Option, Schema } from "effect"
-import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/lib/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
 import { COMMIT_PAGES_PER_INVOCATION, GithubAppClient } from "@/services/integrations/vcs/vendor/github/GithubAppClient"
 import { GithubHttp } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 import { GithubProvider } from "@/services/integrations/vcs/vendor/github/GithubProvider"

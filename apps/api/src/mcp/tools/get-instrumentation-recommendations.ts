@@ -15,7 +15,7 @@ import { resolveTimeRange } from "@/mcp/lib/time"
 import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import { RecommendationIssueStatus, type RecommendationIssueKind } from "@maple/domain/http"
 import { exploreAttributeKeys } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
+import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 const decodeStatus = Schema.decodeUnknownOption(RecommendationIssueStatus)
 

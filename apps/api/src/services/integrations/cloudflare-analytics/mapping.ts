@@ -13,7 +13,7 @@
  * - ABR sampling: true request count = `count × avg.sampleInterval`; `sum.*` fields are already
  *   sampling-adjusted by Cloudflare, so they pass through untouched.
  */
-import { fmtMetricTs, type MetricGaugeRow, type MetricSumRow } from "@/lib/metric-rows"
+import { fmtMetricTs, type MetricGaugeRow, type MetricSumRow } from "@/services/warehouse/metric-rows"
 import type {
 	DnsGroupShape,
 	DurableObjectsGroupShape,

@@ -1,7 +1,7 @@
 import { DailySpendResponse, DailyVolume, WarehouseQueryError } from "@maple/domain/http"
 import { CH, parseWarehouseDateTime, formatWarehouseDateTime } from "@maple/query-engine"
 import { Context, Effect, Layer } from "effect"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import type { TenantContext } from "@/services/auth/AuthService"
 import * as Integrations from "@maple/query-engine-integrations"
 

@@ -21,11 +21,11 @@ import {
 	type DestinationSecretConfig,
 	type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
-import { parseBase64Aes256GcmKey } from "@/lib/Crypto"
+import { parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { SlackBotTokenResolver } from "@/services/integrations/slack-bot-token"
-import { Database } from "@/lib/DatabaseLive"
-import { EmailService } from "@/lib/EmailService"
-import { Env } from "@/lib/Env"
+import { Database } from "@/platform/DatabaseLive"
+import { EmailService } from "@/platform/EmailService"
+import { Env } from "@/platform/Env"
 
 /*
  * Shared notification dispatch for alert-adjacent features (error issues /

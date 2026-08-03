@@ -2,9 +2,9 @@ import { slackWorkspaces } from "@maple/db"
 import { AlertDeliveryError } from "@maple/domain/http"
 import { and, eq, isNull } from "drizzle-orm"
 import { Context, Data, Effect, Layer, Option, Redacted } from "effect"
-import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "@/lib/Crypto"
-import { Database, type DatabaseShape } from "@/lib/DatabaseLive"
-import { Env } from "@/lib/Env"
+import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
+import { Database, type DatabaseShape } from "@/platform/DatabaseLive"
+import { Env } from "@/platform/Env"
 
 /*
  * Slack bot-token resolution for the alert-delivery `slack-bot` arm. This module

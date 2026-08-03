@@ -32,7 +32,7 @@ import {
 	MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS,
 } from "@maple/query-engine/runtime"
 import { Effect, Encoding, Option, Result, Schema } from "effect"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { warehouseToV2 } from "./warehouse-error-map"
 

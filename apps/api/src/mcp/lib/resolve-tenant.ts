@@ -1,9 +1,9 @@
 import { timingSafeEqual } from "node:crypto"
 import { Effect, Option, Redacted, Schema } from "effect"
-import type { TenantContext as McpTenantContext } from "@/lib/tenant-context"
+import type { TenantContext as McpTenantContext } from "@/services/auth/tenant-context"
 import { AuthService } from "@/services/auth/AuthService"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
-import { Env } from "@/lib/Env"
+import { Env } from "@/platform/Env"
 import { ActorId, OrgId, RoleName, UserId } from "@maple/domain/http"
 import { McpAuthMissingError, McpAuthInvalidError, McpInvalidTenantError } from "@/mcp/tools/types"
 

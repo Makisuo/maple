@@ -10,7 +10,7 @@ import {
 import type { AlertDestinationRow } from "@maple/db"
 import { Clock, Duration, Effect, Match, Option, Schema } from "effect"
 import type { EnrichedDestinationSecretConfig } from "./AlertDestinationHydration"
-import { safeFetch } from "@/lib/url-validator"
+import { safeFetch } from "@/http/url-validator"
 // Circular with ./alert-email (it imports our formatting helpers); safe — both
 // sides only reference the other's exports inside function bodies.
 import { buildAlertEmailContent } from "./alert-email"

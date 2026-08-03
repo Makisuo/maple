@@ -13,7 +13,7 @@ import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { errorDetail } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
+import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerErrorDetailTool(server: McpToolRegistrar) {
 	server.tool(
