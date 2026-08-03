@@ -12,17 +12,16 @@ import {
 	onConsentChange,
 	publishSessionSink,
 	rotateSession,
+	setActiveTraceIdProvider,
 	setVisitorTracking,
 	startEventSink,
 	startMetadataSession,
 	type MetadataSessionHandle,
 	type SessionEventSink,
 } from "@maple/browser-session"
-import {
-	type ReplaySessionHandle,
-	setActiveTraceIdProvider,
-	startReplaySession,
-} from "@maple/browser-session/replay"
+// Type-only: the replay entry pulls rrweb, so it may only be reached through the
+// dynamic import in `startRuntime`.
+import type { ReplaySessionHandle } from "@maple/browser-session/replay"
 import { trace } from "@opentelemetry/api"
 import { type MapleBrowserConfig, type ResolvedConfig, resolveConfig } from "./config"
 import { setupTracing } from "./tracing"
@@ -37,8 +36,10 @@ export interface MapleBrowserHandle {
 interface BrowserRuntime {
 	readonly initialSessionId: string
 	readonly sink: SessionEventSink
-	readonly replay?: ReplaySessionHandle | undefined
-	readonly metadata?: MetadataSessionHandle | undefined
+	replay?: ReplaySessionHandle | undefined
+	metadata?: MetadataSessionHandle | undefined
+	/** Settles when the lazy replay chunk resolved; absent on the metadata path. */
+	replayPending?: Promise<void> | undefined
 }
 
 let active: MapleBrowserHandle | undefined
@@ -68,6 +69,9 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 	let stopped = false
 	let rotateOnNextStart = false
 	let shutdownTracing: (() => Promise<void>) | undefined
+	// Bumped by every start and stop, so a replay chunk that lands after a
+	// consent revoke (or a rotation) never attaches a recorder to a dead runtime.
+	let generation = 0
 
 	const startRuntime = (): void => {
 		if (stopped || runtime || !hasConsent()) return
@@ -97,24 +101,46 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 		// The replay path publishes the sink and sources trace ids itself — the
 		// Effect SDK drives it with neither wired — so only the metadata path takes
 		// them from here. Passing both would republish the sink twice per rotation.
-		const replay = recordReplay
-			? startReplaySession({
+		const startMetadata = (): MetadataSessionHandle | undefined =>
+			startMetadataSession({
+				...shared,
+				getTraceIds: getObservedTraceIds,
+				onSessionChange: publishSessionSink,
+			})
+
+		if (!recordReplay) {
+			runtime = { initialSessionId: session.id, sink, metadata: startMetadata() }
+			return
+		}
+
+		// Sampled in: rrweb rides in a code-split chunk so the ~90% of visitors a
+		// sample rate excludes never download it. The sampling decision above is
+		// synchronous — only the recorder handle arrives late.
+		const next: BrowserRuntime = { initialSessionId: session.id, sink }
+		runtime = next
+		const ownGeneration = ++generation
+		const stale = (): boolean =>
+			stopped || !hasConsent() || generation !== ownGeneration || runtime !== next
+		next.replayPending = import("@maple/browser-session/replay")
+			.then(({ startReplaySession }) => {
+				if (stale()) return
+				next.replay = startReplaySession({
 					...shared,
 					maskAllInputs: config.maskAllInputs,
 					maskAllText: config.maskAllText,
 				})
-			: undefined
-		const metadata = replay
-			? undefined
-			: startMetadataSession({
-					...shared,
-					getTraceIds: getObservedTraceIds,
-					onSessionChange: publishSessionSink,
-				})
-		runtime = { initialSessionId: session.id, sink, replay, metadata }
+			})
+			.catch(() => {
+				// A blocked or failed chunk should still leave a session row behind.
+				if (stale()) return
+				next.metadata = startMetadata()
+			})
 	}
 
 	const stopRuntime = async (flush: boolean): Promise<void> => {
+		// Before the first await, so an in-flight replay chunk sees a stale
+		// generation and never starts a recorder behind the teardown.
+		generation++
 		const previous = runtime
 		runtime = undefined
 		if (!previous) return
@@ -128,7 +154,9 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 		sink.stop()
 		if (sink !== previous.sink) previous.sink.stop()
 		clearSessionSink(currentSessionId ?? previous.initialSessionId)
-		await Promise.all([replayShutdown, metadataShutdown])
+		// Awaiting the import too keeps `shutdown()` a real quiescence point: it
+		// resolves with no replay work still scheduled behind it.
+		await Promise.all([replayShutdown, metadataShutdown, previous.replayPending])
 	}
 
 	startRuntime()
