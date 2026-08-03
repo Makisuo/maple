@@ -62,6 +62,19 @@ export interface MapleBrowserConfig {
 		 * purges any id already stored.
 		 */
 		readonly persistVisitorId?: boolean
+		/**
+		 * Scope the visitor-id cookie to the registered domain, so a marketing site
+		 * and an app on sibling subdomains (`example.com` and `app.example.com`)
+		 * resolve to the same visitor and a pre-signup visit links to the account it
+		 * becomes. Default true. Set false to keep the cookie host-only.
+		 */
+		readonly crossSubdomainCookie?: boolean
+		/**
+		 * Explicit cookie `Domain=` (no leading dot), e.g. `"example.com"`. Defaults
+		 * to the broadest domain the browser accepts, discovered by probing. `""`
+		 * forces a host-only cookie.
+		 */
+		readonly cookieDomain?: string
 		/** Capture nothing until `MapleBrowser.setConsent(true)`. Default false. */
 		readonly requireConsent?: boolean
 		/** Send `identify()`'s email to the warehouse. Default true. */
@@ -87,6 +100,8 @@ export interface ResolvedConfig {
 	readonly maskAllInputs: boolean
 	readonly maskAllText: boolean
 	readonly persistVisitorId: boolean
+	readonly crossSubdomainCookie: boolean
+	readonly cookieDomain: string | undefined
 	readonly requireConsent: boolean
 	readonly captureUserEmail: boolean
 	readonly respectDoNotTrack: boolean
@@ -121,6 +136,8 @@ export function resolveConfig(config: MapleBrowserConfig): ResolvedConfig {
 		maskAllInputs: config.privacy?.maskAllInputs ?? true,
 		maskAllText: config.privacy?.maskAllText ?? false,
 		persistVisitorId: config.privacy?.persistVisitorId ?? true,
+		crossSubdomainCookie: config.privacy?.crossSubdomainCookie ?? true,
+		cookieDomain: config.privacy?.cookieDomain,
 		requireConsent: config.privacy?.requireConsent ?? false,
 		captureUserEmail: config.privacy?.captureUserEmail ?? true,
 		respectDoNotTrack: config.privacy?.respectDoNotTrack ?? false,

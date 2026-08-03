@@ -46,15 +46,48 @@ metadata rows and stamped as `user.id` on future browser-created spans.
 ```ts
 MapleBrowser.identify(user.id)
 
+// or the full identity — email, name, and the company/team to group by
+MapleBrowser.identify({
+	id: user.id,
+	email: user.email,
+	groupId: org.id,
+	groupName: org.name,
+	traits: { plan: "pro" },
+})
+
 // after sign-out
 MapleBrowser.identify(null)
 ```
+
+Each call replaces the identity rather than merging it.
+
+## Custom events
+
+`track(name, props)` records a product event as a `session_events` row with
+`Type='custom'`, so it shows up inline in the session transcript rather than in
+a separate analytics silo. Calls before `init()` finishes are queued.
+
+```ts
+MapleBrowser.track("checkout_completed", { plan: "pro", seats: 12 })
+```
+
+## Linking a marketing site to your app
+
+The visitor id lives in localStorage **and** a cookie scoped to your registered
+domain, so `example.com` and `app.example.com` resolve to the same `VisitorId`
+and an anonymous pre-signup visit links to the account it becomes. Session ids
+stay per-origin; `VisitorId` is the join key. Override the scope with
+`privacy.crossSubdomainCookie` / `privacy.cookieDomain`.
 
 ## Privacy
 
 `maskAllInputs` (default **on**) masks every `<input>` value. Use rrweb's
 attribute hooks (`data-rr-block`, `.rr-block`, `.rr-ignore`) to block elements
 or subtrees from capture.
+
+`privacy.requireConsent` holds all capture until `MapleBrowser.setConsent(true)`.
+Global Privacy Control is honored by default and suppresses the persistent
+visitor id; `doNotTrack` is not, unless `privacy.respectDoNotTrack` is set.
 
 ## Notes
 

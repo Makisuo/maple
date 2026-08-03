@@ -9,6 +9,7 @@ import {
 } from "@maple/domain/http"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
+import { trackProduct } from "@/lib/analytics"
 import { useAtomRefresh, useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { IntegrationId } from "./integration-catalog"
@@ -159,7 +160,13 @@ function useIntegrationMessage(
 	handlerRef.current = onMessage
 	useEffect(() => {
 		function listener(event: MessageEvent) {
-			if (event.data?.type === type) handlerRef.current(event.data)
+			if (event.data?.type !== type) return
+			// Every provider's popup posts back through here, so the activation event
+			// is recorded once rather than in each card's success branch.
+			if (event.data?.status === "success") {
+				trackProduct("integration_connected", { provider: type.split(":").pop() ?? type })
+			}
+			handlerRef.current(event.data)
 		}
 		window.addEventListener("message", listener)
 		return () => window.removeEventListener("message", listener)

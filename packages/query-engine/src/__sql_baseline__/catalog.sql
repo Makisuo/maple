@@ -818,7 +818,7 @@ SELECT
         LIMIT 1
         FORMAT JSON
 
--- builder:session-events:sessionTranscriptQuery:default  [ac53e184]
+-- builder:session-events:sessionTranscriptQuery:default  [744f689b]
 SELECT
           Timestamp AS timestamp,
           Seq AS seq,
@@ -833,7 +833,8 @@ SELECT
           NetUrl AS netUrl,
           NetStatus AS netStatus,
           NetDurationMs AS netDurationMs,
-          ErrorStack AS errorStack
+          ErrorStack AS errorStack,
+          toJSONString(Attributes) AS attributes
         FROM session_events
         WHERE OrgId = 'org_sql_catalog'
           AND SessionId = 'sess_0af7651916cd43dd'
@@ -844,7 +845,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- builder:session-replays:getSessionReplayQuery:default  [c277ac48]
+-- builder:session-replays:getSessionReplayQuery:default  [f13cecf7]
 SELECT
           Version AS version,
           SessionId AS sessionId,
@@ -864,7 +865,26 @@ SELECT
           ClickCount AS clickCount,
           ErrorCount AS errorCount,
           TraceIds AS traceIds,
-          toJSONString(ResourceAttributes) AS resourceAttributes
+          toJSONString(ResourceAttributes) AS resourceAttributes,
+          VisitorId AS visitorId,
+          VisitorIsNew AS visitorIsNew,
+          UserEmail AS userEmail,
+          UserName AS userName,
+          GroupId AS groupId,
+          GroupName AS groupName,
+          toJSONString(UserTraits) AS userTraits,
+          Referrer AS referrer,
+          ReferrerHost AS referrerHost,
+          UtmSource AS utmSource,
+          UtmMedium AS utmMedium,
+          UtmCampaign AS utmCampaign,
+          UtmTerm AS utmTerm,
+          UtmContent AS utmContent,
+          Host AS host,
+          EntryPath AS entryPath,
+          ExitPath AS exitPath,
+          Language AS language,
+          LastActivityAt AS lastActivityAt
         FROM session_replays
         WHERE OrgId = 'org_sql_catalog'
           AND SessionId = 'sess_0af7651916cd43dd'
@@ -987,7 +1007,7 @@ SELECT
           AND ErrorCount > 0
 FORMAT JSON
 
--- builder:session-replays:sessionReplaysListQuery:default  [6631a4ef]
+-- builder:session-replays:sessionReplaysListQuery:default  [cd831fa4]
 SELECT
           SessionId AS sessionId,
           argMax(StartTime, Version) AS startTime,
@@ -995,6 +1015,9 @@ SELECT
           argMax(DurationMs, Version) AS durationMs,
           argMax(Status, Version) AS status,
           argMax(UserId, Version) AS userId,
+          argMax(VisitorId, Version) AS visitorId,
+          argMax(UtmSource, Version) AS utmSource,
+          argMax(EntryPath, Version) AS entryPath,
           argMax(UrlInitial, Version) AS urlInitial,
           argMax(BrowserName, Version) AS browserName,
           argMax(OsName, Version) AS osName,
@@ -1016,7 +1039,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- builder:session-replays:sessionReplaysListQuery:filtered  [e21452a7]
+-- builder:session-replays:sessionReplaysListQuery:filtered  [5d7a903d]
 SELECT
           s.sessionId AS sessionId,
           s.startTime AS startTime,
@@ -1024,6 +1047,9 @@ SELECT
           s.durationMs AS durationMs,
           s.status AS status,
           s.userId AS userId,
+          s.visitorId AS visitorId,
+          s.utmSource AS utmSource,
+          s.entryPath AS entryPath,
           s.urlInitial AS urlInitial,
           s.browserName AS browserName,
           s.osName AS osName,
@@ -1042,6 +1068,9 @@ SELECT
           argMax(DurationMs, Version) AS durationMs,
           argMax(Status, Version) AS status,
           argMax(UserId, Version) AS userId,
+          argMax(VisitorId, Version) AS visitorId,
+          argMax(UtmSource, Version) AS utmSource,
+          argMax(EntryPath, Version) AS entryPath,
           argMax(UrlInitial, Version) AS urlInitial,
           argMax(BrowserName, Version) AS browserName,
           argMax(OsName, Version) AS osName,

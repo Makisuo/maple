@@ -31,6 +31,8 @@ export type EventRow = {
 	readonly netStatus: number
 	readonly netDurationMs: number
 	readonly errorStack: string
+	/** `track()` props on a `custom` event, JSON-encoded. Absent on fixtures. */
+	readonly attributes?: string
 }
 
 /** The session metadata the rail's Session tab renders — a subset of the studio's
@@ -51,13 +53,32 @@ export interface SessionRailSession {
 	readonly userAgent?: string | null
 	/** From `recordedMarker()`: true/false when the SDK stamped the session, undefined when unknown. */
 	readonly recorded?: boolean
+	// Analytics dimensions. Optional because the preview fixture and older
+	// sessions (written before migration 0011) have none.
+	/** Persistent per-browser id — the same value on this visitor's other sessions,
+	 *  including anonymous ones on the marketing site. */
+	readonly visitorId?: string | null
+	readonly visitorIsNew?: boolean
+	readonly groupName?: string | null
+	readonly userEmail?: string | null
+	/** Entry pathname; the session's first page rather than its latest URL. */
+	readonly entryPath?: string | null
+	readonly exitPath?: string | null
+	/** Gateway-normalized. `""` means direct *or* suppressed by Referrer-Policy. */
+	readonly referrerHost?: string | null
+	readonly utmSource?: string | null
+	readonly utmMedium?: string | null
+	readonly utmCampaign?: string | null
 }
 
 type RailTab = "events" | "traces" | "session"
-type EventFilter = "all" | "console" | "network" | "error"
+type EventFilter = "all" | "custom" | "console" | "network" | "error"
 
 const EVENT_FILTERS: ReadonlyArray<{ id: EventFilter; label: string }> = [
 	{ id: "all", label: "All" },
+	// Product events from `track()`. First after All because they are the ones
+	// someone reading a session for *behaviour* is looking for.
+	{ id: "custom", label: "Product" },
 	{ id: "console", label: "Console" },
 	{ id: "network", label: "Network" },
 	{ id: "error", label: "Errors" },
@@ -193,6 +214,7 @@ function EventsTab({
 	const renderBody = (events: ReadonlyArray<EventRow>) => {
 		const counts = {
 			all: events.length,
+			custom: events.filter((e) => e.type === "custom").length,
 			console: events.filter((e) => e.type === "console").length,
 			network: events.filter((e) => e.type === "network").length,
 			error: events.filter((e) => e.type === "error").length,
@@ -223,7 +245,8 @@ function EventsTab({
 				</div>
 				{rows.length === 0 ? (
 					<div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
-						No {filter === "all" ? "" : `${filter} `}events in this session.
+						No {filter === "all" ? "" : `${filter === "custom" ? "product" : filter} `}events in
+						this session.
 					</div>
 				) : (
 					<ul className="divide-y divide-border font-mono text-xs">
@@ -268,6 +291,10 @@ function eventTag(ev: EventRow): { label: string; tone: string } {
 			}
 		case "error":
 			return { label: "ERROR", tone: "text-destructive" }
+		case "custom":
+			// Not "CUSTOM": in the transcript these read as product events, and the
+			// gutter is only wide enough for a short word.
+			return { label: "EVENT", tone: "text-primary" }
 		case "console": {
 			const level = (ev.level || "log").toUpperCase()
 			if (ev.level === "error") return { label: level, tone: "text-destructive" }
@@ -277,6 +304,37 @@ function eventTag(ev: EventRow): { label: string; tone: string } {
 		default:
 			return { label: ev.type.toUpperCase(), tone: "text-muted-foreground" }
 	}
+}
+
+/**
+ * A custom event's `track()` props. The column is a JSON-encoded
+ * `Map(String, String)`; anything unparseable is skipped rather than rendered as
+ * a raw blob — the event name above already carries the meaning.
+ */
+function EventProps({ attributes }: { attributes?: string }) {
+	const entries = React.useMemo(() => {
+		if (!attributes) return []
+		try {
+			const parsed: unknown = JSON.parse(attributes)
+			if (!parsed || typeof parsed !== "object") return []
+			return Object.entries(parsed as Record<string, unknown>).map(
+				([key, value]) => [key, String(value)] as const,
+			)
+		} catch {
+			return []
+		}
+	}, [attributes])
+
+	if (entries.length === 0) return null
+	return (
+		<span className="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+			{entries.map(([key, value]) => (
+				<span key={key}>
+					{key}=<span className="text-foreground/80">{value}</span>
+				</span>
+			))}
+		</span>
+	)
 }
 
 function isFailedRequest(ev: EventRow): boolean {
@@ -343,10 +401,17 @@ function EventLine({ ev, showNetworkBar }: { ev: EventRow; showNetworkBar: boole
 				)}
 				{ev.type === "click" && <span>{ev.targetText || ev.targetSelector || "click"}</span>}
 				{ev.type === "nav" && <span>{ev.url}</span>}
+				{ev.type === "custom" && (
+					<span className="flex flex-col gap-0.5">
+						<span className="text-foreground">{ev.message}</span>
+						<EventProps attributes={ev.attributes} />
+					</span>
+				)}
 				{ev.type !== "console" &&
 					ev.type !== "network" &&
 					ev.type !== "error" &&
 					ev.type !== "click" &&
+					ev.type !== "custom" &&
 					ev.type !== "nav" && <span>{ev.message || ev.url}</span>}
 			</div>
 			{ev.traceId && (
@@ -553,6 +618,81 @@ function SessionTab({ sessionId, session }: { sessionId: string; session: Sessio
 					</span>
 				</DetailRail.Row>
 			</DetailRail.Group>
+
+			{session.visitorId ? (
+				<DetailRail.Group label="Visitor">
+					<DetailRail.Row label="Visitor ID" title={session.visitorId}>
+						{/* The link is the point of this group: one visitor id spans this
+						    person's anonymous marketing sessions and their signed-in ones,
+						    so this is how you walk from a signup back to the campaign. */}
+						<Link
+							to="/replays"
+							search={{ visitorId: session.visitorId }}
+							className="truncate font-mono text-xs text-primary underline-offset-2 hover:underline"
+							title="All sessions from this visitor"
+						>
+							{session.visitorId.slice(0, 12)}…
+						</Link>
+					</DetailRail.Row>
+					<DetailRail.Row label="Visitor">
+						<Value mono>{session.visitorIsNew ? "New" : "Returning"}</Value>
+					</DetailRail.Row>
+					{session.groupName && (
+						<DetailRail.Row label="Group">
+							<Value mono className="truncate">
+								{session.groupName}
+							</Value>
+						</DetailRail.Row>
+					)}
+					{session.userEmail && (
+						<DetailRail.Row label="Email" title={session.userEmail}>
+							<Value mono className="truncate">
+								{session.userEmail}
+							</Value>
+						</DetailRail.Row>
+					)}
+				</DetailRail.Group>
+			) : null}
+
+			{session.entryPath || session.referrerHost || session.utmSource ? (
+				<DetailRail.Group label="Acquisition">
+					{session.entryPath && (
+						<DetailRail.Row label="Entry" title={session.entryPath}>
+							<Value mono className="truncate">
+								{session.entryPath}
+							</Value>
+						</DetailRail.Row>
+					)}
+					{session.exitPath && (
+						<DetailRail.Row label="Exit" title={session.exitPath}>
+							<Value mono className="truncate">
+								{session.exitPath}
+							</Value>
+						</DetailRail.Row>
+					)}
+					<DetailRail.Row label="Referrer">
+						{/* '' is direct *or* a referrer the browser suppressed — "Direct"
+						    would assert more than the column knows. */}
+						<Value mono className="truncate">
+							{session.referrerHost || "None"}
+						</Value>
+					</DetailRail.Row>
+					{session.utmSource && (
+						<DetailRail.Row label="Source">
+							<Value mono className="truncate">
+								{[session.utmSource, session.utmMedium].filter(Boolean).join(" / ")}
+							</Value>
+						</DetailRail.Row>
+					)}
+					{session.utmCampaign && (
+						<DetailRail.Row label="Campaign" title={session.utmCampaign}>
+							<Value mono className="truncate">
+								{session.utmCampaign}
+							</Value>
+						</DetailRail.Row>
+					)}
+				</DetailRail.Group>
+			) : null}
 
 			<DetailRail.Group label="Environment">
 				<DetailRail.Row label="Browser">

@@ -1,5 +1,5 @@
 <main class="mx-auto max-w-3xl px-6 py-24">
-    <p class="text-fg-muted text-xs mb-6">Last updated: February 22, 2026</p>
+    <p class="text-fg-muted text-xs mb-6">Last updated: August 3, 2026</p>
     <h1 class="text-fg text-2xl font-medium mb-12">Privacy Policy</h1>
 
     <div class="space-y-10 text-fg-muted text-sm leading-relaxed">
@@ -25,9 +25,18 @@
                 applications. This data is owned by you and processed solely to provide the Service.
             </p>
             <h3 class="text-fg text-sm font-medium mb-2">Usage Data</h3>
-            <p>
+            <p class="mb-3">
                 We collect basic usage information such as page views, feature usage, and performance metrics
-                to improve the Service.
+                to improve the Service. We use our own product to do this: our website and dashboard run the
+                Maple browser SDK, and this data is stored in our own systems rather than shared with a
+                third-party analytics provider.
+            </p>
+            <p>
+                This includes a sampled recording of page interactions (clicks, navigation, and console or
+                network errors) so we can diagnose problems. Text entered into form fields is masked before it
+                leaves your browser and is never recorded. See
+                <a href="#cookies" class="text-fg underline underline-offset-2">Cookies and Similar Technologies</a>
+                for how to opt out.
             </p>
         </section>
 
@@ -86,11 +95,30 @@
             </ul>
         </section>
 
-        <section>
-            <h2 class="text-fg text-base font-medium mb-3">8. Cookies</h2>
-            <p>
+        <section id="cookies">
+            <h2 class="text-fg text-base font-medium mb-3">8. Cookies and Similar Technologies</h2>
+            <p class="mb-3">
                 We use essential cookies for authentication and session management. We do not use
-                third-party advertising or tracking cookies.
+                third-party advertising cookies, and we do not sell or share this data with advertisers.
+            </p>
+            <p class="mb-3">
+                We also set one first-party analytics identifier, <code class="text-fg">maple_visitor</code>,
+                stored as a cookie and in your browser's local storage. It is a random identifier — it contains
+                no name, email, or address — and it lets us count unique visitors and understand which pages
+                lead people to sign up. Because it is scoped to <code class="text-fg">maple.dev</code>, it is
+                shared between our website and our dashboard so that both count as the same visit rather than
+                two. It expires after 13 months.
+            </p>
+            <p>
+                We honor the
+                <a
+                    href="https://globalprivacycontrol.org/"
+                    rel="noopener noreferrer"
+                    target="_blank"
+                    class="text-fg underline underline-offset-2">Global Privacy Control</a
+                >
+                signal: if your browser or extension sends it, we do not set this identifier, and any copy already
+                stored is deleted. Clearing your cookies and site data removes it as well.
             </p>
         </section>
 

@@ -10,6 +10,7 @@
  */
 
 import { writeClipboardText } from "@maple/ui/lib/clipboard"
+import { trackLanding } from "./telemetry"
 
 const RESET_MS = 1600
 
@@ -63,6 +64,10 @@ export function bindCopyButtons({
 
 		button.addEventListener("click", async () => {
 			const ok = await writeClipboardText(text)
+			// Copying the install command is the strongest intent signal the
+			// marketing site has — tracked here rather than at each of the four call
+			// sites, since this is the one place that knows the copy succeeded.
+			trackLanding("install_command_copied", { command: text.slice(0, 120), copied: ok })
 			label.textContent = ok ? copiedLabel : errorLabel
 			button.classList.toggle(doneClass, ok)
 

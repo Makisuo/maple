@@ -166,6 +166,7 @@
         "@fontsource-variable/geist-mono": "^5.2.8",
         "@inlang/paraglide-astro": "^0.4.1",
         "@inlang/paraglide-js": "^2.14.0",
+        "@maple-dev/browser": "workspace:*",
         "@maple/infra": "workspace:*",
         "@maple/ui": "workspace:*",
         "@tailwindcss/vite": "catalog:tailwind",

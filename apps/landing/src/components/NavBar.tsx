@@ -18,6 +18,7 @@ import { formatStars } from "../lib/github-stars"
 import { features } from "../lib/features"
 import { featurePath, useCasePath } from "../lib/page-registry"
 import { useCases } from "../lib/use-cases"
+import { identifyLanding } from "../lib/telemetry"
 import { GithubStarButton, Octocat } from "./GithubStarButton"
 
 const PUBLISHABLE_KEY = import.meta.env.PUBLIC_CLERK_PUBLISHABLE_KEY
@@ -25,11 +26,15 @@ const PUBLISHABLE_KEY = import.meta.env.PUBLIC_CLERK_PUBLISHABLE_KEY
 type MenuLink = { href: string; label: () => string; desc: () => string }
 
 function AuthAwareCTA() {
-	const { isSignedIn, isLoaded } = useAuth()
+	const { isSignedIn, isLoaded, userId } = useAuth()
 	const signedIn = isLoaded && isSignedIn === true
 	useEffect(() => {
 		broadcastSignedIn(signedIn)
-	}, [signedIn])
+		// This island is the only place Clerk is mounted, so it is also the only
+		// place that can name the visitor. Anonymous visitors still link to their
+		// later app sessions through the cross-subdomain visitor cookie.
+		identifyLanding(signedIn ? userId : null)
+	}, [signedIn, userId])
 	return signedIn ? m.nav_dashboard() : m.nav_get_started()
 }
 
@@ -263,6 +268,8 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 
 				<a
 					href="https://app.maple.dev"
+					data-track="cta_click"
+					data-track-location="nav_login"
 					className="hidden text-[13px] font-medium text-fg-muted transition-colors hover:text-fg md:inline-flex"
 				>
 					{m.nav_login()}
@@ -270,6 +277,8 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 
 				<a
 					href="https://app.maple.dev"
+					data-track="cta_click"
+					data-track-location="nav"
 					className={cn(
 						buttonVariants({ size: "sm" }),
 						"overflow-hidden transition-all duration-300",
@@ -376,7 +385,12 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 								</span>
 								{stars != null && <span className="tabular-nums">{formatStars(stars)}</span>}
 							</a>
-							<a href="https://app.maple.dev" className={buttonVariants({ size: "sm" })}>
+							<a
+								href="https://app.maple.dev"
+								data-track="cta_click"
+								data-track-location="nav_mobile"
+								className={buttonVariants({ size: "sm" })}
+							>
 								<CTAButton />
 							</a>
 						</div>

@@ -37,6 +37,7 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 							country: payload.country,
 							deviceType: payload.deviceType,
 							userId: payload.userId,
+							visitorId: payload.visitorId,
 							hasErrors: payload.hasErrors,
 							search: payload.search,
 							cursor: payload.cursor,
@@ -166,6 +167,9 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 							sessionId: decodeSessionId(data.sessionId),
 							userId: data.userId ? decodeUserId(data.userId) : null,
 							traceIds: data.traceIds.map((traceId) => decodeTraceId(traceId)),
+							// UInt8 on the wire (and a JSON-quoted "1" on backends that
+							// refuse the unquote setting) — the response schema is Boolean.
+							visitorIsNew: Number(data.visitorIsNew) === 1,
 							// ClickHouse JSON-quotes 64-bit ints as strings; coerce before
 							// Schema.Number validates (see the facets handler).
 							activeTimeMs: activity ? Number(activity.activeTimeMs) : null,

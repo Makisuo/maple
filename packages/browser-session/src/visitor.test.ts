@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
 	claimNewVisitor,
+	configureVisitorCookie,
 	getVisitorId,
 	isVisitorIdPersisted,
 	resetVisitorCacheForTests,
@@ -23,6 +24,55 @@ function installStorage(options: { throwOnWrite?: boolean } = {}): Map<string, s
 		},
 	})
 	return store
+}
+
+interface CookieEntry {
+	value: string
+	/** `""` = host-only. */
+	domain: string
+}
+
+/**
+ * A `document.cookie` stand-in. `accepts` models the browser rejecting a
+ * `Domain=` it considers too broad (a public suffix), which is exactly what the
+ * domain probe exists to discover.
+ */
+function installCookies(
+	options: { hostname?: string; accepts?: (domain: string) => boolean } = {},
+): Map<string, CookieEntry> {
+	const jar = new Map<string, CookieEntry>()
+	const accepts = options.accepts ?? (() => true)
+	vi.stubGlobal("location", { hostname: options.hostname ?? "app.example.com", protocol: "https:" })
+	vi.stubGlobal("document", {
+		get cookie(): string {
+			return [...jar].map(([name, entry]) => `${name}=${entry.value}`).join("; ")
+		},
+		set cookie(raw: string) {
+			const [pair, ...attrs] = raw.split(";").map((part) => part.trim())
+			const eq = pair?.indexOf("=") ?? -1
+			if (!pair || eq < 0) return
+			const name = pair.slice(0, eq)
+			const value = pair.slice(eq + 1)
+			const domain = (attrs.find((a) => a.toLowerCase().startsWith("domain="))?.slice(7) ?? "").replace(
+				/^\./,
+				"",
+			)
+			if (domain && !accepts(domain)) return
+			const maxAge = attrs.find((a) => a.toLowerCase().startsWith("max-age="))?.slice(8)
+			if (maxAge === "0") {
+				const existing = jar.get(name)
+				if (existing && existing.domain === domain) jar.delete(name)
+				return
+			}
+			jar.set(name, { value, domain })
+		},
+	})
+	return jar
+}
+
+function cookieRecord(jar: Map<string, CookieEntry>): { id: string; mintedAt: number } | undefined {
+	const raw = jar.get("maple_visitor")
+	return raw ? JSON.parse(decodeURIComponent(raw.value)) : undefined
 }
 
 describe("visitor id", () => {
@@ -82,5 +132,126 @@ describe("visitor id", () => {
 
 	it("returns undefined outside a browser", () => {
 		expect(getVisitorId()).toBeUndefined()
+	})
+})
+
+describe("visitor cookie", () => {
+	beforeEach(() => {
+		vi.unstubAllGlobals()
+		resetVisitorCacheForTests()
+	})
+
+	it("writes both stores, scoped to the registered domain", () => {
+		const store = installStorage()
+		const jar = installCookies({ hostname: "app.example.com" })
+
+		const id = getVisitorId()
+		expect(cookieRecord(jar)?.id).toBe(id)
+		// The whole point: `maple.dev` and `app.maple.dev` must resolve to one id,
+		// and localStorage alone is origin-scoped.
+		expect(jar.get("maple_visitor")?.domain).toBe("example.com")
+		expect(JSON.parse(store.get("maple.visitor") as string).id).toBe(id)
+		expect(isVisitorIdPersisted()).toBe(true)
+	})
+
+	it("probes past a public suffix the browser refuses", () => {
+		installStorage()
+		const jar = installCookies({ hostname: "app.shop.co.uk", accepts: (d) => d !== "co.uk" })
+
+		getVisitorId()
+		expect(jar.get("maple_visitor")?.domain).toBe("shop.co.uk")
+	})
+
+	it("keeps the cookie host-only for single-label hosts", () => {
+		installStorage()
+		const jar = installCookies({ hostname: "localhost" })
+
+		getVisitorId()
+		expect(jar.get("maple_visitor")?.domain).toBe("")
+	})
+
+	it("honors crossSubdomainCookie: false and an explicit cookieDomain", () => {
+		installStorage()
+		const jar = installCookies({ hostname: "app.example.com" })
+
+		configureVisitorCookie({ crossSubdomainCookie: false })
+		getVisitorId()
+		expect(jar.get("maple_visitor")?.domain).toBe("")
+
+		resetVisitorCacheForTests()
+		jar.clear()
+		configureVisitorCookie({ cookieDomain: "example.com" })
+		getVisitorId()
+		expect(jar.get("maple_visitor")?.domain).toBe("example.com")
+	})
+
+	it("takes the narrower cookieDomain when two SDKs disagree, in either order", () => {
+		// Both SDKs configure privacy independently, so neither call can be
+		// assumed to be the first — the tighter scope has to win regardless of
+		// which arrives first. `""` (host-only) is the tightest value there is.
+		for (const order of [
+			["example.com", ""],
+			["", "example.com"],
+		] as const) {
+			installStorage()
+			const jar = installCookies({ hostname: "app.example.com" })
+			configureVisitorCookie({ cookieDomain: order[0] })
+			configureVisitorCookie({ cookieDomain: order[1] })
+
+			getVisitorId()
+			expect(jar.get("maple_visitor")?.domain).toBe("")
+			resetVisitorCacheForTests()
+		}
+	})
+
+	it("takes the longer of two non-empty cookie domains — the shorter is broader", () => {
+		installStorage()
+		const jar = installCookies({ hostname: "a.b.example.com" })
+
+		configureVisitorCookie({ cookieDomain: "b.example.com" })
+		configureVisitorCookie({ cookieDomain: "example.com" })
+
+		getVisitorId()
+		expect(jar.get("maple_visitor")?.domain).toBe("b.example.com")
+	})
+
+	it("prefers the shared cookie over a divergent origin-local id, and converges", () => {
+		const store = installStorage()
+		const jar = installCookies({ hostname: "app.example.com" })
+		const mintedAt = Date.now()
+		// The app minted its own id before the cookie existed; the marketing site's
+		// cookie is the identity that links the two surfaces, so it wins.
+		store.set("maple.visitor", JSON.stringify({ id: "origin-local", mintedAt }))
+		jar.set("maple_visitor", {
+			value: encodeURIComponent(JSON.stringify({ id: "shared", mintedAt })),
+			domain: "example.com",
+		})
+
+		expect(getVisitorId()).toBe("shared")
+		expect(claimNewVisitor()).toBe(false)
+		expect(JSON.parse(store.get("maple.visitor") as string).id).toBe("shared")
+	})
+
+	it("survives localStorage being blocked", () => {
+		installStorage({ throwOnWrite: true })
+		const jar = installCookies()
+
+		const id = getVisitorId()
+		// Cookie-only is still a real, persistent visitor id — unlike the in-memory
+		// fallback, it survives the page load, so uniques must not be discounted.
+		expect(cookieRecord(jar)?.id).toBe(id)
+		expect(isVisitorIdPersisted()).toBe(true)
+	})
+
+	it("opting out purges the cookie as well as localStorage", () => {
+		const store = installStorage()
+		const jar = installCookies()
+		getVisitorId()
+		expect(jar.size).toBe(1)
+
+		setVisitorTracking(false)
+		expect(getVisitorId()).toBeUndefined()
+		expect(store.size).toBe(0)
+		expect(jar.size).toBe(0)
 	})
 })

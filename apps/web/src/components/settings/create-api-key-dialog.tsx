@@ -23,6 +23,7 @@ import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-gro
 import { useApiKeyMutationSync } from "@/hooks/use-api-keys"
 import { formatBackendError } from "@/lib/error-messages"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { trackProduct } from "@/lib/analytics"
 import { buildApiKeyCreatePayload } from "./api-key-create-payload"
 import { ApiKeySecretReveal } from "./api-key-secret-reveal"
 
@@ -113,6 +114,7 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 		})
 		if (Exit.isSuccess(result)) {
 			setCreatedKey(result.value)
+			trackProduct("api_key_created", { kind, access: isMcp ? "full" : accessMode })
 			onCreated?.(result.value.secret)
 			void reconcileTxid(result.value.txid)
 		} else {

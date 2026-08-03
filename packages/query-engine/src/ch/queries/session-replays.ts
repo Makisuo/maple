@@ -87,6 +87,13 @@ export interface SessionReplaysListOpts {
 	deviceType?: string
 	/** Exact match on the session's end-user id. */
 	userId?: string
+	/**
+	 * Exact match on the persistent visitor id. This is the join that walks from
+	 * an anonymous marketing session to the signed-in product sessions of the
+	 * same browser — the two have different SessionIds and often different
+	 * ServiceNames, and only VisitorId links them.
+	 */
+	visitorId?: string
 	/** When true, only sessions with at least one recorded error. */
 	hasErrors?: boolean
 	/** Substring match on the initial page URL. */
@@ -132,6 +139,11 @@ export interface SessionReplaysListOutput {
 	readonly durationMs: number | null
 	readonly status: string
 	readonly userId: string
+	/** Persistent per-browser id; equal across a visitor's marketing and app sessions. */
+	readonly visitorId: string
+	/** Acquisition source of the session, for scanning a visitor's history. */
+	readonly utmSource: string
+	readonly entryPath: string
 	readonly urlInitial: string
 	readonly browserName: string
 	readonly osName: string
@@ -177,6 +189,9 @@ export function sessionReplaysListQuery(
 			durationMs: argMax($.DurationMs, $.Version),
 			status: argMax($.Status, $.Version),
 			userId: argMax($.UserId, $.Version),
+			visitorId: argMax($.VisitorId, $.Version),
+			utmSource: argMax($.UtmSource, $.Version),
+			entryPath: argMax($.EntryPath, $.Version),
 			urlInitial: argMax($.UrlInitial, $.Version),
 			browserName: argMax($.BrowserName, $.Version),
 			osName: argMax($.OsName, $.Version),
@@ -206,6 +221,9 @@ export function sessionReplaysListQuery(
 			// each matching session once — same row-level-filter reasoning as
 			// hasErrors/ErrorCount above (see this file's header).
 			CH.when(opts.userId, (v: string) => $.UserId.eq(v)),
+			// Version-invariant like the facets above: VisitorId is written on every
+			// row version of a session, so this is safe pre-GROUP BY.
+			CH.when(opts.visitorId, (v: string) => $.VisitorId.eq(v)),
 			CH.whenTrue(opts.hasErrors, () => $.ErrorCount.gt(0)),
 			CH.when(opts.search, (v: string) => $.UrlInitial.ilike(`%${v}%`)),
 			CH.when(opts.cursor, (v: string) => $.StartTime.lt(v)),
@@ -248,6 +266,9 @@ export function sessionReplaysListQuery(
 				durationMs: $.durationMs,
 				status: $.status,
 				userId: $.userId,
+				visitorId: $.visitorId,
+				utmSource: $.utmSource,
+				entryPath: $.entryPath,
 				urlInitial: $.urlInitial,
 				browserName: $.browserName,
 				osName: $.osName,
@@ -305,6 +326,9 @@ export function sessionReplaysListQuery(
 				durationMs: $.durationMs,
 				status: $.status,
 				userId: $.userId,
+				visitorId: $.visitorId,
+				utmSource: $.utmSource,
+				entryPath: $.entryPath,
 				urlInitial: $.urlInitial,
 				browserName: $.browserName,
 				osName: $.osName,
@@ -347,6 +371,9 @@ export function sessionReplaysListQuery(
 			durationMs: $.durationMs,
 			status: $.status,
 			userId: $.userId,
+			visitorId: $.visitorId,
+			utmSource: $.utmSource,
+			entryPath: $.entryPath,
 			urlInitial: $.urlInitial,
 			browserName: $.browserName,
 			osName: $.osName,
@@ -568,6 +595,28 @@ export function getSessionReplayQuery(opts: SessionReplayDetailOpts = {}) {
 			errorCount: $.ErrorCount,
 			traceIds: $.TraceIds,
 			resourceAttributes: CH.toJSONString($.ResourceAttributes),
+			// Analytics dimensions (migration 0011). Selected on the detail row only:
+			// this is where "who was this and where did they come from" is rendered,
+			// and the list pays for every column on every page.
+			visitorId: $.VisitorId,
+			visitorIsNew: $.VisitorIsNew,
+			userEmail: $.UserEmail,
+			userName: $.UserName,
+			groupId: $.GroupId,
+			groupName: $.GroupName,
+			userTraits: CH.toJSONString($.UserTraits),
+			referrer: $.Referrer,
+			referrerHost: $.ReferrerHost,
+			utmSource: $.UtmSource,
+			utmMedium: $.UtmMedium,
+			utmCampaign: $.UtmCampaign,
+			utmTerm: $.UtmTerm,
+			utmContent: $.UtmContent,
+			host: $.Host,
+			entryPath: $.EntryPath,
+			exitPath: $.ExitPath,
+			language: $.Language,
+			lastActivityAt: $.LastActivityAt,
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),

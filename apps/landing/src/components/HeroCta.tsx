@@ -16,7 +16,13 @@ export function HeroCta({ className }: { className?: string }) {
 		return () => document.removeEventListener(SIGNED_IN_EVENT, onChange)
 	}, [])
 	return (
-		<a href="https://app.maple.dev" data-hero-cta className={className}>
+		<a
+			href="https://app.maple.dev"
+			data-hero-cta
+			data-track="cta_click"
+			data-track-location="hero"
+			className={className}
+		>
 			{signedIn ? m.nav_dashboard() : m.cta_get_started()}
 		</a>
 	)
