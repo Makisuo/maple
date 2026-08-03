@@ -17,9 +17,9 @@
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { from, param, type ColumnAccessor, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "../schema"
-import { MetricsGauge, MetricsSum } from "../tables"
-import { avgWhere, isoBucket } from "./format"
+import { CHNumber } from "@maple/query-engine/ch/schema"
+import { MetricsGauge, MetricsSum } from "@maple/query-engine/ch/tables"
+import { avgWhere, isoBucket } from "@maple/query-engine/ch/format"
 import {
 	CF_FILTERABLE,
 	CF_METRIC,

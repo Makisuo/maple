@@ -16,21 +16,11 @@ import * as activityQueries from "./ch/queries/activity"
 import * as alertCheckQueries from "./ch/queries/alert-checks"
 import * as anomalyQueries from "./ch/queries/anomaly"
 import * as attributeKeyQueries from "./ch/queries/attribute-keys"
-import * as billingUsageQueries from "./ch/queries/billing-usage"
-import * as cloudflareInfraBreakdownQueries from "./ch/queries/cloudflare-infra-breakdowns"
-import * as cloudflareInfraExtendedQueries from "./ch/queries/cloudflare-infra-extended"
-import * as cloudflareInfraFilterQueries from "./ch/queries/cloudflare-infra-filters"
-import * as cloudflareInfraQueries from "./ch/queries/cloudflare-infra"
-import * as cloudflareMapQueries from "./ch/queries/cloudflare-map"
-import * as cloudflareUsageQueries from "./ch/queries/cloudflare-usage"
 import * as errorQueries from "./ch/queries/errors"
 import * as infraQueries from "./ch/queries/infra"
-import * as internalQueries from "./ch/queries/internal"
 import * as livenessQueries from "./ch/queries/liveness"
 import * as logQueries from "./ch/queries/logs"
 import * as metricQueries from "./ch/queries/metrics"
-import * as planetscaleInfraQueries from "./ch/queries/planetscale-infra"
-import * as planetscaleMapQueries from "./ch/queries/planetscale-map"
 import * as serviceInfraQueries from "./ch/queries/service-infra"
 import * as serviceMapRollupQueries from "./ch/queries/service-map-rollup"
 import * as serviceMapQueries from "./ch/queries/service-map"
@@ -38,7 +28,6 @@ import * as serviceOperationQueries from "./ch/queries/service-operations"
 import * as serviceQueries from "./ch/queries/services"
 import * as sessionEventQueries from "./ch/queries/session-events"
 import * as sessionReplayQueries from "./ch/queries/session-replays"
-import * as setupAuditQueries from "./ch/queries/setup-audit"
 import * as topOperationQueries from "./ch/queries/top-operations"
 import * as traceQueries from "./ch/queries/traces"
 
@@ -162,21 +151,11 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	"alert-checks": alertCheckQueries,
 	anomaly: anomalyQueries,
 	"attribute-keys": attributeKeyQueries,
-	"billing-usage": billingUsageQueries,
-	"cloudflare-infra-breakdowns": cloudflareInfraBreakdownQueries,
-	"cloudflare-infra-extended": cloudflareInfraExtendedQueries,
-	"cloudflare-infra-filters": cloudflareInfraFilterQueries,
-	"cloudflare-infra": cloudflareInfraQueries,
-	"cloudflare-map": cloudflareMapQueries,
-	"cloudflare-usage": cloudflareUsageQueries,
 	errors: errorQueries,
 	infra: infraQueries,
-	internal: internalQueries,
 	liveness: livenessQueries,
 	logs: logQueries,
 	metrics: metricQueries,
-	"planetscale-infra": planetscaleInfraQueries,
-	"planetscale-map": planetscaleMapQueries,
 	"service-infra": serviceInfraQueries,
 	"service-map-rollup": serviceMapRollupQueries,
 	"service-map": serviceMapQueries,
@@ -184,7 +163,6 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	services: serviceQueries,
 	"session-events": sessionEventQueries,
 	"session-replays": sessionReplayQueries,
-	"setup-audit": setupAuditQueries,
 	"top-operations": topOperationQueries,
 	traces: traceQueries,
 }
@@ -258,19 +236,8 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 	"anomaly/anomalyLogVolumeTimeseriesQuery",
 	"anomaly/anomalyErrorSpikeTimeseriesQuery",
 	"anomaly/anomalyErrorSpikeServiceTimeseriesQuery",
-	"setup-audit/auditAttributeKeyInventoryQuery",
-	"setup-audit/auditSpanShapeByServiceQuery",
-	"setup-audit/auditSamplingByServiceQuery",
-	"setup-audit/auditLogSeverityByServiceQuery",
-	"setup-audit/auditMetricLabelCardinalityQuery",
-	"setup-audit/auditPeerValueInventoryQuery",
-	"setup-audit/auditDbEdgeIdentityQuery",
-	"setup-audit/auditLogCorrelationQuery",
-	"setup-audit/auditOrphanSpansSQL",
-	"setup-audit/auditRootlessTracesSQL",
 	"liveness/serviceLivenessQuery",
 	"liveness/orgTelemetryPulseQuery",
-	"internal/dbStatementSamplesQuery",
 
 	// todo batch ③ — infra + integrations (infra, cloudflare-*, planetscale-*, service-map, rollups)
 	"infra/listHostsQuery",
@@ -284,31 +251,6 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 	"infra/nodeDetailSummaryQuery",
 	"infra/listWorkloadsQuery",
 	"infra/workloadDetailSummaryQuery",
-	"cloudflare-infra-breakdowns/cloudflareZoneBreakdownTotalsSQL",
-	"cloudflare-infra-breakdowns/cloudflareZoneBreakdownCoverageSQL",
-	"cloudflare-infra-breakdowns/cloudflareZoneFacetsQuery",
-	"cloudflare-infra-extended/cloudflareZoneHostBreakdownSQL",
-	"cloudflare-infra-extended/cloudflareZoneHostTimeseriesSQL",
-	"cloudflare-infra-extended/cloudflareZoneFirewallTimeseriesSQL",
-	"cloudflare-infra-extended/cloudflareZoneFirewallTopSQL",
-	"cloudflare-infra-extended/cloudflareZoneDnsTimeseriesSQL",
-	"cloudflare-infra-extended/cloudflareZoneDnsBreakdownSQL",
-	"cloudflare-infra-extended/cloudflareDurableObjectCountersSQL",
-	"cloudflare-infra/cloudflareZoneCountersSQL",
-	"cloudflare-infra/cloudflareZoneStatusTimeseriesSQL",
-	"cloudflare-infra/cloudflareZoneCacheTimeseriesSQL",
-	"cloudflare-infra/cloudflareZoneLatencyTimeseriesSQL",
-	"cloudflare-infra/cloudflareWorkerCountersSQL",
-	"cloudflare-infra/cloudflareWorkerLatencySQL",
-	"cloudflare-infra/cloudflareWorkerTimeseriesSQL",
-	"cloudflare-map/cloudflareServiceCountersSQL",
-	"planetscale-infra/planetscaleInfraTimeseriesSQL",
-	"planetscale-infra/planetscaleBranchInfraTimeseriesSQL",
-	"planetscale-map/planetscaleBranchGaugesSQL",
-	"planetscale-map/planetscaleStorageSQL",
-	"planetscale-map/planetscaleBranchStorageSQL",
-	"planetscale-map/planetscaleConnectionsSQL",
-	"planetscale-map/planetscaleBranchConnectionsSQL",
 	"service-infra/serviceWorkloadsSQL",
 	"service-map-rollup/serviceMapEdgesExistingHoursSQL",
 	"service-map-rollup/serviceMapEdgesRollupSQL",
@@ -324,9 +266,6 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 	"service-map/servicePlatformsSQL",
 
 	// todo batch ④ — remainder (billing, service detail, operations, stray trace/log lookups)
-	"billing-usage/dailySignalVolumeQuery",
-	"billing-usage/dailySessionCountQuery",
-	"cloudflare-usage/cloudflareUsageStatsQuery",
 	"logs/getLogByKeyQuery",
 	"service-operations/serviceOperationsSummaryRawQuery",
 	"service-operations/serviceOperationsTimeseriesRawQuery",

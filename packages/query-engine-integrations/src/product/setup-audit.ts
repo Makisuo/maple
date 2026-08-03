@@ -32,9 +32,9 @@ import {
 	ServiceMapDbEdgesHourly,
 	ServiceOverviewHourly,
 	TracesAggregatesHourly,
-} from "../tables"
-import { CHNumber } from "../schema"
-import { hourFloor } from "./query-helpers"
+} from "@maple/query-engine/ch/tables"
+import { CHNumber } from "@maple/query-engine/ch/schema"
+import { hourFloor } from "@maple/query-engine/ch/query-helpers"
 
 /** Snaps a window bound to its hour floor so any overlapping hour of an hourly MV contributes. */
 

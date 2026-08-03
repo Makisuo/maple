@@ -19,9 +19,9 @@
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { from, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "../schema"
-import { MetricsGauge, MetricsSum } from "../tables"
-import { avgWhere } from "./format"
+import { CHNumber } from "@maple/query-engine/ch/schema"
+import { MetricsGauge, MetricsSum } from "@maple/query-engine/ch/tables"
+import { avgWhere } from "@maple/query-engine/ch/format"
 
 /** Counter metrics the poller emits for Workers (all in `metrics_sum`). */
 const COUNTER_METRIC_NAMES = ["cloudflare.worker.requests", "cloudflare.worker.errors"] as const

@@ -31,6 +31,7 @@ import { Clock, Context, Effect, Layer, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
 import { Database, type DatabaseError } from "../lib/DatabaseLive"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
+import * as Integrations from "@maple/query-engine-integrations"
 
 /** Telemetry lookback for the warehouse-backed checks — matches the recommendations reconcile. */
 const LOOKBACK_HOURS = 24
@@ -368,17 +369,17 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 				childStart: formatWarehouseDateTime(childStart),
 				childEnd: formatWarehouseDateTime(childEnd),
 				parentStart: formatWarehouseDateTime(childStart - TRACE_PARENT_LOOKBACK_MINUTES * 60_000),
-				traceSampleModulus: CH.auditTraceSampleModulus(spanCountOverLookback),
+				traceSampleModulus: Integrations.auditTraceSampleModulus(spanCountOverLookback),
 			}
 
 			const joined = yield* Effect.all(
 				{
-					orphans: warehouse.compiledQuery(tenant, CH.auditOrphanSpansSQL(window), {
+					orphans: warehouse.compiledQuery(tenant, Integrations.auditOrphanSpansSQL(window), {
 						profile: "aggregation",
 						settings: { maxThreads: 4 },
 						context: "setupAuditOrphanSpans",
 					}),
-					rootless: warehouse.compiledQuery(tenant, CH.auditRootlessTracesSQL(window), {
+					rootless: warehouse.compiledQuery(tenant, Integrations.auditRootlessTracesSQL(window), {
 						profile: "aggregation",
 						settings: { maxThreads: 4 },
 						context: "setupAuditRootlessTraces",
@@ -412,7 +413,7 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 			}
 			const logWindow = {
 				orgId: tenant.orgId,
-				startTime: formatWarehouseDateTime(now - CH.AUDIT_LOG_CORRELATION_MAX_HOURS * 60 * 60 * 1000),
+				startTime: formatWarehouseDateTime(now - Integrations.AUDIT_LOG_CORRELATION_MAX_HOURS * 60 * 60 * 1000),
 				endTime: formatWarehouseDateTime(now),
 			}
 
@@ -428,46 +429,46 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 						"discovery",
 					),
 					attributeKeys: run(
-						CH.compile(CH.auditAttributeKeyInventoryQuery(), window, {
-							rowSchema: CH.auditAttributeKeyInventoryRowSchema,
+						CH.compile(Integrations.auditAttributeKeyInventoryQuery(), window, {
+							rowSchema: Integrations.auditAttributeKeyInventoryRowSchema,
 						}),
 						"discovery",
 					),
 					// `list`, not `discovery`: an org whose span names carry IDs — the very thing NAME-02
 					// detects — inflates traces_aggregates_hourly past a 5s budget.
 					spanShape: run(
-						CH.compile(CH.auditSpanShapeByServiceQuery(), window, {
-							rowSchema: CH.auditSpanShapeRowSchema,
+						CH.compile(Integrations.auditSpanShapeByServiceQuery(), window, {
+							rowSchema: Integrations.auditSpanShapeRowSchema,
 						}),
 						"list",
 					),
 					logSeverity: run(
-						CH.compile(CH.auditLogSeverityByServiceQuery(), window, {
-							rowSchema: CH.auditLogSeverityRowSchema,
+						CH.compile(Integrations.auditLogSeverityByServiceQuery(), window, {
+							rowSchema: Integrations.auditLogSeverityRowSchema,
 						}),
 						"discovery",
 					),
 					metricLabels: run(
-						CH.compile(CH.auditMetricLabelCardinalityQuery(), window, {
-							rowSchema: CH.auditMetricLabelRowSchema,
+						CH.compile(Integrations.auditMetricLabelCardinalityQuery(), window, {
+							rowSchema: Integrations.auditMetricLabelRowSchema,
 						}),
 						"discovery",
 					),
 					peerValues: run(
-						CH.compile(CH.auditPeerValueInventoryQuery(), window, {
-							rowSchema: CH.auditPeerValueRowSchema,
+						CH.compile(Integrations.auditPeerValueInventoryQuery(), window, {
+							rowSchema: Integrations.auditPeerValueRowSchema,
 						}),
 						"discovery",
 					),
 					dbEdges: run(
-						CH.compile(CH.auditDbEdgeIdentityQuery(), window, {
-							rowSchema: CH.auditDbEdgeRowSchema,
+						CH.compile(Integrations.auditDbEdgeIdentityQuery(), window, {
+							rowSchema: Integrations.auditDbEdgeRowSchema,
 						}),
 						"discovery",
 					),
 					logCorrelation: run(
-						CH.compile(CH.auditLogCorrelationQuery(), logWindow, {
-							rowSchema: CH.auditLogCorrelationRowSchema,
+						CH.compile(Integrations.auditLogCorrelationQuery(), logWindow, {
+							rowSchema: Integrations.auditLogCorrelationRowSchema,
 						}),
 						"list",
 					),
@@ -490,7 +491,7 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 
 			const inputs: WarehouseAuditInputs = {
 				lookbackHours: LOOKBACK_HOURS,
-				logCorrelationHours: CH.AUDIT_LOG_CORRELATION_MAX_HOURS,
+				logCorrelationHours: Integrations.AUDIT_LOG_CORRELATION_MAX_HOURS,
 				traceCompleteness,
 				attributeKeys: results.attributeKeys.map((row) => ({
 					scope: row.scope,

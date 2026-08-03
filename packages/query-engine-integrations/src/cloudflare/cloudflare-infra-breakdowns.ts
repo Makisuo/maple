@@ -20,9 +20,9 @@ import {
 	type CHUnionQuery,
 	type CompiledQueryRowSchema,
 } from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "../schema"
-import { MetricsSum } from "../tables"
-import { ISO_Z_FORMAT, isoBucket } from "./format"
+import { CHNumber } from "@maple/query-engine/ch/schema"
+import { MetricsSum } from "@maple/query-engine/ch/tables"
+import { ISO_Z_FORMAT, isoBucket } from "@maple/query-engine/ch/format"
 import {
 	CF_ATTR,
 	CF_FILTERABLE,
