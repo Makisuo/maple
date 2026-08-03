@@ -103,12 +103,18 @@ const ServiceDependenciesOutputSchema: CompiledQueryRowSchema<ServiceDependencie
  * `startExpr` / `endExpr` are raw SQL datetime expressions — the caller is
  * responsible for quoting any literals (e.g. `toDateTime('2026-05-16 09:00:00')`).
  *
- * `orgId` scopes the join to one org. Omit it only for the all-orgs backfill
- * script, which connects to ClickHouse directly; every in-app caller (the
- * rollup and `serviceDependenciesSQL`) must pass it so the query is tenant-scoped.
+ * `orgId` scopes the join to one org and is REQUIRED.
+ *
+ * It used to be optional "for the all-orgs backfill script", degrading to an
+ * empty filter — i.e. a join across every tenant's spans. That is now actively
+ * dangerous rather than merely unchecked: both callers wrap this string in
+ * `unsafeCompiledQuery({ tenantScope: "org" })`, so an omitted org id would be
+ * positively ASSERTED as tenant-scoped and sail through the executor's gate. A
+ * cross-org backfill needs its own explicitly-named entry point, not a
+ * parameter someone can forget.
  */
 export function serviceMapEdgeJoinSQL(params: {
-	orgId?: string
+	orgId: string
 	startExpr: string
 	endExpr: string
 	deploymentEnv?: string
@@ -123,7 +129,7 @@ export function serviceMapEdgeJoinSQL(params: {
 	parentServiceName?: string
 }): string {
 	const esc = escapeClickHouseString
-	const orgFilter = params.orgId ? `AND OrgId = '${esc(params.orgId)}'` : ""
+	const orgFilter = `AND OrgId = '${esc(params.orgId)}'`
 	const envFilter = params.deploymentEnv ? `AND DeploymentEnv = '${esc(params.deploymentEnv)}'` : ""
 	const parentServiceFilter = params.parentServiceName
 		? `AND ServiceName = '${esc(params.parentServiceName)}'`
