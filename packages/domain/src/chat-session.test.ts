@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest"
 import {
+	ChatTurnTenant,
 	chatModeFromSessionId,
 	decodeChatEvent,
+	decodeChatEventOrThrow,
+	decodeChatEventPayload,
 	encodeChatEvent,
+	encodeChatEventPayload,
 	investigationIdFromChatSessionId,
 	makeChatSessionId,
 	orgIdFromChatSessionId,
 	tabIdFromChatSessionId,
 	ChatTextDeltaEvent,
 	ChatToolCallEvent,
+	type ChatEventInput,
 } from "./chat-session"
 
 describe("chat session ids", () => {
@@ -65,5 +70,64 @@ describe("chat events", () => {
 		})
 		const decoded = decodeChatEvent(encodeChatEvent(event))
 		expect(decoded).toMatchObject({ type: "tool-call", proposed: true, name: "update_dashboard" })
+	})
+
+	it("skips a frame it does not understand instead of throwing", () => {
+		// A throwing decode escaped the client's read loop, which then reconnected from *before* the
+		// bad frame — so the server replayed it and the client threw again, until the retry budget
+		// ran out and the conversation was dead. Returning undefined means one new event type
+		// degrades an old client rather than bricking it.
+		expect(decodeChatEvent(JSON.stringify({ seq: 1, type: "from-a-newer-server" }))).toBeUndefined()
+		expect(decodeChatEvent("not json at all")).toBeUndefined()
+		// Structurally invalid members of a *known* type are skipped too.
+		expect(decodeChatEvent(JSON.stringify({ seq: 1, type: "text-delta" }))).toBeUndefined()
+	})
+
+	it("still throws on demand, for producers that control both ends", () => {
+		expect(() => decodeChatEventOrThrow(JSON.stringify({ type: "nope" }))).toThrow()
+	})
+})
+
+describe("chat event storage codec", () => {
+	// The durable log stores an event without its `seq` — the SQLite row key is the seq — so this is
+	// a separate pair from the SSE codecs. It exists because the Durable Object used to read rows
+	// back with `JSON.parse(payload) as ChatEvent`, which turns a shape change into a malformed
+	// event handed straight to the transcript fold rather than an error at the boundary.
+	it("round-trips every member, taking the seq from the row key", () => {
+		const inputs: ReadonlyArray<ChatEventInput> = [
+			{ type: "user-message", id: "u1", text: "hello" },
+			{ type: "turn-start", messageId: "a1" },
+			{ type: "text-delta", messageId: "a1", text: "hi" },
+			{ type: "tool-call", messageId: "a1", callId: "c1", name: "t", input: { a: 1 } },
+			{ type: "tool-call", messageId: "a1", callId: "c2", name: "t", input: {}, proposed: true },
+			{ type: "tool-result", messageId: "a1", callId: "c1", output: "ok" },
+			{ type: "tool-result", messageId: "a1", callId: "c1", output: "no", isError: true },
+			{ type: "turn-end", messageId: "a1", reason: "stop" },
+			{ type: "turn-end", messageId: "a1", reason: "error", error: "boom" },
+		]
+
+		for (const input of inputs) {
+			const decoded = decodeChatEventPayload(encodeChatEventPayload(input), 42)
+			expect(decoded).toEqual({ ...input, seq: 42 })
+		}
+	})
+
+	it("rejects a stored payload that is not a known event", () => {
+		expect(() => decodeChatEventPayload(JSON.stringify({ type: "nonsense" }), 1)).toThrow()
+	})
+})
+
+describe("ChatTurnTenant", () => {
+	it("carries the caller identity a turn runs as across the Durable Object boundary", () => {
+		// The DO has no auth context of its own: the route resolves and authorizes the real tenant,
+		// then hands down this serializable projection.
+		const tenant = new ChatTurnTenant({
+			orgId: "org_1" as ChatTurnTenant["orgId"],
+			userId: "user_1" as ChatTurnTenant["userId"],
+			roles: [],
+			authMode: "self_hosted",
+		})
+		expect(tenant.orgId).toBe("org_1")
+		expect(tenant.authMode).toBe("self_hosted")
 	})
 })
