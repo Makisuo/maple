@@ -4503,14 +4503,62 @@ impl ClickHouseTargetProvider for ClickHouseTargetResolver {
 /// fingerprinting sit upstream.
 struct PostgresKeyStore {
     pool: deadpool_postgres::Pool,
+    /// Target identity for the DB client spans, read off the parsed connection
+    /// string once at startup. Without a `db.namespace` these spans collapse
+    /// into the per-system generic node on the service map instead of naming
+    /// the database they actually hit.
+    target: PostgresTarget,
 }
 
-fn postgres_client_span(operation: &'static str) -> Span {
+/// The `db.namespace` / `server.address` / `server.port` of the configured
+/// origin. Derived from `MAPLE_PG_URL` rather than hardcoded so self-hosted and
+/// local deployments report the database they really talk to.
+#[derive(Clone, Debug, Default)]
+struct PostgresTarget {
+    namespace: String,
+    address: String,
+    port: u16,
+}
+
+impl PostgresTarget {
+    fn from_config(config: &tokio_postgres::Config) -> Self {
+        let address = match config.get_hosts().first() {
+            Some(tokio_postgres::config::Host::Tcp(host)) => host.clone(),
+            Some(tokio_postgres::config::Host::Unix(path)) => path.to_string_lossy().into_owned(),
+            None => String::new(),
+        };
+        Self {
+            namespace: config.get_dbname().unwrap_or_default().to_string(),
+            address,
+            port: config.get_ports().first().copied().unwrap_or_default(),
+        }
+    }
+}
+
+/// One Postgres client span.
+///
+/// `operation`/`collection` are the SQL verb and primary table, NOT the Rust
+/// method name: `db.operation.name` composes with `db.collection.name` into the
+/// query-shape label the warehouse groups on, so a method name there produces a
+/// label like "fetch_ingest_key" that no SQL-shaped view can line up with the
+/// same table hit from the API. The method name rides on `code.function.name`,
+/// which keeps existing log/dashboard filters working.
+fn postgres_client_span(
+    method: &'static str,
+    operation: &'static str,
+    collection: &'static str,
+    target: &PostgresTarget,
+) -> Span {
     tracing::info_span!(
         "postgres.query",
         otel.kind = "client",
         "db.system.name" = "postgresql",
         "db.operation.name" = operation,
+        "db.collection.name" = collection,
+        "db.namespace" = %target.namespace,
+        "server.address" = %target.address,
+        "server.port" = target.port,
+        "code.function.name" = method,
         "peer.service" = "planetscale-postgres",
     )
 }
@@ -4531,6 +4579,9 @@ impl PostgresKeyStore {
             .with_no_client_auth();
         let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
 
+        // Read the target identity before the config is moved into the manager.
+        let target = PostgresTarget::from_config(&pg_config);
+
         let mgr = deadpool_postgres::Manager::from_config(
             pg_config,
             tls,
@@ -4543,7 +4594,7 @@ impl PostgresKeyStore {
             .build()
             .map_err(|error| format!("postgres pool build failed: {error}"))?;
 
-        Ok(Self { pool })
+        Ok(Self { pool, target })
     }
 
     async fn client(&self) -> Result<deadpool_postgres::Object, String> {
@@ -4572,7 +4623,7 @@ impl PostgresKeyStore {
                  WHERE k.private_key_hash = $1 LIMIT 1",
                 &[&"__ingest_probe_no_match__"],
             )
-            .instrument(postgres_client_span("probe"))
+            .instrument(postgres_client_span("probe", "SELECT", "org_ingest_keys", &self.target))
             .await
             .map(|_| ())
             .map_err(|error| format!("postgres probe query failed: {error}"))
@@ -4603,7 +4654,12 @@ impl KeyStore for PostgresKeyStore {
         let client = self.client().await?;
         let rows = client
             .query(&sql, &[&revision, &key_hash])
-            .instrument(postgres_client_span("fetch_ingest_key"))
+            .instrument(postgres_client_span(
+                "fetch_ingest_key",
+                "SELECT",
+                "org_ingest_keys",
+                &self.target,
+            ))
             .await
             .map_err(|error| format!("postgres fetch_ingest_key failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -4638,7 +4694,12 @@ impl KeyStore for PostgresKeyStore {
         );
         let rows = client
             .query(&sql, &[&revision, &connector_id, &secret_hash])
-            .instrument(postgres_client_span("fetch_connector"))
+            .instrument(postgres_client_span(
+                "fetch_connector",
+                "SELECT",
+                "cloudflare_logpush_connectors",
+                &self.target,
+            ))
             .await
             .map_err(|error| format!("postgres fetch_connector failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -4667,7 +4728,12 @@ impl KeyStore for PostgresKeyStore {
                  FROM org_ingest_sampling_policies WHERE org_id = $1 LIMIT 1",
                 &[&org_id],
             )
-            .instrument(postgres_client_span("fetch_sampling_policy"))
+            .instrument(postgres_client_span(
+                "fetch_sampling_policy",
+                "SELECT",
+                "org_ingest_sampling_policies",
+                &self.target,
+            ))
             .await
             .map_err(|error| format!("postgres fetch_sampling_policy failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -4692,7 +4758,12 @@ impl KeyStore for PostgresKeyStore {
                  FROM org_ingest_attribute_mappings WHERE org_id = $1 AND enabled = true",
                 &[&org_id],
             )
-            .instrument(postgres_client_span("fetch_attribute_mappings"))
+            .instrument(postgres_client_span(
+                "fetch_attribute_mappings",
+                "SELECT",
+                "org_ingest_attribute_mappings",
+                &self.target,
+            ))
             .await
             .map_err(|error| format!("postgres fetch_attribute_mappings failed: {error}"))?;
         Ok(rows
@@ -4722,7 +4793,12 @@ impl KeyStore for PostgresKeyStore {
                             THEN schema_version::int ELSE -1 END >= $2 LIMIT 1",
                 &[&org_id, &revision],
             )
-            .instrument(postgres_client_span("fetch_clickhouse_target"))
+            .instrument(postgres_client_span(
+                "fetch_clickhouse_target",
+                "SELECT",
+                "org_clickhouse_settings",
+                &self.target,
+            ))
             .await
             .map_err(|error| format!("postgres fetch_clickhouse_target failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -4759,7 +4835,7 @@ impl KeyStore for PostgresKeyStore {
                 ),
                 &[&revision, &org_id],
             )
-            .instrument(postgres_client_span("fetch_org_routing"))
+            .instrument(postgres_client_span("fetch_org_routing", "SELECT", "org_clickhouse_settings", &self.target))
             .await
             .map_err(|error| format!("postgres fetch_org_routing failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -4788,7 +4864,12 @@ impl KeyStore for PostgresKeyStore {
                  WHERE id = $2",
                 &[&now_ms, &connector_id],
             )
-            .instrument(postgres_client_span("record_connector_success"))
+            .instrument(postgres_client_span(
+                "record_connector_success",
+                "UPDATE",
+                "cloudflare_logpush_connectors",
+                &self.target,
+            ))
             .await
             .map(|_| ())
             .map_err(|error| format!("postgres record_connector_success failed: {error}"))
@@ -4808,7 +4889,12 @@ impl KeyStore for PostgresKeyStore {
                  WHERE id = $3",
                 &[&error, &now_ms, &connector_id],
             )
-            .instrument(postgres_client_span("record_connector_failure"))
+            .instrument(postgres_client_span(
+                "record_connector_failure",
+                "UPDATE",
+                "cloudflare_logpush_connectors",
+                &self.target,
+            ))
             .await
             .map(|_| ())
             .map_err(|err| format!("postgres record_connector_failure failed: {err}"))
@@ -5099,6 +5185,42 @@ mod tests {
     // top-level import avoids an unused-import warning in non-test bin builds.
     use opentelemetry_proto::tonic::metrics::v1::metric;
     use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn postgres_target_is_derived_from_the_connection_string() {
+        let config = "postgres://user:pw@psbouncer.example.com:6432/maple_prod"
+            .parse::<tokio_postgres::Config>()
+            .unwrap();
+        let target = PostgresTarget::from_config(&config);
+        assert_eq!(target.namespace, "maple_prod");
+        assert_eq!(target.address, "psbouncer.example.com");
+        assert_eq!(target.port, 6432);
+    }
+
+    #[test]
+    fn postgres_client_span_declares_db_identity() {
+        // A field that isn't declared here can't be filtered or grouped on, and
+        // an absent `db.namespace` drops the span into the generic per-system
+        // node on the service map instead of naming the database.
+        let target = PostgresTarget {
+            namespace: "maple_prod".to_string(),
+            address: "psbouncer.example.com".to_string(),
+            port: 6432,
+        };
+        let span = postgres_client_span("fetch_ingest_key", "SELECT", "org_ingest_keys", &target);
+        for field in [
+            "db.system.name",
+            "db.operation.name",
+            "db.collection.name",
+            "db.namespace",
+            "server.address",
+            "server.port",
+            "peer.service",
+            "code.function.name",
+        ] {
+            assert!(span.has_field(field), "span is missing field `{field}`");
+        }
+    }
 
     #[test]
     fn hash_is_deterministic() {

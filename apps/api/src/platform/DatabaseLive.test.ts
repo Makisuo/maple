@@ -3,6 +3,7 @@ import { orgOnboardingState } from "@maple/db"
 import { eq, sql } from "drizzle-orm"
 import { Effect, Exit, Tracer } from "effect"
 import { Database } from "./DatabaseLive"
+import { PGLITE_DB_NAMESPACE } from "./DatabasePgliteLive"
 import { cleanupTestDbs, createTestDb, type TestDb } from "./test-pglite"
 
 const trackedDbs: TestDb[] = []
@@ -25,8 +26,12 @@ const makeRecordingTracer = () => {
 	return { spans, tracer }
 }
 
+/**
+ * DB spans are renamed to their query summary once the SQL is known, so they can
+ * no longer be found by name — `db.system.name` is the stable marker.
+ */
 const dbSpans = (spans: ReadonlyArray<Tracer.NativeSpan>) =>
-	spans.filter((span) => span.name === "Database.execute")
+	spans.filter((span) => span.attributes.get("db.system.name") === "postgresql")
 
 describe("Database execute span instrumentation", () => {
 	it.effect("emits a Client-kind span with DB semconv attributes on success", () =>
@@ -46,7 +51,13 @@ describe("Database execute span instrumentation", () => {
 			assert.deepStrictEqual(rest, [])
 			assert.strictEqual(span.kind, "client")
 			assert.strictEqual(span.attributes.get("db.system.name"), "postgresql")
-			assert.strictEqual(span.attributes.get("peer.service"), "postgresql")
+			assert.strictEqual(span.attributes.get("peer.service"), "planetscale-postgres")
+			assert.strictEqual(span.attributes.get("db.namespace"), PGLITE_DB_NAMESPACE)
+			// OTel wants the span named after its query, not after the call site.
+			assert.strictEqual(span.name, "SELECT org_onboarding_state")
+			assert.strictEqual(span.attributes.get("db.query.summary"), "SELECT org_onboarding_state")
+			assert.strictEqual(span.attributes.get("db.operation.name"), "SELECT")
+			assert.strictEqual(span.attributes.get("db.collection.name"), "org_onboarding_state")
 			const queryText = span.attributes.get("db.query.text")
 			assert.isString(queryText)
 			// Parameterized text: placeholder present, the literal param value absent.
@@ -58,6 +69,7 @@ describe("Database execute span instrumentation", () => {
 			assert.strictEqual(span.attributes.get("db.query.truncated"), false)
 			assert.isNumber(span.attributes.get("db.duration_ms"))
 			assert.strictEqual(span.attributes.get("result.rowCount"), 0)
+			assert.strictEqual(span.attributes.get("db.response.returned_rows"), 0)
 		}).pipe(Effect.provide(createTestDb(trackedDbs).layer)),
 	)
 
@@ -75,9 +87,12 @@ describe("Database execute span instrumentation", () => {
 			assert.isDefined(span)
 			// Set at span declaration, so the edge exists for failed calls too.
 			assert.strictEqual(span.attributes.get("db.system.name"), "postgresql")
-			assert.strictEqual(span.attributes.get("peer.service"), "postgresql")
-			// The statement fired before failing, so the tapError path captured it.
+			assert.strictEqual(span.attributes.get("peer.service"), "planetscale-postgres")
+			// The statement fired before failing, so the tapError path captured it —
+			// including the rename and the derived operation/collection.
 			assert.include(span.attributes.get("db.query.text") as string, "select broken from nowhere")
+			assert.strictEqual(span.name, "SELECT nowhere")
+			assert.strictEqual(span.attributes.get("db.operation.name"), "SELECT")
 			assert.isNumber(span.attributes.get("db.duration_ms"))
 			assert.strictEqual(span.status._tag, "Ended")
 			assert.isTrue(span.status._tag === "Ended" && Exit.isFailure(span.status.exit))
@@ -111,6 +126,29 @@ describe("Database execute span instrumentation", () => {
 			const queryText = span.attributes.get("db.query.text") as string
 			assert.include(queryText, "insert into")
 			assert.include(queryText, "select")
+			// A multi-statement call is summarized by the joined text — the same
+			// input the warehouse derives its fallback label from — so the leading
+			// statement names the span.
+			assert.strictEqual(span.name, "INSERT org_onboarding_state")
+			assert.strictEqual(span.attributes.get("db.operation.name"), "INSERT")
+		}).pipe(Effect.provide(createTestDb(trackedDbs).layer)),
+	)
+
+	it.effect("keeps the placeholder name when the call fails before any statement", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const database = yield* Database
+
+			const exit = yield* database
+				.execute(() => Promise.reject(new Error("connection refused")))
+				.pipe(Effect.withTracer(tracer), Effect.exit)
+
+			assert.isTrue(Exit.isFailure(exit))
+			const [span] = dbSpans(spans)
+			assert.isDefined(span)
+			assert.strictEqual(span.name, "Database.execute")
+			assert.isUndefined(span.attributes.get("db.query.summary"))
+			assert.isUndefined(span.attributes.get("db.operation.name"))
 		}).pipe(Effect.provide(createTestDb(trackedDbs).layer)),
 	)
 

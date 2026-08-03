@@ -137,6 +137,9 @@ fn clickhouse_export_span(
     span.record("maple.org_id", org_id);
     span.record("db.system.name", "clickhouse");
     span.record("db.operation.name", "INSERT");
+    // The datasource IS the destination table; the span-detail database panel
+    // and the query-shape label both read `db.collection.name` for it.
+    span.record("db.collection.name", datasource);
     span
 }
 
@@ -1704,6 +1707,19 @@ impl ExportWorker {
                 compressed.len(),
             );
             span.record("server.address", server_address.as_str());
+            // Tinybird's events API is a warehouse append, so this span is a
+            // database client span and needs the same db.* identity the
+            // ClickHouse path emits (clickhouse_export_span above) — without
+            // `db.system.name` the read path can't recognise it as a database
+            // call, and the highest-volume export in the fleet stayed invisible
+            // on the service map. There is no `db.namespace` to give: the
+            // workspace is implicit in the bearer token and appears nowhere in
+            // TinybirdConfig. Leaving it unset is correct rather than inventing
+            // one — the namespace coalesce falls back to `server.address`, so
+            // the node resolves to the actual Tinybird host.
+            span.record("db.system.name", "tinybird");
+            span.record("db.operation.name", "INSERT");
+            span.record("db.collection.name", datasource);
             let span_handle = span.clone();
             let response = self
                 .http

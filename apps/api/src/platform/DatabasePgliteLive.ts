@@ -12,6 +12,9 @@ import {
 } from "./DatabaseLive"
 import { Env } from "./Env"
 
+/** `db.namespace` for the embedded Postgres used by vitest / local entrypoints. */
+export const PGLITE_DB_NAMESPACE = "pglite"
+
 /**
  * Wrap an already-migrated PGlite instance as the Database service (no
  * migration). The test harness pre-migrates via a cached SQL exec and uses
@@ -26,8 +29,14 @@ import { Env } from "./Env"
 export const databaseFromInstance = (pglite: PGlite): DatabaseShape =>
 	Database.of({
 		execute: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			executeWithSpan((collect) =>
-				fn(createMaplePgliteClient(pglite, { onQuery: collect }) as unknown as DatabaseClient),
+			executeWithSpan(
+				(collect) =>
+					fn(createMaplePgliteClient(pglite, { onQuery: collect }) as unknown as DatabaseClient),
+				// Without a namespace these spans collapse into the per-system
+				// generic node. There is no server to address — PGlite is in-process —
+				// so name the engine rather than a host, which also keeps local and
+				// deployed traffic on visibly distinct nodes.
+				{ "db.namespace": PGLITE_DB_NAMESPACE },
 			),
 	} satisfies DatabaseShape)
 

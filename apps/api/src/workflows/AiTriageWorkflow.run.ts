@@ -25,7 +25,7 @@
 import { createHash } from "node:crypto"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { aiTriageRuns, anomalyIncidents, errorIssueEvents } from "@maple/db"
-import { createMaplePgClient, type MaplePgClient } from "@maple/db/client"
+import type { MaplePgClient } from "@maple/db/client"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { AiTriageResult } from "@maple/domain/http"
 import {
@@ -41,6 +41,11 @@ import { and, eq } from "drizzle-orm"
 import { Cause, Data, Effect, Exit, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { applyTriageSeverity } from "@/services/errors/issue-severity"
+import {
+	makeTracedPgConnection,
+	type TracedPgConnection,
+	tracedPgConnectionFrom,
+} from "@/platform/pg-execute"
 import { isWorkersAiBinding } from "@/platform/WorkersAiHttpClient"
 import type { WorkflowEventLike, WorkflowStepLike } from "./ClickHouseSchemaApplyWorkflow.run"
 
@@ -266,20 +271,22 @@ export async function runAiTriage(
 	deps: AiTriageRunDeps = {},
 ): Promise<AiTriageWorkflowResult> {
 	// Injected test clients are owned by the caller; the workflow only ends the
-	// postgres.js connection it dialed itself.
-	const connection: { readonly db: MaplePgClient; readonly end?: () => Promise<void> } =
+	// postgres.js connection it dialed itself. Either way the steps run through
+	// `connection.step`, so this workflow's queries produce the same
+	// `Database.execute` client spans as the request path.
+	const connection =
 		deps.db !== undefined
-			? { db: deps.db }
-			: createMaplePgClient(resolveMapleDbConnectionString(env.MAPLE_DB), { maxConnections: 1 })
+			? tracedPgConnectionFrom(deps.db)
+			: makeTracedPgConnection(resolveMapleDbConnectionString(env.MAPLE_DB))
 	try {
-		return await runAiTriageWithDb(connection.db, env, event, step, deps)
+		return await runAiTriageWithDb(connection, env, event, step, deps)
 	} finally {
-		await connection.end?.().catch(() => undefined)
+		await connection.end()
 	}
 }
 
 async function runAiTriageWithDb(
-	db: MaplePgClient,
+	connection: TracedPgConnection,
 	env: AiTriageWorkflowEnv,
 	event: WorkflowEventLike<AiTriageWorkflowPayload>,
 	step: WorkflowStepLike,
@@ -289,6 +296,15 @@ async function runAiTriageWithDb(
 	const runId = decodeRunId(event.payload.runId)
 	const invokeTriage = deps.invokeTriage ?? invokeTriageWorkflow
 	const clock = deps.now ?? Date.now
+
+	/**
+	 * One unit of DB work, traced as a `Database.execute` client span on this
+	 * module's telemetry layer — the same idiom `logFailure` below uses to reach
+	 * OTLP from outside the worker's layer graph. Rejects on failure, so callers
+	 * keep their existing try/catch shape.
+	 */
+	const dbStep = <T>(fn: (db: MaplePgClient) => Promise<T>): Promise<T> =>
+		Effect.runPromise(connection.step(fn).pipe(Effect.provide(triageTelemetry.layer)))
 
 	/**
 	 * Failure-path structured log, routed through the module's OTLP telemetry
@@ -310,20 +326,24 @@ async function runAiTriageWithDb(
 	const markFailed = async (error: string) => {
 		const now = clock()
 		try {
-			await db
-				.update(aiTriageRuns)
-				.set({ status: "failed", error, completedAt: new Date(now), updatedAt: new Date(now) })
-				.where(and(eq(aiTriageRuns.orgId, decodeOrgId(orgId)), eq(aiTriageRuns.id, runId)))
+			await dbStep((db) =>
+				db
+					.update(aiTriageRuns)
+					.set({ status: "failed", error, completedAt: new Date(now), updatedAt: new Date(now) })
+					.where(and(eq(aiTriageRuns.orgId, decodeOrgId(orgId)), eq(aiTriageRuns.id, runId))),
+			)
 			if (incidentKind === "anomaly") {
-				await db
-					.update(anomalyIncidents)
-					.set({ triageStatus: "skipped", updatedAt: new Date(now) })
-					.where(
-						and(
-							eq(anomalyIncidents.orgId, decodeOrgId(orgId)),
-							eq(anomalyIncidents.id, decodeAnomalyIncidentId(incidentId)),
+				await dbStep((db) =>
+					db
+						.update(anomalyIncidents)
+						.set({ triageStatus: "skipped", updatedAt: new Date(now) })
+						.where(
+							and(
+								eq(anomalyIncidents.orgId, decodeOrgId(orgId)),
+								eq(anomalyIncidents.id, decodeAnomalyIncidentId(incidentId)),
+							),
 						),
-					)
+				)
 			}
 		} catch (cause) {
 			// If this write is lost the row stays queued/running until the enqueue
@@ -343,7 +363,9 @@ async function runAiTriageWithDb(
 	}
 
 	const gate = await step.do("gate-and-claim", GATE_STEP, async () => {
-		const rows = await db.select().from(aiTriageRuns).where(eq(aiTriageRuns.id, runId)).limit(1)
+		const rows = await dbStep((db) =>
+			db.select().from(aiTriageRuns).where(eq(aiTriageRuns.id, runId)).limit(1),
+		)
 		const run = rows[0]
 		// Replay guard: a re-delivered event for a run that already progressed is
 		// a no-op (statuses other than queued mean another execution owns it).
@@ -358,10 +380,12 @@ async function runAiTriageWithDb(
 		}
 
 		const now = clock()
-		await db
-			.update(aiTriageRuns)
-			.set({ status: "running", startedAt: new Date(now), updatedAt: new Date(now) })
-			.where(eq(aiTriageRuns.id, runId))
+		await dbStep((db) =>
+			db
+				.update(aiTriageRuns)
+				.set({ status: "running", startedAt: new Date(now), updatedAt: new Date(now) })
+				.where(eq(aiTriageRuns.id, runId)),
+		)
 
 		return { proceed: true as const, contextJson: run.contextJson }
 	})
@@ -452,21 +476,23 @@ async function runAiTriageWithDb(
 
 	await step.do("persist", PERSIST_STEP, async () => {
 		const now = clock()
-		await db
-			.update(aiTriageRuns)
-			.set({
-				status: "completed",
-				// The agent step's durable output stays a JSON string (1 MiB step
-				// cap bookkeeping); parse at the jsonb write boundary.
-				resultJson: JSON.parse(agentResult.resultJson),
-				model: agentResult.model,
-				inputTokens: agentResult.inputTokens,
-				outputTokens: agentResult.outputTokens,
-				error: null,
-				completedAt: new Date(now),
-				updatedAt: new Date(now),
-			})
-			.where(and(eq(aiTriageRuns.orgId, decodeOrgId(orgId)), eq(aiTriageRuns.id, runId)))
+		await dbStep((db) =>
+			db
+				.update(aiTriageRuns)
+				.set({
+					status: "completed",
+					// The agent step's durable output stays a JSON string (1 MiB step
+					// cap bookkeeping); parse at the jsonb write boundary.
+					resultJson: JSON.parse(agentResult.resultJson),
+					model: agentResult.model,
+					inputTokens: agentResult.inputTokens,
+					outputTokens: agentResult.outputTokens,
+					error: null,
+					completedAt: new Date(now),
+					updatedAt: new Date(now),
+				})
+				.where(and(eq(aiTriageRuns.orgId, decodeOrgId(orgId)), eq(aiTriageRuns.id, runId))),
+		)
 
 		if (issueId) {
 			// Any linked issue (error fingerprint, alert-backed, or anomaly-linked)
@@ -475,45 +501,51 @@ async function runAiTriageWithDb(
 			// idempotent via runId-derived deterministic ids, so a retried persist
 			// step cannot duplicate them.
 			const result = decodeTriageResultJson(agentResult.resultJson)
-			const applied = await applyTriageSeverity(db, {
-				orgId: decodeOrgId(orgId),
-				issueId: decodeIssueId(issueId),
-				runId,
-				severity: result.severityAssessment,
-				confidence: result.confidence,
-				timestamp: now,
-				result,
-			})
-			await db
-				.insert(errorIssueEvents)
-				.values({
-					id: decodeEventId(deterministicEventId(runId)),
+			const applied = await dbStep((db) =>
+				applyTriageSeverity(db, {
 					orgId: decodeOrgId(orgId),
 					issueId: decodeIssueId(issueId),
-					actorId: applied.actorId,
-					type: "ai_triage",
-					payloadJson: {
-						runId,
-						summary: result.summary,
-						severityAssessment: result.severityAssessment,
-						confidence: result.confidence,
-						applied: applied.applied,
-					},
-					createdAt: new Date(now),
-				})
-				.onConflictDoNothing()
+					runId,
+					severity: result.severityAssessment,
+					confidence: result.confidence,
+					timestamp: now,
+					result,
+				}),
+			)
+			await dbStep((db) =>
+				db
+					.insert(errorIssueEvents)
+					.values({
+						id: decodeEventId(deterministicEventId(runId)),
+						orgId: decodeOrgId(orgId),
+						issueId: decodeIssueId(issueId),
+						actorId: applied.actorId,
+						type: "ai_triage",
+						payloadJson: {
+							runId,
+							summary: result.summary,
+							severityAssessment: result.severityAssessment,
+							confidence: result.confidence,
+							applied: applied.applied,
+						},
+						createdAt: new Date(now),
+					})
+					.onConflictDoNothing(),
+			)
 		}
 
 		if (incidentKind === "anomaly") {
-			await db
-				.update(anomalyIncidents)
-				.set({ triageStatus: "completed", updatedAt: new Date(now) })
-				.where(
-					and(
-						eq(anomalyIncidents.orgId, decodeOrgId(orgId)),
-						eq(anomalyIncidents.id, decodeAnomalyIncidentId(incidentId)),
+			await dbStep((db) =>
+				db
+					.update(anomalyIncidents)
+					.set({ triageStatus: "completed", updatedAt: new Date(now) })
+					.where(
+						and(
+							eq(anomalyIncidents.orgId, decodeOrgId(orgId)),
+							eq(anomalyIncidents.id, decodeAnomalyIncidentId(incidentId)),
+						),
 					),
-				)
+			)
 		}
 
 		await trackTokenUsage(env, {

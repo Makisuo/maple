@@ -1,22 +1,14 @@
-import { createMaplePgClient } from "@maple/db/client"
 import { Hyperdrive } from "@maple/effect-cloudflare/hyperdrive-connection"
 import { Effect, Layer } from "effect"
-import {
-	Database,
-	type DatabaseClient,
-	DatabaseError,
-	type DatabaseShape,
-	executeWithSpan,
-} from "./DatabaseLive"
+import { Database, type DatabaseClient, DatabaseError, type DatabaseShape } from "./DatabaseLive"
+import { executeOnFreshPgClient } from "./pg-execute"
 
 const MAPLE_DB = Hyperdrive("MAPLE_DB")
 
 // Workers constraint: this layer lives for the isolate, but TCP sockets are
-// tied to the request that opened them. So the layer holds only the
-// Hyperdrive connection string; every `execute` dials a fresh single-
-// connection postgres.js client and closes it when the callback settles.
-// Hyperdrive keeps the warm origin pool, so the per-call handshake is cheap.
-// Transactions run inside one `execute` callback, so atomicity is unaffected.
+// tied to the request that opened them. So the layer holds only the Hyperdrive
+// connection string and defers the dial to `executeOnFreshPgClient` — see
+// pg-execute.ts for why that is per-call.
 const makePgDatabase = Effect.gen(function* () {
 	const conn = yield* Hyperdrive.bind(MAPLE_DB)
 	const binding = yield* conn.raw
@@ -39,26 +31,24 @@ const makePgDatabase = Effect.gen(function* () {
 	}
 
 	const connectionString = binding.connectionString
+	// Hyperdrive presents itself to the driver as `<config-id>.hyperdrive.local`
+	// with the 32-char config id as the database name. Maple's read path
+	// deliberately collapses both spellings to the `hyperdrive` sentinel node
+	// (see OPAQUE_DB_NAMESPACE_RE in @maple/domain/tinybird/db-query-shape-sql),
+	// so emitting them as-is is correct — the node is branded "Hyperdrive" and
+	// the frontend resolves the real database behind it from the org's
+	// Hyperdrive config inventory.
 	const databaseName = binding.database
+	const serverAddress = binding.host
+	const serverPort = binding.port
 
 	return Database.of({
 		execute: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			executeWithSpan(
-				async (collect) => {
-					const { db, end } = createMaplePgClient(connectionString, {
-						maxConnections: 1,
-						onQuery: collect,
-					})
-					try {
-						return await fn(db)
-					} finally {
-						// Never let a socket-teardown error shadow the real DB error
-						// from fn(db) (mirrors ClickHouseSchemaApplyWorkflow.run.ts).
-						await end().catch(() => undefined)
-					}
-				},
-				{ "db.namespace": databaseName },
-			),
+			executeOnFreshPgClient(connectionString, fn, {
+				"db.namespace": databaseName,
+				"server.address": serverAddress,
+				"server.port": serverPort,
+			}),
 	} satisfies DatabaseShape)
 })
 
