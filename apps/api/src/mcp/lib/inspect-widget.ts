@@ -1,5 +1,5 @@
 import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
-import { QueryEngineService } from "@/services/QueryEngineService"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 import {
 	QuerySpec,

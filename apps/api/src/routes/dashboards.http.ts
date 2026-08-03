@@ -12,10 +12,10 @@ import {
 } from "@maple/domain/http"
 import { Effect } from "effect"
 import { describeSchemaIssue, summarizeSchemaError } from "./schema-error-detail"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { getTemplateById, listTemplateMetadata } from "@/dashboard-templates"
 import type { TemplateParameterValues } from "@/dashboard-templates"
-import { convertPersesDashboardToPortable } from "@/services/perses-dashboard-import"
+import { convertPersesDashboardToPortable } from "@/services/dashboards/perses-dashboard-import"
 
 /**
  * Renders a dashboard request-decode failure as a `DashboardValidationError`

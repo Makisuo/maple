@@ -4,8 +4,8 @@ import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Effect, Layer, Schema } from "effect"
 import { layerPg } from "./lib/DatabasePgLive"
-import { classifyPlanetScaleEvent, upsertPlanetScaleIssue } from "./services/planetscale/webhook-events"
-import { PlanetScaleWebhookJob } from "./services/planetscale/PlanetScaleWebhookQueue"
+import { classifyPlanetScaleEvent, upsertPlanetScaleIssue } from "./services/integrations/planetscale/webhook-events"
+import { PlanetScaleWebhookJob } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",

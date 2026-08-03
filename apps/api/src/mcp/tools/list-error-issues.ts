@@ -10,7 +10,7 @@ import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { ErrorsService } from "@/services/ErrorsService"
+import { ErrorsService } from "@/services/errors/ErrorsService"
 import { IssueKind, IssueSeverity, WorkflowState } from "@maple/domain/http"
 
 const decodeWorkflowState = Schema.decodeUnknownOption(WorkflowState)

@@ -7,7 +7,7 @@ import {
 } from "./types"
 import { Effect, Schema } from "effect"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { inspectWidget, type InspectWidgetTimeRange, type RawSqlInspectionData } from "@/mcp/lib/inspect-widget"
 import { formatTable, truncate } from "@/mcp/lib/format"

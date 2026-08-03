@@ -25,8 +25,8 @@ import {
 import type { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { requireAdmin } from "@/lib/auth"
-import { AnomalyDetectionService } from "@/services/AnomalyDetectionService"
-import { ErrorsService } from "@/services/ErrorsService"
+import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
+import { ErrorsService } from "@/services/errors/ErrorsService"
 
 const toV2Incident = (doc: AnomalyIncidentDocument): V2AnomalyIncident => ({
 	id: doc.id,

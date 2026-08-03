@@ -2,7 +2,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant } from "@maple/domain/http"
 import { dependencyUnavailable, MapleApiV2, isoTimestampOrNull } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { OrganizationService } from "@/services/OrganizationService"
+import { OrganizationService } from "@/services/org/OrganizationService"
 
 export const HttpV2OrganizationLive = HttpApiBuilder.group(MapleApiV2, "organization", (handlers) =>
 	Effect.gen(function* () {

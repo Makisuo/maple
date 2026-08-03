@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import type { TenantContext } from "@/lib/tenant-context"
-import { ErrorsService } from "@/services/ErrorsService"
+import { ErrorsService } from "@/services/errors/ErrorsService"
 import { McpQueryError } from "@/mcp/tools/types"
 
 /**

@@ -9,7 +9,7 @@ import { Effect, Schema } from "effect"
 import type { TenantContext } from "./lib/tenant-context"
 import { callMcpTool, listMcpTools } from "./mcp/dispatcher"
 import { CurrentMcpTenant } from "./mcp/lib/query-warehouse"
-import { InvestigationService } from "./services/InvestigationService"
+import { InvestigationService } from "./services/errors/InvestigationService"
 
 const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
 

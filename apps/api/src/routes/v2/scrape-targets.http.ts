@@ -23,7 +23,7 @@ import {
 } from "@maple/domain/http/v2"
 import type { V2ScrapeTarget, V2ScrapeTargetCheck } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { ScrapeTargetsService } from "@/services/ScrapeTargetsService"
+import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
 
 const toV2ScrapeTarget = (target: ScrapeTargetResponse): V2ScrapeTarget => ({
 	id: target.id,

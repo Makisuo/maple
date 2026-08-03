@@ -14,7 +14,7 @@ import {
 	SpendLimitsService,
 	type ConfiguredSpendLimits,
 	type SpendLimitsServiceShape,
-} from "./services/SpendLimitsService"
+} from "./services/billing/SpendLimitsService"
 
 // ---------------------------------------------------------------------------
 // Hourly spend-limit evaluation.

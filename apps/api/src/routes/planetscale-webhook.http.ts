@@ -10,8 +10,8 @@ import {
 	classifyPlanetScaleEvent,
 	decodePlanetScaleWebhookPayload,
 	verifyPlanetScaleSignature,
-} from "@/services/planetscale/webhook-events"
-import { PlanetScaleWebhookQueue } from "@/services/planetscale/PlanetScaleWebhookQueue"
+} from "@/services/integrations/planetscale/webhook-events"
+import { PlanetScaleWebhookQueue } from "@/services/integrations/planetscale/PlanetScaleWebhookQueue"
 
 // ---------------------------------------------------------------------------
 // Public PlanetScale webhook receiver. NOT behind auth — authenticity comes

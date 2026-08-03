@@ -5,7 +5,7 @@ import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, DashboardsApiGroup } from "@maple/domain/http"
 import { Env } from "@/lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { HttpDashboardSchemaErrorsLive, HttpDashboardsLive } from "./dashboards.http"
 
 const createdDbs: TestDb[] = []

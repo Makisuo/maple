@@ -18,8 +18,8 @@ import {
 import { Array as Arr, Effect, Option } from "effect"
 import { requireAdmin } from "@/lib/auth"
 import { Env } from "@/lib/Env"
-import type { SlackChannelList, SlackInstallStatus } from "@/services/SlackIntegrationService"
-import { SLACK_CALLBACK_PATH, SlackIntegrationService } from "@/services/SlackIntegrationService"
+import type { SlackChannelList, SlackInstallStatus } from "@/services/integrations/SlackIntegrationService"
+import { SLACK_CALLBACK_PATH, SlackIntegrationService } from "@/services/integrations/SlackIntegrationService"
 
 /**
  * Best-effort origin of the incoming request. `x-forwarded-*` is client-supplied

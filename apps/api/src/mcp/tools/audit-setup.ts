@@ -5,7 +5,7 @@ import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import type { AuditCheckResult, AuditSeverity } from "@maple/domain/setup-audit"
-import { SetupAuditService } from "@/services/SetupAuditService"
+import { SetupAuditService } from "@/services/org/SetupAuditService"
 
 /** Fail-first, then by severity, so the table's top rows are the ones worth acting on. */
 const SEVERITY_RANK: Record<AuditSeverity, number> = { critical: 0, warn: 1, info: 2 }

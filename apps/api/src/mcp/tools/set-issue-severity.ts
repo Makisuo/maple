@@ -9,7 +9,7 @@ import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { resolveActorId } from "@/mcp/lib/resolve-actor"
-import { ErrorsService } from "@/services/ErrorsService"
+import { ErrorsService } from "@/services/errors/ErrorsService"
 import { ErrorIssueId, IssueSeverity } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)

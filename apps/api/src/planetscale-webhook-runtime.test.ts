@@ -4,7 +4,7 @@ import { Effect, Layer } from "effect"
 import { Database, DatabaseError } from "./lib/DatabaseLive"
 import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "./lib/test-pglite"
 import { processPlanetScaleWebhookBatch } from "./planetscale-webhook-runtime"
-import type { PlanetScaleWebhookJob } from "./services/planetscale/PlanetScaleWebhookQueue"
+import type { PlanetScaleWebhookJob } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
 
 const trackedDbs: TestDb[] = []
 

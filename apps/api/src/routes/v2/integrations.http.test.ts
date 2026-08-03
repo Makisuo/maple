@@ -13,15 +13,15 @@ import {
 import { MapleApiV2 } from "@maple/domain/http/v2"
 import { Env } from "@/lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
-import { ApiKeysService } from "@/services/ApiKeysService"
-import { AuthService } from "@/services/AuthService"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
-import { ApiAuthorizationV2Layer } from "@/services/ApiAuthorizationV2Layer"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import {
 	SLACK_CALLBACK_PATH,
 	SlackIntegrationService,
 	type SlackIntegrationServiceShape,
-} from "@/services/SlackIntegrationService"
+} from "@/services/integrations/SlackIntegrationService"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,

@@ -7,7 +7,7 @@ import {
 	ScrapeTargetChecksListResponse,
 } from "@maple/domain/http"
 import { Effect, Schema } from "effect"
-import { ScrapeTargetsService } from "@/services/ScrapeTargetsService"
+import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
 
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 

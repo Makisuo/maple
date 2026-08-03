@@ -1,8 +1,8 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiKeyForbiddenError, CurrentTenant, MapleApi } from "@maple/domain/http"
 import { Effect } from "effect"
-import { ApiKeysService } from "@/services/ApiKeysService"
-import { AuthService } from "@/services/AuthService"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
 import { requireAdmin } from "@/lib/auth"
 
 const forbidden = (message: string) => () => new ApiKeyForbiddenError({ message })

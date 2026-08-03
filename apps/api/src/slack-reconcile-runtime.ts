@@ -4,9 +4,9 @@ import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-clou
 import { Effect, Layer } from "effect"
 import { layerPg } from "./lib/DatabasePgLive"
 import { Env } from "./lib/Env"
-import { ApiKeysService } from "./services/ApiKeysService"
-import { OAuthStateRepository } from "./services/OAuthStateRepository"
-import { SlackIntegrationService } from "./services/SlackIntegrationService"
+import { ApiKeysService } from "./services/org/ApiKeysService"
+import { OAuthStateRepository } from "./services/auth/OAuthStateRepository"
+import { SlackIntegrationService } from "./services/integrations/SlackIntegrationService"
 
 // ---------------------------------------------------------------------------
 // Slack workspace reconciliation's cron layer graph — mirrors

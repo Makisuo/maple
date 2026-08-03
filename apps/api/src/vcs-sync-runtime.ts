@@ -5,19 +5,19 @@ import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-clou
 import { Cause, Effect, Layer, Option } from "effect"
 import { layerPg } from "./lib/DatabasePgLive"
 import { Env } from "./lib/Env"
-import { GithubAppClient } from "./services/vcs/vendor/github/GithubAppClient"
-import { GithubHttp } from "./services/vcs/vendor/github/GithubHttp"
-import { GithubProvider } from "./services/vcs/vendor/github/GithubProvider"
-import { VcsProviderRegistry } from "./services/vcs/VcsProviderRegistry"
-import { VcsRepository } from "./services/vcs/VcsRepository"
-import { VcsScheduledSyncService } from "./services/vcs/VcsScheduledSyncService"
+import { GithubAppClient } from "./services/integrations/vcs/vendor/github/GithubAppClient"
+import { GithubHttp } from "./services/integrations/vcs/vendor/github/GithubHttp"
+import { GithubProvider } from "./services/integrations/vcs/vendor/github/GithubProvider"
+import { VcsProviderRegistry } from "./services/integrations/vcs/VcsProviderRegistry"
+import { VcsRepository } from "./services/integrations/vcs/VcsRepository"
+import { VcsScheduledSyncService } from "./services/integrations/vcs/VcsScheduledSyncService"
 import {
 	clampQueueDelaySeconds,
 	MESSAGING_DESTINATION,
 	MESSAGING_SYSTEM,
 	VcsSyncQueue,
-} from "./services/vcs/VcsSyncQueue"
-import { VcsSyncService } from "./services/vcs/VcsSyncService"
+} from "./services/integrations/vcs/VcsSyncQueue"
+import { VcsSyncService } from "./services/integrations/vcs/VcsSyncService"
 
 // ---------------------------------------------------------------------------
 // Per-invocation runtime for the `VCS_SYNC_QUEUE` consumer. Mirrors the

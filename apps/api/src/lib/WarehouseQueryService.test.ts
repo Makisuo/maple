@@ -15,9 +15,9 @@ import { __testables, WarehouseQueryService } from "./WarehouseQueryService"
 import {
 	OrgClickHouseSettingsService,
 	type OrgClickHouseSettingsServiceShape,
-} from "@/services/OrgClickHouseSettingsService"
-import { TinybirdOrgTokenService } from "@/services/TinybirdOrgTokenService"
-import type { TenantContext } from "@/services/AuthService"
+} from "@/services/org/OrgClickHouseSettingsService"
+import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgTokenService"
+import type { TenantContext } from "@/services/auth/AuthService"
 import { Env } from "./Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "./test-pglite"
 

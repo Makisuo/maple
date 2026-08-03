@@ -2,7 +2,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { Effect, Option, Redacted, Schema } from "effect"
 import { ScrapeTargetId } from "@maple/domain/http"
 import { Env } from "@/lib/Env"
-import { ScrapeTargetsService } from "@/services/ScrapeTargetsService"
+import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
 import { isValidInternalBearer } from "@/lib/internal-auth"
 
 const decodeScrapeTargetIdEffect = Schema.decodeUnknownEffect(ScrapeTargetId)

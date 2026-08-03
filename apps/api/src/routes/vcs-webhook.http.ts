@@ -1,8 +1,8 @@
 import { HttpRouter, type HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { Data, Effect, Option } from "effect"
-import type { VcsProviderClient } from "@/services/vcs/VcsProviderClient"
-import { VcsProviderRegistry } from "@/services/vcs/VcsProviderRegistry"
-import { VcsSyncQueue } from "@/services/vcs/VcsSyncQueue"
+import type { VcsProviderClient } from "@/services/integrations/vcs/VcsProviderClient"
+import { VcsProviderRegistry } from "@/services/integrations/vcs/VcsProviderRegistry"
+import { VcsSyncQueue } from "@/services/integrations/vcs/VcsSyncQueue"
 
 /**
  * In-memory sentinel: lets the span exit Error while the HTTP layer returns a

@@ -4,8 +4,8 @@ import { ConfigProvider, Context, Effect, Layer, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Env } from "@/lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
-import { ApiKeysService } from "@/services/ApiKeysService"
-import { AuthService } from "@/services/AuthService"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
 import { McpLive } from "./app"
 
 const createdDbs: TestDb[] = []

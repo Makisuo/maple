@@ -1,6 +1,6 @@
 import { Effect, Option } from "effect"
 import * as CH from "@maple/query-engine/ch"
-import type { TenantContext } from "@/services/AuthService"
+import type { TenantContext } from "@/services/auth/AuthService"
 import type { WarehouseQueryServiceShape } from "./WarehouseQueryService"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"

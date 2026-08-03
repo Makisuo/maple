@@ -1,7 +1,7 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, IngestKeyForbiddenError, MapleApi } from "@maple/domain/http"
 import { Effect } from "effect"
-import { OrgIngestKeysService } from "@/services/OrgIngestKeysService"
+import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import { requireAdmin } from "@/lib/auth"
 
 const forbidden = (message: string) => () => new IngestKeyForbiddenError({ message })

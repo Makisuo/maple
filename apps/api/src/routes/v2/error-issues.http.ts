@@ -25,7 +25,7 @@ import type {
 } from "@maple/domain/http/v2"
 import { dependencyUnavailable, invalidRequest, MapleApiV2, resourceNotFound } from "@maple/domain/http/v2"
 import { Effect, Schema } from "effect"
-import { ErrorsService } from "@/services/ErrorsService"
+import { ErrorsService } from "@/services/errors/ErrorsService"
 
 const toV2Actor = (actor: ActorDocument): V2ErrorIssueActor => ({
 	id: actor.id,

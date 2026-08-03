@@ -8,7 +8,7 @@ import {
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { ErrorsService } from "@/services/ErrorsService"
+import { ErrorsService } from "@/services/errors/ErrorsService"
 
 const decodeStringArray = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
 

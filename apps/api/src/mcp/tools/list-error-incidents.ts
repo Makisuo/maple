@@ -3,7 +3,7 @@ import { formatTable } from "@/mcp/lib/format"
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { ErrorsService } from "@/services/ErrorsService"
+import { ErrorsService } from "@/services/errors/ErrorsService"
 import { ErrorIssueId } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)

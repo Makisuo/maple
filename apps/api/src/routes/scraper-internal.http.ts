@@ -10,12 +10,12 @@ import {
 } from "@maple/domain/http"
 import { Env } from "@/lib/Env"
 import { isValidInternalBearer } from "@/lib/internal-auth"
-import { OrgIngestKeysService } from "@/services/OrgIngestKeysService"
+import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import {
 	PlanetScaleDiscoveryService,
 	type PlanetScaleSubTarget,
-} from "@/services/PlanetScaleDiscoveryService"
-import { ScrapeTargetsService } from "@/services/ScrapeTargetsService"
+} from "@/services/integrations/PlanetScaleDiscoveryService"
+import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
 
 const decodeTargetIdSync = Schema.decodeUnknownSync(ScrapeTargetId)
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)

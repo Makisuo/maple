@@ -8,8 +8,8 @@ import { IncidentTriagePrompt } from "./prompts/incident-triage"
 import { InstructionsResource } from "./resources/instructions"
 import { sessionStore } from "./lib/session-store"
 import { CurrentMcpTenant, resolveHttpMcpTenant } from "./lib/query-warehouse"
-import { ApiKeysService } from "@/services/ApiKeysService"
-import { AuthService } from "@/services/AuthService"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
 import { Env } from "@/lib/Env"
 
 const mcpChallenge = (invalid: boolean) =>

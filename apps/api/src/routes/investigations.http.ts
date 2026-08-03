@@ -1,7 +1,7 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, MapleApi } from "@maple/domain/http"
 import { Effect } from "effect"
-import { InvestigationService } from "@/services/InvestigationService"
+import { InvestigationService } from "@/services/errors/InvestigationService"
 
 /**
  * User-facing investigation endpoints (Clerk-authed via the group's

@@ -17,7 +17,7 @@ import type {
 } from "@maple/domain/http/v2"
 import { MapleApiV2, paginateArray, resourceNotFound } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { AlertsService } from "@/services/AlertsService"
+import { AlertsService } from "@/services/alerts/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
 
 const toV2Destination = (doc: AlertDestinationDocument): V2AlertDestination => ({

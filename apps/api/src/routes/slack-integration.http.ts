@@ -7,7 +7,7 @@ import {
 	SlackIntegrationService,
 	SLACK_CALLBACK_PATH,
 	type SlackRevocationReason,
-} from "@/services/SlackIntegrationService"
+} from "@/services/integrations/SlackIntegrationService"
 
 const INTERNAL_SERVICE_PREFIX = "maple_svc_"
 

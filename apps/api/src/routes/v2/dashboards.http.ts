@@ -32,8 +32,8 @@ import type {
 import { Clock, Effect, Match, Schema } from "effect"
 import { getTemplateById, listTemplateMetadata } from "@/dashboard-templates"
 import type { TemplateParameterValues } from "@/dashboard-templates"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
-import { convertPersesDashboardToPortable } from "@/services/perses-dashboard-import"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { convertPersesDashboardToPortable } from "@/services/dashboards/perses-dashboard-import"
 
 const toV2Dashboard = (dashboard: DashboardDocument): V2Dashboard => ({
 	id: dashboard.id,

@@ -4,7 +4,7 @@ import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 
 export function registerListDashboardsTool(server: McpToolRegistrar) {
 	server.tool(

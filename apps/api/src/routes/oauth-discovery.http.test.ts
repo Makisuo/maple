@@ -5,7 +5,7 @@ import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "
 import { HttpRouter } from "effect/unstable/http"
 import { Env } from "@/lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
-import { McpOAuthService } from "@/services/McpOAuthService"
+import { McpOAuthService } from "@/services/auth/McpOAuthService"
 import { OAuthDiscoveryRouter } from "./oauth-discovery.http"
 
 const createdDbs: TestDb[] = []

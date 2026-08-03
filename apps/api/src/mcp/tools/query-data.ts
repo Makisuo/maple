@@ -10,7 +10,7 @@ import {
 import { resolveTimeRange } from "@/mcp/lib/time"
 import { Effect, Match, Schema } from "effect"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { QueryEngineService } from "@/services/QueryEngineService"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import {
 	MetricType,
 	QuerySpec,

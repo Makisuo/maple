@@ -11,7 +11,7 @@ import {
 	PlanetScaleWebhookQueue,
 	PlanetScaleWebhookQueueError,
 	type PlanetScaleWebhookJob,
-} from "@/services/planetscale/PlanetScaleWebhookQueue"
+} from "@/services/integrations/planetscale/PlanetScaleWebhookQueue"
 import { PlanetScaleWebhookRouter } from "./planetscale-webhook.http"
 
 const trackedDbs: TestDb[] = []

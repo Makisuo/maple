@@ -2,7 +2,7 @@ import { McpQueryError, optionalStringParam, requiredStringParam, type McpToolRe
 import { Clock, Effect, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { DashboardDocument, DashboardId, PortableDashboardDocument } from "@maple/domain/http"
 import { IsoDateTimeString } from "@maple/domain"
 import { validateDashboardTimeRange } from "@/mcp/lib/resolve-dashboard-time-range"

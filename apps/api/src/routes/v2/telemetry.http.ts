@@ -33,7 +33,7 @@ import {
 } from "@maple/query-engine/runtime"
 import { Effect, Encoding, Option, Result, Schema } from "effect"
 import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
-import { QueryEngineService } from "@/services/QueryEngineService"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { warehouseToV2 } from "./warehouse-error-map"
 
 const decodeTraceId = Schema.decodeSync(TraceId)

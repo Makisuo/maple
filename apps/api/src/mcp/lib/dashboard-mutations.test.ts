@@ -13,7 +13,7 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { DashboardDocument, DashboardId, IsoDateTimeString, OrgId, UserId } from "@maple/domain/http"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { Env } from "@/lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
 import { withDashboardMutation } from "./dashboard-mutations"

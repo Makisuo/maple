@@ -4,7 +4,7 @@ import { CurrentTenant } from "@maple/domain/http"
 import { dependencyUnavailable, MapleApiV2, permissionError } from "@maple/domain/http/v2"
 import type { V2IngestKeys } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { OrgIngestKeysService } from "@/services/OrgIngestKeysService"
+import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import { requireAdmin } from "@/lib/auth"
 
 const adminOnly = (action: string) => () =>

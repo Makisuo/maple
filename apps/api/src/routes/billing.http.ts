@@ -26,9 +26,9 @@ import {
 	readCustomerCached,
 	type AutumnResult,
 } from "@/lib/autumn-client"
-import { AuthService, type AuthServiceShape } from "@/services/AuthService"
-import { DailySpendService } from "@/services/DailySpendService"
-import { SpendLimitsService } from "@/services/SpendLimitsService"
+import { AuthService, type AuthServiceShape } from "@/services/auth/AuthService"
+import { DailySpendService } from "@/services/billing/DailySpendService"
+import { SpendLimitsService } from "@/services/billing/SpendLimitsService"
 
 // Pull the `invoices` array off a raw expanded `getOrCreateCustomer` response.
 // Exported for tests. Autumn omits the key for a customer with no invoices, so
