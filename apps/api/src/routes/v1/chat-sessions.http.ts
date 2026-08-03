@@ -29,7 +29,6 @@ import {
 	encodeChatTurnTenant,
 	orgIdFromChatSessionId,
 	type ChatTurnTenantEncoded,
-	type ChatEvent,
 } from "@maple/domain/chat-session"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Effect, Option, Schema, Stream } from "effect"
@@ -148,17 +147,6 @@ const cursorParam = (url: URL): number => {
 	return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0
 }
 
-/**
- * One SSE frame per event.
- *
- * `id:` carries the seq so a client that drops mid-stream resumes from exactly where it stopped
- * rather than re-reading the whole log. `retry:` is sent once per connection so a browser falling
- * back to its own reconnect logic paces itself instead of hammering the Durable Object.
- */
-const frame = (event: ChatEvent): string => `id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`
-
-const RETRY_HINT = "retry: 1000\n\n"
-
 export const ChatSessionsRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
 		yield* router.add("GET", "/api/chat/sessions/:sessionId/history", (request) =>
@@ -222,33 +210,27 @@ export const ChatSessionsRouter = HttpRouter.use((router) =>
 				const { stub, url } = resolved.session
 				const start = cursorParam(url)
 
-				// Replay-then-tail as one stream. `paginate` keeps the cursor in the stream's own
-				// state, so there is no shared mutable position between the replay and the tail.
+				// Replay-then-tail as one stream, framed and pushed by the Durable Object itself.
 				//
-				// An empty batch means the Durable Object held the poll for its full window and
-				// nothing arrived, so the connection is recycled rather than pinned open against the
-				// Worker's request budget. That is a *reconnect* point, not the end of the
-				// conversation — the client resumes from its cursor. A `turn-end` ends the stream
-				// for the same reason.
-				const events = Stream.paginate(start, (cursor: number) =>
-					sessionCall("tail", () => stub.tail(cursor)).pipe(
-						Effect.map((batch) => {
-							const last = batch[batch.length - 1]
-							const ended =
-								last === undefined || batch.some((event) => event.type === "turn-end")
-							return [
-								batch as ReadonlyArray<ChatEvent>,
-								ended ? Option.none<number>() : Option.some(last.seq),
-							] as const
-						}),
-					),
-				).pipe(
-					Stream.map(frame),
-					// A DO failure mid-tail ends the stream cleanly. The client resumes from its
-					// cursor, so a dropped tail costs a reconnect, not the conversation.
+				// This route used to re-enter `stub.tail(cursor)` per batch, which put a
+				// Worker→Durable Object round trip in front of every *visible* update in the
+				// browser. `subscribe` is one RPC for the whole connection: the DO holds the write
+				// end and enqueues frames as events land, so the RTT is paid at connect and the
+				// cadence in the browser is the model's, not the network's.
+				//
+				// The DO closes the stream on `turn-end` or after its idle window. Both are
+				// *reconnect* points, not the end of the conversation — the client resumes from the
+				// cursor it built out of the `id:` fields.
+				const body = yield* sessionCall("subscribe", () => stub.subscribe(start)).pipe(Effect.option)
+				if (Option.isNone(body)) return problem("The chat session is unavailable", 503)
+
+				const events = Stream.fromReadableStream({
+					evaluate: () => body.value,
+					onError: (cause) => cause,
+				}).pipe(
+					// A DO failure mid-stream ends the response cleanly; the client resumes from its
+					// cursor, so a dropped subscription costs a reconnect, not the conversation.
 					Stream.catch(() => Stream.empty),
-					(stream) => Stream.concat(Stream.fromIterable([RETRY_HINT]), stream),
-					Stream.encodeText,
 				)
 
 				return HttpServerResponse.stream(events, {

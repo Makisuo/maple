@@ -51,6 +51,18 @@ const MAX_STEPS = 10
 const TOOL_CONCURRENCY = 4
 
 /**
+ * How many text deltas are folded into one emitted event, and how long a partial batch waits.
+ *
+ * Roughly one animation frame. Every delta that leaves this stream becomes a durable SQLite row, an
+ * SSE frame and a React state commit, and the browser cannot show more than one update per frame
+ * anyway — so batching to that granularity costs no perceptible smoothness and removes most of the
+ * per-token work at all three layers. The size cap keeps a fast provider from letting a batch grow
+ * unboundedly within the window.
+ */
+const DELTA_BATCH_SIZE = 24
+const DELTA_BATCH_WINDOW = "16 millis"
+
+/**
  * Running token total for one turn, accumulated across its steps.
  *
  * Mutable and shared rather than returned, because the one consumer — `submit_diagnosis` — is a
@@ -331,11 +343,18 @@ const runStep = (
 		const live: Stream.Stream<ChatTurnEvent> = LLM.stream(request).pipe(
 			Stream.tap((event) => Effect.sync(() => collected.push(event))),
 			Stream.filter((event) => event.type === "text-delta" && event.text !== ""),
+			// One durable row, one SSE frame and one React commit per *token* is more fidelity than
+			// a screen can show. Coalescing into roughly one frame's worth of deltas is invisible
+			// to a reader and cuts all three by about an order of magnitude. Only text deltas are
+			// batched, and only against each other — `collected` still holds every raw event, and
+			// tool calls and the terminal event live in the concatenated segment below, so nothing
+			// here can reorder them.
+			Stream.groupedWithin(DELTA_BATCH_SIZE, DELTA_BATCH_WINDOW),
 			Stream.map(
-				(event): ChatTurnEvent => ({
+				(events): ChatTurnEvent => ({
 					type: "text-delta",
 					messageId: input.messageId,
-					text: "text" in event ? event.text : "",
+					text: events.map((event) => ("text" in event ? event.text : "")).join(""),
 				}),
 			),
 			// A model failure ends the turn as a recorded event rather than killing the stream —

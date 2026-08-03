@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Exit } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { toastManager } from "@maple/ui/components/ui/toast"
@@ -153,35 +153,40 @@ export function ChatConversation({
 	const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, "applied" | "denied">>(
 		() => new Map(),
 	)
-	const resolveApproval = (toolCallId: string, outcome: "applied" | "denied") =>
+	// These three reach `ChatTranscript`'s memoized rows as props, so a fresh identity per render
+	// would defeat the memo and re-render the whole transcript on every streamed batch.
+	const resolveApproval = useCallback((toolCallId: string, outcome: "applied" | "denied") => {
 		setResolvedApprovals((prev) => {
 			const next = new Map(prev)
 			next.set(toolCallId, outcome)
 			return next
 		})
-	const handleApprove = async (
-		messageId: string,
-		toolCallId: string,
-		tool: string,
-		input: unknown,
-	) => {
-		// `sessionId` + `messageId` + `toolCallId` are what let the server settle the proposal in the
-		// durable transcript, so the card resolves on every device and the model's next turn knows
-		// the mutation happened.
-		const exit = await applyProposal({
-			payload: makeChatApplyPayload(tool, input, { sessionId, messageId, toolCallId }),
-		})
-		if (Exit.isSuccess(exit)) {
-			if (exit.value.isError) {
-				toastManager.add({ title: exit.value.content || `Couldn't apply ${tool}`, type: "error" })
-				return
+	}, [])
+	const handleDeny = useCallback(
+		(toolCallId: string) => resolveApproval(toolCallId, "denied"),
+		[resolveApproval],
+	)
+	const handleApprove = useCallback(
+		async (messageId: string, toolCallId: string, tool: string, input: unknown) => {
+			// `sessionId` + `messageId` + `toolCallId` are what let the server settle the proposal in the
+			// durable transcript, so the card resolves on every device and the model's next turn knows
+			// the mutation happened.
+			const exit = await applyProposal({
+				payload: makeChatApplyPayload(tool, input, { sessionId, messageId, toolCallId }),
+			})
+			if (Exit.isSuccess(exit)) {
+				if (exit.value.isError) {
+					toastManager.add({ title: exit.value.content || `Couldn't apply ${tool}`, type: "error" })
+					return
+				}
+				resolveApproval(toolCallId, "applied")
+				toastManager.add({ title: "Change applied", type: "success" })
+			} else {
+				toastManager.add({ title: `Failed to apply ${tool}`, type: "error" })
 			}
-			resolveApproval(toolCallId, "applied")
-			toastManager.add({ title: "Change applied", type: "success" })
-		} else {
-			toastManager.add({ title: `Failed to apply ${tool}`, type: "error" })
-		}
-	}
+		},
+		[applyProposal, sessionId, resolveApproval],
+	)
 
 	useEffect(() => {
 		onLoadingChange?.(tabId, isLoading)
@@ -231,7 +236,7 @@ export function ChatConversation({
 				isLoading={isLoading}
 				resolvedApprovals={resolvedApprovals}
 				onApprove={handleApprove}
-				onDeny={(toolCallId) => resolveApproval(toolCallId, "denied")}
+				onDeny={handleDeny}
 				fallbackDiagnosis={fallbackDiagnosis && !diagnosisMessageId ? fallbackDiagnosis : null}
 				diagnosisMessageId={diagnosisMessageId}
 				focusMessageId={focusMessageId}

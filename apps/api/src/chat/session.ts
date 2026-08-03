@@ -25,7 +25,14 @@ export interface ChatSessionStub {
 	readonly running: () => Promise<boolean>
 	readonly history: () => Promise<ReadonlyArray<ChatMessage>>
 	readonly since: (cursor: number) => Promise<ReadonlyArray<ChatEvent>>
-	readonly tail: (cursor: number) => Promise<ReadonlyArray<ChatEvent>>
+	/**
+	 * Replay from `cursor` then stay open, as pre-framed SSE bytes.
+	 *
+	 * One RPC per connection rather than one per batch — see `ChatSession.subscribe`. Workers RPC
+	 * carries a `ReadableStream` by reference, so the frames the DO writes reach the client without
+	 * another hop through this stub.
+	 */
+	readonly subscribe: (cursor: number) => Promise<ReadableStream<Uint8Array>>
 	readonly append: (event: ChatEventInput) => Promise<number>
 	readonly beginTurn: (input: {
 		readonly sessionId: string

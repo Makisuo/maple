@@ -35,9 +35,9 @@ const makeSession = () => {
 	/** The id the session minted for the in-flight turn — deliberately not the user message's. */
 	const turnId = (): string | undefined =>
 		(
-			state.storage.sql
-				.exec("SELECT running_message_id FROM session WHERE id = 1")
-				.toArray()[0] as { running_message_id: string | null } | undefined
+			state.storage.sql.exec("SELECT running_message_id FROM session WHERE id = 1").toArray()[0] as
+				| { running_message_id: string | null }
+				| undefined
 		)?.running_message_id ?? undefined
 	return { session, state, turnId }
 }
@@ -265,10 +265,7 @@ describe("ChatSession turn mutex", () => {
 
 		// Simulate the turn vanishing (isolate eviction, a defect, a deploy mid-stream) by ageing
 		// its claim past the staleness ceiling.
-		state.storage.sql.exec(
-			"UPDATE session SET running_since = ? WHERE id = 1",
-			clock - 16 * 60 * 1000,
-		)
+		state.storage.sql.exec("UPDATE session SET running_since = ? WHERE id = 1", clock - 16 * 60 * 1000)
 
 		assert.isFalse(session.running(), "a stale claim is not running")
 		const reclaimed = session.beginTurn({
@@ -287,29 +284,81 @@ describe("ChatSession turn mutex", () => {
 	})
 })
 
-describe("ChatSession.tail", () => {
-	it("returns pending events immediately", async () => {
+describe("ChatSession.subscribe", () => {
+	/** Read the whole subscription, which ends at `turn-end`. */
+	const drain = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
+		const reader = stream.getReader()
+		const decoder = new TextDecoder()
+		let text = ""
+		for (;;) {
+			const { value, done } = await reader.read()
+			if (done) return text
+			text += decoder.decode(value, { stream: true })
+		}
+	}
+
+	/** Frames as `[seq, event]` pairs, skipping the leading `retry:` hint. */
+	const framesOf = (text: string): Array<{ seq: number; type: string }> =>
+		text
+			.split("\n\n")
+			.filter((frame) => frame.startsWith("id:"))
+			.map((frame) => {
+				const data = frame
+					.split("\n")
+					.find((line) => line.startsWith("data:"))!
+					.slice(5)
+					.trimStart()
+				const event = JSON.parse(data) as { seq: number; type: string }
+				return { seq: event.seq, type: event.type }
+			})
+
+	it("replays from the cursor as SSE frames and closes on turn-end", async () => {
 		const { session } = makeSession()
 		session.append({ type: "turn-start", messageId: "a1" })
+		session.append({ type: "text-delta", messageId: "a1", text: "hi" })
+		session.append({ type: "turn-end", messageId: "a1", reason: "stop" })
 
-		const batch = await session.tail(0)
+		const text = await drain(session.subscribe(1))
 
-		assert.lengthOf(batch, 1)
-		assert.equal(batch[0]?.seq, 1)
+		// The `retry:` hint is what keeps a browser's own reconnect logic from hammering the DO.
+		assert.isTrue(text.startsWith("retry: 1000\n\n"))
+		assert.deepEqual(framesOf(text), [
+			{ seq: 2, type: "text-delta" },
+			{ seq: 3, type: "turn-end" },
+		])
 	})
 
-	it("holds the poll open on an idle conversation rather than closing instantly", async () => {
+	it("pushes an event that lands AFTER the subscription, without waiting out a poll", async () => {
 		const { session } = makeSession()
-		// Nothing pending, nothing running. Returning `[]` straight away made the route read the
-		// stream as finished and close it, so every idle tab reconnected in a tight loop — and a
-		// client that opened the stream just before posting missed the whole turn.
+		const stream = session.subscribe(0)
+		const collected = drain(stream)
+
+		// The regression this pins: `tail` slept 40ms between SELECTs, so nothing could reach a
+		// reader faster than that no matter how fast the model produced it. A push has no floor.
 		const started = Date.now()
-		const batch = await Promise.race([
-			session.tail(0),
-			new Promise<"still-open">((resolve) => setTimeout(() => resolve("still-open"), 600)),
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		session.append({ type: "turn-start", messageId: "a1" })
+		session.append({ type: "turn-end", messageId: "a1", reason: "stop" })
+
+		const frames = framesOf(await collected)
+		assert.deepEqual(
+			frames.map((frame) => frame.type),
+			["turn-start", "turn-end"],
+		)
+		assert.isBelow(Date.now() - started, 40, "a push must not pay the old poll interval")
+	})
+
+	it("stays open on an idle conversation rather than closing instantly", async () => {
+		const { session } = makeSession()
+		// Closing on "nothing pending" made the route read the stream as finished, so every idle tab
+		// reconnected in a tight loop — and a client that opened the stream just before posting
+		// missed the whole turn.
+		const stream = session.subscribe(0)
+		const outcome = await Promise.race([
+			drain(stream).then(() => "closed" as const),
+			new Promise<"still-open">((resolve) => setTimeout(() => resolve("still-open"), 300)),
 		])
 
-		assert.equal(batch, "still-open")
-		assert.isAtLeast(Date.now() - started, 500)
+		assert.equal(outcome, "still-open")
 	})
 })

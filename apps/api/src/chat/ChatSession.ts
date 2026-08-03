@@ -70,19 +70,27 @@ INSERT OR IGNORE INTO session (id, running) VALUES (1, 0);
 `
 
 /**
- * How long a client's live tail waits for new events before returning empty. Cloudflare caps a
- * request at a few minutes; 25s keeps the poll well inside that and inside typical proxy idle
- * timeouts, while being long enough that an idle conversation costs almost nothing.
+ * How long a subscription sits silent before the connection is recycled. Cloudflare caps a request
+ * at a few minutes; 25s keeps it well inside that and inside typical proxy idle timeouts.
+ *
+ * This is a *silence* budget, not a connection lifetime: every batch that goes out resets it, so a
+ * turn that streams for two minutes streams over one connection.
  */
-const TAIL_TIMEOUT_MS = 25_000
+const SUBSCRIBE_IDLE_MS = 25_000
 
 /**
- * Poll interval while tailing. Fine-grained while a turn is streaming so tokens feel live, then
- * backed off once the conversation is idle — an idle tab used to cost 625 SQL reads per
- * reconnect for events that were never going to arrive.
+ * One SSE frame per event.
+ *
+ * Framed inside the Durable Object rather than at the route: the DO writes bytes straight into the
+ * stream the route hands back, so the route does no per-event work at all.
+ *
+ * `id:` carries the seq so a client that drops mid-stream resumes from exactly where it stopped
+ * rather than re-reading the whole log.
  */
-const TAIL_POLL_ACTIVE_MS = 40
-const TAIL_POLL_IDLE_MS = 500
+const frameChatEvent = (event: ChatEvent): string => `id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`
+
+/** Sent once per connection so a browser falling back to its own reconnect logic paces itself. */
+const RETRY_HINT = "retry: 1000\n\n"
 
 /**
  * How long a claimed turn may go without finishing before the claim is treated as abandoned.
@@ -96,6 +104,17 @@ const TURN_STALE_MS = 15 * 60 * 1000
 
 export class ChatSession extends DurableObject<Record<string, unknown>> {
 	private readonly sql: SqlStorage
+
+	/**
+	 * Subscribers parked on the next append — the Workers-native stand-in for an in-memory event bus.
+	 *
+	 * Durable Object storage has no change feed, so this used to be a 40ms poll. A poll puts a floor
+	 * under how fast a token can reach the browser that has nothing to do with how fast the model
+	 * produced it, and every wake-up cost two SELECTs against the same isolate the turn was writing
+	 * into. Reader and writer are different requests but the *same object*, so the writer can simply
+	 * tap the reader on the shoulder.
+	 */
+	private waiters: Array<() => void> = []
 
 	constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
 		super(ctx, env)
@@ -120,22 +139,24 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 
 	private sessionRow(): SessionRow {
 		return this.sql
-			.exec<SessionRow>(
-				"SELECT running, running_since, running_message_id FROM session WHERE id = 1",
-			)
+			.exec<SessionRow>("SELECT running, running_since, running_message_id FROM session WHERE id = 1")
 			.one()
 	}
 
 	/**
-	 * Whether a turn holds the slot *right now*.
+	 * The message id of the turn that holds the slot *right now*, or `undefined` if none does.
 	 *
 	 * Expiring a stale claim here rather than in a separate sweep means every caller — `beginTurn`,
-	 * `tail`, the turn's own between-step check — agrees on the answer without needing an alarm to
-	 * have fired first.
+	 * the turn's own between-step check — agrees on the answer without needing an alarm to have
+	 * fired first.
+	 *
+	 * One read serves both questions callers ask ("is anything running?" and "is *this* running?").
+	 * They used to be separate methods issuing the same SELECT, and `holdsTurn` — called once per
+	 * streamed event — paid for both.
 	 */
-	private isRunning(): boolean {
+	private runningTurn(): string | undefined | null {
 		const row = this.sessionRow()
-		if (row.running !== 1) return false
+		if (row.running !== 1) return undefined
 		if (row.running_since !== null && Date.now() - row.running_since > TURN_STALE_MS) {
 			const messageId = row.running_message_id
 			this.clearRunning()
@@ -147,9 +168,14 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 					error: "The turn stopped responding and was abandoned.",
 				})
 			}
-			return false
+			return undefined
 		}
-		return true
+		// `null` means running but with no recorded id — pre-watchdog rows only.
+		return row.running_message_id
+	}
+
+	private isRunning(): boolean {
+		return this.runningTurn() !== undefined
 	}
 
 	private clearRunning(): void {
@@ -160,17 +186,49 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 
 	/** The message id of the turn currently holding the slot, if any. */
 	private runningMessageId(): string | undefined {
-		return this.sessionRow().running_message_id ?? undefined
+		return this.runningTurn() ?? undefined
 	}
 
-	/** Append one event and return the seq it was assigned. */
+	/**
+	 * Append one event and return the seq it was assigned.
+	 *
+	 * `RETURNING seq` rather than a following `SELECT MAX(seq)`: this runs once per token delta, and
+	 * the second statement was pure overhead in an isolate that is also serving every subscriber.
+	 */
 	append(event: ChatEventInput): number {
-		this.sql.exec(
-			"INSERT INTO events (created_at, payload) VALUES (?, ?)",
-			Date.now(),
-			encodeChatEventPayload(event),
-		)
-		return this.cursor()
+		const row = this.sql
+			.exec<CursorRow>(
+				"INSERT INTO events (created_at, payload) VALUES (?, ?) RETURNING seq",
+				Date.now(),
+				encodeChatEventPayload(event),
+			)
+			.one()
+		this.notify()
+		return row.seq ?? 0
+	}
+
+	/** Wake every parked subscriber. Cheap and unconditional — the list is empty when nobody reads. */
+	private notify(): void {
+		if (this.waiters.length === 0) return
+		const parked = this.waiters
+		this.waiters = []
+		for (const wake of parked) wake()
+	}
+
+	/** Resolve `true` when an event lands, `false` if `timeoutMs` elapses first. */
+	private waitForAppend(timeoutMs: number): Promise<boolean> {
+		return new Promise<boolean>((resolve) => {
+			let settled = false
+			const settle = (appended: boolean) => {
+				if (settled) return
+				settled = true
+				resolve(appended)
+			}
+			this.waiters.push(() => settle(true))
+			// A timed-out waiter is left in the list; its closure is a no-op once settled, and
+			// `notify` clears the array wholesale on the next append.
+			void scheduler.wait(timeoutMs).then(() => settle(false))
+		})
 	}
 
 	/** Every event after `cursor`, oldest first. */
@@ -185,23 +243,48 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 	}
 
 	/**
-	 * Wait for events after `cursor`, up to `TAIL_TIMEOUT_MS`.
+	 * Replay from `cursor`, then stay open and push every subsequent event as an SSE frame.
 	 *
-	 * A poll rather than a subscription: Durable Object storage has no change feed, and the reader
-	 * is a different request from the turn that writes.
+	 * Returning a `ReadableStream` over RPC is the point: the route used to re-enter a `tail` call
+	 * per batch, so every *visible* update in the browser cost a Worker→Durable Object round trip.
+	 * The DO is pinned at its first-access colo while the SSE Worker runs at the viewer's edge, so
+	 * that round trip — not the model — set the pace tokens appeared at. Now the RTT is paid once,
+	 * at connect, and bytes flow.
 	 *
-	 * It holds the connection for the full window even when nothing is running. Returning early on
-	 * an idle conversation looks like a saving, but the route reads an empty batch as "stream over"
-	 * and closes the response — so every idle tab reconnected in a tight loop, and a client that
-	 * opened the stream a moment *before* posting its message missed the entire turn.
+	 * The stream ends on `turn-end` or after `SUBSCRIBE_IDLE_MS` of silence, both of which the
+	 * client already treats as a reconnect point rather than the end of the conversation. Ending on
+	 * silence rather than on "nothing pending" is what keeps an idle tab from reconnecting in a
+	 * tight loop, and keeps a client that opened the stream just before posting from missing the
+	 * turn it was about to start.
 	 */
-	async tail(cursor: number): Promise<ReadonlyArray<ChatEvent>> {
-		const deadline = Date.now() + TAIL_TIMEOUT_MS
-		for (;;) {
-			const events = this.since(cursor)
-			if (events.length > 0) return events
-			if (Date.now() >= deadline) return []
-			await scheduler.wait(this.isRunning() ? TAIL_POLL_ACTIVE_MS : TAIL_POLL_IDLE_MS)
+	subscribe(cursor: number): ReadableStream<Uint8Array> {
+		const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+		this.ctx.waitUntil(this.pump(writable, cursor))
+		return readable
+	}
+
+	private async pump(writable: WritableStream<Uint8Array>, cursor: number): Promise<void> {
+		const encoder = new TextEncoder()
+		const writer = writable.getWriter()
+		let position = cursor
+		try {
+			await writer.write(encoder.encode(RETRY_HINT))
+			for (;;) {
+				const events = this.since(position)
+				for (const event of events) {
+					await writer.write(encoder.encode(frameChatEvent(event)))
+					position = event.seq
+				}
+				if (events.some((event) => event.type === "turn-end")) break
+				// The idle budget is spent on silence only: a batch that went out resets it, so a
+				// long turn streams over one connection instead of being recycled mid-answer.
+				if (!(await this.waitForAppend(SUBSCRIBE_IDLE_MS))) break
+			}
+		} catch {
+			// The reader went away, or the stream was already closed. Either way the client resumes
+			// from its own cursor, so a dropped subscription costs a reconnect, not the conversation.
+		} finally {
+			await writer.close().catch(() => undefined)
 		}
 	}
 
@@ -247,7 +330,7 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 	 * effect promptly, and so a turn that has already been superseded stops writing.
 	 */
 	holdsTurn(messageId: string): boolean {
-		return this.isRunning() && this.runningMessageId() === messageId
+		return this.runningTurn() === messageId
 	}
 
 	/**
@@ -272,10 +355,10 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 	 * streaming state.
 	 */
 	abort(): void {
-		if (!this.isRunning()) return
-		const messageId = this.runningMessageId()
+		const messageId = this.runningTurn()
+		if (messageId === undefined) return
 		this.clearRunning()
-		if (messageId !== undefined) {
+		if (messageId !== null) {
 			this.append({ type: "turn-end", messageId, reason: "aborted" })
 		}
 	}

@@ -88,8 +88,7 @@ const collect = (
 
 const types = (events: ReadonlyArray<ChatTurnEvent>) => events.map((event) => event.type)
 
-const terminal = (events: ReadonlyArray<ChatTurnEvent>) =>
-	events.filter((event) => event.type === "turn-end")
+const terminal = (events: ReadonlyArray<ChatTurnEvent>) => events.filter((event) => event.type === "turn-end")
 
 describe("runChatTurn", () => {
 	it("emits turn-start, the text, and exactly one turn-end", async () => {
@@ -97,6 +96,34 @@ describe("runChatTurn", () => {
 
 		assert.deepEqual(types(events), ["turn-start", "text-delta", "turn-end"])
 		assert.lengthOf(terminal(events), 1)
+	})
+
+	it("coalesces adjacent text deltas into one event without losing any text", async () => {
+		const chunks = ["Check", "ing ", "the ", "traces", "."]
+		const events = await Effect.runPromise(collect([[...chunks.map(textDelta), finish()]]))
+
+		// One durable row, one SSE frame and one React commit per token is more fidelity than a
+		// screen can show, and the transcript render cost is paid per commit.
+		const deltas = events.filter((event) => event.type === "text-delta")
+		assert.lengthOf(deltas, 1)
+		assert.equal(
+			deltas.map((event) => (event.type === "text-delta" ? event.text : "")).join(""),
+			chunks.join(""),
+		)
+	})
+
+	it("keeps text ahead of the tool calls it precedes", async () => {
+		const events = await Effect.runPromise(
+			collect([
+				[textDelta("Looking"), textDelta(" it up"), toolCall("c1", "create_alert_rule"), finish()],
+			]),
+		)
+
+		// Batching must never reorder: the deltas live in one stream segment and the tool events in
+		// the concatenated one after it, so a slow batch cannot overtake the call it introduced.
+		assert.deepEqual(types(events), ["turn-start", "text-delta", "tool-call", "turn-end"])
+		const delta = events.find((event) => event.type === "text-delta")
+		assert.equal(delta?.type === "text-delta" ? delta.text : undefined, "Looking it up")
 	})
 
 	it("emits exactly ONE turn-end when the model stream fails", async () => {
@@ -125,9 +152,7 @@ describe("runChatTurn", () => {
 	})
 
 	it("stops on an approval-gated tool with a proposal and no result", async () => {
-		const events = await Effect.runPromise(
-			collect([[toolCall("c1", "create_alert_rule"), finish()]]),
-		)
+		const events = await Effect.runPromise(collect([[toolCall("c1", "create_alert_rule"), finish()]]))
 
 		const proposals = events.filter((event) => event.type === "tool-call")
 		assert.lengthOf(proposals, 1)

@@ -32,7 +32,9 @@ export const makeFakeDurableObjectState = (): FakeDurableObjectState => {
 				return makeCursor([])
 			}
 			const prepared = db.prepare(statement)
-			if (/^\s*(select|pragma)/i.test(statement)) {
+			// `RETURNING` makes a write behave like a read — `ChatSession.append` uses it to get the
+			// assigned seq without a second `SELECT MAX(seq)`, and `run()` would swallow the row.
+			if (/^\s*(select|pragma)/i.test(statement) || /\breturning\b/i.test(statement)) {
 				return makeCursor(prepared.all(...(bindings as never[])) as Array<Record<string, unknown>>)
 			}
 			prepared.run(...(bindings as never[]))
@@ -62,14 +64,21 @@ const makeCursor = (rows: Array<Record<string, unknown>>) => ({
 })
 
 /**
- * `scheduler.wait` is a Workers global that node does not define. `ChatSession.tail` polls with it,
- * so tests that exercise the tail need it present.
+ * `scheduler.wait` is a Workers global that node does not define. `ChatSession.subscribe` uses it
+ * for its idle timeout, so tests that exercise a subscription need it present.
+ *
+ * The timer is unref'd: a subscription that ends on `turn-end` leaves its 25s idle timer pending,
+ * and a ref'd timer would hold the process open long after the test finished.
  */
 export const installSchedulerWait = (): void => {
 	const globals = globalThis as { scheduler?: { wait?: (ms: number) => Promise<void> } }
 	if (globals.scheduler?.wait) return
 	globals.scheduler = {
 		...globals.scheduler,
-		wait: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+		wait: (ms: number) =>
+			new Promise<void>((resolve) => {
+				const timer = setTimeout(resolve, ms)
+				;(timer as { unref?: () => void }).unref?.()
+			}),
 	}
 }
