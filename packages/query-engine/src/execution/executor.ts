@@ -44,11 +44,9 @@ import {
 	deriveWarehouseCapabilities,
 	logBodySearchMode,
 	type WarehouseCapabilities,
-	type WarehouseProjectionMetadataRow,
 	type WarehouseSettingMetadataRow,
 	WarehouseColumnMetadataSchema,
 	WarehouseIndexMetadataSchema,
-	WarehouseProjectionMetadataSchema,
 	WarehouseSettingMetadataSchema,
 	WarehouseVersionMetadataSchema,
 } from "../capabilities"
@@ -60,7 +58,6 @@ const WarehouseCapabilityMetadataTarget = Schema.Literals([
 	"version",
 	"indexes",
 	"columns",
-	"projections",
 	"settings",
 ])
 type WarehouseCapabilityMetadataTarget = Schema.Schema.Type<typeof WarehouseCapabilityMetadataTarget>
@@ -213,22 +210,6 @@ WHERE database = currentDatabase() AND table IN ('logs', 'traces')`,
 					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("columns", cause))),
 				),
 				queryRows(
-					"projections",
-					`SELECT table, name
-FROM system.projections
-WHERE database = currentDatabase() AND table = 'logs'`,
-				).pipe(
-					Effect.flatMap((rows) =>
-						Schema.decodeUnknownEffect(WarehouseProjectionMetadataSchema)(rows),
-					),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("projections", cause))),
-					Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
-						logProbeFailure(error).pipe(
-							Effect.as<ReadonlyArray<WarehouseProjectionMetadataRow>>([]),
-						),
-					),
-				),
-				queryRows(
 					"settings",
 					`SELECT name, value
 FROM system.settings
@@ -247,12 +228,11 @@ WHERE name = 'enable_full_text_index'`,
 			],
 			{ concurrency: "unbounded" },
 		).pipe(
-			Effect.map(([versions, indexes, columns, projections, settings]) =>
+			Effect.map(([versions, indexes, columns, settings]) =>
 				deriveWarehouseCapabilities({
 					serverVersion: versions[0]?.version,
 					indexes,
 					columns,
-					projections,
 					settings,
 					allowSettingOverrides,
 				}),
