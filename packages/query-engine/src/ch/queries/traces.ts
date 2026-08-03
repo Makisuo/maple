@@ -22,6 +22,7 @@ import { METRIC_NEEDS } from "../../traces-shared"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import * as T from "@maple-dev/clickhouse-builder/types"
 import { finalizeTimeseries } from "./series-cap"
+import { edgeCondition, interiorBounds, interiorConditions } from "./rollup-splice"
 import {
 	apdexExprs,
 	buildProjectedMapExpr,
@@ -393,9 +394,6 @@ export function tracesTimeseriesQuery(
 	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
 
 	if (canUseAnnualServiceOverview(opts)) {
-		const startHour = "toStartOfHour(toDateTime(__PARAM_startTime__))"
-		const endHour = "toStartOfHour(toDateTime(__PARAM_endTime__))"
-		const firstFullHour = `if(toDateTime(__PARAM_startTime__) = ${startHour}, ${startHour}, ${startHour} + INTERVAL 1 HOUR)`
 		const rawEdges = from(ServiceOverviewSpans)
 			.select(($) => ({
 				bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
@@ -413,7 +411,7 @@ export function tracesTimeseriesQuery(
 			}))
 			.where(($) => [
 				...serviceOverviewWhereConditions($, opts),
-				CH.rawCond(`(Timestamp < ${firstFullHour} OR Timestamp >= ${endHour})`),
+				edgeCondition("Timestamp"),
 			])
 			.groupBy("bucket")
 
@@ -432,8 +430,7 @@ export function tracesTimeseriesQuery(
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				$.Hour.gte(CH.rawExpr<string>(firstFullHour)),
-				$.Hour.lt(CH.rawExpr<string>(endHour)),
+				...interiorConditions($.Hour),
 				opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
 				opts.environments?.length ? CH.inList($.DeploymentEnv, opts.environments) : undefined,
 				opts.namespaces?.length ? CH.inList($.ServiceNamespace, opts.namespaces) : undefined,
@@ -518,9 +515,6 @@ export function tracesTimeseriesQuery(
 		// hour of traffic. Instead: raw `traces` covers the two partial edge hours,
 		// the MV covers the whole-hour interior, and the two tile the window
 		// exactly. Same shape as the annual service-overview branch above.
-		const startHour = "toStartOfHour(toDateTime(__PARAM_startTime__))"
-		const endHour = "toStartOfHour(toDateTime(__PARAM_endTime__))"
-		const firstFullHour = `if(toDateTime(__PARAM_startTime__) = ${startHour}, ${startHour}, ${startHour} + INTERVAL 1 HOUR)`
 
 		// The union's branches must agree on aggregate-state types, so the raw side
 		// emits `quantilesTDigestWeightedState(…)(Duration, toUInt32(…))` to match
@@ -562,7 +556,7 @@ export function tracesTimeseriesQuery(
 						? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!)).gt(0)
 						: inclusionCondition($.SpanName, v),
 				),
-				CH.rawCond(`(Timestamp < ${firstFullHour} OR Timestamp >= ${endHour})`),
+				edgeCondition("Timestamp"),
 			])
 			.groupBy("bucket", "groupName")
 
@@ -580,7 +574,7 @@ export function tracesTimeseriesQuery(
 				bWeightedErrorCount: CH.sum($.WeightedErrorCount),
 				bDurationQuantiles: CH.rawExpr<string>(mvQuantileState),
 			}))
-			.where(($) => tracesAggregatesWhereConditions($, opts, { gte: firstFullHour, lt: endHour }))
+			.where(($) => tracesAggregatesWhereConditions($, opts, interiorBounds()))
 			.groupBy("bucket", "groupName")
 
 		const weightedCount = CH.rawExpr<number>("sum(bWeightedCount)")
