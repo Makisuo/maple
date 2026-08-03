@@ -2,13 +2,14 @@
 // this platform?
 //
 // `maple schema migrate` is the only code path that reconnects inside one
-// process — every migration query opens and closes a fresh connection,
-// alternating between the source and target `--path` dirs — and the native
-// migration probe stalls on Linux CI with no output while the same flow
-// finishes in seconds on macOS. This isolates whether bare reconnects are the
-// cause, and if so on which cycle. bun:ffi calls block the JS thread, so an
-// in-process watchdog cannot fire — run this under GNU `timeout` and read the
-// last printed line as the hang site.
+// process — its session caches one open connection per data dir but must
+// close and reopen whenever a query switches between the source and target
+// `--path` dirs — and the native migration probe once stalled on Linux CI
+// with no output while the same flow finished in seconds on macOS. This
+// isolates whether bare reconnects are the cause, and if so on which cycle.
+// bun:ffi calls block the JS thread, so an in-process watchdog cannot fire —
+// run this under GNU `timeout` and read the last printed line as the hang
+// site.
 //
 // Delete this probe (and its CI step) once the migration hang is fixed, or
 // keep it as a libchdb-upgrade tripwire.
@@ -39,8 +40,8 @@ const open = (dataDir: string, schemaSql: string, bootstrapSchema: boolean): Chd
 	connects += 1
 	const side = dataDir === sourceDir ? "source" : "target"
 	return timed(`connect #${connects} (${side}, bootstrap=${bootstrapSchema})`, () =>
-		// Like the migration's withDb: no config file, bootstrap only on the first
-		// open of a dir.
+		// Like the migration session's opens: no config file, bootstrap only on
+		// the first open of a dir.
 		Chdb.open({ dataDir, schemaSql, bootstrapSchema }),
 	)
 }
