@@ -19,6 +19,23 @@ export type UIMessagePart =
 			state: "input-available"
 			input: unknown
 	  }
+	/**
+	 * An approval-gated mutation the agent proposed and did NOT run. The turn stops here;
+	 * `POST /api/chat/apply` is what actually mutates, on the user's click.
+	 *
+	 * A distinct state rather than a marker parsed back out of `output`: the server emits a
+	 * `tool-call` with `proposed: true` and *no* result, so there is no output to parse. While the
+	 * client still looked for the old `{status:"proposed"}` marker in an output that never arrived,
+	 * every gated tool rendered as a tool call stuck at `input-available` — a permanent spinner
+	 * where the approval card should be.
+	 */
+	| {
+			type: "dynamic-tool"
+			toolCallId: string
+			toolName: string
+			state: "proposed"
+			input: unknown
+	  }
 	| {
 			type: "dynamic-tool"
 			toolCallId: string

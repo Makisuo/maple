@@ -24,7 +24,6 @@ import { ApprovalCard } from "./approval-card"
 import { DiagnosisReportCard } from "./diagnosis-report-card"
 import { MessageActions, messageText } from "./message-actions"
 import { parseDiagnosisMarker } from "./diagnosis-marker"
-import { parseToolProposal } from "./tool-proposal"
 import { stripContextPreamble } from "./context-preamble"
 import {
 	buildTranscriptRows,
@@ -159,16 +158,18 @@ function renderMessageParts({
 			)
 			continue
 		}
-		const proposal = tp.state === "output-available" ? parseToolProposal(tp.output) : null
-		if (proposal) {
+		// The turn stopped on an approval-gated tool. There is no output to parse — the tool did
+		// not run — so the part's own state carries it.
+		if (tp.state === "proposed") {
+			const toolName = toolNameFor(tp)
 			flushTools()
 			nodes.push(
 				<ApprovalCard
 					key={tp.toolCallId ?? `approval-${i}`}
-					toolName={proposal.tool}
-					input={proposal.input}
+					toolName={toolName}
+					input={tp.input}
 					resolved={resolvedApprovals.get(tp.toolCallId)}
-					onApprove={() => onApprove(tp.toolCallId, proposal.tool, proposal.input)}
+					onApprove={() => onApprove(tp.toolCallId, toolName, tp.input)}
 					onDeny={() => onDeny(tp.toolCallId)}
 				/>,
 			)

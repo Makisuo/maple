@@ -90,7 +90,10 @@ function toolCallToPart(call: ChatToolCall): UIMessagePart {
 			type: "dynamic-tool",
 			toolCallId: call.id,
 			toolName: call.name,
-			state: "input-available",
+			// An approval-gated call never produces output, so on a cold load it is
+			// indistinguishable from a pending one except by this flag. Without it a reloaded
+			// conversation showed every past proposal as a tool stuck mid-flight.
+			state: call.proposed === true ? "proposed" : "input-available",
 			input: call.input,
 		}
 	}
@@ -169,7 +172,9 @@ function addToolCall(message: UIMessage, event: Extract<ChatEvent, { type: "tool
 		type: "dynamic-tool",
 		toolCallId: event.callId,
 		toolName: event.name,
-		state: "input-available",
+		// `proposed` means the turn stopped here and the tool did NOT run; the transcript renders
+		// an approval card rather than a running tool row, and no `tool-result` is coming.
+		state: event.proposed === true ? "proposed" : "input-available",
 		input: event.input,
 	}
 	return { ...finalized, parts: [...finalized.parts, part] }
@@ -227,8 +232,36 @@ function applyChatEvent(messages: UIMessage[], event: ChatEvent): UIMessage[] {
 	}
 }
 
-/** Reconnect budget for a dropped `events` stream before surfacing an error. */
+/** Consecutive-failure budget for a dropped `events` stream before surfacing an error. */
 const MAX_STREAM_RETRIES = 3
+
+/**
+ * Abortable delay. Resolves `true` if it ran to completion, `false` if the signal fired first.
+ * A plain `setTimeout` promise cannot be interrupted, so a `stop()` landing inside a reconnect
+ * backoff was ignored and the loop carried on afterwards with a fresh controller.
+ */
+const sleep = (ms: number, signal: AbortSignal): Promise<boolean> =>
+	new Promise((resolve) => {
+		if (signal.aborted) return resolve(false)
+		const timer = setTimeout(() => {
+			signal.removeEventListener("abort", onAbort)
+			resolve(true)
+		}, ms)
+		const onAbort = () => {
+			clearTimeout(timer)
+			resolve(false)
+		}
+		signal.addEventListener("abort", onAbort, { once: true })
+	})
+
+/**
+ * A send the server refused because the conversation already has a turn in flight — a second tab,
+ * or an investigation's autonomous pass. Worth its own sentence: the raw
+ * `Failed to send message: 409` this used to surface in the destructive banner told the user
+ * nothing about what to do.
+ */
+const TURN_IN_FLIGHT_MESSAGE =
+	"This conversation already has a reply in progress. Wait for it to finish, or stop it first."
 
 /**
  * Rewrite of the Flue-backed `useFlueChat` against Maple's own durable chat
@@ -253,53 +286,84 @@ export function useMapleChat({ tabId, context }: UseMapleChatOptions): UseMapleC
 	const [historyReady, setHistoryReady] = useState(false)
 	const [failedSends, setFailedSends] = useState<FailedSend[]>([])
 
-	const abortRef = useRef<AbortController | undefined>(undefined)
-	const lastSeqRef = useRef(0)
+	// One record per live stream. A resumed tail (from `history.running`) and a tail opened by a
+	// send can both be in flight, and a single shared controller/cursor pair meant the second
+	// silently orphaned the first — never aborted, still writing into `setMessages` — while both
+	// stomped on one cursor, so the next reconnect resumed from the wrong seq and replayed or
+	// skipped events. Each stream now owns its cursor, and a generation counter tells a stream
+	// whether it is still the current one.
+	const streamRef = useRef<{ generation: number; controller: AbortController } | undefined>(undefined)
+	const generationRef = useRef(0)
+	/** Whether this conversation has any message yet, without making `messages` a dependency. */
+	const hasMessagesRef = useRef(false)
+	hasMessagesRef.current = messages.length > 0
 
 	const stopStream = useCallback(() => {
-		abortRef.current?.abort()
-		abortRef.current = undefined
+		generationRef.current += 1
+		streamRef.current?.controller.abort()
+		streamRef.current = undefined
 	}, [])
 
-	// Read the durable event stream from `cursor`, folding every frame into the
-	// transcript until the turn ends, the caller stops it, or the connection drops
-	// for good. A dropped connection resumes from `lastSeqRef` — the whole point of
-	// the server assigning a monotonic seq to every event — instead of replaying
-	// (and re-animating) the turn from the start.
+	// Read the durable event stream from `cursor`, folding every frame into the transcript until
+	// the turn ends, the caller stops it, or the connection drops for good. A dropped connection
+	// resumes from this stream's own cursor — the whole point of the server assigning a monotonic
+	// seq to every event — instead of replaying (and re-animating) the turn from the start.
 	const runStream = useCallback(async (session: string, cursor: number) => {
-		lastSeqRef.current = cursor
-		for (let attempt = 0; ; attempt++) {
+		const generation = (generationRef.current += 1)
+		const isCurrent = () => generationRef.current === generation
+		let seq = cursor
+		// Consecutive failures, not cumulative: a reconnect that works resets the budget, so three
+		// drops spread over a long turn no longer exhaust it as if they had been back to back.
+		let consecutiveFailures = 0
+
+		for (;;) {
+			if (!isCurrent()) return
 			const controller = new AbortController()
-			abortRef.current = controller
+			streamRef.current = { generation, controller }
+			let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
 			try {
 				const init = await authedInit({ signal: controller.signal })
 				const response = await tracedFetch(
 					"maple-api",
-					sessionUrl(session, `/events?cursor=${lastSeqRef.current}`),
+					sessionUrl(session, `/events?cursor=${seq}`),
 					init,
 				)
 				if (!response.ok || !response.body) {
 					throw new Error(`Chat stream request failed: ${response.status}`)
 				}
 
-				const reader = response.body.getReader()
+				reader = response.body.getReader()
 				const decoder = new TextDecoder()
 				let buffer = ""
+				let sawTurnEnd = false
 
 				readLoop: while (true) {
 					const { value, done } = await reader.read()
 					if (done) break
+					if (!isCurrent()) return
 					buffer += decoder.decode(value, { stream: true })
 					const frames = buffer.split("\n\n")
 					buffer = frames.pop() ?? ""
 					for (const frame of frames) {
-						const dataLine = frame.split("\n").find((line) => line.startsWith("data:"))
-						if (!dataLine) continue
-						const event = decodeChatEvent(dataLine.slice(5).trim())
-						lastSeqRef.current = event.seq
+						// SSE allows a payload to span several `data:` lines; joining them is the
+						// spec's own rule, and reading only the first silently truncated any frame
+						// that wrapped.
+						const data = frame
+							.split("\n")
+							.filter((line) => line.startsWith("data:"))
+							.map((line) => line.slice(5).trimStart())
+							.join("\n")
+						if (!data) continue
+						// Unknown frames are skipped, not thrown on. Throwing here reconnected from
+						// the cursor *before* the offending frame, so the server replayed it and the
+						// client threw again until the retry budget ran out.
+						const event = decodeChatEvent(data)
+						if (!event) continue
+						seq = event.seq
 						setMessages((prev) => applyChatEvent(prev, event))
 						if (event.type === "turn-start") setStatus("streaming")
 						if (event.type === "turn-end") {
+							sawTurnEnd = true
 							if (event.reason === "error") {
 								setStatus("error")
 								setError(new Error(event.error ?? "The chat turn failed."))
@@ -310,22 +374,47 @@ export function useMapleChat({ tabId, context }: UseMapleChatOptions): UseMapleC
 						}
 					}
 				}
-				return
+
+				consecutiveFailures = 0
+				// A clean EOF without a `turn-end` is the server recycling the connection after its
+				// tail window elapsed, NOT the end of the turn. Treating it as the end left the
+				// composer disabled forever on any turn that went quiet for 25s — one slow tool
+				// call was enough. Reconnect from the cursor instead.
+				if (sawTurnEnd) return
+				if (!isCurrent()) return
+				continue
 			} catch (cause) {
 				// `controller.abort()` from `stop()` or a session switch — not a failure.
-				if (controller.signal.aborted) return
-				if (attempt >= MAX_STREAM_RETRIES) {
+				if (controller.signal.aborted || !isCurrent()) return
+				consecutiveFailures += 1
+				if (consecutiveFailures > MAX_STREAM_RETRIES) {
 					setStatus("error")
 					setError(cause instanceof Error ? cause : new Error("Lost connection to chat."))
 					return
 				}
-				await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)))
+				// Abortable: an unabortable sleep meant `stop()` (or an unmount) during a reconnect
+				// window did nothing, and the loop went on to build a *fresh* controller and keep
+				// streaming into a conversation the user had left.
+				const settled = await sleep(300 * consecutiveFailures, controller.signal)
+				if (!settled || !isCurrent()) return
+			} finally {
+				// Releasing the reader is what lets the connection close. Without it a turn that
+				// ended while the server still had bytes to write left the body half-consumed and
+				// the socket pinned.
+				await reader?.cancel().catch(() => undefined)
 			}
 		}
 	}, [])
 
-	// Cold-load history whenever the addressed conversation changes, and resume
-	// the live tail if a turn was already running when this device connected.
+	// Cold-load history whenever the addressed conversation changes, and resume the live tail if a
+	// turn was already running when this device connected.
+	//
+	// One of the few sanctioned `useEffect`s (see `.oxlintrc.json`'s `no-restricted-imports` rule):
+	// it subscribes to an external system whose identity is a prop, so `useMountEffect` doesn't
+	// cover it, and the history read is the same subscription's bootstrap rather than independent
+	// data fetching — these routes are a raw `HttpRouter` (SSE), so they have no generated atom in
+	// `MapleApiAtomClient` to fetch through. The state reset below is not a `key`-able concern
+	// either, because the transcript component must keep its scroll position across a resume.
 	useEffect(() => {
 		if (!sessionId) return
 		let cancelled = false
@@ -369,7 +458,10 @@ export function useMapleChat({ tabId, context }: UseMapleChatOptions): UseMapleC
 			if (!trimmed || !sessionId) return
 
 			// Only the first message of a fresh conversation carries the context preamble.
-			const isFirst = messages.length === 0
+			// Read through a ref, not `messages.length`: as a dependency it rebuilt this callback on
+			// every token delta, invalidating the handler identity down through the composer for the
+			// whole stream. (The mobile hook already does it this way.)
+			const isFirst = !hasMessagesRef.current
 			const block = isFirst && context ? buildContextPreamble(context) : ""
 			const outgoing = block ? wrapContextPreamble(block, trimmed) : trimmed
 
@@ -380,6 +472,9 @@ export function useMapleChat({ tabId, context }: UseMapleChatOptions): UseMapleC
 			])
 			setStatus("submitted")
 			setError(undefined)
+			// A retry supersedes the banner from the previous attempt; leaving it up made
+			// "Message not sent" permanent once shown, including after the resend worked.
+			setFailedSends([])
 
 			void (async () => {
 				try {
@@ -389,6 +484,7 @@ export function useMapleChat({ tabId, context }: UseMapleChatOptions): UseMapleC
 						body: JSON.stringify({ text: outgoing }),
 					})
 					const response = await tracedFetch("maple-api", sessionUrl(sessionId, "/messages"), init)
+					if (response.status === 409) throw new Error(TURN_IN_FLIGHT_MESSAGE)
 					if (!response.ok) throw new Error(`Failed to send message: ${response.status}`)
 					const json: unknown = await response.json()
 					const sent = decodeSendResponse(json)
@@ -400,8 +496,11 @@ export function useMapleChat({ tabId, context }: UseMapleChatOptions): UseMapleC
 					await runStream(sessionId, sent.cursor)
 				} catch (cause) {
 					setStatus("ready")
-					setFailedSends((prev) => [
-						...prev,
+					// Drop the optimistic bubble along with the failure. Keeping it meant a retry
+					// rendered the same message twice — and three times after a reload, if the POST
+					// had reached the Durable Object before the response failed.
+					setMessages((prev) => prev.filter((m) => m.id !== localId))
+					setFailedSends([
 						{
 							id: localId,
 							message: trimmed,
@@ -411,13 +510,16 @@ export function useMapleChat({ tabId, context }: UseMapleChatOptions): UseMapleC
 				}
 			})()
 		},
-		[sessionId, messages.length, context, runStream],
+		[sessionId, context, runStream],
 	)
 
 	const stop = useCallback(() => {
 		if (!sessionId) return
 		stopStream()
 		setStatus("ready")
+		// Close the open text part. Without this the last part stays `streaming`, so the thinking
+		// indicator lingers on a turn the user just stopped.
+		setMessages((prev) => prev.map(finalizeStreamingText))
 		void (async () => {
 			try {
 				const init = await authedInit({ method: "POST" })

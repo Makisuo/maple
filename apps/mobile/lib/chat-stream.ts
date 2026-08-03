@@ -22,7 +22,13 @@ export interface ChatStreamCallbacks {
 	onAssistantStart?: (messageId: string) => void
 	onTextDelta?: (partIndex: number, delta: string, textId?: string) => void
 	onToolInputStart?: (toolCallId: string, toolName: string) => void
-	onToolInputAvailable?: (toolCallId: string, toolName: string, input: unknown) => void
+	onToolInputAvailable?: (
+		toolCallId: string,
+		toolName: string,
+		input: unknown,
+		/** Approval-gated: the tool did not run and no result is coming. */
+		proposed?: boolean,
+	) => void
 	onToolOutputAvailable?: (toolCallId: string, output: unknown) => void
 	onToolError?: (toolCallId: string, errorText: string) => void
 	onError?: (errorText: string) => void
@@ -62,11 +68,21 @@ export function streamChat({ client, sessionId, message, callbacks }: StreamChat
 	const completion = (async () => {
 		try {
 			const sent = await client.sendMessage(sessionId, message, controller.signal)
-			const response = await client.openEventStream(sessionId, sent.cursor, controller.signal)
-			if (!response.ok || !response.body) {
-				throw new Error(`Chat stream request failed: ${response.status}`)
+			let cursor = sent.cursor
+			// Reconnect until the turn actually ends. The server recycles the connection after its
+			// tail window elapses, so a clean EOF is NOT the end of the turn — treating it as one
+			// truncated the transcript and settled the composer on any turn that went quiet for
+			// 25s, which one slow tool call is enough to do. The cursor is what makes resuming
+			// exact rather than a replay.
+			for (;;) {
+				const response = await client.openEventStream(sessionId, cursor, controller.signal)
+				if (!response.ok || !response.body) {
+					throw new Error(`Chat stream request failed: ${response.status}`)
+				}
+				const outcome = await readEventStream(response.body, callbacks, cursor)
+				if (outcome.ended || controller.signal.aborted) break
+				cursor = outcome.cursor
 			}
-			await readEventStream(response.body, callbacks)
 		} catch (err) {
 			if (!isAbort(err)) {
 				callbacks.onError?.(err instanceof Error ? err.message : String(err))
@@ -88,32 +104,47 @@ export function streamChat({ client, sessionId, message, callbacks }: StreamChat
 }
 
 /**
- * Read `data:` frames off the durable event stream until `turn-end` or the
- * connection closes. The server always closes right after `turn-end` (see
- * `chat-session.ts`'s doc comment on `ChatEvent`), so exiting on `done` and
- * exiting on that event agree — this only breaks out early so the UI settles a
- * beat sooner than waiting on the socket to actually close.
+ * Read `data:` frames off the durable event stream until `turn-end` or the connection closes.
+ *
+ * Reports which of the two happened, plus the last seq seen, so the caller can resume: a close
+ * without `turn-end` means the server recycled the connection, not that the turn is over.
  */
 async function readEventStream(
 	body: ReadableStream<Uint8Array>,
 	callbacks: ChatStreamCallbacks,
-): Promise<void> {
+	startCursor: number,
+): Promise<{ ended: boolean; cursor: number }> {
 	const reader = body.getReader()
 	const decoder = new TextDecoder()
 	let buffer = ""
+	let cursor = startCursor
 
-	while (true) {
-		const { value, done } = await reader.read()
-		if (done) return
-		buffer += decoder.decode(value, { stream: true })
-		const frames = buffer.split("\n\n")
-		buffer = frames.pop() ?? ""
-		for (const frame of frames) {
-			const dataLine = frame.split("\n").find((line) => line.startsWith("data:"))
-			if (!dataLine) continue
-			const event = parseChatEvent(dataLine.slice(5).trim())
-			if (event && dispatchEvent(event, callbacks)) return
+	try {
+		while (true) {
+			const { value, done } = await reader.read()
+			if (done) return { ended: false, cursor }
+			buffer += decoder.decode(value, { stream: true })
+			const frames = buffer.split("\n\n")
+			buffer = frames.pop() ?? ""
+			for (const frame of frames) {
+				// SSE allows a payload to span several `data:` lines; reading only the first
+				// silently truncated any frame that wrapped.
+				const data = frame
+					.split("\n")
+					.filter((line) => line.startsWith("data:"))
+					.map((line) => line.slice(5).trimStart())
+					.join("\n")
+				if (!data) continue
+				const event = parseChatEvent(data)
+				if (!event) continue
+				cursor = event.seq
+				if (dispatchEvent(event, callbacks)) return { ended: true, cursor }
+			}
 		}
+	} finally {
+		// Releasing the reader is what lets the connection close; without it a turn that ended
+		// while the server still had bytes to write left the socket pinned.
+		await reader.cancel().catch(() => undefined)
 	}
 }
 
@@ -134,7 +165,10 @@ function dispatchEvent(event: ChatEvent, cb: ChatStreamCallbacks): boolean {
 			return false
 		case "tool-call":
 			// Maple delivers tool input complete (no streaming) → input-available.
-			cb.onToolInputAvailable?.(event.callId, event.name, event.input)
+			// `proposed` means the turn stopped on an approval-gated tool that did NOT run, so no
+			// result is coming; surfacing it lets the UI say so instead of showing a tool that
+			// appears to be running forever.
+			cb.onToolInputAvailable?.(event.callId, event.name, event.input, event.proposed === true)
 			return false
 		case "tool-result":
 			if (event.isError) cb.onToolError?.(event.callId, errorText(event.output))

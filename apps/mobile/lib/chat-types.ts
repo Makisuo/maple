@@ -15,7 +15,7 @@ export interface ToolUIPart {
 	type: string
 	toolCallId: string
 	toolName?: string
-	state: "input-streaming" | "input-available" | "output-available" | "output-error"
+	state: "input-streaming" | "input-available" | "proposed" | "output-available" | "output-error"
 	input?: unknown
 	output?: unknown
 	errorText?: string

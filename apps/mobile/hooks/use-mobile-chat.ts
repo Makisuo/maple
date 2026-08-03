@@ -25,7 +25,7 @@ interface ToolPart {
 	type: string
 	toolCallId: string
 	toolName?: string
-	state: "input-streaming" | "input-available" | "output-available" | "output-error"
+	state: "input-streaming" | "input-available" | "proposed" | "output-available" | "output-error"
 	input?: unknown
 	output?: unknown
 	errorText?: string
@@ -161,10 +161,19 @@ export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) 
 							),
 						)
 					},
-					onToolInputAvailable: (toolCallId, toolName, input) => {
+					onToolInputAvailable: (toolCallId, toolName, input, proposed) => {
 						setMessages((prev) =>
 							updateLastAssistant(prev, (msg) =>
-								addOrUpdateToolPart(msg, toolCallId, toolName, "input-available", { input }),
+								// A proposal is terminal for this call: the tool was gated, never ran,
+								// and no `tool-result` follows. Rendering it as `input-available`
+								// leaves a tool row spinning for the rest of the conversation.
+								addOrUpdateToolPart(
+									msg,
+									toolCallId,
+									toolName,
+									proposed === true ? "proposed" : "input-available",
+									{ input },
+								),
 							),
 						)
 					},
