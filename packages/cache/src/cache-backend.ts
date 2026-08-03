@@ -27,7 +27,15 @@ export interface EdgeCacheBackend {
 	readonly delete: (bucket: string, hash: string) => Promise<void>
 }
 
-/** Injected edge-cache storage backend (Workers KV in prod, in-memory in tests/dev). */
+/**
+ * Injected edge-cache storage backend (Workers KV in prod, in-memory in
+ * tests/dev).
+ *
+ * The tag string still names the old home. Tags are identity, not
+ * documentation — `EdgeCacheIOError` next door is a `Schema.TaggedErrorClass`
+ * whose tag is its serialized `_tag`, so renaming this family for tidiness
+ * would be a wire-contract change for no behavioural gain.
+ */
 export class CacheBackend extends Context.Service<CacheBackend, EdgeCacheBackend>()(
 	"@maple/query-engine/caching/CacheBackend",
 ) {}

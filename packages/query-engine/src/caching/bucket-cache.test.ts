@@ -12,8 +12,8 @@ import {
 	type BucketCacheSegmentData,
 	type CachedBucket,
 } from "./bucket-cache"
-import { EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "./edge-cache"
-import { MemoryCacheBackendLive } from "./cache-backend"
+import { EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "@maple/cache"
+import { MemoryCacheBackendLive } from "@maple/cache"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const orgId = asOrgId("org_test")

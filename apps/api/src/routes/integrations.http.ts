@@ -36,7 +36,7 @@ import {
 	VcsCommitDetailResponse,
 } from "@maple/domain/http"
 import { cloudflareAnalyticsState } from "@maple/db"
-import { EdgeCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import { and, eq } from "drizzle-orm"
 import { Cause, Effect, Option, Schema } from "effect"
 import { Database } from "../lib/DatabaseLive"

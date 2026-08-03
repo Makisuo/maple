@@ -1,7 +1,23 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Option } from "effect"
-import { QueryEngineExecuteResponse } from "../query-engine"
+import { Effect, Layer, Option, Schema } from "effect"
 import { EdgeCacheIOError, EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "./edge-cache"
+
+// A stand-in for whatever a caller caches. These tests used to reach for
+// `CachedPayload`, which tied a generic cache to a query type; the
+// property under test is that ANY `Schema.Class` survives the JSON round trip
+// as a real instance, so a local class states it directly.
+class CachedPayload extends Schema.Class<CachedPayload>("CachedPayload")({
+	result: Schema.Struct({
+		kind: Schema.Literals(["timeseries"]),
+		source: Schema.String,
+		data: Schema.Array(
+			Schema.Struct({
+				bucket: Schema.String,
+				series: Schema.Record(Schema.String, Schema.Number),
+			}),
+		),
+	}),
+}) {}
 
 /**
  * In-memory backend that mirrors the Workers cache JSON-roundtrip:
@@ -265,7 +281,7 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 		let computeCalls = 0
 
 		const buildResponse = () =>
-			new QueryEngineExecuteResponse({
+			new CachedPayload({
 				result: {
 					kind: "timeseries" as const,
 					source: "metrics" as const,
@@ -287,7 +303,7 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 					bucket: "qe",
 					key: "k1",
 					ttlSeconds: 30,
-					schema: QueryEngineExecuteResponse,
+					schema: CachedPayload,
 				},
 				compute,
 			)
@@ -296,19 +312,19 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 					bucket: "qe",
 					key: "k1",
 					ttlSeconds: 30,
-					schema: QueryEngineExecuteResponse,
+					schema: CachedPayload,
 				},
 				compute,
 			)
 
 			assert.strictEqual(computeCalls, 1)
 			assert.strictEqual(first.hit, false)
-			assert.instanceOf(first.value, QueryEngineExecuteResponse)
+			assert.instanceOf(first.value, CachedPayload)
 			assert.strictEqual(second.hit, true)
 			// The whole point of the fix: the cache HIT must give us back a real
 			// class instance, not a plain object — otherwise the HTTP API encoder
-			// rejects it with `Expected QueryEngineExecuteResponse, got {...}`.
-			assert.instanceOf(second.value, QueryEngineExecuteResponse)
+			// rejects it with `Expected CachedPayload, got {...}`.
+			assert.instanceOf(second.value, CachedPayload)
 			assert.strictEqual(second.value.result.kind, "timeseries")
 			if (second.value.result.kind === "timeseries") {
 				assert.strictEqual(second.value.result.data.length, 2)
@@ -340,7 +356,7 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 			const cache = yield* EdgeCacheService
 			const compute = Effect.sync(() => {
 				computeCalls += 1
-				return new QueryEngineExecuteResponse({
+				return new CachedPayload({
 					result: {
 						kind: "timeseries" as const,
 						source: "logs" as const,
@@ -353,14 +369,14 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 					bucket: "qe",
 					key: "k-stale",
 					ttlSeconds: 30,
-					schema: QueryEngineExecuteResponse,
+					schema: CachedPayload,
 				},
 				compute,
 			)
 
 			assert.strictEqual(computeCalls, 1)
 			assert.strictEqual(result.hit, false)
-			assert.instanceOf(result.value, QueryEngineExecuteResponse)
+			assert.instanceOf(result.value, CachedPayload)
 		}).pipe(Effect.provide(makeLayer(backend)))
 	})
 
@@ -374,7 +390,7 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 				Effect.andThen(
 					Effect.sync(() => {
 						computeCalls += 1
-						return new QueryEngineExecuteResponse({
+						return new CachedPayload({
 							result: {
 								kind: "timeseries" as const,
 								source: "traces" as const,
@@ -388,7 +404,7 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 				bucket: "qe",
 				key: "k-concurrent",
 				ttlSeconds: 30,
-				schema: QueryEngineExecuteResponse,
+				schema: CachedPayload,
 			} as const
 			const [a, b] = yield* Effect.all(
 				[cache.getOrCompute(opts, compute), cache.getOrCompute(opts, compute)],
@@ -396,8 +412,8 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 			)
 
 			assert.strictEqual(computeCalls, 2)
-			assert.instanceOf(a.value, QueryEngineExecuteResponse)
-			assert.instanceOf(b.value, QueryEngineExecuteResponse)
+			assert.instanceOf(a.value, CachedPayload)
+			assert.instanceOf(b.value, CachedPayload)
 		}).pipe(Effect.provide(makeLayer(backend)))
 	})
 })

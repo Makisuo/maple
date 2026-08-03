@@ -29,7 +29,7 @@ import {
 } from "@maple/db"
 import { eq } from "drizzle-orm"
 import type { CompiledQuery } from "@maple/query-engine/ch"
-import { EdgeCacheService, makeEdgeCacheService, makeMemoryBackend } from "@maple/query-engine/caching"
+import { EdgeCacheService, makeEdgeCacheService, makeMemoryBackend } from "@maple/cache"
 import { Database, DatabaseError } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"

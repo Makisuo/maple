@@ -1,12 +1,12 @@
 import { Effect, Layer } from "effect"
 import { WorkersCache } from "@maple/effect-cloudflare/workers-cache"
-import { CacheBackend, type EdgeCacheBackend, makeMemoryBackend } from "@maple/query-engine/caching"
+import { CacheBackend, type EdgeCacheBackend, makeMemoryBackend } from "@maple/cache"
 
 // ---------------------------------------------------------------------------
 // Concrete `CacheBackend` implementation for the API runtime.
 //
 // The edge-cache logic (and the pure in-memory fallback) lives in
-// `@maple/query-engine/caching`; only the Cloudflare Workers backend lives here,
+// `@maple/cache`; only the Cloudflare Workers backend lives here,
 // so the Workers runtime API never enters the query-engine package (and thus
 // never the web/cli bundles). The default cache is obtained via the
 // `WorkersCache` Effect service from `@maple/effect-cloudflare` — prod gets the

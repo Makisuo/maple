@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { autumnHandler, type CustomerData } from "autumn-js/backend"
-import type { EdgeCacheServiceShape } from "@maple/query-engine/caching"
+import type { EdgeCacheServiceShape } from "@maple/cache"
 import { isActivePlanSubscription } from "@maple/domain/billing"
 import { BillingUpstreamError } from "@maple/domain/http"
 
