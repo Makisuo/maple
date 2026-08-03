@@ -86,7 +86,6 @@ import {
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
-import { InvestigationService } from "@/services/errors/InvestigationService"
 import { escalationDedupeKey, escalationReasonFor } from "@/services/errors/issue-severity"
 import { SYSTEM_ERRORS_AGENT_NAME, isReservedAgentName } from "@/services/auth/system-actors"
 import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
@@ -463,7 +462,7 @@ export interface ErrorsServiceShape {
 const make: Effect.Effect<
 	ErrorsServiceShape,
 	never,
-	Database | WarehouseQueryService | EdgeCacheService | Env | NotificationDispatcher | InvestigationService
+	Database | WarehouseQueryService | EdgeCacheService | Env | NotificationDispatcher
 > = Effect.gen(function* () {
 	const database = yield* Database
 	const warehouse = yield* WarehouseQueryService
@@ -477,9 +476,6 @@ const make: Effect.Effect<
 		onNone: () => undefined,
 		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
 	})
-	// Supplies the `submit_diagnosis` tool for an autonomous investigation turn. Held here rather
-	// than resolved inside the turn so `InvestigationService` does not end up requiring itself.
-	const investigations = yield* InvestigationService
 
 	const newErrorIssueId = () => decodeErrorIssueIdSync(randomUUID())
 	const newErrorIncidentId = () => decodeErrorIncidentIdSync(randomUUID())
@@ -2790,8 +2786,6 @@ const make: Effect.Effect<
 							issueId,
 						},
 						agentBinding: investigationAgentBinding,
-						workerEnv: Option.getOrUndefined(workerEnv),
-						submitDiagnosis: investigations.submitDiagnosis,
 					}).pipe(Effect.provideService(Database, database))
 
 					return { touched: 1, opened: 1 }

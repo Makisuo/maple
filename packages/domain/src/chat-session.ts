@@ -15,6 +15,7 @@
  * turn lifecycle. `apps/api/src/chat/events.ts` is the only place the two are mapped.
  */
 import { Schema } from "effect"
+import { ActorId, AuthMode, OrgId, RoleName, UserId } from "./primitives"
 
 // ---------------------------------------------------------------------------
 // Session addressing
@@ -113,26 +114,20 @@ export class ChatHistoryResponse extends Schema.Class<ChatHistoryResponse>("@map
 // Event stream
 // ---------------------------------------------------------------------------
 
-const withSeq = <Fields extends Schema.Struct.Fields>(fields: Fields) => ({
-	/** Monotonic per session, starting at 1. The reconnect cursor. */
-	seq: Schema.Number,
-	...fields,
-})
-
-export class ChatUserMessageEvent extends Schema.Class<ChatUserMessageEvent>("chat.user-message")(
-	withSeq({ type: Schema.Literal("user-message"), id: Schema.String, text: Schema.String }),
-) {}
-
-export class ChatTurnStartEvent extends Schema.Class<ChatTurnStartEvent>("chat.turn-start")(
-	withSeq({ type: Schema.Literal("turn-start"), messageId: Schema.String }),
-) {}
-
-export class ChatTextDeltaEvent extends Schema.Class<ChatTextDeltaEvent>("chat.text-delta")(
-	withSeq({ type: Schema.Literal("text-delta"), messageId: Schema.String, text: Schema.String }),
-) {}
-
-export class ChatToolCallEvent extends Schema.Class<ChatToolCallEvent>("chat.tool-call")(
-	withSeq({
+/**
+ * Event fields, declared once and used twice: with a `seq` for the wire/`ChatEvent` form, and
+ * without for the durable log, whose SQLite row key *is* the seq. Keeping one declaration is what
+ * stops the two representations drifting.
+ */
+const eventFields = {
+	"user-message": { type: Schema.Literal("user-message"), id: Schema.String, text: Schema.String },
+	"turn-start": { type: Schema.Literal("turn-start"), messageId: Schema.String },
+	"text-delta": {
+		type: Schema.Literal("text-delta"),
+		messageId: Schema.String,
+		text: Schema.String,
+	},
+	"tool-call": {
 		type: Schema.Literal("tool-call"),
 		messageId: Schema.String,
 		callId: Schema.String,
@@ -140,27 +135,51 @@ export class ChatToolCallEvent extends Schema.Class<ChatToolCallEvent>("chat.too
 		input: Schema.Unknown,
 		/** Approval-gated mutation: the tool did not run, this is a proposal. */
 		proposed: Schema.optionalKey(Schema.Boolean),
-	}),
-) {}
-
-export class ChatToolResultEvent extends Schema.Class<ChatToolResultEvent>("chat.tool-result")(
-	withSeq({
+	},
+	"tool-result": {
 		type: Schema.Literal("tool-result"),
 		messageId: Schema.String,
 		callId: Schema.String,
 		output: Schema.Unknown,
 		isError: Schema.optionalKey(Schema.Boolean),
-	}),
-) {}
-
-export class ChatTurnEndEvent extends Schema.Class<ChatTurnEndEvent>("chat.turn-end")(
-	withSeq({
+	},
+	"turn-end": {
 		type: Schema.Literal("turn-end"),
 		messageId: Schema.String,
 		reason: Schema.Literals(["stop", "aborted", "error", "max-steps"]),
 		/** Present when `reason` is `"error"`. */
 		error: Schema.optionalKey(Schema.String),
-	}),
+	},
+} as const
+
+const withSeq = <Fields extends Schema.Struct.Fields>(fields: Fields) => ({
+	/** Monotonic per session, starting at 1. The reconnect cursor. */
+	seq: Schema.Number,
+	...fields,
+})
+
+export class ChatUserMessageEvent extends Schema.Class<ChatUserMessageEvent>("chat.user-message")(
+	withSeq(eventFields["user-message"]),
+) {}
+
+export class ChatTurnStartEvent extends Schema.Class<ChatTurnStartEvent>("chat.turn-start")(
+	withSeq(eventFields["turn-start"]),
+) {}
+
+export class ChatTextDeltaEvent extends Schema.Class<ChatTextDeltaEvent>("chat.text-delta")(
+	withSeq(eventFields["text-delta"]),
+) {}
+
+export class ChatToolCallEvent extends Schema.Class<ChatToolCallEvent>("chat.tool-call")(
+	withSeq(eventFields["tool-call"]),
+) {}
+
+export class ChatToolResultEvent extends Schema.Class<ChatToolResultEvent>("chat.tool-result")(
+	withSeq(eventFields["tool-result"]),
+) {}
+
+export class ChatTurnEndEvent extends Schema.Class<ChatTurnEndEvent>("chat.turn-end")(
+	withSeq(eventFields["turn-end"]),
 ) {}
 
 export const ChatEvent = Schema.Union([
@@ -184,7 +203,71 @@ export type ChatEventInput = DistributiveOmit<ChatEvent, "seq">
 
 /** One SSE frame is exactly one encoded `ChatEvent`; the SSE `id:` field is its `seq`. */
 export const encodeChatEvent = Schema.encodeUnknownSync(Schema.fromJsonString(ChatEvent))
-export const decodeChatEvent = Schema.decodeUnknownSync(Schema.fromJsonString(ChatEvent))
+
+/** The throwing decode, for tests and for producers that control both ends of the wire. */
+export const decodeChatEventOrThrow = Schema.decodeUnknownSync(Schema.fromJsonString(ChatEvent))
+
+/**
+ * Decode one SSE frame, or `undefined` if it is not a `ChatEvent` this build understands.
+ *
+ * Non-throwing on purpose. A frame that failed to decode used to throw out of the client's read
+ * loop, which then reconnected from the cursor *before* the bad frame — so the server replayed it
+ * and the client threw again, until the retry budget ran out and the conversation died. Skipping an
+ * unrecognised frame instead means adding a new `ChatEvent` member degrades old clients rather than
+ * bricking them.
+ */
+export const decodeChatEvent = (frame: string): ChatEvent | undefined => {
+	try {
+		return decodeChatEventOrThrow(frame)
+	} catch {
+		return undefined
+	}
+}
+
+/**
+ * Durable-storage codec for the event log.
+ *
+ * The log stores an event *without* its `seq` — the SQLite row key is the seq. Going through the
+ * schema rather than raw `JSON.parse` + `as ChatEvent` means a shape change surfaces as a decode
+ * error at the boundary instead of as a malformed event handed to the transcript fold.
+ */
+const ChatEventPayload = Schema.Union([
+	Schema.Struct(eventFields["user-message"]),
+	Schema.Struct(eventFields["turn-start"]),
+	Schema.Struct(eventFields["text-delta"]),
+	Schema.Struct(eventFields["tool-call"]),
+	Schema.Struct(eventFields["tool-result"]),
+	Schema.Struct(eventFields["turn-end"]),
+]).pipe(Schema.toTaggedUnion("type"))
+
+const encodePayload = Schema.encodeUnknownSync(Schema.fromJsonString(ChatEventPayload))
+const decodePayload = Schema.decodeUnknownSync(Schema.fromJsonString(ChatEventPayload))
+
+export const encodeChatEventPayload = (event: ChatEventInput): string => encodePayload(event)
+
+export const decodeChatEventPayload = (payload: string, seq: number): ChatEvent =>
+	({ ...decodePayload(payload), seq }) as ChatEvent
+
+// ---------------------------------------------------------------------------
+// Turn identity
+// ---------------------------------------------------------------------------
+
+/**
+ * The caller identity a turn runs as, in the shape that survives a Durable Object hop.
+ *
+ * `apps/api`'s own `TenantContext` is the source of truth for authorization, but it is an
+ * `apps/api` type and the DO takes this over RPC, so the crossing point needs a declared,
+ * serializable shape. The route resolves the real tenant, authorizes it against the session's org,
+ * and passes this projection down; the turn re-widens it on the other side.
+ */
+export class ChatTurnTenant extends Schema.Class<ChatTurnTenant>("@maple/ChatTurnTenant")({
+	orgId: OrgId,
+	userId: UserId,
+	roles: Schema.Array(RoleName),
+	authMode: AuthMode,
+	/** Pre-resolved agent identity, when the caller authenticated as one. */
+	actorId: Schema.optionalKey(ActorId),
+}) {}
 
 // ---------------------------------------------------------------------------
 // Requests

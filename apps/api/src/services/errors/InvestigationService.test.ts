@@ -191,7 +191,8 @@ describe("InvestigationService", () => {
 	/**
 	 * Stub `CHAT_SESSION` namespace. The autonomous turn now claims the turn on the ChatSession
 	 * Durable Object in process instead of POSTing back to chat-flue over a service binding, so the
-	 * observable contract is `beginTurn(messageId, message)` rather than an HTTP request.
+	 * observable contract is one `beginTurn` call rather than an HTTP request. The real object
+	 * also runs the turn inside itself; nothing here does, which is the point.
 	 */
 	const chatSessionHarness = (options?: { readonly busy?: boolean }) => {
 		const beginTurns: Array<{ messageId: string; text: string }> = []
@@ -199,9 +200,11 @@ describe("InvestigationService", () => {
 			idFromName: (name: string) => name,
 			get: () => ({
 				history: async () => [],
-				beginTurn: async (messageId: string, text: string) => {
-					beginTurns.push({ messageId, text })
-					return options?.busy === true ? undefined : { cursor: 0, messageId }
+				beginTurn: async (input: { messageId: string; text: string }) => {
+					beginTurns.push({ messageId: input.messageId, text: input.text })
+					return options?.busy === true
+						? undefined
+						: { cursor: 0, messageId: input.messageId }
 				},
 				append: async () => 1,
 				endTurn: async () => undefined,

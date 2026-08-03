@@ -104,7 +104,6 @@ import {
 import * as AlertingMetrics from "@/observability/AlertingMetrics"
 import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
 import { INVESTIGATION_AGENT_BINDING } from "@/services/errors/ai-triage-enqueue"
-import { InvestigationService } from "@/services/errors/InvestigationService"
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
@@ -1180,10 +1179,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				onNone: () => undefined,
 				onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
 			})
-			// Supplies the `submit_diagnosis` tool for an autonomous investigation turn. Held
-			// here rather than resolved inside the turn so `InvestigationService` does not end
-			// up requiring itself.
-			const investigations = yield* InvestigationService
 			const now = runtime.now
 			const makeUuid = () => runtime.makeUuid()
 			const deliveryTimeoutMs = () => runtime.deliveryTimeoutMs()
@@ -4204,8 +4199,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									: (normalized.serviceNames[0] ?? ""),
 							timestamp,
 							agentBinding: investigationAgentBinding,
-							workerEnv: Option.getOrUndefined(workerEnv),
-							submitDiagnosis: investigations.submitDiagnosis,
 						}).pipe(Effect.provideService(Database, database))
 					} else {
 						yield* Effect.logWarning(

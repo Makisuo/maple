@@ -13,13 +13,18 @@ import { AiTriageRunId, InvestigationId } from "@maple/domain/primitives"
 import { aiTriageSettings, investigations } from "@maple/db"
 import { and, eq, gte, lt, sql } from "drizzle-orm"
 import { Cause, Clock, Data, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
+import { ChatTurnTenant } from "@maple/domain/chat-session"
 import { Database } from "@/platform/DatabaseLive"
-import type { SubmitDiagnosis } from "@/chat/agent"
-import { isChatSessionNamespace, runChatSessionTurn } from "@/chat/session"
+import { isChatSessionNamespace } from "@/chat/session"
 import { UserId } from "@maple/domain/primitives"
 
 /** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
 const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
+
+/** A `beginTurn` call that the Durable Object could not complete (overload, eviction, limits). */
+class InvestigationStartError extends Data.TaggedError("@maple/api/InvestigationStartError")<{
+	readonly message: string
+}> {}
 
 /**
  * The binding that hosts an investigation's durable conversation. This used to be the `CHAT_FLUE`
@@ -115,13 +120,6 @@ export interface MaybeEnqueueTriageInput {
 	readonly context: Record<string, unknown>
 	/** The `CHAT_SESSION` Durable Object namespace, read off the worker env by the caller. */
 	readonly agentBinding: unknown
-	/**
-	 * How the started conversation records its report. Supplied by the caller (which holds
-	 * `InvestigationService`) rather than resolved here — see the note on `SubmitDiagnosis`.
-	 */
-	readonly submitDiagnosis: SubmitDiagnosis
-	/** Full worker env, used to resolve the model the turn runs on. */
-	readonly workerEnv?: Record<string, unknown>
 	/** Manual starts ignore the automation-enabled flag, but never the quota. */
 	readonly force?: boolean
 }
@@ -289,18 +287,36 @@ export const maybeEnqueueTriage: (
 			JSON.stringify({ subject, snapshot }),
 		].join("\n\n")
 
-		// Starting the turn is now a Durable Object call plus a detached fiber, not a 15s-timeout
-		// HTTP round trip to another Worker. There is consequently no "the agent rejected it with
-		// HTTP 4xx" outcome any more — the only failure before the turn begins is a busy session.
+		// Starting the turn is one Durable Object call: `beginTurn` claims the slot, records the
+		// prompt, and runs the turn inside the object. There is consequently no "the agent rejected
+		// it with HTTP 4xx" outcome any more — the only failure before the turn begins is a busy
+		// session — and nothing here has to keep the turn alive, which matters because the cron
+		// ticks that call this run under `runScheduledEffect` and dispose their runtime the moment
+		// the tick settles.
 		const messageId = crypto.randomUUID()
-		const claimed = yield* Effect.promise(() => stub.beginTurn(messageId, message))
+		const claimed = yield* Effect.tryPromise({
+			try: () =>
+				stub.beginTurn({
+					sessionId,
+					messageId,
+					text: message,
+					tenant: new ChatTurnTenant({
+						orgId: input.orgId,
+						userId: internalServiceUserId,
+						roles: [],
+						authMode: "self_hosted",
+					}),
+				}),
+			catch: (cause) => new InvestigationStartError({ message: String(cause) }),
+		}).pipe(Effect.catchTag("@maple/api/InvestigationStartError", () => Effect.succeed(undefined)))
+
 		if (!claimed) {
 			yield* database.execute((db) =>
 				db
 					.update(investigations)
 					.set({
 						status: "failed",
-						error: "start_failed: a turn is already running for this investigation; retry",
+						error: "start_failed: the investigation session could not start a turn; retry",
 						updatedAt: new Date(nowMs),
 					})
 					.where(eq(investigations.id, investigationId)),
@@ -312,22 +328,6 @@ export const maybeEnqueueTriage: (
 			})
 			return { enqueued: false, investigationId, reason: "error" as const }
 		}
-
-		yield* Effect.forkDetach(
-			runChatSessionTurn({
-				sessionId,
-				tenant: {
-					orgId: input.orgId,
-					userId: internalServiceUserId,
-					roles: [],
-					authMode: "self_hosted",
-				},
-				env: input.workerEnv ?? {},
-				stub,
-				messageId,
-				submitDiagnosis: input.submitDiagnosis,
-			}),
-		)
 
 		yield* Effect.annotateCurrentSpan({
 			orgId: input.orgId,

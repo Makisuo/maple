@@ -43,7 +43,6 @@ import {
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
-import { InvestigationService } from "@/services/errors/InvestigationService"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -237,9 +236,6 @@ const make = Effect.gen(function* () {
 		onNone: () => undefined,
 		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
 	})
-	// Supplies the `submit_diagnosis` tool for an autonomous investigation turn. Held here rather
-	// than resolved inside the turn so `InvestigationService` does not end up requiring itself.
-	const investigations = yield* InvestigationService
 
 	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 		database.execute(fn).pipe(
@@ -1571,8 +1567,6 @@ const make = Effect.gen(function* () {
 								detectedAt: new Date(nowMs).toISOString(),
 							},
 							agentBinding: investigationAgentBinding,
-							workerEnv: Option.getOrUndefined(workerEnv),
-							submitDiagnosis: investigations.submitDiagnosis,
 						}).pipe(Effect.provideService(Database, database))
 						if (triage.enqueued) {
 							yield* dbExecute((db) =>

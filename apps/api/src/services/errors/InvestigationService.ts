@@ -26,7 +26,8 @@ import {
 	UserId as UserIdSchema,
 } from "@maple/domain/primitives"
 import { wrapChatContext } from "@maple/domain/chat-preamble"
-import { chatSessionStub, runChatSessionTurn } from "@/chat/session"
+import { ChatTurnTenant } from "@maple/domain/chat-session"
+import { chatSessionStub } from "@/chat/session"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { aiTriageSettings, errorIssueEvents, investigations, type InvestigationRow } from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
@@ -356,8 +357,10 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			 * This used to POST `/agents/maple-chat/<orgId>:inv-<id>` back out over the `CHAT_FLUE`
 			 * service binding with an internal service token — a Worker-to-Worker round trip that
 			 * existed only because the agent lived in another Worker. The agent runs here now, so
-			 * this claims the turn on the `ChatSession` Durable Object and forks the runner, the
-			 * same path `POST /api/chat/sessions/:id/messages` takes.
+			 * this claims the turn on the `ChatSession` Durable Object, which runs it inside itself
+			 * — the same path `POST /api/chat/sessions/:id/messages` takes. Nothing here keeps the
+			 * turn alive, which is what makes it survive: this call is often reached from a cron
+			 * tick under `runScheduledEffect`, whose runtime is disposed as soon as the tick ends.
 			 */
 			const sendAutonomousTurn = Effect.fnUntraced(function* (
 				orgId: OrgId,
@@ -396,11 +399,26 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				)
 
 				const messageId = crypto.randomUUID()
-				const claimed = yield* Effect.promise(() => stub.beginTurn(messageId, message))
+				const claimed = yield* Effect.tryPromise({
+					try: () =>
+						stub.beginTurn({
+							sessionId,
+							messageId,
+							text: message,
+							tenant: new ChatTurnTenant({
+								orgId,
+								userId: internalServiceUserId,
+								roles: [],
+								authMode: "self_hosted",
+							}),
+						}),
+					catch: () => undefined,
+				}).pipe(Effect.orElseSucceed(() => undefined))
+
 				if (!claimed) {
-					// A turn is already running for this session, which for an investigation means
-					// the pass is already under way. Treat it as retryable rather than a hard
-					// failure: the caller's restart path will see the running row next time.
+					// Either a turn is already running for this session — which for an investigation
+					// means the pass is already under way — or the Durable Object could not be
+					// reached. Both are retryable: the caller's restart path sees the row next time.
 					return yield* Effect.fail(
 						new InvestigationUnavailableError({
 							message: "This investigation already has a turn in flight.",
@@ -409,23 +427,6 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						}),
 					)
 				}
-
-				const tenant: TenantContext = {
-					orgId,
-					userId: internalServiceUserId,
-					roles: [],
-					authMode: "self_hosted",
-				}
-				yield* Effect.forkDetach(
-					runChatSessionTurn({
-						sessionId,
-						tenant,
-						env: env ?? {},
-						stub,
-						messageId,
-						submitDiagnosis,
-					}),
-				)
 
 				yield* Effect.annotateCurrentSpan({
 					"maple.investigation.start_result": "started",

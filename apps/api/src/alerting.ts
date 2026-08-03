@@ -16,10 +16,6 @@ export { EmailService } from "@/platform/EmailService"
 export { Env } from "@/platform/Env"
 export { EscalationService } from "./services/alerts/EscalationService"
 export { HazelOAuthService } from "./services/auth/HazelOAuthService"
-// The cron ticks open investigations, and Errors/Alerts/AnomalyDetection now take
-// `InvestigationService` as a dependency (it supplies the turn's `submit_diagnosis`
-// callback), so the alerting worker has to build it too.
-export { InvestigationService } from "./services/errors/InvestigationService"
 export { OrgMembersService } from "./services/org/OrgMembersService"
 export { OrgClickHouseSettingsService } from "./services/org/OrgClickHouseSettingsService"
 export { OrgIngestKeysService } from "./services/org/OrgIngestKeysService"

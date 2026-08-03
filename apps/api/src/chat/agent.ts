@@ -74,6 +74,14 @@ export interface ChatTurnInput {
 	 * into this module's imports.
 	 */
 	readonly extraTools?: Tools
+	/**
+	 * Whether this turn still holds the session's turn slot.
+	 *
+	 * Checked between steps so an abort takes effect at the next boundary instead of only after the
+	 * in-flight model call drains, and so a turn that has been superseded stops writing into a
+	 * conversation that has moved on. Defaults to "always current" for callers with no session.
+	 */
+	readonly isCurrent?: () => boolean
 }
 
 /**
@@ -222,6 +230,9 @@ const turnEnd = (
 	...(error === undefined ? {} : { error }),
 })
 
+/** A turn with no session attached (tests, one-shot callers) is always current. */
+const isCurrent = (input: ChatTurnInput): boolean => input.isCurrent === undefined || input.isCurrent()
+
 /**
  * One assistant turn, then either settle its tool calls and recurse, or stop.
  *
@@ -236,6 +247,13 @@ const runStep = (
 ): Stream.Stream<ChatTurnEvent> =>
 	Stream.suspend(() => {
 		const collected: Array<LLMEvent> = []
+		// Set by the catch below. `Stream.concat`'s second half runs unconditionally, so without an
+		// explicit flag a failed stream that still assembled a partial response would emit a
+		// *second* terminal event after the error one — and, if that partial response carried tool
+		// calls, would dispatch them and recurse after the turn had already been declared over.
+		// Those extra events land invisibly (the SSE route stops at the first `turn-end`) and
+		// surface on the next reload.
+		let failed = false
 
 		const live: Stream.Stream<ChatTurnEvent> = LLM.stream(request).pipe(
 			Stream.tap((event) => Effect.sync(() => collected.push(event))),
@@ -250,94 +268,117 @@ const runStep = (
 			// A model failure ends the turn as a recorded event rather than killing the stream —
 			// the session log is durable, so a client reconnecting after the failure must still be
 			// able to read why the turn stopped.
-			Stream.catch((error) =>
-				Stream.fromIterable([turnEnd(input, "error", toLlmCallError("chat.turn", error).message)]),
-			),
+			Stream.catch((error) => {
+				failed = true
+				return Stream.fromIterable([
+					turnEnd(input, "error", toLlmCallError("chat.turn", error).message),
+				])
+			}),
 		)
 
-		return Stream.concat(
-			live,
-			Stream.unwrap(
-				Effect.gen(function* () {
-					// The catch above already emitted a terminal event for a failed stream; a
-					// response that will not assemble means the same thing.
-					const response = LLMResponse.fromEvents(collected)
-					if (!response) return Stream.empty
+		const settleAndRecurse = Stream.unwrap(
+			Effect.gen(function* () {
+				if (failed) return Stream.empty
+				// Aborted between steps: the session already recorded the terminal event, so stop
+				// without emitting a second one.
+				if (!isCurrent(input)) return Stream.empty
 
-					const calls = response.events
-						.filter(LLMEvent.is.toolCall)
-						.filter((call) => !call.providerExecuted)
+				const response = LLMResponse.fromEvents(collected)
+				// A stream that neither failed nor assembled still ended the turn; say so, rather
+				// than leaving the log with no terminal event at all.
+				if (!response) return Stream.fromIterable([turnEnd(input, "stop")])
 
-					if (calls.length === 0) return Stream.fromIterable([turnEnd(input, "stop")])
+				const calls = response.events
+					.filter(LLMEvent.is.toolCall)
+					.filter((call) => !call.providerExecuted)
 
-					// The real interrupt. A gated call ends the turn immediately — the client
-					// renders an approval card from this event and applies it through
-					// `POST /api/chat/apply`. Read-only calls issued in the same turn are dropped
-					// rather than half-run, so the transcript never shows a partial turn.
-					const gated = calls.find((call) => MUTATING_TOOL_NAMES.has(call.name))
-					if (gated) {
-						const proposal: ChatTurnEvent = {
-							type: "tool-call",
-							messageId: input.messageId,
-							callId: gated.id,
-							name: gated.name,
-							input: gated.input,
-							proposed: true,
-						}
-						return Stream.fromIterable([proposal, turnEnd(input, "stop")])
+				if (calls.length === 0) return Stream.fromIterable([turnEnd(input, "stop")])
+
+				// The real interrupt. A gated call ends the turn immediately — the client renders an
+				// approval card from this event and applies it through `POST /api/chat/apply`.
+				// Read-only calls issued in the same turn are dropped rather than half-run, so the
+				// transcript never shows a partial turn.
+				const gated = calls.find((call) => MUTATING_TOOL_NAMES.has(call.name))
+				if (gated) {
+					const proposal: ChatTurnEvent = {
+						type: "tool-call",
+						messageId: input.messageId,
+						callId: gated.id,
+						name: gated.name,
+						input: gated.input,
+						proposed: true,
 					}
+					return Stream.fromIterable([proposal, turnEnd(input, "stop")])
+				}
 
-					const announced = calls.map(
-						(call): ChatTurnEvent => ({
-							type: "tool-call",
-							messageId: input.messageId,
-							callId: call.id,
-							name: call.name,
-							input: call.input,
-						}),
-					)
+				const announced = calls.map(
+					(call): ChatTurnEvent => ({
+						type: "tool-call",
+						messageId: input.messageId,
+						callId: call.id,
+						name: call.name,
+						input: call.input,
+					}),
+				)
 
-					const dispatched = yield* Effect.forEach(
-						calls,
-						(call) =>
-							ToolRuntime.dispatch(tools, call).pipe(
-								Effect.map((result) => [call, result] as const),
-							),
-						{ concurrency: TOOL_CONCURRENCY },
-					)
-
-					const settledEvents = dispatched.map(
-						([call, settled]): ChatTurnEvent => ({
-							type: "tool-result",
-							messageId: input.messageId,
-							callId: call.id,
-							output: settled.result.value,
-							...(settled.result.type === "error" ? { isError: true } : {}),
-						}),
-					)
-
-					const head = Stream.fromIterable([...announced, ...settledEvents])
-					if (step + 1 >= MAX_STEPS) {
-						return Stream.concat(head, Stream.fromIterable([turnEnd(input, "max-steps")]))
-					}
-
-					const next = LLM.updateRequest(request, {
-						messages: [
-							...request.messages,
-							response.message,
-							...dispatched.map(([call, settled]) =>
-								Message.tool(
-									ToolResultPart.make({
-										id: call.id,
-										name: call.name,
-										result: settled.result,
-									}),
+				// Announce first, settle second, as two stream segments. Emitting both together
+				// after `Effect.forEach` resolved meant a tool call only ever reached the log
+				// *already finished*, so the UI could never render one running — most of the point
+				// of streaming a turn that spends its time in tools.
+				const settled = Stream.unwrap(
+					Effect.gen(function* () {
+						const dispatched = yield* Effect.forEach(
+							calls,
+							(call) =>
+								ToolRuntime.dispatch(tools, call).pipe(
+									Effect.map((result) => [call, result] as const),
 								),
-							),
-						],
-					})
-					return Stream.concat(head, runStep(input, tools, next, step + 1))
-				}),
-			),
+							{ concurrency: TOOL_CONCURRENCY },
+						)
+
+						const results = dispatched.map(
+							([call, outcome]): ChatTurnEvent => ({
+								type: "tool-result",
+								messageId: input.messageId,
+								callId: call.id,
+								output: outcome.result.value,
+								...(outcome.result.type === "error" ? { isError: true } : {}),
+							}),
+						)
+
+						// Aborted while the tools were in flight: record what they returned so the
+						// transcript is not left with dangling calls, then stop.
+						if (!isCurrent(input)) return Stream.fromIterable(results)
+
+						if (step + 1 >= MAX_STEPS) {
+							return Stream.fromIterable([...results, turnEnd(input, "max-steps")])
+						}
+
+						const next = LLM.updateRequest(request, {
+							messages: [
+								...request.messages,
+								response.message,
+								...dispatched.map(([call, outcome]) =>
+									Message.tool(
+										ToolResultPart.make({
+											id: call.id,
+											name: call.name,
+											result: outcome.result,
+										}),
+									),
+								),
+							],
+						})
+						return Stream.concat(
+							Stream.fromIterable(results),
+							runStep(input, tools, next, step + 1),
+						)
+					}),
+				)
+
+				return Stream.concat(Stream.fromIterable(announced), settled)
+			}),
 		)
+
+		return Stream.concat(live, settleAndRecurse)
 	})

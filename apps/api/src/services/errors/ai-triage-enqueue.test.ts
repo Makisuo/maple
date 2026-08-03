@@ -37,9 +37,10 @@ const asOrgId = Schema.decodeUnknownSync(OrgId)
 const ORG = asOrgId("org_enqueue_test")
 
 /**
- * Stub `CHAT_SESSION` Durable Object namespace. Starting an autonomous turn is now a DO call plus
- * a detached fiber rather than an HTTP POST to the chat-flue Worker, so what a test observes is the
- * `beginTurn` call, not a `Request`.
+ * Stub `CHAT_SESSION` Durable Object namespace. Starting an autonomous turn is a single DO call
+ * rather than an HTTP POST to the chat-flue Worker, so what a test observes is the `beginTurn`
+ * call, not a `Request`. The real object also *runs* the turn inside itself; nothing here does,
+ * which is the point — the caller's only job is to claim the slot.
  */
 const fakeBinding = (options?: { readonly busy?: boolean }) => {
 	const created: Array<{ sessionId: string; messageId: string; text: string }> = []
@@ -47,11 +48,13 @@ const fakeBinding = (options?: { readonly busy?: boolean }) => {
 		created,
 		binding: {
 			idFromName: (name: string) => name,
-			get: (sessionId: string) => ({
+			get: () => ({
 				history: async () => [],
-				beginTurn: async (messageId: string, text: string) => {
-					created.push({ sessionId, messageId, text })
-					return options?.busy === true ? undefined : { cursor: 0, messageId }
+				beginTurn: async (input: { sessionId: string; messageId: string; text: string }) => {
+					created.push(input)
+					return options?.busy === true
+						? undefined
+						: { cursor: 0, messageId: input.messageId }
 				},
 				append: async () => 1,
 				endTurn: async () => undefined,
@@ -59,9 +62,6 @@ const fakeBinding = (options?: { readonly busy?: boolean }) => {
 		},
 	}
 }
-
-/** No test here lets a turn reach `submit_diagnosis`; failing loudly beats a silent no-op. */
-const submitDiagnosis = () => Effect.die(new Error("submit_diagnosis is not expected in these tests"))
 
 const enableSettings = Effect.gen(function* () {
 	const database = yield* Database
@@ -82,7 +82,6 @@ const baseInput = (binding: unknown, incidentId: string) => ({
 	incidentId,
 	context: { kind: "error" },
 	agentBinding: binding,
-	submitDiagnosis,
 })
 
 describe("maybeEnqueueTriage", () => {
