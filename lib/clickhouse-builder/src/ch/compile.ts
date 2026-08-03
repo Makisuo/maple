@@ -19,11 +19,11 @@ import { Effect, Option, Schema } from "effect"
 
 // ---------------------------------------------------------------------------
 // QueryBuilderError — tagged error for invariant violations in the DSL.
-// Catchable via `Effect.catchTag("@maple/query-engine/ch/QueryBuilderError")` at the service layer.
+// Catchable via `Effect.catchTag("@maple-dev/clickhouse-builder/QueryBuilderError")` at the service layer.
 // ---------------------------------------------------------------------------
 
 export class QueryBuilderError extends Schema.TaggedErrorClass<QueryBuilderError>()(
-	"@maple/query-engine/ch/QueryBuilderError",
+	"@maple-dev/clickhouse-builder/QueryBuilderError",
 	{
 		code: Schema.Literals(["SelectRequired", "UnresolvedParam"]),
 		message: Schema.String,
@@ -31,7 +31,7 @@ export class QueryBuilderError extends Schema.TaggedErrorClass<QueryBuilderError
 ) {}
 
 export class CompiledQueryDecodeError extends Schema.TaggedErrorClass<CompiledQueryDecodeError>()(
-	"@maple/query-engine/ch/CompiledQueryDecodeError",
+	"@maple-dev/clickhouse-builder/CompiledQueryDecodeError",
 	{
 		message: Schema.String,
 		rowIndex: Schema.Number,

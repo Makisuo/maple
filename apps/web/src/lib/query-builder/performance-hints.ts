@@ -1,4 +1,4 @@
-import { parseWhereClause, normalizeKey } from "@maple/query-engine/where-clause"
+import { parseWhereClause, normalizeKey } from "@maple/domain/where-clause"
 import { TRACE_LIST_MV_ATTR_MAP, TRACE_LIST_MV_RESOURCE_MAP } from "@maple/query-engine/traces-shared"
 
 export interface PerformanceHint {

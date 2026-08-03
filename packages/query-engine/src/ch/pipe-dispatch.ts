@@ -15,7 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import * as CH from "./index"
-import type { TracesMetric, AttributeFilter, MetricType } from "../query-engine"
+import type { TracesMetric, AttributeFilter, MetricType } from "@maple/domain/query-engine"
 import type { OrgId } from "@maple/domain"
 import { unsafeCompiledQuery, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import { Array as A, Match, Result, Schema } from "effect"

@@ -37,7 +37,7 @@ export interface EdgeCacheBackend {
  * would be a wire-contract change for no behavioural gain.
  */
 export class CacheBackend extends Context.Service<CacheBackend, EdgeCacheBackend>()(
-	"@maple/query-engine/caching/CacheBackend",
+	"@maple/cache/CacheBackend",
 ) {}
 
 interface MemoryEntry {

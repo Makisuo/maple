@@ -4,7 +4,7 @@ import { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 export { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 
 export class EdgeCacheIOError extends Schema.TaggedErrorClass<EdgeCacheIOError>()(
-	"@maple/api/EdgeCacheIOError",
+	"@maple/cache/EdgeCacheIOError",
 	{
 		op: Schema.Literals(["get", "put"]),
 		bucket: Schema.String,
@@ -307,7 +307,7 @@ export const makeEdgeCacheService = (
 }
 
 export class EdgeCacheService extends Context.Service<EdgeCacheService, EdgeCacheServiceShape>()(
-	"@maple/api/lib/EdgeCacheService",
+	"@maple/cache/EdgeCacheService",
 ) {
 	/**
 	 * Backed by the injected `CacheBackend` (Workers KV in prod, in-memory in

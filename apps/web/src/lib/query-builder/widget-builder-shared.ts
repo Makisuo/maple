@@ -21,7 +21,7 @@ import {
 	normalizeKey,
 	parseBoolean,
 	parseWhereClause as parseWhereClauses,
-} from "@maple/query-engine/where-clause"
+} from "@maple/domain/where-clause"
 
 // ---------------------------------------------------------------------------
 // Shared widget-builder vocabulary.

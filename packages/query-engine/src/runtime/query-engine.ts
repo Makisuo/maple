@@ -17,7 +17,7 @@ import {
 	type QueryEngineExecuteRequest,
 	type QuerySpec,
 	type TimeseriesPoint,
-} from "../query-engine"
+} from "@maple/domain/query-engine"
 import {
 	QueryEngineExecutionError,
 	QueryEngineTimeoutError,
