@@ -96,8 +96,15 @@ export function compilePipeQuery(
 			// union is scoped exactly when the branch is.
 			tenantScope:
 				current.tenantScope === "org" && previous.tenantScope === "org" ? "org" : "cross-org",
+			// `period` is typed as a plain String, not a `"current" | "previous"`
+			// literal union. The value is produced by our own SELECT so it is
+			// always one of the two at runtime — but the row schema describes the
+			// WIRE type, and ClickHouse reports the column as String. The SQL
+			// catalog's analyzer sweep decodes a synthetic zero-value row built
+			// from DESCRIBE output, where a String column is `""`; a literal union
+			// rejects that and fails the gate.
 			rowSchema: rowSchema
-				? Schema.Struct({ period: Schema.Literals(["current", "previous"]), ...rowSchema.fields })
+				? Schema.Struct({ period: Schema.String, ...rowSchema.fields })
 				: undefined,
 		})
 	}
