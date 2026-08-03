@@ -8,13 +8,32 @@
 // ---------------------------------------------------------------------------
 
 import { spawn } from "node:child_process"
+import { existsSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 export const clickhouseE2eEnabled = process.env.CLICKHOUSE_E2E === "1"
 export const clickhouseUrl = process.env.CLICKHOUSE_E2E_URL ?? "http://127.0.0.1:8123"
 export const clickhouseUser = process.env.CLICKHOUSE_E2E_USER ?? "maple"
 export const clickhousePassword = process.env.CLICKHOUSE_E2E_PASSWORD ?? "maple"
 
-const repoRoot = new URL("../../../..", import.meta.url).pathname
+/**
+ * Walk up to the workspace root instead of counting `../` segments. A fixed
+ * depth silently breaks the moment this file moves — which is exactly what
+ * happened when it moved out of src/lib — and nothing but a live ClickHouse
+ * run catches it, because the path is only built at runtime.
+ */
+const findRepoRoot = (): string => {
+	let dir = dirname(fileURLToPath(import.meta.url))
+	while (!existsSync(join(dir, "turbo.json"))) {
+		const parent = dirname(dir)
+		if (parent === dir) throw new Error("Could not locate the workspace root: no turbo.json above this file")
+		dir = parent
+	}
+	return dir
+}
+
+const repoRoot = findRepoRoot()
 
 /** Unique per suite so parallel test files never share (or drop) a database. */
 export const uniqueDatabase = (prefix: string): string =>
