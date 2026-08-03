@@ -137,7 +137,8 @@ const ALCHEMY_RPC_ERROR_TAG = "~alchemy/rpc/error" as const
 
 // Alchemy's schemaless RPC error envelope is deliberately tiny. Keeping this
 // encoder local avoids pulling its full Worker bridge into an already large API
-// bundle; chat-flue's `toRpcAsync` decodes this exact public wire shape.
+// bundle; alchemy's `toRpcAsync` on the caller side decodes this exact public
+// wire shape.
 const encodeRpcError = (error: unknown): unknown => {
 	if (error == null || typeof error !== "object") return error
 	const object = error as Record<string, unknown>
@@ -307,6 +308,10 @@ const handle = async (
 // so this static export keeps module-scope evaluation light (startup-CPU budget).
 export { ClickHouseSchemaApplyWorkflow } from "./workflows/ClickHouseSchemaApplyWorkflow"
 export { AiTriageWorkflow } from "./workflows/AiTriageWorkflow"
+// The durable chat transcript. Safe to export at module scope despite the 10021 startup-CPU
+// constraint: `ChatSession` imports only types from `@maple/domain/chat-session`, so it pulls
+// none of the app service graph in with it.
+export { ChatSession } from "./chat/ChatSession"
 
 // VCS sync queue consumer. Dynamic-imported (same startup-CPU-budget discipline
 // as the route graph above) to keep module-scope evaluation light.

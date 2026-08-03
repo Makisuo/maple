@@ -19,9 +19,9 @@ interface MessageActionsProps {
 
 /**
  * Assistant-message actions, revealed on hover of the enclosing `Message` row.
- * Deliberately limited to what the transport can honour: `@flue/react` exposes
- * only `sendMessage`, so there is no retry or stop to offer here, and no message
- * carries a timestamp to show.
+ * Deliberately limited to what `useMapleChat` exposes: just `sendMessage`, so
+ * there is no retry or stop to offer here, and no message carries a timestamp
+ * to show.
  */
 export function MessageActions({ message, permalink }: MessageActionsProps) {
 	const text = messageText(message)

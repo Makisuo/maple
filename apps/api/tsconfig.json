@@ -5,7 +5,8 @@
 		"target": "ES2022",
 		"module": "ESNext",
 		"jsx": "react-jsx",
-		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		// ES2023: `@maple/llm` (vendored) uses findLast/findLastIndex/toSorted.
+		"lib": ["ES2023", "DOM", "DOM.Iterable"],
 		"types": ["node", "@cloudflare/workers-types"],
 		"moduleResolution": "bundler",
 		"baseUrl": ".",

@@ -98,7 +98,10 @@ import { dateToMs, msToDate } from "@/platform/time"
 import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/cache"
-import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "@/services/warehouse/warehouse-org-quarantine"
+import {
+	isOrgWarehouseQuarantined,
+	quarantineOnConfigClassCause,
+} from "@/services/warehouse/warehouse-org-quarantine"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const encodeIssueListCursor = Schema.encodeSync(IssueListCursor)
@@ -473,7 +476,6 @@ const make: Effect.Effect<
 		onNone: () => undefined,
 		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
 	})
-	const investigationServiceToken = env.INTERNAL_SERVICE_TOKEN
 
 	const newErrorIssueId = () => decodeErrorIssueIdSync(randomUUID())
 	const newErrorIncidentId = () => decodeErrorIncidentIdSync(randomUUID())
@@ -2784,7 +2786,6 @@ const make: Effect.Effect<
 							issueId,
 						},
 						agentBinding: investigationAgentBinding,
-						internalServiceToken: investigationServiceToken,
 					}).pipe(Effect.provideService(Database, database))
 
 					return { touched: 1, opened: 1 }

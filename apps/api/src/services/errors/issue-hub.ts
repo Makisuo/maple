@@ -52,9 +52,8 @@ export interface UpsertAlertIssueInput {
 	readonly incidentId: AlertIncidentId
 	readonly serviceName: string
 	readonly timestamp: number
-	/** Raw CHAT_FLUE service binding off the worker env (may be undefined). */
+	/** Raw CHAT_SESSION Durable Object namespace off the worker env (may be undefined). */
 	readonly agentBinding: unknown
-	readonly internalServiceToken: Option.Option<Redacted.Redacted<string>>
 }
 
 export interface UpsertAlertIssueResult {
@@ -297,7 +296,6 @@ export const upsertAlertIssue: (
 				issueId,
 			},
 			agentBinding: input.agentBinding,
-			internalServiceToken: input.internalServiceToken,
 		})
 
 		return { issueId, action }

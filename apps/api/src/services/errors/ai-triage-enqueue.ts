@@ -1,4 +1,3 @@
-import { CHAT_FLUE_ORIGIN } from "@/http/chat-flue-origin"
 import { randomUUID } from "node:crypto"
 import {
 	type AiTriageIncidentKind,
@@ -14,29 +13,31 @@ import { AiTriageRunId, InvestigationId } from "@maple/domain/primitives"
 import { aiTriageSettings, investigations } from "@maple/db"
 import { and, eq, gte, lt, sql } from "drizzle-orm"
 import { Cause, Clock, Data, Duration, Effect, Exit, Option, Redacted, Schema } from "effect"
+import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { Database } from "@/platform/DatabaseLive"
+import { isChatSessionNamespace } from "@/chat/session"
+import { UserId } from "@maple/domain/primitives"
 
-/** The service binding hosting the durable `maple-chat` investigation agent. */
-export const INVESTIGATION_AGENT_BINDING = "CHAT_FLUE"
+/** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
+const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
+
+/** A `beginTurn` call that the Durable Object could not complete (overload, eviction, limits). */
+class InvestigationStartError extends Data.TaggedError("@maple/api/InvestigationStartError")<{
+	readonly message: string
+}> {}
+
+/**
+ * The binding that hosts an investigation's durable conversation. This used to be the `CHAT_FLUE`
+ * service binding — a whole other Worker — and is now the `ChatSession` Durable Object namespace in
+ * this Worker.
+ */
+export const INVESTIGATION_AGENT_BINDING = "CHAT_SESSION"
 
 /**
  * Kept for the one-release migration window because the legacy workflow module
  * still imports it. New producers must use `INVESTIGATION_AGENT_BINDING`.
  */
 export const AI_TRIAGE_WORKFLOW_BINDING = "AI_TRIAGE_WORKFLOW"
-
-interface AgentBinding {
-	readonly fetch: typeof fetch
-}
-
-class InvestigationAgentRequestError extends Data.TaggedError(
-	"@maple/api/lib/InvestigationAgentRequestError",
-)<{
-	readonly message: string
-}> {}
-
-const isAgentBinding = (value: unknown): value is AgentBinding =>
-	typeof value === "object" && value !== null && typeof (value as { fetch?: unknown }).fetch === "function"
 
 const decodeInvestigationId = Schema.decodeUnknownSync(InvestigationId)
 const decodeLegacyRunId = Schema.decodeUnknownSync(AiTriageRunId)
@@ -117,8 +118,8 @@ export interface MaybeEnqueueTriageInput {
 	readonly incidentId: string
 	readonly issueId?: ErrorIssueId
 	readonly context: Record<string, unknown>
+	/** The `CHAT_SESSION` Durable Object namespace, read off the worker env by the caller. */
 	readonly agentBinding: unknown
-	readonly internalServiceToken: Option.Option<Redacted.Redacted<string>>
 	/** Manual starts ignore the automation-enabled flag, but never the quota. */
 	readonly force?: boolean
 }
@@ -249,8 +250,12 @@ export const maybeEnqueueTriage: (
 			return { enqueued: false, reason: "duplicate" as const }
 		}
 
-		const agentBinding = input.agentBinding
-		if (!isAgentBinding(agentBinding)) {
+		const namespace = input.agentBinding
+		const sessionId = `${input.orgId}:inv-${investigationId}`
+		const stub = isChatSessionNamespace(namespace)
+			? namespace.get(namespace.idFromName(sessionId))
+			: undefined
+		if (!stub) {
 			yield* database.execute((db) =>
 				db
 					.update(investigations)
@@ -276,85 +281,42 @@ export const maybeEnqueueTriage: (
 			return { enqueued: false, investigationId, reason: "no_binding" as const }
 		}
 
-		const token = Option.getOrUndefined(input.internalServiceToken)
-		if (token === undefined) {
-			yield* database.execute((db) =>
-				db
-					.update(investigations)
-					.set({
-						status: "failed",
-						error: "agent_unavailable: the internal service token is not configured",
-						updatedAt: new Date(nowMs),
-					})
-					.where(eq(investigations.id, investigationId)),
-			)
-			yield* Effect.annotateCurrentSpan({
-				orgId: input.orgId,
-				"maple.investigation.id": investigationId,
-				"maple.investigation.start_result": "missing_service_token",
-			})
-			yield* Effect.logError("Investigation internal service token is unavailable").pipe(
-				Effect.annotateLogs({
-					orgId: input.orgId,
-					incidentId: input.incidentId,
-					investigationId,
-				}),
-			)
-			return { enqueued: false, investigationId, reason: "no_binding" as const }
-		}
-
-		const instanceId = `${input.orgId}:inv-${investigationId}`
 		const message = [
 			"Begin the autonomous investigation now.",
 			"Use the preserved subject snapshot below as the source context, gather evidence with tools, and call submit_diagnosis exactly once.",
 			JSON.stringify({ subject, snapshot }),
 		].join("\n\n")
-		const started = yield* Effect.exit(
-			Effect.tryPromise({
-				try: (signal) =>
-					agentBinding.fetch(
-						new Request(
-							`${CHAT_FLUE_ORIGIN}/agents/maple-chat/${encodeURIComponent(instanceId)}`,
-							{
-								method: "POST",
-								headers: {
-									authorization: `Bearer maple_svc_${Redacted.value(token)}`,
-									"content-type": "application/json",
-								},
-								body: JSON.stringify({ message }),
-								signal,
-							},
-						),
-					),
-				catch: (cause) =>
-					new InvestigationAgentRequestError({
-						message:
-							cause instanceof Error ? cause.message : "Investigation agent request failed",
+
+		// Starting the turn is one Durable Object call: `beginTurn` claims the slot, records the
+		// prompt, and runs the turn inside the object. There is consequently no "the agent rejected
+		// it with HTTP 4xx" outcome any more — the only failure before the turn begins is a busy
+		// session — and nothing here has to keep the turn alive, which matters because the cron
+		// ticks that call this run under `runScheduledEffect` and dispose their runtime the moment
+		// the tick settles.
+		const messageId = crypto.randomUUID()
+		const claimed = yield* Effect.tryPromise({
+			try: () =>
+				stub.beginTurn({
+					sessionId,
+					messageId,
+					text: message,
+					tenant: encodeChatTurnTenant({
+						orgId: input.orgId,
+						userId: internalServiceUserId,
+						roles: [],
+						authMode: "self_hosted",
 					}),
-			}).pipe(
-				Effect.timeoutOrElse({
-					duration: Duration.seconds(15),
-					orElse: () =>
-						Effect.fail(
-							new InvestigationAgentRequestError({
-								message: "Investigation agent request timed out after 15 seconds",
-							}),
-						),
 				}),
-			),
-		)
-		if (Exit.isFailure(started) || !started.value.ok) {
-			const error = Exit.isFailure(started)
-				? Cause.pretty(started.cause)
-				: `agent returned HTTP ${started.value.status}`
-			const retryable =
-				Exit.isFailure(started) || started.value.status === 429 || started.value.status >= 500
+			catch: (cause) => new InvestigationStartError({ message: String(cause) }),
+		}).pipe(Effect.catchTag("@maple/api/InvestigationStartError", () => Effect.succeed(undefined)))
+
+		if (!claimed) {
 			yield* database.execute((db) =>
 				db
 					.update(investigations)
 					.set({
 						status: "failed",
-						error: retryable ? `start_failed: ${error}; retry` : `start_rejected: ${error}`,
+						error: "start_failed: the investigation session could not start a turn; retry",
 						updatedAt: new Date(nowMs),
 					})
 					.where(eq(investigations.id, investigationId)),
@@ -362,22 +324,9 @@ export const maybeEnqueueTriage: (
 			yield* Effect.annotateCurrentSpan({
 				orgId: input.orgId,
 				"maple.investigation.id": investigationId,
-				"maple.investigation.start_result": retryable ? "start_failed" : "start_rejected",
+				"maple.investigation.start_result": "start_failed",
 			})
-			yield* Effect.logWarning("Investigation agent start failed").pipe(
-				Effect.annotateLogs({
-					orgId: input.orgId,
-					incidentId: input.incidentId,
-					investigationId,
-					retryable,
-					error,
-				}),
-			)
-			return {
-				enqueued: false,
-				investigationId,
-				reason: retryable ? ("error" as const) : ("rejected" as const),
-			}
+			return { enqueued: false, investigationId, reason: "error" as const }
 		}
 
 		yield* Effect.annotateCurrentSpan({

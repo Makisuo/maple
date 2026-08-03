@@ -106,8 +106,8 @@ const isStructured = (value: unknown): value is StructuredToolOutput =>
 /**
  * Recover the rich payload a Maple tool renders as a table, chart or tree.
  *
- * Tool results arrive as `{ text, ui? }` — `apps/chat-flue`'s MCP adapter splits
- * the report text from the `__maple_ui` payload. The legacy shapes below are the
+ * Tool results arrive as `{ text, ui? }` — the chat agent's MCP adapter
+ * (`apps/api/src/chat/`) splits the report text from the `__maple_ui` payload. The legacy shapes below are the
  * two the runtime produced before tool results could be structured JSON: a raw
  * MCP `{ content: [...] }` object, and a string with the UI JSON concatenated
  * onto the report. Both still exist in conversations recorded earlier, and a

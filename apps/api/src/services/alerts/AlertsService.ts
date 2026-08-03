@@ -1179,7 +1179,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				onNone: () => undefined,
 				onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
 			})
-			const investigationServiceToken = env.INTERNAL_SERVICE_TOKEN
 			const now = runtime.now
 			const makeUuid = () => runtime.makeUuid()
 			const deliveryTimeoutMs = () => runtime.deliveryTimeoutMs()
@@ -4200,7 +4199,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									: (normalized.serviceNames[0] ?? ""),
 							timestamp,
 							agentBinding: investigationAgentBinding,
-							internalServiceToken: investigationServiceToken,
 						}).pipe(Effect.provideService(Database, database))
 					} else {
 						yield* Effect.logWarning(

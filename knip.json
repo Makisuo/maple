@@ -1,6 +1,6 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
-	"ignoreWorkspaces": ["apps/ingest", "apps/landing", "apps/mobile", "examples/*"],
+	"ignoreWorkspaces": ["apps/ingest", "apps/landing", "apps/mobile", "examples/*", "lib/llm"],
 	"ignore": ["**/routeTree.gen.ts", ".context/**", ".deepsec/**"],
 	"ignoreExportsUsedInFile": true,
 	"workspaces": {
@@ -24,16 +24,6 @@
 		},
 		"apps/alerting": {
 			"entry": ["alchemy.run.ts"]
-		},
-		"apps/chat-flue": {
-			"entry": [
-				"src/app.ts",
-				"src/agents/*.ts",
-				"src/workflows/*.ts",
-				"flue.config.ts",
-				"alchemy.run.ts"
-			],
-			"ignoreDependencies": ["agents", "cloudflare"]
 		},
 		"apps/local-ui": {
 			"entry": ["src/worker.ts", "alchemy.run.ts"]

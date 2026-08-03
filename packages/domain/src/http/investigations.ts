@@ -159,7 +159,7 @@ export class InvestigationStatusUpdateRequest extends Schema.Class<Investigation
 }) {}
 
 /**
- * The internal write the chat-flue `submit_diagnosis` tool posts once the
+ * The internal write the `submit_diagnosis` tool posts once the
  * agent finishes its diagnostic pass. Carries the structured report plus the
  * model + token usage for billing/observability. Re-uses `AiTriageResult` and
  * `AiTriageEvidence` verbatim — the report shape is unchanged.

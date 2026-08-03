@@ -6,7 +6,6 @@ import type { IssueSeverity } from "@maple/domain/http"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { ChatConversation } from "@/components/chat/chat-conversation"
-import { FlueClientProvider } from "@/components/chat/flue-client-provider"
 import type { InvestigationContext } from "@/components/chat/investigation-context"
 import { SeverityBadge } from "@/components/errors/severity-badge"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -162,18 +161,16 @@ export function InvestigationView({
 					    scrolling page is what previously needed a `calc(100dvh - 12rem)`
 					    guess that the billing banners could invalidate. */}
 					<DashboardLayout.Fill>
-						<FlueClientProvider>
-							<ChatConversation
-								tabId={`inv-${investigation.id}`}
-								isActive
-								mode="investigation"
-								investigationContext={context}
-								subjectSeededByServer
-								showAttachmentCard={false}
-								readOnly={isResolved ? "resolved" : false}
-								fallbackDiagnosis={investigation.report}
-							/>
-						</FlueClientProvider>
+						<ChatConversation
+							tabId={`inv-${investigation.id}`}
+							isActive
+							mode="investigation"
+							investigationContext={context}
+							subjectSeededByServer
+							showAttachmentCard={false}
+							readOnly={isResolved ? "resolved" : false}
+							fallbackDiagnosis={investigation.report}
+						/>
 					</DashboardLayout.Fill>
 				</DashboardLayout.Content>
 				<DashboardLayout.RightPanel title="Investigation context" width="w-80">

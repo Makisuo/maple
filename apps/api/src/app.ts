@@ -50,6 +50,7 @@ import { HttpOrgClickHouseSettingsLive } from "@/routes/v1/org-clickhouse-settin
 import { HttpOrganizationsLive } from "@/routes/v1/organizations.http"
 import { PlanetScaleWebhookRouter } from "@/routes/v1/planetscale-webhook.http"
 import { SlackCallbackRouter, SlackInternalRouter } from "@/routes/v1/slack-integration.http"
+import { ChatSessionsRouter } from "@/routes/v1/chat-sessions.http"
 import { PrometheusScrapeProxyRouter } from "@/routes/v1/prometheus-scrape-proxy.http"
 import { ScraperInternalRouter } from "@/routes/v1/scraper-internal.http"
 import { VcsWebhookRouter } from "@/routes/v1/vcs-webhook.http"
@@ -244,7 +245,13 @@ const SetupAuditServiceLive = SetupAuditService.layer.pipe(Layer.provideMerge(Wa
 // AnomalyDetectionService reads it via Effect.serviceOption, so it degrades
 // gracefully when absent and is provided at worker scope where needed.
 const AnomalyDetectionServiceLive = AnomalyDetectionService.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive, EdgeCacheServiceLive)),
+	Layer.provideMerge(
+		Layer.mergeAll(
+			CoreServicesLive,
+			WarehouseQueryServiceLive,
+			EdgeCacheServiceLive,
+		),
+	),
 )
 
 const AiTriageServiceLive = AiTriageService.layer.pipe(Layer.provideMerge(CoreServicesLive))
@@ -363,6 +370,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
 	ApiV2Routes,
+	ChatSessionsRouter,
 	IntegrationsCallbackRouter,
 	SlackCallbackRouter,
 	SlackInternalRouter,

@@ -38,7 +38,7 @@ export interface CreateMapleApiOptions {
 	domains: MapleDomains
 }
 
-/** Alchemy resource type carried across the chat-flue service binding. */
+/** Alchemy resource type for the API Worker, carrying its internal RPC surface. */
 export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcShape>
 
 export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
@@ -119,6 +119,10 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			runId: string
 		}>(resolveWorkerName("ai-triage", stage), { className: "AiTriageWorkflow" })
 
+		// Durable chat transcripts, one Durable Object per "<orgId>:<tabId>". v2 provisions new
+		// DO classes as SQLite-backed by default. Class is exported from src/worker.ts.
+		const chatSession = Cloudflare.DurableObject("chat-session", { className: "ChatSession" })
+
 		// Vendor-agnostic VCS sync queue (commit backfill + webhook deltas). The same
 		// `api` worker is both producer (binding) and consumer (Queues.Consumer
 		// below). Local dev is wired separately in wrangler.jsonc so miniflare runs
@@ -155,6 +159,13 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
+				// Workers AI (`env.AI`, the v1 `Ai()` binding), driving the AI-triage agent on
+				// `@maple/llm`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
+				// resource, which also fronts model calls with caching/rate-limits/logging.
+				// NOTE: the deploy token needs the account-level "AI Gateway: Edit" permission
+				// for this resource.
+				AI: Cloudflare.AI.Gateway("maple-api-ai"),
+				CHAT_SESSION: chatSession,
 				MCP_SESSIONS: mcpSessions,
 				VCS_SYNC_QUEUE: vcsSyncQueue,
 				VCS_SYNC_QUEUE_NAME: vcsSyncQueueName,

@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import type { FailedSend } from "@flue/react"
 import { Exit } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { toastManager } from "@maple/ui/components/ui/toast"
 import { useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { useFlueChat } from "@/hooks/use-flue-chat"
+import { useMapleChat, type FailedSend } from "@/hooks/use-maple-chat"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
 import {
 	investigationNoun,
@@ -143,8 +142,8 @@ export function ChatConversation({
 		return base
 	}, [subjectSeededByServer, mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
 
-	const { messages, status, isLoading, historyReady, failedSends, sendMessage, stop, canStop } =
-		useFlueChat({ tabId, context })
+	const { sessionId, messages, status, isLoading, historyReady, failedSends, sendMessage, stop, canStop } =
+		useMapleChat({ tabId, context })
 	const diagnosisMessageId = useMemo(() => findDiagnosisMessageId(messages), [messages])
 
 	// Apply an approved proposal via Maple's authenticated API (propose-then-apply).
@@ -160,8 +159,18 @@ export function ChatConversation({
 			next.set(toolCallId, outcome)
 			return next
 		})
-	const handleApprove = async (toolCallId: string, tool: string, input: unknown) => {
-		const exit = await applyProposal({ payload: makeChatApplyPayload(tool, input) })
+	const handleApprove = async (
+		messageId: string,
+		toolCallId: string,
+		tool: string,
+		input: unknown,
+	) => {
+		// `sessionId` + `messageId` + `toolCallId` are what let the server settle the proposal in the
+		// durable transcript, so the card resolves on every device and the model's next turn knows
+		// the mutation happened.
+		const exit = await applyProposal({
+			payload: makeChatApplyPayload(tool, input, { sessionId, messageId, toolCallId }),
+		})
 		if (Exit.isSuccess(exit)) {
 			if (exit.value.isError) {
 				toastManager.add({ title: exit.value.content || `Couldn't apply ${tool}`, type: "error" })
@@ -335,7 +344,7 @@ function InvestigationLead({ ctx }: { ctx: InvestigationContext }) {
 }
 
 /**
- * A send that never reached the server. `@flue/react` keeps the optimistic
+ * A send that never reached the server. `useMapleChat` keeps the optimistic
  * message in the transcript rather than dropping it, so the only thing missing is
  * a way to try again.
  */

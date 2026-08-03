@@ -28,6 +28,7 @@ import {
 	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
+import { InvestigationService } from "@/services/errors/InvestigationService"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
@@ -90,6 +91,11 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 	const orgMembersLive = Layer.succeed(OrgMembersService, {
 		resolveMembers: () => Effect.succeed([]),
 	})
+	// Held by AlertsService only to hand an autonomous investigation turn its `submit_diagnosis`
+	// tool; nothing in these tests starts one. The real layer is cheap — Env plus the database.
+	const investigationsLive = InvestigationService.layer.pipe(
+		Layer.provide(Layer.mergeAll(envLive, testDb.layer)),
+	)
 	const alertsLive = AlertsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -101,6 +107,7 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 				hazelOAuthLive,
 				emailLive,
 				orgMembersLive,
+				investigationsLive,
 			),
 		),
 	)

@@ -3,7 +3,7 @@ import { emitAgentLog } from "#lib/telemetry-log.js"
 
 /**
  * Unconditional structured turn-outcome + tool-failure logging — the eve-native
- * port of chat-flue's `observe()` bridge in apps/chat-flue/src/app.ts. It stays
+ * port of chat-flue's `observe()` bridge in apps/api/src/chat/agent.ts. It stays
  * on whether or not the OTel export (agent/instrumentation.ts) is enabled:
  * these lines are the primary signal for the "agent did nothing" failure mode.
  *

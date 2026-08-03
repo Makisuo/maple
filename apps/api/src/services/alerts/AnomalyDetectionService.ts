@@ -36,7 +36,10 @@ import {
 import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import { CH, parseWarehouseDateTime, formatWarehouseDateTime } from "@maple/query-engine"
 import { EdgeCacheService } from "@maple/cache"
-import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "@/services/warehouse/warehouse-org-quarantine"
+import {
+	isOrgWarehouseQuarantined,
+	quarantineOnConfigClassCause,
+} from "@/services/warehouse/warehouse-org-quarantine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
@@ -233,7 +236,6 @@ const make = Effect.gen(function* () {
 		onNone: () => undefined,
 		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
 	})
-	const investigationServiceToken = env.INTERNAL_SERVICE_TOKEN
 
 	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 		database.execute(fn).pipe(
@@ -1565,7 +1567,6 @@ const make = Effect.gen(function* () {
 								detectedAt: new Date(nowMs).toISOString(),
 							},
 							agentBinding: investigationAgentBinding,
-							internalServiceToken: investigationServiceToken,
 						}).pipe(Effect.provideService(Database, database))
 						if (triage.enqueued) {
 							yield* dbExecute((db) =>

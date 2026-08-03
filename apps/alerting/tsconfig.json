@@ -4,7 +4,9 @@
 		"target": "ES2022",
 		"module": "ESNext",
 		"jsx": "react-jsx",
-		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		// ES2023: this worker's layer graph reaches apps/api, which reaches the vendored
+		// `@maple/llm` (findLast/findLastIndex/toSorted). Mirrors apps/api/tsconfig.json.
+		"lib": ["ES2023", "DOM", "DOM.Iterable"],
 		"types": ["node", "@cloudflare/workers-types"],
 		"moduleResolution": "bundler",
 		"allowImportingTsExtensions": true,
