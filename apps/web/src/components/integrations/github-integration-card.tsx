@@ -20,7 +20,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { formatRelativeFrom } from "@maple/ui/time-format"
+import { formatRelativeFrom } from "@maple/ui/lib/time-format"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
 import {

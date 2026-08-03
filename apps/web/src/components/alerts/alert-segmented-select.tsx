@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { useId } from "react"
 import { motion } from "motion/react"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { CheckIcon } from "@/components/icons"
 
 export type AlertSegmentedOption<T extends string> = {

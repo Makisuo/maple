@@ -9,7 +9,7 @@ import { ActorAvatar } from "@/components/errors/actor-chip"
 import { shortIssueId } from "@/components/errors/issue-id"
 import { WorkflowBadge } from "@/components/errors/workflow-badge"
 import { ArrowRightIcon, LinkIcon, XmarkIcon } from "@/components/icons"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 

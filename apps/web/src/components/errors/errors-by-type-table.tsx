@@ -1,6 +1,6 @@
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { TableSkeleton } from "@maple/ui/components/ui/table-skeleton"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Fragment, useState } from "react"
 import { Link } from "@tanstack/react-router"
@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type GetErrorsByTypeInput, type ErrorByType } from "@/api/warehouse/errors"
-import { formatDuration } from "@maple/ui/format"
+import { formatDuration } from "@maple/ui/lib/format"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import {
 	getErrorDetailTracesResultAtom,

@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react"
 import { relativeToAbsolute } from "@/lib/time-utils"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 interface ShorthandInputProps {
 	onApply: (range: { startTime: string; endTime: string }, value: string, label: string) => void

@@ -29,7 +29,7 @@ import {
 import { formatBucketLabel } from "@maple/ui/lib/format"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 /** The single-series signal line and its area fill — one fixed accent, never hashed. */
 const SIGNAL_COLOR = "var(--chart-1)"

@@ -6,7 +6,7 @@ import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
 import { ArrowUpDownIcon } from "@/components/icons"
 import { useTableSort } from "@/hooks/use-table-sort"
-import { formatValueByUnit } from "@maple/ui/format"
+import { formatValueByUnit } from "@maple/ui/lib/format"
 
 interface TableWidgetProps {
 	dataState: WidgetDataState

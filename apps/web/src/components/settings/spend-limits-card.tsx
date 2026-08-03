@@ -7,7 +7,7 @@ import { SpendLimits, UpdateSpendLimitsRequest, type SpendEnforcementMode } from
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { BellIcon } from "@/components/icons"
 import { useAtomSet } from "@/lib/effect-atom"

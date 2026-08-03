@@ -2,7 +2,7 @@ import type { AlertDestinationType } from "@maple/domain/http"
 import { useState, type ReactNode } from "react"
 import { CodeIcon, DiscordIcon, EnvelopeIcon, HazelIcon, SlackIcon } from "@/components/icons"
 import { SLACK_ACCENT, SLACK_ACCENT_ON_LIGHT } from "@/components/integrations/integration-catalog"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 const BRANDFETCH_CLIENT_ID = "1id0IQ-4i8Z46-n-DfQ"
 

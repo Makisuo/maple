@@ -21,8 +21,8 @@ import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
 } from "@/lib/services/atoms/ingestion-atoms"
-import { formatNumber } from "@maple/ui/format"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatNumber } from "@maple/ui/lib/format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 type IssueKind = V2Recommendation["kind"]
 type IssueStatus = V2Recommendation["status"]

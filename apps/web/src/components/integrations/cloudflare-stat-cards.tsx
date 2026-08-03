@@ -5,7 +5,7 @@ import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkl
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { CLOUDFLARE_ACCENT } from "./integration-catalog"
 import { toRowUsage } from "./cloudflare-zone-board"
 

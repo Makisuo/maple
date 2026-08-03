@@ -7,9 +7,9 @@ import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import type { CloudflareDurableObjectRow, CloudflareQueueRow } from "@/api/warehouse/cloudflare-infra"
 import { cloudflarePlatformResourcesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { ColumnHead, DataTable, useTableSort } from "../primitives/data-table"
-import { formatBytes, formatPercent } from "@maple/ui/format"
+import { formatBytes, formatPercent } from "@maple/ui/lib/format"
 import { errorRateClass } from "./constants"
 
 const ROW_CLASS =

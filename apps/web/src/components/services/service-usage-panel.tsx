@@ -1,6 +1,6 @@
-import { formatNumber, formatStorageBytes } from "@maple/ui/format"
+import { formatNumber, formatStorageBytes } from "@maple/ui/lib/format"
 import { useMemo } from "react"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { getServiceUsageResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"

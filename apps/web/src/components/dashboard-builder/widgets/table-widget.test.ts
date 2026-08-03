@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatValueByUnit } from "@maple/ui/format"
+import { formatValueByUnit } from "@maple/ui/lib/format"
 
 import { buildRowKeys, formatCellValue } from "./table-widget"
 

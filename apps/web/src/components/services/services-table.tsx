@@ -16,13 +16,13 @@ import {
 	serviceHealthRowKey,
 	useServiceHealthSummary,
 } from "@/components/services/use-service-health-summary"
-import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
+import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { formatErrorRate } from "@maple/ui/lib/format"
 import {
 	CommitShaHoverCard,

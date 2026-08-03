@@ -9,7 +9,7 @@ import {
 	ComboboxList,
 	ComboboxTrigger,
 } from "@maple/ui/components/ui/combobox"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { ChevronDownIcon, PlusIcon } from "@/components/icons"
 import {
 	useDashboardVariables,

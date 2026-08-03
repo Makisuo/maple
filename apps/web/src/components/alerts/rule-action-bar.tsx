@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import {
 	CheckIcon,

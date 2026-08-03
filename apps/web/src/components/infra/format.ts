@@ -1,6 +1,6 @@
-import { toEpochMs } from "@maple/ui/time-format"
+import { toEpochMs } from "@maple/ui/lib/time-format"
 
-// Generic number/byte/percent formatting lives in `@maple/ui/format`; only
+// Generic number/byte/percent formatting lives in `@maple/ui/lib/format`; only
 // infra-specific status policy stays here.
 
 export type HostStatus = "active" | "idle" | "down"

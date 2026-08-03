@@ -62,8 +62,8 @@ import {
 	TrashIcon,
 } from "@/components/icons"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import { formatDuration, formatNumber } from "@maple/ui/format"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatDuration, formatNumber } from "@maple/ui/lib/format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { diagnoseScrapeError } from "@/lib/scrape-error-diagnosis"
 import { scheduledStatusFromChecks, scheduledStatusFromRollup } from "@/lib/scrape-target-status"
 import { catalogEntry } from "../integrations/integration-catalog"

@@ -2,9 +2,9 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { LatencyValue } from "@maple/ui/components/latency-value"
 
 import type { CloudflareWorkerRow } from "@/api/warehouse/cloudflare-infra"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { ColumnHead, DataTable, useTableSort } from "../primitives/data-table"
-import { formatPercent } from "@maple/ui/format"
+import { formatPercent } from "@maple/ui/lib/format"
 import { errorRateClass } from "./constants"
 
 type SortKey =

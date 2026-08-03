@@ -13,8 +13,8 @@ import {
 	NetworkNodesIcon,
 	PulseIcon,
 } from "@maple/ui/components/icons"
-import { cn } from "@maple/ui/utils"
-import { formatDuration } from "@maple/ui/format"
+import { cn } from "@maple/ui/lib/utils"
+import { formatDuration } from "@maple/ui/lib/format"
 import type { SessionTranscriptOutput } from "@maple/query-engine/ch"
 import {
 	useLocalSessionDetail,

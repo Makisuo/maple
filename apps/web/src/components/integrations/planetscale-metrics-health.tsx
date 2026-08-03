@@ -1,9 +1,9 @@
 import { useState } from "react"
 
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import type { PlanetScaleScrapeTargetSummary } from "@maple/domain/http"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 type HealthState = "degraded" | "waiting" | "stalled" | "healthy"
 

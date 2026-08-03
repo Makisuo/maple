@@ -10,7 +10,7 @@ import {
 } from "@maple/ui/components/ui/navigation-menu"
 import { buttonVariants } from "@maple/ui/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@maple/ui/components/ui/sheet"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import * as m from "../paraglide/messages"
 import { broadcastSignedIn } from "./auth-signal"
 import { ClerkProvider } from "./ClerkProvider"

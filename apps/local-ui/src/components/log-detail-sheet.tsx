@@ -21,7 +21,7 @@ import {
 } from "@maple/ui/components/icons"
 import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@maple/ui/components/attributes"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import type { LocalLog } from "../lib/log-shape"
 import { navigate } from "../lib/router"
 import { ErrorSection } from "@maple/ui/components/error-section"

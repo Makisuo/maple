@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Link } from "@tanstack/react-router"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import {
 	getSessionTranscriptResultAtom,

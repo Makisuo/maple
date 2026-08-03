@@ -6,7 +6,7 @@ import { Spinner } from "@maple/ui/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { QueryBuilderLineChart } from "@maple/ui/components/charts/line/query-builder-line-chart"
 import { MetricTypeBadge } from "@maple/ui/components/metrics/metric-type-badge"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import {
 	useLocalMetricBreakdown,
 	useLocalMetricEntry,

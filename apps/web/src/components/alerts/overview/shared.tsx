@@ -6,7 +6,7 @@ import { signalLabels } from "@/lib/alerts/form-utils"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { TableCell, TableRow } from "@maple/ui/components/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 /* -------------------------------------------------------------------------- */
 /*  Signal badge tone                                                         */

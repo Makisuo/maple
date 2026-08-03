@@ -17,7 +17,7 @@ import {
 } from "@/components/icons"
 import { setupAuditAtom } from "@/lib/services/atoms/audit-atoms"
 import type { SettingsTab } from "@/components/settings/settings-nav"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 type Severity = V2SetupAuditCheck["severity"]
 type Category = V2SetupAuditCheck["category"]

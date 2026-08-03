@@ -1,4 +1,4 @@
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import type { WidgetFixContext } from "./widget-fix-context"
 
 interface WidgetFixAttachmentCardProps {

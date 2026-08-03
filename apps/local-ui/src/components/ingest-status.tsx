@@ -4,9 +4,9 @@
 
 import type { ReactNode } from "react"
 import { ConnectionIcon } from "@maple/ui/components/icons"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { LOCAL_OTLP_ENDPOINT } from "../lib/constants"
-import { formatRelativeFrom } from "@maple/ui/time-format"
+import { formatRelativeFrom } from "@maple/ui/lib/time-format"
 import { useLocalIngestPulse } from "../hooks/use-local-ingest-pulse"
 
 // Data newer than this reads as "live"; the poll cadence keeps it honest.

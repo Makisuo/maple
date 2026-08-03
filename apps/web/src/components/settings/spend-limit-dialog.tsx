@@ -16,7 +16,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Radio, RadioGroup } from "@maple/ui/components/ui/radio-group"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { useAtomSet } from "@/lib/effect-atom"
 import { BILLING_SPEND_LIMITS_KEY, updateSpendLimitsMutation } from "@/lib/services/atoms/billing-atoms"

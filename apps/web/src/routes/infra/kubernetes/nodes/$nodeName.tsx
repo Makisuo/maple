@@ -16,7 +16,7 @@ import { PageHero, HeroChip } from "@/components/infra/primitives/page-hero"
 import { StatRail, StatRailItem } from "@/components/infra/primitives/stat-rail"
 import { listPodsResultAtom, nodeDetailSummaryResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TIME_PRESETS, bucketSecondsFor } from "@/components/infra/constants"
-import { formatUptime } from "@maple/ui/format"
+import { formatUptime } from "@maple/ui/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import type { NodeInfraMetric } from "@/api/warehouse/infra"
 

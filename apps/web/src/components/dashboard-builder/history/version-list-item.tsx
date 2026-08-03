@@ -1,7 +1,7 @@
 import { cn } from "@maple/ui/lib/utils"
 import type { DashboardVersionChangeKind } from "@maple/domain/http"
 import type { V2DashboardVersion } from "@maple/domain/http/v2"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { ArrowPathIcon } from "@/components/icons"
 
 const KIND_LABEL: Record<DashboardVersionChangeKind, string> = {

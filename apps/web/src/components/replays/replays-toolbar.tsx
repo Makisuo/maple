@@ -1,5 +1,5 @@
 import { ToolbarSearch } from "@maple/ui/components/toolbar"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 interface ReplaysToolbarProps {
 	/** Current `q` search param (URL substring filter). */

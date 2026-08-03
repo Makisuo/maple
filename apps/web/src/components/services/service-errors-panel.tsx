@@ -6,9 +6,9 @@ import { SeverityBadge } from "@/components/errors/severity-badge"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { buildServiceOpenIssuesQuery, errorIssueFromV2 } from "@/lib/services/error-issues"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { SectionCard } from "./section-card"
-import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
+import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
 interface ServiceErrorsPanelProps {
 	serviceName: string

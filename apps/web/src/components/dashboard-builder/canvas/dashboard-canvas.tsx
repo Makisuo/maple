@@ -3,7 +3,7 @@ import { GridLayout, noCompactor, verticalCompactor } from "react-grid-layout"
 import type { Layout } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
 import { useContainerSize } from "@maple/ui/hooks/use-container-size"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import {
 	GRID_ROW_HEIGHT,

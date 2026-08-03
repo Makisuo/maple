@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import { AnchoredToastProvider, ToastProvider } from "@maple/ui/components/ui/toast"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { AttributesProvider } from "@maple/ui/components/attributes"
 import { Badge } from "@maple/ui/components/ui/badge"
 import {

@@ -1,4 +1,4 @@
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 /** Health buckets a rule can land in — mirrors the `status` search param. */
 export type AlertsStatusFilter = "firing" | "attention" | "healthy" | "disabled"

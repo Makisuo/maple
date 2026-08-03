@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { getSeverityColor } from "@maple/ui/lib/severity"
 import type { Log, LogsResponse } from "@/api/warehouse/logs"
 import type { SpanHierarchyResponse } from "@/api/warehouse/traces"
