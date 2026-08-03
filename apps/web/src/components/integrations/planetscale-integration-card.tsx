@@ -16,10 +16,10 @@ import {
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { CheckIcon, CircleWarningIcon, LoaderIcon, PlanetScaleIcon } from "@/components/icons"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { IntegrationIconPlate, catalogEntry } from "./integration-catalog"
@@ -84,10 +84,10 @@ export function PlanetScaleIntegrationCard() {
 		})
 		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("PlanetScale organization disconnected")
+			toastManager.add({ title: "PlanetScale organization disconnected", type: "success" })
 			refreshStatus()
 		} else {
-			toast.error("Failed to disconnect PlanetScale organization")
+			toastManager.add({ title: "Failed to disconnect PlanetScale organization", type: "error" })
 		}
 	}
 
@@ -327,14 +327,17 @@ function PlanetScaleMetricsSetup({
 		})
 		setSubmitting(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("Branch metrics enabled")
+			toastManager.add({ title: "Branch metrics enabled", type: "success" })
 			setTokenId("")
 			setTokenSecret("")
 			setFormOpen(false)
 			onSaved()
 		} else {
 			// Surface the API's message (token rejected, wrong permission, …) — actionable.
-			toast.error(extractErrorMessage(result) ?? "Failed to save the metrics service token")
+			toastManager.add({
+				title: extractErrorMessage(result) ?? "Failed to save the metrics service token",
+				type: "error",
+			})
 		}
 	}
 
@@ -457,11 +460,14 @@ function PlanetScaleOrgPicker(props: {
 		})
 		setSubmitting(false)
 		if (Exit.isSuccess(result)) {
-			toast.success(`PlanetScale organization ${selected} connected`)
+			toastManager.add({ title: `PlanetScale organization ${selected} connected`, type: "success" })
 			props.onDone()
 		} else {
 			// Surface the API's message (missing scope, org outside the grant, …) — actionable.
-			toast.error(extractErrorMessage(result) ?? "Failed to connect PlanetScale organization")
+			toastManager.add({
+				title: extractErrorMessage(result) ?? "Failed to connect PlanetScale organization",
+				type: "error",
+			})
 		}
 	}
 

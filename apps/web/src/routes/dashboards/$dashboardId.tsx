@@ -27,6 +27,7 @@ import type { WidgetMode } from "@/components/dashboard-builder/types"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { DashboardHistoryPanel, PreviewedCanvas } from "@/components/dashboard-builder/history"
 import { DashboardViewSkeleton } from "@/components/dashboard-builder/loading-skeletons"
+import { SyncDegradedBanner, SyncUnavailable } from "@/components/common/sync-unavailable"
 import { historyPanelOpenAtom, previewedVersionAtom } from "@/atoms/dashboard-history-atoms"
 import { useDashboardVersions } from "@/components/dashboard-builder/history/use-dashboard-history"
 import { Result } from "@/lib/effect-atom"
@@ -86,6 +87,9 @@ function DashboardViewPage() {
 	const {
 		dashboards,
 		isLoading,
+		isError,
+		degraded,
+		retry,
 		readOnly,
 		persistenceError,
 		updateDashboard,
@@ -158,6 +162,28 @@ function DashboardViewPage() {
 				</DashboardLayout.Root>
 			)
 		}
+		// A dead sync stream must not masquerade as a missing dashboard: the row may
+		// exist and simply never have arrived.
+		if (isError) {
+			return (
+				<DashboardLayout.Root>
+					<DashboardLayout.Breadcrumbs
+						items={[{ label: "Dashboards", href: "/dashboards" }, { label: "Unavailable" }]}
+					/>
+					<DashboardLayout.Body>
+						<DashboardLayout.Content>
+							<DashboardLayout.Scroll>
+								<SyncUnavailable
+									title="Couldn’t load this dashboard"
+									description="The sync stream isn’t reachable, so the dashboard couldn’t be read. Nothing has been lost — this is a read problem."
+									onRetry={retry}
+								/>
+							</DashboardLayout.Scroll>
+						</DashboardLayout.Content>
+					</DashboardLayout.Body>
+				</DashboardLayout.Root>
+			)
+		}
 		return (
 			<DashboardLayout.Root>
 				<DashboardLayout.Breadcrumbs
@@ -166,7 +192,7 @@ function DashboardViewPage() {
 				<DashboardLayout.Body>
 					<DashboardLayout.Content>
 						<DashboardLayout.Scroll>
-							<div className="flex flex-col items-center gap-3 py-24">
+							<div className="flex flex-col items-center gap-3 px-4 py-24 text-center">
 								<p className="text-sm font-medium text-foreground">Dashboard not found</p>
 								<p className="text-xs text-muted-foreground">
 									No dashboard with id{" "}
@@ -245,6 +271,7 @@ function DashboardViewPage() {
 										</DashboardLayout.Header>
 									</DashboardLayout.Sticky>
 									<DashboardLayout.Scroll>
+										{degraded && <SyncDegradedBanner onRetry={retry} />}
 										{persistenceError && (
 											<div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
 												{persistenceError}. Dashboard editing is temporarily disabled.
@@ -259,7 +286,7 @@ function DashboardViewPage() {
 												onRestored={() => setPreviewed(null)}
 											/>
 										) : activeDashboard.widgets.length === 0 && mode === "view" ? (
-											<div className="flex flex-col items-center justify-center py-24 gap-4">
+											<div className="flex flex-col items-center justify-center gap-4 px-4 py-24 text-center">
 												<div className="flex gap-2">
 													<div className="size-8 rounded bg-primary/15" />
 													<div className="size-8 rounded bg-primary/10" />

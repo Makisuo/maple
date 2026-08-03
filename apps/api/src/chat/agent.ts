@@ -25,8 +25,8 @@ import { InvestigationId } from "@maple/domain/primitives"
 import { LLM, LLMEvent, LLMResponse, Message, ToolResultPart, type LLMRequest, type Model } from "@maple/llm"
 import { Tool, ToolFailure, ToolRuntime, toDefinitions, type Tools } from "@maple/llm"
 import { Effect, Schema, Stream } from "effect"
-import { toLlmCallError } from "@/lib/Llm"
-import type { TenantContext } from "@/lib/tenant-context"
+import { toLlmCallError } from "@/platform/Llm"
+import type { TenantContext } from "@/services/auth/tenant-context"
 import { callMcpTool } from "@/mcp/dispatcher"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { MUTATING_TOOL_NAMES } from "@/mcp/tools/mutating"
@@ -122,7 +122,9 @@ export const buildSubmitDiagnosisTool = (
 				).pipe(
 					Effect.as("Diagnosis recorded."),
 					Effect.catchCause((cause) =>
-						Effect.fail(new ToolFailure({ message: `submit_diagnosis failed: ${String(cause)}` })),
+						Effect.fail(
+							new ToolFailure({ message: `submit_diagnosis failed: ${String(cause)}` }),
+						),
 					),
 				),
 			),
@@ -195,7 +197,7 @@ export type ChatTurnEvent = WithoutSeq<Exclude<ChatEvent, { type: "user-message"
 export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> =>
 	Stream.unwrap(
 		Effect.sync(() => {
-			const tools = { ...buildChatTools(input.tenant), ...(input.extraTools ?? {}) }
+			const tools = { ...buildChatTools(input.tenant), ...input.extraTools }
 			const system = buildSystemPrompt({ mode: chatModeFromSessionId(input.sessionId) })
 			const request = LLM.request({
 				id: input.messageId,
@@ -238,18 +240,18 @@ const runStep = (
 		const live: Stream.Stream<ChatTurnEvent> = LLM.stream(request).pipe(
 			Stream.tap((event) => Effect.sync(() => collected.push(event))),
 			Stream.filter((event) => event.type === "text-delta" && event.text !== ""),
-			Stream.map((event): ChatTurnEvent => ({
-				type: "text-delta",
-				messageId: input.messageId,
-				text: "text" in event ? event.text : "",
-			})),
+			Stream.map(
+				(event): ChatTurnEvent => ({
+					type: "text-delta",
+					messageId: input.messageId,
+					text: "text" in event ? event.text : "",
+				}),
+			),
 			// A model failure ends the turn as a recorded event rather than killing the stream —
 			// the session log is durable, so a client reconnecting after the failure must still be
 			// able to read why the turn stopped.
 			Stream.catch((error) =>
-				Stream.fromIterable([
-					turnEnd(input, "error", toLlmCallError("chat.turn", error).message),
-				]),
+				Stream.fromIterable([turnEnd(input, "error", toLlmCallError("chat.turn", error).message)]),
 			),
 		)
 

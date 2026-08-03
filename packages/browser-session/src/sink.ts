@@ -13,15 +13,33 @@ export interface MapleBrowserSessionSink {
 // contributed by two sources: the replay engine's own event capture and an
 // external tracer (notably the Effect client SDK) pushing ids in via the
 // published global sink.
-const observedTraceIds = new Set<string>()
+const observedTraceIdsBySession = new Map<string, Set<string>>()
 
 /** Record a trace id seen during the session. Idempotent per id. */
-export function recordTraceId(traceId: string): void {
-	observedTraceIds.add(traceId)
+export function recordTraceId(traceId: string, sessionId = readSessionSink()?.sessionId): void {
+	if (!sessionId) return
+	let ids = observedTraceIdsBySession.get(sessionId)
+	if (!ids) {
+		ids = new Set()
+		observedTraceIdsBySession.set(sessionId, ids)
+	}
+	ids.add(traceId)
 }
 
-export function getObservedTraceIds(): string[] {
-	return Array.from(observedTraceIds)
+export function getObservedTraceIds(sessionId = readSessionSink()?.sessionId): string[] {
+	return sessionId ? Array.from(observedTraceIdsBySession.get(sessionId) ?? []) : []
+}
+
+/**
+ * Drop the trace ids of every session but `sessionId`. Called when the sink is
+ * republished under a rotated id — the outgoing session's `ended` row, the only
+ * reader of its ids, has already been built by then. Without this a tab left
+ * open for a day accumulates one id Set per 30-minute rotation, forever.
+ */
+function forgetOtherSessions(sessionId: string): void {
+	for (const key of observedTraceIdsBySession.keys()) {
+		if (key !== sessionId) observedTraceIdsBySession.delete(key)
+	}
 }
 
 /**
@@ -31,8 +49,21 @@ export function getObservedTraceIds(): string[] {
  * side, so init ordering between SDKs does not matter.
  */
 export function publishSessionSink(sessionId: string): void {
-	const sink: MapleBrowserSessionSink = { sessionId, recordTraceId }
+	const sink: MapleBrowserSessionSink = {
+		sessionId,
+		recordTraceId: (traceId) => recordTraceId(traceId, sessionId),
+	}
 	;(globalThis as Record<string, unknown>)[SESSION_SINK_KEY] = sink
+	forgetOtherSessions(sessionId)
+}
+
+/** Remove a sink published by this SDK runtime without clobbering a newer one. */
+export function clearSessionSink(sessionId?: string): void {
+	const owner = globalThis as Record<string, unknown>
+	const current = owner[SESSION_SINK_KEY] as MapleBrowserSessionSink | undefined
+	if (!current || (sessionId !== undefined && current.sessionId !== sessionId)) return
+	delete owner[SESSION_SINK_KEY]
+	observedTraceIdsBySession.delete(current.sessionId)
 }
 
 /** Look up the published sink, if any page-level replay session is active. */

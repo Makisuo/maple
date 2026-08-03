@@ -1,8 +1,26 @@
 # CLAUDE.md
 
 Maple is an OpenTelemetry observability platform: TanStack Start (React 19, Vite) + Effect on the
-backend, ClickHouse/Tinybird as the warehouse. Monorepo — `apps/*` (web, api, ingest, alerting, cli,
-landing, …) and `packages/*` (query-engine, db, domain, ui, …).
+backend, ClickHouse/Tinybird as the warehouse.
+
+## Workspace layout
+
+Three roots, and the split is a rule, not a habit:
+
+- **`apps/*`** — deployables (web, api, ingest, alerting, cli, landing, …).
+- **`packages/*`** — shared code that **knows Maple**: its schema, tables, API, or product.
+  `domain`, `query-engine`, `ui`, `db`, `auth`, `effect-sdk`, `browser`, …
+- **`lib/*`** — libraries with **zero Maple knowledge**, extractable to their own repo tomorrow.
+  `clickhouse-builder`, `effect-cloudflare`, `effect-db`, `effect-router`, `cache`,
+  `otel-helpers`, `unitflow`.
+
+The test for `lib/` is "could this ship as a standalone OSS library?" — not "is it published?"
+and not "did we write it?". Publishability is a `package.json` fact, not a directory fact:
+`packages/effect-sdk` and `packages/browser` are both published. **New packages go in
+`packages/` unless they pass the lib test.**
+
+Anything in `lib/` that starts importing `@maple/domain` has stopped qualifying — move it to
+`packages/` rather than weakening the rule.
 
 ## Local dev
 
@@ -41,21 +59,22 @@ To add a query: define it in `packages/query-engine/src/ch/queries/*.ts` with
 
 ```typescript
 const compiled = CH.compile(CH.myQuery({ limit: 50 }), { orgId, startTime, endTime })
-const rows =
-	yield *
-	warehouse
-		.sqlQuery(tenant, compiled.sql, { profile: "list", context: "myQuery" })
-		.pipe(Effect.mapError(mapTinybirdError))
-const typedRows = compiled.castRows(rows)
+const rows = yield* warehouse.compiledQuery(tenant, compiled, { profile: "list", context: "myQuery" })
 ```
+
+`compiledQuery` runs the SQL and decodes rows through the query's `rowSchema` (if declared);
+`profile` defaults to `"aggregation"` when omitted (`"unbounded"` is the explicit opt-out). There is
+no `castRows` — a cast that looked type-safe hid wire-format drift.
 
 - Every query **must** filter `OrgId` (`$.OrgId.eq(param.string("orgId"))`) — enforced at runtime.
 - `context` labels the `executeSql` span (`query.context`), which also carries `db.query.text`,
   `db.query.fingerprint`, `db.duration_ms`, `result.rowCount`, `orgId`, `query.profile`.
-- **64-bit ints arrive as strings on BYO-ClickHouse** (`count`/`sum`/`uniqExact`), as numbers on
-  managed Tinybird. If the value flows into a `Schema.Number`, pass a `rowSchema` built with
-  `CH.CHNumber` as `CH.compile(q, params, { rowSchema })` — otherwise BYO-CH orgs get a bare 500.
-  See `packages/query-engine/src/ch/queries/service-map.ts`.
+- **64-bit ints arrive as numbers on every backend**: ClickHouse-protocol clients pin
+  `output_format_json_quote_64bit_integers=0` (`BackendDialect.unquote64BitIntegers`), matching the
+  Tinybird SDK. Two rules remain: (1) identity UInt64s (hashes/ids) must be `toString()`-wrapped in
+  the SELECT — values above 2^53 corrupt as JS numbers; the SQL-catalog e2e sweep enforces this.
+  (2) `rowSchema`s still use `CH.CHNumber`, never `Schema.Number`, so a gateway/readonly cluster
+  that refuses the setting (quoted wire) keeps decoding.
 - `packages/domain/src/tinybird/endpoints.ts` is **type-only** — no `defineEndpoint()` calls.
 
 ## Application database (PlanetScale Postgres)
@@ -90,10 +109,10 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   for TanStack Router `validateSearch`. `Schema.optionalKey()` for JSON-decoded HTTP/domain schemas;
   `Schema.optional()` only where `undefined` is a real JS value (search params, MCP tool params).
 - **Effect:** source is vendored at `.context/effect/` (subtree of Effect-TS/effect-smol).
-- **LLM core:** `packages/llm` (`@maple/llm`) is a vendored copy of `anomalyco/opencode`'s
-  `packages/llm`, pinned by SHA in `packages/llm/UPSTREAM.json` and re-synced with
+- **LLM core:** `lib/llm` (`@maple/llm`) is a vendored copy of `anomalyco/opencode`'s
+  `packages/llm`, pinned by SHA in `lib/llm/UPSTREAM.json` and re-synced with
   `bun run llm:sync`. Don't reformat it and don't put Maple behaviour inside it — see
-  `packages/llm/MAPLE.md`.
+  `lib/llm/MAPLE.md`.
 - **Span status codes:** Title case — `"Ok"`, `"Error"`, `"Unset"`.
 - **UI:** shadcn/Base UI + Tailwind 4 (`npx shadcn@latest add <component>`), Recharts, Nucleo icons.
   Find an icon in the local Nucleo DB, then port it into `apps/web/src/components/icons/` by copying

@@ -26,7 +26,7 @@ import type {
 	V2ServiceUnavailableError,
 } from "@maple/domain/http/v2"
 import { Array as Arr, Effect, Option } from "effect"
-import { IngestAttributeMappingService } from "../../services/IngestAttributeMappingService"
+import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 
 const toV2AttributeMapping = (mapping: IngestAttributeMapping): V2AttributeMapping => ({
 	id: mapping.id,

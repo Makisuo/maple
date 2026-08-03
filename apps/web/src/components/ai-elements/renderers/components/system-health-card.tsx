@@ -1,7 +1,7 @@
 import type { BaseComponentProps } from "@json-render/react"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { latencyToneClass } from "@maple/ui/lib/latency-tone"
-import { formatDuration, formatErrorRate, formatNumber } from "@maple/ui/format"
+import { formatDuration, formatErrorRate, formatNumber } from "@maple/ui/lib/format"
 
 interface SystemHealthCardProps {
 	serviceCount: number

@@ -4,12 +4,12 @@ import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
 import { DashboardTemplatePublicId, MapleApiV2 } from "@maple/domain/http/v2"
-import { Env } from "../../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -182,6 +182,58 @@ describe("v2 dashboards over HTTP", () => {
 		await harness.dispose()
 	})
 
+	// A widget may pin its own window; the field is optional, snake_cased on the
+	// wire, and must survive a round-trip without leaking onto unpinned widgets.
+	it("round-trips a per-widget time range", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+
+		const widget = (id: string, timeRange?: unknown) => ({
+			id,
+			visualization: "stat",
+			data_source: { endpoint: "custom_query_builder_timeseries" },
+			display: { title: id },
+			layout: { x: 0, y: 0, w: 3, h: 3 },
+			...(timeRange !== undefined ? { time_range: timeRange } : {}),
+		})
+
+		const created = await harness.request("POST", "/v2/dashboards", key.secret, {
+			name: "Mixed ranges",
+			time_range: { type: "relative", value: "7d" },
+			widgets: [widget("pinned", { type: "relative", value: "30m" }), widget("follows")],
+		})
+		expect(created.status).toBe(200)
+		expect(created.body.widgets[0].time_range).toEqual({ type: "relative", value: "30m" })
+		expect("time_range" in created.body.widgets[1]).toBe(false)
+		expect("timeRange" in created.body.widgets[0]).toBe(false)
+
+		const id: string = created.body.id
+		const patched = await harness.request("PATCH", `/v2/dashboards/${id}`, key.secret, {
+			widgets: [
+				widget("pinned", {
+					type: "absolute",
+					start_time: "2026-07-15T00:00:00.000Z",
+					end_time: "2026-07-16T00:00:00.000Z",
+				}),
+			],
+		})
+		expect(patched.status).toBe(200)
+		expect(patched.body.widgets[0].time_range).toEqual({
+			type: "absolute",
+			start_time: "2026-07-15T00:00:00.000Z",
+			end_time: "2026-07-16T00:00:00.000Z",
+		})
+
+		// Re-sending the widget without the field is how an override is removed.
+		const cleared = await harness.request("PATCH", `/v2/dashboards/${id}`, key.secret, {
+			widgets: [widget("pinned")],
+		})
+		expect(cleared.status).toBe(200)
+		expect("time_range" in cleared.body.widgets[0]).toBe(false)
+
+		await harness.dispose()
+	})
+
 	it("enforces dashboard read/write scopes", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey(["dashboards:read"])
@@ -276,6 +328,37 @@ describe("v2 dashboards over HTTP", () => {
 		)
 		expect(missing.status).toBe(404)
 		expect(missing.body.error.code).toBe("dashboard_template_not_found")
+
+		await harness.dispose()
+	})
+
+	it("points an invalid widget field at its widget id and full path", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["dashboards:write"])
+
+		const response = await harness.request("POST", "/v2/dashboards", key.secret, {
+			name: "Operations",
+			time_range: { type: "relative", value: "12h" },
+			widgets: [
+				{
+					id: "error-rate",
+					visualization: "line",
+					data_source: { endpoint: "traces_timeseries", params: {} },
+					// `fill_nulls` is `number | false`; `true` is not a member.
+					display: { title: "error-rate", chart_presentation: { fill_nulls: true } },
+					layout: { x: 0, y: 0, w: 6, h: 4 },
+				},
+			],
+		})
+
+		expect(response.status).toBe(400)
+		expect(response.body.error.type).toBe("invalid_request_error")
+		expect(response.body.error.code).toBe("parameter_invalid")
+		// `param` is the whole path, not just its first segment.
+		expect(response.body.error.param).toContain("widgets[0]")
+		expect(response.body.error.param).toContain("fill_nulls")
+		expect(response.body.error.message).toContain('widget "error-rate"')
+		expect(response.body.error.message).toContain("true")
 
 		await harness.dispose()
 	})

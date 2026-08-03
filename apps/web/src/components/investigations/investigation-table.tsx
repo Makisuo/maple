@@ -1,10 +1,10 @@
 import type { MouseEvent, ReactNode } from "react"
+import { TableSkeleton } from "@maple/ui/components/ui/table-skeleton"
 import { Link, useNavigate } from "@tanstack/react-router"
 import type { V2Investigation } from "@maple/domain/http/v2"
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { cn } from "@maple/ui/lib/utils"
-import { formatRelativeTime, toEpochMs } from "@maple/ui/time-format"
+import { formatRelativeTime, toEpochMs } from "@maple/ui/lib/time-format"
 
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "@/components/icons"
 import { SeverityBadge } from "@/components/errors/severity-badge"
@@ -228,43 +228,20 @@ function SortGlyph({ active, direction }: { active: boolean; direction: SortDire
 /** Ghosts the real column widths, so the table doesn't reflow when rows land. */
 export function InvestigationTableSkeleton() {
 	return (
-		<div className="overflow-x-auto" aria-label="Loading investigations">
-			<Table className={TABLE_LAYOUT}>
-				<TableHeader>
-					<TableRow>
-						<TableHead className="w-[30%]">Subject</TableHead>
-						<TableHead className="w-[100px]">Severity</TableHead>
-						<TableHead>Finding</TableHead>
-						<TableHead className="w-[116px]">Confidence</TableHead>
-						<TableHead className="w-[116px]">Status</TableHead>
-						<TableHead className="w-[92px] text-right">Updated</TableHead>
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{Array.from({ length: 5 }, (_, index) => (
-						<TableRow key={index}>
-							<TableCell>
-								<Skeleton className="h-4 w-[70%]" />
-							</TableCell>
-							<TableCell>
-								<Skeleton className="h-4 w-14" />
-							</TableCell>
-							<TableCell>
-								<Skeleton className="h-4 w-[80%]" />
-							</TableCell>
-							<TableCell>
-								<Skeleton className="h-4 w-16" />
-							</TableCell>
-							<TableCell>
-								<Skeleton className="h-4 w-20" />
-							</TableCell>
-							<TableCell>
-								<Skeleton className="ml-auto h-4 w-10" />
-							</TableCell>
-						</TableRow>
-					))}
-				</TableBody>
-			</Table>
+		<div aria-label="Loading investigations">
+			<TableSkeleton
+				rows={5}
+				tableClassName={TABLE_LAYOUT}
+				className="overflow-x-auto rounded-none border-0"
+				columns={[
+					{ header: "Subject", headClassName: "w-[30%]", skeleton: "w-[70%]" },
+					{ header: "Severity", headClassName: "w-[100px]", skeleton: "w-14" },
+					{ header: "Finding", skeleton: "w-[80%]" },
+					{ header: "Confidence", headClassName: "w-[116px]", skeleton: "w-16" },
+					{ header: "Status", headClassName: "w-[116px]", skeleton: "w-20" },
+					{ header: "Updated", headClassName: "w-[92px] text-right", skeleton: "ml-auto w-10" },
+				]}
+			/>
 		</div>
 	)
 }

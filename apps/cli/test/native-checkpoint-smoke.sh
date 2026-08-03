@@ -12,6 +12,11 @@ SERVER_PID=""
 cleanup() {
 	if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
 		kill "$SERVER_PID" 2>/dev/null || true
+		for _ in $(seq 1 50); do
+			kill -0 "$SERVER_PID" 2>/dev/null || break
+			sleep 0.1
+		done
+		kill -9 "$SERVER_PID" 2>/dev/null || true
 		wait "$SERVER_PID" 2>/dev/null || true
 	fi
 	if [[ "${KEEP_ROOT:-0}" == "1" ]]; then
@@ -29,14 +34,14 @@ fail() {
 
 query() {
 	local sql="$1"
-	curl --fail-with-body -sS "http://127.0.0.1:$PORT/local/query" \
+	curl --fail-with-body -sS --max-time 30 "http://127.0.0.1:$PORT/local/query" \
 		-H 'content-type: application/json' \
 		--data "$(jq -nc --arg sql "$sql" '{sql:$sql}')"
 }
 
 wait_health() {
 	for _ in $(seq 1 200); do
-		if curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+		if curl -fsS --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
 			return
 		fi
 		sleep 0.1
@@ -58,6 +63,15 @@ start_server() {
 
 stop_server() {
 	"$MAPLE" stop --data-dir "$DATA" >/dev/null
+	# Bounded wait: a server that ignores the stop must not eat the job budget.
+	for _ in $(seq 1 300); do
+		kill -0 "$SERVER_PID" 2>/dev/null || break
+		sleep 0.1
+	done
+	if kill -0 "$SERVER_PID" 2>/dev/null; then
+		kill -9 "$SERVER_PID" 2>/dev/null || true
+		fail "server did not exit within 30s of maple stop"
+	fi
 	wait "$SERVER_PID" 2>/dev/null || true
 	SERVER_PID=""
 }

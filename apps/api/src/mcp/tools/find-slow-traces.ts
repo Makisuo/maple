@@ -1,12 +1,12 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
-import { warehouseToMcpHandlers } from "../lib/map-warehouse-error"
-import { withTenantExecutor } from "../lib/query-warehouse"
-import { resolveTimeRange, formatClampNote } from "../lib/time"
-import { clampLimit } from "../lib/limits"
-import { formatDurationFromMs, formatTable } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
+import { withTenantExecutor } from "@/mcp/lib/query-warehouse"
+import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
+import { clampLimit } from "@/mcp/lib/limits"
+import { formatDurationFromMs, formatTable } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, Schema, pipe } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { findSlowTraces } from "@maple/query-engine/observability"
 
 export function registerFindSlowTracesTool(server: McpToolRegistrar) {
@@ -27,8 +27,9 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
 			environment,
 			limit,
 		}) {
-			const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
+			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_SEARCH_MAX_HOURS })
 			const { st, et } = range
+			if (range.exceeded) return rangeExceededResult(range, "find_slow_traces")
 			const lim = clampLimit(limit, { defaultValue: 10, max: 100 })
 
 			const result = yield* withTenantExecutor(
@@ -44,10 +45,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
 				return { content: [{ type: "text" as const, text: `No traces found in ${st} — ${et}` }] }
 			}
 
-			const lines: string[] = [
-				`## Slowest Traces`,
-				`Time range: ${st} — ${et}${formatClampNote(range)}`,
-			]
+			const lines: string[] = [`## Slowest Traces`, `Time range: ${st} — ${et}`]
 
 			if (result.stats) {
 				lines.push(

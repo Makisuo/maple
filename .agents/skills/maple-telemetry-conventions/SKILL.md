@@ -6,7 +6,7 @@ version: "1.0.0"
 
 # Maple Telemetry Conventions
 
-Reference for the **language-agnostic** OpenTelemetry conventions Maple uses across TypeScript (`apps/api`, Cloudflare workers in `lib/effect-sdk/`), Rust (`apps/ingest`), and future Python services. These conventions are load-bearing — Tinybird materialized views pre-extract certain attribute keys into columns, dashboards filter on Title Case status strings, and sampling-aware throughput math relies on the `SampleRate` column. Use the exact attribute spellings here in every language.
+Reference for the **language-agnostic** OpenTelemetry conventions Maple uses across TypeScript (`apps/api`, Cloudflare workers in `packages/effect-sdk/`), Rust (`apps/ingest`), and future Python services. These conventions are load-bearing — Tinybird materialized views pre-extract certain attribute keys into columns, dashboards filter on Title Case status strings, and sampling-aware throughput math relies on the `SampleRate` column. Use the exact attribute spellings here in every language.
 
 ## When to apply
 
@@ -15,7 +15,7 @@ Reference for the **language-agnostic** OpenTelemetry conventions Maple uses acr
 - Wiring a new query through `WarehouseQueryService.sqlQuery()` (the `context` and `profile` options become span attributes)
 - Configuring an OTLP exporter, tracer provider, or resource builder
 - Introducing a new pre-extracted MV column or a new vendor attribute under `maple.*`
-- Reviewing a PR that touches `apps/api/src/services/WarehouseQueryService.ts`, `apps/ingest/src/main.rs`, `apps/api/src/app.ts`, `lib/effect-sdk/src/cloudflare/`, or `packages/domain/src/tinybird/materializations.ts`
+- Reviewing a PR that touches `apps/api/src/services/WarehouseQueryService.ts`, `apps/ingest/src/main.rs`, `apps/api/src/app.ts`, `packages/effect-sdk/src/cloudflare/`, or `packages/domain/src/tinybird/materializations.ts`
 
 ## Index
 
@@ -46,5 +46,5 @@ Reference for the **language-agnostic** OpenTelemetry conventions Maple uses acr
 - `apps/ingest/src/otel.rs` — Resource builder + platform detection + forward-span helper for Rust. The canonical example for Rust resource and outbound-span attribution.
 - `apps/ingest/src/main.rs` — `handle_signal` and `handle_cloudflare_logpush` (search for `tracing::info_span!` with `otel.kind = "server"`) — Server-kind span macros for OTLP inbound.
 - `apps/api/src/app.ts:169-175` — `TracerDisabledWhen` filter.
-- `lib/effect-sdk/src/cloudflare/index.ts` — `MapleCloudflareSDK` tracer setup.
+- `packages/effect-sdk/src/cloudflare/index.ts` — `MapleCloudflareSDK` tracer setup.
 - `packages/domain/src/tinybird/materializations.ts` — MV `SELECT` lists that pre-extract attribute keys into columns.

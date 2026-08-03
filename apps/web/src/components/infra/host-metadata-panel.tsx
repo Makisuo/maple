@@ -1,16 +1,18 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/lib/utils"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 
-import { CheckIcon, CopyIcon, ServerIcon } from "@/components/icons"
+import { ServerIcon } from "@/components/icons"
 import type { HostDetailSummaryResponse } from "@maple/domain/http"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 interface HostMetadataPanelProps {
 	summary: HostDetailSummaryResponse["data"]
 }
 
+// Candidate for DetailRail.MetaRow (@maple/ui) — same mono label/value pair, but
+// this one layers on copy-on-hover and an optional tooltip. Fold in if MetaRow
+// ever grows those.
 interface RowProps {
 	label: string
 	value: string | null | undefined
@@ -19,15 +21,7 @@ interface RowProps {
 }
 
 function Row({ label, value, copyValue, tooltip }: RowProps) {
-	// Silent: the check icon is the feedback; a toast per metadata row is noise.
-	const { copied, copy } = useCopyToClipboard(label, { silent: true })
 	if (!value) return null
-
-	const handleCopy = (e: React.MouseEvent) => {
-		e.preventDefault()
-		e.stopPropagation()
-		copy(copyValue ?? value)
-	}
 
 	const valueNode = (
 		<span className="break-all text-right font-mono text-[11px] tabular-nums text-foreground/85">
@@ -49,18 +43,14 @@ function Row({ label, value, copyValue, tooltip }: RowProps) {
 				) : (
 					valueNode
 				)}
-				<button
-					type="button"
-					onClick={handleCopy}
-					aria-label={`Copy ${label}`}
-					className={cn(
-						"flex size-5 items-center justify-center rounded text-muted-foreground transition-all",
-						"opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground",
-						copied && "opacity-100 text-[var(--severity-info)]",
-					)}
-				>
-					{copied ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
-				</button>
+				<CopyButton
+					value={copyValue ?? value}
+					label={label}
+					// One per row; the hover-revealed glyph is the feedback here.
+					toast={false}
+					iconSize={11}
+					className="size-5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+				/>
 			</div>
 		</div>
 	)

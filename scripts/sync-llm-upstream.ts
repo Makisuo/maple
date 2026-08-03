@@ -1,5 +1,5 @@
 /**
- * Sync (or verify) the vendored `packages/llm` against its upstream, `anomalyco/opencode`.
+ * Sync (or verify) the vendored `lib/llm` against its upstream, `anomalyco/opencode`.
  *
  *   bun run llm:sync                  # re-vendor src/ at the SHA pinned in UPSTREAM.json
  *   bun run llm:sync --sha=<sha>      # re-vendor at a new SHA and rewrite UPSTREAM.json
@@ -15,7 +15,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-const packageDir = fileURLToPath(new URL("../packages/llm", import.meta.url))
+const packageDir = fileURLToPath(new URL("../lib/llm", import.meta.url))
 const upstreamPath = join(packageDir, "UPSTREAM.json")
 
 /** Files under `src/` that Maple intentionally diverges on. Keep in sync with `MAPLE.md`. */
@@ -96,16 +96,16 @@ try {
 			...removed.map((file) => `  missing locally:  ${file}`),
 		]
 		if (problems.length > 0) {
-			console.error(`packages/llm has drifted from upstream ${sha.slice(0, 12)}:`)
+			console.error(`lib/llm has drifted from upstream ${sha.slice(0, 12)}:`)
 			console.error(problems.join("\n"))
 			console.error(
-				"\nEither re-sync with `bun run llm:sync`, or record the delta in packages/llm/MAPLE.md " +
+				"\nEither re-sync with `bun run llm:sync`, or record the delta in lib/llm/MAPLE.md " +
 					"and in KNOWN_DELTAS/MAPLE_ONLY in scripts/sync-llm-upstream.ts.",
 			)
 			process.exit(1)
 		}
 		console.log(
-			`packages/llm matches upstream ${sha.slice(0, 12)} ` +
+			`lib/llm matches upstream ${sha.slice(0, 12)} ` +
 				`(${upstreamFiles.size} files, ${changed.length} documented deltas).`,
 		)
 	} else {
@@ -122,7 +122,7 @@ try {
 		const next: Upstream = { ...upstream, sha, syncedAt: new Date().toISOString().slice(0, 10) }
 		writeFileSync(upstreamPath, `${JSON.stringify(next, null, "\t")}\n`)
 
-		console.log(`Synced packages/llm/src from ${upstream.repo}@${sha.slice(0, 12)}.`)
+		console.log(`Synced lib/llm/src from ${upstream.repo}@${sha.slice(0, 12)}.`)
 		console.log(`  ${upstreamFiles.size} upstream files`)
 		if (changed.length > 0) console.log(`  changed: ${changed.join(", ")}`)
 		if (removed.length > 0) console.log(`  removed: ${removed.join(", ")}`)
@@ -130,7 +130,7 @@ try {
 			`  skipped (documented deltas): ${[...KNOWN_DELTAS].join(", ")} — ` +
 				"re-apply the schema import rewrite by hand if upstream touched them.",
 		)
-		console.log("\nReview `git diff packages/llm` and update packages/llm/MAPLE.md.")
+		console.log("\nReview `git diff lib/llm` and update lib/llm/MAPLE.md.")
 	}
 } finally {
 	rmSync(checkout, { recursive: true, force: true })

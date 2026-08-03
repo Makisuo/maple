@@ -648,5 +648,7 @@ export function describeActionsFriendly(
 	const pool = poolForAction(first)
 	const phrase = pool[Math.min(Math.floor(random() * pool.length), pool.length - 1)]!
 	const status = actions.length === 1 ? phrase : `${phrase} +${actions.length - 1} more`
-	return status.length <= TYPING_STATUS_MAX_LENGTH ? status : `${status.slice(0, TYPING_STATUS_MAX_LENGTH - 1)}…`
+	return status.length <= TYPING_STATUS_MAX_LENGTH
+		? status
+		: `${status.slice(0, TYPING_STATUS_MAX_LENGTH - 1)}…`
 }

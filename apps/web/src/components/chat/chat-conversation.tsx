@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Exit } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useMapleChat, type FailedSend } from "@/hooks/use-maple-chat"
@@ -33,6 +33,7 @@ import {
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
 import { StatusMarker } from "@/components/ai-elements/status-marker"
 import { Button } from "@maple/ui/components/ui/button"
+import { trackProduct } from "@/lib/analytics"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { AiTriageResult } from "@maple/domain/http"
 
@@ -162,13 +163,13 @@ export function ChatConversation({
 		const exit = await applyProposal({ payload: makeChatApplyPayload(tool, input) })
 		if (Exit.isSuccess(exit)) {
 			if (exit.value.isError) {
-				toast.error(exit.value.content || `Couldn't apply ${tool}`)
+				toastManager.add({ title: exit.value.content || `Couldn't apply ${tool}`, type: "error" })
 				return
 			}
 			resolveApproval(toolCallId, "applied")
-			toast.success("Change applied")
+			toastManager.add({ title: "Change applied", type: "success" })
 		} else {
-			toast.error(`Failed to apply ${tool}`)
+			toastManager.add({ title: `Failed to apply ${tool}`, type: "error" })
 		}
 	}
 
@@ -192,6 +193,10 @@ export function ChatConversation({
 		if (messages.length === 0 && onFirstMessage) {
 			onFirstMessage(tabId, text.trim().slice(0, 40))
 		}
+		// The message text stays out of the event — the transcript already has it,
+		// and a prompt is the last thing that should be duplicated into a
+		// LowCardinality-adjacent analytics column.
+		trackProduct("chat_message_sent", { turn: messages.length === 0 ? "first" : "followup" })
 		sendMessage(text.trim())
 	}
 

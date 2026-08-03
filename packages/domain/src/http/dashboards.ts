@@ -1,4 +1,4 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import {
 	DashboardId,
@@ -13,7 +13,7 @@ import {
 import { Authorization } from "./current-tenant"
 import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "./widget-types"
 
-const TimeRangeSchema = Schema.Union([
+export const TimeRangeSchema = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("relative"),
 		value: Schema.String,
@@ -24,6 +24,7 @@ const TimeRangeSchema = Schema.Union([
 		endTime: IsoDateTimeString,
 	}),
 ])
+export type TimeRange = typeof TimeRangeSchema.Type
 
 const UnknownRecord = Schema.Record(Schema.String, Schema.Unknown)
 const StringRecord = Schema.Record(Schema.String, Schema.String)
@@ -220,6 +221,14 @@ export const DashboardWidgetSchema = Schema.Struct({
 	dataSource: WidgetDataSourceSchema,
 	display: WidgetDisplayConfigSchema,
 	layout: WidgetLayoutSchema,
+	// Per-widget time range. Absent (the common case) means "follow the
+	// dashboard's range" — the tile re-queries whenever the board's picker moves.
+	// When set, the tile is pinned to its own window regardless of the board's,
+	// which is how a "last 30 minutes" health stat lives on a 7-day board. The
+	// override only replaces the time window: dashboard variables still
+	// interpolate normally, and the board's auto-refresh still rebases a relative
+	// override against "now".
+	timeRange: Schema.optionalKey(TimeRangeSchema),
 })
 
 // ---------------------------------------------------------------------------
@@ -463,6 +472,21 @@ export class DashboardValidationError extends Schema.TaggedErrorClass<DashboardV
 	{ httpApiStatus: 400 },
 ) {}
 
+/**
+ * Rewrites request-decode failures on the dashboards group into a
+ * `DashboardValidationError` carrying the JSON path, the enclosing widget id
+ * and the expected-vs-received message for every offending field.
+ *
+ * Without it the runtime answers a schema failure with a bare empty 400, so the
+ * only way to find one bad key in a 14-widget document is to bisect it. The
+ * error class is already in every endpoint's error list, so attaching this
+ * widens no client contract.
+ */
+export class DashboardSchemaErrors extends HttpApiMiddleware.Service<DashboardSchemaErrors>()(
+	"DashboardSchemaErrors",
+	{ error: DashboardValidationError },
+) {}
+
 export class DashboardConcurrencyError extends Schema.TaggedErrorClass<DashboardConcurrencyError>()(
 	"@maple/http/errors/DashboardConcurrencyError",
 	{
@@ -503,6 +527,7 @@ export const DashboardTemplatePreviewKind = Schema.Literals([
 	"histogram",
 	"heatmap",
 	"funnel",
+	"hbar",
 	"markdown",
 ])
 export type DashboardTemplatePreviewKind = typeof DashboardTemplatePreviewKind.Type
@@ -682,4 +707,5 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		}),
 	)
 	.prefix("/api/dashboards")
-	.middleware(Authorization) {}
+	.middleware(Authorization)
+	.middleware(DashboardSchemaErrors) {}

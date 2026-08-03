@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/clerk-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { CodeBlock } from "@/components/quick-start/code-block"
 import { PackageManagerCodeBlock } from "@/components/quick-start/package-manager-code-block"
 import {
@@ -16,7 +16,7 @@ import { sdkSnippets, type FrameworkId } from "@/components/quick-start/sdk-snip
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { useQuickStart } from "@/hooks/use-quick-start"
 import type { RoleOption } from "@/atoms/quick-start-atoms"
-import { CopyableField } from "./copyable-field"
+import { CopyableField } from "@maple/ui/components/ui/copyable-field"
 
 const frameworkIconMap: Record<FrameworkId, React.ComponentType<{ size?: number; className?: string }>> = {
 	nextjs: NextjsIcon,

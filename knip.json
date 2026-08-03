@@ -1,6 +1,6 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
-	"ignoreWorkspaces": ["apps/ingest", "apps/landing", "apps/mobile", "examples/*", "packages/llm"],
+	"ignoreWorkspaces": ["apps/ingest", "apps/landing", "apps/mobile", "examples/*", "lib/llm"],
 	"ignore": ["**/routeTree.gen.ts", ".context/**", ".deepsec/**"],
 	"ignoreExportsUsedInFile": true,
 	"workspaces": {
@@ -29,7 +29,13 @@
 			"entry": ["src/worker.ts", "alchemy.run.ts"]
 		},
 		"apps/cli": {
-			"entry": ["test/probes/*.ts", "test/archive-probe-helpers.ts", "test/merge-injection-probe.ts"],
+			"entry": [
+				"test/probes/*.ts",
+				"test/archive-probe-helpers.ts",
+				"test/merge-injection-probe.ts",
+				"test/native-local-store-migration-fixture.ts",
+				"test/native-reconnect-probe.ts"
+			],
 			"ignoreBinaries": ["duckdb"]
 		},
 		"packages/domain": {

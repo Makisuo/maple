@@ -1,6 +1,10 @@
 import { useState, type ReactNode } from "react"
 
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
+import { CopyableValue } from "@maple/ui/components/attributes"
+
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { LinkIcon } from "@/components/icons"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import type { WidgetMode } from "@/components/dashboard-builder/types"
 
@@ -11,6 +15,7 @@ import { formatValue, getThresholdColor } from "@/components/dashboard-builder/w
 import {
 	ChartWidget,
 	FunnelWidget,
+	HbarWidget,
 	HeatmapWidget,
 	HistogramWidget,
 	PieWidget,
@@ -36,6 +41,7 @@ import {
 	listScenarios,
 	pieScenarios,
 	funnelScenarios,
+	hbarScenarios,
 	histogramScenarios,
 	heatmapScenarios,
 	markdownScenarios,
@@ -97,6 +103,110 @@ function Section({ id, title, description, minColWidth = 320, children }: Sectio
 	)
 }
 
+/** Every shape `CopyButton` is asked to take across the product, side by side. */
+function CopyScenarios() {
+	const rows: Array<{ label: string; node: ReactNode }> = [
+		{ label: "icon-xs / ghost (default)", node: <CopyButton value="trace-abc123" label="Trace ID" /> },
+		{
+			label: "tooltip",
+			node: <CopyButton value="9f2c1a" label="Commit SHA" tooltip />,
+		},
+		{
+			label: "link glyph",
+			node: <CopyButton value="https://maple.dev" label="Link" idleIcon={LinkIcon} tooltip />,
+		},
+		{
+			label: "with label / outline",
+			node: <CopyButton value="npm i @maple/cli" label="Command" idleLabel="Copy" variant="outline" />,
+		},
+		{
+			label: "with label / long copied text",
+			node: (
+				<CopyButton
+					value="https://maple.dev/share/xyz"
+					label="Link"
+					idleLabel="Copy link"
+					copiedLabel="Copied link"
+					variant="outline"
+				/>
+			),
+		},
+		{
+			label: "icon-sm / outline",
+			node: <CopyButton value="key_live_x" label="API key" size="icon-sm" variant="outline" />,
+		},
+		{
+			// A resolver that throws (a circular `JSON.stringify`, say) must surface as
+			// the error state, not an uncaught click handler.
+			label: "error branch (10s hold)",
+			node: (
+				<CopyButton
+					value={() => {
+						throw new Error("unserializable")
+					}}
+					label="Broken value"
+					tooltip
+					timeout={10_000}
+				/>
+			),
+		},
+		{
+			// Long hold so the copied state can actually be inspected — the default 2s
+			// is gone before you can look at it.
+			label: "10s hold (inspect the copied state)",
+			node: (
+				<CopyButton
+					value="hold-me"
+					label="Held value"
+					idleLabel="Copy"
+					variant="outline"
+					timeout={10_000}
+				/>
+			),
+		},
+		{
+			// Everything toasts by default; this is the opt-out for surfaces where a
+			// toast per click would pile up.
+			label: "toast={false} (opt-out)",
+			node: (
+				<CopyButton
+					value="issue_123"
+					label="Issue ID"
+					toast={false}
+					idleLabel="Copy"
+					variant="outline"
+				/>
+			),
+		},
+		{ label: "disabled", node: <CopyButton value="x" label="Nothing" disabled /> },
+		{
+			// The app's most-used copy affordance: inline attribute text with no room
+			// for a glyph. It toasts, and tints the row it copied.
+			label: "CopyableValue (inline)",
+			node: (
+				<span className="font-mono text-[11px]">
+					<CopyableValue value="7f3c9a21b4e8" label="span ID">
+						7f3c9a21b4e8
+					</CopyableValue>
+				</span>
+			),
+		},
+	]
+
+	return (
+		<>
+			{rows.map((row) => (
+				<div key={row.label} className="flex flex-col gap-1.5">
+					<span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+						{row.label}
+					</span>
+					<div className="flex h-12 items-center rounded-md border bg-card px-3">{row.node}</div>
+				</div>
+			))}
+		</>
+	)
+}
+
 /**
  * These are the lab's sections, not the widget types: `sparkline` and `stress`
  * have no panel type of their own (one is a stat detail, the other is the chart
@@ -105,6 +215,7 @@ function Section({ id, title, description, minColWidth = 320, children }: Sectio
  * hand-written for that reason — the renderers themselves come from the registry.
  */
 const NAV_ITEMS: Array<{ id: string; label: string }> = [
+	{ id: "copy", label: "Copy" },
 	{ id: "stat", label: "Stat" },
 	{ id: "gauge", label: "Gauge" },
 	{ id: "sparkline", label: "Sparkline" },
@@ -114,6 +225,7 @@ const NAV_ITEMS: Array<{ id: string; label: string }> = [
 	{ id: "list", label: "List" },
 	{ id: "pie", label: "Pie" },
 	{ id: "funnel", label: "Funnel" },
+	{ id: "hbar", label: "Horizontal Bar" },
 	{ id: "histogram", label: "Histogram" },
 	{ id: "heatmap", label: "Heatmap" },
 	{ id: "markdown", label: "Markdown" },
@@ -160,6 +272,15 @@ export function WidgetLab() {
 										</a>
 									))}
 								</nav>
+
+								<Section
+									id="copy"
+									title="Copy"
+									description="The shared CopyButton. Polish: the check draws rather than pops, the label crossfade never changes the button width, and the error branch reads as a failure."
+									minColWidth={240}
+								>
+									<CopyScenarios />
+								</Section>
 
 								<Section
 									id="stat"
@@ -264,6 +385,16 @@ export function WidgetLab() {
 								>
 									{funnelScenarios.map((s, i) => (
 										<FunnelScenarioCard key={`funnel-${i}`} scenario={s} mode={mode} />
+									))}
+								</Section>
+
+								<Section
+									id="hbar"
+									title="Horizontal Bar"
+									description="Ranked categories, each a share of the total. Polish: long labels, value column alignment, overflow cap, near-identical top rows (the case a funnel mislabels as 100%)."
+								>
+									{hbarScenarios.map((s, i) => (
+										<HbarScenarioCard key={`hbar-${i}`} scenario={s} mode={mode} />
 									))}
 								</Section>
 
@@ -413,6 +544,14 @@ function FunnelScenarioCard({ scenario, mode }: { scenario: WidgetScenario; mode
 	return (
 		<ScenarioCell label={scenario.label}>
 			<FunnelWidget dataState={scenario.dataState} display={scenario.display} mode={mode} />
+		</ScenarioCell>
+	)
+}
+
+function HbarScenarioCard({ scenario, mode }: { scenario: WidgetScenario; mode: WidgetMode }) {
+	return (
+		<ScenarioCell label={scenario.label}>
+			<HbarWidget dataState={scenario.dataState} display={scenario.display} mode={mode} />
 		</ScenarioCell>
 	)
 }

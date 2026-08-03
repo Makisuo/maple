@@ -17,7 +17,7 @@ COPY --from=pruner /app/out/full/ ./
 
 # Build workspace dependencies that publish from dist/
 RUN bun run --cwd packages/browser build && \
-    bun run --cwd lib/effect-sdk build
+    bun run --cwd packages/effect-sdk build
 
 # Build-time env vars (baked into the SPA bundle)
 ARG VITE_API_BASE_URL

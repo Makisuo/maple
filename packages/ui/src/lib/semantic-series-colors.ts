@@ -1,4 +1,6 @@
 import { getIdentityColorBySlot, getIdentitySlot, IDENTITY_SLOT_COUNT } from "./colors"
+import { HTTP_METHOD_HEX } from "./http"
+import { SEVERITY_COLORS } from "./severity"
 
 const SPAN_STATUS_COLORS: Record<string, string> = {
 	ok: "var(--severity-info)",
@@ -11,25 +13,6 @@ const AGGREGATE_COLORS: Record<string, string> = {
 	median: "var(--chart-p50)",
 	p95: "var(--chart-p95)",
 	p99: "var(--chart-p99)",
-}
-
-const SEVERITY_COLORS: Record<string, string> = {
-	trace: "var(--severity-trace)",
-	debug: "var(--severity-debug)",
-	info: "var(--severity-info)",
-	warn: "var(--severity-warn)",
-	warning: "var(--severity-warn)",
-	fatal: "var(--severity-fatal)",
-}
-
-const HTTP_METHOD_COLORS: Record<string, string> = {
-	get: "#4A9EFF",
-	post: "#E8872B",
-	put: "#4AA865",
-	patch: "#8A7F72",
-	delete: "#E85D4A",
-	head: "#8A7F72",
-	options: "#5A5248",
 }
 
 // Base OKLCH parameters for each status code class
@@ -75,14 +58,16 @@ const STATUS_CLASS_PATTERN = /^([1-5])xx$/i
 function detectColor(key: string): string | null {
 	const lower = key.toLowerCase()
 
-	// Span status codes
+	// Span status codes ("error" is matched here, before the severity map)
 	if (lower in SPAN_STATUS_COLORS) return SPAN_STATUS_COLORS[lower]
 
-	// Log severities (skip "error" since it's already matched by span status)
-	if (lower in SEVERITY_COLORS) return SEVERITY_COLORS[lower]
+	// Log severities — the shared uppercase-keyed map from ./severity
+	const severity = SEVERITY_COLORS[lower.toUpperCase()]
+	if (severity) return severity
 
 	// HTTP methods
-	if (lower in HTTP_METHOD_COLORS) return HTTP_METHOD_COLORS[lower]
+	const method = HTTP_METHOD_HEX[lower.toUpperCase()]
+	if (method) return method
 
 	// Latency percentiles — these have dedicated chart tokens
 	if (lower in AGGREGATE_COLORS) return AGGREGATE_COLORS[lower]

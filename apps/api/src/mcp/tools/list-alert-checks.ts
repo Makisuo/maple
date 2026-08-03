@@ -5,12 +5,12 @@ import {
 	requiredStringParam,
 	type McpToolRegistrar,
 } from "./types"
-import { formatTable, truncate } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { formatTable, truncate } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/AlertsService"
+import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertRuleId } from "@maple/domain/http"
 
 const decodeRuleId = Schema.decodeUnknownSync(AlertRuleId)

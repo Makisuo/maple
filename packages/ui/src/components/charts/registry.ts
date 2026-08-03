@@ -12,6 +12,7 @@ import {
 	histogramSampleData,
 	heatmapSampleData,
 	funnelSampleData,
+	hbarSampleData,
 } from "./_shared/sample-data"
 
 export const chartRegistry: ChartRegistryEntry[] = [
@@ -41,6 +42,21 @@ export const chartRegistry: ChartRegistryEntry[] = [
 		),
 		sampleData: latencyTimeSeriesData,
 		tags: ["bar", "query-builder", "dynamic", "multi-query"],
+	},
+
+	// Horizontal (ranked) Bars
+	{
+		id: "query-builder-hbar",
+		name: "Horizontal Bar",
+		description: "Ranked categories as horizontal bars, each a share of the total",
+		category: "hbar",
+		component: lazy(() =>
+			import("./hbar/query-builder-hbar-chart").then((m) => ({
+				default: m.QueryBuilderHbarChart,
+			})),
+		),
+		sampleData: hbarSampleData,
+		tags: ["hbar", "horizontal", "bar", "ranked", "top", "breakdown", "query-builder"],
 	},
 
 	// Area Charts

@@ -12,7 +12,7 @@ import {
 	ComboboxItem,
 	ComboboxList,
 } from "@maple/ui/components/ui/combobox"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { GroupByMultiSelect } from "@/components/query-builder/group-by-multi-select"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
 import { useMetricScopedAutocomplete } from "@/hooks/use-metric-scoped-autocomplete"

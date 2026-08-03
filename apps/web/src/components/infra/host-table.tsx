@@ -15,8 +15,8 @@ import {
 	ROW_LINK_CLASS,
 	useTableSort,
 } from "./primitives/data-table"
-import { formatLoad } from "@maple/ui/format"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatLoad } from "@maple/ui/lib/format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 export type HostRow = ListHostsResponse["data"][number]
 

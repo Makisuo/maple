@@ -74,11 +74,15 @@ export interface BaseChartProps {
 		scaleType?: HeatmapScaleType
 	}
 	funnel?: {
+		/**
+		 * Percentage labels on each stage. Unset shows the share of the first
+		 * stage; `true` adds the step-to-step conversion; `false` suppresses both.
+		 */
 		showStepPercent?: boolean
 	}
 }
 
-export type ChartCategory = "bar" | "area" | "line" | "pie" | "histogram" | "heatmap" | "funnel"
+export type ChartCategory = "bar" | "hbar" | "area" | "line" | "pie" | "histogram" | "heatmap" | "funnel"
 
 export interface ChartRegistryEntry {
 	id: string

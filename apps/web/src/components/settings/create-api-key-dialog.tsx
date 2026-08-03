@@ -3,7 +3,7 @@ import { useId, useState } from "react"
 import { Exit } from "effect"
 import type { ApiKeyKind } from "@maple/domain/http"
 import type { V2ApiKeyWithSecret, V2Scope } from "@maple/domain/http/v2"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -23,6 +23,7 @@ import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-gro
 import { useApiKeyMutationSync } from "@/hooks/use-api-keys"
 import { formatBackendError } from "@/lib/error-messages"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { trackProduct } from "@/lib/analytics"
 import { buildApiKeyCreatePayload } from "./api-key-create-payload"
 import { ApiKeySecretReveal } from "./api-key-secret-reveal"
 
@@ -113,11 +114,12 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 		})
 		if (Exit.isSuccess(result)) {
 			setCreatedKey(result.value)
+			trackProduct("api_key_created", { kind, access: isMcp ? "full" : accessMode })
 			onCreated?.(result.value.secret)
 			void reconcileTxid(result.value.txid)
 		} else {
 			const { title, description } = formatBackendError(result)
-			toast.error(title, { description })
+			toastManager.add({ title, description, type: "error" })
 		}
 		setIsCreating(false)
 	}

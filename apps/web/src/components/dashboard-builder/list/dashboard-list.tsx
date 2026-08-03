@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
-import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
+import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 import { ToolbarSearch } from "@maple/ui/components/toolbar"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import { Button } from "@maple/ui/components/ui/button"
@@ -31,7 +31,7 @@ import {
 	DropdownMenuTrigger,
 } from "@maple/ui/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import {
 	ArrowRightIcon,

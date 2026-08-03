@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Flamegraph } from "@maple/ui/components/traces/flamegraph"
 import { TraceFlowView } from "@maple/ui/components/traces/flow-view"
-import type { SpanNode } from "@maple/ui/types"
+import type { SpanNode } from "@maple/ui/lib/types"
 
 const BASE_TIME = "2024-01-15T14:23:01.000Z"
 

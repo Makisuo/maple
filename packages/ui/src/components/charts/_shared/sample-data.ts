@@ -13,6 +13,17 @@ export const funnelSampleData = [
 	{ name: "Converted", value: 360 },
 ]
 
+/** Ranked, not sequential — the top rows are deliberately near-identical, which
+ *  is the case a funnel mislabels as four separate "100%" stages. */
+export const hbarSampleData = [
+	{ name: "RedisClient.beginMutation", value: 87_200_000 },
+	{ name: "UserAttributesCache.beginMutation", value: 86_400_000 },
+	{ name: "RedisClient.endMutation", value: 85_900_000 },
+	{ name: "ArtifactCache.get", value: 39_000_000 },
+	{ name: "SessionStore.load", value: 14_600_000 },
+	{ name: "Billing.meterUsage", value: 4_200_000 },
+]
+
 export const histogramSampleData = [
 	{ name: "0-50", value: 12 },
 	{ name: "50-100", value: 41 },

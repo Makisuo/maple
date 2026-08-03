@@ -163,7 +163,7 @@ export const MarkdownWidget = memo(function MarkdownWidget({ display, mode }: Ma
 		<WidgetShell
 			title={display.title || "Note"}
 			mode={mode}
-			contentClassName="flex-1 min-h-0 overflow-auto p-3"
+			contentClassName="flex-1 min-h-0 overflow-auto p-2 @min-[220px]/widget:p-3"
 		>
 			{content.trim() === "" ? (
 				<div className="text-xs text-muted-foreground italic">

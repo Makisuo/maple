@@ -1,5 +1,5 @@
 import type { TimePreset } from "@/lib/time-utils"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 interface PresetListProps {
 	selectedValue?: string

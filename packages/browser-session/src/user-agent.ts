@@ -4,8 +4,20 @@ interface ParsedUserAgent {
 	readonly deviceType: string
 }
 
+// The UA is constant for a page's lifetime but every metadata row re-parses it
+// — including the 60s heartbeats of a tab left open all day. One slot is enough:
+// callers pass `navigator.userAgent` and nothing else.
+let memo: { ua: string; parsed: ParsedUserAgent } | undefined
+
 /** Best-effort UA parse — enough to populate filterable session facets. */
 export function parseUserAgent(ua: string): ParsedUserAgent {
+	if (memo?.ua === ua) return memo.parsed
+	const parsed = parse(ua)
+	memo = { parsed, ua }
+	return parsed
+}
+
+function parse(ua: string): ParsedUserAgent {
 	const browserName = /edg/i.test(ua)
 		? "Edge"
 		: /opr|opera/i.test(ua)

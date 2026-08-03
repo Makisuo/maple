@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Cause, Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { SpendLimits, UpdateSpendLimitsRequest, type SpendEnforcementMode } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
@@ -16,7 +16,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Radio, RadioGroup } from "@maple/ui/components/ui/radio-group"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { useAtomSet } from "@/lib/effect-atom"
 import { BILLING_SPEND_LIMITS_KEY, updateSpendLimitsMutation } from "@/lib/services/atoms/billing-atoms"
@@ -183,14 +183,17 @@ export function SpendLimitDialog({
 		setSaving(false)
 
 		if (Exit.isSuccess(exit)) {
-			toast.success(editingCap ? "Cap saved." : "Spend limit saved.")
+			toastManager.add({ title: editingCap ? "Cap saved." : "Spend limit saved.", type: "success" })
 			onOpenChange(false)
 			return
 		}
 		// Server-side validation is the authority here (it also guards the API and
 		// the cron), so surface its message rather than pre-empting it client-side.
 		const error = Cause.squash(exit.cause)
-		toast.error(error instanceof Error ? error.message : "Couldn't save spend limits.")
+		toastManager.add({
+			title: error instanceof Error ? error.message : "Couldn't save spend limits.",
+			type: "error",
+		})
 	}
 
 	return (

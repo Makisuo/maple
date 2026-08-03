@@ -1,6 +1,6 @@
 import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
-import { QueryEngineService } from "@/services/QueryEngineService"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import {
 	QuerySpec,
 	type QueryEngineResult,
@@ -35,7 +35,7 @@ import type {
 	WidgetInspectionSummary,
 	WidgetInspectionVerdict,
 } from "@maple/domain"
-import type { TenantContext } from "@/lib/tenant-context"
+import type { TenantContext } from "@/services/auth/tenant-context"
 
 const TIMESERIES_ENDPOINT = "custom_query_builder_timeseries"
 const BREAKDOWN_ENDPOINT = "custom_query_builder_breakdown"
@@ -271,7 +271,8 @@ const metricExistsInCatalog = Effect.fn("metricExistsInCatalog")(function* (
 export interface InspectWidgetTimeRange {
 	startTime: string
 	endTime: string
-	source: "override" | "dashboard" | "fallback"
+	/** `widget` is the widget's own `timeRange` override; `override` is a caller-supplied window. */
+	source: "override" | "widget" | "dashboard" | "fallback"
 }
 
 /** Result of executing a raw_sql_chart widget's stored SQL during inspection. */
@@ -846,6 +847,17 @@ export const inspectWidgetsAfterMutation = Effect.fn("inspectWidgetsAfterMutatio
 					return { startTime: fallback.st, endTime: fallback.et, source: "fallback" as const }
 				})()
 
+		// A widget pinned to its own window must be validated against that window —
+		// inspecting a "last 30 minutes" tile over the board's 7 days would report
+		// on data the tile will never show.
+		const timeRangeFor = (widget: DashboardWidget): InspectWidgetTimeRange => {
+			if (!widget.timeRange) return timeRange
+			const widgetResolved = resolveDashboardTimeRange(widget.timeRange as DashboardTimeRangeInput)
+			return widgetResolved
+				? { startTime: widgetResolved.startTime, endTime: widgetResolved.endTime, source: "widget" }
+				: timeRange
+		}
+
 		const outcomes = yield* Effect.forEach(
 			toInspect,
 			(widget) =>
@@ -853,7 +865,7 @@ export const inspectWidgetsAfterMutation = Effect.fn("inspectWidgetsAfterMutatio
 					tenant,
 					dashboardName: dashboard.name,
 					widget,
-					timeRange,
+					timeRange: timeRangeFor(widget),
 				}),
 			{ concurrency: maxConcurrent },
 		)

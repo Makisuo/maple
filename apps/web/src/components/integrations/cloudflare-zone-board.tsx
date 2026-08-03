@@ -13,8 +13,8 @@ import { cn } from "@maple/ui/lib/utils"
 
 import { ColumnHead, type SortDir } from "@/components/infra/primitives/data-table"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
-import { formatNumber } from "@maple/ui/format"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatNumber } from "@maple/ui/lib/format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { CLOUDFLARE_ACCENT } from "./integration-catalog"
 
 const HOUR_MS = 3_600_000

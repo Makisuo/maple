@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { Match } from "effect"
-import type { TracesMetric } from "../../query-engine"
+import type { TracesMetric } from "@maple/domain/query-engine"
 import { compile } from "@maple-dev/clickhouse-builder/sql"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { avg, count, countIf, quantile } from "@maple-dev/clickhouse-builder"

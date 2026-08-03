@@ -3,7 +3,11 @@ import {
 	bucketTimeline,
 	computeBucketSeconds,
 	formatWarehouseDateTime,
+	formatWarehouseDateTimeMs,
 	parseWarehouseDateTime,
+	relativeRangeSeconds,
+	resolveRelativeRange,
+	resolveRelativeRangeToWarehouse,
 	warehouseDateTimeToIso,
 } from "./datetime"
 
@@ -127,5 +131,111 @@ describe("bucketTimeline", () => {
 
 	it("returns [] when the end precedes the start", () => {
 		expect(bucketTimeline(Date.UTC(2026, 1, 1, 0, 10, 0), Date.UTC(2026, 1, 1, 0, 0, 0), 300)).toEqual([])
+	})
+})
+
+const AT = (iso: string) => Date.parse(iso)
+
+describe("formatWarehouseDateTimeMs", () => {
+	it("keeps milliseconds, so sub-second ordering survives", () => {
+		expect(formatWarehouseDateTimeMs(AT("2026-03-08T14:30:05.789Z"))).toBe("2026-03-08 14:30:05.789")
+	})
+
+	it("agrees with the second-precision variant up to the decimal point", () => {
+		const ms = AT("2026-03-08T14:30:05.789Z")
+		expect(formatWarehouseDateTimeMs(ms).startsWith(formatWarehouseDateTime(ms))).toBe(true)
+	})
+})
+
+describe("relativeRangeSeconds", () => {
+	it("parses every unit the time picker emits", () => {
+		expect(relativeRangeSeconds("15m")).toBe(900)
+		expect(relativeRangeSeconds("6h")).toBe(21_600)
+		expect(relativeRangeSeconds("7d")).toBe(604_800)
+		expect(relativeRangeSeconds("2w")).toBe(1_209_600)
+		expect(relativeRangeSeconds("3mo")).toBe(7_776_000)
+		expect(relativeRangeSeconds("today")).toBe(86_400)
+	})
+
+	it("does not confuse the minute and month units", () => {
+		expect(relativeRangeSeconds("3m")).toBe(180)
+		expect(relativeRangeSeconds("3mo")).toBe(7_776_000)
+	})
+
+	it("rejects malformed shorthand", () => {
+		for (const bad of ["", "d", "7", "7x", "-7d", "0d", "7 d", "last week"]) {
+			expect(relativeRangeSeconds(bad)).toBeNull()
+		}
+	})
+})
+
+describe("resolveRelativeRange", () => {
+	const now = AT("2026-03-08T14:30:00.000Z")
+
+	it("subtracts fixed-width units exactly", () => {
+		expect(resolveRelativeRange("15m", now)).toEqual({ startMs: now - 900_000, endMs: now })
+		expect(resolveRelativeRange("6h", now)).toEqual({ startMs: now - 21_600_000, endMs: now })
+		expect(resolveRelativeRange("7d", now)).toEqual({ startMs: now - 604_800_000, endMs: now })
+		expect(resolveRelativeRange("2w", now)).toEqual({ startMs: now - 1_209_600_000, endMs: now })
+	})
+
+	it("uses real calendar months, not 30-day approximations", () => {
+		// The MCP resolver used to do `days: amount * 30`, so "1mo" from 8 March
+		// landed on 6 February instead of 8 February.
+		const start = new Date(resolveRelativeRange("1mo", now)!.startMs)
+		expect(start.getMonth()).toBe(1)
+		expect(start.getDate()).toBe(8)
+	})
+
+	it("clamps the day of month when the target month is shorter", () => {
+		// 31 March minus one month is 28 February, never 3 March. Mirrors
+		// date-fns `subMonths`, which the web app relied on.
+		const march31 = new Date(2026, 2, 31, 12, 0, 0).getTime()
+		const start = new Date(resolveRelativeRange("1mo", march31)!.startMs)
+		expect(start.getMonth()).toBe(1)
+		expect(start.getDate()).toBe(28)
+	})
+
+	it("clamps across a year boundary too", () => {
+		const march31 = new Date(2026, 2, 31, 12, 0, 0).getTime()
+		const start = new Date(resolveRelativeRange("13mo", march31)!.startMs)
+		expect(start.getFullYear()).toBe(2025)
+		expect(start.getMonth()).toBe(1)
+		expect(start.getDate()).toBe(28)
+	})
+
+	it("resolves 'today' to local midnight", () => {
+		const midday = new Date(2026, 2, 8, 13, 45, 0).getTime()
+		const start = new Date(resolveRelativeRange("today", midday)!.startMs)
+		expect(start.getHours()).toBe(0)
+		expect(start.getMinutes()).toBe(0)
+		expect(start.getSeconds()).toBe(0)
+		expect(start.getDate()).toBe(8)
+	})
+
+	it("returns null for shorthand it cannot parse", () => {
+		for (const bad of ["", "last month", "7x", "0d"]) {
+			expect(resolveRelativeRange(bad, now)).toBeNull()
+		}
+	})
+
+	it("always ends at now", () => {
+		for (const value of ["15m", "7d", "3mo", "today"]) {
+			expect(resolveRelativeRange(value, now)!.endMs).toBe(now)
+		}
+	})
+})
+
+describe("resolveRelativeRangeToWarehouse", () => {
+	it("renders both bounds in warehouse format", () => {
+		const now = AT("2026-03-08T14:30:00.000Z")
+		expect(resolveRelativeRangeToWarehouse("6h", now)).toEqual({
+			startTime: "2026-03-08 08:30:00",
+			endTime: "2026-03-08 14:30:00",
+		})
+	})
+
+	it("propagates null for invalid shorthand", () => {
+		expect(resolveRelativeRangeToWarehouse("nope")).toBeNull()
 	})
 })

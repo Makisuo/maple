@@ -70,9 +70,7 @@ test("infra chart grids' linked cursor avoids synchronized chart render work", a
 	// cheap baseline shrinks the numerator's lead. Every observed failure had a
 	// baseline under ~1350ms (its fastest measurements) with commits and dropped
 	// frames at their best. Gating on it fails a quiet runner for being quiet.
-	expect(cursor.react.commits, "linked cursor commits").toBeLessThanOrEqual(
-		recharts.react.commits * 0.45,
-	)
+	expect(cursor.react.commits, "linked cursor commits").toBeLessThanOrEqual(recharts.react.commits * 0.45)
 	// Duration stays as a loose sanity ceiling: it rejects an order-of-magnitude
 	// per-commit regression that a commit count alone would miss.
 	expect(cursor.react.totalActualDurationMs, "linked cursor render work").toBeLessThanOrEqual(

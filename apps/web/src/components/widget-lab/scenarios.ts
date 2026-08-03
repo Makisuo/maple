@@ -37,6 +37,14 @@ const decodeErrorState: WidgetDataState = {
 	kind: "decode",
 }
 
+const rangeErrorState: WidgetDataState = {
+	status: "error",
+	title: "Range too wide for this list",
+	message:
+		"Lists show individual records, so they cover at most 7 days. Charts on this dashboard are unaffected.",
+	kind: "range",
+}
+
 const ready = <T>(data: T): WidgetDataState => ({ status: "ready", data })
 
 // ---------------------------------------------------------------------------
@@ -221,6 +229,34 @@ export const gaugeScenarios: WidgetScenario[] = [
 			unit: "percent",
 			gauge: { min: 0, max: 1 },
 			thresholds: gaugeThresholds,
+		},
+	},
+	{
+		// The SLO shape: thresholds crowded into the top few percent of the range,
+		// so 95/99/100 all land within ~13° of the arc's end. Only the bounds get
+		// labels; 95 and 99 keep their ticks.
+		label: "Crowded thresholds (SLO)",
+		dataState: ready(99.4),
+		display: {
+			title: "Today's health",
+			unit: "percent_100",
+			gauge: { min: 0, max: 100 },
+			thresholds: [
+				{ value: 0, color: "var(--color-red-500)" },
+				{ value: 95, color: "var(--color-amber-500)" },
+				{ value: 99, color: "var(--color-emerald-500)" },
+			],
+		},
+	},
+	{
+		// Widest labels the dial can produce — checks nothing clips at the arc ends.
+		label: "Wide labels at the arc ends",
+		dataState: ready(720),
+		display: {
+			title: "p99 latency",
+			unit: "duration_ms",
+			gauge: { min: 0, max: 1000 },
+			thresholds: [{ value: 250, color: "var(--color-amber-500)" }],
 		},
 	},
 	{
@@ -508,7 +544,64 @@ const singlePointSeries: Record<string, unknown>[] = [
 	{ bucket: "2026-01-01T00:00:00Z", "demo-api": 42, "demo-worker": 17 },
 ]
 
+/**
+ * A healthy series whose final bucket is the current, still-filling interval.
+ *
+ * Buckets are anchored to wall-clock "now" because that is how the widget
+ * actually detects the in-progress bucket — `query-builder-timeseries` sends no
+ * `partial` flag, so `markIncompleteSegments` falls back to comparing each
+ * bucket's end against the clock. A fixed 2026-01-01 timestamp is entirely in
+ * the past and would exercise nothing.
+ */
+function makeTrailingBucketSeries(lastBucket: { api: number; worker: number } | null) {
+	const hour = 3_600_000
+	const currentBucketStart = Math.floor(Date.now() / hour) * hour
+	return Array.from({ length: 13 }, (_, i) => {
+		const isCurrent = i === 12
+		return {
+			bucket: new Date(currentBucketStart - (12 - i) * hour).toISOString(),
+			"demo-api": isCurrent ? (lastBucket?.api ?? 0) : 900 + Math.round(180 * Math.sin(i / 2)),
+			"demo-worker": isCurrent ? (lastBucket?.worker ?? 0) : 420 + Math.round(90 * Math.cos(i / 3)),
+		}
+	})
+}
+
+/** The current bucket came back with nothing — drawn as-is it cliffs to zero. */
+const trailingEmptyBucketSeries: Record<string, unknown>[] = makeTrailingBucketSeries(null)
+
+/** Same shape, but the current bucket did report — it stays, dashed. */
+const trailingPartialBucketSeries: Record<string, unknown>[] = makeTrailingBucketSeries({
+	api: 240,
+	worker: 110,
+})
+
 export const stressScenarios: ChartScenario[] = [
+	{
+		label: "Area — trailing empty bucket (no cliff)",
+		chartId: "query-builder-area",
+		chartName: "Area",
+		category: "area",
+		dataState: ready(trailingEmptyBucketSeries),
+		display: {
+			title: "Span throughput (current bucket empty)",
+			chartId: "query-builder-area",
+			unit: "number",
+			chartPresentation: { legend: "visible", seriesStats: false },
+		},
+	},
+	{
+		label: "Area — trailing partial bucket (dashed)",
+		chartId: "query-builder-area",
+		chartName: "Area",
+		category: "area",
+		dataState: ready(trailingPartialBucketSeries),
+		display: {
+			title: "Span throughput (current bucket reporting)",
+			chartId: "query-builder-area",
+			unit: "number",
+			chartPresentation: { legend: "visible", seriesStats: false },
+		},
+	},
 	{
 		label: "Line — 25 series (compact legend)",
 		chartId: "query-builder-line",
@@ -963,6 +1056,20 @@ const logRows = [
 
 export const listScenarios: WidgetScenario[] = [
 	{
+		// Muted rather than destructive: the dashboard's charts render the full
+		// window fine, only this tile's query kind can't span it.
+		label: "Range too wide",
+		dataState: rangeErrorState,
+		display: {
+			title: "Recent traces",
+			listDataSource: "traces",
+			columns: [
+				{ field: "traceId", header: "Trace" },
+				{ field: "spanName", header: "Operation" },
+			],
+		},
+	},
+	{
 		label: "Recent traces",
 		dataState: ready(traceRows),
 		display: {
@@ -1049,6 +1156,24 @@ export const pieScenarios: WidgetScenario[] = [
 		},
 	},
 	{
+		label: "Table legend (Value + %)",
+		dataState: ready(pieMany),
+		display: {
+			title: "Traffic by service",
+			chartPresentation: { legend: "right" },
+			pie: {},
+		},
+	},
+	{
+		label: "Table legend — long tail (+N others)",
+		dataState: ready(makePieSlices(50)),
+		display: {
+			title: "Traffic by service (50 groups)",
+			chartPresentation: { legend: "right" },
+			pie: { donut: true },
+		},
+	},
+	{
 		label: "Single slice (100%)",
 		dataState: ready([{ name: "api-gateway", value: 4820 }]),
 		display: { title: "Only one source", pie: { showPercent: true } },
@@ -1098,6 +1223,18 @@ export const funnelScenarios: WidgetScenario[] = [
 			title: "Signup conversion",
 			unit: "number",
 			funnel: { showStepPercent: true },
+		},
+	},
+	{
+		// `false` suppresses BOTH percentage labels — it used to leave the
+		// "% of first" one on screen, so a widget that asked for no percentages
+		// still showed them.
+		label: "Percentages off",
+		dataState: ready(funnelStages),
+		display: {
+			title: "Signup conversion",
+			unit: "number",
+			funnel: { showStepPercent: false },
 		},
 	},
 	{
@@ -1159,6 +1296,113 @@ export const funnelScenarios: WidgetScenario[] = [
 		label: "Empty",
 		dataState: emptyState,
 		display: { title: "Signup conversion" },
+	},
+]
+
+// ---------------------------------------------------------------------------
+// Horizontal bar (ranked)
+// ---------------------------------------------------------------------------
+
+/**
+ * The case that motivated the panel: the top rows are near-identical, which a
+ * funnel labels "100% / 100% / 100% / 100%". As shares of the total they read
+ * 24% / 24% / 24% / 11%.
+ */
+const hbarTopOperations = [
+	{ name: "RedisClient.beginMutation", value: 87_200_000 },
+	{ name: "UserAttributesCache.beginMutation", value: 86_400_000 },
+	{ name: "RedisClient.endMutation", value: 85_900_000 },
+	{ name: "ArtifactCache.get", value: 39_000_000 },
+	{ name: "SessionStore.load", value: 14_600_000 },
+]
+
+export const hbarScenarios: WidgetScenario[] = [
+	{
+		label: "Top operations (% of total)",
+		dataState: ready(hbarTopOperations),
+		display: { title: "Busiest Operations", unit: "number" },
+	},
+	{
+		label: "Unsorted input (chart ranks it)",
+		dataState: ready([
+			{ name: "checkout", value: 120 },
+			{ name: "search", value: 940 },
+			{ name: "cart", value: 410 },
+		]),
+		display: { title: "Requests by route", unit: "number" },
+	},
+	{
+		label: "Long labels + long tail",
+		dataState: ready([
+			{ name: "com.acme.platform.identity.SessionRefreshHandler.handle", value: 9_400_000 },
+			{ name: "com.acme.platform.billing.UsageAggregator.flushWindow", value: 610_000 },
+			{ name: "com.acme.platform.search.QueryPlanner.plan", value: 4_200 },
+			{ name: "com.acme.platform.audit.EventWriter.append", value: 90 },
+		]),
+		display: { title: "Spans by operation", unit: "number" },
+	},
+	{
+		label: "Duration unit",
+		dataState: ready([
+			{ name: "POST /checkout", value: 1_284 },
+			{ name: "GET /search", value: 612 },
+			{ name: "GET /cart", value: 240 },
+		]),
+		display: { title: "P95 by route", unit: "duration_ms" },
+	},
+	{
+		// Rows must cap inside the card with "+N more", never spill (MAP-49).
+		label: "30 rows (overflow cap)",
+		dataState: ready(
+			Array.from({ length: 30 }, (_, i) => ({
+				name: `operation-${i + 1}`,
+				value: Math.round(12_840 / (i + 1)),
+			})),
+		),
+		display: { title: "Busiest Operations", unit: "number" },
+	},
+	{
+		// A single dominant row makes every other share round to 0% — "<0.1%"
+		// has to read as "tiny", not as "no data".
+		label: "One dominant row",
+		dataState: ready([
+			{ name: "cache.get", value: 9_800_000 },
+			{ name: "cache.set", value: 4_000 },
+			{ name: "cache.evict", value: 60 },
+		]),
+		display: { title: "Cache operations", unit: "number" },
+	},
+	{
+		label: "Zero rows + missing labels",
+		dataState: ready([
+			{ name: "api", value: 4820 },
+			{ name: undefined, value: 940 },
+			{ name: "worker", value: 0 },
+		]),
+		display: { title: "Spans by service", unit: "number" },
+	},
+	{
+		// A mis-wired hbar fed timeseries rows must aggregate per series, not
+		// draw one "—" row per bucket.
+		label: "Timeseries-shaped input",
+		dataState: ready(
+			Array.from({ length: 12 }, (_, i) => ({
+				bucket: new Date(new Date("2026-01-01T00:00:00Z").getTime() + i * 3_600_000).toISOString(),
+				A: 125,
+				B: 40,
+			})),
+		),
+		display: { title: "Spans by service", unit: "number" },
+	},
+	{
+		label: "Loading",
+		dataState: loadingState,
+		display: { title: "Busiest Operations" },
+	},
+	{
+		label: "Empty",
+		dataState: emptyState,
+		display: { title: "Busiest Operations" },
 	},
 ]
 

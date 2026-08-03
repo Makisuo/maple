@@ -1,6 +1,9 @@
+import { CollectionError } from "@maple/unitflow/db"
+import type * as Db from "@maple/unitflow/db"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { describe, expect, it } from "vitest"
 import type { DashboardRow } from "@/lib/collections/dashboards"
-import { deriveDashboardsList } from "./dashboards-list-model"
+import { buildList, deriveDashboardsList } from "./dashboards-list-model"
 
 const ISO_OLD = "2026-01-01T00:00:00.000Z"
 const ISO_MID = "2026-03-01T00:00:00.000Z"
@@ -86,6 +89,56 @@ describe("deriveDashboardsList", () => {
 			id: "w1",
 			visualization: "timeseries",
 			layout: { x: 0, y: 0, w: 4, h: 5 },
+		})
+	})
+})
+
+describe("buildList", () => {
+	const rowsInitial: Db.CollectionState<DashboardRow> = AsyncResult.initial(true)
+	const rowsFailed: Db.CollectionState<DashboardRow> = AsyncResult.fail(
+		new CollectionError({ reason: "load-timeout", message: "Collection timed out while loading" }),
+	)
+	const rowsReady = (rows: ReadonlyArray<DashboardRow>): Db.CollectionState<DashboardRow> =>
+		AsyncResult.success(rows)
+
+	const fallbackDashboards = deriveDashboardsList([makeRow("dash-http", ISO_NEW)])
+
+	it("renders synced rows and never reaches for the fallback", () => {
+		const list = buildList(rowsReady([makeRow("dash-live", ISO_NEW)]), {
+			status: "ready",
+			dashboards: fallbackDashboards,
+		})
+		expect(list).toMatchObject({ phase: "ready", degraded: false })
+		expect(list.phase === "ready" && list.dashboards.map((d) => d.id)).toEqual(["dash-live"])
+	})
+
+	it("stays on the skeleton for the tick between the failure and its fallback request", () => {
+		expect(buildList(rowsFailed, { status: "idle" })).toEqual({ phase: "loading" })
+		expect(buildList(rowsFailed, { status: "loading" })).toEqual({ phase: "loading" })
+	})
+
+	it("serves the HTTP snapshot, flagged degraded, once sync has failed", () => {
+		const list = buildList(rowsFailed, { status: "ready", dashboards: fallbackDashboards })
+		expect(list).toMatchObject({ phase: "ready", degraded: true })
+		expect(list.phase === "ready" && list.dashboards.map((d) => d.id)).toEqual(["dash-http"])
+	})
+
+	it("keeps serving the snapshot while a heal attempt re-enters loading", () => {
+		// The recreate puts the rows store back to `initial`; blinking the list away
+		// every 30s while heal attempts cycle would be worse than a frozen list.
+		const list = buildList(rowsInitial, { status: "ready", dashboards: fallbackDashboards })
+		expect(list).toMatchObject({ phase: "ready", degraded: true })
+	})
+
+	it("errors only when sync and the HTTP fallback are both down", () => {
+		expect(buildList(rowsFailed, { status: "failed" })).toMatchObject({ phase: "error" })
+	})
+
+	it("reports a genuinely empty org as ready, not degraded", () => {
+		expect(buildList(rowsReady([]), { status: "idle" })).toEqual({
+			phase: "ready",
+			dashboards: [],
+			degraded: false,
 		})
 	})
 })

@@ -8,8 +8,8 @@ import {
 	paramKey,
 	paramValue,
 	templateId,
-} from "../helpers"
-import type { TemplateDefinition, WidgetDef } from "../types"
+} from "@/dashboard-templates/helpers"
+import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 function widgets(clusterName?: string): WidgetDef[] {
 	// Node/namespace/cluster identity lives on ResourceAttributes — the metrics

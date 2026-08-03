@@ -2,7 +2,7 @@ import { useCallback, useMemo, useReducer, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import type { V2ErrorIssue } from "@maple/domain/http/v2"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useListNavigation } from "@/hooks/use-list-navigation"
@@ -334,7 +334,7 @@ function IssuesReadyBody({ initialPage, listQuery, activeFilter, toolbar }: Issu
 			setExtraIssues((current) => appendUniqueErrorIssues(current, page.data.map(errorIssueFromV2)))
 			setNextCursorOverride(page.next_cursor)
 		} catch {
-			toast.error("More issues could not be loaded")
+			toastManager.add({ title: "More issues could not be loaded", type: "error" })
 		} finally {
 			setLoadingMore(false)
 		}

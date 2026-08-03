@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import {
 	CommitAvatar,
@@ -12,10 +12,10 @@ import {
 } from "@/components/vcs/commit-sha-hover-card"
 import type { ReleasePoint } from "@/components/vcs/commit-markers/marker-layout"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { SectionCard } from "./section-card"
-import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
+import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
 const RAIL_LIMIT = 8
 // Expanded ceiling: bounds mounted commit-resolution subscriptions when a window

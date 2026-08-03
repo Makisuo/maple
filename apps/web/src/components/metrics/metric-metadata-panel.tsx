@@ -1,4 +1,4 @@
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"

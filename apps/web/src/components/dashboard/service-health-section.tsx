@@ -20,7 +20,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatErrorRate, formatLatency } from "@maple/ui/lib/format"
 import { latencyToneClass } from "@maple/ui/lib/latency-tone"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import {
 	deriveServiceHealthFromCauses,

@@ -4,7 +4,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { ColumnHead, DataTable, MetaChip, ROW_BUTTON_CLASS, useTableSort } from "../primitives/data-table"
 import type { BranchCandidate } from "./branch-selection"
 import { MISSING, formatLag, formatStoragePercent, lagClass, utilizationClass } from "./metrics"

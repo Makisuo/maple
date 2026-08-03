@@ -1,5 +1,5 @@
 import { memo } from "react"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import {
 	Combobox,
 	ComboboxContent,

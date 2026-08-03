@@ -4,7 +4,7 @@ import { MapleApiV2, PublicIdPrefixes, dependencyUnavailable, encodePublicId } f
 import type { PublicIdPrefix, V2SetupAudit, V2SetupAuditAffectedEntity } from "@maple/domain/http/v2"
 import type { AuditAffectedEntity, AuditCheckResult, SetupAuditReport } from "@maple/domain/setup-audit"
 import { Effect } from "effect"
-import { SetupAuditService } from "../../services/SetupAuditService"
+import { SetupAuditService } from "@/services/org/SetupAuditService"
 
 /**
  * Affected-entity kinds that map onto a v2 public ID. Repositories and integrations are deliberately

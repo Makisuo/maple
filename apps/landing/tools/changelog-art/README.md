@@ -17,9 +17,9 @@ bun run server.ts          # http://127.0.0.1:4899
 Open the page, then from the console:
 
 ```js
-await renderAll()    // every section poster in SPECS
-await renderAll(0)   // just SPECS[0], for iterating
-await renderCover()  // the 1200×630 release cover / OG card
+await renderAll() // every section poster in SPECS
+await renderAll(0) // just SPECS[0], for iterating
+await renderCover() // the 1200×630 release cover / OG card
 ```
 
 PNGs land in `out/`. Encode for the site:
@@ -47,8 +47,8 @@ magick out/changelog-2026-07.png -strip -define png:compression-level=9 \
   synchronously and `render()` never consults visibility, so it draws even when
   the browser pane is hidden — where rAF is suspended and would hang forever.
 - **Sign of `offsetX` depends on the shape.** Pattern-space shapes (wave, warp,
-  ripple — `v_patternUV`) move right with *negative* offsetX; object-space
-  shapes (sphere, blob — `v_objectUV`) move right with *positive* offsetX.
+  ripple — `v_patternUV`) move right with _negative_ offsetX; object-space
+  shapes (sphere, blob — `v_objectUV`) move right with _positive_ offsetX.
 - **Author the pattern for the displayed size, not the rendered size.** Both
   shader families compute in device-pixel space — grain from
   `gl_FragCoord`/`u_resolution`, dithering keeps `u_pxSize` in "consistent
@@ -58,9 +58,9 @@ magick out/changelog-2026-07.png -strip -define png:compression-level=9 \
   dither `pxSize` 7–9, grain `noise` ~0.26–0.3. **Always review by resizing the
   PNG to 832px wide** — the native export lies to you:
 
-  ```bash
-  magick out/2026-07-api.png -resize 832x /tmp/check.png
-  ```
+    ```bash
+    magick out/2026-07-api.png -resize 832x /tmp/check.png
+    ```
 
 - **`maskField()` is the legibility guarantee.** It fades the field out across
   the left half at composite time, so the headline always sits on clean ground

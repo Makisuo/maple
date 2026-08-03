@@ -1,4 +1,4 @@
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { Result, useAtomValue, useAtomRefresh } from "@/lib/effect-atom"
 import { PlusIcon, ChartLineIcon, ChartBarIcon, ChartBarTrendUpIcon } from "@/components/icons"
 

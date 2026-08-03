@@ -13,6 +13,7 @@ import {
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 // ---------------------------------------------------------------------------
 // List sessions
 // ---------------------------------------------------------------------------
@@ -25,6 +26,8 @@ const ListReplaysInput = Schema.Struct({
 	country: Schema.optional(Schema.String),
 	deviceType: Schema.optional(Schema.String),
 	userId: Schema.optional(Schema.String),
+	/** Every session from one browser — the marketing-visit → signup join. */
+	visitorId: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Boolean),
 	search: Schema.optional(Schema.String),
 	cursor: Schema.optional(Schema.String),
@@ -40,8 +43,10 @@ const ListReplaysInput = Schema.Struct({
 export type ListReplaysInput = Schema.Schema.Type<typeof ListReplaysInput>
 
 const defaultTimeRange = (nowMs: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMs - 24 * 60 * 60 * 1000), endTime: fmt(nowMs) }
+	return {
+		startTime: formatWarehouseDateTime(nowMs - 24 * 60 * 60 * 1000),
+		endTime: formatWarehouseDateTime(nowMs),
+	}
 }
 
 export const listReplays = Effect.fn("SessionReplays.listReplays")(function* ({
@@ -63,6 +68,7 @@ export const listReplays = Effect.fn("SessionReplays.listReplays")(function* ({
 					country: input.country,
 					deviceType: input.deviceType,
 					userId: input.userId,
+					visitorId: input.visitorId,
 					hasErrors: input.hasErrors,
 					search: input.search,
 					cursor: input.cursor,

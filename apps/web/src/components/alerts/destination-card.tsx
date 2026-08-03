@@ -8,7 +8,7 @@ import {
 	PencilIcon,
 	TrashIcon,
 } from "@/components/icons"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card } from "@maple/ui/components/ui/card"
 import {
@@ -19,7 +19,7 @@ import {
 	DropdownMenuTrigger,
 } from "@maple/ui/components/ui/dropdown-menu"
 import { Switch } from "@maple/ui/components/ui/switch"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 interface DestinationCardProps {
 	destination: AlertDestinationDocument

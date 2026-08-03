@@ -116,6 +116,7 @@ export default Alchemy.Stack(
 		const landing = yield* createLandingWorker({
 			stage,
 			domains,
+			ingestUrl,
 			logsDestination: shared.logsDestination,
 			tracesDestination: shared.tracesDestination,
 		})

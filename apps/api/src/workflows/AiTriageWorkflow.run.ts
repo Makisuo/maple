@@ -39,14 +39,14 @@ import {
 import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
 import { and, eq } from "drizzle-orm"
 import { Cause, Data, Effect, Exit, Layer, ManagedRuntime, Option, Schema } from "effect"
-import { trackTokenUsage } from "../lib/autumn-tracker"
-import { applyTriageSeverity } from "../lib/issue-severity"
-import { isWorkersAiBinding } from "../lib/WorkersAiHttpClient"
+import { trackTokenUsage } from "@/services/billing/autumn-tracker"
+import { applyTriageSeverity } from "@/services/errors/issue-severity"
+import { isWorkersAiBinding } from "@/platform/WorkersAiHttpClient"
 import type { WorkflowEventLike, WorkflowStepLike } from "./ClickHouseSchemaApplyWorkflow.run"
 
 export interface AiTriageWorkflowEnv extends Record<string, unknown> {
 	readonly MAPLE_DB: unknown
-	/** Cloudflare Workers AI binding. Keyless + neuron-billed; see `@/lib/WorkersAiHttpClient`. */
+	/** Cloudflare Workers AI binding. Keyless + neuron-billed; see `@/platform/WorkersAiHttpClient`. */
 	readonly AI?: unknown
 	/** REST fallback for stages with no `AI` binding (local `bun dev`, self-hosted). */
 	readonly CLOUDFLARE_API_KEY?: string
@@ -76,7 +76,8 @@ interface InvokeTriageInput {
  * (the keyless, neuron-billed path) or an API key for the REST endpoint.
  */
 const canReachModel = (env: AiTriageWorkflowEnv): boolean =>
-	isWorkersAiBinding(env.AI) || (typeof env.CLOUDFLARE_API_KEY === "string" && env.CLOUDFLARE_API_KEY !== "")
+	isWorkersAiBinding(env.AI) ||
+	(typeof env.CLOUDFLARE_API_KEY === "string" && env.CLOUDFLARE_API_KEY !== "")
 
 /** Internal actor the triage tools run as — same identity the internal MCP RPC path uses. */
 const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
@@ -100,8 +101,8 @@ const invokeTriageWorkflow = async ({
 	const [{ MainLive }, { layerPg }, { layerLlm, resolveTriageModel }, { runTriageAgent }] =
 		await Promise.all([
 			import("../app"),
-			import("../lib/DatabasePgLive"),
-			import("../lib/Llm"),
+			import("../platform/DatabasePgLive"),
+			import("../platform/Llm"),
 			import("./triage-agent"),
 		])
 

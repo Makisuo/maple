@@ -19,8 +19,8 @@ import {
 } from "@maple/ui/components/ui/input-group"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
-import { CheckIcon, CopyIcon, EyeIcon } from "@/components/icons"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { EyeIcon } from "@/components/icons"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
@@ -58,7 +58,6 @@ function helmCommand(token: string) {
 }
 
 export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
-	const { copied, copy } = useCopyToClipboard("Install command")
 	const [revealed, setRevealed] = useState(false)
 
 	const keysResult = useAtomValue(MapleApiV2AtomClient.query("ingestKeys", "retrieve", {}))
@@ -78,11 +77,6 @@ export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 		() => (revealed || !token ? snippet : helmCommand(maskToken(token))),
 		[revealed, snippet, token],
 	)
-
-	function handleCopy() {
-		if (!snippet) return
-		copy(snippet)
-	}
 
 	return (
 		<Dialog
@@ -125,24 +119,13 @@ export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 									<EyeIcon size={14} />
 									{revealed ? "Hide key" : "Reveal key"}
 								</InputGroupButton>
-								<InputGroupButton
-									onClick={handleCopy}
-									aria-label="Copy command"
-									title={copied ? "Copied!" : "Copy"}
+								<CopyButton
+									value={snippet}
+									label="Install command"
+									idleLabel="Copy"
+									render={<InputGroupButton />}
 									className="ml-auto"
-								>
-									{copied ? (
-										<>
-											<CheckIcon size={14} className="text-severity-info" />
-											Copied
-										</>
-									) : (
-										<>
-											<CopyIcon size={14} />
-											Copy
-										</>
-									)}
-								</InputGroupButton>
+								/>
 							</InputGroupAddon>
 						</InputGroup>
 					)}

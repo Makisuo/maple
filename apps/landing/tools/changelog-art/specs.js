@@ -121,7 +121,14 @@ const SPECS = [
 const COVER = {
 	file: "changelog-2026-07",
 	sub: "The biggest month yet — Maple in Slack, alerts rebuilt end to end, and a documented public API.",
-	index: ["Maple in Slack", "Alerts, rebuilt", "A public API", "PlanetScale", "Spend limits", "Investigations"],
+	index: [
+		"Maple in Slack",
+		"Alerts, rebuilt",
+		"A public API",
+		"PlanetScale",
+		"Spend limits",
+		"Investigations",
+	],
 	field: {
 		kind: "grain",
 		shape: 7, // sphere — the same mark that opens the PlanetScale poster

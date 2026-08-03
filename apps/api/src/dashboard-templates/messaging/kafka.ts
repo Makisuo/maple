@@ -8,8 +8,8 @@ import {
 	paramValue,
 	serviceWhereClause,
 	templateId,
-} from "../helpers"
-import type { TemplateDefinition, WidgetDef } from "../types"
+} from "@/dashboard-templates/helpers"
+import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 // Built strictly on metrics the kafkametricsreceiver actually emits. The previous version charted
 // `kafka.topic.partitions.messages_in`, `kafka.partition.under_replicated` and

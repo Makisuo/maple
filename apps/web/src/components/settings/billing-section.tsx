@@ -5,7 +5,7 @@ import { SpendLimits } from "@maple/domain/http"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Button } from "@maple/ui/components/ui/button"
 import { Badge } from "@maple/ui/components/ui/badge"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import {

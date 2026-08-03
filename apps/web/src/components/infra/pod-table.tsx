@@ -11,7 +11,7 @@ import { HostStatusBadge } from "./status-badge"
 import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS } from "./primitives/data-table"
 import { severityLevel } from "./format"
 import { BAR_FILL, BAR_VALUE_TONE } from "./severity-tokens"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 export type PodRow = ListPodsResponse["data"][number]
 

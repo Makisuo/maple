@@ -13,6 +13,7 @@ import {
 	ErrorsService,
 	EscalationService,
 	HazelOAuthService,
+	InvestigationService,
 	layerPg,
 	NotificationDispatcher,
 	OrgClickHouseSettingsService,
@@ -77,6 +78,13 @@ const buildLayer = (_env: Record<string, unknown>) => {
 
 	const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(EnvLive))
 
+	// Hoisted above the services that open investigations: Errors/Alerts/AnomalyDetection
+	// each need `InvestigationService.submitDiagnosis` to hand a chat turn its
+	// `submit_diagnosis` tool. Mirrors the same hoist in apps/api/src/app.ts.
+	const InvestigationServiceLive = InvestigationService.layer.pipe(
+		Layer.provide(Layer.mergeAll(BaseLive, WorkerEnvironment.layer)),
+	)
+
 	// WorkerEnvironment is merged in so the incident-open issue-hub hook can see
 	// the cross-script AI_TRIAGE_WORKFLOW binding (absent → triage marked failed).
 	// AlertRuntime is a Context.Reference with defaults, so it needs no wiring here.
@@ -90,6 +98,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 				EmailServiceLive,
 				OrgMembersServiceLive,
 				WorkerEnvironment.layer,
+				InvestigationServiceLive,
 			),
 		),
 	)
@@ -112,6 +121,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 				EdgeCacheServiceLive,
 				NotificationDispatcherLive,
 				WorkerEnvironment.layer,
+				InvestigationServiceLive,
 			),
 		),
 	)
@@ -123,6 +133,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 				WarehouseQueryServiceLive,
 				EdgeCacheServiceLive,
 				WorkerEnvironment.layer,
+				InvestigationServiceLive,
 			),
 		),
 	)

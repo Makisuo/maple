@@ -6,8 +6,8 @@ import {
 	paramValue,
 	serviceWhereClause,
 	templateId,
-} from "../helpers"
-import type { TemplateDefinition, WidgetDef } from "../types"
+} from "@/dashboard-templates/helpers"
+import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 // The NATS Prometheus exporter namespaces every /varz field as `gnatsd_varz_<field>` (the
 // `gnatsd` prefix is kept for backward compatibility, see its collector.go) — the old `nats.*`

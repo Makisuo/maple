@@ -9,7 +9,7 @@ import { CurrentTenant } from "@maple/domain/http"
 import { MapleApiV2, dependencyUnavailable, paginateArray, resourceNotFound } from "@maple/domain/http/v2"
 import type { V2NotFoundError, V2Recommendation, V2ServiceUnavailableError } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { RecommendationIssueService } from "../../services/RecommendationIssueService"
+import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 
 const toV2Recommendation = (issue: RecommendationIssue): V2Recommendation => ({
 	id: issue.id,

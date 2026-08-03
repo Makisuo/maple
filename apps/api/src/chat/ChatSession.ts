@@ -85,7 +85,11 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 
 	/** Append one event and return the seq it was assigned. */
 	append(event: ChatEventInput): number {
-		this.sql.exec("INSERT INTO events (created_at, payload) VALUES (?, ?)", Date.now(), JSON.stringify(event))
+		this.sql.exec(
+			"INSERT INTO events (created_at, payload) VALUES (?, ?)",
+			Date.now(),
+			JSON.stringify(event),
+		)
 		return this.cursor()
 	}
 
@@ -97,7 +101,9 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 				cursor,
 			)
 			.toArray()
-		return rows.map((row) => ({ ...(JSON.parse(row.payload) as ChatEventInput), seq: row.seq }) as ChatEvent)
+		return rows.map(
+			(row) => ({ ...(JSON.parse(row.payload) as ChatEventInput), seq: row.seq }) as ChatEvent,
+		)
 	}
 
 	/**

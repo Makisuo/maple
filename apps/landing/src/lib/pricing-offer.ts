@@ -167,5 +167,4 @@ export const money = (n: number) => {
 /** Sub-cent rates (per session) need three places; per-GB rates need two. */
 export const rateLabel = (n: number) => `$${n < 0.01 ? n.toFixed(3) : n.toFixed(2)}`
 
-export const volume = (a: Allotment, n: number) =>
-	a.unit === "gb" ? `${n} GB` : n.toLocaleString("en-US")
+export const volume = (a: Allotment, n: number) => (a.unit === "gb" ? `${n} GB` : n.toLocaleString("en-US"))

@@ -1,5 +1,5 @@
-import { CopyIcon, ExternalLinkIcon } from "@/components/icons"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { ExternalLinkIcon } from "@/components/icons"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import type { Log } from "@/api/warehouse/logs"
 import { LogAttributesPanel } from "./log-attributes-panel"
 import { buildLogJsonPayload } from "./log-raw-panel"
@@ -17,8 +17,6 @@ interface LogRowExpandedProps {
  * without leaving the stream.
  */
 export function LogRowExpanded({ log, onOpenDetail }: LogRowExpandedProps) {
-	const { copy } = useCopyToClipboard("Log JSON")
-
 	return (
 		<div className="border-t border-border/60 bg-muted/15 px-3 py-2.5 font-mono">
 			<div className="mb-2 flex items-center justify-end gap-3">
@@ -33,17 +31,14 @@ export function LogRowExpanded({ log, onOpenDetail }: LogRowExpandedProps) {
 					<ExternalLinkIcon size={10} />
 					Open detail
 				</button>
-				<button
-					type="button"
-					onClick={(e) => {
-						e.stopPropagation()
-						copy(buildLogJsonPayload(log))
-					}}
-					className="flex items-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
-				>
-					<CopyIcon size={10} />
-					JSON
-				</button>
+				<CopyButton
+					value={() => buildLogJsonPayload(log)}
+					label="Log JSON"
+					idleLabel="JSON"
+					iconSize={10}
+					className="h-5 px-1.5 text-[10px]"
+					onClick={(e) => e.stopPropagation()}
+				/>
 			</div>
 			{/* Body + attributes share one height-bounded scroll area so even a very
 			    wide event stays a predictable size and scrolls vertically in place. */}

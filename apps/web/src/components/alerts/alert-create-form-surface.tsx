@@ -1,11 +1,11 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { Exit } from "effect"
 import { useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { DetailsSection } from "@/components/alerts/details-section"
 import { NotificationsSection } from "@/components/alerts/notifications-section"
@@ -17,6 +17,7 @@ import { ScopeSection } from "@/components/alerts/scope-section"
 import { SignalAndThresholdSection } from "@/components/alerts/signal-and-threshold-section"
 import { WidgetPrefillNoticeBanner } from "@/components/alerts/widget-prefill-notice-banner"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { trackProduct } from "@/lib/analytics"
 import { useAlertRulePreview } from "@/hooks/use-alert-rule-preview"
 import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
 import {
@@ -117,17 +118,21 @@ export function AlertCreateFormSurface({
 			: await createRule({ payload, reactivityKeys: ["alertRules"] })
 
 		if (Exit.isSuccess(result)) {
-			toast.success(editingRule ? "Rule updated" : "Rule created")
+			toastManager.add({ title: editingRule ? "Rule updated" : "Rule created", type: "success" })
+			if (!editingRule) trackProduct("alert_rule_created", { signal: ruleForm.signalType })
 			navigate({ to: "/alerts" })
 		} else {
-			toast.error(getExitErrorMessage(result, "Failed to save rule"))
+			toastManager.add({ title: getExitErrorMessage(result, "Failed to save rule"), type: "error" })
 		}
 		setSavingRule(false)
 	}
 
 	async function runTest(sendNotification: boolean) {
 		if (!isRulePreviewReady(ruleForm)) {
-			toast.error("Complete the rule name, query, and threshold before testing")
+			toastManager.add({
+				title: "Complete the rule name, query, and threshold before testing",
+				type: "error",
+			})
 			return
 		}
 		const setLoading = sendNotification ? setSendingTestNotification : setPreviewingRule
@@ -145,9 +150,12 @@ export function AlertCreateFormSurface({
 				sampleCount: result.value.sample_count,
 				reason: result.value.reason,
 			})
-			toast.success(sendNotification ? "Preview ran and sent a test notification" : "Preview updated")
+			toastManager.add({
+				title: sendNotification ? "Preview ran and sent a test notification" : "Preview updated",
+				type: "success",
+			})
 		} else {
-			toast.error(getExitErrorMessage(result, "Failed to preview rule"))
+			toastManager.add({ title: getExitErrorMessage(result, "Failed to preview rule"), type: "error" })
 		}
 		setLoading(false)
 	}
@@ -322,8 +330,7 @@ function makeSuggestedName(form: RuleFormState): string | null {
 				: form.groupBy.length > 0
 					? `per ${form.groupBy.join(" · ")}`
 					: null
-	const env =
-		!queryOwnsScope && form.environments.length > 0 ? form.environments.join(" · ") : null
+	const env = !queryOwnsScope && form.environments.length > 0 ? form.environments.join(" · ") : null
 	const suffix = [scope, env].filter((part) => part !== null).join(" · ")
 	return suffix.length > 0 ? `${base} — ${suffix}` : base
 }

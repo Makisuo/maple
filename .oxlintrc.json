@@ -48,5 +48,5 @@
 			}
 		}
 	],
-	"ignorePatterns": [".context", "packages/llm"]
+	"ignorePatterns": [".context", "lib/llm"]
 }

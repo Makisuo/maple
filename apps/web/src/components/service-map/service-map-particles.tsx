@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef } from "react"
 import { useStoreApi } from "@xyflow/react"
-import { useReducedMotion } from "@/hooks/use-reduced-motion"
+import { useMediaQuery } from "@maple/ui/hooks/use-media-query"
 
 /**
  * Canvas particle layer for the service map.
@@ -166,7 +166,7 @@ export function ServiceMapParticleCanvas() {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null)
 	const store = useStoreApi()
 	const registry = useParticleRegistry()
-	const reducedMotion = useReducedMotion()
+	const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)")
 
 	useEffect(() => {
 		if (reducedMotion || !registry) return

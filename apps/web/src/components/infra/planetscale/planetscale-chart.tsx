@@ -11,9 +11,9 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
 import type { PlanetScaleInfraTimeseriesRow } from "@/api/warehouse/planetscale-infra"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler } from "../chart-utils"
-import { formatPercent } from "@maple/ui/format"
+import { formatPercent } from "@maple/ui/lib/format"
 import { CHART_HEIGHT, ChartCard, ChartCardMessage } from "../primitives/chart-card"
 import { formatLag, formatStoragePercent } from "./metrics"
 

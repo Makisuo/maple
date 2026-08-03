@@ -7,7 +7,7 @@ import { cn } from "@maple/ui/lib/utils"
 
 import type { PlanetScaleDatabaseSummary } from "@maple/domain/http"
 import type { PlanetScaleDatabaseStat } from "@/api/warehouse/service-map"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS, useTableSort } from "../primitives/data-table"
 import {
 	MISSING,

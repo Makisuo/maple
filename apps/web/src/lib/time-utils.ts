@@ -1,10 +1,13 @@
-import { subMinutes, subHours, subDays, subWeeks, subMonths, startOfDay, format } from "date-fns"
+import { format } from "date-fns"
+import { formatWarehouseDateTime, resolveRelativeRangeToWarehouse } from "@maple/query-engine"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
-// Format date for Tinybird/ClickHouse DateTime compatibility
-// Converts to ClickHouse format: "YYYY-MM-DD HH:mm:ss"
+/**
+ * Format a Date as the ClickHouse/Tinybird `YYYY-MM-DD HH:mm:ss` shape.
+ * Thin Date-taking wrapper over the shared epoch-ms formatter.
+ */
 export function formatForTinybird(date: Date): string {
-	return date.toISOString().replace("T", " ").slice(0, 19)
+	return formatWarehouseDateTime(date.getTime())
 }
 
 export interface TimePreset {
@@ -29,38 +32,17 @@ export function isTimeRangeWithin(
 	return Number.isFinite(durationSeconds) && durationSeconds >= 0 && durationSeconds <= maxRangeSeconds
 }
 
-const TIME_UNITS: Record<string, (date: Date, amount: number) => Date> = {
-	m: subMinutes,
-	h: subHours,
-	d: subDays,
-	w: subWeeks,
-	mo: subMonths,
-}
-
+/**
+ * Resolve a relative shorthand ("15m", "7d", "3mo", "today") to an absolute
+ * window.
+ *
+ * Delegates to the shared resolver so this app, the API, and the query engine
+ * can't drift on what a shorthand means. The shared implementation reproduces
+ * date-fns' local-calendar semantics — month-end clamping and local midnight
+ * for "today" — so behaviour here is unchanged.
+ */
 export function relativeToAbsolute(shorthand: string): { startTime: string; endTime: string } | null {
-	const trimmed = shorthand.trim().toLowerCase()
-	const now = new Date()
-
-	if (trimmed === "today") {
-		return {
-			startTime: formatForTinybird(startOfDay(now)),
-			endTime: formatForTinybird(now),
-		}
-	}
-
-	const match = trimmed.match(/^(\d+)(mo|m|h|d|w)$/)
-	if (!match) return null
-
-	const [, amountStr, unit] = match
-	const amount = parseInt(amountStr, 10)
-
-	const subtractor = TIME_UNITS[unit]
-	if (!subtractor) return null
-
-	return {
-		startTime: formatForTinybird(subtractor(now, amount)),
-		endTime: formatForTinybird(now),
-	}
+	return resolveRelativeRangeToWarehouse(shorthand)
 }
 
 export function presetLabel(shorthand: string): string {

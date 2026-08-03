@@ -11,17 +11,17 @@ import {
 	UserId,
 } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { Env } from "../../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import {
 	SLACK_CALLBACK_PATH,
 	SlackIntegrationService,
 	type SlackIntegrationServiceShape,
-} from "../../services/SlackIntegrationService"
+} from "@/services/integrations/SlackIntegrationService"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -458,9 +458,7 @@ describe("v2 slack integration over HTTP", () => {
 				Effect.sync(() => {
 					called = true
 					return {
-						channels: [
-							{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: true },
-						],
+						channels: [{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: true }],
 						truncated: false,
 					}
 				}),

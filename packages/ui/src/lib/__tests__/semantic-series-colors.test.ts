@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { getServiceColor } from "../colors"
+import { HTTP_METHOD_HEX } from "../http"
 import { getSemanticSeriesColor, resolveSeriesColors } from "../semantic-series-colors"
 
 describe("getSemanticSeriesColor", () => {
@@ -22,6 +23,21 @@ describe("getSemanticSeriesColor", () => {
 		expect(getSemanticSeriesColor("p50")).toBe("var(--chart-p50)")
 		expect(getSemanticSeriesColor("p95")).toBe("var(--chart-p95)")
 		expect(getSemanticSeriesColor("p99")).toBe("var(--chart-p99)")
+	})
+
+	it("resolves every log severity, with error taking the span-status color", () => {
+		for (const key of ["trace", "debug", "info", "warn", "warning", "fatal"]) {
+			expect(getSemanticSeriesColor(key), key).toBe(
+				`var(--color-severity-${key === "warning" ? "warn" : key})`,
+			)
+		}
+		// "error" matches the span-status map first; same underlying token.
+		expect(getSemanticSeriesColor("error")).toBe("var(--severity-error)")
+	})
+
+	it("resolves HTTP methods to the shared hex palette", () => {
+		expect(getSemanticSeriesColor("get")).toBe(HTTP_METHOD_HEX.GET)
+		expect(getSemanticSeriesColor("DELETE")).toBe(HTTP_METHOD_HEX.DELETE)
 	})
 })
 

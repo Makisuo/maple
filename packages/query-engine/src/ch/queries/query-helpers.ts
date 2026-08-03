@@ -5,7 +5,7 @@
 // traces, alerts, services, and metrics queries.
 // ---------------------------------------------------------------------------
 
-import type { AttributeFilter, MetricType } from "../../query-engine"
+import type { AttributeFilter, MetricType } from "@maple/domain/query-engine"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import type { ColumnAccessor } from "@maple-dev/clickhouse-builder"
@@ -140,8 +140,44 @@ export function inclusionValues(
  * the overwhelmingly common case, and `=` is what the captured `db.query.text`
  * span attribute and every query fingerprint carried before multi-select.
  */
+/**
+ * A time param floored to its hour, for querying hourly rollup tables. Four
+ * files defined this identically; the expression has to agree with the MV's
+ * `Hour` column or the join silently misses.
+ */
+export function hourFloor(name: string): CH.Expr<string> {
+	return CH.toStartOfHour(CH.toDateTime(param.dateTime(name)))
+}
+
+/**
+ * The row shape every facet-sidebar query returns: one distinct value, how many
+ * rows carry it, and which dimension it belongs to. Declared once and aliased
+ * per query, so the seven callers keep their descriptive names (they are public
+ * API) without seven structurally identical declarations.
+ */
+export interface FacetOutput {
+	readonly name: string
+	readonly count: number
+	readonly facetType: string
+}
+
 export function inclusionCondition(col: CH.Expr<string>, values: readonly string[]): CH.Condition {
 	return values.length === 1 ? col.eq(values[0]!) : CH.inList(col, values)
+}
+
+/**
+ * The filter form behind every "type to narrow" text box: a single value under
+ * `contains` mode becomes a case-insensitive substring match, anything else
+ * falls back to `inclusionCondition`.
+ *
+ * `contains` only applies to a single value on purpose — a substring match
+ * across several needles would have to OR them, which is not what the UI's
+ * multi-select means (there it is set membership, not fuzzy matching).
+ */
+export function matchOrIn(col: CH.Expr<string>, values: readonly string[], contains: boolean): CH.Condition {
+	return contains && values.length === 1
+		? CH.positionCaseInsensitive(col, CH.lit(values[0]!)).gt(0)
+		: inclusionCondition(col, values)
 }
 
 /**
@@ -193,9 +229,7 @@ export function tracesBaseWhereConditions(
 		$.Timestamp.gte(param.dateTime("startTime")),
 		$.Timestamp.lte(param.dateTime("endTime")),
 		CH.when(services, (v: readonly string[]) =>
-			mm?.serviceName === "contains" && v.length === 1
-				? CH.positionCaseInsensitive($.ServiceName, CH.lit(v[0]!)).gt(0)
-				: inclusionCondition($.ServiceName, v),
+			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
 		CH.when(spanNames, (v: readonly string[]) => {
 			// The "Root Span" facet and trace_list_mv expose the *display* name
@@ -305,6 +339,14 @@ export function tracesBaseWhereConditions(
 
 /** Returns true iff the opts + groupBy can be served by service_overview_spans_mv. */
 export function canUseServiceOverviewMv(opts: TracesBaseWhereOpts, groupBy?: readonly string[]): boolean {
+	// The MV is *lossy*: it stores only entry-point spans (Server/Consumer OR
+	// root). That set is equivalent to the raw table only when the query itself
+	// asks for entry points via `rootOnly`. Routing a non-rootOnly query here
+	// silently swaps the population — the query says "all spans" and gets
+	// "entry spans", which is how one dashboard could show a breakdown by
+	// service (MV-routed, entry spans) next to a breakdown by span name
+	// (raw-routed, all spans) with a 20x gap between their totals.
+	if (!opts.rootOnly) return false
 	// The MV has no SpanName column, so neither spelling of the span-name filter
 	// can be served from it.
 	if (opts.spanName || opts.spanNames?.length) return false
@@ -322,7 +364,8 @@ export function canUseServiceOverviewMv(opts: TracesBaseWhereOpts, groupBy?: rea
 /**
  * Build the WHERE conditions for queries against service_overview_spans.
  * Mirrors the subset of tracesBaseWhereConditions that the MV can serve.
- * `rootOnly` is a no-op here: the MV already pre-filters to entry-point spans.
+ * `rootOnly` is a no-op here: the MV already pre-filters to entry-point spans,
+ * and `canUseServiceOverviewMv` only routes rootOnly queries to it.
  */
 export function serviceOverviewWhereConditions(
 	$: ColumnAccessor<typeof ServiceOverviewSpans.columns>,
@@ -335,9 +378,7 @@ export function serviceOverviewWhereConditions(
 		$.Timestamp.gte(param.dateTime("startTime")),
 		$.Timestamp.lte(param.dateTime("endTime")),
 		CH.when(services, (v: readonly string[]) =>
-			mm?.serviceName === "contains" && v.length === 1
-				? CH.positionCaseInsensitive($.ServiceName, CH.lit(v[0]!)).gt(0)
-				: inclusionCondition($.ServiceName, v),
+			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
 		errorsOnlyCondition($.StatusCode, opts.errorsOnly),
 	]
@@ -418,22 +459,28 @@ export function canUseTracesAggregatesMv(
 	return true
 }
 
-/** Build WHERE conditions for queries against traces_aggregates_hourly. */
+/**
+ * Build WHERE conditions for queries against traces_aggregates_hourly.
+ *
+ * `hourBounds` overrides the default `[startTime, endTime]` window with raw SQL
+ * expressions. Callers that union this MV with raw partial-hour edges pass the
+ * whole-hour interior (`[firstFullHour, endHour)`) so the two halves tile the
+ * requested window exactly instead of overlapping or leaving a gap.
+ */
 export function tracesAggregatesWhereConditions(
 	$: ColumnAccessor<typeof TracesAggregatesHourly.columns>,
 	opts: TracesBaseWhereOpts,
+	hourBounds?: { readonly gte: string; readonly lt: string },
 ): Array<CH.Condition | undefined> {
 	const mm = opts.matchModes
 	const services = inclusionValues(opts.serviceName, opts.serviceNames)
 	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		$.Hour.gte(param.dateTime("startTime")),
-		$.Hour.lte(param.dateTime("endTime")),
+		hourBounds ? $.Hour.gte(CH.rawExpr<string>(hourBounds.gte)) : $.Hour.gte(param.dateTime("startTime")),
+		hourBounds ? $.Hour.lt(CH.rawExpr<string>(hourBounds.lt)) : $.Hour.lte(param.dateTime("endTime")),
 		CH.when(services, (v: readonly string[]) =>
-			mm?.serviceName === "contains" && v.length === 1
-				? CH.positionCaseInsensitive($.ServiceName, CH.lit(v[0]!)).gt(0)
-				: inclusionCondition($.ServiceName, v),
+			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
 		CH.when(spanNames, (v: readonly string[]) =>
 			mm?.spanName === "contains" && v.length === 1

@@ -3,6 +3,7 @@ import { PlanetScaleInfraTimeseriesRequest, PlanetScaleQueryInsightsRequest } fr
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 /**
  * /infra/planetscale data access. The fleet view composes the polled inventory
  * (integrations `planetscaleDatabases`) with the service-map stat rollups; the
@@ -31,8 +32,10 @@ const GetPlanetScaleInfraTimeseriesInputSchema = Schema.Struct({
 export type GetPlanetScaleInfraTimeseriesInput = (typeof GetPlanetScaleInfraTimeseriesInputSchema)["Encoded"]
 
 const defaultTimeRange = (nowMillis: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMillis - 24 * 60 * 60 * 1000), endTime: fmt(nowMillis) }
+	return {
+		startTime: formatWarehouseDateTime(nowMillis - 24 * 60 * 60 * 1000),
+		endTime: formatWarehouseDateTime(nowMillis),
+	}
 }
 
 export interface PlanetScaleQueryInsightEntry {

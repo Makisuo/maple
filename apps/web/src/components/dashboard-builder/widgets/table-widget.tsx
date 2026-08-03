@@ -6,7 +6,7 @@ import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
 import { ArrowUpDownIcon } from "@/components/icons"
 import { useTableSort } from "@/hooks/use-table-sort"
-import { formatValueByUnit } from "@maple/ui/format"
+import { formatValueByUnit } from "@maple/ui/lib/format"
 
 interface TableWidgetProps {
 	dataState: WidgetDataState
@@ -60,6 +60,32 @@ export function buildRowKeys(rows: ReadonlyArray<Record<string, unknown>>, field
 		seen.set(base, count + 1)
 		return count === 0 ? base : `${base}#${count}`
 	})
+}
+
+/**
+ * Progressive column reveal, keyed off the widget card's own width.
+ *
+ * Table columns here are whatever the query returned (or whatever the author
+ * configured), so there is no fixed "these are the secondary ones" list the way
+ * `TRACE_COLUMNS` has. The rule instead is positional: the first column — the
+ * group key in a breakdown table — always shows, and each column after it needs
+ * another ~100px of card before it earns its place. Without this, a table tile
+ * on a 6- or 1-column grid renders six columns of ellipsis.
+ *
+ * The classes must be written out as literals; Tailwind scans source text, so a
+ * template-interpolated `@min-[${n}px]` would never be generated.
+ */
+const COLUMN_VISIBILITY = [
+	"",
+	"hidden @min-[220px]/widget:table-cell",
+	"hidden @min-[320px]/widget:table-cell",
+	"hidden @min-[420px]/widget:table-cell",
+	"hidden @min-[520px]/widget:table-cell",
+	"hidden @min-[620px]/widget:table-cell",
+]
+
+export function columnVisibilityClass(index: number): string {
+	return COLUMN_VISIBILITY[Math.min(index, COLUMN_VISIBILITY.length - 1)]
 }
 
 function getCellThresholdColor(
@@ -150,12 +176,12 @@ export const TableWidget = memo(function TableWidget({
 			<Table>
 				<TableHeader>
 					<TableRow>
-						{effectiveColumns.map((col) => {
+						{effectiveColumns.map((col, colIndex) => {
 							const active = sortKey === col.field
 							return (
 								<TableHead
 									key={col.field}
-									className="text-xs"
+									className={cn("text-xs", columnVisibilityClass(colIndex))}
 									aria-sort={
 										active ? (sortDir === "asc" ? "ascending" : "descending") : "none"
 									}
@@ -203,13 +229,13 @@ export const TableWidget = memo(function TableWidget({
 					) : (
 						sorted.map((row, i) => (
 							<TableRow key={rowKeys[i]}>
-								{effectiveColumns.map((col) => {
+								{effectiveColumns.map((col, colIndex) => {
 									const value = row[col.field]
 									const thresholdColor = getCellThresholdColor(value, col.thresholds)
 									return (
 										<TableCell
 											key={col.field}
-											className="text-xs"
+											className={cn("text-xs", columnVisibilityClass(colIndex))}
 											style={{
 												textAlign: col.align ?? "left",
 												color: thresholdColor,

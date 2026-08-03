@@ -1,6 +1,6 @@
 import { Array as Arr, Effect, pipe } from "effect"
 import type { TopOperationsOutput } from "../ch/queries/top-operations"
-import type { TracesMetric } from "../query-engine"
+import type { TracesMetric } from "@maple/domain/query-engine"
 import { WarehouseExecutor } from "./WarehouseExecutor"
 import type { TimeRange } from "./types"
 

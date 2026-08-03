@@ -3,7 +3,7 @@ import { formatBackendError } from "@/lib/error-messages"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
 import { Fragment, useCallback, useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
@@ -49,7 +49,7 @@ import {
 	CircleWarningIcon,
 	ChatBubbleSparkleIcon,
 } from "@/components/icons"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent } from "@maple/ui/components/ui/card"
@@ -335,7 +335,7 @@ function RuleDetailContent() {
 					setBucketChecks(page.data.map(v2CheckToDocument))
 				} catch {
 					if (bucketRequest.current !== token) return
-					toast.error("Checks for that bucket could not be loaded")
+					toastManager.add({ title: "Checks for that bucket could not be loaded", type: "error" })
 				} finally {
 					if (bucketRequest.current === token) setBucketLoading(false)
 				}
@@ -394,7 +394,10 @@ function RuleDetailContent() {
 			await navigate({ to: "/investigations/$id", params: { id: result.value.id } })
 			return
 		}
-		toast.error(getExitErrorMessage(result, "Failed to open investigation"))
+		toastManager.add({
+			title: getExitErrorMessage(result, "Failed to open investigation"),
+			type: "error",
+		})
 	}
 
 	const stats = useMemo(() => computeIncidentStats(ruleIncidents), [ruleIncidents])
@@ -547,7 +550,7 @@ function RuleDetailContent() {
 			reactivityKeys: ["alertRules"],
 		})
 		if (!Exit.isSuccess(result)) {
-			toast.error(getExitErrorMessage(result, "Failed to update rule"))
+			toastManager.add({ title: getExitErrorMessage(result, "Failed to update rule"), type: "error" })
 		} else {
 			refreshRules()
 		}
@@ -1351,7 +1354,7 @@ function ChecksPanel({
 			setExtraChecks((current) => [...current, ...page.data.map(v2CheckToDocument)])
 			setNextCursorOverride(page.next_cursor)
 		} catch {
-			toast.error("More alert checks could not be loaded")
+			toastManager.add({ title: "More alert checks could not be loaded", type: "error" })
 		} finally {
 			setLoadingMore(false)
 		}

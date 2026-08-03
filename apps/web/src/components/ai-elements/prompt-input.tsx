@@ -10,7 +10,7 @@ import {
 	InputGroupTextarea,
 } from "@maple/ui/components/ui/input-group"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { CornerDownLeftIcon, SquareIcon, XmarkIcon } from "@/components/icons"
 import { useCallback, useState } from "react"
 

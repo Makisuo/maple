@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { DetailRail } from "@maple/ui/components/detail-rail"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -15,7 +16,7 @@ import { PageHero, HeroChip } from "@/components/infra/primitives/page-hero"
 import { StatRail, StatRailItem } from "@/components/infra/primitives/stat-rail"
 import { listPodsResultAtom, nodeDetailSummaryResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TIME_PRESETS, bucketSecondsFor } from "@/components/infra/constants"
-import { formatUptime } from "@maple/ui/format"
+import { formatUptime } from "@maple/ui/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import type { NodeInfraMetric } from "@/api/warehouse/infra"
 
@@ -82,10 +83,10 @@ function NodeDetailContent() {
 				</CardTitle>
 			</CardHeader>
 			<CardContent className="space-y-1">
-				<MetaRow label="k8s.node.name" value={summary.nodeName} />
-				<MetaRow label="k8s.node.uid" value={summary.nodeUid} />
-				<MetaRow label="k8s.kubelet.version" value={summary.kubeletVersion} />
-				<MetaRow label="container.runtime" value={summary.containerRuntime} />
+				<DetailRail.MetaRow label="k8s.node.name" value={summary.nodeName} />
+				<DetailRail.MetaRow label="k8s.node.uid" value={summary.nodeUid} />
+				<DetailRail.MetaRow label="k8s.kubelet.version" value={summary.kubeletVersion} />
+				<DetailRail.MetaRow label="container.runtime" value={summary.containerRuntime} />
 			</CardContent>
 		</Card>
 	) : null
@@ -204,17 +205,5 @@ function NodeDetailContent() {
 				<DashboardLayout.RightPanel>{rightSidebar}</DashboardLayout.RightPanel>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
-	)
-}
-
-function MetaRow({ label, value }: { label: string; value: string | null | undefined }) {
-	if (!value) return null
-	return (
-		<div className="flex items-baseline justify-between gap-3 border-b border-border/60 py-1.5 last:border-0">
-			<span className="font-mono text-[11px] text-muted-foreground">{label}</span>
-			<span className="break-all text-right font-mono text-[11px] tabular-nums text-foreground/85">
-				{value}
-			</span>
-		</div>
 	)
 }

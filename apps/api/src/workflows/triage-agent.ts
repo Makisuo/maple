@@ -24,11 +24,11 @@ import { AiTriageResult } from "@maple/domain/http"
 import { LLM, LLMEvent, Message, ToolResultPart, type LLMRequest, type Model, type Usage } from "@maple/llm"
 import { Tool, ToolFailure, ToolRuntime, toDefinitions, type Tools } from "@maple/llm"
 import { Effect } from "effect"
-import { toLlmCallError } from "@/lib/Llm"
+import { toLlmCallError } from "@/platform/Llm"
 import { callMcpTool } from "@/mcp/dispatcher"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { mapleToolDefinitions, toInputSchema } from "@/mcp/tools/registry"
-import type { TenantContext } from "@/lib/tenant-context"
+import type { TenantContext } from "@/services/auth/tenant-context"
 import { buildTriageContextMessage, TRIAGE_SYSTEM_PROMPT, TRIAGE_TOOL_NAMES } from "./triage-prompt"
 
 /**
@@ -110,7 +110,9 @@ const buildTriageTools = (tenant: TenantContext): Tools =>
 								// A tool that fails outright (unknown tool, tenant error) must not kill
 								// the investigation — hand the model the message and let it route around.
 								Effect.catchCause((cause) =>
-									Effect.fail(new ToolFailure({ message: `Tool failed: ${String(cause)}` })),
+									Effect.fail(
+										new ToolFailure({ message: `Tool failed: ${String(cause)}` }),
+									),
 								),
 							),
 						),
@@ -118,10 +120,7 @@ const buildTriageTools = (tenant: TenantContext): Tools =>
 			]),
 	)
 
-const addUsage = (
-	total: { input: number; output: number; cacheRead: number },
-	usage: Usage | undefined,
-) => ({
+const addUsage = (total: { input: number; output: number; cacheRead: number }, usage: Usage | undefined) => ({
 	input: total.input + (usage?.inputTokens ?? 0),
 	output: total.output + (usage?.outputTokens ?? 0),
 	cacheRead: total.cacheRead + (usage?.cacheReadInputTokens ?? 0),
@@ -214,4 +213,3 @@ export const runTriageAgent = Effect.fn("ai_triage.investigate")(function* (inpu
 
 const FINAL_INSTRUCTION =
 	"Stop investigating. Using only the evidence you gathered above, produce your structured triage result now."
-

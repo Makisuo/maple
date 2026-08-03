@@ -1,6 +1,6 @@
 /**
  * Integration test for the `@maple-dev/alchemy` provider package
- * (`lib/alchemy-maple`): drives the real provider lifecycle functions
+ * (`packages/alchemy-maple`): drives the real provider lifecycle functions
  * (reconcile / read / delete) through the real v2 handlers over PGlite,
  * with the package's own HTTP client routed at the in-process web handler
  * via a custom `fetch`.
@@ -11,31 +11,32 @@ import { FetchHttpClient, HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
+import { BucketCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli"
 import {
 	AlertDestination,
 	AlertDestinationProvider,
-} from "../../../../../lib/alchemy-maple/src/AlertDestination.ts"
-import { AlertRule, AlertRuleProvider } from "../../../../../lib/alchemy-maple/src/AlertRule.ts"
-import { ApiKey, ApiKeyProvider } from "../../../../../lib/alchemy-maple/src/ApiKey.ts"
-import { Dashboard, DashboardProvider } from "../../../../../lib/alchemy-maple/src/Dashboard.ts"
-import { make as makeMapleApi, MapleApi } from "../../../../../lib/alchemy-maple/src/MapleApi.ts"
-import { MapleEnvironment } from "../../../../../lib/alchemy-maple/src/MapleEnvironment.ts"
-import { CacheBackendLive } from "../../lib/CacheBackendLive"
-import { EmailService } from "../../lib/EmailService"
-import { Env } from "../../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
-import type { WarehouseQueryServiceShape } from "../../lib/WarehouseQueryService"
-import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
-import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import { AlertRuntime, AlertsService } from "../../services/AlertsService"
-import { HazelOAuthService } from "../../services/HazelOAuthService"
-import { OrgMembersService } from "../../services/OrgMembersService"
-import { QueryEngineService } from "../../services/QueryEngineService"
+} from "../../../../../packages/alchemy-maple/src/AlertDestination.ts"
+import { AlertRule, AlertRuleProvider } from "../../../../../packages/alchemy-maple/src/AlertRule.ts"
+import { ApiKey, ApiKeyProvider } from "../../../../../packages/alchemy-maple/src/ApiKey.ts"
+import { Dashboard, DashboardProvider } from "../../../../../packages/alchemy-maple/src/Dashboard.ts"
+import { make as makeMapleApi, MapleApi } from "../../../../../packages/alchemy-maple/src/MapleApi.ts"
+import { MapleEnvironment } from "../../../../../packages/alchemy-maple/src/MapleEnvironment.ts"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import { EmailService } from "@/platform/EmailService"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
+import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
+import { OrgMembersService } from "@/services/org/OrgMembersService"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AllV2GroupLayersLive,
@@ -44,7 +45,7 @@ import {
 	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
-import { InvestigationService } from "@/services/InvestigationService"
+import { InvestigationService } from "@/services/errors/InvestigationService"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))

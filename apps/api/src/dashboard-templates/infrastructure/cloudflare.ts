@@ -9,8 +9,8 @@ import {
 	paramKey,
 	paramValue,
 	templateId,
-} from "../helpers"
-import type { TemplateDefinition, WidgetDef } from "../types"
+} from "@/dashboard-templates/helpers"
+import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 // Edge metrics land under ServiceName `cloudflare/{zoneName}` (the CloudflareAnalyticsService
 // poller); Workers invocation metrics under `cloudflare-worker/{scriptName}`. Counters are

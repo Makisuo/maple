@@ -8,7 +8,7 @@ import {
 	ServerIcon,
 	SquareTerminalIcon,
 } from "@/components/icons"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { ROLE_OPTIONS, type RoleOption } from "@/atoms/quick-start-atoms"
 
 const ROLE_LABELS: Record<RoleOption, string> = {

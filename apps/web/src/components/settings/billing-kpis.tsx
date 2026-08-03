@@ -1,5 +1,5 @@
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { formatCurrency } from "@/lib/billing/currency"
 import { featureUnit, FEATURE_COLORS, type SpendModel } from "@/lib/billing/spend"

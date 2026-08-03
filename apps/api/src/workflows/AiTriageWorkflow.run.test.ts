@@ -13,7 +13,7 @@ import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
 import { AiTriageRunId, AnomalyIncidentId, ErrorIssueId, OrgId } from "@maple/domain/primitives"
 import { eq } from "drizzle-orm"
 import { Schema } from "effect"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { type AiTriageRunDeps, runAiTriage, type AiTriageWorkflowPayload } from "./AiTriageWorkflow.run"
 import type { WorkflowStepLike } from "./ClickHouseSchemaApplyWorkflow.run"
 

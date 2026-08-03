@@ -13,6 +13,8 @@ import {
 export interface CreateLandingWorkerOptions {
 	stage: MapleStage
 	domains: MapleDomains
+	/** Baked into the client bundle so the site reports to the right ingest. */
+	ingestUrl: string
 	logsDestination?: Cloudflare.Workers.ObservabilityDestination
 	tracesDestination?: Cloudflare.Workers.ObservabilityDestination
 }
@@ -20,6 +22,7 @@ export interface CreateLandingWorkerOptions {
 export const createLandingWorker = ({
 	stage,
 	domains,
+	ingestUrl,
 	logsDestination,
 	tracesDestination,
 }: CreateLandingWorkerOptions) =>
@@ -29,6 +32,15 @@ export const createLandingWorker = ({
 			command: "bun run build",
 			cwd: import.meta.dirname,
 			outdir: "dist",
+			// Astro inlines PUBLIC_* at build time, so these belong to the build memo
+			// hash — a key or endpoint change has to produce a new bundle. Same
+			// ingest key the web app uses, so both surfaces land in one org and a
+			// visitor's marketing and product sessions sit side by side.
+			env: {
+				PUBLIC_MAPLE_INGEST_KEY: process.env.MAPLE_OTEL_PUBLIC_INGEST_KEY ?? "",
+				PUBLIC_INGEST_URL: ingestUrl,
+				PUBLIC_MAPLE_REPLAY_SAMPLE_RATE: process.env.PUBLIC_MAPLE_REPLAY_SAMPLE_RATE ?? "0.1",
+			},
 		})
 
 		const worker = yield* Cloudflare.Worker<{}, Cloudflare.AssetsWithHash>("landing", {

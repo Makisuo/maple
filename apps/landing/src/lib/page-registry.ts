@@ -39,6 +39,7 @@ export type ArtifactId =
 	| "service-map"
 	| "mcp-transcript"
 	| "k8s-heatmap"
+	| "alert-firing"
 
 export type SectionId = "k8s-console" | "k8s-views" | "k8s-correlation" | "k8s-install"
 

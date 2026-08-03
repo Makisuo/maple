@@ -167,6 +167,14 @@ export const nav_kubernetes = () => `Kubernetes 모니터링`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_alerts = () => `알림`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const nav_ecommerce = () => `전자상거래 옵저버빌리티`
 
 
@@ -320,6 +328,14 @@ export const nav_desc_ai_mcp = () => `MCP 기반 AI 진단`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const nav_desc_kubernetes = () => `Pod, 노드, 워크로드를 스팬과 함께`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_desc_alerts = () => `어떤 시그널에든 알림, 팀이 있는 곳으로 전달`
 
 
 /**
@@ -2159,87 +2175,7 @@ export const dashboard_ai_text = () => `payment-service의 P95 레이턴시 차�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_badge = () => `알림`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const alert_heading = () => `컨텍스트가 붙어 있는 알림`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_title = () => `알림 규칙`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_desc = () => `에러율, P95/P99 레이턴시, Apdex, 처리량, 커스텀 메트릭, 커스텀 쿼리 등 7가지 내장 시그널 유형. 심각도 레벨, 인시던트 추적, 자동 해결 포함.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_route_title = () => `어디로든 라우팅`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_route_desc = () => `알림을 Slack, Discord, PagerDuty 또는 임의의 웹훅으로 보내세요. 팀이 이미 일하는 곳으로 알림이 갑니다.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_firing = () => `발생 중`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_triggered_ago = () => `34초 전 발생`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_view = () => `Maple에서 보기`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_acknowledge = () => `확인`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_webhook_note = () => `+ 임의의 커스텀 웹훅 엔드포인트`
 
 
 /**
@@ -6240,6 +6176,158 @@ export const feat_errors_cap_5_title = () => `깨어나기 전에 분류`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const feat_errors_cap_5_body = () => `탐지기가 5분마다 실행되어 이슈 자체의 발생률과 확산 범위에서 심각도를 정합니다. 수동 지정 심각도는 항상 탐지기보다 우선하고, 탐지기는 AI보다 우선합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_seo_title = () => `알림 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_seo_desc = () => `트레이스, 로그, 메트릭에 대한 임계값 알림 — 저장 전에 실제 히스토리로 미리 보고, 매분 평가하며, Slack, PagerDuty, Discord, 이메일 또는 임의의 웹훅으로 전달합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_hero_title = () => `근거를 보여주는 알림`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_hero_lede = () => `모든 규칙은 저장하기 전에 히스토리에 대해 리플레이할 수 있고, 저장한 후에는 모든 평가가 기록됩니다. 알림이 도착하면 정확한 이유를 볼 수 있고, 도착하지 않을 때도 그 이유를 볼 수 있습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_panel_title = () => `알림이 오기 전에, 미리 보기`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_panel_lede = () => `미리 보기는 스케줄러가 실행하는 것과 같은 코드를 선택한 기간에 대해 실행합니다. 윈도우별 판정과 발화했을 스팬까지 그대로 — 차트가 보여주는 것이 실제로 일어났을 일입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_title = () => `임계값에서 해결까지`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_1_title = () => `무엇에든 알림`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_1_body = () => `에러율, P95/P99 레이턴시, Apdex, 처리량 등 7가지 내장 트레이스 시그널에 더해, 트레이스·로그·메트릭에 대한 임의의 쿼리 빌더 드래프트. 빌더로 표현할 수 없다면 원시 SQL로.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_2_title = () => `평가기에 충실한 미리 보기`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_2_body = () => `미리 보기는 매분 실행되는 스케줄러와 정확히 같은 코드로 규칙을 히스토리에 리플레이합니다. 지난 화요일에 두 번 발화했을 것이라고 표시되면, 실제로 그렇게 되었을 것입니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_3_title = () => `규칙 하나, 그룹별 인시던트`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_3_body = () => `service.name 또는 임의의 속성으로 그룹화하면 각 그룹이 자체 브리치 카운트, 인시던트, 히스토리를 갖습니다. 한 서비스의 급증이 열두 서비스의 평균에 묻히지 않습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_4_title = () => `모든 체크를 기록`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_4_body = () => `각 평가는 관측값, 샘플 수, 판정을 기록합니다. 실패한 쿼리도 포함되므로 공백은 침묵이 아니라 가시화됩니다. 규칙이 조용할 때는 진단 패널이 파이프라인을 단계별로 점검합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_5_title = () => `끝까지 전달되는 알림`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_5_body = () => `큐 기반 디스패치는 백오프와 함께 최대 5회 시도하고, 모든 프로바이더 응답을 저장합니다. 대상별 커스텀 템플릿과 인시던트가 열려 있는 동안의 재알림 간격도 함께. Slack, PagerDuty, Discord, 이메일, 웹훅, Hazel.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_artifact_title = () => `브리치에서 알림까지 1분`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_artifact_lede = () => `규칙은 60초마다 평가됩니다. 두 번 연속 브리치되면 인시던트가 열리고 관측값이 첨부된 알림이 전송되며, 두 번 연속 정상 윈도우면 자동으로 해결됩니다. 누가 닫기를 누를 필요가 없습니다.`
 
 
 /**

@@ -37,21 +37,27 @@ The SDK is **best-effort**: network failures in telemetry never throw into your 
 
 Every field accepted by `MapleBrowser.init`:
 
-| Option                    | Type      | Default                    | Description                                                                                                                                                                                                                                            |
-| ------------------------- | --------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ingestKey`               | `string`  | —                          | **Required.** Public ingest key (`maple_pk_...`).                                                                                                                                                                                                      |
-| `serviceName`             | `string`  | —                          | **Required.** Service name reported on traces and stored on replay sessions.                                                                                                                                                                           |
-| `endpoint`                | `string`  | `https://ingest.maple.dev` | Maple ingest base URL. Override for self-hosted / regional ingest.                                                                                                                                                                                     |
-| `serviceNamespace`        | `string`  | —                          | Logical group this service belongs to, emitted as the OTel `service.namespace` resource attribute on traces.                                                                                                                                           |
-| `serviceVersion`          | `string`  | —                          | Service version or commit SHA, attached to traces.                                                                                                                                                                                                     |
-| `environment`             | `string`  | —                          | Deployment environment, e.g. `"production"`.                                                                                                                                                                                                           |
-| `userId`                  | `string`  | —                          | User id attached to the replay session for correlation. See [Identifying users](#identifying-users).                                                                                                                                                   |
-| `tracing.enabled`         | `boolean` | `true`                     | Enable OTel browser tracing.                                                                                                                                                                                                                           |
-| `tracing.instrumentFetch` | `boolean` | `true`                     | Auto-instrument `fetch()` to create network spans. Set `false` when another tracer (e.g. the Effect client SDK) already instruments requests — those spans feed the session via the published sink, and disabling this avoids duplicate network spans. |
-| `replay.enabled`          | `boolean` | `true`                     | Enable rrweb session recording.                                                                                                                                                                                                                        |
-| `replay.sampleRate`       | `number`  | `1`                        | Fraction of sessions to record, `0`–`1`. See [Sampling](#sampling).                                                                                                                                                                                    |
-| `privacy.maskAllInputs`   | `boolean` | `true`                     | Mask all `<input>` values in the recording.                                                                                                                                                                                                            |
-| `privacy.maskAllText`     | `boolean` | `false`                    | Mask all text in the rrweb recording and omit captured click-target text from session events.                                                                                                                                                          |
+| Option                         | Type      | Default                    | Description                                                                                                                                                                                                                                            |
+| ------------------------------ | --------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ingestKey`                    | `string`  | —                          | **Required.** Public ingest key (`maple_pk_...`).                                                                                                                                                                                                      |
+| `serviceName`                  | `string`  | —                          | **Required.** Service name reported on traces and stored on replay sessions.                                                                                                                                                                           |
+| `endpoint`                     | `string`  | `https://ingest.maple.dev` | Maple ingest base URL. Override for self-hosted / regional ingest.                                                                                                                                                                                     |
+| `serviceNamespace`             | `string`  | —                          | Logical group this service belongs to, emitted as the OTel `service.namespace` resource attribute on traces.                                                                                                                                           |
+| `serviceVersion`               | `string`  | —                          | Service version or commit SHA, attached to traces.                                                                                                                                                                                                     |
+| `environment`                  | `string`  | —                          | Deployment environment, e.g. `"production"`.                                                                                                                                                                                                           |
+| `userId`                       | `string`  | —                          | User id attached to the replay session for correlation. See [Identifying users](#identifying-users).                                                                                                                                                   |
+| `tracing.enabled`              | `boolean` | `true`                     | Enable OTel browser tracing.                                                                                                                                                                                                                           |
+| `tracing.instrumentFetch`      | `boolean` | `true`                     | Auto-instrument `fetch()` to create network spans. Set `false` when another tracer (e.g. the Effect client SDK) already instruments requests — those spans feed the session via the published sink, and disabling this avoids duplicate network spans. |
+| `replay.enabled`               | `boolean` | `true`                     | Enable rrweb session recording.                                                                                                                                                                                                                        |
+| `replay.sampleRate`            | `number`  | `1`                        | Fraction of sessions to record, `0`–`1`. See [Sampling](#sampling).                                                                                                                                                                                    |
+| `privacy.maskAllInputs`        | `boolean` | `true`                     | Mask all `<input>` values in the recording.                                                                                                                                                                                                            |
+| `privacy.maskAllText`          | `boolean` | `false`                    | Mask all text in the rrweb recording and omit captured click-target text from session events.                                                                                                                                                          |
+| `privacy.persistVisitorId`     | `boolean` | `true`                     | Store a persistent visitor id (localStorage + cookie) so unique visitors and new-vs-returning are measurable. Turning it off also purges any id already stored.                                                                                        |
+| `privacy.crossSubdomainCookie` | `boolean` | `true`                     | Scope the visitor-id cookie to the registered domain so sibling subdomains share it. See [Linking a marketing site to your app](#linking-a-marketing-site-to-your-app).                                                                                |
+| `privacy.cookieDomain`         | `string`  | probed                     | Explicit cookie `Domain=` (no leading dot). `""` forces a host-only cookie.                                                                                                                                                                            |
+| `privacy.requireConsent`       | `boolean` | `false`                    | Capture nothing until `MapleBrowser.setConsent(true)`. See [Consent](#consent).                                                                                                                                                                        |
+| `privacy.captureUserEmail`     | `boolean` | `true`                     | Send `identify()`'s email through to the warehouse.                                                                                                                                                                                                    |
+| `privacy.respectDoNotTrack`    | `boolean` | `false`                    | Treat `navigator.doNotTrack` like Global Privacy Control (suppresses the persistent visitor id).                                                                                                                                                       |
 
 A fully-specified call:
 
@@ -155,6 +161,80 @@ MapleBrowser.identify(user.id)
 // after the user signs out
 MapleBrowser.identify(null)
 ```
+
+`identify()` also takes an object, which is what fills the rest of the session's identity columns —
+the email and name shown on the session, and the company/team the Sessions UI can group by:
+
+```ts
+MapleBrowser.identify({
+	id: "user_123",
+	email: "ada@acme.com",
+	username: "ada",
+	groupId: "org_42",
+	groupName: "Acme",
+	traits: { plan: "pro", signup_month: "2026-01" },
+})
+```
+
+Each call **replaces** the identity rather than merging it — merging would leak a signed-out user's
+email into whoever signs in next on a shared device. Traits are capped (24 keys, 64-char keys,
+256-char values) and the identity is never persisted to storage.
+
+## Custom events
+
+`track(name, props)` records a product event against the current session. It lands as a
+`session_events` row with `Type='custom'`, so it appears inline in the session transcript next to the
+clicks and network calls around it, rather than in a separate analytics silo.
+
+```ts
+MapleBrowser.track("checkout_completed", { plan: "pro", seats: 12 })
+```
+
+Names are capped at 128 chars; props at 32 keys / 64-char keys / 1024-char values / 8KB total.
+Values are coerced to strings (`Date` → ISO, objects → JSON; `null`/`undefined`/functions are
+dropped). Calls before `init()` finishes are queued, and `track()` never throws.
+
+## Linking a marketing site to your app
+
+The visitor id is stored in **both** localStorage and a cookie scoped to your registered domain, so
+`example.com` and `app.example.com` resolve to the same `VisitorId`. Initialize the SDK on both and
+an anonymous visit links to the signed-in sessions it later becomes — filter the Sessions list by
+visitor id to see the whole journey.
+
+The **session** id is deliberately not shared: each origin keeps its own session, and `VisitorId` is
+the join key between them.
+
+The cookie domain is discovered by probing (no public-suffix list needed). Override it when the
+default is wrong:
+
+```ts
+MapleBrowser.init({
+	// …
+	privacy: {
+		crossSubdomainCookie: true, // default; false keeps the cookie host-only
+		cookieDomain: "example.com", // explicit override
+	},
+})
+```
+
+## Consent
+
+Capture is ungated by default. Set `privacy.requireConsent` to hold everything until the user
+agrees, then flip it with `setConsent()`:
+
+```ts
+MapleBrowser.init({ ingestKey, serviceName, privacy: { requireConsent: true } })
+
+// once the banner is accepted
+MapleBrowser.setConsent(true)
+```
+
+Revoking stops capture without flushing, and a later grant starts a fresh session. Global Privacy
+Control is honored regardless of `requireConsent` — it suppresses the persistent visitor id (the one
+cross-session identifier the SDK stores) while leaving session-scoped capture alone. `doNotTrack` is
+ignored unless you set `privacy.respectDoNotTrack`. `privacy.persistVisitorId: false` turns the
+visitor id off entirely and purges any already stored; `privacy.captureUserEmail: false` keeps
+`identify()`'s email out of the warehouse.
 
 ## Privacy & masking
 

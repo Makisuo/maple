@@ -12,7 +12,7 @@ import { Card } from "@maple/ui/components/ui/card"
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { AlertSegmentedSelect } from "@/components/alerts/alert-segmented-select"
 import { SectionHeader } from "@/components/layout/section-header"
@@ -599,9 +599,7 @@ function AlertQueryPanel({ form, onChange, autocompleteValues }: SignalAndThresh
 				onMetricSearch={setMetricSearch}
 				autocompleteValues={autocompleteValues}
 				onUpdate={updateQuery}
-				onAggregationChange={(aggregation) =>
-					updateQuery((current) => ({ ...current, aggregation }))
-				}
+				onAggregationChange={(aggregation) => updateQuery((current) => ({ ...current, aggregation }))}
 				onMetricSelectionChange={(selection) =>
 					updateQuery((current) =>
 						current.dataSource === "metrics"

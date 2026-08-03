@@ -2,8 +2,8 @@ import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { deriveHostStatus, type HostStatus } from "./format"
-import { formatUptime } from "@maple/ui/format"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatUptime } from "@maple/ui/lib/format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import {
 	HoneycombSection,
 	type HoneycombCell,

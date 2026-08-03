@@ -49,7 +49,7 @@ pub fn build_resource(cfg: ResourceConfig) -> Resource {
 }
 
 /// Commit SHA of the running build, from the deploy platform's env vars —
-/// mirrors lib/effect-sdk/src/server/resource.ts (`COMMIT_SHA` chain).
+/// mirrors packages/effect-sdk/src/server/resource.ts (`COMMIT_SHA` chain).
 fn detect_head_revision() -> Option<String> {
     [
         "COMMIT_SHA",
@@ -61,7 +61,7 @@ fn detect_head_revision() -> Option<String> {
     .find_map(|key| env::var(key).ok().filter(|v| !v.is_empty()))
 }
 
-/// Mirrors lib/effect-sdk/src/server/platform.ts platform detection — first
+/// Mirrors packages/effect-sdk/src/server/platform.ts platform detection — first
 /// match wins. Returns the cloud.{provider,platform,region} (and faas.* / k8s.*
 /// where applicable) attribute set for the runtime environment.
 fn detect_platform() -> Vec<KeyValue> {

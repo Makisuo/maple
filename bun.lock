@@ -32,6 +32,7 @@
       "devDependencies": {
         "@cloudflare/workers-types": "4.20260603.1",
         "@effect/language-service": "catalog:effect",
+        "@maple/infra": "workspace:*",
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
         "wrangler": "^4.118.0",
@@ -46,6 +47,7 @@
         "@effect/platform-bun": "catalog:effect",
         "@maple-dev/effect-sdk": "workspace:*",
         "@maple/auth": "workspace:*",
+        "@maple/cache": "workspace:*",
         "@maple/db": "workspace:*",
         "@maple/domain": "workspace:*",
         "@maple/effect-cloudflare": "workspace:*",
@@ -53,6 +55,7 @@
         "@maple/infra": "workspace:*",
         "@maple/llm": "workspace:*",
         "@maple/query-engine": "workspace:*",
+        "@maple/query-engine-integrations": "workspace:*",
         "@react-email/components": "^1.0.11",
         "@tinybirdco/sdk": "catalog:tinybird",
         "autumn-js": "^1.2.29",
@@ -108,6 +111,7 @@
         "@cloudflare/workers-types": "4.20260603.1",
         "@effect/language-service": "catalog:effect",
         "@effect/vitest": "4.0.0-beta.101",
+        "@maple/infra": "workspace:*",
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
@@ -131,6 +135,7 @@
         "@fontsource-variable/geist-mono": "^5.2.8",
         "@inlang/paraglide-astro": "^0.4.1",
         "@inlang/paraglide-js": "^2.14.0",
+        "@maple-dev/browser": "workspace:*",
         "@maple/infra": "workspace:*",
         "@maple/ui": "workspace:*",
         "@tailwindcss/vite": "catalog:tailwind",
@@ -166,7 +171,6 @@
         "effect": "catalog:effect",
         "react": "catalog:react",
         "react-dom": "catalog:react",
-        "sonner": "^2.0.7",
         "sugar-high": "^1.2.1",
       },
       "devDependencies": {
@@ -282,7 +286,6 @@
         "@tanstack/react-virtual": "^3.14.3",
         "@xyflow/react": "catalog:ui",
         "class-variance-authority": "catalog:ui",
-        "clsx": "catalog:ui",
         "date-fns": "^4.4.0",
         "effect": "catalog:effect",
         "elkjs": "^0.11.1",
@@ -293,10 +296,8 @@
         "react-dom": "catalog:react",
         "react-grid-layout": "^2.2.3",
         "recharts": "catalog:ui",
-        "sonner": "^2.0.7",
         "streamdown": "^2.5.0",
         "sugar-high": "^1.2.1",
-        "tailwind-merge": "catalog:tailwind",
         "tailwindcss": "catalog:tailwind",
         "tw-animate-css": "catalog:tailwind",
         "web-vitals": "^5.3.0",
@@ -353,22 +354,16 @@
         "vite": "catalog:",
       },
     },
-    "lib/alchemy-maple": {
-      "name": "@maple-dev/alchemy",
-      "version": "0.1.0",
+    "lib/cache": {
+      "name": "@maple/cache",
+      "dependencies": {
+        "effect": "catalog:effect",
+      },
       "devDependencies": {
         "@effect/language-service": "catalog:effect",
-        "@maple/domain": "workspace:*",
         "@types/node": "catalog:tooling",
-        "alchemy": "2.0.0-beta.64",
-        "effect": "catalog:effect",
-        "tsdown": "^0.21.7",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
-      },
-      "peerDependencies": {
-        "alchemy": ">=2.0.0-beta.64 <3",
-        "effect": ">=4.0.0-beta.100 || >=4.0.0",
       },
     },
     "lib/clickhouse-builder": {
@@ -387,10 +382,6 @@
         "effect": ">=4.0.0-beta.33",
       },
     },
-    "lib/effect-cf": {
-      "name": "effect-cf",
-      "version": "0.0.0",
-    },
     "lib/effect-cloudflare": {
       "name": "@maple/effect-cloudflare",
       "dependencies": {
@@ -403,23 +394,105 @@
         "typescript": "catalog:tooling",
       },
     },
-    "lib/effect-sdk": {
-      "name": "@maple-dev/effect-sdk",
-      "version": "0.7.0",
+    "lib/effect-db": {
+      "name": "@maple/effect-db",
       "dependencies": {
-        "std-env": "^4.0.0",
+        "@electric-sql/client": "1.5.22",
+        "@standard-schema/spec": "^1.1.0",
+        "@tanstack/db": "0.6.13",
+        "@tanstack/electric-db-collection": "0.3.11",
+        "@tanstack/react-db": "0.1.91",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@types/react": "catalog:react",
+        "typescript": "catalog:tooling",
+      },
+      "peerDependencies": {
+        "react": "^19.0.0",
+      },
+    },
+    "lib/effect-router": {
+      "name": "@effect-router/core",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@effect/atom-react": "catalog:effect",
+        "@effect/language-service": "catalog:effect",
+        "@tanstack/react-router": "^1.170.16",
+        "@types/node": "catalog:tooling",
+        "@types/react": "catalog:react",
+        "effect": "catalog:effect",
+        "react": "catalog:react",
+        "typescript": "catalog:tooling",
+      },
+      "peerDependencies": {
+        "@effect/atom-react": ">=4.0.0-beta.0",
+        "@tanstack/react-router": ">=1.150.0",
+        "effect": ">=4.0.0-beta.0",
+        "react": ">=19.0.0",
+      },
+    },
+    "lib/llm": {
+      "name": "@maple/llm",
+      "dependencies": {
+        "@smithy/eventstream-codec": "4.2.14",
+        "@smithy/util-utf8": "4.2.2",
+        "aws4fetch": "1.0.20",
+        "effect": "catalog:effect",
       },
       "devDependencies": {
         "@effect/language-service": "catalog:effect",
-        "@maple/browser-session": "workspace:*",
         "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+        "vite": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "lib/otel-helpers": {
+      "name": "@maple/otel-helpers",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@opentelemetry/api": "^1.9.0",
+        "@types/bun": "^1.3.11",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+      },
+      "peerDependencies": {
+        "@opentelemetry/api": ">=1.9.0",
+      },
+    },
+    "lib/unitflow": {
+      "name": "@maple/unitflow",
+      "dependencies": {
+        "@tanstack/db": "0.6.13",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/vitest": "4.0.0-beta.101",
+        "@types/react": "catalog:react",
+        "typescript": "catalog:tooling",
+        "vitest": "^4.1.9",
+      },
+      "peerDependencies": {
+        "react": "^19.0.0",
+      },
+    },
+    "packages/alchemy-maple": {
+      "name": "@maple-dev/alchemy",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@maple/domain": "workspace:*",
+        "@types/node": "catalog:tooling",
+        "alchemy": "2.0.0-beta.64",
         "effect": "catalog:effect",
         "tsdown": "^0.21.7",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
       },
       "peerDependencies": {
-        "effect": ">=4.0.0-beta.33",
+        "alchemy": ">=2.0.0-beta.64 <3",
+        "effect": ">=4.0.0-beta.100 || >=4.0.0",
       },
     },
     "packages/auth": {
@@ -516,42 +589,23 @@
         "vitest": "catalog:",
       },
     },
-    "packages/effect-db": {
-      "name": "@maple/effect-db",
+    "packages/effect-sdk": {
+      "name": "@maple-dev/effect-sdk",
+      "version": "0.7.0",
       "dependencies": {
-        "@electric-sql/client": "1.5.22",
-        "@standard-schema/spec": "^1.1.0",
-        "@tanstack/db": "0.6.13",
-        "@tanstack/electric-db-collection": "0.3.11",
-        "@tanstack/react-db": "0.1.91",
-        "effect": "catalog:effect",
+        "std-env": "^4.0.0",
       },
       "devDependencies": {
-        "@types/react": "catalog:react",
-        "typescript": "catalog:tooling",
-      },
-      "peerDependencies": {
-        "react": "^19.0.0",
-      },
-    },
-    "packages/effect-router": {
-      "name": "@effect-router/core",
-      "version": "0.1.0",
-      "devDependencies": {
-        "@effect/atom-react": "catalog:effect",
         "@effect/language-service": "catalog:effect",
-        "@tanstack/react-router": "^1.170.16",
+        "@maple/browser-session": "workspace:*",
         "@types/node": "catalog:tooling",
-        "@types/react": "catalog:react",
         "effect": "catalog:effect",
-        "react": "catalog:react",
+        "tsdown": "^0.21.7",
         "typescript": "catalog:tooling",
+        "vitest": "catalog:",
       },
       "peerDependencies": {
-        "@effect/atom-react": ">=4.0.0-beta.0",
-        "@tanstack/react-router": ">=1.150.0",
-        "effect": ">=4.0.0-beta.0",
-        "react": ">=19.0.0",
+        "effect": ">=4.0.0-beta.33",
       },
     },
     "packages/email": {
@@ -578,43 +632,15 @@
         "vitest": "catalog:",
       },
     },
-    "packages/llm": {
-      "name": "@maple/llm",
-      "dependencies": {
-        "@smithy/eventstream-codec": "4.2.14",
-        "@smithy/util-utf8": "4.2.2",
-        "aws4fetch": "1.0.20",
-        "effect": "catalog:effect",
-      },
-      "devDependencies": {
-        "@effect/language-service": "catalog:effect",
-        "@types/node": "catalog:tooling",
-        "typescript": "catalog:tooling",
-        "vite": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
     "packages/otel-collector-maple-exporter": {
       "name": "otel-collector-maple-exporter",
       "version": "0.0.0",
-    },
-    "packages/otel-helpers": {
-      "name": "@maple/otel-helpers",
-      "version": "0.1.0",
-      "devDependencies": {
-        "@opentelemetry/api": "^1.9.0",
-        "@types/bun": "^1.3.11",
-        "@types/node": "catalog:tooling",
-        "typescript": "catalog:tooling",
-      },
-      "peerDependencies": {
-        "@opentelemetry/api": ">=1.9.0",
-      },
     },
     "packages/query-engine": {
       "name": "@maple/query-engine",
       "dependencies": {
         "@maple-dev/clickhouse-builder": "workspace:*",
+        "@maple/cache": "workspace:*",
         "@maple/domain": "workspace:*",
         "effect": "catalog:effect",
       },
@@ -622,6 +648,20 @@
         "@effect/language-service": "catalog:effect",
         "@types/node": "catalog:tooling",
         "expect-type": "^1.3.0",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/query-engine-integrations": {
+      "name": "@maple/query-engine-integrations",
+      "dependencies": {
+        "@maple-dev/clickhouse-builder": "workspace:*",
+        "@maple/query-engine": "workspace:*",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
       },
@@ -642,35 +682,24 @@
         "react-day-picker": "^10.0.1",
         "react-resizable-panels": "^4.9.0",
         "recharts": "catalog:ui",
-        "sonner": "^2.0.7",
         "tailwind-merge": "catalog:tailwind",
       },
       "devDependencies": {
+        "@testing-library/dom": "^10.4.1",
+        "@testing-library/react": "^16.3.2",
         "@types/react": "catalog:react",
         "@types/react-dom": "catalog:react",
+        "jsdom": "^29.1.1",
+        "react": "catalog:react",
+        "react-dom": "catalog:react",
         "typescript": "catalog:tooling",
+        "vite": "catalog:",
         "vitest": "catalog:",
       },
       "peerDependencies": {
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "tailwindcss": "^4.0.0",
-      },
-    },
-    "packages/unitflow": {
-      "name": "@maple/unitflow",
-      "dependencies": {
-        "@tanstack/db": "0.6.13",
-        "effect": "catalog:effect",
-      },
-      "devDependencies": {
-        "@effect/vitest": "4.0.0-beta.101",
-        "@types/react": "catalog:react",
-        "typescript": "catalog:tooling",
-        "vitest": "^4.1.9",
-      },
-      "peerDependencies": {
-        "react": "^19.0.0",
       },
     },
   },
@@ -1081,7 +1110,7 @@
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 
-    "@effect-router/core": ["@effect-router/core@workspace:packages/effect-router"],
+    "@effect-router/core": ["@effect-router/core@workspace:lib/effect-router"],
 
     "@effect/atom-react": ["@effect/atom-react@4.0.0-beta.101", "", { "peerDependencies": { "effect": "^4.0.0-beta.101", "react": "^19.2.4", "scheduler": "*" } }, "sha512-Sjp0K4Yw+xvDtfjuk2n5BCCX2NMEejlRocZEwQ4mdVd82pqI9dtO1QD2fdUzFEZQeBwcEuj8ZCBYbIegj7OLQw=="],
 
@@ -1459,13 +1488,13 @@
 
     "@lix-js/server-protocol-schema": ["@lix-js/server-protocol-schema@0.1.1", "", {}, "sha512-jBeALB6prAbtr5q4vTuxnRZZv1M2rKe8iNqRQhFJ4Tv7150unEa0vKyz0hs8Gl3fUGsWaNJBh3J8++fpbrpRBQ=="],
 
-    "@maple-dev/alchemy": ["@maple-dev/alchemy@workspace:lib/alchemy-maple"],
+    "@maple-dev/alchemy": ["@maple-dev/alchemy@workspace:packages/alchemy-maple"],
 
     "@maple-dev/browser": ["@maple-dev/browser@workspace:packages/browser"],
 
     "@maple-dev/clickhouse-builder": ["@maple-dev/clickhouse-builder@workspace:lib/clickhouse-builder"],
 
-    "@maple-dev/effect-sdk": ["@maple-dev/effect-sdk@workspace:lib/effect-sdk"],
+    "@maple-dev/effect-sdk": ["@maple-dev/effect-sdk@workspace:packages/effect-sdk"],
 
     "@maple-examples/alchemy": ["@maple-examples/alchemy@workspace:examples/alchemy-maple"],
 
@@ -1479,6 +1508,8 @@
 
     "@maple/browser-session": ["@maple/browser-session@workspace:packages/browser-session"],
 
+    "@maple/cache": ["@maple/cache@workspace:lib/cache"],
+
     "@maple/cli": ["@maple/cli@workspace:apps/cli"],
 
     "@maple/clickhouse-cli": ["@maple/clickhouse-cli@workspace:packages/clickhouse-cli"],
@@ -1489,7 +1520,7 @@
 
     "@maple/effect-cloudflare": ["@maple/effect-cloudflare@workspace:lib/effect-cloudflare"],
 
-    "@maple/effect-db": ["@maple/effect-db@workspace:packages/effect-db"],
+    "@maple/effect-db": ["@maple/effect-db@workspace:lib/effect-db"],
 
     "@maple/electric-sync": ["@maple/electric-sync@workspace:apps/electric-sync"],
 
@@ -1501,19 +1532,21 @@
 
     "@maple/landing": ["@maple/landing@workspace:apps/landing"],
 
-    "@maple/llm": ["@maple/llm@workspace:packages/llm"],
+    "@maple/llm": ["@maple/llm@workspace:lib/llm"],
 
     "@maple/local-ui": ["@maple/local-ui@workspace:apps/local-ui"],
 
-    "@maple/otel-helpers": ["@maple/otel-helpers@workspace:packages/otel-helpers"],
+    "@maple/otel-helpers": ["@maple/otel-helpers@workspace:lib/otel-helpers"],
 
     "@maple/query-engine": ["@maple/query-engine@workspace:packages/query-engine"],
+
+    "@maple/query-engine-integrations": ["@maple/query-engine-integrations@workspace:packages/query-engine-integrations"],
 
     "@maple/scraper": ["@maple/scraper@workspace:apps/scraper"],
 
     "@maple/ui": ["@maple/ui@workspace:packages/ui"],
 
-    "@maple/unitflow": ["@maple/unitflow@workspace:packages/unitflow"],
+    "@maple/unitflow": ["@maple/unitflow@workspace:lib/unitflow"],
 
     "@maple/web": ["@maple/web@workspace:apps/web"],
 
@@ -3143,8 +3176,6 @@
 
     "effect": ["effect@4.0.0-beta.101", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "fast-check": "^4.9.0", "find-my-way-ts": "^0.1.6", "ini": "^7.0.0", "kubernetes-types": "^1.30.0", "msgpackr": "^2.0.4", "multipasta": "^0.2.8", "toml": "^4.1.2", "uuid": "^14.0.1", "yaml": "^2.9.0" } }, "sha512-HjowumlIo+orthn4jMlEJPuzIYPBV+uq/XiciHWhiedLsXQpWHdNJHO5d59BVDP5s1LPuvERcktwFqRXnJqnhA=="],
 
-    "effect-cf": ["effect-cf@workspace:lib/effect-cf"],
-
     "electron-to-chromium": ["electron-to-chromium@1.5.399", "", {}, "sha512-lEcqhErbHjXRvd41rnWLpzbyU/IXfIYo7QwaFWmxGeLiLyY2TBCdHnWY88vB+p3ubnihRypDm66panXl7TylLA=="],
 
     "elkjs": ["elkjs@0.11.1", "", {}, "sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg=="],
@@ -4608,8 +4639,6 @@
     "socket.io-parser": ["socket.io-parser@4.2.7", "", { "dependencies": { "@socket.io/component-emitter": "~3.1.0", "debug": "~4.4.1" } }, "sha512-IH/iSeO9T6gz1KkFleGDWkG9N3dl4jXVYUtMhIqH10Md0ttMer8nUNWiP1DKuNrybD2xBrixLJdCC9J6ECoYkg=="],
 
     "solid-js": ["solid-js@1.6.12", "", { "dependencies": { "csstype": "^3.1.0" } }, "sha512-JFqRobfG3q5r1l4RYVOAukk6+FWtHpXGIjgh/GEsHKweN/kK+iHOtzUALE6+P5t/jIcSNeGiVitX8gmJg+cYvQ=="],
-
-    "sonner": ["sonner@2.0.7", "", { "peerDependencies": { "react": "^18.0.0 || ^19.0.0 || ^19.0.0-rc", "react-dom": "^18.0.0 || ^19.0.0 || ^19.0.0-rc" } }, "sha512-W6ZN4p58k8aDKA4XPcx2hpIQXBRAgyiWVkYhT7CvK6D3iAu7xjvVyhQHg2/iaKJZ1XVJ4r7XuwGL+WGEK37i9w=="],
 
     "sorted-btree": ["sorted-btree@1.8.1", "", {}, "sha512-395+XIP+wqNn3USkFSrNz7G3Ss/MXlZEqesxvzCRFwL14h6e8LukDHdLBePn5pwbm5OQ9vGu8mDyz2lLDIqamQ=="],
 

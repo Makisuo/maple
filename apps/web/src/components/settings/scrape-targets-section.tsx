@@ -4,7 +4,7 @@ import type { ScrapeAuthType, ScrapeTargetId } from "@maple/domain/http"
 import type { V2ScrapeTarget, V2ScrapeTargetCheck } from "@maple/domain/http/v2"
 import { useState, type KeyboardEvent, type ReactNode } from "react"
 import { Exit, Schema } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { type ScrapeTargetChecksResponse, useScrapeTargetChecks } from "@/hooks/use-scrape-target-checks"
@@ -62,8 +62,8 @@ import {
 	TrashIcon,
 } from "@/components/icons"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import { formatDuration, formatNumber } from "@maple/ui/format"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatDuration, formatNumber } from "@maple/ui/lib/format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { diagnoseScrapeError } from "@/lib/scrape-error-diagnosis"
 import { scheduledStatusFromChecks, scheduledStatusFromRollup } from "@/lib/scrape-target-status"
 import { catalogEntry } from "../integrations/integration-catalog"
@@ -225,12 +225,15 @@ export function ScrapeTargetsSection({
 		if (Exit.isSuccess(result)) {
 			refreshTargets()
 			if (result.value.success) {
-				toast.success("Connection successful")
+				toastManager.add({ title: "Connection successful", type: "success" })
 			} else {
-				toast.error(`Connection failed: ${result.value.last_scrape_error}`)
+				toastManager.add({
+					title: `Connection failed: ${result.value.last_scrape_error}`,
+					type: "error",
+				})
 			}
 		} else {
-			toast.error("Failed to test connection")
+			toastManager.add({ title: "Failed to test connection", type: "error" })
 		}
 		setProbingId(null)
 	}
@@ -278,7 +281,7 @@ export function ScrapeTargetsSection({
 
 	async function handleSave() {
 		if (!formName.trim() || !formUrl.trim()) {
-			toast.error("Name and URL are required")
+			toastManager.add({ title: "Name and URL are required", type: "error" })
 			return
 		}
 
@@ -286,7 +289,10 @@ export function ScrapeTargetsSection({
 		try {
 			parsedInterval = asScrapeIntervalSeconds(Number.parseInt(formInterval, 10) || 15)
 		} catch {
-			toast.error("Scrape interval must be an integer from 5 to 300 seconds")
+			toastManager.add({
+				title: "Scrape interval must be an integer from 5 to 300 seconds",
+				type: "error",
+			})
 			return
 		}
 
@@ -309,10 +315,10 @@ export function ScrapeTargetsSection({
 			})
 			if (Exit.isSuccess(result)) {
 				refreshTargets()
-				toast.success("Scrape target updated")
+				toastManager.add({ title: "Scrape target updated", type: "success" })
 				setDialogOpen(false)
 			} else {
-				toast.error("Failed to update scrape target")
+				toastManager.add({ title: "Failed to update scrape target", type: "error" })
 			}
 		} else {
 			const result = await createMutation({
@@ -328,11 +334,11 @@ export function ScrapeTargetsSection({
 			})
 			if (Exit.isSuccess(result)) {
 				refreshTargets()
-				toast.success("Scrape target created")
+				toastManager.add({ title: "Scrape target created", type: "success" })
 				setDialogOpen(false)
 				setSelectedTargetId(result.value.id)
 			} else {
-				toast.error("Failed to create scrape target")
+				toastManager.add({ title: "Failed to create scrape target", type: "error" })
 			}
 		}
 		setIsSaving(false)
@@ -346,10 +352,10 @@ export function ScrapeTargetsSection({
 		})
 		if (Exit.isSuccess(result)) {
 			refreshTargets()
-			toast.success("Scrape target deleted")
+			toastManager.add({ title: "Scrape target deleted", type: "success" })
 			if (selectedTargetId === targetId) setSelectedTargetId(null)
 		} else {
-			toast.error("Failed to delete scrape target")
+			toastManager.add({ title: "Failed to delete scrape target", type: "error" })
 		}
 	}
 
@@ -363,7 +369,7 @@ export function ScrapeTargetsSection({
 			reactivityKeys: ["scrapeTargets"],
 		})
 		if (!Exit.isSuccess(result)) {
-			toast.error("Failed to update scrape target")
+			toastManager.add({ title: "Failed to update scrape target", type: "error" })
 		} else {
 			refreshTargets()
 		}

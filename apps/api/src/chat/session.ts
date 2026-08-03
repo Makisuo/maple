@@ -10,8 +10,8 @@
 import type { ChatEventInput, ChatMessage } from "@maple/domain/chat-session"
 import { Message } from "@maple/llm"
 import { Effect, Stream } from "effect"
-import { resolveTriageModel } from "@/lib/Llm"
-import type { TenantContext } from "@/lib/tenant-context"
+import { resolveTriageModel } from "@/platform/Llm"
+import type { TenantContext } from "@/services/auth/tenant-context"
 import { buildSubmitDiagnosisTool, runChatTurn, type ChatTurnEvent, type SubmitDiagnosis } from "./agent"
 
 /** The `ChatSession` Durable Object's RPC surface. Mirrors `./ChatSession.ts`. */

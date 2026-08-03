@@ -2,8 +2,8 @@ import { Effect } from "effect"
 import type { RawSqlValidationError } from "@maple/domain/http"
 import type { WarehouseSqlError } from "@maple/query-engine/execution"
 import { makeExecuteRawSql, type ExecuteRawSqlResult } from "@maple/query-engine/runtime"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
-import type { TenantContext } from "@/lib/tenant-context"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import type { TenantContext } from "@/services/auth/tenant-context"
 
 // Auto-bucket ladder mirrors the web/HTTP raw-SQL path so `$__interval_s`
 // resolves to a sensible value when the caller doesn't pin granularity.

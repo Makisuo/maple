@@ -167,6 +167,14 @@ export const nav_kubernetes = () => `Kubernetes監視`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_alerts = () => `アラート`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const nav_ecommerce = () => `ECサイトのオブザーバビリティ`
 
 
@@ -320,6 +328,14 @@ export const nav_desc_ai_mcp = () => `MCPによるAI診断`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const nav_desc_kubernetes = () => `Pod・ノード・ワークロードをスパンと並べて監視`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_desc_alerts = () => `任意のシグナルにアラート、通知はチームのいる場所へ`
 
 
 /**
@@ -2159,87 +2175,7 @@ export const dashboard_ai_text = () => `payment-serviceのP95レイテンシチ�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_badge = () => `アラート`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const alert_heading = () => `コンテキスト付きのアラート`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_title = () => `アラートルール`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_desc = () => `エラー率、P95/P99レイテンシ、Apdex、スループット、カスタムメトリクス、カスタムクエリの7種類の組み込みシグナル。重大度レベル、インシデント追跡、自動解決付き。`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_route_title = () => `どこへでもルーティング`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_route_desc = () => `アラートをSlack、Discord、PagerDuty、任意のWebhookへ。チームが普段いる場所に通知が届きます。`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_firing = () => `発火中`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_triggered_ago = () => `34秒前に発火`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_view = () => `Mapleで表示`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_acknowledge = () => `確認`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_webhook_note = () => `+ 任意のカスタムWebhookエンドポイント`
 
 
 /**
@@ -6240,6 +6176,158 @@ export const feat_errors_cap_5_title = () => `起きる前にトリアージ`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const feat_errors_cap_5_body = () => `ディテクタは5分ごとに実行され、issue自身の発生率と影響範囲から重大度を設定します。手動で設定した重大度は常にディテクタより優先され、ディテクタはAIより優先されます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_seo_title = () => `アラート | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_seo_desc = () => `トレース・ログ・メトリクスへのしきい値アラート。保存前に自分の履歴でプレビューし、毎分評価して、Slack、PagerDuty、Discord、メール、任意のWebhookへ配信します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_hero_title = () => `根拠を示すアラート`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_hero_lede = () => `すべてのルールは保存する前に履歴に対してリプレイでき、保存した後はすべての評価が記録されます。通知が届いたときはその理由が正確にわかり、届かないときはその理由もわかります。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_panel_title = () => `通知が来る前に、プレビュー`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_panel_lede = () => `プレビューはスケジューラと同じコードを、選んだ期間に対して実行します。ウィンドウごとの判定も、発火したはずのスパンもそのまま。チャートが示すのは、実際に起きたはずのことです。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_title = () => `しきい値から解決まで`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_1_title = () => `何にでもアラート`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_1_body = () => `エラー率、P95/P99レイテンシ、Apdex、スループットという7種の組み込みトレースシグナルに加え、トレース・ログ・メトリクスに対する任意のクエリビルダードラフト。ビルダーで表現できないときは生SQLで。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_2_title = () => `評価器に忠実なプレビュー`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_2_body = () => `プレビューは、毎分実行されるスケジューラとまったく同じコードでルールを履歴にリプレイします。先週の火曜に2回発火したはずと表示されたなら、それが実際に起きたはずのことです。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_3_title = () => `1つのルール、グループごとのインシデント`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_3_body = () => `service.name や任意の属性でグループ化すると、各グループが独自のブリーチカウント、インシデント、履歴を持ちます。1つのサービスのスパイクが12サービスの平均に埋もれることはありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_4_title = () => `すべてのチェックを記録`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_4_body = () => `各評価は観測値、サンプル数、判定を書き込みます。失敗したクエリも含まれるため、欠落は沈黙ではなく可視化されます。ルールが静かなままなら、診断パネルがパイプラインを段階ごとに検証します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_5_title = () => `届くまで諦めない配信`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_5_body = () => `キュー配信はバックオフ付きで最大5回試行し、プロバイダの応答をすべて保存します。宛先ごとのカスタムテンプレートと、インシデントが開いている間の再通知間隔も。Slack、PagerDuty、Discord、メール、Webhook、Hazel。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_artifact_title = () => `ブリーチから通知まで1分`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_artifact_lede = () => `ルールは60秒ごとに評価されます。2回連続のブリーチでインシデントが開き、観測値付きの通知が送信されます。2回連続の正常ウィンドウで自動解決 — 誰かがクローズを押す必要はありません。`
 
 
 /**

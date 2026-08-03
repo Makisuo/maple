@@ -5,7 +5,7 @@ import { ToolbarSearch } from "@maple/ui/components/toolbar"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import {
 	ArrowRightIcon,
 	CircleCheckIcon,

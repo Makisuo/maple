@@ -56,6 +56,11 @@ const absoluteImage = image.startsWith("http") ? image : new URL(image, Astro.si
         <meta name="twitter:image" content={absoluteImage} />
         <meta name="generator" content={Astro.generator} />
         <title>{pageTitle}</title>
+        <!-- Docs pages don't go through Layout.astro, so telemetry is wired here too. -->
+        <script>
+            import { startLandingTelemetry } from "../lib/telemetry";
+            startLandingTelemetry();
+        </script>
     </head>
     <body class="min-h-screen antialiased bg-bg text-fg font-sans">
         <!-- Docs header -->

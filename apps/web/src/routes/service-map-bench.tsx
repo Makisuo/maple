@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import {
 	DEFAULT_BENCH_PARAMS,
