@@ -1,6 +1,6 @@
 import { useHotkeys, type UseHotkeyOptions } from "@tanstack/react-hotkeys"
 
-import { isDialogOpen } from "@/lib/keyboard"
+import { isDialogOpen } from "@maple/ui/lib/keyboard"
 import { type ShortcutId, shortcutDef } from "@/lib/shortcuts"
 
 export interface UseAppHotkeyOptions {

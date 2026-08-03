@@ -59,8 +59,14 @@ export const StatWidget = memo(function StatWidget({ dataState, display, mode }:
 
 	const sparklineSource = display.sparkline?.enabled === true ? display.sparkline.dataSource : undefined
 
+	// The headline scales with the tile, not the viewport: a 3-column stat is
+	// ~90px wide once the grid drops to 6 columns, where `text-2xl` truncates a
+	// formatted value that reads fine one breakpoint up.
 	const valueText = (
-		<span className="text-2xl font-bold" style={thresholdColor ? { color: thresholdColor } : undefined}>
+		<span
+			className="text-base font-bold tabular-nums @min-[150px]/widget:text-2xl @min-[280px]/widget:text-3xl"
+			style={thresholdColor ? { color: thresholdColor } : undefined}
+		>
 			{formattedValue}
 		</span>
 	)
@@ -73,7 +79,7 @@ export const StatWidget = memo(function StatWidget({ dataState, display, mode }:
 			contentClassName={
 				sparklineSource
 					? "flex-1 min-h-0 flex flex-col"
-					: "flex-1 min-h-0 flex items-center justify-center p-4"
+					: "flex-1 min-h-0 flex items-center justify-center p-2 @min-[200px]/widget:p-4"
 			}
 			loadingSkeleton={
 				sparklineSource ? (
@@ -90,11 +96,17 @@ export const StatWidget = memo(function StatWidget({ dataState, display, mode }:
 		>
 			{sparklineSource ? (
 				<>
-					<div className="flex flex-1 items-center justify-center px-4 pt-4">{valueText}</div>
-					<StatSparklineLoader
-						dataSource={sparklineSource}
-						color={thresholdColor ?? "var(--chart-1)"}
-					/>
+					<div className="flex flex-1 items-center justify-center px-2 pt-2 @min-[200px]/widget:px-4 @min-[200px]/widget:pt-4">
+						{valueText}
+					</div>
+					{/* Under ~140px the trend is a few pixels of noise under the
+					    number — drop it and give the value the whole tile. */}
+					<div className="hidden shrink-0 @min-[140px]/widget:block">
+						<StatSparklineLoader
+							dataSource={sparklineSource}
+							color={thresholdColor ?? "var(--chart-1)"}
+						/>
+					</div>
 				</>
 			) : (
 				valueText

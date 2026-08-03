@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState, type ReactElement, type ReactNode } from "react"
+import { useMemo, useRef, type ReactElement, type ReactNode } from "react"
 import { cn } from "@maple/ui/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 
-import { useMountEffect } from "@/hooks/use-mount-effect"
+import { useContainerSize } from "@maple/ui/hooks/use-container-size"
 
 export type HoneycombTone = "ok" | "warn" | "crit" | "stale"
 
@@ -64,36 +64,9 @@ const ROW_MARGIN_TOP = PITCH_Y - HEX_H // negative: rows interlock
 const ROW_OFFSET_X = PITCH_X / 2 // odd-row brick shift
 const HEX_CLIP = "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)"
 
-function useContainerWidth() {
-	const ref = useRef<HTMLDivElement>(null)
-	const [width, setWidth] = useState(0)
-	useMountEffect(() => {
-		const el = ref.current
-		if (!el) return
-		// Measure eagerly (sync) and again after layout (rAF) — the sync read can be
-		// 0 before first layout, and the ResizeObserver's initial callback doesn't
-		// always land, which would leave cols at 0 and the grid empty.
-		const measure = () => {
-			const w = el.clientWidth
-			if (w > 0) setWidth(w)
-		}
-		measure()
-		const raf = requestAnimationFrame(measure)
-		const ro = new ResizeObserver((entries) => {
-			const w = entries[0]?.contentRect.width
-			if (w && w > 0) setWidth(w)
-		})
-		ro.observe(el)
-		return () => {
-			cancelAnimationFrame(raf)
-			ro.disconnect()
-		}
-	})
-	return [ref, width] as const
-}
-
 export function Honeycomb({ cells }: { cells: ReadonlyArray<HoneycombCell> }) {
-	const [ref, width] = useContainerWidth()
+	const ref = useRef<HTMLDivElement>(null)
+	const { width } = useContainerSize(ref)
 
 	// Reserve the odd-row offset so the brick shift never overflows the right edge.
 	const cols = useMemo(() => {

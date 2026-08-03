@@ -25,6 +25,7 @@ import { from, fromQuery, type ColumnAccessor, type CHQuery } from "@maple-dev/c
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { SessionReplays, SessionReplayEvents, TraceDetailSpans } from "../tables"
 import { sessionActivityAggregateQuery, sessionEventMatchQuery } from "./session-events"
+import type { FacetOutput } from "./query-helpers"
 
 // argMax(value, ordering) — finalize a ReplacingMergeTree column to its latest
 // version. Generic per call site, so declared here rather than via defineFn.
@@ -392,11 +393,7 @@ export interface SessionReplaysFacetsOpts {
 	search?: string
 }
 
-export interface SessionReplaysFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type SessionReplaysFacetsOutput = FacetOutput
 
 type SessionFacetKey = "service" | "browser" | "country" | "device"
 

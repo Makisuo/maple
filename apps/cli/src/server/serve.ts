@@ -7,16 +7,18 @@ import * as ManagedRuntime from "effect/ManagedRuntime"
 import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
 import { isLoopbackHostname } from "../lib/local-address"
-import { acquireChdb, type Chdb, type ChdbError } from "./chdb"
+import { MAPLE_VERSION } from "../version"
+import { acquireChdb, ChdbError, type Chdb } from "./chdb"
 import { buildInsertStatements } from "./inserts"
 import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch, OtlpFieldError } from "./otlp/encode"
 import { decodeLogsRequest, decodeMetricsRequest, decodeTraceRequest } from "./otlp/proto"
-import schemaSql from "./schema/local-schema.sql" with { type: "text" }
-import { schemaFingerprint } from "./store-version"
+import { CURRENT_LOCAL_SCHEMA, LOCAL_SCHEMA_SQL, SCHEMA_FINGERPRINT } from "./schema-identity"
+import { assertCurrentPhysicalSchema } from "./schema-physical"
+import { ensureStoreMarkerDurable } from "./store-version"
 
-/** Fingerprint of the schema this build bootstraps stores with. Stamped into the
- *  store marker so `maple start` can rebuild a store left on an older schema. */
-export const SCHEMA_FINGERPRINT = schemaFingerprint(schemaSql)
+/** Fingerprint of the schema this build bootstraps stores with. Re-exported
+ * from this module for the existing archive/checkpoint metadata seam. */
+export { SCHEMA_FINGERPRINT }
 
 /** Resolves a request path to a static asset (the bundled SPA). Returns
  *  `undefined` to fall through to the SPA shell (client-side routing). */
@@ -406,8 +408,35 @@ export const startServer = (
 	Effect.gen(function* () {
 		const db = yield* acquireChdb({
 			dataDir: options.dataDir,
-			schemaSql,
+			schemaSql: LOCAL_SCHEMA_SQL,
 			configFile: options.configFile,
+		})
+		// `CREATE ... IF NOT EXISTS` does not repair a table whose physical
+		// definition was altered out of band. Inspect the opened store before the
+		// listener is bound; a mismatch fails startup rather than allowing new
+		// query code to run against a partially old layout.
+		yield* Effect.try({
+			try: () => assertCurrentPhysicalSchema(db),
+			catch: (error) =>
+				new ChdbError({
+					message: `local physical-schema verification failed: ${error instanceof Error ? error.message : String(error)}`,
+				}),
+		})
+		yield* Effect.tryPromise({
+			try: () =>
+				ensureStoreMarkerDurable(
+					options.dataDir,
+					{
+						version: CURRENT_LOCAL_SCHEMA.version,
+						digest: CURRENT_LOCAL_SCHEMA.digest,
+						fingerprint: SCHEMA_FINGERPRINT,
+					},
+					MAPLE_VERSION,
+				),
+			catch: (error) =>
+				new ChdbError({
+					message: `could not durably record local-store identity: ${error instanceof Error ? error.message : String(error)}`,
+				}),
 		})
 		// A dedicated runtime carrying the OTel tracer for per-request spans: the
 		// Bun.serve handler runs outside Effect, so each request's span effect is

@@ -8,11 +8,12 @@
 //
 // They are deliberately CROSS-ORG: there is no `OrgId.eq(...)` predicate, so a
 // single cheap scan of the small recent window / hourly MVs enumerates active
-// orgs at once. `OrgId` still appears in SELECT/GROUP BY, which satisfies the
-// WarehouseQueryService `sql.includes("OrgId")` guard. `.routing("ingest")`
-// routes them to the managed Tinybird workspace (where all managed orgs' data
-// lives); BYO-ClickHouse orgs are invisible here and are gated separately by
-// the caller (always processed).
+// orgs at once. Each declares `.crossOrg()`, which is what lets them through
+// `WarehouseQueryService.crossOrgQuery` — the ordinary read path rejects a
+// query with no top-level tenant predicate. `.routing("ingest")` routes them to
+// the managed Tinybird workspace (where all managed orgs' data lives);
+// BYO-ClickHouse orgs are invisible here and are gated separately by the caller
+// (always processed).
 //
 // The discovery window must be a SUPERSET of the per-org scan window so no
 // active org is missed for the tick.
@@ -33,6 +34,7 @@ export function activeOrgsByErrorEventsQuery() {
 		.groupBy("orgId")
 		.format("JSON")
 		.routing("ingest")
+		.crossOrg()
 }
 
 /** Orgs with any span aggregates since `startTime` (gates the anomaly detector). */
@@ -43,6 +45,7 @@ export function activeOrgsByTracesQuery() {
 		.groupBy("orgId")
 		.format("JSON")
 		.routing("ingest")
+		.crossOrg()
 }
 
 /** Orgs with any log aggregates since `startTime` (gates the anomaly detector). */
@@ -53,4 +56,5 @@ export function activeOrgsByLogsQuery() {
 		.groupBy("orgId")
 		.format("JSON")
 		.routing("ingest")
+		.crossOrg()
 }

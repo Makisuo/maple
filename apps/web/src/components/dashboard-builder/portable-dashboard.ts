@@ -1,6 +1,7 @@
 import { PortableDashboardDocument, defaultWidgetLayout } from "@maple/domain/http"
 import { Schema } from "effect"
 
+import { CANONICAL_COLS } from "@/components/dashboard-builder/canvas/grid-breakpoints"
 import type { Dashboard, DashboardWidget, WidgetLayout } from "@/components/dashboard-builder/types"
 
 export type PortableDashboard = Omit<Dashboard, "id" | "createdAt" | "updatedAt">
@@ -43,7 +44,7 @@ function findNextWidgetPosition(widgets: DashboardWidget[], width: number) {
 	const bottomRowWidgets = widgets.filter((widget) => widget.layout.y === maxY)
 	const rightEdge = Math.max(...bottomRowWidgets.map((widget) => widget.layout.x + widget.layout.w))
 
-	if (rightEdge + width <= 12) {
+	if (rightEdge + width <= CANONICAL_COLS) {
 		return { x: rightEdge, y: maxY }
 	}
 

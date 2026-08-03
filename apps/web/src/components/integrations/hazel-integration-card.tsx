@@ -3,7 +3,7 @@ import { Exit, Option } from "effect"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { ErrorState } from "@/components/common/error-state"
 import { HazelIcon, LoaderIcon } from "@/components/icons"
@@ -58,9 +58,9 @@ export function HazelIntegrationCard() {
 		})
 		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("Hazel disconnected")
+			toastManager.add({ title: "Hazel disconnected", type: "success" })
 		} else {
-			toast.error("Failed to disconnect Hazel")
+			toastManager.add({ title: "Failed to disconnect Hazel", type: "error" })
 		}
 	}
 

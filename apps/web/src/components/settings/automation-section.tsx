@@ -7,7 +7,7 @@ import {
 	EscalationPolicyEvaluationRequest,
 	type IssueSeverity,
 } from "@maple/domain/http"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { Button } from "@maple/ui/components/ui/button"
 import { Badge } from "@maple/ui/components/ui/badge"
 
@@ -80,7 +80,7 @@ function PolicySimulator() {
 		if (Exit.isSuccess(result)) {
 			setDecision(result.value)
 		} else {
-			toast.error("Policy evaluation failed")
+			toastManager.add({ title: "Policy evaluation failed", type: "error" })
 		}
 	}
 

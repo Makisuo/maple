@@ -9,6 +9,7 @@ import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import type { ServiceUsageResponse, ServiceUsageTotals } from "@/api/warehouse/service-usage"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 type CardKey = "logs" | "traces" | "metrics" | "dataSize"
 
 const cardConfig: Array<{
@@ -50,8 +51,10 @@ function shiftRangeBack(startTime?: string, endTime?: string) {
 	const duration = end.getTime() - start.getTime()
 	const prevEnd = new Date(start.getTime())
 	const prevStart = new Date(start.getTime() - duration)
-	const fmt = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(prevStart), endTime: fmt(prevEnd) }
+	return {
+		startTime: formatWarehouseDateTime(prevStart.getTime()),
+		endTime: formatWarehouseDateTime(prevEnd.getTime()),
+	}
 }
 
 function DeltaChip({ current, previous }: { current: number; previous: number }) {

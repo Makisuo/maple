@@ -1,15 +1,9 @@
-// @vitest-environment jsdom
-
-// `useCopy` lives in `@maple/ui`, but that package's vitest suite is pure-logic
-// with no DOM renderer. apps/web already has jsdom + @testing-library wired, so
-// the hook's behavior is covered from here.
-
 import { act, cleanup, render } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { toast } from "sonner"
-import { useCopy, type CopyAPI, type UseCopyOptions } from "@maple/ui/hooks/use-copy"
+import { toastManager } from "../components/ui/toast"
+import { useCopy, type CopyAPI, type UseCopyOptions } from "./use-copy"
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
+vi.mock("../components/ui/toast", () => ({ toastManager: { add: vi.fn() } }))
 
 function Probe({ options, onReady }: { options?: UseCopyOptions; onReady: (api: CopyAPI) => void }) {
 	const api = useCopy(options)
@@ -21,13 +15,18 @@ function Probe({ options, onReady }: { options?: UseCopyOptions; onReady: (api: 
 function mount(options?: UseCopyOptions) {
 	let latest!: CopyAPI
 	const view = render(<Probe options={options} onReady={(api) => (latest = api)} />)
-	return { get api() { return latest }, view }
+	return {
+		get api() {
+			return latest
+		},
+		view,
+	}
 }
 
 let writeText: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
-	// The sonner mock is module-level, so its call log outlives `restoreAllMocks`.
+	// The toast mock is module-level, so its call log outlives `restoreAllMocks`.
 	vi.clearAllMocks()
 	vi.useFakeTimers()
 	writeText = vi.fn().mockResolvedValue(undefined)
@@ -77,6 +76,24 @@ describe("useCopy", () => {
 		expect(onError).toHaveBeenCalledOnce()
 	})
 
+	it("succeeds through the execCommand fallback when the clipboard API rejects", async () => {
+		// The path that only ever runs on insecure origins and embedded contexts —
+		// i.e. never in a developer's browser, so it needs a test more than the
+		// happy path does.
+		const onCopy = vi.fn()
+		writeText.mockRejectedValue(new Error("denied"))
+		Object.defineProperty(document, "execCommand", { configurable: true, value: () => true })
+		const probe = mount({ label: "Trace ID", onCopy })
+
+		await act(async () => {
+			expect(await probe.api.copy("maple")).toBe(true)
+		})
+		expect(probe.api.status).toBe("copied")
+		expect(onCopy).toHaveBeenCalledWith("maple")
+		expect(toastManager.add).toHaveBeenCalledWith({ title: "Trace ID copied", type: "success" })
+		expect(toastManager.add).not.toHaveBeenCalledWith(expect.objectContaining({ type: "error" }))
+	})
+
 	it("treats an empty value as an error rather than a silent success", async () => {
 		const probe = mount()
 
@@ -113,7 +130,7 @@ describe("useCopy", () => {
 		await act(async () => {
 			await probe.api.copy("abc")
 		})
-		expect(toast.success).not.toHaveBeenCalled()
+		expect(toastManager.add).not.toHaveBeenCalled()
 	})
 
 	it("toasts on both outcomes by default", async () => {
@@ -122,13 +139,13 @@ describe("useCopy", () => {
 		await act(async () => {
 			await probe.api.copy("abc")
 		})
-		expect(toast.success).toHaveBeenCalledWith("Trace ID copied")
+		expect(toastManager.add).toHaveBeenCalledWith({ title: "Trace ID copied", type: "success" })
 
 		writeText.mockRejectedValue(new Error("denied"))
 		await act(async () => {
 			await probe.api.copy("abc")
 		})
-		expect(toast.error).toHaveBeenCalledWith("Failed to copy trace id")
+		expect(toastManager.add).toHaveBeenCalledWith({ title: "Failed to copy trace id", type: "error" })
 	})
 
 	it("falls back to a generic toast when no label is given", async () => {
@@ -137,7 +154,7 @@ describe("useCopy", () => {
 		await act(async () => {
 			await probe.api.copy("abc")
 		})
-		expect(toast.success).toHaveBeenCalledWith("Copied to clipboard")
+		expect(toastManager.add).toHaveBeenCalledWith({ title: "Copied to clipboard", type: "success" })
 	})
 
 	it("`reset` clears the state immediately", async () => {

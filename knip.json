@@ -39,7 +39,13 @@
 			"entry": ["src/worker.ts", "alchemy.run.ts"]
 		},
 		"apps/cli": {
-			"entry": ["test/probes/*.ts", "test/archive-probe-helpers.ts", "test/merge-injection-probe.ts"],
+			"entry": [
+				"test/probes/*.ts",
+				"test/archive-probe-helpers.ts",
+				"test/merge-injection-probe.ts",
+				"test/native-local-store-migration-fixture.ts",
+				"test/native-reconnect-probe.ts"
+			],
 			"ignoreBinaries": ["duckdb"]
 		},
 		"packages/domain": {

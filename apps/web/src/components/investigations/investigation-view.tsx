@@ -3,7 +3,7 @@ import { Exit } from "effect"
 import { useAtomSet } from "@/lib/effect-atom"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import type { IssueSeverity } from "@maple/domain/http"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { ChatConversation } from "@/components/chat/chat-conversation"
 import { FlueClientProvider } from "@/components/chat/flue-client-provider"
@@ -115,10 +115,13 @@ export function InvestigationView({
 		const result = await restart({ params: { id: investigation.id }, reactivityKeys })
 		setBusy(false)
 		if (Exit.isSuccess(result)) {
-			toast.success(isResolved ? "Investigation reopened" : "Investigation restarted")
+			toastManager.add({
+				title: isResolved ? "Investigation reopened" : "Investigation restarted",
+				type: "success",
+			})
 			onRefresh()
 		} else {
-			toast.error("Investigation could not be restarted")
+			toastManager.add({ title: "Investigation could not be restarted", type: "error" })
 		}
 	}
 
@@ -131,10 +134,10 @@ export function InvestigationView({
 		})
 		setBusy(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("Investigation resolved")
+			toastManager.add({ title: "Investigation resolved", type: "success" })
 			onRefresh()
 		} else {
-			toast.error("Investigation could not be resolved")
+			toastManager.add({ title: "Investigation could not be resolved", type: "error" })
 		}
 	}
 

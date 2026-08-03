@@ -1,3 +1,6 @@
+// Keyboard-shortcut guards shared by every surface that binds page-level keys
+// (web hotkeys, the docs search overlay, the trace timeline).
+
 const EDITABLE_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"])
 
 /** True when the event target is a text field / contentEditable — skip shortcuts there. */

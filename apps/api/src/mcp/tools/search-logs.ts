@@ -1,7 +1,7 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
 import { toMcpQueryError } from "../lib/map-warehouse-error"
 import { resolveTenant } from "../lib/query-warehouse"
-import { resolveTimeRange, formatClampNote } from "../lib/time"
+import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "../lib/time"
 import { clampLimit, clampOffset } from "../lib/limits"
 import { truncate, formatNumber } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
@@ -40,8 +40,9 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 			offset,
 			limit,
 		}) {
-			const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
+			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_SEARCH_MAX_HOURS })
 			const { st, et } = range
+			if (range.exceeded) return rangeExceededResult(range, "search_logs")
 			const lim = clampLimit(limit, { defaultValue: 30, max: 200 })
 			const off = clampOffset(offset, { max: 10_000 })
 			const tenant = yield* resolveTenant
@@ -75,7 +76,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 
 			const lines: string[] = [
 				`## Logs (${formatNumber(result.total)} total, showing ${result.logs.length})`,
-				`Time range: ${st} — ${et}${formatClampNote(range)}`,
+				`Time range: ${st} — ${et}`,
 			]
 
 			const filters: string[] = []

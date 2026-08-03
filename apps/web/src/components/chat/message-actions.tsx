@@ -1,5 +1,6 @@
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import type { UIMessage } from "@/components/ai-elements/types"
+import { LinkIcon } from "@/components/icons"
 
 /** The visible text of a message, with tool calls and markers left out. */
 export function messageText(message: UIMessage): string {
@@ -30,7 +31,13 @@ export function MessageActions({ message, permalink }: MessageActionsProps) {
 		<div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100">
 			{text ? <CopyButton value={text} label="Message" size="icon-sm" toast={false} /> : null}
 			{permalink ? (
-				<CopyButton value={permalink} label="Link to message" glyph="link" size="icon-sm" toast={false} />
+				<CopyButton
+					value={permalink}
+					label="Link to message"
+					idleIcon={LinkIcon}
+					size="icon-sm"
+					toast={false}
+				/>
 			) : null}
 		</div>
 	)

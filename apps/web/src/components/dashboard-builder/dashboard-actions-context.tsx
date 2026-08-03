@@ -2,7 +2,7 @@ import * as React from "react"
 import type { ReactNode } from "react"
 import type { DashboardId } from "@maple/domain/http"
 import { useNavigate } from "@tanstack/react-router"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { pickVariableParams } from "@/lib/dashboard-variables/search-params"
 
 import type {
@@ -90,12 +90,13 @@ export function DashboardActionsProvider({
 				if (readOnly) return
 				const removed = store.removeWidget(dashboardId, widgetId)
 				if (!removed) return
-				toast("Widget removed", {
-					action: {
-						label: "Undo",
+				toastManager.add({
+					title: "Widget removed",
+					actionProps: {
+						children: "Undo",
 						onClick: () => store.restoreWidget(dashboardId, removed),
 					},
-					duration: 6000,
+					timeout: 6000,
 				})
 			},
 			cloneWidget: (widgetId) => {

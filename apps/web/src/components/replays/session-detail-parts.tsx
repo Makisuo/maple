@@ -3,9 +3,6 @@ import { motion, useReducedMotion } from "motion/react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { GlobeIcon, ClockIcon } from "@/components/icons"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
-
-// Re-exported so the replay panels keep importing their copy control from here.
-export { CopyButton }
 import { formatRelativeFrom } from "@maple/ui/time-format"
 import { formatSessionDuration, gradientFor, hostFromUrl } from "./replay-format"
 import { parseChTimestampMs } from "./replay-timeline"

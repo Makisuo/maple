@@ -22,8 +22,8 @@ import { from, fromQuery } from "@maple-dev/clickhouse-builder"
 import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 import { ServiceMapEdgesHourly, Traces } from "../tables"
 import { serviceMapEdgeJoinSQL } from "./service-map"
+import { CHNumber } from "../schema"
 
-const CHNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
 
 /** One pre-aggregated service-to-service edge bucket — mirrors the columns of
  * the `service_map_edges_hourly` ClickHouse table. */
@@ -106,6 +106,7 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 
 	return unsafeCompiledQuery({
 		sql,
+		tenantScope: "org",
 		rowSchema: ServiceMapEdgesExistingHourSchema,
 	})
 }
@@ -128,6 +129,7 @@ FORMAT JSON`
 
 	return unsafeCompiledQuery({
 		sql,
+		tenantScope: "org",
 		rowSchema: ServiceMapEdgesHourlyOutputSchema,
 	})
 }
@@ -235,6 +237,7 @@ export function serviceMapResolutionsRollupSQL(
 
 	return unsafeCompiledQuery({
 		sql,
+		tenantScope: "org",
 		rowSchema: ServiceAddressResolutionsHourlyOutputSchema,
 	})
 }

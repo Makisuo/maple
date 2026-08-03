@@ -4,7 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "portless",
-		"dev:app": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --port ${PORT:-3476} --inspector-port=13476",
+		"dev:app": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --port ${PORT:-3476} --inspector-port=$((${PORT:-3476} + 10000))",
 		"deploy": "wrangler deploy",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit"

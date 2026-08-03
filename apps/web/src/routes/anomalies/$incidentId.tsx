@@ -2,7 +2,7 @@ import { useState } from "react"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { PulseIcon } from "@/components/icons"
 import { AnomalyHero } from "@/components/anomalies/anomaly-hero"
@@ -221,7 +221,7 @@ function AnomalyDetailBody({
 				await navigate({ to: "/investigations/$id", params: { id: result.value.id } })
 				return
 			}
-			toast.error(result.cause.toString())
+			toastManager.add({ title: result.cause.toString(), type: "error" })
 		} finally {
 			setBusy(false)
 		}

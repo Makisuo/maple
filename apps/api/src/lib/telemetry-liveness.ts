@@ -3,6 +3,7 @@ import * as CH from "@maple/query-engine/ch"
 import type { TenantContext } from "../services/AuthService"
 import type { WarehouseQueryServiceShape } from "./WarehouseQueryService"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 /**
  * "Is this signal quiet because it recovered, or because we stopped receiving
  * data?"
@@ -95,9 +96,6 @@ export interface LivenessProbeInput {
 // I/O
 // ---------------------------------------------------------------------------
 
-const toWarehouseDateTime = (epochMs: number) =>
-	new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
-
 const EMPTY_TOTALS: ServiceWindowTotals = { spanCount: 0, estimatedSpanCount: 0 }
 
 /**
@@ -119,8 +117,8 @@ const probeServiceWindow = (
 			{
 				orgId: tenant.orgId,
 				serviceName,
-				startTime: toWarehouseDateTime(startMs),
-				endTime: toWarehouseDateTime(endMs),
+				startTime: formatWarehouseDateTime(startMs),
+				endTime: formatWarehouseDateTime(endMs),
 			},
 			{ rowSchema: CH.serviceLivenessRowSchema },
 		)
@@ -147,8 +145,8 @@ const probeOrgWindow = (
 			CH.orgTelemetryPulseQuery(),
 			{
 				orgId: tenant.orgId,
-				startTime: toWarehouseDateTime(startMs),
-				endTime: toWarehouseDateTime(endMs),
+				startTime: formatWarehouseDateTime(startMs),
+				endTime: formatWarehouseDateTime(endMs),
 			},
 			{ rowSchema: CH.telemetryPulseRowSchema },
 		)

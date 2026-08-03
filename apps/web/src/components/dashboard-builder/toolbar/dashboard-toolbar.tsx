@@ -56,10 +56,17 @@ export function DashboardToolbar({
 	const isEdit = mode === "edit"
 
 	return (
-		<div className="flex items-center gap-3">
-			<VariableSelects
-				onManage={isEdit && !readOnly ? () => setVariablesDialogOpen(true) : undefined}
-			/>
+		// Wraps rather than overflows: variable chips, the time picker and the
+		// action group together need ~700px, which the canvas does not have on a
+		// phone or with both sidebars open. Gating is on `@container/page`
+		// (declared by PageLayout.Content) because the sidebars, not the viewport,
+		// decide how much room this actually gets.
+		<div className="flex flex-wrap items-center justify-end gap-2 @min-[720px]/page:gap-3">
+			<div className="flex min-w-0 max-w-full items-center overflow-x-auto">
+				<VariableSelects
+					onManage={isEdit && !readOnly ? () => setVariablesDialogOpen(true) : undefined}
+				/>
+			</div>
 			<TimeRangePicker
 				hotkey
 				startTime={resolvedTimeRange?.startTime}
@@ -86,10 +93,18 @@ export function DashboardToolbar({
 			<ReloadControls />
 
 			<div className="flex items-center gap-1">
+				{/* Labels collapse to icon-only on a narrow canvas; `aria-label`
+				    keeps the buttons named for screen readers either way. */}
 				{isEdit && (
-					<Button variant="outline" size="sm" onClick={onAddWidget} disabled={readOnly}>
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={onAddWidget}
+						disabled={readOnly}
+						aria-label="Add widget"
+					>
 						<PlusIcon size={14} data-icon="inline-start" />
-						Add Widget
+						<span className="hidden @min-[560px]/page:inline">Add Widget</span>
 					</Button>
 				)}
 				<Button
@@ -97,13 +112,14 @@ export function DashboardToolbar({
 					size="sm"
 					onClick={onToggleEdit}
 					disabled={readOnly}
+					aria-label={isEdit ? "Done editing" : "Edit dashboard"}
 				>
 					{isEdit ? (
 						<CheckIcon size={14} data-icon="inline-start" />
 					) : (
 						<PencilIcon size={14} data-icon="inline-start" />
 					)}
-					{isEdit ? "Done" : "Edit"}
+					<span className="hidden @min-[560px]/page:inline">{isEdit ? "Done" : "Edit"}</span>
 				</Button>
 				<DropdownMenu>
 					<DropdownMenuTrigger

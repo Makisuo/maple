@@ -2,6 +2,7 @@ import { Array as Arr, Effect, Option, Schema, pipe } from "effect"
 import * as CH from "../ch"
 import { WarehouseExecutor } from "./WarehouseExecutor"
 
+import { formatWarehouseDateTime } from "../datetime"
 const StringRecordFromJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String))
 
 const parseAttributes = (raw: string): Effect.Effect<Record<string, string>> =>
@@ -16,7 +17,6 @@ const parseAttributes = (raw: string): Effect.Effect<Record<string, string>> =>
 		Effect.orElseSucceed(() => ({})),
 	)
 
-const tinybirdDateTime = (d: Date): string => d.toISOString().replace("T", " ").slice(0, 19)
 const DEFAULT_RANGE_HOURS = 1
 
 export interface SpanDetailInput {
@@ -58,8 +58,8 @@ export const spanDetail = Effect.fn("Observability.spanDetail")(function* (input
 		? (() => {
 				const halfWidthMs = (input.rangeHours ?? DEFAULT_RANGE_HOURS) * 60 * 60 * 1000
 				return {
-					startTime: tinybirdDateTime(new Date(input.timestampHint.getTime() - halfWidthMs)),
-					endTime: tinybirdDateTime(new Date(input.timestampHint.getTime() + halfWidthMs)),
+					startTime: formatWarehouseDateTime(input.timestampHint.getTime() - halfWidthMs),
+					endTime: formatWarehouseDateTime(input.timestampHint.getTime() + halfWidthMs),
 				}
 			})()
 		: undefined

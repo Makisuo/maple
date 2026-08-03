@@ -4,7 +4,7 @@ import { Alert, AlertAction, AlertDescription, AlertTitle } from "@maple/ui/comp
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { CircleWarningIcon, CloudflareIcon, CloudflareMonoIcon, LoaderIcon } from "@/components/icons"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
@@ -319,9 +319,9 @@ export function CloudflareHeaderActions() {
 		})
 		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("Cloudflare account disconnected")
+			toastManager.add({ title: "Cloudflare account disconnected", type: "success" })
 		} else {
-			toast.error("Failed to disconnect Cloudflare account")
+			toastManager.add({ title: "Failed to disconnect Cloudflare account", type: "error" })
 		}
 	}
 

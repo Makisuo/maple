@@ -37,8 +37,8 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, ServicePlatformsHourly } from "../tables"
+import { CHNumber } from "../schema"
 
-const CHNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
 
 export interface ServiceWorkloadsOpts {
 	services: ReadonlyArray<string>
@@ -81,7 +81,13 @@ export function serviceWorkloadsSQL(
 	params: { orgId: string; startTime: string; endTime: string },
 ): CompiledQuery<ServiceWorkloadsOutput> {
 	if (opts.services.length === 0) {
-		return unsafeCompiledQuery({ sql: EMPTY_WORKLOADS_SQL, rowSchema: ServiceWorkloadsOutputSchema })
+		// Reads no table at all (`WHERE 0`), so it cannot cross tenants; it stands
+		// in for a scoped call whose service list was empty.
+		return unsafeCompiledQuery({
+			sql: EMPTY_WORKLOADS_SQL,
+			tenantScope: "org",
+			rowSchema: ServiceWorkloadsOutputSchema,
+		})
 	}
 
 	// Per-service workload identity from the pre-aggregated MV. `max()` over the
@@ -212,5 +218,5 @@ export function serviceWorkloadsSQL(
 		endTime: params.endTime,
 	})
 
-	return unsafeCompiledQuery({ sql, rowSchema: ServiceWorkloadsOutputSchema })
+	return unsafeCompiledQuery({ sql, tenantScope: "org", rowSchema: ServiceWorkloadsOutputSchema })
 }

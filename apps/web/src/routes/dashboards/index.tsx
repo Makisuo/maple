@@ -1,7 +1,7 @@
 import { useRef } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Unitflow, View } from "@maple/unitflow/react"
 import { Button } from "@maple/ui/components/ui/button"
@@ -82,16 +82,18 @@ function DashboardListPage() {
 					if (isPersesDashboardJson(parsed)) {
 						const { dashboard, warnings } = await importPersesDashboard(parsed)
 						navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: dashboard.id } })
-						toast.success(`Dashboard "${dashboard.name}" imported from Perses`)
+						toastManager.add({
+							title: `Dashboard "${dashboard.name}" imported from Perses`,
+							type: "success",
+						})
 						if (warnings.length > 0) {
 							const preview = warnings.slice(0, 3).join("\n")
 							const suffix = warnings.length > 3 ? `\n+${warnings.length - 3} more` : ""
-							toast.warning(
-								`Imported with ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`,
-								{
-									description: `${preview}${suffix}`,
-								},
-							)
+							toastManager.add({
+								title: `Imported with ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`,
+								description: `${preview}${suffix}`,
+								type: "warning",
+							})
 						}
 						return
 					}
@@ -99,9 +101,12 @@ function DashboardListPage() {
 					const imported = parsePortableDashboardJson(raw)
 					const dashboard = await importDashboard(imported)
 					navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: dashboard.id } })
-					toast.success(`Dashboard "${dashboard.name}" imported`)
+					toastManager.add({ title: `Dashboard "${dashboard.name}" imported`, type: "success" })
 				} catch (error) {
-					toast.error(error instanceof Error ? error.message : "Failed to parse dashboard file")
+					toastManager.add({
+						title: error instanceof Error ? error.message : "Failed to parse dashboard file",
+						type: "error",
+					})
 				}
 			})()
 		}
@@ -119,7 +124,10 @@ function DashboardListPage() {
 					search: { mode: "edit" },
 				})
 			} catch (error) {
-				toast.error(error instanceof Error ? error.message : "Failed to create dashboard")
+				toastManager.add({
+					title: error instanceof Error ? error.message : "Failed to create dashboard",
+					type: "error",
+				})
 			}
 		})()
 	}
@@ -136,9 +144,12 @@ function DashboardListPage() {
 				const portable = toPortableDashboard(dashboard)
 				const copy = await importDashboard({ ...portable, name: `${dashboard.name} copy` })
 				navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: copy.id } })
-				toast.success(`Duplicated as "${copy.name}"`)
+				toastManager.add({ title: `Duplicated as "${copy.name}"`, type: "success" })
 			} catch (error) {
-				toast.error(error instanceof Error ? error.message : "Failed to duplicate dashboard")
+				toastManager.add({
+					title: error instanceof Error ? error.message : "Failed to duplicate dashboard",
+					type: "error",
+				})
 			}
 		})()
 	}

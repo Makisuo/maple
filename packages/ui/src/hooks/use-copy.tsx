@@ -1,8 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { toast as sonner } from "sonner"
+import { toastManager } from "../components/ui/toast"
 
+import { writeClipboardFallback } from "../lib/clipboard"
 import { useClipboard } from "./use-clipboard"
 
 export type CopyStatus = "idle" | "copied" | "error"
@@ -38,42 +39,6 @@ export interface CopyAPI {
 }
 
 /**
- * Last-resort clipboard write for insecure origins and embedded contexts where
- * `navigator.clipboard` is missing or rejects. Restores the user's selection so
- * copying doesn't visibly steal the caret.
- */
-function writeFallback(text: string): boolean {
-	if (typeof document === "undefined") return false
-
-	const area = document.createElement("textarea")
-	area.value = text
-	area.setAttribute("readonly", "")
-	area.style.position = "fixed"
-	area.style.top = "0"
-	area.style.left = "0"
-	area.style.opacity = "0"
-	document.body.appendChild(area)
-
-	const selection = document.getSelection()
-	const previous = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-
-	area.select()
-	let ok = false
-	try {
-		ok = document.execCommand("copy")
-	} catch {
-		ok = false
-	}
-
-	document.body.removeChild(area)
-	if (selection && previous) {
-		selection.removeAllRanges()
-		selection.addRange(previous)
-	}
-	return ok
-}
-
-/**
  * The one copy-to-clipboard hook. Writes through the platform `ClipboardAPI`
  * (so a `ClipboardProvider` override still applies), falls back to
  * `document.execCommand` when that rejects, and exposes an `idle | copied |
@@ -92,24 +57,26 @@ export function useCopy({
 }: UseCopyOptions = {}): CopyAPI {
 	const clipboard = useClipboard()
 	const [status, setStatus] = React.useState<CopyStatus>("idle")
-	// Bumped on every copy so a re-click during the hold restarts the timer.
-	const [ticket, setTicket] = React.useState(0)
 
+	// Restarted on every copy so a re-click during the hold extends the window
+	// rather than letting the first timer snap the status back early.
+	const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 	const mounted = React.useRef(true)
 	React.useEffect(() => {
 		mounted.current = true
 		return () => {
 			mounted.current = false
+			clearTimeout(timer.current)
 		}
 	}, [])
 
 	// Kept in refs so `copy` stays referentially stable across renders.
-	const latest = React.useRef({ clipboard, label, onCopy, onError, successMessage, toast })
-	latest.current = { clipboard, label, onCopy, onError, successMessage, toast }
+	const latest = React.useRef({ clipboard, label, onCopy, onError, successMessage, timeout, toast })
+	latest.current = { clipboard, label, onCopy, onError, successMessage, timeout, toast }
 
 	const reset = React.useCallback(() => {
+		clearTimeout(timer.current)
 		setStatus("idle")
-		setTicket(0)
 	}, [])
 
 	const copy = React.useCallback(async (text: string | null | undefined): Promise<boolean> => {
@@ -119,6 +86,7 @@ export function useCopy({
 			onCopy: copied,
 			onError: failed,
 			successMessage: message,
+			timeout: hold,
 			toast: notify,
 		} = latest.current
 
@@ -134,7 +102,7 @@ export function useCopy({
 			} catch (error) {
 				reason = error
 				try {
-					ok = writeFallback(text)
+					ok = writeClipboardFallback(text)
 				} catch {
 					ok = false
 				}
@@ -145,23 +113,29 @@ export function useCopy({
 		if (!ok) failed?.(reason)
 
 		if (notify) {
-			if (ok) sonner.success(message ?? (name ? `${name} copied` : "Copied to clipboard"))
-			else sonner.error(name ? `Failed to copy ${name.toLowerCase()}` : "Failed to copy")
+			if (ok) {
+				toastManager.add({
+					title: message ?? (name ? `${name} copied` : "Copied to clipboard"),
+					type: "success",
+				})
+			} else {
+				toastManager.add({
+					title: name ? `Failed to copy ${name.toLowerCase()}` : "Failed to copy",
+					type: "error",
+				})
+			}
 		}
 
 		if (!mounted.current) return ok
 
 		setStatus(ok ? "copied" : "error")
-		setTicket((t) => t + 1)
+		clearTimeout(timer.current)
+		timer.current = setTimeout(() => {
+			if (mounted.current) setStatus("idle")
+		}, hold)
 
 		return ok
 	}, [])
-
-	React.useEffect(() => {
-		if (ticket === 0 || status === "idle") return
-		const id = setTimeout(() => setStatus("idle"), timeout)
-		return () => clearTimeout(id)
-	}, [ticket, status, timeout])
 
 	return { copied: status === "copied", copy, reset, status }
 }

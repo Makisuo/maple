@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { Button } from "@maple/ui/components/ui/button"
 import {
 	Dialog,
@@ -38,11 +38,11 @@ export function PreviewBanner({ dashboardId, preview, onCancel, onRestored }: Pr
 			const result = await restore(buildRestorePayload(dashboardId, preview.versionId) as never)
 			if (Exit.isSuccess(result)) {
 				void reconcileTxid(result.value.txid)
-				toast.success(`Restored from v${preview.versionNumber}`)
+				toastManager.add({ title: `Restored from v${preview.versionNumber}`, type: "success" })
 				setConfirmOpen(false)
 				onRestored()
 			} else {
-				toast.error("Restore failed")
+				toastManager.add({ title: "Restore failed", type: "error" })
 			}
 		} finally {
 			setPending(false)

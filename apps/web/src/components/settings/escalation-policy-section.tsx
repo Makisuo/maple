@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Schema } from "effect"
 
@@ -106,9 +106,9 @@ export function EscalationPolicySection({ isAdmin }: { isAdmin: boolean }) {
 		})
 		setIsSaving(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("Escalation policy saved")
+			toastManager.add({ title: "Escalation policy saved", type: "success" })
 		} else {
-			toast.error("Failed to save escalation policy")
+			toastManager.add({ title: "Failed to save escalation policy", type: "error" })
 		}
 	}
 

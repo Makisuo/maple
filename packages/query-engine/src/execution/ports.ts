@@ -5,6 +5,7 @@ import type {
 	WarehouseQueryRequest,
 	WarehouseQueryResponse,
 	WarehouseValidationError,
+	WarehouseSchemaDriftError,
 } from "@maple/domain/http"
 import type { ResolvedWarehouseConfig } from "./backend"
 import type { CompiledQuery } from "../ch"
@@ -86,11 +87,20 @@ export interface WarehouseQueryServiceShape {
 		payload: WarehouseQueryRequest,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<WarehouseQueryResponse, WarehouseSqlError | WarehouseValidationError>
-	readonly sqlQuery: (
+	/**
+	 * Execute a query that deliberately spans every tenant. The compiled query
+	 * must declare `.crossOrg()`, and `justification` is recorded on the span so
+	 * cross-tenant reads are auditable from the traces.
+	 *
+	 * There is deliberately no general `sqlQuery(tenant, sql)` on this shape:
+	 * arbitrary strings cannot carry a `tenantScope`, so accepting them would
+	 * reintroduce the substring guard this replaced.
+	 */
+	readonly crossOrgQuery: <T>(
 		tenant: ExecutionTenant,
-		sql: string,
-		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseSqlError | WarehouseValidationError>
+		compiled: CompiledQuery<T>,
+		options: SqlQueryOptions & { readonly justification: string },
+	) => Effect.Effect<ReadonlyArray<T>, WarehouseSqlError | WarehouseValidationError | WarehouseSchemaDriftError>
 	/** Execute validated user-authored SQL with tenant-scoped credentials and hard response limits. */
 	readonly rawSqlQuery: (
 		tenant: ExecutionTenant,

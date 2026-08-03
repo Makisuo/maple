@@ -1,29 +1,10 @@
-// ---------------------------------------------------------------------------
-// Standalone session emission — sessions in the Sessions UI without
-// `@maple-dev/browser`.
-//
-// The Sessions UI is backed by `session_replays` metadata rows, which only the
-// browser SDK used to post. When the Effect client SDK runs alone it now posts
-// those rows itself (active on setup / tab-visible, ended with the observed
-// trace ids on tab-hidden / pagehide), so a session appears in Maple — as a
-// session-grouped list entry with linked traces, just without an rrweb
-// recording to play back.
-//
-// When the `@maple-dev/browser` sink is published, that SDK owns the session
-// rows (it has the replay recorder, click counts, and `identify()`); every
-// post here re-checks the sink and stands down, matching `withSessionLink`,
-// which routes span linking through the sink in the same situation.
-// ---------------------------------------------------------------------------
-import {
-	buildSessionMetaRow,
-	getSession,
-	nextMetaVersion,
-	postSessionMetaRow,
-	readSessionSink,
-} from "@maple/browser-session"
-import { getCurrentUserId } from "./user.js"
+// Metadata-only session emission for the Effect client SDK. The lifecycle is
+// implemented in @maple/browser-session so it stays identical to the browser
+// SDK's unsampled path (including idle rotation and cumulative counters).
+import { readSessionSink, startMetadataSession, type MetadataSessionHandle } from "@maple/browser-session"
+import { getCurrentIdentity } from "./user.js"
 
-/** Trace ids observed per standalone session — attached to its ended rows. */
+/** Trace ids observed per standalone session — attached to its ended row. */
 const observedBySession = new Map<string, Set<string>>()
 
 export interface StandaloneSessionOptions {
@@ -32,41 +13,54 @@ export interface StandaloneSessionOptions {
 	readonly serviceName: string
 	readonly environment?: string | undefined
 	readonly serviceVersion?: string | undefined
+	readonly captureUserEmail?: boolean | undefined
 }
 
-let current: { sessionId: string; startedAt: Date; options: StandaloneSessionOptions } | undefined
-let listenersInstalled = false
-
-const post = (status: "active" | "ended", keepalive: boolean): void => {
-	if (!current) return
-	if (readSessionSink()) return // `@maple-dev/browser` owns the session rows.
-	const { sessionId, startedAt, options } = current
-	void postSessionMetaRow(
-		options.endpoint,
-		options.ingestKey!,
-		buildSessionMetaRow({
-			sessionId,
-			startedAt,
-			version: nextMetaVersion(),
-			status,
-			serviceName: options.serviceName,
-			userId: getCurrentUserId(),
-			environment: options.environment,
-			serviceVersion: options.serviceVersion,
-			traceIds: status === "ended" ? Array.from(observedBySession.get(sessionId) ?? []) : undefined,
-			// Standalone means replay is off or unsampled — metadata only, no chunks.
-			recorded: false,
-		}),
-		keepalive,
-	)
-}
+let current: { handle: MetadataSessionHandle; references: number } | undefined
 
 /**
- * Record a span created while no browser-SDK sink is published. Called by
- * `withSessionLink` per span; rotation is detected here (a span landing on a
- * new session id after the idle window) so the old session gets its ended row
- * and the new one its active row without any timer of our own.
+ * The page-level metadata session, handed out as reference-counted leases.
+ *
+ * The refcount is load-bearing, not defensive scaffolding: `Maple.layer` starts
+ * a client session per *runtime*, and two runtimes can overlap on one page —
+ * `ManagedRuntime.dispose()` resolves asynchronously, so a React StrictMode
+ * double-mount (or an HMR remount) builds the replacement runtime before the
+ * outgoing one's release finalizer runs. Both then hold a lease on the same
+ * singleton. Without the count, the outgoing runtime's `shutdown` posts the
+ * `ended` row and clears `current` while the live runtime is still holding the
+ * handle — the session dies mid-page and nothing restarts it, because
+ * `setupStandaloneSession` only runs on runtime start. Two `MapleFlush.make()`
+ * calls in one page reproduce the same overlap.
+ *
+ * Within a single `startClientSession` controller leases never overlap
+ * (`stopRuntime` calls the outgoing `shutdown` synchronously, before any await,
+ * and `startRuntime` refuses to run while a runtime exists), so the count only
+ * ever exceeds 1 across controllers. The per-lease `released` flag keeps a
+ * double `shutdown` of one lease from decrementing twice and stranding another
+ * holder. Covered by the overlap cases in `standalone-session.test.ts`.
  */
+const leaseCurrent = (): MetadataSessionHandle | undefined => {
+	if (!current) return undefined
+	current.references++
+	const owned = current.handle
+	let released = false
+	return {
+		get sessionId() {
+			return owned.sessionId
+		},
+		shutdown: async (options) => {
+			if (released) return
+			released = true
+			if (!current || current.handle !== owned) return
+			current.references--
+			if (current.references > 0) return
+			current = undefined
+			await owned.shutdown(options)
+		},
+	}
+}
+
+/** Record a span against the session resolved by the shared span decorator. */
 export const noteStandaloneSpan = (sessionId: string, traceId: string): void => {
 	let ids = observedBySession.get(sessionId)
 	if (!ids) {
@@ -74,44 +68,45 @@ export const noteStandaloneSpan = (sessionId: string, traceId: string): void => 
 		observedBySession.set(sessionId, ids)
 	}
 	ids.add(traceId)
-	if (current && sessionId !== current.sessionId) {
-		post("ended", false)
-		const record = getSession()
-		current = { ...current, sessionId: record.id, startedAt: new Date(record.startedAt) }
-		post("active", false)
-	}
 }
 
 /**
- * Start posting session metadata rows for the standalone session. No-ops
- * outside a browser, without an ingest key, or when the browser SDK's sink is
- * already published. Idempotent per page load — the client presets call it on
- * construction and tests reset via `resetStandaloneSessionForTests`.
+ * Start metadata-only emission when the browser SDK is not already the owner.
+ * Idempotent per Effect client runtime.
  */
-export const setupStandaloneSession = (options: StandaloneSessionOptions): void => {
-	if (typeof window === "undefined") return
-	if (!options.ingestKey) return
-	if (current) return
-	if (readSessionSink()) return
-	const record = getSession()
-	current = { sessionId: record.id, startedAt: new Date(record.startedAt), options }
-	post("active", false)
-	if (!listenersInstalled && typeof globalThis.addEventListener === "function") {
-		listenersInstalled = true
-		globalThis.addEventListener("pagehide", () => post("ended", true))
-		globalThis.addEventListener("visibilitychange", () => {
-			const doc = (globalThis as Record<string, any>)["document"]
-			if (!doc) return
-			if (doc.visibilityState === "hidden") post("ended", true)
-			else post("active", false)
-		})
-	}
+export const setupStandaloneSession = (
+	options: StandaloneSessionOptions,
+): MetadataSessionHandle | undefined => {
+	if (typeof window === "undefined" || !options.ingestKey || readSessionSink()) return undefined
+	if (current) return leaseCurrent()
+	const handle = startMetadataSession({
+		endpoint: options.endpoint,
+		ingestKey: options.ingestKey,
+		serviceName: options.serviceName,
+		environment: options.environment,
+		serviceVersion: options.serviceVersion,
+		captureUserEmail: options.captureUserEmail,
+		getIdentity: getCurrentIdentity,
+		getTraceIds: (sessionId) => Array.from(observedBySession.get(sessionId) ?? []),
+		// Fires after the outgoing session's `ended` row has already read its ids,
+		// so the rotated-out entry is safe to drop here. Without this a tab left
+		// open for a day keeps one id Set per 30-minute rotation, forever — the
+		// same leak `sink.ts` prunes on the browser SDK's side.
+		onSessionChange: (sessionId) => {
+			for (const key of observedBySession.keys()) {
+				if (key !== sessionId) observedBySession.delete(key)
+			}
+		},
+	})
+	if (!handle) return undefined
+	current = { handle, references: 0 }
+	return leaseCurrent()
 }
 
-/** Test-only: clear the singleton so each test starts from a fresh page state. */
+/** Test-only: clear singleton state without emitting an ended row. */
 export const resetStandaloneSessionForTests = (): void => {
+	const active = current?.handle
 	current = undefined
+	void active?.shutdown({ flush: false })
 	observedBySession.clear()
-	// Listeners stay installed (they no-op with `current` unset in a fresh
-	// setup), matching a real page where they live for the page lifetime.
 }

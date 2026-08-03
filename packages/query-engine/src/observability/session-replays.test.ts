@@ -30,10 +30,6 @@ const makeExecutor = (captured: Captured, responses: MockResponses): WarehouseEx
 	return {
 		orgId: "org_test",
 		query: () => Effect.succeed({ data: [] as ReadonlyArray<never> }),
-		sqlQuery: ((sql: string) => {
-			captured.sqls.push(sql)
-			return Effect.succeed(rowsFor(sql) as ReadonlyArray<never>)
-		}) as WarehouseExecutorShape["sqlQuery"],
 		compiledQuery: ((compiled) => {
 			captured.sqls.push(compiled.sql)
 			return compiled.decodeRows(rowsFor(compiled.sql)).pipe(Effect.orDie)
@@ -145,14 +141,6 @@ describe("getSessionTraces", () => {
 			const failing: WarehouseExecutorShape = {
 				orgId: "org_test",
 				query: () => Effect.succeed({ data: [] }),
-				sqlQuery: () =>
-					Effect.fail(
-						new WarehouseUpstreamError({
-							pipeName: "session_traces",
-							message: "ClickHouse exploded",
-							upstreamStatus: 503,
-						}),
-					),
 				compiledQuery: () =>
 					Effect.fail(
 						new WarehouseUpstreamError({

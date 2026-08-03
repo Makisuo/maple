@@ -7,7 +7,7 @@ import type {
 import type { V2AttributeMapping } from "@maple/domain/http/v2"
 import { useState } from "react"
 import { Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import {
 	AlertDialog,
@@ -140,7 +140,7 @@ export function AttributeMappingsSection() {
 
 	async function handleSave() {
 		if (!formName.trim() || !formSourceKey.trim() || !formTargetKey.trim()) {
-			toast.error("Name, source key, and target key are required")
+			toastManager.add({ title: "Name, source key, and target key are required", type: "error" })
 			return
 		}
 
@@ -157,12 +157,12 @@ export function AttributeMappingsSection() {
 				},
 			})
 			if (Exit.isSuccess(result)) {
-				toast.success("Attribute mapping updated")
+				toastManager.add({ title: "Attribute mapping updated", type: "success" })
 				setDialogOpen(false)
 				refreshMappings()
 				refreshRecommendations()
 			} else {
-				toast.error("Failed to update attribute mapping")
+				toastManager.add({ title: "Failed to update attribute mapping", type: "error" })
 			}
 		} else {
 			const result = await createMutation({
@@ -175,12 +175,12 @@ export function AttributeMappingsSection() {
 				},
 			})
 			if (Exit.isSuccess(result)) {
-				toast.success("Attribute mapping created")
+				toastManager.add({ title: "Attribute mapping created", type: "success" })
 				setDialogOpen(false)
 				refreshMappings()
 				refreshRecommendations()
 			} else {
-				toast.error("Failed to create attribute mapping")
+				toastManager.add({ title: "Failed to create attribute mapping", type: "error" })
 			}
 		}
 		setIsSaving(false)
@@ -190,11 +190,11 @@ export function AttributeMappingsSection() {
 		setDeleteConfirm(null)
 		const result = await deleteMutation({ params: { id: mappingId } })
 		if (Exit.isSuccess(result)) {
-			toast.success("Attribute mapping deleted")
+			toastManager.add({ title: "Attribute mapping deleted", type: "success" })
 			refreshMappings()
 			refreshRecommendations()
 		} else {
-			toast.error("Failed to delete attribute mapping")
+			toastManager.add({ title: "Failed to delete attribute mapping", type: "error" })
 		}
 	}
 
@@ -209,7 +209,7 @@ export function AttributeMappingsSection() {
 		if (Exit.isSuccess(result)) {
 			refreshMappings()
 		} else {
-			toast.error("Failed to update attribute mapping")
+			toastManager.add({ title: "Failed to update attribute mapping", type: "error" })
 		}
 		setTogglingId(null)
 	}

@@ -5,6 +5,7 @@ import type {
 	AlertIncidentDocument,
 	AlertRuleDocument,
 } from "@maple/domain/http"
+import { formatRelativeFrom } from "@maple/ui/time-format"
 import type { AlertRuleStateRow } from "@/lib/collections/alerts"
 import { comparatorLabels, formatSignalValue } from "@/lib/alerts/form-utils"
 import { staleThresholdMs } from "@/lib/alerts/rule-status"
@@ -38,15 +39,7 @@ export interface DiagnosisInput {
 	readonly selectedGroupKey?: string
 }
 
-const relative = (now: number, thenMs: number): string => {
-	const diff = Math.max(0, now - thenMs)
-	const mins = Math.round(diff / 60_000)
-	if (mins < 1) return "just now"
-	if (mins < 60) return `${mins}m ago`
-	const hours = Math.floor(mins / 60)
-	if (hours < 24) return `${hours}h ago`
-	return `${Math.floor(hours / 24)}d ago`
-}
+const relative = (now: number, thenMs: number): string => formatRelativeFrom(thenMs, now)
 
 const parseMs = (value: string | null | undefined): number | null => {
 	if (value == null) return null

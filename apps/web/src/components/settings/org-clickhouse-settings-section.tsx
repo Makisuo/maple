@@ -1,7 +1,7 @@
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Exit, Option } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { formatBackendError } from "@/lib/error-messages"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 
@@ -135,9 +135,9 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 		if (status === "succeeded") {
 			refreshSettings()
 			refreshDiff()
-			toast.success("Schema applied")
+			toastManager.add({ title: "Schema applied", type: "success" })
 		} else if (status === "failed") {
-			toast.error(applyStatus?.errorMessage ?? "Schema apply failed")
+			toastManager.add({ title: applyStatus?.errorMessage ?? "Schema apply failed", type: "error" })
 		}
 	}, [applyStatus?.status, applyStatus?.errorMessage, refreshSettings, refreshDiff])
 
@@ -187,10 +187,10 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 			setChPassword("")
 			refreshSettings()
 			refreshDiff()
-			toast.success("ClickHouse connection saved")
+			toastManager.add({ title: "ClickHouse connection saved", type: "success" })
 			return
 		}
-		toast.error(getExitErrorMessage(result, "Failed to save settings"))
+		toastManager.add({ title: getExitErrorMessage(result, "Failed to save settings"), type: "error" })
 	}
 
 	async function handleApply() {
@@ -202,16 +202,19 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 		if (Exit.isSuccess(result)) {
 			refreshStatus()
 			if (result.value.status === "already_running") {
-				toast.info("A schema apply is already in progress")
+				toastManager.add({ title: "A schema apply is already in progress", type: "info" })
 			} else {
-				toast.message("Schema apply started")
+				toastManager.add({ title: "Schema apply started" })
 			}
 			// Hand off to the status poll; keep the button busy until it reports active.
 			setTimeout(() => setIsStarting(false), 1500)
 			return
 		}
 		setIsStarting(false)
-		toast.error(getExitErrorMessage(result, "Failed to start schema apply"))
+		toastManager.add({
+			title: getExitErrorMessage(result, "Failed to start schema apply"),
+			type: "error",
+		})
 	}
 
 	async function handleRefreshDiff() {
@@ -234,10 +237,13 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 			setChPassword("")
 			refreshSettings()
 			refreshDiff()
-			toast.success("BYO ClickHouse disabled")
+			toastManager.add({ title: "BYO ClickHouse disabled", type: "success" })
 			return
 		}
-		toast.error(getExitErrorMessage(result, "Failed to disable BYO ClickHouse"))
+		toastManager.add({
+			title: getExitErrorMessage(result, "Failed to disable BYO ClickHouse"),
+			type: "error",
+		})
 	}
 
 	function toggleDriftRow(name: string) {

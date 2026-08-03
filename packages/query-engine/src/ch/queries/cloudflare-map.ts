@@ -21,6 +21,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { from, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { CHNumber } from "../schema"
 import { MetricsGauge, MetricsSum } from "../tables"
+import { avgWhere } from "./format"
 
 /** Counter metrics the poller emits for Workers (all in `metrics_sum`). */
 const COUNTER_METRIC_NAMES = ["cloudflare.worker.requests", "cloudflare.worker.errors"] as const
@@ -100,8 +101,6 @@ export function cloudflareServiceLatencySQL() {
 	// `avgIf` over a metric with no matching rows is NaN, which serializes to
 	// JSON `null` and would break row decoding — so guard each with
 	// `if(countIf > 0, avgIf, 0)`.
-	const avgWhere = (value: CH.Expr<number>, cond: CH.Condition) =>
-		CH.if_(CH.countIf(cond).gt(0), CH.avgIf(value, cond), CH.lit(0))
 	return from(MetricsGauge)
 		.select(($) => ({
 			serviceName: $.ServiceName,

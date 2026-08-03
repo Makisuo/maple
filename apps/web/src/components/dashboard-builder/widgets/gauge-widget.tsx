@@ -157,7 +157,7 @@ export const GaugeWidget = memo(function GaugeWidget({ dataState, display, mode 
 			title={display.title || "Untitled"}
 			dataState={dataState}
 			mode={mode}
-			contentClassName="flex-1 min-h-0 flex items-center justify-center p-2"
+			contentClassName="flex-1 min-h-0 flex items-center justify-center p-1 @min-[200px]/widget:p-2"
 			loadingSkeleton={<ChartSkeleton variant="gauge" />}
 		>
 			<svg

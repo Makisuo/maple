@@ -4,6 +4,7 @@ import { ChevronDownIcon, XmarkIcon } from "../icons"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible"
 import { Input } from "../ui/input"
 import { cn } from "../../lib/utils"
+import { useDebouncedCallback } from "../../hooks/use-debounced-callback"
 import { FILTER_SECTION_LABEL } from "./filter-styles"
 
 /** The unit the caller's numbers are already in. Only affects parsing and display —
@@ -80,14 +81,6 @@ export function RangeFilterSection({
 		setDraft({ min: formatCompact(minValue, unit), max: formatCompact(maxValue, unit) })
 	}
 
-	const commitTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-	const cancelPendingCommit = () => {
-		if (commitTimer.current !== undefined) {
-			clearTimeout(commitTimer.current)
-			commitTimer.current = undefined
-		}
-	}
-
 	// A reversed pair is a typo, not an intent — swap it rather than committing a
 	// range that can never match and leaving the reader to work out why.
 	const emit = (min: number | undefined, max: number | undefined) => {
@@ -98,18 +91,18 @@ export function RangeFilterSection({
 		onRangeChange(min, max)
 	}
 
+	const debouncedCommit = useDebouncedCallback((next: { min: string; max: string }) => {
+		emit(parseRange(next.min, unit), parseRange(next.max, unit))
+	}, debounceMs)
+
 	const commitDraft = (next: { min: string; max: string }) => {
-		cancelPendingCommit()
+		debouncedCommit.cancel()
 		emit(parseRange(next.min, unit), parseRange(next.max, unit))
 	}
 
 	const handleDraftChange = (next: { min: string; max: string }) => {
 		setDraft(next)
-		cancelPendingCommit()
-		commitTimer.current = setTimeout(() => {
-			commitTimer.current = undefined
-			emit(parseRange(next.min, unit), parseRange(next.max, unit))
-		}, debounceMs)
+		debouncedCommit(next)
 	}
 
 	// Commit whatever is pending, then rewrite the field in canonical form so
@@ -129,7 +122,7 @@ export function RangeFilterSection({
 	}
 
 	const applyRange = (min: number | undefined, max: number | undefined) => {
-		cancelPendingCommit()
+		debouncedCommit.cancel()
 		setDraft({ min: formatCompact(min, unit), max: formatCompact(max, unit) })
 		emit(min, max)
 	}

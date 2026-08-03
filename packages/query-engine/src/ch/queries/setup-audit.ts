@@ -34,9 +34,9 @@ import {
 	TracesAggregatesHourly,
 } from "../tables"
 import { CHNumber } from "../schema"
+import { hourFloor } from "./query-helpers"
 
 /** Snaps a window bound to its hour floor so any overlapping hour of an hourly MV contributes. */
-const hourFloor = (name: string) => CH.toStartOfHour(CH.toDateTime(param.dateTime(name)))
 
 /** Span kinds and status codes Maple stores; anything else is an SDK emitting the wrong casing. */
 const VALID_SPAN_KINDS = ["Server", "Client", "Producer", "Consumer", "Internal", ""]
@@ -550,7 +550,7 @@ export function auditOrphanSpansSQL(params: AuditTraceWindowParams): CompiledQue
     LIMIT 200
     FORMAT JSON`
 
-	return unsafeCompiledQuery({ sql, rowSchema: auditOrphanSpanRowSchema })
+	return unsafeCompiledQuery({ sql, tenantScope: "org", rowSchema: auditOrphanSpanRowSchema })
 }
 
 export interface AuditRootlessTraceRow {
@@ -618,5 +618,5 @@ export function auditRootlessTracesSQL(params: AuditTraceWindowParams): Compiled
     LIMIT 200
     FORMAT JSON`
 
-	return unsafeCompiledQuery({ sql, rowSchema: auditRootlessTraceRowSchema })
+	return unsafeCompiledQuery({ sql, tenantScope: "org", rowSchema: auditRootlessTraceRowSchema })
 }

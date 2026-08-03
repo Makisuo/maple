@@ -105,7 +105,13 @@ export type WidgetLayout = DeepMutable<typeof WidgetLayoutSchema.Type>
  */
 export type VisualizationType = WidgetVisualization
 export type WidgetMode = "view" | "edit"
-type WidgetErrorKind = "decode" | "runtime"
+/**
+ * `range` is a constraint rather than a failure: the tile's query kind can't
+ * span the requested window (list widgets cap out well below charts), so it
+ * renders a muted explanation with a one-click narrowing instead of a red
+ * error block — and never issues the doomed request in the first place.
+ */
+type WidgetErrorKind = "decode" | "runtime" | "range"
 export type WidgetDataState =
 	| { status: "loading" }
 	| { status: "error"; title?: string; message?: string; kind?: WidgetErrorKind }

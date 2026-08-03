@@ -18,7 +18,7 @@ import {
 	TraceListMv,
 	Traces,
 } from "../tables"
-import { buildProjectedMapExpr, inclusionValues, inclusionCondition } from "./query-helpers"
+import { buildProjectedMapExpr, inclusionValues, inclusionCondition, matchOrIn , type FacetOutput} from "./query-helpers"
 import { httpDisplaySpanName } from "../../traces-shared"
 
 function errorEventsTableForRecentScan(opts: {
@@ -426,14 +426,10 @@ export function tracesDurationStatsQuery(opts: TracesDurationStatsOpts) {
 			$.Timestamp.gte(param.dateTime("startTime")),
 			$.Timestamp.lte(param.dateTime("endTime")),
 			CH.when(services, (v: readonly string[]) =>
-				mm?.serviceName === "contains" && v.length === 1
-					? CH.positionCaseInsensitive($.ServiceName, CH.lit(v[0]!)).gt(0)
-					: inclusionCondition($.ServiceName, v),
+				matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 			),
 			CH.when(spanNames, (v: readonly string[]) =>
-				mm?.spanName === "contains" && v.length === 1
-					? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!)).gt(0)
-					: inclusionCondition($.SpanName, v),
+				matchOrIn($.SpanName, v, mm?.spanName === "contains"),
 			),
 			CH.whenTrue(!!opts.hasError, () => $.HasError.eq(1)),
 			CH.when(opts.minDurationMs, (v: number) => $.Duration.gte(v * 1000000)),
@@ -441,14 +437,10 @@ export function tracesDurationStatsQuery(opts: TracesDurationStatsOpts) {
 			CH.when(httpMethods, (v: readonly string[]) => inclusionCondition($.HttpMethod, v)),
 			CH.when(httpStatusCodes, (v: readonly string[]) => inclusionCondition($.HttpStatusCode, v)),
 			CH.when(envs, (v: readonly string[]) =>
-				mm?.deploymentEnv === "contains" && v.length === 1
-					? CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(v[0]!)).gt(0)
-					: inclusionCondition($.DeploymentEnv, v),
+				matchOrIn($.DeploymentEnv, v, mm?.deploymentEnv === "contains"),
 			),
 			CH.when(namespaces, (v: readonly string[]) =>
-				mm?.serviceNamespace === "contains" && v.length === 1
-					? CH.positionCaseInsensitive($.ServiceNamespace, CH.lit(v[0]!)).gt(0)
-					: inclusionCondition($.ServiceNamespace, v),
+				matchOrIn($.ServiceNamespace, v, mm?.serviceNamespace === "contains"),
 			),
 		])
 		.format("JSON")
@@ -502,11 +494,7 @@ export interface TracesFacetsOpts {
 	facet?: TracesFacetDimension
 }
 
-export interface TracesFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type TracesFacetsOutput = FacetOutput
 
 export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFacetsOutput> {
 	const baseWhere = ($: ColumnAccessor<typeof TraceListMv.columns>): Array<CH.Condition | undefined> => {
@@ -524,18 +512,10 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 		const namespaces = inclusionValues(opts.namespace, opts.namespaces)
 
 		if (services) {
-			conditions.push(
-				opts.matchModes?.serviceName === "contains" && services.length === 1
-					? CH.positionCaseInsensitive($.ServiceName, CH.lit(services[0]!)).gt(0)
-					: inclusionCondition($.ServiceName, services),
-			)
+			conditions.push(matchOrIn($.ServiceName, services, opts.matchModes?.serviceName === "contains"))
 		}
 		if (spanNames) {
-			conditions.push(
-				opts.matchModes?.spanName === "contains" && spanNames.length === 1
-					? CH.positionCaseInsensitive($.SpanName, CH.lit(spanNames[0]!)).gt(0)
-					: inclusionCondition($.SpanName, spanNames),
-			)
+			conditions.push(matchOrIn($.SpanName, spanNames, opts.matchModes?.spanName === "contains"))
 		}
 		if (opts.hasError) conditions.push($.HasError.eq(1))
 		if (opts.minDurationMs != null) conditions.push($.Duration.gte(opts.minDurationMs * 1000000))
@@ -543,18 +523,10 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 		if (httpMethods) conditions.push(inclusionCondition($.HttpMethod, httpMethods))
 		if (httpStatusCodes) conditions.push(inclusionCondition($.HttpStatusCode, httpStatusCodes))
 		if (envs) {
-			conditions.push(
-				opts.matchModes?.deploymentEnv === "contains" && envs.length === 1
-					? CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(envs[0]!)).gt(0)
-					: inclusionCondition($.DeploymentEnv, envs),
-			)
+			conditions.push(matchOrIn($.DeploymentEnv, envs, opts.matchModes?.deploymentEnv === "contains"))
 		}
 		if (namespaces) {
-			conditions.push(
-				opts.matchModes?.serviceNamespace === "contains" && namespaces.length === 1
-					? CH.positionCaseInsensitive($.ServiceNamespace, CH.lit(namespaces[0]!)).gt(0)
-					: inclusionCondition($.ServiceNamespace, namespaces),
-			)
+			conditions.push(matchOrIn($.ServiceNamespace, namespaces, opts.matchModes?.serviceNamespace === "contains"))
 		}
 
 		// Attribute filter EXISTS subqueries (correlated — references outer TraceId)
@@ -670,11 +642,7 @@ export interface ErrorsFacetsOpts {
 	fingerprintHashes?: readonly string[]
 }
 
-export interface ErrorsFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type ErrorsFacetsOutput = FacetOutput
 
 export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFacetsOutput> {
 	const table = errorEventsTableForRecentScan(opts)

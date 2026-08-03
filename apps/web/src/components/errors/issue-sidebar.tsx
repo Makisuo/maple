@@ -14,7 +14,7 @@ import { LeaseHud } from "./lease-hud"
 import { SEVERITY_LABEL, SEVERITY_ORDER, SEVERITY_SOURCE_LABEL, SEVERITY_TONE } from "./severity-badge"
 import { StateSelect } from "./state-select"
 import { ServiceDot } from "@maple/ui/components/service-dot"
-import { DetailRail } from "@/components/common/detail-rail"
+import { DetailRail } from "@maple/ui/components/detail-rail"
 
 type Busy = "state" | "claim" | "release" | "heartbeat" | "comment" | "severity" | "investigation" | null
 

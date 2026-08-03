@@ -10,7 +10,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
-import { BellIcon, GridSquareCirclePlusIcon } from "@/components/icons"
+import { BellIcon, GridSquareCirclePlusIcon, LinkIcon } from "@/components/icons"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { encodeAlertChartToSearchParam } from "@/lib/alerts/widget-chart-param"
@@ -65,7 +65,7 @@ export function MetricGraduationActions({ draft }: MetricGraduationActionsProps)
 				value={() => window.location.href}
 				label="Link"
 				idleLabel="Copy link"
-				glyph="link"
+				idleIcon={LinkIcon}
 				toast={false}
 				variant="outline"
 			/>

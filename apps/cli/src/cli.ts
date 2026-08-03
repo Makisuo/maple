@@ -10,6 +10,7 @@ import { timeseries, breakdown, compare } from "./commands/analytics"
 import { auth, login, logout, whoami } from "./commands/auth"
 import { use } from "./commands/config"
 import { start, stop, reset, checkpoint, restore } from "./commands/server"
+import { schema } from "./commands/schema"
 import { archive } from "./commands/archive"
 import { update } from "./commands/update"
 
@@ -49,6 +50,7 @@ export const cli = Command.make("maple").pipe(
 		reset,
 		checkpoint,
 		restore,
+		schema,
 		// Parquet archives (local mode)
 		archive,
 		// Self-update

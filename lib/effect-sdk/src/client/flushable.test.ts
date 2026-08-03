@@ -1,5 +1,6 @@
 import { describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { resetConsentForTests, setConsent } from "@maple/browser-session"
+import { Effect, Metric } from "effect"
 import { afterEach, expect, vi } from "vitest"
 import { make } from "./flushable.js"
 
@@ -81,6 +82,9 @@ describe("MapleFlush.make (client)", () => {
 
 	afterEach(() => {
 		restore?.()
+		delete (globalThis as Record<string, unknown>)["__MAPLE_BROWSER_SESSION__"]
+		setConsent(false)
+		resetConsentForTests()
 		vi.useRealTimers()
 	})
 
@@ -113,6 +117,90 @@ describe("MapleFlush.make (client)", () => {
 		expect(attrMap["maple.sdk.type"]).toBe("client")
 		expect(attrMap["deployment.environment"]).toBe("test")
 		expect(attrMap["deployment.environment.name"]).toBe("test")
+	})
+
+	it("captures and exports only after explicit consent is granted", async () => {
+		const { calls, restore: r } = setupFetch()
+		restore = r
+		const recordTraceId = vi.fn()
+		;(globalThis as Record<string, unknown>)["__MAPLE_BROWSER_SESSION__"] = {
+			sessionId: "consented-session",
+			recordTraceId,
+		}
+		const telemetry = make({ ...baseConfig, privacy: { requireConsent: true } })
+		const counter = Metric.counter("consent_counter")
+
+		await Effect.runPromise(
+			Effect.all([
+				Effect.succeed(undefined).pipe(Effect.withSpan("before-consent")),
+				Metric.update(counter, 5),
+			]).pipe(Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush()
+		expect(calls.some((call) => call.url.endsWith("/v1/traces"))).toBe(false)
+		expect(recordTraceId).not.toHaveBeenCalled()
+
+		setConsent(true)
+		await Effect.runPromise(
+			Effect.all([
+				Effect.succeed(undefined).pipe(Effect.withSpan("after-consent")),
+				Metric.update(counter, 2),
+			]).pipe(Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush()
+		const traceCall = calls.find((call) => call.url.endsWith("/v1/traces"))
+		expect(traceCall).toBeDefined()
+		const spans = (traceCall!.body as any).resourceSpans[0].scopeSpans[0].spans
+		expect(spans.map((span: { name: string }) => span.name)).toEqual(["after-consent"])
+		expect(recordTraceId).toHaveBeenCalledTimes(1)
+		const metricCall = calls.find((call) => call.url.endsWith("/v1/metrics"))
+		const metrics = (metricCall!.body as any).resourceMetrics[0].scopeMetrics[0].metrics
+		expect(
+			metrics.find((metric: { name: string }) => metric.name === "consent_counter").sum.dataPoints[0]
+				.asDouble,
+		).toBe(2)
+		await telemetry.dispose()
+	})
+
+	it("stops exporting metrics after a revoke, because cumulative state cannot be un-accumulated", async () => {
+		const { calls, restore: r } = setupFetch()
+		restore = r
+		const telemetry = make({ ...baseConfig, privacy: { requireConsent: true } })
+		const counter = Metric.counter("revoked_counter")
+
+		setConsent(true)
+		await Effect.runPromise(Metric.update(counter, 5).pipe(Effect.provide(telemetry.layer)))
+		await telemetry.flush()
+		expect(calls.some((call) => call.url.endsWith("/v1/metrics"))).toBe(true)
+		calls.length = 0
+
+		setConsent(false)
+		setConsent(true)
+		await Effect.runPromise(Metric.update(counter, 2).pipe(Effect.provide(telemetry.layer)))
+		await telemetry.flush()
+
+		// A counter that reached 5 under the first grant still reads 5, so the
+		// post-re-grant snapshot would carry the revoked-era total. Spans and logs
+		// resume (their buffers are droppable); metrics stay off for the page.
+		expect(calls.some((call) => call.url.endsWith("/v1/metrics"))).toBe(false)
+		await telemetry.dispose()
+	})
+
+	it("still exports metrics when consent simply arrives late", async () => {
+		const { calls, restore: r } = setupFetch()
+		restore = r
+		const telemetry = make({ ...baseConfig, privacy: { requireConsent: true } })
+		const counter = Metric.counter("late_grant_counter")
+
+		// Nothing was recorded before the grant, so there is nothing to forget —
+		// the buffer starting out disabled must not read as a revoke.
+		setConsent(true)
+		await Effect.runPromise(Metric.update(counter, 3).pipe(Effect.provide(telemetry.layer)))
+		await telemetry.flush()
+
+		const metricCall = calls.find((call) => call.url.endsWith("/v1/metrics"))
+		expect(metricCall).toBeDefined()
+		await telemetry.dispose()
 	})
 
 	it("captures browser navigator + Intl resource attributes", async () => {

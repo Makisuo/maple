@@ -18,19 +18,13 @@ import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import { ServiceOverviewHourly, ServiceOverviewSpans, ServiceUsage, TracesAggregatesHourly } from "../tables"
 import { CHNumber } from "../schema"
-import { apdexExprs, serviceOverviewWhereConditions } from "./query-helpers"
+import { apdexExprs, serviceOverviewWhereConditions , hourFloor, type FacetOutput} from "./query-helpers"
+import { edgeCondition, interiorConditions } from "./rollup-splice"
 
 // ---------------------------------------------------------------------------
 // Service overview
 // ---------------------------------------------------------------------------
 
-const hourFloor = (name: string) => CH.toStartOfHour(CH.toDateTime(param.dateTime(name)))
-const SERVICE_START_DT = "toDateTime(__PARAM_startTime__)"
-const SERVICE_END_DT = "toDateTime(__PARAM_endTime__)"
-const SERVICE_START_HOUR = `toStartOfHour(${SERVICE_START_DT})`
-const SERVICE_END_HOUR = `toStartOfHour(${SERVICE_END_DT})`
-const SERVICE_FIRST_FULL_HOUR = `if(${SERVICE_START_DT} = ${SERVICE_START_HOUR}, ${SERVICE_START_HOUR}, ${SERVICE_START_HOUR} + INTERVAL 1 HOUR)`
-const SERVICE_RAW_EDGE_CONDITION = `(Timestamp < ${SERVICE_FIRST_FULL_HOUR} OR Timestamp >= ${SERVICE_END_HOUR})`
 const SERVICE_RAW_DURATION_STATE = "quantilesTDigestState(0.5, 0.95, 0.99)(Duration)"
 const SERVICE_ROLLUP_DURATION_STATE = "quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles)"
 
@@ -68,7 +62,7 @@ function serviceOverviewWindows(filters: ServiceWindowFilters) {
 				$.StatusCode.neq("Error").and($.Duration.gte(500_000_000)).and($.Duration.lt(2_000_000_000)),
 			),
 		}))
-		.where(($) => [...serviceOverviewWhereConditions($, filters), CH.rawCond(SERVICE_RAW_EDGE_CONDITION)])
+		.where(($) => [...serviceOverviewWhereConditions($, filters), edgeCondition("Timestamp")])
 		.groupBy("bHour", "bServiceName", "bServiceNamespace", "bEnvironment", "bCommitSha")
 
 	const hourlyInterior = from(ServiceOverviewHourly)
@@ -90,8 +84,7 @@ function serviceOverviewWindows(filters: ServiceWindowFilters) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(CH.rawExpr<string>(SERVICE_FIRST_FULL_HOUR)),
-			$.Hour.lt(CH.rawExpr<string>(SERVICE_END_HOUR)),
+			...interiorConditions($.Hour),
 			CH.when(filters.serviceName, (value: string) => $.ServiceName.eq(value)),
 			filters.environments?.length ? CH.inList($.DeploymentEnv, filters.environments) : undefined,
 			filters.namespaces?.length ? CH.inList($.ServiceNamespace, filters.namespaces) : undefined,
@@ -126,7 +119,7 @@ export interface ServiceOverviewOutput {
 	readonly firstSeen: string
 }
 
-export const serviceOverviewRowSchema: CompiledQueryRowSchema<ServiceOverviewOutput> = Schema.Struct({
+export const serviceOverviewRowSchema = Schema.Struct({
 	serviceName: Schema.String,
 	serviceNamespace: Schema.String,
 	environment: Schema.String,
@@ -140,7 +133,7 @@ export const serviceOverviewRowSchema: CompiledQueryRowSchema<ServiceOverviewOut
 	p99LatencyMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 	firstSeen: Schema.String,
-})
+}) satisfies CompiledQueryRowSchema<ServiceOverviewOutput>
 
 export interface ServiceCatalogOpts {
 	serviceName?: string
@@ -506,6 +499,23 @@ export interface ServiceUsageOutput {
 	readonly totalSizeBytes: number
 }
 
+export const serviceUsageRowSchema = Schema.Struct({
+	serviceName: Schema.String,
+	totalLogCount: CHNumber,
+	totalLogSizeBytes: CHNumber,
+	totalTraceCount: CHNumber,
+	totalTraceSizeBytes: CHNumber,
+	totalSumMetricCount: CHNumber,
+	totalSumMetricSizeBytes: CHNumber,
+	totalGaugeMetricCount: CHNumber,
+	totalGaugeMetricSizeBytes: CHNumber,
+	totalHistogramMetricCount: CHNumber,
+	totalHistogramMetricSizeBytes: CHNumber,
+	totalExpHistogramMetricCount: CHNumber,
+	totalExpHistogramMetricSizeBytes: CHNumber,
+	totalSizeBytes: CHNumber,
+}) satisfies CompiledQueryRowSchema<ServiceUsageOutput>
+
 export function serviceUsageQuery(opts: ServiceUsageOpts) {
 	return from(ServiceUsage)
 		.select(($) => ({
@@ -567,7 +577,6 @@ export interface ServiceUsageWithPreviousOutput extends ServiceUsageOutput {
  * delta chips consume.
  */
 export function serviceUsageWithPreviousQuery(opts: ServiceUsageOpts) {
-	const hourFloor = (p: string) => CH.toStartOfHour(CH.toDateTime(param.dateTime(p)))
 	const inCurrent = ($: ColumnAccessor<typeof ServiceUsage.columns>) =>
 		$.Hour.gte(hourFloor("startTime")).and($.Hour.lte(hourFloor("endTime")))
 	const inPrevious = ($: ColumnAccessor<typeof ServiceUsage.columns>) =>
@@ -624,11 +633,7 @@ export function serviceUsageWithPreviousQuery(opts: ServiceUsageOpts) {
 // Services facets (UNION ALL — environment + commit_sha facets)
 // ---------------------------------------------------------------------------
 
-export interface ServicesFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type ServicesFacetsOutput = FacetOutput
 
 // NOTE: kept as a 4-way UNION ALL on purpose. A single-scan rewrite (ARRAY JOIN
 // of (facetType, value) pairs, or GROUP BY GROUPING SETS) reads ~3× fewer rows

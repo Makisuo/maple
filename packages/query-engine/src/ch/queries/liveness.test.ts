@@ -146,9 +146,7 @@ describe("orgTelemetryPulseQuery", () => {
 	// one still hands back whatever the backend sent.
 	it("leaves rows untouched when compiled without a row schema", () => {
 		const compiled = compileUnion(orgTelemetryPulseQuery(), pulseParams)
-		const [row] = decodeRows(compiled, [
-			{ signal: "spans", count: "7", lastSeen: "2024-01-01 00:09:00" },
-		])
+		const [row] = decodeRows(compiled, [{ signal: "spans", count: "7", lastSeen: "2024-01-01 00:09:00" }])
 		expect(typeof row?.count).toBe("string")
 	})
 })
