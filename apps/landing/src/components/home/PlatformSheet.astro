@@ -14,9 +14,9 @@ import MediaFrame from "./MediaFrame.astro";
 
 const locale = Astro.currentLocale ?? "en";
 /**
- * Cells stay hand-composed — their copy is homepage-specific and one cell isn't
- * a feature page at all — but the hrefs go through the registry's helper so a
- * slug rename can't silently 404 the page's main link hub.
+ * Cells stay hand-composed — their copy is homepage-specific — but the hrefs go
+ * through the registry's helper so a slug rename can't silently 404 the page's
+ * main link hub.
  */
 const l = (slug: string) => featurePath(locale, slug);
 
@@ -173,8 +173,8 @@ const cells: Cell[] = [
 	{
 		name: m.alert_heading(),
 		desc: m.platform_alerts_desc(),
-		href: null,
-		link: null,
+		href: l("alerts"),
+		link: m.nav_alerts(),
 		shot: "Alert rules with severity, signal type and current state",
 		src: "/screenshots/surface-alerts.webp",
 		width: 1280,
