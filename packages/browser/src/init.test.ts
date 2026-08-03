@@ -9,6 +9,16 @@ vi.mock("./tracing", () => ({
 	},
 }))
 
+// Stands in for the lazily imported rrweb chunk: the point under test is that
+// `init` reaches it only through `import()`, not that rrweb records here.
+const replay = vi.hoisted(() => ({ start: vi.fn(), shutdown: vi.fn(async () => {}) }))
+vi.mock("@maple/browser-session/replay", () => ({
+	startReplaySession: (options: unknown) => {
+		replay.start(options)
+		return { sessionId: "replay-session", shutdown: replay.shutdown }
+	},
+}))
+
 import { resetSinkForTests } from "../../browser-session/src/events-sink"
 import { init } from "./init"
 
@@ -32,7 +42,63 @@ afterEach(() => {
 	clearSessionSink()
 	tracing.setup.mockClear()
 	tracing.shutdown.mockClear()
+	replay.start.mockClear()
+	replay.shutdown.mockClear()
 	vi.unstubAllGlobals()
+})
+
+const stubBrowser = (): void => {
+	vi.stubGlobal("fetch", async () => new Response(null, { status: 200 }))
+	vi.stubGlobal("window", {
+		sessionStorage: new MemoryStorage(),
+		localStorage: new MemoryStorage(),
+		location: { href: "https://app.example.com/", host: "app.example.com" },
+	})
+}
+
+describe("lazy replay chunk", () => {
+	it("starts the recorder once the chunk lands and shuts it down on shutdown", async () => {
+		stubBrowser()
+		const handle = init({
+			ingestKey: "public-key",
+			serviceName: "test-web",
+			endpoint: "https://collector.test",
+			tracing: { enabled: false },
+			replay: { enabled: true, sampleRate: 1 },
+		})
+
+		// The sampling decision is synchronous; only the handle arrives late.
+		expect(replay.start).not.toHaveBeenCalled()
+		expect(handle.sessionId).not.toBe("")
+		await vi.waitFor(() => expect(replay.start).toHaveBeenCalledTimes(1))
+		expect(handle.sessionId).toBe("replay-session")
+
+		await handle.shutdown()
+		expect(replay.shutdown).toHaveBeenCalledWith({ flush: true })
+	})
+
+	it("never attaches a recorder when consent is revoked before the chunk lands", async () => {
+		setConsent(true)
+		stubBrowser()
+		const handle = init({
+			ingestKey: "public-key",
+			serviceName: "test-web",
+			endpoint: "https://collector.test",
+			tracing: { enabled: false },
+			replay: { enabled: true, sampleRate: 1 },
+			privacy: { requireConsent: true },
+		})
+		setConsent(false)
+
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(replay.start).not.toHaveBeenCalled()
+
+		// A later grant still records — the revoke poisoned that one chunk's
+		// callback, not the sampling decision.
+		setConsent(true)
+		await vi.waitFor(() => expect(replay.start).toHaveBeenCalledTimes(1))
+		await handle.shutdown()
+	})
 })
 
 describe("browser consent lifecycle", () => {
