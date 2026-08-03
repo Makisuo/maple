@@ -2,7 +2,7 @@ import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-a
 import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import {
 	AlertDialog,
@@ -52,10 +52,13 @@ function StatusBanner({ connection }: { connection: IngestConnection }) {
 		setSending(true)
 		try {
 			await sendTestEvent(connection.apiKey)
-			toast.success("Test event sent — watch for it to land in traces")
+			toastManager.add({ title: "Test event sent — watch for it to land in traces", type: "success" })
 			connection.refresh()
 		} catch {
-			toast.error("Couldn't reach the ingest endpoint — double-check your API key")
+			toastManager.add({
+				title: "Couldn't reach the ingest endpoint — double-check your API key",
+				type: "error",
+			})
 		} finally {
 			setSending(false)
 		}
@@ -257,11 +260,12 @@ export function IngestionSection() {
 		if (Exit.isSuccess(result)) {
 			refreshKeys()
 
-			toast.success(
-				`${regenerateKeyType === "public" ? "Public" : "Private"} key regenerated. Previous key was revoked immediately.`,
-			)
+			toastManager.add({
+				title: `${regenerateKeyType === "public" ? "Public" : "Private"} key regenerated. Previous key was revoked immediately.`,
+				type: "success",
+			})
 		} else {
-			toast.error("Unable to complete request")
+			toastManager.add({ title: "Unable to complete request", type: "error" })
 		}
 
 		setSubmittingKeyType(null)
@@ -304,7 +308,7 @@ export function IngestionSection() {
 						badge="HTTP"
 						badgeClass="text-muted-foreground"
 						value={ingestUrl}
-						/>
+					/>
 					<CredentialRow
 						label="Public key"
 						badge="Client"
@@ -315,7 +319,7 @@ export function IngestionSection() {
 						description="For browser and client-side telemetry SDKs"
 						isVisible={publicKeyVisible}
 						onToggleVisibility={() => setPublicKeyVisible((v) => !v)}
-							onRegenerate={() => openRegenerateDialog("public")}
+						onRegenerate={() => openRegenerateDialog("public")}
 						disabled={isBusy}
 					/>
 					<CredentialRow
@@ -328,7 +332,7 @@ export function IngestionSection() {
 						description="For server-side ingestion and backend services"
 						isVisible={privateKeyVisible}
 						onToggleVisibility={() => setPrivateKeyVisible((v) => !v)}
-							onRegenerate={() => openRegenerateDialog("private")}
+						onRegenerate={() => openRegenerateDialog("private")}
 						disabled={isBusy}
 					/>
 				</div>

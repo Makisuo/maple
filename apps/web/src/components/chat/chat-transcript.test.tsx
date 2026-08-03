@@ -126,16 +126,20 @@ describe("ChatTranscript", () => {
 			/>,
 		)
 
-		expect(screen.queryAllByLabelText("Copy message")).toHaveLength(1)
-		expect(screen.queryAllByLabelText("Copy link to message")).toHaveLength(1)
+		// `CopyButton` composes its accessible name as `Copy ${label}`, and the
+		// shared convention is a capitalized label ("Session ID", "API key", …) —
+		// so these read "Copy Message" / "Copy Link to message" since the
+		// one-CopyButton refactor replaced the hand-rolled buttons here.
+		expect(screen.queryAllByLabelText("Copy Message")).toHaveLength(1)
+		expect(screen.queryAllByLabelText("Copy Link to message")).toHaveLength(1)
 		expect(document.querySelectorAll('[data-slot="message-footer"]')).toHaveLength(1)
 	})
 
 	it("omits the permalink action when the thread isn't shareable", () => {
 		render(<ChatTranscript {...baseProps} messages={[message("m1", "assistant", "hello")]} />)
 
-		expect(screen.queryByLabelText("Copy message")).toBeTruthy()
-		expect(screen.queryByLabelText("Copy link to message")).toBeNull()
+		expect(screen.queryByLabelText("Copy Message")).toBeTruthy()
+		expect(screen.queryByLabelText("Copy Link to message")).toBeNull()
 	})
 
 	it("marks a read-only shared thread with a separator row", () => {

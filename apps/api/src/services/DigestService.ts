@@ -22,9 +22,10 @@ import { dateToMs } from "../lib/time"
 import { EmailService } from "../lib/EmailService"
 import { Env } from "../lib/Env"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
-import { EdgeCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "../lib/warehouse-org-quarantine"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 const SYSTEM_DIGEST_USER = UserId.make("system-digest")
 const ROOT_ROLE = RoleName.make("root")
 const D1_INARRAY_CHUNK_SIZE = 90
@@ -211,14 +212,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 
 			const now = new Date(yield* Clock.currentTimeMillis)
-			const toClickHouseDateTime = (d: Date) =>
-				d
-					.toISOString()
-					.replace("T", " ")
-					.replace(/\.\d{3}Z$/, "")
-			const currentEnd = toClickHouseDateTime(now)
-			const currentStart = toClickHouseDateTime(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000))
-			const previousStart = toClickHouseDateTime(new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000))
+			const currentEnd = formatWarehouseDateTime(now.getTime())
+			const currentStart = formatWarehouseDateTime(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+			const previousStart = formatWarehouseDateTime(now.getTime() - 14 * 24 * 60 * 60 * 1000)
 
 			// Sparkline window: 7 *complete* UTC days. `bucket_seconds: 86_400`
 			// snaps `toStartOfInterval` to UTC midnight, so a rolling now-7d
@@ -226,8 +222,8 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			// weekday at the seam). Day-aligning the window keeps it to exactly 7.
 			const DAY_MS = 24 * 60 * 60 * 1000
 			const todayStartMs = Math.floor(now.getTime() / DAY_MS) * DAY_MS
-			const seriesStart = toClickHouseDateTime(new Date(todayStartMs - 7 * DAY_MS))
-			const seriesEnd = toClickHouseDateTime(new Date(todayStartMs - 1000))
+			const seriesStart = formatWarehouseDateTime(todayStartMs - 7 * DAY_MS)
+			const seriesEnd = formatWarehouseDateTime(todayStartMs - 1000)
 
 			const systemTenant = {
 				orgId,

@@ -12,7 +12,8 @@ import {
 import { QueryEngineService } from "./QueryEngineService"
 import type { TenantContext } from "./AuthService"
 import { WarehouseQueryService, type WarehouseQueryServiceShape } from "../lib/WarehouseQueryService"
-import { EdgeCacheService, BucketCacheService, type EdgeCacheServiceShape } from "@maple/query-engine/caching"
+import { BucketCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService, type EdgeCacheServiceShape } from "@maple/cache"
 import { CacheBackendLive } from "../lib/CacheBackendLive"
 import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
 

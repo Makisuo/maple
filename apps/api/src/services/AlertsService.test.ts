@@ -22,7 +22,8 @@ import {
 	type AlertsServiceShape,
 	interleaveAlertRulesByOrg,
 } from "./AlertsService"
-import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
+import { BucketCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import { baselineWarehouseCapabilities } from "@maple/query-engine"
 import { CacheBackendLive } from "../lib/CacheBackendLive"
 import { Env } from "../lib/Env"

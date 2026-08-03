@@ -3,6 +3,7 @@ import { Tinybird } from "@tinybirdco/sdk"
 import { Context, Effect, Layer, Option, Redacted } from "effect"
 import { WarehouseConfigError, type WarehouseQueryRequest } from "@maple/domain/http"
 import {
+	BackendDialect,
 	makeWarehouseExecutor,
 	toWarehouseQueryError,
 	WarehouseResponseLimitError,
@@ -42,11 +43,19 @@ const createClickHouseSqlClient = (config: ClickHouseProtocolBackendConfig): War
 		password: config.password,
 		database: config.database,
 	})
+	// Wire-format parity with the Tinybird SDK: without this, JSONEachRow quotes
+	// 64-bit ints ("count":"42") and every schema-less query leaks strings into
+	// Schema.Number responses on BYO-CH orgs. Sent as a per-query URL param, so
+	// the compiled SQL text (and its fingerprint) is untouched.
+	const clickhouseSettings = BackendDialect[config.kind].unquote64BitIntegers
+		? ({ output_format_json_quote_64bit_integers: 0 } as const)
+		: undefined
 	return {
 		sql: async (sql: string, options) => {
 			const resultSet = await client.query({
 				query: sql,
 				format: "JSONEachRow",
+				...(clickhouseSettings ? { clickhouse_settings: clickhouseSettings } : {}),
 			})
 			const limits = options?.responseLimits
 			if (limits === undefined) {

@@ -1,9 +1,10 @@
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { XmarkIcon, MagnifierIcon } from "@/components/icons"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useDebouncedCallback } from "@maple/ui/hooks/use-debounced-callback"
 import { FilterSection, SearchableFilterSection, serviceColorMap } from "@/components/filters/filter-section"
 import { Route } from "@/routes/logs"
 import { FILTER_SECTION_LABEL } from "@maple/ui/components/filters/filter-styles"
@@ -38,20 +39,20 @@ export function LogsFilterSidebar() {
 	)
 
 	const [searchText, setSearchText] = useState(search.search ?? "")
-	const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+	const debouncedNavigate = useDebouncedCallback((value: string) => {
+		const trimmed = value.trim() || undefined
+		navigate({
+			search: (prev) => ({ ...prev, search: trimmed }),
+		})
+	}, 300)
 
 	const handleSearchChange = useCallback(
 		(value: string) => {
 			setSearchText(value)
-			if (debounceRef.current) clearTimeout(debounceRef.current)
-			debounceRef.current = setTimeout(() => {
-				const trimmed = value.trim() || undefined
-				navigate({
-					search: (prev) => ({ ...prev, search: trimmed }),
-				})
-			}, 300)
+			debouncedNavigate(value)
 		},
-		[navigate],
+		[debouncedNavigate],
 	)
 
 	const facetsAtom = getLogsFacetsResultAtom({

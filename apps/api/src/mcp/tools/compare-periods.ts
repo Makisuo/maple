@@ -7,6 +7,7 @@ import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { formatNextSteps } from "../lib/next-steps"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 export function registerComparePeriodsTool(server: McpToolRegistrar) {
 	server.tool(
 		"compare_periods",
@@ -47,10 +48,10 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
 					})
 				}
 				const halfWindow = 30 * 60 * 1000 // 30 minutes
-				prevSt = new Date(center.getTime() - halfWindow).toISOString().replace("T", " ").slice(0, 19)
+				prevSt = formatWarehouseDateTime(center.getTime() - halfWindow)
 				prevEt = around_time
 				curSt = around_time
-				curEt = new Date(center.getTime() + halfWindow).toISOString().replace("T", " ").slice(0, 19)
+				curEt = formatWarehouseDateTime(center.getTime() + halfWindow)
 			} else {
 				// Resolve current period
 				const current = resolveTimeRange(current_start, current_end, 1)
@@ -72,12 +73,7 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
 				const durationMs = currentEndDate.getTime() - currentStartDate.getTime()
 
 				prevEt = previous_end ?? current.st
-				prevSt =
-					previous_start ??
-					new Date(currentStartDate.getTime() - durationMs)
-						.toISOString()
-						.replace("T", " ")
-						.slice(0, 19)
+				prevSt = previous_start ?? formatWarehouseDateTime(currentStartDate.getTime() - durationMs)
 			}
 
 			// Query both periods in parallel

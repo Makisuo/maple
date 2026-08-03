@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { UpsertDigestSubscriptionRequest } from "@maple/domain/http"
@@ -56,9 +56,12 @@ export function NotificationsSection() {
 
 		if (Exit.isSuccess(result)) {
 			refreshSubscription()
-			toast.success(checked ? "Weekly digest enabled" : "Weekly digest disabled")
+			toastManager.add({
+				title: checked ? "Weekly digest enabled" : "Weekly digest disabled",
+				type: "success",
+			})
 		} else {
-			toast.error("Failed to update notification preferences")
+			toastManager.add({ title: "Failed to update notification preferences", type: "error" })
 			setEnabled(!checked)
 		}
 		setIsSaving(false)
@@ -74,7 +77,7 @@ export function NotificationsSection() {
 				win.document.close()
 			}
 		} else {
-			toast.error("Failed to generate digest preview")
+			toastManager.add({ title: "Failed to generate digest preview", type: "error" })
 		}
 		setIsPreviewing(false)
 	}

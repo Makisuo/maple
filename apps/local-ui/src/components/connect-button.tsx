@@ -60,7 +60,7 @@ function ConnectPanel() {
 				<span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
 					Quick start
 				</span>
-				<CopyableField label="" value={`OTEL_EXPORTER_OTLP_ENDPOINT=${LOCAL_OTLP_ENDPOINT}`} />
+				<CopyableField label="" copyLabel="Command" value={`OTEL_EXPORTER_OTLP_ENDPOINT=${LOCAL_OTLP_ENDPOINT}`} />
 				<p className="text-xs text-muted-foreground">
 					Recording browser sessions? Point{" "}
 					<code className="rounded bg-muted px-1">@maple-dev/browser</code> at the same endpoint.

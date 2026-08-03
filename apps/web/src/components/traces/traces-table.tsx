@@ -1,4 +1,5 @@
 import { formatDuration } from "@maple/ui/format"
+import { TableSkeleton } from "@maple/ui/components/ui/table-skeleton"
 import * as React from "react"
 import { Result } from "@/lib/effect-atom"
 import { Link, useNavigate } from "@tanstack/react-router"
@@ -6,7 +7,6 @@ import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tan
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import { Badge } from "@maple/ui/components/ui/badge"
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type Trace } from "@/api/warehouse/traces"
 import type { TracesSearchParams } from "@/routes/traces"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
@@ -131,37 +131,17 @@ interface TracesTableProps {
 function LoadingState() {
 	return (
 		<div className="flex-1 min-h-0 flex flex-col gap-4">
-			<div className="rounded-md border">
-				<table className="w-full table-fixed caption-bottom text-sm">
-					<thead className="[&_tr]:border-b">
-						<tr className="border-b transition-colors hover:bg-muted/50">
-							{TRACE_COLUMNS.map((column) => (
-								<th
-									key={column.id}
-									className={`${HEADER_CELL_CLASS} ${column.responsive ?? ""}`}
-									style={{ width: column.width }}
-								>
-									{column.header}
-								</th>
-							))}
-						</tr>
-					</thead>
-					<tbody className="[&_tr:last-child]:border-0">
-						{Array.from({ length: 10 }).map((_, i) => (
-							<tr key={i} className="border-b transition-colors">
-								{TRACE_COLUMNS.map((column) => (
-									<td
-										key={column.id}
-										className={`p-2 align-middle ${column.responsive ?? ""}`}
-									>
-										<Skeleton className={`h-4 ${column.skeleton}`} />
-									</td>
-								))}
-							</tr>
-						))}
-					</tbody>
-				</table>
-			</div>
+			<TableSkeleton
+				rows={10}
+				tableClassName="w-full table-fixed"
+				columns={TRACE_COLUMNS.map((column) => ({
+					header: column.header,
+					headClassName: column.responsive,
+					cellClassName: column.responsive,
+					skeleton: column.skeleton,
+					width: column.width,
+				}))}
+			/>
 		</div>
 	)
 }

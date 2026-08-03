@@ -2,7 +2,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpServerRequest } from "effect/unstable/http"
 import { Clock, Effect, Option, Redacted, Schema } from "effect"
 import type { CustomerData } from "autumn-js/backend"
-import { EdgeCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import {
 	AttachResult,
 	BillingCustomer,

@@ -1,6 +1,6 @@
 import { useCallback } from "react"
 import { Cause, Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { useAtomSet } from "@/lib/effect-atom"
 import {
 	AttachRequest,
@@ -68,7 +68,10 @@ export function useBillingActions() {
 				return
 			}
 			const error = Cause.squash(exit.cause)
-			toast.error(error instanceof Error ? error.message : "Couldn't open the billing portal.")
+			toastManager.add({
+				title: error instanceof Error ? error.message : "Couldn't open the billing portal.",
+				type: "error",
+			})
 		},
 		[portalSet],
 	)

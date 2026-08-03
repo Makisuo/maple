@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { DetailRail } from "@maple/ui/components/detail-rail"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { Schema } from "effect"
@@ -89,15 +90,15 @@ function PodDetailContent() {
 				</CardTitle>
 			</CardHeader>
 			<CardContent className="space-y-1">
-				<MetaRow label="k8s.pod.name" value={summary.podName} />
-				<MetaRow label="k8s.namespace.name" value={summary.namespace} />
-				<MetaRow label="k8s.node.name" value={summary.nodeName} />
-				<MetaRow label="k8s.pod.uid" value={summary.podUid} />
-				<MetaRow label="k8s.pod.qos_class" value={summary.qosClass} />
-				<MetaRow label="k8s.deployment.name" value={summary.deploymentName} />
-				<MetaRow label="k8s.statefulset.name" value={summary.statefulsetName} />
-				<MetaRow label="k8s.daemonset.name" value={summary.daemonsetName} />
-				<MetaRow label="k8s.pod.start_time" value={summary.podStartTime} />
+				<DetailRail.MetaRow label="k8s.pod.name" value={summary.podName} />
+				<DetailRail.MetaRow label="k8s.namespace.name" value={summary.namespace} />
+				<DetailRail.MetaRow label="k8s.node.name" value={summary.nodeName} />
+				<DetailRail.MetaRow label="k8s.pod.uid" value={summary.podUid} />
+				<DetailRail.MetaRow label="k8s.pod.qos_class" value={summary.qosClass} />
+				<DetailRail.MetaRow label="k8s.deployment.name" value={summary.deploymentName} />
+				<DetailRail.MetaRow label="k8s.statefulset.name" value={summary.statefulsetName} />
+				<DetailRail.MetaRow label="k8s.daemonset.name" value={summary.daemonsetName} />
+				<DetailRail.MetaRow label="k8s.pod.start_time" value={summary.podStartTime} />
 			</CardContent>
 		</Card>
 	) : null
@@ -206,17 +207,5 @@ function PodDetailContent() {
 				<DashboardLayout.RightPanel>{rightSidebar}</DashboardLayout.RightPanel>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
-	)
-}
-
-function MetaRow({ label, value }: { label: string; value: string | null | undefined }) {
-	if (!value) return null
-	return (
-		<div className="flex items-baseline justify-between gap-3 border-b border-border/60 py-1.5 last:border-0">
-			<span className="font-mono text-[11px] text-muted-foreground">{label}</span>
-			<span className="break-all text-right font-mono text-[11px] tabular-nums text-foreground/85">
-				{value}
-			</span>
-		</div>
 	)
 }

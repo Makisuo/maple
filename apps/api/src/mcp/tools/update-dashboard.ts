@@ -5,17 +5,12 @@ import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
 import { DashboardDocument, DashboardId, PortableDashboardDocument } from "@maple/domain/http"
 import { IsoDateTimeString } from "@maple/domain"
+import { validateDashboardTimeRange } from "../lib/resolve-dashboard-time-range"
+import { MAX_QUERY_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
 
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
 const decodeIsoDateTimeString = Schema.decodeUnknownSync(IsoDateTimeString)
 const decodeDashboardId = Schema.decodeUnknownSync(DashboardId)
-
-const TIME_RANGE_MAP: Record<string, string> = {
-	"1h": "1h",
-	"6h": "6h",
-	"24h": "24h",
-	"7d": "7d",
-}
 
 export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 	server.tool(
@@ -27,7 +22,9 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 			),
 			name: optionalStringParam("New dashboard name"),
 			description: optionalStringParam("New dashboard description"),
-			time_range: optionalStringParam("New time range: 1h, 6h, 24h, or 7d"),
+			time_range: optionalStringParam(
+				`New time range as relative shorthand — e.g. 15m, 6h, 24h, 7d, 2w, 3mo, or "today". Up to ${formatRangeSeconds(MAX_QUERY_RANGE_SECONDS)}.`,
+			),
 			dashboard_json: optionalStringParam(
 				"Full dashboard JSON to replace the current configuration. Use get_dashboard to see the current schema.",
 			),
@@ -39,6 +36,16 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 			time_range,
 			dashboard_json,
 		}) {
+			if (time_range) {
+				const timeRangeError = validateDashboardTimeRange(time_range)
+				if (timeRangeError) {
+					return {
+						isError: true as const,
+						content: [{ type: "text" as const, text: timeRangeError }],
+					}
+				}
+			}
+
 			const tenant = yield* resolveTenant
 			const persistence = yield* DashboardPersistenceService
 
@@ -85,7 +92,7 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 						const timeRange = time_range
 							? {
 									type: "relative" as const,
-									value: TIME_RANGE_MAP[time_range] ?? time_range,
+									value: time_range,
 								}
 							: existing.timeRange
 

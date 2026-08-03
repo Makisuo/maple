@@ -162,6 +162,7 @@ export {
 	unsafeCompiledQuery,
 	type CompiledQuery,
 	type CompiledQueryRowSchema,
+	type TenantScope,
 	QueryBuilderError,
 	CompiledQueryDecodeError,
 } from "./compile"

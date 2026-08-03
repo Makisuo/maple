@@ -132,6 +132,7 @@ import {
 	type DatasetSettingsShape,
 	type SettingsResponseShape,
 } from "./cloudflare-analytics/queries"
+import * as Integrations from "@maple/query-engine-integrations"
 
 /**
  * OAuth scopes the poller needs (space-delimited ids in `oauth_connections.scope`). Kept next to
@@ -2165,7 +2166,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			}
 
 			const compiled = CH.compile(
-				CH.cloudflareUsageQuery(),
+				Integrations.cloudflareUsageQuery(),
 				{
 					orgId,
 					bucketSeconds: USAGE_BUCKET_SECONDS,
@@ -2176,7 +2177,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				// strings from a BYO-CH org's raw ClickHouse (`FORMAT JSON` quotes 64-bit
 				// ints), and `CHNumber` coerces them centrally in `decodeRows`. Without it
 				// the string trips a `ParseError` inside `CloudflareUsageBucket` → bare 500.
-				{ rowSchema: CH.cloudflareUsageRowSchema },
+				{ rowSchema: Integrations.cloudflareUsageRowSchema },
 			)
 			// Metrics flow through the ingest gateway, which routes each org to the SAME
 			// warehouse the gateway wrote to: a BYO-CH org's own ClickHouse when it is
@@ -2195,14 +2196,14 @@ export class CloudflareAnalyticsService extends Context.Service<
 			// Companion scalar stats (previous-24h total + firewall blocked count) share the
 			// readiness decision and run concurrently with the bucketed usage query.
 			const compiledStats = CH.compile(
-				CH.cloudflareUsageStatsQuery(),
+				Integrations.cloudflareUsageStatsQuery(),
 				{
 					orgId,
 					prevStartTime: toWarehouseDateTime64(windowStart - USAGE_WINDOW_MS),
 					currentStartTime: toWarehouseDateTime64(windowStart),
 					endTime: toWarehouseDateTime64(now),
 				},
-				{ rowSchema: CH.cloudflareUsageStatsRowSchema },
+				{ rowSchema: Integrations.cloudflareUsageStatsRowSchema },
 			)
 			const routeOptions = clickHouseReady ? {} : { route: "ingest" as const }
 			const [rows, statsRows] = yield* Effect.all(

@@ -3,7 +3,7 @@ import type { V2Recommendation } from "@maple/domain/http/v2"
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -146,11 +146,14 @@ export function RecommendedMappingsSection() {
 			},
 		})
 		if (Exit.isSuccess(result)) {
-			toast.success(`Mapping created — ${issue.source_key} → ${canonicalKey}`)
+			toastManager.add({
+				title: `Mapping created — ${issue.source_key} → ${canonicalKey}`,
+				type: "success",
+			})
 			refreshIssues()
 			refreshMappings()
 		} else {
-			toast.error("Failed to create mapping")
+			toastManager.add({ title: "Failed to create mapping", type: "error" })
 		}
 		setApplyingId(null)
 	}
@@ -161,7 +164,7 @@ export function RecommendedMappingsSection() {
 		if (Exit.isSuccess(result)) {
 			refreshIssues()
 		} else {
-			toast.error("Failed to dismiss recommendation")
+			toastManager.add({ title: "Failed to dismiss recommendation", type: "error" })
 		}
 		setBusyId(null)
 	}
@@ -172,7 +175,7 @@ export function RecommendedMappingsSection() {
 		if (Exit.isSuccess(result)) {
 			refreshIssues()
 		} else {
-			toast.error("Failed to reopen recommendation")
+			toastManager.add({ title: "Failed to reopen recommendation", type: "error" })
 		}
 		setBusyId(null)
 	}

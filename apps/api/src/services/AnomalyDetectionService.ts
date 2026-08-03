@@ -34,8 +34,8 @@ import {
 	orgIngestKeys,
 } from "@maple/db"
 import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
-import { CH, parseWarehouseDateTime } from "@maple/query-engine"
-import { EdgeCacheService } from "@maple/query-engine/caching"
+import { CH, parseWarehouseDateTime, formatWarehouseDateTime } from "@maple/query-engine"
+import { EdgeCacheService } from "@maple/cache"
 import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "../lib/warehouse-org-quarantine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
@@ -252,9 +252,6 @@ const make = Effect.gen(function* () {
 			Effect.mapError(makePersistenceError),
 		)
 
-	const toTinybirdDateTime = (epochMs: number) =>
-		new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
-
 	const isoFromEpoch = (ms: number) => decodeIsoSync(new Date(ms).toISOString())
 
 	const isoFromDate = (date: Date) => decodeIsoSync(date.toISOString())
@@ -294,19 +291,29 @@ const make = Effect.gen(function* () {
 			return byo as ReadonlySet<string>
 		}
 
-		const startTime = toTinybirdDateTime(nowMs - ANOMALY_ACTIVE_DISCOVERY_WINDOW_MS)
+		const startTime = formatWarehouseDateTime(nowMs - ANOMALY_ACTIVE_DISCOVERY_WINDOW_MS)
 		const routingTenant = systemTenant(knownOrgs[0])
 		return yield* Effect.all(
 			[
-				warehouse.compiledQuery(
+				warehouse.crossOrgQuery(
 					routingTenant,
 					CH.compile(CH.activeOrgsByTracesQuery(), { startTime }),
-					{ profile: "discovery", context: "anomalyActiveOrgsTraces" },
+					{
+						profile: "discovery",
+						context: "anomalyActiveOrgsTraces",
+						justification:
+							"enumerate orgs with recent span aggregates so the anomaly tick skips idle orgs",
+					},
 				),
-				warehouse.compiledQuery(
+				warehouse.crossOrgQuery(
 					routingTenant,
 					CH.compile(CH.activeOrgsByLogsQuery(), { startTime }),
-					{ profile: "discovery", context: "anomalyActiveOrgsLogs" },
+					{
+						profile: "discovery",
+						context: "anomalyActiveOrgsLogs",
+						justification:
+							"enumerate orgs with recent log aggregates so the anomaly tick skips idle orgs",
+					},
 				),
 			],
 			{ concurrency: 2 },
@@ -685,8 +692,8 @@ const make = Effect.gen(function* () {
 
 		const queryWindow = {
 			orgId,
-			startTime: toTinybirdDateTime(startMs),
-			endTime: toTinybirdDateTime(endMs),
+			startTime: formatWarehouseDateTime(startMs),
+			endTime: formatWarehouseDateTime(endMs),
 		}
 
 		let unit: AnomalyTimeseriesUnit
@@ -703,7 +710,7 @@ const make = Effect.gen(function* () {
 				...queryWindow,
 				// Include the preceding window so the first displayed point has
 				// a complete rolling 30-minute value.
-				startTime: toTinybirdDateTime(startMs - SPIKE_WINDOW_MS),
+				startTime: formatWarehouseDateTime(startMs - SPIKE_WINDOW_MS),
 				fingerprintHash: row.fingerprintHash ?? "0",
 				deploymentEnv: row.deploymentEnv,
 				bucketSeconds,
@@ -855,8 +862,8 @@ const make = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const compiled = CH.compile(CH.anomalyTraceSignalsQuery({ hoursOfDay }), {
 					orgId: tenant.orgId,
-					startTime: toTinybirdDateTime(nowMs - BASELINE_WINDOW_MS),
-					endTime: toTinybirdDateTime(currentHourStartMs),
+					startTime: formatWarehouseDateTime(nowMs - BASELINE_WINDOW_MS),
+					endTime: formatWarehouseDateTime(currentHourStartMs),
 				})
 				const rows = yield* warehouse
 					.compiledQuery(tenant, compiled, {
@@ -881,8 +888,8 @@ const make = Effect.gen(function* () {
 
 		const currentCompiled = CH.compile(CH.anomalyTraceSignalsQuery({ hoursOfDay }), {
 			orgId: tenant.orgId,
-			startTime: toTinybirdDateTime(currentHourStartMs),
-			endTime: toTinybirdDateTime(nowMs),
+			startTime: formatWarehouseDateTime(currentHourStartMs),
+			endTime: formatWarehouseDateTime(nowMs),
 		})
 		const currentRows = yield* warehouse
 			.compiledQuery(tenant, currentCompiled, {
@@ -946,8 +953,8 @@ const make = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const compiled = CH.compile(CH.anomalyLogVolumeQuery({ hoursOfDay }), {
 					orgId: tenant.orgId,
-					startTime: toTinybirdDateTime(nowMs - BASELINE_WINDOW_MS),
-					endTime: toTinybirdDateTime(currentHourStartMs),
+					startTime: formatWarehouseDateTime(nowMs - BASELINE_WINDOW_MS),
+					endTime: formatWarehouseDateTime(currentHourStartMs),
 				})
 				const rows = yield* warehouse
 					.compiledQuery(tenant, compiled, {
@@ -968,8 +975,8 @@ const make = Effect.gen(function* () {
 
 		const currentCompiled = CH.compile(CH.anomalyLogVolumeQuery({ hoursOfDay }), {
 			orgId: tenant.orgId,
-			startTime: toTinybirdDateTime(currentHourStartMs),
-			endTime: toTinybirdDateTime(nowMs),
+			startTime: formatWarehouseDateTime(currentHourStartMs),
+			endTime: formatWarehouseDateTime(nowMs),
 		})
 		const currentRows = yield* warehouse
 			.compiledQuery(tenant, currentCompiled, {
@@ -1005,8 +1012,8 @@ const make = Effect.gen(function* () {
 	) {
 		const currentCompiled = CH.compile(CH.anomalyErrorSpikeCurrentQuery({}), {
 			orgId: tenant.orgId,
-			startTime: toTinybirdDateTime(nowMs - SPIKE_WINDOW_MS),
-			endTime: toTinybirdDateTime(nowMs),
+			startTime: formatWarehouseDateTime(nowMs - SPIKE_WINDOW_MS),
+			endTime: formatWarehouseDateTime(nowMs),
 		})
 		const currentRows = yield* warehouse
 			.compiledQuery(tenant, currentCompiled, {
@@ -1039,8 +1046,8 @@ const make = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const baselineCompiled = CH.compile(CH.anomalyErrorSpikeBaselineQuery({}), {
 					orgId: tenant.orgId,
-					startTime: toTinybirdDateTime(nowMs - BASELINE_WINDOW_MS),
-					endTime: toTinybirdDateTime(Math.floor(nowMs / HOUR_MS) * HOUR_MS),
+					startTime: formatWarehouseDateTime(nowMs - BASELINE_WINDOW_MS),
+					endTime: formatWarehouseDateTime(Math.floor(nowMs / HOUR_MS) * HOUR_MS),
 				})
 				const rows = yield* warehouse
 					.compiledQuery(tenant, baselineCompiled, {

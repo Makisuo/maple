@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react"
+import { useRef } from "react"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { useContainerSize } from "@maple/ui/hooks/use-container-size"
 
 import { formatBucketTick, formatNumber, stubBuckets, totalCount } from "./live-logs-volume-data"
 
@@ -17,17 +18,7 @@ const HEIGHT = 140
 export default function LiveLogsVolumeChart() {
 	const total = totalCount(stubBuckets)
 	const wrapRef = useRef<HTMLDivElement | null>(null)
-	const [width, setWidth] = useState(0)
-
-	useEffect(() => {
-		const el = wrapRef.current
-		if (!el) return
-		const update = () => setWidth(el.clientWidth)
-		update()
-		const ro = new ResizeObserver(update)
-		ro.observe(el)
-		return () => ro.disconnect()
-	}, [])
+	const { width } = useContainerSize(wrapRef)
 
 	return (
 		<div className="live-frame">

@@ -4,27 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DotMatrixPhase } from "@/lib/dotmatrix-core"
 
-export function usePrefersReducedMotion(): boolean {
-	const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
-
-	useEffect(() => {
-		const query = window.matchMedia("(prefers-reduced-motion: reduce)")
-
-		const update = () => {
-			setPrefersReducedMotion(query.matches)
-		}
-
-		update()
-		query.addEventListener("change", update)
-
-		return () => {
-			query.removeEventListener("change", update)
-		}
-	}, [])
-
-	return prefersReducedMotion
-}
-
 interface UseDotMatrixPhasesOptions {
 	animated?: boolean
 	hoverAnimated?: boolean

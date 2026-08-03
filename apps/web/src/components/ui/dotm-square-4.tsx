@@ -10,7 +10,7 @@ import {
 	outerRingClockwiseNormFromIndex,
 	outerRingClockwiseOrderValue,
 } from "@/lib/dotmatrix-core"
-import { usePrefersReducedMotion } from "@/lib/dotmatrix-hooks"
+import { useMediaQuery } from "@maple/ui/hooks/use-media-query"
 import type { DotAnimationResolver, DotMatrixCommonProps } from "@/lib/dotmatrix-core"
 
 export type DotmSquare4Props = DotMatrixCommonProps
@@ -62,7 +62,7 @@ export function DotmSquare4({
 	hoverAnimated = false,
 	...rest
 }: DotmSquare4Props) {
-	const reducedMotion = usePrefersReducedMotion()
+	const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)")
 	const {
 		phase: matrixPhase,
 		onMouseEnter,

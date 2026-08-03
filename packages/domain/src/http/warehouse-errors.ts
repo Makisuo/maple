@@ -66,11 +66,35 @@ export class WarehouseClientError extends Schema.TaggedErrorClass<WarehouseClien
  * A BYO ClickHouse cluster is missing a column or has the wrong type for one
  * Maple expects; remediated by running schema apply on the cluster. The MCP
  * layer enriches this with an actionable hint.
+ *
+ * `kind` splits two failure modes that need opposite advice: `"cluster"`
+ * (absent = cluster, for wire compatibility) means the cluster itself rejected
+ * the query — run schema apply; `"decode"` means the cluster answered but the
+ * rows failed Maple's own row schema — schema apply cannot fix that and the
+ * presenter must not suggest it.
  */
 export class WarehouseSchemaDriftError extends Schema.TaggedErrorClass<WarehouseSchemaDriftError>()(
 	"@maple/http/errors/WarehouseSchemaDriftError",
-	warehouseErrorBaseFields,
+	{ ...warehouseErrorBaseFields, kind: Schema.optional(Schema.Literals(["cluster", "decode"])) },
 	{ httpApiStatus: 502 },
+) {}
+
+/**
+ * ClickHouse's analyzer rejected the SQL Maple generated — a type mismatch
+ * between `if()` arms or `UNION` branches, an illegal argument type, an
+ * ambiguous column. This is a **Maple bug**, not a customer problem: the same
+ * SQL fails for every org on every cluster, no retry helps, and no schema apply
+ * fixes it.
+ *
+ * It is split out from `WarehouseQueryError` (which means "the warehouse said
+ * no" and covers genuinely external failures) so it can be alerted on and so the
+ * UI stops telling people to check their database. Mapped to 500 — the fault is
+ * ours.
+ */
+export class WarehouseMalformedQueryError extends Schema.TaggedErrorClass<WarehouseMalformedQueryError>()(
+	"@maple/http/errors/WarehouseMalformedQueryError",
+	warehouseErrorBaseFields,
+	{ httpApiStatus: 500 },
 ) {}
 
 /** A query exceeded a ClickHouse resource quota. Mapped to 429. */
@@ -102,6 +126,7 @@ export type WarehouseError =
 	| WarehouseConfigError
 	| WarehouseClientError
 	| WarehouseSchemaDriftError
+	| WarehouseMalformedQueryError
 	| WarehouseQuotaExceededError
 	| WarehouseValidationError
 
@@ -118,6 +143,7 @@ export const warehouseHttpErrors = [
 	WarehouseConfigError,
 	WarehouseClientError,
 	WarehouseSchemaDriftError,
+	WarehouseMalformedQueryError,
 	WarehouseQuotaExceededError,
 	WarehouseValidationError,
 ] as const

@@ -7,7 +7,7 @@ import {
 } from "./types"
 import { warehouseToMcpHandlers } from "../lib/map-warehouse-error"
 import { withTenantExecutor } from "../lib/query-warehouse"
-import { resolveTimeRange, formatClampNote } from "../lib/time"
+import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "../lib/time"
 import { clampLimit, clampOffset } from "../lib/limits"
 import { formatDurationFromMs, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
@@ -45,8 +45,11 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max results (default 20)"),
 		}),
 		Effect.fn("McpTool.searchTraces")(function* (params) {
-			const range = resolveTimeRange(params.start_time, params.end_time, { maxHours: 24 * 7 })
+			const range = resolveTimeRange(params.start_time, params.end_time, {
+				maxHours: MCP_SEARCH_MAX_HOURS,
+			})
 			const { st, et } = range
+			if (range.exceeded) return rangeExceededResult(range, "search_traces")
 			const lim = clampLimit(params.limit, { defaultValue: 20, max: 200 })
 			const off = clampOffset(params.offset, { max: 10_000 })
 
@@ -101,7 +104,7 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
 
 			const lines: string[] = [
 				`## ${isSpanLevel ? "Matching Spans" : "Traces"} (showing ${off + 1}–${off + spans.length})`,
-				`Time range: ${st} — ${et}${formatClampNote(range)}`,
+				`Time range: ${st} — ${et}`,
 				``,
 			]
 

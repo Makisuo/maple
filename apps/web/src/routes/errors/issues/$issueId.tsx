@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
 import { useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { useCopy } from "@maple/ui/hooks/use-copy"
 
@@ -157,8 +157,8 @@ function IssueDetailPage() {
 			reactivityKeys: invalidateKeys,
 		})
 		setBusy(null)
-		if (Exit.isSuccess(result)) toast.success(`Moved to ${next}`)
-		else toast.error("State change failed")
+		if (Exit.isSuccess(result)) toastManager.add({ title: `Moved to ${next}`, type: "success" })
+		else toastManager.add({ title: "State change failed", type: "error" })
 	}
 
 	const claim = async () => {
@@ -169,8 +169,8 @@ function IssueDetailPage() {
 			reactivityKeys: invalidateKeys,
 		})
 		setBusy(null)
-		if (Exit.isSuccess(result)) toast.success("Claimed")
-		else toast.error("Claim failed")
+		if (Exit.isSuccess(result)) toastManager.add({ title: "Claimed", type: "success" })
+		else toastManager.add({ title: "Claim failed", type: "error" })
 	}
 
 	const heartbeat = async () => {
@@ -180,8 +180,8 @@ function IssueDetailPage() {
 			reactivityKeys: invalidateKeys,
 		})
 		setBusy(null)
-		if (Exit.isSuccess(result)) toast.success("Lease extended")
-		else toast.error("Heartbeat failed")
+		if (Exit.isSuccess(result)) toastManager.add({ title: "Lease extended", type: "success" })
+		else toastManager.add({ title: "Heartbeat failed", type: "error" })
 	}
 
 	const release = async () => {
@@ -192,8 +192,8 @@ function IssueDetailPage() {
 			reactivityKeys: invalidateKeys,
 		})
 		setBusy(null)
-		if (Exit.isSuccess(result)) toast.success("Released")
-		else toast.error("Release failed")
+		if (Exit.isSuccess(result)) toastManager.add({ title: "Released", type: "success" })
+		else toastManager.add({ title: "Release failed", type: "error" })
 	}
 
 	const applySeverity = async (next: IssueSeverity | null) => {
@@ -205,9 +205,12 @@ function IssueDetailPage() {
 		})
 		setBusy(null)
 		if (Exit.isSuccess(result)) {
-			toast.success(next === null ? "Severity cleared" : `Severity set to ${next}`)
+			toastManager.add({
+				title: next === null ? "Severity cleared" : `Severity set to ${next}`,
+				type: "success",
+			})
 		} else {
-			toast.error("Severity change failed")
+			toastManager.add({ title: "Severity change failed", type: "error" })
 		}
 	}
 
@@ -217,7 +220,10 @@ function IssueDetailPage() {
 				payload: new EscalationPolicyEvaluationRequest({ severity: next, source: "manual" }),
 			})
 			if (Exit.isFailure(preview)) {
-				toast.error("Could not evaluate the escalation policy. Severity was not changed.")
+				toastManager.add({
+					title: "Could not evaluate the escalation policy. Severity was not changed.",
+					type: "error",
+				})
 				return
 			}
 			if (preview.value.outcome === "route") {
@@ -282,7 +288,7 @@ function IssueDetailPage() {
 				params: { id: result.value.id },
 			})
 		} else {
-			toast.error("Investigation could not be started")
+			toastManager.add({ title: "Investigation could not be started", type: "error" })
 		}
 	}
 
@@ -298,9 +304,9 @@ function IssueDetailPage() {
 		setBusy(null)
 		if (Exit.isSuccess(result)) {
 			setCommentDraft("")
-			toast.success("Comment added")
+			toastManager.add({ title: "Comment added", type: "success" })
 		} else {
-			toast.error("Comment failed")
+			toastManager.add({ title: "Comment failed", type: "error" })
 		}
 	}
 

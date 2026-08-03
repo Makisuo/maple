@@ -7,7 +7,7 @@ import {
 	HazelStartConnectRequest,
 	PlanetScaleStartConnectRequest,
 } from "@maple/domain/http"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { useAtomRefresh, useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -142,7 +142,7 @@ function useOAuthPopupFlow({
 			popup?.close()
 			popupRef.current = null
 			setPopupOpen(false)
-			toast.error(startErrorMessage(result))
+			toastManager.add({ title: startErrorMessage(result), type: "error" })
 		}
 	}
 
@@ -183,11 +183,11 @@ function CloudflareConnectBoundary({ children }: { children: React.ReactNode }) 
 
 	useIntegrationMessage("maple:integration:cloudflare", (data) => {
 		if (data.status === "success") {
-			toast.success("Cloudflare account connected")
+			toastManager.add({ title: "Cloudflare account connected", type: "success" })
 			refreshStatus()
 			refreshUsage()
 		} else if (data.status === "error") {
-			toast.error(data.message ?? "Cloudflare connection failed")
+			toastManager.add({ title: data.message ?? "Cloudflare connection failed", type: "error" })
 		}
 	})
 
@@ -221,10 +221,10 @@ function HazelConnectBoundary({ children }: { children: React.ReactNode }) {
 
 	useIntegrationMessage("maple:integration:hazel", (data) => {
 		if (data.status === "success") {
-			toast.success("Hazel connected")
+			toastManager.add({ title: "Hazel connected", type: "success" })
 			refreshStatus()
 		} else if (data.status === "error") {
-			toast.error(data.message ?? "Hazel connection failed")
+			toastManager.add({ title: data.message ?? "Hazel connection failed", type: "error" })
 		}
 	})
 
@@ -255,10 +255,10 @@ function GithubConnectBoundary({ children }: { children: React.ReactNode }) {
 
 	useIntegrationMessage("maple:integration:github", (data) => {
 		if (data.status === "success") {
-			toast.success("GitHub connected")
+			toastManager.add({ title: "GitHub connected", type: "success" })
 			refreshStatus()
 		} else if (data.status === "error") {
-			toast.error(data.message ?? "GitHub connection failed")
+			toastManager.add({ title: data.message ?? "GitHub connection failed", type: "error" })
 		}
 	})
 
@@ -294,7 +294,7 @@ function PlanetscaleConnectBoundary({ children }: { children: React.ReactNode })
 		if (data.status === "success") {
 			refreshStatus()
 		} else if (data.status === "error") {
-			toast.error(data.message ?? "PlanetScale connection failed")
+			toastManager.add({ title: data.message ?? "PlanetScale connection failed", type: "error" })
 		}
 	})
 

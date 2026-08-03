@@ -76,7 +76,7 @@ export const defaultSizeForVisualization = (visualization: string): { w: number;
 
 /**
  * Port of `findNextPosition` from
- * `apps/web/src/hooks/use-dashboard-store.ts:32-54`. Keeps auto-layout
+ * `findNextPosition` in `apps/web/src/hooks/use-dashboard-store.ts`. Keeps auto-layout
  * behavior identical between UI-added and MCP-added widgets.
  */
 export const findNextWidgetPosition = (

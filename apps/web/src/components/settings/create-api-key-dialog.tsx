@@ -3,7 +3,7 @@ import { useId, useState } from "react"
 import { Exit } from "effect"
 import type { ApiKeyKind } from "@maple/domain/http"
 import type { V2ApiKeyWithSecret, V2Scope } from "@maple/domain/http/v2"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -117,7 +117,7 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 			void reconcileTxid(result.value.txid)
 		} else {
 			const { title, description } = formatBackendError(result)
-			toast.error(title, { description })
+			toastManager.add({ title, description, type: "error" })
 		}
 		setIsCreating(false)
 	}

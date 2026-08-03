@@ -83,6 +83,12 @@ const makeTenant = (): TenantContext => ({
 	authMode: "self_hosted",
 })
 
+// A scoped stand-in for the removed `sqlQuery(tenant, sql)` entry point: these
+// tests exercise retry/routing/caching, not scope, so the SQL travels wrapped in
+// a compiled query that declares it.
+const scopedSql = (sql: string) =>
+	unsafeCompiledQuery<Record<string, unknown>>({ sql, tenantScope: "org" })
+
 const transient503 = () => new Error("HTTP status 503 service temporarily unavailable")
 
 const decodeJwtPayload = (token: string): Record<string, unknown> =>
@@ -287,7 +293,7 @@ describe("bounded Tinybird response fetch", () => {
 	})
 })
 
-describe("WarehouseQueryService.sqlQuery retry on transient upstream failures", () => {
+describe("WarehouseQueryService.compiledQuery retry on transient upstream failures", () => {
 	// Runs under it.live: the retry schedule uses real exponential backoff
 	// delays, so the default TestClock would stall the retries.
 	it.live("recovers after two 503s on the third attempt", () => {
@@ -306,7 +312,7 @@ describe("WarehouseQueryService.sqlQuery retry on transient upstream failures", 
 
 		return Effect.gen(function* () {
 			const result = yield* WarehouseQueryService.use((service) =>
-				service.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_test'"),
+				service.compiledQuery(tenant, scopedSql("SELECT 1 FROM traces WHERE OrgId = 'org_test'")),
 			)
 
 			assert.strictEqual(attempts, 3)
@@ -330,7 +336,7 @@ describe("WarehouseQueryService.sqlQuery retry on transient upstream failures", 
 		return Effect.gen(function* () {
 			const exit = yield* Effect.exit(
 				WarehouseQueryService.use((service) =>
-					service.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_test'"),
+					service.compiledQuery(tenant, scopedSql("SELECT 1 FROM traces WHERE OrgId = 'org_test'")),
 				),
 			)
 
@@ -356,7 +362,7 @@ describe("WarehouseQueryService.sqlQuery retry on transient upstream failures", 
 		return Effect.gen(function* () {
 			const exit = yield* Effect.exit(
 				WarehouseQueryService.use((service) =>
-					service.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_test'"),
+					service.compiledQuery(tenant, scopedSql("SELECT 1 FROM traces WHERE OrgId = 'org_test'")),
 				),
 			)
 
@@ -383,6 +389,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
 		const compiled = unsafeCompiledQuery<{ readonly serviceName: string; readonly count: number }>({
+			tenantScope: "org",
 			sql: "SELECT ServiceName AS serviceName, count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ serviceName: Schema.String, count: RowNumber }),
 		})
@@ -405,6 +412,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			tenantScope: "org",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
@@ -428,8 +436,12 @@ describe("WarehouseQueryService.compiledQuery", () => {
 
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
+		// No top-level OrgId predicate. Previously expressed as SQL lacking the
+		// substring "OrgId"; scope is now a property of the compiled query, so a
+		// query that merely mentions the column can no longer sneak through.
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
-			sql: "SELECT count() AS count FROM traces",
+			sql: "SELECT count() AS count, 'x' AS OrgId FROM traces",
+			tenantScope: "cross-org",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
 
@@ -442,7 +454,8 @@ describe("WarehouseQueryService.compiledQuery", () => {
 			const failure = getError(exit)
 			assert.strictEqual(
 				(failure as { message?: string } | undefined)?.message,
-				"SQL query must contain OrgId filter (sqlQuery)",
+				"compiled query is not tenant-scoped: no top-level OrgId predicate (compiledQuery). " +
+					"Deliberate cross-tenant reads must declare .crossOrg() and run through crossOrgQuery.",
 			)
 		}).pipe(Effect.provide(layer))
 	})
@@ -465,6 +478,7 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
 		const compiled = unsafeCompiledQuery<{ readonly serviceName: string; readonly count: number }>({
+			tenantScope: "org",
 			sql: "SELECT ServiceName AS serviceName, count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ serviceName: Schema.String, count: RowNumber }),
 		})
@@ -490,6 +504,7 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			tenantScope: "org",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
@@ -512,6 +527,7 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			tenantScope: "org",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
@@ -799,7 +815,7 @@ describe("ingest routes writes to the managed pipeline, not a per-org read overr
 		const tenant = makeTenant()
 
 		return Effect.gen(function* () {
-			yield* executor.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_test'")
+			yield* executor.compiledQuery(tenant, scopedSql("SELECT 1 FROM traces WHERE OrgId = 'org_test'"))
 			yield* executor.ingest(tenant, "traces", [{ trace_id: "a" }])
 
 			assert.deepStrictEqual(purposes, ["read", "ingest"])
@@ -838,7 +854,7 @@ describe("ingest pins writes to Tinybird even when CLICKHOUSE_URL makes managed 
 
 		return Effect.gen(function* () {
 			yield* WarehouseQueryService.use((service) =>
-				service.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_test'"),
+				service.compiledQuery(tenant, scopedSql("SELECT 1 FROM traces WHERE OrgId = 'org_test'")),
 			)
 			yield* WarehouseQueryService.use((service) =>
 				service.ingest(tenant, "traces", [{ trace_id: "a" }]),
@@ -869,7 +885,7 @@ describe("WarehouseUpstreamError surfaces transient classification", () => {
 describe("isEmptyJsonBodyError (empty Tinybird body ⇒ zero rows)", () => {
 	// The Tinybird SDK's sql() parses the response body as JSON; a successful (2xx) query that
 	// matches zero rows can return an empty body, throwing `SyntaxError: "Unexpected end of JSON
-	// input"`. That must be treated as zero rows so alert rules (and every sqlQuery caller) hit the
+	// input"`. That must be treated as zero rows so alert rules (and every compiledQuery caller) hit the
 	// no-data path instead of surfacing a spurious WarehouseClientError.
 	it("treats an empty-body SyntaxError as zero rows", () => {
 		assert.isTrue(__testables.isEmptyJsonBodyError(new SyntaxError("Unexpected end of JSON input")))

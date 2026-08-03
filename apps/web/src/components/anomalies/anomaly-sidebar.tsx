@@ -17,7 +17,7 @@ import {
 	TRIAGE_STATUS_CHIP,
 } from "./anomaly-format"
 import { ServiceDot } from "@maple/ui/components/service-dot"
-import { DetailRail } from "@/components/common/detail-rail"
+import { DetailRail } from "@maple/ui/components/detail-rail"
 
 export function AnomalySidebar({
 	incident,

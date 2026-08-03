@@ -136,8 +136,6 @@ export const makeRemoteWarehouseExecutorShape = (
 					},
 				}),
 			),
-		sqlQuery: <T = Record<string, unknown>>(_sql: string, _options?: SqlQueryOptions) =>
-			unsupported<ReadonlyArray<T>>("sqlQuery"),
 		compiledQuery: <T>(_compiled: unknown, _options?: SqlQueryOptions) =>
 			unsupported<ReadonlyArray<T>>("compiledQuery"),
 		compiledQueryFirst: <T>(_compiled: unknown, _options?: SqlQueryOptions) =>

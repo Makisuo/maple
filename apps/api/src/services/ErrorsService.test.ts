@@ -29,7 +29,7 @@ import {
 } from "@maple/db"
 import { eq } from "drizzle-orm"
 import type { CompiledQuery } from "@maple/query-engine/ch"
-import { EdgeCacheService, makeEdgeCacheService, makeMemoryBackend } from "@maple/query-engine/caching"
+import { EdgeCacheService, makeEdgeCacheService, makeMemoryBackend } from "@maple/cache"
 import { Database, DatabaseError } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
@@ -38,6 +38,7 @@ import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { describeCause, ErrorsService, isBusyDatabaseError, makePersistenceError } from "./ErrorsService"
 import { NotificationDispatcher } from "./NotificationDispatcher"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 describe("makePersistenceError", () => {
 	it("omits the cause key when the source has no cause", () => {
 		const err = makePersistenceError(new Error("boom"))
@@ -147,7 +148,7 @@ const testConfig = () =>
  * Typed warehouse stub. The scheduled tick is the only consumer that reaches
  * the warehouse in these tests, so the stub feeds synthetic `errorIssuesScan`
  * rows (shaped like `ErrorIssuesOutput`) through the compiled query's own
- * `castRows`, and returns empty results for every other compiled query.
+ * `decodeRows`, and returns empty results for every other compiled query.
  */
 const makeWarehouseStub = (
 	scanRows: () => ReadonlyArray<Record<string, unknown>> = () => [],
@@ -155,25 +156,32 @@ const makeWarehouseStub = (
 	fingerprintRows?: () => ReadonlyArray<Record<string, unknown>>,
 ): WarehouseQueryServiceShape => ({
 	query: () => Effect.die(new Error("unexpected warehouse query")),
-	sqlQuery: () => Effect.succeed([]),
 	rawSqlQuery: () => Effect.succeed([]),
+	// Active-org discovery is a declared cross-org read, so it arrives here
+	// rather than on compiledQuery. Same modelling as before: surface the org
+	// iff it currently has error rows.
+	crossOrgQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>) =>
+		Effect.suspend(() => {
+			const orgId = (tenant as { orgId?: string }).orgId ?? ""
+			return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
+		}),
 	compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
-		Effect.sync(() => {
+		Effect.suspend(() => {
 			if (options?.context === "errorIssuesScan") {
 				onScan?.()
-				return compiled.castRows(scanRows())
+				return Effect.orDie(compiled.decodeRows(scanRows()))
 			}
 			// listIssues' deployment-environment filter (shaped like ErrorFingerprintsOutput).
 			if (options?.context === "errorIssueEnvFingerprints") {
-				return compiled.castRows(fingerprintRows?.() ?? [])
+				return Effect.orDie(compiled.decodeRows(fingerprintRows?.() ?? []))
 			}
 			// Active-org discovery reads the same data the scan does, so model that
 			// consistency: surface the org iff it currently has error rows.
 			if (options?.context === "errorActiveOrgsDiscovery") {
 				const orgId = (tenant as { orgId?: string }).orgId ?? ""
-				return compiled.castRows(scanRows().length > 0 ? [{ orgId }] : [])
+				return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
 			}
-			return compiled.castRows([])
+			return Effect.orDie(compiled.decodeRows([]))
 		}),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected warehouse query")),
 	ingest: () => Effect.void,
@@ -257,23 +265,33 @@ const makeGatingLayer = (opts: {
 	const scanRows = opts.scanRows ?? (() => [])
 	const warehouseStub: WarehouseQueryServiceShape = {
 		query: () => Effect.die(new Error("unexpected warehouse query")),
-		sqlQuery: () => Effect.succeed([]),
 		rawSqlQuery: () => Effect.succeed([]),
+		crossOrgQuery: <T>(
+			tenant: unknown,
+			compiled: CompiledQuery<T>,
+			options: SqlQueryOptions & { readonly justification: string },
+		) =>
+			Effect.suspend(() => {
+				if (options?.context) opts.profiles?.set(options.context, options.profile)
+				if (opts.failDiscovery) return Effect.die(new Error("discovery down"))
+				const orgId = (tenant as { orgId?: string }).orgId ?? ""
+				return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
+			}),
 		compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) => {
 			if (options?.context) opts.profiles?.set(options.context, options.profile)
 			if (options?.context === "errorActiveOrgsDiscovery") {
 				if (opts.failDiscovery) return Effect.die(new Error("discovery down"))
 				const orgId = (tenant as { orgId?: string }).orgId ?? ""
-				return Effect.sync(() => compiled.castRows(scanRows().length > 0 ? [{ orgId }] : []))
+				return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
 			}
 			if (options?.context === "errorIssuesScan") {
 				const orgId = (tenant as { orgId?: string }).orgId ?? ""
-				return Effect.sync(() => {
+				return Effect.suspend(() => {
 					opts.scanned?.add(orgId)
-					return compiled.castRows(scanRows())
+					return Effect.orDie(compiled.decodeRows(scanRows()))
 				})
 			}
-			return Effect.sync(() => compiled.castRows([]))
+			return Effect.orDie(compiled.decodeRows([]))
 		},
 		compiledQueryFirst: () => Effect.die(new Error("unexpected warehouse query")),
 		ingest: () => Effect.void,
@@ -738,8 +756,6 @@ const RETENTION_TICK_MS = 1_750_003_200_000
 const TICK_MS = RETENTION_TICK_MS + 120_000
 
 /** Same format the tick itself sends to the warehouse ("YYYY-MM-DD HH:MM:SS", UTC). */
-const toWarehouseDateTime = (epochMs: number) =>
-	new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
 
 /** Real error fingerprints are decimal UInt64 strings from ClickHouse. */
 const SCAN_FINGERPRINT = "12345678901234567890"
@@ -753,8 +769,8 @@ const scanRow = (overrides: Record<string, unknown> = {}): Record<string, unknow
 	topFrame: "checkout/handler.ts:42",
 	count: 3,
 	affectedServicesCount: 1,
-	firstSeen: toWarehouseDateTime(TICK_MS - 60_000),
-	lastSeen: toWarehouseDateTime(TICK_MS - 1_000),
+	firstSeen: formatWarehouseDateTime(TICK_MS - 60_000),
+	lastSeen: formatWarehouseDateTime(TICK_MS - 1_000),
 	...overrides,
 })
 
@@ -1034,8 +1050,8 @@ describe("ErrorsService.runTick", () => {
 			const reopenMs = TICK_MS + 32 * 60_000
 			rows = [
 				scanRow({
-					firstSeen: toWarehouseDateTime(reopenMs - 60_000),
-					lastSeen: toWarehouseDateTime(reopenMs - 1_000),
+					firstSeen: formatWarehouseDateTime(reopenMs - 60_000),
+					lastSeen: formatWarehouseDateTime(reopenMs - 1_000),
 				}),
 			]
 			yield* TestClock.setTime(reopenMs)

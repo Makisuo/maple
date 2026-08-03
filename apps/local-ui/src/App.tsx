@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Toaster } from "sonner"
+import { AnchoredToastProvider, ToastProvider } from "@maple/ui/components/ui/toast"
 import { cn } from "@maple/ui/utils"
 import { AttributesProvider } from "@maple/ui/components/attributes"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -94,119 +94,124 @@ export function App() {
 
 	return (
 		<AttributesProvider highlightJson={highlightJson}>
-			<div className="flex h-screen flex-col bg-background text-foreground">
-				<header className="flex shrink-0 items-center gap-1 border-b px-4 py-2">
-					<span className="mr-3 flex items-center gap-1.5 font-display text-sm font-semibold">
-						Maple
-						<Badge
-							variant="secondary"
-							className="px-1.5 py-0 font-mono text-[10px] font-medium uppercase tracking-wider"
-						>
-							Local
-						</Badge>
-					</span>
-					<NavTab
-						label="Traces"
-						icon={<NetworkNodesIcon size={14} />}
-						active={tab === "traces"}
-						onClick={() => switchTab("/traces")}
-					/>
-					<NavTab
-						label="Logs"
-						icon={<CodeIcon size={14} />}
-						active={tab === "logs"}
-						onClick={() => switchTab("/logs")}
-					/>
-					<NavTab
-						label="Metrics"
-						icon={<PulseIcon size={14} />}
-						active={tab === "metrics"}
-						onClick={() => switchTab("/metrics")}
-					/>
-					<NavTab
-						label="Services"
-						icon={<DatabaseIcon size={14} />}
-						active={tab === "services"}
-						onClick={() => switchTab("/services")}
-					/>
-					<NavTab
-						label="Errors"
-						icon={<CircleWarningIcon size={14} />}
-						active={tab === "errors"}
-						onClick={() => switchTab("/errors")}
-					/>
-					<NavTab
-						label="Sessions"
-						icon={<EyeIcon size={14} />}
-						active={tab === "sessions"}
-						onClick={() => switchTab("/sessions")}
-					/>
-					<div className="ml-auto flex items-center gap-3">
-						<IngestStatus />
-						<ConnectButton />
-					</div>
-				</header>
+			<ToastProvider position="bottom-right">
+				<AnchoredToastProvider>
+					<div className="flex h-screen flex-col bg-background text-foreground">
+						<header className="flex shrink-0 items-center gap-1 border-b px-4 py-2">
+							<span className="mr-3 flex items-center gap-1.5 font-display text-sm font-semibold">
+								Maple
+								<Badge
+									variant="secondary"
+									className="px-1.5 py-0 font-mono text-[10px] font-medium uppercase tracking-wider"
+								>
+									Local
+								</Badge>
+							</span>
+							<NavTab
+								label="Traces"
+								icon={<NetworkNodesIcon size={14} />}
+								active={tab === "traces"}
+								onClick={() => switchTab("/traces")}
+							/>
+							<NavTab
+								label="Logs"
+								icon={<CodeIcon size={14} />}
+								active={tab === "logs"}
+								onClick={() => switchTab("/logs")}
+							/>
+							<NavTab
+								label="Metrics"
+								icon={<PulseIcon size={14} />}
+								active={tab === "metrics"}
+								onClick={() => switchTab("/metrics")}
+							/>
+							<NavTab
+								label="Services"
+								icon={<DatabaseIcon size={14} />}
+								active={tab === "services"}
+								onClick={() => switchTab("/services")}
+							/>
+							<NavTab
+								label="Errors"
+								icon={<CircleWarningIcon size={14} />}
+								active={tab === "errors"}
+								onClick={() => switchTab("/errors")}
+							/>
+							<NavTab
+								label="Sessions"
+								icon={<EyeIcon size={14} />}
+								active={tab === "sessions"}
+								onClick={() => switchTab("/sessions")}
+							/>
+							<div className="ml-auto flex items-center gap-3">
+								<IngestStatus />
+								<ConnectButton />
+							</div>
+						</header>
 
-				<main className="min-h-0 flex-1">
-					{connection.status === "disconnected" ? (
-						<DisconnectedState onRetry={connection.retry} />
-					) : route.name === "trace-detail" ? (
-						<TraceDetailView
-							traceId={route.traceId}
-							onBack={() => navigate("/traces", carry())}
-						/>
-					) : route.name === "session-detail" ? (
-						<SessionDetailView
-							sessionId={route.sessionId}
-							onBack={() => navigate("/sessions", carry())}
-							onSelectTrace={(traceId) => navigate(`/traces/${encodeURIComponent(traceId)}`)}
-						/>
-					) : route.name === "metric-detail" ? (
-						<MetricDetailView
-							metricName={route.metricName}
-							onBack={() => navigate("/metrics", carry())}
-						/>
-					) : route.name === "metrics" ? (
-						<MetricsListView
-							onSelectMetric={(metricName) =>
-								navigate(`/metrics/${encodeURIComponent(metricName)}`, carry())
-							}
-						/>
-					) : route.name === "service-detail" ? (
-						<ServiceDetailView
-							serviceName={route.serviceName}
-							onBack={() => navigate("/services", carry())}
-						/>
-					) : route.name === "services" ? (
-						<ServicesListView
-							onSelectService={(serviceName) =>
-								navigate(`/services/${encodeURIComponent(serviceName)}`, carry())
-							}
-						/>
-					) : route.name === "errors" ? (
-						<ErrorsView
-							onSelectTrace={(traceId) =>
-								navigate(`/traces/${encodeURIComponent(traceId)}`, carry())
-							}
-						/>
-					) : route.name === "logs" ? (
-						<LogsView />
-					) : route.name === "sessions" ? (
-						<SessionsListView
-							onSelectSession={(sessionId) =>
-								navigate(`/sessions/${encodeURIComponent(sessionId)}`, carry())
-							}
-						/>
-					) : (
-						<TraceListView
-							onSelectTrace={(traceId) =>
-								navigate(`/traces/${encodeURIComponent(traceId)}`, carry())
-							}
-						/>
-					)}
-				</main>
-			</div>
-			<Toaster position="bottom-right" theme="system" />
+						<main className="min-h-0 flex-1">
+							{connection.status === "disconnected" ? (
+								<DisconnectedState onRetry={connection.retry} />
+							) : route.name === "trace-detail" ? (
+								<TraceDetailView
+									traceId={route.traceId}
+									onBack={() => navigate("/traces", carry())}
+								/>
+							) : route.name === "session-detail" ? (
+								<SessionDetailView
+									sessionId={route.sessionId}
+									onBack={() => navigate("/sessions", carry())}
+									onSelectTrace={(traceId) =>
+										navigate(`/traces/${encodeURIComponent(traceId)}`)
+									}
+								/>
+							) : route.name === "metric-detail" ? (
+								<MetricDetailView
+									metricName={route.metricName}
+									onBack={() => navigate("/metrics", carry())}
+								/>
+							) : route.name === "metrics" ? (
+								<MetricsListView
+									onSelectMetric={(metricName) =>
+										navigate(`/metrics/${encodeURIComponent(metricName)}`, carry())
+									}
+								/>
+							) : route.name === "service-detail" ? (
+								<ServiceDetailView
+									serviceName={route.serviceName}
+									onBack={() => navigate("/services", carry())}
+								/>
+							) : route.name === "services" ? (
+								<ServicesListView
+									onSelectService={(serviceName) =>
+										navigate(`/services/${encodeURIComponent(serviceName)}`, carry())
+									}
+								/>
+							) : route.name === "errors" ? (
+								<ErrorsView
+									onSelectTrace={(traceId) =>
+										navigate(`/traces/${encodeURIComponent(traceId)}`, carry())
+									}
+								/>
+							) : route.name === "logs" ? (
+								<LogsView />
+							) : route.name === "sessions" ? (
+								<SessionsListView
+									onSelectSession={(sessionId) =>
+										navigate(`/sessions/${encodeURIComponent(sessionId)}`, carry())
+									}
+								/>
+							) : (
+								<TraceListView
+									onSelectTrace={(traceId) =>
+										navigate(`/traces/${encodeURIComponent(traceId)}`, carry())
+									}
+								/>
+							)}
+						</main>
+					</div>
+				</AnchoredToastProvider>
+			</ToastProvider>
 		</AttributesProvider>
 	)
 }

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { type EdgeCacheBackend, makeEdgeCacheService, makeMemoryBackend } from "@maple/query-engine/caching"
+import { type EdgeCacheBackend, makeEdgeCacheService, makeMemoryBackend } from "@maple/cache"
 import {
 	CUSTOMER_CACHE_BUCKET,
 	CUSTOMER_CACHE_TTL_SECONDS,

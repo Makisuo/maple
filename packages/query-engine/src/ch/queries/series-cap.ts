@@ -56,7 +56,8 @@ export function finalizeTimeseries<Output extends Record<string, unknown>>(
 	// Compile the inner query with placeholders intact ({} params, skipFormat) so
 	// the outer `CH.compile()` substitutes them once — same pattern as the
 	// list-query cutoff and the metrics-rate CTE.
-	const innerSql = compileCH(inner, {}, { skipFormat: true }).sql
+	const innerCompiled = compileCH(inner, {}, { skipFormat: true })
+	const innerSql = innerCompiled.sql
 	const baseTable = table(SERIES_BASE_ALIAS, outputColumns)
 
 	// Top-N group names, ranked by the max of `rankColumn` across all buckets.
@@ -80,7 +81,9 @@ export function finalizeTimeseries<Output extends Record<string, unknown>>(
 	}
 
 	const capped = from(baseTable)
-		.withCTE(SERIES_BASE_ALIAS, innerSql)
+		// The capped query reads only from this CTE, so it inherits the inner
+		// query's tenant scope — which the opaque SQL string can't carry.
+		.withCTE(SERIES_BASE_ALIAS, innerSql, { tenantScope: innerCompiled.tenantScope })
 		.select(() => passthrough)
 		.where(() => [CH.inSubquery(CH.dynamicColumn<string>("groupName"), topGroupsSql)])
 		.orderBy(["bucket", "asc"], ["groupName", "asc"])

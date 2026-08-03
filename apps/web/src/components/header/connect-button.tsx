@@ -68,7 +68,7 @@ function ConnectPanel() {
 				<span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
 					Fastest path · Claude Code
 				</span>
-				<CopyableField value={ONBOARD_SKILL_COMMAND} />
+				<CopyableField value={ONBOARD_SKILL_COMMAND} copyLabel="Command" />
 				<p className="text-xs text-muted-foreground">
 					The <code className="rounded bg-muted px-1">maple-onboard</code> skill installs
 					OpenTelemetry and wires traces, logs, and metrics end-to-end.

@@ -12,7 +12,7 @@ import {
 	type SlackBotResolution,
 } from "@maple/domain/http"
 import { slackWorkspaces, type SlackWorkspaceRow } from "@maple/db"
-import { EdgeCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import { and, desc, eq, isNotNull, isNull, ne, or } from "drizzle-orm"
 import { Array as Arr, Clock, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"

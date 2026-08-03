@@ -11,27 +11,17 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
 import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
-import { Alert, AlertTitle, AlertDescription } from "@maple/ui/components/ui/alert"
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@maple/ui/components/ui/collapsible"
-import {
-	XmarkIcon,
-	ClockIcon,
-	CircleInfoIcon,
-	CircleWarningIcon,
-	ChevronDownIcon,
-	ChevronUpIcon,
-	CodeIcon,
-} from "@maple/ui/components/icons"
+import { XmarkIcon, ClockIcon, CircleInfoIcon, CodeIcon } from "@maple/ui/components/icons"
 import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@maple/ui/components/attributes"
-import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { getCacheInfo, cacheResultStyles } from "@maple/ui/lib/cache"
 import { getServiceColor } from "@maple/ui/lib/colors"
 import { formatDuration } from "@maple/ui/format"
 import { cn } from "@maple/ui/utils"
+import { getSpanKindLabel, getSpanStatusBadgeClass } from "@maple/ui/lib/span-kind"
 import type { SpanNode } from "@maple/ui/types"
 import { useLocalSpanDetail } from "../hooks/use-local-span-detail"
 import { useLocalSpanLogs } from "../hooks/use-local-span-logs"
-import { formatErrorPrompt } from "../lib/error-prompt"
+import { ErrorSection } from "@maple/ui/components/error-section"
 import type { LocalLog } from "../lib/log-shape"
 import { LogDetailSheet } from "./log-detail-sheet"
 
@@ -40,24 +30,10 @@ interface SpanDetailPanelProps {
 	onClose: () => void
 }
 
-const statusStyles: Record<string, string> = {
-	Ok: "bg-severity-info/15 text-severity-info border-severity-info/30",
-	Error: "bg-severity-error/15 text-severity-error border-severity-error/30",
-	Unset: "bg-muted text-muted-foreground border-border",
-}
-
-const kindLabels: Record<string, string> = {
-	SPAN_KIND_SERVER: "Server",
-	SPAN_KIND_CLIENT: "Client",
-	SPAN_KIND_PRODUCER: "Producer",
-	SPAN_KIND_CONSUMER: "Consumer",
-	SPAN_KIND_INTERNAL: "Internal",
-}
-
 export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 	const cacheInfo = getCacheInfo(span.spanAttributes)
-	const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
-	const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
+	const statusStyle = getSpanStatusBadgeClass(span.statusCode)
+	const kindLabel = getSpanKindLabel(span.spanKind)
 
 	const logs = useLocalSpanLogs(span.traceId, span.spanId)
 	const logCount = logs.data?.length ?? null
@@ -129,9 +105,11 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 			{span.statusCode === "Error" && span.statusMessage && (
 				<ErrorSection
 					message={span.statusMessage}
-					serviceName={span.serviceName}
-					spanName={span.spanName}
-					attributes={detail.data?.spanAttributes ?? span.spanAttributes}
+					prompt={{
+						serviceName: span.serviceName,
+						operation: span.spanName,
+						attributes: detail.data?.spanAttributes ?? span.spanAttributes,
+					}}
 				/>
 			)}
 
@@ -243,52 +221,6 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 				</TabsContent>
 			</Tabs>
 		</aside>
-	)
-}
-
-interface ErrorSectionProps {
-	message: string
-	serviceName: string
-	spanName: string
-	attributes?: Record<string, string>
-}
-
-function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSectionProps) {
-	const [expanded, setExpanded] = useState(false)
-	const isLong = message.length > 120 || message.includes("\n")
-
-	return (
-		<Alert variant="error" className="mx-3 my-2 rounded-md border-destructive/30">
-			<CircleWarningIcon size={14} />
-			<AlertTitle className="flex items-center justify-between">
-				<span>Error</span>
-				<CopyButton
-					value={() => formatErrorPrompt({ message, serviceName, operation: spanName, attributes })}
-					label="Error prompt"
-					idleLabel="Copy as prompt"
-					iconSize={10}
-					className="h-5 px-1.5 text-[10px] text-destructive hover:bg-destructive/10 hover:text-destructive/80"
-				/>
-			</AlertTitle>
-			<AlertDescription>
-				{isLong ? (
-					<Collapsible open={expanded} onOpenChange={setExpanded}>
-						{!expanded && <p className="font-mono text-[11px] line-clamp-2">{message}</p>}
-						<CollapsibleTrigger className="mt-1 flex items-center gap-1 text-[10px] text-destructive hover:text-destructive/80">
-							{expanded ? "Show less" : "Show full error"}
-							{expanded ? <ChevronUpIcon size={10} /> : <ChevronDownIcon size={10} />}
-						</CollapsibleTrigger>
-						<CollapsibleContent>
-							<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-destructive/5 p-2 font-mono text-[11px]">
-								{message}
-							</pre>
-						</CollapsibleContent>
-					</Collapsible>
-				) : (
-					<p className="font-mono text-[11px]">{message}</p>
-				)}
-			</AlertDescription>
-		</Alert>
 	)
 }
 

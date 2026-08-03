@@ -1,7 +1,7 @@
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
-import { EdgeCacheService, type EdgeCacheServiceShape } from "@maple/query-engine/caching"
+import { EdgeCacheService, type EdgeCacheServiceShape } from "@maple/cache"
 import { BillingCustomer, BillingUsage, CatalogPlan, OrgId } from "@maple/domain/http"
 import { Clock, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { CacheBackendLive } from "./lib/CacheBackendLive"

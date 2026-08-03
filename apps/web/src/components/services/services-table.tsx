@@ -1,4 +1,5 @@
 import React from "react"
+import { TableSkeleton } from "@maple/ui/components/ui/table-skeleton"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Link, useNavigate } from "@tanstack/react-router"
 
@@ -481,51 +482,25 @@ interface ServicesTableProps {
 	filters?: ServicesSearchParams
 }
 
+const SERVICES_SKELETON_COLUMNS = [
+	{ header: "Service", skeleton: "w-32" },
+	{ header: "P50", headClassName: "w-[6%]", skeleton: "w-12" },
+	{ header: "P95", headClassName: "w-[9%]", skeleton: "w-14" },
+	{ header: "P99", headClassName: "w-[7%]", skeleton: "w-12" },
+	{ header: "Error Rate", headClassName: "w-[12%]", skeleton: "h-8 w-full" },
+	{ header: "Throughput", headClassName: "w-[12%]", skeleton: "h-8 w-full" },
+	{ header: "Last deploy", headClassName: "w-[18%]", skeleton: "w-24" },
+]
+
 function LoadingState() {
 	return (
 		<div className="space-y-4">
-			<div className="hidden rounded-md border overflow-auto md:block">
-				<Table className="w-full table-fixed">
-					<TableHeader>
-						<TableRow>
-							<TableHead>Service</TableHead>
-							<TableHead className="w-[6%]">P50</TableHead>
-							<TableHead className="w-[9%]">P95</TableHead>
-							<TableHead className="w-[7%]">P99</TableHead>
-							<TableHead className="w-[12%]">Error Rate</TableHead>
-							<TableHead className="w-[12%]">Throughput</TableHead>
-							<TableHead className="w-[18%]">Last deploy</TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{Array.from({ length: 5 }).map((_, i) => (
-							<TableRow key={i}>
-								<TableCell>
-									<Skeleton className="h-4 w-32" />
-								</TableCell>
-								<TableCell>
-									<Skeleton className="h-4 w-12" />
-								</TableCell>
-								<TableCell>
-									<Skeleton className="h-4 w-14" />
-								</TableCell>
-								<TableCell>
-									<Skeleton className="h-4 w-12" />
-								</TableCell>
-								<TableCell>
-									<Skeleton className="h-8 w-full" />
-								</TableCell>
-								<TableCell>
-									<Skeleton className="h-8 w-full" />
-								</TableCell>
-								<TableCell>
-									<Skeleton className="h-4 w-24" />
-								</TableCell>
-							</TableRow>
-						))}
-					</TableBody>
-				</Table>
-			</div>
+			<TableSkeleton
+				columns={SERVICES_SKELETON_COLUMNS}
+				rows={5}
+				tableClassName="w-full table-fixed"
+				className="hidden overflow-auto md:block"
+			/>
 			<div className="overflow-hidden rounded-md border md:hidden">
 				{Array.from({ length: 5 }).map((_, i) => (
 					<div

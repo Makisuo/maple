@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isBackfill, renderStatementFull, type BackfillSpec } from "../backfill"
+import { type BackfillSpec, isBackfill, renderStatementFull } from "../backfill"
 import { migration_0004_service_namespace_projections } from "./0004_service_namespace_projections"
 import { migration_0005_alert_checks_error_columns } from "./0005_alert_checks_error_columns"
 import { migration_0006_db_edge_namespace } from "./0006_db_edge_namespace"
@@ -13,6 +13,8 @@ import {
 	serviceOverviewHourlyBackfill,
 } from "./0009_one_year_service_history"
 import { migration_0010_search_indexes } from "./0010_search_indexes"
+import { migration_0011_session_analytics_columns } from "./0011_session_analytics_columns"
+import { migration_0012_session_event_attribute_keys } from "./0012_session_event_attribute_keys"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -27,11 +29,47 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-		expect(migrations.at(-1)).toBe(migration_0010_search_indexes)
-		expect(latestMigrationVersion).toBe(10)
-		expect(clickHouseSchemaVersion).toBe("9")
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+		expect(migrations.at(-1)).toBe(migration_0012_session_event_attribute_keys)
+		expect(latestMigrationVersion).toBe(12)
+		// 0010 is performance-only, so the ingest-gating version skips it: 9 → 12.
+		expect(clickHouseSchemaVersion).toBe("12")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
+	})
+
+	it("adds session analytics columns with defaults so older SDK rows never quarantine", () => {
+		const sql = migration_0011_session_analytics_columns.statements.join("\n")
+
+		expect(sql).toContain("ADD COLUMN IF NOT EXISTS VisitorId String DEFAULT ''")
+		expect(sql).toContain("ADD COLUMN IF NOT EXISTS GroupId String DEFAULT ''")
+		expect(sql).toContain("ADD COLUMN IF NOT EXISTS UserTraits Map(String, String) DEFAULT map()")
+		expect(sql).toContain("ADD COLUMN IF NOT EXISTS ReferrerHost LowCardinality(String) DEFAULT ''")
+		expect(sql).toContain("ADD INDEX IF NOT EXISTS idx_type Type TYPE set(16)")
+
+		// Every session_replays column add must carry a DEFAULT — Tinybird
+		// quarantines rows omitting a non-defaulted column, which is exactly what
+		// an older SDK sends. Nullable columns default to NULL implicitly.
+		const columnAdds = migration_0011_session_analytics_columns.statements.filter((s) =>
+			s.includes("ADD COLUMN"),
+		)
+		for (const statement of columnAdds) {
+			expect(statement.includes("DEFAULT") || statement.includes("Nullable(")).toBe(true)
+		}
+
+		// Gates direct ingest: the native INSERT names every column explicitly, so
+		// a BYO cluster without them must not be routed direct writes. Read off the
+		// typed array — the migration literal itself simply omits the field.
+		expect(migrations.find((m) => m.version === 11)?.requiredForIngest).toBeUndefined()
+	})
+
+	it("widens session_events attribute keys off the shared dictionary", () => {
+		// `track()` props are customer-named, so the keys stop being a small fixed
+		// set. MODIFY COLUMN is a mutation, not a metadata edit — it lives alone in
+		// its own migration for that reason.
+		expect(migration_0012_session_event_attribute_keys.statements).toEqual([
+			"ALTER TABLE session_events MODIFY COLUMN Attributes Map(String, String)",
+		])
+		expect(migrations.find((m) => m.version === 12)?.requiredForIngest).toBeUndefined()
 	})
 
 	it("adds the portable search substrate without requiring experimental text indexes", () => {

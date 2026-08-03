@@ -11,7 +11,8 @@ import { FetchHttpClient, HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
+import { BucketCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli"
 import {
 	AlertDestination,

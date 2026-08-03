@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import { formatWarehouseDateTimeMs } from "@maple/query-engine"
 import {
 	buildTimeline,
 	COLLAPSED_GAP_MS,
@@ -136,8 +137,7 @@ describe("parseChTimestampMs", () => {
 describe("spanDisplayRange", () => {
 	// Recording starts at this epoch ms; the playhead's time-zero.
 	const recordingStartEpochMs = Date.UTC(2026, 4, 22, 10, 30, 45, 0)
-	const isoAt = (offsetMs: number) =>
-		new Date(recordingStartEpochMs + offsetMs).toISOString().replace("T", " ").replace("Z", "")
+	const isoAt = (offsetMs: number) => formatWarehouseDateTimeMs(recordingStartEpochMs + offsetMs)
 
 	it("maps a span's absolute start to a rrweb-relative offset (identity timeline)", () => {
 		const timeline = buildTimeline([], 60_000)
