@@ -22,7 +22,7 @@ import { dateToMs } from "../lib/time"
 import { EmailService } from "../lib/EmailService"
 import { Env } from "../lib/Env"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
-import { EdgeCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "../lib/warehouse-org-quarantine"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"

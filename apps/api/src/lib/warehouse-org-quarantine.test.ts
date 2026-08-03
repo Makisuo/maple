@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { WarehouseAuthError, WarehouseConfigError, WarehouseUpstreamError } from "@maple/domain/http"
-import { makeEdgeCacheService, makeMemoryBackend } from "@maple/query-engine/caching"
+import { makeEdgeCacheService, makeMemoryBackend } from "@maple/cache"
 import { Cause, Effect } from "effect"
 import {
 	causeHasWarehouseConfigClassError,

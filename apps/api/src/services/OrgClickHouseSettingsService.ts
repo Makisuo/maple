@@ -28,7 +28,7 @@ import {
 	type TableDiffEntry,
 } from "@maple/domain/clickhouse"
 import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
-import { EdgeCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import { eq } from "drizzle-orm"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Clock, Context, Duration, Effect, Layer, Option, Redacted, Ref, Schedule, Schema } from "effect"

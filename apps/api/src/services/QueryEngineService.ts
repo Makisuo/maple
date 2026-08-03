@@ -32,7 +32,8 @@ import {
 } from "@maple/query-engine/runtime"
 import type { QuerySpec } from "@maple/query-engine"
 import type { TenantContext } from "./AuthService"
-import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
+import { BucketCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import * as QueryEngineMetrics from "../lib/QueryEngineMetrics"
 

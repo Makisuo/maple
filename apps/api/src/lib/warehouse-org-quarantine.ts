@@ -1,4 +1,4 @@
-import type { EdgeCacheServiceShape } from "@maple/query-engine/caching"
+import type { EdgeCacheServiceShape } from "@maple/cache"
 import { Cause, Effect, Option } from "effect"
 
 /**
