@@ -29,7 +29,7 @@ Key routes (all served by the one container): `POST /eve/v1/session`, `GET /eve/
 ```
 agent/
   agent.ts            # model (Workers AI) + workflow world selection
-  instructions.md     # system prompt (Slack-adapted port of chat-flue's SYSTEM_PROMPT)
+  instructions.md     # system prompt (Slack-adapted port of the web chat's SYSTEM_PROMPT)
   instructions/maple-app-url.ts # injects MAPLE_APP_BASE_URL for deep links at session start
   instrumentation.ts  # OTel NodeSDK export to Maple's ingest (maple-slack-agent service)
   skills/dashboard-builder/     # test-before-propose dashboard workflow (load_skill)
@@ -324,26 +324,32 @@ All seven are disabled with a `disableTool()` sentinel per file under `agent/too
 > `isDisabledToolSentinel`) and fails on both mistakes; `eve build` also writes the decision to
 > `.output/.eve/compile/compiled-agent-manifest.json` under `disabledFrameworkTools`.
 
-## Parity with the web chat (chat-flue)
+## Parity with the web chat
 
-This agent mirrors the Maple capabilities of `apps/chat-flue` (the Flue web chat) **without
-sharing code** — each capability is re-expressed in eve's native idiom:
+This agent mirrors the Maple capabilities of the web chat (`apps/api/src/chat/`, which replaced the
+Flue-based `apps/chat-flue` worker) **without sharing code** — each capability is re-expressed in
+eve's native idiom:
 
-- **Prompts:** `agent/instructions.md` is the Slack-adapted port of chat-flue's `SYSTEM_PROMPT`
+- **Prompts:** `agent/instructions.md` is the Slack-adapted port of the web chat's `SYSTEM_PROMPT`
+  (`apps/api/src/chat/prompts.ts`)
   (tool prefix `maple__<tool>` instead of `mcp__maple__<tool>`; inline `<<maple:...>>` cards
   replaced with Slack markdown + deep links built from `MAPLE_APP_BASE_URL`).
-- **Modes → skills:** chat-flue's dashboard-builder and investigate modes are progressive-
+- **Modes → skills:** the web chat's dashboard-builder and investigate modes are progressive-
   disclosure skills (`agent/skills/dashboard-builder/`, `agent/skills/incident-investigation/`)
   the model loads via `load_skill`. Alert context comes from the Slack thread (Maple delivers
   alert notifications into Slack), not from a request payload.
-- **Approvals — the one behavioral difference:** chat-flue uses propose-then-apply (the tool
-  returns a `proposed` marker; the web client performs the mutation) because Flue has no
-  human-in-the-loop interrupt. eve has native HITL: `agent/lib/approval.ts` gates the same
-  `MUTATING_TOOL_NAMES` set behind a Slack approve/deny card, and **on approve the real MCP
-  tool executes** with the workspace's `mapleApiKey` — approval is consent; the Maple API
-  boundary still enforces authorization. App-principal (automated/scheduled) turns are denied
-  mutations outright. The mutating-tool set is mirrored, not imported — keep in sync with
-  `apps/api/src/mcp/tools/mutating.ts` (source of truth) and `apps/chat-flue/src/lib/approval.ts`.
+- **Approvals — both sides now interrupt, by different mechanisms:** the web chat stops the turn on
+  a gated tool and emits a `tool-call` with `proposed: true` and no result
+  (`apps/api/src/chat/agent.ts`); the user approves and `POST /api/chat/apply` performs the
+  mutation, which is then recorded back into the transcript as that call's result. (Under Flue this
+  was propose-then-apply with a fabricated `proposed` marker as the tool's *output*, because Flue's
+  event stream had no human-in-the-loop primitive; that marker no longer exists.) eve has native
+  HITL: `agent/lib/approval.ts` gates the same `MUTATING_TOOL_NAMES` set behind a Slack
+  approve/deny card, and **on approve the real MCP tool executes** with the workspace's
+  `mapleApiKey` — approval is consent; the Maple API boundary still enforces authorization.
+  App-principal (automated/scheduled) turns are denied mutations outright. The mutating-tool set is
+  mirrored, not imported — keep in sync with `apps/api/src/mcp/tools/mutating.ts`, which is the
+  source of truth for both.
 - **Telemetry:** `agent/instrumentation.ts` exports AI SDK spans to Maple's ingest as service
   `maple-slack-agent` when `MAPLE_INGEST_KEY` is set (no-op otherwise), with `service.version` +
   `deployment.commit_sha` from Railway's `RAILWAY_GIT_COMMIT_SHA` so releases show up in the
@@ -351,17 +357,17 @@ sharing code** — each capability is re-expressed in eve's native idiom:
   `maple.slack.*` span attributes (omitted rather than empty-string when absent).
   `agent/hooks/outcome-log.ts` logs turn outcomes + tool failures unconditionally, through
   `lib/telemetry-log.ts` — OTLP `/v1/logs` when the ingest key is set (queryable and
-  trace-correlated, like chat-flue), a structured JSON line on stdout otherwise.
+  trace-correlated, like the web chat), a structured JSON line on stdout otherwise.
 - **Deliberately not ported:** page context and the widget-fix entry point (web-only payloads —
   the surgical fix _rules_ live in the dashboard-builder skill, with `get_dashboard` standing in
   for the attached widget JSON), the `submit_diagnosis` tool (the thread reply _is_ the report),
-  and the headless triage workflow (apps/api invokes chat-flue for that).
+  and the headless triage agent (`apps/api/src/workflows/triage-agent.ts`).
 - **Beyond parity — chart images:** the authored `render_chart` tool renders a time-series
   chart in-process (hand-rolled SVG → `@resvg/resvg-js`, no headless browser or external chart
   service) and posts it into the thread via Slack's external-upload flow with the per-team bot
   token (needs the `files:write` scope; the Dockerfile installs `fonts-dejavu-core` for text
   rasterization). On render/upload failure it returns a Unicode sparkline for the model to
-  inline. This is net-new: chat-flue renders no images anywhere.
+  inline. This is net-new: the web chat renders no images anywhere.
 
 Env vars added by this parity work (set on Railway; all runtime-only):
 
@@ -423,7 +429,7 @@ patch mirrors the resolver shape proposed in #222 and can be dropped when upstre
 The same patch file carries a second, Maple-specific hunk: `McpConnectionClient.executeTool`
 (`dist/src/runtime/connections/mcp-client.js`) strips tool-result content entries tagged
 `__maple_ui`. Maple's MCP server emits those structured payloads for the web chat's tables and
-charts (`createDualContent` in apps/api); chat-flue splits them off client-side
+charts (`createDualContent` in apps/api); the web chat splits them off client-side
 (`splitToolResult`), and eve has no result-transform hook, so without the patch the model would
 receive the raw UI JSON duplicated next to the text report on every Maple tool call. Guarded by
 `agent/lib/eve-patch.test.ts` alongside the botToken canary.

@@ -28,6 +28,15 @@ export interface WorkersAiBinding {
 	) => Promise<Response>
 }
 
+/**
+ * Whether `value` is an `Ai` binding this shim can drive.
+ *
+ * Worth being loud about, because the failure is silent: when this returns false the vendored
+ * provider falls through to the REST endpoint with `BINDING_PLACEHOLDER` credentials and 401s at
+ * the *end* of a turn, which reads like a model outage rather than a misconfiguration. Local dev
+ * declares a plain `ai` binding in `wrangler.jsonc` while deploys attach an AI Gateway resource
+ * (`apps/api/alchemy.run.ts`), so the two shapes have to satisfy the same check.
+ */
 export const isWorkersAiBinding = (value: unknown): value is WorkersAiBinding =>
 	typeof value === "object" && value !== null && typeof (value as { run?: unknown }).run === "function"
 
@@ -87,7 +96,19 @@ export const workersAiHttpClient = (
 	fallback: HttpClient.HttpClient,
 	binding: unknown,
 ): HttpClient.HttpClient => {
-	if (!isWorkersAiBinding(binding)) return fallback
+	if (!isWorkersAiBinding(binding)) {
+		// A binding that is *present but unusable* is a misconfiguration, not the documented
+		// keyless-unavailable fallback, and it is otherwise indistinguishable from a model outage:
+		// every call quietly becomes a REST request with placeholder credentials and 401s at the end
+		// of a turn. Say so once, at layer build, rather than per request.
+		if (binding !== undefined && binding !== null) {
+			console.warn(
+				"[workers-ai] the AI binding is present but has no `run` method; " +
+					"model calls will fall back to the REST endpoint",
+			)
+		}
+		return fallback
+	}
 	const ai = binding
 
 	return HttpClient.make((request, _url, signal) => {
