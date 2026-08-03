@@ -191,7 +191,6 @@
       "dependencies": {
         "@maple/infra": "workspace:*",
         "@maple/query-engine": "workspace:*",
-        "@maple/query-engine-integrations": "workspace:*",
         "@maple/ui": "workspace:*",
         "@tanstack/react-query": "^5.95.2",
         "@tanstack/react-virtual": "^3.14.3",
@@ -300,7 +299,6 @@
         "@maple/effect-db": "workspace:*",
         "@maple/infra": "workspace:*",
         "@maple/query-engine": "workspace:*",
-        "@maple/query-engine-integrations": "workspace:*",
         "@maple/ui": "workspace:*",
         "@maple/unitflow": "workspace:*",
         "@rrweb/replay": "^2.0.1",
@@ -646,7 +644,6 @@
       "name": "@maple/query-engine-integrations",
       "dependencies": {
         "@maple-dev/clickhouse-builder": "workspace:*",
-        "@maple/domain": "workspace:*",
         "@maple/query-engine": "workspace:*",
         "effect": "catalog:effect",
       },

@@ -67,8 +67,7 @@
 		"tailwindcss": "catalog:tailwind",
 		"tw-animate-css": "catalog:tailwind",
 		"web-vitals": "^5.3.0",
-		"zod": "^4.4.3",
-		"@maple/query-engine-integrations": "workspace:*"
+		"zod": "^4.4.3"
 	},
 	"devDependencies": {
 		"@effect/language-service": "catalog:effect",
