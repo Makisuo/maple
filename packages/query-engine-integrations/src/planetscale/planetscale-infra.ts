@@ -16,8 +16,8 @@
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { from, fromQuery, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "../schema"
-import { MetricsGauge } from "../tables"
+import { CHNumber } from "@maple/query-engine/ch/schema"
+import { MetricsGauge } from "@maple/query-engine/ch/tables"
 import {
 	CONNECTION_METRIC_NAMES,
 	CPU_METRIC_NAMES,

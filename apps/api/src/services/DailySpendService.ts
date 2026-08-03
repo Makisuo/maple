@@ -3,6 +3,7 @@ import { CH, parseWarehouseDateTime, formatWarehouseDateTime } from "@maple/quer
 import { Context, Effect, Layer } from "effect"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import type { TenantContext } from "./AuthService"
+import * as Integrations from "@maple/query-engine-integrations"
 
 /**
  * The daily volume series behind the billing page's cumulative spend chart.
@@ -69,8 +70,8 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				const signalRows = yield* warehouse
 					.compiledQuery(
 						tenant,
-						CH.compile(CH.dailySignalVolumeQuery(), params, {
-							rowSchema: CH.dailySignalVolumeRowSchema,
+						CH.compile(Integrations.dailySignalVolumeQuery(), params, {
+							rowSchema: Integrations.dailySignalVolumeRowSchema,
 						}),
 						{ profile: "list", context: "billingDailySignalVolume" },
 					)
@@ -79,8 +80,8 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				const sessionRows = yield* warehouse
 					.compiledQuery(
 						tenant,
-						CH.compile(CH.dailySessionCountQuery(), params, {
-							rowSchema: CH.dailySessionCountRowSchema,
+						CH.compile(Integrations.dailySessionCountQuery(), params, {
+							rowSchema: Integrations.dailySessionCountRowSchema,
 						}),
 						{ profile: "list", context: "billingDailySessionCount" },
 					)
