@@ -10,7 +10,7 @@
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from } from "@maple-dev/clickhouse-builder"
-import { Traces } from "../tables"
+import { Traces } from "@maple/query-engine/ch/tables"
 
 // ---------------------------------------------------------------------------
 // db.statement samples

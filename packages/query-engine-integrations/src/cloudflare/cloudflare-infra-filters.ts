@@ -17,7 +17,7 @@
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { type ColumnAccessor } from "@maple-dev/clickhouse-builder"
-import type { MetricsGauge, MetricsSum } from "../tables"
+import type { MetricsGauge, MetricsSum } from "@maple/query-engine/ch/tables"
 
 /** Filter key → the metric attribute it lives on. */
 export const CF_ATTR = {

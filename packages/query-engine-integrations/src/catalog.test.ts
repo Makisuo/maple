@@ -1,0 +1,35 @@
+import { describe, expect, it } from "vitest"
+import { collectIntegrationCatalog } from "./catalog"
+
+// The integration-side half of the SQL gate. `@maple/query-engine`'s catalog
+// cannot reach these builders — it must not depend on this package — so the
+// same guarantees are asserted here: every shape compiles, is tenant-scoped,
+// and is pinned byte-for-byte.
+describe("integration sql catalog", () => {
+	const entries = collectIntegrationCatalog()
+
+	it("compiles every fixture", () => {
+		expect(entries.length).toBeGreaterThan(0)
+		for (const entry of entries) {
+			expect(entry.sql, entry.id).toBeTruthy()
+			expect(entry.sql.toUpperCase(), entry.id).toContain("SELECT")
+		}
+	})
+
+	// Structural, not a substring check on the SQL — see the tenant-scope work in
+	// @maple-dev/clickhouse-builder. No integration query reads across tenants.
+	it("scopes every query to an org", () => {
+		for (const entry of entries) {
+			expect(entry.compiled.tenantScope, `${entry.id} tenant scope`).toBe("org")
+		}
+	})
+
+	it("emits the same SQL as the recorded baseline", async () => {
+		const rendered = [...entries]
+			.sort((a, b) => a.id.localeCompare(b.id))
+			.map((entry) => `-- ${entry.id}\n${entry.sql}`)
+			.join("\n\n")
+
+		await expect(rendered).toMatchFileSnapshot("__sql_baseline__/integrations.sql")
+	})
+})

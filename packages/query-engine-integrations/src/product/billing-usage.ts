@@ -23,9 +23,9 @@
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { from, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { ServiceUsage, SessionReplays } from "../tables"
-import { CHNumber } from "../schema"
-import { hourFloor } from "./query-helpers"
+import { ServiceUsage, SessionReplays } from "@maple/query-engine/ch/tables"
+import { CHNumber } from "@maple/query-engine/ch/schema"
+import { hourFloor } from "@maple/query-engine/ch/query-helpers"
 
 const DAY_SECONDS = 86_400
 

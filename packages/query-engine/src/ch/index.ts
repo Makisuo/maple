@@ -69,42 +69,6 @@ export {
 } from "./queries/attribute-keys"
 
 // Queries — Setup audit
-export {
-	auditAttributeKeyInventoryQuery,
-	auditAttributeKeyInventoryRowSchema,
-	auditSpanShapeByServiceQuery,
-	auditSpanShapeRowSchema,
-	auditSamplingByServiceQuery,
-	auditSamplingRowSchema,
-	auditLogSeverityByServiceQuery,
-	auditLogSeverityRowSchema,
-	auditMetricLabelCardinalityQuery,
-	auditMetricLabelRowSchema,
-	auditPeerValueInventoryQuery,
-	auditPeerValueRowSchema,
-	auditDbEdgeIdentityQuery,
-	auditDbEdgeRowSchema,
-	auditLogCorrelationQuery,
-	auditLogCorrelationRowSchema,
-	auditOrphanSpansSQL,
-	auditOrphanSpanRowSchema,
-	auditRootlessTracesSQL,
-	auditRootlessTraceRowSchema,
-	auditTraceSampleModulus,
-	AUDIT_LOG_CORRELATION_MAX_HOURS,
-	AUDIT_PEER_KEYS,
-	type AuditAttributeKeyRow,
-	type AuditSpanShapeRow,
-	type AuditSamplingRow,
-	type AuditLogSeverityRow,
-	type AuditMetricLabelRow,
-	type AuditPeerValueRow,
-	type AuditDbEdgeRow,
-	type AuditLogCorrelationRow,
-	type AuditOrphanSpanRow,
-	type AuditRootlessTraceRow,
-	type AuditTraceWindowParams,
-} from "./queries/setup-audit"
 
 // Queries — Metrics
 export {
@@ -372,165 +336,24 @@ export {
 } from "./queries/alert-checks"
 
 // Queries — Cloudflare integration usage (integrations-page ingest proof)
-export {
-	BLOCKED_FIREWALL_ACTIONS,
-	CLOUDFLARE_USAGE_METRIC_NAMES,
-	cloudflareUsageQuery,
-	cloudflareUsageRowSchema,
-	cloudflareUsageStatsQuery,
-	cloudflareUsageStatsRowSchema,
-	type CloudflareUsageOutput,
-	type CloudflareUsageStatsOutput,
-} from "./queries/cloudflare-usage"
 
 // Queries — Cloudflare service-map stats (per-zone / per-Worker node rollups)
-export {
-	cloudflareServiceCountersRowSchema,
-	cloudflareServiceCountersSQL,
-	cloudflareServiceLatencyRowSchema,
-	cloudflareServiceLatencySQL,
-	type CloudflareServiceCountersOutput,
-	type CloudflareServiceLatencyOutput,
-} from "./queries/cloudflare-map"
 
 // Queries — PlanetScale service-map stats (per-database / per-branch rollups)
-export {
-	planetscaleBranchConnectionsRowSchema,
-	planetscaleBranchConnectionsSQL,
-	planetscaleBranchGaugesSQL,
-	planetscaleBranchStatsRowSchema,
-	planetscaleBranchStorageRowSchema,
-	planetscaleBranchStorageSQL,
-	planetscaleConnectionsRowSchema,
-	planetscaleConnectionsSQL,
-	planetscaleDatabaseStatsRowSchema,
-	planetscaleGaugesSQL,
-	planetscaleStorageRowSchema,
-	planetscaleStorageSQL,
-	type PlanetScaleBranchConnectionsOutput,
-	type PlanetScaleBranchStatsOutput,
-	type PlanetScaleBranchStorageOutput,
-	type PlanetScaleConnectionsOutput,
-	type PlanetScaleDatabaseStatsOutput,
-	type PlanetScaleStorageOutput,
-} from "./queries/planetscale-map"
 
 // Queries — PlanetScale infrastructure page (per-database / per-branch timeseries)
-export {
-	planetscaleBranchInfraTimeseriesSQL,
-	planetscaleInfraTimeseriesRowSchema,
-	planetscaleInfraTimeseriesSQL,
-	type PlanetScaleInfraTimeseriesOutput,
-} from "./queries/planetscale-infra"
 
 // Queries — Cloudflare infrastructure page (per-zone HTTP + per-Worker rollups & timeseries)
-export {
-	cloudflareZoneCountersRowSchema,
-	cloudflareZoneCountersSQL,
-	cloudflareZoneLatencyRowSchema,
-	cloudflareZoneLatencySQL,
-	cloudflareZoneTimeseriesRowSchema,
-	cloudflareZoneTimeseriesSQL,
-	cloudflareZoneStatusTimeseriesRowSchema,
-	cloudflareZoneStatusTimeseriesSQL,
-	cloudflareZoneCacheTimeseriesRowSchema,
-	cloudflareZoneCacheTimeseriesSQL,
-	cloudflareZoneLatencyTimeseriesRowSchema,
-	cloudflareZoneLatencyTimeseriesSQL,
-	cloudflareWorkerCountersRowSchema,
-	cloudflareWorkerCountersSQL,
-	cloudflareWorkerLatencyRowSchema,
-	cloudflareWorkerLatencySQL,
-	cloudflareWorkerTimeseriesRowSchema,
-	cloudflareWorkerTimeseriesSQL,
-	type CloudflareZoneCountersOutput,
-	type CloudflareZoneLatencyOutput,
-	type CloudflareZoneTimeseriesOutput,
-	type CloudflareZoneStatusTimeseriesOutput,
-	type CloudflareZoneCacheTimeseriesOutput,
-	type CloudflareZoneLatencyTimeseriesOutput,
-	type CloudflareWorkerCountersOutput,
-	type CloudflareWorkerLatencyOutput,
-	type CloudflareWorkerTimeseriesOutput,
-} from "./queries/cloudflare-infra"
 
 // Queries — Cloudflare infrastructure page, extended datasets (hosts, firewall, DNS, platform)
-export {
-	cloudflareZoneHostBreakdownRowSchema,
-	cloudflareZoneHostBreakdownSQL,
-	cloudflareZoneHostTimeseriesRowSchema,
-	cloudflareZoneHostTimeseriesSQL,
-	cloudflareZoneFirewallTimeseriesRowSchema,
-	cloudflareZoneFirewallTimeseriesSQL,
-	cloudflareZoneFirewallTopRowSchema,
-	cloudflareZoneFirewallTopSQL,
-	cloudflareZoneDnsTimeseriesRowSchema,
-	cloudflareZoneDnsTimeseriesSQL,
-	cloudflareZoneDnsBreakdownRowSchema,
-	cloudflareZoneDnsBreakdownSQL,
-	cloudflareQueueGaugesRowSchema,
-	cloudflareQueueGaugesSQL,
-	cloudflareDurableObjectCountersRowSchema,
-	cloudflareDurableObjectCountersSQL,
-	type CloudflareZoneHostBreakdownOutput,
-	type CloudflareZoneHostTimeseriesOutput,
-	type CloudflareZoneFirewallTimeseriesOutput,
-	type CloudflareZoneFirewallTopOutput,
-	type CloudflareZoneDnsTimeseriesOutput,
-	type CloudflareZoneDnsBreakdownOutput,
-	type CloudflareQueueGaugesOutput,
-	type CloudflareDurableObjectCountersOutput,
-} from "./queries/cloudflare-infra-extended"
 
 // Queries — Cloudflare zone filters (which dimensions each metric family actually carries)
-export {
-	CF_ATTR,
-	CF_FILTERABLE,
-	CF_METRIC,
-	cloudflareFilterConditions,
-	cloudflareHostAttr,
-	cloudflareIgnoredFilters,
-	cloudflareIgnoredFiltersFor,
-	type CfFilterKey,
-	type CloudflareFilterOpts,
-} from "./queries/cloudflare-infra-filters"
 
 // Queries — Cloudflare zone breakdowns (generic per-dimension totals/timeseries) + filter facets
-export {
-	CLOUDFLARE_BREAKDOWN_DIMENSIONS,
-	CLOUDFLARE_BREAKDOWN_OTHER_KEY,
-	CLOUDFLARE_BREAKDOWN_SERIES_LIMIT,
-	cloudflareBreakdownMetrics,
-	cloudflareZoneBreakdownCoverageRowSchema,
-	cloudflareZoneBreakdownCoverageSQL,
-	cloudflareZoneBreakdownTimeseriesRowSchema,
-	cloudflareZoneBreakdownTimeseriesSQL,
-	cloudflareZoneBreakdownTotalsRowSchema,
-	cloudflareZoneBreakdownTotalsSQL,
-	cloudflareZoneFacetsQuery,
-	type CloudflareBreakdownDimension,
-	type CloudflareZoneBreakdownCoverageOutput,
-	type CloudflareZoneBreakdownTimeseriesOutput,
-	type CloudflareZoneBreakdownTotalsOutput,
-	type CloudflareZoneFacetsOutput,
-} from "./queries/cloudflare-infra-breakdowns"
 
 // Queries — Internal observability (Maple's own self-instrumentation)
-export {
-	dbStatementSamplesQuery,
-	type DbStatementSamplesOpts,
-	type DbStatementSamplesOutput,
-} from "./queries/internal"
 
 // Queries — Billing (daily ingested volume behind the spend chart)
-export {
-	dailySessionCountQuery,
-	dailySessionCountRowSchema,
-	dailySignalVolumeQuery,
-	dailySignalVolumeRowSchema,
-	type DailySessionCountOutput,
-	type DailySignalVolumeOutput,
-} from "./queries/billing-usage"
 
 // Queries — Telemetry liveness (auto-resolve gating + local-mode header heartbeat)
 export {

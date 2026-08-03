@@ -18,7 +18,8 @@
 		"effect": "catalog:effect",
 		"react": "catalog:react",
 		"react-dom": "catalog:react",
-		"sugar-high": "^1.2.1"
+		"sugar-high": "^1.2.1",
+		"@maple/query-engine-integrations": "workspace:*"
 	},
 	"devDependencies": {
 		"@tailwindcss/vite": "catalog:tailwind",
