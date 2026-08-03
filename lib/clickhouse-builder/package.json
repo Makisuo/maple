@@ -10,11 +10,25 @@
 		"typescript"
 	],
 	"license": "MIT",
+	"author": "Maple Tech Labs",
+	"homepage": "https://github.com/MapleTechLabs/maple/tree/main/lib/clickhouse-builder#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/MapleTechLabs/maple.git",
+		"directory": "lib/clickhouse-builder"
+	},
+	"bugs": {
+		"url": "https://github.com/MapleTechLabs/maple/issues"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
 	"files": [
 		"dist",
 		"README.md"
 	],
 	"type": "module",
+	"sideEffects": false,
 	"exports": {
 		".": {
 			"types": "./dist/index.d.mts",

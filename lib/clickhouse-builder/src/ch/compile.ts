@@ -25,7 +25,7 @@ import { Effect, Option, Schema } from "effect"
 export class QueryBuilderError extends Schema.TaggedErrorClass<QueryBuilderError>()(
 	"@maple-dev/clickhouse-builder/QueryBuilderError",
 	{
-		code: Schema.Literals(["SelectRequired", "UnresolvedParam"]),
+		code: Schema.Literals(["SelectRequired", "UnresolvedParam", "InvalidOrderBySpec"]),
 		message: Schema.String,
 	},
 ) {}
@@ -38,6 +38,28 @@ export class CompiledQueryDecodeError extends Schema.TaggedErrorClass<CompiledQu
 		cause: Schema.optional(Schema.Unknown),
 	},
 ) {}
+
+/** `orderBy` takes `[column, direction]` tuples. A bare string is the natural
+ *  mistake (`.orderBy("count", "desc")`), and it is invisible without types:
+ *  destructuring a string yields its first two characters, so `"count"` used to
+ *  compile to `count -> "c O"`. Fail loudly instead of emitting invalid SQL. */
+const orderByClause = (specs: ReadonlyArray<[string, "asc" | "desc"]>): Array<string> =>
+	specs.map((spec) => {
+		if (!Array.isArray(spec) || spec.length !== 2) {
+			throw new QueryBuilderError({
+				code: "InvalidOrderBySpec",
+				message: `CHQuery: orderBy() takes [column, direction] tuples, got ${JSON.stringify(spec)}`,
+			})
+		}
+		const [column, direction] = spec
+		if (direction !== "asc" && direction !== "desc") {
+			throw new QueryBuilderError({
+				code: "InvalidOrderBySpec",
+				message: `CHQuery: orderBy() direction must be "asc" or "desc", got ${JSON.stringify(direction)}`,
+			})
+		}
+		return `${column} ${direction.toUpperCase()}`
+	})
 
 // ---------------------------------------------------------------------------
 // CompiledQuery — bundles the SQL string with its output type so consumers
@@ -266,7 +288,7 @@ export function compileCH<
 		joins,
 		where: whereFragments,
 		groupBy: state.groupByKeys.map((k) => raw(k)),
-		orderBy: state.orderBySpecs.map(([k, dir]) => raw(`${k} ${dir.toUpperCase()}`)),
+		orderBy: orderByClause(state.orderBySpecs).map(raw),
 		limit: state.limitValue != null ? raw(String(Math.round(state.limitValue))) : undefined,
 		offset: state.offsetValue != null ? raw(String(Math.round(state.offsetValue))) : undefined,
 		format: options?.skipFormat ? undefined : state.formatValue,
@@ -329,7 +351,7 @@ export function compileUnion<Output extends Record<string, any>, Params extends 
 	if (hasOuter) {
 		sql = `SELECT * FROM (\n${sql}\n)`
 		if (state.outerOrderBySpecs.length > 0) {
-			sql += `\nORDER BY ${state.outerOrderBySpecs.map(([k, dir]) => `${k} ${dir.toUpperCase()}`).join(", ")}`
+			sql += `\nORDER BY ${orderByClause(state.outerOrderBySpecs).join(", ")}`
 		}
 		if (state.outerLimitValue != null) {
 			sql += `\nLIMIT ${Math.round(state.outerLimitValue)}`
