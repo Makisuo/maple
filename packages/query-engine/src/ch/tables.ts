@@ -387,6 +387,34 @@ export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
 	SampleRateSum: T.float64,
 })
 
+// Reached only from the raw-SQL builders in queries/service-map.ts, which
+// interpolate `.name` rather than going through the DSL — the `multiIf` ladders
+// they emit are what the DSL can't express. Declared here anyway so
+// tables.test.ts drift-checks the columns those builders read.
+export const ServiceExternalEdgesHourly = table("service_external_edges_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	ServiceName: T.string,
+	TargetType: T.string,
+	TargetSystem: T.string,
+	TargetName: T.string,
+	DeploymentEnv: T.string,
+	CallCount: T.uint64,
+	ErrorCount: T.uint64,
+	DurationSumMs: T.float64,
+	MaxDurationMs: T.float64,
+	SampleRateSum: T.float64,
+})
+
+export const ServiceAddressResolutionsHourly = table("service_address_resolutions_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	SourceService: T.string,
+	ParentServerAddress: T.string,
+	ResolvedTargetService: T.string,
+	DeploymentEnv: T.string,
+})
+
 export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 	OrgId: T.string,
 	Hour: T.dateTime,

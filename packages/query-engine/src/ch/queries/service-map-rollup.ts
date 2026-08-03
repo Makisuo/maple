@@ -106,6 +106,7 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 
 	return unsafeCompiledQuery({
 		sql,
+		tenantScope: "org",
 		rowSchema: ServiceMapEdgesExistingHourSchema,
 	})
 }
@@ -128,6 +129,7 @@ FORMAT JSON`
 
 	return unsafeCompiledQuery({
 		sql,
+		tenantScope: "org",
 		rowSchema: ServiceMapEdgesHourlyOutputSchema,
 	})
 }
@@ -235,6 +237,7 @@ export function serviceMapResolutionsRollupSQL(
 
 	return unsafeCompiledQuery({
 		sql,
+		tenantScope: "org",
 		rowSchema: ServiceAddressResolutionsHourlyOutputSchema,
 	})
 }

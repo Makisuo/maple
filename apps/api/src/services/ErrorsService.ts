@@ -548,12 +548,14 @@ const make: Effect.Effect<
 			startTime: formatWarehouseDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS),
 		})
 		return yield* warehouse
-			.compiledQuery(systemTenant(knownOrgs[0] as OrgId), compiled, {
+			.crossOrgQuery(systemTenant(knownOrgs[0] as OrgId), compiled, {
 				// Bound the one cross-org scan (no OrgId predicate ⇒ can't prune the
 				// primary key): abort server-side at 5s instead of riding the ~30s
 				// client timeout when the warehouse is slow.
 				profile: "discovery",
 				context: "errorActiveOrgsDiscovery",
+				justification:
+					"enumerate orgs with recent error events so the error-issue sweep skips idle orgs",
 			})
 			.pipe(
 				Effect.map((rows) => {

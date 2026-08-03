@@ -156,8 +156,15 @@ const makeWarehouseStub = (
 	fingerprintRows?: () => ReadonlyArray<Record<string, unknown>>,
 ): WarehouseQueryServiceShape => ({
 	query: () => Effect.die(new Error("unexpected warehouse query")),
-	sqlQuery: () => Effect.succeed([]),
 	rawSqlQuery: () => Effect.succeed([]),
+	// Active-org discovery is a declared cross-org read, so it arrives here
+	// rather than on compiledQuery. Same modelling as before: surface the org
+	// iff it currently has error rows.
+	crossOrgQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>) =>
+		Effect.suspend(() => {
+			const orgId = (tenant as { orgId?: string }).orgId ?? ""
+			return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
+		}),
 	compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
 		Effect.suspend(() => {
 			if (options?.context === "errorIssuesScan") {
@@ -258,8 +265,18 @@ const makeGatingLayer = (opts: {
 	const scanRows = opts.scanRows ?? (() => [])
 	const warehouseStub: WarehouseQueryServiceShape = {
 		query: () => Effect.die(new Error("unexpected warehouse query")),
-		sqlQuery: () => Effect.succeed([]),
 		rawSqlQuery: () => Effect.succeed([]),
+		crossOrgQuery: <T>(
+			tenant: unknown,
+			compiled: CompiledQuery<T>,
+			options: SqlQueryOptions & { readonly justification: string },
+		) =>
+			Effect.suspend(() => {
+				if (options?.context) opts.profiles?.set(options.context, options.profile)
+				if (opts.failDiscovery) return Effect.die(new Error("discovery down"))
+				const orgId = (tenant as { orgId?: string }).orgId ?? ""
+				return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
+			}),
 		compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) => {
 			if (options?.context) opts.profiles?.set(options.context, options.profile)
 			if (options?.context === "errorActiveOrgsDiscovery") {

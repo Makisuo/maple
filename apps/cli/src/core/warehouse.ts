@@ -48,8 +48,6 @@ export const WarehouseExecutorFromMode = Layer.effect(
 				getShape.pipe(
 					Effect.flatMap((shape) => shape.query<T>(pipe as WarehouseQueryName, params, options)),
 				),
-			sqlQuery: <T = Record<string, unknown>>(sql: string, options?: SqlQueryOptions) =>
-				getShape.pipe(Effect.flatMap((shape) => shape.sqlQuery<T>(sql, options))),
 			compiledQuery: (compiled, options?: SqlQueryOptions) =>
 				getShape.pipe(Effect.flatMap((shape) => shape.compiledQuery(compiled, options))),
 			compiledQueryFirst: (compiled, options?: SqlQueryOptions) =>

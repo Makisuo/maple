@@ -18,7 +18,7 @@ import * as CH from "./index"
 import type { TracesMetric, AttributeFilter, MetricType } from "../query-engine"
 import type { OrgId } from "@maple/domain"
 import { unsafeCompiledQuery, type CompiledQuery } from "@maple-dev/clickhouse-builder"
-import { Array as A, Match, Result } from "effect"
+import { Array as A, Match, Result, Schema } from "effect"
 import {
 	attributeIndexMode,
 	baselineWarehouseCapabilities,
@@ -59,7 +59,7 @@ export function compilePipeQuery(
 	const int = (key: string, def?: number) => (params[key] != null ? Number(params[key]) : def)
 	const bool = (key: string) => params[key] === true || params[key] === "1" || params[key] === "true"
 
-	const compileCompare = (
+	const compileCompare = <Fields extends Schema.Struct.Fields>(
 		query: CompileTarget,
 		ranges: {
 			currentStart: string
@@ -67,23 +67,38 @@ export function compilePipeQuery(
 			previousStart: string
 			previousEnd: string
 		},
+		/**
+		 * The branch query's row schema. Taking a `Schema.Struct` rather than a
+		 * bare `Schema` is what makes the `period` field spreadable below — and
+		 * every `*RowSchema` export already is one. Without this the union
+		 * decoded nothing, so on a backend that quotes 64-bit integers every
+		 * count came back as a string. See ../schema.ts.
+		 */
+		rowSchema?: Schema.Struct<Fields>,
 	): PipeCompiledQuery => {
-		const currentSql = CH.compile(
+		const current = CH.compile(
 			query,
 			{ orgId, startTime: ranges.currentStart, endTime: ranges.currentEnd },
 			{ skipFormat: true },
-		).sql
-		const previousSql = CH.compile(
+		)
+		const previous = CH.compile(
 			query,
 			{ orgId, startTime: ranges.previousStart, endTime: ranges.previousEnd },
 			{ skipFormat: true },
-		).sql
+		)
 		return unsafeCompiledQuery({
 			sql:
-				`SELECT 'current' AS period, * FROM (\n${currentSql}\n)\n` +
+				`SELECT 'current' AS period, * FROM (\n${current.sql}\n)\n` +
 				`UNION ALL\n` +
-				`SELECT 'previous' AS period, * FROM (\n${previousSql}\n)\n` +
+				`SELECT 'previous' AS period, * FROM (\n${previous.sql}\n)\n` +
 				`FORMAT JSON`,
+			// Both branches are the same builder over different windows, so the
+			// union is scoped exactly when the branch is.
+			tenantScope:
+				current.tenantScope === "org" && previous.tenantScope === "org" ? "org" : "cross-org",
+			rowSchema: rowSchema
+				? Schema.Struct({ period: Schema.Literals(["current", "previous"]), ...rowSchema.fields })
+				: undefined,
 		})
 	}
 
@@ -301,6 +316,7 @@ export function compilePipeQuery(
 						previousStart: str("previous_start_time") ?? startTime,
 						previousEnd: str("previous_end_time") ?? endTime,
 					},
+					CH.serviceOverviewRowSchema,
 				),
 			),
 			Match.when("services_facets", () =>
@@ -342,7 +358,9 @@ export function compilePipeQuery(
 					currentEnd: str("current_end_time") ?? endTime,
 					previousStart: str("previous_start_time") ?? startTime,
 					previousEnd: str("previous_end_time") ?? endTime,
-				}),
+				},
+				CH.serviceUsageRowSchema,
+				),
 			),
 			Match.when("service_dependencies", () =>
 				eraseType(

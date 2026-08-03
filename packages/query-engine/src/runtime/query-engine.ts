@@ -80,11 +80,6 @@ export interface QueryTenant {
  * `WarehouseQueryService` and `T` is inferred as that concrete tenant.
  */
 export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
-	readonly sqlQuery: (
-		tenant: T,
-		sql: string,
-		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError>
 	readonly rawSqlQuery: (
 		tenant: T,
 		sql: string,
