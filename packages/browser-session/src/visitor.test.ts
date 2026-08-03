@@ -185,6 +185,36 @@ describe("visitor cookie", () => {
 		expect(jar.get("maple_visitor")?.domain).toBe("example.com")
 	})
 
+	it("takes the narrower cookieDomain when two SDKs disagree, in either order", () => {
+		// Both SDKs configure privacy independently, so neither call can be
+		// assumed to be the first — the tighter scope has to win regardless of
+		// which arrives first. `""` (host-only) is the tightest value there is.
+		for (const order of [
+			["example.com", ""],
+			["", "example.com"],
+		] as const) {
+			installStorage()
+			const jar = installCookies({ hostname: "app.example.com" })
+			configureVisitorCookie({ cookieDomain: order[0] })
+			configureVisitorCookie({ cookieDomain: order[1] })
+
+			getVisitorId()
+			expect(jar.get("maple_visitor")?.domain).toBe("")
+			resetVisitorCacheForTests()
+		}
+	})
+
+	it("takes the longer of two non-empty cookie domains — the shorter is broader", () => {
+		installStorage()
+		const jar = installCookies({ hostname: "a.b.example.com" })
+
+		configureVisitorCookie({ cookieDomain: "b.example.com" })
+		configureVisitorCookie({ cookieDomain: "example.com" })
+
+		getVisitorId()
+		expect(jar.get("maple_visitor")?.domain).toBe("b.example.com")
+	})
+
 	it("prefers the shared cookie over a divergent origin-local id, and converges", () => {
 		const store = installStorage()
 		const jar = installCookies({ hostname: "app.example.com" })

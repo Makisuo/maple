@@ -31,16 +31,27 @@ const REPLAY_SAMPLE_RATE = Number(import.meta.env.PUBLIC_MAPLE_REPLAY_SAMPLE_RAT
 const COOKIE_DOMAIN = import.meta.env.PUBLIC_MAPLE_COOKIE_DOMAIN
 
 /**
- * Event names, `object_action`. Keeping them in a union rather than free-form
- * strings is what stops `cta_click` and `clicked_cta` from both existing three
- * months from now — the warehouse has no schema to catch it.
+ * Event names, `object_action`. Keeping them in a closed set rather than
+ * free-form strings is what stops `cta_click` and `clicked_cta` from both
+ * existing three months from now — the warehouse has no schema to catch it.
+ *
+ * This is a runtime set, not just a union, because the `data-track` attributes
+ * below are strings in markup that no compiler ever sees. The type is derived
+ * from it so the two cannot drift.
  */
-export type LandingEvent =
-	| "cta_click"
-	| "pricing_plan_selected"
-	| "pricing_calculator_changed"
-	| "install_command_copied"
-	| "docs_search"
+export const LANDING_EVENTS = [
+	"cta_click",
+	"pricing_plan_selected",
+	"pricing_calculator_changed",
+	"install_command_copied",
+	"docs_search",
+] as const
+
+export type LandingEvent = (typeof LANDING_EVENTS)[number]
+
+function isLandingEvent(name: string): name is LandingEvent {
+	return (LANDING_EVENTS as ReadonlyArray<string>).includes(name)
+}
 
 let started = false
 
@@ -110,6 +121,17 @@ function bindDeclarativeTracking(): void {
 			const host = target.closest<HTMLElement>("[data-track]")
 			const name = host?.dataset.track
 			if (!host || !name) return
+			// The markup is the one path into `track()` that the compiler never
+			// checks, so a typo'd `data-track` would otherwise ship silently and
+			// show up as a second event name in the warehouse weeks later.
+			if (!isLandingEvent(name)) {
+				if (import.meta.env.DEV) {
+					console.warn(
+						`[maple] ignoring unknown data-track="${name}" — add it to LANDING_EVENTS first.`,
+					)
+				}
+				return
+			}
 
 			const props: Record<string, string> = {}
 			for (const [key, value] of Object.entries(host.dataset)) {
@@ -117,7 +139,7 @@ function bindDeclarativeTracking(): void {
 				// `data-track-location` → dataset.trackLocation → `location`.
 				props[key.slice(5).replace(/^./, (c) => c.toLowerCase())] = value
 			}
-			MapleBrowser.track(name, props)
+			trackLanding(name, props)
 		},
 		// Capture, so a handler that stops propagation (or a React island that
 		// re-renders the node away) can't swallow the event first.

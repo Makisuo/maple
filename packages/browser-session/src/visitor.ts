@@ -78,16 +78,30 @@ let probedCookieDomain: string | undefined
  * Like the consent gates, this only ever *tightens*: an app that initializes two
  * SDKs, only one of which passes a `privacy` block, must not have the other's
  * absent option widen the cookie back out to every subdomain.
+ *
+ * "Tighter" for `cookieDomain` means *narrower scope*, which is why this is not
+ * first-write-wins: `""` (host-only) is the tightest value there is, and a
+ * second SDK asking for it has to win over an earlier `"example.com"`. Between
+ * two non-empty domains the shorter one is the broader — `example.com` covers
+ * `app.example.com` and not the reverse — so the longer string wins.
  */
 export function configureVisitorCookie(options: {
 	readonly crossSubdomainCookie?: boolean | undefined
 	readonly cookieDomain?: string | undefined
 }): void {
 	if (options.crossSubdomainCookie === false) crossSubdomainCookie = false
-	if (options.cookieDomain !== undefined && cookieDomainOverride === undefined) {
-		cookieDomainOverride = options.cookieDomain
+	if (options.cookieDomain !== undefined) {
+		cookieDomainOverride = tighterCookieDomain(cookieDomainOverride, options.cookieDomain)
 	}
 	probedCookieDomain = undefined
+}
+
+/** The narrower of two `Domain=` values, treating `undefined` as "unset". */
+function tighterCookieDomain(current: string | undefined, next: string): string {
+	if (current === undefined) return next
+	// Host-only beats any domain-scoped cookie, whichever side asked for it.
+	if (current === "" || next === "") return ""
+	return next.length > current.length ? next : current
 }
 
 // --- Cookie plumbing -------------------------------------------------------
@@ -128,9 +142,9 @@ function setRawCookie(name: string, value: string, domain: string, maxAgeSeconds
 /**
  * The broadest domain this browser will actually accept a cookie for, found by
  * probing rather than by carrying a public-suffix list — the same trick
- * posthog-js uses. Candidates widen from two labels outward and the first that
- * sticks wins, so `app.example.co.uk` skips the rejected `co.uk` and lands on
- * `example.co.uk`.
+ * posthog-js uses. Candidates start at the broadest (the last two labels) and
+ * narrow a label at a time, with the first that sticks winning — so
+ * `app.example.co.uk` tries the rejected `co.uk`, then lands on `example.co.uk`.
  *
  * Returns `""` (host-only cookie) for single-label hosts like `localhost` and
  * for bare IPs, neither of which can carry a `Domain=` attribute.
