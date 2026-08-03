@@ -69,7 +69,7 @@ jobs:
                         - *base
                         - 'apps/cli/**'
                         - 'apps/local-ui/**'
-                        - 'lib/effect-sdk/**'
+                        - 'packages/effect-sdk/**'
                         - 'lib/clickhouse-builder/**'
                         - 'packages/domain/**'
                         - 'packages/query-engine/**'

@@ -21,11 +21,11 @@ Every service must publish these on its OTel `Resource`. Skip any of them and th
 
 ### TypeScript (Effect server)
 
-Use `MapleServerSDK` from [lib/effect-sdk/src/server/index.ts](../../../../lib/effect-sdk/src/server/index.ts). Detection lives in [lib/effect-sdk/src/server/platform.ts](../../../../lib/effect-sdk/src/server/platform.ts) — it auto-resolves `cloud.*` / `faas.*` / `process.runtime.name` from `std-env` plus per-platform env vars. No manual setup needed beyond passing `serviceName` and `serviceVersion`.
+Use `MapleServerSDK` from [packages/effect-sdk/src/server/index.ts](../../../../packages/effect-sdk/src/server/index.ts). Detection lives in [packages/effect-sdk/src/server/platform.ts](../../../../packages/effect-sdk/src/server/platform.ts) — it auto-resolves `cloud.*` / `faas.*` / `process.runtime.name` from `std-env` plus per-platform env vars. No manual setup needed beyond passing `serviceName` and `serviceVersion`.
 
 ### TypeScript (Cloudflare Workers)
 
-Use `MapleCloudflareSDK` from [lib/effect-sdk/src/cloudflare/index.ts](../../../../lib/effect-sdk/src/cloudflare/index.ts). Hard-codes `cloud.provider="cloudflare"`, `cloud.platform="cloudflare.workers"`, `process.runtime.name="workerd"`, `maple.sdk.type="cloudflare"`.
+Use `MapleCloudflareSDK` from [packages/effect-sdk/src/cloudflare/index.ts](../../../../packages/effect-sdk/src/cloudflare/index.ts). Hard-codes `cloud.provider="cloudflare"`, `cloud.platform="cloudflare.workers"`, `process.runtime.name="workerd"`, `maple.sdk.type="cloudflare"`.
 
 ### Rust
 
@@ -43,7 +43,7 @@ let resource = build_resource(ResourceConfig {
 });
 ```
 
-The helper sets `process.runtime.name="rust"`, `maple.sdk.type="server"`, dual-emits `deployment.environment(.name)`, and runs the same platform-detection cascade as the TS SDK (Cloudflare → AWS Lambda → Railway → Vercel → Cloud Run → Render → Fly → k8s). Adding a new platform: extend `detect_platform()`, mirror the env-var sources used in `lib/effect-sdk/src/server/platform.ts`.
+The helper sets `process.runtime.name="rust"`, `maple.sdk.type="server"`, dual-emits `deployment.environment(.name)`, and runs the same platform-detection cascade as the TS SDK (Cloudflare → AWS Lambda → Railway → Vercel → Cloud Run → Render → Fly → k8s). Adding a new platform: extend `detect_platform()`, mirror the env-var sources used in `packages/effect-sdk/src/server/platform.ts`.
 
 ### Python (forward-looking)
 

@@ -5,7 +5,7 @@ FROM oven/bun:1.3.11 AS runner
 WORKDIR /app
 
 COPY . .
-RUN bun install --frozen-lockfile && bun run --cwd lib/effect-sdk build
+RUN bun install --frozen-lockfile && bun run --cwd packages/effect-sdk build
 
 EXPOSE 3475
 

@@ -4,7 +4,7 @@
  *
  *   MAPLE_API_KEY=maple_ak_… CLOUDFLARE_ACCOUNT_ID=… bun alchemy deploy
  *
- * Requires `@maple-dev/alchemy` to be built first (`bun run --cwd ../../lib/alchemy-maple build`).
+ * Requires `@maple-dev/alchemy` to be built first (`bun run --cwd ../../packages/alchemy-maple build`).
  */
 import * as Maple from "@maple-dev/alchemy"
 import * as Alchemy from "alchemy"

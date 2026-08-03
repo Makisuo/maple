@@ -1,6 +1,6 @@
 /**
  * Integration test for the `@maple-dev/alchemy` provider package
- * (`lib/alchemy-maple`): drives the real provider lifecycle functions
+ * (`packages/alchemy-maple`): drives the real provider lifecycle functions
  * (reconcile / read / delete) through the real v2 handlers over PGlite,
  * with the package's own HTTP client routed at the in-process web handler
  * via a custom `fetch`.
@@ -17,12 +17,12 @@ import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli"
 import {
 	AlertDestination,
 	AlertDestinationProvider,
-} from "../../../../../lib/alchemy-maple/src/AlertDestination.ts"
-import { AlertRule, AlertRuleProvider } from "../../../../../lib/alchemy-maple/src/AlertRule.ts"
-import { ApiKey, ApiKeyProvider } from "../../../../../lib/alchemy-maple/src/ApiKey.ts"
-import { Dashboard, DashboardProvider } from "../../../../../lib/alchemy-maple/src/Dashboard.ts"
-import { make as makeMapleApi, MapleApi } from "../../../../../lib/alchemy-maple/src/MapleApi.ts"
-import { MapleEnvironment } from "../../../../../lib/alchemy-maple/src/MapleEnvironment.ts"
+} from "../../../../../packages/alchemy-maple/src/AlertDestination.ts"
+import { AlertRule, AlertRuleProvider } from "../../../../../packages/alchemy-maple/src/AlertRule.ts"
+import { ApiKey, ApiKeyProvider } from "../../../../../packages/alchemy-maple/src/ApiKey.ts"
+import { Dashboard, DashboardProvider } from "../../../../../packages/alchemy-maple/src/Dashboard.ts"
+import { make as makeMapleApi, MapleApi } from "../../../../../packages/alchemy-maple/src/MapleApi.ts"
+import { MapleEnvironment } from "../../../../../packages/alchemy-maple/src/MapleEnvironment.ts"
 import { CacheBackendLive } from "../../lib/CacheBackendLive"
 import { EmailService } from "../../lib/EmailService"
 import { Env } from "../../lib/Env"
