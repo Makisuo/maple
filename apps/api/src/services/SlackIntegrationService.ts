@@ -35,12 +35,57 @@ const SLACK_OAUTH_REVOKE_URL = "https://slack.com/api/auth.revoke"
 const SLACK_CONVERSATIONS_LIST_URL = "https://slack.com/api/conversations.list"
 const SLACK_AUTH_TEST_URL = "https://slack.com/api/auth.test"
 /**
- * `conversations.list` pages at 200 (Slack's own recommendation — larger pages
- * time out on a combined `public_channel,private_channel` type filter), so this
- * bounds the walk at ~2000 channels. Workspaces above that get a `truncated`
- * flag rather than a silently short list; see {@link collectChannelPages}.
+ * Per-page size for `conversations.list`. Slack's documented maximum is 1000;
+ * their docs *recommend* <= 200 because very large pages are more likely to time
+ * out server-side. We take the max anyway and lean on the retry below, because
+ * the binding constraint here is the rate limit, not page latency:
+ * `conversations.list` is Tier 2 (~20 req/min), so at 200/page a 10k-channel
+ * workspace would need 50 requests — guaranteed 429s and a multi-minute wait.
+ * At 1000/page the same workspace is 10 requests, comfortably inside one window.
  */
-const SLACK_MAX_CHANNEL_PAGES = 10
+const SLACK_CHANNELS_PER_PAGE = 1000
+
+/**
+ * Safety cap on the cursor walk — a runaway `next_cursor` must not loop forever.
+ * At {@link SLACK_CHANNELS_PER_PAGE} this allows ~20k channels, well past the
+ * largest real workspaces, while still fitting the Tier 2 budget with the
+ * 429 backoff below. Tripping it (or the time budget) sets `truncated` and logs
+ * a warning, so a short list is never mistaken for a small workspace.
+ */
+const SLACK_MAX_CHANNEL_PAGES = 20
+
+/** Attempts per page when Slack answers 429 or 5xx; each waits before retrying. */
+const SLACK_RATE_LIMIT_RETRIES = 3
+
+/**
+ * Absolute ceiling on a single honoured `Retry-After`.
+ *
+ * This bounds ONE sleep, not the request — {@link SLACK_CHANNEL_WALK_BUDGET_MS}
+ * is what keeps the overall walk bounded. `conversations.list` is Tier 2 with a
+ * 60-second window, so Slack routinely answers `Retry-After: 60`; clamping that
+ * to anything shorter just guarantees the retry lands inside the same window and
+ * re-429s, burning an attempt for nothing.
+ */
+const SLACK_MAX_RETRY_AFTER_MS = 60_000
+
+/** Backoff before retrying a 5xx (Slack sends no `Retry-After` on those). */
+const SLACK_SERVER_ERROR_BACKOFF_MS = 1_000
+
+/**
+ * Wall-clock budget for the entire channel walk — every page, every retry, every
+ * backoff sleep.
+ *
+ * The per-sleep and per-page caps do not compose into anything usable on their
+ * own: {@link SLACK_MAX_CHANNEL_PAGES} pages × ({@link SLACK_RATE_LIMIT_RETRIES}
+ * + 1) attempts × a 60s `Retry-After` is over an hour of sleeping. Cloudflare's
+ * edge gives up on the response at ~100s, so past that point the Worker is
+ * burning CPU-seconds on a request nobody is listening to. 45s leaves generous
+ * headroom under that cutoff. Exhausting the budget is not an error: we return
+ * the channels collected so far (a partial picker beats a failed one), flagged
+ * `truncated`.
+ */
+const SLACK_CHANNEL_WALK_BUDGET_MS = 45_000
+
 /** Per-org `conversations.list` cache. Invalidated on install/uninstall. */
 const SLACK_CHANNELS_CACHE_BUCKET = "slack-channels"
 const SLACK_CHANNELS_CACHE_TTL_SECONDS = 300
@@ -174,6 +219,24 @@ const DEAD_TOKEN_AUTH_TEST_ERRORS: ReadonlySet<string> = new Set([
 	"token_revoked",
 	"token_expired",
 ])
+
+/**
+ * Slack's 429 `Retry-After` is whole seconds. Missing/garbage header → 1s, and
+ * anything longer than {@link SLACK_MAX_RETRY_AFTER_MS} is clamped so one absurd
+ * header can't eat the whole {@link SLACK_CHANNEL_WALK_BUDGET_MS}.
+ */
+/**
+ * Statuses worth another attempt: the rate limit, and Slack's own 5xx (a
+ * 1000-channel page is big enough to occasionally time out server-side, which
+ * is exactly the risk {@link SLACK_CHANNELS_PER_PAGE} accepts).
+ */
+const isRetryableSlackStatus = (status: number): boolean => status === 429 || status >= 500
+
+const retryAfterMs = (header: string | undefined): number => {
+	const seconds = Number.parseInt(header ?? "", 10)
+	if (!Number.isFinite(seconds) || seconds <= 0) return 1_000
+	return Math.min(seconds * 1_000, SLACK_MAX_RETRY_AFTER_MS)
+}
 
 const SlackConversationsListSchema = Schema.Struct({
 	ok: Schema.Boolean,
@@ -907,15 +970,21 @@ const make: Effect.Effect<
 		return { uninstalled: false }
 	})
 
-	/** Fetch one `conversations.list` page; returns the page's channels + next cursor. */
+	/**
+	 * Fetch one `conversations.list` page; returns the page's channels + next cursor.
+	 *
+	 * `conversations.list` is Tier 2 (~20 req/min) and answers 429 with an empty
+	 * body plus `Retry-After`, so a rate-limited page is retried here rather than
+	 * being surfaced as an "unexpected payload" upstream error.
+	 */
 	const fetchChannelPage = Effect.fnUntraced(function* (botToken: string, cursor: Option.Option<string>) {
 		const params = new URLSearchParams({
 			types: "public_channel,private_channel",
 			exclude_archived: "true",
-			limit: "200",
+			limit: String(SLACK_CHANNELS_PER_PAGE),
 		})
 		if (Option.isSome(cursor)) params.set("cursor", cursor.value)
-		const response = yield* httpClient
+		const request = httpClient
 			.get(`${SLACK_CONVERSATIONS_LIST_URL}?${params.toString()}`, {
 				headers: { authorization: `Bearer ${botToken}`, accept: "application/json" },
 			})
@@ -928,6 +997,46 @@ const make: Effect.Effect<
 						}),
 				),
 			)
+		let response = yield* request
+		for (
+			let attempt = 0;
+			isRetryableSlackStatus(response.status) && attempt < SLACK_RATE_LIMIT_RETRIES;
+			attempt++
+		) {
+			// 429 carries `Retry-After`; a 5xx doesn't, so back off linearly instead.
+			// Both are bounded by the caller's overall budget, not by this loop.
+			const waitMs =
+				response.status === 429
+					? retryAfterMs(response.headers["retry-after"])
+					: SLACK_SERVER_ERROR_BACKOFF_MS * (attempt + 1)
+			yield* Effect.logWarning("Slack conversations.list failed — backing off", {
+				status: response.status,
+				attempt: attempt + 1,
+				waitMs,
+			})
+			yield* Effect.sleep(waitMs)
+			response = yield* request
+		}
+		if (response.status === 429) {
+			return yield* Effect.fail(
+				new IntegrationsUpstreamError({
+					message: "Slack conversations.list is rate limited — try again in a minute",
+					status: 429,
+				}),
+			)
+		}
+		// Anything else non-2xx (a Slack 5xx that outlived the retries, a proxy's
+		// HTML error page, an auth redirect) has no JSON body worth parsing —
+		// without this it fell through to `response.json` and surfaced as the
+		// thoroughly unhelpful "returned a non-JSON response".
+		if (response.status < 200 || response.status >= 300) {
+			return yield* Effect.fail(
+				new IntegrationsUpstreamError({
+					message: `Slack conversations.list failed with HTTP ${response.status}`,
+					status: response.status,
+				}),
+			)
+		}
 		const json = yield* response.json.pipe(
 			Effect.mapError(
 				(error) =>
@@ -968,24 +1077,40 @@ const make: Effect.Effect<
 	})
 
 	/**
-	 * Cursor-driven page walk, capped at {@link SLACK_MAX_CHANNEL_PAGES} pages.
+	 * Cursor-driven page walk that runs to cursor exhaustion, with
+	 * {@link SLACK_MAX_CHANNEL_PAGES} as a runaway guard rather than an intended
+	 * limit and {@link SLACK_CHANNEL_WALK_BUDGET_MS} as a hard wall-clock stop.
 	 * `truncated` distinguishes "Slack ran out of channels" from "we ran out of
-	 * pages" so callers can say the list is incomplete instead of implying the
-	 * workspace has exactly this many channels.
+	 * pages or time" so callers can say the list is incomplete instead of implying
+	 * the workspace has exactly this many channels. Truncation is also logged: a
+	 * silently short channel list is exactly the failure mode we can't see from
+	 * the UI.
+	 *
+	 * `collected` deliberately lives outside the timed effect — when the budget
+	 * interrupts the walk mid-page we still return every page that completed.
 	 */
 	const collectChannelPages = Effect.fnUntraced(function* (botToken: string) {
 		const collected: Array<SlackChannelSummary> = []
-		let cursor = Option.none<string>()
-		let truncated = false
-		for (let page = 0; page < SLACK_MAX_CHANNEL_PAGES; page++) {
-			const { channels, next } = yield* fetchChannelPage(botToken, cursor)
-			collected.push(...channels)
-			if (Option.isNone(next)) break
-			cursor = next
-			// A cursor still in hand on the last allowed page means Slack has more.
-			truncated = page === SLACK_MAX_CHANNEL_PAGES - 1
-		}
-		return { channels: collected, truncated }
+		const walk = Effect.gen(function* () {
+			let cursor = Option.none<string>()
+			for (let page = 0; page < SLACK_MAX_CHANNEL_PAGES; page++) {
+				const { channels, next } = yield* fetchChannelPage(botToken, cursor)
+				collected.push(...channels)
+				if (Option.isNone(next)) return true
+				cursor = next
+			}
+			return false
+		})
+		const outcome = yield* Effect.timeoutOption(walk, SLACK_CHANNEL_WALK_BUDGET_MS)
+		if (Option.isSome(outcome) && outcome.value) return { channels: collected, truncated: false }
+		yield* Effect.logWarning("Slack channel list truncated", {
+			reason: Option.isNone(outcome) ? "time-budget" : "page-cap",
+			pages: SLACK_MAX_CHANNEL_PAGES,
+			perPage: SLACK_CHANNELS_PER_PAGE,
+			budgetMs: SLACK_CHANNEL_WALK_BUDGET_MS,
+			channels: collected.length,
+		})
+		return { channels: collected, truncated: true }
 	})
 
 	/**
@@ -1013,7 +1138,10 @@ const make: Effect.Effect<
 		}
 		const botToken = yield* decryptRowSecret(rowOption.value, "bot_token")
 		const walk = collectChannelPages(botToken).pipe(
-			Effect.map((result) => ({ channels: sortChannels(result.channels), truncated: result.truncated })),
+			Effect.map((result) => ({
+				channels: sortChannels(result.channels),
+				truncated: result.truncated,
+			})),
 		)
 		// Up to ten sequential Slack round-trips on a cold walk. The endpoint is
 		// admin-gated and only fires when the destination dialog opens, so a short
