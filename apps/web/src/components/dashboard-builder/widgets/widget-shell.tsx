@@ -236,9 +236,11 @@ export function WidgetFrame({
 	footer,
 	children,
 }: WidgetFrameProps) {
-	// `WidgetShell` resolves the menu actions against context itself; `fix`
-	// drives the inline error CTA below, so it is resolved here too.
-	const fix = useWidgetActions()?.fix
+	// `WidgetShell` resolves the menu actions against context itself; `fix` and
+	// `narrowRange` drive the inline error CTAs below, so they are resolved here.
+	const actions = useWidgetActions()
+	const fix = actions?.fix
+	const narrowRange = actions?.narrowRange
 
 	return (
 		<WidgetShell
@@ -253,6 +255,31 @@ export function WidgetFrame({
 				dataState.message === "No query data found in selected time range" ? (
 					<div className="flex items-center justify-center h-full">
 						<span className="text-xs text-muted-foreground">No data in selected time range</span>
+					</div>
+				) : dataState.kind === "range" ? (
+					// A constraint, not a failure — muted like the empty state rather
+					// than destructive, since nothing is broken and the neighbouring
+					// charts on this dashboard are showing the full window fine.
+					<div className="flex items-center justify-center h-full flex-col gap-1.5 px-3">
+						<span className="text-xs font-medium text-muted-foreground">
+							{dataState.title ?? "Range too wide"}
+						</span>
+						{dataState.message && (
+							<span className="text-[10px] text-muted-foreground/70 max-w-full text-center line-clamp-3">
+								{dataState.message}
+							</span>
+						)}
+						{narrowRange && (
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={narrowRange}
+								className="mt-1 h-6 gap-1 text-[10px]"
+							>
+								<ClockIcon size={12} />
+								{actions?.narrowRangeLabel ?? "Narrow range"}
+							</Button>
+						)}
 					</div>
 				) : (
 					<div className="flex items-center justify-center h-full flex-col gap-1.5 px-3">

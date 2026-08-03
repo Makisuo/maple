@@ -119,7 +119,10 @@ export const formatBackendError = (input: unknown): FormattedError => {
 				const message = stringField(error, "message") ?? "Invalid query parameters"
 				const details = stringArrayField(error, "details") ?? []
 				return {
-					title: "Invalid query parameters",
+					// The engine's `message` is the specific headline ("List query time
+					// range too large"); a generic title here discarded it whenever
+					// `details` was populated, which is nearly always.
+					title: message,
 					description: details.length > 0 ? details.join("; ") : message,
 				}
 			}

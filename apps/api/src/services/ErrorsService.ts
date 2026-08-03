@@ -77,7 +77,12 @@ import {
 	orgIngestKeys,
 } from "@maple/db"
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm"
-import { CH, parseWarehouseDateTime, warehouseDateTimeToIso } from "@maple/query-engine"
+import {
+	CH,
+	parseWarehouseDateTime,
+	warehouseDateTimeToIso,
+	formatWarehouseDateTime,
+} from "@maple/query-engine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
 import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "../lib/ai-triage-enqueue"
@@ -499,9 +504,6 @@ const make: Effect.Effect<
 			Effect.mapError(makePersistenceError),
 		)
 
-	const toTinybirdDateTime = (epochMs: number) =>
-		new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
-
 	const isoFromDate = (date: Date) => decodeIsoDateTimeStringSync(date.toISOString())
 
 	const systemTenant = (orgId: OrgId): TenantContext => ({
@@ -543,7 +545,7 @@ const make: Effect.Effect<
 		}
 
 		const compiled = CH.compile(CH.activeOrgsByErrorEventsQuery(), {
-			startTime: toTinybirdDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS),
+			startTime: formatWarehouseDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS),
 		})
 		return yield* warehouse
 			.compiledQuery(systemTenant(knownOrgs[0] as OrgId), compiled, {
@@ -1138,8 +1140,8 @@ const make: Effect.Effect<
 					}),
 					{
 						orgId,
-						startTime: toTinybirdDateTime(scanStartMs),
-						endTime: toTinybirdDateTime(scanEndMs),
+						startTime: formatWarehouseDateTime(scanStartMs),
+						endTime: formatWarehouseDateTime(scanEndMs),
 					},
 				)
 				const fingerprintRows = yield* warehouse
@@ -1288,8 +1290,8 @@ const make: Effect.Effect<
 			const timeseriesCompiled = CH.compile(CH.errorIssueTimeseriesQuery(), {
 				orgId,
 				fingerprintHash: issueRow.fingerprintHash,
-				startTime: toTinybirdDateTime(startMs),
-				endTime: toTinybirdDateTime(endMs),
+				startTime: formatWarehouseDateTime(startMs),
+				endTime: formatWarehouseDateTime(endMs),
 				bucketSeconds,
 			})
 			const timeseriesEffect = isErrorKind
@@ -1301,8 +1303,8 @@ const make: Effect.Effect<
 			const samplesCompiled = CH.compile(CH.errorIssueSampleTracesQuery({ limit: sampleLimit }), {
 				orgId,
 				fingerprintHash: issueRow.fingerprintHash,
-				startTime: toTinybirdDateTime(startMs),
-				endTime: toTinybirdDateTime(endMs),
+				startTime: formatWarehouseDateTime(startMs),
+				endTime: formatWarehouseDateTime(endMs),
 			})
 			const samplesEffect = isErrorKind
 				? warehouse
@@ -2554,8 +2556,8 @@ const make: Effect.Effect<
 		// covers an org that went inactive between discovery and the scan.
 		const issuesCompiled = CH.compile(CH.errorIssuesQuery({ limit: 500 }), {
 			orgId,
-			startTime: toTinybirdDateTime(windowStartMs),
-			endTime: toTinybirdDateTime(windowEndMs),
+			startTime: formatWarehouseDateTime(windowStartMs),
+			endTime: formatWarehouseDateTime(windowEndMs),
 		})
 		const issuesRaw = isActive
 			? yield* warehouse

@@ -1,5 +1,5 @@
 import { Clock, Effect, Option, Schema } from "effect"
-import { LogsFacetDimension, QueryEngineExecuteRequest } from "@maple/query-engine"
+import { LogsFacetDimension, QueryEngineExecuteRequest, formatWarehouseDateTime } from "@maple/query-engine"
 import { TraceId, SpanId } from "@maple/domain"
 import {
 	DeploymentEnvironment,
@@ -189,8 +189,10 @@ export function getLogsCount({ data }: { data: ListLogsInput }) {
 }
 
 const defaultLogsTimeRange = (nowMillis: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMillis - 24 * 60 * 60 * 1000), endTime: fmt(nowMillis) }
+	return {
+		startTime: formatWarehouseDateTime(nowMillis - 24 * 60 * 60 * 1000),
+		endTime: formatWarehouseDateTime(nowMillis),
+	}
 }
 
 const getLogsCountEffect = Effect.fn("QueryEngine.getLogsCount")(function* ({

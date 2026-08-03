@@ -11,7 +11,7 @@ import {
 } from "@maple/domain/http"
 import { detectAttributeRecommendations, planReconcileIssues } from "@maple/domain/recommendations"
 import { orgIngestAttributeMappings, orgRecommendationIssues } from "@maple/db"
-import { CH } from "@maple/query-engine"
+import { CH, formatWarehouseDateTime } from "@maple/query-engine"
 import { and, eq } from "drizzle-orm"
 import { Array as Arr, Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
@@ -64,8 +64,6 @@ const rowToIssue = (row: IssueRow): RecommendationIssue =>
 		...(row.resolvedAt != null ? { resolvedAt: decodeIsoSync(row.resolvedAt.toISOString()) } : {}),
 	})
 
-const fmtWarehouseTime = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-
 export class RecommendationIssueService extends Context.Service<
 	RecommendationIssueService,
 	RecommendationIssueServiceShape
@@ -111,8 +109,8 @@ export class RecommendationIssueService extends Context.Service<
 			const now = yield* Clock.currentTimeMillis
 			const compiled = CH.compile(CH.attributeKeysQuery({ scope: "span" }), {
 				orgId: tenant.orgId,
-				startTime: fmtWarehouseTime(now - 24 * 60 * 60 * 1000),
-				endTime: fmtWarehouseTime(now),
+				startTime: formatWarehouseDateTime(now - 24 * 60 * 60 * 1000),
+				endTime: formatWarehouseDateTime(now),
 			})
 			const rows = yield* warehouse
 				.compiledQuery(tenant, compiled, { profile: "discovery", context: "recommendationIssues" })

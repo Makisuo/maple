@@ -5,6 +5,7 @@ import {
 	QueryEngineNoDataBehavior,
 	type QueryEngineSampleCountStrategy,
 	QuerySpec,
+	formatWarehouseDateTime,
 } from "@maple/query-engine"
 import * as CH from "@maple/query-engine/ch"
 import { buildTimeseriesQuerySpec, resolveGroupBy } from "@maple/query-engine/query-builder"
@@ -107,11 +108,7 @@ import { upsertAlertIssue } from "../lib/issue-hub"
 import { probeLiveness } from "../lib/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import type { TenantContext } from "./AuthService"
-import {
-	encryptAes256Gcm,
-	parseBase64Aes256GcmKey,
-	type EncryptedValue,
-} from "../lib/Crypto"
+import { encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "../lib/Crypto"
 import { Database, type DatabaseClient } from "../lib/DatabaseLive"
 import { readTxid, txidColumn } from "../lib/electric-txid"
 import {
@@ -438,8 +435,6 @@ const toIngestDateTime64 = (epochMs: number) => {
 	const pad = (n: number, w = 2) => n.toString().padStart(w, "0")
 	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
 }
-
-const toTinybirdDateTime = (epochMs: number) => new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
 
 const compareThreshold = (
 	value: number,
@@ -1611,8 +1606,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const source = yield* planEvaluateSource(plan, rule.windowMinutes)
 				const observations: ReadonlyArray<GroupedAlertObservation> = yield* queryEngine
 					.evaluate(systemTenant(orgId), {
-						startTime: toTinybirdDateTime(startMs),
-						endTime: toTinybirdDateTime(endMs),
+						startTime: formatWarehouseDateTime(startMs),
+						endTime: formatWarehouseDateTime(endMs),
 						source,
 						reducer: plan.reducer,
 						sampleCountStrategy: plan.sampleCountStrategy,
@@ -2944,8 +2939,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								)
 								const observations = yield* queryEngine
 									.evaluateSeries(systemTenant(orgId), {
-										startTime: toTinybirdDateTime(startMs),
-										endTime: toTinybirdDateTime(queryEndMs),
+										startTime: formatWarehouseDateTime(startMs),
+										endTime: formatWarehouseDateTime(queryEndMs),
 										source: perServiceSource,
 										reducer: perServicePlan.reducer,
 										sampleCountStrategy: perServicePlan.sampleCountStrategy,
@@ -2965,8 +2960,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					const source = yield* planEvaluateSource(plan, normalized.windowMinutes)
 					const observations = yield* queryEngine
 						.evaluateSeries(systemTenant(orgId), {
-							startTime: toTinybirdDateTime(startMs),
-							endTime: toTinybirdDateTime(queryEndMs),
+							startTime: formatWarehouseDateTime(startMs),
+							endTime: formatWarehouseDateTime(queryEndMs),
 							source,
 							reducer: plan.reducer,
 							sampleCountStrategy: plan.sampleCountStrategy,

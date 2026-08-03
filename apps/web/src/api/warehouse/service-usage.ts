@@ -3,6 +3,7 @@ import { ServiceName, ServiceUsageRequest } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 interface ServiceUsage {
 	serviceName: string
 	totalLogs: number
@@ -39,8 +40,10 @@ const GetServiceUsageInput = Schema.Struct({
 export type GetServiceUsageInput = (typeof GetServiceUsageInput)["Encoded"]
 
 const defaultTimeRange = (nowMillis: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMillis - 24 * 60 * 60 * 1000), endTime: fmt(nowMillis) }
+	return {
+		startTime: formatWarehouseDateTime(nowMillis - 24 * 60 * 60 * 1000),
+		endTime: formatWarehouseDateTime(nowMillis),
+	}
 }
 
 export const getServiceUsage = Effect.fn("QueryEngine.getServiceUsage")(function* ({

@@ -17,7 +17,7 @@ import type {
 	V2SessionReplayRef,
 	V2SessionTranscriptEvent,
 } from "@maple/domain/http/v2"
-import { CH } from "@maple/query-engine"
+import { CH, formatWarehouseDateTime } from "@maple/query-engine"
 import { Effect, Option, Schema } from "effect"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
 import { warehouseToV2 } from "./warehouse-error-map"
@@ -33,7 +33,7 @@ const toTinybird = (value: string, param: string) => {
 	const ms = Date.parse(value)
 	return Number.isNaN(ms)
 		? Effect.fail(invalidRequest("parameter_invalid", `Invalid ISO-8601 timestamp for ${param}.`, param))
-		: Effect.succeed(new Date(ms).toISOString().slice(0, 19).replace("T", " "))
+		: Effect.succeed(formatWarehouseDateTime(ms))
 }
 
 const optTinybird = (value: string | undefined, param: string) =>
