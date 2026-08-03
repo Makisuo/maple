@@ -16,11 +16,11 @@ import {
 	type VcsSyncJob,
 } from "@maple/domain/http"
 import { Clock, Context, Effect, Layer, Option } from "effect"
-import { Env } from "../../../../lib/Env"
-import { OAuthStateRepository } from "../../../OAuthStateRepository"
-import { VcsRepository } from "../../VcsRepository"
-import { BACKFILL_WINDOW_MS } from "../../VcsSyncService"
-import { VcsSyncQueue } from "../../VcsSyncQueue"
+import { Env } from "@/lib/Env"
+import { OAuthStateRepository } from "@/services/OAuthStateRepository"
+import { VcsRepository } from "@/services/vcs/VcsRepository"
+import { BACKFILL_WINDOW_MS } from "@/services/vcs/VcsSyncService"
+import { VcsSyncQueue } from "@/services/vcs/VcsSyncQueue"
 import { GithubAppClient, type GithubAppError } from "./GithubAppClient"
 
 // ---------------------------------------------------------------------------

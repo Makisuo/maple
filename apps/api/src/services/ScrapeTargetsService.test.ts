@@ -8,9 +8,9 @@ import {
 	ScrapeTargetId,
 	UpdateScrapeTargetRequest,
 } from "@maple/domain/http"
-import { Env } from "../lib/Env"
-import { runScrapeCheckRetention } from "../lib/scrape-check-retention"
-import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "../lib/test-pglite"
+import { Env } from "@/lib/Env"
+import { runScrapeCheckRetention } from "@/lib/scrape-check-retention"
+import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/lib/test-pglite"
 import { PlanetScaleDiscoveryService } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService } from "./PlanetScaleOAuthService"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"

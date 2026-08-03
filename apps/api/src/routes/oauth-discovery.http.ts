@@ -5,7 +5,7 @@ import {
 	McpOAuthProtocolError,
 	McpOAuthRateLimitError,
 	McpOAuthService,
-} from "../services/McpOAuthService"
+} from "@/services/McpOAuthService"
 
 const RegistrationRequest = Schema.Struct({
 	client_name: Schema.String,

@@ -6,9 +6,9 @@ import {
 	type McpToolRegistrar,
 } from "./types"
 import { Effect, Option, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
-import { resolveTenant } from "../lib/query-warehouse"
-import { resolveActorId } from "../lib/resolve-actor"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { resolveActorId } from "@/mcp/lib/resolve-actor"
 import { ErrorsService } from "@/services/ErrorsService"
 import { ErrorIssueId, WorkflowState } from "@maple/domain/http"
 

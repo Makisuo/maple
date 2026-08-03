@@ -1,6 +1,6 @@
 import { GitCommitSha } from "@maple/domain/http"
 import { Clock, Context, Data, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
-import { Env } from "../../../../lib/Env"
+import { Env } from "@/lib/Env"
 import { GithubHttp } from "./GithubHttp"
 
 // ---------------------------------------------------------------------------

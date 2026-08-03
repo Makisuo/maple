@@ -7,9 +7,9 @@ import {
 	MapleApi,
 } from "@maple/domain/http"
 import { Effect, Schema } from "effect"
-import { mapleToolDefinitions } from "../mcp/tools/registry"
-import { MUTATING_TOOL_NAMES } from "../mcp/tools/mutating"
-import type { McpToolResult } from "../mcp/tools/types"
+import { mapleToolDefinitions } from "@/mcp/tools/registry"
+import { MUTATING_TOOL_NAMES } from "@/mcp/tools/mutating"
+import type { McpToolResult } from "@/mcp/tools/types"
 
 const errorResult = (label: string, message: string): McpToolResult => ({
 	isError: true,

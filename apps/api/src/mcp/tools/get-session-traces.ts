@@ -1,11 +1,11 @@
 import { requiredStringParam, optionalNumberParam, type McpToolRegistrar } from "./types"
-import { warehouseToMcpHandlers } from "../lib/map-warehouse-error"
-import { withTenantExecutor, resolveTenant } from "../lib/query-warehouse"
-import { clampLimit } from "../lib/limits"
-import { formatTable, truncate } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
+import { withTenantExecutor, resolveTenant } from "@/mcp/lib/query-warehouse"
+import { clampLimit } from "@/mcp/lib/limits"
+import { formatTable, truncate } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, Schema, pipe } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { getSessionTraces } from "@maple/query-engine/observability"
 
 export function registerGetSessionTracesTool(server: McpToolRegistrar) {

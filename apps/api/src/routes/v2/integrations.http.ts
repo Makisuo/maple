@@ -16,10 +16,10 @@ import {
 	upstreamError,
 } from "@maple/domain/http/v2"
 import { Array as Arr, Effect, Option } from "effect"
-import { requireAdmin } from "../../lib/auth"
-import { Env } from "../../lib/Env"
-import type { SlackChannelList, SlackInstallStatus } from "../../services/SlackIntegrationService"
-import { SLACK_CALLBACK_PATH, SlackIntegrationService } from "../../services/SlackIntegrationService"
+import { requireAdmin } from "@/lib/auth"
+import { Env } from "@/lib/Env"
+import type { SlackChannelList, SlackInstallStatus } from "@/services/SlackIntegrationService"
+import { SLACK_CALLBACK_PATH, SlackIntegrationService } from "@/services/SlackIntegrationService"
 
 /**
  * Best-effort origin of the incoming request. `x-forwarded-*` is client-supplied

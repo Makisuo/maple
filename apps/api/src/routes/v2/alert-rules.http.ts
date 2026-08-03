@@ -26,7 +26,7 @@ import {
 } from "@maple/domain/http/v2"
 import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
-import { AlertsService } from "../../services/AlertsService"
+import { AlertsService } from "@/services/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
 
 const decodeIsoDateTime = Schema.decodeUnknownSync(IsoDateTimeString)

@@ -2,12 +2,12 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { Effect, Option, Redacted, Schema } from "effect"
 import { timingSafeEqual } from "node:crypto"
 import { SlackBotResolutionResponseSchema } from "@maple/domain/http"
-import { Env } from "../lib/Env"
+import { Env } from "@/lib/Env"
 import {
 	SlackIntegrationService,
 	SLACK_CALLBACK_PATH,
 	type SlackRevocationReason,
-} from "../services/SlackIntegrationService"
+} from "@/services/SlackIntegrationService"
 
 const INTERNAL_SERVICE_PREFIX = "maple_svc_"
 

@@ -32,7 +32,7 @@ import type {
 	V2InvestigationSubject,
 } from "@maple/domain/http/v2"
 import { Effect, Match, Schema } from "effect"
-import { InvestigationService } from "../../services/InvestigationService"
+import { InvestigationService } from "@/services/InvestigationService"
 
 class InvestigationSubjectDecodeError extends Schema.TaggedErrorClass<InvestigationSubjectDecodeError>()(
 	"@maple/api/routes/v2/InvestigationSubjectDecodeError",

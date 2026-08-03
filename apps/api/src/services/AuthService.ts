@@ -14,7 +14,7 @@ import {
 	type TenantContext,
 } from "@maple/auth"
 import { Context, Effect, Layer } from "effect"
-import { Env } from "../lib/Env"
+import { Env } from "@/lib/Env"
 
 // The pure tenant-resolution + self-hosted login primitives live in the shared
 // `@maple/auth` package (consumed by apps/api AND the standalone

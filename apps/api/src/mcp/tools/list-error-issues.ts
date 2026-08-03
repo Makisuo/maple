@@ -5,11 +5,11 @@ import {
 	validationError,
 	type McpToolRegistrar,
 } from "./types"
-import { formatNumber, formatTable, truncate } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { formatNumber, formatTable, truncate } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Option, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
-import { resolveTenant } from "../lib/query-warehouse"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { ErrorsService } from "@/services/ErrorsService"
 import { IssueKind, IssueSeverity, WorkflowState } from "@maple/domain/http"
 

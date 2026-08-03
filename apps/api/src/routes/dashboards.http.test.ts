@@ -3,9 +3,9 @@ import { ConfigProvider, Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, DashboardsApiGroup } from "@maple/domain/http"
-import { Env } from "../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
-import { DashboardPersistenceService } from "../services/DashboardPersistenceService"
+import { Env } from "@/lib/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
+import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
 import { HttpDashboardSchemaErrorsLive, HttpDashboardsLive } from "./dashboards.http"
 
 const createdDbs: TestDb[] = []

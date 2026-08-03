@@ -5,16 +5,16 @@ import {
 	validationError,
 	type McpToolRegistrar,
 } from "./types"
-import { warehouseToMcpHandlers } from "../lib/map-warehouse-error"
-import { withTenantExecutor } from "../lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "../lib/time"
-import { clampLimit, clampOffset } from "../lib/limits"
-import { formatDurationFromMs, formatTable } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
+import { withTenantExecutor } from "@/mcp/lib/query-warehouse"
+import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
+import { clampLimit, clampOffset } from "@/mcp/lib/limits"
+import { formatDurationFromMs, formatTable } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, Schema, pipe } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { searchTraces } from "@maple/query-engine/observability"
-import { resolveTenant } from "../lib/query-warehouse"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
 
 export function registerSearchTracesTool(server: McpToolRegistrar) {
 	server.tool(

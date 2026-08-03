@@ -34,8 +34,8 @@ import {
 } from "@maple/domain/primitives"
 import { and, eq } from "drizzle-orm"
 import { Cause, Data, Effect, Exit, Option, Schema } from "effect"
-import { trackTokenUsage } from "../lib/autumn-tracker"
-import { applyTriageSeverity } from "../lib/issue-severity"
+import { trackTokenUsage } from "@/lib/autumn-tracker"
+import { applyTriageSeverity } from "@/lib/issue-severity"
 import type { WorkflowEventLike, WorkflowStepLike } from "./ClickHouseSchemaApplyWorkflow.run"
 
 /** Minimal shape of the `CHAT_FLUE` service binding (a Cloudflare `Fetcher`). */

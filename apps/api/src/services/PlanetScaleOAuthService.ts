@@ -11,9 +11,9 @@ import {
 import { oauthAuthStates } from "@maple/db"
 import { Clock, Context, Duration, Effect, Layer, Option, Redacted, Result, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { Database } from "../lib/DatabaseLive"
-import { Env, type EnvShape } from "../lib/Env"
-import { msToDate } from "../lib/time"
+import { Database } from "@/lib/DatabaseLive"
+import { Env, type EnvShape } from "@/lib/Env"
+import { msToDate } from "@/lib/time"
 import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS, toUpstreamError } from "./oauth/connection-helpers"
 
 const PLANETSCALE_PROVIDER = "planetscale"

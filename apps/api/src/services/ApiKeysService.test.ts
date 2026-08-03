@@ -1,9 +1,9 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import { ApiKeyNotFoundError, OrgId, UserId } from "@maple/domain/http"
-import { Env } from "../lib/Env"
+import { Env } from "@/lib/Env"
 import { ApiKeysService } from "./ApiKeysService"
-import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../lib/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/lib/test-pglite"
 
 const trackedDbs: TestDb[] = []
 

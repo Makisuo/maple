@@ -10,9 +10,9 @@ import {
 	type OrgId,
 } from "@maple/domain/http"
 import { Effect } from "effect"
-import { AnomalyDetectionService } from "../services/AnomalyDetectionService"
-import { ErrorsService } from "../services/ErrorsService"
-import { requireAdmin } from "../lib/auth"
+import { AnomalyDetectionService } from "@/services/AnomalyDetectionService"
+import { ErrorsService } from "@/services/ErrorsService"
+import { requireAdmin } from "@/lib/auth"
 
 export const HttpAnomaliesLive = HttpApiBuilder.group(MapleApi, "anomalies", (handlers) =>
 	Effect.gen(function* () {

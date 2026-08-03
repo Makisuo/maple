@@ -8,7 +8,7 @@ import {
 } from "./types"
 import { Effect, Schema } from "effect"
 import { MCP_VISUALIZATIONS, RawSqlDisplayType } from "@maple/domain/http"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import {
 	decodeDataSourceJson,
 	decodeDisplayJson,
@@ -19,14 +19,14 @@ import {
 	generateWidgetId,
 	withDashboardMutation,
 	type DashboardWidget,
-} from "../lib/dashboard-mutations"
-import { buildRawSqlDataSource, validateRawSqlMacro, visualizationToDisplayType } from "../lib/raw-sql-widget"
+} from "@/mcp/lib/dashboard-mutations"
+import { buildRawSqlDataSource, validateRawSqlMacro, visualizationToDisplayType } from "@/mcp/lib/raw-sql-widget"
 import {
 	collectBlockingBuilderWarnings,
 	formatValidationSummary,
 	inspectWidgetsAfterMutation,
-} from "../lib/inspect-widget"
-import { resolveTenant } from "../lib/query-warehouse"
+} from "@/mcp/lib/inspect-widget"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
 
 const TOOL = "add_dashboard_widget"
 

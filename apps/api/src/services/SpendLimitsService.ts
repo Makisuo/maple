@@ -9,7 +9,7 @@ import {
 import { orgSpendLimits, type OrgSpendLimitsRow } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option } from "effect"
-import { Database, DatabaseError } from "../lib/DatabaseLive"
+import { Database, DatabaseError } from "@/lib/DatabaseLive"
 
 /**
  * Per-org spend guardrails: the monthly ceiling on estimated spend, the alert

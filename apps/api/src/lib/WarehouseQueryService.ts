@@ -18,9 +18,9 @@ import {
 import type { CompiledQuery } from "@maple/query-engine/ch"
 import { WarehouseExecutor } from "@maple/query-engine/observability"
 import { Env } from "./Env"
-import type { TenantContext } from "../services/AuthService"
-import { OrgClickHouseSettingsService } from "../services/OrgClickHouseSettingsService"
-import { TinybirdOrgTokenService } from "../services/TinybirdOrgTokenService"
+import type { TenantContext } from "@/services/AuthService"
+import { OrgClickHouseSettingsService } from "@/services/OrgClickHouseSettingsService"
+import { TinybirdOrgTokenService } from "@/services/TinybirdOrgTokenService"
 
 // ---------------------------------------------------------------------------
 // WarehouseQueryService — the API's managed-warehouse executor.

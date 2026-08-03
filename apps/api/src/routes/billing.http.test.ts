@@ -7,7 +7,7 @@ import {
 	CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS,
 	readCustomerCached,
 	responseHasActivePlan,
-} from "../lib/autumn-client"
+} from "@/lib/autumn-client"
 import { BillingCustomer } from "@maple/domain/http"
 import { decodeInvoices, resolveCycleWindow } from "./billing.http"
 

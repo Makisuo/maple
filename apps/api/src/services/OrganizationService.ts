@@ -36,8 +36,8 @@ import {
 } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
-import { Database } from "../lib/DatabaseLive"
-import { Env } from "../lib/Env"
+import { Database } from "@/lib/DatabaseLive"
+import { Env } from "@/lib/Env"
 
 const ROOT_ROLE = Schema.decodeUnknownSync(RoleName)("root")
 const ORG_ADMIN_ROLE = Schema.decodeUnknownSync(RoleName)("org:admin")

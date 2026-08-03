@@ -2,12 +2,12 @@ import { createHash } from "node:crypto"
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { OrgId, RoleName, UserId } from "@maple/domain/http"
 import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
-import { Env } from "../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
+import { Env } from "@/lib/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
 import { ApiKeysService } from "./ApiKeysService"
 import { AuthService } from "./AuthService"
 import { matchesMcpOAuthRedirectUri, McpOAuthService, validateMcpOAuthRedirectUri } from "./McpOAuthService"
-import { resolveMcpTenantContext } from "../mcp/lib/resolve-tenant"
+import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))

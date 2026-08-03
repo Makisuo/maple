@@ -23,9 +23,9 @@ import {
 import type { MapleDatabaseTransaction } from "@maple/db/client"
 import { and, eq, gt, inArray, isNull, lt } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
-import { Database } from "../lib/DatabaseLive"
-import { Env } from "../lib/Env"
-import { WorkerEnvironment } from "../lib/WorkerEnvironment"
+import { Database } from "@/lib/DatabaseLive"
+import { Env } from "@/lib/Env"
+import { WorkerEnvironment } from "@/lib/WorkerEnvironment"
 
 const AUTHORIZATION_REQUEST_TTL_MS = 10 * 60 * 1000
 const AUTHORIZATION_CODE_TTL_MS = 5 * 60 * 1000

@@ -9,7 +9,7 @@ import {
 	diagnoseService,
 	searchLogs,
 } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "../lib/WarehouseQueryService"
+import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
 
 // Warehouse errors propagate with their canonical per-tag HTTP statuses (503
 // transient, 429 quota, 400 validation, 502 otherwise) — declared on the

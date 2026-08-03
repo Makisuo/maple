@@ -3,15 +3,15 @@ import { IntegrationsPersistenceError, OrgId } from "@maple/domain/http"
 import { planetscaleConnections } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Clock, Effect, Option, Redacted, Schema } from "effect"
-import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "../lib/Crypto"
-import { Database } from "../lib/DatabaseLive"
-import { Env } from "../lib/Env"
+import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "@/lib/Crypto"
+import { Database } from "@/lib/DatabaseLive"
+import { Env } from "@/lib/Env"
 import {
 	classifyPlanetScaleEvent,
 	decodePlanetScaleWebhookPayload,
 	verifyPlanetScaleSignature,
-} from "../services/planetscale/webhook-events"
-import { PlanetScaleWebhookQueue } from "../services/planetscale/PlanetScaleWebhookQueue"
+} from "@/services/planetscale/webhook-events"
+import { PlanetScaleWebhookQueue } from "@/services/planetscale/PlanetScaleWebhookQueue"
 
 // ---------------------------------------------------------------------------
 // Public PlanetScale webhook receiver. NOT behind auth — authenticity comes

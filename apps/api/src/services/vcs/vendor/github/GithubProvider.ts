@@ -16,9 +16,9 @@ import {
 	VcsWebhookSignatureError,
 } from "@maple/domain/http"
 import { Clock, Context, Effect, Layer, Match, Option, Redacted, Schema } from "effect"
-import { Env } from "../../../../lib/Env"
-import type { VcsProviderClient, VcsWebhookRequest } from "../../VcsProviderClient"
-import { QUEUE_MESSAGE_LIMIT_BYTES } from "../../VcsSyncQueue"
+import { Env } from "@/lib/Env"
+import type { VcsProviderClient, VcsWebhookRequest } from "@/services/vcs/VcsProviderClient"
+import { QUEUE_MESSAGE_LIMIT_BYTES } from "@/services/vcs/VcsSyncQueue"
 import { type GithubApiCommit, GithubAppClient, GithubAppError } from "./GithubAppClient"
 
 const PROVIDER: VcsProviderId = "github"

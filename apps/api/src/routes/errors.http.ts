@@ -1,8 +1,8 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, ErrorForbiddenError, MapleApi } from "@maple/domain/http"
 import { Effect } from "effect"
-import { ErrorsService } from "../services/ErrorsService"
-import { requireAdmin } from "../lib/auth"
+import { ErrorsService } from "@/services/ErrorsService"
+import { requireAdmin } from "@/lib/auth"
 
 export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers) =>
 	Effect.gen(function* () {

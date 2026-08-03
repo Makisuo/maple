@@ -2,7 +2,7 @@ import { OAuthStatePersistenceError } from "@maple/domain/http"
 import { oauthAuthStates, type OAuthAuthStateInsert, type OAuthAuthStateRow } from "@maple/db"
 import { eq, lt } from "drizzle-orm"
 import { Context, Effect, Layer, Option } from "effect"
-import { Database, type DatabaseError } from "../lib/DatabaseLive"
+import { Database, type DatabaseError } from "@/lib/DatabaseLive"
 
 // ---------------------------------------------------------------------------
 // Generic, provider-agnostic repo over the shared `oauth_auth_states` table —

@@ -12,8 +12,8 @@ import {
 import { Effect, Layer, Option, Schema } from "effect"
 import { ApiKeysService } from "./ApiKeysService"
 import { makeResolveTenant } from "./AuthService"
-import { annotateAuthSpan } from "../lib/auth-span"
-import { Env } from "../lib/Env"
+import { annotateAuthSpan } from "@/lib/auth-span"
+import { Env } from "@/lib/Env"
 import {
 	API_V2_RATE_LIMIT_PERIOD_SECONDS,
 	API_V2_RATE_LIMIT_REQUESTS,

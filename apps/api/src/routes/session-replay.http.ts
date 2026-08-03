@@ -15,7 +15,7 @@ import {
 } from "@maple/domain/http"
 import { Effect, Option, Schema } from "effect"
 import { CH } from "@maple/query-engine"
-import { WarehouseQueryService } from "../lib/WarehouseQueryService"
+import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 
 const decodeSessionId = Schema.decodeSync(SessionId)
 const decodeTraceId = Schema.decodeSync(TraceId)

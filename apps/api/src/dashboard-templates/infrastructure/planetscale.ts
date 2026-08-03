@@ -8,8 +8,8 @@ import {
 	paramKey,
 	paramValue,
 	templateId,
-} from "../helpers"
-import type { TemplateDefinition, WidgetDef } from "../types"
+} from "@/dashboard-templates/helpers"
+import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 // PlanetScale branch metrics arrive via the scraper (the integration's managed
 // scrape target) with PlanetScale's own Prometheus metric names, all gauges.

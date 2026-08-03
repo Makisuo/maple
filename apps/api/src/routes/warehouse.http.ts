@@ -1,7 +1,7 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, MapleApi } from "@maple/domain/http"
 import { Effect } from "effect"
-import { WarehouseQueryService } from "../lib/WarehouseQueryService"
+import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 
 // Generic `{pipe, params}` → `{data}` warehouse query endpoint. This is the
 // remote counterpart to the local binary's `/local/query`: the unified `maple`

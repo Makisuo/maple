@@ -23,9 +23,9 @@ import {
 	encryptAes256Gcm,
 	parseBase64Aes256GcmKey,
 	type EncryptedValue,
-} from "../lib/Crypto"
-import { Database } from "../lib/DatabaseLive"
-import { Env } from "../lib/Env"
+} from "@/lib/Crypto"
+import { Database } from "@/lib/DatabaseLive"
+import { Env } from "@/lib/Env"
 
 const toPersistenceError = (error: unknown) =>
 	new IngestKeyPersistenceError({

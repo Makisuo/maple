@@ -1,9 +1,9 @@
 import { McpQueryError, optionalBooleanParam, type McpToolRegistrar } from "./types"
-import { formatTable, truncate } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { formatTable, truncate } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
-import { resolveTenant } from "../lib/query-warehouse"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import type { AuditCheckResult, AuditSeverity } from "@maple/domain/setup-audit"
 import { SetupAuditService } from "@/services/SetupAuditService"
 

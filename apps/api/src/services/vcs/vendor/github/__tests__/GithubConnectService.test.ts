@@ -24,8 +24,8 @@ import {
 	testEnv,
 	upsertCommitsFor,
 	upsertReposFor,
-} from "../../../__tests__/harness"
-import { decodeGitCommitSha } from "../../../__tests__/fixtures"
+} from "@/services/vcs/__tests__/harness"
+import { decodeGitCommitSha } from "@/services/vcs/__tests__/fixtures"
 
 const trackedDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(trackedDbs))

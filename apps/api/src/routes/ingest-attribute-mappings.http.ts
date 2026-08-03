@@ -1,7 +1,7 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, MapleApi } from "@maple/domain/http"
 import { Effect } from "effect"
-import { IngestAttributeMappingService } from "../services/IngestAttributeMappingService"
+import { IngestAttributeMappingService } from "@/services/IngestAttributeMappingService"
 
 export const HttpIngestAttributeMappingsLive = HttpApiBuilder.group(
 	MapleApi,

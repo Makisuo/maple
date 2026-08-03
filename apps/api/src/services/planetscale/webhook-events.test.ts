@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { OrgId } from "@maple/domain/http"
-import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../../lib/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/lib/test-pglite"
 import {
 	classifyPlanetScaleEvent,
 	decodePlanetScaleWebhookPayload,

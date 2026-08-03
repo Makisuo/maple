@@ -3,15 +3,15 @@ import { afterEach, assert, describe, it } from "@effect/vitest"
 import { planetscaleConnections } from "@maple/db"
 import { ConfigProvider, Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
-import { encryptAes256Gcm } from "../lib/Crypto"
-import { Database } from "../lib/DatabaseLive"
-import { Env } from "../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
+import { encryptAes256Gcm } from "@/lib/Crypto"
+import { Database } from "@/lib/DatabaseLive"
+import { Env } from "@/lib/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
 import {
 	PlanetScaleWebhookQueue,
 	PlanetScaleWebhookQueueError,
 	type PlanetScaleWebhookJob,
-} from "../services/planetscale/PlanetScaleWebhookQueue"
+} from "@/services/planetscale/PlanetScaleWebhookQueue"
 import { PlanetScaleWebhookRouter } from "./planetscale-webhook.http"
 
 const trackedDbs: TestDb[] = []

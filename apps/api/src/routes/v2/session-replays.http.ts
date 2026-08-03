@@ -19,7 +19,7 @@ import type {
 } from "@maple/domain/http/v2"
 import { CH, formatWarehouseDateTime } from "@maple/query-engine"
 import { Effect, Option, Schema } from "effect"
-import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
+import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 import { warehouseToV2 } from "./warehouse-error-map"
 
 const decodeSessionId = Schema.decodeSync(SessionId)

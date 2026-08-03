@@ -15,8 +15,8 @@ import { CH, formatWarehouseDateTime } from "@maple/query-engine"
 import { and, eq } from "drizzle-orm"
 import { Array as Arr, Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
-import { Database, type DatabaseError } from "../lib/DatabaseLive"
-import { WarehouseQueryService } from "../lib/WarehouseQueryService"
+import { Database, type DatabaseError } from "@/lib/DatabaseLive"
+import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 
 type IssueRow = typeof orgRecommendationIssues.$inferSelect
 

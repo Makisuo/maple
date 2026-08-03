@@ -11,11 +11,11 @@ import {
 } from "@maple/query-engine/runtime"
 import { QueryEngineService } from "./QueryEngineService"
 import type { TenantContext } from "./AuthService"
-import { WarehouseQueryService, type WarehouseQueryServiceShape } from "../lib/WarehouseQueryService"
+import { WarehouseQueryService, type WarehouseQueryServiceShape } from "@/lib/WarehouseQueryService"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService, type EdgeCacheServiceShape } from "@maple/cache"
-import { CacheBackendLive } from "../lib/CacheBackendLive"
-import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
+import { CacheBackendLive } from "@/lib/CacheBackendLive"
+import { traceCacheTtlSeconds } from "@/lib/trace-detail-cache"
 
 const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 

@@ -10,10 +10,10 @@ import {
 	PortableDashboardDocument,
 	UserId,
 } from "@maple/domain/http"
-import { Database, DatabaseError } from "../lib/DatabaseLive"
+import { Database, DatabaseError } from "@/lib/DatabaseLive"
 import { DashboardPersistenceService } from "./DashboardPersistenceService"
-import { Env } from "../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
+import { Env } from "@/lib/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
 
 const trackedDbs: TestDb[] = []
 

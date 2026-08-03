@@ -5,13 +5,13 @@ import {
 	requiredStringParam,
 	type McpToolRegistrar,
 } from "./types"
-import { resolveTenant } from "../lib/query-warehouse"
-import { resolveTimeRange } from "../lib/time"
-import { formatDurationFromMs, truncate } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
-import { toMcpQueryError } from "../lib/map-warehouse-error"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { resolveTimeRange } from "@/mcp/lib/time"
+import { formatDurationFromMs, truncate } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
+import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { Array as Arr, Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { errorDetail } from "@maple/query-engine/observability"
 import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
 

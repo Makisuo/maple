@@ -4,7 +4,7 @@ import { CurrentTenant } from "@maple/domain/http"
 import type { V2AlertDelivery } from "@maple/domain/http/v2"
 import { MapleApiV2, paginateOffsetQuery, timestamp, timestampOrNull } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { AlertsService } from "../../services/AlertsService"
+import { AlertsService } from "@/services/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
 
 const toV2Delivery = (doc: AlertDeliveryEventDocument): V2AlertDelivery => ({

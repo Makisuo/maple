@@ -2,8 +2,8 @@ import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { OrgId, UserId } from "@maple/domain/http"
 import { DashboardPersistenceService } from "./DashboardPersistenceService"
-import { Env } from "../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
+import { Env } from "@/lib/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
 import { convertPersesDashboardToPortable } from "./perses-dashboard-import"
 
 const trackedDbs: TestDb[] = []

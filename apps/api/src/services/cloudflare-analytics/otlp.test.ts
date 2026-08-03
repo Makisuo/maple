@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { MetricGaugeRow, MetricSumRow } from "../../lib/metric-rows"
+import type { MetricGaugeRow, MetricSumRow } from "@/lib/metric-rows"
 import { metricRowsToOtlp } from "./otlp"
 
 const baseGauge = (over: Partial<MetricGaugeRow>): MetricGaugeRow => ({

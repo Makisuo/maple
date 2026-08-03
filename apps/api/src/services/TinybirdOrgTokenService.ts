@@ -1,8 +1,8 @@
 import type { OrgId } from "@maple/domain"
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
-import { listOrgScopedDatasourceNames } from "../lib/warehouse-catalog"
-import { mintOrgReadJwt } from "../lib/tinybird-jwt"
-import { Env } from "../lib/Env"
+import { listOrgScopedDatasourceNames } from "@/lib/warehouse-catalog"
+import { mintOrgReadJwt } from "@/lib/tinybird-jwt"
+import { Env } from "@/lib/Env"
 
 // ---------------------------------------------------------------------------
 // TinybirdOrgTokenService — mints and caches per-org Tinybird read JWTs used to

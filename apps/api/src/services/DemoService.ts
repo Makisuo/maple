@@ -1,6 +1,6 @@
 import { DemoSeedError, DemoSeedResponse } from "@maple/domain/http"
 import { Context, Effect, Layer } from "effect"
-import { WarehouseQueryService } from "../lib/WarehouseQueryService"
+import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 import type { TenantContext } from "./AuthService"
 import { generateDemoRows } from "./demo/fixtures"
 

@@ -101,16 +101,16 @@ import {
 	Schema,
 	Context,
 } from "effect"
-import * as AlertingMetrics from "../lib/AlertingMetrics"
-import { warehouseHandlers } from "../lib/warehouse-error-handlers"
-import { INVESTIGATION_AGENT_BINDING } from "../lib/ai-triage-enqueue"
-import { upsertAlertIssue } from "../lib/issue-hub"
-import { probeLiveness } from "../lib/telemetry-liveness"
+import * as AlertingMetrics from "@/lib/AlertingMetrics"
+import { warehouseHandlers } from "@/lib/warehouse-error-handlers"
+import { INVESTIGATION_AGENT_BINDING } from "@/lib/ai-triage-enqueue"
+import { upsertAlertIssue } from "@/lib/issue-hub"
+import { probeLiveness } from "@/lib/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import type { TenantContext } from "./AuthService"
-import { encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "../lib/Crypto"
-import { Database, type DatabaseClient } from "../lib/DatabaseLive"
-import { readTxid, txidColumn } from "../lib/electric-txid"
+import { encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "@/lib/Crypto"
+import { Database, type DatabaseClient } from "@/lib/DatabaseLive"
+import { readTxid, txidColumn } from "@/lib/electric-txid"
 import {
 	buildAlertChatUrl,
 	dispatchDelivery as dispatchDeliveryImpl,
@@ -120,15 +120,15 @@ import {
 	type DispatchResult,
 	verifyPagerDutyRoutingKey,
 } from "./AlertDeliveryDispatch"
-import { EmailService } from "../lib/EmailService"
-import { Env } from "../lib/Env"
+import { EmailService } from "@/lib/EmailService"
+import { Env } from "@/lib/Env"
 import { OrgMembersService, type OrgMember } from "./OrgMembersService"
 import { describeCause } from "./ErrorsService"
 import { HazelOAuthService } from "./HazelOAuthService"
 import { QueryEngineService } from "./QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
-import { WarehouseQueryService } from "../lib/WarehouseQueryService"
-import { validateExternalUrl } from "../lib/url-validator"
+import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { validateExternalUrl } from "@/lib/url-validator"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import {
 	DestinationPublicConfigSchema,
@@ -138,7 +138,7 @@ import {
 	type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
 import { SlackBotTokenResolver } from "./slack-bot-token"
-import { dateToMs } from "../lib/time"
+import { dateToMs } from "@/lib/time"
 
 /**
  * Persisted evaluation-failure category per warehouse tag (`ErrorCategory` on

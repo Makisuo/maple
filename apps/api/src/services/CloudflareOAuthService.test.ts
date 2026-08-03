@@ -2,9 +2,9 @@ import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
-import { Env } from "../lib/Env"
+import { Env } from "@/lib/Env"
 import { CloudflareOAuthService } from "./CloudflareOAuthService"
-import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "../lib/test-pglite"
+import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/lib/test-pglite"
 
 const trackedDbs: TestDb[] = []
 

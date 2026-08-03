@@ -7,7 +7,7 @@ import {
 	type McpToolRegistrar,
 	type McpToolResult,
 } from "./types"
-import { resolveTimeRange } from "../lib/time"
+import { resolveTimeRange } from "@/mcp/lib/time"
 import { Effect, Match, Schema } from "effect"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { QueryEngineService } from "@/services/QueryEngineService"
@@ -25,8 +25,8 @@ import {
 	type MetricsTimeseriesQuery,
 	type MetricsBreakdownQuery,
 } from "@maple/query-engine"
-import { formatQueryResult } from "../lib/format-query-result"
-import { warehouseErrorText, warehouseHandlers } from "../lib/map-warehouse-error"
+import { formatQueryResult } from "@/mcp/lib/format-query-result"
+import { warehouseErrorText, warehouseHandlers } from "@/mcp/lib/map-warehouse-error"
 import {
 	CommitSha,
 	DeploymentEnvironment,

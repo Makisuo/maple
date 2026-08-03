@@ -3,8 +3,8 @@ import { CurrentTenant, RoleName, UnauthorizedError } from "@maple/domain/http"
 import { Effect, Layer, Option, Schema } from "effect"
 import { ApiKeysService } from "./ApiKeysService"
 import { makeResolveTenant } from "./AuthService"
-import { annotateAuthSpan } from "../lib/auth-span"
-import { Env } from "../lib/Env"
+import { annotateAuthSpan } from "@/lib/auth-span"
+import { Env } from "@/lib/Env"
 
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const apiKeyDefaultRoles = [decodeRoleNameSync("root")] as const

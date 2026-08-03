@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { OrgId, SpendLimitValidationError, UpdateSpendLimitsRequest } from "@maple/domain/http"
 import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
 import { SpendLimitsService, validateSpendLimits } from "./SpendLimitsService"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)

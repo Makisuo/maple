@@ -72,10 +72,10 @@ import {
 	SpanId,
 } from "@maple/domain/http"
 import { Clock, Config, Effect, Match, Option, Schema } from "effect"
-import { QueryEngineService } from "../services/QueryEngineService"
+import { QueryEngineService } from "@/services/QueryEngineService"
 import { makeDirectRouteCachePolicy, makeExecuteRawSql } from "@maple/query-engine/runtime"
-import { WarehouseQueryService } from "../lib/WarehouseQueryService"
-import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
+import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { traceCacheTtlSeconds } from "@/lib/trace-detail-cache"
 import {
 	CH,
 	QueryEngineExecuteRequest,

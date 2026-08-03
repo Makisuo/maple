@@ -3,7 +3,7 @@
 // here we only guard the tool's severity mapping and coverage-gap derivation.
 
 import { describe, expect, it } from "vitest"
-import { deriveCoverageGaps, kindToSeverity } from "../get-instrumentation-recommendations"
+import { deriveCoverageGaps, kindToSeverity } from "@/mcp/tools/get-instrumentation-recommendations"
 
 describe("kindToSeverity", () => {
 	it("maps rename and double-emission to warn", () => {

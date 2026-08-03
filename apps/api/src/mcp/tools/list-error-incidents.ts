@@ -1,8 +1,8 @@
 import { McpQueryError, optionalStringParam, validationError, type McpToolRegistrar } from "./types"
-import { formatTable } from "../lib/format"
+import { formatTable } from "@/mcp/lib/format"
 import { Effect, Option, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
-import { resolveTenant } from "../lib/query-warehouse"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
 import { ErrorsService } from "@/services/ErrorsService"
 import { ErrorIssueId } from "@maple/domain/http"
 

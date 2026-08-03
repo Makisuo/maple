@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Option, Schema } from "effect"
 import { ScrapeResultReportList } from "@maple/domain/http"
-import { isValidInternalBearer } from "../lib/internal-auth"
+import { isValidInternalBearer } from "@/lib/internal-auth"
 import { toInternalScrapeTarget } from "./scraper-internal.http"
 
 describe("internal bearer auth", () => {

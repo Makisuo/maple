@@ -20,8 +20,8 @@ import {
 import { and, eq, isNull, lt, or } from "drizzle-orm"
 import { Cause, Clock, Context, Duration, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { Database } from "../lib/DatabaseLive"
-import { Env } from "../lib/Env"
+import { Database } from "@/lib/DatabaseLive"
+import { Env } from "@/lib/Env"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 
 /**

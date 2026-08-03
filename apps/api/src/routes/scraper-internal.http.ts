@@ -8,14 +8,14 @@ import {
 	ScrapeTargetId,
 	UserId,
 } from "@maple/domain/http"
-import { Env } from "../lib/Env"
-import { isValidInternalBearer } from "../lib/internal-auth"
-import { OrgIngestKeysService } from "../services/OrgIngestKeysService"
+import { Env } from "@/lib/Env"
+import { isValidInternalBearer } from "@/lib/internal-auth"
+import { OrgIngestKeysService } from "@/services/OrgIngestKeysService"
 import {
 	PlanetScaleDiscoveryService,
 	type PlanetScaleSubTarget,
-} from "../services/PlanetScaleDiscoveryService"
-import { ScrapeTargetsService } from "../services/ScrapeTargetsService"
+} from "@/services/PlanetScaleDiscoveryService"
+import { ScrapeTargetsService } from "@/services/ScrapeTargetsService"
 
 const decodeTargetIdSync = Schema.decodeUnknownSync(ScrapeTargetId)
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)

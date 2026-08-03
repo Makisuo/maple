@@ -21,9 +21,9 @@ import { planetscaleConnections, scrapeTargets, type PlanetScaleConnectionRow } 
 import { and, eq } from "drizzle-orm"
 import { Clock, Context, Duration, Effect, Layer, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "../lib/Crypto"
-import { Database } from "../lib/DatabaseLive"
-import { Env } from "../lib/Env"
+import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "@/lib/Crypto"
+import { Database } from "@/lib/DatabaseLive"
+import { Env } from "@/lib/Env"
 import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
 import {
 	HttpSdResponse,

@@ -11,17 +11,17 @@ import {
 	UserId,
 } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { Env } from "../../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
+import { Env } from "@/lib/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
+import { ApiKeysService } from "@/services/ApiKeysService"
+import { AuthService } from "@/services/AuthService"
+import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
+import { ApiAuthorizationV2Layer } from "@/services/ApiAuthorizationV2Layer"
 import {
 	SLACK_CALLBACK_PATH,
 	SlackIntegrationService,
 	type SlackIntegrationServiceShape,
-} from "../../services/SlackIntegrationService"
+} from "@/services/SlackIntegrationService"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,

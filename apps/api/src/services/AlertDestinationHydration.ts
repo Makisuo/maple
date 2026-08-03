@@ -1,6 +1,6 @@
 import type { AlertDestinationRow } from "@maple/db"
 import { Effect, Schema } from "effect"
-import { decryptAes256Gcm } from "../lib/Crypto"
+import { decryptAes256Gcm } from "@/lib/Crypto"
 
 /**
  * `alert_destinations.config_json` is a jsonb column, so the driver hands back

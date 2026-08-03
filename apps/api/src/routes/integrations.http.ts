@@ -39,12 +39,12 @@ import { cloudflareAnalyticsState } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
 import { and, eq } from "drizzle-orm"
 import { Cause, Effect, Option, Schema } from "effect"
-import { Database } from "../lib/DatabaseLive"
-import { Env } from "../lib/Env"
-import { graphqlQuery } from "../lib/CloudflareApi"
-import { CloudflareAnalyticsService } from "../services/CloudflareAnalyticsService"
-import { CloudflareOAuthService } from "../services/CloudflareOAuthService"
-import { abrCount } from "../services/cloudflare-analytics/mapping"
+import { Database } from "@/lib/DatabaseLive"
+import { Env } from "@/lib/Env"
+import { graphqlQuery } from "@/lib/CloudflareApi"
+import { CloudflareAnalyticsService } from "@/services/CloudflareAnalyticsService"
+import { CloudflareOAuthService } from "@/services/CloudflareOAuthService"
+import { abrCount } from "@/services/cloudflare-analytics/mapping"
 import {
 	decodeTopTrafficResponse,
 	HTTP_DATASET,
@@ -52,14 +52,14 @@ import {
 	topTrafficFilterVariables,
 	topTrafficQuery,
 	type TopTrafficGroupShape,
-} from "../services/cloudflare-analytics/queries"
-import { PlanetScaleConnectionService } from "../services/PlanetScaleConnectionService"
-import { PlanetScaleOAuthService } from "../services/PlanetScaleOAuthService"
-import { PlanetScaleService } from "../services/PlanetScaleService"
-import { GithubConnectService } from "../services/vcs/vendor/github/GithubConnectService"
-import { VcsCommitService } from "../services/vcs/VcsCommitService"
-import { HazelOAuthService } from "../services/HazelOAuthService"
-import { requireAdmin as requireAdminRole } from "../lib/auth"
+} from "@/services/cloudflare-analytics/queries"
+import { PlanetScaleConnectionService } from "@/services/PlanetScaleConnectionService"
+import { PlanetScaleOAuthService } from "@/services/PlanetScaleOAuthService"
+import { PlanetScaleService } from "@/services/PlanetScaleService"
+import { GithubConnectService } from "@/services/vcs/vendor/github/GithubConnectService"
+import { VcsCommitService } from "@/services/vcs/VcsCommitService"
+import { HazelOAuthService } from "@/services/HazelOAuthService"
+import { requireAdmin as requireAdminRole } from "@/lib/auth"
 
 const asExternalUserId = Schema.decodeUnknownSync(ExternalUserId)
 const asUserId = Schema.decodeUnknownSync(UserId)
