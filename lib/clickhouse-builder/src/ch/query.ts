@@ -30,6 +30,7 @@ import type { ColumnDefs, CHType, InferTS, OutputToColumnDefs, NullableColumnDef
 import type { Table } from "./table"
 import type { Expr, Condition, ColumnRef } from "./expr"
 import { makeColumnRef } from "./expr"
+import type { TenantScope } from "./compile"
 
 // ---------------------------------------------------------------------------
 // Type utilities
@@ -89,6 +90,8 @@ interface CHQueryState {
 	readonly formatValue?: string
 	/** Execution-routing metadata carried onto the CompiledQuery (see compile.ts). */
 	readonly routingValue?: "ingest"
+	/** Set by `.crossOrg()`. Forces `tenantScope: "cross-org"` (see compile.ts). */
+	readonly crossOrg?: boolean
 	/** Typed FROM subquery. Compiled lazily at compileCH time. */
 	readonly fromQuery?: CHQuery<any, any, any>
 	readonly fromQueryAlias?: string
@@ -97,7 +100,7 @@ interface CHQueryState {
 	/** Typed joins (compiled lazily at compileCH time). */
 	readonly typedJoins: TypedJoinClause[]
 	/** CTE definitions prepended as WITH clauses. */
-	readonly ctes: Array<{ name: string; sql: string }>
+	readonly ctes: Array<{ name: string; sql: string; tenantScope?: TenantScope }>
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +148,17 @@ export interface CHQuery<
 	 * ingest backend instead of a per-org read override.
 	 */
 	routing(route: "ingest"): CHQuery<Cols, Output, Joins>
+
+	/**
+	 * Declare that this query deliberately reads across every tenant, forcing
+	 * `tenantScope: "cross-org"` on the compiled result.
+	 *
+	 * Opting in explicitly rather than relying on the absence of a tenant
+	 * predicate is the whole point: "no `OrgId` filter" is indistinguishable
+	 * from "someone forgot the `OrgId` filter" until an author says which.
+	 * Executors are expected to refuse these on the ordinary read path.
+	 */
+	crossOrg(): CHQuery<Cols, Output, Joins>
 
 	// ---------------------------------------------------------------------------
 	// Type-safe joins with Table
@@ -211,7 +225,19 @@ export interface CHQuery<
 	 * Add a CTE (WITH clause). The CTE SQL is prepended to the compiled query.
 	 * The CTE name can then be used as a table name via `from()` or in raw expressions.
 	 */
-	withCTE(name: string, sql: string): CHQuery<Cols, Output, Joins>
+	/**
+	 * Attach a CTE from pre-compiled SQL.
+	 *
+	 * `tenantScope` describes the SQL being passed in. It cannot be inferred —
+	 * the CTE arrives as an opaque string — so a caller splicing in a query it
+	 * compiled itself should pass the scope through, otherwise a query whose only
+	 * row source is a scoped CTE reads as cross-org.
+	 */
+	withCTE(
+		name: string,
+		sql: string,
+		options?: { readonly tenantScope?: TenantScope },
+	): CHQuery<Cols, Output, Joins>
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +279,7 @@ function createQualifiedColumnAccessor(alias: string): ColumnAccessor<any> {
 			if (typeof prop !== "string") return undefined
 			let ref = cache.get(prop)
 			if (!ref) {
-				ref = makeColumnRef(`${alias}.${prop}`)
+				ref = makeColumnRef(`${alias}.${prop}`, prop)
 				cache.set(prop, ref)
 			}
 			return ref
@@ -288,7 +314,7 @@ export function createJoinedColumnAccessor<Cols extends ColumnDefs, Joins extend
 
 			// Main table column — qualify with alias when joins are present
 			const qualifiedName = mainAlias ? `${mainAlias}.${prop}` : prop
-			cached = makeColumnRef(qualifiedName)
+			cached = makeColumnRef(qualifiedName, prop)
 			cache.set(prop, cached)
 			return cached
 		},
@@ -350,6 +376,10 @@ function makeQuery<
 
 		routing(route) {
 			return makeQuery({ ...state, routingValue: route })
+		},
+
+		crossOrg() {
+			return makeQuery({ ...state, crossOrg: true })
 		},
 
 		// -----------------------------------------------------------------------
@@ -428,10 +458,10 @@ function makeQuery<
 			}) as any
 		},
 
-		withCTE(name, sql) {
+		withCTE(name, sql, options) {
 			return makeQuery({
 				...state,
-				ctes: [...state.ctes, { name, sql }],
+				ctes: [...state.ctes, { name, sql, tenantScope: options?.tenantScope }],
 			})
 		},
 	}

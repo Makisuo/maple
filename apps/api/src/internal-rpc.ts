@@ -6,10 +6,10 @@ import {
 import { SubmitDiagnosisRequest } from "@maple/domain/http"
 import { UserId } from "@maple/domain/primitives"
 import { Effect, Schema } from "effect"
-import type { TenantContext } from "./lib/tenant-context"
+import type { TenantContext } from "@/services/auth/tenant-context"
 import { callMcpTool, listMcpTools } from "./mcp/dispatcher"
 import { CurrentMcpTenant } from "./mcp/lib/query-warehouse"
-import { InvestigationService } from "./services/InvestigationService"
+import { InvestigationService } from "./services/errors/InvestigationService"
 
 const internalServiceUserId = Schema.decodeUnknownSync(UserId)("internal-service")
 

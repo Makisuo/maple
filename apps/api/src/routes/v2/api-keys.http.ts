@@ -13,9 +13,9 @@ import {
 } from "@maple/domain/http/v2"
 import type { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { requireAdmin } from "../../lib/auth"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { requireAdmin } from "@/services/auth/auth"
 
 const adminOnly = (action: string) => () =>
 	permissionError("insufficient_permissions", `Only org admins can ${action} API keys`)

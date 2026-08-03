@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { PlusIcon } from "@/components/icons"
 import { ALERT_TEMPLATES, type AlertTemplate } from "@/lib/alerts/templates"

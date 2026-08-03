@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { InternalRpcInvalidInputError } from "@maple/domain/internal-rpc"
 import { callMcpToolRpc, submitDiagnosisRpc } from "./internal-rpc"
-import { InvestigationService, type InvestigationServiceShape } from "./services/InvestigationService"
+import { InvestigationService, type InvestigationServiceShape } from "./services/errors/InvestigationService"
 
 const investigationId = "00000000-0000-4000-8000-000000000001"
 const report = {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AuditCheckResult } from "@maple/domain/setup-audit"
-import { byUrgency, formatAffected } from "../audit-setup"
+import { byUrgency, formatAffected } from "@/mcp/tools/audit-setup"
 
 const check = (overrides: Partial<AuditCheckResult> = {}): AuditCheckResult => ({
 	id: "CFG-ALERT-01",

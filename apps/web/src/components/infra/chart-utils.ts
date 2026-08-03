@@ -4,7 +4,7 @@
 // value formatting used by tooltips, legend chips, and axes. Series colors come
 // from `resolveSeriesColors` — a host/pod/zone keeps its color across windows.
 
-import { formatBytesPerSecond, formatLoad, formatPercent } from "@maple/ui/format"
+import { formatBytesPerSecond, formatLoad, formatPercent } from "@maple/ui/lib/format"
 
 /** Recharts grid dash — one value across every infra chart. */
 export const CHART_GRID_DASH = "3 3"

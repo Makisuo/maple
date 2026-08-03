@@ -167,6 +167,14 @@ export const nav_kubernetes = () => `Kubernetes Monitoring`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_alerts = () => `Alerting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const nav_ecommerce = () => `E-Commerce Observability`
 
 
@@ -320,6 +328,14 @@ export const nav_desc_ai_mcp = () => `AI-powered diagnostics via MCP`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const nav_desc_kubernetes = () => `Pods, nodes, and workloads alongside spans`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_desc_alerts = () => `Alert on any signal, routed where you work`
 
 
 /**
@@ -2159,87 +2175,7 @@ export const dashboard_ai_text = () => `Add a P95 latency chart for payment-serv
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_badge = () => `Alerting`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const alert_heading = () => `Alerts with the context attached`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_title = () => `Alert rules`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_desc = () => `7 built-in signal types — error rate, P95/P99 latency, Apdex, throughput, custom metrics, and custom queries. With severity levels, incident tracking, and auto-resolution.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_route_title = () => `Route everywhere`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_route_desc = () => `Push alerts to Slack, Discord, PagerDuty, or any webhook. Your team gets notified where they already work.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_firing = () => `Firing`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_triggered_ago = () => `Triggered 34s ago`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_view = () => `View in Maple`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_acknowledge = () => `Acknowledge`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const alert_webhook_note = () => `+ any custom webhook endpoint`
 
 
 /**
@@ -6240,6 +6176,158 @@ export const feat_errors_cap_5_title = () => `Triaged before you wake`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const feat_errors_cap_5_body = () => `A detector runs every five minutes and sets a severity from the issue's own rate and spread. Manual severity always wins over the detector's, and the detector's over the AI's.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_seo_title = () => `Alerting | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_seo_desc = () => `Threshold alerts on traces, logs and metrics — previewed against your own history before you save, evaluated every minute, and delivered to Slack, PagerDuty, Discord, email or any webhook.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_hero_title = () => `Alerts that show their work`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_hero_lede = () => `Every rule can be replayed against your history before it exists, and every evaluation is recorded after. When a page arrives you can see exactly why — and when one doesn't, you can see that too.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_panel_title = () => `Previewed before it can page you`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_panel_lede = () => `The preview runs the same code the scheduler runs, over the range you pick — per-window verdicts, would-fire spans and all. What the chart shows is what would have happened.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_title = () => `From threshold to resolution`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_1_title = () => `Alert on anything`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_1_body = () => `Seven built-in trace signals — error rate, P95/P99 latency, Apdex, throughput — plus any query-builder draft over traces, logs or metrics. Raw SQL when the builder can't say it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_2_title = () => `Evaluator-faithful preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_2_body = () => `The preview replays the rule over history with the exact code the scheduler runs every minute. If it says the rule would have fired twice last Tuesday, that is what would have happened.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_3_title = () => `One rule, per-group incidents`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_3_body = () => `Group by service.name or any attribute and each group gets its own breach count, its own incident and its own history. A spike in one service never hides behind the average of twelve.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_4_title = () => `Every check on the record`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_4_body = () => `Each evaluation writes its observed value, sample count and verdict — including failed queries, so a gap is visible instead of silent. When a rule stays quiet, a diagnosis panel walks the pipeline stage by stage.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_5_title = () => `Delivery that survives`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_cap_5_body = () => `Queued dispatch with five attempts and backoff, every provider response stored, custom templates per destination, and a renotify interval while the incident stays open. Slack, PagerDuty, Discord, email, webhooks, Hazel.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_artifact_title = () => `From breach to page in a minute`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const feat_alerts_artifact_lede = () => `Rules evaluate every 60 seconds. Two consecutive breaches open the incident and send the notification with the observed value attached; two healthy windows resolve it without anyone clicking close.`
 
 
 /**

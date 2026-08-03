@@ -5,7 +5,7 @@ import { toastManager } from "@maple/ui/components/ui/toast"
 
 import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { DetailsSection } from "@/components/alerts/details-section"
 import { NotificationsSection } from "@/components/alerts/notifications-section"

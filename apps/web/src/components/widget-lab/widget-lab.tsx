@@ -131,7 +131,10 @@ function CopyScenarios() {
 				/>
 			),
 		},
-		{ label: "icon-sm / outline", node: <CopyButton value="key_live_x" label="API key" size="icon-sm" variant="outline" /> },
+		{
+			label: "icon-sm / outline",
+			node: <CopyButton value="key_live_x" label="API key" size="icon-sm" variant="outline" />,
+		},
 		{
 			// A resolver that throws (a circular `JSON.stringify`, say) must surface as
 			// the error state, not an uncaught click handler.
@@ -165,7 +168,15 @@ function CopyScenarios() {
 			// Everything toasts by default; this is the opt-out for surfaces where a
 			// toast per click would pile up.
 			label: "toast={false} (opt-out)",
-			node: <CopyButton value="issue_123" label="Issue ID" toast={false} idleLabel="Copy" variant="outline" />,
+			node: (
+				<CopyButton
+					value="issue_123"
+					label="Issue ID"
+					toast={false}
+					idleLabel="Copy"
+					variant="outline"
+				/>
+			),
 		},
 		{ label: "disabled", node: <CopyButton value="x" label="Nothing" disabled /> },
 		{

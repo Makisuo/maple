@@ -14,12 +14,26 @@ import type {
 	StateDispositionEntry,
 } from "../local-store-migration-module"
 
-// Batch bounds keep memory bounded and the journal resumable, but every batch
-// costs a full source open + target open (one connection per process, one
-// query per open), so bounds this size dominate real-store migration time.
+// Batch bounds keep memory bounded and the journal resumable. Consecutive
+// same-side queries share one cached connection, but each batch still
+// alternates a source SELECT with a target INSERT, and chDB allows one
+// connection per process — so every batch pays one full store reopen per
+// side, and bounds this size dominate real-store migration time.
 export const LEGACY_RAW_TABLES = [
-	{ name: "logs", timeColumn: "TimestampTime", retentionDays: 30, batchRows: 2000, batchBytes: 4 * 1024 * 1024 },
-	{ name: "traces", timeColumn: "Timestamp", retentionDays: 30, batchRows: 2000, batchBytes: 4 * 1024 * 1024 },
+	{
+		name: "logs",
+		timeColumn: "TimestampTime",
+		retentionDays: 30,
+		batchRows: 2000,
+		batchBytes: 4 * 1024 * 1024,
+	},
+	{
+		name: "traces",
+		timeColumn: "Timestamp",
+		retentionDays: 30,
+		batchRows: 2000,
+		batchBytes: 4 * 1024 * 1024,
+	},
 	{
 		name: "metrics_sum",
 		timeColumn: "TimeUnix",

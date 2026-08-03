@@ -1,6 +1,6 @@
 import { memo, useEffect, useId } from "react"
 import { getSmoothStepPath, type EdgeProps } from "@xyflow/react"
-import { getServiceColor, getValueHue } from "@maple/ui/colors"
+import { getServiceColor, getValueHue } from "@maple/ui/lib/colors"
 import { getDbNodeColor } from "./service-map-db"
 import {
 	isDbNodeId,

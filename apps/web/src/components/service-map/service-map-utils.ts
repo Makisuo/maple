@@ -9,7 +9,7 @@ import type {
 } from "@/api/warehouse/service-map"
 import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
-import { getServiceColor, getValueHue } from "@maple/ui/colors"
+import { getServiceColor, getValueHue } from "@maple/ui/lib/colors"
 import { getDbNodeColor, PLANETSCALE_COLOR, resolveDbNodePresentation } from "./service-map-db"
 import {
 	matchHyperdriveConfigs,

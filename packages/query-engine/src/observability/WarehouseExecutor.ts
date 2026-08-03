@@ -23,11 +23,6 @@ export interface WarehouseExecutorShape {
 	) => Effect.Effect<{ data: ReadonlyArray<T> }, WarehouseExecutorError>
 
 	/** Execute raw ClickHouse SQL. The SQL MUST include an OrgId filter. */
-	readonly sqlQuery: <T = Record<string, unknown>>(
-		sql: string,
-		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<T>, WarehouseExecutorError>
-
 	readonly compiledQuery: <T>(
 		compiled: CompiledQuery<T>,
 		options?: SqlQueryOptions,

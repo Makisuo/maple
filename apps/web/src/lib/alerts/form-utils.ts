@@ -38,7 +38,7 @@ import {
 	createQueryDraft,
 	type QueryBuilderQueryDraft,
 } from "@/lib/query-builder/model"
-import { formatErrorRate, formatLatency, formatNumber } from "@maple/ui/format"
+import { formatErrorRate, formatLatency, formatNumber } from "@maple/ui/lib/format"
 
 const asHazelOrganizationId = Schema.decodeUnknownSync(HazelOrganizationId)
 const asHazelChannelId = Schema.decodeUnknownSync(HazelChannelId)
@@ -211,9 +211,7 @@ function parseNonNegativeNumber(value: string, fallback: number): number {
 	return parsed
 }
 
-export function normalizeRuleQueryDraft(
-	draft: QueryBuilderQueryDraftPayload | null,
-): QueryBuilderQueryDraft {
+export function normalizeRuleQueryDraft(draft: QueryBuilderQueryDraftPayload | null): QueryBuilderQueryDraft {
 	const base = createQueryDraft(0)
 	if (draft == null) return base
 
@@ -385,7 +383,9 @@ export function buildRuleCreateParamsV2(form: RuleFormState): V2AlertRuleCreateP
 		renotify_interval_minutes: parsePositiveNumber(form.renotifyIntervalMinutes, 30),
 		apdex_threshold_ms: signalType === "apdex" ? parsePositiveNumber(form.apdexThresholdMs, 500) : null,
 		query_builder_draft:
-			signalType === "builder_query" ? Object.fromEntries(Object.entries(form.queryBuilderDraft)) : null,
+			signalType === "builder_query"
+				? Object.fromEntries(Object.entries(form.queryBuilderDraft))
+				: null,
 		raw_query_sql: signalType === "raw_query" ? form.rawQuerySql.trim() || null : null,
 		raw_query_reducer: signalType === "raw_query" ? form.rawQueryReducer : null,
 		// Dedupe so the same destination is never persisted twice (e.g. when editing a

@@ -217,6 +217,8 @@ approval prompt in prose, and never retry a denied action without a new
 directive.
 
 ## Response Style
-- Be concise. State what you found, then propose the widget.
+- Be concise. State what you found, then propose the widget. One or two short
+  sentences per widget — the widget itself is the deliverable, not your prose.
 - DO NOT narrate your tool calls or explain your investigation process in detail
+- Never list a widget's config in text; the proposal card already shows it
 - After adding widgets, confirm what was added in one sentence, with a link to the dashboard

@@ -658,50 +658,70 @@ const MIN_MIGRATION_FREE_BYTES = 128 * 1024 * 1024
 
 type MigrationStoreRole = "source" | "target"
 
-const openDb = (dataDir: string, bootstrapSchema: boolean, options: MigrationDbOptions = {}): Chdb =>
-	Chdb.open({
-		dataDir,
-		schemaSql: options.schemaSql ?? LOCAL_SCHEMA_SQL,
-		bootstrapSchema: options.bootstrapSchema ?? bootstrapSchema,
-	})
+interface MigrationSessionOptions extends MigrationDbOptions {
+	readonly role?: MigrationStoreRole
+}
 
-/** Every migration connection is sentinel-managed. A source sentinel left by
- * an abrupt kill is a hard stop; staged-target evidence can be explicitly
- * abandoned and rebuilt, but is never silently reopened. */
-const withDb = async <A>(
-	dataDir: string,
-	bootstrapSchema: boolean,
-	fn: (db: Chdb) => A | Promise<A>,
-	options: MigrationDbOptions & { readonly role?: MigrationStoreRole } = {},
-): Promise<A> => {
-	const role = options.role ?? "source"
-	if (isStoreDirty(dataDir)) {
-		throw new Error(
-			`${role} store at ${dataDir} was not cleanly closed; refusing to reopen it during migration. ` +
-				(role === "target"
-					? "Discard the incomplete migration and rebuild its staged target explicitly."
-					: "Preserve the source and inspect the open sentinel before retrying."),
-		)
-	}
-	await markStoreOpenDurable(dataDir)
-	let db: Chdb | undefined
-	try {
-		db = openDb(dataDir, bootstrapSchema, options)
-		return await fn(db)
-	} finally {
-		if (db !== undefined) {
-			let closed = false
-			try {
-				db.close()
-				closed = true
-			} finally {
-				if (closed) await markStoreClosedDurable(dataDir)
-			}
+/** One chDB connection shared across a migration's queries. chDB allows a
+ * single connection per process, so the session keeps at most one store open,
+ * reusing it for consecutive same-dir queries and closing it before the other
+ * side (or a bootstrap-requiring reopen) is served. Every open and close is
+ * sentinel-managed exactly like the previous per-query connections: evidence
+ * is durable before chDB connects and cleared only after a clean close, so an
+ * abrupt kill anywhere while a store is open leaves it dirty. A source
+ * sentinel left behind is a hard stop; staged-target evidence can be
+ * explicitly abandoned and rebuilt, but is never silently reopened. */
+class MigrationDbSession {
+	#open: {
+		readonly dataDir: string
+		readonly db: Chdb
+		readonly schemaSql: string
+		readonly bootstrapSchema: boolean
+	} | null = null
+
+	async use<A>(
+		dataDir: string,
+		fn: (db: Chdb) => A | Promise<A>,
+		options: MigrationSessionOptions = {},
+	): Promise<A> {
+		const role = options.role ?? "source"
+		const schemaSql = options.schemaSql ?? LOCAL_SCHEMA_SQL
+		const bootstrapSchema = options.bootstrapSchema ?? false
+		if (
+			this.#open !== null &&
+			(this.#open.dataDir !== dataDir ||
+				(bootstrapSchema && !(this.#open.bootstrapSchema && this.#open.schemaSql === schemaSql)))
+		) {
+			await this.close()
 		}
+		if (this.#open === null) {
+			if (isStoreDirty(dataDir)) {
+				throw new Error(
+					`${role} store at ${dataDir} was not cleanly closed; refusing to reopen it during migration. ` +
+						(role === "target"
+							? "Discard the incomplete migration and rebuild its staged target explicitly."
+							: "Preserve the source and inspect the open sentinel before retrying."),
+				)
+			}
+			await markStoreOpenDurable(dataDir)
+			const db = Chdb.open({ dataDir, schemaSql, bootstrapSchema })
+			this.#open = { dataDir, db, schemaSql, bootstrapSchema }
+		}
+		return await fn(this.#open.db)
+	}
+
+	/** Close the live connection and clear its sentinel. If chDB's close throws,
+	 * the sentinel stays behind so the store fails closed as dirty. */
+	async close(): Promise<void> {
+		const open = this.#open
+		if (open === null) return
+		this.#open = null
+		open.db.close()
+		await markStoreClosedDurable(open.dataDir)
 	}
 }
 
-const ensureMigrationCapacity = async (dataDir: string): Promise<void> => {
+const ensureMigrationCapacity = async (dataDir: string, session: MigrationDbSession): Promise<void> => {
 	const treeBytes = async (path: string): Promise<number> => {
 		const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
 			if (error.code === "ENOENT") return null
@@ -716,12 +736,15 @@ const ensureMigrationCapacity = async (dataDir: string): Promise<void> => {
 		for (const entry of entries) total += await treeBytes(join(path, entry))
 		return total
 	}
-	const rows = await withDb(dataDir, false, (db) =>
-		parseJsonEachRow<{ bytes: string | number }>(
-			db.query(
-				"SELECT coalesce(sum(bytes_on_disk), 0) AS bytes FROM system.parts WHERE database = 'default' AND active = 1",
+	const rows = await session.use(
+		dataDir,
+		(db) =>
+			parseJsonEachRow<{ bytes: string | number }>(
+				db.query(
+					"SELECT coalesce(sum(bytes_on_disk), 0) AS bytes FROM system.parts WHERE database = 'default' AND active = 1",
+				),
 			),
-		),
+		{ role: "source" },
 	)
 	const sourceBytes = Number(rows[0]?.bytes ?? 0)
 	if (!Number.isFinite(sourceBytes) || sourceBytes < 0)
@@ -1082,6 +1105,7 @@ const makeModuleContext = (
 	dataDir: string,
 	journal: MigrationJournal,
 	stepIndex: number,
+	session: MigrationDbSession,
 ): {
 	readonly context: MigrationModuleContext
 	readonly current: () => MigrationJournal
@@ -1098,14 +1122,11 @@ const makeModuleContext = (
 		target: step.to,
 		cutoffAt: journal.cutoffAt,
 		step,
-		openSource: (fn, options = {}) =>
-			withDb(sourceDataDir, options.bootstrapSchema ?? false, fn, { ...options, role: "source" }),
+		openSource: (fn, options = {}) => session.use(sourceDataDir, fn, { ...options, role: "source" }),
 		openTarget: (fn, options = {}) =>
-			withDb(journal.targetDataDir, options.bootstrapSchema ?? false, fn, {
-				...options,
-				role: "target",
-			}),
-		ensureCapacity: () => (stepIndex === 0 ? ensureMigrationCapacity(dataDir) : Promise.resolve()),
+			session.use(journal.targetDataDir, fn, { ...options, role: "target" }),
+		ensureCapacity: () =>
+			stepIndex === 0 ? ensureMigrationCapacity(dataDir, session) : Promise.resolve(),
 		saveStep: async (update) => {
 			const previous = current.chain[stepIndex]!
 			const nextStep: MigrationStepJournal = {
@@ -1206,91 +1227,102 @@ export const executeMigrationChain = async (
 ): Promise<MigrationJournal> => {
 	let journal = input
 	let freshlyAdvanced = false
-	while (journal.currentStepIndex < journal.chain.length) {
-		const stepIndex = journal.currentStepIndex
-		const lifecycleStep = journal.chain[stepIndex]!
-		let step = lifecycleStep
-		const migration = moduleForStep(lifecycleStep, modules)
-		if (step.status === "pending") {
-			step = { ...step, status: "running" }
+	// One shared connection session for the whole chain. The finally close is
+	// load-bearing: promotion renames the source and target directories, so no
+	// connection (and no open-store sentinel) may outlive this function.
+	const session = new MigrationDbSession()
+	try {
+		while (journal.currentStepIndex < journal.chain.length) {
+			const stepIndex = journal.currentStepIndex
+			const lifecycleStep = journal.chain[stepIndex]!
+			let step = lifecycleStep
+			const migration = moduleForStep(lifecycleStep, modules)
+			if (step.status === "pending") {
+				step = { ...step, status: "running" }
+				journal = await updateJournal(dataDir, journal, {
+					chain: journal.chain.map((candidate, index) => (index === stepIndex ? step : candidate)),
+				})
+			}
+			const targetMarker = readMarker(journal.targetDataDir)
+			const prepareTarget = !markerMatches(targetMarker, migration.to, journal.targetStoreId, "staging")
 			journal = await updateJournal(dataDir, journal, {
-				chain: journal.chain.map((candidate, index) => (index === stepIndex ? step : candidate)),
+				phase:
+					lifecycleStep.status === "pending" && stepIndex === 0
+						? "planned"
+						: lifecycleStep.status === "pending"
+							? "target-created"
+							: "copying",
 			})
-		}
-		const targetMarker = readMarker(journal.targetDataDir)
-		const prepareTarget = !markerMatches(targetMarker, migration.to, journal.targetStoreId, "staging")
-		journal = await updateJournal(dataDir, journal, {
-			phase:
-				lifecycleStep.status === "pending" && stepIndex === 0
-					? "planned"
-					: lifecycleStep.status === "pending"
-						? "target-created"
-						: "copying",
-		})
-		const { context, current, setPhase } = makeModuleContext(dataDir, journal, stepIndex)
-		// Keep the persisted step running before invoking the handlers, but pass
-		// the pre-transition status to the lifecycle seam. A newly started step
-		// must preflight/apply; only a step recovered after a restart should call
-		// recover first.
-		const lifecycleInput = freshlyAdvanced
-			? { ...lifecycleStep, status: "pending" as const }
-			: lifecycleStep
-		freshlyAdvanced = false
-		await executeMigrationModule(migration, context, lifecycleInput, {
-			prepareTarget,
-			onPhase: async (phase) => {
-				setPhase(phase)
-				journal = await updateJournal(dataDir, current(), { phase })
-			},
-		})
-		journal = await updateJournal(dataDir, current(), { phase: "copy-verified" })
-		const activeStep = current().chain[stepIndex]!
-		if (activeStep.status !== "verified" && activeStep.status !== "completed") {
-			const verifiedStep: MigrationStepJournal = { ...activeStep, status: "verified" }
+			const { context, current, setPhase } = makeModuleContext(dataDir, journal, stepIndex, session)
+			// Keep the persisted step running before invoking the handlers, but pass
+			// the pre-transition status to the lifecycle seam. A newly started step
+			// must preflight/apply; only a step recovered after a restart should call
+			// recover first.
+			const lifecycleInput = freshlyAdvanced
+				? { ...lifecycleStep, status: "pending" as const }
+				: lifecycleStep
+			freshlyAdvanced = false
+			await executeMigrationModule(migration, context, lifecycleInput, {
+				prepareTarget,
+				onPhase: async (phase) => {
+					setPhase(phase)
+					journal = await updateJournal(dataDir, current(), { phase })
+				},
+			})
+			journal = await updateJournal(dataDir, current(), { phase: "copy-verified" })
+			const activeStep = current().chain[stepIndex]!
+			if (activeStep.status !== "verified" && activeStep.status !== "completed") {
+				const verifiedStep: MigrationStepJournal = { ...activeStep, status: "verified" }
+				journal = await updateJournal(
+					dataDir,
+					{
+						...current(),
+						chain: current().chain.map((candidate, index) =>
+							index === stepIndex ? verifiedStep : candidate,
+						),
+					},
+					{},
+				)
+			}
+
+			await assertRealDirectory(journal.targetDataDir, "migration target")
+			await ensureStoreMarkerDurable(
+				journal.targetDataDir,
+				migration.to,
+				MAPLE_VERSION,
+				journal.createdAt,
+				{
+					activation: "staging",
+					storeId: journal.targetStoreId,
+				},
+			)
+			const completedStep: MigrationStepJournal = {
+				...current().chain[stepIndex]!,
+				status: "completed",
+			}
+			const nextChain = current().chain.map((candidate, index) =>
+				index === stepIndex
+					? completedStep
+					: index === stepIndex + 1
+						? { ...candidate, status: "running" as const }
+						: candidate,
+			)
 			journal = await updateJournal(
 				dataDir,
 				{
 					...current(),
-					chain: current().chain.map((candidate, index) =>
-						index === stepIndex ? verifiedStep : candidate,
-					),
+					chain: nextChain,
 				},
-				{},
+				{
+					currentStepIndex: stepIndex + 1,
+					phase: stepIndex + 1 < current().chain.length ? "target-created" : "copy-verified",
+				},
 			)
+			freshlyAdvanced = stepIndex + 1 < journal.chain.length
+			onProgress?.(`${migration.id}: step ${stepIndex + 1}/${journal.chain.length} verified`)
 		}
-
-		await assertRealDirectory(journal.targetDataDir, "migration target")
-		await ensureStoreMarkerDurable(
-			journal.targetDataDir,
-			migration.to,
-			MAPLE_VERSION,
-			journal.createdAt,
-			{
-				activation: "staging",
-				storeId: journal.targetStoreId,
-			},
-		)
-		const completedStep: MigrationStepJournal = { ...current().chain[stepIndex]!, status: "completed" }
-		const nextChain = current().chain.map((candidate, index) =>
-			index === stepIndex
-				? completedStep
-				: index === stepIndex + 1
-					? { ...candidate, status: "running" as const }
-					: candidate,
-		)
-		journal = await updateJournal(
-			dataDir,
-			{
-				...current(),
-				chain: nextChain,
-			},
-			{
-				currentStepIndex: stepIndex + 1,
-				phase: stepIndex + 1 < current().chain.length ? "target-created" : "copy-verified",
-			},
-		)
-		freshlyAdvanced = stepIndex + 1 < journal.chain.length
-		onProgress?.(`${migration.id}: step ${stepIndex + 1}/${journal.chain.length} verified`)
+	} finally {
+		await session.close()
 	}
 	return journal
 }

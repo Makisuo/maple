@@ -1,7 +1,7 @@
 # alchemy-maple example
 
 A Cloudflare Worker and the Maple resources that observe it, in one stack — via
-[`@maple-dev/alchemy`](../../lib/alchemy-maple) and [`@maple-dev/effect-sdk`](../../lib/effect-sdk).
+[`@maple-dev/alchemy`](../../packages/alchemy-maple) and [`@maple-dev/effect-sdk`](../../packages/effect-sdk).
 
 |                                    |                                                                            |
 | ---------------------------------- | -------------------------------------------------------------------------- |
@@ -31,7 +31,7 @@ that never reports.
 ## Deploy
 
 ```bash
-bun run --cwd ../../lib/alchemy-maple build && bun run --cwd ../../lib/effect-sdk build
+bun run --cwd ../../packages/alchemy-maple build && bun run --cwd ../../packages/effect-sdk build
 ```
 
 ```bash

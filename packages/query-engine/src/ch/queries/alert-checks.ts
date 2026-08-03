@@ -9,8 +9,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from } from "@maple-dev/clickhouse-builder"
 import { AlertChecks } from "../tables"
-
-const ISO_Z_FORMAT = "%Y-%m-%dT%H:%i:%S.%fZ"
+import { ISO_Z_FORMAT } from "./format"
 
 export interface ListRuleChecksOpts {
 	readonly groupKey?: string

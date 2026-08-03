@@ -10,7 +10,7 @@ import { useAutocompleteContextOptional } from "@/hooks/use-autocomplete-context
 import { useAutocompleteValuesContextOptional } from "@/hooks/use-autocomplete-values"
 import { useWhereClauseAutocomplete } from "@/hooks/use-where-clause-autocomplete"
 import { WHERE_CLAUSE_TOKEN_COLOR, tokenizeWhereClause } from "@/lib/query-builder/where-clause-highlight"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 interface WhereClauseEditorProps {
 	dataSource: QueryBuilderDataSource

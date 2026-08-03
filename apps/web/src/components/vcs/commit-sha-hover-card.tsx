@@ -1,4 +1,4 @@
-import { formatRelativeFrom, formatRelativeShortFrom } from "@maple/ui/time-format"
+import { formatRelativeFrom, formatRelativeShortFrom } from "@maple/ui/lib/time-format"
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
@@ -9,7 +9,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@maple/ui/compone
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { CopyIndicator } from "@maple/ui/components/ui/copy-button"
 import { useCopy } from "@maple/ui/hooks/use-copy"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 // A full 40-hex git SHA. Telemetry `deployment.commit_sha` is unguarded OTel
 // data, so a value may be a short SHA, a tag, or arbitrary text — those never

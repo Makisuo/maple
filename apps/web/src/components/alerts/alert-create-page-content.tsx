@@ -5,7 +5,7 @@ import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/
 import type { Dashboard } from "@/components/dashboard-builder/types"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { AlertCreateFormSurface } from "@/components/alerts/alert-create-form-surface"
 import { RULE_FORM_MAX_WIDTH } from "@/components/alerts/rule-form-layout"

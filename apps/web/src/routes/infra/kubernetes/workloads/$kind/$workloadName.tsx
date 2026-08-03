@@ -23,7 +23,7 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TIME_PRESETS, bucketSecondsFor } from "@/components/infra/constants"
 import { severityLevel } from "@/components/infra/format"
-import { formatPercent } from "@maple/ui/format"
+import { formatPercent } from "@maple/ui/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import type { WorkloadInfraMetric, WorkloadKind } from "@/api/warehouse/infra"
 

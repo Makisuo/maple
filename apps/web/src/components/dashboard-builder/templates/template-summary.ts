@@ -1,5 +1,5 @@
 import type { V2DashboardTemplate } from "@maple/domain/http/v2"
-import { formatRelativeFrom, toEpochMs } from "@maple/ui/time-format"
+import { formatRelativeFrom, toEpochMs } from "@maple/ui/lib/time-format"
 
 /**
  * The empty-dashboard template. It is pinned below the list as its own row

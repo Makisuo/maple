@@ -14,7 +14,6 @@
 		"./query-engine": "./src/query-engine.ts",
 		"./recommendations": "./src/recommendations.ts",
 		"./setup-audit": "./src/setup-audit.ts",
-		"./sqlcommenter": "./src/sqlcommenter.ts",
 		"./tinybird-project-sync": "./src/tinybird/project-sync.ts",
 		"./warehouse-queries": "./src/warehouse-queries.ts",
 		"./tinybird": "./src/tinybird/index.ts",

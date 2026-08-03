@@ -27,7 +27,7 @@ import {
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
 import { getHttpInfo, type HttpInfo } from "@maple/ui/lib/http"
-import type { Span, SpanNode } from "@maple/ui/types"
+import type { Span, SpanNode } from "@maple/ui/lib/types"
 import {
 	buildSpanTree,
 	dedupeBySpanId,
@@ -334,7 +334,7 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 // Canonical Span/SpanNode shapes live in @maple/ui so the shared trace
 // components can consume them; re-export here so existing
 // `@/api/warehouse/traces` importers keep working unchanged.
-export type { Span, SpanNode } from "@maple/ui/types"
+export type { Span, SpanNode } from "@maple/ui/lib/types"
 
 export interface SpanHierarchyResponse {
 	traceId: TraceId

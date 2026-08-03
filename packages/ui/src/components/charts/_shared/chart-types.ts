@@ -82,15 +82,7 @@ export interface BaseChartProps {
 	}
 }
 
-export type ChartCategory =
-	| "bar"
-	| "hbar"
-	| "area"
-	| "line"
-	| "pie"
-	| "histogram"
-	| "heatmap"
-	| "funnel"
+export type ChartCategory = "bar" | "hbar" | "area" | "line" | "pie" | "histogram" | "heatmap" | "funnel"
 
 export interface ChartRegistryEntry {
 	id: string

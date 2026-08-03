@@ -1,8 +1,8 @@
 import { McpQueryError, requiredBooleanParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Effect, Option, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/AlertsService"
+import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertRuleId } from "@maple/domain"
 
 const decodeAlertRuleId = Schema.decodeUnknownOption(AlertRuleId)

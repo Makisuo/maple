@@ -8,7 +8,7 @@ import {
 	DialogPopup,
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { ALERT_TEMPLATES, BlankRuleIcon, type AlertTemplate } from "@/lib/alerts/templates"
 import { ChartLineIcon, ChevronRightIcon } from "@/components/icons"

@@ -21,7 +21,7 @@ import {
 	formatNumber,
 	inferBucketSeconds,
 	inferRangeMs,
-} from "@maple/ui/format"
+} from "@maple/ui/lib/format"
 import { useCopy } from "@maple/ui/hooks/use-copy"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"

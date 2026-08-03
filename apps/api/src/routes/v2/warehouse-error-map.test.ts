@@ -57,7 +57,10 @@ describe("warehouseToV2", () => {
 
 	it("carries the schema-drift remediation instead of a fixed string", () => {
 		const mapped = map(
-			new WarehouseSchemaDriftError({ pipeName: "service_overview", message: "Unknown column SampleRate" }),
+			new WarehouseSchemaDriftError({
+				pipeName: "service_overview",
+				message: "Unknown column SampleRate",
+			}),
 		)
 		expect(mapped).toBeInstanceOf(V2UpstreamError)
 		expect(mapped.error.code).toBe("warehouse_schema_drift")

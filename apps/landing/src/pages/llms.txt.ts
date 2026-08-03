@@ -67,18 +67,14 @@ export const GET: APIRoute = ({ site }) => {
 		"",
 		`One page per capability — tracing, session replay, logs, metrics, service catalog, error tracking, MCP, Kubernetes. ${CONVENTION("feature")}`,
 		"",
-		...features.map(
-			(feature) => `- [${feature.navLabel()}](${url(`/features/${feature.slug}.md`)})`,
-		),
+		...features.map((feature) => `- [${feature.navLabel()}](${url(`/features/${feature.slug}.md`)})`),
 		"",
 
 		"## Use cases",
 		"",
 		`Worked debugging stories, step by step. ${CONVENTION("use-case")}`,
 		"",
-		...useCases.map(
-			(useCase) => `- [${useCase.navLabel()}](${url(`/use-cases/${useCase.slug}.md`)})`,
-		),
+		...useCases.map((useCase) => `- [${useCase.navLabel()}](${url(`/use-cases/${useCase.slug}.md`)})`),
 		"",
 
 		"## Command line tool",

@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
 import { Toggle } from "@maple/ui/components/ui/toggle"
@@ -28,10 +28,7 @@ export function AlertTagControls({
 	grouped,
 	onGroupedChange,
 }: AlertTagControlsProps) {
-	const options = useMemo(
-		() => facets.map((facet) => ({ value: facet.name, meta: facet.count })),
-		[facets],
-	)
+	const options = useMemo(() => facets.map((facet) => ({ value: facet.name, meta: facet.count })), [facets])
 
 	if (facets.length === 0 && selected.length === 0) return null
 

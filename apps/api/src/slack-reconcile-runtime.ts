@@ -2,11 +2,11 @@ import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Effect, Layer } from "effect"
-import { layerPg } from "./lib/DatabasePgLive"
-import { Env } from "./lib/Env"
-import { ApiKeysService } from "./services/ApiKeysService"
-import { OAuthStateRepository } from "./services/OAuthStateRepository"
-import { SlackIntegrationService } from "./services/SlackIntegrationService"
+import { layerPg } from "@/platform/DatabasePgLive"
+import { Env } from "@/platform/Env"
+import { ApiKeysService } from "./services/org/ApiKeysService"
+import { OAuthStateRepository } from "./services/auth/OAuthStateRepository"
+import { SlackIntegrationService } from "./services/integrations/SlackIntegrationService"
 
 // ---------------------------------------------------------------------------
 // Slack workspace reconciliation's cron layer graph — mirrors

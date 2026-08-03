@@ -7,11 +7,11 @@ import {
 } from "./types"
 import { Effect, Schema } from "effect"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange } from "../lib/time"
-import { autoBucketSeconds, runRawSql } from "../lib/run-raw-sql"
-import { createDualContent } from "../lib/structured-output"
-import { formatTable, truncate } from "../lib/format"
-import { toMcpQueryError } from "../lib/map-warehouse-error"
+import { resolveTimeRange } from "@/mcp/lib/time"
+import { autoBucketSeconds, runRawSql } from "@/mcp/lib/run-raw-sql"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { formatTable, truncate } from "@/mcp/lib/format"
+import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 
 // Rows returned to the model are capped so a wide/long result doesn't blow the
 // context. The full count is always reported via meta.rowCount.

@@ -33,6 +33,7 @@
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260603.1",
 		"@flue/cli": "1.0.0-beta.9",
+		"@maple/infra": "workspace:*",
 		"@valibot/to-json-schema": "^1.3.0",
 		"typescript": "catalog:tooling",
 		"vitest": "catalog:",

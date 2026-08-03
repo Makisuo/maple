@@ -5,7 +5,7 @@ import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Unitflow, View } from "@maple/unitflow/react"
 import { Button } from "@maple/ui/components/ui/button"
-import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
+import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
 import { DashboardList, type DashboardScope } from "@/components/dashboard-builder/list/dashboard-list"
 import { headerSummary } from "@/components/dashboard-builder/list/dashboard-summary"

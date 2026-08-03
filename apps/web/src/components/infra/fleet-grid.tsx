@@ -3,8 +3,8 @@ import { Link } from "@tanstack/react-router"
 import { cn } from "@maple/ui/lib/utils"
 
 import { deriveHostStatus, severityLevel, type HostStatus } from "./format"
-import { formatPercent } from "@maple/ui/format"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatPercent } from "@maple/ui/lib/format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import {
 	HoneycombSection,
 	type HoneycombCell,

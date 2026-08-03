@@ -2,8 +2,8 @@ import { DatabaseIcon } from "@maple/ui/components/icons"
 import { LatencyValue } from "@maple/ui/components/latency-value"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
-import { formatNumber } from "@maple/ui/format"
-import { cn } from "@maple/ui/utils"
+import { formatNumber } from "@maple/ui/lib/format"
+import { cn } from "@maple/ui/lib/utils"
 import { SearchableFilterSection } from "@maple/ui/components/filters/filter-section"
 import {
 	FilterSidebarBody,

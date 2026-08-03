@@ -6,17 +6,17 @@ import {
 	type McpToolRegistrar,
 } from "./types"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "../lib/time"
-import { clampLimit } from "../lib/limits"
-import { formatTable } from "../lib/format"
-import { formatMetricValue } from "../lib/format-query-result"
-import { formatNextSteps } from "../lib/next-steps"
-import { createDualContent } from "../lib/structured-output"
-import { toMcpQueryError } from "../lib/map-warehouse-error"
+import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
+import { clampLimit } from "@/mcp/lib/limits"
+import { formatTable } from "@/mcp/lib/format"
+import { formatMetricValue } from "@/mcp/lib/format-query-result"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { Effect, Option, Schema } from "effect"
 import { topOperations } from "@maple/query-engine/observability"
 import { TracesMetric } from "@maple/query-engine"
-import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
+import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 const decodeTracesMetric = Schema.decodeUnknownOption(TracesMetric)
 

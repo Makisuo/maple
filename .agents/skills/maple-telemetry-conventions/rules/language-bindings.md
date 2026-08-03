@@ -50,7 +50,7 @@ Use this when you need attributes set at span-open time rather than via `annotat
 
 ### Cloudflare Workers — `MapleCloudflareSDK`
 
-Workers get their tracer from `MapleCloudflareSDK` in `lib/effect-sdk/src/cloudflare/index.ts`. The setup configures the OTLP exporter and resource — once it's installed via `telemetry.layer`, you use the same `Effect.fn` / `Effect.annotateCurrentSpan` / `Effect.withSpan` API as elsewhere.
+Workers get their tracer from `MapleCloudflareSDK` in `packages/effect-sdk/src/cloudflare/index.ts`. The setup configures the OTLP exporter and resource — once it's installed via `telemetry.layer`, you use the same `Effect.fn` / `Effect.annotateCurrentSpan` / `Effect.withSpan` API as elsewhere.
 
 ### Canonical TS example
 

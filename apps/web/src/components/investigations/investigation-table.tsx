@@ -4,7 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { cn } from "@maple/ui/lib/utils"
-import { formatRelativeTime, toEpochMs } from "@maple/ui/time-format"
+import { formatRelativeTime, toEpochMs } from "@maple/ui/lib/time-format"
 
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "@/components/icons"
 import { SeverityBadge } from "@/components/errors/severity-badge"

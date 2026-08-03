@@ -30,6 +30,8 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, fromUnion } from "@maple-dev/clickhouse-builder"
 import {
+	ServiceAddressResolutionsHourly,
+	ServiceExternalEdgesHourly,
 	ServiceMapChildren,
 	ServiceMapDbEdgesHourly,
 	ServiceMapDbQueryShapesHourly,
@@ -101,12 +103,18 @@ const ServiceDependenciesOutputSchema: CompiledQueryRowSchema<ServiceDependencie
  * `startExpr` / `endExpr` are raw SQL datetime expressions — the caller is
  * responsible for quoting any literals (e.g. `toDateTime('2026-05-16 09:00:00')`).
  *
- * `orgId` scopes the join to one org. Omit it only for the all-orgs backfill
- * script, which connects to ClickHouse directly; every in-app caller (the
- * rollup and `serviceDependenciesSQL`) must pass it so the query is tenant-scoped.
+ * `orgId` scopes the join to one org and is REQUIRED.
+ *
+ * It used to be optional "for the all-orgs backfill script", degrading to an
+ * empty filter — i.e. a join across every tenant's spans. That is now actively
+ * dangerous rather than merely unchecked: both callers wrap this string in
+ * `unsafeCompiledQuery({ tenantScope: "org" })`, so an omitted org id would be
+ * positively ASSERTED as tenant-scoped and sail through the executor's gate. A
+ * cross-org backfill needs its own explicitly-named entry point, not a
+ * parameter someone can forget.
  */
 export function serviceMapEdgeJoinSQL(params: {
-	orgId?: string
+	orgId: string
 	startExpr: string
 	endExpr: string
 	deploymentEnv?: string
@@ -121,7 +129,7 @@ export function serviceMapEdgeJoinSQL(params: {
 	parentServiceName?: string
 }): string {
 	const esc = escapeClickHouseString
-	const orgFilter = params.orgId ? `AND OrgId = '${esc(params.orgId)}'` : ""
+	const orgFilter = `AND OrgId = '${esc(params.orgId)}'`
 	const envFilter = params.deploymentEnv ? `AND DeploymentEnv = '${esc(params.deploymentEnv)}'` : ""
 	const parentServiceFilter = params.parentServiceName
 		? `AND ServiceName = '${esc(params.parentServiceName)}'`
@@ -145,7 +153,7 @@ export function serviceMapEdgeJoinSQL(params: {
       )) AS SampleRateSum
     FROM (
       SELECT OrgId, Timestamp, TraceId, SpanId, ServiceName, DeploymentEnv
-      FROM service_map_spans
+      FROM ${ServiceMapSpans.name}
       WHERE SpanKind IN ('Client', 'Producer')
         AND Timestamp >= ${params.startExpr}
         AND Timestamp < ${params.endExpr}
@@ -155,7 +163,7 @@ export function serviceMapEdgeJoinSQL(params: {
     ) AS p
     INNER JOIN (
       SELECT TraceId, ParentSpanId, ServiceName, Duration, StatusCode, TraceState
-      FROM service_map_children
+      FROM ${ServiceMapChildren.name}
       WHERE Timestamp >= ${params.startExpr}
         AND Timestamp < ${params.endExpr}
         ${orgFilter}
@@ -203,7 +211,7 @@ export function serviceDependenciesSQL(
       sum(DurationSumMs) AS bucketDurationSumMs,
       max(MaxDurationMs) AS bucketMaxDurationMs,
       sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
-    FROM service_map_edges_hourly
+    FROM ${ServiceMapEdgesHourly.name}
     WHERE OrgId = '${esc(params.orgId)}'
 	  AND Hour >= ${startEdgeEnd}
 	  AND Hour < ${endHour}
@@ -254,6 +262,7 @@ FORMAT JSON`
 
 	return unsafeCompiledQuery({
 		sql,
+		tenantScope: "org",
 		rowSchema: ServiceDependenciesOutputSchema,
 	})
 }
@@ -1100,7 +1109,7 @@ export function serviceExternalEdgesSQL(
       sum(DurationSumMs) AS bucketDurationSumMs,
       max(MaxDurationMs) AS bucketMaxDurationMs,
       sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
-    FROM service_external_edges_hourly
+    FROM ${ServiceExternalEdgesHourly.name}
     WHERE OrgId = '${esc(params.orgId)}'
       AND ServiceName = '${esc(opts.serviceName)}'
       AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
@@ -1140,7 +1149,7 @@ export function serviceExternalEdgesSQL(
       sum(Duration / 1000000) AS bucketDurationSumMs,
       max(Duration / 1000000) AS bucketMaxDurationMs,
       sum(SampleRate) AS bucketEstimatedSpanCount
-    FROM traces
+    FROM ${Traces.name}
     WHERE OrgId = '${esc(params.orgId)}'
       AND ServiceName = '${esc(opts.serviceName)}'
       AND Timestamp >= toStartOfHour(toDateTime('${esc(params.endTime)}'))
@@ -1184,7 +1193,7 @@ WHERE NOT (
   targetType = 'http'
   AND targetName IN (
     SELECT DISTINCT ParentServerAddress
-    FROM service_address_resolutions_hourly
+    FROM ${ServiceAddressResolutionsHourly.name}
     WHERE OrgId = '${esc(params.orgId)}'
       AND SourceService = '${esc(opts.serviceName)}'
       AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
@@ -1200,6 +1209,7 @@ FORMAT JSON`
 
 	return unsafeCompiledQuery({
 		sql,
+		tenantScope: "org",
 		rowSchema: ServiceExternalEdgesOutputSchema,
 	})
 }
@@ -1287,6 +1297,7 @@ export function servicePlatformsSQL(
 
 	return unsafeCompiledQuery({
 		sql,
+		tenantScope: "org",
 		rowSchema: ServicePlatformsOutputSchema,
 	})
 }

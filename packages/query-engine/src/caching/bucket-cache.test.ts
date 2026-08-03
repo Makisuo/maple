@@ -1,7 +1,7 @@
 import { assert, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Exit, Layer, Schema } from "effect"
 import { OrgId } from "@maple/domain"
-import type { TimeseriesPoint } from "../query-engine"
+import type { TimeseriesPoint } from "@maple/domain/query-engine"
 import {
 	BucketCacheService,
 	coalesceMissingRanges,
@@ -12,8 +12,8 @@ import {
 	type BucketCacheSegmentData,
 	type CachedBucket,
 } from "./bucket-cache"
-import { EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "./edge-cache"
-import { MemoryCacheBackendLive } from "./cache-backend"
+import { EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "@maple/cache"
+import { MemoryCacheBackendLive } from "@maple/cache"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const orgId = asOrgId("org_test")

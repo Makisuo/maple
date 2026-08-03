@@ -62,9 +62,15 @@ const compiled = compile(listRuleChecksQuery({ limit: 1 }), {
 	ruleId: "rule_test",
 })
 
+// The old `sqlQuery(tenant, sql)` entry point took a raw string; scope now
+// travels on the compiled query, so these execution/span/retry tests wrap their
+// SQL in a compiled value that declares it.
+const scoped = (sql: string) => unsafeCompiledQuery<Record<string, unknown>>({ sql, tenantScope: "org" })
+
 // A plain query with no routing declaration follows the default read route.
 const untaggedCompiled = unsafeCompiledQuery<{ readonly c: number }>({
 	sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
+	tenantScope: "org",
 })
 
 // Records the backend each constructed client was wired to, so a test can assert
@@ -114,7 +120,7 @@ describe("makeWarehouseExecutor ingest routing", () => {
 		Effect.gen(function* () {
 			const created: Array<ResolvedWarehouseConfig["kind"]> = []
 			const executor = makeWarehouseExecutor(makeDeps(created))
-			yield* executor.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", {
+			yield* executor.compiledQuery(tenant, scoped("SELECT 1 WHERE OrgId = 'org_test'"), {
 				context: "test",
 				route: "ingest",
 			})
@@ -130,7 +136,7 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 			const executor = makeWarehouseExecutor(makeDeps([]))
 
 			yield* executor
-				.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", {
+				.compiledQuery(tenant, scoped("SELECT 1 WHERE OrgId = 'org_test'"), {
 					profile: "list",
 					context: "spanContract",
 				})
@@ -162,7 +168,7 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 			)
 
 			yield* executor
-				.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", { context: "localSpan" })
+				.compiledQuery(tenant, scoped("SELECT 1 WHERE OrgId = 'org_test'"), { context: "localSpan" })
 				.pipe(Effect.withTracer(tracer))
 
 			const span = spans.find((candidate) => candidate.name === "WarehouseQueryService.executeSql")
@@ -204,6 +210,7 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 					() =>
 						unsafeCompiledQuery<{ readonly c: number }>({
 							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+							tenantScope: "org",
 						}),
 					{ context: "capabilitySpan" },
 				)
@@ -237,7 +244,7 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 			})
 
 			const exit = yield* executor
-				.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", { context: "retrySpan" })
+				.compiledQuery(tenant, scoped("SELECT 1 WHERE OrgId = 'org_test'"), { context: "retrySpan" })
 				.pipe(Effect.withTracer(tracer), Effect.exit)
 
 			assert.strictEqual(exit._tag, "Failure")
@@ -315,6 +322,7 @@ describe("makeWarehouseExecutor compiled-query defaults", () => {
 			}
 			const withSchema = unsafeCompiledQuery<{ readonly c: number }>({
 				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
+				tenantScope: "org",
 				rowSchema: Schema.Struct({ c: Schema.Number }),
 			})
 			const executor = makeWarehouseExecutor(badRowDeps)
@@ -431,6 +439,7 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const factory = (capabilities: WarehouseCapabilities) =>
 				unsafeCompiledQuery<{ readonly c: number }>({
 					sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'text' FORMAT JSON`,
+					tenantScope: "org",
 				})
 
 			yield* executor.compiledQuery(tenant, factory, { context: "capability-test" })
@@ -484,6 +493,7 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 					() =>
 						unsafeCompiledQuery<{ readonly c: number }>({
 							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+							tenantScope: "org",
 						}),
 					{ context: "capability-request-local" },
 				)
@@ -527,6 +537,7 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 				(capabilities) =>
 					unsafeCompiledQuery<{ readonly c: number }>({
 						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+						tenantScope: "org",
 					}),
 				{ context: "capability-fallback-test" },
 			)
@@ -577,6 +588,7 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 				(capabilities) =>
 					unsafeCompiledQuery<{ readonly c: number }>({
 						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+						tenantScope: "org",
 					}),
 				{ context: "tinybird-gateway-capabilities" },
 			)
@@ -618,6 +630,7 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 						(capabilities) =>
 							unsafeCompiledQuery<{ readonly c: number }>({
 								sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+								tenantScope: "org",
 							}),
 						{ context: "hung-capability-probe" },
 					)
@@ -784,10 +797,10 @@ describe("makeWarehouseExecutor client cache partitions", () => {
 					}),
 			})
 
-			yield* executor.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'")
+			yield* executor.compiledQuery(tenant, scoped("SELECT 1 WHERE OrgId = 'org_test'"))
 			yield* executor.rawSqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'")
 			yield* executor.ingest(tenant, "traces", [{ TraceId: "trace" }])
-			yield* executor.sqlQuery(tenant, "SELECT 2 WHERE OrgId = 'org_test'")
+			yield* executor.compiledQuery(tenant, scoped("SELECT 2 WHERE OrgId = 'org_test'"))
 
 			assert.strictEqual(nextClientId, 3)
 			assert.deepStrictEqual(calls, [

@@ -147,7 +147,10 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "spanDetailQuery",
 		label: "narrowByTime",
 		compile: () =>
-			CH.compile(CH.spanDetailQuery({ traceId: TRACE_ID, spanId: SPAN_ID, narrowByTime: true }), window),
+			CH.compile(
+				CH.spanDetailQuery({ traceId: TRACE_ID, spanId: SPAN_ID, narrowByTime: true }),
+				window,
+			),
 	},
 	{
 		// ErrorsService errorIssuesScan (the scheduled sweep)
@@ -187,5 +190,203 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 				...window,
 				fingerprintHash: FINGERPRINT,
 			}),
+	},
+
+	// -------------------------------------------------------------------------
+	// Batch ④ — the modules the query-engine refactor touches. These exist so a
+	// refactor that claims "no SQL changed" is actually checkable: without a
+	// fixture, a builder contributes nothing to `__sql_baseline__/catalog.sql`
+	// and its SQL can drift silently.
+	// -------------------------------------------------------------------------
+
+	// ----- service-operations: the three-tier raw/minutely/hourly splice -----
+	{
+		// routes/v2/services.http.ts — service detail "Operations" tab.
+		module: "service-operations",
+		name: "serviceOperationsSummaryQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(CH.serviceOperationsSummaryQuery({ serviceName: "api", limit: 50 }), window),
+	},
+	{
+		// Env filter exercises the extra predicate on every tier of the splice.
+		module: "service-operations",
+		name: "serviceOperationsSummaryQuery",
+		label: "envFiltered",
+		compile: () =>
+			CH.compile(
+				CH.serviceOperationsSummaryQuery({
+					serviceName: "api",
+					environments: ["production"],
+					limit: 50,
+				}),
+				window,
+			),
+	},
+	{
+		module: "service-operations",
+		name: "serviceOperationsTimeseriesQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(
+				CH.serviceOperationsTimeseriesQuery({
+					serviceName: "api",
+					spanNames: ["GET /v2/services", "POST /v2/alerts"],
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+
+	// ----- services: the hourly-rollup splice behind the service catalog -----
+	{
+		// routes/v2/services.http.ts — the services list.
+		module: "services",
+		name: "serviceCatalogQuery",
+		label: "default",
+		compile: () => CH.compile(CH.serviceCatalogQuery({ limit: 50 }), window),
+	},
+	{
+		module: "services",
+		name: "serviceCatalogQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compile(
+				CH.serviceCatalogQuery({
+					serviceName: "api",
+					deploymentEnvironment: "production",
+					serviceNamespace: "backend",
+					limit: 50,
+				}),
+				window,
+			),
+	},
+
+	// ----- infra: the four gauge-timeseries shapes and three facet unions -----
+	{
+		module: "infra",
+		name: "hostGaugeTimeseriesQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(
+				CH.hostGaugeTimeseriesQuery({
+					hostName: "ip-10-0-1-42",
+					metricName: "system.cpu.utilization",
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		// `groupByAttributeKey` switches the projected column off the `lit("")` default.
+		module: "infra",
+		name: "hostGaugeTimeseriesQuery",
+		label: "grouped",
+		compile: () =>
+			CH.compile(
+				CH.hostGaugeTimeseriesQuery({
+					hostName: "ip-10-0-1-42",
+					metricName: "system.cpu.utilization",
+					groupByAttributeKey: "cpu",
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		module: "infra",
+		name: "podGaugeTimeseriesQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(
+				CH.podGaugeTimeseriesQuery({
+					podName: "api-7d9f8b6c5-x2n4k",
+					namespace: "backend",
+					metricName: "k8s.pod.cpu.utilization",
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		module: "infra",
+		name: "nodeGaugeTimeseriesQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(
+				CH.nodeGaugeTimeseriesQuery({
+					nodeName: "ip-10-0-1-42.ec2.internal",
+					metricName: "k8s.node.cpu.utilization",
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		module: "infra",
+		name: "workloadGaugeTimeseriesQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(
+				CH.workloadGaugeTimeseriesQuery({
+					kind: "deployment",
+					workloadName: "api",
+					namespace: "backend",
+					metricName: "k8s.pod.cpu.utilization",
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		// `groupByPod` fans the workload series out per pod.
+		module: "infra",
+		name: "workloadGaugeTimeseriesQuery",
+		label: "groupedByPod",
+		compile: () =>
+			CH.compile(
+				CH.workloadGaugeTimeseriesQuery({
+					kind: "statefulset",
+					workloadName: "clickhouse",
+					namespace: "data",
+					metricName: "k8s.pod.memory.usage",
+					groupByPod: true,
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		module: "infra",
+		name: "podFacetsQuery",
+		label: "default",
+		compile: () => CH.compileUnion(CH.podFacetsQuery(), window),
+	},
+	{
+		module: "infra",
+		name: "nodeFacetsQuery",
+		label: "default",
+		compile: () => CH.compileUnion(CH.nodeFacetsQuery(), window),
+	},
+	{
+		module: "infra",
+		name: "workloadFacetsQuery",
+		label: "default",
+		compile: () => CH.compileUnion(CH.workloadFacetsQuery({ kind: "deployment" }), window),
+	},
+
+	// ----- activity: the only deliberately cross-org builders in the product.
+	// ----- Fixtured so the catalog's tenant-scope test actually exercises the
+	// ----- cross-org branch, rather than asserting a rule nothing exemplifies.
+	{
+		module: "activity",
+		name: "activeOrgsByErrorEventsQuery",
+		label: "default",
+		compile: () => CH.compile(CH.activeOrgsByErrorEventsQuery(), { startTime: START_TIME }),
+	},
+	{
+		module: "activity",
+		name: "activeOrgsByTracesQuery",
+		label: "default",
+		compile: () => CH.compile(CH.activeOrgsByTracesQuery(), { startTime: START_TIME }),
+	},
+	{
+		module: "activity",
+		name: "activeOrgsByLogsQuery",
+		label: "default",
+		compile: () => CH.compile(CH.activeOrgsByLogsQuery(), { startTime: START_TIME }),
 	},
 ]

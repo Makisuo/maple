@@ -1,5 +1,5 @@
 import type { V2Investigation } from "@maple/domain/http/v2"
-import { toEpochMs } from "@maple/ui/time-format"
+import { toEpochMs } from "@maple/ui/lib/time-format"
 
 import { SEVERITY_ORDER, severityRank } from "@/components/errors/severity-badge"
 import { CONFIDENCE_RANK } from "./confidence-meter"

@@ -10,7 +10,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { EnvelopeIcon } from "@/components/icons"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 export function NotificationsSection() {
 	const { user } = useUser()

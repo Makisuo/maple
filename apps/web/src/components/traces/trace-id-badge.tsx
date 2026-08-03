@@ -1,7 +1,7 @@
 import type { VariantProps } from "class-variance-authority"
 import type { badgeVariants } from "@maple/ui/components/ui/badge"
 import { CopyableBadge } from "@maple/ui/components/ui/copyable-badge"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { IdBadgeIcon } from "@/components/icons"
 
 interface TraceIdBadgeProps {

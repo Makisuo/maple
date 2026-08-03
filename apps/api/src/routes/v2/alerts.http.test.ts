@@ -4,21 +4,22 @@ import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
-import { CacheBackendLive } from "../../lib/CacheBackendLive"
-import { EmailService } from "../../lib/EmailService"
-import { Env } from "../../lib/Env"
-import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "../../lib/test-pglite"
-import type { WarehouseQueryServiceShape } from "../../lib/WarehouseQueryService"
-import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
-import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import { AlertRuntime, AlertsService } from "../../services/AlertsService"
-import { HazelOAuthService } from "../../services/HazelOAuthService"
-import { OrgMembersService } from "../../services/OrgMembersService"
-import { QueryEngineService } from "../../services/QueryEngineService"
+import { BucketCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import { EmailService } from "@/platform/EmailService"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
+import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
+import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
+import { OrgMembersService } from "@/services/org/OrgMembersService"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AllV2GroupLayersLive,
@@ -163,10 +164,7 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 }
 
 describe("v2 alerts over HTTP", () => {
-	const createWebhookAndRule = async (
-		harness: ReturnType<typeof makeHarness>,
-		token: string,
-	) => {
+	const createWebhookAndRule = async (harness: ReturnType<typeof makeHarness>, token: string) => {
 		const destination = await harness.request("POST", "/v2/alerts/destinations", token, {
 			type: "webhook",
 			name: "Ops hook",
@@ -356,9 +354,11 @@ describe("v2 alerts over HTTP", () => {
 		expect(second.body.has_more).toBe(false)
 		expect(second.body.next_cursor).toBeNull()
 		expect(new Set([...first.body.data, ...second.body.data].map((item) => item.id)).size).toBe(105)
-		expect([...first.body.data, ...second.body.data].some((item) => item.delivery_key === "foreign-delivery")).toBe(
-			false,
-		)
+		expect(
+			[...first.body.data, ...second.body.data].some(
+				(item) => item.delivery_key === "foreign-delivery",
+			),
+		).toBe(false)
 
 		await harness.dispose()
 	})

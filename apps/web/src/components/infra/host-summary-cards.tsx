@@ -4,7 +4,7 @@ import { fleetUtilizationTimeseriesResultAtom } from "@/lib/services/atoms/wareh
 
 import { StatRail, StatRailItem, StatRailLoading } from "./primitives/stat-rail"
 import { deriveHostStatus, severityLevel } from "./format"
-import { formatPercent } from "@maple/ui/format"
+import { formatPercent } from "@maple/ui/lib/format"
 import type { HostRow } from "./host-table"
 
 interface HostSummaryCardsProps {

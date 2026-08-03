@@ -1,8 +1,26 @@
 # CLAUDE.md
 
 Maple is an OpenTelemetry observability platform: TanStack Start (React 19, Vite) + Effect on the
-backend, ClickHouse/Tinybird as the warehouse. Monorepo — `apps/*` (web, api, ingest, alerting, cli,
-landing, …) and `packages/*` (query-engine, db, domain, ui, …).
+backend, ClickHouse/Tinybird as the warehouse.
+
+## Workspace layout
+
+Three roots, and the split is a rule, not a habit:
+
+- **`apps/*`** — deployables (web, api, ingest, alerting, cli, landing, …).
+- **`packages/*`** — shared code that **knows Maple**: its schema, tables, API, or product.
+  `domain`, `query-engine`, `ui`, `db`, `auth`, `effect-sdk`, `browser`, …
+- **`lib/*`** — libraries with **zero Maple knowledge**, extractable to their own repo tomorrow.
+  `clickhouse-builder`, `effect-cloudflare`, `effect-db`, `effect-router`, `cache`,
+  `otel-helpers`, `unitflow`.
+
+The test for `lib/` is "could this ship as a standalone OSS library?" — not "is it published?"
+and not "did we write it?". Publishability is a `package.json` fact, not a directory fact:
+`packages/effect-sdk` and `packages/browser` are both published. **New packages go in
+`packages/` unless they pass the lib test.**
+
+Anything in `lib/` that starts importing `@maple/domain` has stopped qualifying — move it to
+`packages/` rather than weakening the rule.
 
 ## Local dev
 

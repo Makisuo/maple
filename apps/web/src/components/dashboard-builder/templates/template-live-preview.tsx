@@ -1,6 +1,6 @@
 import { memo, useDeferredValue, useMemo, useRef, useState } from "react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { useContainerSize } from "@maple/ui/hooks/use-container-size"
 import type { V2DashboardTemplate } from "@maple/domain/http/v2"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"

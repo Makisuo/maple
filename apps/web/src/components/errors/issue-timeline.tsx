@@ -1,7 +1,7 @@
 import type { ErrorIssueEventDocument, IssueEscalationAttemptDocument } from "@maple/domain/http"
 import { cn } from "@maple/ui/lib/utils"
 import { ActorChip } from "./actor-chip"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 const EVENT_LABEL: Record<ErrorIssueEventDocument["type"], string> = {
 	created: "Created",

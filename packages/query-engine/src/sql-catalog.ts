@@ -730,10 +730,6 @@ function makeCapturingWarehouse(capabilities: WarehouseCapabilities): {
 	const captured: Array<CapturedSql> = []
 	const empty = Effect.succeed([] as ReadonlyArray<never>)
 	const warehouse: QueryEngineWarehouse<QueryTenant> = {
-		sqlQuery: (_tenant, sql) => {
-			captured.push({ sql })
-			return empty
-		},
 		rawSqlQuery: (_tenant, sql) => {
 			captured.push({ sql })
 			return empty

@@ -1,7 +1,7 @@
-import { formatLatency } from "@maple/ui/format"
+import { formatLatency } from "@maple/ui/lib/format"
 import { memo } from "react"
 import { Handle, Position } from "@xyflow/react"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@maple/ui/components/ui/tooltip"
 import {

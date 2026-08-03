@@ -44,17 +44,28 @@ describe("the allowlist", () => {
 describe("triggering-message registry", () => {
 	test("a top-level message is found under its own ts as the thread key", () => {
 		registerAckedTriggeringMessage({ teamId: "T1", channelId: "C1", messageTs: "100.1" })
-		expect(lookupAckedTriggeringMessage({ teamId: "T1", channelId: "C1", threadTs: "100.1" })).toBe("100.1")
+		expect(lookupAckedTriggeringMessage({ teamId: "T1", channelId: "C1", threadTs: "100.1" })).toBe(
+			"100.1",
+		)
 	})
 
 	test("a thread follow-up is found under the thread root, resolving to its own ts", () => {
-		registerAckedTriggeringMessage({ teamId: "T1", channelId: "C1", messageTs: "100.2", threadTs: "100.1" })
-		expect(lookupAckedTriggeringMessage({ teamId: "T1", channelId: "C1", threadTs: "100.1" })).toBe("100.2")
+		registerAckedTriggeringMessage({
+			teamId: "T1",
+			channelId: "C1",
+			messageTs: "100.2",
+			threadTs: "100.1",
+		})
+		expect(lookupAckedTriggeringMessage({ teamId: "T1", channelId: "C1", threadTs: "100.1" })).toBe(
+			"100.2",
+		)
 	})
 
 	test("workspaces do not collide", () => {
 		registerAckedTriggeringMessage({ teamId: "T1", channelId: "C1", messageTs: "100.1" })
-		expect(lookupAckedTriggeringMessage({ teamId: "T2", channelId: "C1", threadTs: "100.1" })).toBeUndefined()
+		expect(
+			lookupAckedTriggeringMessage({ teamId: "T2", channelId: "C1", threadTs: "100.1" }),
+		).toBeUndefined()
 	})
 
 	test("lookup without a thread finds nothing", () => {
@@ -65,7 +76,12 @@ describe("triggering-message registry", () => {
 
 describe("reactToTriggeringMessage", () => {
 	test("reacts to the registered triggering message and removes the ack", async () => {
-		registerAckedTriggeringMessage({ teamId: "T1", channelId: "C1", messageTs: "100.2", threadTs: "100.1" })
+		registerAckedTriggeringMessage({
+			teamId: "T1",
+			channelId: "C1",
+			messageTs: "100.2",
+			threadTs: "100.1",
+		})
 		const { deps, added, removed } = makeDeps()
 
 		const result = await reactToTriggeringMessage(
@@ -75,7 +91,9 @@ describe("reactToTriggeringMessage", () => {
 		)
 
 		expect(result.reacted).toBe(true)
-		expect(added).toEqual([{ botToken: "xoxb-test", channelId: "C1", timestamp: "100.2", name: "raised_hands" }])
+		expect(added).toEqual([
+			{ botToken: "xoxb-test", channelId: "C1", timestamp: "100.2", name: "raised_hands" },
+		])
 		expect(removed).toEqual([
 			{ botToken: "xoxb-test", channelId: "C1", timestamp: "100.2", name: ACK_REACTION_NAME },
 		])
@@ -120,7 +138,9 @@ describe("reactToTriggeringMessage", () => {
 
 	test("a failed ack removal is tolerated — the new reaction already landed", async () => {
 		registerAckedTriggeringMessage({ teamId: "T1", channelId: "C1", messageTs: "100.1" })
-		const { deps, added } = makeDeps({ removeReaction: mock(() => Promise.reject(new Error("no_reaction"))) })
+		const { deps, added } = makeDeps({
+			removeReaction: mock(() => Promise.reject(new Error("no_reaction"))),
+		})
 		const result = await reactToTriggeringMessage(
 			"tada",
 			session({ team_id: "T1", channel_id: "C1", thread_ts: "100.1" }),

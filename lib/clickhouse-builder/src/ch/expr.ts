@@ -52,6 +52,14 @@ export interface ColumnRef<Name extends string, ColType extends CHType<string, a
 
 export interface Condition {
 	readonly _brand: "Condition"
+	/**
+	 * Set only by an equality/membership test on the tenant column
+	 * (`TENANT_COLUMN`). `compile` reads it off the top-level `where` list to
+	 * decide whether a query is tenant-scoped, so it deliberately does NOT
+	 * propagate through `and`/`or`: `OrgId.eq(x).or(y)` is not a scoping
+	 * predicate, and treating it as one is the bug this marker exists to catch.
+	 */
+	readonly scopesTenant?: boolean
 	toFragment(): SqlFragment
 	and(other: Condition): Condition
 	or(other: Condition): Condition
@@ -128,27 +136,62 @@ export function makeExpr<T>(fragment: SqlFragment): Expr<T> {
 // ColumnRef implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * The column carrying row-level tenancy. An equality or membership test on it
+ * is what marks a query as tenant-scoped (`CompiledQuery.tenantScope`).
+ *
+ * Row-per-tenant is the usual ClickHouse multi-tenancy shape, but the column's
+ * name is a schema decision — this is the single place to change it.
+ */
+export const TENANT_COLUMN = "OrgId"
+
 export function makeColumnRef<Name extends string, ColType extends CHType<string, any>>(
 	name: Name,
+	/**
+	 * Unqualified column name. Differs from `name` for joined accessors, where
+	 * `name` is `alias.Column` — so `$.p.OrgId.eq(…)` still marks the query as
+	 * scoped.  Defaults to `name` for the unqualified case.
+	 */
+	columnName?: string,
 ): ColumnRef<Name, ColType> {
 	const fragment = raw(name)
 	const base = makeExpr<InferTS<ColType>>(fragment)
-	return Object.assign(base, {
-		columnName: name as Name,
-		get(key: string): Expr<string> {
-			return makeExpr<string>(raw(`${name}[${compile(str(key))}]`))
+	const isTenantColumn = (columnName ?? name) === TENANT_COLUMN
+	// Captured before `Object.assign` mutates `base` — the overrides below reuse
+	// these to emit byte-identical SQL, and reading them off `base` afterwards
+	// would just call the override again.
+	const baseEq = base.eq
+	const baseIn = base.in_
+	return Object.assign(
+		base,
+		// Only `eq`/`in_` scope a query. `neq`/`notIn`/`like` on the tenant column
+		// narrow nothing, and marking them would let `OrgId != 'x'` pass as scoped.
+		isTenantColumn
+			? {
+					eq: (other: any) => makeCond(baseEq(other).toFragment(), true),
+					in_: (...values: ReadonlyArray<any>) =>
+						makeCond((baseIn as any)(...values).toFragment(), true),
+				}
+			: {},
+		{
+			columnName: name as Name,
+			get(key: string): Expr<string> {
+				return makeExpr<string>(raw(`${name}[${compile(str(key))}]`))
+			},
 		},
-	}) as ColumnRef<Name, ColType>
+	) as ColumnRef<Name, ColType>
 }
 
 // ---------------------------------------------------------------------------
 // Condition implementation
 // ---------------------------------------------------------------------------
 
-export function makeCond(fragment: SqlFragment): Condition {
+export function makeCond(fragment: SqlFragment, scopesTenant?: boolean): Condition {
 	return {
 		_brand: "Condition" as const,
+		...(scopesTenant === true ? { scopesTenant: true as const } : {}),
 		toFragment: () => fragment,
+		// Composition drops the marker on purpose — see `Condition.scopesTenant`.
 		and: (other) => makeCond(raw(`(${compile(fragment)} AND ${compile(other.toFragment())})`)),
 		or: (other) => makeCond(raw(`(${compile(fragment)} OR ${compile(other.toFragment())})`)),
 	}
