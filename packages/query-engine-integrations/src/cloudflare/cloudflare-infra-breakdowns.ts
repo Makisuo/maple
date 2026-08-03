@@ -34,7 +34,6 @@ import {
 	type CloudflareMetricsAccessor,
 } from "./cloudflare-infra-filters"
 
-
 export type CloudflareBreakdownDimension =
 	| "path"
 	| "host"

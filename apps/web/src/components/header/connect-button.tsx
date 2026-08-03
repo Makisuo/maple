@@ -10,11 +10,7 @@ import {
 	PopoverTrigger,
 } from "@maple/ui/components/ui/popover"
 import { Separator } from "@maple/ui/components/ui/separator"
-import {
-	ArrowRightIcon,
-	ChatBubbleSparkleIcon,
-	ConnectionIcon,
-} from "@/components/icons"
+import { ArrowRightIcon, ChatBubbleSparkleIcon, ConnectionIcon } from "@/components/icons"
 import { CopyableField } from "@maple/ui/components/ui/copyable-field"
 import { ConnectCredentials } from "@/components/ingest/connect-credentials"
 import { ConnectionStatusPill } from "@/components/ingest/connection-status"

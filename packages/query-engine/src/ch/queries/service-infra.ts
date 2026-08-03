@@ -39,7 +39,6 @@ import { from, fromQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, ServicePlatformsHourly } from "../tables"
 import { CHNumber } from "../schema"
 
-
 export interface ServiceWorkloadsOpts {
 	services: ReadonlyArray<string>
 }

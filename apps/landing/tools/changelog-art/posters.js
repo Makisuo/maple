@@ -6,7 +6,13 @@
  * independent of the viewport — we render the backing store at SCALE× and read
  * it back with toDataURL rather than screenshotting.
  */
-const { ShaderMount, grainGradientFragmentShader, ditheringFragmentShader, getShaderColorFromString, getShaderNoiseTexture } = PaperShaders
+const {
+	ShaderMount,
+	grainGradientFragmentShader,
+	ditheringFragmentShader,
+	getShaderColorFromString,
+	getShaderNoiseTexture,
+} = PaperShaders
 
 const W = 1280
 const H = 660
@@ -284,7 +290,13 @@ async function drawCover(spec) {
 	// The field is rendered at poster size; cover-fit it onto the card.
 	const s = Math.max(c.width / field.width, c.height / field.height)
 	const masked = maskField(field, spec.field)
-	ctx.drawImage(masked, (c.width - field.width * s) / 2, (c.height - field.height * s) / 2, field.width * s, field.height * s)
+	ctx.drawImage(
+		masked,
+		(c.width - field.width * s) / 2,
+		(c.height - field.height * s) / 2,
+		field.width * s,
+		field.height * s,
+	)
 	ctx.globalAlpha = 1
 
 	const PAD = px(40)

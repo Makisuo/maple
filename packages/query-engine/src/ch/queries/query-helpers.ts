@@ -174,11 +174,7 @@ export function inclusionCondition(col: CH.Expr<string>, values: readonly string
  * across several needles would have to OR them, which is not what the UI's
  * multi-select means (there it is set membership, not fuzzy matching).
  */
-export function matchOrIn(
-	col: CH.Expr<string>,
-	values: readonly string[],
-	contains: boolean,
-): CH.Condition {
+export function matchOrIn(col: CH.Expr<string>, values: readonly string[], contains: boolean): CH.Condition {
 	return contains && values.length === 1
 		? CH.positionCaseInsensitive(col, CH.lit(values[0]!)).gt(0)
 		: inclusionCondition(col, values)

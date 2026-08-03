@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-	AlertDeliveryEventId,
-	AlertDestinationId,
-	AlertIncidentId,
-	AlertRuleId,
-} from "@maple/domain/http"
+import { AlertDeliveryEventId, AlertDestinationId, AlertIncidentId, AlertRuleId } from "@maple/domain/http"
 import {
 	buildDestinationCreateParamsV2,
 	buildDestinationUpdateParamsV2,

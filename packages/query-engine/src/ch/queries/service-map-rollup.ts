@@ -24,7 +24,6 @@ import { ServiceMapEdgesHourly, Traces } from "../tables"
 import { serviceMapEdgeJoinSQL } from "./service-map"
 import { CHNumber } from "../schema"
 
-
 /** One pre-aggregated service-to-service edge bucket — mirrors the columns of
  * the `service_map_edges_hourly` ClickHouse table. */
 export interface ServiceMapEdgesHourlyOutput {

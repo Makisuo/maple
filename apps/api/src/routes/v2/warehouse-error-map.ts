@@ -1,15 +1,6 @@
 import { Match } from "effect"
-import {
-	presentWarehouseErrorPublic,
-	warehouseErrorMeta,
-	type WarehouseError,
-} from "@maple/domain/http"
-import {
-	dependencyUnavailable,
-	invalidRequest,
-	rateLimited,
-	upstreamError,
-} from "@maple/domain/http/v2"
+import { presentWarehouseErrorPublic, warehouseErrorMeta, type WarehouseError } from "@maple/domain/http"
+import { dependencyUnavailable, invalidRequest, rateLimited, upstreamError } from "@maple/domain/http/v2"
 import type {
 	V2InvalidRequestError,
 	V2RateLimitError,

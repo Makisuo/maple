@@ -1,10 +1,6 @@
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 
-import {
-	normalizeRuleQueryDraft,
-	rawSqlHasValueColumn,
-	type RuleFormState,
-} from "@/lib/alerts/form-utils"
+import { normalizeRuleQueryDraft, rawSqlHasValueColumn, type RuleFormState } from "@/lib/alerts/form-utils"
 import { buildTimeseriesQuerySpec } from "@/lib/query-builder/model"
 
 export type WidgetAlertPrefillNotice = {

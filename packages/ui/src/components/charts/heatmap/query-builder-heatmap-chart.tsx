@@ -363,9 +363,7 @@ function computeLayout(
 	if (!wide) return null
 	if (wide.cellW >= TIGHT_CELL_THRESHOLD && wide.cellH >= TIGHT_CELL_THRESHOLD) return wide
 
-	return (
-		layoutForGap(containerW, containerH, xValues, yValues, allYIso, CELL_GAP_TIGHT, footnoteH) ?? wide
-	)
+	return layoutForGap(containerW, containerH, xValues, yValues, allYIso, CELL_GAP_TIGHT, footnoteH) ?? wide
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -536,9 +534,7 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 		if (!el) return
 		const rect = el.getBoundingClientRect()
 		setTooltipBox((prev) =>
-			prev.w === rect.width && prev.h === rect.height
-				? prev
-				: { w: rect.width, h: rect.height },
+			prev.w === rect.width && prev.h === rect.height ? prev : { w: rect.width, h: rect.height },
 		)
 	})
 
@@ -833,7 +829,9 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 										title={raw}
 										className={cn(
 											"absolute whitespace-nowrap tabular-nums transition-colors duration-100",
-											isActive ? "font-medium text-foreground" : "text-muted-foreground",
+											isActive
+												? "font-medium text-foreground"
+												: "text-muted-foreground",
 										)}
 										style={{
 											left: colCenterX(xi),

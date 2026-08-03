@@ -74,12 +74,7 @@ export function LogMetaStrip({ log, timeZone, showOpenFullPage = true }: LogMeta
 					tooltip
 				/>
 
-				<CopyButton
-					value={() => buildLogJsonPayload(log)}
-					label="Log JSON"
-					iconSize={13}
-					tooltip
-				/>
+				<CopyButton value={() => buildLogJsonPayload(log)} label="Log JSON" iconSize={13} tooltip />
 			</div>
 		</div>
 	)

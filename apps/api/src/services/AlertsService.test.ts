@@ -1821,7 +1821,9 @@ describe("AlertsService", () => {
 			assert.strictEqual(rule.signalType, "builder_query")
 			assert.deepStrictEqual(rule.queryBuilderDraft?.groupBy, ["attr.http.method", "attr.http.route"])
 		}).pipe(
-			Effect.provide(makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows }))),
+			Effect.provide(
+				makeLayer(testDb, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows })),
+			),
 		)
 	})
 

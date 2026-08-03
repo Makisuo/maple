@@ -103,9 +103,7 @@ export function compilePipeQuery(
 			// catalog's analyzer sweep decodes a synthetic zero-value row built
 			// from DESCRIBE output, where a String column is `""`; a literal union
 			// rejects that and fails the gate.
-			rowSchema: rowSchema
-				? Schema.Struct({ period: Schema.String, ...rowSchema.fields })
-				: undefined,
+			rowSchema: rowSchema ? Schema.Struct({ period: Schema.String, ...rowSchema.fields }) : undefined,
 		})
 	}
 
@@ -360,13 +358,15 @@ export function compilePipeQuery(
 				),
 			),
 			Match.when("get_service_usage_compare", () =>
-				compileCompare(CH.serviceUsageQuery({ serviceName: str("service") }), {
-					currentStart: str("current_start_time") ?? startTime,
-					currentEnd: str("current_end_time") ?? endTime,
-					previousStart: str("previous_start_time") ?? startTime,
-					previousEnd: str("previous_end_time") ?? endTime,
-				},
-				CH.serviceUsageRowSchema,
+				compileCompare(
+					CH.serviceUsageQuery({ serviceName: str("service") }),
+					{
+						currentStart: str("current_start_time") ?? startTime,
+						currentEnd: str("current_end_time") ?? endTime,
+						previousStart: str("previous_start_time") ?? startTime,
+						previousEnd: str("previous_end_time") ?? endTime,
+					},
+					CH.serviceUsageRowSchema,
 				),
 			),
 			Match.when("service_dependencies", () =>

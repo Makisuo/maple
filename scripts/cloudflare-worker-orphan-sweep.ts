@@ -167,16 +167,12 @@ const main = async (): Promise<void> => {
 	// are gone (deleting them here fails with 11005).
 	const listedQueues = await cfRequest(token, `/accounts/${accountId}/queues?per_page=100`)
 	if (!listedQueues.ok) {
-		fail(
-			`Could not list Queues (HTTP ${listedQueues.status}): ${JSON.stringify(listedQueues.errors)}`,
-		)
+		fail(`Could not list Queues (HTTP ${listedQueues.status}): ${JSON.stringify(listedQueues.errors)}`)
 	}
 	// A success response whose `result` isn't an array means the API shape
 	// changed under us — fail loudly rather than green-no-op'ing the safety net.
 	if (!Array.isArray(listedQueues.result)) {
-		fail(
-			`Unexpected Queue list response shape (result is ${typeof listedQueues.result}, expected array)`,
-		)
+		fail(`Unexpected Queue list response shape (result is ${typeof listedQueues.result}, expected array)`)
 	}
 	const queues = listedQueues.result as ReadonlyArray<QueueInfo>
 	const queueCandidates = queues
@@ -268,11 +264,9 @@ const main = async (): Promise<void> => {
 			continue
 		}
 		console.log(`… deleting orphan ${name} (PR #${prNumber} is closed)`)
-		const removed = await cfRequest(
-			token,
-			`/accounts/${accountId}/workers/scripts/${name}?force=true`,
-			{ method: "DELETE" },
-		)
+		const removed = await cfRequest(token, `/accounts/${accountId}/workers/scripts/${name}?force=true`, {
+			method: "DELETE",
+		})
 		if (!removed.ok && removed.status !== 404) {
 			console.log(`✗ delete failed (HTTP ${removed.status}): ${JSON.stringify(removed.errors)}`)
 			failures.push(name)

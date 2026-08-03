@@ -65,8 +65,7 @@ const compiled = compile(listRuleChecksQuery({ limit: 1 }), {
 // The old `sqlQuery(tenant, sql)` entry point took a raw string; scope now
 // travels on the compiled query, so these execution/span/retry tests wrap their
 // SQL in a compiled value that declares it.
-const scoped = (sql: string) =>
-	unsafeCompiledQuery<Record<string, unknown>>({ sql, tenantScope: "org" })
+const scoped = (sql: string) => unsafeCompiledQuery<Record<string, unknown>>({ sql, tenantScope: "org" })
 
 // A plain query with no routing declaration follows the default read route.
 const untaggedCompiled = unsafeCompiledQuery<{ readonly c: number }>({

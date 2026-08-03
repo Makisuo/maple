@@ -56,7 +56,6 @@ export const dailySignalVolumeRowSchema: CompiledQueryRowSchema<DailySignalVolum
  * the customer is never billed for separately.
  */
 export function dailySignalVolumeQuery() {
-
 	return from(ServiceUsage)
 		.select(($) => ({
 			day: CH.toStartOfInterval($.Hour, DAY_SECONDS),

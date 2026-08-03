@@ -409,10 +409,7 @@ export function tracesTimeseriesQuery(
 						.and($.Duration.lt(2_000_000_000)),
 				),
 			}))
-			.where(($) => [
-				...serviceOverviewWhereConditions($, opts),
-				edgeCondition("Timestamp"),
-			])
+			.where(($) => [...serviceOverviewWhereConditions($, opts), edgeCondition("Timestamp")])
 			.groupBy("bucket")
 
 		const hourlyInterior = from(ServiceOverviewHourly)

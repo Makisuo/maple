@@ -100,7 +100,10 @@ export interface WarehouseQueryServiceShape {
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T>,
 		options: SqlQueryOptions & { readonly justification: string },
-	) => Effect.Effect<ReadonlyArray<T>, WarehouseSqlError | WarehouseValidationError | WarehouseSchemaDriftError>
+	) => Effect.Effect<
+		ReadonlyArray<T>,
+		WarehouseSqlError | WarehouseValidationError | WarehouseSchemaDriftError
+	>
 	/** Execute validated user-authored SQL with tenant-scoped credentials and hard response limits. */
 	readonly rawSqlQuery: (
 		tenant: ExecutionTenant,

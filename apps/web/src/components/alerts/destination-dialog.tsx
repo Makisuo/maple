@@ -798,8 +798,8 @@ function SlackBotFields({
 				// channel past the cap stays out of reach whatever the user does in
 				// Slack. Saying the list is incomplete beats implying it's complete.
 				<p className="text-[11px] text-muted-foreground">
-					This workspace has more channels than Maple can list in one go, so some aren&apos;t
-					shown here.
+					This workspace has more channels than Maple can list in one go, so some aren&apos;t shown
+					here.
 				</p>
 			) : null}
 			<p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">

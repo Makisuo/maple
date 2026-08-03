@@ -4,12 +4,7 @@ import * as React from "react"
 
 import { EyeIcon } from "../icons"
 import { CopyButton } from "./copy-button"
-import {
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupInput,
-} from "./input-group"
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "./input-group"
 
 /** Mask a secret, keeping the readable prefix + last four characters. */
 export function maskKey(key: string): string {
@@ -36,12 +31,7 @@ export interface CopyableFieldProps {
  * implementation shared by the Connect popover, ingestion settings, the
  * dashboard setup checklist, and the local UI's disconnected state.
  */
-export function CopyableField({
-	value,
-	label,
-	copyLabel,
-	masked,
-}: CopyableFieldProps): React.ReactElement {
+export function CopyableField({ value, label, copyLabel, masked }: CopyableFieldProps): React.ReactElement {
 	const [isVisible, setIsVisible] = React.useState(false)
 
 	return (

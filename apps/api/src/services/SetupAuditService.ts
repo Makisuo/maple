@@ -413,7 +413,9 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 			}
 			const logWindow = {
 				orgId: tenant.orgId,
-				startTime: formatWarehouseDateTime(now - Integrations.AUDIT_LOG_CORRELATION_MAX_HOURS * 60 * 60 * 1000),
+				startTime: formatWarehouseDateTime(
+					now - Integrations.AUDIT_LOG_CORRELATION_MAX_HOURS * 60 * 60 * 1000,
+				),
 				endTime: formatWarehouseDateTime(now),
 			}
 

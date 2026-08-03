@@ -242,7 +242,7 @@ projection, and with `(org_id, id)` present via `REPLICA IDENTITY USING INDEX`.
 
 So `0009`'s stated rationale is wrong in its details (`DEFAULT` keys deletes on the
 primary key perfectly well, composite or not) but binding in its conclusion. What has
-*not* held up is its other claim — "these are low-write control-plane tables, so the
+_not_ held up is its other claim — "these are low-write control-plane tables, so the
 extra WAL volume is negligible." `FULL` writes the entire old row into the WAL on top
 of the new one, and since Electric Cloud consumes the slot over a direct connection,
 every one of those bytes is billed PlanetScale egress.
@@ -250,7 +250,7 @@ every one of those bytes is billed PlanetScale egress.
 Because the per-write multiplier is not negotiable, **the only lever on a synced table
 is its write rate.** Before adding a hot writer to one, gate it:
 
-- the alerting scheduler's per-minute claim lock lives in the *unpublished*
+- the alerting scheduler's per-minute claim lock lives in the _unpublished_
   `alert_rule_claims` table (`0027`), not in `alert_rules`;
 - `alert_rules.last_scheduled_at` is refreshed on a 5-minute heartbeat, SQL-gated so
   the off-beat ticks are zero-row updates that write no WAL tuple at all;

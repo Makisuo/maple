@@ -4,5 +4,8 @@
 	"printWidth": 110,
 	"useTabs": true,
 	"tabWidth": 4,
-	"ignorePatterns": [".context", "deploy", "skills"],
+	// packages/db/drizzle is drizzle-kit output — the next `db:generate` rewrites
+	// it in drizzle's own style, so formatting it is churn that only obscures the
+	// migration-snapshot diff.
+	"ignorePatterns": [".context", "deploy", "skills", "packages/db/drizzle"],
 }

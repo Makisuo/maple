@@ -164,10 +164,7 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 }
 
 describe("v2 alerts over HTTP", () => {
-	const createWebhookAndRule = async (
-		harness: ReturnType<typeof makeHarness>,
-		token: string,
-	) => {
+	const createWebhookAndRule = async (harness: ReturnType<typeof makeHarness>, token: string) => {
 		const destination = await harness.request("POST", "/v2/alerts/destinations", token, {
 			type: "webhook",
 			name: "Ops hook",
@@ -357,9 +354,11 @@ describe("v2 alerts over HTTP", () => {
 		expect(second.body.has_more).toBe(false)
 		expect(second.body.next_cursor).toBeNull()
 		expect(new Set([...first.body.data, ...second.body.data].map((item) => item.id)).size).toBe(105)
-		expect([...first.body.data, ...second.body.data].some((item) => item.delivery_key === "foreign-delivery")).toBe(
-			false,
-		)
+		expect(
+			[...first.body.data, ...second.body.data].some(
+				(item) => item.delivery_key === "foreign-delivery",
+			),
+		).toBe(false)
 
 		await harness.dispose()
 	})

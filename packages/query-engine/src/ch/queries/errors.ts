@@ -18,7 +18,13 @@ import {
 	TraceListMv,
 	Traces,
 } from "../tables"
-import { buildProjectedMapExpr, inclusionValues, inclusionCondition, matchOrIn , type FacetOutput} from "./query-helpers"
+import {
+	buildProjectedMapExpr,
+	inclusionValues,
+	inclusionCondition,
+	matchOrIn,
+	type FacetOutput,
+} from "./query-helpers"
 import { httpDisplaySpanName } from "../../traces-shared"
 
 function errorEventsTableForRecentScan(opts: {
@@ -526,7 +532,9 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 			conditions.push(matchOrIn($.DeploymentEnv, envs, opts.matchModes?.deploymentEnv === "contains"))
 		}
 		if (namespaces) {
-			conditions.push(matchOrIn($.ServiceNamespace, namespaces, opts.matchModes?.serviceNamespace === "contains"))
+			conditions.push(
+				matchOrIn($.ServiceNamespace, namespaces, opts.matchModes?.serviceNamespace === "contains"),
+			)
 		}
 
 		// Attribute filter EXISTS subqueries (correlated — references outer TraceId)

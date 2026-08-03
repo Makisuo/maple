@@ -18,7 +18,7 @@ import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import { ServiceOverviewHourly, ServiceOverviewSpans, ServiceUsage, TracesAggregatesHourly } from "../tables"
 import { CHNumber } from "../schema"
-import { apdexExprs, serviceOverviewWhereConditions , hourFloor, type FacetOutput} from "./query-helpers"
+import { apdexExprs, serviceOverviewWhereConditions, hourFloor, type FacetOutput } from "./query-helpers"
 import { edgeCondition, interiorConditions } from "./rollup-splice"
 
 // ---------------------------------------------------------------------------

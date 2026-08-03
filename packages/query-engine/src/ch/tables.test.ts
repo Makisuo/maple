@@ -109,7 +109,6 @@ for (const value of Object.values(Tables)) {
 	mirrored.push({ columns: value.columns, name: value.name })
 }
 
-
 describe("DSL table definitions mirror the warehouse schema", () => {
 	it("covers every table the DSL declares (or knowingly skips it)", () => {
 		// Views and tables the snapshot doesn't own would silently pass the
@@ -150,7 +149,9 @@ describe("DSL table definitions mirror the warehouse schema", () => {
 		// wrong here.
 		const ddl = ddlByTable.get("session_replays")
 		expect(ddl).toBeDefined()
-		const missing = [...ddl!.columns.keys()].filter((column) => !(column in Tables.SessionReplays.columns))
+		const missing = [...ddl!.columns.keys()].filter(
+			(column) => !(column in Tables.SessionReplays.columns),
+		)
 		expect(missing).toEqual([])
 	})
 })

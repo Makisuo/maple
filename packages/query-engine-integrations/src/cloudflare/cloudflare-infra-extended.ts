@@ -28,7 +28,6 @@ import {
 	type CloudflareFilterOpts,
 } from "./cloudflare-infra-filters"
 
-
 // Same NaN guard as cloudflare-infra.ts.
 
 // ---------------------------------------------------------------------------

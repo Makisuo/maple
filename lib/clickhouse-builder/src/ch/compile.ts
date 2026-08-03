@@ -152,8 +152,7 @@ export const unsafeCompiledQuery = <Output>(args: {
 	readonly tenantScope: TenantScope
 	readonly rowSchema?: CompiledQueryRowSchema<Output>
 	readonly routing?: "ingest"
-}): CompiledQuery<Output> =>
-	makeCompiledQuery(args.sql, args.tenantScope, args.rowSchema, args.routing)
+}): CompiledQuery<Output> => makeCompiledQuery(args.sql, args.tenantScope, args.rowSchema, args.routing)
 
 export function compileCH<
 	Cols extends ColumnDefs,

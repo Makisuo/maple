@@ -136,7 +136,6 @@ function namespaceCondition(
 	return CH.inList(nsAttr, opts.namespaces)
 }
 
-
 function rawLogsTimeRange($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> {
 	return [
 		// TimestampTime is the partition/index key; this filter unlocks
@@ -696,10 +695,7 @@ export function errorRateByServiceQuery() {
 			bucketErrorLogs: CH.sumIf($.Count, CH.inList($.SeverityText, ["ERROR", "FATAL"])),
 			errorRate: CH.lit(0),
 		}))
-		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			...interiorConditions($.Hour),
-		])
+		.where(($) => [$.OrgId.eq(param.string("orgId")), ...interiorConditions($.Hour)])
 		.groupBy("serviceName")
 
 	return fromUnion(unionAll(rawEdges, mvInterior), "rates")

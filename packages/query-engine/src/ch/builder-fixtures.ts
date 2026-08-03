@@ -389,5 +389,4 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		label: "default",
 		compile: () => CH.compile(CH.activeOrgsByLogsQuery(), { startTime: START_TIME }),
 	},
-
 ]

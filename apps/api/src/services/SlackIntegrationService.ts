@@ -1013,7 +1013,10 @@ const make: Effect.Effect<
 		}
 		const botToken = yield* decryptRowSecret(rowOption.value, "bot_token")
 		const walk = collectChannelPages(botToken).pipe(
-			Effect.map((result) => ({ channels: sortChannels(result.channels), truncated: result.truncated })),
+			Effect.map((result) => ({
+				channels: sortChannels(result.channels),
+				truncated: result.truncated,
+			})),
 		)
 		// Up to ten sequential Slack round-trips on a cold walk. The endpoint is
 		// admin-gated and only fires when the destination dialog opens, so a short

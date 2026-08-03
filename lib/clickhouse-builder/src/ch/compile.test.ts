@@ -273,8 +273,8 @@ describe("CompiledQuery.tenantScope", () => {
 	})
 
 	it("requires handwritten SQL to state its scope", () => {
-		expect(
-			unsafeCompiledQuery({ sql: "SELECT 1", tenantScope: "cross-org" }).tenantScope,
-		).toBe("cross-org")
+		expect(unsafeCompiledQuery({ sql: "SELECT 1", tenantScope: "cross-org" }).tenantScope).toBe(
+			"cross-org",
+		)
 	})
 })

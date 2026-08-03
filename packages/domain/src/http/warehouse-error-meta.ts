@@ -40,13 +40,11 @@ const readHttpStatus = (value: unknown): number | undefined => {
 }
 
 /** Every warehouse error tag, derived from the classes — never hand-listed. */
-export const WAREHOUSE_ERROR_TAGS: ReadonlyArray<WarehouseErrorTag> = warehouseHttpErrors.map(
-	(cls) => {
-		const tag = readTag(cls)
-		if (tag === undefined) throw new Error("warehouse error class without a _tag literal")
-		return tag as WarehouseErrorTag
-	},
-)
+export const WAREHOUSE_ERROR_TAGS: ReadonlyArray<WarehouseErrorTag> = warehouseHttpErrors.map((cls) => {
+	const tag = readTag(cls)
+	if (tag === undefined) throw new Error("warehouse error class without a _tag literal")
+	return tag as WarehouseErrorTag
+})
 
 /** `httpApiStatus` per tag, derived from the class annotations. */
 export const warehouseErrorStatus: ReadonlyMap<WarehouseErrorTag, number> = new Map(
@@ -266,8 +264,7 @@ export const presentWarehouseError = (error: WarehouseErrorLike): PresentedWareh
 	}
 }
 
-export const isWarehouseErrorTag = (tag: string): tag is WarehouseErrorTag =>
-	tag in warehouseErrorMeta
+export const isWarehouseErrorTag = (tag: string): tag is WarehouseErrorTag => tag in warehouseErrorMeta
 
 /**
  * Presentation with the raw upstream message REDACTED — every description

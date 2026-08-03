@@ -27,7 +27,6 @@ import {
 	type CloudflareFilterOpts,
 } from "./cloudflare-infra-filters"
 
-
 /** Counter metrics the poller emits for zone HTTP analytics (all in `metrics_sum`). */
 const ZONE_COUNTER_METRIC_NAMES = [
 	"cloudflare.http.requests",

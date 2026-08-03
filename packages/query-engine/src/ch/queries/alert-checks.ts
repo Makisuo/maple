@@ -11,7 +11,6 @@ import { from } from "@maple-dev/clickhouse-builder"
 import { AlertChecks } from "../tables"
 import { ISO_Z_FORMAT } from "./format"
 
-
 export interface ListRuleChecksOpts {
 	readonly groupKey?: string
 	readonly status?: string

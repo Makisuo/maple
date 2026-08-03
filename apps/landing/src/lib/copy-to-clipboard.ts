@@ -57,7 +57,7 @@ export function bindCopyButtons({
 		const label = labelSelector ? button.querySelector<HTMLElement>(labelSelector) : button
 		if (!label) continue
 
-		const resting = idleLabel ?? (label.textContent ?? "")
+		const resting = idleLabel ?? label.textContent ?? ""
 		const text = host.dataset.copy ?? ""
 		let timer: ReturnType<typeof setTimeout> | undefined
 

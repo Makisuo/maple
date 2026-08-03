@@ -86,8 +86,7 @@ const makeTenant = (): TenantContext => ({
 // A scoped stand-in for the removed `sqlQuery(tenant, sql)` entry point: these
 // tests exercise retry/routing/caching, not scope, so the SQL travels wrapped in
 // a compiled query that declares it.
-const scopedSql = (sql: string) =>
-	unsafeCompiledQuery<Record<string, unknown>>({ sql, tenantScope: "org" })
+const scopedSql = (sql: string) => unsafeCompiledQuery<Record<string, unknown>>({ sql, tenantScope: "org" })
 
 const transient503 = () => new Error("HTTP status 503 service temporarily unavailable")
 

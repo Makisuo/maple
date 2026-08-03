@@ -2,13 +2,7 @@ import { describe, expect, it } from "vitest"
 import { compile } from "../index"
 import { compile as compileFragment } from "@maple-dev/clickhouse-builder/sql"
 import * as CH from "../index"
-import {
-	edgeCondition,
-	hourGrain,
-	interiorBounds,
-	interiorConditions,
-	minuteGrain,
-} from "./rollup-splice"
+import { edgeCondition, hourGrain, interiorBounds, interiorConditions, minuteGrain } from "./rollup-splice"
 
 // ---------------------------------------------------------------------------
 // These pin the tiling invariant: the raw edge and the aggregate interior must
@@ -74,9 +68,7 @@ describe("rollup splice boundaries", () => {
 			["minute", minuteGrain],
 		])("edge and interior share one boundary definition (%s grain)", (_label, grain) => {
 			const edge = sqlOf(edgeCondition("Timestamp", grain))
-			expect(edge).toBe(
-				`(Timestamp < ${grain.firstFullBucket} OR Timestamp >= ${grain.endFloor})`,
-			)
+			expect(edge).toBe(`(Timestamp < ${grain.firstFullBucket} OR Timestamp >= ${grain.endFloor})`)
 
 			const [lower, upper] = interiorConditions(CH.rawExpr<string>("Hour"), grain)
 			// The edge excludes exactly what the interior includes.

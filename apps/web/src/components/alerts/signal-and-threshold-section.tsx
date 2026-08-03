@@ -599,9 +599,7 @@ function AlertQueryPanel({ form, onChange, autocompleteValues }: SignalAndThresh
 				onMetricSearch={setMetricSearch}
 				autocompleteValues={autocompleteValues}
 				onUpdate={updateQuery}
-				onAggregationChange={(aggregation) =>
-					updateQuery((current) => ({ ...current, aggregation }))
-				}
+				onAggregationChange={(aggregation) => updateQuery((current) => ({ ...current, aggregation }))}
 				onMetricSelectionChange={(selection) =>
 					updateQuery((current) =>
 						current.dataSource === "metrics"

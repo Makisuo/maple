@@ -307,8 +307,7 @@ describe("promotion deadline", () => {
 	test("a slow workspace resolve falls through unpromoted at the deadline", async () => {
 		let fetchCalls = 0
 		const deps: ThreadFollowUpDeps = {
-			resolveBotToken: () =>
-				new Promise((resolve) => setTimeout(() => resolve("xoxb-test"), 200)),
+			resolveBotToken: () => new Promise((resolve) => setTimeout(() => resolve("xoxb-test"), 200)),
 			fetchThreadReplies: async () => {
 				fetchCalls += 1
 				return ENGAGED_THREAD

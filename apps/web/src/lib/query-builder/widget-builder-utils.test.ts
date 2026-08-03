@@ -239,19 +239,17 @@ describe("funnel/heatmap endpoint routing (MAP-49)", () => {
 		// The pie is the only breakdown panel that collapses its tail into "Other",
 		// so it is the only one that fetches past what it draws. Handing 50 rows to
 		// a funnel turns a 10-stage funnel into a truncated list.
-		const pie = buildWidgetDataSource(
-			makeWidget(),
-			{ ...makeState(), visualization: "pie" as const },
-			["A", "B"],
-		)
+		const pie = buildWidgetDataSource(makeWidget(), { ...makeState(), visualization: "pie" as const }, [
+			"A",
+			"B",
+		])
 		expect(pie.params?.defaultLimit).toBe(BREAKDOWN_TAIL_LIMIT)
 
 		for (const visualization of ["funnel", "heatmap", "histogram"] as const) {
-			const dataSource = buildWidgetDataSource(
-				makeWidget(),
-				{ ...makeState(), visualization },
-				["A", "B"],
-			)
+			const dataSource = buildWidgetDataSource(makeWidget(), { ...makeState(), visualization }, [
+				"A",
+				"B",
+			])
 			expect(dataSource.params?.defaultLimit).toBeUndefined()
 		}
 	})

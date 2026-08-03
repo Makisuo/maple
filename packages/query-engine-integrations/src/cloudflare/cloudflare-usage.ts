@@ -14,7 +14,6 @@ import { CHNumber } from "@maple/query-engine/ch/schema"
 import { MetricsSum } from "@maple/query-engine/ch/tables"
 import { ISO_Z_FORMAT, isoBucket } from "@maple/query-engine/ch/format"
 
-
 /**
  * The only metric names the poller emits as monotonic request counters — the
  * selective predicate for usage rows (nothing else writes `cloudflare.*.requests`).
