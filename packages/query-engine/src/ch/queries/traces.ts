@@ -28,7 +28,6 @@ import {
 	buildProjectedMapExpr,
 	canUseServiceOverviewMv,
 	canUseTracesAggregatesMv,
-	inclusionCondition,
 	inclusionValues,
 	serviceOverviewWhereConditions,
 	tracesAggregatesWhereConditions,
