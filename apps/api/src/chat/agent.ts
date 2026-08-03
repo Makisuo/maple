@@ -22,9 +22,18 @@ import {
 } from "@maple/domain/chat-session"
 import { AiTriageResult, SubmitDiagnosisRequest } from "@maple/domain/http"
 import { InvestigationId } from "@maple/domain/primitives"
-import { LLM, LLMEvent, LLMResponse, Message, ToolResultPart, type LLMRequest, type Model } from "@maple/llm"
+import {
+	LLM,
+	LLMEvent,
+	LLMResponse,
+	Message,
+	ToolResultPart,
+	type LLMRequest,
+	type Model,
+	type Usage,
+} from "@maple/llm"
 import { Tool, ToolFailure, ToolRuntime, toDefinitions, type Tools } from "@maple/llm"
-import { Effect, Schema, Stream } from "effect"
+import { Cause, Effect, Option, Schema, Stream } from "effect"
 import { toLlmCallError } from "@/platform/Llm"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { callMcpTool } from "@/mcp/dispatcher"
@@ -33,13 +42,38 @@ import { MUTATING_TOOL_NAMES } from "@/mcp/tools/mutating"
 import { mapleToolDefinitions, toInputSchema } from "@/mcp/tools/registry"
 import { buildSystemPrompt } from "./modes"
 
-const decodeInvestigationId = Schema.decodeUnknownSync(InvestigationId)
+const decodeInvestigationIdOption = Schema.decodeUnknownOption(InvestigationId)
 
 /** Hard cap on assistant turns per submission. */
 const MAX_STEPS = 10
 
 /** Fan-out cap for tool calls issued in the same assistant turn. */
 const TOOL_CONCURRENCY = 4
+
+/**
+ * Running token total for one turn, accumulated across its steps.
+ *
+ * Mutable and shared rather than returned, because the one consumer — `submit_diagnosis` — is a
+ * *tool* invoked mid-turn, so there is no "after the turn" moment at which to hand it a total.
+ * In practice the diagnosis call is the last thing an investigation does, so this is the whole
+ * turn bar the final assistant message. Before this, `SubmitDiagnosisRequest` was built with no
+ * usage at all, so `InvestigationService`'s `if (env && (inputTokens || outputTokens))` was always
+ * false: `investigations.model` stayed null and Autumn was never metered for autonomous
+ * investigations, which the pre-`@maple/llm` workflow path did meter.
+ */
+export interface TurnUsage {
+	input: number
+	output: number
+	cacheRead: number
+}
+
+export const makeTurnUsage = (): TurnUsage => ({ input: 0, output: 0, cacheRead: 0 })
+
+const addUsage = (total: TurnUsage, usage: Usage | undefined): void => {
+	total.input += usage?.inputTokens ?? 0
+	total.output += usage?.outputTokens ?? 0
+	total.cacheRead += usage?.cacheReadInputTokens ?? 0
+}
 
 /**
  * Re-pin the service requirements of an MCP tool handler. See the identical helper in
@@ -52,6 +86,24 @@ const withRuntimeServices = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Eff
 
 const toolResultText = (result: { content: ReadonlyArray<{ text: string }> }): string =>
 	result.content.map((block) => block.text).join("\n")
+
+/**
+ * A one-line reason for a failed tool, safe to hand the model.
+ *
+ * `String(cause)` renders the whole Effect cause: stack frames, and — inside a `DatabaseError` —
+ * connection details. That went into the model's context and, through the tool-result event, into
+ * a durable transcript the browser reads back.
+ */
+const summarizeToolFailure = (cause: Cause.Cause<unknown>): string => {
+	const failure = cause.reasons.find(Cause.isFailReason)
+	const error: unknown = failure?.error
+	if (error instanceof Error) return error.message
+	if (error && typeof error === "object" && "message" in error) {
+		const message = (error as { message?: unknown }).message
+		if (typeof message === "string") return message
+	}
+	return "the tool failed"
+}
 
 /**
  * Description suffix on gated tools. The model still calls them normally; it just needs to know
@@ -82,6 +134,8 @@ export interface ChatTurnInput {
 	 * conversation that has moved on. Defaults to "always current" for callers with no session.
 	 */
 	readonly isCurrent?: () => boolean
+	/** Accumulates this turn's token usage; see {@link TurnUsage}. */
+	readonly usage?: TurnUsage
 }
 
 /**
@@ -110,10 +164,18 @@ export const buildSubmitDiagnosisTool = (
 	sessionId: string,
 	tenant: TenantContext,
 	submitDiagnosis: SubmitDiagnosis,
+	usage: TurnUsage,
+	model: Model,
 ): Tools => {
 	const tools: Tools = {}
-	const investigationId = investigationIdFromChatSessionId(sessionId)
-	if (!investigationId) return tools
+	const rawId = investigationIdFromChatSessionId(sessionId)
+	if (!rawId) return tools
+	// `decodeUnknownSync` here turned a session id whose `inv-` suffix was not a UUID into a thrown
+	// defect on a user-supplied string. An unparseable id simply means this conversation is not an
+	// investigation, so it gets no `submit_diagnosis` tool.
+	const decoded = decodeInvestigationIdOption(rawId)
+	if (Option.isNone(decoded)) return tools
+	const investigationId = decoded.value
 	tools.submit_diagnosis = Tool.make({
 		description:
 			"Record your structured diagnosis for THIS investigation. Call it exactly once, " +
@@ -125,13 +187,22 @@ export const buildSubmitDiagnosisTool = (
 			withRuntimeServices(
 				submitDiagnosis(
 					tenant.orgId,
-					decodeInvestigationId(investigationId),
-					new SubmitDiagnosisRequest({ report }),
+					investigationId,
+					new SubmitDiagnosisRequest({
+						report,
+						model: String(model.id),
+						inputTokens: usage.input,
+						outputTokens: usage.output,
+					}),
 				).pipe(
 					Effect.as("Diagnosis recorded."),
+					// Named failures only. `catchCause` + `String(cause)` fed the model a rendered
+					// Effect cause — stack frames, and connection details out of a DatabaseError.
 					Effect.catchCause((cause) =>
 						Effect.fail(
-							new ToolFailure({ message: `submit_diagnosis failed: ${String(cause)}` }),
+							new ToolFailure({
+								message: `submit_diagnosis failed: ${summarizeToolFailure(cause)}`,
+							}),
 						),
 					),
 				),
@@ -174,7 +245,9 @@ const buildChatTools = (tenant: TenantContext): Tools =>
 										),
 										Effect.catchCause((cause) =>
 											Effect.fail(
-												new ToolFailure({ message: `Tool failed: ${String(cause)}` }),
+												new ToolFailure({
+													message: `Tool failed: ${summarizeToolFailure(cause)}`,
+												}),
 											),
 										),
 									),
@@ -287,6 +360,8 @@ const runStep = (
 				// A stream that neither failed nor assembled still ended the turn; say so, rather
 				// than leaving the log with no terminal event at all.
 				if (!response) return Stream.fromIterable([turnEnd(input, "stop")])
+
+				if (input.usage) addUsage(input.usage, response.usage)
 
 				const calls = response.events
 					.filter(LLMEvent.is.toolCall)

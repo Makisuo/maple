@@ -46,6 +46,9 @@ export interface FailedSend {
 }
 
 export interface UseMapleChatResult {
+	/** `"<orgId>:<tabId>"`, or undefined before the org resolves. Callers that record something
+	 * back into this conversation (an applied approval) need it. */
+	sessionId: string | undefined
 	messages: UIMessage[]
 	status: ChatStatus
 	error: Error | undefined
@@ -534,6 +537,7 @@ export function useMapleChat({ tabId, context }: UseMapleChatOptions): UseMapleC
 	const isLoading = status === "submitted" || status === "streaming"
 
 	return {
+		sessionId,
 		messages,
 		status,
 		error,

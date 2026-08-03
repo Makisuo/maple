@@ -59,19 +59,44 @@ const toTenantContext = (tenant: ChatTurnTenant): TenantContext => ({
 })
 
 /**
- * Project the durable transcript into `@maple/llm` messages.
+ * How much transcript a turn replays.
+ *
+ * The log is append-only and never pruned, so without a bound a long-lived conversation grows
+ * until it exceeds the model's context window — and then stays broken, because every retry sends
+ * the same oversized request. Bounding by characters as well as by count matters because one
+ * pasted stack trace can outweigh fifty short turns.
+ */
+const MAX_REPLAYED_MESSAGES = 40
+const MAX_REPLAYED_CHARS = 60_000
+
+/**
+ * Project the durable transcript into `@maple/llm` messages, most recent first-limited.
  *
  * Tool calls are deliberately NOT replayed as tool messages: a rehydrated conversation needs the
  * *conclusions*, not a second copy of every tool payload, and replaying tool results without their
  * matching provider-native call ids is what makes providers reject a continuation. The assistant's
  * text is what carries forward.
  */
-const toLlmMessages = (history: ReadonlyArray<ChatMessage>): ReadonlyArray<Message> =>
-	history
-		.filter((message) => message.text.trim() !== "")
-		.map((message) =>
-			message.role === "user" ? Message.user(message.text) : Message.assistant(message.text),
-		)
+const toLlmMessages = (history: ReadonlyArray<ChatMessage>): ReadonlyArray<Message> => {
+	const spoken = history.filter((message) => message.text.trim() !== "")
+
+	// Walk backwards so the newest turns are the ones kept: the tail is the part the next turn
+	// actually needs, and dropping from the head is what a human skimming a long thread does too.
+	const kept: Array<ChatMessage> = []
+	let chars = 0
+	for (let i = spoken.length - 1; i >= 0; i--) {
+		const message = spoken[i]!
+		if (kept.length >= MAX_REPLAYED_MESSAGES) break
+		if (chars + message.text.length > MAX_REPLAYED_CHARS && kept.length > 0) break
+		chars += message.text.length
+		kept.push(message)
+	}
+	kept.reverse()
+
+	return kept.map((message) =>
+		message.role === "user" ? Message.user(message.text) : Message.assistant(message.text),
+	)
+}
 
 /**
  * Drive one turn to completion.
@@ -104,20 +129,27 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	const program = Effect.gen(function* () {
 		const investigations = yield* InvestigationService
 		const history = input.session.history()
+		const model = resolveTriageModel(input.env)
+		// Shared with the turn so `submit_diagnosis` can report what the investigation cost. See
+		// `TurnUsage` — the tool is invoked mid-turn, so there is no later moment to hand it a total.
+		const usage = agent.makeTurnUsage()
 		const extraTools = agent.buildSubmitDiagnosisTool(
 			input.sessionId,
 			tenant,
 			investigations.submitDiagnosis,
+			usage,
+			model,
 		)
 
 		yield* agent
 			.runChatTurn({
 				sessionId: input.sessionId,
 				tenant,
-				model: resolveTriageModel(input.env),
+				model,
 				messages: toLlmMessages(history),
 				messageId: input.messageId,
 				extraTools,
+				usage,
 				// An abort clears the claim; the turn notices here and stops at the next event
 				// rather than streaming into a conversation that has moved on.
 				isCurrent: () => input.session.holdsTurn(input.messageId),

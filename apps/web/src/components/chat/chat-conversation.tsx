@@ -142,7 +142,7 @@ export function ChatConversation({
 		return base
 	}, [subjectSeededByServer, mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
 
-	const { messages, status, isLoading, historyReady, failedSends, sendMessage, stop, canStop } =
+	const { sessionId, messages, status, isLoading, historyReady, failedSends, sendMessage, stop, canStop } =
 		useMapleChat({ tabId, context })
 	const diagnosisMessageId = useMemo(() => findDiagnosisMessageId(messages), [messages])
 
@@ -159,8 +159,18 @@ export function ChatConversation({
 			next.set(toolCallId, outcome)
 			return next
 		})
-	const handleApprove = async (toolCallId: string, tool: string, input: unknown) => {
-		const exit = await applyProposal({ payload: makeChatApplyPayload(tool, input) })
+	const handleApprove = async (
+		messageId: string,
+		toolCallId: string,
+		tool: string,
+		input: unknown,
+	) => {
+		// `sessionId` + `messageId` + `toolCallId` are what let the server settle the proposal in the
+		// durable transcript, so the card resolves on every device and the model's next turn knows
+		// the mutation happened.
+		const exit = await applyProposal({
+			payload: makeChatApplyPayload(tool, input, { sessionId, messageId, toolCallId }),
+		})
 		if (Exit.isSuccess(exit)) {
 			if (exit.value.isError) {
 				toastManager.add({ title: exit.value.content || `Couldn't apply ${tool}`, type: "error" })
