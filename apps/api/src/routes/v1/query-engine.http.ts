@@ -516,23 +516,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("planetscaleInfraTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const base = {
-						orgId: tenant.orgId,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-						bucketSeconds: Math.max(60, Math.floor(payload.bucketSeconds)),
-						database: payload.database,
-					}
-					const compiled =
-						payload.branch === undefined
-							? CH.compile(Integrations.planetscaleInfraTimeseriesSQL(), base, {
-									rowSchema: Integrations.planetscaleInfraTimeseriesRowSchema,
-								})
-							: CH.compile(
-									Integrations.planetscaleBranchInfraTimeseriesSQL(),
-									{ ...base, branch: payload.branch },
-									{ rowSchema: Integrations.planetscaleInfraTimeseriesRowSchema },
-								)
 					const rows = yield* runQuery(Queries.planetscaleInfraTimeseries, tenant, payload)
 					return new PlanetScaleInfraTimeseriesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
@@ -684,70 +667,14 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const filters = toCloudflareFilters(payload)
-					const params = {
-						orgId: tenant.orgId,
-						serviceName: payload.serviceName,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-					}
-					const totalsCompiled = CH.compile(
-						Integrations.cloudflareZoneBreakdownTotalsSQL(
-							payload.dimension,
-							filters,
-							payload.limit ?? 100,
-						),
-						params,
-						{ rowSchema: Integrations.cloudflareZoneBreakdownTotalsRowSchema },
-					)
-					// Coverage is deliberately unfiltered: it answers "what did the poller collect
-					// here", which the UI needs in order to say "not collected yet" rather than
-					// "no traffic" for a window that predates the dataset.
-					const coverageCompiled = CH.compile(
-						Integrations.cloudflareZoneBreakdownCoverageSQL(payload.dimension),
-						params,
-						{ rowSchema: Integrations.cloudflareZoneBreakdownCoverageRowSchema },
-					)
-					const zoneTotalCompiled = CH.compile(
-						Integrations.cloudflareZoneCountersSQL(filters),
-						params,
-						{
-							rowSchema: Integrations.cloudflareZoneCountersRowSchema,
-						},
-					)
 					const [totalRows, coverageRows, zoneRows] = yield* Effect.all(
 						[
-							mapExecError(
-								warehouse.compiledQuery(tenant, totalsCompiled, {
-									profile: "aggregation",
-									context: "cloudflareInfraZoneBreakdownTotals",
-								}),
-								"cloudflareInfraZoneBreakdownTotals query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, coverageCompiled, {
-									profile: "aggregation",
-									context: "cloudflareInfraZoneBreakdownCoverage",
-								}),
-								"cloudflareInfraZoneBreakdownCoverage query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, zoneTotalCompiled, {
-									profile: "aggregation",
-									context: "cloudflareInfraZoneBreakdownZoneTotal",
-								}),
-								"cloudflareInfraZoneBreakdownZoneTotal query failed",
-							),
+							runQuery(Queries.cloudflareInfraZoneBreakdownTotals, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneBreakdownCoverage, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneBreakdownZoneTotal, tenant, payload),
 						],
 						{ concurrency: 3 },
 					)
-					// The chart runs after the totals rather than beside them: totals are already
-					// ranked by requests, so they name the series worth plotting. Without that the
-					// grouping is unbounded — a zone taking scanner traffic returns a distinct path
-					// per probe, and the response grows to buckets × thousands of keys. One extra
-					// round trip over the same warm scan buys a payload that can't blow up.
-					// The poller's own tail bucket is dropped from the picks, not plotted as a peer —
-					// it means the same thing as the fold, so it merges into it and leaves the slot
-					// for a real key.
 					const topKeys = totalRows
 						.filter((row) => row.key !== Integrations.CLOUDFLARE_BREAKDOWN_OTHER_KEY)
 						.slice(0, Integrations.CLOUDFLARE_BREAKDOWN_SERIES_LIMIT)
@@ -755,28 +682,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const bucketRows: ReadonlyArray<Integrations.CloudflareZoneBreakdownTimeseriesOutput> =
 						topKeys.length === 0
 							? []
-							: yield* mapExecError(
-									warehouse.compiledQuery(
-										tenant,
-										CH.compile(
-											Integrations.cloudflareZoneBreakdownTimeseriesSQL(
-												payload.dimension,
-												filters,
-												topKeys,
-											),
-											{ ...params, bucketSeconds: payload.bucketSeconds },
-											{
-												rowSchema:
-													Integrations.cloudflareZoneBreakdownTimeseriesRowSchema,
-											},
-										),
-										{
-											profile: "aggregation",
-											context: "cloudflareInfraZoneBreakdownTimeseries",
-										},
-									),
-									"cloudflareInfraZoneBreakdownTimeseries query failed",
-								)
+							: yield* runQuery(Queries.cloudflareInfraZoneBreakdownTimeseries, tenant, {
+									...payload,
+									topKeys,
+								})
 					const coverage = coverageRows[0]
 					const zoneRequests = zoneRows.find((row) => row.serviceName === payload.serviceName)
 					// Breakdown metrics are a per-window top-N fold of what Cloudflare returned, so
@@ -1106,11 +1015,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"serviceOperations",
 						payload,
 						Effect.gen(function* () {
-							const params = {
-								orgId: tenant.orgId,
-								startTime: payload.startTime,
-								endTime: payload.endTime,
-							}
 							yield* Effect.annotateCurrentSpan(
 								"query.rollup.enabled",
 								serviceOperationsRollupEnabled,
@@ -1118,50 +1022,27 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							// The rollout flag stays off until migration 0008 is deployed,
 							// backfilled, and parity-checked. Disabling it restores the all-raw
 							// rollback path without changing the endpoint contract.
-							const summaryOptions = {
-								serviceName: payload.serviceName,
-								environments: payload.environments,
-								limit: payload.limit,
-							}
 							const runRawSummary = () =>
-								warehouse.compiledQuery(
-									tenant,
-									CH.compile(CH.serviceOperationsSummaryRawQuery(summaryOptions), params, {
-										rowSchema: CH.serviceOperationsSummaryRowSchema,
-									}),
-									{ profile: "aggregation", context: "serviceOperations" },
-								)
+								runQuery(Queries.serviceOperationsSummaryRaw, tenant, payload)
 							let useRollup = serviceOperationsRollupEnabled
 							const summaryEffect = useRollup
-								? warehouse
-										.compiledQuery(
-											tenant,
-											CH.compile(
-												CH.serviceOperationsSummaryQuery(summaryOptions),
-												params,
-												{
-													rowSchema: CH.serviceOperationsSummaryRowSchema,
-												},
-											),
-											{ profile: "aggregation", context: "serviceOperations" },
-										)
-										.pipe(
-											Effect.catch((error) => {
-												if (!isMissingServiceOperationsRollup(error))
-													return Effect.fail(error)
-												useRollup = false
-												return Effect.gen(function* () {
-													yield* Effect.logWarning(
-														"Service operations rollup is unavailable; using raw rollback path",
-													).pipe(Effect.annotateLogs({ orgId: tenant.orgId }))
-													yield* Effect.annotateCurrentSpan(
-														"query.rollup.fallback",
-														true,
-													)
-													return yield* runRawSummary()
-												})
-											}),
-										)
+								? runQuery(Queries.serviceOperationsSummary, tenant, payload).pipe(
+										Effect.catch((error) => {
+											if (!isMissingServiceOperationsRollup(error))
+												return Effect.fail(error)
+											useRollup = false
+											return Effect.gen(function* () {
+												yield* Effect.logWarning(
+													"Service operations rollup is unavailable; using raw rollback path",
+												).pipe(Effect.annotateLogs({ orgId: tenant.orgId }))
+												yield* Effect.annotateCurrentSpan(
+													"query.rollup.fallback",
+													true,
+												)
+												return yield* runRawSummary()
+											})
+										}),
+									)
 								: runRawSummary()
 							const summaryRows = yield* mapExecError(
 								summaryEffect,
@@ -1182,50 +1063,23 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							)
 							const requestedBucketSeconds = payload.bucketSeconds ?? windowSeconds / 50
 							const bucketSeconds = Math.max(1, Math.round(requestedBucketSeconds / 60)) * 60
-							const timeseriesOptions = {
-								serviceName: payload.serviceName,
-								environments: payload.environments,
-								spanNames,
-								bucketSeconds,
-							}
-							const timeseriesParams = { ...params, bucketSeconds }
+							const timeseriesInput = { ...payload, spanNames, bucketSeconds }
 							const runRawTimeseries = () =>
-								warehouse.compiledQuery(
-									tenant,
-									CH.compile(
-										CH.serviceOperationsTimeseriesRawQuery(timeseriesOptions),
-										timeseriesParams,
-										{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
-									),
-									{ profile: "aggregation", context: "serviceOperationsTimeseries" },
-								)
+								runQuery(Queries.serviceOperationsTimeseriesRaw, tenant, timeseriesInput)
 							const timeseriesEffect = useRollup
-								? warehouse
-										.compiledQuery(
-											tenant,
-											CH.compile(
-												CH.serviceOperationsTimeseriesQuery(timeseriesOptions),
-												timeseriesParams,
-												{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
-											),
-											{
-												profile: "aggregation",
-												context: "serviceOperationsTimeseries",
-											},
-										)
-										.pipe(
-											Effect.catch((error) =>
-												isMissingServiceOperationsRollup(error)
-													? Effect.gen(function* () {
-															yield* Effect.annotateCurrentSpan(
-																"query.rollup.fallback",
-																true,
-															)
-															return yield* runRawTimeseries()
-														})
-													: Effect.fail(error),
-											),
-										)
+								? runQuery(Queries.serviceOperationsTimeseries, tenant, timeseriesInput).pipe(
+										Effect.catch((error) =>
+											isMissingServiceOperationsRollup(error)
+												? Effect.gen(function* () {
+														yield* Effect.annotateCurrentSpan(
+															"query.rollup.fallback",
+															true,
+														)
+														return yield* runRawTimeseries()
+													})
+												: Effect.fail(error),
+										),
+									)
 								: runRawTimeseries()
 							const timeseriesRows = yield* mapExecError(
 								timeseriesEffect,
