@@ -3,6 +3,7 @@ import * as Integrations from "@maple/query-engine-integrations"
 import { defineQuery } from "@maple/query-engine/registry"
 import { Queries as Core } from "@maple/query-engine/registry"
 import type {
+	CloudflareInfraZoneFacetsRequest,
 	CloudflareInfraZoneDetailRequest,
 	ServicePlanetScaleStatsRequest,
 	CloudflareInfraPlatformResourcesRequest,
@@ -449,6 +450,25 @@ const planetscaleServiceStorage = defineQuery({
 	},
 })
 
+/**
+ * Zone facet counts: 8 UNION branches over the wide Attributes Map column.
+ * maxThreads caps read-thread concurrency so per-thread decompression buffers
+ * stay inside the discovery memory budget — same guard as podFacets.
+ */
+const cloudflareInfraZoneFacets = defineQuery({
+	id: "cloudflareInfraZoneFacets",
+	profile: "discovery",
+	settings: { maxThreads: 4 },
+	cache: undefined,
+	compile: (payload: CloudflareInfraZoneFacetsRequest, orgId: string) =>
+		CH.compileUnion(Integrations.cloudflareZoneFacetsQuery(toCloudflareFilters(payload)), {
+			orgId,
+			serviceName: payload.serviceName,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
 export const Queries = {
 	...Core,
 
@@ -630,4 +650,5 @@ export const Queries = {
 	planetscaleServiceGauges,
 	planetscaleServiceConnections,
 	planetscaleServiceStorage,
+	cloudflareInfraZoneFacets,
 } as const

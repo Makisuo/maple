@@ -837,26 +837,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("cloudflareInfraZoneFacets", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compileUnion(
-						Integrations.cloudflareZoneFacetsQuery(toCloudflareFilters(payload)),
-						{
-							orgId: tenant.orgId,
-							serviceName: payload.serviceName,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-						},
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "discovery",
-							// 8 UNION branches each re-read the wide Attributes Map column; cap
-							// read-thread concurrency so the per-thread decompression buffers stay
-							// inside the discovery memory budget — same guard as podFacets.
-							settings: { maxThreads: 4 },
-							context: "cloudflareInfraZoneFacets",
-						}),
-						"cloudflareInfraZoneFacets query failed",
-					)
+					const rows = yield* runQuery(Queries.cloudflareInfraZoneFacets, tenant, payload)
 					const buckets = {
 						hosts: [] as Array<{ name: string; count: number }>,
 						cacheStatuses: [] as Array<{ name: string; count: number }>,
