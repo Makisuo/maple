@@ -43,6 +43,9 @@ interface ReplaysFacets {
 	readonly browsers: ReadonlyArray<ReplaysFacetItem>
 	readonly countries: ReadonlyArray<ReplaysFacetItem>
 	readonly devices: ReadonlyArray<ReplaysFacetItem>
+	/** Identified groups (company / team). Empty for orgs that never call
+	 *  `identify()` with a group — the section hides itself then. */
+	readonly groups: ReadonlyArray<ReplaysFacetItem>
 	readonly errorCount: number
 	/** Session-length distribution: `name` is the bucket floor in ms. */
 	readonly durationBuckets: ReadonlyArray<ReplaysFacetItem>
@@ -148,7 +151,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 
 	// Single-value params: take the last toggled option (switching dimensions
 	// replaces the prior value; unchecking the only one clears it).
-	const setSingle = (key: "service" | "browser" | "country" | "deviceType", values: string[]) => {
+	const setSingle = (key: "service" | "browser" | "country" | "deviceType" | "group", values: string[]) => {
 		navigate({
 			search: (prev) => ({ ...prev, [key]: values.at(-1) ?? undefined }),
 		})
@@ -162,6 +165,10 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 
 	const setUserId = (value: string | undefined) => {
 		navigate({ search: (prev) => ({ ...prev, userId: value }) })
+	}
+
+	const setUserSearch = (value: string | undefined) => {
+		navigate({ search: (prev) => ({ ...prev, user: value }) })
 	}
 
 	// Session-time ranges (seconds in the URL; mapped to ms before the query).
@@ -190,6 +197,8 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 		!!search.country ||
 		!!search.deviceType ||
 		!!search.userId ||
+		!!search.user ||
+		!!search.group ||
 		search.hasErrors === true ||
 		search.durationMin != null ||
 		search.durationMax != null ||
@@ -204,19 +213,37 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 			const browsers = withSelected(facets.browsers, search.browser)
 			const countries = withSelected(facets.countries, search.country)
 			const devices = withSelected(facets.devices, search.deviceType)
+			const groups = withSelected(facets.groups, search.group)
 
 			const hasFacets =
 				services.length > 0 ||
 				browsers.length > 0 ||
 				countries.length > 0 ||
 				devices.length > 0 ||
+				groups.length > 0 ||
 				facets.errorCount > 0
 
 			return (
 				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
-						<UserIdFilter value={search.userId} onApply={setUserId} />
+						<TextFilter
+							id="replays-user-search"
+							label="Name or email"
+							placeholder="Filter by name or email…"
+							clearLabel="Clear name or email filter"
+							value={search.user}
+							onApply={setUserSearch}
+						/>
+
+						<TextFilter
+							id="replays-user-filter"
+							label="User ID"
+							placeholder="Filter by user ID…"
+							clearLabel="Clear user ID filter"
+							value={search.userId}
+							onApply={setUserId}
+						/>
 
 						<SingleCheckboxFilter
 							title="Has errors"
@@ -260,6 +287,17 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 							getOptionIcon={browserIconFor}
 						/>
 
+						{/* Hidden entirely when nobody is grouped — an empty facet list here
+						    would just read as a broken section. */}
+						{groups.length > 0 && (
+							<SearchableFilterSection
+								title="Group"
+								options={groups}
+								selected={search.group ? [search.group] : []}
+								onChange={(vals) => setSingle("group", vals)}
+							/>
+						)}
+
 						<FilterSection
 							title="Device"
 							options={devices}
@@ -287,19 +325,24 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 		.render()
 }
 
-// UserId is high-cardinality identity data, so it's a typed exact-match field
-// rather than a facet checklist. Exact match means partial input matches nothing,
-// so the filter commits on Enter (not per-keystroke) — mirrors the toolbar's
+// Identity is high-cardinality, so it's typed rather than picked from a facet
+// checklist. Both identity filters commit on Enter (not per-keystroke) — the
+// user-id one is an exact match, where partial input matches nothing, and the
+// name/email one would otherwise refetch on every letter. Mirrors the toolbar's
 // local-state-synced input. The × clears both the field and the applied filter.
-interface UserIdFilterProps {
+interface TextFilterProps {
+	id: string
+	label: string
+	placeholder: string
+	clearLabel: string
 	value: string | undefined
 	onApply: (value: string | undefined) => void
 }
 
-function UserIdFilter({ value, onApply }: UserIdFilterProps) {
+function TextFilter({ id, label, placeholder, clearLabel, value, onApply }: TextFilterProps) {
 	const [text, setText] = useState(value ?? "")
 
-	// Keep in sync when userId changes elsewhere (Clear all, the active-user chip's ×).
+	// Keep in sync when the param changes elsewhere (Clear all, the active-user chip's ×).
 	useEffect(() => {
 		setText(value ?? "")
 	}, [value])
@@ -317,26 +360,23 @@ function UserIdFilter({ value, onApply }: UserIdFilterProps) {
 				onApply(text.trim() || undefined)
 			}}
 		>
-			<Label
-				htmlFor="replays-user-filter"
-				className={`mb-2 block ${FILTER_SECTION_LABEL} text-muted-foreground`}
-			>
-				User
+			<Label htmlFor={id} className={`mb-2 block ${FILTER_SECTION_LABEL} text-muted-foreground`}>
+				{label}
 			</Label>
 			<InputGroup>
 				<InputGroupAddon>
 					<MagnifierIcon />
 				</InputGroupAddon>
 				<InputGroupInput
-					id="replays-user-filter"
+					id={id}
 					size="sm"
 					value={text}
 					onChange={(e) => setText(e.target.value)}
-					placeholder="Filter by user ID…"
+					placeholder={placeholder}
 				/>
 				{text && (
 					<InputGroupAddon align="inline-end">
-						<InputGroupButton aria-label="Clear user filter" onClick={clear}>
+						<InputGroupButton aria-label={clearLabel} onClick={clear}>
 							<XmarkIcon />
 						</InputGroupButton>
 					</InputGroupAddon>

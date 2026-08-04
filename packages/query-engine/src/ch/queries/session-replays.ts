@@ -88,6 +88,15 @@ export interface SessionReplaysListOpts {
 	/** Exact match on the session's end-user id. */
 	userId?: string
 	/**
+	 * Substring match (case-insensitive) on the identified user's name or email.
+	 * Complements `userId`: the id is opaque and matched exactly, while the name
+	 * and email are what a human types. Sessions recorded before `identify()`
+	 * carry `''` in both columns and so never match — expected, not a bug.
+	 */
+	userSearch?: string
+	/** Exact match on the identified group (company / team / tenant) name. */
+	groupName?: string
+	/**
 	 * Exact match on the persistent visitor id. This is the join that walks from
 	 * an anonymous marketing session to the signed-in product sessions of the
 	 * same browser — the two have different SessionIds and often different
@@ -139,6 +148,13 @@ export interface SessionReplaysListOutput {
 	readonly durationMs: number | null
 	readonly status: string
 	readonly userId: string
+	// identify() identity (migration 0011). `''` when the session was never
+	// identified — the list renders its existing session-id/host line in that case,
+	// so pre-identify sessions are unaffected.
+	readonly userName: string
+	readonly userEmail: string
+	readonly groupId: string
+	readonly groupName: string
 	/** Persistent per-browser id; equal across a visitor's marketing and app sessions. */
 	readonly visitorId: string
 	/** Acquisition source of the session, for scanning a visitor's history. */
@@ -189,6 +205,14 @@ export function sessionReplaysListQuery(
 			durationMs: argMax($.DurationMs, $.Version),
 			status: argMax($.Status, $.Version),
 			userId: argMax($.UserId, $.Version),
+			// identify() writes these on every row version (see meta-row.ts) — the
+			// ReplacingMergeTree replaces whole rows, so anything written on only one
+			// version would be lost. argMax picks the latest, which is what a
+			// mid-session identify() lands on.
+			userName: argMax($.UserName, $.Version),
+			userEmail: argMax($.UserEmail, $.Version),
+			groupId: argMax($.GroupId, $.Version),
+			groupName: argMax($.GroupName, $.Version),
 			visitorId: argMax($.VisitorId, $.Version),
 			utmSource: argMax($.UtmSource, $.Version),
 			entryPath: argMax($.EntryPath, $.Version),
@@ -224,6 +248,14 @@ export function sessionReplaysListQuery(
 			// Version-invariant like the facets above: VisitorId is written on every
 			// row version of a session, so this is safe pre-GROUP BY.
 			CH.when(opts.visitorId, (v: string) => $.VisitorId.eq(v)),
+			// Name/email and group ride the same row-level reasoning as UserId above —
+			// identify() writes them on every row version, so filtering pre-GROUP BY is
+			// safe. One ILIKE spanning both name and email: the reader has a single box
+			// and doesn't know which column their input lives in.
+			CH.when(opts.userSearch, (v: string) =>
+				$.UserName.ilike(`%${v}%`).or($.UserEmail.ilike(`%${v}%`)),
+			),
+			CH.when(opts.groupName, (v: string) => $.GroupName.eq(v)),
 			CH.whenTrue(opts.hasErrors, () => $.ErrorCount.gt(0)),
 			CH.when(opts.search, (v: string) => $.UrlInitial.ilike(`%${v}%`)),
 			CH.when(opts.cursor, (v: string) => $.StartTime.lt(v)),
@@ -266,6 +298,10 @@ export function sessionReplaysListQuery(
 				durationMs: $.durationMs,
 				status: $.status,
 				userId: $.userId,
+				userName: $.userName,
+				userEmail: $.userEmail,
+				groupId: $.groupId,
+				groupName: $.groupName,
 				visitorId: $.visitorId,
 				utmSource: $.utmSource,
 				entryPath: $.entryPath,
@@ -326,6 +362,10 @@ export function sessionReplaysListQuery(
 				durationMs: $.durationMs,
 				status: $.status,
 				userId: $.userId,
+				userName: $.userName,
+				userEmail: $.userEmail,
+				groupId: $.groupId,
+				groupName: $.groupName,
 				visitorId: $.visitorId,
 				utmSource: $.utmSource,
 				entryPath: $.entryPath,
@@ -371,6 +411,10 @@ export function sessionReplaysListQuery(
 			durationMs: $.durationMs,
 			status: $.status,
 			userId: $.userId,
+			userName: $.userName,
+			userEmail: $.userEmail,
+			groupId: $.groupId,
+			groupName: $.groupName,
 			visitorId: $.visitorId,
 			utmSource: $.utmSource,
 			entryPath: $.entryPath,
@@ -416,13 +460,17 @@ export interface SessionReplaysFacetsOpts {
 	deviceType?: string
 	/** Exact match on the session's end-user id (narrows every facet branch). */
 	userId?: string
+	/** Substring match on the identified user's name or email (narrows every branch). */
+	userSearch?: string
+	/** Exact match on the identified group name — excluded from its own branch. */
+	groupName?: string
 	hasErrors?: boolean
 	search?: string
 }
 
 export type SessionReplaysFacetsOutput = FacetOutput
 
-type SessionFacetKey = "service" | "browser" | "country" | "device"
+type SessionFacetKey = "service" | "browser" | "country" | "device" | "group"
 
 export function sessionReplaysFacetsQuery(
 	opts: SessionReplaysFacetsOpts,
@@ -438,6 +486,9 @@ export function sessionReplaysFacetsQuery(
 		exclude === "browser" ? undefined : CH.when(opts.browser, (v: string) => $.BrowserName.eq(v)),
 		exclude === "country" ? undefined : CH.when(opts.country, (v: string) => $.Country.eq(v)),
 		exclude === "device" ? undefined : CH.when(opts.deviceType, (v: string) => $.DeviceType.eq(v)),
+		exclude === "group" ? undefined : CH.when(opts.groupName, (v: string) => $.GroupName.eq(v)),
+		// Like UserId below: no facet branch of its own, so it narrows every dimension.
+		CH.when(opts.userSearch, (v: string) => $.UserName.ilike(`%${v}%`).or($.UserEmail.ilike(`%${v}%`))),
 		// UserId has no facet branch (high cardinality), so it's never excluded — it
 		// narrows every dimension's counts to the selected user.
 		CH.when(opts.userId, (v: string) => $.UserId.eq(v)),
@@ -509,6 +560,10 @@ export function sessionReplaysFacetsQuery(
 		makeFacet("browser", ($) => $.BrowserName),
 		makeFacet("country", ($) => $.Country),
 		makeFacet("device", ($) => $.DeviceType),
+		// GroupName is the company/team a session belongs to. makeFacet already drops
+		// the `= ''` rows, so sessions recorded before identify() never surface as a
+		// blank option.
+		makeFacet("group", ($) => $.GroupName),
 		durationHistogram,
 		durationStat("p50", 0.5),
 		durationStat("p95", 0.95),
@@ -529,6 +584,10 @@ export function sessionReplaysFacetsQuery(
 				CH.when(opts.country, (v: string) => $.Country.eq(v)),
 				CH.when(opts.deviceType, (v: string) => $.DeviceType.eq(v)),
 				CH.when(opts.userId, (v: string) => $.UserId.eq(v)),
+				CH.when(opts.groupName, (v: string) => $.GroupName.eq(v)),
+				CH.when(opts.userSearch, (v: string) =>
+					$.UserName.ilike(`%${v}%`).or($.UserEmail.ilike(`%${v}%`)),
+				),
 				CH.when(opts.search, (v: string) => $.UrlInitial.ilike(`%${v}%`)),
 				$.ErrorCount.gt(0),
 			]),

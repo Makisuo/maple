@@ -26,6 +26,11 @@ const replaysSearchSchema = Schema.Struct({
 	country: Schema.optional(Schema.String),
 	deviceType: Schema.optional(Schema.String),
 	userId: Schema.optional(Schema.String),
+	/** Substring match on the identified user's name or email — the human-typed
+	 *  counterpart to the exact `userId`. */
+	user: Schema.optional(Schema.String),
+	/** Identified group (company / team) name, from the sidebar facet. */
+	group: Schema.optional(Schema.String),
 	/** Scope to one browser — spans signed-out marketing and signed-in app sessions. */
 	visitorId: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
@@ -73,6 +78,8 @@ function ReplaysPage() {
 			search.country,
 			search.deviceType,
 			search.userId,
+			search.user,
+			search.group,
 			search.visitorId,
 			search.hasErrors,
 			search.q,

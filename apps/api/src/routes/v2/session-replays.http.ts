@@ -142,6 +142,12 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 									? { deviceType: payload.device_type }
 									: {}),
 								...(payload.user_id !== undefined ? { userId: payload.user_id } : {}),
+								...(payload.user_search !== undefined
+									? { userSearch: payload.user_search }
+									: {}),
+								...(payload.group_name !== undefined
+									? { groupName: payload.group_name }
+									: {}),
 								...(payload.has_errors !== undefined
 									? { hasErrors: payload.has_errors }
 									: {}),
@@ -177,6 +183,10 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 											duration_ms: row.durationMs,
 											status: row.status,
 											user_id: nullableUserId(row.userId),
+											user_name: row.userName,
+											user_email: row.userEmail,
+											group_id: row.groupId,
+											group_name: row.groupName,
 											url_initial: row.urlInitial,
 											browser_name: row.browserName,
 											os_name: row.osName,
@@ -239,6 +249,10 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 						duration_ms: data.durationMs,
 						status: data.status,
 						user_id: nullableUserId(data.userId),
+						user_name: data.userName,
+						user_email: data.userEmail,
+						group_id: data.groupId,
+						group_name: data.groupName,
 						url_initial: data.urlInitial,
 						browser_name: data.browserName,
 						os_name: data.osName,

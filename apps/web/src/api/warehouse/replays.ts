@@ -31,6 +31,10 @@ const ListReplaysInput = Schema.Struct({
 	country: Schema.optional(Schema.String),
 	deviceType: Schema.optional(Schema.String),
 	userId: Schema.optional(Schema.String),
+	/** Substring match on the identified user's name or email. */
+	userSearch: Schema.optional(Schema.String),
+	/** Identified group (company / team) name. */
+	groupName: Schema.optional(Schema.String),
 	/** Every session from one browser — the marketing-visit → signup join. */
 	visitorId: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Boolean),
@@ -73,6 +77,8 @@ export const listReplays = Effect.fn("SessionReplays.listReplays")(function* ({
 					country: input.country,
 					deviceType: input.deviceType,
 					userId: input.userId,
+					userSearch: input.userSearch,
+					groupName: input.groupName,
 					visitorId: input.visitorId,
 					hasErrors: input.hasErrors,
 					search: input.search,
@@ -102,6 +108,8 @@ const ReplaysFacetsInput = Schema.Struct({
 	country: Schema.optional(Schema.String),
 	deviceType: Schema.optional(Schema.String),
 	userId: Schema.optional(Schema.String),
+	userSearch: Schema.optional(Schema.String),
+	groupName: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Boolean),
 	search: Schema.optional(Schema.String),
 })
@@ -126,6 +134,8 @@ export const getReplaysFacets = Effect.fn("SessionReplays.facets")(function* ({
 					country: input.country,
 					deviceType: input.deviceType,
 					userId: input.userId,
+					userSearch: input.userSearch,
+					groupName: input.groupName,
 					hasErrors: input.hasErrors,
 					search: input.search,
 				}),
@@ -137,6 +147,7 @@ export const getReplaysFacets = Effect.fn("SessionReplays.facets")(function* ({
 		browsers: result.browsers,
 		countries: result.countries,
 		devices: result.devices,
+		groups: result.groups,
 		errorCount: result.errorCount,
 		durationBuckets: result.durationBuckets,
 		durationP50: result.durationP50,

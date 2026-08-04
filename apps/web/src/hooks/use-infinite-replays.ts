@@ -25,6 +25,8 @@ export interface ReplaysFilterInputs {
 	country?: string
 	deviceType?: string
 	userId?: string
+	userSearch?: string
+	groupName?: string
 	hasErrors?: boolean
 	search?: string
 	durationMinMs?: number

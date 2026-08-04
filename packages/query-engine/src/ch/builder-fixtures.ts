@@ -74,6 +74,8 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 					serviceName: "web",
 					hasErrors: true,
 					search: "checkout",
+					userSearch: "ada",
+					groupName: "Acme Inc",
 					durationMinMs: 1_000,
 					activeTimeMinMs: 500,
 					limit: 50,
@@ -86,6 +88,18 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "sessionReplaysFacetsQuery",
 		label: "default",
 		compile: () => CH.compileUnion(CH.sessionReplaysFacetsQuery({}), window),
+	},
+	{
+		// Covers the identity predicates, which are excluded from their own branch
+		// (group) or narrow every branch (userSearch).
+		module: "session-replays",
+		name: "sessionReplaysFacetsQuery",
+		label: "identity-filtered",
+		compile: () =>
+			CH.compileUnion(
+				CH.sessionReplaysFacetsQuery({ userSearch: "ada", groupName: "Acme Inc" }),
+				window,
+			),
 	},
 	{
 		module: "session-replays",

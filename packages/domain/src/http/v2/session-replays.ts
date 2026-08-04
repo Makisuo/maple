@@ -43,6 +43,21 @@ const sessionReplayBaseFields = {
 	user_id: Schema.NullOr(Schema.String).annotate({
 		description: "The identified user, or `null` if anonymous.",
 	}),
+	// From the browser SDK's identify(). Empty string when the session was never
+	// identified — including every session recorded before the SDK had identify().
+	user_name: Schema.String.annotate({
+		description: 'The identified user\'s display name, or `""` if unknown.',
+	}),
+	user_email: Schema.String.annotate({
+		description:
+			"The identified user's email, or `\"\"` if unknown or suppressed by the SDK's `captureUserEmail` setting.",
+	}),
+	group_id: Schema.String.annotate({
+		description: 'The identified group (company / team / tenant) ID, or `""` if unknown.',
+	}),
+	group_name: Schema.String.annotate({
+		description: 'The identified group\'s display name, or `""` if unknown.',
+	}),
 	url_initial: Schema.String.annotate({ description: "The first URL of the session." }),
 	browser_name: Schema.String.annotate({ description: "Browser name." }),
 	os_name: Schema.String.annotate({ description: "Operating system name." }),
@@ -68,6 +83,10 @@ export const V2SessionReplayListItem = Schema.Struct(sessionReplayBaseFields).an
 			duration_ms: 390000,
 			status: "ended",
 			user_id: "user_2abc",
+			user_name: "Ada Lovelace",
+			user_email: "ada@acme.com",
+			group_id: "acme",
+			group_name: "Acme Inc",
 			url_initial: "https://app.example.com/dashboard",
 			browser_name: "Chrome",
 			os_name: "macOS",
@@ -107,6 +126,10 @@ export const V2SessionReplay = Schema.Struct({
 			duration_ms: 390000,
 			status: "ended",
 			user_id: "user_2abc",
+			user_name: "Ada Lovelace",
+			user_email: "ada@acme.com",
+			group_id: "acme",
+			group_name: "Acme Inc",
 			url_initial: "https://app.example.com/dashboard",
 			browser_name: "Chrome",
 			os_name: "macOS",
@@ -272,6 +295,14 @@ export const V2SessionReplaySearchParams = Schema.Struct({
 	country: Schema.optionalKey(Schema.String.annotate({ description: "Filter by country." })),
 	device_type: Schema.optionalKey(Schema.String.annotate({ description: "Filter by device type." })),
 	user_id: Schema.optionalKey(Schema.String.annotate({ description: "Filter by identified user." })),
+	user_search: Schema.optionalKey(
+		Schema.String.annotate({
+			description: "Case-insensitive substring match on the identified user's name or email.",
+		}),
+	),
+	group_name: Schema.optionalKey(
+		Schema.String.annotate({ description: "Filter by identified group (company / team) name." }),
+	),
 	has_errors: Schema.optionalKey(
 		Schema.Boolean.annotate({ description: "Only sessions with (or without) errors." }),
 	),

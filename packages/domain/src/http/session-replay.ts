@@ -32,6 +32,10 @@ export class ListReplaysRequest extends Schema.Class<ListReplaysRequest>("ListRe
 	// Plain string (not the branded UserId) — matches the other optional filters and
 	// avoids brand validation rejecting partial input the client constructs JS-side.
 	userId: Schema.optional(Schema.String),
+	/** Substring match on the identified user's name or email (one input, both columns). */
+	userSearch: Schema.optional(Schema.String),
+	/** Exact match on the identified group (company / team) name. */
+	groupName: Schema.optional(Schema.String),
 	/** Every session from one browser — how a marketing visit links to a signup. */
 	visitorId: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Boolean),
@@ -56,6 +60,13 @@ export const SessionReplayListItem = Schema.Struct({
 	durationMs: Schema.NullOr(Schema.Number),
 	status: Schema.String,
 	userId: Schema.NullOr(UserId),
+	// identify() identity. `""` when the session was never identified (including
+	// every session recorded before the SDK had identify()) — the list falls back
+	// to its session-id/host line, so an empty value is a display state, not a gap.
+	userName: Schema.String,
+	userEmail: Schema.String,
+	groupId: Schema.String,
+	groupName: Schema.String,
 	/** Persistent per-browser id — equal across a visitor's marketing and app sessions. */
 	visitorId: Schema.String,
 	/** Acquisition source captured at session start; `""` when there was none. */
@@ -93,6 +104,8 @@ export class ReplaysFacetsRequest extends Schema.Class<ReplaysFacetsRequest>("Re
 	country: Schema.optional(Schema.String),
 	deviceType: Schema.optional(Schema.String),
 	userId: Schema.optional(Schema.String),
+	userSearch: Schema.optional(Schema.String),
+	groupName: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Boolean),
 	search: Schema.optional(Schema.String),
 }) {}
@@ -107,6 +120,9 @@ export class ReplaysFacetsResponse extends Schema.Class<ReplaysFacetsResponse>("
 	browsers: Schema.Array(ReplayFacetItem),
 	countries: Schema.Array(ReplayFacetItem),
 	devices: Schema.Array(ReplayFacetItem),
+	/** Identified groups (company / team), by session count. Empty for orgs that
+	 *  never call `identify()` with a group — the sidebar hides the section then. */
+	groups: Schema.Array(ReplayFacetItem),
 	/** Distinct sessions with at least one recorded error, within the current filter. */
 	errorCount: Schema.Number,
 	/** Session-length distribution: `name` is the bucket floor in ms, `count` the

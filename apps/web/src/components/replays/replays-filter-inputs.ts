@@ -14,6 +14,10 @@ export interface ReplaysSearchState {
 	readonly country?: string
 	readonly deviceType?: string
 	readonly userId?: string
+	/** Substring match on the identified user's name or email. */
+	readonly user?: string
+	/** Identified group (company / team) name. */
+	readonly group?: string
 	readonly visitorId?: string
 	readonly hasErrors?: boolean
 	readonly q?: string
@@ -46,6 +50,8 @@ export const replaysFilterInputs = (search: ReplaysSearchState) => {
 		country: search.country,
 		deviceType: search.deviceType,
 		userId: search.userId,
+		userSearch: search.user,
+		groupName: search.group,
 		visitorId: search.visitorId,
 		hasErrors: search.hasErrors,
 		search: search.q,
