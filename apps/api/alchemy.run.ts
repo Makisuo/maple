@@ -148,11 +148,16 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 		// the one failure mode with no good client-side handling.
 		const replayBlobs = yield* Cloudflare.R2.Bucket("replay-blobs", {
 			name: resolveWorkerName("replay-blobs", stage),
+			// Deliberately unprefixed, so the rule covers whatever key scheme is
+			// current. `replay_object_key` is versioned (`v1/…`) precisely so a
+			// format change can write under a new prefix while the old one ages
+			// out — a rule pinned to `v1/` would silently stop expiring anything
+			// the moment that happens, and the bucket would grow forever with no
+			// failing test to catch it. Nothing else writes here.
 			lifecycleRules: [
 				{
 					id: "expire-replay-chunks",
 					enabled: true,
-					prefix: "v1/",
 					deleteObjectsTransition: { condition: { type: "Age", maxAge: 32 * 24 * 60 * 60 } },
 				},
 			],
