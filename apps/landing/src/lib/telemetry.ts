@@ -10,8 +10,6 @@
  *   the session that follows on `app.maple.dev` resolve to the *same*
  *   `VisitorId`. That is the join that makes "which campaign produced this
  *   signup" answerable — the session ids stay separate on purpose.
- * - Replay is sampled rather than on: the marketing site is our highest-traffic
- *   surface and full rrweb capture there would dwarf the product's ingest.
  *
  * Privacy posture matches what the site already did with its third-party
  * analytics tag: no consent gate, inputs masked, and Global Privacy Control
@@ -22,7 +20,6 @@ import { MapleBrowser, type TrackProps } from "@maple-dev/browser"
 
 const INGEST_KEY = import.meta.env.PUBLIC_MAPLE_INGEST_KEY
 const ENDPOINT = import.meta.env.PUBLIC_INGEST_URL || "https://ingest.maple.dev"
-const REPLAY_SAMPLE_RATE = Number(import.meta.env.PUBLIC_MAPLE_REPLAY_SAMPLE_RATE ?? "0.1")
 /**
  * Escape hatch for hosts where the cookie-domain probe can't find a shared
  * parent — chiefly local dev, where browsers make `*.localhost` cookies
@@ -72,10 +69,7 @@ export function startLandingTelemetry(): void {
 		serviceName: "maple-landing",
 		serviceNamespace: "client",
 		environment: import.meta.env.MODE,
-		replay: {
-			enabled: true,
-			sampleRate: Number.isFinite(REPLAY_SAMPLE_RATE) ? REPLAY_SAMPLE_RATE : 0.1,
-		},
+		replay: { enabled: true },
 		privacy: {
 			maskAllInputs: true,
 			// Empty means "unset" — the SDK's probe finds the shared domain on its

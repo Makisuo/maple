@@ -47,9 +47,6 @@ const telemetryEnv = {
 			rootEnv.VITE_INGEST_URL?.trim() ||
 			"",
 	),
-	"import.meta.env.PUBLIC_MAPLE_REPLAY_SAMPLE_RATE": JSON.stringify(
-		process.env.PUBLIC_MAPLE_REPLAY_SAMPLE_RATE?.trim() || "0.1",
-	),
 	// Local dev only: browsers make `*.localhost` cookies host-only, so
 	// landing.localhost and web.localhost can't share a visitor id without help.
 	"import.meta.env.PUBLIC_MAPLE_COOKIE_DOMAIN": JSON.stringify(

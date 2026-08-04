@@ -39,7 +39,6 @@ export const createLandingWorker = ({
 			env: {
 				PUBLIC_MAPLE_INGEST_KEY: process.env.MAPLE_OTEL_PUBLIC_INGEST_KEY ?? "",
 				PUBLIC_INGEST_URL: ingestUrl,
-				PUBLIC_MAPLE_REPLAY_SAMPLE_RATE: process.env.PUBLIC_MAPLE_REPLAY_SAMPLE_RATE ?? "0.1",
 			},
 		})
 
