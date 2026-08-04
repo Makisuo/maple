@@ -20,6 +20,12 @@ const baseRow = {
 	durationMs: null,
 	status: "ended",
 	userId: null,
+	// `""` is the never-identified state (see SessionReplayListItem), which is
+	// what an anonymous `userId: null` row carries.
+	userName: "",
+	userEmail: "",
+	groupId: "",
+	groupName: "",
 	visitorId: "b0f2b0c6-8a9f-4a1f-9a0e-2b4f9e2f1a77",
 	utmSource: "",
 	entryPath: "/",
