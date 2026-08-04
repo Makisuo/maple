@@ -13,6 +13,7 @@ import type { WarehouseCapabilities } from "../capabilities"
 import type { WarehouseExecutorShape } from "../observability"
 import type { SqlQueryOptions } from "../profiles"
 import type { WarehouseSqlError } from "./errors"
+import type { WarehouseResponseLimitError } from "./response-limits"
 
 /** The minimal tenant surface the executor reads (org scope + identity for spans). */
 export interface ExecutionTenant {
@@ -115,6 +116,24 @@ export interface WarehouseQueryServiceShape {
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<T>, WarehouseSqlError | WarehouseValidationError>
+	/**
+	 * `compiledQuery` with an explicit ceiling on how much of the response we are
+	 * willing to materialize, failing with `WarehouseResponseLimitError` past it.
+	 *
+	 * Separate from `compiledQuery` on purpose: the extra failure mode belongs in
+	 * the signature of the handful of call sites that can actually hit it, not in
+	 * the error union of the ~30 endpoints that cannot.
+	 */
+	readonly compiledQueryBounded: <T>(
+		tenant: ExecutionTenant,
+		compiled: CompiledQuery<T>,
+		options: SqlQueryOptions & {
+			readonly responseLimits: { readonly maxRows: number; readonly maxBytes: number }
+		},
+	) => Effect.Effect<
+		ReadonlyArray<T>,
+		WarehouseSqlError | WarehouseValidationError | WarehouseResponseLimitError
+	>
 	readonly compiledQueryWithCapabilities: <T>(
 		tenant: ExecutionTenant,
 		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,

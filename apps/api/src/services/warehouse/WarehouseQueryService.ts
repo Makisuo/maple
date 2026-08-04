@@ -431,6 +431,20 @@ export class WarehouseQueryService extends Context.Service<
 		options?: SqlQueryOptions,
 	) => this.use((service) => service.compiledQuery(tenant, compiled, options))
 
+	/**
+	 * `compiledQuery` with a hard ceiling on the response we'll materialize.
+	 * Fails with `WarehouseResponseLimitError` past it rather than buffering the
+	 * rest into the Worker heap — for queries whose result size follows user data
+	 * rather than the query shape (session-replay rrweb payloads).
+	 */
+	static readonly compiledQueryBounded = <T>(
+		tenant: TenantContext,
+		compiled: CompiledQuery<T>,
+		options: SqlQueryOptions & {
+			readonly responseLimits: { readonly maxRows: number; readonly maxBytes: number }
+		},
+	) => this.use((service) => service.compiledQueryBounded(tenant, compiled, options))
+
 	static readonly compiledQueryFirst = <T>(
 		tenant: TenantContext,
 		compiled: CompiledQuery<T>,

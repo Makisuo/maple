@@ -104,6 +104,7 @@ import { getQueryBuilderBreakdown } from "@/api/warehouse/query-builder-breakdow
 import {
 	getReplay,
 	getReplayEvents,
+	getReplayManifest,
 	getReplaysFacets,
 	getReplaysForTrace,
 	getSessionTranscript,
@@ -248,12 +249,20 @@ export const getSessionTraceSummariesResultAtom = makeQueryAtomFamily(getSession
 	staleTime: 60_000,
 })
 
-// Idle TTL keeps the chunks (and their inline rrweb events) stable across the
-// player's frequent re-renders so the decode memo in the player context isn't
-// thrown away and re-run. The API serves event arrays inline whether they came
-// from ClickHouse or R2, so there is no client-side fetch/gunzip either way.
-export const getReplayEventsResultAtom = makeQueryAtomFamily(getReplayEvents, {
+// The session's chunk timeline without payloads. Cheap enough to fetch on every
+// replay open, and the prerequisite for every payload range.
+export const getReplayManifestResultAtom = makeQueryAtomFamily(getReplayManifest, {
 	staleTime: 240_000,
+})
+
+// One entry per chunk range. Held far longer than a normal list query because a
+// chunk row is immutable once written (plain MergeTree, 30-day TTL) — so
+// scrubbing back over an already-played stretch must never refetch it.
+//
+// Idle TTL also keeps the chunks stable across the player's frequent
+// re-renders, so the decode memo in the player context isn't thrown away.
+export const getReplayEventsResultAtom = makeQueryAtomFamily(getReplayEvents, {
+	staleTime: 600_000,
 })
 
 // Distilled session transcript (console/network/error/nav/click) for the panels.

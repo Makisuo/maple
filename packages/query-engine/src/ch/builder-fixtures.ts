@@ -99,6 +99,16 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 	},
 	{
 		module: "session-replays",
+		name: "sessionReplayChunkIndexQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(CH.sessionReplayChunkIndexQuery({ startTime: START_TIME, endTime: END_TIME }), {
+				orgId: ORG_ID,
+				sessionId: SESSION_ID,
+			}),
+	},
+	{
+		module: "session-replays",
 		name: "sessionReplayEventsQuery",
 		label: "default",
 		compile: () =>
@@ -106,6 +116,24 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 				orgId: ORG_ID,
 				sessionId: SESSION_ID,
 			}),
+	},
+	{
+		// The shape playback actually emits: a bounded chunk window. Distinct SQL
+		// from "default" (ChunkSeq predicates + LIMIT), so it needs its own sweep.
+		module: "session-replays",
+		name: "sessionReplayEventsQuery",
+		label: "ranged",
+		compile: () =>
+			CH.compile(
+				CH.sessionReplayEventsQuery({
+					startTime: START_TIME,
+					endTime: END_TIME,
+					fromChunkSeq: 16,
+					toChunkSeq: 31,
+					limit: 40,
+				}),
+				{ orgId: ORG_ID, sessionId: SESSION_ID },
+			),
 	},
 	{
 		module: "session-replays",

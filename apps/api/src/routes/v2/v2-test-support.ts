@@ -148,6 +148,7 @@ export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
 	crossOrgQuery: die,
 	rawSqlQuery: die,
 	compiledQuery: die,
+	compiledQueryBounded: die,
 	compiledQueryWithCapabilities: die,
 	compiledQueryFirst: die,
 	ingest: die,

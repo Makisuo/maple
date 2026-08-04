@@ -1462,6 +1462,22 @@ SELECT
         LIMIT 1
         FORMAT JSON
 
+-- builder:session-replays:sessionReplayChunkIndexQuery:default  [2e322b20]
+SELECT
+          ChunkSeq AS chunkSeq,
+          Timestamp AS timestamp,
+          DurationMs AS durationMs,
+          EventCount AS eventCount,
+          ByteSize AS byteSize,
+          IsCheckpoint AS isCheckpoint
+        FROM session_replay_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND SessionId = 'sess_0af7651916cd43dd'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        ORDER BY chunkSeq ASC
+        FORMAT JSON
+
 -- builder:session-replays:sessionReplayEventsQuery:default  [42cce486]
 SELECT
           ChunkSeq AS chunkSeq,
@@ -1477,6 +1493,26 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
         ORDER BY chunkSeq ASC
+        FORMAT JSON
+
+-- builder:session-replays:sessionReplayEventsQuery:ranged  [5bdfa930]
+SELECT
+          ChunkSeq AS chunkSeq,
+          Timestamp AS timestamp,
+          DurationMs AS durationMs,
+          EventCount AS eventCount,
+          ByteSize AS byteSize,
+          Events AS events,
+          IsCheckpoint AS isCheckpoint
+        FROM session_replay_events
+        WHERE OrgId = 'org_sql_catalog'
+          AND SessionId = 'sess_0af7651916cd43dd'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ChunkSeq >= 16
+          AND ChunkSeq <= 31
+        ORDER BY chunkSeq ASC
+        LIMIT 40
         FORMAT JSON
 
 -- builder:session-replays:sessionReplaysFacetsQuery:default  [896379cc]

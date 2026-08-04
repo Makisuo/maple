@@ -138,6 +138,35 @@ export class V2ConflictError extends Schema.ErrorClass<V2ConflictError>("@maple/
 	},
 ) {}
 
+/**
+ * The request asked for more data than one response may carry.
+ *
+ * Reuses the `invalid_request_error` type — the closed enum stays closed — but
+ * keeps 413 so the distinction from an ordinary 400 survives: nothing about the
+ * request is malformed, the window is simply too wide. It is a statement about
+ * the size of the answer, so retrying it unchanged can only fail identically;
+ * the message says what to narrow.
+ */
+export class V2PayloadTooLargeError extends Schema.ErrorClass<V2PayloadTooLargeError>(
+	"@maple/http/v2/PayloadTooLargeError",
+)(
+	{
+		error: errorBody("invalid_request_error", {
+			code: "range_too_large",
+			message:
+				"That part of the recording is too large to load in one request. Request a narrower chunk range.",
+			param: "to_chunk_seq",
+		}),
+	},
+	{
+		httpApiStatus: 413,
+		identifier: "PayloadTooLargeError",
+		title: "Payload too large error",
+		description:
+			"The requested range would exceed the endpoint's response budget. Narrow the range and retry. HTTP 413.",
+	},
+) {}
+
 export class V2RateLimitError extends Schema.ErrorClass<V2RateLimitError>("@maple/http/v2/RateLimitError")(
 	{
 		error: errorBody("rate_limit_error", {
@@ -246,6 +275,22 @@ export const resourceNotFound = (resource: string, message: string, param = "id"
 
 export const conflict = (code: string, message: string) =>
 	new V2ConflictError({ error: { type: "conflict_error", code, message } })
+
+/**
+ * The message crosses the public boundary verbatim: unlike the warehouse
+ * errors, this one carries no database diagnostics — only the range the caller
+ * asked for and the caps it exceeded — and it is the one error here where
+ * telling the user exactly what to do is the whole value.
+ */
+export const payloadTooLarge = (message: string, param?: string) =>
+	new V2PayloadTooLargeError({
+		error: {
+			type: "invalid_request_error",
+			code: "range_too_large",
+			message,
+			...(param !== undefined ? { param } : {}),
+		},
+	})
 
 export const rateLimited = () =>
 	new V2RateLimitError({

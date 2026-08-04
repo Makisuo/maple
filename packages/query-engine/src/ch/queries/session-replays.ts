@@ -630,7 +630,13 @@ export function getSessionReplayQuery(opts: SessionReplayDetailOpts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Chunk index for one session (ordered for playback)
+// Chunk reads for one session (ordered for playback)
+//
+// Two builders, deliberately split: `sessionReplayChunkIndexQuery` returns the
+// timeline without payloads, and `sessionReplayEventsQuery` returns payloads for
+// a bounded chunk range. Playback fetches the index once, then pulls ranges on
+// demand. Reading every chunk's `Events` in one go is what made large sessions
+// fail — see the range opts below.
 //
 // session_replay_events is a plain MergeTree — each chunk is written exactly
 // once, so no dedup is needed. Sorted by (OrgId, SessionId, ChunkSeq) so the
@@ -643,10 +649,73 @@ export function getSessionReplayQuery(opts: SessionReplayDetailOpts = {}) {
 // the session's time window) prune to the 1-2 partitions the session spans.
 // ---------------------------------------------------------------------------
 
+export interface SessionReplayChunkIndexOpts {
+	/** Optional session time window — prunes daily partitions. Omit to scan all. */
+	startTime?: string
+	endTime?: string
+}
+
+export interface SessionReplayChunkIndexOutput {
+	readonly chunkSeq: number
+	/**
+	 * Gateway receipt time — the chunk's position on the playback timeline.
+	 *
+	 * It trails the recording's own clock by the upload latency, which is well
+	 * inside one chunk's duration, so it resolves a seek to the right chunk. The
+	 * exact offset within that chunk comes from its rrweb events once loaded.
+	 */
+	readonly timestamp: string
+	readonly durationMs: number
+	readonly eventCount: number
+	readonly byteSize: number
+	readonly isCheckpoint: number
+}
+
+/**
+ * Every chunk of a session EXCEPT its payload — the playback timeline and byte
+ * budget in one cheap read.
+ *
+ * This is what makes bounded playback possible: the player learns how many
+ * chunks exist, how big each one is, where the checkpoints (seek anchors) are,
+ * and which chunk covers a given moment — all without touching `Events`. On a
+ * MergeTree, omitting the wide column means its granules are never read, so
+ * this stays milliseconds even on a session whose payload is hundreds of MB.
+ */
+export function sessionReplayChunkIndexQuery(opts: SessionReplayChunkIndexOpts = {}) {
+	return from(SessionReplayEvents)
+		.select(($) => ({
+			chunkSeq: $.ChunkSeq,
+			timestamp: $.Timestamp,
+			durationMs: $.DurationMs,
+			eventCount: $.EventCount,
+			byteSize: $.ByteSize,
+			isCheckpoint: $.IsCheckpoint,
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.SessionId.eq(param.string("sessionId")),
+			CH.when(opts.startTime, (v: string) => $.Timestamp.gte(v)),
+			CH.when(opts.endTime, (v: string) => $.Timestamp.lte(v)),
+		])
+		.orderBy(["chunkSeq", "asc"])
+		.format("JSON")
+}
+
 export interface SessionReplayEventsOpts {
 	/** Optional session time window — prunes daily partitions. Omit to scan all. */
 	startTime?: string
 	endTime?: string
+	/**
+	 * Inclusive chunk-sequence window. Callers get these from the chunk index and
+	 * fetch a session in bounded slices — selecting `Events` for a whole session
+	 * buffers the entire payload (p99 ~594 MB) into a 128 MB Worker.
+	 */
+	fromChunkSeq?: number
+	toChunkSeq?: number
+	/** Row cap — the last line of defence if the range is miscomputed. */
+	limit?: number
+	/** Page within the range, for the public cursor-paginated surface. */
+	offset?: number
 }
 
 export interface SessionReplayEventsOutput {
@@ -661,7 +730,7 @@ export interface SessionReplayEventsOutput {
 }
 
 export function sessionReplayEventsQuery(opts: SessionReplayEventsOpts = {}) {
-	return from(SessionReplayEvents)
+	const query = from(SessionReplayEvents)
 		.select(($) => ({
 			chunkSeq: $.ChunkSeq,
 			timestamp: $.Timestamp,
@@ -676,9 +745,15 @@ export function sessionReplayEventsQuery(opts: SessionReplayEventsOpts = {}) {
 			$.SessionId.eq(param.string("sessionId")),
 			CH.when(opts.startTime, (v: string) => $.Timestamp.gte(v)),
 			CH.when(opts.endTime, (v: string) => $.Timestamp.lte(v)),
+			opts.fromChunkSeq === undefined ? undefined : $.ChunkSeq.gte(opts.fromChunkSeq),
+			opts.toChunkSeq === undefined ? undefined : $.ChunkSeq.lte(opts.toChunkSeq),
 		])
 		.orderBy(["chunkSeq", "asc"])
-		.format("JSON")
+	// `ORDER BY chunkSeq ASC` makes the truncation deterministic: a clipped range
+	// loses the tail, never a hole in the middle.
+	if (opts.limit === undefined) return query.format("JSON")
+	const limited = query.limit(opts.limit)
+	return (opts.offset === undefined ? limited : limited.offset(opts.offset)).format("JSON")
 }
 
 // ---------------------------------------------------------------------------

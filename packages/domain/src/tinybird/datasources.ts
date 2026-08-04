@@ -1830,6 +1830,9 @@ export const sessionReplayEvents = defineDatasource("session_replay_events", {
 		OrgId: column(t.string().lowCardinality(), { jsonPath: "$.org_id" }),
 		SessionId: column(t.string(), { jsonPath: "$.session_id" }),
 		ChunkSeq: column(t.uint32(), { jsonPath: "$.chunk_seq" }),
+		// Gateway receipt time. Drives partitioning and the TTL, and doubles as the
+		// chunk index's playback anchor: it trails the recording's own clock by the
+		// upload latency, which is well inside a single chunk's duration.
 		Timestamp: column(t.dateTime64(9), { jsonPath: "$.timestamp" }),
 		DurationMs: column(t.uint32().default(0), { jsonPath: "$.duration_ms" }),
 		EventCount: column(t.uint32().default(0), { jsonPath: "$.event_count" }),

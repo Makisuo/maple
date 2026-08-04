@@ -1,6 +1,5 @@
 import { Clock, Effect, Schema } from "effect"
 import {
-	GetReplayEventsRequest,
 	GetReplayRequest,
 	ListReplaysRequest,
 	ReplaysFacetsRequest,
@@ -11,7 +10,13 @@ import {
 	TraceId,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import {
+	WarehouseDateTimeString,
+	decodeInput,
+	runWarehouseQuery,
+	runWarehouseQueryV2,
+} from "@/api/warehouse/effect-utils"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
 // ---------------------------------------------------------------------------
@@ -175,13 +180,66 @@ export const getReplay = Effect.fn("SessionReplays.getReplay")(function* ({
 })
 
 // ---------------------------------------------------------------------------
-// Session event chunks (rrweb payloads inline, from ClickHouse, ordered)
+// Session event chunks — manifest first, then bounded ranges (v2)
+//
+// A session's rrweb payload is unbounded by construction: ingest accepts up to
+// 1 GiB and the p99 session is ~594 MB. Fetching all of it in one response
+// buffered the whole thing into a 128 MB Worker and surfaced as a 503 that
+// blamed the database. So the player pulls the cheap manifest (timeline and
+// sizes, no payloads), then pulls payloads a range at a time.
+//
+// These are the only replay reads on v2 — the v1 group has no payload endpoint
+// precisely so the unbounded read cannot come back.
 // ---------------------------------------------------------------------------
+
+/** Warehouse `YYYY-MM-DD HH:mm:ss` → the ISO-8601 the v2 query params take. */
+const toIsoWindow = (value: string | undefined) =>
+	value === undefined ? undefined : new Date(`${value.replace(" ", "T")}Z`).toISOString()
+
+const GetReplayManifestInput = Schema.Struct({
+	sessionId: SessionId,
+	windowStart: Schema.optional(WarehouseDateTimeString),
+	windowEnd: Schema.optional(WarehouseDateTimeString),
+})
+export type GetReplayManifestInput = (typeof GetReplayManifestInput)["Encoded"]
+
+export const getReplayManifest = Effect.fn("SessionReplays.getReplayManifest")(function* ({
+	data,
+}: {
+	data: GetReplayManifestInput
+}) {
+	const input = yield* decodeInput(GetReplayManifestInput, data ?? {}, "getReplayManifest")
+	return yield* runWarehouseQueryV2("getReplayManifest", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiV2AtomClient
+			// The `srep_…` public-ID codec lives in the client's param encoder, so
+			// the internal SessionId goes in as-is.
+			return yield* client.sessionReplays.manifest({
+				params: { id: input.sessionId },
+				query: {
+					...(toIsoWindow(input.windowStart) !== undefined
+						? { window_start: toIsoWindow(input.windowStart)! }
+						: {}),
+					...(toIsoWindow(input.windowEnd) !== undefined
+						? { window_end: toIsoWindow(input.windowEnd)! }
+						: {}),
+				},
+			})
+		}),
+	)
+})
 
 const GetReplayEventsInput = Schema.Struct({
 	sessionId: SessionId,
 	windowStart: Schema.optional(WarehouseDateTimeString),
 	windowEnd: Schema.optional(WarehouseDateTimeString),
+	/**
+	 * Inclusive chunk range from the manifest. Required: an optional range would
+	 * leave the unbounded read reachable from the client, and something would
+	 * eventually reach it.
+	 */
+	fromChunkSeq: Schema.Number,
+	toChunkSeq: Schema.Number,
 })
 export type GetReplayEventsInput = (typeof GetReplayEventsInput)["Encoded"]
 
@@ -191,19 +249,29 @@ export const getReplayEvents = Effect.fn("SessionReplays.getReplayEvents")(funct
 	data: GetReplayEventsInput
 }) {
 	const input = yield* decodeInput(GetReplayEventsInput, data ?? {}, "getReplayEvents")
-	const result = yield* runWarehouseQuery("getReplayEvents", () =>
+	const result = yield* runWarehouseQueryV2("getReplayEvents", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.sessionReplays.getReplayEvents({
-				payload: new GetReplayEventsRequest({
-					sessionId: input.sessionId,
-					windowStart: input.windowStart,
-					windowEnd: input.windowEnd,
-				}),
+			const client = yield* MapleApiV2AtomClient
+			return yield* client.sessionReplays.events({
+				params: { id: input.sessionId },
+				query: {
+					from_chunk_seq: input.fromChunkSeq,
+					to_chunk_seq: input.toChunkSeq,
+					// One page covers the whole range: ranges are sized by the caller
+					// against the server's advertised cap, so paging within one would
+					// only add round-trips.
+					limit: Math.max(1, input.toChunkSeq - input.fromChunkSeq + 1),
+					...(toIsoWindow(input.windowStart) !== undefined
+						? { window_start: toIsoWindow(input.windowStart)! }
+						: {}),
+					...(toIsoWindow(input.windowEnd) !== undefined
+						? { window_end: toIsoWindow(input.windowEnd)! }
+						: {}),
+				},
 			})
 		}),
 	)
-	return { chunks: result.chunks }
+	return { chunks: result.data }
 })
 
 // ---------------------------------------------------------------------------
