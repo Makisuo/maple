@@ -18,7 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import { escapeClickHouseString } from "../sql"
-import { splitWhereClause } from "../where-clause"
+import { splitWhereClause } from "@maple/domain/where-clause"
 
 /** Sentinel for the "All" selection, both in URLs and resolved values. */
 export const ALL_VALUE = "$__all"

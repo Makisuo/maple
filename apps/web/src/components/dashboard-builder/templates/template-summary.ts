@@ -1,4 +1,5 @@
 import type { V2DashboardTemplate } from "@maple/domain/http/v2"
+import { formatRelativeFrom, toEpochMs } from "@maple/ui/lib/time-format"
 
 /**
  * The empty-dashboard template. It is pinned below the list as its own row
@@ -63,11 +64,7 @@ export function templateMatches(template: V2DashboardTemplate, query: string): b
 /** "12s ago" / "4m ago" / "3h ago", or null when the timestamp is unusable. */
 export function relativeAge(iso: string | null, now: number): string | null {
 	if (iso === null) return null
-	const parsed = Date.parse(iso.endsWith("Z") || iso.includes("+") ? iso : `${iso}Z`)
-	if (Number.isNaN(parsed)) return null
-	const seconds = Math.max(0, Math.round((now - parsed) / 1000))
-	if (seconds < 60) return `${seconds}s ago`
-	if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`
-	if (seconds < 86_400) return `${Math.round(seconds / 3600)}h ago`
-	return `${Math.round(seconds / 86_400)}d ago`
+	const epochMs = toEpochMs(iso)
+	if (!Number.isFinite(epochMs)) return null
+	return formatRelativeFrom(epochMs, now)
 }

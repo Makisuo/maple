@@ -1,7 +1,7 @@
 import * as React from "react"
 import { useReplayPlayer } from "@/components/replays/replay-player-context"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import { isDialogOpen, isEditableTarget } from "@/lib/keyboard"
+import { isDialogOpen, isEditableTarget } from "@maple/ui/lib/keyboard"
 
 /** Arrow-key seek step, in display ms. */
 const SEEK_STEP_MS = 5000
@@ -12,7 +12,7 @@ const SEEK_STEP_MS = 5000
  * - Left / Right → seek ∓ {@link SEEK_STEP_MS}
  *
  * Mount once inside a {@link useReplayPlayer} provider. Guards against typing
- * in text fields and open dialogs (see `@/lib/keyboard`).
+ * in text fields and open dialogs (see `@maple/ui/lib/keyboard`).
  */
 export function useReplayKeyboardShortcuts(): void {
 	const { togglePlay, seekRelativeDisplay } = useReplayPlayer()

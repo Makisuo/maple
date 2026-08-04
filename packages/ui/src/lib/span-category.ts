@@ -15,15 +15,10 @@ import { getCloudPlatform } from "./cloud-platforms"
 import type { CloudPlatformInfo } from "./cloud-platforms"
 import { getHttpInfo } from "./http"
 import type { HttpInfo } from "./http"
+import { SPAN_KIND_LABELS } from "./span-kind"
 import type { Span } from "./types"
 
-export const SPAN_KIND_LABELS: Record<string, string> = {
-	SPAN_KIND_SERVER: "Server",
-	SPAN_KIND_CLIENT: "Client",
-	SPAN_KIND_PRODUCER: "Producer",
-	SPAN_KIND_CONSUMER: "Consumer",
-	SPAN_KIND_INTERNAL: "Internal",
-}
+export { SPAN_KIND_LABELS }
 
 export type SpanCategoryId =
 	| "server"

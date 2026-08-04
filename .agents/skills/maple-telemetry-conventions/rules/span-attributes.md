@@ -31,7 +31,7 @@ Source: `packages/query-engine/src/execution/executor.ts` (`executeSql`)
 | `db.duration_ms` | int | `executor.ts` | Execution time in ms (emitted on both success and error tap) |
 | `db.total_duration_ms` | int | `executor.ts` | Total execution-span duration including config resolution and client setup |
 | `db.retry.attempts` | int | `executor.ts` | Retries actually performed (not total attempts) |
-| `query.pipe` | string | `executor.ts` | Original pipe name passed to `sqlQuery()` |
+| `query.pipe` | string | `executor.ts` | Original pipe name resolved by `query()` |
 | `query.context` | string | `executor.ts` | Semantic call-site label (e.g. `"errorsByType"`, `"spanHierarchy"`). Set via `SqlQueryOptions.context`. |
 | `query.profile` | string | `executor.ts` | Execution profile (e.g. `"list"`, `"analytics"`). Set via `SqlQueryOptions.profile`. |
 | `ch.settings` | string (JSON) | `executor.ts` | JSON-encoded ClickHouse settings applied to the query |

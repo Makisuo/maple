@@ -9,7 +9,7 @@ import type { WorkloadKind } from "@/api/warehouse/infra"
 import { HostStatusBadge } from "./status-badge"
 import { UsageBar } from "./usage-bar"
 import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS, useTableSort } from "./primitives/data-table"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 export type WorkloadRow = ListWorkloadsResponse["data"][number]
 

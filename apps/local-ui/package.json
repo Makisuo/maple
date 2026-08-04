@@ -18,7 +18,6 @@
 		"effect": "catalog:effect",
 		"react": "catalog:react",
 		"react-dom": "catalog:react",
-		"sonner": "^2.0.7",
 		"sugar-high": "^1.2.1"
 	},
 	"devDependencies": {

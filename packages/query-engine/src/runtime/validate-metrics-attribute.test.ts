@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { MetricName } from "@maple/domain"
-import type { MetricsTimeseriesQuery } from "../query-engine"
+import type { MetricsTimeseriesQuery } from "@maple/domain/query-engine"
 import { validateEvaluate, type AlertEvaluateRequest } from "./query-engine"
 
 const makeRequest = (query: MetricsTimeseriesQuery): AlertEvaluateRequest => ({

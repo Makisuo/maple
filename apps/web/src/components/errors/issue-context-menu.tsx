@@ -13,7 +13,7 @@ import {
 
 import { WORKFLOW_LABEL, WorkflowRingIcon } from "@/components/icons/workflow-ring"
 import { CheckIcon } from "@/components/icons"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { useCopy } from "@maple/ui/hooks/use-copy"
 import { agentPromptFromIssue } from "./agent-debug-prompt"
 import type { IssueMutations } from "./use-issue-mutations"
 
@@ -43,16 +43,16 @@ export function IssueContextMenu({
 	const canClaim = !issue.leaseHolder
 	const canRelease = Boolean(issue.leaseHolder)
 
-	const idCopy = useCopyToClipboard("Issue ID")
-	const linkCopy = useCopyToClipboard("Link")
-	const promptCopy = useCopyToClipboard("Agent prompt")
+	const idCopy = useCopy({ label: "Issue ID" })
+	const linkCopy = useCopy({ label: "Link" })
+	const promptCopy = useCopy({
+		label: "Agent prompt",
+		successMessage: "Agent prompt copied — paste it into your MCP agent",
+	})
 
-	const copyId = () => idCopy.copy(issue.id)
-	const copyUrl = () => linkCopy.copy(window.location.origin + issueUrl)
-	const copyAgentPrompt = () =>
-		promptCopy.copy(agentPromptFromIssue(issue), {
-			successMessage: "Agent prompt copied — paste it into your MCP agent",
-		})
+	const copyId = () => void idCopy.copy(issue.id)
+	const copyUrl = () => void linkCopy.copy(window.location.origin + issueUrl)
+	const copyAgentPrompt = () => void promptCopy.copy(agentPromptFromIssue(issue))
 
 	return (
 		<ContextMenu>

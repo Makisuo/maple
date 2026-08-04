@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { getSession, getSessionId, markActivity, nextChunkSeq, nextMetaVersion } from "./session"
+import {
+	getSession,
+	getSessionId,
+	isNewVisitorSession,
+	markActivity,
+	nextChunkSeq,
+	nextMetaVersion,
+	onSessionRotate,
+	peekSession,
+} from "./session"
+import { resetVisitorCacheForTests } from "./visitor"
 
 // Minimal in-memory sessionStorage standing in for the browser's, so the
 // rotation logic can be exercised under Node with a controllable clock.
@@ -25,7 +35,11 @@ beforeEach(() => {
 	vi.useFakeTimers()
 	vi.setSystemTime(new Date("2026-05-22T12:00:00Z"))
 	storage = new FakeStorage()
-	;(globalThis as { window?: unknown }).window = { sessionStorage: storage }
+	resetVisitorCacheForTests()
+	;(globalThis as { window?: unknown }).window = {
+		sessionStorage: storage,
+		localStorage: new FakeStorage(),
+	}
 })
 
 afterEach(() => {
@@ -60,6 +74,19 @@ describe("getSession", () => {
 		expect(second.id).not.toBe(first.id)
 		expect(second.chunkSeq).toBe(0)
 		expect(second.startedAt).toBe(Date.now())
+	})
+
+	it("notifies rotation listeners before installing the replacement record", () => {
+		const first = getSession()
+		const rotations: Array<[string, string, string | undefined]> = []
+		const stop = onSessionRotate((previous, next) => {
+			rotations.push([previous.id, next.id, peekSession()?.id])
+		})
+		vi.advanceTimersByTime(31 * MINUTE)
+		const second = getSession()
+		stop()
+
+		expect(rotations).toEqual([[first.id, second.id, first.id]])
 	})
 
 	it("rotates once the session passes the 24h lifetime cap", () => {
@@ -220,5 +247,41 @@ describe("markActivity", () => {
 		vi.advanceTimersByTime(20 * MINUTE) // 40min since start, but only 20min since activity
 		const second = getSession()
 		expect(second.id).toBe(first.id)
+	})
+})
+
+describe("new-visitor attribution", () => {
+	it("survives a reload, because the winning metadata row is the last one written", () => {
+		const first = getSession()
+		expect(first.visitorIsNew).toBe(true)
+		expect(isNewVisitorSession()).toBe(true)
+
+		// A reload clears the in-memory "minted just now" flag but keeps the
+		// session. Re-deriving it here would post `visitor_is_new = 0` at a higher
+		// Version, and ReplacingMergeTree would keep *that* row — turning every
+		// new visitor who refreshes into a returning one.
+		resetVisitorCacheForTests()
+		expect(getSession().id).toBe(first.id)
+		expect(isNewVisitorSession()).toBe(true)
+	})
+
+	it("does not mark the session a visitor rotates into as new", () => {
+		expect(getSession().visitorIsNew).toBe(true)
+		vi.advanceTimersByTime(31 * MINUTE)
+		// Same visitor, new session: the id was not minted for it.
+		expect(getSession().visitorIsNew).toBe(false)
+		expect(isNewVisitorSession()).toBe(false)
+	})
+
+	it("migrates a legacy in-flight session and consumes the new-visitor claim", () => {
+		storage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({ id: "old", startedAt: Date.now(), lastActivityAt: Date.now(), chunkSeq: 0 }),
+		)
+		expect(isNewVisitorSession()).toBe(true)
+		expect(JSON.parse(storage.getItem(STORAGE_KEY)!).visitorIsNew).toBe(true)
+
+		vi.advanceTimersByTime(31 * MINUTE)
+		expect(getSession().visitorIsNew).toBe(false)
 	})
 })

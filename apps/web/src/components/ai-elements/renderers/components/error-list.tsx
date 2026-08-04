@@ -1,4 +1,4 @@
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import type { BaseComponentProps } from "@json-render/react"
 
 interface ErrorListProps {

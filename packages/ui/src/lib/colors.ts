@@ -95,12 +95,34 @@ function getServiceColorTier(serviceName: string): { l: number; c: number } {
 }
 
 /**
+ * The identity palette flattened to a single index space: `tier * 16 + hue`.
+ * Chart series resolution needs slot-addressable access so it can detect (and
+ * deterministically step past) two names that hash to the same color.
+ */
+export const IDENTITY_SLOT_COUNT = SERVICE_HUES.length * SERVICE_COLOR_TIERS.length
+
+/** The slot a name naturally hashes to — the same hue/tier pair as {@link getServiceColor}. */
+export function getIdentitySlot(name: string): number {
+	const hash = hashString(name)
+	const hueIndex = hash % SERVICE_HUES.length
+	const tierIndex = Math.floor(hash / SERVICE_HUES.length) % SERVICE_COLOR_TIERS.length
+	return tierIndex * SERVICE_HUES.length + hueIndex
+}
+
+/** The color occupying a given identity slot. Wraps, so any integer is valid. */
+export function getIdentityColorBySlot(slot: number): string {
+	const index = ((Math.floor(slot) % IDENTITY_SLOT_COUNT) + IDENTITY_SLOT_COUNT) % IDENTITY_SLOT_COUNT
+	const tier = SERVICE_COLOR_TIERS[Math.floor(index / SERVICE_HUES.length)]
+	const hue = SERVICE_HUES[index % SERVICE_HUES.length]
+	return `oklch(${tier.l} ${tier.c} ${hue})`
+}
+
+/**
  * The canonical color for a service, deterministic from its name alone.
  * Hue and lightness tier both derive from the name hash.
  */
 export function getServiceColor(serviceName: string): string {
-	const tier = getServiceColorTier(serviceName)
-	return `oklch(${tier.l} ${tier.c} ${getServiceHueFromName(serviceName)})`
+	return getIdentityColorBySlot(getIdentitySlot(serviceName))
 }
 
 /**

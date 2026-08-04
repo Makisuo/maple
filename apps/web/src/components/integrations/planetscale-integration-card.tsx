@@ -1,7 +1,6 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Cause, Exit } from "effect"
-import { PlanetScaleMetricsTokenRequest, PlanetScaleSelectOrganizationRequest } from "@maple/domain/http"
-import { Alert, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
+import { PlanetScaleSelectOrganizationRequest } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -16,10 +15,12 @@ import {
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
-import { CheckIcon, CircleWarningIcon, LoaderIcon, PlanetScaleIcon } from "@/components/icons"
-import { cn } from "@maple/ui/utils"
+import { LoaderIcon, PlanetScaleIcon } from "@/components/icons"
+import { cn } from "@maple/ui/lib/utils"
+import { isExcluded } from "@/components/infra/planetscale/branch-selection"
+import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { IntegrationIconPlate, catalogEntry } from "./integration-catalog"
@@ -33,6 +34,9 @@ import {
 	IntegrationEmptyMedia,
 } from "./integration-empty-state"
 import { PlanetScaleMetricsHealth } from "./planetscale-metrics-health"
+import { PlanetScaleMetricsTokenForm } from "./planetscale-metrics-token-form"
+import { PlanetScaleSetupChecklist } from "./planetscale-setup-checklist"
+import { derivePlanetScaleSetup } from "./planetscale-setup-steps"
 
 const PLANETSCALE_ENTRY = catalogEntry("planetscale")
 
@@ -70,12 +74,27 @@ export function PlanetScaleIntegrationCard() {
 	const [disconnectBusy, setDisconnectBusy] = useState(false)
 	const actionBusy = connectFlow.busy || disconnectBusy
 	const [pickerOpen, setPickerOpen] = useState(false)
+	const [rotateOpen, setRotateOpen] = useState(false)
 
 	const status = Result.builder(statusResult)
 		.onSuccess((s) => s)
 		.orElse(() => null)
 	const isConnected = status?.connected === true
 	const pendingOrgSelection = status?.pendingOrgSelection === true
+
+	// Recomputed on every render (including each poll tick), so the elapsed-time
+	// copy below advances without a second timer.
+	const setup = status !== null ? derivePlanetScaleSetup(status, Date.now()) : null
+	const awaitingFirstScrape = setup?.awaitingFirstScrape === true
+
+	// Once a token is saved the first scrape lands within a scrape interval —
+	// poll so "waiting" becomes "streaming" in place, without a reload.
+	useIntervalRefresh(refreshStatus, { intervalMs: 5_000, enabled: awaitingFirstScrape })
+	// When the watch began. Captured once per mount; PlanetScale gives us no
+	// "token added at" timestamp, so this measures how long *we* have been
+	// looking, and the copy says exactly that rather than inventing a duration.
+	const [watchStartedAt] = useState(() => Date.now())
+	const watchedForMs = Date.now() - watchStartedAt
 
 	async function handleDisconnect() {
 		setDisconnectBusy(true)
@@ -84,10 +103,10 @@ export function PlanetScaleIntegrationCard() {
 		})
 		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("PlanetScale organization disconnected")
+			toastManager.add({ title: "PlanetScale organization disconnected", type: "success" })
 			refreshStatus()
 		} else {
-			toast.error("Failed to disconnect PlanetScale organization")
+			toastManager.add({ title: "Failed to disconnect PlanetScale organization", type: "error" })
 		}
 	}
 
@@ -182,9 +201,6 @@ export function PlanetScaleIntegrationCard() {
 		)
 	}
 
-	const target = status?.scrapeTarget ?? null
-	const missingDatabasesPermission = status?.detectedPermissions?.readDatabases === false
-
 	return (
 		<div className="flex flex-col gap-4">
 			<div className="overflow-hidden rounded-lg border border-border/60 bg-card">
@@ -194,10 +210,18 @@ export function PlanetScaleIntegrationCard() {
 						<div className="min-w-0">
 							<div className="flex items-center gap-2">
 								<h3 className="text-sm font-semibold">PlanetScale</h3>
-								<Badge variant="success">Connected</Badge>
+								{/* "Connected" while three of four steps are done overstates it —
+								    the badge tracks the checklist. */}
+								{setup !== null && !setup.complete ? (
+									<Badge variant="warning">
+										Step {setup.activeStepNumber} of {setup.steps.length}
+									</Badge>
+								) : (
+									<Badge variant="success">Connected</Badge>
+								)}
 							</div>
 							<p className="mt-1 text-xs text-muted-foreground">
-								{status?.metricsAuth === "missing" ? (
+								{setup !== null && !setup.complete ? (
 									<>
 										Connected to{" "}
 										<span className="font-medium text-foreground">
@@ -233,28 +257,79 @@ export function PlanetScaleIntegrationCard() {
 					</div>
 				</div>
 
-				{status ? (
-					<PlanetScaleMetricsSetup
+				{/* Setup is only shown while there is setup left. A finished
+				    connection collapses to the single health row it has always been. */}
+				{status !== null && setup !== null && !setup.complete ? (
+					<div className="border-t border-border/60 p-4">
+						<PlanetScaleSetupChecklist
+							steps={setup.steps}
+							actions={{
+								connected: (
+									<Button size="sm" onClick={connectFlow.connect} disabled={actionBusy}>
+										{connectFlow.busy ? (
+											<LoaderIcon size={14} className="animate-spin" />
+										) : null}
+										Reconnect
+									</Button>
+								),
+								permissions: (
+									<Button size="sm" onClick={connectFlow.connect} disabled={actionBusy}>
+										{connectFlow.busy ? (
+											<LoaderIcon size={14} className="animate-spin" />
+										) : null}
+										Reauthorize with read_databases
+									</Button>
+								),
+								"metrics-token": (
+									<PlanetScaleMetricsTokenForm
+										organization={status.organization}
+										docsUrl={PLANETSCALE_ENTRY.docsUrl}
+										mode="initial"
+										onSaved={refreshStatus}
+									/>
+								),
+								"first-metrics": (
+									<FirstMetricsDetail
+										scrapeError={status.scrapeTarget?.lastScrapeError ?? null}
+										watchedForMs={watchedForMs}
+										onRotate={() => setRotateOpen(true)}
+									/>
+								),
+							}}
+						/>
+					</div>
+				) : null}
+
+				{status !== null && status.scrapeTarget !== null && setup?.complete === true ? (
+					<PlanetScaleMetricsHealth
+						target={status.scrapeTarget}
 						metricsAuth={status.metricsAuth}
-						onSaved={() => refreshStatus()}
+						action={
+							status.metricsAuth === "service_token" && !rotateOpen ? (
+								<button
+									type="button"
+									onClick={() => setRotateOpen(true)}
+									className="text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground"
+								>
+									Rotate token
+								</button>
+							) : null
+						}
 					/>
 				) : null}
 
-				{status && target ? (
-					<PlanetScaleMetricsHealth target={target} metricsAuth={status.metricsAuth} />
-				) : null}
-
-				{missingDatabasesPermission ? (
+				{rotateOpen && status !== null ? (
 					<div className="border-t border-border/60 p-4">
-						<Alert variant="warning">
-							<CircleWarningIcon />
-							<AlertTitle>Database inventory unavailable</AlertTitle>
-							<AlertDescription>
-								The authorization can read metrics but not databases — grant the OAuth
-								application the <code className="font-mono text-xs">read_databases</code>{" "}
-								scope so Maple can link databases on the service map, then reconnect.
-							</AlertDescription>
-						</Alert>
+						<PlanetScaleMetricsTokenForm
+							organization={status.organization}
+							docsUrl={PLANETSCALE_ENTRY.docsUrl}
+							mode="rotate"
+							onSaved={() => {
+								setRotateOpen(false)
+								refreshStatus()
+							}}
+							onCancel={() => setRotateOpen(false)}
+						/>
 					</div>
 				) : null}
 			</div>
@@ -274,6 +349,7 @@ export function PlanetScaleIntegrationCard() {
 					<DialogPanel>
 						<PlanetScaleOrgPicker
 							initialOrganization={status?.organization ?? null}
+							initialIncludeBranches={status?.scrapeTarget?.includeBranches.join(", ") ?? ""}
 							initialExcludeBranches={status?.scrapeTarget?.excludeBranches.join(", ") ?? ""}
 							onDone={() => {
 								setPickerOpen(false)
@@ -290,129 +366,51 @@ export function PlanetScaleIntegrationCard() {
 }
 
 /**
- * The metrics half of the hybrid setup. The OAuth grant covers the management
- * plane (inventory, insights, webhooks), but PlanetScale's metrics endpoints
- * only accept service tokens — so the connected card carries one follow-up
- * step: paste a token created with just the read_metrics_endpoints permission.
- * Once configured it collapses to a quiet confirmation row with a rotate
- * affordance.
+ * The action attached to the "Metrics arriving" step while it is current or
+ * blocked. Three outcomes, three different next moves — a generic "waiting"
+ * spinner would leave a wrong-permission token spinning forever.
  */
-function PlanetScaleMetricsSetup({
-	metricsAuth,
-	onSaved,
+function FirstMetricsDetail({
+	scrapeError,
+	watchedForMs,
+	onRotate,
 }: {
-	metricsAuth: "oauth" | "service_token" | "missing"
-	onSaved: () => void
+	scrapeError: string | null
+	/** How long this card has been open. See the note at the call site. */
+	watchedForMs: number
+	onRotate: () => void
 }) {
-	const setMetricsToken = useAtomSet(
-		MapleApiAtomClient.mutation("integrations", "planetscaleSetMetricsToken"),
-		{ mode: "promiseExit" },
-	)
-	const [formOpen, setFormOpen] = useState(false)
-	const [tokenId, setTokenId] = useState("")
-	const [tokenSecret, setTokenSecret] = useState("")
-	const [submitting, setSubmitting] = useState(false)
+	if (scrapeError !== null) {
+		return (
+			<div className="space-y-2">
+				<p className="break-all rounded-md bg-muted/40 p-2 font-mono text-xs text-muted-foreground">
+					{scrapeError}
+				</p>
+				<Button size="sm" variant="outline" onClick={onRotate}>
+					Rotate token
+				</Button>
+			</div>
+		)
+	}
 
-	// Scraping works through the grant — nothing to set up.
-	if (metricsAuth === "oauth") return null
-
-	const showForm = metricsAuth === "missing" || formOpen
-
-	async function handleSubmit() {
-		setSubmitting(true)
-		const result = await setMetricsToken({
-			payload: new PlanetScaleMetricsTokenRequest({ tokenId: tokenId.trim(), tokenSecret }),
-			// The managed scrape target row below flips authType/enabled — refresh it too.
-			reactivityKeys: ["planetscaleIntegrationStatus", "scrapeTargets"],
-		})
-		setSubmitting(false)
-		if (Exit.isSuccess(result)) {
-			toast.success("Branch metrics enabled")
-			setTokenId("")
-			setTokenSecret("")
-			setFormOpen(false)
-			onSaved()
-		} else {
-			// Surface the API's message (token rejected, wrong permission, …) — actionable.
-			toast.error(extractErrorMessage(result) ?? "Failed to save the metrics service token")
-		}
+	// Three minutes is several scrape intervals at the 30s default: long enough
+	// that "usually under a minute" has stopped being true.
+	if (watchedForMs < 3 * 60 * 1000) {
+		return (
+			<p className="text-xs text-muted-foreground">Usually under a minute — this updates on its own.</p>
+		)
 	}
 
 	return (
-		<div className="border-t border-border/60 p-4">
-			{metricsAuth === "service_token" ? (
-				<div className="flex flex-wrap items-center justify-between gap-2">
-					<div className="flex items-center gap-2 text-xs text-muted-foreground">
-						<CheckIcon size={14} className="shrink-0 text-severity-info" />
-						<span>
-							Branch metrics authenticated with a service token
-							{" — inventory, insights, and webhooks use the OAuth grant."}
-						</span>
-					</div>
-					{!formOpen ? (
-						<Button size="sm" variant="outline" onClick={() => setFormOpen(true)}>
-							Rotate token
-						</Button>
-					) : null}
-				</div>
-			) : (
-				<div className="space-y-1">
-					<div className="flex items-center gap-2">
-						<h4 className="text-sm font-semibold">Enable branch metrics</h4>
-						<Badge variant="warning">1 step left</Badge>
-					</div>
-					<p className="text-xs text-muted-foreground">
-						PlanetScale only exposes branch metrics (CPU, connections, replication lag) to service
-						tokens. Create one in the organization settings with just the{" "}
-						<code className="font-mono">read_metrics_endpoints</code> permission and paste it here
-						— everything else already runs on the OAuth authorization.
-					</p>
-				</div>
-			)}
-
-			{showForm ? (
-				<div className="mt-3 flex flex-wrap items-end gap-2">
-					<div className="flex min-w-40 flex-1 flex-col gap-1.5">
-						<Label htmlFor="ps-metrics-token-id">Service token ID</Label>
-						<Input
-							id="ps-metrics-token-id"
-							placeholder="tok_…"
-							value={tokenId}
-							onChange={(event) => setTokenId(event.target.value)}
-							autoComplete="off"
-						/>
-					</div>
-					<div className="flex min-w-40 flex-1 flex-col gap-1.5">
-						<Label htmlFor="ps-metrics-token-secret">Service token secret</Label>
-						<Input
-							id="ps-metrics-token-secret"
-							type="password"
-							placeholder="pscale_tkn_…"
-							value={tokenSecret}
-							onChange={(event) => setTokenSecret(event.target.value)}
-							autoComplete="off"
-						/>
-					</div>
-					<div className="flex items-center gap-1.5">
-						{metricsAuth === "service_token" ? (
-							<Button
-								variant="outline"
-								onClick={() => setFormOpen(false)}
-								disabled={submitting}
-							>
-								Cancel
-							</Button>
-						) : null}
-						<Button
-							onClick={handleSubmit}
-							disabled={submitting || tokenId.trim().length === 0 || tokenSecret.length === 0}
-						>
-							{submitting ? <LoaderIcon size={14} className="animate-spin" /> : null}
-							{metricsAuth === "service_token" ? "Update token" : "Enable metrics"}
-						</Button>
-					</div>
-				</div>
-			) : null}
+		<div className="space-y-2">
+			<p className="text-xs text-muted-foreground">
+				Still nothing after a few minutes. The most common cause is a token without the{" "}
+				<code className="font-mono text-[11px]">read_metrics_endpoints</code> permission — PlanetScale
+				accepts the token and then serves no metrics.
+			</p>
+			<Button size="sm" variant="outline" onClick={onRotate}>
+				Rotate token
+			</Button>
 		</div>
 	)
 }
@@ -424,6 +422,7 @@ function PlanetScaleMetricsSetup({
  */
 function PlanetScaleOrgPicker(props: {
 	initialOrganization?: string | null
+	initialIncludeBranches?: string
 	initialExcludeBranches?: string
 	onDone: () => void
 	onCancel: () => void
@@ -434,34 +433,64 @@ function PlanetScaleOrgPicker(props: {
 			reactivityKeys: ["planetscaleIntegrationStatus"],
 		}),
 	)
+	// Powers the live filter preview. Empty before the first inventory poll, which
+	// is exactly the pending-org-selection case — the preview then stays quiet.
+	const inventoryResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "planetscaleDatabases", {
+			reactivityKeys: ["planetscaleIntegrationStatus"],
+		}),
+	)
 	const selectOrganization = useAtomSet(
 		MapleApiAtomClient.mutation("integrations", "planetscaleSelectOrganization"),
 		{ mode: "promiseExit" },
 	)
 
 	const [selected, setSelected] = useState<string | null>(props.initialOrganization ?? null)
+	const [includeBranches, setIncludeBranches] = useState(props.initialIncludeBranches ?? "")
 	const [excludeBranches, setExcludeBranches] = useState(props.initialExcludeBranches ?? "")
 	const [submitting, setSubmitting] = useState(false)
+
+	const branchNames = useMemo(
+		() =>
+			Result.builder(inventoryResult)
+				.onSuccess((inventory) => [
+					...new Set(inventory.databases.flatMap((db) => db.branches.map((b) => b.name))),
+				])
+				.orElse<ReadonlyArray<string>>(() => []),
+		[inventoryResult],
+	)
+	const preview = useMemo(() => {
+		const include = parsePatternList(includeBranches)
+		const exclude = parsePatternList(excludeBranches)
+		if (branchNames.length === 0 || (include.length === 0 && exclude.length === 0)) return null
+		const dropped = branchNames.filter((name) => isExcluded(name, include, exclude))
+		return { total: branchNames.length, kept: branchNames.length - dropped.length, dropped }
+	}, [branchNames, includeBranches, excludeBranches])
 
 	async function handleSubmit() {
 		if (selected === null) return
 		setSubmitting(true)
-		const patterns = parsePatternList(excludeBranches)
+		const include = parsePatternList(includeBranches)
+		const exclude = parsePatternList(excludeBranches)
 		const result = await selectOrganization({
 			payload: new PlanetScaleSelectOrganizationRequest({
 				organization: selected,
-				...(patterns.length > 0 ? { excludeBranches: patterns } : {}),
+				...(include.length > 0 ? { includeBranches: include } : {}),
+				...(exclude.length > 0 ? { excludeBranches: exclude } : {}),
 			}),
 			// finalizeOrgSelection re-parents the managed scrape target — refresh the list below.
 			reactivityKeys: ["planetscaleIntegrationStatus", "scrapeTargets"],
 		})
 		setSubmitting(false)
 		if (Exit.isSuccess(result)) {
-			toast.success(`PlanetScale organization ${selected} connected`)
+			toastManager.add({ title: `PlanetScale organization ${selected} connected`, type: "success" })
 			props.onDone()
 		} else {
 			// Surface the API's message (missing scope, org outside the grant, …) — actionable.
-			toast.error(extractErrorMessage(result) ?? "Failed to connect PlanetScale organization")
+			toastManager.add({
+				title: extractErrorMessage(result) ?? "Failed to connect PlanetScale organization",
+				type: "error",
+			})
 		}
 	}
 
@@ -502,18 +531,52 @@ function PlanetScaleOrgPicker(props: {
 					</button>
 				))}
 			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor="ps-exclude-branches">Exclude branches (optional)</Label>
-				<Input
-					id="ps-exclude-branches"
-					placeholder="pr-*, preview-*"
-					value={excludeBranches}
-					onChange={(event) => setExcludeBranches(event.target.value)}
-					autoComplete="off"
-				/>
-				<p className="text-xs text-muted-foreground">
-					Glob patterns for branches to skip — keeps preview branches out of your metrics.
-				</p>
+			<div className="flex flex-col gap-3">
+				<div className="flex flex-col gap-1.5">
+					<Label htmlFor="ps-include-branches">Only these branches (optional)</Label>
+					<Input
+						id="ps-include-branches"
+						placeholder="main, staging"
+						value={includeBranches}
+						onChange={(event) => setIncludeBranches(event.target.value)}
+						autoComplete="off"
+					/>
+					<p className="text-xs text-muted-foreground">
+						Leave blank to collect every branch. When set, only matching branches are collected —
+						exclusions still apply on top.
+					</p>
+				</div>
+				<div className="flex flex-col gap-1.5">
+					<Label htmlFor="ps-exclude-branches">Exclude branches (optional)</Label>
+					<Input
+						id="ps-exclude-branches"
+						placeholder="pr-*, preview-*"
+						value={excludeBranches}
+						onChange={(event) => setExcludeBranches(event.target.value)}
+						autoComplete="off"
+					/>
+					<p className="text-xs text-muted-foreground">
+						Glob patterns — <code className="font-mono text-[11px]">*</code> matches any run,{" "}
+						<code className="font-mono text-[11px]">?</code> exactly one character.
+					</p>
+				</div>
+				{/* The preview shares its glob implementation with the scraper
+				    (@maple/domain/glob), so what it counts is what gets collected. */}
+				{preview !== null ? (
+					<p className="text-xs text-muted-foreground">
+						<span className="font-medium text-foreground">
+							{preview.kept} of {preview.total}
+						</span>{" "}
+						branches will be collected
+						{preview.dropped.length > 0 ? (
+							<>
+								{" — skipping "}
+								<span className="font-mono">{preview.dropped.slice(0, 6).join(", ")}</span>
+								{preview.dropped.length > 6 ? ` and ${preview.dropped.length - 6} more` : ""}
+							</>
+						) : null}
+					</p>
+				) : null}
 			</div>
 			<DialogFooter>
 				<Button variant="outline" onClick={props.onCancel} disabled={submitting}>

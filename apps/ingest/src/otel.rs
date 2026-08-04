@@ -49,7 +49,7 @@ pub fn build_resource(cfg: ResourceConfig) -> Resource {
 }
 
 /// Commit SHA of the running build, from the deploy platform's env vars —
-/// mirrors lib/effect-sdk/src/server/resource.ts (`COMMIT_SHA` chain).
+/// mirrors packages/effect-sdk/src/server/resource.ts (`COMMIT_SHA` chain).
 fn detect_head_revision() -> Option<String> {
     [
         "COMMIT_SHA",
@@ -61,7 +61,7 @@ fn detect_head_revision() -> Option<String> {
     .find_map(|key| env::var(key).ok().filter(|v| !v.is_empty()))
 }
 
-/// Mirrors lib/effect-sdk/src/server/platform.ts platform detection — first
+/// Mirrors packages/effect-sdk/src/server/platform.ts platform detection — first
 /// match wins. Returns the cloud.{provider,platform,region} (and faas.* / k8s.*
 /// where applicable) attribute set for the runtime environment.
 fn detect_platform() -> Vec<KeyValue> {
@@ -465,11 +465,14 @@ pub fn export_client_span(
         "http.response.status_code" = Empty,
         "peer.service" = peer_service,
         // Recorded by the caller: for ClickHouse it is only known after the
-        // per-org target resolves.
+        // per-org target resolves. Both destinations are warehouse writes, so
+        // both record the db.* set — without `db.system.name` a span carries no
+        // database identity and never becomes a node on the service map.
         "server.address" = Empty,
         "db.system.name" = Empty,
         "db.operation.name" = Empty,
         "db.namespace" = Empty,
+        "db.collection.name" = Empty,
         "maple.ingest.datasource" = datasource,
         "maple.ingest.attempt" = attempt,
         "maple.ingest.row_count" = rows,
@@ -605,19 +608,28 @@ mod tests {
 
     #[test]
     fn export_span_declares_fields_recorded_by_both_destinations() {
-        // post_tinybird records the http/outcome fields; post_clickhouse also
-        // records the db.* and org fields via clickhouse_export_span.
+        // Both destinations record the http/outcome fields AND the db.* set —
+        // ClickHouse via clickhouse_export_span, Tinybird inline in
+        // post_tinybird. A field that isn't declared here is silently dropped
+        // when the caller records it — which is how the Tinybird path shipped
+        // without a `db.system.name` and never appeared as a database node.
+        const REQUIRED: &[&str] = &[
+            "http.response.status_code",
+            "server.address",
+            "maple.ingest.outcome",
+            "maple.org_id",
+            "db.system.name",
+            "db.operation.name",
+            "db.namespace",
+            "db.collection.name",
+        ];
         assert_declares(
             &export_client_span("clickhouse.export", "clickhouse", "spans", 2, 10, 100),
-            &[
-                "http.response.status_code",
-                "server.address",
-                "maple.ingest.outcome",
-                "maple.org_id",
-                "db.system.name",
-                "db.operation.name",
-                "db.namespace",
-            ],
+            REQUIRED,
+        );
+        assert_declares(
+            &export_client_span("tinybird.export", "tinybird", "spans", 2, 10, 100),
+            REQUIRED,
         );
     }
 

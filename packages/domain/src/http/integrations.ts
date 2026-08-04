@@ -479,6 +479,76 @@ export class PlanetScaleQueryInsightsResponse extends Schema.Class<PlanetScaleQu
 	unavailableReason: Schema.NullOr(Schema.String),
 }) {}
 
+/**
+ * The PlanetScale lifecycle timeline for a window: deploy-request transitions
+ * and branch state changes. Backs both the chart markers on the database
+ * drill-in and the activity feed under them.
+ */
+export const PlanetScaleEventCategory = Schema.Literals([
+	"deploy_request",
+	"branch",
+	"database",
+	"cluster",
+	"keyspace",
+])
+
+export class PlanetScaleEventsRequest extends Schema.Class<PlanetScaleEventsRequest>(
+	"PlanetScaleEventsRequest",
+)({
+	/** Omit for the org-wide feed. */
+	database: Schema.optionalKey(Schema.String),
+	/**
+	 * Narrows branch-scoped rows. Deploy requests span two branches and carry no
+	 * single one, so they are never filtered out by this.
+	 */
+	branch: Schema.optionalKey(Schema.String),
+	/** Window bounds, epoch ms. */
+	startTime: Schema.Number,
+	endTime: Schema.Number,
+	categories: Schema.optionalKey(Schema.Array(PlanetScaleEventCategory)),
+	/** Defaults to 100, capped at 500. */
+	limit: Schema.optionalKey(Schema.Number),
+	/** Keyset cursor from the previous page's `nextCursor`. */
+	cursor: Schema.optionalKey(Schema.String),
+}) {}
+
+export class PlanetScaleEventSummary extends Schema.Class<PlanetScaleEventSummary>("PlanetScaleEventSummary")(
+	{
+		id: Schema.String,
+		databaseName: Schema.String,
+		/** "" for events that belong to no single branch (deploy requests). */
+		branchName: Schema.String,
+		/**
+		 * One of `PlanetScaleEventCategory` in practice, but typed as a plain string
+		 * on the way out: the classifier is deliberately forward-compatible, so a
+		 * category added by a newer poller must render as an unknown row in the feed
+		 * rather than fail the whole response's decode.
+		 */
+		category: Schema.String,
+		/** Raw PlanetScale event string, e.g. "deploy_request.schema_applied". */
+		eventType: Schema.String,
+		state: Schema.NullOr(Schema.String),
+		/** Deploy-request number or branch id; "" when the event has none. */
+		externalId: Schema.String,
+		title: Schema.String,
+		/** "webhook" (live) or "backfill" (REST history). */
+		source: Schema.String,
+		actorLogin: Schema.NullOr(Schema.String),
+		url: Schema.NullOr(Schema.String),
+		/** Epoch ms, truncated to the second. */
+		occurredAt: Schema.Number,
+	},
+) {}
+
+export class PlanetScaleEventsResponse extends Schema.Class<PlanetScaleEventsResponse>(
+	"PlanetScaleEventsResponse",
+)({
+	/** Newest first. */
+	events: Schema.Array(PlanetScaleEventSummary),
+	/** Null when this is the last page. */
+	nextCursor: Schema.NullOr(Schema.String),
+}) {}
+
 // ---- GitHub (VCS App installation) ----------------------------------------
 
 /** One branch a repo knows about — an option in the tracked-branch picker. */
@@ -853,6 +923,15 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 				IntegrationsUpstreamError,
 				IntegrationsPersistenceError,
 			],
+		}),
+	)
+	.add(
+		// POST, matching query-insights: the window + filters make a long key that
+		// belongs in a body, and the handler edge-caches on a computed key anyway.
+		HttpApiEndpoint.post("planetscaleEvents", "/planetscale/events", {
+			payload: PlanetScaleEventsRequest,
+			success: PlanetScaleEventsResponse,
+			error: [IntegrationsValidationError, IntegrationsPersistenceError],
 		}),
 	)
 	.add(

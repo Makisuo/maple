@@ -20,6 +20,7 @@ const { Content, headings } = await render(doc);
     description={doc.data.description}
     headings={headings}
     currentSlug={doc.id}
+    mdHref={`/docs/${doc.id}.md`}
 >
     <article class="docs-content max-w-none">
         <Breadcrumb sdk={doc.data.sdk} group={doc.data.group} title={doc.data.title} />

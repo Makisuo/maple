@@ -1,5 +1,9 @@
 import { Clock, Effect, Schema } from "effect"
-import { QueryEngineExecuteRequest, warehouseDateTimeToIso } from "@maple/query-engine"
+import {
+	QueryEngineExecuteRequest,
+	warehouseDateTimeToIso,
+	formatWarehouseDateTime,
+} from "@maple/query-engine"
 import {
 	DeploymentEnvironment,
 	ErrorsByTypeRequest,
@@ -105,8 +109,10 @@ const GetErrorsFacetsInputSchema = Schema.Struct({
 export type GetErrorsFacetsInput = (typeof GetErrorsFacetsInputSchema)["Encoded"]
 
 const defaultErrorsTimeRange = (nowMillis: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMillis - 24 * 60 * 60 * 1000), endTime: fmt(nowMillis) }
+	return {
+		startTime: formatWarehouseDateTime(nowMillis - 24 * 60 * 60 * 1000),
+		endTime: formatWarehouseDateTime(nowMillis),
+	}
 }
 
 export function getErrorsFacets({ data }: { data: GetErrorsFacetsInput }) {

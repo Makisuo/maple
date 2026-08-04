@@ -1,4 +1,4 @@
-import { warehouseDateTimeToIso } from "@maple/query-engine"
+import { warehouseDateTimeToIso, formatWarehouseDateTime } from "@maple/query-engine"
 import type { ActionKind } from "./replay-player-context"
 
 // Presentation helpers for the session-replay surfaces (list, detail, player,
@@ -74,7 +74,6 @@ export interface ReplayPartitionWindow {
 }
 
 /** Format an epoch-ms instant as a `YYYY-MM-DD HH:mm:ss` (UTC) TinybirdDateTime string. */
-const toWarehouseDateTime = (ms: number): string => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
 
 /**
  * Derive `{ windowStart, windowEnd }` (TinybirdDateTime strings) bounding a
@@ -92,7 +91,7 @@ export function replayPartitionWindow(
 	const endMs = endHint ? Date.parse(warehouseDateTimeToIso(endHint)) : Number.NaN
 	const upperMs = Number.isNaN(endMs) ? startMs + MAX_SESSION_MS : endMs + WINDOW_MARGIN_MS
 	return {
-		windowStart: toWarehouseDateTime(startMs - WINDOW_MARGIN_MS),
-		windowEnd: toWarehouseDateTime(upperMs),
+		windowStart: formatWarehouseDateTime(startMs - WINDOW_MARGIN_MS),
+		windowEnd: formatWarehouseDateTime(upperMs),
 	}
 }

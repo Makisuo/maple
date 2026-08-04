@@ -1,7 +1,7 @@
 import { formatDurationFromMs, formatNumber, formatPercent, formatTable } from "./format"
 import { formatNextSteps } from "./next-steps"
 import { createDualContent } from "./structured-output"
-import type { McpToolResult } from "../tools/types"
+import type { McpToolResult } from "@/mcp/tools/types"
 import type { QueryEngineExecuteResponse } from "@maple/query-engine"
 import type { QueryDataQueryContext, QueryDataUnit } from "@maple/domain"
 

@@ -1,0 +1,57 @@
+{
+	"name": "@maple-dev/alchemy",
+	"version": "0.1.0",
+	"description": "Alchemy provider for Maple resources — declare API keys, ingest keys, dashboards, alert destinations, and alert rules in your alchemy.run.ts",
+	"keywords": [
+		"alchemy",
+		"effect",
+		"infrastructure-as-code",
+		"maple",
+		"observability",
+		"opentelemetry"
+	],
+	"homepage": "https://maple.dev",
+	"bugs": "https://github.com/MapleTechLabs/maple/issues",
+	"license": "MIT",
+	"author": "Maple Tech Labs",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/MapleTechLabs/maple.git",
+		"directory": "packages/alchemy-maple"
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"type": "module",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"import": "./dist/index.mjs"
+		}
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"prepublishOnly": "bun run build"
+	},
+	"devDependencies": {
+		"@effect/language-service": "catalog:effect",
+		"@maple/domain": "workspace:*",
+		"@types/node": "catalog:tooling",
+		"alchemy": "2.0.0-beta.64",
+		"effect": "catalog:effect",
+		"tsdown": "^0.22.14",
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
+	},
+	"peerDependencies": {
+		"alchemy": ">=2.0.0-beta.64 <3",
+		"effect": ">=4.0.0-beta.100 || >=4.0.0"
+	}
+}

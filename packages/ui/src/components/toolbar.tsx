@@ -7,7 +7,7 @@ import { ArrowRotateClockwiseIcon, ClockIcon, MagnifierIcon, XmarkIcon } from ".
 import { Button } from "./ui/button"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "./ui/input-group"
 import { NativeSelect, NativeSelectOption } from "./ui/native-select"
-import { useMountEffect } from "../hooks/use-mount-effect"
+import { useDebouncedCallback } from "../hooks/use-debounced-callback"
 import { cn } from "../lib/utils"
 
 export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
@@ -69,7 +69,6 @@ export function ToolbarSearch({
 	className?: string
 }) {
 	const [value, setValue] = useState(query)
-	const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	// The trimmed value we last pushed to `onSearch`, in the form it comes back as
 	// `query`. Lets us tell an external `query` change (Clear all, back/forward) from
 	// our own debounced search echoing back, so a resync never clobbers keystrokes
@@ -86,23 +85,18 @@ export function ToolbarSearch({
 		}
 	}
 
-	// Cancel a pending debounce if the toolbar unmounts mid-type, so it can't fire a
-	// search after the page it belongs to is gone.
-	useMountEffect(() => () => {
-		if (debounceRef.current) clearTimeout(debounceRef.current)
-	})
+	const debouncedSearch = useDebouncedCallback((next: string) => {
+		const trimmed = next.trim() || undefined
+		lastSentRef.current = trimmed ?? ""
+		onSearch(trimmed)
+	}, debounceMs)
 
 	const handleChange = useCallback(
 		(next: string) => {
 			setValue(next)
-			if (debounceRef.current) clearTimeout(debounceRef.current)
-			debounceRef.current = setTimeout(() => {
-				const trimmed = next.trim() || undefined
-				lastSentRef.current = trimmed ?? ""
-				onSearch(trimmed)
-			}, debounceMs)
+			debouncedSearch(next)
 		},
-		[onSearch, debounceMs],
+		[debouncedSearch],
 	)
 
 	return (

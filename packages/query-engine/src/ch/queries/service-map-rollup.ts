@@ -7,23 +7,22 @@
 // Instead, `ServiceMapRollupService` runs this query once per completed hour
 // and ingests the result into `service_map_edges_hourly`.
 //
-// The query is `serviceMapEdgeJoinSQL` (shared verbatim with the in-progress
-// branch of `serviceDependenciesSQL`) bounded to a single hour. Its output
-// columns match the `service_map_edges_hourly` table exactly, so rows flow
-// straight from `sqlQuery` into `ingest` with no reshaping.
+// The query is `serviceMapEdgeJoinQuery` (sharing its join source verbatim with
+// the in-progress branch of `serviceDependenciesSQL`) bounded to a single hour.
+// Its output columns match the `service_map_edges_hourly` table exactly — a
+// test in `service-map.test.ts` asserts the alias set — so rows flow straight
+// into `ingest` with no reshaping.
 // ---------------------------------------------------------------------------
 
 import { Schema } from "effect"
 import type { CompiledQuery, CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { compileCH, unsafeCompiledQuery } from "@maple-dev/clickhouse-builder"
+import { compileCH } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
-import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 import { ServiceMapEdgesHourly, Traces } from "../tables"
-import { serviceMapEdgeJoinSQL } from "./service-map"
-
-const CHNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
+import { serviceMapEdgeJoinQuery } from "./service-map"
+import { CHNumber } from "../schema"
 
 /** One pre-aggregated service-to-service edge bucket — mirrors the columns of
  * the `service_map_edges_hourly` ClickHouse table. */
@@ -98,16 +97,15 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 		.groupBy("hourTs")
 		.format("JSON")
 
-	const { sql } = compileCH(query, {
-		orgId: params.orgId,
-		startTime: params.startTime,
-		endTime: params.endTime,
-	})
-
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServiceMapEdgesExistingHourSchema,
-	})
+	return compileCH(
+		query,
+		{
+			orgId: params.orgId,
+			startTime: params.startTime,
+			endTime: params.endTime,
+		},
+		{ rowSchema: ServiceMapEdgesExistingHourSchema },
+	)
 }
 
 /**
@@ -118,18 +116,22 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 export function serviceMapEdgesRollupSQL(
 	params: ServiceMapEdgesRollupParams,
 ): CompiledQuery<ServiceMapEdgesHourlyOutput> {
-	const esc = escapeClickHouseString
-	const sql = `${serviceMapEdgeJoinSQL({
-		orgId: params.orgId,
-		startExpr: `toDateTime('${esc(params.hourStart)}')`,
-		endExpr: `toDateTime('${esc(params.hourEnd)}')`,
-	})}
-FORMAT JSON`
+	const query = serviceMapEdgeJoinQuery({
+		rangeStart: CH.toDateTime(param.dateTime("hourStart")),
+		rangeEnd: CH.toDateTime(param.dateTime("hourEnd")),
+	}).format("JSON")
 
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServiceMapEdgesHourlyOutputSchema,
-	})
+	// Scope is derived from both join sources filtering OrgId — see
+	// `serviceMapEdgeJoinQuery`, which used to hand it over as an assertion.
+	return compileCH(
+		query,
+		{
+			orgId: params.orgId,
+			hourStart: params.hourStart,
+			hourEnd: params.hourEnd,
+		},
+		{ rowSchema: ServiceMapEdgesHourlyOutputSchema },
+	)
 }
 
 // ---------------------------------------------------------------------------
@@ -227,14 +229,15 @@ export function serviceMapResolutionsRollupSQL(
 		)
 		.format("JSON")
 
-	const { sql } = compileCH(query, {
-		orgId: params.orgId,
-		hourStart: params.hourStart,
-		hourEnd: params.hourEnd,
-	})
-
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServiceAddressResolutionsHourlyOutputSchema,
-	})
+	// No top-level `OrgId` predicate here on purpose: the scope is derived from
+	// the sources, both of which filter `OrgId` themselves.
+	return compileCH(
+		query,
+		{
+			orgId: params.orgId,
+			hourStart: params.hourStart,
+			hourEnd: params.hourEnd,
+		},
+		{ rowSchema: ServiceAddressResolutionsHourlyOutputSchema },
+	)
 }

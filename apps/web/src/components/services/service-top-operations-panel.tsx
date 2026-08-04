@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
 import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"

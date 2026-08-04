@@ -10,7 +10,20 @@ import {
 	ProviderLogo,
 	type DestinationProvider,
 } from "@/components/alerts/destination-provider"
-import { ArrowRightIcon, CircleInfoIcon, HazelIcon, LoaderIcon } from "@/components/icons"
+import {
+	ArrowRightIcon,
+	ArrowRotateClockwiseIcon,
+	CircleInfoIcon,
+	HazelIcon,
+	LoaderIcon,
+	MagnifierIcon,
+} from "@/components/icons"
+import {
+	CHANNEL_RESULT_LIMIT,
+	channelLabel,
+	channelPickerView,
+	resolveSearchQuery,
+} from "@/components/alerts/slack-channel-search"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { v2ErrorInfo } from "@/lib/error-messages"
@@ -20,7 +33,7 @@ import type { HazelChannelsListResponse } from "@maple/domain/http"
 import type { V2SlackChannelList } from "@maple/domain/http/v2"
 import { Exit, Option } from "effect"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "@maple/ui/components/ui/button"
 import {
 	Dialog,
@@ -47,11 +60,12 @@ import {
 	ComboboxInput,
 	ComboboxItem,
 	ComboboxList,
+	ComboboxStatus,
 } from "@maple/ui/components/ui/combobox"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Avatar, AvatarFallback, AvatarImage } from "@maple/ui/components/ui/avatar"
 import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { useOrganization } from "@clerk/clerk-react"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
@@ -582,10 +596,42 @@ function SlackBotFields({
 				Option.map(channelsResult.previousSuccess, (previous) => [...previous.value.channels]),
 			)
 		: null
-	const channels = Result.builder(channelsResult)
-		.onSuccess((c) => [...c.channels])
-		.orElse(() => previousChannels ?? ([] as V2SlackChannelList["channels"][number][]))
+	// Memoised on the Result so the array identity is stable between renders —
+	// ranking below keys off it, and a workspace can return thousands of rows.
+	const channels = useMemo(
+		() =>
+			Result.builder(channelsResult)
+				.onSuccess((c) => [...c.channels])
+				.orElse(() => previousChannels ?? ([] as V2SlackChannelList["channels"][number][])),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[channelsResult],
+	)
+	// The workspace has more channels than the API's page-capped walk could reach,
+	// so the list below is a prefix — say so rather than letting a missing channel
+	// read as "the bot can't see it".
+	const channelsTruncated = Result.builder(channelsResult)
+		.onSuccess((c) => c.truncated)
+		.orElse(() => false)
 	const channelsLoading = installed && channelsResult.waiting
+
+	// The Combobox's own filtering never ran here (Base UI only filters when the
+	// root is given `items`), so every channel stayed visible no matter what was
+	// typed. We rank and cap the list ourselves instead — see
+	// `slack-channel-search.ts` — and hand the result back as `items` so the
+	// popup's empty state and keyboard highlighting agree with what's rendered.
+	const [channelQuery, setChannelQuery] = useState("")
+	// Picking a channel makes Base UI write its label into the input; that is a
+	// selection, not a search, and must not narrow the list to one row. Compare
+	// against the same label function the Combobox displays — a private channel's
+	// label carries a " (private)" suffix that a bare-name compare misses, which
+	// left `searchQuery` holding "#alerts (private)" and emptied the picker.
+	const selectedChannel = channels.find((c) => c.id === form.slackChannelId)
+	const searchQuery = resolveSearchQuery(channelQuery, selectedChannel)
+	const { visible: visibleChannels, truncated } = useMemo(
+		() => channelPickerView(channels, searchQuery, form.slackChannelId || null),
+		[channels, searchQuery, form.slackChannelId],
+	)
+	const visibleChannelIds = useMemo(() => visibleChannels.map((c) => c.id), [visibleChannels])
 
 	// `GET /v2/integrations/slack/channels` is admin-gated (`requireAdmin`), so a
 	// regular member gets a 403 that no amount of retrying will clear. The v2
@@ -601,6 +647,15 @@ function SlackBotFields({
 	// A 403 is never worth a Retry button, with or without a stale list to fall
 	// back on. Everything else keeps the retryable error line.
 	const channelsFailed = Result.isFailure(channelsResult) && !channelsPermissionDenied
+
+	// `byId` backs both the label function and the value handler; the *visible*
+	// item ids come from `channelPickerView`, which already ranked and capped
+	// them, so Base UI is handed a finished list rather than filtering again.
+	const byId = useMemo(() => {
+		const map = new Map<string, V2SlackChannelList["channels"][number]>()
+		for (const channel of channels) map.set(channel.id, channel)
+		return map
+	}, [channels])
 
 	const statusPending = Result.isInitial(statusResult) && status === null
 	const statusFailed = Result.isFailure(statusResult) && status === null
@@ -674,14 +729,13 @@ function SlackBotFields({
 	}
 
 	const label = (id: string): string => {
-		const channel = channels.find((c) => c.id === id)
+		const channel = byId.get(id)
 		// Unknown id (stale/stored channel not in the fetched list): prefer the
 		// stored name, but never render an empty label — show the raw id.
 		if (!channel) return form.slackChannelName ? `#${form.slackChannelName}` : id
-		return channel.is_private ? `#${channel.name} (private)` : `#${channel.name}`
+		return channelLabel(channel)
 	}
 
-	const selectedChannel = channels.find((c) => c.id === form.slackChannelId)
 	// Editing keeps the stored channel until a new one is picked — its id isn't
 	// returned, so the form field is empty by design. Render the stored value as a
 	// value (not as placeholder gray, which reads as "nothing configured").
@@ -692,22 +746,49 @@ function SlackBotFields({
 
 	return (
 		<div className="space-y-1.5">
-			<div className="flex items-baseline justify-between gap-2">
+			<div className="flex items-center justify-between gap-2">
 				<Label htmlFor="destination-slack-channel" className="text-xs">
 					Channel
 				</Label>
-				{storedChannelName ? (
-					<span className="truncate text-[11px] text-muted-foreground">
-						Currently <span className="font-medium text-foreground">#{storedChannelName}</span>
-					</span>
-				) : null}
+				<div className="flex min-w-0 items-center gap-1.5">
+					{storedChannelName ? (
+						<span className="truncate text-[11px] text-muted-foreground">
+							Currently{" "}
+							<span className="font-medium text-foreground">#{storedChannelName}</span>
+						</span>
+					) : null}
+					{/* The list is fetched once per dialog and cached by reactivity key, so
+					    a channel created in Slack a minute ago isn't in it. Re-fetch in
+					    place: `refreshChannels` pokes the same atom, and the previous
+					    success keeps rendering, so the list never blanks mid-pick. */}
+					<Button
+						type="button"
+						size="xs"
+						variant="ghost"
+						className="-my-1 h-6 gap-1 px-1.5 text-[11px] text-muted-foreground"
+						onClick={refreshChannels}
+						disabled={channelsLoading}
+						title="Re-fetch the channel list from Slack"
+					>
+						<ArrowRotateClockwiseIcon
+							size={12}
+							className={cn(channelsLoading && "animate-spin")}
+						/>
+						{channelsLoading ? "Refreshing…" : "Refresh"}
+					</Button>
+				</div>
 			</div>
 			<Combobox
 				value={form.slackChannelId || null}
+				items={visibleChannelIds}
+				// Ranking and capping already happened in `visibleChannels`; Base UI
+				// must not filter the result a second time with its own matcher.
+				filter={null}
+				onInputValueChange={(value) => setChannelQuery(value)}
 				itemToStringLabel={(value: string) => label(value)}
 				onValueChange={(value) => {
 					if (value == null) return
-					const channel = channels.find((c) => c.id === value)
+					const channel = byId.get(value)
 					onFormChange((current) => ({
 						...current,
 						slackChannelId: value,
@@ -720,12 +801,25 @@ function SlackBotFields({
 					// The stored channel is shown as a value above; the placeholder stays
 					// the actual prompt so the field never looks pre-filled.
 					placeholder={channelsLoading ? "Loading channels…" : "Search channels…"}
+					// Single-select never clears the input on close, so a query that
+					// matched nothing would survive an Escape and reopen as an empty
+					// popup with no way out. The clear button is the way out.
+					showClear
 					className="w-full"
+					startAddon={<MagnifierIcon />}
 				/>
 				<ComboboxContent>
-					<ComboboxEmpty>No matching channels.</ComboboxEmpty>
+					{/* "Nothing matched" and "nothing loaded yet" are different problems
+					    with different next steps — don't collapse them into one line. */}
+					<ComboboxEmpty>
+						{channelsLoading
+							? "Loading channels…"
+							: channels.length === 0
+								? "No channels loaded yet."
+								: "No matching channels."}
+					</ComboboxEmpty>
 					<ComboboxList>
-						{channels.map((channel) => (
+						{visibleChannels.map((channel) => (
 							<ComboboxItem key={channel.id} value={channel.id}>
 								<span className="flex items-center gap-2">
 									<span className="truncate">#{channel.name}</span>
@@ -743,6 +837,20 @@ function SlackBotFields({
 							</ComboboxItem>
 						))}
 					</ComboboxList>
+					{/* Big workspaces run to thousands of channels; rendering them all is
+					    both slow and useless. Say that the list is a top-N so an absent
+					    channel reads as "keep typing", not "we don't have it".
+					    `truncated` means matches were actually dropped, so this can never
+					    render over an empty list — and while a query is active we don't
+					    know the true match count, only that it exceeded the cap, so don't
+					    print the workspace total as if it were one. */}
+					{truncated ? (
+						<ComboboxStatus>
+							{searchQuery.trim().length > 0
+								? `Showing the closest ${CHANNEL_RESULT_LIMIT} matches — keep typing to narrow.`
+								: `Showing ${CHANNEL_RESULT_LIMIT} of ${channels.length} channels — type to narrow.`}
+						</ComboboxStatus>
+					) : null}
 				</ComboboxContent>
 			</Combobox>
 			{channelsFailed ? (
@@ -754,7 +862,16 @@ function SlackBotFields({
 				</div>
 			) : channels.length === 0 && !channelsLoading ? (
 				<p className="text-[11px] text-muted-foreground">
-					No channels returned. Make sure the Maple bot has been added to at least one channel.
+					No channels returned. Make sure the Maple bot has been added to at least one channel, then
+					hit Refresh.
+				</p>
+			) : channelsTruncated ? (
+				// Deliberately no "do X to fix it": the walk is page-capped, so a
+				// channel past the cap stays out of reach whatever the user does in
+				// Slack. Saying the list is incomplete beats implying it's complete.
+				<p className="text-[11px] text-muted-foreground">
+					This workspace has more channels than Maple can list in one go, so some aren&apos;t shown
+					here.
 				</p>
 			) : null}
 			<p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">

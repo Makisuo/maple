@@ -15,7 +15,7 @@ observability tools. See [Multi-workspace architecture](#multi-workspace-archite
 | ---------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Framework  | eve `0.25.x` (durable agent runtime, Nitro HTTP host)                                                 | filesystem-first agents                                                                                                                                                                           |
 | Host       | **Railway** container running `eve start` (long-running Node)                                         | eve's supported self-host model; edge Workers is blocked today by a workflow-world protocol gap                                                                                                   |
-| Model      | **Cloudflare Workers AI** via REST (`workers-ai-provider`), `@cf/zai-org/glm-5.2`                     | `createWorkersAI({ accountId, apiKey })` → an AI-SDK model, no Workers runtime needed; streams structured tool calls, 256K window (see Notes)                                                     |
+| Model      | **OpenRouter** via REST (`@openrouter/ai-sdk-provider`), `openai/gpt-5.6-luna`                        | `createOpenRouter({ apiKey })` → an AI-SDK model; streams structured tool calls (see Notes)                                                                                                       |
 | Durability | **`@workflow/world-postgres`** (`5.0.0-beta.27`) + Railway Postgres                                   | protocol-compatible with eve's vendored `@workflow/*` 5.0.0-beta line                                                                                                                             |
 | Slack      | **self-managed, multi-workspace** (`slackChannel()` + custom `webhookVerifier` + per-team `botToken`) | one public app across many workspaces; static signing secret verifies inbound, per-team bot token resolved from the Maple API — see [Multi-workspace architecture](#multi-workspace-architecture) |
 | Maple      | **resolve endpoint** (`/internal/slack/workspaces/:teamId`) + **MCP** (`/mcp`)                        | per-team install lookup (TTL-cached) and observability tools scoped per org                                                                                                                       |
@@ -28,8 +28,8 @@ Key routes (all served by the one container): `POST /eve/v1/session`, `GET /eve/
 
 ```
 agent/
-  agent.ts            # model (Workers AI) + workflow world selection
-  instructions.md     # system prompt (Slack-adapted port of chat-flue's SYSTEM_PROMPT)
+  agent.ts            # model (OpenRouter) + workflow world selection
+  instructions.md     # system prompt (Slack-adapted port of the web chat's SYSTEM_PROMPT)
   instructions/maple-app-url.ts # injects MAPLE_APP_BASE_URL for deep links at session start
   instrumentation.ts  # OTel NodeSDK export to Maple's ingest (maple-slack-agent service)
   skills/dashboard-builder/     # test-before-propose dashboard workflow (load_skill)
@@ -68,7 +68,7 @@ railway.json          # DOCKERFILE builder, /eve/v1/health healthcheck
 
 ```bash
 cd apps/slack-agent
-cp .env.local.example .env.local   # fill in CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN
+cp .env.local.example .env.local   # fill in OPENROUTER_API_KEY
 bun install
 bun run dev                        # eve terminal UI — chat with the agent, test tools
 ```
@@ -199,7 +199,7 @@ variables in (d), since two of them embed the URL.
 
 **d. Set service variables:**
 
-- `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`
+- `OPENROUTER_API_KEY`
 - `SLACK_SIGNING_SECRET` — per-app/static; HMAC-verifies every inbound webhook.
 - `MAPLE_API_BASE_URL` — the Maple API base (e.g. `https://api.maple.dev`). **Also needed at build
   time**: it forms the Maple MCP connection URL, which eve bakes into its manifest at build (like
@@ -324,26 +324,32 @@ All seven are disabled with a `disableTool()` sentinel per file under `agent/too
 > `isDisabledToolSentinel`) and fails on both mistakes; `eve build` also writes the decision to
 > `.output/.eve/compile/compiled-agent-manifest.json` under `disabledFrameworkTools`.
 
-## Parity with the web chat (chat-flue)
+## Parity with the web chat
 
-This agent mirrors the Maple capabilities of `apps/chat-flue` (the Flue web chat) **without
-sharing code** — each capability is re-expressed in eve's native idiom:
+This agent mirrors the Maple capabilities of the web chat (`apps/api/src/chat/`, which replaced the
+Flue-based `apps/chat-flue` worker) **without sharing code** — each capability is re-expressed in
+eve's native idiom:
 
-- **Prompts:** `agent/instructions.md` is the Slack-adapted port of chat-flue's `SYSTEM_PROMPT`
+- **Prompts:** `agent/instructions.md` is the Slack-adapted port of the web chat's `SYSTEM_PROMPT`
+  (`apps/api/src/chat/prompts.ts`)
   (tool prefix `maple__<tool>` instead of `mcp__maple__<tool>`; inline `<<maple:...>>` cards
   replaced with Slack markdown + deep links built from `MAPLE_APP_BASE_URL`).
-- **Modes → skills:** chat-flue's dashboard-builder and investigate modes are progressive-
+- **Modes → skills:** the web chat's dashboard-builder and investigate modes are progressive-
   disclosure skills (`agent/skills/dashboard-builder/`, `agent/skills/incident-investigation/`)
   the model loads via `load_skill`. Alert context comes from the Slack thread (Maple delivers
   alert notifications into Slack), not from a request payload.
-- **Approvals — the one behavioral difference:** chat-flue uses propose-then-apply (the tool
-  returns a `proposed` marker; the web client performs the mutation) because Flue has no
-  human-in-the-loop interrupt. eve has native HITL: `agent/lib/approval.ts` gates the same
-  `MUTATING_TOOL_NAMES` set behind a Slack approve/deny card, and **on approve the real MCP
-  tool executes** with the workspace's `mapleApiKey` — approval is consent; the Maple API
-  boundary still enforces authorization. App-principal (automated/scheduled) turns are denied
-  mutations outright. The mutating-tool set is mirrored, not imported — keep in sync with
-  `apps/api/src/mcp/tools/mutating.ts` (source of truth) and `apps/chat-flue/src/lib/approval.ts`.
+- **Approvals — both sides now interrupt, by different mechanisms:** the web chat stops the turn on
+  a gated tool and emits a `tool-call` with `proposed: true` and no result
+  (`apps/api/src/chat/agent.ts`); the user approves and `POST /api/chat/apply` performs the
+  mutation, which is then recorded back into the transcript as that call's result. (Under Flue this
+  was propose-then-apply with a fabricated `proposed` marker as the tool's _output_, because Flue's
+  event stream had no human-in-the-loop primitive; that marker no longer exists.) eve has native
+  HITL: `agent/lib/approval.ts` gates the same `MUTATING_TOOL_NAMES` set behind a Slack
+  approve/deny card, and **on approve the real MCP tool executes** with the workspace's
+  `mapleApiKey` — approval is consent; the Maple API boundary still enforces authorization.
+  App-principal (automated/scheduled) turns are denied mutations outright. The mutating-tool set is
+  mirrored, not imported — keep in sync with `apps/api/src/mcp/tools/mutating.ts`, which is the
+  source of truth for both.
 - **Telemetry:** `agent/instrumentation.ts` exports AI SDK spans to Maple's ingest as service
   `maple-slack-agent` when `MAPLE_INGEST_KEY` is set (no-op otherwise), with `service.version` +
   `deployment.commit_sha` from Railway's `RAILWAY_GIT_COMMIT_SHA` so releases show up in the
@@ -351,17 +357,17 @@ sharing code** — each capability is re-expressed in eve's native idiom:
   `maple.slack.*` span attributes (omitted rather than empty-string when absent).
   `agent/hooks/outcome-log.ts` logs turn outcomes + tool failures unconditionally, through
   `lib/telemetry-log.ts` — OTLP `/v1/logs` when the ingest key is set (queryable and
-  trace-correlated, like chat-flue), a structured JSON line on stdout otherwise.
+  trace-correlated, like the web chat), a structured JSON line on stdout otherwise.
 - **Deliberately not ported:** page context and the widget-fix entry point (web-only payloads —
   the surgical fix _rules_ live in the dashboard-builder skill, with `get_dashboard` standing in
   for the attached widget JSON), the `submit_diagnosis` tool (the thread reply _is_ the report),
-  and the headless triage workflow (apps/api invokes chat-flue for that).
+  and the headless triage agent (`apps/api/src/workflows/triage-agent.ts`).
 - **Beyond parity — chart images:** the authored `render_chart` tool renders a time-series
   chart in-process (hand-rolled SVG → `@resvg/resvg-js`, no headless browser or external chart
   service) and posts it into the thread via Slack's external-upload flow with the per-team bot
   token (needs the `files:write` scope; the Dockerfile installs `fonts-dejavu-core` for text
   rasterization). On render/upload failure it returns a Unicode sparkline for the model to
-  inline. This is net-new: chat-flue renders no images anywhere.
+  inline. This is net-new: the web chat renders no images anywhere.
 
 Env vars added by this parity work (set on Railway; all runtime-only):
 
@@ -423,7 +429,7 @@ patch mirrors the resolver shape proposed in #222 and can be dropped when upstre
 The same patch file carries a second, Maple-specific hunk: `McpConnectionClient.executeTool`
 (`dist/src/runtime/connections/mcp-client.js`) strips tool-result content entries tagged
 `__maple_ui`. Maple's MCP server emits those structured payloads for the web chat's tables and
-charts (`createDualContent` in apps/api); chat-flue splits them off client-side
+charts (`createDualContent` in apps/api); the web chat splits them off client-side
 (`splitToolResult`), and eve has no result-transform hook, so without the patch the model would
 receive the raw UI JSON duplicated next to the text report on every Maple tool call. Guarded by
 `agent/lib/eve-patch.test.ts` alongside the botToken canary.
@@ -458,49 +464,31 @@ and **activate public distribution** so the app can be installed into any worksp
 ## Notes
 
 - **Model must support tool calling _while streaming_.** eve's harness is tool-driven and always
-  streams, and that second half is the constraint that actually bites. Several Workers AI models
-  parse tool calls only on non-streaming requests; streamed, they emit the model's raw tool-call
-  JSON as ordinary text deltas, which the agent then posts into Slack verbatim:
+  streams, and that second half is the constraint that actually bites. Some models/providers parse
+  tool calls only on non-streaming requests; streamed, they emit the model's raw tool-call JSON as
+  ordinary text deltas, which the agent then posts into Slack verbatim:
 
     ```
     {"type": "function", "name": "ask_question", "parameters": {"prompt": "…", "allowFreeform": "true"}}
     ```
 
-    `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (the previous default) has exactly this bug — it
-    returns a proper `tool_calls` array non-streaming, but streams the JSON as text. It also
-    stringifies non-string arguments (`"allowFreeform": "true"`) even in the structured form.
-    `@cf/zai-org/glm-5.2` (the current default) streams OpenAI-shaped incremental `delta.tool_calls`
-    chunks — name and id on the first, argument fragments keyed by `index` after — terminated by
-    `finish_reason: "tool_calls"`, which `workers-ai-provider` maps correctly. (The provider does have
-    a text-salvage path for leaked tool calls, but it only engages for a _forced_ tool choice — eve
-    uses auto, so it never fires here.)
+    (We hit exactly this on Workers AI's `@cf/meta/llama-3.3-70b-instruct-fp8-fast` before moving
+    to OpenRouter — proper `tool_calls` array non-streaming, JSON-as-text when streamed.)
 
-    Both `@cf/zai-org/glm-5.2` and `@cf/openai/gpt-oss-120b` are verified good. Workers AI prices
-    them very differently, so the choice is a real trade-off:
-
-    | Model                       | Context | $/M in | $/M out |
-    | --------------------------- | ------- | ------ | ------- |
-    | `@cf/zai-org/glm-5.2`       | 256K    | 1.40   | 4.40    |
-    | `@cf/openai/gpt-oss-120b`   | 128K    | 0.35   | 0.75    |
-    | `@cf/zai-org/glm-4.7-flash` | 128K    | 0.06   | 0.40    |
-
-    We're on GLM-5.2 for headroom as Maple domain tools land — reasoning over traces and spans is a
-    harder job than the generic tools here, and long Slack threads benefit from the 256K window. If
-    spend becomes the concern before the tools get hard, gpt-oss-120b handled the current toolset
-    identically at roughly a fifth the output cost.
-
-    Before switching `WORKERS_AI_MODEL`, check the streaming shape directly:
+    The current default is `openai/gpt-5.6-luna` via OpenRouter, which streams OpenAI-shaped
+    incremental `delta.tool_calls` chunks that `@openrouter/ai-sdk-provider` maps correctly. When
+    switching `OPENROUTER_MODEL`, verify the streaming shape directly:
 
     ```bash
-    curl "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/<model>" \
-      -H "authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'content-type: application/json' \
-      -d '{"stream":true,"messages":[{"role":"user","content":"what time is it in Tokyo?"}],
+    curl https://openrouter.ai/api/v1/chat/completions \
+      -H "authorization: Bearer $OPENROUTER_API_KEY" -H 'content-type: application/json' \
+      -d '{"model":"<model>","stream":true,"messages":[{"role":"user","content":"what time is it in Tokyo?"}],
            "tools":[{"type":"function","function":{"name":"get_time","description":"Get the time in a timezone.",
            "parameters":{"type":"object","properties":{"timezone":{"type":"string"}},"required":["timezone"]}}}]}'
     ```
 
-    The SSE must carry `delta.tool_calls`, not a JSON blob inside `response`. Also set
-    `WORKERS_AI_CONTEXT_WINDOW` to the new model's window.
+    The SSE must carry `delta.tool_calls`, not a JSON blob inside the text content. Also set
+    `OPENROUTER_CONTEXT_WINDOW` to the new model's window.
 
 - **Auth:** `agent/channels/eve.ts` fails closed in deployed environments (`RAILWAY_ENVIRONMENT_NAME`
   set, or `NODE_ENV=production`): the browser/API routes always require HTTP Basic there. With

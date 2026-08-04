@@ -1,5 +1,10 @@
 import { Clock, Effect, Schema } from "effect"
-import { QueryEngineExecuteRequest, TracesFacetDimension, type AttributeFilter } from "@maple/query-engine"
+import {
+	QueryEngineExecuteRequest,
+	TracesFacetDimension,
+	type AttributeFilter,
+	formatWarehouseDateTime,
+} from "@maple/query-engine"
 import { TraceId, SpanId } from "@maple/domain"
 import {
 	DeploymentEnvironment,
@@ -22,7 +27,7 @@ import {
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
 import { getHttpInfo, type HttpInfo } from "@maple/ui/lib/http"
-import type { Span, SpanNode } from "@maple/ui/types"
+import type { Span, SpanNode } from "@maple/ui/lib/types"
 import {
 	buildSpanTree,
 	dedupeBySpanId,
@@ -329,7 +334,7 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 // Canonical Span/SpanNode shapes live in @maple/ui so the shared trace
 // components can consume them; re-export here so existing
 // `@/api/warehouse/traces` importers keep working unchanged.
-export type { Span, SpanNode } from "@maple/ui/types"
+export type { Span, SpanNode } from "@maple/ui/lib/types"
 
 export interface SpanHierarchyResponse {
 	traceId: TraceId
@@ -670,8 +675,10 @@ export function getSpanAttributeKeys({ data }: { data: GetSpanAttributeKeysInput
 }
 
 const defaultTimeRange = (nowMillis: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMillis - 24 * 60 * 60 * 1000), endTime: fmt(nowMillis) }
+	return {
+		startTime: formatWarehouseDateTime(nowMillis - 24 * 60 * 60 * 1000),
+		endTime: formatWarehouseDateTime(nowMillis),
+	}
 }
 
 const getSpanAttributeKeysEffect = Effect.fn("QueryEngine.getSpanAttributeKeys")(function* ({

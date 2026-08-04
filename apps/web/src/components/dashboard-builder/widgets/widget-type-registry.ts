@@ -38,6 +38,12 @@ export type VisualizationComponent = ComponentType<{
 	dataState: WidgetDataState
 	display: WidgetDisplayConfig
 	mode: WidgetMode
+	/**
+	 * The widget's configured row cap, when it has one. Lives on the data source
+	 * rather than the display, so it is threaded in separately: a table that
+	 * returned exactly this many rows is showing a truncated top-N, and says so.
+	 */
+	rowLimit?: number
 }>
 
 export interface BuildDisplayContext {

@@ -194,7 +194,12 @@ describe("bundled migrations", () => {
 
 		await pg.exec(readFileSync(resolve(migrationsDir(), "0026_windy_bromley.sql"), "utf8"))
 
-		for (const table of ["alert_delivery_events", "alert_incidents", "alert_rule_states", "alert_rules"]) {
+		for (const table of [
+			"alert_delivery_events",
+			"alert_incidents",
+			"alert_rule_states",
+			"alert_rules",
+		]) {
 			const deleted = await pg.query<{ count: number }>(
 				`SELECT count(*)::int AS count FROM ${table} WHERE ${table === "alert_rules" ? "id" : "rule_id"} = 'rule_metric'`,
 			)

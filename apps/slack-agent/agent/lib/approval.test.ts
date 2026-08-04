@@ -110,7 +110,7 @@ describe("mapleToolApproval", () => {
 // ── drift canary ────────────────────────────────────────────────────────────
 
 // Mirrors apps/api/src/mcp/tools/mutating.ts and
-// apps/chat-flue/src/lib/approval.ts. If this snapshot fails, either sync all
+// apps/api/src/mcp/tools/mutating.ts. If this snapshot fails, either sync all
 // three copies deliberately or revert the accidental edit.
 
 /**

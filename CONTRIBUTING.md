@@ -104,7 +104,7 @@ INGEST_PORT=3474
 MAPLE_SELF_HOSTED_MODE=single_tenant
 MAPLE_ORG_ID_OVERRIDE=default
 
-# Internal service auth (must match across api, scraper, chat-flue)
+# Internal service auth (must match across api and scraper)
 INTERNAL_SERVICE_TOKEN=dev-internal-service-token
 SD_INTERNAL_TOKEN=dev-internal-service-token
 
@@ -191,7 +191,7 @@ Default URL: `http://localhost:3472`
 | `CLICKHOUSE_URL`                                                  | recommended           | `http://localhost:8123` for local ClickHouse stack                                                   |
 | `CLICKHOUSE_PROVIDER`                                             | optional              | `tinybird` (default) or `clickhouse`; set `clickhouse` for env-level vanilla/self-managed ClickHouse |
 | `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_DATABASE` | with CH               | Match docker-compose (`maple` / `maple` / `default`)                                                 |
-| `INTERNAL_SERVICE_TOKEN`                                          | recommended           | Shared with scraper + chat-flue                                                                      |
+| `INTERNAL_SERVICE_TOKEN`                                          | recommended           | Internal MCP tool calls; shared with the scraper                                                     |
 | `SD_INTERNAL_TOKEN`                                               | optional              | Prometheus scraper internal API auth                                                                 |
 | `CLERK_*`                                                         | clerk mode            | See `.env.example`                                                                                   |
 
@@ -211,7 +211,6 @@ Default URL: `http://localhost:3471`
 | `VITE_API_BASE_URL`     | yes        | `http://localhost:3472` (or portless `https://api.localhost`) |
 | `VITE_MAPLE_AUTH_MODE`  | yes        | Mirror `MAPLE_AUTH_MODE`                                      |
 | `VITE_INGEST_URL`       | optional   | Defaults derived; set if ingest port differs                  |
-| `VITE_FLUE_CHAT_URL`    | optional   | Chat agent URL when testing Flue chat                         |
 | `VITE_CLERK_*`          | clerk mode | Publishable key + sign-in URLs                                |
 | `VITE_MAPLE_INGEST_KEY` | optional   | Browser self-telemetry via ingest                             |
 
@@ -262,57 +261,31 @@ Default health port: `3475`
 
 Loads `../../.env.local` via `bun --env-file`.
 
-### 5. Chat agent (`apps/chat-flue`)
+### 5. AI chat and triage (in `apps/api`)
 
-Required for `/chat` and `/investigations/*` — Flue-based chat + triage on Workers AI.
+`/chat` and `/investigations/*` are served by `apps/api` itself: the `ChatSession` Durable
+Object owns each transcript and the agent turn runs in-process on `@maple/llm` against the
+Workers AI `AI` binding. There is no second worker to start — but the chat routes only work
+when `apps/api` is running **under wrangler** (`cd apps/api && bun dev:app`), because a plain
+`bun` process has neither the Durable Object namespace nor the `AI` binding.
 
-```bash
-bun --filter=@maple/chat-flue dev:app   # or just `bun dev` from the repo root
-```
-
-`.dev.vars` is **generated**, not copied: `dev:app` runs
-`scripts/sync-chat-flue-dev-vars.ts`, which projects `INTERNAL_SERVICE_TOKEN`, the auth
-mode and the Clerk keys out of the repo-root `.env.local`. They must match `apps/api` and
-`apps/web` or `/agents/*` rejects every browser request with a bare `401`. Local-only
-overrides go below the marker in `.dev.vars` and survive regeneration.
-
-Cloudflare target needs a Cloudflare account with Workers AI (`wrangler login`). Confirm
-the model id in `src/agents/maple-chat.ts` is still in the catalog — `bunx wrangler ai
-models list`; a retired id returns `410`. Override with `MAPLE_CHAT_MODEL`.
-
-**Both workers must be running.** `apps/api` reaches chat-flue over the `CHAT_FLUE`
-service binding and chat-flue calls back over `MAPLE_API_RPC`; the two resolve through
-wrangler's local dev registry, which needs `maple-api` and `maple-chat-flue` to be
-registered at the same time:
-
-```bash
-ls ~/Library/Preferences/.wrangler/registry/   # expect maple-api and maple-chat-flue
-```
-
-Start order doesn't matter, but kill stale `wrangler dev` processes first — two of them
-write the same registry entry and the last writer wins.
-
-When something goes wrong, the `investigations.error` column names it:
-
-| `error` value                             | Cause                                                          |
-| ----------------------------------------- | -------------------------------------------------------------- |
-| `start_failed: agent returned HTTP 503`   | `maple-chat-flue` is not in the dev registry                   |
-| `agent_unavailable: …`                    | `apps/api` isn't running under wrangler (no `CHAT_FLUE`)       |
-| `start_rejected: agent returned HTTP 401` | `INTERNAL_SERVICE_TOKEN` mismatch                              |
-| `start_rejected: agent returned HTTP 403` | Vite rejected the request's `Host` — see `chat-flue-origin.ts` |
+The `AI` binding needs a Cloudflare account with Workers AI (`wrangler login`). Confirm the
+default model id in `apps/api/src/lib/Llm.ts` is still in the catalog — `bunx wrangler ai
+models list`; a retired id returns `410`. Override it with `MAPLE_TRIAGE_MODEL`.
 
 > **`MAPLE_ORG_ID_OVERRIDE` breaks the investigation chat.** It pins every API request to
-> one org, but the browser addresses the chat agent as `<clerk org>:<tab>`. With the
-> override set to anything other than your Clerk organization's id, the page watches an
-> agent instance the API never seeded, and the transcript stays empty forever. Unset it,
+> one org, but the browser addresses the session as `<clerk org>:<tab>`. With the
+> override set to anything other than your Clerk organization's id, the page watches a
+> session the API never seeded, and the transcript stays empty forever. Unset it,
 > or set it to your Clerk org id, when working on chat.
 
-The **Node target** (`flue dev --target node`) has neither the `AI` binding nor
-`MAPLE_API_RPC`, so tools and `submit_diagnosis` cannot work — it is not usable for
-investigations.
+When an autonomous investigation fails to start, the `investigations.error` column names it:
 
-Under portless the web app finds the agent automatically (`https://chat-flue.localhost`).
-On raw ports, set `VITE_FLUE_CHAT_URL=http://localhost:3583`.
+| `error` value                                                    | Cause                                                                          |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `agent_unavailable: …`                                           | `apps/api` isn't running under wrangler, so there is no `CHAT_SESSION` binding |
+| `start_failed: a turn is already running for this investigation` | The session is busy; retry                                                     |
+| `diagnosis_timeout: …`                                           | The turn ran but never called `submit_diagnosis` within 15 minutes             |
 
 ### All-in-one alternatives
 
@@ -340,9 +313,6 @@ procs:
     scraper:
         shell: bun dev
         cwd: apps/scraper
-    chat-flue:
-        shell: bun flue dev --target node --env ../../.env.local
-        cwd: apps/chat-flue
 ```
 
 Run with `mprocs development.mprocs.yaml`.

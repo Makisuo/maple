@@ -11,17 +11,17 @@ import {
 	UserId,
 } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { Env } from "../../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import {
 	SLACK_CALLBACK_PATH,
 	SlackIntegrationService,
 	type SlackIntegrationServiceShape,
-} from "../../services/SlackIntegrationService"
+} from "@/services/integrations/SlackIntegrationService"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -409,10 +409,13 @@ describe("v2 slack integration over HTTP", () => {
 	it("returns the bespoke channel-list envelope with snake_case channel flags", async () => {
 		const harness = makeHarness({
 			listChannels: () =>
-				Effect.succeed([
-					{ id: "C0789CHAN", name: "incidents", isPrivate: false, isMember: true },
-					{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: false },
-				]),
+				Effect.succeed({
+					channels: [
+						{ id: "C0789CHAN", name: "incidents", isPrivate: false, isMember: true },
+						{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: false },
+					],
+					truncated: false,
+				}),
 		})
 		const key = await harness.bootstrapAdminKey()
 
@@ -425,7 +428,26 @@ describe("v2 slack integration over HTTP", () => {
 				{ id: "C0789CHAN", name: "incidents", is_private: false, is_member: true },
 				{ id: "C0790PRIV", name: "sre-private", is_private: true, is_member: false },
 			],
+			truncated: false,
 		})
+		await harness.dispose()
+	})
+
+	it("reports a page-capped walk as truncated on the wire", async () => {
+		const harness = makeHarness({
+			listChannels: () =>
+				Effect.succeed({
+					channels: [{ id: "C0789CHAN", name: "incidents", isPrivate: false, isMember: true }],
+					truncated: true,
+				}),
+		})
+		const key = await harness.bootstrapAdminKey()
+
+		const { status, body } = await harness.request("GET", "/v2/integrations/slack/channels", key.secret)
+		expect(status).toBe(200)
+		// The client renders an "incomplete list" note off this flag, so it must
+		// survive the wire mapping rather than defaulting to false.
+		expect(body.truncated).toBe(true)
 		await harness.dispose()
 	})
 
@@ -435,7 +457,10 @@ describe("v2 slack integration over HTTP", () => {
 			listChannels: () =>
 				Effect.sync(() => {
 					called = true
-					return [{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: true }]
+					return {
+						channels: [{ id: "C0790PRIV", name: "sre-private", isPrivate: true, isMember: true }],
+						truncated: false,
+					}
 				}),
 		})
 		const member = await harness.bootstrapMemberKey()

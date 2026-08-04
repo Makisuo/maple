@@ -1,12 +1,11 @@
 // ---------------------------------------------------------------------------
 // Typed Service Map Queries
 //
-// Mix of raw-SQL builders (org-wide variants — `*SQL`) and typesafe-DSL
-// builders (service-scoped variants — `*Query`). Both styles co-exist because
-// the cross-span rollup helper (`serviceMapEdgeJoinSQL`) needs to emit raw
-// SQL fragments callable from outside the DSL (the rollup service in
-// `apps/api/src/services/ServiceMapRollupService.ts`), while the
-// service-detail page builders go fully through `CH.compile()`.
+// `*Query` exports return a `CHQuery` for the caller to compile; `*SQL` exports
+// compile it themselves and attach a row schema. Both go through the DSL, so
+// every query's tenant scope is derived from its predicates rather than
+// asserted — see `serviceMapEdgeJoinQuery` for why that distinction earned its
+// own paragraph.
 // ---------------------------------------------------------------------------
 
 import {
@@ -18,18 +17,17 @@ import {
 	presentableStatementSql,
 } from "@maple/domain/tinybird/db-query-shape-sql"
 import { Schema } from "effect"
-import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
-import {
-	compileCH,
-	unsafeCompiledQuery,
-	type CompiledQuery,
-	type CompiledQueryRowSchema,
-} from "@maple-dev/clickhouse-builder"
+import { compileCH, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { defineCondFn, defineFn } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
+// From the root, not `/expr`: this overload takes a `CHQuery`, so the subquery
+// keeps its params, table names and column types checked.
+import { inSubquery } from "@maple-dev/clickhouse-builder"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, fromUnion } from "@maple-dev/clickhouse-builder"
 import {
+	ServiceAddressResolutionsHourly,
+	ServiceExternalEdgesHourly,
 	ServiceMapChildren,
 	ServiceMapDbEdgesHourly,
 	ServiceMapDbQueryShapesHourly,
@@ -78,184 +76,161 @@ const ServiceDependenciesOutputSchema: CompiledQueryRowSchema<ServiceDependencie
 	estimatedSpanCount: CHNumber,
 })
 
+/** The `th:` TraceState marker for a consistent-probability sampling decision. */
+const SAMPLED_TRACE_STATE_RE = "th:[0-9a-f]+"
+
 /**
- * Topology-join SQL that derives service-to-service edges for the half-open
- * window `[startExpr, endExpr)`.
+ * Sample-weight expression: `1 / (1 - acceptanceProbability)` for spans carrying
+ * a `th:` TraceState threshold, else `1.0` (unsampled).
+ *
+ * The bit math stays raw — `reinterpretAsUInt64`/`unhex`/`rightPad`/`pow`/
+ * `reverse` aren't worth promoting to first-class DSL helpers for one call site.
+ */
+const sampleWeightExpr = (traceState: CH.Expr<string>) =>
+	CH.multiIf(
+		[
+			[
+				_matchRegex(traceState, SAMPLED_TRACE_STATE_RE),
+				CH.rawExpr<number>(
+					"1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001)",
+				),
+			],
+		],
+		CH.rawExpr<number>("1.0"),
+	)
+
+/**
+ * The parent(Client/Producer) ⋈ child(Server/Consumer) span join that every
+ * service-map edge builder is a projection of.
+ *
+ * Returns the joined query with `p` as the main source and `c` as the joined
+ * alias, before any SELECT — callers pick the output shape. Both sides filter
+ * `OrgId`, so anything built on this derives `tenantScope: "org"` without the
+ * outer query having to repeat the predicate.
+ *
+ * `parentServiceName` is pushed into the parent subquery rather than the outer
+ * WHERE, so ClickHouse skips the full Client/Producer scan and shrinks the
+ * join's left side to one service's outbound spans. The rollup omits it to
+ * cover every service.
+ */
+function serviceMapEdgeJoinSource(opts: {
+	rangeStart: CH.Expr<string>
+	rangeEnd: CH.Expr<string>
+	deploymentEnv?: string
+	parentServiceName?: string
+}) {
+	const envFilter = (deploymentEnv: CH.Expr<string>) =>
+		opts.deploymentEnv ? deploymentEnv.eq(opts.deploymentEnv) : undefined
+
+	const parentSpans = from(ServiceMapSpans)
+		.select(($) => ({
+			OrgId: $.OrgId,
+			Timestamp: $.Timestamp,
+			TraceId: $.TraceId,
+			SpanId: $.SpanId,
+			ServiceName: $.ServiceName,
+			DeploymentEnv: $.DeploymentEnv,
+		}))
+		.where(($) => [
+			$.SpanKind.in_("Client", "Producer"),
+			$.Timestamp.gte(opts.rangeStart),
+			$.Timestamp.lt(opts.rangeEnd),
+			$.OrgId.eq(param.string("orgId")),
+			envFilter($.DeploymentEnv),
+			opts.parentServiceName ? $.ServiceName.eq(opts.parentServiceName) : undefined,
+		])
+
+	const childSpans = from(ServiceMapChildren)
+		.select(($) => ({
+			TraceId: $.TraceId,
+			ParentSpanId: $.ParentSpanId,
+			ServiceName: $.ServiceName,
+			Duration: $.Duration,
+			StatusCode: $.StatusCode,
+			TraceState: $.TraceState,
+		}))
+		.where(($) => [
+			$.Timestamp.gte(opts.rangeStart),
+			$.Timestamp.lt(opts.rangeEnd),
+			$.OrgId.eq(param.string("orgId")),
+			envFilter($.DeploymentEnv),
+		])
+
+	// In a join the main subquery's columns auto-qualify with its alias
+	// (`p.ServiceName`); joined columns are reached via `$.c.Column`.
+	return fromQuery(parentSpans, "p").innerJoinQuery(childSpans, "c", (p, c) =>
+		p.SpanId.eq(c.ParentSpanId).and(p.TraceId.eq(c.TraceId)),
+	)
+}
+
+/**
+ * Service-to-service edges for `[rangeStart, rangeEnd)`, projected with the
+ * exact column shape of the `service_map_edges_hourly` table so the rollup can
+ * `ingest` the rows unchanged.
  *
  * The downstream service name is recovered by joining each Client/Producer span
  * to its child Server/Consumer span: modern OTEL instrumentation no longer
- * emits a `peer.service` attribute (only `server.address`, a hostname), so the
- * parent→child span join is the only reliable source of the *logical*
- * downstream service. A ClickHouse materialized view cannot express this
- * cross-span join, which is why `service_map_edges_hourly` is filled by the
- * scheduled `ServiceMapRollupService` rollup rather than an MV.
- *
- * Produces one row per `(OrgId, Hour, SourceService, TargetService,
- * DeploymentEnv)` with the exact column shape of the `service_map_edges_hourly`
- * table — used both by the rollup (one completed hour per call) and by
- * `serviceDependenciesSQL`'s in-progress-hour branch.
+ * emits `peer.service` (only `server.address`, a hostname), so the parent→child
+ * span join is the only reliable source of the *logical* downstream service. A
+ * materialized view cannot express a cross-span join, which is why
+ * `service_map_edges_hourly` is filled by the scheduled
+ * `ServiceMapRollupService` rather than an MV.
  *
  * `SampleRateSum` is computed inline from the child span's `th:` TraceState
  * threshold because `service_map_children` carries no `SampleRate` column.
  *
- * `startExpr` / `endExpr` are raw SQL datetime expressions — the caller is
- * responsible for quoting any literals (e.g. `toDateTime('2026-05-16 09:00:00')`).
- *
- * `orgId` scopes the join to one org. Omit it only for the all-orgs backfill
- * script, which connects to ClickHouse directly; every in-app caller (the
- * rollup and `serviceDependenciesSQL`) must pass it so the query is tenant-scoped.
+ * This used to be a SQL-string builder taking an optional `orgId` that degraded
+ * to an empty filter for a backfill script — i.e. a join across every tenant's
+ * spans, wrapped by both callers in `unsafeCompiledQuery({ tenantScope: "org" })`
+ * so an omitted org id would have been positively ASSERTED as scoped and sailed
+ * through the executor's gate. The org filter is now structural: it comes from
+ * `param.string("orgId")` inside the join source, and the scope is derived. A
+ * cross-org backfill needs its own explicitly-named entry point.
  */
-export function serviceMapEdgeJoinSQL(params: {
-	orgId?: string
-	startExpr: string
-	endExpr: string
+export function serviceMapEdgeJoinQuery(opts: {
+	rangeStart: CH.Expr<string>
+	rangeEnd: CH.Expr<string>
 	deploymentEnv?: string
-	/**
-	 * Optional source-service filter applied to the parent (`p`) subquery — the
-	 * Client/Producer span emitting the outbound call. Pushing this filter into
-	 * the inner SELECT (rather than the outer WHERE) lets ClickHouse skip the
-	 * full Client/Producer scan and shrink the JOIN's left side to a single
-	 * service's outbound spans. The rollup callers in `service-map-rollup.ts`
-	 * omit this so they continue to cover every service.
-	 */
 	parentServiceName?: string
-}): string {
-	const esc = escapeClickHouseString
-	const orgFilter = params.orgId ? `AND OrgId = '${esc(params.orgId)}'` : ""
-	const envFilter = params.deploymentEnv ? `AND DeploymentEnv = '${esc(params.deploymentEnv)}'` : ""
-	const parentServiceFilter = params.parentServiceName
-		? `AND ServiceName = '${esc(params.parentServiceName)}'`
-		: ""
-	return `SELECT
-      p.OrgId AS OrgId,
-      toStartOfHour(p.Timestamp) AS Hour,
-      p.ServiceName AS SourceService,
-      c.ServiceName AS TargetService,
-      p.DeploymentEnv AS DeploymentEnv,
-      count() AS CallCount,
-      countIf(c.StatusCode = 'Error') AS ErrorCount,
-      sum(c.Duration / 1000000) AS DurationSumMs,
-      max(c.Duration / 1000000) AS MaxDurationMs,
-      countIf(match(c.TraceState, 'th:[0-9a-f]+')) AS SampledSpanCount,
-      countIf(NOT match(c.TraceState, 'th:[0-9a-f]+')) AS UnsampledSpanCount,
-      sum(multiIf(
-        match(c.TraceState, 'th:[0-9a-f]+'),
-        1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001),
-        1.0
-      )) AS SampleRateSum
-    FROM (
-      SELECT OrgId, Timestamp, TraceId, SpanId, ServiceName, DeploymentEnv
-      FROM service_map_spans
-      WHERE SpanKind IN ('Client', 'Producer')
-        AND Timestamp >= ${params.startExpr}
-        AND Timestamp < ${params.endExpr}
-        ${orgFilter}
-        ${envFilter}
-        ${parentServiceFilter}
-    ) AS p
-    INNER JOIN (
-      SELECT TraceId, ParentSpanId, ServiceName, Duration, StatusCode, TraceState
-      FROM service_map_children
-      WHERE Timestamp >= ${params.startExpr}
-        AND Timestamp < ${params.endExpr}
-        ${orgFilter}
-        ${envFilter}
-    ) AS c
-    ON p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId
-    WHERE p.ServiceName != c.ServiceName
-    GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv`
+}) {
+	return serviceMapEdgeJoinSource(opts)
+		.select(($) => ({
+			OrgId: $.OrgId,
+			Hour: CH.toStartOfHour($.Timestamp),
+			SourceService: $.ServiceName,
+			TargetService: $.c.ServiceName,
+			DeploymentEnv: $.DeploymentEnv,
+			CallCount: CH.count(),
+			ErrorCount: CH.countIf($.c.StatusCode.eq("Error")),
+			DurationSumMs: CH.sum($.c.Duration.div(1000000)),
+			MaxDurationMs: CH.max_($.c.Duration.div(1000000)),
+			SampledSpanCount: CH.countIf(_matchRegex($.c.TraceState, SAMPLED_TRACE_STATE_RE)),
+			UnsampledSpanCount: CH.countIf(CH.not(_matchRegex($.c.TraceState, SAMPLED_TRACE_STATE_RE))),
+			SampleRateSum: CH.sum(sampleWeightExpr($.c.TraceState)),
+		}))
+		.where(($) => [$.ServiceName.neq($.c.ServiceName)])
+		.groupBy("OrgId", "Hour", "SourceService", "TargetService", "DeploymentEnv")
 }
 
+/**
+ * Org-wide service dependencies — every edge, for the global services map.
+ *
+ * Same builder as the service-scoped variant with the `serviceName` filter
+ * dropped; see {@link serviceDependenciesQueryBase} for the branch structure.
+ */
 export function serviceDependenciesSQL(
 	opts: ServiceDependenciesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
 ): CompiledQuery<ServiceDependenciesOutput> {
-	const esc = escapeClickHouseString
-	const envFilter = opts.deploymentEnv ? `AND DeploymentEnv = '${esc(opts.deploymentEnv)}'` : ""
-
-	// Inner branches expose distinct alias names (`bucket*`) so the outer
-	// SELECT's `sum(...) AS callCount` doesn't collide with an inner
-	// `sum(CallCount) AS callCount`. ClickHouse's UNION-ALL+GROUP-BY
-	// optimizer otherwise rewrites the outer as `sum(sum(CallCount))` and
-	// rejects the query with "found inside another aggregate function".
-	//
-	// We also carry `bucketDurationSumMs` separately from `bucketCallCount`
-	// so the outer can compute a properly-weighted average:
-	//   sum(bucketDurationSumMs) / sum(bucketCallCount)
-	// instead of `avg(avgDurationMs)` (averaging averages, which ignores
-	// the relative call counts of each branch).
-	//
-	// Only complete interior hours may come from the hourly rollup. The partial
-	// start and end hours are read from raw spans so neither edge includes data
-	// outside the requested half-open window. `startEdgeEnd` also collapses a
-	// same-hour request into one raw branch; the end branch is then empty.
-	const startDateTime = `toDateTime('${esc(params.startTime)}')`
-	const endDateTime = `toDateTime('${esc(params.endTime)}')`
-	const startHour = `toStartOfHour(${startDateTime})`
-	const endHour = `toStartOfHour(${endDateTime})`
-	const startEdgeEnd = `least(${endDateTime}, if(${startDateTime} = ${startHour}, ${startDateTime}, addHours(${startHour}, 1)))`
-	const endEdgeStart = `greatest(${startEdgeEnd}, ${endHour})`
-	const completedHourEdges = `SELECT
-      SourceService AS sourceService,
-      TargetService AS targetService,
-      sum(CallCount) AS bucketCallCount,
-      sum(ErrorCount) AS bucketErrorCount,
-      sum(DurationSumMs) AS bucketDurationSumMs,
-      max(MaxDurationMs) AS bucketMaxDurationMs,
-      sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
-    FROM service_map_edges_hourly
-    WHERE OrgId = '${esc(params.orgId)}'
-	  AND Hour >= ${startEdgeEnd}
-	  AND Hour < ${endHour}
-      ${envFilter}
-    GROUP BY sourceService, targetService`
-
-	// Live topology join for the in-progress hour only — the rollup has not
-	// yet sealed this hour into `service_map_edges_hourly`. Reuses the exact
-	// SQL the rollup runs (`serviceMapEdgeJoinSQL`) so the two stay in lockstep,
-	// then re-aggregates dropping `Hour` into the `bucket*` shape.
-	const joinEdges = (startExpr: string, endExpr: string) => `SELECT
-      SourceService AS sourceService,
-      TargetService AS targetService,
-      sum(CallCount) AS bucketCallCount,
-      sum(ErrorCount) AS bucketErrorCount,
-      sum(DurationSumMs) AS bucketDurationSumMs,
-      max(MaxDurationMs) AS bucketMaxDurationMs,
-      sum(SampleRateSum) AS bucketEstimatedSpanCount
-    FROM (
-      ${serviceMapEdgeJoinSQL({
+	return compileCH(
+		serviceDependenciesQueryBase({ deploymentEnv: opts.deploymentEnv }),
+		{
 			orgId: params.orgId,
-			startExpr,
-			endExpr,
-			deploymentEnv: opts.deploymentEnv,
-		})}
-    )
-    GROUP BY sourceService, targetService`
-
-	const sql = `SELECT
-  sourceService,
-  targetService,
-  sum(bucketCallCount) AS callCount,
-  sum(bucketErrorCount) AS errorCount,
-  sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-  max(bucketMaxDurationMs) AS p95DurationMs,
-  sum(bucketEstimatedSpanCount) AS estimatedSpanCount
-FROM (
-  ${completedHourEdges}
-  UNION ALL
-  ${joinEdges(startDateTime, startEdgeEnd)}
-  UNION ALL
-  ${joinEdges(endEdgeStart, endDateTime)}
-)
-GROUP BY sourceService, targetService
-ORDER BY callCount DESC
-LIMIT 200
-FORMAT JSON`
-
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServiceDependenciesOutputSchema,
-	})
+			startTime: params.startTime,
+			endTime: params.endTime,
+		},
+		{ rowSchema: ServiceDependenciesOutputSchema },
+	)
 }
 
 // ---------------------------------------------------------------------------
@@ -278,15 +253,36 @@ export interface ServiceDependenciesForServiceOpts {
 }
 
 /**
- * Typesafe-DSL builder for the service-detail page's "Services" dependency
- * panel. Hourly MV branch (sealed buckets) UNION ALL live topology JOIN
- * (in-progress hour), then re-aggregated through `fromUnion()` so the outer
- * SELECT can compute properly-weighted averages across both sources.
+ * Service dependency edges: hourly MV branch (sealed buckets) UNION ALL a live
+ * topology JOIN per partial hour, re-aggregated through `fromUnion()` so the
+ * outer SELECT computes properly-weighted averages across both sources.
  *
- * Returns a `CHQuery`; caller passes `{orgId, startTime, endTime}` to
- * `CH.compile(q, params)` to get the executable SQL.
+ * Omit `serviceName` for the org-wide global services map; pass it for the
+ * service-detail page, which pushes the filter into both branches so the hourly
+ * branch reads only rows tagged with that service and the join's left side
+ * shrinks to one service's outbound spans.
+ *
+ * Returns a `CHQuery`; the caller passes `{orgId, startTime, endTime}` to
+ * `CH.compile(q, params)`.
+ *
+ * ## Why the inner branches use `bucket*` aliases
+ *
+ * The outer SELECT's `sum(...) AS callCount` must not collide with an inner
+ * `sum(CallCount) AS callCount`. ClickHouse's UNION-ALL + GROUP-BY optimizer
+ * otherwise rewrites the outer as `sum(sum(CallCount))` and rejects the query
+ * with "found inside another aggregate function". The disjoint alias sets are
+ * load-bearing, not stylistic — `service-map.test.ts` asserts it.
+ *
+ * `bucketDurationSumMs` is carried separately from `bucketCallCount` so the
+ * outer computes `sum(durations) / sum(calls)` rather than `avg(avgDurationMs)`
+ * — averaging averages would ignore each branch's relative call count.
+ *
+ * Only complete interior hours come from the hourly rollup. The partial start
+ * and end hours are read from raw spans so neither edge includes data outside
+ * the requested half-open window. `startEdgeEnd` also collapses a same-hour
+ * request into one raw branch; the end branch is then empty.
  */
-export function serviceDependenciesForServiceQuery(opts: ServiceDependenciesForServiceOpts) {
+export function serviceDependenciesQueryBase(opts: { serviceName?: string; deploymentEnv?: string }) {
 	const envFilterMv = (deploymentEnv: CH.Expr<string>) =>
 		opts.deploymentEnv ? deploymentEnv.eq(opts.deploymentEnv) : undefined
 
@@ -320,71 +316,24 @@ export function serviceDependenciesForServiceQuery(opts: ServiceDependenciesForS
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.SourceService.eq(opts.serviceName),
+			opts.serviceName ? $.SourceService.eq(opts.serviceName) : undefined,
 			$.Hour.gte(startEdgeEnd),
 			$.Hour.lt(endHour),
 			envFilterMv($.DeploymentEnv),
 		])
 		.groupBy("sourceService", "targetService")
 
-	// Raw topology JOIN for one partial-hour edge. Called for both the start and
-	// end edges; empty intervals naturally return no rows.
-	const liveJoinBranch = (rangeStart: CH.Expr<string>, rangeEnd: CH.Expr<string>) => {
-		const parentSpans = from(ServiceMapSpans)
-			.select(($) => ({
-				TraceId: $.TraceId,
-				SpanId: $.SpanId,
-				ServiceName: $.ServiceName,
-				Timestamp: $.Timestamp,
-			}))
-			.where(($) => [
-				$.SpanKind.in_("Client", "Producer"),
-				$.Timestamp.gte(rangeStart),
-				$.Timestamp.lt(rangeEnd),
-				$.OrgId.eq(param.string("orgId")),
-				$.ServiceName.eq(opts.serviceName),
-				envFilterMv($.DeploymentEnv),
-			])
-
-		const childSpans = from(ServiceMapChildren)
-			.select(($) => ({
-				TraceId: $.TraceId,
-				ParentSpanId: $.ParentSpanId,
-				ServiceName: $.ServiceName,
-				Duration: $.Duration,
-				StatusCode: $.StatusCode,
-				TraceState: $.TraceState,
-			}))
-			.where(($) => [
-				$.Timestamp.gte(rangeStart),
-				$.Timestamp.lt(rangeEnd),
-				$.OrgId.eq(param.string("orgId")),
-				envFilterMv($.DeploymentEnv),
-			])
-
-		// Sample-weight expression: `1 / (1 - acceptanceProbability)` for spans
-		// carrying a `th:` TraceState threshold, else `1.0` (unsampled). The bit
-		// math is intentionally raw — these CH functions (reinterpret/unhex/
-		// rightPad/pow/reverse/greatest) aren't worth promoting to first-class
-		// DSL helpers for a single call site.
-		const sampleWeightExpr = CH.multiIf(
-			[
-				[
-					_matchRegex(CH.rawExpr<string>("c.TraceState"), "th:[0-9a-f]+"),
-					CH.rawExpr<number>(
-						"1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001)",
-					),
-				],
-			],
-			CH.rawExpr<number>("1.0"),
-		)
-
-		// In a join, the main subquery's columns are auto-qualified with its alias
-		// (`p.ServiceName`), and joined columns are reached via `$.<alias>.Column`.
-		return fromQuery(parentSpans, "p")
-			.innerJoinQuery(childSpans, "c", (p, c) =>
-				p.SpanId.eq(c.ParentSpanId).and(p.TraceId.eq(c.TraceId)),
-			)
+	// Raw topology JOIN for one partial-hour edge — the rollup has not yet sealed
+	// the in-progress hour into `service_map_edges_hourly`. Shares its join source
+	// with the rollup's own builder so the two stay in lockstep, then re-aggregates
+	// dropping `Hour` into the `bucket*` shape.
+	const liveJoinBranch = (rangeStart: CH.Expr<string>, rangeEnd: CH.Expr<string>) =>
+		serviceMapEdgeJoinSource({
+			rangeStart,
+			rangeEnd,
+			deploymentEnv: opts.deploymentEnv,
+			parentServiceName: opts.serviceName,
+		})
 			.select(($) => ({
 				sourceService: $.ServiceName,
 				targetService: $.c.ServiceName,
@@ -392,11 +341,10 @@ export function serviceDependenciesForServiceQuery(opts: ServiceDependenciesForS
 				bucketErrorCount: CH.countIf($.c.StatusCode.eq("Error")),
 				bucketDurationSumMs: CH.sum($.c.Duration.div(1000000)),
 				bucketMaxDurationMs: CH.max_($.c.Duration.div(1000000)),
-				bucketEstimatedSpanCount: CH.sum(sampleWeightExpr),
+				bucketEstimatedSpanCount: CH.sum(sampleWeightExpr($.c.TraceState)),
 			}))
 			.where(($) => [$.ServiceName.neq($.c.ServiceName)])
 			.groupBy("sourceService", "targetService")
-	}
 
 	const startLiveBranch = liveJoinBranch(startDateTime, startEdgeEnd)
 	const endLiveBranch = liveJoinBranch(endEdgeStart, endDateTime)
@@ -418,6 +366,14 @@ export function serviceDependenciesForServiceQuery(opts: ServiceDependenciesForS
 		.orderBy(["callCount", "desc"])
 		.limit(200)
 		.format("JSON")
+}
+
+/**
+ * Outbound dependency edges for one service — the service-detail page's
+ * "Services" panel. See {@link serviceDependenciesQueryBase}.
+ */
+export function serviceDependenciesForServiceQuery(opts: ServiceDependenciesForServiceOpts) {
+	return serviceDependenciesQueryBase(opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -1080,128 +1036,155 @@ export function serviceExternalEdgesSQL(
 	opts: ServiceExternalEdgesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
 ): CompiledQuery<ServiceExternalEdgesOutput> {
-	const esc = escapeClickHouseString
-	const envFilterMv = opts.deploymentEnv ? `AND DeploymentEnv = '${esc(opts.deploymentEnv)}'` : ""
-	const envFilterRaw = opts.deploymentEnv
-		? `AND ResourceAttributes['deployment.environment'] = '${esc(opts.deploymentEnv)}'`
-		: ""
-	const envFilterRes = opts.deploymentEnv ? `AND DeploymentEnv = '${esc(opts.deploymentEnv)}'` : ""
+	const startHour = CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))
+	const endHour = CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))
 
-	// Hourly branch: sealed buckets from the MV-fed table. Carries
-	// `bucket*` aliases so the outer aggregate can't collide with inner ones
-	// (same nested-aggregate optimizer gotcha as `serviceDbEdgesSQL`).
-	const hourlyEdges = `SELECT
-      ServiceName AS sourceService,
-      TargetType AS targetType,
-      TargetSystem AS targetSystem,
-      TargetName AS targetName,
-      sum(CallCount) AS bucketCallCount,
-      sum(ErrorCount) AS bucketErrorCount,
-      sum(DurationSumMs) AS bucketDurationSumMs,
-      max(MaxDurationMs) AS bucketMaxDurationMs,
-      sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
-    FROM service_external_edges_hourly
-    WHERE OrgId = '${esc(params.orgId)}'
-      AND ServiceName = '${esc(opts.serviceName)}'
-      AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
-      AND Hour < toStartOfHour(toDateTime('${esc(params.endTime)}'))
-      AND TargetName != ''
-      ${envFilterMv}
-    GROUP BY sourceService, targetType, targetSystem, targetName`
+	// Hourly branch: sealed buckets from the MV-fed table. Carries `bucket*`
+	// aliases so the outer aggregate can't collide with inner ones (same
+	// nested-aggregate optimizer gotcha as `serviceDbEdgesSQL`).
+	const hourlyEdges = from(ServiceExternalEdgesHourly)
+		.select(($) => ({
+			sourceService: $.ServiceName,
+			targetType: $.TargetType,
+			targetSystem: $.TargetSystem,
+			targetName: $.TargetName,
+			bucketCallCount: CH.sum($.CallCount),
+			bucketErrorCount: CH.sum($.ErrorCount),
+			bucketDurationSumMs: CH.sum($.DurationSumMs),
+			bucketMaxDurationMs: CH.max_($.MaxDurationMs),
+			bucketEstimatedSpanCount: CH.sum(
+				CH.if_($.SampleRateSum.gt(0), $.SampleRateSum, _toFloat64($.CallCount)),
+			),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.ServiceName.eq(opts.serviceName),
+			$.Hour.gte(startHour),
+			$.Hour.lt(endHour),
+			$.TargetName.neq(""),
+			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
+		])
+		.groupBy("sourceService", "targetType", "targetSystem", "targetName")
 
 	// Recent branch: raw `traces` for the in-progress hour only. Mirrors the
-	// `multiIf` precedence used by the MV (messaging > rpc > http) so the
-	// two branches produce identical row shapes for the same span.
-	const recentEdges = `SELECT
-      ServiceName AS sourceService,
-      multiIf(
-        SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '', 'messaging',
-        SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', 'rpc',
-        'http'
-      ) AS targetType,
-      multiIf(
-        SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '', SpanAttributes['messaging.system'],
-        SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '', SpanAttributes['rpc.system'],
-        ''
-      ) AS targetSystem,
-      multiIf(
-        SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != '',
-          if(SpanAttributes['messaging.destination'] != '', SpanAttributes['messaging.destination'], SpanAttributes['messaging.system']),
-        SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != '',
-          if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']),
-        if(SpanAttributes['server.address'] != '',
-          SpanAttributes['server.address'],
-          if(SpanAttributes['http.host'] != '',
-            SpanAttributes['http.host'],
-            SpanAttributes['url.authority']))
-      ) AS targetName,
-      count() AS bucketCallCount,
-      countIf(StatusCode = 'Error') AS bucketErrorCount,
-      sum(Duration / 1000000) AS bucketDurationSumMs,
-      max(Duration / 1000000) AS bucketMaxDurationMs,
-      sum(SampleRate) AS bucketEstimatedSpanCount
-    FROM traces
-    WHERE OrgId = '${esc(params.orgId)}'
-      AND ServiceName = '${esc(opts.serviceName)}'
-      AND Timestamp >= toStartOfHour(toDateTime('${esc(params.endTime)}'))
-      AND Timestamp <= '${esc(params.endTime)}'
-      AND SpanKind IN ('Client', 'Producer')
-      AND SpanAttributes['db.system.name'] = ''
-      AND (
-           SpanAttributes['server.address'] != ''
-        OR SpanAttributes['http.host'] != ''
-        OR SpanAttributes['url.authority'] != ''
-        OR SpanAttributes['messaging.destination'] != ''
-        OR SpanAttributes['messaging.system'] != ''
-        OR SpanAttributes['rpc.service'] != ''
-        OR SpanAttributes['rpc.system'] != ''
-      )
-      ${envFilterRaw}
-    GROUP BY sourceService, targetType, targetSystem, targetName
-    HAVING targetName != ''`
+	// `multiIf` precedence the MV uses (messaging > rpc > http) so both branches
+	// produce identical row shapes for the same span.
+	const recentEdges = from(Traces)
+		.select(($) => {
+			const attr = (key: string) => $.SpanAttributes.get(key)
+			const isMessaging = attr("messaging.destination").neq("").or(attr("messaging.system").neq(""))
+			const isRpc = attr("rpc.service").neq("").or(attr("rpc.system").neq(""))
+			return {
+				sourceService: $.ServiceName,
+				targetType: CH.multiIf(
+					[
+						[isMessaging, CH.lit("messaging")],
+						[isRpc, CH.lit("rpc")],
+					],
+					CH.lit("http"),
+				),
+				targetSystem: CH.multiIf(
+					[
+						[isMessaging, attr("messaging.system")],
+						[isRpc, attr("rpc.system")],
+					],
+					CH.lit(""),
+				),
+				targetName: CH.multiIf(
+					[
+						[
+							isMessaging,
+							CH.if_(
+								attr("messaging.destination").neq(""),
+								attr("messaging.destination"),
+								attr("messaging.system"),
+							),
+						],
+						[isRpc, CH.if_(attr("rpc.service").neq(""), attr("rpc.service"), attr("rpc.system"))],
+					],
+					CH.if_(
+						attr("server.address").neq(""),
+						attr("server.address"),
+						CH.if_(attr("http.host").neq(""), attr("http.host"), attr("url.authority")),
+					),
+				),
+				bucketCallCount: CH.count(),
+				bucketErrorCount: CH.countIf($.StatusCode.eq("Error")),
+				bucketDurationSumMs: CH.sum($.Duration.div(1000000)),
+				bucketMaxDurationMs: CH.max_($.Duration.div(1000000)),
+				bucketEstimatedSpanCount: CH.sum($.SampleRate),
+			}
+		})
+		.where(($) => {
+			const attr = (key: string) => $.SpanAttributes.get(key)
+			return [
+				$.OrgId.eq(param.string("orgId")),
+				$.ServiceName.eq(opts.serviceName),
+				$.Timestamp.gte(endHour),
+				$.Timestamp.lte(param.dateTime("endTime")),
+				CH.inList($.SpanKind, ["Client", "Producer"]),
+				attr("db.system.name").eq(""),
+				attr("server.address")
+					.neq("")
+					.or(attr("http.host").neq(""))
+					.or(attr("url.authority").neq(""))
+					.or(attr("messaging.destination").neq(""))
+					.or(attr("messaging.system").neq(""))
+					.or(attr("rpc.service").neq(""))
+					.or(attr("rpc.system").neq("")),
+				opts.deploymentEnv
+					? $.ResourceAttributes.get("deployment.environment").eq(opts.deploymentEnv)
+					: undefined,
+			]
+		})
+		.groupBy("sourceService", "targetType", "targetSystem", "targetName")
+		// Deliberately HAVING, not WHERE: `targetName` is a computed output alias,
+		// and although it happens to be a pure function of grouped columns today,
+		// a future editor shouldn't have to re-derive that to know this is safe.
+		.having(() => [CH.dynamicColumn<string>("targetName").neq("")])
+
+	// Addresses this service was observed calling that resolve to a known
+	// internal service in the same window. `GROUP BY` is the DSL's SELECT DISTINCT.
+	const internalResolutions = from(ServiceAddressResolutionsHourly)
+		.select(($) => ({ ParentServerAddress: $.ParentServerAddress }))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.SourceService.eq(opts.serviceName),
+			$.Hour.gte(startHour),
+			$.Hour.lt(endHour),
+			$.ParentServerAddress.neq(""),
+			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
+		])
+		.groupBy("ParentServerAddress")
 
 	// Internal-service overlap suppression: drop HTTP rows whose `targetName`
-	// resolves to a known internal service in the same window. Messaging and
-	// RPC pass through unchanged (queues/RPC services are never the same
-	// identity as an internal service name). Scoped to `[startHour, endHour]`
-	// so we don't anti-join against ancient resolutions.
-	const sql = `SELECT
-  sourceService,
-  targetType,
-  targetSystem,
-  targetName,
-  sum(bucketCallCount) AS callCount,
-  sum(bucketErrorCount) AS errorCount,
-  sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-  max(bucketMaxDurationMs) AS p95DurationMs,
-  sum(bucketEstimatedSpanCount) AS estimatedSpanCount
-FROM (
-  ${hourlyEdges}
-  UNION ALL
-  ${recentEdges}
-) AS edges
-WHERE NOT (
-  targetType = 'http'
-  AND targetName IN (
-    SELECT DISTINCT ParentServerAddress
-    FROM service_address_resolutions_hourly
-    WHERE OrgId = '${esc(params.orgId)}'
-      AND SourceService = '${esc(opts.serviceName)}'
-      AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
-      AND Hour < toStartOfHour(toDateTime('${esc(params.endTime)}'))
-      AND ParentServerAddress != ''
-      ${envFilterRes}
-  )
-)
-GROUP BY sourceService, targetType, targetSystem, targetName
-ORDER BY callCount DESC
-LIMIT 200
-FORMAT JSON`
+	// resolves to a known internal service in the same window — those already
+	// appear under "Services" via `serviceDependenciesSQL`. Messaging and RPC
+	// pass through unchanged (a queue or RPC service is never the same identity
+	// as an internal service name).
+	//
+	// The outer query carries no `OrgId` predicate: its scope is derived from
+	// both union branches being scoped. The anti-join subquery contributes
+	// nothing to that — see `inSubquery`.
+	const query = fromUnion(unionAll(hourlyEdges, recentEdges), "edges")
+		.select(($) => ({
+			sourceService: $.sourceService,
+			targetType: $.targetType,
+			targetSystem: $.targetSystem,
+			targetName: $.targetName,
+			callCount: CH.sum($.bucketCallCount),
+			errorCount: CH.sum($.bucketErrorCount),
+			avgDurationMs: CH.sum($.bucketDurationSumMs).div(CH.nullIf(CH.sum($.bucketCallCount), CH.lit(0))),
+			p95DurationMs: CH.max_($.bucketMaxDurationMs),
+			estimatedSpanCount: CH.sum($.bucketEstimatedSpanCount),
+		}))
+		.where(($) => [CH.not($.targetType.eq("http").and(inSubquery($.targetName, internalResolutions)))])
+		.groupBy("sourceService", "targetType", "targetSystem", "targetName")
+		.orderBy(["callCount", "desc"])
+		.limit(200)
+		.format("JSON")
 
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServiceExternalEdgesOutputSchema,
-	})
+	return compileCH(query, params, { rowSchema: ServiceExternalEdgesOutputSchema })
 }
 
 // ---------------------------------------------------------------------------
@@ -1279,14 +1262,13 @@ export function servicePlatformsSQL(
 		.limit(500)
 		.format("JSON")
 
-	const { sql } = compileCH(query, {
-		orgId: params.orgId,
-		startTime: params.startTime,
-		endTime: params.endTime,
-	})
-
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServicePlatformsOutputSchema,
-	})
+	return compileCH(
+		query,
+		{
+			orgId: params.orgId,
+			startTime: params.startTime,
+			endTime: params.endTime,
+		},
+		{ rowSchema: ServicePlatformsOutputSchema },
+	)
 }

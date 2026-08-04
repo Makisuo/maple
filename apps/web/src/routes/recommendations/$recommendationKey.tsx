@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit } from "effect"
 import { useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import type { V2Recommendation } from "@maple/domain/http/v2"
 
@@ -12,7 +12,7 @@ import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
 } from "@/lib/services/atoms/ingestion-atoms"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -29,16 +29,14 @@ import { cn } from "@maple/ui/lib/utils"
 import {
 	ArrowRotateAnticlockwiseIcon,
 	BoltIcon,
-	CheckIcon,
 	CircleCheckIcon,
 	CircleXmarkIcon,
 	CodeIcon,
-	CopyIcon,
 	PulseIcon,
 	XmarkIcon,
 } from "@/components/icons"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
-import { DetailRail } from "@/components/common/detail-rail"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
+import { DetailRail } from "@maple/ui/components/detail-rail"
 
 /** This rail runs a narrower label column than the shared default. */
 const Row = (props: Omit<React.ComponentProps<typeof DetailRail.Row>, "labelWidth">) => (
@@ -161,11 +159,14 @@ function RecommendationDetailPage() {
 			},
 		})
 		if (Exit.isSuccess(result)) {
-			toast.success(`Mapping created — ${target.source_key} → ${canonicalKey}`)
+			toastManager.add({
+				title: `Mapping created — ${target.source_key} → ${canonicalKey}`,
+				type: "success",
+			})
 			refreshIssues()
 			refreshMappings()
 		} else {
-			toast.error("Failed to create mapping")
+			toastManager.add({ title: "Failed to create mapping", type: "error" })
 		}
 		setBusy(null)
 	}
@@ -174,7 +175,7 @@ function RecommendationDetailPage() {
 		setBusy("dismiss")
 		const result = await dismissMutation({ params: { id: target.id } })
 		if (Exit.isSuccess(result)) refreshIssues()
-		else toast.error("Failed to dismiss recommendation")
+		else toastManager.add({ title: "Failed to dismiss recommendation", type: "error" })
 		setBusy(null)
 	}
 
@@ -182,7 +183,7 @@ function RecommendationDetailPage() {
 		setBusy("reopen")
 		const result = await reopenMutation({ params: { id: target.id } })
 		if (Exit.isSuccess(result)) refreshIssues()
-		else toast.error("Failed to reopen recommendation")
+		else toastManager.add({ title: "Failed to reopen recommendation", type: "error" })
 		setBusy(null)
 	}
 
@@ -388,10 +389,7 @@ function CautionCallout({ issue, isApplyable }: { issue: V2Recommendation; isApp
 
 /** The exact ingest mapping Apply creates — the analog of the reference page's SQL block. */
 function MappingBlock({ issue, isLive }: { issue: V2Recommendation; isLive: boolean }) {
-	const { copied, copy } = useCopyToClipboard("Mapping")
 	const snippet = `WHEN span attribute \`${issue.source_key}\` is present\nCOPY → \`${issue.canonical_key}\``
-
-	const onCopy = () => copy(snippet)
 
 	return (
 		<section>
@@ -401,15 +399,7 @@ function MappingBlock({ issue, isLive }: { issue: V2Recommendation; isLive: bool
 					<span className="text-xs text-muted-foreground">
 						{isLive ? "This mapping is live" : "Ingest attribute mapping"}
 					</span>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						onClick={onCopy}
-						aria-label="Copy mapping"
-						title="Copy"
-					>
-						{copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-					</Button>
+					<CopyButton value={snippet} label="Mapping" size="icon-sm" tooltip />
 				</div>
 				<div className="space-y-1.5 px-4 py-3 font-mono text-[13px] leading-relaxed">
 					<div className="flex items-baseline gap-3">

@@ -4,9 +4,9 @@
 
 import type { ReactNode } from "react"
 import { ConnectionIcon } from "@maple/ui/components/icons"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { LOCAL_OTLP_ENDPOINT } from "../lib/constants"
-import { formatRelativeMs } from "../lib/time"
+import { formatRelativeFrom } from "@maple/ui/lib/time-format"
 import { useLocalIngestPulse } from "../hooks/use-local-ingest-pulse"
 
 // Data newer than this reads as "live"; the poll cadence keeps it honest.
@@ -27,7 +27,7 @@ export function IngestStatus() {
 
 	if (isLive) {
 		return (
-			<Pill tone="live" title={`Last telemetry ${formatRelativeMs(lastSeenMs)}`}>
+			<Pill tone="live" title={`Last telemetry ${formatRelativeFrom(lastSeenMs)}`}>
 				<LiveDot />
 				Receiving
 			</Pill>
@@ -38,7 +38,7 @@ export function IngestStatus() {
 		return (
 			<Pill tone="idle" title="Connected — no telemetry in the last few minutes">
 				<span className="size-1.5 rounded-full bg-muted-foreground/40" />
-				Last data {formatRelativeMs(lastSeenMs)}
+				Last data {formatRelativeFrom(lastSeenMs)}
 			</Pill>
 		)
 	}

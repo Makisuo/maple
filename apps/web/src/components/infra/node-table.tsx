@@ -7,8 +7,8 @@ import type { ListNodesResponse } from "@maple/domain/http"
 
 import { HostStatusBadge } from "./status-badge"
 import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS, useTableSort } from "./primitives/data-table"
-import { formatUptime } from "@maple/ui/format"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatUptime } from "@maple/ui/lib/format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 export type NodeRow = ListNodesResponse["data"][number]
 

@@ -58,6 +58,7 @@ function WidgetConfigurePage() {
 		visualization: VisualizationType
 		dataSource: WidgetDataSource
 		display: WidgetDisplayConfig
+		timeRange: TimeRange | undefined
 	}) => {
 		if (readOnly || isSaving) return
 		setIsSaving(true)

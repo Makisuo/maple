@@ -238,6 +238,64 @@ describe("org-collections bounded self-heal", () => {
 		expect(mod.getCollectionsGeneration()).toBe(start + 1)
 	})
 
+	it("marks a terminally stopped stream, and clears the mark when it is recreated", async () => {
+		const { mod } = await freshModule()
+		const failed = new CustomEvent("collection:sync-failed", {
+			detail: { collectionId: "dashboards:org_a" },
+		})
+
+		mod.handleCollectionSyncFailed(failed)
+		expect(mod.isCollectionSyncFailed("dashboards:org_a")).toBe(true)
+		expect(mod.isCollectionSyncFailed("alert_rules:org_a")).toBe(false)
+
+		// The rebuilt collection reuses the same id, so a stale mark would make a
+		// brand-new stream look dead before its first fetch.
+		mod.recreateOrgCollections()
+		expect(mod.isCollectionSyncFailed("dashboards:org_a")).toBe(false)
+	})
+
+	it("retryOrgCollections recreates even after the heal budget is spent", async () => {
+		const { mod } = await freshModule()
+
+		for (let i = 0; i < 12; i++) {
+			mod.handleSchemaError()
+			vi.advanceTimersByTime(6_000)
+		}
+		const exhausted = mod.getCollectionsGeneration()
+
+		// The user-facing retry is the only way out of a spent budget — without it
+		// a page reload is the only recovery.
+		mod.retryOrgCollections()
+		expect(mod.getCollectionsGeneration()).toBe(exhausted + 1)
+
+		// And the budget is refreshed, so automatic recovery works again.
+		mod.handleCollectionStuck()
+		vi.advanceTimersByTime(6_000)
+		expect(mod.getCollectionsGeneration()).toBe(exhausted + 2)
+	})
+
+	it("notifies subscribers when a stream fails and when the mark clears", async () => {
+		const { mod } = await freshModule()
+		const listener = vi.fn()
+		const unsubscribe = mod.subscribeSyncFailure(listener)
+
+		mod.handleCollectionSyncFailed(
+			new CustomEvent("collection:sync-failed", { detail: { collectionId: "dashboards:org_a" } }),
+		)
+		expect(listener).toHaveBeenCalledTimes(1)
+
+		// A repeat event for the same collection is not a state change.
+		mod.handleCollectionSyncFailed(
+			new CustomEvent("collection:sync-failed", { detail: { collectionId: "dashboards:org_a" } }),
+		)
+		expect(listener).toHaveBeenCalledTimes(1)
+
+		mod.recreateOrgCollections()
+		expect(listener).toHaveBeenCalledTimes(2)
+
+		unsubscribe()
+	})
+
 	it("resets the heal budget on a genuine org switch", async () => {
 		const { mod } = await freshModule()
 

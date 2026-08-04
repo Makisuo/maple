@@ -87,7 +87,7 @@ const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpAp
 // under the far larger per-request CPU budget.
 const buildHandler = async () => {
 	const { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } = await import("./app")
-	const { layerPg } = await import("./lib/DatabasePgLive")
+	const { layerPg } = await import("@/platform/DatabasePgLive")
 	return HttpRouter.toWebHandler(
 		AllRoutes.pipe(
 			Layer.provideMerge(MainLive),
@@ -116,7 +116,7 @@ const getHandler = () => (handlerPromise ??= buildHandler())
 // stays behind a dynamic import, preserving the worker's startup-CPU budget.
 const buildRpcRuntime = async (env: Record<string, unknown>) => {
 	const { MainLive } = await import("./app")
-	const { layerPg } = await import("./lib/DatabasePgLive")
+	const { layerPg } = await import("@/platform/DatabasePgLive")
 	return ManagedRuntime.make(
 		MainLive.pipe(
 			Layer.provideMerge(WorkerPlatformLive),
@@ -137,7 +137,8 @@ const ALCHEMY_RPC_ERROR_TAG = "~alchemy/rpc/error" as const
 
 // Alchemy's schemaless RPC error envelope is deliberately tiny. Keeping this
 // encoder local avoids pulling its full Worker bridge into an already large API
-// bundle; chat-flue's `toRpcAsync` decodes this exact public wire shape.
+// bundle; alchemy's `toRpcAsync` on the caller side decodes this exact public
+// wire shape.
 const encodeRpcError = (error: unknown): unknown => {
 	if (error == null || typeof error !== "object") return error
 	const object = error as Record<string, unknown>
@@ -307,6 +308,10 @@ const handle = async (
 // so this static export keeps module-scope evaluation light (startup-CPU budget).
 export { ClickHouseSchemaApplyWorkflow } from "./workflows/ClickHouseSchemaApplyWorkflow"
 export { AiTriageWorkflow } from "./workflows/AiTriageWorkflow"
+// The durable chat transcript. Safe to export at module scope despite the 10021 startup-CPU
+// constraint: `ChatSession` imports only types from `@maple/domain/chat-session`, so it pulls
+// none of the app service graph in with it.
+export { ChatSession } from "./chat/ChatSession"
 
 // VCS sync queue consumer. Dynamic-imported (same startup-CPU-budget discipline
 // as the route graph above) to keep module-scope evaluation light.
@@ -372,11 +377,20 @@ const handleScheduled = async (
 ): Promise<void> => {
 	if (event.cron === SCRAPE_RETENTION_CRON) {
 		const { buildScrapeRetentionLayer, flushVcsTelemetry } = await import("./vcs-sync-runtime")
-		const { runScrapeCheckRetention } = await import("./lib/scrape-check-retention")
+		const { runScrapeCheckRetention } = await import("@/services/integrations/scrape-check-retention")
+		const { runPlanetScaleEventRetention } =
+			await import("@/services/integrations/planetscale-event-retention")
 		try {
-			await runScheduledEffect(buildScrapeRetentionLayer(env), runScrapeCheckRetention, ctx, {
-				onInterrupt: "graceful",
-			})
+			// Both sweeps ride this one cron: each new cron string costs an entry in
+			// wrangler.jsonc and alchemy.run.ts, and neither needs its own beat.
+			// Sequential, not concurrent — they share a Database layer whose
+			// `execute` dials a client per call.
+			await runScheduledEffect(
+				buildScrapeRetentionLayer(env),
+				Effect.andThen(runScrapeCheckRetention, runPlanetScaleEventRetention),
+				ctx,
+				{ onInterrupt: "graceful" },
+			)
 		} finally {
 			ctx.waitUntil(flushVcsTelemetry(env))
 		}

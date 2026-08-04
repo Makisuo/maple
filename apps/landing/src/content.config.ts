@@ -45,6 +45,27 @@ const blog = defineCollection({
 	}),
 })
 
+// One entry per monthly release — the filename is the permalink (`2026-07.md`
+// → /changelog/2026-07), so it sorts chronologically on disk too. `highlights`
+// feeds the index panel; the body is the full release note.
+const changelog = defineCollection({
+	loader: glob({ pattern: "**/*.{md,mdx}", base: "./src/content/changelog" }),
+	schema: z.object({
+		title: z.string(),
+		description: z.string(),
+		date: z.coerce.date(), // month close — sorts the ledger, drives <time>
+		highlights: z.array(z.string()).default([]),
+		// Release cover served from /public/changelog. Doubles as the per-release
+		// OG card; without it the page falls back to the generic /og-image.png.
+		cover: z.string().optional(),
+		coverAlt: z.string().optional(),
+		// Drives the BREAKING marker only. The prose stays in the body so there
+		// is one source of truth for what actually broke.
+		breaking: z.boolean().default(false),
+		draft: z.boolean().default(false),
+	}),
+})
+
 // Customer logos rendered in the homepage "trusted by" marquee. Frontmatter-only
 // entries (no body) — one file per company. The entry id (filename) maps to a
 // brand logo component in the LOGOS registry inside CustomerLogos.astro.
@@ -57,4 +78,4 @@ const logos = defineCollection({
 	}),
 })
 
-export const collections = { roadmap, docs, blog, logos }
+export const collections = { roadmap, docs, blog, changelog, logos }

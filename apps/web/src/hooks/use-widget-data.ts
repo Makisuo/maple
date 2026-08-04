@@ -1,12 +1,14 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Atom, Result } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { Effect, Schedule, Schema } from "effect"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
+import { useWidgetTimeRangeOverride } from "@/components/dashboard-builder/widgets/widget-time-range-context"
+import { resolveTimeRange } from "@/atoms/dashboard-time-range-atoms"
 import { getServerFunction } from "@/components/dashboard-builder/data-source-registry"
 import { hasUnresolvedVariableRefs, interpolateWidgetParams } from "@/lib/dashboard-variables/interpolate"
-import type { DashboardWidget, WidgetDataSource } from "@/components/dashboard-builder/types"
+import type { DashboardWidget, TimeRange, WidgetDataSource } from "@/components/dashboard-builder/types"
 
 /**
  * The structural shape a data source must satisfy to be fetched. Both the
@@ -26,6 +28,9 @@ import { formatBackendError } from "@/lib/error-messages"
 import { Cause, Option } from "effect"
 import { WarehouseDecodeError, type BackendError } from "@/api/warehouse/effect-utils"
 import { QueryEngineValidationError } from "@maple/domain/http"
+import { MAX_LIST_RANGE_SECONDS, formatRangeSeconds } from "@maple/query-engine"
+import { formatForTinybird } from "@/lib/time-utils"
+import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 // An error means "the query input/response failed validation" (rather than a
 // transient runtime failure) when it is one of these tagged validation errors,
@@ -38,12 +43,30 @@ const isDecodeError = (value: unknown): boolean =>
 const extractError = (input: unknown): unknown =>
 	Cause.isCause(input) ? Option.getOrElse(Cause.findErrorOption(input), () => input) : input
 
-const classifyWidgetErrorKind = (input: unknown): "decode" | "runtime" => {
+// A validation error the engine raised because the window is wider than the
+// query kind supports. Classified apart from other decode errors so the tile
+// renders the muted "narrow your range" state instead of a red block with a
+// "Fix with AI" button — there is nothing about the widget to fix.
+const isRangeError = (value: unknown): boolean =>
+	value instanceof QueryEngineValidationError && /time range too large/i.test(value.message)
+
+const classifyWidgetErrorKind = (input: unknown): "decode" | "runtime" | "range" => {
 	const error = extractError(input)
+	if (isRangeError(error)) return "range"
+	if (error instanceof WidgetDataAtomError && isRangeError(error.cause)) return "range"
 	if (isDecodeError(error)) return "decode"
 	if (error instanceof WidgetDataAtomError && isDecodeError(error.cause)) return "decode"
 	return "runtime"
 }
+
+// Endpoints whose queries are `kind: "list"` — they scan raw rows and so carry
+// the engine's much tighter list ceiling.
+const LIST_ENDPOINTS: ReadonlySet<string> = new Set(["custom_query_builder_list", "list_traces", "list_logs"])
+
+const rangeSecondsOf = (range: { startTime: string; endTime: string }): number =>
+	(Date.parse(normalizeTimestampInput(range.endTime)) -
+		Date.parse(normalizeTimestampInput(range.startTime))) /
+	1000
 
 function isSeriesNameHidden(seriesName: string, hiddenBaseNames: Set<string>): boolean {
 	for (const base of hiddenBaseNames) {
@@ -347,10 +370,54 @@ export function useWidgetDataSource(
 	 * visibility (lazy-load) so off-screen tiles don't fire queries on mount.
 	 */
 	enabled = true,
+	/**
+	 * Pins this fetch to a window of its own instead of the dashboard's. Callers
+	 * that already hold the widget pass `widget.timeRange`; nested fetches inside
+	 * a widget (a stat's sparkline) inherit it from context instead.
+	 */
+	timeRangeOverride?: TimeRange,
 ) {
 	const {
-		state: { resolvedTimeRange },
+		state: { resolvedTimeRange: dashboardTimeRange },
 	} = useDashboardTimeRange()
+	const contextOverride = useWidgetTimeRangeOverride()
+	const override = timeRangeOverride ?? contextOverride ?? undefined
+	const overrideKey = override ? encodeKey(override) : null
+
+	const effectiveTimeRange = useMemo(
+		() => (override ? resolveTimeRange(override) : dashboardTimeRange),
+		// Keyed on the serialized override, not its identity: the dashboard object
+		// is rebuilt on every optimistic write, and re-resolving an unchanged
+		// override would hand every pinned tile fresh params and refetch it.
+		// `dashboardTimeRange` stays in the deps so a manual reload or auto-refresh
+		// (which gives it a new identity) rebases a relative override against "now"
+		// as well.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[overrideKey, dashboardTimeRange],
+	)
+
+	// A list-kind tile on a window wider than the engine's list cap. Detected
+	// here rather than left to the API so the tile never fires a request that is
+	// certain to 400 (and never burns the fetch's two retries on it).
+	const exceedsListCap =
+		dataSource !== undefined &&
+		LIST_ENDPOINTS.has(dataSource.endpoint) &&
+		effectiveTimeRange !== null &&
+		rangeSecondsOf(effectiveTimeRange) > MAX_LIST_RANGE_SECONDS
+
+	// Opt-in, per-tile, not persisted: the viewer can pull just this tile back to
+	// the cap without touching the dashboard's range or needing write access.
+	const [narrowedToCap, setNarrowedToCap] = useState(false)
+	const narrowed = narrowedToCap && exceedsListCap
+
+	const resolvedTimeRange = useMemo(() => {
+		if (!narrowed || !effectiveTimeRange) return effectiveTimeRange
+		const endMs = Date.parse(normalizeTimestampInput(effectiveTimeRange.endTime))
+		return {
+			startTime: formatForTinybird(new Date(endMs - MAX_LIST_RANGE_SECONDS * 1000)),
+			endTime: effectiveTimeRange.endTime,
+		}
+	}, [narrowed, effectiveTimeRange])
 	const variablesContext = useDashboardVariablesOptional()
 
 	const isStatic = dataSource?.endpoint === "markdown_static"
@@ -361,7 +428,9 @@ export function useWidgetDataSource(
 		: isStatic
 			? null
 			: !resolvedTimeRange
-				? "Unable to resolve dashboard time range"
+				? override
+					? "Unable to resolve this widget's time range"
+					: "Unable to resolve dashboard time range"
 				: !hasServerFn
 					? `Unknown data source endpoint: ${dataSource.endpoint}`
 					: null
@@ -402,14 +471,30 @@ export function useWidgetDataSource(
 	// where useAtomValue / useAtomRefresh re-subscribe and drop an in-flight
 	// fetch (the user-visible symptom: widgets stuck on the loading skeleton).
 	const fetchAtom = useMemo(() => {
-		if (disableReason !== null || isStatic || !dataSource || !enabled || waitingOnVariables) {
+		if (
+			disableReason !== null ||
+			isStatic ||
+			!dataSource ||
+			!enabled ||
+			waitingOnVariables ||
+			(exceedsListCap && !narrowed)
+		) {
 			return disabledResultAtom<unknown, WidgetFetchError>()
 		}
 		return widgetFetchAtom({
 			endpoint: dataSource.endpoint,
 			params: resolvedParams,
 		})
-	}, [disableReason, isStatic, dataSource, resolvedParams, enabled, waitingOnVariables])
+	}, [
+		disableReason,
+		isStatic,
+		dataSource,
+		resolvedParams,
+		enabled,
+		waitingOnVariables,
+		exceedsListCap,
+		narrowed,
+	])
 
 	const result = useRefreshableAtomValue(fetchAtom)
 
@@ -428,6 +513,14 @@ export function useWidgetDataSource(
 		if (disableReason) {
 			return { status: "error", message: disableReason } as const
 		}
+		if (exceedsListCap && !narrowed) {
+			return {
+				status: "error",
+				kind: "range",
+				title: `Range too wide for this list`,
+				message: `Lists show individual records, so they cover at most ${formatRangeSeconds(MAX_LIST_RANGE_SECONDS)}. Charts on this dashboard are unaffected.`,
+			} as const
+		}
 		return Result.builder(result)
 			.onInitial(() => ({ status: "loading" }) as const)
 			.onError((error) => {
@@ -443,15 +536,25 @@ export function useWidgetDataSource(
 			})
 			.onSuccess((rawData) => ({ status: "ready", data: applyTransform(rawData, transform) }) as const)
 			.orElse(() => ({ status: "error", message: "Unknown error" }) as const)
-	}, [result, transform, disableReason, isStatic, enabled, waitingOnVariables])
+	}, [result, transform, disableReason, isStatic, enabled, waitingOnVariables, exceedsListCap, narrowed])
+
+	// Offered only while the tile is actually blocked, so the frame can render
+	// the action without knowing anything about time ranges.
+	const narrowRange = useMemo(
+		() => (exceedsListCap && !narrowed ? () => setNarrowedToCap(true) : undefined),
+		[exceedsListCap, narrowed],
+	)
 
 	return {
 		dataState,
+		narrowRange,
+		/** Label for the narrowing action, e.g. "Show last 7 days". */
+		narrowRangeLabel: `Show last ${formatRangeSeconds(MAX_LIST_RANGE_SECONDS)}`,
 	}
 }
 
 export function useWidgetData(widget: DashboardWidget, enabled = true) {
-	return useWidgetDataSource(widget.dataSource, enabled)
+	return useWidgetDataSource(widget.dataSource, enabled, widget.timeRange)
 }
 
 export const __testables = {

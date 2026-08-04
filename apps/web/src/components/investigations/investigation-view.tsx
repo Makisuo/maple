@@ -3,10 +3,9 @@ import { Exit } from "effect"
 import { useAtomSet } from "@/lib/effect-atom"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import type { IssueSeverity } from "@maple/domain/http"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { ChatConversation } from "@/components/chat/chat-conversation"
-import { FlueClientProvider } from "@/components/chat/flue-client-provider"
 import type { InvestigationContext } from "@/components/chat/investigation-context"
 import { SeverityBadge } from "@/components/errors/severity-badge"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -115,10 +114,13 @@ export function InvestigationView({
 		const result = await restart({ params: { id: investigation.id }, reactivityKeys })
 		setBusy(false)
 		if (Exit.isSuccess(result)) {
-			toast.success(isResolved ? "Investigation reopened" : "Investigation restarted")
+			toastManager.add({
+				title: isResolved ? "Investigation reopened" : "Investigation restarted",
+				type: "success",
+			})
 			onRefresh()
 		} else {
-			toast.error("Investigation could not be restarted")
+			toastManager.add({ title: "Investigation could not be restarted", type: "error" })
 		}
 	}
 
@@ -131,10 +133,10 @@ export function InvestigationView({
 		})
 		setBusy(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("Investigation resolved")
+			toastManager.add({ title: "Investigation resolved", type: "success" })
 			onRefresh()
 		} else {
-			toast.error("Investigation could not be resolved")
+			toastManager.add({ title: "Investigation could not be resolved", type: "error" })
 		}
 	}
 
@@ -159,18 +161,16 @@ export function InvestigationView({
 					    scrolling page is what previously needed a `calc(100dvh - 12rem)`
 					    guess that the billing banners could invalidate. */}
 					<DashboardLayout.Fill>
-						<FlueClientProvider>
-							<ChatConversation
-								tabId={`inv-${investigation.id}`}
-								isActive
-								mode="investigation"
-								investigationContext={context}
-								subjectSeededByServer
-								showAttachmentCard={false}
-								readOnly={isResolved ? "resolved" : false}
-								fallbackDiagnosis={investigation.report}
-							/>
-						</FlueClientProvider>
+						<ChatConversation
+							tabId={`inv-${investigation.id}`}
+							isActive
+							mode="investigation"
+							investigationContext={context}
+							subjectSeededByServer
+							showAttachmentCard={false}
+							readOnly={isResolved ? "resolved" : false}
+							fallbackDiagnosis={investigation.report}
+						/>
 					</DashboardLayout.Fill>
 				</DashboardLayout.Content>
 				<DashboardLayout.RightPanel title="Investigation context" width="w-80">

@@ -8,8 +8,8 @@ import { ServiceDot } from "@maple/ui/components/service-dot"
 import { Spinner } from "@maple/ui/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { QueryBuilderLineChart } from "@maple/ui/components/charts/line/query-builder-line-chart"
-import { formatDuration, formatNumber } from "@maple/ui/format"
-import { cn } from "@maple/ui/utils"
+import { formatDuration, formatNumber } from "@maple/ui/lib/format"
+import { cn } from "@maple/ui/lib/utils"
 import {
 	useLocalServiceOperations,
 	useLocalServiceOperationsTimeseries,

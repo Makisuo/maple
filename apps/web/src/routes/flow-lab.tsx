@@ -6,6 +6,7 @@ import { TraceFlowView } from "@maple/ui/components/traces/flow-view"
 import { buildTraceDetail, type SpanHierarchyRow } from "@maple/ui/lib/span-tree"
 import type { SpanNode } from "@maple/ui/lib/types"
 
+import { formatWarehouseDateTimeMs } from "@maple/query-engine"
 export const Route = createFileRoute("/flow-lab")({
 	component: FlowLab,
 })
@@ -14,7 +15,7 @@ const T0_MS = new Date("2026-07-21T10:00:00.000Z").getTime()
 
 /** Trace-relative start time so edges get realistic "+Nms" start offsets. */
 function at(offsetMs: number): string {
-	return new Date(T0_MS + offsetMs).toISOString().replace("T", " ").replace("Z", "")
+	return formatWarehouseDateTimeMs(T0_MS + offsetMs)
 }
 
 function row(overrides: Partial<SpanHierarchyRow> & { spanId: string; spanName: string }): SpanHierarchyRow {

@@ -1,6 +1,5 @@
-import { CopyIcon, CheckIcon } from "@/components/icons"
-import { cn } from "@maple/ui/utils"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { cn } from "@maple/ui/lib/utils"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { highlightCode } from "@/lib/sugar-high"
 
 interface CodeBlockProps {
@@ -10,7 +9,6 @@ interface CodeBlockProps {
 }
 
 export function CodeBlock({ code, language, className }: CodeBlockProps) {
-	const { copied, copy } = useCopyToClipboard("Code")
 	const highlighted = highlightCode(code)
 
 	return (
@@ -19,20 +17,7 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
 				{language && (
 					<span className="text-[10px] font-medium uppercase tracking-wider">{language}</span>
 				)}
-				<button
-					type="button"
-					onClick={() => copy(code)}
-					className="ml-auto flex items-center gap-1 text-xs hover:text-foreground transition-colors"
-				>
-					{copied ? (
-						<CheckIcon
-							size={14}
-							className="text-severity-info animate-in zoom-in-50 duration-200"
-						/>
-					) : (
-						<CopyIcon size={14} />
-					)}
-				</button>
+				<CopyButton value={code} label="Code" className="ml-auto" />
 			</div>
 			<div className="overflow-x-auto bg-background/50 p-3">
 				<pre className="text-xs leading-relaxed">

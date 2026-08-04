@@ -1,6 +1,6 @@
 import { useOrganization, useAuth } from "@clerk/clerk-react"
 import { useState } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
@@ -100,14 +100,14 @@ export function MembersSection() {
 				emailAddress: inviteEmail.trim(),
 				role: inviteRole as "org:admin" | "org:member",
 			})
-			toast.success(`Invitation sent to ${inviteEmail}`)
+			toastManager.add({ title: `Invitation sent to ${inviteEmail}`, type: "success" })
 			setInviteEmail("")
 			setInviteRole("org:member")
 			setInviteOpen(false)
 			invitations?.revalidate?.()
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : "Failed to send invitation"
-			toast.error(message)
+			toastManager.add({ title: message, type: "error" })
 		} finally {
 			setInviteLoading(false)
 		}
@@ -120,10 +120,13 @@ export function MembersSection() {
 		const newRole = currentRole === "org:admin" ? "org:member" : "org:admin"
 		try {
 			await update({ role: newRole })
-			toast.success(`Role updated to ${newRole === "org:admin" ? "Admin" : "Member"}`)
+			toastManager.add({
+				title: `Role updated to ${newRole === "org:admin" ? "Admin" : "Member"}`,
+				type: "success",
+			})
 			memberships?.revalidate?.()
 		} catch {
-			toast.error("Failed to update role")
+			toastManager.add({ title: "Failed to update role", type: "error" })
 		}
 	}
 
@@ -132,10 +135,10 @@ export function MembersSection() {
 		setRemoveLoading(true)
 		try {
 			await memberToRemove.destroy()
-			toast.success(`${memberToRemove.name} has been removed`)
+			toastManager.add({ title: `${memberToRemove.name} has been removed`, type: "success" })
 			memberships?.revalidate?.()
 		} catch {
-			toast.error("Failed to remove member")
+			toastManager.add({ title: "Failed to remove member", type: "error" })
 		} finally {
 			setRemoveLoading(false)
 			setRemoveDialogOpen(false)
@@ -146,10 +149,10 @@ export function MembersSection() {
 	async function handleRevokeInvitation(revoke: () => Promise<unknown>, email: string) {
 		try {
 			await revoke()
-			toast.success(`Invitation to ${email} revoked`)
+			toastManager.add({ title: `Invitation to ${email} revoked`, type: "success" })
 			invitations?.revalidate?.()
 		} catch {
-			toast.error("Failed to revoke invitation")
+			toastManager.add({ title: "Failed to revoke invitation", type: "error" })
 		}
 	}
 

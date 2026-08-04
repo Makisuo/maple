@@ -5,7 +5,7 @@
 // a raw-SQL builder for counter rate/increase (which requires CTEs).
 // ---------------------------------------------------------------------------
 
-import type { AttributeFilter, MetricType } from "../../query-engine"
+import type { AttributeFilter, MetricType } from "@maple/domain/query-engine"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import * as T from "@maple-dev/clickhouse-builder/types"
 import { param } from "@maple-dev/clickhouse-builder"
@@ -213,7 +213,7 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 		param.int("bucketSeconds"),
 	)
 
-	const hourlySql = compileCH(
+	const hourlyCompiled = compileCH(
 		from(SpanMetricsCallsHourly)
 			.select(($) => ({
 				Hour: $.Hour,
@@ -246,7 +246,8 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 			),
 		{},
 		{ skipFormat: true },
-	).sql
+	)
+	const hourlySql = hourlyCompiled.sql
 
 	const hourlyValues = table("hourly_values", {
 		Hour: T.dateTime,
@@ -295,8 +296,10 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 	})
 
 	const q = from(deltas)
-		.withCTE("hourly_values", hourlySql)
-		.withCTE("with_deltas", deltasSql)
+		// Both CTEs descend from `hourlySql`, so the outer query is confined to
+		// whatever that was — the compiled CTE strings can't carry it themselves.
+		.withCTE("hourly_values", hourlySql, { tenantScope: hourlyCompiled.tenantScope })
+		.withCTE("with_deltas", deltasSql, { tenantScope: hourlyCompiled.tenantScope })
 		.select(($) => ({
 			bucket: CH.toStartOfInterval($.Hour, param.int("bucketSeconds")),
 			serviceName: $.ServiceName,
@@ -405,7 +408,7 @@ export function metricsTimeseriesRateQuery(
 	})
 
 	const q = from(cteTable)
-		.withCTE("with_deltas", cteSql.sql)
+		.withCTE("with_deltas", cteSql.sql, { tenantScope: cteSql.tenantScope })
 		.select(($) => ({
 			bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
 			serviceName: $.ServiceName,

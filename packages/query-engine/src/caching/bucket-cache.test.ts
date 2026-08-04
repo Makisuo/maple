@@ -1,9 +1,10 @@
 import { assert, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Exit, Layer, Schema } from "effect"
 import { OrgId } from "@maple/domain"
-import type { TimeseriesPoint } from "../query-engine"
+import type { TimeseriesPoint } from "@maple/domain/query-engine"
 import {
 	BucketCacheService,
+	coalesceMissingRanges,
 	findMissingRanges,
 	generateFingerprint,
 	mergeAndDeduplicateBuckets,
@@ -11,8 +12,9 @@ import {
 	type BucketCacheSegmentData,
 	type CachedBucket,
 } from "./bucket-cache"
-import { EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "./edge-cache"
-import { MemoryCacheBackendLive } from "./cache-backend"
+import { EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "@maple/cache"
+import { MemoryCacheBackendLive } from "@maple/cache"
+import { computeBucketSeconds } from "../datetime"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const orgId = asOrgId("org_test")
@@ -81,6 +83,75 @@ describe("findMissingRanges", () => {
 	})
 })
 
+describe("coalesceMissingRanges", () => {
+	it("returns nothing for a fully covered range", () => {
+		expect(coalesceMissingRanges([])).toEqual([])
+	})
+
+	it("passes a single range through unchanged", () => {
+		const missing = findMissingRanges([], 0, 10 * MIN, MIN, FAR_FUTURE_FLUX)
+		expect(coalesceMissingRanges(missing)).toEqual(missing)
+	})
+
+	it("collapses head + tail gaps into one query spanning the cached middle", () => {
+		const buckets = [bucket(2 * MIN, 3 * MIN), bucket(3 * MIN, 4 * MIN)]
+		const missing = findMissingRanges(buckets, 0, 6 * MIN, MIN, FAR_FUTURE_FLUX)
+		expect(missing).toHaveLength(2)
+		expect(coalesceMissingRanges(missing)).toEqual([
+			{ range: { startMs: 0, endMs: 6 * MIN }, cachable: true },
+		])
+	})
+
+	it("keeps the cachable range and the live tail separate", () => {
+		const buckets = [bucket(0, MIN), bucket(MIN, 2 * MIN)]
+		const flux = 3 * MIN
+		const missing = findMissingRanges(buckets, 0, 4 * MIN, MIN, flux)
+		expect(coalesceMissingRanges(missing)).toEqual([
+			{ range: { startMs: 2 * MIN, endMs: 3 * MIN }, cachable: true },
+			{ range: { startMs: 3 * MIN, endMs: 4 * MIN }, cachable: false },
+		])
+	})
+
+	it("never emits more than two ranges, however fragmented the gaps", () => {
+		// Alternating cached/uncached buckets across a long window — the shape
+		// that produced the ~2.9-queries-per-request fan-out in prod.
+		const buckets = Array.from({ length: 10 }, (_, i) => bucket(2 * i * MIN, (2 * i + 1) * MIN))
+		const flux = 15 * MIN
+		const missing = findMissingRanges(buckets, 0, 20 * MIN, MIN, flux)
+		expect(missing.length).toBeGreaterThan(2)
+
+		const coalesced = coalesceMissingRanges(missing)
+		expect(coalesced).toHaveLength(2)
+		expect(coalesced.filter((r) => r.cachable)).toHaveLength(1)
+		expect(coalesced.filter((r) => !r.cachable)).toHaveLength(1)
+	})
+
+	it("keeps every cachable range strictly below the flux boundary", () => {
+		const buckets = [bucket(0, MIN), bucket(5 * MIN, 6 * MIN)]
+		const flux = 7 * MIN
+		const missing = findMissingRanges(buckets, 0, 10 * MIN, MIN, flux)
+		for (const { range, cachable } of coalesceMissingRanges(missing)) {
+			if (cachable) expect(range.endMs).toBeLessThanOrEqual(flux)
+			else expect(range.startMs).toBeGreaterThanOrEqual(flux)
+		}
+	})
+
+	it("covers every original gap within the coalesced spans", () => {
+		const buckets = [bucket(MIN, 2 * MIN), bucket(4 * MIN, 5 * MIN), bucket(7 * MIN, 8 * MIN)]
+		const missing = findMissingRanges(buckets, 0, 10 * MIN, MIN, FAR_FUTURE_FLUX)
+		const coalesced = coalesceMissingRanges(missing)
+		for (const gap of missing) {
+			const covering = coalesced.find(
+				(span) =>
+					span.cachable === gap.cachable &&
+					span.range.startMs <= gap.range.startMs &&
+					span.range.endMs >= gap.range.endMs,
+			)
+			expect(covering).toBeDefined()
+		}
+	})
+})
+
 describe("pointsToBuckets", () => {
 	it("groups points by bucket window and drops live (post-flux) buckets", () => {
 		const bucketMs = MIN
@@ -144,6 +215,94 @@ describe("generateFingerprint", () => {
 		const a = await generateFingerprint("org-1", query, 60)
 		const b = await generateFingerprint("org-2", query, 60)
 		expect(a).not.toBe(b)
+	})
+
+	it("ignores undefined-valued keys so optional fields don't split the cache", async () => {
+		const a = await generateFingerprint(orgId, { source: "logs", limit: undefined }, 60)
+		const b = await generateFingerprint(orgId, { source: "logs" }, 60)
+		expect(a).toBe(b)
+	})
+
+	it("is order-insensitive at every nesting depth", async () => {
+		const a = await generateFingerprint(
+			orgId,
+			{ kind: "timeseries", filters: { env: "prod", nested: { b: 1, a: 2 } }, source: "traces" },
+			60,
+		)
+		const b = await generateFingerprint(
+			orgId,
+			{ source: "traces", filters: { nested: { a: 2, b: 1 }, env: "prod" }, kind: "timeseries" },
+			60,
+		)
+		expect(a).toBe(b)
+	})
+
+	// Array order IS meaningful (an ORDER BY list is not a set), so it must
+	// stay part of the identity — a normalizer that sorted arrays would merge
+	// two genuinely different queries onto one entry.
+	it("distinguishes queries that differ only in array order", async () => {
+		const a = await generateFingerprint(orgId, { orderBy: ["a", "b"] }, 60)
+		const b = await generateFingerprint(orgId, { orderBy: ["b", "a"] }, 60)
+		expect(a).not.toBe(b)
+	})
+})
+
+// The fingerprint is only half the key; the other half is `segmentStartMs`.
+// A window that slides continuously must keep landing on the same segment
+// until it genuinely crosses a boundary, otherwise every refresh reads a key
+// nothing ever wrote.
+describe("segment key stability under a sliding window", () => {
+	const segmentStartsFor = (startMs: number, endMs: number, segmentMs: number): number[] => {
+		const first = Math.floor(startMs / segmentMs) * segmentMs
+		const last = Math.floor((endMs - 1) / segmentMs) * segmentMs
+		const out: number[] = []
+		for (let cursor = first; cursor <= last; cursor += segmentMs) out.push(cursor)
+		return out
+	}
+
+	it("changes the segment set only when a real boundary is crossed", () => {
+		const bucketMs = 120_000
+		const segmentMs = bucketMs * 120 // 4h, the production default
+		const windowMs = 60 * MIN
+		const base = 1_760_000_000_000
+
+		let changes = 0
+		let previous = segmentStartsFor(base - windowMs, base, segmentMs).join(",")
+
+		// One hour of a dashboard refreshing every second.
+		for (let tick = 1; tick <= 3600; tick++) {
+			const endMs = base + tick * 1000
+			const current = segmentStartsFor(endMs - windowMs, endMs, segmentMs).join(",")
+			if (current !== previous) changes++
+			previous = current
+		}
+
+		// A 1h window sliding across 1h of wall clock can cross at most one 4h
+		// segment boundary at each end.
+		expect(changes).toBeLessThanOrEqual(2)
+	})
+})
+
+describe("computeBucketSeconds", () => {
+	// bucketSeconds is part of the fingerprint, so an unstable step is an
+	// unstable cache key. It depends only on the window's duration — this pins
+	// that, so a future ladder change can't destabilize every key by accident.
+	it("is constant for a fixed duration regardless of where the window sits", () => {
+		const windowMs = 60 * MIN
+		const base = 1_760_000_000_000
+		const expected = computeBucketSeconds(base - windowMs, base)
+
+		for (let tick = 0; tick < 600; tick++) {
+			const endMs = base + tick * 1000
+			expect(computeBucketSeconds(endMs - windowMs, endMs)).toBe(expected)
+		}
+	})
+
+	it("still changes when the user zooms, so zoomed views get their own entries", () => {
+		const base = 1_760_000_000_000
+		const oneHour = computeBucketSeconds(base - 60 * MIN, base)
+		const oneDay = computeBucketSeconds(base - 24 * 60 * MIN, base)
+		expect(oneHour).not.toBe(oneDay)
 	})
 })
 
@@ -243,6 +402,47 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.deepStrictEqual(computeCalls[1], { startMs: 3 * MIN, endMs: 4 * MIN })
 			assert.strictEqual(second.missingRangeCount, 1)
 			assert.strictEqual(second.points.length, 3)
+		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+	})
+
+	it.live("issues one warehouse query when the cached buckets are fragmented", () => {
+		// Regression guard for the fan-out that made the cache net-negative in
+		// prod: a partially-cached window used to dispatch one query per gap, so
+		// warehouse load stayed flat no matter how much was cached.
+		const base = {
+			orgId,
+			query: { source: "traces", kind: "timeseries", fragmented: true },
+			bucketSeconds: 60,
+		}
+
+		const computeCalls: Array<{ startMs: number; endMs: number }> = []
+		const compute = ({ startMs, endMs }: { startMs: number; endMs: number }) => {
+			computeCalls.push({ startMs, endMs })
+			const out: TimeseriesPoint[] = []
+			for (let t = startMs; t < endMs; t += MIN) {
+				out.push(point(new Date(t).toISOString(), { v: t }))
+			}
+			return Effect.succeed(out)
+		}
+
+		return Effect.gen(function* () {
+			const svc = yield* BucketCacheService
+
+			// Warm two disjoint slices, leaving holes at [1m,2m) and [3m,6m).
+			yield* svc.getOrComputeBuckets({ ...base, startMs: 0, endMs: MIN }, compute)
+			yield* svc.getOrComputeBuckets({ ...base, startMs: 2 * MIN, endMs: 3 * MIN }, compute)
+			computeCalls.length = 0
+
+			const outcome = yield* svc.getOrComputeBuckets({ ...base, startMs: 0, endMs: 6 * MIN }, compute)
+
+			// Multiple gaps, but they collapse into a single warehouse query.
+			assert.isTrue(outcome.missingRangeCount > 1)
+			assert.strictEqual(outcome.warehouseQueryCount, 1)
+			assert.strictEqual(computeCalls.length, 1)
+			assert.deepStrictEqual(computeCalls[0], { startMs: MIN, endMs: 6 * MIN })
+
+			// Over-fetching the cached middle must not corrupt the result set.
+			assert.strictEqual(outcome.points.length, 6)
 		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
 	})
 
@@ -443,14 +643,14 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 		)
 	})
 
-	it.live("recomputes after a segment timeout without overwriting unknown cache state", () => {
-		let writes = 0
+	it.live("repopulates a timed-out segment with fresh settled buckets only", () => {
+		const writes: BucketCacheSegmentData[] = []
 		let computes = 0
 		const backend: EdgeCacheBackend = {
 			name: "memory",
 			get: async () => await new Promise<never>(() => {}),
-			put: async () => {
-				writes++
+			put: async (_bucket, _hash, value) => {
+				writes.push(value as BucketCacheSegmentData)
 			},
 			delete: async () => {},
 		}
@@ -470,9 +670,19 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			})
 
 			assert.strictEqual(computes, 1)
-			assert.strictEqual(writes, 0)
 			assert.strictEqual(outcome.segmentsTimedOut, 1)
 			assert.strictEqual(outcome.warehouseQueryCount, 1)
+
+			// A read that never answered leaves the stored contents unknown, so the
+			// write must carry only the freshly computed (settled, immutable)
+			// buckets — never a merge that would present an empty read as the whole
+			// segment. Writing nothing at all would leave the segment permanently
+			// cold under sustained timeouts.
+			assert.strictEqual(writes.length, 1)
+			assert.deepStrictEqual(
+				writes[0]!.buckets.map((b) => b.startMs),
+				[0, MIN],
+			)
 		}).pipe(
 			Effect.provide(makeBucketLive(backend, 10)),
 			Effect.provide(makeConfig()),

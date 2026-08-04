@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react"
+import { lazy, memo, Suspense, useMemo, useState } from "react"
 import {
 	ChevronDownIcon,
 	ChevronRightIcon,
@@ -106,8 +106,8 @@ const isStructured = (value: unknown): value is StructuredToolOutput =>
 /**
  * Recover the rich payload a Maple tool renders as a table, chart or tree.
  *
- * Tool results arrive as `{ text, ui? }` — `apps/chat-flue`'s MCP adapter splits
- * the report text from the `__maple_ui` payload. The legacy shapes below are the
+ * Tool results arrive as `{ text, ui? }` — the chat agent's MCP adapter
+ * (`apps/api/src/chat/`) splits the report text from the `__maple_ui` payload. The legacy shapes below are the
  * two the runtime produced before tool results could be structured JSON: a raw
  * MCP `{ content: [...] }` object, and a string with the UI JSON concatenated
  * onto the report. Both still exist in conversations recorded earlier, and a
@@ -209,19 +209,23 @@ interface ToolProps {
  * summary, and an inline-expandable detail panel. The bordered container is owned
  * by the parent (standalone `Tool` shell or `ToolGroup`) so rows never nest cards.
  */
-export function ToolRow(props: ToolProps) {
+export const ToolRow = memo(function ToolRow(props: ToolProps) {
 	const { toolName, state, input, output, errorText } = props
 	const status = deriveStatus(state)
 	const label = toolLabel(toolName)
 	const Icon = toolIcon(toolName)
-	const summary = toolSummary(input)
+	const summary = useMemo(() => toolSummary(input), [input])
 
 	const [open, setOpen] = useState(false)
 
 	const hasInput =
 		input != null && typeof input === "object" && Object.keys(input as Record<string, unknown>).length > 0
-	const structuredData = extractStructuredData(output)
-	const outputText = extractOutputText(output)
+	// Both walk the output, `split("\n\n")` it and `JSON.parse` every `{`-prefixed chunk. A settled
+	// tool result never changes, but this used to re-run on every render of the transcript — and
+	// Maple's tool outputs are warehouse rows and trace payloads, so that was the single most
+	// expensive thing a streamed token could trigger.
+	const structuredData = useMemo(() => extractStructuredData(output), [output])
+	const outputText = useMemo(() => extractOutputText(output), [output])
 	const hasContent = hasInput || structuredData != null || outputText != null || errorText != null
 
 	return (
@@ -300,13 +304,13 @@ export function ToolRow(props: ToolProps) {
 			)}
 		</div>
 	)
-}
+})
 
 /** Standalone (non-grouped) tool call: one `ToolRow` in its own hairline shell. */
-export function Tool(props: ToolProps) {
+export const Tool = memo(function Tool(props: ToolProps) {
 	return (
 		<div className="overflow-hidden rounded-lg border border-border/60 bg-muted/20">
 			<ToolRow {...props} />
 		</div>
 	)
-}
+})

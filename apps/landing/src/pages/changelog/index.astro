@@ -1,0 +1,268 @@
+---
+/**
+ * The changelog index — a release ledger, not a card feed.
+ *
+ * Leads with the newest release rendered as a panel (highlights, not the full
+ * body — the permalink owns that text) and lists every prior month as a
+ * hairline row beneath. With a single release the ledger is absent rather than
+ * empty-stated with a dashed box; the page still reads complete.
+ *
+ * Deliberately monochrome in its own chrome. RoadmapBoard one nav item away
+ * owns the site's categorical chart colors, so the only saturated things here
+ * are the BREAKING key and the release cover — and the covers are drawn to the
+ * same rule, one amber moment each. See DESIGN.md on spending amber once per
+ * screen.
+ */
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import Footer from "../../components/Footer.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import { getSortedReleases, monthLabel } from "../../lib/changelog";
+import { formatDate, isoDate } from "../../lib/blog";
+
+const releases = await getSortedReleases();
+const [latest, ...earlier] = releases;
+
+const pageTitle = "Changelog — What shipped in Maple";
+const pageDescription =
+    "Every Maple release, month by month. Traces, logs, metrics, alerting, integrations and the API — what changed and what broke.";
+
+const canonicalUrl = Astro.site ? new URL("/changelog", Astro.site).toString() : undefined;
+
+const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: "Maple changelog",
+    description: pageDescription,
+    ...(canonicalUrl ? { url: canonicalUrl } : {}),
+    ...(latest ? { dateModified: isoDate(latest.data.date) } : {}),
+    publisher: {
+        "@type": "Organization",
+        name: "Maple",
+        logo: { "@type": "ImageObject", url: "https://maple.dev/logo192.png" },
+    },
+    hasPart: releases.map((r) => ({
+        "@type": "TechArticle",
+        headline: r.data.title,
+        description: r.data.description,
+        datePublished: isoDate(r.data.date),
+        ...(Astro.site ? { url: new URL(`/changelog/${r.id}`, Astro.site).toString() } : {}),
+    })),
+};
+
+const breadcrumbLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Maple", item: "https://maple.dev/" },
+        { "@type": "ListItem", position: 2, name: "Changelog", item: "https://maple.dev/changelog" },
+    ],
+};
+
+const key = "font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted";
+---
+
+<Layout title={pageTitle} description={pageDescription} alternates={["en"]} mdHref="/changelog.md">
+    <link
+        slot="head"
+        rel="alternate"
+        type="application/rss+xml"
+        title="Maple changelog"
+        href="/changelog/rss.xml"
+    />
+    <SeoHead title={pageTitle} description={pageDescription} />
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+    <script type="application/ld+json" set:html={JSON.stringify(breadcrumbLd)} />
+    <Nav />
+
+    <div class="pt-[19px]">
+        <div class="mx-auto max-w-6xl px-6 pt-20 md:pt-24">
+            {/* ── Header ── */}
+            <header>
+                <p class={key}>changelog</p>
+                <h1
+                    class="mt-4 max-w-[14ch] font-display text-[clamp(34px,8vw,72px)] font-semibold leading-[0.95] tracking-[-0.035em] text-balance text-foreground"
+                >
+                    What shipped
+                </h1>
+                <p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-pretty text-fg-muted">
+                    Every Maple release, month by month — the features, the fixes, and anything that
+                    needs your attention before you upgrade.
+                </p>
+
+                {/* Ledger of the ledger: what this page contains. */}
+                <dl
+                    class="mt-10 flex flex-wrap items-stretch border-y border-border font-mono tabular-nums"
+                >
+                    <div class="min-w-[104px] border-r border-border py-3 pr-5">
+                        <dt class={key}>releases</dt>
+                        <dd class="mt-1 text-[13px] text-foreground">{releases.length}</dd>
+                    </div>
+                    {latest && (
+                        <div class="min-w-[132px] border-r border-border px-5 py-3">
+                            <dt class={key}>latest</dt>
+                            <dd class="mt-1 text-[13px] text-foreground">
+                                <time datetime={isoDate(latest.data.date)}>{latest.id}</time>
+                            </dd>
+                        </div>
+                    )}
+                    <div class="py-3 pl-5">
+                        <dt class={key}>subscribe</dt>
+                        <dd class="mt-1 text-[13px]">
+                            <a
+                                href="/changelog/rss.xml"
+                                class="text-fg-muted underline underline-offset-2 transition-colors hover:text-primary"
+                            >
+                                rss
+                            </a>
+                        </dd>
+                    </div>
+                </dl>
+            </header>
+
+            {/* ── Latest release ── */}
+            {latest && (
+                <section class="mt-14 border border-border bg-bg-elevated md:mt-16">
+                    {latest.data.cover && (
+                        <a
+                            href={`/changelog/${latest.id}`}
+                            class="block w-full aspect-[1200/630] overflow-hidden border-b border-border bg-bg-deep"
+                        >
+                            <img
+                                src={latest.data.cover}
+                                alt={latest.data.coverAlt ?? ""}
+                                width="1200"
+                                height="630"
+                                loading="eager"
+                                decoding="async"
+                                class="h-full w-full object-cover"
+                            />
+                        </a>
+                    )}
+
+                    <div
+                        class="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5 md:px-6"
+                    >
+                        <div class="flex items-center gap-2">
+                            <span class="h-1.5 w-1.5 rounded-full bg-primary animate-pulse-dot" aria-hidden="true"
+                            ></span>
+                            <span class={key}>latest release</span>
+                        </div>
+                        <time
+                            datetime={isoDate(latest.data.date)}
+                            class="font-mono text-[11px] tabular-nums text-fg-muted"
+                        >
+                            {formatDate(latest.data.date)}
+                        </time>
+                    </div>
+
+                    <div class="px-4 py-8 md:px-6 md:py-10">
+                        <div class="flex flex-wrap items-center gap-3">
+                            <h2
+                                class="font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-foreground md:text-[40px]"
+                            >
+                                {latest.data.title}
+                            </h2>
+                            {latest.data.breaking && (
+                                <span
+                                    class="border border-primary/40 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-primary"
+                                >
+                                    breaking
+                                </span>
+                            )}
+                        </div>
+
+                        <p class="mt-4 max-w-[62ch] text-sm leading-relaxed text-fg-muted">
+                            {latest.data.description}
+                        </p>
+
+                        {latest.data.highlights.length > 0 && (
+                            <ul class="mt-8">
+                                {latest.data.highlights.map((h) => (
+                                    <li
+                                        class="flex gap-4 border-t border-border py-3.5 text-[13px] leading-relaxed text-fg-muted last:border-b"
+                                    >
+                                        <span class="mt-[7px] h-px w-4 shrink-0 bg-border" aria-hidden="true"></span>
+                                        <span class="min-w-0">{h}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+
+                        <a
+                            href={`/changelog/${latest.id}`}
+                            class="mt-8 inline-flex items-center gap-1.5 font-mono text-xs text-fg-muted transition-colors hover:text-primary"
+                        >
+                            Read the full {latest.data.title} release <span aria-hidden="true">→</span>
+                        </a>
+                    </div>
+                </section>
+            )}
+
+            {/* ── Earlier releases ── */}
+            {earlier.length > 0 ? (
+                <section class="mt-16 md:mt-20">
+                    <div class="mb-6 flex items-baseline gap-4">
+                        <h2 class="font-display text-xl font-semibold tracking-tight text-foreground md:text-2xl">
+                            Earlier
+                        </h2>
+                        <div class="flex-1 border-t border-border"></div>
+                        <span class={key}>{earlier.length} releases</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-px border border-border bg-border">
+                        {earlier.map((r, i) => (
+                            <a
+                                href={`/changelog/${r.id}`}
+                                class="roadmap-reveal group flex flex-col gap-2 bg-bg px-4 py-4 transition-colors duration-200 hover:bg-bg-elevated sm:flex-row sm:items-baseline sm:gap-5 md:px-6"
+                                style={`animation-delay:${i * 45}ms`}
+                            >
+                                <span
+                                    class="shrink-0 font-mono text-[13px] tabular-nums text-fg-muted group-hover:text-primary"
+                                >
+                                    {monthLabel(r.data.date)}
+                                </span>
+                                <span
+                                    class="shrink-0 text-[13px] font-medium text-foreground sm:w-[124px]"
+                                >
+                                    {r.data.title}
+                                </span>
+                                <span class="min-w-0 flex-1 text-[13px] leading-relaxed text-fg-muted">
+                                    {r.data.description}
+                                </span>
+                                {r.data.breaking && (
+                                    <span
+                                        class="shrink-0 border border-primary/40 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-primary"
+                                    >
+                                        breaking
+                                    </span>
+                                )}
+                                <time
+                                    datetime={isoDate(r.data.date)}
+                                    class="shrink-0 font-mono text-[11px] tabular-nums text-fg-muted"
+                                >
+                                    {r.id}
+                                </time>
+                            </a>
+                        ))}
+                    </div>
+                </section>
+            ) : (
+                <p class="mt-10 border-t border-border pt-5 text-[13px] leading-relaxed text-fg-muted">
+                    Earlier releases will land here as they ship.{" "}
+                    <a
+                        href="/changelog/rss.xml"
+                        class="text-fg-muted underline underline-offset-2 transition-colors hover:text-primary"
+                    >
+                        Subscribe by RSS
+                    </a>{" "}
+                    to get them.
+                </p>
+            )}
+        </div>
+    </div>
+
+    <BottomCTA />
+    <Footer />
+</Layout>

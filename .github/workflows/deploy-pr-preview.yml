@@ -1,11 +1,22 @@
 name: Deploy PR Preview (Cloudflare via Alchemy)
 
+# PREVIEW DEPLOYS ARE DISABLED (2026-08, cost). Only the `closed` event still
+# fires, so this workflow now does teardown ONLY: it tears down the stacks of
+# PRs that were deployed before the cutover and never deploys a new one. The
+# deploy-side steps below are kept intact and simply never run.
+#
+# To re-enable, restore the full trigger list:
+#     types: [opened, synchronize, reopened, closed]
+# Previews will then deploy without an application database — see the comment
+# further down and `resolveDatabaseMode` in packages/infra/src/cloudflare/stage.ts.
+#
+# While disabled, cleanup-preview-orphans.yml stays the backstop: its 6-hourly
+# sweeps reap any preview worker, queue, Tinybird branch or Hyperdrive config
+# whose PR closes without a teardown run (GitHub creates no `closed` run for a
+# PR that conflicts with its base branch).
 on:
     pull_request:
         types:
-            - opened
-            - synchronize
-            - reopened
             - closed
 
 concurrency:
@@ -89,99 +100,43 @@ jobs:
               if: ${{ github.event.action != 'closed' }}
               run: bun scripts/tinybird-pr-branch.ts up "$PR_NUMBER"
 
-            - name: Install PlanetScale CLI
-              if: ${{ env.PLANETSCALE_SERVICE_TOKEN != '' }}
-              uses: planetscale/setup-pscale-action@v1
-
-            # The PlanetScale + Alchemy steps below are gated on
-            # PLANETSCALE_SERVICE_TOKEN: until the `dev` Infisical environment carries the
-            # PlanetScale service token (+ PLANETSCALE_SERVICE_TOKEN_ID,
-            # PLANETSCALE_ORG), PR previews can't provision a Postgres branch, so
-            # they SKIP cleanly (the check stays green) rather than fail every PR.
-            # Adding the token activates per-PR preview deploys automatically.
-
-            # Ensure the ephemeral PlanetScale Postgres branch `pr-<n>` exists
-            # and is empty (created once per PR — ~9 min provision — then reset
-            # in SQL on later deploys), mint a credential, and export
-            # MAPLE_PG_URL to GITHUB_ENV so the migrate + Alchemy steps below
-            # bind to the branch.
-            - name: Create/refresh PlanetScale PR branch
-              if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
-              # GITHUB_TOKEN lets the script refuse to provision when the PR is
-              # already closed — a delayed/re-run deploy after teardown would
-              # otherwise recreate the branch with nothing left to delete it.
-              env:
-                  GITHUB_TOKEN: ${{ github.token }}
-              run: bun scripts/planetscale-pr-branch.ts up "$PR_NUMBER"
-
-            # BEFORE migrate: installs default privileges granting PUBLIC on every
-            # table created from here on, so a new or rebuilt table can never land
-            # owner-only and leave a consumer with "permission denied for table …".
-            # Default privileges only apply to objects created after they are set,
-            # hence the ordering. See packages/db/scripts/ensure-privileges.ts.
-            - name: Ensure database privileges
-              if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
-              run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:ensure-privileges
-
-            - name: Run database migrations
-              if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
-              run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:migrate
-
-            # Reassign everything this run's ephemeral role created to `postgres`
-            # so the NEXT deploy's role (which inherits postgres) can drop it —
-            # pscale_api_* roles are not grantable to each other, so without this
-            # the in-place reset always fails on the prior run's objects and
-            # falls back to the ~9-minute delete → recreate path. See
-            # packages/db/scripts/normalize-preview-ownership.ts.
-            - name: Normalize preview branch ownership
-              if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
-              run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:normalize-preview
-
-            # Create/refresh an Electric Cloud environment `pr-<n>` + a Postgres
-            # source pointed at this PR's PlanetScale branch (via the dedicated
-            # replication-role credential MAPLE_PG_ELECTRIC_URL), and
-            # export ELECTRIC_URL/ELECTRIC_SOURCE_ID/ELECTRIC_SECRET to GITHUB_ENV so
-            # the Alchemy deploy below binds the electric-sync worker to it. Runs
-            # after migrations so `0009_electric_publication` exists. Gated on
-            # ELECTRIC_API_TOKEN: until the `dev` Infisical environment carries the
-            # Electric CLI token (+ ELECTRIC_PROJECT_ID), previews SKIP cleanly —
-            # the electric-sync worker deploys unconfigured (503) and the web app
-            # stays on its effect-atom fetches. Adding the token activates per-PR
-            # sync automatically.
-            - name: Create/refresh Electric Cloud PR source
-              if: ${{ github.event.action != 'closed' && env.ELECTRIC_API_TOKEN != '' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
-              run: bun scripts/electric-pr-branch.ts up "$PR_NUMBER"
+            # NO DATABASE STEP HERE, ON PURPOSE. PR previews used to provision an
+            # ephemeral PlanetScale branch `pr-<n>` (+ migrations + an Electric
+            # Cloud source pointed at it). PS-DEV branches bill for time used and
+            # every preview also burned one of the account's 25 Hyperdrive configs,
+            # so as of 2026-08 the `pr` stage deploys with NO application database:
+            # `resolveDatabaseMode` (packages/infra/src/cloudflare/stage.ts) returns
+            # "none", no MAPLE_DB binding is created, and DatabasePgLive fails per
+            # query — DB-backed routes 500 while the rest of the preview works.
+            #
+            # To restore per-PR databases: flip that resolver back to "managed" for
+            # `pr` and re-add the steps this comment replaced (PlanetScale CLI setup,
+            # `planetscale-pr-branch.ts up`, `db:ensure-privileges`, `db:migrate`,
+            # `db:normalize-preview`, `electric-pr-branch.ts up`, and the matching
+            # `planetscale-pr-branch.ts down` teardown). Every script is still in the
+            # repo, dormant.
 
             - name: Deploy PR preview stack with Alchemy
               id: deploy
-              if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
+              if: ${{ github.event.action != 'closed' }}
               run: bun run alchemy:deploy:pr
 
             - name: Destroy PR preview stack with Alchemy
               id: destroy
-              if: ${{ github.event.action == 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
-              # MAPLE_PG_URL is generated by the deploy run and does not survive
-              # into this separate close-event runner. Destroy only needs a valid
-              # URL so alchemy.run.ts can reconstruct the resource graph from
-              # state; it never connects to this placeholder origin.
-              env:
-                  MAPLE_PG_URL: postgres://preview-teardown:preview-teardown@127.0.0.1:5432/postgres
+              if: ${{ github.event.action == 'closed' }}
               run: bun run alchemy:destroy:pr
 
-            # After the stack (and its Hyperdrive config) is destroyed. PS-DEV
-            # branches bill for time used — this must run on every PR close.
             # `!cancelled()` keeps each teardown step running even when a sibling
             # teardown step fails — a failed `alchemy destroy` must not leave the
-            # PS/Electric/Tinybird branches behind (that skip-chain is how the
+            # Electric/Tinybird resources behind (that skip-chain is how the
             # pre-#215 orphan fleet accumulated).
-            - name: Remove PlanetScale PR branch
-              if: ${{ !cancelled() && github.event.action == 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
-              run: bun scripts/planetscale-pr-branch.ts down "$PR_NUMBER"
 
             # Delete the Electric Cloud environment `pr-<n>` (its services are
             # deleted first — Electric refuses to delete an env holding
-            # services). Each source holds a PlanetScale replication slot and a
-            # plan max-databases slot, so teardown on close is mandatory.
+            # services). Residual since previews stopped creating sources: this
+            # only reaps environments left over from PRs opened before 2026-08,
+            # and is a no-op afterwards. Kept because each old source still holds
+            # a plan max-databases slot.
             - name: Remove Electric Cloud PR source
               if: ${{ !cancelled() && github.event.action == 'closed' && env.ELECTRIC_API_TOKEN != '' }}
               run: bun scripts/electric-pr-branch.ts down "$PR_NUMBER"
@@ -202,7 +157,6 @@ jobs:
                   DESTROY_OUTCOME: ${{ steps.destroy.outcome }}
                   WEB_URL: ${{ steps.deploy.outputs.web_url }}
                   API_URL: ${{ steps.deploy.outputs.api_url }}
-                  CHAT_URL: ${{ steps.deploy.outputs.chat_url }}
                   SYNC_URL: ${{ steps.deploy.outputs.sync_url }}
                   COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
                   COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.pull_request.head.sha }}
@@ -240,7 +194,6 @@ jobs:
                       echo "| :-- | :-- |"
                       printf '| Web | [%s](%s) |\n' "${WEB_URL#https://}" "$WEB_URL"
                       printf '| API | [%s](%s) |\n' "${API_URL#https://}" "$API_URL"
-                      printf '| Chat | [%s](%s) |\n' "${CHAT_URL#https://}" "$CHAT_URL"
                       printf '| Electric Sync | [%s](%s) |\n' "${SYNC_URL#https://}" "$SYNC_URL"
                       echo
                       printf 'Deployed from [`%s`](%s) · [View workflow run](%s)\n' "$short_sha" "$COMMIT_URL" "$RUN_URL"

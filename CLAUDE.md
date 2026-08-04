@@ -1,8 +1,26 @@
 # CLAUDE.md
 
 Maple is an OpenTelemetry observability platform: TanStack Start (React 19, Vite) + Effect on the
-backend, ClickHouse/Tinybird as the warehouse. Monorepo — `apps/*` (web, api, ingest, alerting, cli,
-landing, …) and `packages/*` (query-engine, db, domain, ui, …).
+backend, ClickHouse/Tinybird as the warehouse.
+
+## Workspace layout
+
+Three roots, and the split is a rule, not a habit:
+
+- **`apps/*`** — deployables (web, api, ingest, alerting, cli, landing, …).
+- **`packages/*`** — shared code that **knows Maple**: its schema, tables, API, or product.
+  `domain`, `query-engine`, `ui`, `db`, `auth`, `effect-sdk`, `browser`, …
+- **`lib/*`** — libraries with **zero Maple knowledge**, extractable to their own repo tomorrow.
+  `clickhouse-builder`, `effect-cloudflare`, `effect-db`, `effect-router`, `cache`,
+  `otel-helpers`, `unitflow`.
+
+The test for `lib/` is "could this ship as a standalone OSS library?" — not "is it published?"
+and not "did we write it?". Publishability is a `package.json` fact, not a directory fact:
+`packages/effect-sdk` and `packages/browser` are both published. **New packages go in
+`packages/` unless they pass the lib test.**
+
+Anything in `lib/` that starts importing `@maple/domain` has stopped qualifying — move it to
+`packages/` rather than weakening the rule.
 
 ## Local dev
 
@@ -26,7 +44,7 @@ upgrading a runtime (keep `bun` in sync with `packageManager`).
 ## Warehouse queries
 
 **No Tinybird pipes/endpoints exist.** All backend queries use the ClickHouse DSL in
-`@maple/query-engine` and run through `WarehouseQueryService.sqlQuery()`, which routes to the
+`@maple/query-engine` and run through `WarehouseQueryService.compiledQuery()`, which routes to the
 Tinybird SDK or ClickHouse per org config. Never `fetch()` `/v0/sql` directly.
 
 Subpath exports: `./ch` (DSL + `compile`), `./runtime` (dashboard/alert lowering, `evaluate`,
@@ -41,27 +59,28 @@ To add a query: define it in `packages/query-engine/src/ch/queries/*.ts` with
 
 ```typescript
 const compiled = CH.compile(CH.myQuery({ limit: 50 }), { orgId, startTime, endTime })
-const rows =
-	yield *
-	warehouse
-		.sqlQuery(tenant, compiled.sql, { profile: "list", context: "myQuery" })
-		.pipe(Effect.mapError(mapTinybirdError))
-const typedRows = compiled.castRows(rows)
+const rows = yield * warehouse.compiledQuery(tenant, compiled, { profile: "list", context: "myQuery" })
 ```
+
+`compiledQuery` runs the SQL and decodes rows through the query's `rowSchema` (if declared);
+`profile` defaults to `"aggregation"` when omitted (`"unbounded"` is the explicit opt-out). There is
+no `castRows` — a cast that looked type-safe hid wire-format drift.
 
 - Every query **must** filter `OrgId` (`$.OrgId.eq(param.string("orgId"))`) — enforced at runtime.
 - `context` labels the `executeSql` span (`query.context`), which also carries `db.query.text`,
   `db.query.fingerprint`, `db.duration_ms`, `result.rowCount`, `orgId`, `query.profile`.
-- **64-bit ints arrive as strings on BYO-ClickHouse** (`count`/`sum`/`uniqExact`), as numbers on
-  managed Tinybird. If the value flows into a `Schema.Number`, pass a `rowSchema` built with
-  `CH.CHNumber` as `CH.compile(q, params, { rowSchema })` — otherwise BYO-CH orgs get a bare 500.
-  See `packages/query-engine/src/ch/queries/service-map.ts`.
+- **64-bit ints arrive as numbers on every backend**: ClickHouse-protocol clients pin
+  `output_format_json_quote_64bit_integers=0` (`BackendDialect.unquote64BitIntegers`), matching the
+  Tinybird SDK. Two rules remain: (1) identity UInt64s (hashes/ids) must be `toString()`-wrapped in
+  the SELECT — values above 2^53 corrupt as JS numbers; the SQL-catalog e2e sweep enforces this.
+  (2) `rowSchema`s still use `CH.CHNumber`, never `Schema.Number`, so a gateway/readonly cluster
+  that refuses the setting (quoted wire) keeps decoding.
 - `packages/domain/src/tinybird/endpoints.ts` is **type-only** — no `defineEndpoint()` calls.
 
 ## Application database (PlanetScale Postgres)
 
 Relational state (issues, alert rules, dashboards, org config, keys) is Drizzle/`pgTable` in
-`packages/db/src/schema/`, one PS branch per stage (`main`=prd, `stg`, `pr-<n>`), reached from
+`packages/db/src/schema/`, one PS branch per deployed stage (`main`=prd, `stg`), reached from
 Workers via the Hyperdrive binding `MAPLE_DB`.
 
 - App code keeps epoch-ms numbers and converts at the drizzle boundary (`new Date(ms)` writing,
@@ -71,8 +90,16 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   `DatabasePgliteLive` (tests/local; `createTestDb()` in `apps/api/src/lib/test-pglite.ts`).
 - Migrations: `bun run --cwd packages/db db:generate`; CI applies them against the branch's DIRECT
   port 5432 (never a pooler) before `alchemy deploy`. PGlite applies them at layer build.
-- PR previews: `scripts/planetscale-pr-branch.ts up|down <n>`; deleting the branch on PR close is
-  mandatory (billing + Hyperdrive config cap).
+- **PR preview deploys are disabled** (2026-08, cost). `deploy-pr-preview.yml` triggers on the
+  `closed` event only, so it tears down pre-cutover stacks and never deploys a new one; restore
+  `types: [opened, synchronize, reopened, closed]` to re-enable.
+- **PR previews have no application database** either (PS-DEV branches billed continuously and
+  ate the Hyperdrive config cap) — this is the state previews return to when re-enabled.
+  `resolveDatabaseMode` in
+  `packages/infra/src/cloudflare/stage.ts` returns `"none"` for `pr`, so no `MAPLE_DB` is bound
+  and `DatabasePgLive` fails every query with a `DatabaseError` — DB-backed routes 500, the rest
+  of the preview works. To restore: return `"managed"` for `pr` and re-add the PlanetScale +
+  Electric steps to `.github/workflows/deploy-pr-preview.yml` (the scripts are kept, dormant).
 - The ingest gateway resolves ingest keys from the same Postgres via PSBouncer (6432, no Hyperdrive).
 
 ## Conventions
@@ -82,6 +109,10 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   for TanStack Router `validateSearch`. `Schema.optionalKey()` for JSON-decoded HTTP/domain schemas;
   `Schema.optional()` only where `undefined` is a real JS value (search params, MCP tool params).
 - **Effect:** source is vendored at `.context/effect/` (subtree of Effect-TS/effect-smol).
+- **LLM core:** `lib/llm` (`@maple/llm`) is a vendored copy of `anomalyco/opencode`'s
+  `packages/llm`, pinned by SHA in `lib/llm/UPSTREAM.json` and re-synced with
+  `bun run llm:sync`. Don't reformat it and don't put Maple behaviour inside it — see
+  `lib/llm/MAPLE.md`.
 - **Span status codes:** Title case — `"Ok"`, `"Error"`, `"Unset"`.
 - **UI:** shadcn/Base UI + Tailwind 4 (`npx shadcn@latest add <component>`), Recharts, Nucleo icons.
   Find an icon in the local Nucleo DB, then port it into `apps/web/src/components/icons/` by copying

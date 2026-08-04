@@ -2,7 +2,7 @@
 // Shared constants and helpers used by the CH DSL queries.
 // ---------------------------------------------------------------------------
 
-import type { TracesMetric, AttributeFilter } from "./query-engine"
+import type { TracesMetric, AttributeFilter } from "@maple/domain/query-engine"
 import type { AttributeIndexMode } from "./capabilities"
 
 // ---------------------------------------------------------------------------
@@ -113,7 +113,13 @@ export function buildAttrFilterCondition(
 
 	const positive = ((): CH.Condition => {
 		if (af.mode === "exists") {
-			const exact = anyMapContains(mapExpr, keys)
+			// ClickHouse `Map` lookups return the value type's default (`''`) for a
+			// missing key, and instrumentation also writes genuinely empty values.
+			// `mapContains` alone therefore let `''` rows through, so an `exists`
+			// filter still produced a "(no value)" bucket in breakdowns — exactly
+			// what the user was filtering out. Require a non-empty value too, which
+			// makes `!exists` (the `NOT (...)` wrapper below) mean "absent or empty".
+			const exact = anyMapContains(mapExpr, keys).and(colExpr.neq(""))
 			if (af.negated || indexMode === "none") return exact
 			let candidate = CH.has(CH.mapKeys(mapExpr), CH.lit(keys[0]!))
 			for (let i = 1; i < keys.length; i++) {

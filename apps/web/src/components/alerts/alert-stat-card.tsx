@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import { Card, CardContent } from "@maple/ui/components/ui/card"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 type Tone = "default" | "critical" | "emerald" | "amber"
 

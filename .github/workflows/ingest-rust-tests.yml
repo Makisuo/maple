@@ -42,6 +42,14 @@ jobs:
         defaults:
             run:
                 working-directory: apps/ingest
+        env:
+            # The perf comparison — head bench, Criterion, the base-branch release
+            # build, its probe and its bench — is opt-in. It was ~60% of this job's
+            # runtime on every ingest PR, and this job was the single most expensive
+            # workflow in the repo. Label a PR `bench-ingest` when you are actually
+            # changing the hot path; `cargo test` and the release build still run
+            # unconditionally. Same opt-in shape as eval.yml's `run-evals`.
+            RUN_BENCH: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'bench-ingest') }}
         steps:
             - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -65,7 +73,14 @@ jobs:
             - name: Build PR ingest and benchmark binaries
               run: |
                   set +e
-                  cargo build --locked --release --bin maple-ingest --bin load_test 2>&1 | tee "$RUNNER_TEMP/ingest-head-build.txt"
+                  # load_test only exists to drive the benchmark, so only build it
+                  # when the benchmark is going to run.
+                  bins="--bin maple-ingest"
+                  if [ "$RUN_BENCH" = "true" ]; then
+                    bins="$bins --bin load_test"
+                  fi
+                  # shellcheck disable=SC2086
+                  cargo build --locked --release $bins 2>&1 | tee "$RUNNER_TEMP/ingest-head-build.txt"
                   echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-head-build.exit"
                   mkdir -p "$RUNNER_TEMP/head"
                   if [ -x target/release/maple-ingest ]; then
@@ -76,7 +91,26 @@ jobs:
                   fi
                   exit 0
 
+            # Every step above records its exit code and returns 0 so the run reaches
+            # the aggregation step and reports test and build failures together. That
+            # is worth doing for the cheap steps; it is not worth spending the
+            # benchmark budget on a tree that does not compile.
+            - name: Skip benchmarks if tests or build failed
+              id: bench-gate
+              if: ${{ env.RUN_BENCH == 'true' }}
+              run: |
+                  for file in "$RUNNER_TEMP"/ingest-cargo-test.exit "$RUNNER_TEMP"/ingest-head-build.exit; do
+                    [ -f "$file" ] || continue
+                    if [ "$(cat "$file")" != "0" ]; then
+                      echo "::notice::skipping benchmarks — $(basename "$file") is non-zero"
+                      echo "ok=false" >> "$GITHUB_OUTPUT"
+                      exit 0
+                    fi
+                  done
+                  echo "ok=true" >> "$GITHUB_OUTPUT"
+
             - name: Run PR ingest load benchmark (median of N)
+              if: ${{ steps.bench-gate.outputs.ok == 'true' }}
               run: |
                   set +e
                   set -o pipefail
@@ -105,6 +139,7 @@ jobs:
                   exit 0
 
             - name: Run Criterion WAL-ack microbench
+              if: ${{ steps.bench-gate.outputs.ok == 'true' }}
               run: |
                   set +e
                   set -o pipefail
@@ -114,7 +149,7 @@ jobs:
                   exit 0
 
             - name: Build base ingest binary
-              if: ${{ github.event_name == 'pull_request' }}
+              if: ${{ steps.bench-gate.outputs.ok == 'true' && github.event_name == 'pull_request' }}
               run: |
                   set +e
                   git fetch origin "${{ github.base_ref }}" --depth=1
@@ -144,7 +179,7 @@ jobs:
                   exit 0
 
             - name: Probe whether base supports head ingest mode
-              if: ${{ github.event_name == 'pull_request' }}
+              if: ${{ steps.bench-gate.outputs.ok == 'true' && github.event_name == 'pull_request' }}
               run: |
                   set +e
                   echo "0" > "$RUNNER_TEMP/base-supports-mode"
@@ -170,7 +205,7 @@ jobs:
                   exit 0
 
             - name: Run base ingest load benchmark (median of N)
-              if: ${{ github.event_name == 'pull_request' }}
+              if: ${{ steps.bench-gate.outputs.ok == 'true' && github.event_name == 'pull_request' }}
               run: |
                   set +e
                   set -o pipefail
@@ -204,7 +239,7 @@ jobs:
                   exit 0
 
             - name: Render PR comment body
-              if: ${{ always() && github.event_name == 'pull_request' }}
+              if: ${{ always() && steps.bench-gate.outputs.ok == 'true' && github.event_name == 'pull_request' }}
               env:
                   TEST_OUTPUT: ${{ runner.temp }}/ingest-cargo-test.txt
                   CRITERION_OUTPUT: ${{ runner.temp }}/ingest-criterion.txt
@@ -218,7 +253,7 @@ jobs:
                     python "$GITHUB_WORKSPACE/.github/scripts/format-ingest-benchmark-comment.py"
 
             - name: Post or update PR comment (sticky)
-              if: ${{ always() && github.event_name == 'pull_request' }}
+              if: ${{ always() && steps.bench-gate.outputs.ok == 'true' && github.event_name == 'pull_request' }}
               env:
                   GH_TOKEN: ${{ github.token }}
                   PR_NUMBER: ${{ github.event.pull_request.number }}

@@ -3,7 +3,7 @@
 import type { ComponentProps } from "react"
 
 import { Button } from "@maple/ui/components/ui/button"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { useCallback } from "react"
 
 export type SuggestionsProps = ComponentProps<"div">

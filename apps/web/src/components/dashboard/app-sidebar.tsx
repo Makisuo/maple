@@ -258,6 +258,30 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 		return best
 	}, [subItems, currentPath])
 
+	// While a section is open the rail belongs to the child you're actually on,
+	// not the parent — otherwise two amber bars compete and neither points at
+	// the current page. The open parent keeps the fill.
+	const isOpen = Boolean(subItems && subItems.length > 0 && isActive)
+
+	// A closed section is a word with its contents hidden behind it: "Explore"
+	// doesn't say traces/logs/metrics/replays. Trailing miniatures of the
+	// children's own glyphs say it without spending four rows. Only drawn when
+	// every child has a mark — a partial run reads as a broken list — and
+	// dropped once the section opens and the real rows are on screen. Repeated
+	// marks collapse to one: Infrastructure's three k8s pages share a glyph, and
+	// drawing it three times both crowds the label and overstates the variety.
+	const preview = useMemo(() => {
+		if (isOpen || !subItems?.every((sub) => sub.icon)) return undefined
+		const seen = new Set<NavSubItem["icon"]>()
+		const unique: NavSubItem[] = []
+		for (const sub of subItems) {
+			if (!sub.icon || seen.has(sub.icon)) continue
+			seen.add(sub.icon)
+			unique.push(sub)
+		}
+		return unique
+	}, [isOpen, subItems])
+
 	// The sub-list can't render at 48px, so the rail turns the row into a menu.
 	// Without this, every child route is stranded while the sidebar is collapsed
 	// — which is the state Infrastructure ships in today.
@@ -290,30 +314,6 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 			</SidebarMenuItem>
 		)
 	}
-
-	// While a section is open the rail belongs to the child you're actually on,
-	// not the parent — otherwise two amber bars compete and neither points at
-	// the current page. The open parent keeps the fill.
-	const isOpen = Boolean(subItems && subItems.length > 0 && isActive)
-
-	// A closed section is a word with its contents hidden behind it: "Explore"
-	// doesn't say traces/logs/metrics/replays. Trailing miniatures of the
-	// children's own glyphs say it without spending four rows. Only drawn when
-	// every child has a mark — a partial run reads as a broken list — and
-	// dropped once the section opens and the real rows are on screen. Repeated
-	// marks collapse to one: Infrastructure's three k8s pages share a glyph, and
-	// drawing it three times both crowds the label and overstates the variety.
-	const preview = useMemo(() => {
-		if (isOpen || !subItems?.every((sub) => sub.icon)) return undefined
-		const seen = new Set<NavSubItem["icon"]>()
-		const unique: NavSubItem[] = []
-		for (const sub of subItems) {
-			if (!sub.icon || seen.has(sub.icon)) continue
-			seen.add(sub.icon)
-			unique.push(sub)
-		}
-		return unique
-	}, [isOpen, subItems])
 
 	return (
 		<SidebarMenuItem>

@@ -38,7 +38,10 @@ services:
                 condition: service_healthy
 
     clickhouse:
-        image: clickhouse/clickhouse-server:24.8
+        # Keep in sync with the clickhouse-schema-e2e job in .github/workflows/ci.yml —
+        # CI verifies migrations against exactly one version, and it should be the one
+        # developers actually run.
+        image: clickhouse/clickhouse-server:26.2
         ports:
             - "8123:8123" # HTTP (queries, migrations, mapleexporter)
             - "9000:9000" # native protocol (optional; handy for clickhouse-client)

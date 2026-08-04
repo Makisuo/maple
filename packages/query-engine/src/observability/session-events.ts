@@ -20,6 +20,8 @@ export interface SearchSessionsInput {
 	readonly endTime: string
 	// Session metadata filters (session_replays)
 	readonly userId?: string
+	/** Every session from one browser, signed in or not — the cross-surface join. */
+	readonly visitorId?: string
 	readonly serviceName?: string
 	readonly browser?: string
 	readonly country?: string
@@ -48,6 +50,7 @@ export const searchSessions = Effect.fn("Observability.searchSessions")(function
 	const compiled = CH.compile(
 		CH.sessionReplaysListQuery({
 			userId: input.userId,
+			visitorId: input.visitorId,
 			serviceName: input.serviceName,
 			browser: input.browser,
 			country: input.country,

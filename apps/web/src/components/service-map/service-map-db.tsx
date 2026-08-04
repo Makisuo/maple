@@ -114,6 +114,18 @@ export function getDbDescriptor(system: string | undefined): DbDescriptor {
 				color: "oklch(0.58 0.2 25)",
 				branded: true,
 			}
+		case "tinybird":
+			// No Nucleo/brand icon for Tinybird yet, so the generic database glyph
+			// carries the brand color rather than shipping an invented mark. The
+			// case still earns its keep: without it the node renders the raw
+			// lowercase `tinybird` in the default database blue.
+			return {
+				category: "database",
+				Icon: DatabaseIcon,
+				label: "Tinybird",
+				color: "oklch(0.82 0.19 155)",
+				branded: false,
+			}
 	}
 
 	const category = categoryOf(s)

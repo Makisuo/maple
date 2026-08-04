@@ -12,7 +12,8 @@
  */
 import { createDecipheriv } from "node:crypto"
 import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
-import { createMaplePgClient, type MaplePgClient } from "@maple/db/client"
+import type { MaplePgClient } from "@maple/db/client"
+import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import {
 	clickHouseSchemaVersion,
 	clickHouseSchemaFeatures,
@@ -28,8 +29,27 @@ import {
 	type DesiredTable,
 } from "@maple/domain/clickhouse"
 import { eq } from "drizzle-orm"
+import { Effect } from "effect"
+import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
+import { makeTracedPgConnection, type TracedPgConnection } from "@/platform/pg-execute"
 
-export interface SchemaApplyWorkflowEnv {
+/**
+ * This workflow runs outside the worker's layer graph, so it owns its telemetry
+ * instance and drains it itself — same arrangement as AiTriageWorkflow.run.
+ * Module scope is safe because the file is only ever dynamically imported from
+ * the thin shell in `ClickHouseSchemaApplyWorkflow.ts`, off the startup-CPU path.
+ */
+const schemaApplyTelemetry = MapleCloudflareSDK.make({
+	serviceName: "maple-api",
+	serviceNamespace: "backend",
+	repositoryUrl: "https://github.com/Makisuo/maple",
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
+})
+
+/** One unit of DB work, traced as a `Database.execute` client span. */
+type DbStep = <T>(fn: (db: MaplePgClient) => Promise<T>) => Promise<T>
+
+export interface SchemaApplyWorkflowEnv extends Record<string, unknown> {
 	readonly MAPLE_DB: unknown
 	readonly MAPLE_INGEST_KEY_ENCRYPTION_KEY: string
 }
@@ -209,12 +229,10 @@ const normalizeExpression = (value: string): string =>
 
 // --- config load + decrypt (imperative mirror of the service helper) --------
 
-const loadConfig = async (db: MaplePgClient, orgId: string, encryptionKey: Buffer): Promise<ChConfig> => {
-	const rows = await db
-		.select()
-		.from(orgClickHouseSettings)
-		.where(eq(orgClickHouseSettings.orgId, orgId))
-		.limit(1)
+const loadConfig = async (dbStep: DbStep, orgId: string, encryptionKey: Buffer): Promise<ChConfig> => {
+	const rows = await dbStep((db) =>
+		db.select().from(orgClickHouseSettings).where(eq(orgClickHouseSettings.orgId, orgId)).limit(1),
+	)
 	const row = rows[0]
 	if (!row) throw new Error(`No ClickHouse settings configured for org ${orgId}`)
 	let password = ""
@@ -263,11 +281,13 @@ type RunPatch = Partial<{
 	finishedAt: Date | null
 }>
 
-const updateRun = async (db: MaplePgClient, orgId: string, patch: RunPatch, now: number): Promise<void> => {
-	await db
-		.update(orgClickHouseSchemaApplyRuns)
-		.set({ ...patch, updatedAt: new Date(now) })
-		.where(eq(orgClickHouseSchemaApplyRuns.orgId, orgId))
+const updateRun = async (dbStep: DbStep, orgId: string, patch: RunPatch, now: number): Promise<void> => {
+	await dbStep((db) =>
+		db
+			.update(orgClickHouseSchemaApplyRuns)
+			.set({ ...patch, updatedAt: new Date(now) })
+			.where(eq(orgClickHouseSchemaApplyRuns.orgId, orgId)),
+	)
 }
 
 // --- snapshot-diff additive (mirror of OrgClickHouseSettingsService) --------
@@ -331,32 +351,35 @@ export async function runClickHouseSchemaApply(
 	event: WorkflowEventLike<SchemaApplyWorkflowPayload>,
 	step: WorkflowStepLike,
 ): Promise<SchemaApplyWorkflowResult> {
-	const connection = createMaplePgClient(resolveMapleDbConnectionString(env.MAPLE_DB), {
-		maxConnections: 1,
-	})
+	const connection = makeTracedPgConnection(resolveMapleDbConnectionString(env.MAPLE_DB))
 	try {
-		return await runWithDb(connection.db, env, event, step)
+		return await runWithDb(connection, env, event, step)
 	} finally {
-		await connection.end().catch(() => undefined)
+		await connection.end()
+		// This module owns its telemetry instance (the workflow runs outside the
+		// worker's layer graph), so nothing else will drain the span buffer.
+		await schemaApplyTelemetry.flush(env).catch(() => undefined)
 	}
 }
 
 async function runWithDb(
-	db: MaplePgClient,
+	connection: TracedPgConnection,
 	env: SchemaApplyWorkflowEnv,
 	event: WorkflowEventLike<SchemaApplyWorkflowPayload>,
 	step: WorkflowStepLike,
 ): Promise<SchemaApplyWorkflowResult> {
 	const orgId = event.payload.orgId
+	const dbStep: DbStep = (fn) =>
+		Effect.runPromise(connection.step(fn).pipe(Effect.provide(schemaApplyTelemetry.layer)))
 	const encryptionKey = Buffer.from(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY.trim(), "base64")
 	const startedAt = Date.now()
 	const appliedVersions: number[] = []
 	const skippedFeatures: Array<{ readonly id: string; readonly reason: string }> = []
 
 	const cfg = await step.do("load-config", STEP, async () => {
-		const c = await loadConfig(db, orgId, encryptionKey)
+		const c = await loadConfig(dbStep, orgId, encryptionKey)
 		await updateRun(
-			db,
+			dbStep,
 			orgId,
 			{ status: "running", phase: "connecting", errorMessage: null, startedAt: new Date(startedAt) },
 			Date.now(),
@@ -386,7 +409,7 @@ async function runWithDb(
 				})
 				done += 1
 				await updateRun(
-					db,
+					dbStep,
 					orgId,
 					{
 						phase: `migration ${migration.version} · ${s.name}`,
@@ -406,7 +429,7 @@ async function runWithDb(
 		// Snapshot-diff additive pass: create snapshot objects missing on the
 		// cluster + add missing columns (metadata-only, fits a step easily).
 		await step.do("snapshot-diff", STEP, async () => {
-			await updateRun(db, orgId, { phase: "reconciling schema snapshot" }, Date.now())
+			await updateRun(dbStep, orgId, { phase: "reconciling schema snapshot" }, Date.now())
 			const desired = parseDesiredTables()
 			const desiredByName = new Map(desired.map((t) => [t.name, t]))
 			const actual = await fetchActualSchema(cfg)
@@ -436,16 +459,18 @@ async function runWithDb(
 		// installed due to permissions, server support, or transient load.
 		await step.do("stamp-correctness", STEP, async () => {
 			const stampedAt = Date.now()
-			await db
-				.update(orgClickHouseSettings)
-				.set({
-					lastSyncAt: new Date(stampedAt),
-					lastSyncError: null,
-					syncStatus: "connected",
-					schemaVersion: clickHouseSchemaVersion,
-					updatedAt: new Date(stampedAt),
-				})
-				.where(eq(orgClickHouseSettings.orgId, orgId))
+			await dbStep((db) =>
+				db
+					.update(orgClickHouseSettings)
+					.set({
+						lastSyncAt: new Date(stampedAt),
+						lastSyncError: null,
+						syncStatus: "connected",
+						schemaVersion: clickHouseSchemaVersion,
+						updatedAt: new Date(stampedAt),
+					})
+					.where(eq(orgClickHouseSettings.orgId, orgId)),
+			)
 		})
 
 		for (const migration of clickHouseMigrations) {
@@ -462,7 +487,7 @@ async function runWithDb(
 						STEP,
 						async () => {
 							await updateRun(
-								db,
+								dbStep,
 								orgId,
 								{
 									phase: `performance migration ${migration.version} · ${index + 1}/${steps.length}`,
@@ -546,7 +571,7 @@ async function runWithDb(
 							const statement = feature.statements[index]!
 							await step.do(`feature-${feature.id}:${index + 1}`, STEP, async () => {
 								await updateRun(
-									db,
+									dbStep,
 									orgId,
 									{
 										phase: `feature ${feature.id} · ${index + 1}/${feature.statements.length}`,
@@ -574,7 +599,7 @@ async function runWithDb(
 		const finishedAt = Date.now()
 		await step.do("finalize", STEP, async () => {
 			await updateRun(
-				db,
+				dbStep,
 				orgId,
 				{
 					status: "succeeded",
@@ -593,16 +618,17 @@ async function runWithDb(
 		const finishedAt = Date.now()
 		const message = error instanceof Error ? error.message : String(error)
 		await updateRun(
-			db,
+			dbStep,
 			orgId,
 			{ status: "failed", errorMessage: message, finishedAt: new Date(finishedAt) },
 			finishedAt,
 		).catch(() => undefined)
-		await db
-			.update(orgClickHouseSettings)
-			.set({ syncStatus: "error", lastSyncError: message, updatedAt: new Date(finishedAt) })
-			.where(eq(orgClickHouseSettings.orgId, orgId))
-			.catch(() => undefined)
+		await dbStep((db) =>
+			db
+				.update(orgClickHouseSettings)
+				.set({ syncStatus: "error", lastSyncError: message, updatedAt: new Date(finishedAt) })
+				.where(eq(orgClickHouseSettings.orgId, orgId)),
+		).catch(() => undefined)
 		throw error
 	}
 }

@@ -23,13 +23,25 @@ const toDecodeErrorMessage = (definition: MapleToolDefinition, error: unknown): 
 	return String(error)
 }
 
-const toolDescriptors: ReadonlyArray<InternalMcpToolDescriptor> = mapleToolDefinitions.map((definition) => ({
-	name: definition.name,
-	description: definition.description,
-	inputSchema: toInputSchema(definition.schema),
-}))
+/**
+ * Built on first use, not at module scope.
+ *
+ * `apps/api/src/chat/agent.ts` imports this module and is itself reachable from the tool registry's
+ * own import graph (registry -> a tool -> issue-hub/ai-triage-enqueue -> chat/session -> chat/agent
+ * -> here). Computing the descriptors eagerly meant that whichever module the bundler happened to
+ * evaluate first could observe `mapleToolDefinitions` as `undefined`. Deferring removes the
+ * ordering dependency entirely rather than papering over one edge of the cycle.
+ */
+let toolDescriptors: ReadonlyArray<InternalMcpToolDescriptor> | undefined
 
-export const listMcpTools = Effect.succeed(toolDescriptors)
+const listToolDescriptors = (): ReadonlyArray<InternalMcpToolDescriptor> =>
+	(toolDescriptors ??= mapleToolDefinitions.map((definition) => ({
+		name: definition.name,
+		description: definition.description,
+		inputSchema: toInputSchema(definition.schema),
+	})))
+
+export const listMcpTools = Effect.sync(listToolDescriptors)
 
 /** Shared tool dispatcher for public MCP-over-HTTP and internal Worker RPC. */
 export const callMcpTool = Effect.fn("McpToolDispatcher.call")(function* (name: string, input: unknown) {

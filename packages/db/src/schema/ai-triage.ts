@@ -4,8 +4,8 @@ import type { AiTriageIncidentKind, AiTriageRunStatus } from "@maple/domain/http
 
 /**
  * Per-org AI auto-triage policy. Disabled by default, so an admin must opt in.
- * Triage runs on Maple's managed AI (Cloudflare Workers AI via the chat-flue
- * Flue workflow) — no per-org model or key configuration is needed.
+ * Triage runs on Maple's managed AI (Cloudflare Workers AI via the api worker's
+ * `AI` binding) — no per-org model or key configuration is needed.
  */
 export const aiTriageSettings = pgTable("ai_triage_settings", {
 	orgId: text("org_id").$type<OrgId>().notNull().primaryKey(),

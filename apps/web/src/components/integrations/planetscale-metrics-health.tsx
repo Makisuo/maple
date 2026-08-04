@@ -1,38 +1,37 @@
 import { useState } from "react"
+import { Link } from "@tanstack/react-router"
 
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import type { PlanetScaleScrapeTargetSummary } from "@maple/domain/http"
-import { formatRelativeTime } from "@maple/ui/time-format"
-
-type HealthState = "degraded" | "waiting" | "stalled" | "healthy"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
+import { metricsHealthState, type MetricsAuth, type MetricsHealthState } from "./planetscale-setup-steps"
 
 /**
  * Outcome-level health for the managed branch-metrics collection. Collection
  * itself is fully automatic (Maple provisions and runs it), so the card shows a
  * single status row instead of the underlying machinery: one dot, one label,
  * and — only when degraded — the raw error behind a disclosure.
+ *
+ * The state comes from {@link metricsHealthState}, shared with the setup
+ * checklist, so this row and the checklist can never disagree about whether
+ * metrics are flowing.
  */
 export function PlanetScaleMetricsHealth({
 	target,
 	metricsAuth,
+	action,
 }: {
 	target: PlanetScaleScrapeTargetSummary
-	metricsAuth: "oauth" | "service_token" | "missing"
+	metricsAuth: MetricsAuth
+	/** Trailing affordance (e.g. Rotate token) rendered at the end of the row. */
+	action?: React.ReactNode
 }) {
 	const [detailsOpen, setDetailsOpen] = useState(false)
 
+	const state = metricsHealthState(target, metricsAuth, Date.now())
 	// The token-setup step owns the missing-auth state — don't show two messages.
-	if (metricsAuth === "missing") return null
-
-	const state: HealthState =
-		target.lastScrapeError !== null
-			? "degraded"
-			: target.lastScrapeAt === null
-				? "waiting"
-				: Date.now() - target.lastScrapeAt > 3 * target.scrapeIntervalSeconds * 1000
-					? "stalled"
-					: "healthy"
+	if (state === "unconfigured") return null
 
 	const updatedAgo =
 		target.lastScrapeAt !== null ? formatRelativeTime(new Date(target.lastScrapeAt).toISOString()) : null
@@ -49,18 +48,10 @@ export function PlanetScaleMetricsHealth({
 						(state === "degraded" || state === "stalled") && "bg-severity-warn",
 					)}
 				/>
-				<span className="font-medium text-foreground">
-					{state === "degraded"
-						? "Metrics collection degraded"
-						: state === "stalled"
-							? "Metrics collection stalled"
-							: state === "waiting"
-								? "Waiting for first metrics"
-								: "Metrics"}
-				</span>
+				<span className="font-medium text-foreground">{HEADLINE[state]}</span>
 				<span className="text-muted-foreground">
 					{state === "waiting"
-						? "Branch metrics usually appear within a minute of connecting."
+						? "Branch metrics usually appear within a minute."
 						: state === "healthy"
 							? `Updated ${updatedAgo}`
 							: updatedAgo !== null
@@ -70,15 +61,27 @@ export function PlanetScaleMetricsHealth({
 						<> · excluding {target.excludeBranches.join(", ")}</>
 					) : null}
 				</span>
-				{state === "degraded" ? (
-					<button
-						type="button"
-						onClick={() => setDetailsOpen((open) => !open)}
-						className="ml-auto text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground"
+				{/* The payoff link: the point of finishing setup is the fleet page. */}
+				{state === "healthy" ? (
+					<Link
+						to="/infra/planetscale"
+						className="text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground"
 					>
-						{detailsOpen ? "Hide details" : "Show details"}
-					</button>
+						View databases
+					</Link>
 				) : null}
+				<div className="ml-auto flex items-center gap-2">
+					{state === "degraded" ? (
+						<button
+							type="button"
+							onClick={() => setDetailsOpen((open) => !open)}
+							className="text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground"
+						>
+							{detailsOpen ? "Hide details" : "Show details"}
+						</button>
+					) : null}
+					{action}
+				</div>
 			</div>
 			{state === "degraded" && detailsOpen ? (
 				<p className="mt-2 break-all rounded-md bg-muted/40 p-2 font-mono text-xs text-muted-foreground">
@@ -87,4 +90,12 @@ export function PlanetScaleMetricsHealth({
 			) : null}
 		</div>
 	)
+}
+
+const HEADLINE: Record<MetricsHealthState, string> = {
+	unconfigured: "",
+	degraded: "Metrics collection degraded",
+	stalled: "Metrics collection stalled",
+	waiting: "Waiting for first metrics",
+	healthy: "Metrics",
 }

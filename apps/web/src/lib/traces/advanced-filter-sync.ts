@@ -3,7 +3,7 @@ import {
 	parseBoolean,
 	parseNumber,
 	parseWhereClause as parseWhereClauses,
-} from "@maple/query-engine/where-clause"
+} from "@maple/domain/where-clause"
 import { Match } from "effect"
 
 interface AttributeFilterEntry {

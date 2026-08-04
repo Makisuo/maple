@@ -1,15 +1,23 @@
 import { WIDGET_TYPES } from "@maple/domain/http"
 
-import { ArrowTrendDownIcon, ChartBarIcon, CirclePercentageIcon, LayersIcon } from "@/components/icons"
+import {
+	ArrowTrendDownIcon,
+	ChartBarHorizontalIcon,
+	ChartBarIcon,
+	CirclePercentageIcon,
+	LayersIcon,
+} from "@/components/icons"
 import { WidgetSettings } from "@/components/dashboard-builder/config/settings-fields"
 import {
 	FunnelWidget,
+	HbarWidget,
 	HeatmapWidget,
 	HistogramWidget,
 	PieWidget,
 } from "@/components/dashboard-builder/widgets/make-chart-widget"
 import {
 	funnelPresets,
+	hbarPresets,
 	heatmapPresets,
 	histogramPresets,
 	piePresets,
@@ -18,6 +26,7 @@ import {
 	extendDisplay,
 	type WidgetTypeDefinition,
 } from "@/components/dashboard-builder/widgets/widget-type-registry"
+import { BREAKDOWN_TAIL_LIMIT } from "@/lib/query-builder/model"
 import type { BuildDataSourceContext } from "@/lib/query-builder/widget-builder-shared"
 import {
 	hasActiveGroupBy,
@@ -28,7 +37,7 @@ import type { WidgetDataSource } from "@/components/dashboard-builder/types"
 import { chartPresetPreview } from "@/components/dashboard-builder/widgets/types/preset-preview"
 
 // ---------------------------------------------------------------------------
-// Categorical charts: pie, histogram, heatmap, funnel.
+// Categorical charts: pie, histogram, heatmap, funnel, horizontal bar.
 //
 // They read one row per category from the breakdown endpoint, not one row per
 // time bucket from the timeseries endpoint. Sending them to the wrong endpoint
@@ -37,7 +46,13 @@ import { chartPresetPreview } from "@/components/dashboard-builder/widgets/types
 // (`meta.requiresGroupBy`) and enforced before Apply.
 // ---------------------------------------------------------------------------
 
-const breakdownDataSource = ({ sharedTransform, visibleQueries }: BuildDataSourceContext) =>
+const breakdownDataSource = (
+	{ sharedTransform, visibleQueries }: BuildDataSourceContext,
+	// Only the pie collapses its long tail into an "Other" slice, so only the pie
+	// asks for rows past what it draws. Funnel/heatmap/histogram plot every row
+	// they receive — handing them 50 turns a 10-stage funnel into a truncated list.
+	options?: { defaultLimit?: number },
+) =>
 	({
 		endpoint: "custom_query_builder_breakdown",
 		// Deliberately NOT forwarding `state.formulas`. A formula is a timeseries
@@ -46,7 +61,10 @@ const breakdownDataSource = ({ sharedTransform, visibleQueries }: BuildDataSourc
 		// accepts only startTime/endTime/queries — smuggling formulas through the
 		// params to preserve them across a reopen fails the request decode and
 		// leaves the widget stuck on its loading skeleton.
-		params: { queries: visibleQueries },
+		params: {
+			queries: visibleQueries,
+			...(options?.defaultLimit ? { defaultLimit: options.defaultLimit } : {}),
+		},
 		transform: sharedTransform,
 	}) satisfies WidgetDataSource
 
@@ -55,10 +73,18 @@ export const pieWidgetType: WidgetTypeDefinition = {
 	icon: CirclePercentageIcon,
 	Renderer: PieWidget,
 	queryEditor: "builder",
-	ConfigPanel: () => <WidgetSettings.QueryOptions />,
+	// "Right" renders the sorted Value/% table — the standard reading of a
+	// composition breakdown, and the reason the legend is configurable here at all.
+	ConfigPanel: () => (
+		<>
+			<WidgetSettings.Divider />
+			<WidgetSettings.Legend seriesStats={false} />
+			<WidgetSettings.QueryOptions />
+		</>
+	),
 	presets: piePresets,
 	PresetPreview: chartPresetPreview("query-builder-pie"),
-	buildDataSource: breakdownDataSource,
+	buildDataSource: (ctx) => breakdownDataSource(ctx, { defaultLimit: BREAKDOWN_TAIL_LIMIT }),
 	buildDisplay: ({ base }) => base,
 }
 
@@ -71,6 +97,23 @@ export const funnelWidgetType: WidgetTypeDefinition = {
 	ConfigPanel: () => <WidgetSettings.QueryOptions />,
 	presets: funnelPresets,
 	PresetPreview: chartPresetPreview("query-builder-funnel"),
+	buildDataSource: breakdownDataSource,
+	buildDisplay: ({ base }) => base,
+}
+
+/**
+ * The ranked "top N by volume" panel, and the one a funnel was standing in for.
+ * Same breakdown rows as a funnel; the difference is in the reading — sorted by
+ * value, each row a share of the total rather than of the biggest row.
+ */
+export const hbarWidgetType: WidgetTypeDefinition = {
+	meta: WIDGET_TYPES.hbar,
+	icon: ChartBarHorizontalIcon,
+	Renderer: HbarWidget,
+	queryEditor: "builder",
+	ConfigPanel: () => <WidgetSettings.QueryOptions />,
+	presets: hbarPresets,
+	PresetPreview: chartPresetPreview("query-builder-hbar"),
 	buildDataSource: breakdownDataSource,
 	buildDisplay: ({ base }) => base,
 }

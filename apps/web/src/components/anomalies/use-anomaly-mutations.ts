@@ -1,5 +1,5 @@
 import { Cause, Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
@@ -30,9 +30,9 @@ export function useAnomalyMutations() {
 			reactivityKeys: ["anomalyIncidents", `anomalyIncident:${incidentId}`],
 		})
 		if (Exit.isSuccess(result)) {
-			toast.success("Anomaly resolved")
+			toastManager.add({ title: "Anomaly resolved", type: "success" })
 		} else {
-			toast.error("Resolve failed", { description: describeFailure(result) })
+			toastManager.add({ title: "Resolve failed", description: describeFailure(result), type: "error" })
 		}
 		return result
 	}
@@ -55,10 +55,15 @@ export function useAnomalyMutations() {
 			reactivityKeys: ["anomalyIncidents", `anomalyIncident:${incidentId}`, ...issueKeys],
 		})
 		if (Exit.isSuccess(result)) {
-			toast.success(issueId === null ? "Issue unlinked" : "Linked to issue")
+			toastManager.add({
+				title: issueId === null ? "Issue unlinked" : "Linked to issue",
+				type: "success",
+			})
 		} else {
-			toast.error(issueId === null ? "Unlink failed" : "Link failed", {
+			toastManager.add({
+				title: issueId === null ? "Unlink failed" : "Link failed",
 				description: describeFailure(result),
+				type: "error",
 			})
 		}
 		return result

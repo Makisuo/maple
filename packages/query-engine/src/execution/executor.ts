@@ -10,7 +10,7 @@ import {
 	WarehouseValidationError,
 } from "@maple/domain/http"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
-import { compilePipeQuery, type CompiledQuery } from "../ch"
+import { compilePipeQuery, type CompiledQuery, type TenantScope } from "../ch"
 import type { WarehouseExecutorShape } from "../observability"
 import {
 	appendSettings,
@@ -27,7 +27,7 @@ import {
 	normalizeSqlForClickHouseClient,
 	truncateSql,
 } from "./fingerprint"
-import { BackendDialect } from "./backend"
+import { BackendDialect, warehouseTargetAttributes } from "./backend"
 import { findIngestPinnedTable } from "./datasource-routing"
 import type {
 	ExecutionTenant,
@@ -44,11 +44,9 @@ import {
 	deriveWarehouseCapabilities,
 	logBodySearchMode,
 	type WarehouseCapabilities,
-	type WarehouseProjectionMetadataRow,
 	type WarehouseSettingMetadataRow,
 	WarehouseColumnMetadataSchema,
 	WarehouseIndexMetadataSchema,
-	WarehouseProjectionMetadataSchema,
 	WarehouseSettingMetadataSchema,
 	WarehouseVersionMetadataSchema,
 } from "../capabilities"
@@ -56,13 +54,7 @@ import {
 const CLIENT_CACHE_TTL_MS = 30_000
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000
 const CAPABILITIES_INSPECTION_TIMEOUT = Duration.seconds(2)
-const WarehouseCapabilityMetadataTarget = Schema.Literals([
-	"version",
-	"indexes",
-	"columns",
-	"projections",
-	"settings",
-])
+const WarehouseCapabilityMetadataTarget = Schema.Literals(["version", "indexes", "columns", "settings"])
 type WarehouseCapabilityMetadataTarget = Schema.Schema.Type<typeof WarehouseCapabilityMetadataTarget>
 
 class WarehouseCapabilityProbeError extends Schema.TaggedErrorClass<WarehouseCapabilityProbeError>()(
@@ -213,22 +205,6 @@ WHERE database = currentDatabase() AND table IN ('logs', 'traces')`,
 					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("columns", cause))),
 				),
 				queryRows(
-					"projections",
-					`SELECT table, name
-FROM system.projections
-WHERE database = currentDatabase() AND table = 'logs'`,
-				).pipe(
-					Effect.flatMap((rows) =>
-						Schema.decodeUnknownEffect(WarehouseProjectionMetadataSchema)(rows),
-					),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("projections", cause))),
-					Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
-						logProbeFailure(error).pipe(
-							Effect.as<ReadonlyArray<WarehouseProjectionMetadataRow>>([]),
-						),
-					),
-				),
-				queryRows(
 					"settings",
 					`SELECT name, value
 FROM system.settings
@@ -247,12 +223,11 @@ WHERE name = 'enable_full_text_index'`,
 			],
 			{ concurrency: "unbounded" },
 		).pipe(
-			Effect.map(([versions, indexes, columns, projections, settings]) =>
+			Effect.map(([versions, indexes, columns, settings]) =>
 				deriveWarehouseCapabilities({
 					serverVersion: versions[0]?.version,
 					indexes,
 					columns,
-					projections,
 					settings,
 					allowSettingOverrides,
 				}),
@@ -321,6 +296,7 @@ WHERE name = 'enable_full_text_index'`,
 					"db.client": dialect.dbClient,
 					"db.system.name": dialect.dbSystemName,
 					"peer.service": dialect.peerService,
+					...warehouseTargetAttributes(resolved.config),
 					"warehouse.backend": resolved.config.kind,
 					"warehouse.route": purpose,
 					"warehouse.config_source": resolved.source,
@@ -408,6 +384,9 @@ WHERE name = 'enable_full_text_index'`,
 		yield* Effect.annotateCurrentSpan("db.client", dialect.dbClient)
 		yield* Effect.annotateCurrentSpan("db.system.name", dialect.dbSystemName)
 		yield* Effect.annotateCurrentSpan("peer.service", dialect.peerService)
+		// Target identity, so a read joins the same service-map node the ingest
+		// gateway writes to instead of collapsing into a nameless per-system one.
+		yield* Effect.annotateCurrentSpan(warehouseTargetAttributes(resolved.config))
 		const settings = dialect.stripTinybirdRestrictedSettings
 			? stripTinybirdRestrictedSettings(resolveSettings(options))
 			: resolveSettings(options)
@@ -440,7 +419,10 @@ WHERE name = 'enable_full_text_index'`,
 							code: "ResourceLimit",
 							message: error.message,
 						})
-					: mapWarehouseError(pipe, error),
+					: // `execution` decides authorship: raw SQL comes from the caller (the
+						// raw_sql widget, the `run_sql` MCP tool), so an analyzer complaint
+						// about it is their typo and must keep the database's own message.
+						mapWarehouseError(pipe, error, execution === "raw" ? "caller" : "maple"),
 		})
 		// `db.duration_ms` measures warehouse execution only — captured here, after
 		// config resolution + settings/client-cache preamble, immediately before the
@@ -582,9 +564,13 @@ WHERE name = 'enable_full_text_index'`,
 			})
 		}
 
-		const rows = yield* executeTrustedSql(
+		// The pipe path used to call `executeTrustedSql` directly, with no scope
+		// assertion of any kind — it relied on `compilePipeQuery` always threading
+		// `org_id`. Same gate as the compiled path now.
+		const rows = yield* executeScopedSql(
 			tenant,
 			compiled.sql,
+			compiled.tenantScope,
 			payload.pipeName,
 			withCapabilitySettings(capabilities, options),
 		)
@@ -594,6 +580,7 @@ WHERE name = 'enable_full_text_index'`,
 					new WarehouseSchemaDriftError({
 						pipeName: payload.pipeName,
 						message: error.message,
+						kind: "decode",
 						cause: error,
 					}),
 			),
@@ -604,24 +591,37 @@ WHERE name = 'enable_full_text_index'`,
 		})
 	})
 
-	const sqlQuery = Effect.fn("WarehouseQueryService.sqlQuery")(function* (
+	/**
+	 * Run SQL that a `CompiledQuery` has already vouched for.
+	 *
+	 * Callers must pass the compiled query's `tenantScope`, not a string they
+	 * assembled themselves. The old gate here was `sql.includes("OrgId")`, which
+	 * `SELECT count() AS OrgId …` and `WHERE OrgId = 'x' OR 1=1` both satisfy —
+	 * so scoping is now decided by the builder when it sees an `OrgId` predicate
+	 * in a top-level WHERE, and this only enforces the decision.
+	 */
+	const executeScopedSql = Effect.fn("WarehouseQueryService.executeScopedSql")(function* (
 		tenant: ExecutionTenant,
 		sql: string,
+		tenantScope: TenantScope,
+		context: string,
 		options?: SqlQueryOptions,
 	) {
 		if (!tenant.orgId || tenant.orgId.trim() === "") {
 			return yield* new WarehouseValidationError({
-				pipeName: "sqlQuery",
-				message: "org_id must not be empty (sqlQuery)",
+				pipeName: context,
+				message: `org_id must not be empty (${context})`,
 			})
 		}
-		if (!sql.includes("OrgId")) {
+		if (tenantScope !== "org") {
 			return yield* new WarehouseValidationError({
-				pipeName: "sqlQuery",
-				message: "SQL query must contain OrgId filter (sqlQuery)",
+				pipeName: context,
+				message:
+					`compiled query is not tenant-scoped: no top-level OrgId predicate (${context}). ` +
+					`Deliberate cross-tenant reads must declare .crossOrg() and run through crossOrgQuery.`,
 			})
 		}
-		return yield* executeTrustedSql(tenant, sql, "sqlQuery", options)
+		return yield* executeTrustedSql(tenant, sql, context, options)
 	})
 
 	const rawSqlQuery = Effect.fn("WarehouseQueryService.rawSqlQuery")(function* (
@@ -629,12 +629,12 @@ WHERE name = 'enable_full_text_index'`,
 		sql: string,
 		options?: Pick<SqlQueryOptions, "profile" | "context">,
 	) {
-		if (!sql.includes("OrgId")) {
-			return yield* new RawSqlValidationError({
-				code: "MissingOrgFilter",
-				message: "Raw SQL must contain the expanded OrgId filter",
-			})
-		}
+		// No OrgId assertion here on purpose. This path runs user-authored SQL,
+		// whose isolation is enforced upstream at the credential layer — a
+		// per-org datasource-scoped JWT on managed Tinybird, the org's own
+		// cluster credentials on BYO ClickHouse. `prepareRawSql` has already
+		// expanded and validated `$__orgFilter`; a substring check on top of that
+		// asserts nothing and invites the belief that it does.
 		return yield* executeSql(tenant, sql, "rawSqlQuery", options, "raw")
 	})
 
@@ -647,11 +647,22 @@ WHERE name = 'enable_full_text_index'`,
 	): SqlQueryOptions | undefined =>
 		compiled.routing === "ingest" ? { ...options, route: "ingest" } : options
 
+	// Every compiled query runs under a cost profile: an omitted `profile` used to
+	// mean "no SETTINGS clause at all" (no server-side memory/time budget, flat
+	// 30s client cap), which ~20 call sites hit by accident. Default to
+	// "aggregation" like the QuerySpec lowering does; "unbounded" stays the
+	// explicit opt-out.
+	const withDefaultProfile = (options?: SqlQueryOptions): SqlQueryOptions => ({
+		...options,
+		profile: options?.profile ?? "aggregation",
+	})
+
 	const executeCompiledQuery = Effect.fn("WarehouseQueryService.executeCompiledQuery")(function* <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
-		options?: SqlQueryOptions,
+		rawOptions?: SqlQueryOptions,
 	) {
+		const options = withDefaultProfile(rawOptions)
 		const capabilities =
 			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
@@ -661,13 +672,20 @@ WHERE name = 'enable_full_text_index'`,
 			"query.optimization.capabilityAware",
 			typeof compiled === "function",
 		)
-		const rows = yield* sqlQuery(tenant, selected.sql, withCompiledRouting(selected, executionOptions))
+		const rows = yield* executeScopedSql(
+			tenant,
+			selected.sql,
+			selected.tenantScope,
+			options.context ?? "compiledQuery",
+			withCompiledRouting(selected, executionOptions),
+		)
 		return yield* selected.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
 					new WarehouseSchemaDriftError({
-						pipeName: "compiledQuery",
+						pipeName: options.context ?? "compiledQuery",
 						message: error.message,
+						kind: "decode",
 						cause: error,
 					}),
 			),
@@ -686,11 +704,59 @@ WHERE name = 'enable_full_text_index'`,
 		options?: SqlQueryOptions,
 	) => executeCompiledQuery(tenant, compile, options)
 
+	/**
+	 * Deliberately read across every tenant.
+	 *
+	 * A separate method rather than a flag on `compiledQuery`, so that grepping
+	 * for cross-tenant reads returns a finite, reviewable list. The compiled
+	 * query must have declared `.crossOrg()`; a scoped query arriving here is
+	 * just as much a bug as an unscoped one on the normal path, so both
+	 * directions are rejected.
+	 */
+	const crossOrgQuery = Effect.fn("WarehouseQueryService.crossOrgQuery")(function* <T>(
+		tenant: ExecutionTenant,
+		compiled: CompiledQuery<T>,
+		rawOptions: SqlQueryOptions & { readonly justification: string },
+	) {
+		const options = withDefaultProfile(rawOptions)
+		const context = options.context ?? "crossOrgQuery"
+		if (compiled.tenantScope !== "cross-org") {
+			return yield* new WarehouseValidationError({
+				pipeName: context,
+				message:
+					`tenant-scoped query routed through crossOrgQuery (${context}). ` +
+					`Use compiledQuery — the cross-org path skips scope enforcement.`,
+			})
+		}
+		// Annotated so "who reads across tenants, and why" is answerable from the
+		// traces themselves rather than from code review alone.
+		yield* Effect.annotateCurrentSpan("tenant.scope", "cross-org")
+		yield* Effect.annotateCurrentSpan("tenant.crossOrg.justification", rawOptions.justification)
+		const rows = yield* executeTrustedSql(
+			tenant,
+			compiled.sql,
+			context,
+			withCompiledRouting(compiled, options),
+		)
+		return yield* compiled.decodeRows(rows).pipe(
+			Effect.mapError(
+				(error) =>
+					new WarehouseSchemaDriftError({
+						pipeName: context,
+						message: error.message,
+						kind: "decode",
+						cause: error,
+					}),
+			),
+		)
+	})
+
 	const compiledQueryFirst = Effect.fn("WarehouseQueryService.compiledQueryFirst")(function* <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
-		options?: SqlQueryOptions,
+		rawOptions?: SqlQueryOptions,
 	) {
+		const options = withDefaultProfile(rawOptions)
 		const capabilities =
 			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
@@ -700,13 +766,20 @@ WHERE name = 'enable_full_text_index'`,
 			"query.optimization.capabilityAware",
 			typeof compiled === "function",
 		)
-		const rows = yield* sqlQuery(tenant, selected.sql, withCompiledRouting(selected, executionOptions))
+		const rows = yield* executeScopedSql(
+			tenant,
+			selected.sql,
+			selected.tenantScope,
+			options.context ?? "compiledQueryFirst",
+			withCompiledRouting(selected, executionOptions),
+		)
 		return yield* selected.decodeFirstRow(rows).pipe(
 			Effect.mapError(
 				(error) =>
 					new WarehouseSchemaDriftError({
-						pipeName: "compiledQueryFirst",
+						pipeName: options.context ?? "compiledQueryFirst",
 						message: error.message,
+						kind: "decode",
 						cause: error,
 					}),
 			),
@@ -752,6 +825,9 @@ WHERE name = 'enable_full_text_index'`,
 			try: () => client.insert(datasource, rows),
 			// Classify like the read path so an auth failure or quota breach on
 			// insert surfaces with its real tag instead of a generic query error.
+			// Authorship stays the default "caller": inserts are not DSL-generated
+			// SQL, and a rejection here usually means the rows are wrong, not that
+			// Maple composed a bad statement.
 			catch: (error) => mapWarehouseError(label, error),
 		}).pipe(
 			Effect.tap(() =>
@@ -790,6 +866,7 @@ WHERE name = 'enable_full_text_index'`,
 					"db.client": dialect.dbClient,
 					"db.system.name": dialect.dbSystemName,
 					"peer.service": dialect.peerService,
+					...warehouseTargetAttributes(resolved.config),
 					"warehouse.backend": resolved.config.kind,
 					"warehouse.route": "ingest",
 					"warehouse.config_source": resolved.source,
@@ -808,10 +885,6 @@ WHERE name = 'enable_full_text_index'`,
 			query(tenant, { pipeName: pipe, params }, { context: `pipe:${pipe}`, ...options }).pipe(
 				Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> })),
 			),
-		sqlQuery: <T>(sql: string, options?: SqlQueryOptions) =>
-			sqlQuery(tenant, sql, { context: "warehouseExecutor.sqlQuery", ...options }).pipe(
-				Effect.map((rows) => rows as unknown as ReadonlyArray<T>),
-			),
 		compiledQuery: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
 			compiledQuery(tenant, compiled, { context: "warehouseExecutor.compiledQuery", ...options }),
 		compiledQueryFirst: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
@@ -823,7 +896,7 @@ WHERE name = 'enable_full_text_index'`,
 
 	return {
 		query,
-		sqlQuery,
+		crossOrgQuery,
 		rawSqlQuery,
 		compiledQuery,
 		compiledQueryWithCapabilities,

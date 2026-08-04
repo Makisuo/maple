@@ -15,7 +15,7 @@ import { Separator } from "@maple/ui/components/ui/separator"
 import { ConnectionIcon } from "@maple/ui/components/icons"
 import { LOCAL_OTLP_ENDPOINT } from "../lib/constants"
 import { DOCS_LOCAL_MODE_SEND_TELEMETRY } from "../lib/links"
-import { CopyableField } from "./copyable-field"
+import { CopyableField } from "@maple/ui/components/ui/copyable-field"
 
 export function ConnectButton() {
 	const [open, setOpen] = useState(false)
@@ -60,7 +60,11 @@ function ConnectPanel() {
 				<span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
 					Quick start
 				</span>
-				<CopyableField label="" value={`OTEL_EXPORTER_OTLP_ENDPOINT=${LOCAL_OTLP_ENDPOINT}`} />
+				<CopyableField
+					label=""
+					copyLabel="Command"
+					value={`OTEL_EXPORTER_OTLP_ENDPOINT=${LOCAL_OTLP_ENDPOINT}`}
+				/>
 				<p className="text-xs text-muted-foreground">
 					Recording browser sessions? Point{" "}
 					<code className="rounded bg-muted px-1">@maple-dev/browser</code> at the same endpoint.

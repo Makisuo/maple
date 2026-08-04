@@ -13,6 +13,13 @@ interface Props {
      * every caller relied on before this prop existed.
      */
     alternates?: readonly string[];
+    /**
+     * Path of this page's markdown twin (`/pricing.md`), when it has one.
+     * Advertised as `rel="alternate"` so an agent can find the machine-readable
+     * copy without guessing the suffix. English-only — the twins are not
+     * localized — so locale routes leave it unset.
+     */
+    mdHref?: string;
 }
 
 const {
@@ -21,6 +28,7 @@ const {
     image = "/og-image.png",
     ogType = "website",
     alternates = ["en", "ja", "ko"],
+    mdHref,
 } = Astro.props;
 
 const currentLocale = Astro.currentLocale ?? "en";
@@ -66,6 +74,9 @@ const absoluteImage = image.startsWith("http")
             />
         ))}
         <link rel="alternate" hreflang="x-default" href={new URL(pathWithoutLocale, Astro.site).toString()} />
+        {mdHref && (
+            <link rel="alternate" type="text/markdown" href={new URL(mdHref, Astro.site).toString()} />
+        )}
         <link rel="dns-prefetch" href="https://cdn.brandfetch.io" />
         <link rel="preconnect" href="https://cdn.brandfetch.io" crossorigin />
         <meta property="og:type" content={ogType} />
@@ -81,11 +92,20 @@ const absoluteImage = image.startsWith("http")
         <meta name="twitter:description" content={description} />
         <meta name="twitter:image" content={absoluteImage} />
         <meta name="generator" content={Astro.generator} />
+        <!-- Per-page head tags (feed discovery, preloads). Default-empty, so
+             callers that don't fill it are unaffected. -->
+        <slot name="head" />
         <script
             is:inline
             src="https://analytics.ahrefs.com/analytics.js"
             data-key="VKnjG071OvfESS7TIl25eA"
             async></script>
+        <!-- Maple's own SDK, dogfooded. Bundled (not is:inline) so it can import
+             the package; deferred by Astro, so it never blocks first paint. -->
+        <script>
+            import { startLandingTelemetry } from "../lib/telemetry";
+            startLandingTelemetry();
+        </script>
         <title>{title}</title>
     </head>
     <body class="min-h-screen antialiased">

@@ -204,6 +204,13 @@
       "when": 1785514557099,
       "tag": "0029_purge_orphan_metric_incidents",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1785800580058,
+      "tag": "0030_planetscale_events",
+      "breakpoints": true
     }
   ]
 }

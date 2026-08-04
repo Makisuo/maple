@@ -1,8 +1,8 @@
 import { McpQueryError, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 
 export function registerGetDashboardTool(server: McpToolRegistrar) {
 	server.tool(
@@ -56,6 +56,10 @@ export function registerGetDashboardTool(server: McpToolRegistrar) {
 					dataSource: w.dataSource,
 					display: w.display,
 					layout: w.layout,
+					// Only present when the widget is pinned to its own window; the
+					// absence is meaningful ("follows the dashboard range"), so it must
+					// not become an explicit `undefined` on the way out.
+					...(w.timeRange ? { timeRange: w.timeRange } : {}),
 				})),
 				createdAt: dashboard.createdAt,
 				updatedAt: dashboard.updatedAt,

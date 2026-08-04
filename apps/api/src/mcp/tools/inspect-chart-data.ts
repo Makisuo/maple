@@ -7,12 +7,19 @@ import {
 } from "./types"
 import { Effect, Schema } from "effect"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
-import { createDualContent } from "../lib/structured-output"
-import { inspectWidget, type InspectWidgetTimeRange, type RawSqlInspectionData } from "../lib/inspect-widget"
-import { formatTable, truncate } from "../lib/format"
-import { resolveDashboardTimeRange, type DashboardTimeRangeInput } from "../lib/resolve-dashboard-time-range"
-import { resolveTimeRange } from "../lib/time"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import {
+	inspectWidget,
+	type InspectWidgetTimeRange,
+	type RawSqlInspectionData,
+} from "@/mcp/lib/inspect-widget"
+import { formatTable, truncate } from "@/mcp/lib/format"
+import {
+	resolveDashboardTimeRange,
+	type DashboardTimeRangeInput,
+} from "@/mcp/lib/resolve-dashboard-time-range"
+import { resolveTimeRange } from "@/mcp/lib/time"
 import type { InspectChartDataData, InspectChartQueryResult } from "@maple/domain"
 
 function formatNumber(value: number | null): string {
@@ -246,12 +253,17 @@ export function registerInspectChartDataTool(server: McpToolRegistrar) {
 				const range = resolveTimeRange(start_time, end_time)
 				timeRange = { startTime: range.st, endTime: range.et, source: "override" }
 			} else {
-				const resolved = resolveDashboardTimeRange(dashboard.timeRange as DashboardTimeRangeInput)
+				// A widget pinned to its own window is inspected on that window —
+				// otherwise the rows returned here aren't the rows the tile renders.
+				const source = widget.timeRange ? ("widget" as const) : ("dashboard" as const)
+				const resolved = resolveDashboardTimeRange(
+					(widget.timeRange ?? dashboard.timeRange) as DashboardTimeRangeInput,
+				)
 				if (resolved) {
 					timeRange = {
 						startTime: resolved.startTime,
 						endTime: resolved.endTime,
-						source: "dashboard",
+						source,
 					}
 				} else {
 					const fallback = resolveTimeRange(undefined, undefined, 6)

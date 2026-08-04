@@ -3,7 +3,7 @@ import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 import { usePlotArea, useXAxisScale, ZIndexLayer } from "recharts"
 
 import { useSuppressChartTooltip } from "@maple/ui/components/ui/chart"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { CommitDetailBody, CommitListBody } from "../commit-sha-hover-card"
 import {

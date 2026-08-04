@@ -20,7 +20,8 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { toast } from "sonner"
+import { formatRelativeFrom } from "@maple/ui/lib/time-format"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import {
 	ArrowRotateClockwiseIcon,
@@ -66,19 +67,6 @@ const SYNC_PRESENTATION: Record<
 	backfilling: { label: "Syncing", tone: "text-info-foreground", Icon: LoaderIcon, spin: true },
 	pending: { label: "Queued", tone: "text-muted-foreground", Icon: ClockIcon },
 	error: { label: "Sync failed", tone: "text-destructive-foreground", Icon: CircleWarningIcon },
-}
-
-function relativeFromMillis(ms: number): string {
-	const diff = Date.now() - ms
-	if (diff < 0) return "just now"
-	const seconds = Math.floor(diff / 1000)
-	if (seconds < 60) return "just now"
-	const minutes = Math.floor(seconds / 60)
-	if (minutes < 60) return `${minutes}m ago`
-	const hours = Math.floor(minutes / 60)
-	if (hours < 24) return `${hours}h ago`
-	const days = Math.floor(hours / 24)
-	return `${days}d ago`
 }
 
 export function GithubIntegrationCard() {
@@ -165,9 +153,9 @@ export function GithubIntegrationCard() {
 		const result = await disconnect({ reactivityKeys: ["githubIntegrationStatus"] })
 		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
-			toast.success("GitHub disconnected")
+			toastManager.add({ title: "GitHub disconnected", type: "success" })
 		} else {
-			toast.error("Failed to disconnect GitHub")
+			toastManager.add({ title: "Failed to disconnect GitHub", type: "error" })
 		}
 	}
 
@@ -180,9 +168,9 @@ export function GithubIntegrationCard() {
 		})
 		setDeletingRepoId(null)
 		if (Exit.isSuccess(result)) {
-			toast.success(`Deleted ${repo.fullName} from Maple`)
+			toastManager.add({ title: `Deleted ${repo.fullName} from Maple`, type: "success" })
 		} else {
-			toast.error(`Failed to delete ${repo.fullName}`)
+			toastManager.add({ title: `Failed to delete ${repo.fullName}`, type: "error" })
 		}
 	}
 
@@ -194,13 +182,16 @@ export function GithubIntegrationCard() {
 		})
 		if (Exit.isSuccess(result)) {
 			if (result.value.backfillQueued) {
-				toast.success(`Now tracking ${trackedBranch} — re-syncing commits…`)
+				toastManager.add({
+					title: `Now tracking ${trackedBranch} — re-syncing commits…`,
+					type: "success",
+				})
 				// Poll through the gap between enqueue and the worker flipping the repo to "backfilling".
 				setForcePoll(true)
 				refreshStatus()
 			}
 		} else {
-			toast.error("Failed to change tracked branch")
+			toastManager.add({ title: "Failed to change tracked branch", type: "error" })
 			// Surface failure so the selector can revert its optimistic state.
 			throw new Error("Failed to change tracked branch")
 		}
@@ -694,7 +685,7 @@ function RepoRow({
 						</span>
 					) : repo.lastSyncedAt ? (
 						<span className="text-muted-foreground">
-							· {relativeFromMillis(repo.lastSyncedAt)}
+							· {formatRelativeFrom(repo.lastSyncedAt)}
 						</span>
 					) : null}
 				</div>

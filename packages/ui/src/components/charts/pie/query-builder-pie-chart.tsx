@@ -2,15 +2,19 @@ import * as React from "react"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
+import { useContainerSize } from "../../../hooks/use-container-size"
 import { formatNumber, formatValueByUnit } from "../../../lib/format"
 import { pieSampleData } from "../_shared/sample-data"
-import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
-import { bucketCategorical, MAX_CATEGORICAL, OTHER_COLOR, OTHER_LABEL } from "../_shared/bucket-series"
+import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
+import {
+	bucketCategorical,
+	type CategoricalRow,
+	MAX_CATEGORICAL,
+	OTHER_COLOR,
+	OTHER_LABEL,
+} from "../_shared/bucket-series"
 
-interface Row {
-	name: string
-	value: number
-}
+type Row = CategoricalRow
 
 interface Slice extends Row {
 	pct: number
@@ -114,6 +118,19 @@ const LEGEND_ROW_H = 18
 const LEGEND_MAX_ROWS = 2
 const PIE_PAD = 4
 const PIE_MIN_SIZE = 48
+// Tabular legend: a share of the card, bounded so the pie never starves and the
+// name column never runs away. Below TABLE_MIN_PIE_W of remaining width there
+// is no pie worth drawing, so that layout falls back to the bottom chips.
+//
+// The minimum is set by the columns, not by taste: swatch + gaps + padding +
+// the Value and Percent columns come to TABLE_FIXED_W, and anything narrower
+// than that leaves the flex-1 name column at zero width — a legend of coloured
+// squares and numbers with no labels, which is worse than the chips it replaced.
+const TABLE_LEGEND_RATIO = 0.46
+const TABLE_FIXED_W = 116
+const TABLE_LEGEND_MIN_W = TABLE_FIXED_W + 52
+const TABLE_LEGEND_MAX_W = 240
+const TABLE_MIN_PIE_W = 120
 // Slices below this percentage do not get an in-slice label — the wedge is
 // too narrow to host text without overflowing onto its neighbours.
 const LABEL_MIN_PCT = 0.06
@@ -145,12 +162,17 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 		const sum = bucketed.reduce((acc, r) => acc + r.value, 0)
 		if (sum <= 0) return { slices: [] as Slice[], total: 0 }
 		let cursor = 0
-		const out: Slice[] = bucketed.map((row, idx) => {
+		// Resolved by name, so a slice keeps its color even though `bucketCategorical`
+		// re-sorts largest-first. "Other" is a bucket, not an identity.
+		const colors = resolveSeriesColors(
+			bucketed.map((row) => row.name).filter((name) => name !== OTHER_LABEL),
+		)
+		const out: Slice[] = bucketed.map((row) => {
 			const pct = row.value / sum
 			const startA = cursor * 2 * Math.PI
 			cursor += pct
 			const endA = cursor * 2 * Math.PI
-			const color = row.name === OTHER_LABEL ? OTHER_COLOR : resolveSeriesColor(row.name, idx)
+			const color = row.name === OTHER_LABEL ? OTHER_COLOR : (colors.get(row.name) ?? OTHER_COLOR)
 			return { ...row, pct, color, startA, endA }
 		})
 		return { slices: out, total: sum }
@@ -158,37 +180,41 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 
 	// Measure container.
 	const containerRef = React.useRef<HTMLDivElement | null>(null)
-	const [size, setSize] = React.useState({ w: 0, h: 0 })
-	React.useEffect(() => {
-		const el = containerRef.current
-		if (!el) return
-		const ro = new ResizeObserver((entries) => {
-			const r = entries[0]?.contentRect
-			if (r) setSize({ w: Math.floor(r.width), h: Math.floor(r.height) })
-		})
-		ro.observe(el)
-		return () => ro.disconnect()
-	}, [])
+	const containerSize = useContainerSize(containerRef)
+	const size = { w: Math.floor(containerSize.width), h: Math.floor(containerSize.height) }
+
+	// A composition breakdown is read as a ranked table, not as a colour-matching
+	// exercise: `legend: "right"` puts the slices in a sorted Value/% table beside
+	// the pie. "visible" keeps the compact bottom chips for cards too narrow to
+	// host a table. Below TABLE_MIN_PIE_W of leftover width the table would starve
+	// the pie, so it degrades to chips rather than rendering both badly.
+	const showLegend = legend !== "hidden"
+	const tableLegendW = clamp(
+		Math.round(size.w * TABLE_LEGEND_RATIO),
+		TABLE_LEGEND_MIN_W,
+		TABLE_LEGEND_MAX_W,
+	)
+	const tableLegend = showLegend && legend === "right" && size.w - tableLegendW >= TABLE_MIN_PIE_W
 
 	// Measure legend after render. We allow up to LEGEND_MAX_ROWS rows of
 	// wrapped chips, then clip excess (the tooltip still shows the full name).
-	const showLegend = legend !== "hidden"
+	const chipLegend = showLegend && !tableLegend
 	const legendRef = React.useRef<HTMLDivElement | null>(null)
 	const [legendH, setLegendH] = React.useState(() => (showLegend ? LEGEND_ROW_H : 0))
 	React.useLayoutEffect(() => {
-		if (!showLegend || !legendRef.current) {
+		if (!chipLegend || !legendRef.current) {
 			if (legendH !== 0) setLegendH(0)
 			return
 		}
 		const h = legendRef.current.scrollHeight
 		const capped = Math.min(h, LEGEND_ROW_H * LEGEND_MAX_ROWS + 2)
 		if (capped !== legendH) setLegendH(capped)
-	}, [showLegend, slices.length, size.w])
+	}, [chipLegend, slices.length, size.w])
 
 	const [hover, setHover] = React.useState<number | null>(null)
 
-	const pieAreaW = size.w
-	const pieAreaH = size.h - (showLegend ? legendH + LEGEND_GAP : 0)
+	const pieAreaW = tableLegend ? size.w - tableLegendW : size.w
+	const pieAreaH = size.h - (chipLegend ? legendH + LEGEND_GAP : 0)
 	const pieSize = Math.max(PIE_MIN_SIZE, Math.min(pieAreaW, pieAreaH) - PIE_PAD * 2)
 	const cx = pieAreaW / 2
 	const cy = Math.max(pieSize / 2 + PIE_PAD, pieAreaH / 2)
@@ -360,6 +386,11 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 							style={{ backgroundColor: slices[hover].color }}
 						/>
 						<span>{slices[hover].name}</span>
+						{slices[hover].collapsedCount ? (
+							<span className="font-normal text-muted-foreground">
+								({slices[hover].collapsedCount} categories)
+							</span>
+						) : null}
 					</div>
 					<div className="mt-0.5 tabular-nums text-muted-foreground">
 						<span className="text-foreground/90">{fmtValue(slices[hover].value, unit)}</span>
@@ -369,8 +400,70 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 				</div>
 			)}
 
+			{/* Tabular legend — sorted largest-first, with Value and % columns. */}
+			{tableLegend && (
+				<div
+					className="absolute right-0 top-0 bottom-0 flex flex-col overflow-hidden"
+					style={{ width: tableLegendW }}
+				>
+					{/* Column widths here must match the rows below and TABLE_FIXED_W. */}
+					<div className="flex items-center gap-1.5 border-b border-border/60 px-1 pb-1 text-[10px] uppercase tracking-[0.04em] text-muted-foreground/70">
+						<span className="size-2.5 shrink-0" />
+						<span className="min-w-0 flex-1">Name</span>
+						<span className="w-12 shrink-0 text-right">Value</span>
+						<span className="w-8 shrink-0 text-right">%</span>
+					</div>
+					<div className="min-h-0 flex-1 overflow-y-auto">
+						{slices.map((s, i) => {
+							const isHover = hover === i
+							const collapsed = s.collapsedCount
+							return (
+								<button
+									key={s.name}
+									type="button"
+									title={
+										collapsed
+											? `${s.name} — ${collapsed} smaller categories · ${fmtValue(s.value, unit)} (${(s.pct * 100).toFixed(1)}%)`
+											: `${s.name} · ${fmtValue(s.value, unit)} (${(s.pct * 100).toFixed(1)}%)`
+									}
+									onPointerEnter={() => setHover(i)}
+									onFocus={() => setHover(i)}
+									className={cn(
+										"flex w-full items-center gap-1.5 rounded-[3px] px-1 py-[3px] text-left text-[11px] tabular-nums transition-colors",
+										isHover
+											? "bg-muted/50 text-foreground"
+											: hover !== null
+												? "text-muted-foreground/60"
+												: "text-muted-foreground",
+									)}
+								>
+									<span
+										className="size-2.5 shrink-0 rounded-[2px]"
+										style={{ backgroundColor: s.color }}
+									/>
+									<span className="min-w-0 flex-1 truncate">
+										{s.name}
+										{collapsed ? (
+											<span className="pl-1 text-muted-foreground/60">
+												+{collapsed}
+											</span>
+										) : null}
+									</span>
+									<span className="w-12 shrink-0 truncate text-right text-foreground/85">
+										{fmtValue(s.value, unit)}
+									</span>
+									<span className="w-8 shrink-0 text-right">
+										{(s.pct * 100).toFixed(s.pct >= 0.1 ? 0 : 1)}
+									</span>
+								</button>
+							)
+						})}
+					</div>
+				</div>
+			)}
+
 			{/* Legend — bottom, wrapping, capped at LEGEND_MAX_ROWS rows. */}
-			{showLegend && (
+			{chipLegend && (
 				<div
 					ref={legendRef}
 					className="absolute left-0 right-0 bottom-0 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 overflow-hidden px-2"
@@ -400,6 +493,11 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 									style={{ backgroundColor: s.color }}
 								/>
 								<span className="truncate">{s.name}</span>
+								{s.collapsedCount ? (
+									<span className="shrink-0 text-muted-foreground/60">
+										+{s.collapsedCount}
+									</span>
+								) : null}
 							</button>
 						)
 					})}

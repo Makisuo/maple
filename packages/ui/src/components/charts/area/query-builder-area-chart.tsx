@@ -3,7 +3,7 @@ import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
-import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
+import { resolveSeriesColors } from "../../../lib/semantic-series-colors"
 import type { BaseChartProps } from "../_shared/chart-types"
 import { QueryBuilderLegend, responsiveLegendHeight } from "../_shared/query-builder-legend"
 import { useTimeseriesSeriesPresentation } from "../_shared/use-series-presentation"
@@ -128,10 +128,11 @@ export function QueryBuilderAreaChart({
 	)
 
 	const chartConfig = React.useMemo(() => {
-		const base = seriesDefinitions.reduce((config, definition, index) => {
+		const colors = resolveSeriesColors(seriesDefinitions.map((d) => d.rawKey))
+		const base = seriesDefinitions.reduce((config, definition) => {
 			config[definition.chartKey] = {
 				label: definition.rawKey,
-				color: resolveSeriesColor(definition.rawKey, index),
+				color: colors.get(definition.rawKey),
 			}
 			return config
 		}, {} as ChartConfig)

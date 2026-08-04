@@ -10,7 +10,7 @@ import type {
 } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card } from "@maple/ui/components/ui/card"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { CheckIcon, ChevronDownIcon, CircleWarningIcon } from "@/components/icons"
 import type { AlertRuleStateRow } from "@/lib/collections/alerts"
 import {

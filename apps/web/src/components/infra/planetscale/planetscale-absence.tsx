@@ -15,7 +15,7 @@ import { Link } from "@tanstack/react-router"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import { Button } from "@maple/ui/components/ui/button"
 import { AlertWarningIcon, CircleWarningIcon } from "@/components/icons"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 /** Metrics scraping is off. Said the same way wherever a metric would have been. */
 export const METRICS_PAUSED_MESSAGE = "Branch metrics are paused — add a metrics token to collect them."

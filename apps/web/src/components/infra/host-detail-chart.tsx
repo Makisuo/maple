@@ -10,14 +10,14 @@ import {
 } from "@maple/ui/components/ui/chart"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
+import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 
 import { hostInfraTimeseriesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { HostInfraMetric } from "@/api/warehouse/infra"
-import { formatBytesPerSecond } from "@maple/ui/format"
+import { formatBytesPerSecond } from "@maple/ui/lib/format"
 import {
 	CHART_EMPTY_MESSAGE,
 	CHART_GRID_DASH,
-	COLOR_PALETTE,
 	formatValueWithUnit,
 	transformRows,
 	UNNAMED_SERIES_KEY,
@@ -121,10 +121,7 @@ export function HostMetricChartView({
 	// Series names can contain dots/slashes (container names, mount points),
 	// which are invalid in a raw `var(--color-…)` reference — colour series
 	// directly instead of via the ChartContainer CSS variables.
-	const seriesColor = useMemo(
-		() => new Map(series.map((name, idx) => [name, COLOR_PALETTE[idx % COLOR_PALETTE.length] ?? ""])),
-		[series],
-	)
+	const seriesColor = useMemo(() => resolveSeriesColors(series), [series])
 
 	const config = useMemo<ChartConfig>(
 		() =>

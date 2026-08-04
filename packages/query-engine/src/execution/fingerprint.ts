@@ -24,6 +24,53 @@ export const fingerprintSql = (s: string): string => {
 }
 
 /**
+ * The SQL verb and primary table of a statement, plus the OTEL
+ * `db.query.summary` composed from them.
+ */
+export interface SqlSummary {
+	/** `db.operation.name` — the uppercased leading verb ("SELECT"), or `""`. */
+	readonly operation: string
+	/** `db.collection.name` — the first table named after from/into/update/join/table, or `""`. */
+	readonly collection: string
+	/** `db.query.summary` — `"{operation} {collection}"`, either part omitted when empty. */
+	readonly summary: string
+}
+
+/**
+ * Leading verb. Mirrors the RE2 `extract(stmt, '^\\s*(\\w+)')` on the read side —
+ * `\w` is `[0-9A-Za-z_]` in both engines. Exported so the parity test can assert
+ * this exact pattern still appears in the ClickHouse fragment.
+ */
+export const SQL_VERB_RE = /^\s*(\w+)/
+
+/**
+ * First table named by a from/into/update/join/table clause. The optional `\W`
+ * skips one quote/bracket so `from "alert_rules"` yields `alert_rules`. The `i`
+ * flag stands in for RE2's inline `(?i)`. Exported for the parity test.
+ */
+export const SQL_TABLE_RE = /(?:from|into|update|join|table)\s+\W?([\w.]+)/i
+
+/**
+ * Derive `db.operation.name` / `db.collection.name` / `db.query.summary` from raw
+ * statement text, for instrumentation that only learns the SQL after the fact
+ * (the drizzle `logger` fires while the DB span is already open).
+ *
+ * MUST stay behaviourally identical to `derivedStatementSummarySql` in
+ * `@maple/domain/tinybird/db-query-shape-sql` — that fragment is what the
+ * warehouse derives a shape label with when `db.query.summary` is ABSENT, and
+ * the emitted summary takes precedence over it. If the two disagree, every
+ * existing shape in `service_map_db_query_shapes_hourly` forks into a duplicate
+ * at the moment we start emitting. `summarize-sql.test.ts` pins the parity.
+ */
+export const summarizeSql = (sql: string): SqlSummary => {
+	if (sql === "") return { operation: "", collection: "", summary: "" }
+	const operation = (SQL_VERB_RE.exec(sql)?.[1] ?? "").toUpperCase()
+	const collection = SQL_TABLE_RE.exec(sql)?.[1] ?? ""
+	const summary = `${operation}${collection === "" ? "" : ` ${collection}`}`.trim()
+	return { operation, collection, summary }
+}
+
+/**
  * The official ClickHouse client rejects a trailing `FORMAT JSONEachRow`/`FORMAT
  * JSON` (it sets the format itself) and a trailing `;`. Strip both before
  * handing the SQL to the CH driver. Tinybird's `/v0/sql` keeps the SQL as-is.

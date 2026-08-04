@@ -10,7 +10,7 @@ import {
 	InputGroupTextarea,
 } from "@maple/ui/components/ui/input-group"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { CornerDownLeftIcon, SquareIcon, XmarkIcon } from "@/components/icons"
 import { useCallback, useState } from "react"
 
@@ -18,10 +18,10 @@ import { useCallback, useState } from "react"
  * The chat composer, vendored from shadcn's `ai-elements` and cut down to what Maple's
  * chat actually uses. The upstream component carries attachment/drag-drop, model-select,
  * hover-card and command-palette machinery that this app has no path to: the chat has no
- * file uploads, and `@flue/react` picks the model server-side.
+ * file uploads, and the model is picked server-side by the chat agent.
  *
  * There is no newer shadcn composer to move to — the current track's composer is built
- * around the Vercel `ai-sdk` helper, which this app deliberately dropped for Flue.
+ * around the Vercel `ai-sdk` helper, which this app deliberately does not use.
  */
 
 export interface PromptInputMessage {

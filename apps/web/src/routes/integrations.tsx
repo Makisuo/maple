@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import {
@@ -123,15 +123,17 @@ function IntegrationsPage() {
 		// Keyed toast: StrictMode double-invokes effects, and the navigate below can
 		// re-run the effect before the params are stripped — the id dedupes both.
 		if (slackReturn === "connected") {
-			toast.success(slackTeam ? `Slack connected to ${clampLabel(slackTeam)}` : "Slack connected", {
+			toastManager.add({
 				id: "slack-oauth",
+				title: slackTeam ? `Slack connected to ${clampLabel(slackTeam)}` : "Slack connected",
+				type: "success",
 			})
 		} else if (slackReturn === "updated") {
 			// An in-place re-auth of the existing installation (permissions refresh) —
 			// "connected" would wrongly suggest it had been disconnected in between.
-			toast.success("Slack connection updated", { id: "slack-oauth" })
+			toastManager.add({ id: "slack-oauth", title: "Slack connection updated", type: "success" })
 		} else {
-			toast.error(slackErrorMessage(slackMessage), { id: "slack-oauth" })
+			toastManager.add({ id: "slack-oauth", title: slackErrorMessage(slackMessage), type: "error" })
 		}
 		navigate({ search: { integration: "slack" }, replace: true })
 	}, [slackReturn, slackMessage, slackTeam, navigate])

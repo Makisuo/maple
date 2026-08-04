@@ -7,6 +7,11 @@
 	"dev": {
 		"port": 3472,
 	},
+	// Workers AI binding — the keyless, neuron-billed path the AI-triage agent runs on
+	// (`@/lib/WorkersAiHttpClient` shims `@maple/llm`'s Cloudflare provider onto `env.AI.run`).
+	"ai": {
+		"binding": "AI",
+	},
 	"vars": {
 		"API_V2_RATE_LIMIT_PARTITION": "local",
 		"PLANETSCALE_WEBHOOK_QUEUE_NAME": "maple-planetscale-webhooks-local",
@@ -40,13 +45,28 @@
 			"localConnectionString": "postgres://maple:maple@localhost:5499/maple",
 		},
 	],
+	// Durable chat transcripts, one DO per "<orgId>:<tabId>". Chat and AI triage both run
+	// in this worker; the class is exported from src/worker.ts.
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "CHAT_SESSION",
+				"class_name": "ChatSession",
+			},
+		],
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["ChatSession"],
+		},
+	],
 	"kv_namespaces": [
 		{
 			"binding": "MCP_SESSIONS",
 			"id": "00000000000000000000000000000000",
 		},
 	],
-	"services": [{ "binding": "CHAT_FLUE", "service": "maple-chat-flue" }],
 	// Cloudflare Email Service (Email Sending). `remote: true` routes sends through
 	// the real Cloudflare sender even under local dev. (Mirrored in alchemy.run.ts
 	// for deploy.) Pure `bun dev` (non-wrangler) has no EMAIL binding → sends skip.

@@ -8,6 +8,7 @@ import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
 	formatMapleStage,
+	resolveDatabaseMode,
 	resolveDeploymentEnvironment,
 	resolveHyperdriveName,
 	resolveHyperdriveRefId,
@@ -37,7 +38,7 @@ export interface CreateMapleApiOptions {
 	domains: MapleDomains
 }
 
-/** Alchemy resource type carried across the chat-flue service binding. */
+/** Alchemy resource type for the API Worker, carrying its internal RPC surface. */
 export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcShape>
 
 export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
@@ -50,42 +51,49 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 		//   live only in the Cloudflare dashboard; deploys never see them and
 		//   MAPLE_PG_URL is not required.
 		//
-		// - pr/dev stages get an alchemy-MANAGED per-branch Hyperdrive whose origin
-		//   is pushed from MAPLE_PG_URL (a standard Postgres connection string,
-		//   direct port 5432) — the same env var the CI `drizzle-kit migrate` step
-		//   + import scripts use. Cloudflare Hyperdrive needs a STRUCTURED origin
-		//   (discrete host/user/…), not a URL, so we parse it here. Schema
-		//   migrations run in CI before deploy, never at boot.
+		// - dev stages get an alchemy-MANAGED Hyperdrive whose origin is pushed
+		//   from MAPLE_PG_URL (a standard Postgres connection string, direct port
+		//   5432) — the same env var the CI `drizzle-kit migrate` step + import
+		//   scripts use. Cloudflare Hyperdrive needs a STRUCTURED origin (discrete
+		//   host/user/…), not a URL, so we parse it here. Schema migrations run in
+		//   CI before deploy, never at boot.
+		//
+		// - pr previews get NO database binding at all (resolveDatabaseMode →
+		//   "none"): PlanetScale PR branches are no longer provisioned. The worker
+		//   still boots and serves — DatabasePgLive fails per query instead of
+		//   dying — so DB-backed routes 500 while everything else works.
+		const databaseMode = resolveDatabaseMode(stage)
 		const hyperdriveRefId = resolveHyperdriveRefId(stage)
-		const mapleDb = hyperdriveRefId
-			? undefined
-			: yield* Effect.gen(function* () {
-					const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
-					return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
-						name: resolveHyperdriveName(stage),
-						origin: {
-							scheme: "postgres",
-							host: pgUrl.hostname,
-							port: Number(pgUrl.port || "5432"),
-							// Connect-time db (`postgres`, the PlanetScale cluster default),
-							// not the PS resource name.
-							database: pgUrl.pathname.replace(/^\//, "") || "postgres",
-							user: decodeURIComponent(pgUrl.username),
-							password: Redacted.make(decodeURIComponent(pgUrl.password)),
-						},
-						// Read-after-write everywhere (alert state CAS, dashboard versioning) —
-						// revisit caching once read paths that tolerate staleness are identified.
-						caching: { disabled: true },
-						dev: {
-							scheme: "postgres",
-							host: "localhost",
-							port: 5499,
-							database: "maple",
-							user: "maple",
-							password: Redacted.make("maple"),
-						},
+		const mapleDb =
+			databaseMode !== "managed"
+				? undefined
+				: yield* Effect.gen(function* () {
+						const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
+						return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
+							name: resolveHyperdriveName(stage),
+							origin: {
+								scheme: "postgres",
+								host: pgUrl.hostname,
+								port: Number(pgUrl.port || "5432"),
+								// Connect-time db (`postgres`, the PlanetScale cluster default),
+								// not the PS resource name.
+								database: pgUrl.pathname.replace(/^\//, "") || "postgres",
+								user: decodeURIComponent(pgUrl.username),
+								password: Redacted.make(decodeURIComponent(pgUrl.password)),
+							},
+							// Read-after-write everywhere (alert state CAS, dashboard versioning) —
+							// revisit caching once read paths that tolerate staleness are identified.
+							caching: { disabled: true },
+							dev: {
+								scheme: "postgres",
+								host: "localhost",
+								port: 5499,
+								database: "maple",
+								user: "maple",
+								password: Redacted.make("maple"),
+							},
+						})
 					})
-				})
 
 		const mcpSessions = yield* Cloudflare.KV.Namespace("MCP_SESSIONS", {
 			title: resolveWorkerName("mcp-sessions", stage),
@@ -110,6 +118,10 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			issueId?: string
 			runId: string
 		}>(resolveWorkerName("ai-triage", stage), { className: "AiTriageWorkflow" })
+
+		// Durable chat transcripts, one Durable Object per "<orgId>:<tabId>". v2 provisions new
+		// DO classes as SQLite-backed by default. Class is exported from src/worker.ts.
+		const chatSession = Cloudflare.DurableObject("chat-session", { className: "ChatSession" })
 
 		// Vendor-agnostic VCS sync queue (commit backfill + webhook deltas). The same
 		// `api` worker is both producer (binding) and consumer (Queues.Consumer
@@ -147,6 +159,13 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
+				// Workers AI (`env.AI`, the v1 `Ai()` binding), driving the AI-triage agent on
+				// `@maple/llm`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
+				// resource, which also fronts model calls with caching/rate-limits/logging.
+				// NOTE: the deploy token needs the account-level "AI Gateway: Edit" permission
+				// for this resource.
+				AI: Cloudflare.AI.Gateway("maple-api-ai"),
+				CHAT_SESSION: chatSession,
 				MCP_SESSIONS: mcpSessions,
 				VCS_SYNC_QUEUE: vcsSyncQueue,
 				VCS_SYNC_QUEUE_NAME: vcsSyncQueueName,
@@ -202,9 +221,15 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				QE_BUCKET_CACHE_TTL_SECONDS: process.env.QE_BUCKET_CACHE_TTL_SECONDS?.trim() || "86400",
 				QE_BUCKET_CACHE_FLUX_SECONDS: process.env.QE_BUCKET_CACHE_FLUX_SECONDS?.trim() || "60",
 				QE_BUCKET_CACHE_SEGMENT_BUCKETS: process.env.QE_BUCKET_CACHE_SEGMENT_BUCKETS?.trim() || "120",
-				QE_BUCKET_CACHE_READ_CONCURRENCY:
-					process.env.QE_BUCKET_CACHE_READ_CONCURRENCY?.trim() || "16",
-				EDGE_CACHE_READ_TIMEOUT_MS: process.env.EDGE_CACHE_READ_TIMEOUT_MS?.trim() || "250",
+				// Both of the next two knobs are bounded by Cloudflare's
+				// six-simultaneous-connection limit, which `cache.match()` counts
+				// against while it waits for response headers. Keep the deploy-time
+				// values in step with the reasoning in `bucket-cache.ts` and
+				// `edge-cache.ts` — a stale override here silently defeats a tuned
+				// default, which is exactly what happened when these were pinned to
+				// 16/250 and the code defaults moved to 6/40 underneath them.
+				QE_BUCKET_CACHE_READ_CONCURRENCY: process.env.QE_BUCKET_CACHE_READ_CONCURRENCY?.trim() || "6",
+				EDGE_CACHE_READ_TIMEOUT_MS: process.env.EDGE_CACHE_READ_TIMEOUT_MS?.trim() || "40",
 				SERVICE_OPERATIONS_ROLLUP_ENABLED:
 					process.env.SERVICE_OPERATIONS_ROLLUP_ENABLED?.trim() || "false",
 				...optionalPlain("MAPLE_ENDPOINT"),
@@ -215,6 +240,13 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				MAPLE_ENVIRONMENT: resolveDeploymentEnvironment(stage),
 				...optionalPlain("COMMIT_SHA"),
 				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
+				// Agent LLM path. `MAPLE_LLM_PROVIDER` flips between OpenRouter (default) and
+				// Workers AI; both stay wired, so a switch is this one var plus a redeploy.
+				// See `@/platform/Llm` for the provider-scoped model overrides.
+				...optionalPlain("MAPLE_LLM_PROVIDER"),
+				...optionalPlain("MAPLE_TRIAGE_MODEL_OPENROUTER"),
+				...optionalPlain("MAPLE_TRIAGE_MODEL_WORKERS_AI"),
+				...optionalSecret("OPENROUTER_API_KEY"),
 				...optionalSecret("MAPLE_ROOT_PASSWORD"),
 				...optionalSecret("CLERK_SECRET_KEY"),
 				...optionalPlain("CLERK_PUBLISHABLE_KEY"),

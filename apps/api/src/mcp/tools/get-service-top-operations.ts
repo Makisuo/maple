@@ -6,17 +6,17 @@ import {
 	type McpToolRegistrar,
 } from "./types"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { resolveTimeRange, formatClampNote } from "../lib/time"
-import { clampLimit } from "../lib/limits"
-import { formatTable } from "../lib/format"
-import { formatMetricValue } from "../lib/format-query-result"
-import { formatNextSteps } from "../lib/next-steps"
-import { createDualContent } from "../lib/structured-output"
-import { toMcpQueryError } from "../lib/map-warehouse-error"
+import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
+import { clampLimit } from "@/mcp/lib/limits"
+import { formatTable } from "@/mcp/lib/format"
+import { formatMetricValue } from "@/mcp/lib/format-query-result"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { Effect, Option, Schema } from "effect"
 import { topOperations } from "@maple/query-engine/observability"
 import { TracesMetric } from "@maple/query-engine"
-import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
+import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 const decodeTracesMetric = Schema.decodeUnknownOption(TracesMetric)
 
@@ -40,8 +40,9 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 			end_time,
 			limit,
 		}) {
-			const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
+			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_SEARCH_MAX_HOURS })
 			const { st, et } = range
+			if (range.exceeded) return rangeExceededResult(range, "get_service_top_operations")
 			const metricOption =
 				metric === undefined ? Option.some("count" as const) : decodeTracesMetric(metric)
 			if (Option.isNone(metricOption)) {
@@ -71,7 +72,7 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 
 			const lines: string[] = [
 				`## Top Operations: ${service_name}`,
-				`Time range: ${st} — ${et}${formatClampNote(range)}`,
+				`Time range: ${st} — ${et}`,
 				`Metric: ${resolvedMetric}`,
 				``,
 			]

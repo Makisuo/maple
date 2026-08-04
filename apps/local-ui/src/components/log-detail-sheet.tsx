@@ -7,36 +7,25 @@ import { useMemo, useState } from "react"
 import { Sheet, SheetContent, SheetTitle } from "@maple/ui/components/ui/sheet"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
 import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
-import {
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupInput,
-} from "@maple/ui/components/ui/input-group"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
-import { Alert, AlertTitle, AlertDescription } from "@maple/ui/components/ui/alert"
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@maple/ui/components/ui/collapsible"
 import { SeverityBadge } from "@maple/ui/components/logs/severity-badge"
 import {
 	CircleInfoIcon,
-	CircleWarningIcon,
 	ChevronDownIcon,
 	ChevronUpIcon,
 	ClockIcon,
 	CodeIcon,
-	CopyIcon,
-	MagnifierIcon,
 	PulseIcon,
 	XmarkIcon,
 } from "@maple/ui/components/icons"
 import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@maple/ui/components/attributes"
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
-import { cn } from "@maple/ui/utils"
-import { toast } from "sonner"
+import { CopyButton } from "@maple/ui/components/ui/copy-button"
+import { cn } from "@maple/ui/lib/utils"
 import type { LocalLog } from "../lib/log-shape"
 import { navigate } from "../lib/router"
-import { formatErrorPrompt } from "../lib/error-prompt"
+import { ErrorSection } from "@maple/ui/components/error-section"
+import { SearchInput } from "@maple/ui/components/ui/search-input"
 import { highlightJson } from "../lib/highlight"
 
 interface LogDetailSheetProps {
@@ -208,8 +197,6 @@ function LogHeroHeader({ log, onClose }: { log: LocalLog; onClose: () => void })
 }
 
 function LogMetaStrip({ log, onOpenTrace }: { log: LocalLog; onOpenTrace: () => void }) {
-	const clipboard = useClipboard()
-
 	return (
 		<div className="flex shrink-0 items-center gap-2 overflow-x-auto whitespace-nowrap border-b px-4 py-1.5 text-xs">
 			<div className="flex shrink-0 items-center gap-1.5">
@@ -238,18 +225,7 @@ function LogMetaStrip({ log, onOpenTrace }: { log: LocalLog; onOpenTrace: () => 
 			)}
 
 			<div className="ml-auto flex shrink-0 items-center gap-0.5">
-				<button
-					type="button"
-					onClick={() => {
-						clipboard.copy(buildLogJsonPayload(log))
-						toast.success("Copied log as JSON")
-					}}
-					className="flex shrink-0 items-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-					title="Copy entire log as JSON"
-					aria-label="Copy log as JSON"
-				>
-					<CopyIcon size={13} />
-				</button>
+				<CopyButton value={() => buildLogJsonPayload(log)} label="Log JSON" iconSize={13} tooltip />
 			</div>
 		</div>
 	)
@@ -260,66 +236,16 @@ function getErrorMessage(log: LocalLog): string {
 }
 
 function LogErrorBanner({ log }: { log: LocalLog }) {
-	const clipboard = useClipboard()
-	const [expanded, setExpanded] = useState(false)
 	const message = getErrorMessage(log)
-	const isFatal = log.severityText.toUpperCase() === "FATAL"
-	const title = isFatal ? "Fatal" : "Error"
-	const isLong = message.length > 120 || message.includes("\n")
-	const exceptionType = log.logAttributes["exception.type"] ?? log.logAttributes["error.type"]
-
 	if (!message) return null
 
-	const handleCopyPrompt = () => {
-		clipboard.copy(
-			formatErrorPrompt({ message, serviceName: log.serviceName, attributes: log.logAttributes }),
-		)
-		toast.success("Copied error prompt to clipboard")
-	}
-
 	return (
-		<Alert variant="error" className="mx-3 my-2 rounded-md border-destructive/30">
-			<CircleWarningIcon size={14} />
-			<AlertTitle className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-				<span className="flex items-center gap-2">
-					{title}
-					{exceptionType && (
-						<span className="font-mono text-[10px] break-all text-destructive/80">
-							{exceptionType}
-						</span>
-					)}
-				</span>
-				<Button
-					variant="ghost"
-					size="sm"
-					className="h-5 px-1.5 text-[10px] text-destructive hover:bg-destructive/10 hover:text-destructive/80"
-					onClick={handleCopyPrompt}
-				>
-					<CopyIcon size={10} className="mr-1" />
-					Copy as prompt
-				</Button>
-			</AlertTitle>
-			<AlertDescription>
-				{isLong ? (
-					<Collapsible open={expanded} onOpenChange={setExpanded}>
-						{!expanded && (
-							<p className="font-mono text-[11px] break-words line-clamp-2">{message}</p>
-						)}
-						<CollapsibleTrigger className="mt-1 flex items-center gap-1 text-[10px] text-destructive hover:text-destructive/80">
-							{expanded ? "Show less" : "Show full error"}
-							{expanded ? <ChevronUpIcon size={10} /> : <ChevronDownIcon size={10} />}
-						</CollapsibleTrigger>
-						<CollapsibleContent>
-							<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-destructive/5 p-2 font-mono text-[11px]">
-								{message}
-							</pre>
-						</CollapsibleContent>
-					</Collapsible>
-				) : (
-					<p className="font-mono text-[11px] break-words">{message}</p>
-				)}
-			</AlertDescription>
-		</Alert>
+		<ErrorSection
+			message={message}
+			title={log.severityText.toUpperCase() === "FATAL" ? "Fatal" : "Error"}
+			badge={log.logAttributes["exception.type"] ?? log.logAttributes["error.type"]}
+			prompt={{ serviceName: log.serviceName, attributes: log.logAttributes }}
+		/>
 	)
 }
 
@@ -332,25 +258,11 @@ function LogAttributesPanel({ log }: { log: LocalLog }) {
 	return (
 		<div className="space-y-3">
 			{hasAttributes && (
-				<InputGroup>
-					<InputGroupAddon>
-						<MagnifierIcon />
-					</InputGroupAddon>
-					<InputGroupInput
-						size="sm"
-						type="text"
-						value={attrSearch}
-						onChange={(e) => setAttrSearch(e.target.value)}
-						placeholder="Search attributes..."
-					/>
-					{attrSearch && (
-						<InputGroupAddon align="inline-end">
-							<InputGroupButton aria-label="Clear search" onClick={() => setAttrSearch("")}>
-								<XmarkIcon />
-							</InputGroupButton>
-						</InputGroupAddon>
-					)}
-				</InputGroup>
+				<SearchInput
+					value={attrSearch}
+					onValueChange={setAttrSearch}
+					placeholder="Search attributes..."
+				/>
 			)}
 
 			<AttributesTable
@@ -415,7 +327,6 @@ function buildLogJsonPayload(log: LocalLog): string {
 }
 
 function LogRawPanel({ log }: { log: LocalLog }) {
-	const clipboard = useClipboard()
 	const jsonPayload = buildLogJsonPayload(log)
 	const highlighted = useMemo(() => highlightJson(jsonPayload), [jsonPayload])
 
@@ -423,17 +334,13 @@ function LogRawPanel({ log }: { log: LocalLog }) {
 		<div>
 			<div className="mb-2 flex items-center justify-between">
 				<span className="text-xs font-medium text-muted-foreground">JSON Payload</span>
-				<button
-					type="button"
-					onClick={() => {
-						clipboard.copy(jsonPayload)
-						toast.success("Copied log as JSON")
-					}}
-					className="flex items-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-				>
-					<CopyIcon size={10} />
-					Copy
-				</button>
+				<CopyButton
+					value={jsonPayload}
+					label="Log JSON"
+					idleLabel="Copy"
+					iconSize={10}
+					className="h-5 px-1.5 text-[10px]"
+				/>
 			</div>
 			<pre className="whitespace-pre-wrap break-all rounded-md border bg-muted/30 p-2 font-mono text-[11px] leading-relaxed">
 				<code dangerouslySetInnerHTML={{ __html: highlighted }} />

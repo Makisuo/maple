@@ -16,6 +16,7 @@ import {
 	DashboardVariableName,
 	DashboardVersionChangeKind,
 } from "../dashboards"
+import { HEATMAP_COLOR_SCALES, HEATMAP_SCALE_TYPES } from "../widget-types"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ConflictError, V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
@@ -216,8 +217,8 @@ export const V2WidgetDisplay = Schema.Struct({
 	),
 	heatmap: optional(
 		Schema.Struct({
-			colorScale: optional(Schema.Literals(["viridis", "magma", "cividis", "blues", "reds"])),
-			scaleType: optional(Schema.Literals(["linear", "log"])),
+			colorScale: optional(Schema.Literals(HEATMAP_COLOR_SCALES)),
+			scaleType: optional(Schema.Literals(HEATMAP_SCALE_TYPES)),
 		}).pipe(Schema.encodeKeys({ colorScale: "color_scale", scaleType: "scale_type" })),
 	),
 	gauge: optional(
@@ -263,7 +264,10 @@ export const V2DashboardWidget = Schema.Struct({
 	dataSource: V2WidgetDataSource,
 	display: V2WidgetDisplay,
 	layout: V2WidgetLayout,
-}).pipe(Schema.encodeKeys({ dataSource: "data_source" }))
+	// Optional per-widget window. Omit it — the overwhelmingly common case — and
+	// the widget follows the dashboard's `time_range`.
+	timeRange: optional(V2TimeRange),
+}).pipe(Schema.encodeKeys({ dataSource: "data_source", timeRange: "time_range" }))
 
 const V2DashboardVariableSource = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("facet"), facet: DashboardQueryVariableFacet }),

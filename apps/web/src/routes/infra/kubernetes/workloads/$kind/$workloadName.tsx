@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { DetailRail } from "@maple/ui/components/detail-rail"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { Schema } from "effect"
@@ -22,7 +23,7 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TIME_PRESETS, bucketSecondsFor } from "@/components/infra/constants"
 import { severityLevel } from "@/components/infra/format"
-import { formatPercent } from "@maple/ui/format"
+import { formatPercent } from "@maple/ui/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import type { WorkloadInfraMetric, WorkloadKind } from "@/api/warehouse/infra"
 
@@ -127,10 +128,10 @@ function WorkloadDetailContent() {
 				</CardTitle>
 			</CardHeader>
 			<CardContent className="space-y-1">
-				<MetaRow label="kind" value={KIND_LABEL[params.kind]} />
-				<MetaRow label={`k8s.${params.kind}.name`} value={summary.workloadName} />
-				<MetaRow label="k8s.namespace.name" value={summary.namespace} />
-				<MetaRow label="pods" value={String(summary.podCount)} />
+				<DetailRail.MetaRow label="kind" value={KIND_LABEL[params.kind]} />
+				<DetailRail.MetaRow label={`k8s.${params.kind}.name`} value={summary.workloadName} />
+				<DetailRail.MetaRow label="k8s.namespace.name" value={summary.namespace} />
+				<DetailRail.MetaRow label="pods" value={String(summary.podCount)} />
 			</CardContent>
 		</Card>
 	) : null
@@ -281,17 +282,5 @@ function WorkloadDetailContent() {
 				<DashboardLayout.RightPanel>{rightSidebar}</DashboardLayout.RightPanel>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
-	)
-}
-
-function MetaRow({ label, value }: { label: string; value: string | null | undefined }) {
-	if (!value) return null
-	return (
-		<div className="flex items-baseline justify-between gap-3 border-b border-border/60 py-1.5 last:border-0">
-			<span className="font-mono text-[11px] text-muted-foreground">{label}</span>
-			<span className="break-all text-right font-mono text-[11px] tabular-nums text-foreground/85">
-				{value}
-			</span>
-		</div>
 	)
 }

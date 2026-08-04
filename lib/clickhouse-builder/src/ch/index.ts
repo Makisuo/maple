@@ -44,10 +44,16 @@ export {
 	whenTrue,
 	inList,
 	inExprList,
-	exists,
-	inSubquery,
 	outerRef,
+	// Reference an output alias (a GROUP BY key or aggregate) that isn't on the
+	// column accessor — the usual way to write a `having()` body.
+	dynamicColumn,
 } from "./expr"
+
+// Subquery conditions. These accept a `CHQuery` as well as raw SQL, so they
+// supersede the string-only `exists`/`inSubquery` still exported from `./expr`
+// for direct subpath importers.
+export { type Subquery, exists, inSubquery, notInSubquery } from "./subquery"
 
 // Function factories (for extensibility by package consumers)
 export { defineFn, defineCondFn, compileFnCall, compileFnCallCond, makeExpr, makeCond } from "./define-fn"
@@ -70,6 +76,9 @@ export {
 	maxIf,
 	minIf,
 	groupUniqArray,
+	groupUniqArrayIf,
+	argMin,
+	argMax,
 	argMaxMerge,
 	// String
 	toString_ as toString,
@@ -80,6 +89,8 @@ export {
 	lower_,
 	replaceOne,
 	extract_ as extract,
+	match_ as match,
+	matchCond,
 	concat,
 	hasToken,
 	hasAllTokens,
@@ -160,8 +171,10 @@ export {
 	compileCH as compile,
 	compileUnion,
 	unsafeCompiledQuery,
+	type RawSqlReason,
 	type CompiledQuery,
 	type CompiledQueryRowSchema,
+	type TenantScope,
 	QueryBuilderError,
 	CompiledQueryDecodeError,
 } from "./compile"

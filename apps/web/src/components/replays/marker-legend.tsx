@@ -1,4 +1,4 @@
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import type { ActionKind } from "./replay-player-context"
 import { MARKER_LABELS, MARKER_STYLES } from "./replay-format"
 

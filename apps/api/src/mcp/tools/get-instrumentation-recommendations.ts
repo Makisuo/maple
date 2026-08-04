@@ -5,17 +5,17 @@ import {
 	validationError,
 	type McpToolRegistrar,
 } from "./types"
-import { formatNumber, formatTable } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { formatNumber, formatTable } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Option, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
-import { resolveTenant } from "../lib/query-warehouse"
-import { toMcpQueryError } from "../lib/map-warehouse-error"
-import { resolveTimeRange } from "../lib/time"
-import { RecommendationIssueService } from "@/services/RecommendationIssueService"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
+import { resolveTimeRange } from "@/mcp/lib/time"
+import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
 import { RecommendationIssueStatus, type RecommendationIssueKind } from "@maple/domain/http"
 import { exploreAttributeKeys } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
+import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 const decodeStatus = Schema.decodeUnknownOption(RecommendationIssueStatus)
 

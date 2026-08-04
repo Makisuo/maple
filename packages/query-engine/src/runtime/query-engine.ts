@@ -17,7 +17,7 @@ import {
 	type QueryEngineExecuteRequest,
 	type QuerySpec,
 	type TimeseriesPoint,
-} from "../query-engine"
+} from "@maple/domain/query-engine"
 import {
 	QueryEngineExecutionError,
 	QueryEngineTimeoutError,
@@ -35,7 +35,16 @@ import {
 	type SqlQueryOptions,
 	type WarehouseQuerySettings,
 } from "../profiles"
+import { canonicalJSON } from "../canonical-json"
 import { computeBucketSeconds } from "../datetime"
+import {
+	MAX_BREAKDOWN_RANGE_SECONDS,
+	MAX_LIST_RANGE_SECONDS,
+	MAX_QUERY_RANGE_SECONDS,
+	MAX_TIMESERIES_POINTS,
+	MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS,
+	formatRangeSeconds,
+} from "../limits"
 import { attributeIndexMode, logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeExecuteRawSql } from "./raw-sql"
 import type { BucketGroupObs } from "./evaluate-bucket-codec"
@@ -44,6 +53,21 @@ import type { BucketGroupObs } from "./evaluate-bucket-codec"
 // `computeBucketSeconds` from here; the implementation now lives in the pure
 // `../datetime` module so the web app and the engine share one definition.
 export { computeBucketSeconds } from "../datetime"
+
+// Same arrangement for the range ceilings: they now live in the pure `../limits`
+// module so the MCP tools, the v2 API, and the web widget layer all bound
+// ranges against one definition instead of their own copies.
+export {
+	MAX_BREAKDOWN_RANGE_SECONDS,
+	MAX_LIST_RANGE_SECONDS,
+	MAX_QUERY_RANGE_SECONDS,
+	MAX_TIMESERIES_POINTS,
+	MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS,
+	formatRangeSeconds,
+	maxRangeSecondsForKind,
+	validateRelativeRange,
+} from "../limits"
+export { relativeRangeSeconds, resolveRelativeRange, resolveRelativeRangeToWarehouse } from "../datetime"
 
 /** Minimal tenant surface the lowering needs — only the org scope. */
 export interface QueryTenant {
@@ -57,11 +81,6 @@ export interface QueryTenant {
  * `WarehouseQueryService` and `T` is inferred as that concrete tenant.
  */
 export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
-	readonly sqlQuery: (
-		tenant: T,
-		sql: string,
-		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError>
 	readonly rawSqlQuery: (
 		tenant: T,
 		sql: string,
@@ -136,11 +155,6 @@ export type QueryEngineDirectError = QueryEngineExecutionError | QueryEngineTime
 
 export type QueryEngineRouteError = QueryEngineValidationError | QueryEngineDirectError
 
-export const MAX_QUERY_RANGE_SECONDS = 60 * 60 * 24 * 31
-const MAX_LIST_RANGE_SECONDS = 60 * 60 * 24 * 7
-const MAX_TIMESERIES_POINTS = 1_500
-const MAX_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24 * 30
-const MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24
 const QUERY_ENGINE_TIMEOUT = Duration.seconds(30)
 
 export const withTimeout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -247,9 +261,17 @@ export function cacheTtlForQueryKind(kind: string): number {
 	)
 }
 
+/**
+ * The query is canonicalized, not `JSON.stringify`d. The same widget reaches
+ * this path from the dashboard builder, a saved template, and the MCP widget
+ * tools, and those producers build the `QuerySpec` with different key insertion
+ * order — which `JSON.stringify` faithfully preserves into three distinct keys
+ * for one query. `canonicalJSON` is the same normalizer the bucket cache's
+ * fingerprint uses, so both layers agree on when two queries are the same.
+ */
 export function buildCacheKey(orgId: string, request: QueryEngineExecuteRequest): string {
 	const snap = snapWindowForQueryKind(request.query.kind)
-	return `${orgId}:${snapToWindow(request.startTime, snap)}:${snapToWindow(request.endTime, snap)}:${JSON.stringify(request.query)}`
+	return `${orgId}:${snapToWindow(request.startTime, snap)}:${snapToWindow(request.endTime, snap)}:${canonicalJSON(request.query)}`
 }
 
 export function buildEvaluateCacheKey(orgId: string, request: AlertEvaluateRequest): string {
@@ -257,7 +279,7 @@ export function buildEvaluateCacheKey(orgId: string, request: AlertEvaluateReque
 	// never share an entry.
 	const source =
 		request.source.kind === "spec"
-			? `spec:${JSON.stringify(request.source.query)}`
+			? `spec:${canonicalJSON(request.source.query)}`
 			: `raw:${request.source.windowMinutes}:${request.source.sql}`
 	return `eval:${orgId}:${snapSeconds(request.startTime)}:${snapSeconds(request.endTime)}:${request.reducer}:${request.sampleCountStrategy}:${source}`
 }
@@ -426,7 +448,7 @@ const validateTimeRange = Effect.fn("QueryEngineService.validateTimeRange")(func
 	if (rangeSeconds > MAX_QUERY_RANGE_SECONDS) {
 		return yield* new QueryEngineValidationError({
 			message: "Time range too large",
-			details: [`Maximum supported range is ${MAX_QUERY_RANGE_SECONDS} seconds`],
+			details: [`Maximum supported range is ${formatRangeSeconds(MAX_QUERY_RANGE_SECONDS)}`],
 		})
 	}
 
@@ -522,7 +544,7 @@ const validateListQuery = Effect.fn("QueryEngineService.validateListQuery")(func
 		return yield* new QueryEngineValidationError({
 			message: "List query time range too large",
 			details: [
-				`List queries support a maximum range of 7 days`,
+				`List queries support a maximum range of ${formatRangeSeconds(MAX_LIST_RANGE_SECONDS)}`,
 				"Narrow the time range or use a timeseries/breakdown query for wider ranges",
 			],
 		})
@@ -588,7 +610,7 @@ const validateBreakdownQuery = Effect.fn("QueryEngineService.validateBreakdownQu
 		return yield* new QueryEngineValidationError({
 			message: "Breakdown query time range too large",
 			details: [
-				"Breakdown queries support a maximum range of 30 days",
+				`Breakdown queries support a maximum range of ${formatRangeSeconds(MAX_BREAKDOWN_RANGE_SECONDS)}`,
 				"Narrow the time range or use a timeseries query for wider trends",
 			],
 		})
@@ -598,7 +620,7 @@ const validateBreakdownQuery = Effect.fn("QueryEngineService.validateBreakdownQu
 		return yield* new QueryEngineValidationError({
 			message: "Breakdown query too broad without filters",
 			details: [
-				"Breakdowns spanning more than 24 hours require a serviceName, environment, or similar filter",
+				`Breakdowns spanning more than ${formatRangeSeconds(MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS)} require a serviceName, environment, or similar filter`,
 				"Add a filter or narrow the time range",
 			],
 		})
@@ -1990,7 +2012,6 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 		return obs as ReadonlyArray<BucketGroupObs>
 	}
 
-
 	if (query.source === "traces") {
 		const opts = extractTracesOpts(query.filters as Record<string, unknown>)
 		const rows = yield* executeCHQuery(
@@ -2015,7 +2036,11 @@ export const computeAlertBuckets = Effect.fnUntraced(function* <T extends QueryT
 			"tracesAlertEval",
 		)
 		for (const row of rows) {
-			const sampleCount = Number(row.count ?? 0)
+			// `count` is a sample-weighted estimate; `minimumSampleCount` is a
+			// confidence guard and must see rows actually observed. They differ only
+			// under sampling, and only the hourly rollup (which stores no raw count)
+			// falls back to the estimate.
+			const sampleCount = Number(row.spanCount ?? row.count ?? 0)
 			const value = sampleCount > 0 ? tracesAggregateValueForMetric(query.metric, row) : null
 			obs.push({
 				bucket: normalizeBucket(row.bucket),
@@ -2183,9 +2208,7 @@ const computeRawSqlBuckets = Effect.fnUntraced(function* <T extends QueryTenant>
 			// by `Date.parse`, which would read that space-separated form as local
 			// time rather than UTC.
 			bucket: normalizeBucket(
-				typeof row.bucket === "string" || row.bucket instanceof Date
-					? row.bucket
-					: range.startTime,
+				typeof row.bucket === "string" || row.bucket instanceof Date ? row.bucket : range.startTime,
 			),
 			groupKey,
 			value,
@@ -2206,10 +2229,7 @@ export const reduceAlertBuckets = (
 	obs: ReadonlyArray<BucketGroupObs>,
 	reducer: QueryEngineAlertReducer,
 ): ReadonlyArray<GroupedAlertObservation> => {
-	const byGroup = new Map<
-		string,
-		Array<{ value: number | null; sampleCount: number; hasData: boolean }>
-	>()
+	const byGroup = new Map<string, Array<{ value: number | null; sampleCount: number; hasData: boolean }>>()
 	for (const o of obs) {
 		const entry = { value: o.value, sampleCount: o.sampleCount, hasData: o.sampleCount > 0 }
 		const list = byGroup.get(o.groupKey)
@@ -2221,7 +2241,6 @@ export const reduceAlertBuckets = (
 	}
 	return reducePerGroupObservations(byGroup, reducer)
 }
-
 
 /**
  * Annotate, validate and resolve the bucket size for one alert evaluation.
@@ -2270,8 +2289,10 @@ const prepareAlertEvaluation = Effect.fnUntraced(function* (request: AlertEvalua
 	}
 
 	// Use the spec's bucketSeconds when present, otherwise auto-compute from the
-	// time range — same as the dashboard execute path.
-	return query.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
+	// time range. Pinned to the historical 30-point target: the chart default is
+	// denser, but finer buckets would change per-bucket observation values (and
+	// `minimumSampleCount` behavior) for every rule that relies on auto sizing.
+	return query.bucketSeconds ?? computeBucketSeconds(startMs, endMs, { targetPoints: 30 })
 })
 
 export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>

@@ -1,13 +1,13 @@
 import { useState } from "react"
 import { Cause, Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { format } from "date-fns"
 
 import { SpendLimits, UpdateSpendLimitsRequest, type SpendEnforcementMode } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { BellIcon } from "@/components/icons"
 import { useAtomSet } from "@/lib/effect-atom"
@@ -116,11 +116,17 @@ export function SpendLimitsCard({
 		})
 		setSwitching(false)
 		if (Exit.isSuccess(exit)) {
-			toast.success(next === "pause" ? "Ingest will pause at the limit." : "Switched to notify-only.")
+			toastManager.add({
+				title: next === "pause" ? "Ingest will pause at the limit." : "Switched to notify-only.",
+				type: "success",
+			})
 			return
 		}
 		const error = Cause.squash(exit.cause)
-		toast.error(error instanceof Error ? error.message : "Couldn't change enforcement.")
+		toastManager.add({
+			title: error instanceof Error ? error.message : "Couldn't change enforcement.",
+			type: "error",
+		})
 	}
 
 	return (

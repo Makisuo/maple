@@ -144,7 +144,11 @@ describe("errorDetailTracesQuery", () => {
 		const q = errorDetailTracesQuery({ fingerprintHash: "111" })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).not.toContain("INNER JOIN")
-		expect(sql).toContain("TraceId IN (SELECT TraceId FROM (SELECT")
+		// The subquery projects a single column (an IN list needs exactly one) from
+		// the ranked error-trace query, now spliced as a typed CHQuery rather than a
+		// pre-compiled SQL string — hence the `AS matching_traces` alias.
+		expect(sql).toContain("TraceId IN (SELECT")
+		expect(sql).toContain("AS matching_traces)")
 		expect(sql).toContain("GROUP BY TraceId")
 		expect(sql).toContain("FROM trace_detail_spans")
 		expect(sql).toContain("GROUP BY traceId")

@@ -81,7 +81,7 @@ This is intentionally **not** `maple.org_id` (the vendor-namespaced span attribu
 
 ## Effect SDK — Cloudflare workers
 
-For TypeScript services running in Cloudflare Workers, resource attributes are set when constructing `MapleCloudflareSDK` in `lib/effect-sdk/src/cloudflare/index.ts`. The config object accepts `serviceName`, `serviceVersion`, and `attributes` for additional resource keys.
+For TypeScript services running in Cloudflare Workers, resource attributes are set when constructing `MapleCloudflareSDK` in `packages/effect-sdk/src/cloudflare/index.ts`. The config object accepts `serviceName`, `serviceVersion`, and `attributes` for additional resource keys.
 
 When wiring a new worker:
 

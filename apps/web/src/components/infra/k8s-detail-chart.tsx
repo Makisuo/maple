@@ -10,6 +10,7 @@ import {
 } from "@maple/ui/components/ui/chart"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
+import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 
 import {
 	podInfraTimeseriesResultAtom,
@@ -25,7 +26,6 @@ import type {
 import {
 	CHART_EMPTY_MESSAGE,
 	CHART_GRID_DASH,
-	COLOR_PALETTE,
 	formatSeconds,
 	formatValueWithUnit,
 	transformRows,
@@ -103,10 +103,7 @@ export function K8sMetricChartView({
 	// Series names can contain dots/slashes (container names, pod names),
 	// which are invalid in a raw `var(--color-…)` reference — colour series
 	// directly instead of via the ChartContainer CSS variables.
-	const seriesColor = useMemo(
-		() => new Map(series.map((name, idx) => [name, COLOR_PALETTE[idx % COLOR_PALETTE.length] ?? ""])),
-		[series],
-	)
+	const seriesColor = useMemo(() => resolveSeriesColors(series), [series])
 
 	const config = useMemo<ChartConfig>(
 		() =>

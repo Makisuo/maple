@@ -15,12 +15,26 @@ import {
 	type V2Span,
 	type V2TraceSummary,
 } from "@maple/domain/http/v2"
-import { CH, QueryEngineExecuteRequest } from "@maple/query-engine"
+import {
+	CH,
+	QueryEngineExecuteRequest,
+	formatWarehouseDateTime,
+	formatWarehouseDateTimeMs,
+} from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
-import { computeBucketSeconds, MAX_QUERY_RANGE_SECONDS } from "@maple/query-engine/runtime"
+import {
+	computeBucketSeconds,
+	formatRangeSeconds,
+	MAX_BREAKDOWN_RANGE_SECONDS,
+	MAX_LIST_RANGE_SECONDS,
+	MAX_QUERY_RANGE_SECONDS,
+	MAX_TIMESERIES_POINTS as MAX_TIMESERIES_BUCKETS,
+	MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS,
+} from "@maple/query-engine/runtime"
 import { Effect, Encoding, Option, Result, Schema } from "effect"
-import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
-import { QueryEngineService } from "../../services/QueryEngineService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
+import { warehouseToV2 } from "./warehouse-error-map"
 
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
@@ -36,7 +50,10 @@ const metricCatalogRowSchema = Schema.Struct({
 	dataPointCount: CH.CHNumber,
 	firstSeen: Schema.String,
 	lastSeen: Schema.String,
-	isMonotonic: Schema.Union([Schema.Boolean, CH.CHNumber]),
+	// `metric_catalog.IsMonotonic` is `SimpleAggregateFunction(anyLast, UInt8)` —
+	// always 0/1 on the wire, never a JSON boolean. `CHNumber` covers both the
+	// numeric and the quoted-string encoding.
+	isMonotonic: CH.CHNumber,
 })
 
 const serviceCatalogRowSchema = Schema.Struct({
@@ -55,19 +72,19 @@ const serviceCatalogRowSchema = Schema.Struct({
 const PARTITION_HINT_RADIUS_MS = 60 * 60 * 1000
 const PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT = 50
 const PUBLIC_BREAKDOWN_DEFAULT_LIMIT = 20
-const MAX_SEARCH_RANGE_SECONDS = 60 * 60 * 24 * 7
-const MAX_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24 * 30
-const MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24
+// Search endpoints return raw rows, so they carry the query engine's list cap.
+const MAX_SEARCH_RANGE_SECONDS = MAX_LIST_RANGE_SECONDS
+// Summary endpoints read the 365-day hourly rollups rather than raw tables, so
+// they can span far wider than any query-engine kind — no shared equivalent.
 const MAX_SUMMARY_RANGE_SECONDS = 60 * 60 * 24 * 365
-const MAX_TIMESERIES_BUCKETS = 1_500
 
-const mapWarehouseError = (operation: string) => () => dependencyUnavailable(`${operation}_unavailable`)
+const mapWarehouseError = warehouseToV2
 
 const toWarehouseDateTime = (value: string, param: string) => {
 	const ms = Date.parse(value)
 	return Number.isNaN(ms)
 		? Effect.fail(invalidRequest("parameter_invalid", `Invalid ISO-8601 timestamp for ${param}.`, param))
-		: Effect.succeed(new Date(ms).toISOString().replace("T", " ").replace(/Z$/, ""))
+		: Effect.succeed(formatWarehouseDateTimeMs(ms))
 }
 
 const parseWindow = (
@@ -89,7 +106,7 @@ const parseWindow = (
 			return yield* Effect.fail(
 				invalidRequest(
 					"time_range_too_large",
-					`${options.rangeLabel ?? "Telemetry queries"} support a maximum time range of ${Math.floor(maxSeconds / 86_400)} days.`,
+					`${options.rangeLabel ?? "Telemetry queries"} support a maximum time range of ${formatRangeSeconds(maxSeconds)}.`,
 					"start_time",
 				),
 			)
@@ -108,12 +125,11 @@ const chToIso = (value: string): Timestamp => {
 	return timestamp(Number.isNaN(ms) ? value : new Date(ms).toISOString())
 }
 
-const warehouseDate = (ms: number) => new Date(ms).toISOString().replace("T", " ").replace(/Z$/, "")
 const partitionWindow = (value: string) => {
 	const ms = Date.parse(value.includes("T") ? value : `${value.replace(" ", "T")}Z`)
 	return {
-		startTime: warehouseDate(ms - PARTITION_HINT_RADIUS_MS),
-		endTime: warehouseDate(ms + PARTITION_HINT_RADIUS_MS),
+		startTime: formatWarehouseDateTimeMs(ms - PARTITION_HINT_RADIUS_MS),
+		endTime: formatWarehouseDateTimeMs(ms + PARTITION_HINT_RADIUS_MS),
 	}
 }
 
@@ -145,7 +161,7 @@ const expandTimestamp = (value: string) => {
 	if (match === null) return value
 	const epochSeconds = Number.parseInt(match[1]!, 36)
 	if (!Number.isSafeInteger(epochSeconds)) return value
-	const seconds = new Date(epochSeconds * 1000).toISOString().slice(0, 19).replace("T", " ")
+	const seconds = formatWarehouseDateTime(epochSeconds * 1000)
 	return `${seconds}${match[2] ?? ""}`
 }
 const compactHexId = (value: string) => {
@@ -394,7 +410,7 @@ const validateTimeseriesBucket = (
 		? Effect.fail(
 				invalidRequest(
 					"bucket_count_too_large",
-					"bucket_seconds produces more than 1,500 buckets.",
+					`bucket_seconds produces more than ${MAX_TIMESERIES_BUCKETS.toLocaleString("en-US")} buckets.`,
 					"bucket_seconds",
 				),
 			)
@@ -415,7 +431,7 @@ const validateBreakdownRange = (rangeSeconds: number, filters: unknown) => {
 	return Effect.fail(
 		invalidRequest(
 			"breakdown_filter_required",
-			"Breakdowns over 24 hours require at least one narrowing filter.",
+			`Breakdowns over ${formatRangeSeconds(MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS)} require at least one narrowing filter.`,
 			"filters",
 		),
 	)

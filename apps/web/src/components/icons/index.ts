@@ -29,6 +29,7 @@ export {
 	FireIcon,
 	GlobeIcon,
 	LineHeightIcon,
+	LinkIcon,
 	LoaderIcon,
 	MagnifierIcon,
 	MenuIcon,
@@ -59,6 +60,7 @@ export { BoltIcon } from "./bolt"
 export { BracketsCurlyIcon } from "./brackets-curly"
 export { ChatBubbleSparkleIcon } from "./chat-bubble-sparkle"
 export { ChartBarIcon } from "./chart-bar"
+export { ChartBarHorizontalIcon } from "./chart-bar-horizontal"
 export { ChartBarTrendUpIcon } from "./chart-bar-trend-up"
 export { ChartLineIcon } from "./chart-line"
 export { CirclePercentageIcon } from "./circle-percentage"
@@ -100,7 +102,6 @@ export { KubernetesIcon } from "./kubernetes"
 export { LanguageIcon } from "./language"
 export { LayoutLeftIcon } from "./layout-left"
 export { LayoutRightIcon } from "./layout-right"
-export { LinkIcon } from "./link"
 export { LogoutIcon } from "./logout"
 export { MagnifierCheckIcon } from "./magnifier-check"
 export { MaximizeIcon } from "./maximize"

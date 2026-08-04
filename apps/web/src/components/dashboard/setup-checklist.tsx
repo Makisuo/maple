@@ -1,6 +1,6 @@
 import { useAuth } from "@clerk/clerk-react"
 import { useNavigate } from "@tanstack/react-router"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent } from "@maple/ui/components/ui/card"
 import {
@@ -80,7 +80,10 @@ function SetupChecklistCard() {
 						className="size-8 p-0"
 						onClick={() => {
 							dismissChecklist()
-							toast.success("Setup checklist hidden — you can reset it from settings later")
+							toastManager.add({
+								title: "Setup checklist hidden — you can reset it from settings later",
+								type: "success",
+							})
 						}}
 					>
 						<XmarkIcon size={14} />

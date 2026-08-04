@@ -1,9 +1,9 @@
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Button } from "@maple/ui/components/ui/button"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { ArrowRightIcon, CircleCheckIcon, PaperPlaneIcon, PulseIcon } from "@/components/icons"
 import { sendTestEvent, type IngestConnection } from "./use-ingest-connection"
 
@@ -50,10 +50,13 @@ export function SendTestEventStrip({ apiKey, onTestSent }: { apiKey: string; onT
 		setSending(true)
 		try {
 			await sendTestEvent(apiKey)
-			toast.success("Test event sent — watch for it to land below")
+			toastManager.add({ title: "Test event sent — watch for it to land below", type: "success" })
 			onTestSent()
 		} catch {
-			toast.error("Couldn't reach the ingest endpoint — double-check your API key")
+			toastManager.add({
+				title: "Couldn't reach the ingest endpoint — double-check your API key",
+				type: "error",
+			})
 		} finally {
 			setSending(false)
 		}

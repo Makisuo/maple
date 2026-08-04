@@ -74,7 +74,7 @@ describe("eve __maple_ui strip patch", () => {
 	 * drops content entries tagged `__maple_ui`. Those entries are the structured
 	 * payloads Maple's MCP server emits for the web chat's tables/charts
 	 * (`createDualContent` in apps/api); chat-flue splits them out client-side
-	 * (`splitToolResult` in apps/chat-flue/src/lib/mcp.ts), and without this
+	 * (`splitToolResult` in apps/api/src/mcp/), and without this
 	 * patch the Slack agent's model receives the raw JSON blob duplicated next
 	 * to the text report on every Maple tool call.
 	 *

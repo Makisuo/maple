@@ -23,6 +23,7 @@ import { httpDisplaySpanName } from "../../traces-shared"
 import { CHNumber } from "../schema"
 import { ServiceOperationsHourly, ServiceOperationsMinutely, Traces } from "../tables"
 import { tracesBaseWhereConditions } from "./query-helpers"
+import { edgeCondition, hourGrain, interiorConditions, minuteGrain } from "./rollup-splice"
 
 export interface ServiceOperationsSummaryOpts {
 	serviceName: string
@@ -61,16 +62,6 @@ export const serviceOperationsSummaryRowSchema = Schema.Struct({
 const displaySpanName = ($: ColumnAccessor<typeof Traces.columns>) =>
 	httpDisplaySpanName($.SpanName, $.SpanAttributes.get("http.route"), $.SpanAttributes.get("url.path"))
 
-const START_DT = "toDateTime(__PARAM_startTime__)"
-const END_DT = "toDateTime(__PARAM_endTime__)"
-const START_MINUTE = `toStartOfMinute(${START_DT})`
-const END_MINUTE = `toStartOfMinute(${END_DT})`
-const FIRST_FULL_MINUTE = `if(${START_DT} = ${START_MINUTE}, ${START_MINUTE}, ${START_MINUTE} + INTERVAL 1 MINUTE)`
-const RAW_EDGE_CONDITION = `(Timestamp < ${FIRST_FULL_MINUTE} OR Timestamp >= ${END_MINUTE})`
-const START_HOUR = `toStartOfHour(${START_DT})`
-const END_HOUR = `toStartOfHour(${END_DT})`
-const FIRST_FULL_HOUR = `if(${START_DT} = ${START_HOUR}, ${START_HOUR}, ${START_HOUR} + INTERVAL 1 HOUR)`
-const MINUTELY_EDGE_CONDITION = `(Minute < ${FIRST_FULL_HOUR} OR Minute >= ${END_HOUR})`
 const RAW_DURATION_STATE = "quantilesTDigestState(0.5, 0.95)(Duration)"
 const ROLLUP_DURATION_STATE = "quantilesTDigestMergeState(0.5, 0.95)(DurationQuantiles)"
 
@@ -142,7 +133,7 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 				serviceName: opts.serviceName,
 				environments: opts.environments,
 			}),
-			CH.rawCond(RAW_EDGE_CONDITION),
+			edgeCondition("Timestamp", minuteGrain),
 		])
 		.groupBy("bSpanName")
 
@@ -160,9 +151,8 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(opts.serviceName),
 			rollupEnvironmentCondition($, opts.environments),
-			$.Minute.gte(CH.rawExpr<string>(FIRST_FULL_MINUTE)),
-			$.Minute.lt(CH.rawExpr<string>(END_MINUTE)),
-			CH.rawCond(MINUTELY_EDGE_CONDITION),
+			...interiorConditions($.Minute, minuteGrain),
+			edgeCondition("Minute", hourGrain),
 		])
 		.groupBy("bSpanName")
 
@@ -180,8 +170,7 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(opts.serviceName),
 			hourlyEnvironmentCondition($, opts.environments),
-			$.Hour.gte(CH.rawExpr<string>(FIRST_FULL_HOUR)),
-			$.Hour.lt(CH.rawExpr<string>(END_HOUR)),
+			...interiorConditions($.Hour, hourGrain),
 		])
 		.groupBy("bSpanName")
 
@@ -274,7 +263,7 @@ export function serviceOperationsTimeseriesQuery(opts: ServiceOperationsTimeseri
 				serviceName: opts.serviceName,
 				environments: opts.environments,
 			}),
-			CH.rawCond(RAW_EDGE_CONDITION),
+			edgeCondition("Timestamp", minuteGrain),
 			CH.inList(displaySpanName($), opts.spanNames),
 		])
 		.groupBy("bucket", "spanName")
@@ -289,10 +278,9 @@ export function serviceOperationsTimeseriesQuery(opts: ServiceOperationsTimeseri
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(opts.serviceName),
 			rollupEnvironmentCondition($, opts.environments),
-			$.Minute.gte(CH.rawExpr<string>(FIRST_FULL_MINUTE)),
-			$.Minute.lt(CH.rawExpr<string>(END_MINUTE)),
+			...interiorConditions($.Minute, minuteGrain),
 			opts.bucketSeconds != null && opts.bucketSeconds >= 3600
-				? CH.rawCond(MINUTELY_EDGE_CONDITION)
+				? edgeCondition("Minute", hourGrain)
 				: undefined,
 			CH.inList($.SpanName, opts.spanNames),
 		])
@@ -308,8 +296,7 @@ export function serviceOperationsTimeseriesQuery(opts: ServiceOperationsTimeseri
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(opts.serviceName),
 			hourlyEnvironmentCondition($, opts.environments),
-			$.Hour.gte(CH.rawExpr<string>(FIRST_FULL_HOUR)),
-			$.Hour.lt(CH.rawExpr<string>(END_HOUR)),
+			...interiorConditions($.Hour, hourGrain),
 			CH.inList($.SpanName, opts.spanNames),
 		])
 		.groupBy("bucket", "spanName")

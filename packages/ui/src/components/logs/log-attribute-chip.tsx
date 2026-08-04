@@ -3,9 +3,9 @@
 import { useRef, useState } from "react"
 
 import { cn } from "../../lib/utils"
-import { useClipboard } from "../../hooks/use-clipboard"
+import { useCopy } from "../../hooks/use-copy"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "../ui/hover-card"
-import { tryParseJson, CopyableValue, CollapsibleJsonValue, useAttributesConfig } from "../attributes"
+import { tryParseJson, CopyableValue, CollapsibleJsonValue } from "../attributes"
 import type { ChipTone } from "../../lib/log-attributes"
 
 const TONE_CLASSES: Record<ChipTone, string> = {
@@ -38,22 +38,21 @@ export interface LogAttributeChipProps {
 
 /**
  * Compact, copy-on-click attribute pill rendered inline on a log row. Hovering
- * reveals the full key/value (with JSON expansion). Copies the `key=value` pair
- * and reports it through `AttributesProvider`'s `notifyCopied`.
+ * reveals the full key/value (with JSON expansion). Copies the `key=value` pair.
+ * The chip is too small to carry a status glyph, so this is one of the few
+ * surfaces that toasts.
  */
 export function LogAttributeChip({ attrKey, value, tone }: LogAttributeChipProps) {
 	const [detailsEnabled, setDetailsEnabled] = useState(false)
 	const triggerRef = useRef<HTMLButtonElement>(null)
-	const clipboard = useClipboard()
-	const { notifyCopied } = useAttributesConfig()
+	const { copy } = useCopy({ successMessage: `Copied ${attrKey}` })
 	const parsed = tryParseJson(value)
 	const displayValue = parsed !== null ? "{…}" : truncateValue(value)
 	const displayKey = shortKey(attrKey)
 
 	const handleCopy = (e: React.SyntheticEvent) => {
 		e.stopPropagation()
-		clipboard.copy(`${attrKey}=${value}`)
-		notifyCopied?.(`Copied ${attrKey}`)
+		void copy(`${attrKey}=${value}`)
 	}
 
 	const trigger = (

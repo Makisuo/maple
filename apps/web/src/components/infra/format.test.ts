@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { deriveHostStatus, severityLevel } from "./format"
-import { formatBytesPerSecond, formatLoad, formatPercent, formatUptime } from "@maple/ui/format"
+import { formatBytesPerSecond, formatLoad, formatPercent, formatUptime } from "@maple/ui/lib/format"
 
 describe("deriveHostStatus", () => {
 	const now = new Date("2026-04-24T12:00:00Z").getTime()
