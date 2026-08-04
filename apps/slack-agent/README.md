@@ -342,7 +342,7 @@ eve's native idiom:
   a gated tool and emits a `tool-call` with `proposed: true` and no result
   (`apps/api/src/chat/agent.ts`); the user approves and `POST /api/chat/apply` performs the
   mutation, which is then recorded back into the transcript as that call's result. (Under Flue this
-  was propose-then-apply with a fabricated `proposed` marker as the tool's *output*, because Flue's
+  was propose-then-apply with a fabricated `proposed` marker as the tool's _output_, because Flue's
   event stream had no human-in-the-loop primitive; that marker no longer exists.) eve has native
   HITL: `agent/lib/approval.ts` gates the same `MUTATING_TOOL_NAMES` set behind a Slack
   approve/deny card, and **on approve the real MCP tool executes** with the workspace's

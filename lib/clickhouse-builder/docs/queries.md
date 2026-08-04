@@ -13,7 +13,7 @@ const limited = base.limit(10) // `base` still has no LIMIT
 
 That makes shared base queries safe to hand around and specialise per caller.
 
-*(Backed by `docs/queries.md > Queries are immutable`.)*
+_(Backed by `docs/queries.md > Queries are immutable`.)_
 
 ## `select`
 
@@ -36,12 +36,12 @@ CH.from(Events).select(($) => ({
 }))
 ```
 
-The object keys become the SQL aliases *and* the keys of the output row type. `select` is
+The object keys become the SQL aliases _and_ the keys of the output row type. `select` is
 required: compiling without one throws `QueryBuilderError` with code `SelectRequired`.
 
 Calling `select` again replaces the previous projection rather than adding to it.
 
-*(Backed by `docs/queries.md > select by column name`.)*
+_(Backed by `docs/queries.md > select by column name`.)_
 
 ## `where`
 
@@ -83,7 +83,7 @@ Takes `[column, direction]` tuples, one per sort key:
 > its first two characters and emit `ORDER BY c O, d E`. It now throws `QueryBuilderError`
 > with code `InvalidOrderBySpec` instead.
 
-*(Backed by `docs/queries.md > orderBy takes tuples` and `> orderBy rejects a bare string`.)*
+_(Backed by `docs/queries.md > orderBy takes tuples` and `> orderBy rejects a bare string`.)_
 
 ## `limit` / `offset`
 

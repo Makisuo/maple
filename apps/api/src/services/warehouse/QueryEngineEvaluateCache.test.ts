@@ -11,7 +11,10 @@ import {
 } from "@maple/query-engine/runtime"
 import { QueryEngineService } from "./QueryEngineService"
 import type { TenantContext } from "@/services/auth/AuthService"
-import { WarehouseQueryService, type WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import {
+	WarehouseQueryService,
+	type WarehouseQueryServiceShape,
+} from "@/services/warehouse/WarehouseQueryService"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService, type EdgeCacheServiceShape } from "@maple/cache"
 import { CacheBackendLive } from "@/platform/CacheBackendLive"

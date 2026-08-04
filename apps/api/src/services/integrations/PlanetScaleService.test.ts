@@ -7,7 +7,8 @@ import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } 
 import { PlanetScaleConnectionService } from "./PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
-import { PlanetScaleService } from "./PlanetScaleService"
+import { PlanetScaleService, deployRequestTimelineRows } from "./PlanetScaleService"
+import { insertPlanetScaleEvent } from "./planetscale/webhook-events"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"
 
 const trackedDbs: TestDb[] = []
@@ -59,6 +60,7 @@ const asUserId = Schema.decodeUnknownSync(UserId)
 const stubApi = (fixtures: {
 	databases: Array<{ id: string; name: string; kind?: string }>
 	branchesByDatabase: Record<string, Array<{ id: string; name: string; production?: boolean }>>
+	deployRequestsByDatabase?: Record<string, Array<Record<string, unknown>>>
 }) => {
 	const stub = (async (input: string | URL | Request) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
@@ -84,6 +86,15 @@ const stubApi = (fixtures: {
 		const branchesMatch = url.match(/\/databases\/([^/?]+)\/branches/)
 		if (branchesMatch) {
 			return json({ data: fixtures.branchesByDatabase[decodeURIComponent(branchesMatch[1])] ?? [] })
+		}
+		// Must precede the /databases catch-all, which would otherwise serve the
+		// databases fixture to the deploy-request poller — the poller would then
+		// decode it as deploy requests and silently record nothing.
+		const deployRequestsMatch = url.match(/\/databases\/([^/?]+)\/deploy-requests/)
+		if (deployRequestsMatch) {
+			return json({
+				data: fixtures.deployRequestsByDatabase?.[decodeURIComponent(deployRequestsMatch[1])] ?? [],
+			})
 		}
 		if (url.includes("/databases")) {
 			return json({ data: fixtures.databases })
@@ -459,5 +470,72 @@ describe("PlanetScaleService", () => {
 			Effect.provideService(FetchHttpClient.Fetch, stub),
 			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
 		)
+	})
+})
+
+describe("deployRequestTimelineRows", () => {
+	it("emits one row per transition the payload actually timestamps", () => {
+		const rows = deployRequestTimelineRows({
+			number: 42,
+			state: "closed",
+			created_at: "2026-08-01T10:00:00Z",
+			closed_at: "2026-08-01T10:20:00Z",
+			deployment: {
+				state: "complete",
+				started_at: "2026-08-01T10:10:00Z",
+				finished_at: "2026-08-01T10:15:00Z",
+			},
+		})
+		assert.deepStrictEqual(
+			rows.map((row) => row.state),
+			["opened", "in_progress", "schema_applied", "closed"],
+		)
+		// The event types must match the webhook vocabulary exactly, or the two
+		// sources stop colliding on the dedupe index and every marker doubles.
+		assert.deepStrictEqual(
+			rows.map((row) => row.eventType),
+			[
+				"deploy_request.opened",
+				"deploy_request.in_progress",
+				"deploy_request.schema_applied",
+				"deploy_request.closed",
+			],
+		)
+		assert.strictEqual(rows[0]?.occurredAtMs, Date.parse("2026-08-01T10:00:00Z"))
+	})
+
+	it("emits nothing for transitions the payload doesn't timestamp", () => {
+		// A marker at a guessed moment invites blaming the wrong deploy for a
+		// latency cliff — silence is the safer failure.
+		const rows = deployRequestTimelineRows({ number: 7, state: "open" })
+		assert.deepStrictEqual(rows, [])
+	})
+
+	it("distinguishes a failed deployment from an applied one", () => {
+		const rows = deployRequestTimelineRows({
+			number: 8,
+			deployment: { state: "error", finished_at: "2026-08-01T10:15:00Z" },
+		})
+		assert.deepStrictEqual(
+			rows.map((row) => row.state),
+			["errored"],
+		)
+	})
+
+	it("distinguishes a revert from an ordinary close", () => {
+		const reverted = deployRequestTimelineRows({
+			number: 9,
+			state: "reverted",
+			closed_at: "2026-08-01T11:00:00Z",
+		})
+		assert.deepStrictEqual(
+			reverted.map((row) => row.state),
+			["reverted"],
+		)
+	})
+
+	it("ignores unparseable timestamps rather than emitting an epoch-0 marker", () => {
+		const rows = deployRequestTimelineRows({ number: 10, created_at: "not-a-date" })
+		assert.deepStrictEqual(rows, [])
 	})
 })

@@ -191,6 +191,88 @@ describe("PlanetScaleWebhookRouter", () => {
 		}).pipe(Effect.provide(testDb.layer))
 	})
 
+	it.effect("enqueues lifecycle events too, and still drops genuinely unknown ones", () => {
+		const testDb = createTestDb(trackedDbs)
+		const jobs: PlanetScaleWebhookJob[] = []
+		return Effect.gen(function* () {
+			const database = yield* Database
+			const encrypted = yield* encryptAes256Gcm(
+				SECRET,
+				ENCRYPTION_KEY,
+				(message) => new Error(message),
+			).pipe(Effect.orDie)
+			const now = new Date("2026-07-11T00:00:00.000Z")
+			yield* database.execute((db) =>
+				db.insert(planetscaleConnections).values({
+					id: CONNECTION_ID,
+					orgId: "org_1",
+					psOrganization: "acme",
+					connectedByUserId: "user_1",
+					webhookSecretCiphertext: encrypted.ciphertext,
+					webhookSecretIv: encrypted.iv,
+					webhookSecretTag: encrypted.tag,
+					createdAt: now,
+					updatedAt: now,
+				}),
+			)
+			const { handler, dispose } = HttpRouter.toWebHandler(
+				makeRouterLayer(testDb, (job) => Effect.sync(() => jobs.push(job))),
+				{ disableLogger: true },
+			)
+
+			const post = (payload: Record<string, unknown>) => {
+				const body = JSON.stringify(payload)
+				return Effect.promise(() =>
+					handler(
+						new Request(`http://api.localhost${WEBHOOK_PATH}`, {
+							method: "POST",
+							headers: {
+								"x-planetscale-signature": createHmac("sha256", SECRET)
+									.update(body, "utf8")
+									.digest("hex"),
+							},
+							body,
+						}),
+						Context.make(Database, database),
+					),
+				)
+			}
+
+			yield* Effect.gen(function* () {
+				// A deploy transition is not an issue, but it IS a chart marker —
+				// before the timeline existed this returned 202 and enqueued nothing.
+				const deploy = yield* post({
+					event: "deploy_request.schema_applied",
+					organization: "acme",
+					database: "shop",
+					resource: { number: 42 },
+				})
+				assert.strictEqual(deploy.status, 202)
+				assert.strictEqual(jobs.length, 1)
+				assert.strictEqual(jobs[0]?.payload.event, "deploy_request.schema_applied")
+
+				const branchReady = yield* post({
+					event: "branch.ready",
+					organization: "acme",
+					database: "shop",
+					resource: { name: "main" },
+				})
+				assert.strictEqual(branchReady.status, 202)
+				assert.strictEqual(jobs.length, 2)
+
+				// Forward-compatibility must not become "enqueue everything": an
+				// event neither side knows is acknowledged and dropped.
+				const unknown = yield* post({
+					event: "branch.some_future_event",
+					organization: "acme",
+					database: "shop",
+				})
+				assert.strictEqual(unknown.status, 202)
+				assert.strictEqual(jobs.length, 2)
+			}).pipe(Effect.ensuring(Effect.promise(dispose)))
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
 	it.effect("returns 503 when durable enqueueing fails", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {

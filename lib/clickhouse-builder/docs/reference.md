@@ -78,10 +78,10 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 
 ### Compilation
 
-| Export                  | Signature                                                       |
-| ----------------------- | --------------------------------------------------------------- |
-| `compile` / `compileCH` | `(query, params, options?) => CompiledQuery<Output>`            |
-| `compileUnion`          | `(union, params, options?) => CompiledQuery<Output>`            |
+| Export                  | Signature                                                                     |
+| ----------------------- | ----------------------------------------------------------------------------- |
+| `compile` / `compileCH` | `(query, params, options?) => CompiledQuery<Output>`                          |
+| `compileUnion`          | `(union, params, options?) => CompiledQuery<Output>`                          |
 | `unsafeCompiledQuery`   | `({ sql, tenantScope, reason, note, rowSchema?, routing? }) => CompiledQuery` |
 
 ### Params

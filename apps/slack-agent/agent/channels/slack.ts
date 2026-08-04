@@ -96,7 +96,9 @@ export default slackChannel({
 		async "actions.requested"(event, channel) {
 			const narrated = channel.state.pendingToolCallMessage
 			channel.state.pendingToolCallMessage = null
-			await channel.thread.startTyping(narrated ? truncateTypingStatus(narrated) : describeActions(event.actions))
+			await channel.thread.startTyping(
+				narrated ? truncateTypingStatus(narrated) : describeActions(event.actions),
+			)
 		},
 	},
 })

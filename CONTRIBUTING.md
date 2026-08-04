@@ -281,11 +281,11 @@ models list`; a retired id returns `410`. Override it with `MAPLE_TRIAGE_MODEL`.
 
 When an autonomous investigation fails to start, the `investigations.error` column names it:
 
-| `error` value                                                    | Cause                                                                     |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `error` value                                                    | Cause                                                                          |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `agent_unavailable: …`                                           | `apps/api` isn't running under wrangler, so there is no `CHAT_SESSION` binding |
-| `start_failed: a turn is already running for this investigation` | The session is busy; retry                                                |
-| `diagnosis_timeout: …`                                           | The turn ran but never called `submit_diagnosis` within 15 minutes        |
+| `start_failed: a turn is already running for this investigation` | The session is busy; retry                                                     |
+| `diagnosis_timeout: …`                                           | The turn ran but never called `submit_diagnosis` within 15 minutes             |
 
 ### All-in-one alternatives
 

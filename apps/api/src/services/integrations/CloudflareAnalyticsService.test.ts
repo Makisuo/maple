@@ -17,7 +17,10 @@ import { encryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
-import { WarehouseQueryService, type WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import {
+	WarehouseQueryService,
+	type WarehouseQueryServiceShape,
+} from "@/services/warehouse/WarehouseQueryService"
 import { CloudflareAnalyticsService, hasAnalyticsScopes } from "./CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "@/services/auth/CloudflareOAuthService"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"

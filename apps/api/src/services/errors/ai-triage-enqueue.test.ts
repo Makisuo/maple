@@ -52,9 +52,7 @@ const fakeBinding = (options?: { readonly busy?: boolean }) => {
 				history: async () => [],
 				beginTurn: async (input: { sessionId: string; messageId: string; text: string }) => {
 					created.push(input)
-					return options?.busy === true
-						? undefined
-						: { cursor: 0, messageId: input.messageId }
+					return options?.busy === true ? undefined : { cursor: 0, messageId: input.messageId }
 				},
 				append: async () => 1,
 				endTurn: async () => undefined,

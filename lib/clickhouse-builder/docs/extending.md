@@ -98,18 +98,18 @@ const compiled = CH.unsafeCompiledQuery<{ readonly name: string }>({
 
 `tenantScope` is **required** — it cannot be inferred from a string, and whatever you assert is
 taken at face value. That is the whole hazard: this is the one place tenant scope is asserted
-rather than derived, so a query that forgot its tenant predicate would be positively *claimed*
+rather than derived, so a query that forgot its tenant predicate would be positively _claimed_
 as scoped and sail through an executor's gate.
 
 `reason` is therefore required too, and its type — `RawSqlReason` — **is** the boundary between
 legitimate raw SQL and raw SQL nobody got round to converting:
 
-| reason | when |
-| --- | --- |
-| `"user-authored-sql"` | The SQL came from a user. There is no AST to build; isolation comes from the credential layer. |
-| `"empty-result-stub"` | A constant zero-row result reading no table (`SELECT … WHERE 0`). The builder always emits a FROM. |
+| reason                 | when                                                                                                                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"user-authored-sql"`  | The SQL came from a user. There is no AST to build; isolation comes from the credential layer.                                                                             |
+| `"empty-result-stub"`  | A constant zero-row result reading no table (`SELECT … WHERE 0`). The builder always emits a FROM.                                                                         |
 | `"param-varied-union"` | A `UNION ALL` of one builder over two parameter sets. Params substitute once per compile, so one `CHQuery` cannot carry both. Derive the scope from the compiled branches. |
-| `"test-fixture"` | A test asserting executor behaviour on synthetic SQL. |
+| `"test-fixture"`       | A test asserting executor behaviour on synthetic SQL.                                                                                                                      |
 
 Adding a member is the review gate — a one-line diff in `compile.ts` that a reviewer cannot
 miss. There is deliberately no `"legacy"` or `"todo"` member: with one, the gate is decorative.

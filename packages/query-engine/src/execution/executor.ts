@@ -54,12 +54,7 @@ import {
 const CLIENT_CACHE_TTL_MS = 30_000
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000
 const CAPABILITIES_INSPECTION_TIMEOUT = Duration.seconds(2)
-const WarehouseCapabilityMetadataTarget = Schema.Literals([
-	"version",
-	"indexes",
-	"columns",
-	"settings",
-])
+const WarehouseCapabilityMetadataTarget = Schema.Literals(["version", "indexes", "columns", "settings"])
 type WarehouseCapabilityMetadataTarget = Schema.Schema.Type<typeof WarehouseCapabilityMetadataTarget>
 
 class WarehouseCapabilityProbeError extends Schema.TaggedErrorClass<WarehouseCapabilityProbeError>()(

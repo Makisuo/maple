@@ -17,11 +17,7 @@ import {
 	presentableStatementSql,
 } from "@maple/domain/tinybird/db-query-shape-sql"
 import { Schema } from "effect"
-import {
-	compileCH,
-	type CompiledQuery,
-	type CompiledQueryRowSchema,
-} from "@maple-dev/clickhouse-builder"
+import { compileCH, type CompiledQuery, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { defineCondFn, defineFn } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 // From the root, not `/expr`: this overload takes a `CHQuery`, so the subquery

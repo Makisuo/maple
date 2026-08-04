@@ -21,7 +21,7 @@ throws `QueryBuilderError` with code `UnresolvedParam`, since there is nothing t
 ## How params are resolved
 
 > **Params are resolved at compile time, not execution time.** `compile` substitutes each
-> value into the SQL text. This is *not* server-side parameter binding — ClickHouse never sees
+> value into the SQL text. This is _not_ server-side parameter binding — ClickHouse never sees
 > a placeholder.
 
 ```ts
@@ -36,19 +36,19 @@ Two consequences worth planning around:
 - **Escaping is the safety mechanism**, not binding. String values go through
   `escapeClickHouseString`, which escapes backslashes and single quotes:
 
-  ```ts
-  CH.compile(query, { orgId: "a'b\\c" })
-  // … WHERE OrgId = 'a\'b\\c'
-  ```
+    ```ts
+    CH.compile(query, { orgId: "a'b\\c" })
+    // … WHERE OrgId = 'a\'b\\c'
+    ```
 
-  Values flowing through `param.*` and the comparison methods are escaped. Values you splice
-  in via [`rawExpr` / `rawCond`](./extending.md#raw-escape-hatches) are **not** — never build
-  those from user input.
+    Values flowing through `param.*` and the comparison methods are escaped. Values you splice
+    in via [`rawExpr` / `rawCond`](./extending.md#raw-escape-hatches) are **not** — never build
+    those from user input.
 
 A query is a reusable template: compile the same one repeatedly with different params.
 
-*(Backed by `docs/params-and-compilation.md > Params are resolved at compile time`,
-`> String params are escaped`, `> One query, many parameter sets`.)*
+_(Backed by `docs/params-and-compilation.md > Params are resolved at compile time`,
+`> String params are escaped`, `> One query, many parameter sets`.)_
 
 ## `compile`
 
@@ -56,11 +56,11 @@ A query is a reusable template: compile the same one repeatedly with different p
 CH.compile(query, params, options?)
 ```
 
-| Argument | Meaning |
-| --- | --- |
-| `query` | The `CHQuery` to compile |
-| `params` | Record resolving every `param.*` placeholder by name |
-| `options.rowSchema` | Effect `Schema` used by `decodeRows` / `decodeFirstRow` |
+| Argument             | Meaning                                                          |
+| -------------------- | ---------------------------------------------------------------- |
+| `query`              | The `CHQuery` to compile                                         |
+| `params`             | Record resolving every `param.*` placeholder by name             |
+| `options.rowSchema`  | Effect `Schema` used by `decodeRows` / `decodeFirstRow`          |
 | `options.skipFormat` | Omit a trailing `FORMAT` clause (used internally for subqueries) |
 
 `compile` and `compileCH` are the same function. Unions use `compileUnion(union, params)`.
@@ -78,13 +78,13 @@ interface CompiledQuery<Output> {
 }
 ```
 
-| Field | Purpose |
-| --- | --- |
-| `sql` | The statement to execute. The builder never runs it. |
-| `tenantScope` | Whether the query pins a single tenant — see [Tenant scoping](./tenant-scoping.md) |
-| `rowSchemaDeclared` | Whether a `rowSchema` was supplied, so a caller can tell real validation from a pass-through |
-| `routing` | Set by `.routing("ingest")`; metadata for your executor |
-| `decodeRows` / `decodeFirstRow` | See [Decoding results](./decoding-results.md) |
+| Field                           | Purpose                                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------------------- |
+| `sql`                           | The statement to execute. The builder never runs it.                                         |
+| `tenantScope`                   | Whether the query pins a single tenant — see [Tenant scoping](./tenant-scoping.md)           |
+| `rowSchemaDeclared`             | Whether a `rowSchema` was supplied, so a caller can tell real validation from a pass-through |
+| `routing`                       | Set by `.routing("ingest")`; metadata for your executor                                      |
+| `decodeRows` / `decodeFirstRow` | See [Decoding results](./decoding-results.md)                                                |
 
 There is deliberately **no `castRows`**. A bare cast looked type-safe while hiding wire-format
 drift, so it was removed in favour of schema-checked decoding.
@@ -99,10 +99,10 @@ because it cannot be inferred from a string. See [Extending the DSL](./extending
 
 `QueryBuilderError` is thrown synchronously during compilation, with a `code`:
 
-| Code | Cause |
-| --- | --- |
-| `SelectRequired` | Compiling a query with no `select()` |
-| `UnresolvedParam` | Comparing on a param before compilation resolved it |
+| Code                 | Cause                                                        |
+| -------------------- | ------------------------------------------------------------ |
+| `SelectRequired`     | Compiling a query with no `select()`                         |
+| `UnresolvedParam`    | Comparing on a param before compilation resolved it          |
 | `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple |
 
 It is an Effect `Schema.TaggedErrorClass`, catchable by the tag

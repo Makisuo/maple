@@ -43,9 +43,7 @@ describe("scoreChannelName", () => {
 	it("prefers the shorter name among prefix matches", () => {
 		// Both are prefix matches and neither is exact — otherwise this would be
 		// comparing tiers (exact > prefix) and prove nothing about length.
-		expect(scoreChannelName("dep-a", "dep")).toBeGreaterThan(
-			scoreChannelName("dep-a-very-long", "dep")!,
-		)
+		expect(scoreChannelName("dep-a", "dep")).toBeGreaterThan(scoreChannelName("dep-a-very-long", "dep")!)
 	})
 })
 

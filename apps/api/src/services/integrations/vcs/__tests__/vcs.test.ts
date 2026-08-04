@@ -13,14 +13,24 @@ import {
 } from "@maple/domain/http"
 import { Clock, Effect, Exit, Layer, Option, Schema } from "effect"
 import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
-import { COMMIT_PAGES_PER_INVOCATION, GithubAppClient } from "@/services/integrations/vcs/vendor/github/GithubAppClient"
+import {
+	COMMIT_PAGES_PER_INVOCATION,
+	GithubAppClient,
+} from "@/services/integrations/vcs/vendor/github/GithubAppClient"
 import { GithubHttp } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 import { GithubProvider } from "@/services/integrations/vcs/vendor/github/GithubProvider"
 import type { VcsProviderClient } from "@/services/integrations/vcs/VcsProviderClient"
-import { VcsProviderRegistry, type VcsProviderRegistryShape } from "@/services/integrations/vcs/VcsProviderRegistry"
+import {
+	VcsProviderRegistry,
+	type VcsProviderRegistryShape,
+} from "@/services/integrations/vcs/VcsProviderRegistry"
 import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
 import { clampQueueDelaySeconds } from "@/services/integrations/vcs/VcsSyncQueue"
-import { BACKFILL_WINDOW_MS, MAX_BACKFILL_STALL_RETRIES, VcsSyncService } from "@/services/integrations/vcs/VcsSyncService"
+import {
+	BACKFILL_WINDOW_MS,
+	MAX_BACKFILL_STALL_RETRIES,
+	VcsSyncService,
+} from "@/services/integrations/vcs/VcsSyncService"
 import {
 	asOrgId,
 	asUserId,
