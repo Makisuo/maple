@@ -1,4 +1,5 @@
 import type {
+	ServiceUsageRequest,
 	ErrorDetailTracesRequest,
 	ErrorRateByServiceRequest,
 	ErrorsByTypeRequest,
@@ -412,4 +413,113 @@ export const workloadDetailSummary = defineQuery({
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
 		),
+})
+
+// --- Sub-queries of composite (bundle) handlers ---------------------------
+//
+// Bundle endpoints run several queries in one Worker invocation so per-org
+// config resolves once and the browser makes one round-trip instead of three.
+// Each sub-query keeps its own id, because that id is both its span context and
+// its cache-key prefix -- collapsing them under the bundle's name would merge
+// unrelated cache entries.
+//
+// Their payload types are the MINIMAL input each needs rather than the bundle's
+// full payload. That is load-bearing: `runQuery` keys the cache on whatever
+// payload it is handed, so typing these narrowly reproduces the exact key the
+// hand-written `cachedDirect` calls used.
+
+/** Release markers for the service detail overview chart. Uncached, mirroring the standalone path. */
+export const serviceReleases = defineQuery({
+	id: "serviceReleases",
+	profile: "list",
+	cache: undefined,
+	compile: (
+		payload: {
+			readonly serviceName: string
+			readonly startTime: string
+			readonly endTime: string
+			readonly releasesBucketSeconds?: number | undefined
+		},
+		orgId: string,
+	) =>
+		CH.compile(CH.serviceReleasesTimelineQuery({ serviceName: payload.serviceName }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+			bucketSeconds: payload.releasesBucketSeconds ?? 300,
+		}),
+})
+
+/** Environments a service reported in the window. Edge-cached on a service-scoped key. */
+export const serviceEnvironments = defineQuery({
+	id: "serviceEnvironments",
+	profile: "discovery",
+	cache: 15,
+	compile: (
+		payload: { readonly serviceName: string; readonly startTime: string; readonly endTime: string },
+		orgId: string,
+	) =>
+		CH.compile(CH.serviceEnvironmentsQuery({ serviceName: payload.serviceName }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+/**
+ * External (non-service) edges for the dependencies tab.
+ *
+ * Built by `serviceExternalEdgesSQL`, which returns a CompiledQuery directly
+ * rather than going through `CH.compile`.
+ */
+export const serviceExternalEdges = defineQuery({
+	id: "serviceExternalEdges",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (
+		payload: {
+			readonly serviceName: string
+			readonly deploymentEnv?: string | undefined
+			readonly startTime: string
+			readonly endTime: string
+		},
+		orgId: string,
+	) =>
+		CH.serviceExternalEdgesSQL(
+			{ deploymentEnv: payload.deploymentEnv, serviceName: payload.serviceName },
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+/**
+ * Service usage totals.
+ *
+ * Two builders behind one id: with both previous-window bounds the query
+ * returns current-vs-previous in a single scan, otherwise just the current
+ * window. The branch lives in `compile` so the id, profile and TTL stay one
+ * decision.
+ */
+export const serviceUsage = defineQuery({
+	id: "serviceUsage",
+	profile: "aggregation",
+	// Usage totals (GB / session counts) tolerate a minute of staleness; a 60s
+	// TTL cuts repeat-load recomputes ~4x vs 15s.
+	cache: 60,
+	compile: (payload: ServiceUsageRequest, orgId: string) => {
+		const prevStart = payload.previousStartTime
+		const prevEnd = payload.previousEndTime
+		return prevStart != null && prevEnd != null
+			? CH.compile(CH.serviceUsageWithPreviousQuery({ serviceName: payload.service }), {
+					orgId,
+					startTime: payload.startTime,
+					endTime: payload.endTime,
+					previousStartTime: prevStart,
+					previousEndTime: prevEnd,
+				})
+			: CH.compile(CH.serviceUsageQuery({ serviceName: payload.service }), {
+					orgId,
+					startTime: payload.startTime,
+					endTime: payload.endTime,
+				})
+	},
 })

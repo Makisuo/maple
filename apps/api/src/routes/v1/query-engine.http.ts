@@ -1259,21 +1259,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceDetailOverview", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-
-					const releasesCompiled = CH.compile(
-						CH.serviceReleasesTimelineQuery({ serviceName: payload.serviceName }),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds: payload.releasesBucketSeconds ?? 300,
-						},
-					)
-					const environmentsCompiled = CH.compile(
-						CH.serviceEnvironmentsQuery({ serviceName: payload.serviceName }),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-
 					// One Worker invocation for the whole Overview tab: per-org config
 					// resolves once (the first sub-query warms the in-isolate memo) and
 					// the three queries run concurrently, replacing three separate
@@ -1283,33 +1268,15 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const [timeseries, releaseRows, environmentRows] = yield* Effect.all(
 						[
 							queryEngine.execute(tenant, payload.timeseries),
-							mapExecError(
-								warehouse.compiledQuery(tenant, releasesCompiled, {
-									profile: "list",
-									context: "serviceReleases",
-								}),
-								"serviceReleases query failed",
-							),
-							queryEngine.cachedDirect(
-								tenant,
-								"serviceEnvironments",
-								{
-									serviceName: payload.serviceName,
-									startTime: payload.startTime,
-									endTime: payload.endTime,
-								},
-								mapExecError(
-									warehouse.compiledQuery(tenant, environmentsCompiled, {
-										profile: "discovery",
-										context: "serviceEnvironments",
-									}),
-									"serviceEnvironments query failed",
-								),
-							),
+							runQuery(Queries.serviceReleases, tenant, payload),
+							runQuery(Queries.serviceEnvironments, tenant, {
+								serviceName: payload.serviceName,
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+							}),
 						],
 						{ concurrency: 3 },
 					)
-
 					return new ServiceDetailOverviewResponse({
 						timeseries,
 						releases: releaseRows.map((row) => ({
@@ -1327,56 +1294,17 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceDependenciesBundle", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-
-					const dependenciesCompiled = CH.compile(
-						CH.serviceDependenciesForServiceQuery({
-							serviceName: payload.serviceName,
-							deploymentEnv: payload.deploymentEnv,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const dbEdgesCompiled = CH.compile(
-						CH.serviceDbEdgesForServiceQuery({
-							serviceName: payload.serviceName,
-							deploymentEnv: payload.deploymentEnv,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const externalEdgesCompiled = CH.serviceExternalEdgesSQL(
-						{ deploymentEnv: payload.deploymentEnv, serviceName: payload.serviceName },
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-
 					// Dependencies tab in one Worker invocation: the three service-map
 					// edge queries run concurrently and share a single config
 					// resolution, replacing three independent round-trips.
 					const [dependencyRows, dbEdgeRows, externalEdgeRows] = yield* Effect.all(
 						[
-							mapExecError(
-								warehouse.compiledQuery(tenant, dependenciesCompiled, {
-									profile: "aggregation",
-									context: "serviceDependenciesForService",
-								}),
-								"serviceDependenciesForService query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, dbEdgesCompiled, {
-									profile: "aggregation",
-									context: "serviceDbEdgesForService",
-								}),
-								"serviceDbEdgesForService query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, externalEdgesCompiled, {
-									profile: "aggregation",
-									context: "serviceExternalEdges",
-								}),
-								"serviceExternalEdges query failed",
-							),
+							runQuery(Queries.serviceDependenciesForService, tenant, payload),
+							runQuery(Queries.serviceDbEdgesForService, tenant, payload),
+							runQuery(Queries.serviceExternalEdges, tenant, payload),
 						],
 						{ concurrency: 3 },
 					)
-
 					return new ServiceDependenciesBundleResponse({
 						dependencies: dependencyRows.map((row) => ({ ...row })),
 						dbEdges: dbEdgeRows.map((row) => ({ ...row })),
@@ -1588,37 +1516,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceUsage", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const prevStart = payload.previousStartTime
-					const prevEnd = payload.previousEndTime
-					const compiled =
-						prevStart != null && prevEnd != null
-							? CH.compile(CH.serviceUsageWithPreviousQuery({ serviceName: payload.service }), {
-									orgId: tenant.orgId,
-									startTime: payload.startTime,
-									endTime: payload.endTime,
-									previousStartTime: prevStart,
-									previousEndTime: prevEnd,
-								})
-							: CH.compile(CH.serviceUsageQuery({ serviceName: payload.service }), {
-									orgId: tenant.orgId,
-									startTime: payload.startTime,
-									endTime: payload.endTime,
-								})
-					const rows = yield* queryEngine.cachedDirect(
-						tenant,
-						"serviceUsage",
-						payload,
-						mapExecError(
-							warehouse.compiledQuery(tenant, compiled, {
-								profile: "aggregation",
-								context: "serviceUsage",
-							}),
-							"serviceUsage query failed",
-						),
-						// Usage totals (GB / session counts) tolerate a minute of
-						// staleness; a 60s TTL cuts repeat-load recomputes ~4× vs 15s.
-						60,
-					)
+					const rows = yield* runQuery(Queries.serviceUsage, tenant, payload)
 					return new ServiceUsageResponse({ data: rows })
 				}),
 			)
