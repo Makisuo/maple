@@ -211,11 +211,15 @@ export function serviceWorkloadsSQL(
 		.limit(500)
 		.format("JSON")
 
-	const { sql } = compileCH(query, {
-		orgId: params.orgId,
-		startTime: params.startTime,
-		endTime: params.endTime,
-	})
-
-	return unsafeCompiledQuery({ sql, tenantScope: "org", rowSchema: ServiceWorkloadsOutputSchema })
+	// No top-level `OrgId` predicate here on purpose: the scope is derived from
+	// the sources, both of which filter `OrgId` themselves.
+	return compileCH(
+		query,
+		{
+			orgId: params.orgId,
+			startTime: params.startTime,
+			endTime: params.endTime,
+		},
+		{ rowSchema: ServiceWorkloadsOutputSchema },
+	)
 }

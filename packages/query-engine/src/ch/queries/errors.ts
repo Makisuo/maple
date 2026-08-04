@@ -5,6 +5,9 @@
 // ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
+// From the root, not `/expr`: these overloads take a `CHQuery`, keeping the
+// subquery's params, table names and column types checked.
+import { exists, inSubquery } from "@maple-dev/clickhouse-builder"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
@@ -547,20 +550,19 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 				opts.attributeFilterValueMatchMode === "contains"
 					? CH.positionCaseInsensitive(attrCol, CH.lit(opts.attributeFilterValue ?? "")).gt(0)
 					: attrCol.eq(opts.attributeFilterValue ?? "")
-			const innerSql = compileCH(
-				from(Traces, "t_attr")
-					.select(() => ({ _: CH.lit(1) }))
-					.where(() => [
-						CH.dynamicColumn("t_attr.TraceId").eq(CH.outerRef("TraceId")),
-						CH.dynamicColumn("t_attr.OrgId").eq(param.string("orgId")),
-						CH.dynamicColumn<string>("t_attr.Timestamp").gte(param.dateTime("startTime")),
-						CH.dynamicColumn<string>("t_attr.Timestamp").lte(param.dateTime("endTime")),
-						matchCond,
-					]),
-				{},
-				{ skipFormat: true },
+			conditions.push(
+				exists(
+					from(Traces, "t_attr")
+						.select(() => ({ _: CH.lit(1) }))
+						.where(() => [
+							CH.dynamicColumn("t_attr.TraceId").eq(CH.outerRef("TraceId")),
+							CH.dynamicColumn("t_attr.OrgId").eq(param.string("orgId")),
+							CH.dynamicColumn<string>("t_attr.Timestamp").gte(param.dateTime("startTime")),
+							CH.dynamicColumn<string>("t_attr.Timestamp").lte(param.dateTime("endTime")),
+							matchCond,
+						]),
+				),
 			)
-			conditions.push(CH.exists(innerSql.sql))
 		}
 		if (opts.resourceFilterKey) {
 			const resCol = CH.mapGet(
@@ -571,20 +573,19 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 				opts.resourceFilterValueMatchMode === "contains"
 					? CH.positionCaseInsensitive(resCol, CH.lit(opts.resourceFilterValue ?? "")).gt(0)
 					: resCol.eq(opts.resourceFilterValue ?? "")
-			const innerSql = compileCH(
-				from(Traces, "t_res")
-					.select(() => ({ _: CH.lit(1) }))
-					.where(() => [
-						CH.dynamicColumn("t_res.TraceId").eq(CH.outerRef("TraceId")),
-						CH.dynamicColumn("t_res.OrgId").eq(param.string("orgId")),
-						CH.dynamicColumn<string>("t_res.Timestamp").gte(param.dateTime("startTime")),
-						CH.dynamicColumn<string>("t_res.Timestamp").lte(param.dateTime("endTime")),
-						matchCond,
-					]),
-				{},
-				{ skipFormat: true },
+			conditions.push(
+				exists(
+					from(Traces, "t_res")
+						.select(() => ({ _: CH.lit(1) }))
+						.where(() => [
+							CH.dynamicColumn("t_res.TraceId").eq(CH.outerRef("TraceId")),
+							CH.dynamicColumn("t_res.OrgId").eq(param.string("orgId")),
+							CH.dynamicColumn<string>("t_res.Timestamp").gte(param.dateTime("startTime")),
+							CH.dynamicColumn<string>("t_res.Timestamp").lte(param.dateTime("endTime")),
+							matchCond,
+						]),
+				),
 			)
-			conditions.push(CH.exists(innerSql.sql))
 		}
 
 		return conditions
@@ -1008,8 +1009,6 @@ export function errorDetailTracesQuery(opts: ErrorDetailTracesOpts) {
 		.orderBy(["lastErrorSeen", "desc"])
 		.limit(limit)
 
-	const errorSubSql = compileCH(errorSub, {}, { skipFormat: true }).sql
-
 	// Outer query: fetch all spans for the matching traces. Use an IN-filtered
 	// small subquery instead of an INNER JOIN so ClickHouse can apply the
 	// trace-detail projection's (OrgId, TraceId, SpanId) sort key while reading
@@ -1026,7 +1025,10 @@ export function errorDetailTracesQuery(opts: ErrorDetailTracesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			CH.inSubquery($.TraceId, `SELECT TraceId FROM (${errorSubSql})`),
+			inSubquery(
+				$.TraceId,
+				fromQuery(errorSub, "matching_traces").select(($$) => ({ TraceId: $$.TraceId })),
+			),
 			$.Timestamp.gte(param.dateTime("startTime")),
 			$.Timestamp.lte(param.dateTime("endTime")),
 		])

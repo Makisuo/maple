@@ -368,6 +368,86 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		compile: () => CH.compileUnion(CH.workloadFacetsQuery({ kind: "deployment" }), window),
 	},
 
+	// ----- service-map: the parent⋈child span join and its two projections.
+	// ----- The rollup's rows are `ingest`ed into service_map_edges_hourly
+	// ----- verbatim, so these must reach the ClickHouse DESCRIBE sweep.
+	{
+		// Mirrors ServiceMapRollupService's per-hour call (service-map-rollup.ts).
+		module: "service-map",
+		name: "serviceMapEdgeJoinQuery",
+		label: "rollup-hour",
+		compile: () =>
+			CH.compile(
+				CH.serviceMapEdgeJoinQuery({
+					rangeStart: CH.toDateTime(CH.param.dateTime("hourStart")),
+					rangeEnd: CH.toDateTime(CH.param.dateTime("hourEnd")),
+				}).format("JSON"),
+				{ orgId: ORG_ID, hourStart: START_TIME, hourEnd: END_TIME },
+			),
+	},
+	{
+		// The service-scoped variant pushes the filter into the parent subquery.
+		module: "service-map",
+		name: "serviceMapEdgeJoinQuery",
+		label: "scoped-to-service",
+		compile: () =>
+			CH.compile(
+				CH.serviceMapEdgeJoinQuery({
+					rangeStart: CH.toDateTime(CH.param.dateTime("hourStart")),
+					rangeEnd: CH.toDateTime(CH.param.dateTime("hourEnd")),
+					deploymentEnv: "production",
+					parentServiceName: "web",
+				}).format("JSON"),
+				{ orgId: ORG_ID, hourStart: START_TIME, hourEnd: END_TIME },
+			),
+	},
+	{
+		module: "service-map-rollup",
+		name: "serviceMapEdgesRollupSQL",
+		label: "default",
+		compile: () =>
+			CH.serviceMapEdgesRollupSQL({ orgId: ORG_ID, hourStart: START_TIME, hourEnd: END_TIME }),
+	},
+	{
+		module: "service-map-rollup",
+		name: "serviceMapEdgesExistingHoursSQL",
+		label: "default",
+		compile: () => CH.serviceMapEdgesExistingHoursSQL(window),
+	},
+	{
+		// Org-wide: hourly MV branch UNION ALL two partial-hour live joins.
+		module: "service-map",
+		name: "serviceDependenciesSQL",
+		label: "default",
+		compile: () => CH.serviceDependenciesSQL({}, window),
+	},
+	{
+		module: "service-map",
+		name: "serviceDependenciesSQL",
+		label: "env-scoped",
+		compile: () => CH.serviceDependenciesSQL({ deploymentEnv: "production" }, window),
+	},
+	{
+		module: "service-map",
+		name: "serviceDependenciesForServiceQuery",
+		label: "default",
+		compile: () => CH.compile(CH.serviceDependenciesForServiceQuery({ serviceName: "web" }), window),
+	},
+	{
+		// Hourly MV UNION ALL raw traces, minus the internal-resolution anti-join.
+		module: "service-map",
+		name: "serviceExternalEdgesSQL",
+		label: "default",
+		compile: () => CH.serviceExternalEdgesSQL({ serviceName: "web" }, window),
+	},
+	{
+		module: "service-map",
+		name: "serviceExternalEdgesSQL",
+		label: "env-scoped",
+		compile: () =>
+			CH.serviceExternalEdgesSQL({ serviceName: "web", deploymentEnv: "production" }, window),
+	},
+
 	// ----- activity: the only deliberately cross-org builders in the product.
 	// ----- Fixtured so the catalog's tenant-scope test actually exercises the
 	// ----- cross-org branch, rather than asserting a rule nothing exemplifies.
