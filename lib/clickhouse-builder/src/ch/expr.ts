@@ -214,27 +214,10 @@ export function lit(value: string | number): Expr<string> | Expr<number> {
 // ---------------------------------------------------------------------------
 // Subquery expressions
 //
-// These string-only forms are superseded by `./subquery`, whose `exists` /
-// `inSubquery` / `notInSubquery` also accept a `CHQuery`. They need `compileCH`,
-// which this module cannot import without closing a cycle, so they live there
-// and are re-exported from the package root. Prefer those.
+// `exists` / `inSubquery` / `notInSubquery` live in `./subquery`, not here —
+// they accept a `CHQuery` and so need `compileCH`, which this module cannot
+// import without closing a cycle. Reach them from the package root.
 // ---------------------------------------------------------------------------
-
-/**
- * EXISTS (subquery) — for correlated subqueries.
- * The subquery must be compiled separately; this wraps its SQL as a condition.
- */
-export function exists(subquerySql: string): Condition {
-	return makeCond(raw(`EXISTS (${subquerySql})`))
-}
-
-/**
- * expr IN (subquery) — for uncorrelated subqueries.
- * The subquery must be compiled separately; this wraps its SQL as a condition.
- */
-export function inSubquery<T>(expr: Expr<T>, subquerySql: string): Condition {
-	return makeCond(raw(`${compile(expr.toFragment())} IN (${subquerySql})`))
-}
 
 /**
  * Reference an outer query's column in a correlated subquery.

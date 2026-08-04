@@ -267,7 +267,7 @@ export {
 	serviceDbQueryTimeseriesSQL,
 	serviceDbTopQueriesSQL,
 	servicePlatformsSQL,
-	serviceMapEdgeJoinSQL,
+	serviceMapEdgeJoinQuery,
 	type ServiceDependenciesOpts,
 	type ServiceDependenciesForServiceOpts,
 	type ServiceDependenciesOutput,
