@@ -1,6 +1,7 @@
 import { Atom } from "@/lib/effect-atom"
 import { Effect, Schema } from "effect"
-import { encodeKey } from "@/lib/cache-key"
+import { encodeOrgScopedKey, orgScopedKeyPayload } from "@/lib/cache-key"
+import { getActiveOrgId } from "@/lib/services/common/auth-headers"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { BackendError, WarehouseApiError } from "@/api/warehouse/effect-utils"
 import {
@@ -161,7 +162,7 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 		// shipped). The inner query spans already export by re-providing this same
 		// (memoized) layer; this lifts the parent onto the same tracer.
 		let resultAtom = MapleApiAtomClient.runtime.atom(
-			Schema.decodeUnknownEffect(UnknownFromJson)(key).pipe(
+			Schema.decodeUnknownEffect(UnknownFromJson)(orgScopedKeyPayload(key)).pipe(
 				Effect.flatMap((input) => query(input as Input)),
 				Effect.mapError(toQueryAtomError),
 			),
@@ -174,7 +175,7 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 		return resultAtom
 	})
 
-	return (input: Input) => family(encodeKey(input))
+	return (input: Input) => family(encodeOrgScopedKey(getActiveOrgId(), input))
 }
 
 export const getServiceUsageResultAtom = makeQueryAtomFamily(getServiceUsage, {

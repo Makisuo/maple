@@ -23,7 +23,8 @@ export type WidgetDataSourceLike = {
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
-import { encodeKey } from "@/lib/cache-key"
+import { encodeKey, encodeOrgScopedKey, orgScopedKeyPayload } from "@/lib/cache-key"
+import { getActiveOrgId } from "@/lib/services/common/auth-headers"
 import { formatBackendError } from "@/lib/error-messages"
 import { Cause, Option } from "effect"
 import { WarehouseDecodeError, type BackendError } from "@/api/warehouse/effect-utils"
@@ -318,8 +319,9 @@ const toWidgetDataAtomError = (error: unknown): WidgetFetchError => {
 const fetchWidgetData = Effect.fnUntraced(
 	function* (key: string) {
 		const parsed = yield* Effect.try({
+			// The key is org-scoped; only the payload after the separator is JSON.
 			try: () =>
-				JSON.parse(key) as {
+				JSON.parse(orgScopedKeyPayload(key)) as {
 					endpoint: string
 					params: Record<string, unknown>
 				},
@@ -355,7 +357,7 @@ const widgetFetchFamily = Atom.family((key: string) =>
 )
 
 const widgetFetchAtom = (input: { endpoint: string; params: Record<string, unknown> }) =>
-	widgetFetchFamily(encodeKey(input))
+	widgetFetchFamily(encodeOrgScopedKey(getActiveOrgId(), input))
 
 /**
  * Fetches and transforms data for a single data source. Powers both whole
