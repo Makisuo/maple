@@ -517,7 +517,27 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const leader = yield* Effect.forkChild(query())
 			yield* Effect.promise(() => versionQueryStarted)
 			const follower = yield* Effect.forkChild(query())
-			yield* Effect.promise(() => new Promise<void>((resolve) => globalThis.setTimeout(resolve, 10)))
+			// Wait for the follower to actually reach its own probe rather than
+			// assuming a fixed delay is long enough for it to get scheduled. The
+			// leader is parked on `versionQueryGate`, so a second probe can only
+			// appear if the follower genuinely issued one — which is what this test
+			// asserts. Under a loaded runner a fixed 10ms window expired before the
+			// follower ran, the gate released, and the leader's now-cached
+			// capabilities made the follower skip its probe: a failure that meant
+			// "CI was busy", not "requests coalesced". Bounded, so a regression that
+			// really does coalesce them still fails the assertion below rather than
+			// hanging here.
+			yield* Effect.promise(
+				() =>
+					new Promise<void>((resolve) => {
+						const deadlineAt = Date.now() + 5_000
+						const poll = () => {
+							if (versionQueries >= 2 || Date.now() >= deadlineAt) resolve()
+							else globalThis.setTimeout(poll, 5)
+						}
+						poll()
+					}),
+			)
 			releaseVersionQuery?.()
 			yield* Fiber.join(leader)
 			yield* Fiber.join(follower)
