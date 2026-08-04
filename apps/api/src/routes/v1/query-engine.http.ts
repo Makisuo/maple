@@ -83,6 +83,8 @@ import {
 	parseWarehouseDateTime,
 } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
+import { Queries } from "@maple/query-engine/registry"
+import { runQuery, runQueryFirst } from "@/routes/query-runner"
 import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
 import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 import * as Integrations from "@maple/query-engine-integrations"
@@ -329,26 +331,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("errorsByType", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.errorsByTypeQuery({
-							rootOnly: payload.rootOnly,
-							services: payload.services,
-							deploymentEnvs: payload.deploymentEnvs,
-							fingerprintHashes: payload.fingerprintHashes,
-							limit: payload.limit,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "errorsByType",
-						}),
-						"errorsByType query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.errorsByType, tenant, payload)
 					return new ErrorsByTypeResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							fingerprintHash: decodeFingerprintHash(row.fingerprintHash),
 							errorLabel: row.errorLabel,
 							sampleMessage: row.sampleMessage,
@@ -363,28 +348,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("errorsTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.errorsTimeseriesQuery({
-							fingerprintHash: payload.fingerprintHash,
-							services: payload.services,
-						}),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds: payload.bucketSeconds ?? 3600,
-						},
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "errorsTimeseries",
-						}),
-						"errorsTimeseries query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.errorsTimeseries, tenant, payload)
 					return new ErrorsTimeseriesResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							bucket: String(row.bucket),
 							count: Number(row.count),
 						})),
@@ -394,24 +360,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("errorsSummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.errorsSummaryQuery({
-							rootOnly: payload.rootOnly,
-							services: payload.services,
-							deploymentEnvs: payload.deploymentEnvs,
-							fingerprintHashes: payload.fingerprintHashes,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const row = yield* mapExecError(
-						warehouse
-							.compiledQueryFirst(tenant, compiled, {
-								profile: "aggregation",
-								context: "errorsSummary",
-							})
-							.pipe(Effect.map(Option.getOrNull)),
-						"errorsSummary query failed",
-					)
+					const row = yield* runQueryFirst(Queries.errorsSummary, tenant, payload)
 					return new ErrorsSummaryResponse({
 						data: row
 							? {
@@ -461,21 +410,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("errorRateByService", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(CH.errorRateByServiceQuery(), {
-						orgId: tenant.orgId,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-					})
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "errorRateByService",
-						}),
-						"errorRateByService query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.errorRateByService, tenant, payload)
 					return new ErrorRateByServiceResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							serviceName: decodeServiceName(row.serviceName),
 							totalLogs: Number(row.totalLogs),
 							errorLogs: Number(row.errorLogs),
@@ -487,29 +424,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceOverview", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.serviceOverviewQuery({
-							environments: payload.environments,
-							namespaces: payload.namespaces,
-							commitShas: payload.commitShas,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* queryEngine.cachedDirect(
-						tenant,
-						"serviceOverview",
-						payload,
-						mapExecError(
-							warehouse.compiledQuery(tenant, compiled, {
-								profile: "aggregation",
-								context: "serviceOverview",
-							}),
-							"serviceOverview query failed",
-						),
-						// v2: rows gained per-commit `firstSeen`; the version bump keeps
-						// pre-upgrade cached rows (missing the field) from being served.
-						makeDirectRouteCachePolicy({ ttlSeconds: 15, version: 2 }),
-					)
+					const rows = yield* runQuery(Queries.serviceOverview, tenant, payload)
 					return new ServiceOverviewResponse({ data: rows })
 				}),
 			)

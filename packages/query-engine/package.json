@@ -14,6 +14,7 @@
 		"./caching": "./src/caching/index.ts",
 		"./execution": "./src/execution/index.ts",
 		"./runtime": "./src/runtime/index.ts",
+		"./registry": "./src/registry/index.ts",
 		"./observability": "./src/observability/index.ts",
 		"./local": "./src/local.ts",
 		"./sql-catalog": "./src/sql-catalog.ts",
