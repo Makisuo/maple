@@ -18,6 +18,9 @@ export {
 	maxIf,
 	minIf,
 	groupUniqArray,
+	groupUniqArrayIf,
+	argMin,
+	argMax,
 	argMaxMerge,
 } from "./aggregate"
 
@@ -30,6 +33,8 @@ export {
 	lower_,
 	replaceOne,
 	extract_,
+	match_,
+	matchCond,
 	concat,
 	hasToken,
 	hasAllTokens,

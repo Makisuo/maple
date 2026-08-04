@@ -25,6 +25,8 @@ describe("CompiledQuery.decodeRows", () => {
 	it.effect("decodes rows with the declared schema for handwritten SQL", () =>
 		Effect.gen(function* () {
 			const compiled = unsafeCompiledQuery<{ readonly name: string; readonly count: number }>({
+				reason: "test-fixture",
+				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				tenantScope: "org",
 				sql: "SELECT name, count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ name: Schema.String, count: RowNumber }),
@@ -39,6 +41,8 @@ describe("CompiledQuery.decodeRows", () => {
 	it.effect("fails with CompiledQueryDecodeError when a row does not match its schema", () =>
 		Effect.gen(function* () {
 			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+				reason: "test-fixture",
+				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				tenantScope: "org",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
@@ -60,6 +64,8 @@ describe("CompiledQuery.decodeFirstRow", () => {
 	it.effect("returns Some with the first decoded row", () =>
 		Effect.gen(function* () {
 			const compiled = unsafeCompiledQuery<{ readonly name: string; readonly count: number }>({
+				reason: "test-fixture",
+				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				tenantScope: "org",
 				sql: "SELECT name, count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ name: Schema.String, count: RowNumber }),
@@ -80,6 +86,8 @@ describe("CompiledQuery.decodeFirstRow", () => {
 	it.effect("returns None when the result set is empty", () =>
 		Effect.gen(function* () {
 			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+				reason: "test-fixture",
+				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				tenantScope: "org",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
@@ -94,6 +102,8 @@ describe("CompiledQuery.decodeFirstRow", () => {
 	it.effect("fails when the first row does not match the declared schema", () =>
 		Effect.gen(function* () {
 			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+				reason: "test-fixture",
+				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				tenantScope: "org",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
@@ -113,6 +123,8 @@ describe("CompiledQuery.decodeFirstRow", () => {
 	it.effect("does not decode later rows when only the first row is requested", () =>
 		Effect.gen(function* () {
 			const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+				reason: "test-fixture",
+				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				tenantScope: "org",
 				sql: "SELECT count FROM events WHERE OrgId = 'org'",
 				rowSchema: Schema.Struct({ count: RowNumber }),
@@ -273,8 +285,13 @@ describe("CompiledQuery.tenantScope", () => {
 	})
 
 	it("requires handwritten SQL to state its scope", () => {
-		expect(unsafeCompiledQuery({ sql: "SELECT 1", tenantScope: "cross-org" }).tenantScope).toBe(
-			"cross-org",
-		)
+		expect(
+			unsafeCompiledQuery({
+				reason: "test-fixture",
+				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				sql: "SELECT 1",
+				tenantScope: "cross-org",
+			}).tenantScope,
+		).toBe("cross-org")
 	})
 })

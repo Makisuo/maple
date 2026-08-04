@@ -7,7 +7,7 @@ compiled.tenantScope // "org" | "cross-org"
 ```
 
 `"org"` means the query pins itself to a single tenant. `"cross-org"` means it reads whatever
-the credentials can see. The builder only *computes and reports* this — it never blocks a
+the credentials can see. The builder only _computes and reports_ this — it never blocks a
 query. The intended use is that your executor refuses `"cross-org"` on its ordinary read path,
 so a forgotten tenant filter fails loudly instead of quietly returning another tenant's rows.
 
@@ -28,7 +28,7 @@ CH.from(Events)
 // tenantScope: "org"
 ```
 
-*(Backed by `docs/tenant-scoping.md > An OrgId equality scopes the query`.)*
+_(Backed by `docs/tenant-scoping.md > An OrgId equality scopes the query`.)_
 
 ## The tenant column is `OrgId`, and that is hardcoded
 
@@ -49,21 +49,21 @@ field carries no signal for you. Conversely, a column named `OrgId` that is not 
 tenant key will mark queries as scoped when they are not. Know which case you are in before
 building an authorization decision on top of this.
 
-*(Backed by `docs/tenant-scoping.md > A column named anything else does not scope`.)*
+_(Backed by `docs/tenant-scoping.md > A column named anything else does not scope`.)_
 
 ## Only `eq` and `in_` count
 
 ```ts
-$.OrgId.eq("org_123")        // scopes
+$.OrgId.eq("org_123") // scopes
 $.OrgId.in_("org_a", "org_b") // scopes
-$.OrgId.neq("org_123")       // does NOT scope
-$.OrgId.like("org_%")        // does NOT scope
+$.OrgId.neq("org_123") // does NOT scope
+$.OrgId.like("org_%") // does NOT scope
 ```
 
 `!=` and `LIKE` on the tenant column narrow nothing meaningful, and treating them as scoping
 would be worse than useless.
 
-*(Backed by `docs/tenant-scoping.md > in_ also scopes; neq does not`.)*
+_(Backed by `docs/tenant-scoping.md > in_ also scopes; neq does not`.)\_
 
 ## The marker does not survive `and` / `or`
 
@@ -77,7 +77,7 @@ tenants. Composition drops the marker deliberately, and it applies to `.and()` t
 tenant predicates as their own top-level entry in the `where` array rather than folding them
 into a compound condition.
 
-*(Backed by `docs/tenant-scoping.md > The marker does not survive or()`.)*
+_(Backed by `docs/tenant-scoping.md > The marker does not survive or()`.)_
 
 ## Inherited scope
 
@@ -93,7 +93,7 @@ CH.fromQuery(inner, "sub").select(($) => ({ name: $.name }))
 ```
 
 For joins, **every** joined source must be scoped — one unscoped table drags the result to
-`"cross-org"`. A CTE contributes only if the query's `FROM` names it *and* it was declared with
+`"cross-org"`. A CTE contributes only if the query's `FROM` names it _and_ it was declared with
 `{ tenantScope: "org" }`; see [Unions and CTEs](./unions-and-ctes.md#declare-the-ctes-scope).
 
 ## `crossOrg()` — the explicit opt-out
@@ -111,7 +111,7 @@ else. The point is to distinguish "this query deliberately spans tenants" from "
 the filter" — two states that are otherwise identical from the outside. Use it for admin and
 internal-rollup queries so that reviewers, and your executor, can tell them apart.
 
-*(Backed by `docs/tenant-scoping.md > crossOrg() is the explicit opt-out`.)*
+_(Backed by `docs/tenant-scoping.md > crossOrg() is the explicit opt-out`.)_
 
 ## `routing("ingest")`
 
@@ -124,9 +124,11 @@ no SQL and means nothing on its own — it exists so a query definition can decl
 backend it must be read from, and an executor that understands the convention can honour it.
 If you have no such executor, ignore it.
 
-*(Backed by `docs/tenant-scoping.md > routing is carried onto the compiled query`.)*
+_(Backed by `docs/tenant-scoping.md > routing is carried onto the compiled query`.)_
 
 ## Handwritten SQL
 
 `unsafeCompiledQuery` requires `tenantScope` explicitly, since a raw string cannot be
-inspected. Whatever you pass is taken at face value.
+inspected. Whatever you pass is taken at face value — which is why it also requires a
+`reason` naming why the query isn't a builder query at all. See
+[Extending](./extending.md#handwritten-queries-unsafecompiledquery).

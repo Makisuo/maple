@@ -84,6 +84,9 @@ interface CHQueryState {
 	readonly selectFn?: ($: any) => SelectRecord
 	readonly whereFn?: ($: any) => Array<Condition | undefined>
 	readonly groupByKeys: string[]
+	/** Post-aggregation filter. Deliberately NOT consulted when deriving tenant
+	 *  scope — see `having()` on the interface. */
+	readonly havingFn?: ($: any) => Array<Condition | undefined>
 	readonly orderBySpecs: Array<[string, "asc" | "desc"]>
 	readonly limitValue?: number
 	readonly offsetValue?: number
@@ -99,8 +102,15 @@ interface CHQueryState {
 	readonly fromUnion?: import("./union").CHUnionQuery<any>
 	/** Typed joins (compiled lazily at compileCH time). */
 	readonly typedJoins: TypedJoinClause[]
-	/** CTE definitions prepended as WITH clauses. */
-	readonly ctes: Array<{ name: string; sql: string; tenantScope?: TenantScope }>
+	/** CTE definitions prepended as WITH clauses. Either pre-compiled SQL with a
+	 *  caller-asserted scope, or a query compiled lazily at compileCH time whose
+	 *  scope is derived. */
+	readonly ctes: Array<{
+		name: string
+		sql?: string
+		query?: CHQuery<any, any, any>
+		tenantScope?: TenantScope
+	}>
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +142,21 @@ export interface CHQuery<
 	): CHQuery<Cols, Output, Joins>
 
 	groupBy(...keys: Array<keyof Output & string>): CHQuery<Cols, Output, Joins>
+
+	/**
+	 * Post-aggregation filter, applied after `GROUP BY`.
+	 *
+	 * Output aliases are not on the column accessor, so reference them with
+	 * `CH.dynamicColumn<T>("alias")`.
+	 *
+	 * A `HAVING` predicate on the tenant column does NOT make a query
+	 * tenant-scoped: the rows are already aggregated by then, so the scan that
+	 * produced them crossed tenants regardless. Scope comes only from the
+	 * top-level `where` list.
+	 */
+	having(
+		fn: ($: JoinedColumnAccessor<Cols, Joins>) => Array<Condition | undefined>,
+	): CHQuery<Cols, Output, Joins>
 
 	orderBy(...specs: Array<OrderBySpec<Output>>): CHQuery<Cols, Output, Joins>
 
@@ -222,16 +247,24 @@ export interface CHQuery<
 	): CHQuery<Cols, Output, Joins & { readonly [K in Alias]: OutputToColumnDefs<JOutput> }>
 
 	/**
-	 * Add a CTE (WITH clause). The CTE SQL is prepended to the compiled query.
-	 * The CTE name can then be used as a table name via `from()` or in raw expressions.
+	 * Add a CTE (WITH clause). The CTE is prepended to the compiled query, and
+	 * its name can then be used as a table name via `from()` or in raw
+	 * expressions.
+	 *
+	 * Prefer this arm: the CTE is compiled at `compileCH` time and its tenant
+	 * scope is *derived*, so a query whose only row source is a scoped CTE is
+	 * itself scoped without anyone asserting it.
 	 */
+	withCTE(name: string, query: CHQuery<any, any, any>): CHQuery<Cols, Output, Joins>
+
 	/**
 	 * Attach a CTE from pre-compiled SQL.
 	 *
 	 * `tenantScope` describes the SQL being passed in. It cannot be inferred —
 	 * the CTE arrives as an opaque string — so a caller splicing in a query it
 	 * compiled itself should pass the scope through, otherwise a query whose only
-	 * row source is a scoped CTE reads as cross-org.
+	 * row source is a scoped CTE reads as cross-org. Pass the query itself
+	 * instead where you can, and this problem goes away.
 	 */
 	withCTE(
 		name: string,
@@ -358,6 +391,10 @@ function makeQuery<
 			return makeQuery({ ...state, groupByKeys: keys as string[] })
 		},
 
+		having(fn) {
+			return makeQuery({ ...state, havingFn: fn })
+		},
+
 		orderBy(...specs) {
 			return makeQuery({ ...state, orderBySpecs: specs as Array<[string, "asc" | "desc"]> })
 		},
@@ -458,11 +495,18 @@ function makeQuery<
 			}) as any
 		},
 
-		withCTE(name, sql, options) {
-			return makeQuery({
-				...state,
-				ctes: [...state.ctes, { name, sql, tenantScope: options?.tenantScope }],
-			})
+		withCTE(
+			name: string,
+			sqlOrQuery: string | CHQuery<any, any, any>,
+			options?: { tenantScope?: TenantScope },
+		) {
+			// The query arm is compiled lazily in compileCH (like `fromQuery`), so
+			// its scope is derived there rather than taken from the caller.
+			const cte =
+				typeof sqlOrQuery === "string"
+					? { name, sql: sqlOrQuery, tenantScope: options?.tenantScope }
+					: { name, query: sqlOrQuery }
+			return makeQuery({ ...state, ctes: [...state.ctes, cte] })
 		},
 	}
 }

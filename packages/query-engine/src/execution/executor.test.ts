@@ -65,10 +65,18 @@ const compiled = compile(listRuleChecksQuery({ limit: 1 }), {
 // The old `sqlQuery(tenant, sql)` entry point took a raw string; scope now
 // travels on the compiled query, so these execution/span/retry tests wrap their
 // SQL in a compiled value that declares it.
-const scoped = (sql: string) => unsafeCompiledQuery<Record<string, unknown>>({ sql, tenantScope: "org" })
+const scoped = (sql: string) =>
+	unsafeCompiledQuery<Record<string, unknown>>({
+		sql,
+		tenantScope: "org",
+		reason: "test-fixture",
+		note: "Synthetic SQL asserting executor behaviour, not a product query.",
+	})
 
 // A plain query with no routing declaration follows the default read route.
 const untaggedCompiled = unsafeCompiledQuery<{ readonly c: number }>({
+	reason: "test-fixture",
+	note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 	sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
 	tenantScope: "org",
 })
@@ -209,6 +217,8 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 					tenant,
 					() =>
 						unsafeCompiledQuery<{ readonly c: number }>({
+							reason: "test-fixture",
+							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
 							tenantScope: "org",
 						}),
@@ -321,6 +331,8 @@ describe("makeWarehouseExecutor compiled-query defaults", () => {
 					}),
 			}
 			const withSchema = unsafeCompiledQuery<{ readonly c: number }>({
+				reason: "test-fixture",
+				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
 				tenantScope: "org",
 				rowSchema: Schema.Struct({ c: Schema.Number }),
@@ -438,6 +450,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 
 			const factory = (capabilities: WarehouseCapabilities) =>
 				unsafeCompiledQuery<{ readonly c: number }>({
+					reason: "test-fixture",
+					note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 					sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'text' FORMAT JSON`,
 					tenantScope: "org",
 				})
@@ -492,6 +506,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 					tenant,
 					() =>
 						unsafeCompiledQuery<{ readonly c: number }>({
+							reason: "test-fixture",
+							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
 							tenantScope: "org",
 						}),
@@ -536,6 +552,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 				tenant,
 				(capabilities) =>
 					unsafeCompiledQuery<{ readonly c: number }>({
+						reason: "test-fixture",
+						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
 						tenantScope: "org",
 					}),
@@ -587,6 +605,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 				tenant,
 				(capabilities) =>
 					unsafeCompiledQuery<{ readonly c: number }>({
+						reason: "test-fixture",
+						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
 						tenantScope: "org",
 					}),
@@ -629,6 +649,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 						tenant,
 						(capabilities) =>
 							unsafeCompiledQuery<{ readonly c: number }>({
+								reason: "test-fixture",
+								note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 								sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
 								tenantScope: "org",
 							}),

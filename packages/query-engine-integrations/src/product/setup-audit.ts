@@ -14,23 +14,26 @@
 // `CHNumber` in the caller's `rowSchema` — ClickHouse serializes 64-bit integers as JSON strings, so
 // a BYO-ClickHouse org otherwise fails to decode.
 
-import * as CH from "@maple-dev/clickhouse-builder/expr"
+import * as CH from "@maple-dev/clickhouse-builder"
 import {
+	compileCH,
 	from,
+	fromQuery,
 	param,
-	unsafeCompiledQuery,
 	type CompiledQuery,
 	type CompiledQueryRowSchema,
 } from "@maple-dev/clickhouse-builder"
-import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 import { Schema } from "effect"
 import {
 	AttributeKeysHourly,
 	AttributeValuesHourly,
 	Logs,
 	LogsAggregatesHourly,
+	ServiceMapChildren,
 	ServiceMapDbEdgesHourly,
+	ServiceMapSpans,
 	ServiceOverviewHourly,
+	TraceListMv,
 	TracesAggregatesHourly,
 } from "@maple/query-engine/ch/tables"
 import { CHNumber } from "@maple/query-engine/ch/schema"
@@ -434,8 +437,7 @@ export function auditLogCorrelationQuery() {
 // ---------------------------------------------------------------------------
 // B2 / B3 — trace completeness
 //
-// Both are raw-SQL builders because the DSL has no join surface; they mirror
-// `serviceMapEdgeJoinSQL` in service-map.ts, which is the same join over the same two tables and the
+// Both mirror the service-map edge join, which is the same join over the same two tables and the
 // same window size that `ServiceMapRollupService` already runs once per org per hour in production.
 // That is the cost precedent these rely on — do not widen the window, and never put them on a
 // dashboard-polled path.
@@ -451,8 +453,12 @@ export function auditLogCorrelationQuery() {
  *
  * Without it a high-volume org builds a multi-gigabyte hash table on the parent side. Pick N from the
  * org's own span volume rather than a fixed value: {@link auditTraceSampleModulus}.
+ *
+ * Returns `undefined` at modulus 1 so `where()` drops the predicate entirely rather than emitting a
+ * tautology.
  */
-const modulusFilter = (modulus: number) => (modulus > 1 ? `AND cityHash64(TraceId) % ${modulus} = 0` : "")
+const modulusFilter = (traceId: CH.Expr<string>, modulus: number) =>
+	modulus > 1 ? CH.cityHash64(traceId).mod(modulus).eq(0) : undefined
 
 /** Clamps a caller-supplied modulus into a sane power-of-two-ish range. */
 const normalizeModulus = (modulus: number | undefined) =>
@@ -470,7 +476,7 @@ export function auditTraceSampleModulus(spanCountOverLookback: number): number {
 }
 
 /** `th:<hex>` in the W3C TraceState marks a consistent-probability sampling decision. */
-const SAMPLED_TRACE_STATE = "match(c.TraceState, 'th:[0-9a-f]+')"
+const SAMPLED_TRACE_STATE_PATTERN = "th:[0-9a-f]+"
 
 export interface AuditOrphanSpanRow {
 	readonly serviceName: string
@@ -514,43 +520,65 @@ export interface AuditTraceWindowParams {
  * expected rather than a defect; the caller reports those as a sampling observation instead.
  */
 export function auditOrphanSpansSQL(params: AuditTraceWindowParams): CompiledQuery<AuditOrphanSpanRow> {
-	const esc = escapeClickHouseString
-	const org = esc(params.orgId)
-	const sampled = modulusFilter(normalizeModulus(params.traceSampleModulus))
-	const childStart = `toDateTime('${esc(params.childStart)}')`
-	const childEnd = `toDateTime('${esc(params.childEnd)}')`
-	const parentStart = `toDateTime('${esc(params.parentStart)}')`
+	const modulus = normalizeModulus(params.traceSampleModulus)
 
-	const sql = `SELECT
-      c.ServiceName AS serviceName,
-      count() AS childCount,
-      countIf(p.SpanId = '') AS orphanCount,
-      countIf(p.SpanId = '' AND ${SAMPLED_TRACE_STATE}) AS sampledOrphanCount,
-      groupUniqArrayIf(3)(c.TraceId, p.SpanId = '') AS sampleTraceIds
-    FROM (
-      SELECT TraceId, ParentSpanId, ServiceName, TraceState
-      FROM service_map_children
-      WHERE OrgId = '${org}'
-        AND Timestamp >= ${childStart}
-        AND Timestamp < ${childEnd}
-        AND ParentSpanId != ''
-        ${sampled}
-    ) AS c
-    LEFT JOIN (
-      SELECT TraceId, SpanId
-      FROM service_map_spans
-      WHERE OrgId = '${org}'
-        AND Timestamp >= ${parentStart}
-        AND Timestamp < ${childEnd}
-        ${sampled}
-    ) AS p
-    ON c.TraceId = p.TraceId AND c.ParentSpanId = p.SpanId
-    GROUP BY serviceName
-    ORDER BY orphanCount DESC
-    LIMIT 200
-    FORMAT JSON`
+	const children = from(ServiceMapChildren)
+		.select(($) => ({
+			TraceId: $.TraceId,
+			ParentSpanId: $.ParentSpanId,
+			ServiceName: $.ServiceName,
+			TraceState: $.TraceState,
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("childStart")),
+			$.Timestamp.lt(param.dateTime("childEnd")),
+			$.ParentSpanId.neq(""),
+			modulusFilter($.TraceId, modulus),
+		])
 
-	return unsafeCompiledQuery({ sql, tenantScope: "org", rowSchema: auditOrphanSpanRowSchema })
+	const parents = from(ServiceMapSpans)
+		.select(($) => ({ TraceId: $.TraceId, SpanId: $.SpanId }))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("parentStart")),
+			$.Timestamp.lt(param.dateTime("childEnd")),
+			modulusFilter($.TraceId, modulus),
+		])
+
+	const query = fromQuery(children, "c")
+		.leftJoinQuery(parents, "p", (c, p) => c.TraceId.eq(p.TraceId).and(c.ParentSpanId.eq(p.SpanId)))
+		.select(($) => {
+			// With ClickHouse's default `join_use_nulls = 0`, an unmatched LEFT JOIN
+			// row yields '' rather than NULL — which is what makes this the orphan
+			// test. `leftJoinQuery` types the joined side as nullable, so compare
+			// through a non-null assertion-free coalesce.
+			const missedParent = $.p.SpanId.eq("")
+			return {
+				serviceName: $.ServiceName,
+				childCount: CH.count(),
+				orphanCount: CH.countIf(missedParent),
+				sampledOrphanCount: CH.countIf(
+					missedParent.and(CH.matchCond($.TraceState, SAMPLED_TRACE_STATE_PATTERN)),
+				),
+				sampleTraceIds: CH.groupUniqArrayIf(3)($.TraceId, missedParent),
+			}
+		})
+		.groupBy("serviceName")
+		.orderBy(["orphanCount", "desc"])
+		.limit(200)
+		.format("JSON")
+
+	return compileCH(
+		query,
+		{
+			orgId: params.orgId,
+			childStart: params.childStart,
+			childEnd: params.childEnd,
+			parentStart: params.parentStart,
+		},
+		{ rowSchema: auditOrphanSpanRowSchema },
+	)
 }
 
 export interface AuditRootlessTraceRow {
@@ -579,44 +607,59 @@ export const auditRootlessTraceRowSchema: CompiledQueryRowSchema<AuditRootlessTr
  * caller collapses it into one finding rather than one per service.
  */
 export function auditRootlessTracesSQL(params: AuditTraceWindowParams): CompiledQuery<AuditRootlessTraceRow> {
-	const esc = escapeClickHouseString
-	const org = esc(params.orgId)
-	const sampled = modulusFilter(normalizeModulus(params.traceSampleModulus))
-	const childStart = `toDateTime('${esc(params.childStart)}')`
-	const childEnd = `toDateTime('${esc(params.childEnd)}')`
-	const parentStart = `toDateTime('${esc(params.parentStart)}')`
+	const modulus = normalizeModulus(params.traceSampleModulus)
 
-	const sql = `SELECT
-      t.entryService AS entryService,
-      count() AS traceCount,
-      countIf(r.TraceId = '') AS rootlessCount,
-      countIf(r.TraceId = '' AND t.isSampled = 1) AS sampledRootlessCount
-    FROM (
-      SELECT
-        TraceId,
-        argMin(ServiceName, Timestamp) AS entryService,
-        max(match(TraceState, 'th:[0-9a-f]+')) AS isSampled
-      FROM service_map_children
-      WHERE OrgId = '${org}'
-        AND Timestamp >= ${childStart}
-        AND Timestamp < ${childEnd}
-        ${sampled}
-      GROUP BY TraceId
-    ) AS t
-    LEFT JOIN (
-      SELECT TraceId
-      FROM trace_list_mv
-      WHERE OrgId = '${org}'
-        AND Timestamp >= ${parentStart}
-        AND Timestamp < ${childEnd}
-        ${sampled}
-      GROUP BY TraceId
-    ) AS r
-    ON t.TraceId = r.TraceId
-    GROUP BY entryService
-    ORDER BY rootlessCount DESC
-    LIMIT 200
-    FORMAT JSON`
+	const traces = from(ServiceMapChildren)
+		.select(($) => ({
+			TraceId: $.TraceId,
+			entryService: CH.argMin($.ServiceName, $.Timestamp),
+			// `match` returns UInt8, so max() over the trace's spans is "any span
+			// carried a sampling threshold".
+			isSampled: CH.max(CH.match($.TraceState, SAMPLED_TRACE_STATE_PATTERN)),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("childStart")),
+			$.Timestamp.lt(param.dateTime("childEnd")),
+			modulusFilter($.TraceId, modulus),
+		])
+		.groupBy("TraceId")
 
-	return unsafeCompiledQuery({ sql, tenantScope: "org", rowSchema: auditRootlessTraceRowSchema })
+	const roots = from(TraceListMv)
+		.select(($) => ({ TraceId: $.TraceId }))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("parentStart")),
+			$.Timestamp.lt(param.dateTime("childEnd")),
+			modulusFilter($.TraceId, modulus),
+		])
+		.groupBy("TraceId")
+
+	const query = fromQuery(traces, "t")
+		.leftJoinQuery(roots, "r", (t, r) => t.TraceId.eq(r.TraceId))
+		.select(($) => {
+			// `join_use_nulls = 0` turns a miss into '' — see auditOrphanSpansSQL.
+			const noRoot = $.r.TraceId.eq("")
+			return {
+				entryService: $.entryService,
+				traceCount: CH.count(),
+				rootlessCount: CH.countIf(noRoot),
+				sampledRootlessCount: CH.countIf(noRoot.and($.isSampled.eq(1))),
+			}
+		})
+		.groupBy("entryService")
+		.orderBy(["rootlessCount", "desc"])
+		.limit(200)
+		.format("JSON")
+
+	return compileCH(
+		query,
+		{
+			orgId: params.orgId,
+			childStart: params.childStart,
+			childEnd: params.childEnd,
+			parentStart: params.parentStart,
+		},
+		{ rowSchema: auditRootlessTraceRowSchema },
+	)
 }

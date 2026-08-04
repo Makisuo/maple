@@ -158,13 +158,13 @@ describe("trace-completeness joins", () => {
 		expect(sql).toContain("FROM service_map_children")
 		expect(sql).toContain("LEFT JOIN")
 		expect(sql).toContain("FROM service_map_spans")
-		expect(sql).toContain("ON c.TraceId = p.TraceId AND c.ParentSpanId = p.SpanId")
+		expect(sql).toContain("ON (c.TraceId = p.TraceId AND c.ParentSpanId = p.SpanId)")
 		// join_use_nulls = 0 makes a miss an empty string, not NULL.
 		expect(sql).toContain("countIf(p.SpanId = '')")
 		// Both sides scoped to the org; the parent side reaches further back for long spans.
 		expect(sql.match(/OrgId = 'org_1'/g)).toHaveLength(2)
-		expect(sql).toContain("Timestamp >= toDateTime('2024-01-01 09:00:00')")
-		expect(sql).toContain("Timestamp >= toDateTime('2024-01-01 10:00:00')")
+		expect(sql).toContain("Timestamp >= '2024-01-01 09:00:00'")
+		expect(sql).toContain("Timestamp >= '2024-01-01 10:00:00'")
 		// Sampling-marked orphans are split out rather than counted as defects.
 		expect(sql).toContain("sampledOrphanCount")
 	})
@@ -195,6 +195,14 @@ describe("trace-completeness joins", () => {
 		expect(auditOrphanSpansSQL({ ...window, traceSampleModulus: 99_999 }).sql).toContain(
 			"cityHash64(TraceId) % 1024 = 0",
 		)
+	})
+
+	it("derives tenant scope from the join sources rather than asserting it", () => {
+		// Neither outer query carries an OrgId predicate — the scope comes from
+		// both join sides being scoped. Asserting it by hand is what these used to
+		// do, and an omitted filter would have sailed through the executor's gate.
+		expect(auditOrphanSpansSQL(window).tenantScope).toBe("org")
+		expect(auditRootlessTracesSQL(window).tenantScope).toBe("org")
 	})
 
 	it("escapes the org id so an embedded quote cannot terminate the literal", () => {

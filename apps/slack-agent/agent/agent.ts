@@ -1,24 +1,22 @@
+import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import { defineAgent } from "eve"
-import { createWorkersAI } from "workers-ai-provider"
 
 /**
- * Cloudflare Workers AI over its REST API (no Workers runtime / AI binding
- * required).
+ * OpenRouter over its REST API.
  */
-const workersai = createWorkersAI({
-	accountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? "",
-	apiKey: process.env.CLOUDFLARE_API_TOKEN ?? "",
+const openrouter = createOpenRouter({
+	apiKey: process.env.OPENROUTER_API_KEY ?? "",
 })
 
 /**
  * Make sure no envs are missing on startup.
  */
-const missingModelEnv = ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"].filter((name) => !process.env[name])
+const missingModelEnv = ["OPENROUTER_API_KEY"].filter((name) => !process.env[name])
 const isEveBuildInvocation = process.argv.includes("build")
 if (missingModelEnv.length > 0 && !isEveBuildInvocation) {
 	console.warn(
 		`[startup] ${missingModelEnv.join(" and ")} ${missingModelEnv.length === 1 ? "is" : "are"} not set. ` +
-			`The service will start, but every Workers AI model call will fail until ${missingModelEnv.length === 1 ? "it is" : "they are"} configured.`,
+			`The service will start, but every OpenRouter model call will fail until ${missingModelEnv.length === 1 ? "it is" : "they are"} configured.`,
 	)
 }
 
@@ -26,8 +24,8 @@ if (missingModelEnv.length > 0 && !isEveBuildInvocation) {
  * Must support tool calling **while streaming** — eve's harness is tool-driven and
  * always streams.
  */
-const modelId = process.env.WORKERS_AI_MODEL ?? "@cf/zai-org/glm-5.2"
-const contextWindowTokens = Number(process.env.WORKERS_AI_CONTEXT_WINDOW ?? 262_144)
+const modelId = process.env.OPENROUTER_MODEL ?? "openai/gpt-5.6-luna"
+const contextWindowTokens = Number(process.env.OPENROUTER_CONTEXT_WINDOW ?? 400_000)
 
 /**
  * Durable workflow state ("world").
@@ -35,7 +33,7 @@ const contextWindowTokens = Number(process.env.WORKERS_AI_CONTEXT_WINDOW ?? 262_
 const workflowWorld = process.env.EVE_WORKFLOW_WORLD
 
 export default defineAgent({
-	model: workersai(modelId),
+	model: openrouter(modelId),
 	modelContextWindowTokens: contextWindowTokens,
 	...(workflowWorld ? { experimental: { workflow: { world: workflowWorld } } } : {}),
 })

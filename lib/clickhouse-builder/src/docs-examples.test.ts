@@ -210,9 +210,7 @@ describe("docs/expressions.md", () => {
 			.select(($) => ({ name: $.Name }))
 			.where(($) => [$.OrgId.eq("org_123"), $.Name.eq("checkout").or($.Name.eq("cart"))])
 
-		expect(oneLine(compileCH(query, {}).sql)).toContain(
-			"AND (Name = 'checkout' OR Name = 'cart')",
-		)
+		expect(oneLine(compileCH(query, {}).sql)).toContain("AND (Name = 'checkout' OR Name = 'cart')")
 	})
 
 	it("Conditional aggregation", () => {
@@ -279,20 +277,44 @@ describe("docs/joins-and-subqueries.md", () => {
 	})
 
 	it("Correlated subquery with outerRef", () => {
-		const inner = CH.compile(
-			CH.from(Events)
-				.select(($) => ({ n: $.Name }))
-				.where(($) => [$.OrgId.eq("org_123"), $.Name.eq(CH.outerRef("s.Name"))]),
-			{},
-		)
+		const inner = CH.from(Events)
+			.select(($) => ({ n: $.Name }))
+			.where(($) => [$.OrgId.eq("org_123"), $.Name.eq(CH.outerRef("s.Name"))])
 
 		const query = CH.from(Services, "s")
 			.select(($) => ({ team: $.Team }))
-			.where(($) => [$.OrgId.eq("org_123"), CH.exists(inner.sql)])
+			.where(($) => [$.OrgId.eq("org_123"), CH.exists(inner)])
 
 		const sql = oneLine(compileCH(query, {}).sql)
 		expect(sql).toContain("EXISTS (")
 		expect(sql).toContain("Name = s.Name")
+	})
+
+	it("notInSubquery splices a query and resolves its params from the outer set", () => {
+		const excluded = CH.from(Events)
+			.select(($) => ({ n: $.Name }))
+			.where(($) => [$.OrgId.eq(CH.param.string("orgId"))])
+
+		const query = CH.from(Services, "s")
+			.select(($) => ({ team: $.Team }))
+			.where(($) => [$.OrgId.eq(CH.param.string("orgId")), CH.notInSubquery($.Team, excluded)])
+
+		const sql = oneLine(compileCH(query, { orgId: "org_123" }).sql)
+		expect(sql).toContain("Team NOT IN (SELECT Name AS n FROM events WHERE OrgId = 'org_123')")
+		expect(sql).not.toContain("__PARAM_")
+	})
+
+	it("A subquery does not scope its outer query", () => {
+		const scopedInner = CH.from(Events)
+			.select(($) => ({ n: $.Name }))
+			.where(($) => [$.OrgId.eq("org_123")])
+
+		const query = CH.from(Services, "s")
+			.select(($) => ({ team: $.Team }))
+			.where(($) => [CH.inSubquery($.Team, scopedInner)])
+
+		// The inner filter confines the subquery, not the outer scan.
+		expect(compileCH(query, {}).tenantScope).toBe("cross-org")
 	})
 
 	it("A scoped subquery keeps the outer query scoped", () => {
@@ -347,15 +369,22 @@ describe("docs/unions-and-ctes.md", () => {
 	it("Selecting from a CTE", () => {
 		// To read a CTE, declare a table whose name matches it and start there.
 		const Recent = CH.table("recent", { Name: T.string })
-		const cteSql = "SELECT Name FROM events WHERE OrgId = 'org_123'"
+
+		const cte = CH.from(Events)
+			.select(($) => ({ Name: $.Name }))
+			.where(($) => [$.OrgId.eq("org_123")])
 
 		const query = CH.from(Recent)
-			.withCTE("recent", cteSql, { tenantScope: "org" })
+			.withCTE("recent", cte)
 			.select(($) => ({ name: $.Name }))
 
-		expect(oneLine(compileCH(query, {}).sql)).toBe(
-			`WITH recent AS ( ${cteSql} ) SELECT Name AS name FROM recent`,
+		const compiled = compileCH(query, {})
+		expect(oneLine(compiled.sql)).toBe(
+			"WITH recent AS ( SELECT Name AS Name FROM events WHERE OrgId = 'org_123' ) " +
+				"SELECT Name AS name FROM recent",
 		)
+		// Derived off the CTE — the outer query has no OrgId predicate of its own.
+		expect(compiled.tenantScope).toBe("org")
 	})
 
 	it("A CTE needs its tenantScope declared", () => {
@@ -580,9 +609,7 @@ describe("docs/extending.md", () => {
 			.select(($) => ({ bucket: toStartOfFiveMinute($.Timestamp) }))
 			.where(($) => [$.OrgId.eq("org_123")])
 
-		expect(oneLine(compileCH(query, {}).sql)).toContain(
-			"toStartOfFiveMinute(Timestamp) AS bucket",
-		)
+		expect(oneLine(compileCH(query, {}).sql)).toContain("toStartOfFiveMinute(Timestamp) AS bucket")
 	})
 
 	it("defineCondFn declares a predicate", () => {
@@ -623,15 +650,15 @@ describe("docs/extending.md", () => {
 			.select(($) => ({ p99: quantileExact(0.99)($.DurationMs) }))
 			.where(($) => [$.OrgId.eq("org_123")])
 
-		expect(oneLine(compileCH(query, {}).sql)).toContain(
-			"quantileExact(0.99)(DurationMs) AS p99",
-		)
+		expect(oneLine(compileCH(query, {}).sql)).toContain("quantileExact(0.99)(DurationMs) AS p99")
 	})
 
 	it.effect("unsafeCompiledQuery wraps handwritten SQL", () =>
 		Effect.gen(function* () {
 			const compiled = CH.unsafeCompiledQuery<{ readonly name: string }>({
 				sql: "SELECT Name AS name FROM events WHERE OrgId = 'org_123'",
+				reason: "user-authored-sql",
+				note: "The SQL came from a user; there is no AST to build.",
 				// Cannot be inferred from a raw string — the caller must assert it.
 				tenantScope: "org",
 				rowSchema: Schema.Struct({ name: Schema.String }),
