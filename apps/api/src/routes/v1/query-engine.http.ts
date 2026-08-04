@@ -458,60 +458,15 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const byBranch = payload.database !== undefined
-					const params = {
-						orgId: tenant.orgId,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-						...(payload.database !== undefined ? { database: payload.database } : {}),
-					}
 					// Utilization gauges + the two-level connections rollup run
 					// concurrently, then merge by database(+branch). Routed through the
 					// org's configured warehouse like the metric explorer reads the same
 					// scraped `planetscale_*` metrics.
-					const gaugesCompiled = byBranch
-						? CH.compile(Integrations.planetscaleBranchGaugesSQL(), params, {
-								rowSchema: Integrations.planetscaleBranchStatsRowSchema,
-							})
-						: CH.compile(Integrations.planetscaleGaugesSQL(), params, {
-								rowSchema: Integrations.planetscaleDatabaseStatsRowSchema,
-							})
-					const connectionsCompiled = byBranch
-						? CH.compile(Integrations.planetscaleBranchConnectionsSQL(), params, {
-								rowSchema: Integrations.planetscaleBranchConnectionsRowSchema,
-							})
-						: CH.compile(Integrations.planetscaleConnectionsSQL(), params, {
-								rowSchema: Integrations.planetscaleConnectionsRowSchema,
-							})
-					const storageCompiled = byBranch
-						? CH.compile(Integrations.planetscaleBranchStorageSQL(), params, {
-								rowSchema: Integrations.planetscaleBranchStorageRowSchema,
-							})
-						: CH.compile(Integrations.planetscaleStorageSQL(), params, {
-								rowSchema: Integrations.planetscaleStorageRowSchema,
-							})
 					const [gaugeRows, connectionRows, storageRows] = yield* Effect.all(
 						[
-							mapExecError(
-								warehouse.compiledQuery(tenant, gaugesCompiled, {
-									profile: "aggregation",
-									context: "planetscaleServiceGauges",
-								}),
-								"planetscaleServiceGauges query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, connectionsCompiled, {
-									profile: "aggregation",
-									context: "planetscaleServiceConnections",
-								}),
-								"planetscaleServiceConnections query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, storageCompiled, {
-									profile: "aggregation",
-									context: "planetscaleServiceStorage",
-								}),
-								"planetscaleServiceStorage query failed",
-							),
+							runQuery(Queries.planetscaleServiceGauges, tenant, payload),
+							runQuery(Queries.planetscaleServiceConnections, tenant, payload),
+							runQuery(Queries.planetscaleServiceStorage, tenant, payload),
 						],
 						{ concurrency: 3 },
 					)
@@ -676,58 +631,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("cloudflareInfraZoneDetail", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const params = {
-						orgId: tenant.orgId,
-						serviceName: payload.serviceName,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-						bucketSeconds: payload.bucketSeconds,
-					}
 					const filters = toCloudflareFilters(payload)
-					const statusCompiled = CH.compile(
-						Integrations.cloudflareZoneStatusTimeseriesSQL(filters),
-						params,
-						{
-							rowSchema: Integrations.cloudflareZoneStatusTimeseriesRowSchema,
-						},
-					)
-					const cacheCompiled = CH.compile(
-						Integrations.cloudflareZoneCacheTimeseriesSQL(filters),
-						params,
-						{
-							rowSchema: Integrations.cloudflareZoneCacheTimeseriesRowSchema,
-						},
-					)
-					const latencyCompiled = CH.compile(
-						Integrations.cloudflareZoneLatencyTimeseriesSQL(),
-						params,
-						{
-							rowSchema: Integrations.cloudflareZoneLatencyTimeseriesRowSchema,
-						},
-					)
 					const [statusRows, cacheRows, latencyRows] = yield* Effect.all(
 						[
-							mapExecError(
-								warehouse.compiledQuery(tenant, statusCompiled, {
-									profile: "aggregation",
-									context: "cloudflareInfraZoneDetailStatus",
-								}),
-								"cloudflareInfraZoneDetailStatus query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, cacheCompiled, {
-									profile: "aggregation",
-									context: "cloudflareInfraZoneDetailCache",
-								}),
-								"cloudflareInfraZoneDetailCache query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, latencyCompiled, {
-									profile: "aggregation",
-									context: "cloudflareInfraZoneDetailLatency",
-								}),
-								"cloudflareInfraZoneDetailLatency query failed",
-							),
+							runQuery(Queries.cloudflareInfraZoneDetailStatus, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneDetailCache, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneDetailLatency, tenant, payload),
 						],
 						{ concurrency: 3 },
 					)

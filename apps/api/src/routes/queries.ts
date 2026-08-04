@@ -3,6 +3,8 @@ import * as Integrations from "@maple/query-engine-integrations"
 import { defineQuery } from "@maple/query-engine/registry"
 import { Queries as Core } from "@maple/query-engine/registry"
 import type {
+	CloudflareInfraZoneDetailRequest,
+	ServicePlanetScaleStatsRequest,
 	CloudflareInfraPlatformResourcesRequest,
 	CloudflareInfraWorkerTimeseriesRequest,
 	CloudflareInfraWorkersRequest,
@@ -341,6 +343,112 @@ const planetscaleInfraTimeseries = defineQuery({
 	},
 })
 
+// --- cloudflareInfraZoneDetail sub-queries --------------------------------
+
+const zoneDetailParams = (payload: CloudflareInfraZoneDetailRequest, orgId: string) => ({
+	orgId,
+	serviceName: payload.serviceName,
+	startTime: payload.startTime,
+	endTime: payload.endTime,
+	bucketSeconds: payload.bucketSeconds,
+})
+
+const cloudflareInfraZoneDetailStatus = defineQuery({
+	id: "cloudflareInfraZoneDetailStatus",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: CloudflareInfraZoneDetailRequest, orgId: string) =>
+		CH.compile(
+			Integrations.cloudflareZoneStatusTimeseriesSQL(toCloudflareFilters(payload)),
+			zoneDetailParams(payload, orgId),
+			{ rowSchema: Integrations.cloudflareZoneStatusTimeseriesRowSchema },
+		),
+})
+
+const cloudflareInfraZoneDetailCache = defineQuery({
+	id: "cloudflareInfraZoneDetailCache",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: CloudflareInfraZoneDetailRequest, orgId: string) =>
+		CH.compile(
+			Integrations.cloudflareZoneCacheTimeseriesSQL(toCloudflareFilters(payload)),
+			zoneDetailParams(payload, orgId),
+			{ rowSchema: Integrations.cloudflareZoneCacheTimeseriesRowSchema },
+		),
+})
+
+/** Latency comes from a gauge family that honors no request filters — hence the no-arg SQL. */
+const cloudflareInfraZoneDetailLatency = defineQuery({
+	id: "cloudflareInfraZoneDetailLatency",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: CloudflareInfraZoneDetailRequest, orgId: string) =>
+		CH.compile(Integrations.cloudflareZoneLatencyTimeseriesSQL(), zoneDetailParams(payload, orgId), {
+			rowSchema: Integrations.cloudflareZoneLatencyTimeseriesRowSchema,
+		}),
+})
+
+// --- servicePlanetScaleStats sub-queries ----------------------------------
+//
+// Each reads either the database-level or the branch-level rollup depending on
+// whether a database was requested. The branch lives inside `compile` so the id,
+// profile and row schema stay one decision per sub-query rather than two.
+
+const planetscaleStatsParams = (payload: ServicePlanetScaleStatsRequest, orgId: string) => ({
+	orgId,
+	startTime: payload.startTime,
+	endTime: payload.endTime,
+	...(payload.database !== undefined ? { database: payload.database } : {}),
+})
+
+const planetscaleServiceGauges = defineQuery({
+	id: "planetscaleServiceGauges",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServicePlanetScaleStatsRequest, orgId: string) => {
+		const params = planetscaleStatsParams(payload, orgId)
+		return payload.database !== undefined
+			? CH.compile(Integrations.planetscaleBranchGaugesSQL(), params, {
+					rowSchema: Integrations.planetscaleBranchStatsRowSchema,
+				})
+			: CH.compile(Integrations.planetscaleGaugesSQL(), params, {
+					rowSchema: Integrations.planetscaleDatabaseStatsRowSchema,
+				})
+	},
+})
+
+const planetscaleServiceConnections = defineQuery({
+	id: "planetscaleServiceConnections",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServicePlanetScaleStatsRequest, orgId: string) => {
+		const params = planetscaleStatsParams(payload, orgId)
+		return payload.database !== undefined
+			? CH.compile(Integrations.planetscaleBranchConnectionsSQL(), params, {
+					rowSchema: Integrations.planetscaleBranchConnectionsRowSchema,
+				})
+			: CH.compile(Integrations.planetscaleConnectionsSQL(), params, {
+					rowSchema: Integrations.planetscaleConnectionsRowSchema,
+				})
+	},
+})
+
+const planetscaleServiceStorage = defineQuery({
+	id: "planetscaleServiceStorage",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServicePlanetScaleStatsRequest, orgId: string) => {
+		const params = planetscaleStatsParams(payload, orgId)
+		return payload.database !== undefined
+			? CH.compile(Integrations.planetscaleBranchStorageSQL(), params, {
+					rowSchema: Integrations.planetscaleBranchStorageRowSchema,
+				})
+			: CH.compile(Integrations.planetscaleStorageSQL(), params, {
+					rowSchema: Integrations.planetscaleStorageRowSchema,
+				})
+	},
+})
+
 export const Queries = {
 	...Core,
 
@@ -514,4 +622,12 @@ export const Queries = {
 	cloudflareServiceCounters,
 	cloudflareServiceLatency,
 	planetscaleInfraTimeseries,
+
+	// ZoneDetail / PlanetScaleStats sub-queries, declared above.
+	cloudflareInfraZoneDetailStatus,
+	cloudflareInfraZoneDetailCache,
+	cloudflareInfraZoneDetailLatency,
+	planetscaleServiceGauges,
+	planetscaleServiceConnections,
+	planetscaleServiceStorage,
 } as const
