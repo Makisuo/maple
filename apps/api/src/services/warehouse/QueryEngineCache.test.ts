@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { cacheTtlForQueryKind, snapToWindow, snapWindowForQueryKind } from "@maple/query-engine/runtime"
+import {
+	buildCacheKey,
+	cacheTtlForQueryKind,
+	snapToWindow,
+	snapWindowForQueryKind,
+} from "@maple/query-engine/runtime"
 
 describe("snapToWindow", () => {
 	it("snaps within a single minute when window is 15s", () => {
@@ -78,5 +83,54 @@ describe("cacheTtlForQueryKind", () => {
 		expect(cacheTtlForQueryKind("list")).toBe(15)
 		expect(cacheTtlForQueryKind("count")).toBe(15)
 		expect(cacheTtlForQueryKind("stats")).toBe(15)
+	})
+})
+
+describe("buildCacheKey", () => {
+	const request = (query: Record<string, unknown>) =>
+		({
+			startTime: "2026-04-27 12:00:00",
+			endTime: "2026-04-27 13:00:00",
+			query,
+		}) as never
+
+	// The same widget reaches this path from the dashboard builder, a saved
+	// template, and the MCP widget tools, and each builds its QuerySpec with a
+	// different key insertion order — which `JSON.stringify` preserves. Hashing
+	// that raw output minted one entry per producer for a single query: three
+	// cold misses where there should have been one, with nothing in a trace to
+	// attribute the loss to.
+	it("is insensitive to the query's key insertion order", () => {
+		const a = buildCacheKey("org_1", request({ kind: "timeseries", source: "traces", metric: "count" }))
+		const b = buildCacheKey("org_1", request({ metric: "count", source: "traces", kind: "timeseries" }))
+		expect(a).toBe(b)
+	})
+
+	it("is insensitive to key order in nested filter objects", () => {
+		const a = buildCacheKey(
+			"org_1",
+			request({ kind: "timeseries", filters: { env: "prod", service: "api" } }),
+		)
+		const b = buildCacheKey(
+			"org_1",
+			request({ kind: "timeseries", filters: { service: "api", env: "prod" } }),
+		)
+		expect(a).toBe(b)
+	})
+
+	it("still separates queries that differ in value, org, or window", () => {
+		const base = request({ kind: "timeseries", metric: "count" })
+		expect(buildCacheKey("org_1", base)).not.toBe(
+			buildCacheKey("org_1", request({ kind: "timeseries", metric: "errors" })),
+		)
+		expect(buildCacheKey("org_1", base)).not.toBe(buildCacheKey("org_2", base))
+	})
+
+	// Array order is meaningful — an ORDER BY list is not a set — so it must
+	// stay part of the key, or two genuinely different queries would collide.
+	it("keeps queries differing only in array order apart", () => {
+		const a = buildCacheKey("org_1", request({ orderBy: ["duration", "name"] }))
+		const b = buildCacheKey("org_1", request({ orderBy: ["name", "duration"] }))
+		expect(a).not.toBe(b)
 	})
 })

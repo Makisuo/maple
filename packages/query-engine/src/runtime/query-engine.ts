@@ -35,6 +35,7 @@ import {
 	type SqlQueryOptions,
 	type WarehouseQuerySettings,
 } from "../profiles"
+import { canonicalJSON } from "../canonical-json"
 import { computeBucketSeconds } from "../datetime"
 import {
 	MAX_BREAKDOWN_RANGE_SECONDS,
@@ -260,9 +261,17 @@ export function cacheTtlForQueryKind(kind: string): number {
 	)
 }
 
+/**
+ * The query is canonicalized, not `JSON.stringify`d. The same widget reaches
+ * this path from the dashboard builder, a saved template, and the MCP widget
+ * tools, and those producers build the `QuerySpec` with different key insertion
+ * order — which `JSON.stringify` faithfully preserves into three distinct keys
+ * for one query. `canonicalJSON` is the same normalizer the bucket cache's
+ * fingerprint uses, so both layers agree on when two queries are the same.
+ */
 export function buildCacheKey(orgId: string, request: QueryEngineExecuteRequest): string {
 	const snap = snapWindowForQueryKind(request.query.kind)
-	return `${orgId}:${snapToWindow(request.startTime, snap)}:${snapToWindow(request.endTime, snap)}:${JSON.stringify(request.query)}`
+	return `${orgId}:${snapToWindow(request.startTime, snap)}:${snapToWindow(request.endTime, snap)}:${canonicalJSON(request.query)}`
 }
 
 export function buildEvaluateCacheKey(orgId: string, request: AlertEvaluateRequest): string {
@@ -270,7 +279,7 @@ export function buildEvaluateCacheKey(orgId: string, request: AlertEvaluateReque
 	// never share an entry.
 	const source =
 		request.source.kind === "spec"
-			? `spec:${JSON.stringify(request.source.query)}`
+			? `spec:${canonicalJSON(request.source.query)}`
 			: `raw:${request.source.windowMinutes}:${request.source.sql}`
 	return `eval:${orgId}:${snapSeconds(request.startTime)}:${snapSeconds(request.endTime)}:${request.reducer}:${request.sampleCountStrategy}:${source}`
 }
