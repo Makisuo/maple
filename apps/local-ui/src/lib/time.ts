@@ -39,12 +39,11 @@ export const TIME_RANGES: ReadonlyArray<TimeRange> = [
 export const DEFAULT_RANGE = "30d"
 
 /** Resolve a range key to ClickHouse DateTime bounds, padding the upper bound for clock skew. */
-export function boundsForRange(key: string | undefined): TimeBounds {
+export function boundsForRange(key: string | undefined, anchorMs = Date.now()): TimeBounds {
 	const range = TIME_RANGES.find((r) => r.key === key) ?? TIME_RANGES[TIME_RANGES.length - 1]
-	const now = Date.now()
 	return {
-		startTime: toClickHouseDateTime(now - range.minutes * 60 * 1000),
-		endTime: toClickHouseDateTime(now + 60 * 60 * 1000),
+		startTime: toClickHouseDateTime(anchorMs - range.minutes * 60 * 1000),
+		endTime: toClickHouseDateTime(anchorMs + 60 * 60 * 1000),
 	}
 }
 

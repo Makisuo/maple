@@ -340,7 +340,10 @@ function buildLogsGroupNameExpr(
 
 export interface LogsBreakdownOpts extends LogsQueryOpts {
 	groupBy: "service" | "severity"
-	limit?: number
+	/** Maximum groups to return. Pass `null` when complete membership is required. */
+	limit?: number | null
+	/** Force an exact raw-log scan when aggregate retention is not semantically equivalent. */
+	source?: "auto" | "raw"
 }
 
 export interface LogsBreakdownOutput {
@@ -356,7 +359,7 @@ function logsBreakdownName(
 }
 
 export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs, LogsBreakdownOutput, {}> {
-	if (!canUseLogsAggregateInterior(opts)) {
+	if (opts.source === "raw" || !canUseLogsAggregateInterior(opts)) {
 		const raw = from(Logs)
 			.select(($) => ({
 				name: logsBreakdownName($, opts.groupBy),
@@ -377,9 +380,8 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 			])
 			.groupBy("name")
 			.orderBy(["count", "desc"])
-			.limit(opts.limit ?? 10)
-			.format("JSON")
-		return raw as unknown as CHQuery<ColumnDefs, LogsBreakdownOutput, {}>
+		const result = opts.limit === null ? raw.format("JSON") : raw.limit(opts.limit ?? 10).format("JSON")
+		return result as unknown as CHQuery<ColumnDefs, LogsBreakdownOutput, {}>
 	}
 
 	const rawEdges = from(Logs)
@@ -425,9 +427,9 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 		}))
 		.groupBy("name")
 		.orderBy(["count", "desc"])
-		.limit(opts.limit ?? 10)
-		.format("JSON")
-	return combined as unknown as CHQuery<ColumnDefs, LogsBreakdownOutput, {}>
+	const result =
+		opts.limit === null ? combined.format("JSON") : combined.limit(opts.limit ?? 10).format("JSON")
+	return result as unknown as CHQuery<ColumnDefs, LogsBreakdownOutput, {}>
 }
 
 // ---------------------------------------------------------------------------

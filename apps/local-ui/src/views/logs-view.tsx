@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { LogAttributeChip } from "@maple/ui/components/logs/log-attribute-chip"
 import { CodeIcon } from "@maple/ui/components/icons"
@@ -6,7 +6,8 @@ import { Spinner } from "@maple/ui/components/ui/spinner"
 import { pickImportantAttributes } from "@maple/ui/lib/log-attributes"
 import { getSeverityColor } from "@maple/ui/lib/severity"
 import { useLocalLogs, useLocalLogSeverities } from "../hooks/use-local-logs"
-import { useLocalServices } from "../hooks/use-local-services"
+import { useLocalLogServices } from "../hooks/use-local-log-services"
+import { useLogTimeWindow } from "../hooks/use-log-time-window"
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE } from "../lib/time"
 import { normalizeLog, type LocalLog } from "../lib/log-shape"
@@ -37,11 +38,19 @@ export function LogsView() {
 	const service = query.get("service") || undefined
 	const severity = query.get("severity") || undefined
 	const search = query.get("q") || undefined
+	const timeWindow = useLogTimeWindow(range)
+	const updateParamsWithFreshTimeWindow = useCallback(
+		(updates: Record<string, string | null | undefined>) => {
+			timeWindow.advance()
+			setParams(updates)
+		},
+		[setParams, timeWindow.advance],
+	)
 
-	const services = useLocalServices(range)
-	const severities = useLocalLogSeverities(range)
+	const services = useLocalLogServices(timeWindow.bounds)
+	const severities = useLocalLogSeverities(timeWindow.bounds)
 	const { data, isPending, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
-		useLocalLogs({ service, severity, search, range })
+		useLocalLogs({ service, severity, search }, timeWindow.bounds)
 
 	const rows = useMemo<ReadonlyArray<LocalLog>>(() => (data?.pages.flat() ?? []).map(normalizeLog), [data])
 	const scrollRef = useRef<HTMLDivElement>(null)
@@ -79,20 +88,20 @@ export function LogsView() {
 		>
 			<FilterSidebarHeader
 				canClear={hasActiveFilters}
-				onClear={() => setParams({ service: null, severity: null })}
+				onClear={() => updateParamsWithFreshTimeWindow({ service: null, severity: null })}
 			/>
 			<FilterSidebarBody>
 				<FilterSection
 					title="Severity"
 					options={(severities.data ?? []).map((o) => ({ name: o.name, count: o.count }))}
 					selected={severity ? [severity] : []}
-					onChange={(vals) => setParams({ severity: vals.at(-1) ?? null })}
+					onChange={(vals) => updateParamsWithFreshTimeWindow({ severity: vals.at(-1) ?? null })}
 				/>
 				<SearchableFilterSection
 					title="Service"
 					options={(services.data ?? []).map((o) => ({ name: o.name, count: o.count }))}
 					selected={service ? [service] : []}
-					onChange={(vals) => setParams({ service: vals.at(-1) ?? null })}
+					onChange={(vals) => updateParamsWithFreshTimeWindow({ service: vals.at(-1) ?? null })}
 				/>
 			</FilterSidebarBody>
 		</FilterSidebarFrame>
@@ -102,13 +111,16 @@ export function LogsView() {
 		<Toolbar>
 			<ToolbarSearch
 				query={search ?? ""}
-				onSearch={(value) => setParams({ q: value ?? null })}
+				onSearch={(value) => updateParamsWithFreshTimeWindow({ q: value ?? null })}
 				placeholder="Search log bodies…"
 			/>
 			<ToolbarStats>
 				<ToolbarStat value={rows.length} label={hasNextPage ? "logs+" : "logs"} />
-				<RefreshButton />
-				<TimeRangeSelect value={range} onChange={(next) => setParams({ range: next })} />
+				<RefreshButton onBeforeRefresh={timeWindow.advance} />
+				<TimeRangeSelect
+					value={range}
+					onChange={(next) => updateParamsWithFreshTimeWindow({ range: next })}
+				/>
 			</ToolbarStats>
 		</Toolbar>
 	)

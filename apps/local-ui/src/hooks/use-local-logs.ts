@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { CH } from "@maple/query-engine"
 import { executeLocalCompiledQuery } from "@/lib/query"
 import { LOCAL_ORG_ID } from "../lib/constants"
-import { boundsForRange } from "../lib/time"
+import type { TimeBounds } from "../lib/time"
 import type { FilterOption } from "@maple/ui/components/filters/filter-section"
 
 const PAGE_SIZE = 50
@@ -14,20 +14,17 @@ export interface LogFilters {
 	severity?: string
 	/** Substring match on the log body. */
 	search?: string
-	/** Time-range preset key (see `TIME_RANGES`). */
-	range?: string
 }
 
 /**
  * Infinite log stream, newest first. Keyset pagination on `Timestamp` — the
  * cursor is the last row's `timestamp`.
  */
-export function useLocalLogs(filters: LogFilters) {
+export function useLocalLogs(filters: LogFilters, bounds: TimeBounds) {
 	return useInfiniteQuery({
-		queryKey: ["local", "logs", filters],
+		queryKey: ["local", "logs", filters, bounds.startTime, bounds.endTime],
 		initialPageParam: undefined as string | undefined,
 		queryFn: async ({ pageParam }) => {
-			const { startTime, endTime } = boundsForRange(filters.range)
 			const compiled = CH.compile(
 				CH.logsListQuery({
 					limit: PAGE_SIZE,
@@ -36,7 +33,7 @@ export function useLocalLogs(filters: LogFilters) {
 					severity: filters.severity,
 					search: filters.search,
 				}),
-				{ orgId: LOCAL_ORG_ID, startTime, endTime },
+				{ orgId: LOCAL_ORG_ID, ...bounds },
 			)
 			return executeLocalCompiledQuery(compiled)
 		},
@@ -49,16 +46,14 @@ export function useLocalLogs(filters: LogFilters) {
  * Distinct severity values in the window (with counts), for the severity facet.
  * Derived from the data so the option casing always matches what's stored.
  */
-export function useLocalLogSeverities(range: string | undefined) {
+export function useLocalLogSeverities(bounds: TimeBounds) {
 	return useQuery<ReadonlyArray<FilterOption>>({
-		queryKey: ["local", "log-severities", range],
+		queryKey: ["local", "log-severities", bounds.startTime, bounds.endTime],
 		staleTime: 60_000,
 		queryFn: async () => {
-			const { startTime, endTime } = boundsForRange(range)
 			const compiled = CH.compile(CH.logsBreakdownQuery({ groupBy: "severity", limit: 20 }), {
 				orgId: LOCAL_ORG_ID,
-				startTime,
-				endTime,
+				...bounds,
 			})
 			const rows = await executeLocalCompiledQuery(compiled)
 			return rows.filter((row) => row.name).map((row) => ({ name: row.name, count: row.count }))
