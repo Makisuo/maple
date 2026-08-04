@@ -3,6 +3,7 @@ import * as Integrations from "@maple/query-engine-integrations"
 import { defineQuery } from "@maple/query-engine/registry"
 import { Queries as Core } from "@maple/query-engine/registry"
 import type {
+	HostInfraTimeseriesRequest,
 	CloudflareInfraZoneFacetsRequest,
 	CloudflareInfraZoneDetailRequest,
 	ServicePlanetScaleStatsRequest,
@@ -24,6 +25,7 @@ import type {
 	WorkloadInfraTimeseriesRequest,
 } from "@maple/domain/http"
 import {
+	hostMetricSpec,
 	nodeMetricSpec,
 	partitionWindowAround,
 	podMetricSpec,
@@ -469,6 +471,49 @@ const cloudflareInfraZoneFacets = defineQuery({
 		}),
 })
 
+// --- hostInfraTimeseries: two query families behind one endpoint ----------
+//
+// Network reads a counter family, everything else a gauge family, so they are
+// separate defs rather than one def with a branch — the row shapes differ and
+// the handler maps them differently. Both keep the id "hostInfraTimeseries",
+// which is what their spans already report; renaming would break continuity of
+// existing telemetry for no gain.
+
+const hostInfraNetworkTimeseries = defineQuery({
+	id: "hostInfraTimeseries",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: HostInfraTimeseriesRequest, orgId: string) =>
+		CH.compile(CH.hostNetworkTimeseriesQuery({ hostName: payload.hostName }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+			bucketSeconds: payload.bucketSeconds ?? 60,
+		}),
+})
+
+const hostInfraGaugeTimeseries = defineQuery({
+	id: "hostInfraTimeseries",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: HostInfraTimeseriesRequest, orgId: string) => {
+		const spec = hostMetricSpec(payload.metric)
+		return CH.compile(
+			CH.hostGaugeTimeseriesQuery({
+				hostName: payload.hostName,
+				metricName: spec.metricName,
+				groupByAttributeKey: spec.groupByAttributeKey,
+			}),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				bucketSeconds: payload.bucketSeconds ?? 60,
+			},
+		)
+	},
+})
+
 export const Queries = {
 	...Core,
 
@@ -651,4 +696,6 @@ export const Queries = {
 	planetscaleServiceConnections,
 	planetscaleServiceStorage,
 	cloudflareInfraZoneFacets,
+	hostInfraNetworkTimeseries,
+	hostInfraGaugeTimeseries,
 } as const
