@@ -127,6 +127,9 @@ const makeStub = (counter: { n: number }): WarehouseQueryServiceShape =>
 			counter.n += 1
 			return compiled.decodeFirstRow(ROWS).pipe(Effect.orDie)
 		},
+		// Deliberately does not touch `counter`: warming resolves route config, it
+		// does not issue a warehouse query, and these tests assert query counts.
+		warmRoute: () => Effect.void,
 		ingest: () => Effect.void,
 		sql: () => Promise.resolve({ data: [] }),
 	}) as unknown as WarehouseQueryServiceShape

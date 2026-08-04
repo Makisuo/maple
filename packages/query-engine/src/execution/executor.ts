@@ -1006,6 +1006,17 @@ WHERE name = 'enable_full_text_index'`,
 		compiledQueryWithCapabilities,
 		compiledQueryFirst: (tenant, compiled, options) =>
 			unbounded(compiledQueryFirst(tenant, compiled, withoutResponseLimits(options))),
+		// `resolveCapabilities` resolves the route on its way through, so warming
+		// it warms both. `ignore` keeps a failed warm-up invisible — the real
+		// query behind it fails with its own context a moment later.
+		warmRoute: (tenant, options) =>
+			resolveCapabilities(tenant, options).pipe(
+				Effect.asVoid,
+				Effect.ignore,
+				Effect.withSpan("WarehouseQueryService.warmRoute", {
+					attributes: { orgId: tenant.orgId },
+				}),
+			),
 		ingest,
 		asExecutor,
 	} satisfies WarehouseQueryServiceShape

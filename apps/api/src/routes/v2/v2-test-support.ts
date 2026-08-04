@@ -151,6 +151,9 @@ export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
 	compiledQueryBounded: die,
 	compiledQueryWithCapabilities: die,
 	compiledQueryFirst: die,
+	// Not `die`: warming is best-effort and silent by contract, so a stub that
+	// throws would fail a path that only tried to warm up.
+	warmRoute: () => Effect.void,
 	ingest: die,
 	asExecutor: dieSync,
 })
