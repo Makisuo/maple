@@ -92,6 +92,8 @@ export function compilePipeQuery(
 				`UNION ALL\n` +
 				`SELECT 'previous' AS period, * FROM (\n${previous.sql}\n)\n` +
 				`FORMAT JSON`,
+			reason: "param-varied-union",
+			note: "One builder over a current and a previous window; params are substituted once per compile, so a single CHQuery cannot carry both.",
 			// Both branches are the same builder over different windows, so the
 			// union is scoped exactly when the branch is.
 			tenantScope:

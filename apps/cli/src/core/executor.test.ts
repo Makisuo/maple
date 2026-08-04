@@ -37,6 +37,8 @@ describe("makeLocalWarehouseExecutorShape", () => {
 			const requests = stubLocalServer([{ c: 1 }])
 			const shape = makeLocalWarehouseExecutorShape("http://127.0.0.1:4318")
 			const compiled = unsafeCompiledQuery<{ readonly c: number }>({
+				reason: "test-fixture",
+				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				tenantScope: "org",
 				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'local'\nFORMAT JSON",
 			})
@@ -61,7 +63,14 @@ describe("makeLocalWarehouseExecutorShape", () => {
 			// Scope now rides on the compiled query rather than being sniffed out
 			// of the SQL string, so an unscoped one is rejected before execution.
 			const exit = yield* shape
-				.compiledQuery(unsafeCompiledQuery({ sql: "SELECT 1", tenantScope: "cross-org" }))
+				.compiledQuery(
+					unsafeCompiledQuery({
+						reason: "test-fixture",
+						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+						sql: "SELECT 1",
+						tenantScope: "cross-org",
+					}),
+				)
 				.pipe(Effect.exit)
 
 			expect(Exit.isFailure(exit)).toBe(true)
@@ -80,6 +89,8 @@ describe("makeLocalWarehouseExecutorShape", () => {
 			const exit = yield* shape
 				.compiledQuery(
 					unsafeCompiledQuery({
+						reason: "test-fixture",
+						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 						sql: "SELECT nope FROM traces WHERE OrgId = 'local'",
 						tenantScope: "org",
 					}),
