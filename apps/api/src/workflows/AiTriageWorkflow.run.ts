@@ -99,6 +99,7 @@ const invokeTriageWorkflow = async ({
 	env,
 	orgId,
 	incidentKind,
+	incidentId,
 	context,
 }: InvokeTriageInput): Promise<TriageInvocationResult> => {
 	if (!canReachModel(env)) throw new Error("llm_unavailable")
@@ -127,7 +128,11 @@ const invokeTriageWorkflow = async ({
 				orgId,
 				incidentKind,
 				context,
-				model: resolveTriageModel(env),
+				model: resolveTriageModel(env, {
+					surface: "ai-triage",
+					orgId,
+					sessionId: `triage_${incidentKind}_${incidentId}`,
+				}),
 				tenant: {
 					orgId: decodeOrgId(orgId),
 					userId: internalServiceUserId,
