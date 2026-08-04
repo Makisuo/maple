@@ -37,7 +37,10 @@ const ALERT_TEMPLATES: Record<string, AlertTemplate> = {
 		signalType: "error_rate",
 		comparator: "gt",
 		defaultThreshold: 0.05,
-		defaults: {},
+		// Group per service by default. Ungrouped, the rule evaluates one org-wide
+		// ratio whose denominator is every root span in the org — a service can be
+		// failing outright and still not move a 5% threshold.
+		defaults: { groupBy: ["service.name"] },
 	},
 	slow_p95: {
 		signalType: "p95_latency",
@@ -200,6 +203,11 @@ function buildAlertRuleRequest(
 			.filter((s) => s.length > 0)
 		if (dimensions.length > 0) request.groupBy = dimensions
 	}
+	// A template's groupBy is a default, not an assertion. Grouping and an explicit
+	// service scope are mutually exclusive, so an inherited groupBy must step aside
+	// for a caller-supplied service — an explicit group_by is left alone to be
+	// rejected on its own terms.
+	if (params.service_names && !params.group_by) delete request.groupBy
 	if (params.minimum_sample_count !== undefined) request.minimumSampleCount = params.minimum_sample_count
 	if (params.consecutive_breaches !== undefined)
 		request.consecutiveBreachesRequired = params.consecutive_breaches
@@ -264,7 +272,10 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			enabled: optionalBooleanParam("Whether the rule is enabled (default: true)"),
 			// Custom-mode params (used when template is 'custom' or omitted)
 			signal_type: optionalStringParam(
-				"Signal type (for custom): error_rate, p95_latency, p99_latency, apdex, throughput, builder_query, raw_query. Use builder_query with a metrics draft for custom metrics.",
+				"Signal type (for custom): error_rate, p95_latency, p99_latency, apdex, throughput, builder_query, raw_query. Use builder_query with a metrics draft for custom metrics. " +
+					"NOTE: error_rate, p95_latency, p99_latency, apdex and throughput are all computed over ROOT spans only. A service that records failures on child spans " +
+					"and returns success from its entry point (common in cron jobs and workers — see audit_setup STAT-04 for which services emit no entry-point spans) " +
+					"will read as healthy no matter the threshold. For those, use raw_query, or rely on error-issue notifications, which fingerprint child-span exceptions.",
 			),
 			comparator: optionalStringParam(
 				"Comparison operator (for custom): gt (>), gte (>=), lt (<), lte (<=)",

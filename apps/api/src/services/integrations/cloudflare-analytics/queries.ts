@@ -21,6 +21,21 @@ export const DO_DATASET = "do_invocations"
 /** Cloudflare caps zone-scoped GraphQL queries at 10 zones per call. */
 export const MAX_ZONES_PER_QUERY = 10
 
+/**
+ * Cloudflare bills a request as "the number of zone/account scopes, multiplied by the number of
+ * nodes to which they are applied" and rejects the whole document once the product is too large
+ * ("In combination, your request queries too many nodes, zones and accounts"). Batching N datasets
+ * into one zone document costs N nodes per zone, so the zone chunk has to shrink as datasets are
+ * added — {@link MAX_ZONES_PER_QUERY} is just this budget at one node.
+ *
+ * @see https://developers.cloudflare.com/analytics/graphql-api/limits/
+ */
+export const MAX_QUERIES_PER_REQUEST = 10
+
+/** Largest zone chunk that keeps `zones × nodes` within {@link MAX_QUERIES_PER_REQUEST}. */
+export const zoneChunkSizeFor = (nodeCount: number): number =>
+	Math.min(MAX_ZONES_PER_QUERY, Math.max(1, Math.floor(MAX_QUERIES_PER_REQUEST / Math.max(1, nodeCount))))
+
 /** Max rows Cloudflare returns per selection — window sizing must keep group counts below this. */
 const GROUP_LIMIT = 5000
 

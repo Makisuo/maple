@@ -129,6 +129,7 @@ import {
 	WORKERS_DATASET,
 	workersSelection,
 	zoneAnalyticsDocument,
+	zoneChunkSizeFor,
 	type DatasetSettingsShape,
 	type SettingsResponseShape,
 } from "./cloudflare-analytics/queries"
@@ -754,7 +755,11 @@ const buildWorkItems = (rows: ReadonlyArray<CloudflareAnalyticsStateRow>, now: n
 				const zoneIds = [
 					...new Set([...group.byDataset.values()].flat().map((row) => row.zoneId)),
 				].sort()
-				for (const chunk of Arr.chunksOf(zoneIds, MAX_ZONES_PER_QUERY)) {
+				// Every dataset in this group contributes its own node to the shared `zones`
+				// selection, and Cloudflare rejects the document on `zones × nodes`, not on zones
+				// alone — so the chunk has to shrink as datasets batch together.
+				const nodeCount = scopeDatasets.filter((dataset) => group.byDataset.has(dataset.id)).length
+				for (const chunk of Arr.chunksOf(zoneIds, zoneChunkSizeFor(nodeCount))) {
 					const chunkSet = new Set(chunk)
 					const parts = scopeDatasets.flatMap((dataset) => {
 						const datasetRows = (group.byDataset.get(dataset.id) ?? []).filter((row) =>
@@ -811,7 +816,7 @@ const partForError = (error: CloudflareGraphqlError, parts: ReadonlyArray<WorkPa
 interface DatasetPollFailure {
 	readonly scope: "zone" | "account"
 	readonly datasetId: string
-	readonly kind: "authz" | "upstream" | "revoked" | "other"
+	readonly kind: "authz" | "upstream" | "revoked" | "billing" | "other"
 	readonly message: string
 	/** State rows this failure applies to (used for the health write when not org-wide). */
 	readonly rowIds: ReadonlyArray<string>
@@ -833,7 +838,7 @@ class CloudflareAnalyticsPollError extends Schema.TaggedErrorClass<CloudflareAna
 		message: Schema.String,
 		orgId: OrgId,
 		dataset: Schema.String,
-		kind: Schema.Literals(["authz", "upstream", "revoked", "other"]),
+		kind: Schema.Literals(["authz", "upstream", "revoked", "billing", "other"]),
 	},
 ) {}
 
@@ -870,6 +875,35 @@ const allPartsFailed = (
 			...options,
 		}),
 	}))
+
+/**
+ * One failure for the whole document, rather than {@link allPartsFailed}'s one per part. For a
+ * condition that is a property of the org and not of any dataset — the gateway refusing delivery
+ * on billing grounds — fanning out per part multiplies a single cause into N observations, N error
+ * events and N issue increments. In production one 402 became ~60 dataset failures per tick, which
+ * is how a single unpaid subscription grew a 209,453-event error issue.
+ */
+const documentFailed = (
+	item: WorkItem,
+	kind: DatasetPollFailure["kind"],
+	message: string,
+): Array<PartResult> => {
+	const part = item.parts[0]
+	if (!part) return []
+	return [
+		{
+			part,
+			outcome: failedOutcome({
+				scope: part.dataset.scope,
+				datasetId: part.dataset.id,
+				kind,
+				message,
+				rowIds: item.parts.flatMap((entry) => entry.rows.map((row) => row.id)),
+				orgWide: true,
+			}),
+		},
+	]
+}
 
 /**
  * The single seam that turns a poll failure into signal: record health to Postgres (as before) AND
@@ -1866,19 +1900,32 @@ export class CloudflareAnalyticsService extends Context.Service<
 				const rowsIngestedRef = yield* Ref.make(0)
 				// Set when Cloudflare rejects the token mid-loop — every further call would 401 too.
 				const revokedRef = yield* Ref.make(false)
-				// Genuine dataset failures this tick (authz/upstream/revoked/other) — the seam pushes
+				// Set when the ingest gateway refuses this org's metrics (402). Like `revokedRef`,
+				// it ends the org's tick rather than letting every remaining document rediscover
+				// the same org-level condition.
+				const deliveryBlockedRef = yield* Ref.make(false)
+				// Genuine dataset failures this tick (authz/upstream/revoked/billing/other) — the seam pushes
 				// here so the org summary carries a failure count and the tick can escalate.
 				const datasetFailures: Array<DatasetPollFailure> = []
 
 				// Round-based catch-up: every round advances each behind zone/dataset by one window;
 				// loop until caught up or the call budget is spent (backfill resumes next tick).
-				while (!(yield* Ref.get(revokedRef)) && budget.calls < MAX_CALLS_PER_ORG_TICK) {
+				while (
+					!(yield* Ref.get(revokedRef)) &&
+					!(yield* Ref.get(deliveryBlockedRef)) &&
+					budget.calls < MAX_CALLS_PER_ORG_TICK
+				) {
 					const work = buildWorkItems(rows, now)
 					if (work.length === 0) break
 					let progressed = false
 
 					for (const item of work) {
-						if (budget.calls >= MAX_CALLS_PER_ORG_TICK || (yield* Ref.get(revokedRef))) break
+						if (
+							budget.calls >= MAX_CALLS_PER_ORG_TICK ||
+							(yield* Ref.get(revokedRef)) ||
+							(yield* Ref.get(deliveryBlockedRef))
+						)
+							break
 						budget.calls += 1
 						const partResults = yield* pollDatasetChunk(
 							item,
@@ -1900,7 +1947,16 @@ export class CloudflareAnalyticsService extends Context.Service<
 								),
 							),
 							Effect.catchTag("@maple/http/errors/IntegrationsUpstreamError", (error) =>
-								Effect.succeed(allPartsFailed(item, "upstream", error.message)),
+								// A 402 is the gateway refusing this org's metrics on billing grounds.
+								// It is org-wide and cannot clear mid-tick, so stop the loop the way a
+								// revoke does: continuing would re-fetch windows from Cloudflare that
+								// have nowhere to land, and — because the frontier only advances on
+								// acceptance — replay the same windows on every future tick forever.
+								error.status === 402
+									? Ref.set(deliveryBlockedRef, true).pipe(
+											Effect.as(documentFailed(item, "billing", error.message)),
+										)
+									: Effect.succeed(allPartsFailed(item, "upstream", error.message)),
 							),
 						)
 

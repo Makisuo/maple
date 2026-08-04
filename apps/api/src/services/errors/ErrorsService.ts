@@ -1934,9 +1934,15 @@ const make: Effect.Effect<
 		ErrorNotificationPolicyDocument.fields.destinationIds,
 	)
 
+	// Mirrors the column defaults on `error_notification_policies` — an org with no
+	// row must behave exactly like an org that just got one. Notifications are
+	// enabled but route nowhere until a destination is picked, so the empty
+	// `destinationIdsJson` (not `enabled`) is what holds delivery back. Setting
+	// `enabled: false` here instead made CFG-NOTIF-01 report "turned off" for
+	// row-less orgs and hid the real reason.
 	const defaultPolicy = (orgId: OrgId, timestamp: number): ErrorNotificationPolicyRow => ({
 		orgId,
-		enabled: false,
+		enabled: true,
 		destinationIdsJson: [],
 		notifyOnFirstSeen: true,
 		notifyOnRegression: true,

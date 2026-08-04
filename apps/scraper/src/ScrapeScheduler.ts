@@ -63,6 +63,15 @@ export interface ScrapeOutcome {
 	 * rejecting OAuth bearers on metrics.psdb.cloud every 60s).
 	 */
 	readonly authFailed: boolean
+	/**
+	 * Maple's own ingest gateway refused the metrics for billing reasons (HTTP
+	 * 402) — distinct from `authFailed`, which is about the *target's*
+	 * credential. Scraping the target again cannot help: the data has nowhere to
+	 * go until the org's subscription is fixed, so back off instead of paying for
+	 * a scrape whose result is discarded (prod hit this at full cadence, ~7.2k
+	 * failures in 6h across the fleet).
+	 */
+	readonly deliveryBlocked: boolean
 	/** Upstream `Retry-After` translated to ms, when present. */
 	readonly retryAfterMs: number | null
 }
@@ -74,12 +83,14 @@ class ScrapeAttemptFailed extends Schema.TaggedErrorClass<ScrapeAttemptFailed>()
 		samplesPostMetricRelabeling: Schema.optional(Schema.Number),
 		rateLimited: Schema.Boolean,
 		authFailed: Schema.Boolean,
+		deliveryBlocked: Schema.Boolean,
 		retryAfterMs: Schema.NullOr(Schema.Number),
 	}),
 }) {}
 
 /** A scrape outcome that must escalate the delay instead of holding cadence. */
-export const shouldBackOff = (outcome: ScrapeOutcome): boolean => outcome.rateLimited || outcome.authFailed
+export const shouldBackOff = (outcome: ScrapeOutcome): boolean =>
+	outcome.rateLimited || outcome.authFailed || outcome.deliveryBlocked
 
 /**
  * The target period before a target's next scrape. The happy path returns the
@@ -233,6 +244,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 										error: `target returned HTTP ${response.status}`,
 										rateLimited: response.status === 429 || response.status === 503,
 										authFailed: response.status === 401 || response.status === 403,
+										deliveryBlocked: false,
 										retryAfterMs:
 											response.retryAfterSeconds !== null
 												? response.retryAfterSeconds * 1000
@@ -274,6 +286,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 										converted.dataPointCounts.histogram,
 									rateLimited: false,
 									authFailed: false,
+									deliveryBlocked: false,
 									retryAfterMs: null,
 								} satisfies ScrapeOutcome
 							}).pipe(
@@ -282,6 +295,11 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 										error: error.message,
 										rateLimited: false,
 										authFailed: false,
+										// The gateway's 402 is the one failure in here that a
+										// retry provably cannot clear.
+										deliveryBlocked:
+											error._tag === "@maple/scraper/OtlpIngestError" &&
+											error.status === 402,
 										retryAfterMs: null,
 									}),
 								),
@@ -290,6 +308,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 										error: Cause.pretty(Cause.die(defect)),
 										rateLimited: false,
 										authFailed: false,
+										deliveryBlocked: false,
 										retryAfterMs: null,
 									}),
 								),

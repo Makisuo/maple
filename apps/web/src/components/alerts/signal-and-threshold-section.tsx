@@ -399,43 +399,50 @@ function BuiltinSignalChips({
 	onChange: (next: AlertSignalType) => void
 }) {
 	return (
-		<div
-			role="radiogroup"
-			aria-label="Built-in signal"
-			className="-mt-1 flex flex-wrap items-center gap-1 rounded-md border border-dashed border-border/60 bg-muted/20 p-1"
-			data-slot="builtin-signal-chips"
-		>
-			{BUILTIN_SIGNAL_OPTIONS.map((opt) => {
-				const selected = value === opt.value
-				const Icon = opt.icon
-				return (
-					<button
-						key={opt.value}
-						type="button"
-						role="radio"
-						aria-checked={selected}
-						onClick={() => onChange(opt.value)}
-						className={cn(
-							"inline-flex h-7 items-center gap-1.5 rounded-sm border border-transparent px-2 text-xs font-medium",
-							"transition-[background-color,border-color,color] duration-150",
-							"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-							selected
-								? opt.selectedClass
-								: "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
-						)}
-					>
-						<Icon
-							size={12}
+		<div className="-mt-1 flex flex-col gap-1.5">
+			<div
+				role="radiogroup"
+				aria-label="Built-in signal"
+				className="flex flex-wrap items-center gap-1 rounded-md border border-dashed border-border/60 bg-muted/20 p-1"
+				data-slot="builtin-signal-chips"
+			>
+				{BUILTIN_SIGNAL_OPTIONS.map((opt) => {
+					const selected = value === opt.value
+					const Icon = opt.icon
+					return (
+						<button
+							key={opt.value}
+							type="button"
+							role="radio"
+							aria-checked={selected}
+							onClick={() => onChange(opt.value)}
 							className={cn(
-								"transition-opacity",
-								opt.iconClass,
-								selected ? "opacity-100" : "opacity-70",
+								"inline-flex h-7 items-center gap-1.5 rounded-sm border border-transparent px-2 text-xs font-medium",
+								"transition-[background-color,border-color,color] duration-150",
+								"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+								selected
+									? opt.selectedClass
+									: "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
 							)}
-						/>
-						{opt.label}
-					</button>
-				)
-			})}
+						>
+							<Icon
+								size={12}
+								className={cn(
+									"transition-opacity",
+									opt.iconClass,
+									selected ? "opacity-100" : "opacity-70",
+								)}
+							/>
+							{opt.label}
+						</button>
+					)
+				})}
+			</div>
+			<p className="text-[11px] leading-snug text-muted-foreground">
+				Built-in signals measure entry-point (root) spans only. A service that records failures on
+				child spans and returns success from its entry point — cron jobs and workers typically do —
+				stays healthy here at any threshold. Use Raw SQL for those, or rely on error notifications.
+			</p>
 		</div>
 	)
 }
