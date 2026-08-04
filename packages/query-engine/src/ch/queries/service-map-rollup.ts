@@ -20,7 +20,7 @@ import { compileCH } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery } from "@maple-dev/clickhouse-builder"
-import { ServiceMapEdgesHourly, Traces } from "../tables"
+import { ServiceAddressResolutionsHourly, ServiceMapEdgesHourly, Traces } from "../tables"
 import { serviceMapEdgeJoinQuery } from "./service-map"
 import { CHNumber } from "../schema"
 
@@ -88,6 +88,43 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 	// rollup only cares about which hour starts have been sealed, not which
 	// edges live in them. Same semantics as SELECT DISTINCT, with the DSL.
 	const query = from(ServiceMapEdgesHourly)
+		.select(($) => ({ hourTs: CH.toUnixTimestamp($.Hour) }))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Hour.gte(param.dateTime("startTime")),
+			$.Hour.lt(param.dateTime("endTime")),
+		])
+		.groupBy("hourTs")
+		.format("JSON")
+
+	return compileCH(
+		query,
+		{
+			orgId: params.orgId,
+			startTime: params.startTime,
+			endTime: params.endTime,
+		},
+		{ rowSchema: ServiceMapEdgesExistingHourSchema },
+	)
+}
+
+/**
+ * SQL listing the distinct hours already present in
+ * `service_address_resolutions_hourly` for an org within `[startTime, endTime)`.
+ *
+ * The companion resolutions write can fail independently of the edges write, so
+ * the rollup runs a repair pass over sealed hours. Without this probe that pass
+ * was unconditional: it re-ran the resolutions join — a raw-`traces` self-join,
+ * the most expensive query in the tick — for every sealed hour on every tick,
+ * forever. Asking which hours already resolved costs one cheap sorted-prefix
+ * read and skips nearly all of them.
+ */
+export function serviceMapResolutionsExistingHoursSQL(params: {
+	orgId: string
+	startTime: string
+	endTime: string
+}): CompiledQuery<ServiceMapEdgesExistingHour> {
+	const query = from(ServiceAddressResolutionsHourly)
 		.select(($) => ({ hourTs: CH.toUnixTimestamp($.Hour) }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),

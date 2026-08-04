@@ -28,6 +28,7 @@ import {
 	truncateSql,
 } from "./fingerprint"
 import { BackendDialect, warehouseTargetAttributes } from "./backend"
+import { managedWarehouseCapabilities } from "./managed-capabilities"
 import { findIngestPinnedTable } from "./datasource-routing"
 import type {
 	ExecutionTenant,
@@ -44,7 +45,6 @@ import {
 	deriveWarehouseCapabilities,
 	logBodySearchMode,
 	type WarehouseCapabilities,
-	type WarehouseSettingMetadataRow,
 	WarehouseColumnMetadataSchema,
 	WarehouseIndexMetadataSchema,
 	WarehouseSettingMetadataSchema,
@@ -52,7 +52,12 @@ import {
 } from "../capabilities"
 
 const CLIENT_CACHE_TTL_MS = 30_000
-const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000
+/**
+ * Only BYO ClickHouse is probed now, and its answer changes solely when the
+ * user migrates their cluster. The cache is isolate-local (and there are two
+ * per isolate), so the TTL — not the map — is what bounds probe volume.
+ */
+const CAPABILITIES_CACHE_TTL_MS = 60 * 60_000
 const CAPABILITIES_INSPECTION_TIMEOUT = Duration.seconds(2)
 const WarehouseCapabilityMetadataTarget = Schema.Literals(["version", "indexes", "columns", "settings"])
 type WarehouseCapabilityMetadataTarget = Schema.Schema.Type<typeof WarehouseCapabilityMetadataTarget>
@@ -178,46 +183,68 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 				}),
 			)
 
+		// Every probe degrades to an empty result rather than failing the whole
+		// inspection. A backend that denies one `system.*` table (Tinybird answers
+		// `403` for `system.columns` and `system.data_skipping_indices` but serves
+		// `system.settings`) should lose only the features that depend on that
+		// table: collapsing to `baselineWarehouseCapabilities()` silently disables
+		// the bloom and tokenbf prefilters on a backend that does have them.
+		const degradeToEmpty = <A>(
+			effect: Effect.Effect<ReadonlyArray<A>, WarehouseCapabilityProbeError>,
+		): Effect.Effect<ReadonlyArray<A>> =>
+			effect.pipe(
+				Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
+					logProbeFailure(error).pipe(Effect.as<ReadonlyArray<A>>([])),
+				),
+			)
+
 		const inspection = Effect.all(
 			[
-				queryRows("version", "SELECT version() AS version").pipe(
-					Effect.flatMap((rows) =>
-						Schema.decodeUnknownEffect(WarehouseVersionMetadataSchema)(rows),
+				degradeToEmpty(
+					queryRows("version", "SELECT version() AS version").pipe(
+						Effect.flatMap((rows) =>
+							Schema.decodeUnknownEffect(WarehouseVersionMetadataSchema)(rows),
+						),
+						Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("version", cause))),
 					),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("version", cause))),
 				),
-				queryRows(
-					"indexes",
-					`SELECT table, name, type, expr AS expression
+				degradeToEmpty(
+					queryRows(
+						"indexes",
+						`SELECT table, name, type, expr AS expression
 FROM system.data_skipping_indices
 WHERE database = currentDatabase() AND table IN ('logs', 'traces')`,
-				).pipe(
-					Effect.flatMap((rows) => Schema.decodeUnknownEffect(WarehouseIndexMetadataSchema)(rows)),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("indexes", cause))),
+					).pipe(
+						Effect.flatMap((rows) =>
+							Schema.decodeUnknownEffect(WarehouseIndexMetadataSchema)(rows),
+						),
+						Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("indexes", cause))),
+					),
 				),
-				queryRows(
-					"columns",
-					`SELECT table, name
+				degradeToEmpty(
+					queryRows(
+						"columns",
+						`SELECT table, name
 FROM system.columns
 WHERE database = currentDatabase() AND table IN ('logs', 'traces')`,
-				).pipe(
-					Effect.flatMap((rows) => Schema.decodeUnknownEffect(WarehouseColumnMetadataSchema)(rows)),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("columns", cause))),
+					).pipe(
+						Effect.flatMap((rows) =>
+							Schema.decodeUnknownEffect(WarehouseColumnMetadataSchema)(rows),
+						),
+						Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("columns", cause))),
+					),
 				),
-				queryRows(
-					"settings",
-					`SELECT name, value
+				degradeToEmpty(
+					queryRows(
+						"settings",
+						`SELECT name, value
 FROM system.settings
 WHERE name = 'enable_full_text_index'`,
-				).pipe(
-					Effect.flatMap((rows) =>
-						Schema.decodeUnknownEffect(WarehouseSettingMetadataSchema)(rows),
-					),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("settings", cause))),
-					Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
-						logProbeFailure(error).pipe(
-							Effect.as<ReadonlyArray<WarehouseSettingMetadataRow>>([]),
+					).pipe(
+						Effect.flatMap((rows) =>
+							Schema.decodeUnknownEffect(WarehouseSettingMetadataSchema)(rows),
 						),
+						Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("settings", cause))),
 					),
 				),
 			],
@@ -234,16 +261,12 @@ WHERE name = 'enable_full_text_index'`,
 			),
 		)
 
-		const timed: Effect.Effect<
-			WarehouseCapabilities,
-			WarehouseCapabilityProbeError | Cause.TimeoutError
-		> = inspection.pipe(Effect.timeout(CAPABILITIES_INSPECTION_TIMEOUT))
-		const probeRecovered: Effect.Effect<WarehouseCapabilities, Cause.TimeoutError> = timed.pipe(
-			Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
-				logProbeFailure(error).pipe(Effect.as(baselineWarehouseCapabilities())),
-			),
+		// Individual probe failures are already absorbed by `degradeToEmpty`, so
+		// only a whole-inspection timeout can still reach the conservative plan.
+		const timed: Effect.Effect<WarehouseCapabilities, Cause.TimeoutError> = inspection.pipe(
+			Effect.timeout(CAPABILITIES_INSPECTION_TIMEOUT),
 		)
-		return probeRecovered.pipe(
+		return timed.pipe(
 			Effect.catchTag("TimeoutError", (error) =>
 				Effect.logWarning("Warehouse capability inspection fell back to conservative plan").pipe(
 					Effect.annotateLogs({ target: "inspection", error: error.message }),
@@ -259,6 +282,23 @@ WHERE name = 'enable_full_text_index'`,
 	) {
 		const purpose: RoutePurpose = options?.route === "ingest" ? "ingest" : "read"
 		const resolved = yield* deps.resolveRoute(tenant, purpose, "capabilities")
+
+		// Backends running the schema we deploy answer from the generated
+		// snapshot: no client, no round-trip, no cache entry, and no way to fall
+		// back to a conservative plan because a `system.*` probe was denied.
+		if (BackendDialect[resolved.config.kind].managedSchema) {
+			const capabilities = managedWarehouseCapabilities()
+			yield* Effect.annotateCurrentSpan({
+				"maple.query.capabilities.cache": "static",
+				"maple.query.capabilities.metadata_available": capabilities.metadataAvailable,
+				"warehouse.backend": resolved.config.kind,
+				"warehouse.route": purpose,
+				"warehouse.config_source": resolved.source,
+				orgId: tenant.orgId,
+			})
+			return capabilities
+		}
+
 		const nowMs = yield* Clock.currentTimeMillis
 		const configKey = sqlClientCacheKey(resolved.config)
 		const cache = yield* Ref.get(capabilitiesCache)
@@ -951,9 +991,15 @@ WHERE name = 'enable_full_text_index'`,
 	})
 
 	return {
-		query: (tenant, payload, options) => unbounded(query(tenant, payload, withoutResponseLimits(options))),
+		query: (tenant, payload, options) =>
+			unbounded(query(tenant, payload, withoutResponseLimits(options))),
 		crossOrgQuery: (tenant, compiled, options) =>
-			unbounded(crossOrgQuery(tenant, compiled, { ...withoutResponseLimits(options), justification: options.justification })),
+			unbounded(
+				crossOrgQuery(tenant, compiled, {
+					...withoutResponseLimits(options),
+					justification: options.justification,
+				}),
+			),
 		rawSqlQuery: (tenant, sql, options) => unbounded(rawSqlQuery(tenant, sql, options)),
 		compiledQuery,
 		compiledQueryBounded,

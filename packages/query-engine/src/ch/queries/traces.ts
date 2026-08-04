@@ -947,6 +947,7 @@ function spanSearchFrom<Name extends string>(
 	opts: SpanSearchOpts,
 	limit: number,
 	offset: number,
+	cutoff?: CH.Expr<string>,
 ) {
 	const q = from(source)
 		.select(($) => ({
@@ -964,6 +965,7 @@ function spanSearchFrom<Name extends string>(
 		.where(($) => [
 			...tracesBaseWhereConditions($, opts),
 			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
+			cutoff === undefined ? undefined : $.Timestamp.gte(cutoff),
 		])
 		.orderBy(["timestamp", "desc"])
 		.limit(limit)
@@ -976,11 +978,32 @@ export function spanSearchQuery(opts: SpanSearchOpts) {
 	const limit = opts.limit ?? 20
 	const offset = opts.offset ?? 0
 
+	// With a trace id, `trace_detail_spans` is keyed `(OrgId, TraceId, SpanId)`:
+	// the filter is a sort-key prefix and the row set is one trace, so the whole
+	// Maps are cheap to read directly.
 	if (opts.traceId) {
 		return spanSearchFrom(TraceDetailSpans, opts, limit, offset)
 	}
 
-	return spanSearchFrom(Traces, opts, limit, offset)
+	// Without one, this reads raw `traces`, whose sort key
+	// `(OrgId, ServiceName, SpanName, toDateTime(Timestamp))` cannot serve
+	// `ORDER BY Timestamp DESC` — so a single-stage query materialized both
+	// attribute Maps for every matching row in range before `LIMIT` discarded
+	// all but N (9–13 GB reads in production). Two-stage it exactly like
+	// `tracesListQuery`: stage 1 reads only `Timestamp` to find the cutoff,
+	// stage 2 reads the Maps only at/after it.
+	const cutoffInner = from(Traces)
+		.select(($) => ({ ts: $.Timestamp }))
+		.where(($) => [
+			...tracesBaseWhereConditions($, opts),
+			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
+		])
+		.orderBy(["ts", "desc"])
+		.limit(limit + offset)
+	const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true }).sql
+	const cutoff = CH.rawExpr<string>(`(SELECT min(ts) FROM (${cutoffSql}))`)
+
+	return spanSearchFrom(Traces, opts, limit, offset, cutoff)
 }
 
 // ---------------------------------------------------------------------------

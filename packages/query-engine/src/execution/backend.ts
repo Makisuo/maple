@@ -112,6 +112,16 @@ export interface WarehouseBackendDialect {
 	 * SQL-catalog e2e sweep enforces.
 	 */
 	readonly unquote64BitIntegers: boolean
+	/**
+	 * True when this backend runs the schema *we* deploy, so its columns and
+	 * skip indices are known at compile time and capability probing is both
+	 * unnecessary and — on Tinybird — impossible (`system.*` answers `403`
+	 * through the SDK and takes ~2.2s through the gateway). BYO ClickHouse is
+	 * the user's own cluster and must still be inspected live; `chdb` applies
+	 * the same generated schema but is cheap to probe and can lag a migration,
+	 * so it keeps the live answer too.
+	 */
+	readonly managedSchema: boolean
 }
 
 /** Single source of truth for per-backend behavior. */
@@ -125,6 +135,7 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		peerService: "tinybird",
 		// The SDK's /v0/sql JSON already returns 64-bit ints as numbers.
 		unquote64BitIntegers: false,
+		managedSchema: true,
 	},
 	"tinybird-gateway": {
 		driver: "clickhouse-web",
@@ -134,6 +145,7 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		dbSystemName: "clickhouse",
 		peerService: "clickhouse",
 		unquote64BitIntegers: true,
+		managedSchema: true,
 	},
 	clickhouse: {
 		driver: "clickhouse-web",
@@ -143,6 +155,7 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		dbSystemName: "clickhouse",
 		peerService: "clickhouse",
 		unquote64BitIntegers: true,
+		managedSchema: false,
 	},
 	chdb: {
 		driver: "clickhouse-web",
@@ -152,5 +165,6 @@ export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialec
 		dbSystemName: "clickhouse",
 		peerService: "chdb",
 		unquote64BitIntegers: true,
+		managedSchema: false,
 	},
 }

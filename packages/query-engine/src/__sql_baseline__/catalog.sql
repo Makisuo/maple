@@ -554,6 +554,16 @@ SELECT
         GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv
         FORMAT JSON
 
+-- builder:service-map-rollup:serviceMapResolutionsExistingHoursSQL:default  [ea1bee51]
+SELECT
+          toUnixTimestamp(Hour) AS hourTs
+        FROM service_address_resolutions_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= '2026-01-01 10:30:00'
+          AND Hour < '2026-01-03 14:15:00'
+        GROUP BY hourTs
+        FORMAT JSON
+
 -- builder:service-map:serviceDependenciesForServiceQuery:default  [32f3ee6f]
 SELECT
           sourceService AS sourceService,
@@ -4410,7 +4420,7 @@ SELECT
         LIMIT 5000
         FORMAT JSON
 
--- pipe:span_search:default:baseline  [d4e4a298]
+-- pipe:span_search:default:baseline  [bfce1ab3]
 SELECT
           TraceId AS traceId,
           SpanId AS spanId,
@@ -4427,11 +4437,20 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND StatusCode != 'Error'
+          AND Timestamp >= (SELECT min(ts) FROM (SELECT
+          Timestamp AS ts
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND StatusCode != 'Error'
+        ORDER BY ts DESC
+        LIMIT 20))
         ORDER BY timestamp DESC
         LIMIT 20
         FORMAT JSON
 
--- pipe:span_search:default:bloom  [d4e4a298]
+-- pipe:span_search:default:bloom  [bfce1ab3]
 SELECT
           TraceId AS traceId,
           SpanId AS spanId,
@@ -4448,11 +4467,20 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND StatusCode != 'Error'
+          AND Timestamp >= (SELECT min(ts) FROM (SELECT
+          Timestamp AS ts
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND StatusCode != 'Error'
+        ORDER BY ts DESC
+        LIMIT 20))
         ORDER BY timestamp DESC
         LIMIT 20
         FORMAT JSON
 
--- pipe:span_search:default:text  [d4e4a298]
+-- pipe:span_search:default:text  [bfce1ab3]
 SELECT
           TraceId AS traceId,
           SpanId AS spanId,
@@ -4469,6 +4497,15 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND StatusCode != 'Error'
+          AND Timestamp >= (SELECT min(ts) FROM (SELECT
+          Timestamp AS ts
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND StatusCode != 'Error'
+        ORDER BY ts DESC
+        LIMIT 20))
         ORDER BY timestamp DESC
         LIMIT 20
         FORMAT JSON

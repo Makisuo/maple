@@ -1,5 +1,5 @@
 import { RoleName, UserId as UserIdSchema, type OrgId } from "@maple/domain/http"
-import { orgIngestKeys } from "@maple/db"
+import { orgClickHouseSettings, orgIngestKeys } from "@maple/db"
 import * as CH from "@maple/query-engine/ch"
 import { Clock, Cause, Context, Effect, Layer, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
@@ -15,11 +15,23 @@ const HOUR_MS = 3_600_000
 /**
  * How many completed hours back the rollup re-checks on every run. Bounds the
  * per-run cost to a constant and lets a few missed cron ticks catch up. Hours
- * already present in `service_map_edges_hourly` are skipped, so re-checking is
- * cheap; an hour with genuinely zero cross-service calls is re-attempted each
- * run until it ages out of this window — also cheap (an empty join).
+ * already present in `service_map_edges_hourly` are skipped; an hour with
+ * genuinely zero cross-service calls is re-attempted each run until it ages out
+ * of this window.
+ *
+ * That re-attempt is NOT free — the join is empty only *after* it has scanned
+ * the hour's spans. Keep the org set gated (see `resolveActiveOrgs`): when the
+ * rollup fanned out across every org that ever held an ingest key, this window
+ * turned ~260 orgs into ~6 executions each per tick, of two queries, one of
+ * them a raw-`traces` self-join.
  */
 const LOOKBACK_HOURS = 6
+
+/**
+ * Discovery window for the active-org scan. Must be a SUPERSET of the per-org
+ * lookback so no org that produced spans in a candidate hour is skipped.
+ */
+const ACTIVE_DISCOVERY_HOURS = LOOKBACK_HOURS + 2
 
 /** Concurrency for per-org rollup processing. */
 const ORG_CONCURRENCY = 4
@@ -149,8 +161,26 @@ export class ServiceMapRollupService extends Context.Service<
 			// ingest can fail independently. Recompute resolution rows for sealed
 			// hours in the bounded lookback as an idempotent repair pass
 			// (ReplacingMergeTree deduplicates the same mapping key).
+			//
+			// Only for hours that have no resolution rows yet: the repair join
+			// reads raw `traces`, so re-running it for every sealed hour on every
+			// tick was the single most expensive thing this service did.
+			const resolvedRows = yield* warehouse.compiledQuery(
+				tenant,
+				CH.serviceMapResolutionsExistingHoursSQL({
+					orgId,
+					startTime: formatWarehouseDateTime(oldestHourMs),
+					endTime: formatWarehouseDateTime(currentHourMs),
+				}),
+				{ context: "serviceMapResolutionsExistingHours" },
+			)
+			const resolved = new Set(resolvedRows.map((row) => Number(row.hourTs)))
+
 			yield* Effect.forEach(
-				candidates.filter((hourMs) => existing.has(Math.floor(hourMs / 1000))),
+				candidates.filter(
+					(hourMs) =>
+						existing.has(Math.floor(hourMs / 1000)) && !resolved.has(Math.floor(hourMs / 1000)),
+				),
 				(hourMs) =>
 					Effect.gen(function* () {
 						const resolutionsRows = yield* warehouse.compiledQuery(
@@ -182,6 +212,70 @@ export class ServiceMapRollupService extends Context.Service<
 			}
 		})
 
+		/**
+		 * Which orgs actually produced spans in the discovery window.
+		 *
+		 * One cross-org scan of `traces_aggregates_hourly` replaces per-org
+		 * guessing — the same gating the error-issue and anomaly ticks already
+		 * use (`packages/query-engine/src/ch/queries/activity.ts`). Idle orgs
+		 * have no spans to join, so every hour they are handed costs two
+		 * warehouse scans to prove a join is empty.
+		 *
+		 * BYO-ClickHouse orgs are invisible to this managed-workspace scan and
+		 * are always processed.
+		 *
+		 * Fails OPEN, unlike the anomaly tick: a skipped rollup hour is a
+		 * permanent gap in the service map once it ages past `LOOKBACK_HOURS`,
+		 * whereas a skipped anomaly evaluation is only a late alert. A discovery
+		 * outage costs one hour of the old fan-out; failing closed could cost
+		 * the edges outright.
+		 */
+		const resolveActiveOrgs = Effect.fn("ServiceMapRollupService.resolveActiveOrgs")(function* (
+			knownOrgs: ReadonlyArray<OrgId>,
+		) {
+			if (knownOrgs.length === 0) return undefined
+
+			const nowMs = yield* Clock.currentTimeMillis
+			const startTime = formatWarehouseDateTime(nowMs - ACTIVE_DISCOVERY_HOURS * HOUR_MS)
+			const byoRows = yield* database
+				.execute((db) =>
+					db.selectDistinct({ orgId: orgClickHouseSettings.orgId }).from(orgClickHouseSettings),
+				)
+				.pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ orgId: string }>))
+
+			return yield* warehouse
+				.crossOrgQuery(
+					systemTenant(knownOrgs[0]!),
+					CH.compile(CH.activeOrgsByTracesQuery(), { startTime }),
+					{
+						profile: "discovery",
+						context: "serviceMapRollupActiveOrgs",
+						justification:
+							"enumerate orgs with recent span aggregates so the hourly service-map rollup skips idle orgs",
+					},
+				)
+				.pipe(
+					Effect.map((rows) => {
+						const active = new Set<string>(byoRows.map((row) => row.orgId))
+						for (const row of rows) {
+							const orgId = String((row as { orgId?: unknown }).orgId ?? "")
+							if (orgId) active.add(orgId)
+						}
+						return active as ReadonlySet<string>
+					}),
+					Effect.catchCause((cause) =>
+						Cause.hasInterruptsOnly(cause)
+							? Effect.interrupt
+							: Effect.as(
+									Effect.logWarning(
+										"Service map rollup active-org discovery failed; processing every known org",
+									).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) })),
+									undefined,
+								),
+					),
+				)
+		})
+
 		const runRollupTick: ServiceMapRollupServiceShape["runRollupTick"] = Effect.fn(
 			"ServiceMapRollupService.runRollupTick",
 		)(function* () {
@@ -189,10 +283,20 @@ export class ServiceMapRollupService extends Context.Service<
 				db.selectDistinct({ orgId: orgIngestKeys.orgId }).from(orgIngestKeys),
 			)
 
+			const knownOrgs = orgRows.map((row) => row.orgId as OrgId)
+			const active = yield* resolveActiveOrgs(knownOrgs)
+			const targetOrgs =
+				active === undefined ? knownOrgs : knownOrgs.filter((orgId) => active.has(orgId))
+			yield* Effect.annotateCurrentSpan({
+				knownOrgs: knownOrgs.length,
+				targetOrgs: targetOrgs.length,
+				activeOrgDiscovery: active === undefined ? "failed" : "ok",
+			})
+
 			const results = yield* Effect.forEach(
-				orgRows,
-				(row) =>
-					processOrg(row.orgId as OrgId).pipe(
+				targetOrgs,
+				(orgId) =>
+					processOrg(orgId).pipe(
 						// Interrupts (isolate teardown) are NOT failures — re-raise them
 						// so the tick cancels promptly instead of logging phantom
 						// per-org failures.
@@ -202,7 +306,7 @@ export class ServiceMapRollupService extends Context.Service<
 								: Effect.as(
 										Effect.logError("Service map rollup failed for org").pipe(
 											Effect.annotateLogs({
-												orgId: row.orgId,
+												orgId,
 												error: Cause.pretty(cause),
 											}),
 										),
@@ -221,7 +325,7 @@ export class ServiceMapRollupService extends Context.Service<
 			)
 
 			return {
-				orgsProcessed: orgRows.length,
+				orgsProcessed: targetOrgs.length,
 				hoursRolledUp: results.reduce((sum, r) => sum + r.hoursRolledUp, 0),
 				edgesWritten: results.reduce((sum, r) => sum + r.edgesWritten, 0),
 				resolutionsWritten: results.reduce((sum, r) => sum + r.resolutionsWritten, 0),
