@@ -68,7 +68,7 @@ import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
 const cloudflareInfraZoneCounters = defineQuery({
 	id: "cloudflareInfraZoneCounters",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZonesRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -88,7 +88,7 @@ const cloudflareInfraZoneCounters = defineQuery({
 const cloudflareInfraZoneLatency = defineQuery({
 	id: "cloudflareInfraZoneLatency",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZonesRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -108,7 +108,7 @@ const cloudflareInfraZoneLatency = defineQuery({
 const cloudflareInfraZoneHostTotals = defineQuery({
 	id: "cloudflareInfraZoneHostTotals",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneHostsRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -126,7 +126,7 @@ const cloudflareInfraZoneHostTotals = defineQuery({
 const cloudflareInfraZoneHostTimeseries = defineQuery({
 	id: "cloudflareInfraZoneHostTimeseries",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneHostsRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -146,7 +146,7 @@ const cloudflareInfraZoneHostTimeseries = defineQuery({
 const cloudflareInfraZoneFirewallTimeseries = defineQuery({
 	id: "cloudflareInfraZoneFirewallTimeseries",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneSecurityRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -166,7 +166,7 @@ const cloudflareInfraZoneFirewallTimeseries = defineQuery({
 const cloudflareInfraZoneFirewallTop = defineQuery({
 	id: "cloudflareInfraZoneFirewallTop",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneSecurityRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -184,7 +184,7 @@ const cloudflareInfraZoneFirewallTop = defineQuery({
 const cloudflareInfraZoneDnsTimeseries = defineQuery({
 	id: "cloudflareInfraZoneDnsTimeseries",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneDnsRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -204,7 +204,7 @@ const cloudflareInfraZoneDnsTimeseries = defineQuery({
 const cloudflareInfraZoneDnsBreakdown = defineQuery({
 	id: "cloudflareInfraZoneDnsBreakdown",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneDnsRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -222,7 +222,7 @@ const cloudflareInfraZoneDnsBreakdown = defineQuery({
 const cloudflareInfraWorkerCounters = defineQuery({
 	id: "cloudflareInfraWorkerCounters",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraWorkersRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -238,7 +238,7 @@ const cloudflareInfraWorkerCounters = defineQuery({
 const cloudflareInfraWorkerLatency = defineQuery({
 	id: "cloudflareInfraWorkerLatency",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraWorkersRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -254,7 +254,7 @@ const cloudflareInfraWorkerLatency = defineQuery({
 const cloudflareInfraQueueGauges = defineQuery({
 	id: "cloudflareInfraQueueGauges",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraPlatformResourcesRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -270,7 +270,7 @@ const cloudflareInfraQueueGauges = defineQuery({
 const cloudflareInfraDurableObjects = defineQuery({
 	id: "cloudflareInfraDurableObjects",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraPlatformResourcesRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -286,7 +286,7 @@ const cloudflareInfraDurableObjects = defineQuery({
 const cloudflareServiceCounters = defineQuery({
 	id: "cloudflareServiceCounters",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServiceCloudflareStatsRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -306,7 +306,7 @@ const cloudflareServiceCounters = defineQuery({
 const cloudflareServiceLatency = defineQuery({
 	id: "cloudflareServiceLatency",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServiceCloudflareStatsRequest, orgId: string) => {
 		const params = {
 			orgId: orgId,
@@ -326,7 +326,7 @@ const cloudflareServiceLatency = defineQuery({
 const planetscaleInfraTimeseries = defineQuery({
 	id: "planetscaleInfraTimeseries",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: PlanetScaleInfraTimeseriesRequest, orgId: string) => {
 		const base = {
 			orgId: orgId,
@@ -360,7 +360,7 @@ const zoneDetailParams = (payload: CloudflareInfraZoneDetailRequest, orgId: stri
 const cloudflareInfraZoneDetailStatus = defineQuery({
 	id: "cloudflareInfraZoneDetailStatus",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneDetailRequest, orgId: string) =>
 		CH.compile(
 			Integrations.cloudflareZoneStatusTimeseriesSQL(toCloudflareFilters(payload)),
@@ -372,7 +372,7 @@ const cloudflareInfraZoneDetailStatus = defineQuery({
 const cloudflareInfraZoneDetailCache = defineQuery({
 	id: "cloudflareInfraZoneDetailCache",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneDetailRequest, orgId: string) =>
 		CH.compile(
 			Integrations.cloudflareZoneCacheTimeseriesSQL(toCloudflareFilters(payload)),
@@ -385,7 +385,7 @@ const cloudflareInfraZoneDetailCache = defineQuery({
 const cloudflareInfraZoneDetailLatency = defineQuery({
 	id: "cloudflareInfraZoneDetailLatency",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneDetailRequest, orgId: string) =>
 		CH.compile(Integrations.cloudflareZoneLatencyTimeseriesSQL(), zoneDetailParams(payload, orgId), {
 			rowSchema: Integrations.cloudflareZoneLatencyTimeseriesRowSchema,
@@ -408,7 +408,7 @@ const planetscaleStatsParams = (payload: ServicePlanetScaleStatsRequest, orgId: 
 const planetscaleServiceGauges = defineQuery({
 	id: "planetscaleServiceGauges",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServicePlanetScaleStatsRequest, orgId: string) => {
 		const params = planetscaleStatsParams(payload, orgId)
 		return payload.database !== undefined
@@ -424,7 +424,7 @@ const planetscaleServiceGauges = defineQuery({
 const planetscaleServiceConnections = defineQuery({
 	id: "planetscaleServiceConnections",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServicePlanetScaleStatsRequest, orgId: string) => {
 		const params = planetscaleStatsParams(payload, orgId)
 		return payload.database !== undefined
@@ -440,7 +440,7 @@ const planetscaleServiceConnections = defineQuery({
 const planetscaleServiceStorage = defineQuery({
 	id: "planetscaleServiceStorage",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServicePlanetScaleStatsRequest, orgId: string) => {
 		const params = planetscaleStatsParams(payload, orgId)
 		return payload.database !== undefined
@@ -462,7 +462,7 @@ const cloudflareInfraZoneFacets = defineQuery({
 	id: "cloudflareInfraZoneFacets",
 	profile: "discovery",
 	settings: { maxThreads: 4 },
-	cache: undefined,
+	cache: 60,
 	compile: (payload: CloudflareInfraZoneFacetsRequest, orgId: string) =>
 		CH.compileUnion(Integrations.cloudflareZoneFacetsQuery(toCloudflareFilters(payload)), {
 			orgId,
@@ -483,7 +483,7 @@ const cloudflareInfraZoneFacets = defineQuery({
 const hostInfraNetworkTimeseries = defineQuery({
 	id: "hostInfraTimeseries",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: HostInfraTimeseriesRequest, orgId: string) =>
 		CH.compile(CH.hostNetworkTimeseriesQuery({ hostName: payload.hostName }), {
 			orgId,
@@ -496,7 +496,7 @@ const hostInfraNetworkTimeseries = defineQuery({
 const hostInfraGaugeTimeseries = defineQuery({
 	id: "hostInfraTimeseries",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: HostInfraTimeseriesRequest, orgId: string) => {
 		const spec = hostMetricSpec(payload.metric)
 		return CH.compile(
@@ -527,7 +527,7 @@ const zoneBreakdownParams = (payload: CloudflareInfraZoneBreakdownRequest, orgId
 const cloudflareInfraZoneBreakdownTotals = defineQuery({
 	id: "cloudflareInfraZoneBreakdownTotals",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) =>
 		CH.compile(
 			Integrations.cloudflareZoneBreakdownTotalsSQL(
@@ -548,7 +548,7 @@ const cloudflareInfraZoneBreakdownTotals = defineQuery({
 const cloudflareInfraZoneBreakdownCoverage = defineQuery({
 	id: "cloudflareInfraZoneBreakdownCoverage",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) =>
 		CH.compile(
 			Integrations.cloudflareZoneBreakdownCoverageSQL(payload.dimension),
@@ -560,7 +560,7 @@ const cloudflareInfraZoneBreakdownCoverage = defineQuery({
 const cloudflareInfraZoneBreakdownZoneTotal = defineQuery({
 	id: "cloudflareInfraZoneBreakdownZoneTotal",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) =>
 		CH.compile(
 			Integrations.cloudflareZoneCountersSQL(toCloudflareFilters(payload)),
@@ -583,7 +583,7 @@ const cloudflareInfraZoneBreakdownZoneTotal = defineQuery({
 const cloudflareInfraZoneBreakdownTimeseries = defineQuery({
 	id: "cloudflareInfraZoneBreakdownTimeseries",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (
 		payload: CloudflareInfraZoneBreakdownRequest & { readonly topKeys: ReadonlyArray<string> },
 		orgId: string,
@@ -610,7 +610,7 @@ export const Queries = {
 	getLog: defineQuery({
 		id: "getLog",
 		profile: "list",
-		cache: undefined,
+		cache: 15,
 		compile: (payload: GetLogRequest, orgId: string) => {
 			const { startTime, endTime } = partitionWindowAround(payload.timestamp)
 			return CH.compile(
@@ -651,7 +651,7 @@ export const Queries = {
 	fleetUtilizationTimeseries: defineQuery({
 		id: "fleetUtilizationTimeseries",
 		profile: "aggregation",
-		cache: undefined,
+		cache: 15,
 		compile: (payload: FleetUtilizationTimeseriesRequest, orgId: string) =>
 			CH.compile(CH.fleetUtilizationTimeseriesQuery(), {
 				orgId,
@@ -664,7 +664,7 @@ export const Queries = {
 	podInfraTimeseries: defineQuery({
 		id: "podInfraTimeseries",
 		profile: "aggregation",
-		cache: undefined,
+		cache: 15,
 		compile: (payload: PodInfraTimeseriesRequest, orgId: string) =>
 			CH.compile(
 				CH.podGaugeTimeseriesQuery({
@@ -684,7 +684,7 @@ export const Queries = {
 	nodeInfraTimeseries: defineQuery({
 		id: "nodeInfraTimeseries",
 		profile: "aggregation",
-		cache: undefined,
+		cache: 15,
 		compile: (payload: NodeInfraTimeseriesRequest, orgId: string) =>
 			CH.compile(
 				CH.nodeGaugeTimeseriesQuery({
@@ -703,7 +703,7 @@ export const Queries = {
 	workloadInfraTimeseries: defineQuery({
 		id: "workloadInfraTimeseries",
 		profile: "aggregation",
-		cache: undefined,
+		cache: 15,
 		compile: (payload: WorkloadInfraTimeseriesRequest, orgId: string) =>
 			CH.compile(
 				CH.workloadGaugeTimeseriesQuery({
@@ -725,7 +725,7 @@ export const Queries = {
 	cloudflareInfraZoneTimeseries: defineQuery({
 		id: "cloudflareInfraZoneTimeseries",
 		profile: "aggregation",
-		cache: undefined,
+		cache: 15,
 		compile: (payload: CloudflareInfraZoneTimeseriesRequest, orgId: string) =>
 			CH.compile(
 				Integrations.cloudflareZoneTimeseriesSQL(toCloudflareFilters(payload)),
@@ -742,7 +742,7 @@ export const Queries = {
 	cloudflareInfraWorkerTimeseries: defineQuery({
 		id: "cloudflareInfraWorkerTimeseries",
 		profile: "aggregation",
-		cache: undefined,
+		cache: 15,
 		compile: (payload: CloudflareInfraWorkerTimeseriesRequest, orgId: string) =>
 			CH.compile(
 				Integrations.cloudflareWorkerTimeseriesSQL(),

@@ -51,17 +51,33 @@ import { defineQuery } from "./query-def"
  * a `QueryDef` through `runQuery` or keeps its inline wiring. Nothing breaks
  * while entries are added.
  *
- * Cache values below are carried over EXACTLY as the handlers had them, so this
- * pilot changes no caching behaviour — `cache: undefined` here means the handler
- * was uncached before, not that being uncached is correct. Turning any of those
- * on is a separate, separately-reviewed change with a justified TTL.
+ * ## Cache policy
+ *
+ * Every entry states a TTL. Two values do almost all the work:
+ *
+ * - **15s** — the house default, already proven on `serviceOverview`,
+ *   `serviceHealthSnapshot`, `serviceApdex` and `listLogs`. Short enough that a
+ *   panel never looks frozen, long enough to absorb the repeat loads that come
+ *   from navigating between tabs of the same service.
+ * - **60s** — dimension lists (facets, metric catalogues). These move on the
+ *   scale of deploys, not requests, so a minute of staleness is invisible while
+ *   the queries themselves are UNION fan-outs over wide Map columns.
+ *
+ * `cache: undefined` now means exactly one thing: the query runs inside an
+ * outer `cachedDirect` in its handler, so caching it here would double-cache.
+ * For `spanHierarchy`'s probes that is not merely redundant but wrong — they
+ * exist to fire only on an outer miss, and caching them would run a probe on
+ * every request. The seven such entries are commented individually.
+ *
+ * Anything that needs a different number should say why in a comment next to
+ * it, the way `serviceUsage` (60s) and `serviceOverview` (15s, version 2) do.
  */
 
 export const errorsByType = defineQuery({
 	id: "errorsByType",
 	profile: "aggregation",
 	// Was uncached inline. Preserved as-is: changing it belongs in its own commit.
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ErrorsByTypeRequest, orgId: string) =>
 		CH.compile(
 			CH.errorsByTypeQuery({
@@ -78,7 +94,7 @@ export const errorsByType = defineQuery({
 export const errorsTimeseries = defineQuery({
 	id: "errorsTimeseries",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ErrorsTimeseriesRequest, orgId: string) =>
 		CH.compile(
 			CH.errorsTimeseriesQuery({
@@ -100,7 +116,7 @@ export const errorsTimeseries = defineQuery({
 export const errorsSummary = defineQuery({
 	id: "errorsSummary",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ErrorsSummaryRequest, orgId: string) =>
 		CH.compile(
 			CH.errorsSummaryQuery({
@@ -116,7 +132,7 @@ export const errorsSummary = defineQuery({
 export const errorRateByService = defineQuery({
 	id: "errorRateByService",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	// The builder takes no options — this query is scoped entirely by org and
 	// time range. The payload still carries the range.
 	compile: (payload: ErrorRateByServiceRequest, orgId: string) =>
@@ -148,7 +164,7 @@ export const serviceOverview = defineQuery({
 export const errorDetailTraces = defineQuery({
 	id: "errorDetailTraces",
 	profile: "list",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ErrorDetailTracesRequest, orgId: string) =>
 		CH.compile(
 			CH.errorDetailTracesQuery({
@@ -209,7 +225,7 @@ export const serviceApdex = defineQuery({
 export const serviceDependenciesForService = defineQuery({
 	id: "serviceDependenciesForService",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServiceDependenciesForServiceRequest, orgId: string) =>
 		CH.compile(
 			CH.serviceDependenciesForServiceQuery({
@@ -227,7 +243,7 @@ export const serviceDependenciesForService = defineQuery({
 export const serviceDbEdgesForService = defineQuery({
 	id: "serviceDbEdgesForService",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServiceDbEdgesForServiceRequest, orgId: string) =>
 		CH.compile(
 			CH.serviceDbEdgesForServiceQuery({
@@ -278,7 +294,7 @@ export const listLogs = defineQuery({
 export const listMetrics = defineQuery({
 	id: "listMetrics",
 	profile: "discovery",
-	cache: undefined,
+	cache: 60,
 	compile: (payload: ListMetricsRequest, orgId: string) =>
 		CH.compile(
 			CH.listMetricsQuery({
@@ -295,7 +311,7 @@ export const listMetrics = defineQuery({
 export const metricsSummary = defineQuery({
 	id: "metricsSummary",
 	profile: "discovery",
-	cache: undefined,
+	cache: 60,
 	compile: (payload: MetricsSummaryRequest, orgId: string) =>
 		CH.compile(CH.metricsSummaryQuery({ serviceName: payload.service }), {
 			orgId,
@@ -307,7 +323,7 @@ export const metricsSummary = defineQuery({
 export const listHosts = defineQuery({
 	id: "listHosts",
 	profile: "list",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ListHostsRequest, orgId: string) =>
 		CH.compile(
 			CH.listHostsQuery({
@@ -322,7 +338,7 @@ export const listHosts = defineQuery({
 export const hostDetailSummary = defineQuery({
 	id: "hostDetailSummary",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: HostDetailSummaryRequest, orgId: string) =>
 		CH.compile(CH.hostDetailSummaryQuery({ hostName: payload.hostName }), {
 			orgId,
@@ -334,7 +350,7 @@ export const hostDetailSummary = defineQuery({
 export const podsSummary = defineQuery({
 	id: "podsSummary",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: PodsSummaryRequest, orgId: string) =>
 		CH.compile(
 			CH.listPodsSummaryQuery({
@@ -350,7 +366,7 @@ export const podsSummary = defineQuery({
 export const podDetailSummary = defineQuery({
 	id: "podDetailSummary",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: PodDetailSummaryRequest, orgId: string) =>
 		CH.compile(CH.podDetailSummaryQuery({ podName: payload.podName, namespace: payload.namespace }), {
 			orgId,
@@ -362,7 +378,7 @@ export const podDetailSummary = defineQuery({
 export const listNodes = defineQuery({
 	id: "listNodes",
 	profile: "list",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ListNodesRequest, orgId: string) =>
 		CH.compile(
 			CH.listNodesQuery({
@@ -380,7 +396,7 @@ export const listNodes = defineQuery({
 export const nodeDetailSummary = defineQuery({
 	id: "nodeDetailSummary",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: NodeDetailSummaryRequest, orgId: string) =>
 		CH.compile(CH.nodeDetailSummaryQuery({ nodeName: payload.nodeName }), {
 			orgId,
@@ -392,7 +408,7 @@ export const nodeDetailSummary = defineQuery({
 export const listWorkloads = defineQuery({
 	id: "listWorkloads",
 	profile: "list",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ListWorkloadsRequest, orgId: string) =>
 		CH.compile(
 			CH.listWorkloadsQuery({
@@ -413,7 +429,7 @@ export const listWorkloads = defineQuery({
 export const workloadDetailSummary = defineQuery({
 	id: "workloadDetailSummary",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: WorkloadDetailSummaryRequest, orgId: string) =>
 		CH.compile(
 			CH.workloadDetailSummaryQuery({
@@ -442,7 +458,7 @@ export const workloadDetailSummary = defineQuery({
 export const serviceReleases = defineQuery({
 	id: "serviceReleases",
 	profile: "list",
-	cache: undefined,
+	cache: 15,
 	compile: (
 		payload: {
 			readonly serviceName: string
@@ -485,7 +501,7 @@ export const serviceEnvironments = defineQuery({
 export const serviceExternalEdges = defineQuery({
 	id: "serviceExternalEdges",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (
 		payload: {
 			readonly serviceName: string
@@ -541,7 +557,7 @@ export const serviceUsage = defineQuery({
 export const serviceDependencies = defineQuery({
 	id: "serviceDependencies",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServiceDependenciesRequest, orgId: string) =>
 		CH.serviceDependenciesSQL(
 			{ deploymentEnv: payload.deploymentEnv },
@@ -552,7 +568,7 @@ export const serviceDependencies = defineQuery({
 export const serviceDbEdges = defineQuery({
 	id: "serviceDbEdges",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServiceDbEdgesRequest, orgId: string) =>
 		CH.serviceDbEdgesSQL(
 			{ deploymentEnv: payload.deploymentEnv },
@@ -570,7 +586,7 @@ export const serviceDbEdges = defineQuery({
 export const serviceWorkloads = defineQuery({
 	id: "serviceWorkloads",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServiceWorkloadsRequest, orgId: string) =>
 		CH.serviceWorkloadsSQL(
 			{ services: payload.services },
@@ -581,7 +597,7 @@ export const serviceWorkloads = defineQuery({
 export const servicePlatforms = defineQuery({
 	id: "servicePlatforms",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServicePlatformsRequest, orgId: string) =>
 		CH.servicePlatformsSQL(
 			{ deploymentEnv: payload.deploymentEnv },
@@ -609,7 +625,7 @@ const dbQueryParams = (payload: ServiceDbQuerySummaryRequest, orgId: string) => 
 export const serviceDbQuerySummary = defineQuery({
 	id: "serviceDbQuerySummary",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServiceDbQuerySummaryRequest, orgId: string) =>
 		CH.serviceDbQuerySummarySQL(dbQueryParams(payload, orgId)),
 })
@@ -617,7 +633,7 @@ export const serviceDbQuerySummary = defineQuery({
 export const serviceDbQueryTimeseries = defineQuery({
 	id: "serviceDbQueryTimeseries",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServiceDbQuerySummaryRequest, orgId: string) =>
 		CH.serviceDbQueryTimeseriesSQL(dbQueryParams(payload, orgId)),
 })
@@ -625,7 +641,7 @@ export const serviceDbQueryTimeseries = defineQuery({
 export const serviceDbTopQueries = defineQuery({
 	id: "serviceDbTopQueries",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ServiceDbQuerySummaryRequest, orgId: string) =>
 		CH.serviceDbTopQueriesSQL(dbQueryParams(payload, orgId)),
 })
@@ -638,7 +654,7 @@ export const podFacets = defineQuery({
 	// Cap read-thread concurrency to bound Map-column decompression memory
 	// across the fan-out of UNION branches.
 	settings: { maxThreads: 4 },
-	cache: undefined,
+	cache: 60,
 	compile: (payload: PodFacetsRequest, orgId: string) =>
 		CH.compileUnion(
 			CH.podFacetsQuery({
@@ -664,7 +680,7 @@ export const nodeFacets = defineQuery({
 	// Cap read-thread concurrency to bound Map-column decompression memory
 	// across the fan-out of UNION branches.
 	settings: { maxThreads: 4 },
-	cache: undefined,
+	cache: 60,
 	compile: (payload: NodeFacetsRequest, orgId: string) =>
 		CH.compileUnion(
 			CH.nodeFacetsQuery({
@@ -683,7 +699,7 @@ export const workloadFacets = defineQuery({
 	// Cap read-thread concurrency to bound Map-column decompression memory
 	// across the fan-out of UNION branches.
 	settings: { maxThreads: 4 },
-	cache: undefined,
+	cache: 60,
 	compile: (payload: WorkloadFacetsRequest, orgId: string) =>
 		CH.compileUnion(
 			CH.workloadFacetsQuery({
@@ -723,7 +739,7 @@ const listPodsFilters = (payload: ListPodsRequest) => ({
 export const listPods = defineQuery({
 	id: "listPods",
 	profile: "list",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ListPodsRequest, orgId: string) =>
 		CH.compile(
 			CH.listPodsQuery({
@@ -742,7 +758,7 @@ export const listPods = defineQuery({
 export const listPodsCount = defineQuery({
 	id: "listPodsCount",
 	profile: "aggregation",
-	cache: undefined,
+	cache: 15,
 	compile: (payload: ListPodsRequest, orgId: string) =>
 		CH.compile(
 			CH.listPodsSummaryQuery(listPodsFilters(payload)),
