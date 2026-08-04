@@ -1644,10 +1644,9 @@ export type LogsAggregatesHourlyRow = InferRow<typeof logsAggregatesHourly>
  * row (not just the ended one) — otherwise a tab killed without an unload beacon
  * leaves only the v1 row's zeroes, and bounce rate reads 100%.
  *
- * The rrweb event payloads live in `sessionReplayEvents` (one row per chunk,
- * payload inline in ClickHouse — there is no R2 blob store); this table only
- * holds small, queryable metadata so the sessions list/filter views never
- * touch the multi-MB rrweb blobs.
+ * The rrweb event payloads live in `sessionReplayEvents` (one row per chunk);
+ * this table only holds small, queryable metadata so the sessions list/filter
+ * views never touch the multi-MB rrweb blobs.
  *
  * `TraceIds` carries the OTel trace ids observed during the session — the
  * correlation key that lets the trace detail view link to a replay and back.
@@ -1806,12 +1805,15 @@ export const sessionReplays = defineDatasource("session_replays", {
 export type SessionReplaysRow = InferRow<typeof sessionReplays>
 
 /**
- * Session replay events — one row per uploaded rrweb chunk, payload included.
+ * Session replay events — one row per uploaded rrweb chunk.
  *
- * The ingest gateway gunzips the chunk body and writes the rrweb event array
- * JSON into `Events` (a String column ClickHouse ZSTD-compresses). Playback
- * reads chunks back directly from here — there is no R2 blob store on the
- * replay path.
+ * `Events` holds the rrweb event array as JSON text, but only for chunks
+ * written before the R2 cutover and for deployments with no blob store
+ * configured (self-hosted, BYO-ClickHouse). On the managed path the gateway
+ * stores the chunk's gzip in R2 under a key derived from
+ * `(OrgId, SessionId, ChunkSeq)` and writes `Events = ''`; the API refills it
+ * on read. So an empty `Events` means "blob-backed", never "empty chunk" — the
+ * SDK never uploads a chunk with no events.
  *
  * `IsCheckpoint=1` marks chunks that contain a full rrweb DOM snapshot, so the
  * player can seek to a timestamp by loading the nearest preceding checkpoint
@@ -1823,7 +1825,7 @@ export type SessionReplaysRow = InferRow<typeof sessionReplays>
  */
 export const sessionReplayEvents = defineDatasource("session_replay_events", {
 	description:
-		"Session replay rrweb events (one row per chunk, payload included). The ingest gateway gunzips the chunk and stores the event-array JSON in `Events`. Playback reads directly from ClickHouse — no R2.",
+		"Session replay rrweb events, one row per chunk. `Events` carries the event-array JSON inline for pre-cutover rows and for deployments without a blob store; otherwise it is empty and the payload lives in R2 under v1/{OrgId}/{SessionId}/{ChunkSeq}.json.gz.",
 	schema: {
 		OrgId: column(t.string().lowCardinality(), { jsonPath: "$.org_id" }),
 		SessionId: column(t.string(), { jsonPath: "$.session_id" }),

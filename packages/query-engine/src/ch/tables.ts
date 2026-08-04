@@ -574,8 +574,9 @@ export const SessionReplayEvents = table("session_replay_events", {
 	DurationMs: T.uint32,
 	EventCount: T.uint32,
 	ByteSize: T.uint32,
-	// The rrweb event array for this chunk, stored as a JSON string. ClickHouse
-	// ZSTD-compresses this column; playback reads it back directly (no R2).
+	// The rrweb event array for this chunk as a JSON string — inline for
+	// pre-cutover rows and blob-store-less deployments, empty when the payload
+	// lives in R2 (the API refills it on read).
 	Events: T.string,
 	IsCheckpoint: T.uint8,
 })

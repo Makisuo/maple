@@ -250,8 +250,8 @@ export const getSessionTraceSummariesResultAtom = makeQueryAtomFamily(getSession
 
 // Idle TTL keeps the chunks (and their inline rrweb events) stable across the
 // player's frequent re-renders so the decode memo in the player context isn't
-// thrown away and re-run. Events come straight from ClickHouse — no R2, no
-// signed URLs, no client-side fetch/gunzip.
+// thrown away and re-run. The API serves event arrays inline whether they came
+// from ClickHouse or R2, so there is no client-side fetch/gunzip either way.
 export const getReplayEventsResultAtom = makeQueryAtomFamily(getReplayEvents, {
 	staleTime: 240_000,
 })

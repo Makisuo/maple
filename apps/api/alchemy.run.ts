@@ -136,6 +136,33 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			name: planetScaleWebhookQueueName,
 		})
 
+		// Session-replay rrweb payloads. The ingest gateway (a Railway container,
+		// not a Worker) writes these over the S3 API with SigV4; this binding is
+		// the read side, hydrating `session_replay_events` rows whose `Events` is
+		// empty. Stage-isolated, so a pr/stg deploy can never serve or overwrite
+		// prd recordings.
+		//
+		// The 32-day expiry is deliberately LONGER than the table's 30-day TTL:
+		// the row must disappear before the object does. The other way round
+		// leaves a session that lists as recorded but plays back empty, which is
+		// the one failure mode with no good client-side handling.
+		const replayBlobs = yield* Cloudflare.R2.Bucket("replay-blobs", {
+			name: resolveWorkerName("replay-blobs", stage),
+			// Deliberately unprefixed, so the rule covers whatever key scheme is
+			// current. `replay_object_key` is versioned (`v1/…`) precisely so a
+			// format change can write under a new prefix while the old one ages
+			// out — a rule pinned to `v1/` would silently stop expiring anything
+			// the moment that happens, and the bucket would grow forever with no
+			// failing test to catch it. Nothing else writes here.
+			lifecycleRules: [
+				{
+					id: "expire-replay-chunks",
+					enabled: true,
+					deleteObjectsTransition: { condition: { type: "Age", maxAge: 32 * 24 * 60 * 60 } },
+				},
+			],
+		})
+
 		const worker = (yield* Cloudflare.Worker("api", {
 			name: resolveWorkerName("api", stage),
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
@@ -167,6 +194,9 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				AI: Cloudflare.AI.Gateway("maple-api-ai"),
 				CHAT_SESSION: chatSession,
 				MCP_SESSIONS: mcpSessions,
+				// Read side of the replay payload store; absent bindings degrade to
+				// inline-only hydration (see platform/ReplayBlobStore.ts).
+				REPLAY_BLOBS: replayBlobs,
 				VCS_SYNC_QUEUE: vcsSyncQueue,
 				VCS_SYNC_QUEUE_NAME: vcsSyncQueueName,
 				PLANETSCALE_WEBHOOK_QUEUE: planetScaleWebhookQueue,

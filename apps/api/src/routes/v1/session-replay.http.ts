@@ -13,17 +13,19 @@ import {
 	TraceId,
 	UserId,
 } from "@maple/domain/http"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
 import { CH } from "@maple/query-engine"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { ReplayBlobStore, ReplayBlobStoreLive } from "@/platform/ReplayBlobStore"
 
 const decodeSessionId = Schema.decodeSync(SessionId)
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeUserId = Schema.decodeSync(UserId)
 
-export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionReplays", (handlers) =>
+const HttpSessionReplaysGroup = HttpApiBuilder.group(MapleApi, "sessionReplays", (handlers) =>
 	Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService
+		const blobs = yield* ReplayBlobStore
 
 		return handlers
 			.handle("listReplays", ({ payload }) =>
@@ -195,12 +197,15 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 							sessionId: payload.sessionId,
 						},
 					)
-					const chunks = yield* warehouse.compiledQuery(tenant, compiled, {
+					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 						profile: "list",
 						context: "getReplayEvents",
 					})
-					// rrweb payloads come straight from ClickHouse (no R2 / presigning);
-					// each chunk's `events` is the rrweb array JSON the player parses.
+					// Each chunk's `events` is the rrweb array JSON the player parses.
+					// Rows written since the R2 cutover carry an empty `events` and the
+					// payload comes from the blob store; older rows carry it inline and
+					// pass through untouched.
+					const chunks = yield* blobs.hydrate(tenant.orgId, payload.sessionId, rows)
 					return new GetReplayEventsResponse({ chunks })
 				}),
 			)
@@ -294,3 +299,10 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 			)
 	}),
 )
+
+// Self-contained: the blob store resolves from the worker env (and degrades to
+// a no-op hydrator when the R2 binding is absent), so it is provided here
+// rather than pushed onto every caller that builds this group — the v2 route
+// tests construct their own layer stack and would otherwise have to know about
+// a storage detail of one handler.
+export const HttpSessionReplaysLive = HttpSessionReplaysGroup.pipe(Layer.provide(ReplayBlobStoreLive))
