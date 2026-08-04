@@ -114,6 +114,28 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 					1,
 				)
 
+			/**
+			 * Coverage at or above which a bucket-cache lookup counts as a hit.
+			 *
+			 * The obvious test — "issued no warehouse query" — is unusable on this
+			 * path: the trailing flux window is never cacheable, so a live dashboard
+			 * always issues one, and the counter reported a miss on literally every
+			 * request regardless of how well the cache was working. Coverage is what
+			 * actually determines whether the request was cheap.
+			 */
+			const BUCKET_CACHE_HIT_COVERAGE = 0.9
+
+			const recordBucketCacheOutcome = (outcome: {
+				readonly bucketsHit: number
+				readonly requestedBuckets: number
+			}) =>
+				Effect.gen(function* () {
+					const coverage =
+						outcome.requestedBuckets === 0 ? 1 : outcome.bucketsHit / outcome.requestedBuckets
+					yield* Metric.update(QueryEngineMetrics.bucketCacheCoverageRatio, coverage)
+					yield* recordCacheOutcome(coverage >= BUCKET_CACHE_HIT_COVERAGE)
+				})
+
 			const legacyBlobCachedExecute = Effect.fn("QueryEngineService.legacyBlobCachedExecute")(
 				function* (tenant: TenantContext, request: QueryEngineExecuteRequest) {
 					const startMs = yield* Clock.currentTimeMillis
@@ -188,7 +210,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentTimeouts, outcome.segmentsTimedOut)
 				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentErrors, outcome.segmentsErrored)
 				yield* Metric.update(QueryEngineMetrics.bucketCacheMissingRanges, outcome.missingRangeCount)
-				yield* recordCacheOutcome(outcome.warehouseQueryCount === 0)
+				yield* recordBucketCacheOutcome(outcome)
 				yield* Effect.annotateCurrentSpan("cache.bucketsHit", outcome.bucketsHit)
 				yield* Effect.annotateCurrentSpan("cache.bucketsMissed", outcome.bucketsMissed)
 				yield* Effect.annotateCurrentSpan("cache.missingRangeCount", outcome.missingRangeCount)
@@ -212,9 +234,18 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 			) {
 				return yield* withTimeout(
 					Effect.gen(function* () {
-						if (!bucketCache.enabled || request.query.kind !== "timeseries") {
-							return yield* legacyBlobCachedExecute(tenant, request)
-						}
+						// Every `return` below picks one of two very differently-priced
+						// paths, and a request that quietly lands on the blob path looks
+						// exactly like a bucket cache with a bad hit rate. Record which
+						// path ran, and why, so the two are distinguishable in a trace.
+						const useBlobPath = (reason: string) =>
+							Effect.annotateCurrentSpan({
+								"cache.path": "blob",
+								"cache.blob_reason": reason,
+							}).pipe(Effect.andThen(legacyBlobCachedExecute(tenant, request)))
+
+						if (!bucketCache.enabled) return yield* useBlobPath("bucket_cache_disabled")
+						if (request.query.kind !== "timeseries") return yield* useBlobPath("not_timeseries")
 
 						const startEpochMs = toEpochMs(request.startTime)
 						const endEpochMs = toEpochMs(request.endTime)
@@ -223,7 +254,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 							Number.isNaN(endEpochMs) ||
 							endEpochMs <= startEpochMs
 						) {
-							return yield* legacyBlobCachedExecute(tenant, request)
+							return yield* useBlobPath("invalid_range")
 						}
 						const rangeBounds: TimeRangeBounds = {
 							startMs: startEpochMs,
@@ -236,9 +267,10 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 							computeBucketSeconds(rangeBounds.startMs, rangeBounds.endMs)
 
 						if (rangeBounds.endMs - rangeBounds.startMs < bucketSeconds * 1000) {
-							return yield* legacyBlobCachedExecute(tenant, request)
+							return yield* useBlobPath("range_below_one_bucket")
 						}
 
+						yield* Effect.annotateCurrentSpan("cache.path", "bucket")
 						return yield* bucketCachedExecute(tenant, request, bucketSeconds, rangeBounds)
 					}).pipe(
 						Effect.withSpan("QueryEngineService.cachedExecute", {
@@ -303,7 +335,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentTimeouts, outcome.segmentsTimedOut)
 				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentErrors, outcome.segmentsErrored)
 				yield* Metric.update(QueryEngineMetrics.bucketCacheMissingRanges, outcome.missingRangeCount)
-				yield* recordCacheOutcome(outcome.warehouseQueryCount === 0)
+				yield* recordBucketCacheOutcome(outcome)
 				yield* Effect.annotateCurrentSpan("cache.bucketsHit", outcome.bucketsHit)
 				yield* Effect.annotateCurrentSpan("cache.bucketsMissed", outcome.bucketsMissed)
 				yield* Effect.annotateCurrentSpan("cache.missingRangeCount", outcome.missingRangeCount)
