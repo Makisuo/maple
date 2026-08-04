@@ -4,6 +4,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
 	DropdownMenuSeparator,
@@ -105,7 +106,9 @@ function BulkMenu({ label, children }: { label: string; children: ReactNode }) {
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>{label}</DropdownMenuTrigger>
-			<DropdownMenuContent align="center">{children}</DropdownMenuContent>
+			<DropdownMenuContent align="center">
+				<DropdownMenuGroup>{children}</DropdownMenuGroup>
+			</DropdownMenuContent>
 		</DropdownMenu>
 	)
 }

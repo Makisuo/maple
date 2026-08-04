@@ -4,6 +4,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
 	DropdownMenuTrigger,
@@ -59,32 +60,36 @@ export function PlanetScaleAlertMenu({
 				Alert on this
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="w-72">
-				<DropdownMenuLabel>Create an alert rule</DropdownMenuLabel>
-				{suggestions.map((suggestion) => (
-					<DropdownMenuItem
-						key={suggestion.id}
-						onClick={() => {
-							const chart = encodeAlertChartToSearchParam({
-								dashboardId: "planetscale",
-								widget: {
-									id: crypto.randomUUID(),
-									visualization: "chart",
-									dataSource: {
-										endpoint: "custom_query_builder_timeseries",
-										params: { queries: [suggestion.draft] },
+				<DropdownMenuGroup>
+					<DropdownMenuLabel>Create an alert rule</DropdownMenuLabel>
+					{suggestions.map((suggestion) => (
+						<DropdownMenuItem
+							key={suggestion.id}
+							onClick={() => {
+								const chart = encodeAlertChartToSearchParam({
+									dashboardId: "planetscale",
+									widget: {
+										id: crypto.randomUUID(),
+										visualization: "chart",
+										dataSource: {
+											endpoint: "custom_query_builder_timeseries",
+											params: { queries: [suggestion.draft] },
+										},
+										display: { title: `${suggestion.title} · ${database}` },
 									},
-									display: { title: `${suggestion.title} · ${database}` },
-								},
-							})
-							void navigate({ to: "/alerts/create", search: chart ? { chart } : {} })
-						}}
-					>
-						<div className="flex flex-col gap-0.5">
-							<span className="text-xs font-medium">{suggestion.title}</span>
-							<span className="text-[11px] text-muted-foreground">{suggestion.summary}</span>
-						</div>
-					</DropdownMenuItem>
-				))}
+								})
+								void navigate({ to: "/alerts/create", search: chart ? { chart } : {} })
+							}}
+						>
+							<div className="flex flex-col gap-0.5">
+								<span className="text-xs font-medium">{suggestion.title}</span>
+								<span className="text-[11px] text-muted-foreground">
+									{suggestion.summary}
+								</span>
+							</div>
+						</DropdownMenuItem>
+					))}
+				</DropdownMenuGroup>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	)

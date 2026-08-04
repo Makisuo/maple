@@ -3,6 +3,7 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 
 import { cn } from "../../lib/utils"
 import { ChevronRightIcon, CheckIcon } from "../icons"
+import { InMenuGroupContext, useInMenuGroup } from "./menu-group-context"
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
 	return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />
@@ -48,7 +49,11 @@ function DropdownMenuContent({
 }
 
 function DropdownMenuGroup({ ...props }: MenuPrimitive.Group.Props) {
-	return <MenuPrimitive.Group data-slot="dropdown-menu-group" {...props} />
+	return (
+		<InMenuGroupContext.Provider value={true}>
+			<MenuPrimitive.Group data-slot="dropdown-menu-group" {...props} />
+		</InMenuGroupContext.Provider>
+	)
 }
 
 function DropdownMenuLabel({
@@ -58,7 +63,7 @@ function DropdownMenuLabel({
 }: MenuPrimitive.GroupLabel.Props & {
 	inset?: boolean
 }) {
-	return (
+	const label = (
 		<MenuPrimitive.GroupLabel
 			data-slot="dropdown-menu-label"
 			data-inset={inset}
@@ -66,6 +71,11 @@ function DropdownMenuLabel({
 			{...props}
 		/>
 	)
+
+	// A bare label would throw `MenuGroupContext is missing` and take out the
+	// page. See menu-group-context.tsx for why this detects instead of wrapping
+	// unconditionally.
+	return useInMenuGroup() ? label : <MenuPrimitive.Group>{label}</MenuPrimitive.Group>
 }
 
 function DropdownMenuItem({
@@ -173,7 +183,11 @@ function DropdownMenuCheckboxItem({
 }
 
 function DropdownMenuRadioGroup({ ...props }: MenuPrimitive.RadioGroup.Props) {
-	return <MenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />
+	return (
+		<InMenuGroupContext.Provider value={true}>
+			<MenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />
+		</InMenuGroupContext.Provider>
+	)
 }
 
 function DropdownMenuRadioItem({ className, children, ...props }: MenuPrimitive.RadioItem.Props) {

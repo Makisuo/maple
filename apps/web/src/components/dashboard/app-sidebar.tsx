@@ -296,8 +296,6 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 						<span>{item.title}</span>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="start" className="min-w-44" side="right" sideOffset={4}>
-						{/* Base UI scopes labels to a group — a bare DropdownMenuLabel
-						    throws MenuGroupContext is missing. */}
 						<DropdownMenuGroup>
 							<DropdownMenuLabel>{item.title}</DropdownMenuLabel>
 							{subItems.map((sub) => (

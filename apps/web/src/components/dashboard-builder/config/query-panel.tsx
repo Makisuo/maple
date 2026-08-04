@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -394,6 +394,25 @@ function MetricsBody({
 		metricType: metricsQuery?.metricType || undefined,
 	})
 
+	// The options list is one fetched page (and narrows further as you search),
+	// so a metric that arrived by prefill — a dashboard widget, or an "Alert on
+	// this" suggestion — often isn't in it, leaving the combobox with no item to
+	// render the selection from. Synthesize one so the current metric always
+	// shows and stays reselectable.
+	const metricOptions = useMemo(() => {
+		if (!metricValue || metricSelectionOptions.some((o) => o.value === metricValue)) {
+			return metricSelectionOptions
+		}
+		return [
+			{
+				value: metricValue,
+				label: `${metricsQuery?.metricName} (${metricsQuery?.metricType})`,
+				isMonotonic: metricsQuery?.isMonotonic ?? metricsQuery?.metricType === "sum",
+			},
+			...metricSelectionOptions,
+		]
+	}, [metricValue, metricSelectionOptions, metricsQuery])
+
 	return (
 		<>
 			{/* Row 1: Metric type + name */}
@@ -404,7 +423,7 @@ function MetricsBody({
 					onValueChange={(value) => {
 						const parsed = value ? parseMetricSelection(value) : null
 						if (!parsed) return
-						const selectedOption = metricSelectionOptions.find((o) => o.value === value)
+						const selectedOption = metricOptions.find((o) => o.value === value)
 						const isMonotonic = selectedOption?.isMonotonic ?? parsed.metricType === "sum"
 						onMetricSelectionChange({
 							metricName: parsed.metricName,
@@ -419,13 +438,13 @@ function MetricsBody({
 						onChange={(e) => onMetricSearch?.(e.target.value)}
 					/>
 					<ComboboxContent>
-						{metricSelectionOptions.length === 0 ? (
+						{metricOptions.length === 0 ? (
 							<div className="py-4 text-center text-xs text-muted-foreground">
 								No metrics found.
 							</div>
 						) : (
 							<ComboboxList>
-								{metricSelectionOptions.map((metric) => (
+								{metricOptions.map((metric) => (
 									<ComboboxItem key={metric.value} value={metric.value}>
 										{metric.label}
 									</ComboboxItem>
