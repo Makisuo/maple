@@ -1,4 +1,5 @@
 import type {
+	ServiceOperationsRequest,
 	ListPodsRequest,
 	NodeFacetsRequest,
 	PodFacetsRequest,
@@ -808,4 +809,97 @@ export const spanHierarchy = defineQuery({
 			narrowByTime ? { orgId, startTime: payload.startTime, endTime: payload.endTime } : { orgId },
 		)
 	},
+})
+
+// --- serviceOperations: rollup and raw variants ---------------------------
+//
+// Four defs, two logical queries. Each has a rollup form and a raw form, and
+// the CHOICE between them stays in the handler because it is policy, not query
+// construction: a feature flag selects the rollup, and a typed
+// `isMissingServiceOperationsRollup` error falls back to raw at runtime,
+// flipping a flag that the timeseries query then honors too.
+//
+// Rollup/raw pairs share an id, matching the context their spans already
+// report — the fallback is recorded separately as `query.rollup.fallback`.
+//
+// All four are `cache: undefined`; the handler wraps the whole sequence in one
+// `cachedDirect`.
+
+const serviceOperationsSummaryOptions = (payload: ServiceOperationsRequest) => ({
+	serviceName: payload.serviceName,
+	environments: payload.environments,
+	limit: payload.limit,
+})
+
+const serviceOperationsParams = (payload: ServiceOperationsRequest, orgId: string) => ({
+	orgId,
+	startTime: payload.startTime,
+	endTime: payload.endTime,
+})
+
+export const serviceOperationsSummary = defineQuery({
+	id: "serviceOperations",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceOperationsRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceOperationsSummaryQuery(serviceOperationsSummaryOptions(payload)),
+			serviceOperationsParams(payload, orgId),
+			{ rowSchema: CH.serviceOperationsSummaryRowSchema },
+		),
+})
+
+/** Rollback path, used when the rollup table is absent or the flag is off. */
+export const serviceOperationsSummaryRaw = defineQuery({
+	id: "serviceOperations",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceOperationsRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceOperationsSummaryRawQuery(serviceOperationsSummaryOptions(payload)),
+			serviceOperationsParams(payload, orgId),
+			{ rowSchema: CH.serviceOperationsSummaryRowSchema },
+		),
+})
+
+/**
+ * `spanNames` and `bucketSeconds` ride in the payload: both are derived from the
+ * summary rows and the requested window, so `compile` cannot see them. The
+ * rollup is minute-grain, which is why the caller rounds the bucket to a whole
+ * minute before passing it here.
+ */
+type ServiceOperationsTimeseriesInput = ServiceOperationsRequest & {
+	readonly spanNames: ReadonlyArray<string>
+	readonly bucketSeconds: number
+}
+
+const serviceOperationsTimeseriesOptions = (payload: ServiceOperationsTimeseriesInput) => ({
+	serviceName: payload.serviceName,
+	environments: payload.environments,
+	spanNames: payload.spanNames,
+	bucketSeconds: payload.bucketSeconds,
+})
+
+export const serviceOperationsTimeseries = defineQuery({
+	id: "serviceOperationsTimeseries",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceOperationsTimeseriesInput, orgId: string) =>
+		CH.compile(
+			CH.serviceOperationsTimeseriesQuery(serviceOperationsTimeseriesOptions(payload)),
+			{ ...serviceOperationsParams(payload, orgId), bucketSeconds: payload.bucketSeconds },
+			{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
+		),
+})
+
+export const serviceOperationsTimeseriesRaw = defineQuery({
+	id: "serviceOperationsTimeseries",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceOperationsTimeseriesInput, orgId: string) =>
+		CH.compile(
+			CH.serviceOperationsTimeseriesRawQuery(serviceOperationsTimeseriesOptions(payload)),
+			{ ...serviceOperationsParams(payload, orgId), bucketSeconds: payload.bucketSeconds },
+			{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
+		),
 })

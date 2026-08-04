@@ -3,6 +3,7 @@ import * as Integrations from "@maple/query-engine-integrations"
 import { defineQuery } from "@maple/query-engine/registry"
 import { Queries as Core } from "@maple/query-engine/registry"
 import type {
+	CloudflareInfraZoneBreakdownRequest,
 	HostInfraTimeseriesRequest,
 	CloudflareInfraZoneFacetsRequest,
 	CloudflareInfraZoneDetailRequest,
@@ -514,6 +515,90 @@ const hostInfraGaugeTimeseries = defineQuery({
 	},
 })
 
+// --- cloudflareInfraZoneBreakdown: three parallel, then one dependent -----
+
+const zoneBreakdownParams = (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) => ({
+	orgId,
+	serviceName: payload.serviceName,
+	startTime: payload.startTime,
+	endTime: payload.endTime,
+})
+
+const cloudflareInfraZoneBreakdownTotals = defineQuery({
+	id: "cloudflareInfraZoneBreakdownTotals",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) =>
+		CH.compile(
+			Integrations.cloudflareZoneBreakdownTotalsSQL(
+				payload.dimension,
+				toCloudflareFilters(payload),
+				payload.limit ?? 100,
+			),
+			zoneBreakdownParams(payload, orgId),
+			{ rowSchema: Integrations.cloudflareZoneBreakdownTotalsRowSchema },
+		),
+})
+
+/**
+ * Coverage is deliberately UNFILTERED: it answers "what did the poller collect
+ * here", which the UI needs in order to say "not collected yet" rather than "no
+ * traffic" for a window that predates the dataset. Do not thread filters in.
+ */
+const cloudflareInfraZoneBreakdownCoverage = defineQuery({
+	id: "cloudflareInfraZoneBreakdownCoverage",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) =>
+		CH.compile(
+			Integrations.cloudflareZoneBreakdownCoverageSQL(payload.dimension),
+			zoneBreakdownParams(payload, orgId),
+			{ rowSchema: Integrations.cloudflareZoneBreakdownCoverageRowSchema },
+		),
+})
+
+const cloudflareInfraZoneBreakdownZoneTotal = defineQuery({
+	id: "cloudflareInfraZoneBreakdownZoneTotal",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) =>
+		CH.compile(
+			Integrations.cloudflareZoneCountersSQL(toCloudflareFilters(payload)),
+			zoneBreakdownParams(payload, orgId),
+			{ rowSchema: Integrations.cloudflareZoneCountersRowSchema },
+		),
+})
+
+/**
+ * The chart runs AFTER the totals rather than beside them: totals are already
+ * ranked by requests, so they name the series worth plotting. Without that the
+ * grouping is unbounded — a zone taking scanner traffic returns a distinct path
+ * per probe, and the response grows to buckets x thousands of keys. One extra
+ * round trip over the same warm scan buys a payload that can't blow up.
+ *
+ * `topKeys` therefore rides in the PAYLOAD rather than being derived inside
+ * `compile`: it is the output of a previous query, which a def has no way to
+ * see. The caller must also skip this entirely when `topKeys` is empty.
+ */
+const cloudflareInfraZoneBreakdownTimeseries = defineQuery({
+	id: "cloudflareInfraZoneBreakdownTimeseries",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (
+		payload: CloudflareInfraZoneBreakdownRequest & { readonly topKeys: ReadonlyArray<string> },
+		orgId: string,
+	) =>
+		CH.compile(
+			Integrations.cloudflareZoneBreakdownTimeseriesSQL(
+				payload.dimension,
+				toCloudflareFilters(payload),
+				payload.topKeys,
+			),
+			{ ...zoneBreakdownParams(payload, orgId), bucketSeconds: payload.bucketSeconds },
+			{ rowSchema: Integrations.cloudflareZoneBreakdownTimeseriesRowSchema },
+		),
+})
+
 export const Queries = {
 	...Core,
 
@@ -698,4 +783,8 @@ export const Queries = {
 	cloudflareInfraZoneFacets,
 	hostInfraNetworkTimeseries,
 	hostInfraGaugeTimeseries,
+	cloudflareInfraZoneBreakdownTotals,
+	cloudflareInfraZoneBreakdownCoverage,
+	cloudflareInfraZoneBreakdownZoneTotal,
+	cloudflareInfraZoneBreakdownTimeseries,
 } as const
