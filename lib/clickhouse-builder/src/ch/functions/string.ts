@@ -1,6 +1,6 @@
 import { defineFn, compileFnCall } from "../define-fn"
 import { makeCond } from "../expr"
-import { compile, raw } from "../../sql/sql-fragment"
+import { compile, raw, str } from "../../sql/sql-fragment"
 import type { Condition, Expr } from "../expr"
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,23 @@ export function extract_(expr: Expr<string>, pattern: string): Expr<string> {
 
 export function replaceOne(haystack: Expr<string>, pattern: string, replacement: string): Expr<string> {
 	return compileFnCall<string>("replaceOne", haystack, pattern, replacement)
+}
+
+/**
+ * `match(haystack, pattern)` — RE2 regex test, returning UInt8.
+ *
+ * The numeric form is what you want when the result is a *value*: aggregating
+ * it (`max(match(…))`) or projecting it as a 0/1 flag. Use {@link matchCond}
+ * where a predicate is wanted, so the SQL reads as a condition rather than
+ * `match(…) = 1`.
+ */
+export function match_(haystack: Expr<string>, pattern: string): Expr<number> {
+	return compileFnCall<number>("match", haystack, pattern)
+}
+
+/** `match(haystack, pattern)` as a predicate — see {@link match_}. */
+export function matchCond(haystack: Expr<string>, pattern: string): Condition {
+	return makeCond(raw(`match(${compile(haystack.toFragment())}, ${compile(str(pattern))})`))
 }
 
 // ---------------------------------------------------------------------------

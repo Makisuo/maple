@@ -49,6 +49,16 @@ export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
 	return compileFnCall<ReadonlyArray<T>>("groupUniqArray", expr)
 }
 
+/** `argMin(value, orderBy)` — the `value` from the row with the smallest `orderBy`. */
+export function argMin<T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> {
+	return compileFnCall<T>("argMin", value, orderBy)
+}
+
+/** `argMax(value, orderBy)` — the `value` from the row with the largest `orderBy`. */
+export function argMax<T>(value: Expr<T>, orderBy: Expr<any>): Expr<T> {
+	return compileFnCall<T>("argMax", value, orderBy)
+}
+
 export function argMaxMerge<T>(expr: Expr<T>): Expr<T> {
 	return compileFnCall<T>("argMaxMerge", expr)
 }
@@ -60,4 +70,21 @@ export function argMaxMerge<T>(expr: Expr<T>): Expr<T> {
 export function quantile(q: number) {
 	return (expr: Expr<number>): Expr<number> =>
 		makeExpr<number>(raw(`quantile(${q})(${compile(expr.toFragment())})`))
+}
+
+/**
+ * `groupUniqArrayIf(maxSize)(value, condition)` — up to `maxSize` distinct
+ * values from the rows matching `condition`.
+ *
+ * The size is a *parameter* of the aggregate, not an argument, hence the
+ * curried shape: `groupUniqArrayIf(3)(x, cond)` → `groupUniqArrayIf(3)(x, cond)`.
+ */
+export function groupUniqArrayIf(maxSize: number) {
+	return <T>(expr: Expr<T>, cond: Condition): Expr<ReadonlyArray<T>> =>
+		makeExpr<ReadonlyArray<T>>(
+			raw(
+				`groupUniqArrayIf(${Math.round(maxSize)})(` +
+					`${compile(expr.toFragment())}, ${compile(cond.toFragment())})`,
+			),
+		)
 }

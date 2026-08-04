@@ -22,7 +22,7 @@ level (`$.Name`), joined columns sit under their alias (`$.s.Team`). Alias the m
 
 Available: `innerJoin`, `leftJoin`, `crossJoin` (which takes no ON callback).
 
-*(Backed by `docs/joins-and-subqueries.md > Joining a table`.)*
+_(Backed by `docs/joins-and-subqueries.md > Joining a table`.)_
 
 ### `leftJoin` nullability
 
@@ -72,33 +72,57 @@ The outer query inherits the inner query's tenant scope: a scoped subquery canno
 tenants' rows, so the outer stays `"org"` even with no WHERE of its own. See
 [Tenant scoping](./tenant-scoping.md).
 
-*(Backed by `docs/joins-and-subqueries.md > Subquery in FROM uses flat accessors` and
-`> A scoped subquery keeps the outer query scoped`.)*
+_(Backed by `docs/joins-and-subqueries.md > Subquery in FROM uses flat accessors` and
+`> A scoped subquery keeps the outer query scoped`.)_
 
-## Correlated subqueries
+## Subquery conditions
 
-These take **pre-compiled SQL strings**, because the inner query is compiled separately:
-
-- `exists(subquerySql)` → `EXISTS (…)`
-- `inSubquery(expr, subquerySql)` → `expr IN (…)`
+- `inSubquery(expr, subquery)` → `expr IN (…)`
+- `notInSubquery(expr, subquery)` → `expr NOT IN (…)`, i.e. an anti-join as a predicate
+- `exists(subquery)` → `EXISTS (…)`
 - `outerRef<T>(name)` — reference an outer column from inside the inner query, e.g.
   `outerRef("e.TraceId")`
 
+Pass the **query itself**. It is compiled where it is spliced, so its params, table names and
+column types stay checked:
+
 ```ts
-const inner = CH.compile(
-	CH.from(Events)
-		.select(($) => ({ n: $.Name }))
-		.where(($) => [$.OrgId.eq("org_123"), $.Name.eq(CH.outerRef("s.Name"))]),
-	{},
-)
+const excluded = CH.from(Events)
+	.select(($) => ({ n: $.Name }))
+	.where(($) => [$.OrgId.eq(param.string("orgId"))])
+
+const query = CH.from(Services, "s")
+	.select(($) => ({ team: $.Team }))
+	.where(($) => [$.OrgId.eq(param.string("orgId")), CH.notInSubquery($.Team, excluded)])
+
+const compiled = CH.compile(query, { orgId: "org_123" })
+// … WHERE OrgId = 'org_123' AND Team NOT IN (SELECT Name AS n FROM events WHERE OrgId = 'org_123')
+```
+
+Params inside the subquery resolve from the **outer** param set: placeholders survive the splice
+and are substituted in one pass at the end, so `orgId` above is passed once and reaches both.
+
+For correlated subqueries, `outerRef` names a column of the enclosing query:
+
+```ts
+const inner = CH.from(Events)
+	.select(($) => ({ n: $.Name }))
+	.where(($) => [$.OrgId.eq("org_123"), $.Name.eq(CH.outerRef("s.Name"))])
 
 CH.from(Services, "s")
 	.select(($) => ({ team: $.Team }))
-	.where(($) => [$.OrgId.eq("org_123"), CH.exists(inner.sql)])
+	.where(($) => [$.OrgId.eq("org_123"), CH.exists(inner)])
 ```
 
-Because the subquery arrives as a string, none of its structure — including its tenant scope —
-is visible to the outer compile. Filter explicitly on both sides.
+All three also accept a pre-compiled SQL string, for the rare case where that is all you have.
+
+> **A subquery never scopes its outer query.** `WHERE x IN (SELECT y FROM t WHERE OrgId = 'a')`
+> does not confine the outer read to org `a` — nothing stops org `b` holding the same `y`. The
+> outer query still needs its own tenant predicate, or a row source that is itself scoped. This
+> is true whether you pass a query or a string.
+
+> **`NOT IN` and NULLs.** If the subquery yields any NULL, `NOT IN` is never true. Project a
+> non-nullable column, or filter the NULLs out inside the subquery.
 
 ## Membership helpers
 

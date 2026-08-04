@@ -30,11 +30,11 @@ Unions compile with **`compileUnion`**, not `compile`.
 > branch pairing (say) a `Float64` with a `UInt64` can be rejected outright depending on server
 > settings. Cast explicitly in each branch when the types are not already identical.
 
-*(Backed by `docs/unions-and-ctes.md > unionAll with an outer ORDER BY`.)*
+_(Backed by `docs/unions-and-ctes.md > unionAll with an outer ORDER BY`.)_
 
 ## `fromUnion`
 
-To aggregate *across* a union, wrap it as the FROM source:
+To aggregate _across_ a union, wrap it as the FROM source:
 
 ```ts
 const outer = CH.fromUnion(combined, "branches")
@@ -51,44 +51,56 @@ in-progress hour, then re-aggregating over both.
 
 ## CTEs
 
-`withCTE(name, sql, options?)` prepends a `WITH` clause. The body is a **pre-compiled SQL
-string**, not a query object:
+`withCTE(name, query)` prepends a `WITH` clause. Pass the query itself — it is compiled at
+`compile` time and its tenant scope is **derived**, so nobody has to assert it:
 
 ```ts
 const Recent = CH.table("recent", { Name: T.string })
-const cteSql = "SELECT Name FROM events WHERE OrgId = 'org_123'"
+
+const cte = CH.from(Events)
+	.select(($) => ({ Name: $.Name }))
+	.where(($) => [$.OrgId.eq("org_123")])
 
 const query = CH.from(Recent)
-	.withCTE("recent", cteSql, { tenantScope: "org" })
+	.withCTE("recent", cte)
 	.select(($) => ({ name: $.Name }))
 
-// WITH recent AS ( SELECT Name FROM events WHERE OrgId = 'org_123' )
+const compiled = CH.compile(query, {})
+// WITH recent AS ( SELECT Name AS Name FROM events WHERE OrgId = 'org_123' )
 // SELECT Name AS name FROM recent
+compiled.tenantScope // "org" — read off the CTE, not declared
 ```
 
-To *read* a CTE, declare a table whose name matches it and start the query there. That is what
-gives you typed accessors over the CTE's columns — the builder cannot infer them from the
-string.
+To _read_ a CTE, declare a table whose name matches it and start the query there. That is what
+gives you typed accessors over the CTE's columns.
 
-*(Backed by `docs/unions-and-ctes.md > Selecting from a CTE`.)*
+_(Backed by `docs/unions-and-ctes.md > Selecting from a CTE`.)_
 
-### Declare the CTE's scope
+### The string form declares its own scope
+
+`withCTE(name, sql, { tenantScope })` takes a pre-compiled body, for the rare case where that is
+all you have:
 
 ```ts
-.withCTE("recent", cteSql, { tenantScope: "org" })
+const cteSql = "SELECT Name FROM events WHERE OrgId = 'org_123'"
+
+CH.from(CH.table("recent", { Name: T.string }))
+	.withCTE("recent", cteSql, { tenantScope: "org" })
+	.select(($) => ({ name: $.Name }))
 ```
 
-The body is opaque, so the builder cannot see the `OrgId` filter inside it. If the CTE is the
-query's row source and you omit `tenantScope`, the compiled query reads as `"cross-org"` even
-though its SQL is perfectly well filtered.
+The body is opaque here, so the builder cannot see the `OrgId` filter inside it. If the CTE is
+the query's row source and you omit `tenantScope`, the compiled query reads as `"cross-org"`
+even though its SQL is perfectly well filtered.
 
 Two caveats worth internalising:
 
 - The declaration is an **assertion you are making**, not something that gets verified. Passing
-  `tenantScope: "org"` for a CTE that does not filter by tenant defeats the mechanism.
+  `tenantScope: "org"` for a CTE that does not filter by tenant defeats the mechanism. This is
+  the reason to prefer the query form.
 - It only takes effect when the query's `FROM` **names that CTE**. A CTE attached to a query
   that reads from a different table contributes nothing to the scope.
 
-*(Backed by `docs/unions-and-ctes.md > A CTE needs its tenantScope declared`.)*
+_(Backed by `docs/unions-and-ctes.md > A CTE needs its tenantScope declared`.)_
 
 See [Tenant scoping](./tenant-scoping.md) for what `tenantScope` is for.
