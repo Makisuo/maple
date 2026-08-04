@@ -293,6 +293,7 @@ export {
 export {
 	serviceMapEdgesRollupSQL,
 	serviceMapEdgesExistingHoursSQL,
+	serviceMapResolutionsExistingHoursSQL,
 	serviceMapResolutionsRollupSQL,
 	type ServiceMapEdgesRollupParams,
 	type ServiceMapEdgesHourlyOutput,

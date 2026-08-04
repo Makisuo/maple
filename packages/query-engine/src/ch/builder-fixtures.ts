@@ -474,6 +474,12 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		compile: () => CH.serviceMapEdgesExistingHoursSQL(window),
 	},
 	{
+		module: "service-map-rollup",
+		name: "serviceMapResolutionsExistingHoursSQL",
+		label: "default",
+		compile: () => CH.serviceMapResolutionsExistingHoursSQL(window),
+	},
+	{
 		// Org-wide: hourly MV branch UNION ALL two partial-hour live joins.
 		module: "service-map",
 		name: "serviceDependenciesSQL",

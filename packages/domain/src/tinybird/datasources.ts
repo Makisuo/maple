@@ -413,7 +413,12 @@ export type ServiceMapChildrenRow = InferRow<typeof serviceMapChildren>
 export const serviceMapEdgesHourly = defineDatasource("service_map_edges_hourly", {
 	description:
 		"Pre-aggregated hourly service-to-service edges for the service map. Uses AggregatingMergeTree for incremental aggregation. Populated by the scheduled ServiceMapRollupService rollup (one write per completed hour).",
-	jsonPaths: false,
+	// jsonPaths enabled: this is ingested directly via POST /v0/events from
+	// ServiceMapRollupService, not by a materialized view. Declaring
+	// `jsonPaths: false` made Tinybird reject every write with "Data Source
+	// needs to have JSONPaths defined", so the table stopped filling — and
+	// because an hour is sealed only once its edge rows land, the rollup then
+	// re-ran all six lookback hours for every org on every tick, forever.
 	schema: {
 		OrgId: t.string().lowCardinality(),
 		Hour: t.dateTime(),
@@ -609,7 +614,8 @@ export type ServiceExternalEdgesHourlyRow = InferRow<typeof serviceExternalEdges
 export const serviceAddressResolutionsHourly = defineDatasource("service_address_resolutions_hourly", {
 	description:
 		"Resolved (sourceService, parent.server.address) → resolved targetService facts emitted by the ServiceMapRollupService rollup. Used to anti-join internal-service overlap out of the external-edges query.",
-	jsonPaths: false,
+	// jsonPaths enabled — same reason as `service_map_edges_hourly`: the rollup
+	// writes these rows directly via POST /v0/events, which requires them.
 	schema: {
 		OrgId: t.string().lowCardinality(),
 		Hour: t.dateTime(),

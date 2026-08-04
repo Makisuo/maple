@@ -586,29 +586,16 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 		}),
 	)
 
-	it.effect("does not select text indexes when the Tinybird gateway rejects setting overrides", () =>
+	it.effect("answers Tinybird gateway capabilities from the deployed schema, not a probe", () =>
 		Effect.gen(function* () {
 			const sqls: string[] = []
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
 					sql: async (sql) => {
 						sqls.push(sql)
-						if (sql.includes("SELECT version()")) return { data: [{ version: "26.2.1" }] }
-						if (sql.includes("system.data_skipping_indices")) {
-							return {
-								data: [
-									{
-										table: "logs",
-										name: "idx_lower_body_text",
-										type: "text",
-										expression: "lower(Body)",
-									},
-								],
-							}
-						}
-						if (sql.includes("system.settings")) {
-							return { data: [{ name: "enable_full_text_index", value: "0" }] }
-						}
+						// A probe here would be a bug: Tinybird answers `403` for
+						// `system.columns` / `system.data_skipping_indices`, so any
+						// live inspection collapses to the conservative plan.
 						return { data: [] }
 					},
 					insert: async () => {},
@@ -627,16 +614,20 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 					unsafeCompiledQuery<{ readonly c: number }>({
 						reason: "test-fixture",
 						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'tokenbf' FORMAT JSON`,
 						tenantScope: "org",
 					}),
 				{ context: "tinybird-gateway-capabilities" },
 			)
 
+			// The tokenbf prefilter is selected because `logs.idx_lower_body` is in
+			// the deployed schema — the whole point of resolving statically.
 			const executed = sqls.find((sql) => sql.includes("FROM logs WHERE"))
 			assert.isDefined(executed)
-			assert.include(executed!, "'scan' = 'scan'")
+			assert.include(executed!, "'tokenbf' = 'tokenbf'")
+			// Managed backends reject inline setting overrides, so no text plan.
 			assert.notInclude(executed!, "enable_full_text_index")
+			assert.isEmpty(sqls.filter((sql) => sql.includes("system.")))
 		}),
 	)
 

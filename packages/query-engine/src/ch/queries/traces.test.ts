@@ -453,4 +453,25 @@ describe("spanSearchQuery", () => {
 		expect(sql).not.toContain("FROM trace_detail_spans")
 		expect(sql).toContain("SpanName = 'GET /users'")
 	})
+
+	it("two-stages the raw-traces path so the attribute Maps are read after a cutoff", () => {
+		const q = spanSearchQuery({ spanName: "GET /users", limit: 20, offset: 5 })
+		const { sql } = compileCH(q, baseParams)
+
+		// `traces` is sorted (OrgId, ServiceName, SpanName, toDateTime(Timestamp)),
+		// so `ORDER BY Timestamp DESC` cannot read in order — single-stage meant
+		// materializing SpanAttributes and ResourceAttributes for every matching
+		// row in range before LIMIT discarded all but N.
+		expect(sql).toContain("Timestamp >= (SELECT min(ts) FROM (")
+		// The cutoff must cover every row the outer query can examine.
+		expect(sql).toContain("LIMIT 25")
+		expect(sql).toContain("SpanAttributes AS spanAttributes")
+	})
+
+	it("does not add a cutoff on the trace-detail path", () => {
+		const q = spanSearchQuery({ traceId: "trace_123", limit: 50 })
+		const { sql } = compileCH(q, baseParams)
+
+		expect(sql).not.toContain("SELECT min(ts)")
+	})
 })
