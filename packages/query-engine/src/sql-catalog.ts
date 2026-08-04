@@ -327,6 +327,9 @@ export interface CatalogEntry {
 	/** Present when the SQL came from a compiled DSL query. Absent for raw-SQL
 	 *  paths. `decodeRows` is what the 64-bit-int assertion exercises. */
 	readonly compiled?: CompiledQuery<unknown>
+	/** Sample values for output columns the row schema narrows beyond their
+	 *  ClickHouse type — see `BuilderFixture.sampleValues`. */
+	readonly sampleValues?: Readonly<Record<string, unknown>>
 }
 
 /**
@@ -830,6 +833,7 @@ export function collectBuilderCatalog(): ReadonlyArray<CatalogEntry> {
 			sql: compiled.sql,
 			fingerprint: fingerprintSql(compiled.sql),
 			compiled,
+			...(fixture.sampleValues ? { sampleValues: fixture.sampleValues } : {}),
 		})
 	}
 	return entries

@@ -26,6 +26,23 @@ export interface BuilderFixture {
 	/** Distinguishes fixtures for one builder; appears in failure output. */
 	readonly label: string
 	readonly compile: () => CompiledQuery<unknown>
+	/**
+	 * Sample values for output columns whose row schema narrows what the ClickHouse
+	 * column type allows.
+	 *
+	 * The E2E sweep decodes a synthetic row to prove the schema accepts both 64-bit
+	 * wire shapes, and it builds that row from the DESCRIBEd column *types* alone —
+	 * so every `String` column gets `""`. A schema that legitimately narrows a
+	 * String (a literal union over a column the SQL itself guarantees, like
+	 * `serviceExternalEdges.targetType`) rejects `""` and fails a check that is
+	 * about integer quoting, with a message telling the author to reach for
+	 * `CH.CHNumber` on a string field.
+	 *
+	 * The narrowing is worth keeping — `service-map.test.ts` asserts an unexpected
+	 * `targetType` is rejected — so the fixture names the value instead. Keyed by
+	 * output column name.
+	 */
+	readonly sampleValues?: Readonly<Record<string, unknown>>
 }
 
 const ORG_ID = "org_sql_catalog"
@@ -439,6 +456,9 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		name: "serviceExternalEdgesSQL",
 		label: "default",
 		compile: () => CH.serviceExternalEdgesSQL({ serviceName: "web" }, window),
+		// TargetType is a String column, but both branches of the UNION emit only
+		// http/messaging/rpc, and the row schema holds that line.
+		sampleValues: { targetType: "http" },
 	},
 	{
 		module: "service-map",
@@ -446,6 +466,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		label: "env-scoped",
 		compile: () =>
 			CH.serviceExternalEdgesSQL({ serviceName: "web", deploymentEnv: "production" }, window),
+		sampleValues: { targetType: "http" },
 	},
 
 	// ----- activity: the only deliberately cross-org builders in the product.
