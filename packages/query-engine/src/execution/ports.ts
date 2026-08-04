@@ -144,6 +144,24 @@ export interface WarehouseQueryServiceShape {
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
 	) => Effect.Effect<Option.Option<T>, WarehouseSqlError | WarehouseValidationError>
+	/**
+	 * Resolve this tenant's route and capabilities once, so a fan-out that
+	 * follows finds them memoized instead of each branch deriving them itself.
+	 *
+	 * Exists because route resolution reads per-org ClickHouse config from
+	 * Postgres, and that read has been measured at ~2.9s cold. A fan-out that
+	 * starts every branch at once has every branch miss the in-isolate memo:
+	 * one prod trace of a single dashboard panel resolved the identical config
+	 * twice concurrently at 2.90s each, while the two warehouse queries the
+	 * fan-out existed to run took 428ms and 1179ms. The lookup cost more than
+	 * double the work it was preparing for.
+	 *
+	 * Cheap and idempotent on a warm memo, so callers may invoke it
+	 * unconditionally. Errors are swallowed: this is a warm-up, and the real
+	 * query behind it reports failures with proper context. Never let this
+	 * change the error semantics of the path it precedes.
+	 */
+	readonly warmRoute: (tenant: ExecutionTenant, options?: SqlQueryOptions) => Effect.Effect<void>
 	readonly ingest: <T>(
 		tenant: ExecutionTenant,
 		datasource: string,

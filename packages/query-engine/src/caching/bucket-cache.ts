@@ -382,6 +382,25 @@ export interface BucketCacheServiceShape {
 	readonly getOrComputeBuckets: <E, R>(
 		request: BucketCacheRequest,
 		computeRange: (range: TimeRange) => Effect.Effect<ReadonlyArray<TimeseriesPoint>, E, R>,
+		/**
+		 * Optional warm-up run once before a multi-range fill fans out.
+		 *
+		 * Each `computeRange` branch resolves the tenant's warehouse route on its
+		 * own, and that resolution reads per-org config from Postgres (~2.9s
+		 * cold). Started together, every branch misses the in-isolate memo and
+		 * pays it: one prod trace resolved the identical config twice
+		 * concurrently at 2.90s each while the queries being prepared for took
+		 * 428ms and 1179ms. Running this first collapses that to one lookup.
+		 *
+		 * Deliberately NOT part of `BucketCacheRequest` — that object is
+		 * canonicalized into the cache-key fingerprint, and an Effect in it would
+		 * poison the key.
+		 *
+		 * Skipped when the fill is 0 or 1 ranges: with none there is nothing to
+		 * prepare, and with one the warm-up would move the same cost rather than
+		 * remove it, while adding a sequential step to a pure cache hit.
+		 */
+		prepare?: Effect.Effect<void>,
 	) => Effect.Effect<BucketCacheOutcome, E, R>
 }
 
@@ -431,6 +450,7 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 			const getOrComputeBuckets = Effect.fn("BucketCacheService.getOrComputeBuckets")(function* <E, R>(
 				request: BucketCacheRequest,
 				computeRange: (range: TimeRange) => Effect.Effect<ReadonlyArray<TimeseriesPoint>, E, R>,
+				prepare?: Effect.Effect<void>,
 			) {
 				const bucketMs = request.bucketSeconds * 1000
 				const segmentMs = bucketMs * segmentBucketCount
@@ -536,6 +556,12 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 						fluxBoundaryMs,
 					)
 					const fillRanges = coalesceMissingRanges(missing)
+					// One warm-up before the fan-out, not one route resolution per
+					// branch. See `prepare` on BucketCacheServiceShape for the trace
+					// this came from. Only worth it above one range — see the doc there.
+					if (prepare !== undefined && fillRanges.length > 1) {
+						yield* prepare
+					}
 					const freshByRange = yield* Effect.forEach(
 						fillRanges,
 						(item) => computeRange(item.range),

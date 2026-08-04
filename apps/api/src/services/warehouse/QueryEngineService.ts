@@ -196,6 +196,14 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 								response.result.kind === "timeseries" ? response.result.data : [],
 							),
 						),
+					// Resolve this org's warehouse route once before the fill fans
+					// out. Without it each branch resolves it independently and they
+					// all miss the in-isolate memo, because they start together:
+					// measured in prod as the same config read running twice
+					// concurrently at 2.90s each, against warehouse queries of 428ms
+					// and 1179ms. The bucket cache only runs this on a >1-range fill,
+					// so cache hits and single-range fills are unaffected.
+					warehouse.warmRoute(tenant),
 				)
 
 				yield* Metric.update(QueryEngineMetrics.bucketCacheBucketsHit, outcome.bucketsHit)
