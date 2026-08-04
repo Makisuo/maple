@@ -77,17 +77,18 @@ describe("formatWarehouseDateTime", () => {
 
 describe("computeBucketSeconds", () => {
 	// Canonical windows — the single source of truth shared by the web app and the
-	// engine. Short windows use the sub-5-minute rungs so charts stay dense.
+	// engine. The ~100-point default keeps charts dense enough for manual
+	// investigation on every window.
 	const cases: Array<[label: string, rangeSeconds: number, expected: number]> = [
 		["5 min", 5 * 60, 60],
 		["15 min", 15 * 60, 60],
 		["30 min", 30 * 60, 60],
-		["1 hour", 60 * 60, 120],
-		["6 hours", 6 * 3600, 900],
-		["12 hours", 12 * 3600, 1800],
-		["24 hours", 24 * 3600, 3600],
-		["7 days", 7 * 86400, 14400],
-		["30 days", 30 * 86400, 86400],
+		["1 hour", 60 * 60, 60],
+		["6 hours", 6 * 3600, 300],
+		["12 hours", 12 * 3600, 300],
+		["24 hours", 24 * 3600, 900],
+		["7 days", 7 * 86400, 3600],
+		["30 days", 30 * 86400, 14400],
 	]
 
 	for (const [label, rangeSeconds, expected] of cases) {
