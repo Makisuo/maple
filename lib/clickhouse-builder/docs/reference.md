@@ -8,22 +8,22 @@ Everything on this page is exported from the root entry point
 Some ClickHouse functions collide with JavaScript reserved words or globals. The source defines
 those with a trailing underscore, and the root barrel renames **some but not all** of them:
 
-| Root barrel name | Also on `/expr` as | Note |
-| --- | --- | --- |
-| `min` | `min_` | renamed |
-| `max` | `max_` | renamed |
-| `any` | `any_` | renamed |
-| `toString` | `toString_` | renamed |
-| `position` | `position_` | renamed |
-| `left` | `left_` | renamed |
-| `length` | `length_` | renamed |
-| `extract` | `extract_` | renamed |
-| `least` | `least_` | renamed |
-| `greatest` | `greatest_` | renamed |
-| `if_` | `if_` | **not** renamed |
-| `lower_` | `lower_` | **not** renamed |
-| `round_` | `round_` | **not** renamed |
-| `in_` / `notIn` | — | `Expr` methods; `in` is reserved |
+| Root barrel name | Also on `/expr` as | Note                             |
+| ---------------- | ------------------ | -------------------------------- |
+| `min`            | `min_`             | renamed                          |
+| `max`            | `max_`             | renamed                          |
+| `any`            | `any_`             | renamed                          |
+| `toString`       | `toString_`        | renamed                          |
+| `position`       | `position_`        | renamed                          |
+| `left`           | `left_`            | renamed                          |
+| `length`         | `length_`          | renamed                          |
+| `extract`        | `extract_`         | renamed                          |
+| `least`          | `least_`           | renamed                          |
+| `greatest`       | `greatest_`        | renamed                          |
+| `if_`            | `if_`              | **not** renamed                  |
+| `lower_`         | `lower_`           | **not** renamed                  |
+| `round_`         | `round_`           | **not** renamed                  |
+| `in_` / `notIn`  | —                  | `Expr` methods; `in` is reserved |
 
 There is no rule to infer here — check the table. Importing the kitchen-sink namespace
 (`import * as CH from "@maple-dev/clickhouse-builder/expr"`) gives you the raw names uniformly,
@@ -33,13 +33,13 @@ which some codebases prefer for exactly this reason.
 
 The root barrel is curated. These are exported by the package but not from it:
 
-| Symbol | Subpath |
-| --- | --- |
-| `uint16`, `uint32`, `int32`, `bool` | `/types` |
-| `not`, `notInList`, `dynamicColumn` | `/expr` |
-| `TENANT_COLUMN`, `makeColumnRef`, `aliased`, `toFragment` | `/expr` |
-| `raw`, `str`, `ident`, `int`, `join`, `as_`, `when`, `compile`, `escapeClickHouseString` | `/sql` |
-| `SqlQuery`, `compileQuery` | `/sql` |
+| Symbol                                                                                   | Subpath  |
+| ---------------------------------------------------------------------------------------- | -------- |
+| `uint16`, `uint32`, `int32`, `bool`                                                      | `/types` |
+| `not`, `notInList`, `dynamicColumn`                                                      | `/expr`  |
+| `TENANT_COLUMN`, `makeColumnRef`, `aliased`, `toFragment`                                | `/expr`  |
+| `raw`, `str`, `ident`, `int`, `join`, `as_`, `when`, `compile`, `escapeClickHouseString` | `/sql`   |
+| `SqlQuery`, `compileQuery`                                                               | `/sql`   |
 
 Note `/sql` exports a `compile` (fragment → string) distinct from the root `compile`
 (query → `CompiledQuery`), and a `when` distinct from the root `when` (optional conditions).
@@ -50,39 +50,39 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 
 ### Query construction
 
-| Export | Signature |
-| --- | --- |
-| `table` | `(name, columns) => Table` |
-| `from` | `(table, alias?) => CHQuery` |
-| `fromQuery` | `(query, alias) => CHQuery` |
-| `fromUnion` | `(union, alias) => CHQuery` |
-| `unionAll` | `(...queries) => CHUnionQuery` |
+| Export      | Signature                      |
+| ----------- | ------------------------------ |
+| `table`     | `(name, columns) => Table`     |
+| `from`      | `(table, alias?) => CHQuery`   |
+| `fromQuery` | `(query, alias) => CHQuery`    |
+| `fromUnion` | `(union, alias) => CHQuery`    |
+| `unionAll`  | `(...queries) => CHUnionQuery` |
 
 ### `CHQuery` methods
 
-| Method | Notes |
-| --- | --- |
-| `select(...names)` / `select(fn)` | Required before compiling |
-| `where(fn)` | Returns `Array<Condition \| undefined>`; AND-joined |
-| `groupBy(...outputKeys)` | Takes select aliases, not column names |
-| `orderBy(...[col, dir])` | **Tuples**, not two strings |
-| `limit(n)` / `offset(n)` | Rounded before emission |
-| `format(fmt)` | `"JSON"` \| `"JSONEachRow"` |
-| `innerJoin` / `leftJoin` / `crossJoin` | `(table, alias, on?)` |
-| `innerJoinQuery` / `leftJoinQuery` / `crossJoinQuery` | `(query, alias, on?)` |
-| `withCTE(name, sql, options?)` | `options.tenantScope` |
-| `routing("ingest")` | Metadata only |
-| `crossOrg()` | Forces `tenantScope: "cross-org"` |
+| Method                                                | Notes                                               |
+| ----------------------------------------------------- | --------------------------------------------------- |
+| `select(...names)` / `select(fn)`                     | Required before compiling                           |
+| `where(fn)`                                           | Returns `Array<Condition \| undefined>`; AND-joined |
+| `groupBy(...outputKeys)`                              | Takes select aliases, not column names              |
+| `orderBy(...[col, dir])`                              | **Tuples**, not two strings                         |
+| `limit(n)` / `offset(n)`                              | Rounded before emission                             |
+| `format(fmt)`                                         | `"JSON"` \| `"JSONEachRow"`                         |
+| `innerJoin` / `leftJoin` / `crossJoin`                | `(table, alias, on?)`                               |
+| `innerJoinQuery` / `leftJoinQuery` / `crossJoinQuery` | `(query, alias, on?)`                               |
+| `withCTE(name, sql, options?)`                        | `options.tenantScope`                               |
+| `routing("ingest")`                                   | Metadata only                                       |
+| `crossOrg()`                                          | Forces `tenantScope: "cross-org"`                   |
 
 `CHUnionQuery` offers only `orderBy`, `limit`, `offset`, `format`.
 
 ### Compilation
 
-| Export | Signature |
-| --- | --- |
-| `compile` / `compileCH` | `(query, params, options?) => CompiledQuery<Output>` |
-| `compileUnion` | `(union, params, options?) => CompiledQuery<Output>` |
-| `unsafeCompiledQuery` | `({ sql, tenantScope, rowSchema?, routing? }) => CompiledQuery` |
+| Export                  | Signature                                                       |
+| ----------------------- | --------------------------------------------------------------- |
+| `compile` / `compileCH` | `(query, params, options?) => CompiledQuery<Output>`            |
+| `compileUnion`          | `(union, params, options?) => CompiledQuery<Output>`            |
+| `unsafeCompiledQuery`   | `({ sql, tenantScope, reason, note, rowSchema?, routing? }) => CompiledQuery` |
 
 ### Params
 
@@ -92,18 +92,18 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 
 ## Expressions
 
-| Export | Purpose |
-| --- | --- |
-| `lit(value)` | Literal `Expr` from a `string` or `number` |
-| `rawExpr<T>(sql)` | Unescaped `Expr` from SQL text |
-| `rawCond(sql)` | Unescaped `Condition` from SQL text |
-| `when(value, fn)` | `Condition \| undefined`; skips `undefined`/`null`/`false` |
-| `whenTrue(flag, fn)` | Boolean-gated variant |
-| `inList(expr, values)` | `expr IN ('a', 'b')` |
-| `inExprList(expr, exprs)` | Same for expression lists |
-| `exists(sql)` | `EXISTS (…)` from pre-compiled SQL |
-| `inSubquery(expr, sql)` | `expr IN (…)` from pre-compiled SQL |
-| `outerRef<T>(name)` | Reference an outer column in a correlated subquery |
+| Export                    | Purpose                                                    |
+| ------------------------- | ---------------------------------------------------------- |
+| `lit(value)`              | Literal `Expr` from a `string` or `number`                 |
+| `rawExpr<T>(sql)`         | Unescaped `Expr` from SQL text                             |
+| `rawCond(sql)`            | Unescaped `Condition` from SQL text                        |
+| `when(value, fn)`         | `Condition \| undefined`; skips `undefined`/`null`/`false` |
+| `whenTrue(flag, fn)`      | Boolean-gated variant                                      |
+| `inList(expr, values)`    | `expr IN ('a', 'b')`                                       |
+| `inExprList(expr, exprs)` | Same for expression lists                                  |
+| `exists(sql)`             | `EXISTS (…)` from pre-compiled SQL                         |
+| `inSubquery(expr, sql)`   | `expr IN (…)` from pre-compiled SQL                        |
+| `outerRef<T>(name)`       | Reference an outer column in a correlated subquery         |
 
 `Expr<T>` methods: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in_`, `notIn`, `like`, `notLike`,
 `ilike` (string-only), and `add`, `sub`, `mul`, `div` (number-only, **no parentheses**).
@@ -114,14 +114,14 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 
 ## Extensibility
 
-| Export | Purpose |
-| --- | --- |
-| `defineFn<Args, R>(name)` | Declare a standard `fn(args…)` returning `Expr<R>` |
-| `defineCondFn<Args>(name)` | Same, returning `Condition` |
-| `compileFnCall<R>(name, ...args)` | Variadic/generic wrapper |
-| `compileFnCallCond(name, ...args)` | Same, returning `Condition` |
-| `makeExpr<T>(fragment)` | Build an `Expr` from a fragment |
-| `makeCond(fragment)` | Build a `Condition` from a fragment |
+| Export                             | Purpose                                            |
+| ---------------------------------- | -------------------------------------------------- |
+| `defineFn<Args, R>(name)`          | Declare a standard `fn(args…)` returning `Expr<R>` |
+| `defineCondFn<Args>(name)`         | Same, returning `Condition`                        |
+| `compileFnCall<R>(name, ...args)`  | Variadic/generic wrapper                           |
+| `compileFnCallCond(name, ...args)` | Same, returning `Condition`                        |
+| `makeExpr<T>(fragment)`            | Build an `Expr` from a fragment                    |
+| `makeCond(fragment)`               | Build a `Condition` from a fragment                |
 
 ---
 
@@ -131,7 +131,7 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 
 `count()`, `countIf(cond)`, `avg(e)`, `sum(e)`, `min(e)`, `max(e)`, `any(e)`, `uniq(e)`,
 `sumIf(e, cond)`, `avgIf(e, cond)`, `minIf(e, cond)`, `maxIf(e, cond)`, `anyIf(e, cond)`,
-`groupUniqArray(e)`, `argMaxMerge(e)`, `quantile(q)(e)` *(curried)*.
+`groupUniqArray(e)`, `argMaxMerge(e)`, `quantile(q)(e)` _(curried)_.
 
 `min`/`max` return `Expr<NonNullable<T>>`; `groupUniqArray` returns `Expr<ReadonlyArray<T>>`.
 
@@ -178,8 +178,8 @@ Note `/sql` exports a `compile` (fragment → string) distinct from the root `co
 ### Window
 
 `over(expr, spec)`, `windowSpec({ partitionBy?, orderBy?, frame? })`,
-`rowsBetween(start, end)`, `lagInFrame(expr, offset, defaultValue)` *(all three arguments
-required)*, and the frame bounds `currentRow`, `unboundedPreceding`, `unboundedFollowing`,
+`rowsBetween(start, end)`, `lagInFrame(expr, offset, defaultValue)` _(all three arguments
+required)_, and the frame bounds `currentRow`, `unboundedPreceding`, `unboundedFollowing`,
 `preceding(n)`, `following(n)`.
 
 ```ts
@@ -215,11 +215,11 @@ Both are Effect `Schema.TaggedErrorClass`es, catchable by tag.
 Tag `"@maple-dev/clickhouse-builder/QueryBuilderError"`. Thrown **synchronously** during
 compilation.
 
-| `code` | Cause |
-| --- | --- |
-| `SelectRequired` | Compiling a query with no `select()` |
-| `UnresolvedParam` | Calling a comparison on a param before compilation resolved it |
-| `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple |
+| `code`               | Cause                                                          |
+| -------------------- | -------------------------------------------------------------- |
+| `SelectRequired`     | Compiling a query with no `select()`                           |
+| `UnresolvedParam`    | Calling a comparison on a param before compilation resolved it |
+| `InvalidOrderBySpec` | An `orderBy` entry that is not a `[column, direction]` tuple   |
 
 ### `CompiledQueryDecodeError`
 

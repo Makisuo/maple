@@ -171,6 +171,7 @@ export {
 	compileCH as compile,
 	compileUnion,
 	unsafeCompiledQuery,
+	type RawSqlReason,
 	type CompiledQuery,
 	type CompiledQueryRowSchema,
 	type TenantScope,

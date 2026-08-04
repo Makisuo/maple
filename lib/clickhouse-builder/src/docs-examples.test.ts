@@ -657,6 +657,8 @@ describe("docs/extending.md", () => {
 		Effect.gen(function* () {
 			const compiled = CH.unsafeCompiledQuery<{ readonly name: string }>({
 				sql: "SELECT Name AS name FROM events WHERE OrgId = 'org_123'",
+				reason: "user-authored-sql",
+				note: "The SQL came from a user; there is no AST to build.",
 				// Cannot be inferred from a raw string — the caller must assert it.
 				tenantScope: "org",
 				rowSchema: Schema.Struct({ name: Schema.String }),

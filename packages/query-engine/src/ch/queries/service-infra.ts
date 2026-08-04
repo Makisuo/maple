@@ -84,6 +84,8 @@ export function serviceWorkloadsSQL(
 		// in for a scoped call whose service list was empty.
 		return unsafeCompiledQuery({
 			sql: EMPTY_WORKLOADS_SQL,
+			reason: "empty-result-stub",
+			note: "SELECT of literals with WHERE 0 and no FROM; the builder always emits a FROM, and naming a table this reads no rows from would be worse.",
 			tenantScope: "org",
 			rowSchema: ServiceWorkloadsOutputSchema,
 		})
