@@ -2,8 +2,11 @@
  * Maple's seam onto `@maple/llm` — the vendored, Effect-native LLM core.
  *
  * Everything Maple-specific about talking to a model lives here, never inside `lib/llm`
- * (see `lib/llm/MAPLE.md`): the layer wiring, the Workers AI binding shim, model selection
+ * (see `lib/llm/MAPLE.md`): the layer wiring, the Workers AI binding shim, provider/model selection
  * from env, and the mapping from the vendored `LLMError` onto a Maple domain error.
+ *
+ * Two provider paths stay live at once — OpenRouter (default) and Cloudflare Workers AI — and
+ * `MAPLE_LLM_PROVIDER` picks between them per deploy without a code change.
  *
  * Layer shape mirrors `CloudflareApi.ts`: `LLMClient.layer <- RequestExecutor.layer <- HttpClient`.
  * `RequestExecutor` already owns retry, backoff and secret redaction, so the HTTP layer underneath
@@ -15,6 +18,7 @@
  */
 import { LlmCallError } from "@maple/domain/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
+import * as OpenRouter from "@maple/llm/providers/openrouter"
 import { LLMClient, RequestExecutor } from "@maple/llm/route"
 import { isContextOverflowFailure } from "@maple/llm"
 import type { LLMClientService, LLMError, Model } from "@maple/llm"
@@ -23,11 +27,25 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { layerWorkersAi } from "./WorkersAiHttpClient"
 
 /**
- * Default triage/chat model. Carried over unchanged from the pre-`@maple/llm` chat backend
- * (`cloudflare/@cf/moonshotai/kimi-k2.6`, minus that runtime's `provider/` prefix), so the
+ * Default triage/chat model on OpenRouter — the provider agents run on by default.
+ */
+export const DEFAULT_OPENROUTER_MODEL = "openai/gpt-5.6-luna"
+
+/**
+ * Default triage/chat model on Workers AI. Carried over unchanged from the pre-`@maple/llm` chat
+ * backend (`cloudflare/@cf/moonshotai/kimi-k2.6`, minus that runtime's `provider/` prefix), so the
  * backend swap did not silently change the model at the same time.
  */
 export const DEFAULT_WORKERS_AI_MODEL = "@cf/moonshotai/kimi-k2.6"
+
+/**
+ * The two provider paths agents can run on. Both stay wired at all times — flipping between them
+ * is one env var (`MAPLE_LLM_PROVIDER`) and no redeploy of code, because `layerLlm` builds the
+ * same stack either way (see below).
+ */
+export type LlmProvider = "openrouter" | "workers-ai"
+
+export const DEFAULT_LLM_PROVIDER: LlmProvider = "openrouter"
 
 /**
  * Workers AI has no per-request API key when reached through the `AI` binding, but the vendored
@@ -42,7 +60,10 @@ export interface LlmEnv extends Record<string, unknown> {
 	readonly AI?: unknown
 	readonly CLOUDFLARE_ACCOUNT_ID?: string
 	readonly CLOUDFLARE_API_KEY?: string
-	readonly MAPLE_TRIAGE_MODEL?: string
+	readonly MAPLE_LLM_PROVIDER?: string
+	readonly MAPLE_TRIAGE_MODEL_OPENROUTER?: string
+	readonly MAPLE_TRIAGE_MODEL_WORKERS_AI?: string
+	readonly OPENROUTER_API_KEY?: string
 }
 
 const readString = (env: LlmEnv, key: keyof LlmEnv): string | undefined => {
@@ -50,16 +71,34 @@ const readString = (env: LlmEnv, key: keyof LlmEnv): string | undefined => {
 	return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined
 }
 
-/** Resolve the model the triage agent should run on, from env, with the Workers AI default. */
+/**
+ * Which provider agents run on. Model overrides are deliberately provider-scoped: a model id is
+ * only meaningful to one provider, so a single shared `MAPLE_TRIAGE_MODEL` would send `@cf/…` to
+ * OpenRouter the moment someone flipped the switch. With one var per provider, both can stay set
+ * and the flip is genuinely one variable.
+ */
+export const resolveLlmProvider = (env: LlmEnv): LlmProvider =>
+	readString(env, "MAPLE_LLM_PROVIDER")?.toLowerCase() === "workers-ai"
+		? "workers-ai"
+		: DEFAULT_LLM_PROVIDER
+
+/** Resolve the model the triage/chat agents should run on, from env. */
 export const resolveTriageModel = (env: LlmEnv): Model =>
-	CloudflareWorkersAI.configure({
-		accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
-		apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
-	}).model(readString(env, "MAPLE_TRIAGE_MODEL") ?? DEFAULT_WORKERS_AI_MODEL)
+	resolveLlmProvider(env) === "workers-ai"
+		? CloudflareWorkersAI.configure({
+				accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
+				apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
+			}).model(readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ?? DEFAULT_WORKERS_AI_MODEL)
+		: OpenRouter.configure({
+				apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
+			}).model(readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL)
 
 /**
- * The runnable LLM stack. `env` supplies the `AI` binding; when it is absent the shim is a no-op
- * and requests go out over `fetch` to the Workers AI REST endpoint.
+ * The runnable LLM stack — identical for both providers, which is what makes the switch a pure
+ * env flip. The Workers AI shim stays in the stack unconditionally: it only intercepts POSTs to
+ * the Workers AI chat URL, so it is inert for OpenRouter traffic. `env` supplies the `AI` binding;
+ * when it is absent the shim is a no-op and Workers AI requests go out over `fetch` to the REST
+ * endpoint instead.
  */
 export const layerLlm = (env: LlmEnv): Layer.Layer<LLMClientService> =>
 	LLMClient.layer.pipe(
