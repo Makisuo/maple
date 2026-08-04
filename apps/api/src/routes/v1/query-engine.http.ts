@@ -84,6 +84,7 @@ import {
 } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import {
+	hostMetricSpec,
 	nodeMetricSpec,
 	partitionWindowAround,
 	podMetricSpec,
@@ -91,7 +92,7 @@ import {
 	workloadMetricSpec,
 } from "@/routes/query-helpers"
 import { Queries } from "@/routes/queries"
-import { runQuery, runQueryFirst } from "@/routes/query-runner"
+import { makeQueryRunners } from "@/routes/query-runner"
 import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
 import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 import * as Integrations from "@maple/query-engine-integrations"
@@ -152,6 +153,8 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 	Effect.gen(function* () {
 		const queryEngine = yield* QueryEngineService
 		const warehouse = yield* WarehouseQueryService
+		const { runQuery, runQueryFirst } = makeQueryRunners({ warehouse, queryEngine })
+
 		const serviceOperationsRollupEnabled = yield* Config.boolean(
 			"SERVICE_OPERATIONS_ROLLUP_ENABLED",
 		).pipe(Config.withDefault(false))
@@ -186,60 +189,23 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							let startTime = payload.startTime
 							let endTime = payload.endTime
 							if (startTime == null || endTime == null) {
-								const runProbe = (narrowByTime: boolean) =>
-									mapExecError(
-										warehouse
-											.compiledQueryFirst(
-												tenant,
-												CH.compile(
-													CH.traceTimeProbeQuery({
-														traceId: payload.traceId,
-														narrowByTime,
-													}),
-													narrowByTime
-														? {
-																orgId: tenant.orgId,
-																startTime: formatWarehouseDateTime(
-																	nowMs - PROBE_RECENT_WINDOW_MS,
-																),
-															}
-														: { orgId: tenant.orgId },
-												),
-												{
-													profile: "discovery",
-													context: narrowByTime
-														? "spanHierarchyProbeRecent"
-														: "spanHierarchyProbe",
-												},
-											)
-											.pipe(Effect.map(Option.getOrNull)),
-										"spanHierarchy probe failed",
-									)
-								const probe = (yield* runProbe(true)) ?? (yield* runProbe(false))
+								const probe =
+									(yield* runQueryFirst(Queries.spanHierarchyProbeRecent, tenant, {
+										traceId: payload.traceId,
+										startTime: formatWarehouseDateTime(nowMs - PROBE_RECENT_WINDOW_MS),
+									})) ?? (yield* runQueryFirst(Queries.spanHierarchyProbe, tenant, payload))
 								if (probe?.timestamp != null) {
 									const window = partitionWindowAround(probe.timestamp)
 									startTime = window.startTime
 									endTime = window.endTime
 								}
 							}
-							const narrowByTime = startTime != null && endTime != null
-							const compiled = CH.compile(
-								CH.spanHierarchyQuery({
-									traceId: payload.traceId,
-									spanId: payload.spanId,
-									narrowByTime,
-								}),
-								narrowByTime
-									? { orgId: tenant.orgId, startTime, endTime }
-									: { orgId: tenant.orgId },
-							)
-							return yield* mapExecError(
-								warehouse.compiledQuery(tenant, compiled, {
-									profile: "list",
-									context: "spanHierarchy",
-								}),
-								"spanHierarchy query failed",
-							)
+							return yield* runQuery(Queries.spanHierarchy, tenant, {
+								traceId: payload.traceId,
+								spanId: payload.spanId,
+								startTime,
+								endTime,
+							})
 						}),
 						traceCacheTtlSeconds(payload.endTime, nowMs),
 					)
@@ -1536,66 +1502,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const tenant = yield* CurrentTenant.Context
 					const bucketSeconds = payload.bucketSeconds ?? 60
 
-					const spec = (() => {
-						switch (payload.metric) {
-							case "cpu":
-								return {
-									metricName: "system.cpu.utilization",
-									groupByAttributeKey: "state",
-									unit: "percent" as const,
-									isNetwork: false,
-								}
-							case "memory":
-								return {
-									metricName: "system.memory.utilization",
-									groupByAttributeKey: "state",
-									unit: "percent" as const,
-									isNetwork: false,
-								}
-							case "filesystem":
-								return {
-									metricName: "system.filesystem.utilization",
-									groupByAttributeKey: "mountpoint",
-									unit: "percent" as const,
-									isNetwork: false,
-								}
-							case "load15":
-								return {
-									metricName: "system.cpu.load_average.15m",
-									groupByAttributeKey: undefined,
-									unit: "load" as const,
-									isNetwork: false,
-								}
-							case "network":
-								return {
-									metricName: "system.network.io",
-									groupByAttributeKey: "direction",
-									unit: "bytes_per_second" as const,
-									isNetwork: true,
-								}
-						}
-					})()
+					const spec = hostMetricSpec(payload.metric)
 
 					if (spec.isNetwork) {
-						const compiled = CH.compile(
-							CH.hostNetworkTimeseriesQuery({ hostName: payload.hostName }),
-							{
-								orgId: tenant.orgId,
-								startTime: payload.startTime,
-								endTime: payload.endTime,
-								bucketSeconds,
-							},
-						)
-						const rows = yield* mapExecError(
-							warehouse.compiledQuery(tenant, compiled, {
-								profile: "aggregation",
-								context: "hostInfraTimeseries",
-							}),
-							"hostInfraTimeseries (network) query failed",
-						)
-						const typedRows = rows
+						const rows = yield* runQuery(Queries.hostInfraNetworkTimeseries, tenant, payload)
 						return new HostInfraTimeseriesResponse({
-							data: typedRows.map((row) => ({
+							data: rows.map((row) => ({
 								bucket: String(row.bucket),
 								attributeValue: String(row.attributeValue ?? ""),
 								value: Number(row.sumValue) || 0,
@@ -1605,29 +1517,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						})
 					}
 
-					const compiled = CH.compile(
-						CH.hostGaugeTimeseriesQuery({
-							hostName: payload.hostName,
-							metricName: spec.metricName,
-							groupByAttributeKey: spec.groupByAttributeKey,
-						}),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds,
-						},
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "hostInfraTimeseries",
-						}),
-						"hostInfraTimeseries query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.hostInfraGaugeTimeseries, tenant, payload)
 					return new HostInfraTimeseriesResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							bucket: String(row.bucket),
 							attributeValue: String(row.attributeValue ?? ""),
 							value: Number(row.avgValue) || 0,

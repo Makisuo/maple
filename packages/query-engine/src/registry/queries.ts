@@ -749,3 +749,63 @@ export const listPodsCount = defineQuery({
 			{ rowSchema: CH.ListPodsSummaryOutputSchema },
 		),
 })
+
+// --- spanHierarchy: probe, then the pruned hierarchy read -----------------
+//
+// `trace_detail_spans` is partitioned by toDate(Timestamp); without a time
+// predicate the hierarchy query seeks every daily partition (~30) — p95 ~8.8s
+// vs ~2.3s when pruned to one. When the caller has no timestamp (direct URL,
+// shared link, AI link) a cheap LIMIT-1 probe resolves one.
+//
+// All three carry `cache: undefined` ON PURPOSE. The handler wraps the whole
+// probe-then-read sequence in a single `cachedDirect`, so the probe only fires
+// on an outer cache miss. Caching them individually would run the probe on
+// every request and cache a result nobody asked for.
+
+/** Probe restricted to the recent window — tries ~2 daily partitions first. */
+export const spanHierarchyProbeRecent = defineQuery({
+	id: "spanHierarchyProbeRecent",
+	profile: "discovery",
+	cache: undefined,
+	compile: (payload: { readonly traceId: string; readonly startTime: string }, orgId: string) =>
+		CH.compile(CH.traceTimeProbeQuery({ traceId: payload.traceId, narrowByTime: true }), {
+			orgId,
+			startTime: payload.startTime,
+		}),
+})
+
+/** Unbounded fallback probe: every partition, only when the recent one missed. */
+export const spanHierarchyProbe = defineQuery({
+	id: "spanHierarchyProbe",
+	profile: "discovery",
+	cache: undefined,
+	compile: (payload: { readonly traceId: string }, orgId: string) =>
+		CH.compile(CH.traceTimeProbeQuery({ traceId: payload.traceId, narrowByTime: false }), {
+			orgId,
+		}),
+})
+
+export const spanHierarchy = defineQuery({
+	id: "spanHierarchy",
+	profile: "list",
+	cache: undefined,
+	compile: (
+		payload: {
+			readonly traceId: string
+			readonly spanId?: string | undefined
+			readonly startTime?: string | undefined
+			readonly endTime?: string | undefined
+		},
+		orgId: string,
+	) => {
+		const narrowByTime = payload.startTime != null && payload.endTime != null
+		return CH.compile(
+			CH.spanHierarchyQuery({
+				traceId: payload.traceId,
+				spanId: payload.spanId,
+				narrowByTime,
+			}),
+			narrowByTime ? { orgId, startTime: payload.startTime, endTime: payload.endTime } : { orgId },
+		)
+	},
+})

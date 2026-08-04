@@ -1,6 +1,7 @@
 import * as Integrations from "@maple/query-engine-integrations"
 import { formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-engine"
 import type {
+	HostInfraTimeseriesRequest,
 	NodeInfraTimeseriesRequest,
 	PodInfraTimeseriesRequest,
 	WorkloadInfraTimeseriesRequest,
@@ -108,6 +109,53 @@ export const workloadMetricSpec = (metric: WorkloadInfraTimeseriesRequest["metri
 			return {
 				metricName: "k8s.pod.memory_limit_utilization",
 				unit: "percent" as const,
+			}
+	}
+}
+
+/**
+ * Metric name, grouping key, unit and query-family flag for a host metric.
+ *
+ * Shared like the pod/node/workload specs: the registry needs `metricName` and
+ * `isNetwork` to build the query, the handler needs `unit` and
+ * `groupByAttributeKey` for its response.
+ */
+export const hostMetricSpec = (metric: HostInfraTimeseriesRequest["metric"]) => {
+	switch (metric) {
+		case "cpu":
+			return {
+				metricName: "system.cpu.utilization",
+				groupByAttributeKey: "state",
+				unit: "percent" as const,
+				isNetwork: false,
+			}
+		case "memory":
+			return {
+				metricName: "system.memory.utilization",
+				groupByAttributeKey: "state",
+				unit: "percent" as const,
+				isNetwork: false,
+			}
+		case "filesystem":
+			return {
+				metricName: "system.filesystem.utilization",
+				groupByAttributeKey: "mountpoint",
+				unit: "percent" as const,
+				isNetwork: false,
+			}
+		case "load15":
+			return {
+				metricName: "system.cpu.load_average.15m",
+				groupByAttributeKey: undefined,
+				unit: "load" as const,
+				isNetwork: false,
+			}
+		case "network":
+			return {
+				metricName: "system.network.io",
+				groupByAttributeKey: "direction",
+				unit: "bytes_per_second" as const,
+				isNetwork: true,
 			}
 	}
 }
