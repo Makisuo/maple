@@ -207,7 +207,12 @@ export function resolveRelativeRangeToWarehouse(
 const AUTO_BUCKET_LADDER = [60, 120, 300, 900, 1800, 3600, 14400, 86400] as const
 
 export interface ComputeBucketSecondsOptions {
-	/** Aim for roughly this many points across the window. Default 30. */
+	/**
+	 * Aim for roughly this many points across the window. Default 100 — dense
+	 * enough for manual investigation (spikes stay visible instead of averaging
+	 * into a 30-point line). Alert evaluation pins `targetPoints: 30` explicitly
+	 * so observation windows keep their historical granularity.
+	 */
 	targetPoints?: number
 	/**
 	 * Never pick a bucket so coarse the window yields fewer than this many
@@ -228,7 +233,7 @@ export function computeBucketSeconds(
 	endMs: number,
 	options?: ComputeBucketSecondsOptions,
 ): number {
-	const targetPoints = options?.targetPoints ?? 30
+	const targetPoints = options?.targetPoints ?? 100
 	const minBuckets = options?.minBuckets ?? 6
 	const rangeSeconds = Math.max((endMs - startMs) / 1000, 1)
 	const raw = Math.max(Math.ceil(rangeSeconds / targetPoints), 1)

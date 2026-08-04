@@ -1,6 +1,6 @@
 import { bucketTimeline, computeBucketSeconds as computeBucketSecondsMs } from "@maple/query-engine"
 
-const TARGET_POINTS = 30
+const TARGET_POINTS = 100
 const TINYBIRD_DATETIME_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(\.\d+)?$/
 
 function toEpochMs(value: string): number {

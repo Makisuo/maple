@@ -2280,8 +2280,10 @@ const prepareAlertEvaluation = Effect.fnUntraced(function* (request: AlertEvalua
 	}
 
 	// Use the spec's bucketSeconds when present, otherwise auto-compute from the
-	// time range — same as the dashboard execute path.
-	return query.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
+	// time range. Pinned to the historical 30-point target: the chart default is
+	// denser, but finer buckets would change per-bucket observation values (and
+	// `minimumSampleCount` behavior) for every rule that relies on auto sizing.
+	return query.bucketSeconds ?? computeBucketSeconds(startMs, endMs, { targetPoints: 30 })
 })
 
 export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
