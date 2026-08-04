@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
 	INITIAL_WINDOW_BYTES,
-	RANGE_SIZE,
+	MAX_CHUNKS_PER_RANGE,
 	type ReplayChunkMeta,
 	type ReplayRange,
 	checkpointAtOrBefore,
 	chunkAtOffset,
 	initialRanges,
+	planRanges,
 	rangeContaining,
 	rangeKey,
 	rangesCovering,
@@ -38,6 +39,7 @@ const chunk = (seq: number, overrides: Partial<ReplayChunkMeta> = {}): ReplayChu
 
 /** A 100-chunk session: ~8 minutes, 10 MB of payload, checkpoints every 20. */
 const manifest = Array.from({ length: 100 }, (_, seq) => chunk(seq))
+const plan = planRanges(manifest)
 
 /**
  * Replay a playthrough the way the loader does: start from the initial window,
@@ -45,7 +47,7 @@ const manifest = Array.from({ length: 100 }, (_, seq) => chunk(seq))
  * pull the next grid range.
  */
 const simulate = (chunks: ReadonlyArray<ReplayChunkMeta>, throughMs: number) => {
-	const fetched: Array<ReplayRange> = [...initialRanges(chunks)]
+	const fetched: Array<ReplayRange> = [...initialRanges(chunks, planRanges(chunks))]
 	const loadedThrough = () =>
 		Math.max(...fetched.map((r) => r.toChunkSeq), -1)
 	const lastSeq = chunks[chunks.length - 1]!.chunk_seq
@@ -53,8 +55,8 @@ const simulate = (chunks: ReadonlyArray<ReplayChunkMeta>, throughMs: number) => 
 	while (playhead <= throughMs) {
 		const loadedUntilMs = (loadedThrough() + 1) * CHUNK_MS
 		if (playhead + 20_000 >= loadedUntilMs && loadedThrough() < lastSeq) {
-			const next = rangeContaining(loadedThrough() + 1)
-			if (!fetched.some((r) => rangeKey(r) === rangeKey(next))) fetched.push(next)
+			const next = rangeContaining(planRanges(chunks), loadedThrough() + 1)
+			if (next && !fetched.some((r) => rangeKey(r) === rangeKey(next))) fetched.push(next)
 		}
 		playhead += 250 // sample far faster than chunk cadence, like the rAF tick
 	}
@@ -63,8 +65,8 @@ const simulate = (chunks: ReadonlyArray<ReplayChunkMeta>, throughMs: number) => 
 
 describe("opening window", () => {
 	it("starts on a couple of MB, not the whole session", () => {
-		const ranges = initialRanges(manifest)
-		const bytes = ranges.length * RANGE_SIZE * 100_000
+		const ranges = initialRanges(manifest, plan)
+		const bytes = ranges.length * MAX_CHUNKS_PER_RANGE * 100_000
 		// The session is 10 MB. Before this change the player fetched all of it in
 		// one response, which is what made long sessions fail.
 		expect(bytes).toBeLessThan(4 * INITIAL_WINDOW_BYTES)
@@ -73,7 +75,7 @@ describe("opening window", () => {
 
 	it("is independent of session length", () => {
 		const long = Array.from({ length: 2000 }, (_, seq) => chunk(seq))
-		expect(initialRanges(long)).toEqual(initialRanges(manifest))
+		expect(initialRanges(long, planRanges(long))).toEqual(initialRanges(manifest, plan))
 	})
 })
 
@@ -105,7 +107,7 @@ describe("playing forward", () => {
 	it("does not refetch a range the playhead scrubs back over", () => {
 		const forward = simulate(manifest, 40 * CHUNK_MS).map(rangeKey)
 		// Grid alignment means an earlier position maps to an already-fetched key.
-		const back = rangeContaining(chunkAtOffset(manifest, 12 * CHUNK_MS)!.chunk_seq)
+		const back = rangeContaining(plan, chunkAtOffset(manifest, 12 * CHUNK_MS)!.chunk_seq)!
 		expect(forward).toContain(rangeKey(back))
 	})
 })
@@ -113,7 +115,7 @@ describe("playing forward", () => {
 describe("seeking", () => {
 	const loadedAfterOpening = () => {
 		const covered = new Set<number>()
-		for (const r of initialRanges(manifest)) {
+		for (const r of initialRanges(manifest, plan)) {
 			for (let s = r.fromChunkSeq; s <= r.toChunkSeq; s++) covered.add(s)
 		}
 		return covered
@@ -138,7 +140,7 @@ describe("seeking", () => {
 	it("loads a fresh window from the anchor, covering the target", () => {
 		const target = chunkAtOffset(manifest, 90 * CHUNK_MS)!
 		const anchor = checkpointAtOrBefore(manifest, target.chunk_seq)!
-		const ranges = rangesCovering(manifest, anchor.chunk_seq, INITIAL_WINDOW_BYTES)
+		const ranges = rangesCovering(manifest, plan, anchor.chunk_seq, INITIAL_WINDOW_BYTES)
 		const covered = new Set<number>()
 		for (const r of ranges) {
 			for (let s = r.fromChunkSeq; s <= r.toChunkSeq; s++) covered.add(s)
@@ -165,9 +167,9 @@ describe("request volume", () => {
 		// The load-bearing property. Before: 1 request, entire payload, no ceiling.
 		// After: N requests, each capped at RANGE_SIZE chunks and 8 MB.
 		const fetched = simulate(manifest, 100 * CHUNK_MS)
-		expect(fetched.length).toBe(Math.ceil(manifest.length / RANGE_SIZE))
+		expect(fetched.length).toBe(plan.length)
 		for (const r of fetched) {
-			expect(r.toChunkSeq - r.fromChunkSeq + 1).toBe(RANGE_SIZE)
+			expect(r.toChunkSeq - r.fromChunkSeq + 1).toBeLessThanOrEqual(MAX_CHUNKS_PER_RANGE)
 		}
 	})
 })

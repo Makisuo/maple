@@ -1245,6 +1245,58 @@ describe("v2 session_replays over HTTP", () => {
 			await harness.dispose()
 		})
 
+		it("refuses an over-budget range of blob-backed chunks before hydrating", async () => {
+			// The seam between this change and the R2 move. Once payloads live in
+			// the blob store the warehouse response is only an index — `events` is
+			// "" — so the `responseLimits` ceiling on that read measures almost
+			// nothing and would wave this through. `byteSize` is the uncompressed
+			// payload size and is right there in the index, so the range is refused
+			// without fetching a single object.
+			const hugeBlobRows = chunkRows.slice(0, 4).map((row) => ({
+				...row,
+				events: "",
+				byteSize: 5_000_000,
+			}))
+			const harness = makeHarness({
+				...warehouseStub,
+				compiledQueryBounded: (_tenant, compiled) =>
+					compiled.decodeRows(hugeBlobRows).pipe(Effect.orDie),
+			})
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_blobs_toobig")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/events?from_chunk_seq=0&to_chunk_seq=3`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(413)
+			expect(response.body.error.code).toBe("range_too_large")
+			await harness.dispose()
+		})
+
+		it("serves a blob-backed range that fits the budget", async () => {
+			const blobRows = chunkRows.slice(0, 4).map((row) => ({ ...row, events: "", byteSize: 100_000 }))
+			const harness = makeHarness({
+				...warehouseStub,
+				compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows(blobRows).pipe(Effect.orDie),
+			})
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_blobs_ok")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/events?from_chunk_seq=0&to_chunk_seq=3`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(200)
+			expect(response.body.data).toHaveLength(4)
+			// No R2 binding in tests, so hydration is a no-op passthrough — the
+			// point here is that the budget guard let the range through.
+			expect(response.body.data[0].byte_size).toBe(100_000)
+			await harness.dispose()
+		})
+
 		it("refuses an over-budget range with 413 range_too_large, not a 503", async () => {
 			// The regression that motivated all of this: the old failure claimed the
 			// database was unavailable and invited a retry that could only fail the

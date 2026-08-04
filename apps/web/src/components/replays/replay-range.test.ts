@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
 	INITIAL_WINDOW_BYTES,
-	RANGE_SIZE,
+	MAX_BYTES_PER_RANGE,
+	MAX_CHUNKS_PER_RANGE,
 	type ReplayChunkMeta,
-	alignRangeStart,
 	checkpointAtOrBefore,
 	chunkAtOffset,
 	chunkStartMs,
 	initialRanges,
+	planRanges,
 	manifestDurationMs,
 	rangeContaining,
 	rangesCovering,
@@ -30,37 +31,72 @@ const chunk = (seq: number, overrides: Partial<ReplayChunkMeta> = {}): ReplayChu
 const manifest = (count: number, overrides: (seq: number) => Partial<ReplayChunkMeta> = () => ({})) =>
 	Array.from({ length: count }, (_, seq) => chunk(seq, overrides(seq)))
 
-describe("range grid alignment", () => {
-	it("snaps any chunk in a slot to the same range", () => {
-		// The cache-correctness property: without it the playhead mints a new atom
-		// key every tick and scrubbing back refetches everything.
-		const ranges = [0, 1, 7, 15].map((seq) => rangeContaining(seq))
-		for (const range of ranges) {
-			expect(range).toEqual({ fromChunkSeq: 0, toChunkSeq: RANGE_SIZE - 1 })
+describe("range planning", () => {
+	it("keeps every range inside the server's byte budget", () => {
+		// Real sessions carry ~838 KB chunks. A fixed 16-chunk range of those is
+		// ~13 MB, which the server refuses with 413 — and the client has no way to
+		// recover a range it cannot request.
+		const big = manifest(64, () => ({ byte_size: 838_026 }))
+		for (const range of planRanges(big)) {
+			const bytes = big
+				.filter((c) => c.chunk_seq >= range.fromChunkSeq && c.chunk_seq <= range.toChunkSeq)
+				.reduce((sum, c) => sum + c.byte_size, 0)
+			expect(bytes).toBeLessThanOrEqual(MAX_BYTES_PER_RANGE)
 		}
-		expect(rangeContaining(RANGE_SIZE)).toEqual({
-			fromChunkSeq: RANGE_SIZE,
-			toChunkSeq: RANGE_SIZE * 2 - 1,
-		})
 	})
 
-	it("produces one identical atom key for every position inside a slot", () => {
-		// Keys are JSON.stringify of the input, so this also pins property order.
+	it("still caps chunk count when chunks are small", () => {
+		for (const range of planRanges(manifest(64))) {
+			expect(range.toChunkSeq - range.fromChunkSeq + 1).toBeLessThanOrEqual(MAX_CHUNKS_PER_RANGE)
+		}
+	})
+
+	it("covers every chunk exactly once", () => {
+		const chunks = manifest(50, (seq) => ({ byte_size: seq % 7 === 0 ? 900_000 : 100_000 }))
+		const seen: number[] = []
+		for (const r of planRanges(chunks)) {
+			for (let s = r.fromChunkSeq; s <= r.toChunkSeq; s++) seen.push(s)
+		}
+		expect(seen).toEqual(chunks.map((c) => c.chunk_seq))
+	})
+
+	it("keeps boundaries stable as a live session appends chunks", () => {
+		// The cache-correctness property: the atom family keys on the range, so a
+		// boundary that shifted when new chunks arrived would orphan everything
+		// already fetched and refetch the session from the start.
+		const grown = manifest(60)
+		const early = planRanges(grown.slice(0, 40))
+		const later = planRanges(grown)
+		expect(later.slice(0, early.length - 1)).toEqual(early.slice(0, early.length - 1))
+	})
+
+	it("resolves any chunk in a range to that same range", () => {
+		const chunks = manifest(64)
+		const p = planRanges(chunks)
+		const first = p[0]!
+		for (const seq of [first.fromChunkSeq, first.toChunkSeq]) {
+			expect(rangeContaining(p, seq)).toEqual(first)
+		}
+	})
+
+	it("produces one identical atom key for every position inside a range", () => {
+		const chunks = manifest(64)
+		const p = planRanges(chunks)
 		const window = { windowStart: "2026-08-04 10:00:00", windowEnd: "2026-08-04 11:00:00" }
 		const keys = new Set(
-			[0, 3, 9, 15].map((seq) =>
-				JSON.stringify(replayRangeInput("sess_1", window, rangeContaining(seq))),
+			[p[0]!.fromChunkSeq, p[0]!.fromChunkSeq + 1, p[0]!.toChunkSeq].map((seq) =>
+				JSON.stringify(replayRangeInput("sess_1", window, rangeContaining(p, seq)!)),
 			),
 		)
 		expect(keys.size).toBe(1)
 	})
 
-	it("keeps ranges within the server's per-request chunk cap", () => {
-		expect(RANGE_SIZE).toBeLessThanOrEqual(40)
+	it("returns nothing for a chunk past the end of the plan", () => {
+		expect(rangeContaining(planRanges(manifest(4)), 999)).toBeUndefined()
 	})
 
-	it("aligns down, never up — chunk 0 must not land in a negative slot", () => {
-		expect(alignRangeStart(0)).toBe(0)
+	it("keeps ranges within the server's per-request chunk cap", () => {
+		expect(MAX_CHUNKS_PER_RANGE).toBeLessThanOrEqual(40)
 	})
 })
 
@@ -68,8 +104,8 @@ describe("initialRanges", () => {
 	it("stops on the byte budget, not a chunk count", () => {
 		// 100 KB chunks: ~20 chunks fit in the 2 MB budget, so more than one
 		// 16-chunk range.
-		const ranges = initialRanges(manifest(64))
-		const bytes = ranges.length * RANGE_SIZE * 100_000
+		const ranges = initialRanges(manifest(64), planRanges(manifest(64)))
+		const bytes = ranges.length * MAX_CHUNKS_PER_RANGE * 100_000
 		expect(bytes).toBeGreaterThanOrEqual(INITIAL_WINDOW_BYTES)
 		expect(ranges.length).toBeLessThanOrEqual(2)
 	})
@@ -77,7 +113,7 @@ describe("initialRanges", () => {
 	it("loads exactly one range when chunks are large", () => {
 		// A 4 MB chunk (full snapshot of a dense DOM) blows the budget alone. The
 		// count-based version of this would have pulled 8 of them — 32 MB.
-		const ranges = initialRanges(manifest(64, () => ({ byte_size: 4_000_000 })))
+		const ranges = initialRanges(manifest(64, () => ({ byte_size: 4_000_000 })), planRanges(manifest(64, () => ({ byte_size: 4_000_000 }))))
 		expect(ranges).toHaveLength(1)
 	})
 
@@ -85,27 +121,27 @@ describe("initialRanges", () => {
 		// Chunks before the first snapshot are mutations against a DOM that was
 		// never built — loading them buys a blank screen.
 		const chunks = manifest(64, (seq) => ({ is_checkpoint: seq === 20 }))
-		expect(initialRanges(chunks)[0]).toEqual(rangeContaining(20))
+		expect(initialRanges(chunks, planRanges(chunks))[0]).toEqual(rangeContaining(planRanges(chunks), 20))
 	})
 
 	it("returns nothing for an empty manifest", () => {
-		expect(initialRanges([])).toEqual([])
+		expect(initialRanges([], planRanges([]))).toEqual([])
 	})
 
 	it("never runs past the end of a short session", () => {
 		// 3 chunks = 300 KB, well under the budget: it must stop at the manifest
 		// end rather than looping toward the budget forever.
-		expect(initialRanges(manifest(3))).toEqual([rangeContaining(0)])
+		expect(initialRanges(manifest(3), planRanges(manifest(3)))).toEqual([rangeContaining(planRanges(manifest(3)), 0)])
 	})
 })
 
 describe("rangesCovering", () => {
 	it("always yields at least one range, even past the budget", () => {
-		expect(rangesCovering(manifest(4), 0, 0)).toHaveLength(1)
+		expect(rangesCovering(manifest(4), planRanges(manifest(4)), 0, 0)).toHaveLength(1)
 	})
 
 	it("returns nothing when there is nothing to cover", () => {
-		expect(rangesCovering([], 0, INITIAL_WINDOW_BYTES)).toEqual([])
+		expect(rangesCovering([], planRanges([]), 0, INITIAL_WINDOW_BYTES)).toEqual([])
 	})
 })
 
@@ -168,12 +204,12 @@ describe("sessions recorded before this change", () => {
 		// pick an anchor rather than refusing.
 		const chunks = manifest(8, () => ({ is_checkpoint: false }))
 		expect(checkpointAtOrBefore(chunks, 5)?.chunk_seq).toBe(0)
-		expect(initialRanges(chunks)[0]).toEqual(rangeContaining(0))
+		expect(initialRanges(chunks, planRanges(chunks))[0]).toEqual(rangeContaining(planRanges(chunks), 0))
 	})
 
 	it("handles a single-chunk session", () => {
 		const chunks = manifest(1)
-		expect(initialRanges(chunks)).toEqual([rangeContaining(0)])
+		expect(initialRanges(chunks, planRanges(chunks))).toEqual([{ fromChunkSeq: 0, toChunkSeq: 0 }])
 		expect(chunkAtOffset(chunks, 0)?.chunk_seq).toBe(0)
 		expect(manifestDurationMs(chunks)).toBe(5_000)
 	})
@@ -182,7 +218,7 @@ describe("sessions recorded before this change", () => {
 		// nextChunkSeq() is monotonic across reloads and persisted on the session
 		// record, so a session resumed after a refresh starts mid-sequence.
 		const chunks = manifest(20).map((c) => ({ ...c, chunk_seq: c.chunk_seq + 137 }))
-		expect(initialRanges(chunks)[0]).toEqual(rangeContaining(137))
+		expect(initialRanges(chunks, planRanges(chunks))[0]).toEqual(rangeContaining(planRanges(chunks), 137))
 		expect(checkpointAtOrBefore(chunks, 150)?.chunk_seq).toBe(137)
 	})
 })

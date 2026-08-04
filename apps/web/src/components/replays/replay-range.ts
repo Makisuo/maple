@@ -10,18 +10,20 @@ import type { ReplayPartitionWindow } from "./replay-format"
  */
 
 /**
- * Chunks per fetched range.
+ * Upper bound on chunks per fetched range.
  *
- * Ranges are aligned to a fixed grid of this size, which is the single load-
- * bearing decision here: an unaligned range starting at the playhead would mint
- * a new atom-family key on every tick, so nothing would ever be served from
- * cache and scrubbing back would refetch. Aligned, the same stretch of the
- * recording always resolves to the same key.
- *
- * Must stay <= the server's `max_chunks_per_request` (40); the manifest echoes
- * the real cap so a mismatch is detectable rather than silent.
+ * A range can be shorter — `planRanges` closes one early when its payload would
+ * exceed the server's byte budget. Must stay <= the server's
+ * `max_chunks_per_request` (40); the manifest echoes the real cap so a mismatch
+ * is detectable rather than silent.
  */
-export const RANGE_SIZE = 16
+export const MAX_CHUNKS_PER_RANGE = 16
+
+/**
+ * Fallback byte budget for one range, used before the manifest reports the
+ * server's own `max_bytes_per_request`. Matches the server default.
+ */
+export const MAX_BYTES_PER_RANGE = 8_000_000
 
 /**
  * Bytes to load before starting playback.
@@ -49,14 +51,60 @@ export interface ReplayRange {
 	readonly toChunkSeq: number
 }
 
-/** Snap a chunk sequence down to its grid slot. */
-export const alignRangeStart = (chunkSeq: number) => Math.floor(chunkSeq / RANGE_SIZE) * RANGE_SIZE
-
-/** The grid range containing `chunkSeq`. */
-export const rangeContaining = (chunkSeq: number): ReplayRange => {
-	const fromChunkSeq = alignRangeStart(chunkSeq)
-	return { fromChunkSeq, toChunkSeq: fromChunkSeq + RANGE_SIZE - 1 }
+/**
+ * Cut the session into the ranges playback will fetch.
+ *
+ * Two properties matter, and a fixed-size grid only delivers one of them:
+ *
+ * 1. **Every range fits the server's byte budget.** Chunk sizes vary by more
+ *    than an order of magnitude — a flush is ~100 KB but a full DOM snapshot
+ *    runs to several hundred KB or more, and real sessions carry 838 KB chunks.
+ *    A fixed 16-chunk slot of those is ~13 MB, well past the 8 MB ceiling, so
+ *    the request comes back 413 and that stretch of the recording is unplayable.
+ * 2. **Boundaries are stable**, because the atom family keys on the range. A
+ *    range recomputed from the playhead would mint a new key every tick and
+ *    nothing would ever be cached.
+ *
+ * Walking greedily from the first chunk gives both: the cut points depend only
+ * on chunks at or before them, so a live session appending chunks extends the
+ * plan without moving any boundary already in it.
+ *
+ * A single chunk always gets a range even if it alone exceeds the budget — the
+ * SDK caps a chunk at 4 MB, so under an 8 MB budget that can't happen, but
+ * emitting nothing would stall playback rather than fail it.
+ */
+export const planRanges = (
+	chunks: ReadonlyArray<ReplayChunkMeta>,
+	maxBytes: number = MAX_BYTES_PER_RANGE,
+	maxChunks: number = MAX_CHUNKS_PER_RANGE,
+): ReadonlyArray<ReplayRange> => {
+	const ranges: Array<ReplayRange> = []
+	let start: number | undefined
+	let end = 0
+	let bytes = 0
+	let count = 0
+	for (const chunk of chunks) {
+		if (start !== undefined && (bytes + chunk.byte_size > maxBytes || count >= maxChunks)) {
+			ranges.push({ fromChunkSeq: start, toChunkSeq: end })
+			start = undefined
+			bytes = 0
+			count = 0
+		}
+		if (start === undefined) start = chunk.chunk_seq
+		end = chunk.chunk_seq
+		bytes += chunk.byte_size
+		count++
+	}
+	if (start !== undefined) ranges.push({ fromChunkSeq: start, toChunkSeq: end })
+	return ranges
 }
+
+/** The planned range containing `chunkSeq`, or undefined if it is past the end. */
+export const rangeContaining = (
+	plan: ReadonlyArray<ReplayRange>,
+	chunkSeq: number,
+): ReplayRange | undefined =>
+	plan.find((range) => chunkSeq >= range.fromChunkSeq && chunkSeq <= range.toChunkSeq)
 
 /** Stable key for a range — must match `replayRangeInput`'s identity exactly. */
 export const rangeKey = (range: ReplayRange) => `${range.fromChunkSeq}:${range.toChunkSeq}`
@@ -166,38 +214,47 @@ export const checkpointAtOrBefore = (
  * whose first chunks are pre-snapshot noise — without a snapshot there is
  * nothing to render, so those bytes would buy a blank screen.
  */
-export const initialRanges = (chunks: ReadonlyArray<ReplayChunkMeta>): ReadonlyArray<ReplayRange> => {
+export const initialRanges = (
+	chunks: ReadonlyArray<ReplayChunkMeta>,
+	plan: ReadonlyArray<ReplayRange>,
+): ReadonlyArray<ReplayRange> => {
 	if (chunks.length === 0) return []
 	const seed = chunks.find((chunk) => chunk.is_checkpoint) ?? chunks[0]!
-	return rangesCovering(chunks, seed.chunk_seq, INITIAL_WINDOW_BYTES)
+	return rangesCovering(chunks, plan, seed.chunk_seq, INITIAL_WINDOW_BYTES)
 }
 
 /**
- * Grid ranges starting at `fromChunkSeq`, extended until `byteBudget` is met.
+ * Planned ranges from the one containing `fromChunkSeq`, extended until
+ * `byteBudget` is met.
  *
- * Always returns at least one range, so a single chunk larger than the whole
- * budget still loads instead of stalling playback forever.
+ * Always returns at least one range, so a chunk larger than the whole budget
+ * still loads instead of stalling playback forever.
  */
 export const rangesCovering = (
 	chunks: ReadonlyArray<ReplayChunkMeta>,
+	plan: ReadonlyArray<ReplayRange>,
 	fromChunkSeq: number,
 	byteBudget: number,
 ): ReadonlyArray<ReplayRange> => {
+	const startIndex = plan.findIndex(
+		(range) => fromChunkSeq >= range.fromChunkSeq && fromChunkSeq <= range.toChunkSeq,
+	)
+	if (startIndex < 0) return []
+	const bytesIn = (range: ReplayRange) =>
+		chunks.reduce(
+			(sum, chunk) =>
+				chunk.chunk_seq >= range.fromChunkSeq && chunk.chunk_seq <= range.toChunkSeq
+					? sum + chunk.byte_size
+					: sum,
+			0,
+		)
 	const ranges: Array<ReplayRange> = []
 	let bytes = 0
-	let cursor = fromChunkSeq
-	const lastSeq = chunks[chunks.length - 1]?.chunk_seq
-	if (lastSeq === undefined) return []
-	while (cursor <= lastSeq) {
-		const range = rangeContaining(cursor)
-		if (ranges.some((existing) => existing.fromChunkSeq === range.fromChunkSeq)) break
+	for (let i = startIndex; i < plan.length; i++) {
+		const range = plan[i]!
 		ranges.push(range)
-		for (const chunk of chunks) {
-			if (chunk.chunk_seq < range.fromChunkSeq || chunk.chunk_seq > range.toChunkSeq) continue
-			bytes += chunk.byte_size
-		}
+		bytes += bytesIn(range)
 		if (bytes >= byteBudget) break
-		cursor = range.toChunkSeq + 1
 	}
 	return ranges
 }

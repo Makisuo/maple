@@ -5,14 +5,16 @@ import { normalizeEvents } from "./replay-events"
 import type { ReplayPartitionWindow } from "./replay-format"
 import {
 	INITIAL_WINDOW_BYTES,
+	MAX_BYTES_PER_RANGE,
+	MAX_CHUNKS_PER_RANGE,
 	PREFETCH_AHEAD_MS,
-	RANGE_SIZE,
 	type ReplayChunkMeta,
 	type ReplayRange,
 	chunkAtOffset,
 	chunkStartMs,
 	checkpointAtOrBefore,
 	initialRanges,
+	planRanges,
 	manifestStartMs,
 	rangeContaining,
 	rangeKey,
@@ -107,6 +109,14 @@ export function useReplayChunkLoader({
 	const playheadRef = React.useRef(0)
 
 	const startMs = React.useMemo(() => manifestStartMs(chunks), [chunks])
+	// Where the session gets cut into fetchable ranges. Derived from the manifest
+	// so no range can exceed the server's byte ceiling — chunk sizes vary by more
+	// than an order of magnitude, and a fixed chunk count would 413 on a session
+	// whose snapshots are large.
+	const plan = React.useMemo(
+		() => planRanges(chunks, MAX_BYTES_PER_RANGE, MAX_CHUNKS_PER_RANGE),
+		[chunks],
+	)
 
 	// Plan the opening window once the manifest lands — and only once.
 	//
@@ -123,8 +133,8 @@ export function useReplayChunkLoader({
 		setSeedCount(0)
 		setIsSeeking(false)
 		setSeekTargetMs(null)
-		setQueue(initialRanges(chunks))
-	}, [enabled, chunks, sessionId])
+		setQueue(initialRanges(chunks, plan))
+	}, [enabled, chunks, plan, sessionId])
 
 	const activeRange = queue[0]
 	const loadedKeys = React.useMemo(() => new Set(loaded.map((entry) => entry.key)), [loaded])
@@ -138,7 +148,7 @@ export function useReplayChunkLoader({
 	// to believe exists, so hold at the first grid slot: that is where playback
 	// starts for most sessions, making it a prefetch rather than a wasted call.
 	const subscribedRange =
-		activeRange ?? loaded[loaded.length - 1]?.range ?? { fromChunkSeq: 0, toChunkSeq: RANGE_SIZE - 1 }
+		activeRange ?? loaded[loaded.length - 1]?.range ?? plan[0] ?? { fromChunkSeq: 0, toChunkSeq: 0 }
 	const rangeResult = useAtomValue(
 		getReplayEventsResultAtom({ data: replayRangeInput(sessionId, window, subscribedRange) }),
 	)
@@ -215,11 +225,11 @@ export function useReplayChunkLoader({
 		if (!hasMoreChunks) return
 		setQueue((current) => {
 			if (current.length > 0) return current
-			const next = rangeContaining(loadedThroughSeq + 1)
-			if (loadedKeys.has(rangeKey(next))) return current
+			const next = rangeContaining(plan, loadedThroughSeq + 1)
+			if (next === undefined || loadedKeys.has(rangeKey(next))) return current
 			return [next]
 		})
-	}, [hasMoreChunks, loadedThroughSeq, loadedKeys])
+	}, [hasMoreChunks, loadedThroughSeq, loadedKeys, plan])
 
 	const reportProgress = React.useCallback(
 		(offsetMs: number) => {
@@ -262,10 +272,10 @@ export function useReplayChunkLoader({
 			setSeedCount(0)
 			setIsSeeking(true)
 			setSeekTargetMs(offsetMs)
-			setQueue(rangesCovering(chunks, anchor.chunk_seq, INITIAL_WINDOW_BYTES))
+			setQueue(rangesCovering(chunks, plan, anchor.chunk_seq, INITIAL_WINDOW_BYTES))
 			return true
 		},
-		[chunks, loaded, loadedThroughSeq],
+		[chunks, plan, loaded, loadedThroughSeq],
 	)
 
 	const bufferState: ReplayBufferState = isSeeking
