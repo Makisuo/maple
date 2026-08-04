@@ -181,11 +181,16 @@ export function compileCH<
 	Output extends Record<string, any>,
 	Joins extends Record<string, ColumnDefs>,
 	Params extends Record<string, any>,
+	// The row schema, not the SELECT inference, is what actually produces values
+	// at runtime, so it decides the compiled query's output type. `extends Output`
+	// keeps it honest: a schema may *narrow* what the builder inferred (a String
+	// column decoded as a literal union) but never contradict it.
+	Decoded extends Output = Output,
 >(
 	query: CHQuery<Cols, Output, Joins>,
 	params: Params,
-	options?: { skipFormat?: boolean; rowSchema?: CompiledQueryRowSchema<Output> },
-): CompiledQuery<Output> {
+	options?: { skipFormat?: boolean; rowSchema?: CompiledQueryRowSchema<Decoded> },
+): CompiledQuery<Decoded> {
 	const state = query._state
 
 	// Build column accessor — joined or simple depending on joins
@@ -218,6 +223,17 @@ export function compileCH<
 	// top-level list is AND-joined below, so one marked entry is sufficient.
 	const hasOwnTenantPredicate = whereConditions.some((c) => c?.scopesTenant === true)
 
+	// CTEs — resolved before the FROM below, which reads their scope. A CTE given
+	// as a query is compiled here and its scope derived; one given as a string
+	// carries whatever scope the caller declared.
+	const resolvedCtes = state.ctes.map((c) => {
+		if (c.query) {
+			const compiled = compileCH(c.query, params, { skipFormat: true })
+			return { name: c.name, sql: compiled.sql, tenantScope: compiled.tenantScope }
+		}
+		return { name: c.name, sql: c.sql ?? "", tenantScope: c.tenantScope }
+	})
+
 	// FROM clause
 	let fromFragment
 	// Whether the row source is itself tenant-confined. A query reading only from
@@ -242,11 +258,10 @@ export function compileCH<
 		fromFragment = ident(state.tableName)
 	}
 
-	// A FROM that names a CTE inherits whatever scope the CTE was declared with.
-	// The CTE body is an opaque pre-compiled string, so the declaration is the
-	// only thing that can carry this — see `withCTE`.
+	// A FROM that names a CTE inherits the CTE's scope — derived when the CTE was
+	// given as a query, declared by the caller when it arrived as a string.
 	if (!state.fromQuery && !state.fromUnion) {
-		const cte = state.ctes.find((c) => c.name === state.tableName)
+		const cte = resolvedCtes.find((c) => c.name === state.tableName)
 		if (cte?.tenantScope === "org") fromSourceScope = "org"
 	}
 
@@ -288,6 +303,12 @@ export function compileCH<
 		joins,
 		where: whereFragments,
 		groupBy: state.groupByKeys.map((k) => raw(k)),
+		// Deliberately not fed into `hasOwnTenantPredicate`: by HAVING time the
+		// rows are already aggregated, so the scan that produced them crossed
+		// tenants no matter what this filters out.
+		having: (state.havingFn ? state.havingFn($) : [])
+			.filter((c): c is NonNullable<typeof c> => c != null)
+			.map((c) => c.toFragment()),
 		orderBy: orderByClause(state.orderBySpecs).map(raw),
 		limit: state.limitValue != null ? raw(String(Math.round(state.limitValue))) : undefined,
 		offset: state.offsetValue != null ? raw(String(Math.round(state.offsetValue))) : undefined,
@@ -297,8 +318,8 @@ export function compileCH<
 	let sql = compileQuery(sqlQuery)
 
 	// Prepend CTE definitions
-	if (state.ctes.length > 0) {
-		const cteDefs = state.ctes.map((c) => `${c.name} AS (\n${c.sql}\n)`).join(",\n")
+	if (resolvedCtes.length > 0) {
+		const cteDefs = resolvedCtes.map((c) => `${c.name} AS (\n${c.sql}\n)`).join(",\n")
 		sql = `WITH ${cteDefs}\n${sql}`
 	}
 
@@ -319,7 +340,7 @@ export function compileCH<
 				: "cross-org"
 
 	return {
-		...makeCompiledQuery<Output>(sql, tenantScope, options?.rowSchema, state.routingValue),
+		...makeCompiledQuery<Decoded>(sql, tenantScope, options?.rowSchema, state.routingValue),
 	}
 }
 

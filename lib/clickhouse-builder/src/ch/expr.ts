@@ -40,6 +40,7 @@ export interface Expr<TSType> {
 	mul(this: Expr<number>, n: number | Expr<number>): Expr<number>
 	add(this: Expr<number>, n: number | Expr<number>): Expr<number>
 	sub(this: Expr<number>, n: number | Expr<number>): Expr<number>
+	mod(this: Expr<number>, n: number | Expr<number>): Expr<number>
 }
 
 export interface ColumnRef<Name extends string, ColType extends CHType<string, any>> extends Expr<
@@ -128,6 +129,8 @@ export function makeExpr<T>(fragment: SqlFragment): Expr<T> {
 			makeExpr<number>(raw(`${compile(fragment)} + ${compile(toFragment(n))}`)),
 		sub: (n: number | Expr<number>) =>
 			makeExpr<number>(raw(`${compile(fragment)} - ${compile(toFragment(n))}`)),
+		mod: (n: number | Expr<number>) =>
+			makeExpr<number>(raw(`${compile(fragment)} % ${compile(toFragment(n))}`)),
 	}
 	return self
 }
@@ -210,6 +213,11 @@ export function lit(value: string | number): Expr<string> | Expr<number> {
 
 // ---------------------------------------------------------------------------
 // Subquery expressions
+//
+// These string-only forms are superseded by `./subquery`, whose `exists` /
+// `inSubquery` / `notInSubquery` also accept a `CHQuery`. They need `compileCH`,
+// which this module cannot import without closing a cycle, so they live there
+// and are re-exported from the package root. Prefer those.
 // ---------------------------------------------------------------------------
 
 /**

@@ -50,7 +50,10 @@ const metricCatalogRowSchema = Schema.Struct({
 	dataPointCount: CH.CHNumber,
 	firstSeen: Schema.String,
 	lastSeen: Schema.String,
-	isMonotonic: Schema.Union([Schema.Boolean, CH.CHNumber]),
+	// `metric_catalog.IsMonotonic` is `SimpleAggregateFunction(anyLast, UInt8)` —
+	// always 0/1 on the wire, never a JSON boolean. `CHNumber` covers both the
+	// numeric and the quoted-string encoding.
+	isMonotonic: CH.CHNumber,
 })
 
 const serviceCatalogRowSchema = Schema.Struct({
