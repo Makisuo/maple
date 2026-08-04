@@ -1,4 +1,5 @@
 import type {
+	ListPodsRequest,
 	NodeFacetsRequest,
 	PodFacetsRequest,
 	WorkloadFacetsRequest,
@@ -694,5 +695,57 @@ export const workloadFacets = defineQuery({
 				computeTypes: payload.computeTypes,
 			}),
 			{ orgId: orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+// --- listPods: page + denominator -----------------------------------------
+// Both run the same WHERE clause, so the "N of M" the list prints can never
+// disagree with the rows above it. The shared filter projection keeps that
+// true by construction rather than by two hand-kept copies.
+
+const listPodsFilters = (payload: ListPodsRequest) => ({
+	search: payload.search,
+	podNames: payload.podNames,
+	namespaces: payload.namespaces,
+	nodeNames: payload.nodeNames,
+	clusters: payload.clusters,
+	deployments: payload.deployments,
+	statefulsets: payload.statefulsets,
+	daemonsets: payload.daemonsets,
+	jobs: payload.jobs,
+	environments: payload.environments,
+	computeTypes: payload.computeTypes,
+	workloadKind: payload.workloadKind,
+	workloadName: payload.workloadName,
+})
+
+export const listPods = defineQuery({
+	id: "listPods",
+	profile: "list",
+	cache: undefined,
+	compile: (payload: ListPodsRequest, orgId: string) =>
+		CH.compile(
+			CH.listPodsQuery({
+				...listPodsFilters(payload),
+				scope: payload.scope,
+				sortBy: payload.sortBy,
+				sortDir: payload.sortDir,
+				limit: payload.limit,
+				offset: payload.offset,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+/** Single-row denominator for listPods. Read through `runQueryFirst`. */
+export const listPodsCount = defineQuery({
+	id: "listPodsCount",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ListPodsRequest, orgId: string) =>
+		CH.compile(
+			CH.listPodsSummaryQuery(listPodsFilters(payload)),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+			{ rowSchema: CH.ListPodsSummaryOutputSchema },
 		),
 })

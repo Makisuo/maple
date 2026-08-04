@@ -1640,74 +1640,15 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("listPods", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.listPodsQuery({
-							search: payload.search,
-							podNames: payload.podNames,
-							namespaces: payload.namespaces,
-							nodeNames: payload.nodeNames,
-							clusters: payload.clusters,
-							deployments: payload.deployments,
-							statefulsets: payload.statefulsets,
-							daemonsets: payload.daemonsets,
-							jobs: payload.jobs,
-							environments: payload.environments,
-							computeTypes: payload.computeTypes,
-							workloadKind: payload.workloadKind,
-							workloadName: payload.workloadName,
-							scope: payload.scope,
-							sortBy: payload.sortBy,
-							sortDir: payload.sortDir,
-							limit: payload.limit,
-							offset: payload.offset,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					// The page and its denominator run the same WHERE clause, so the
-					// "N of M" the list prints can never disagree with the rows above it.
-					const countCompiled = CH.compile(
-						CH.listPodsSummaryQuery({
-							search: payload.search,
-							podNames: payload.podNames,
-							namespaces: payload.namespaces,
-							nodeNames: payload.nodeNames,
-							clusters: payload.clusters,
-							deployments: payload.deployments,
-							statefulsets: payload.statefulsets,
-							daemonsets: payload.daemonsets,
-							jobs: payload.jobs,
-							environments: payload.environments,
-							computeTypes: payload.computeTypes,
-							workloadKind: payload.workloadKind,
-							workloadName: payload.workloadName,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-						{ rowSchema: CH.ListPodsSummaryOutputSchema },
-					)
 					const [rows, countRow] = yield* Effect.all(
 						[
-							mapExecError(
-								warehouse.compiledQuery(tenant, compiled, {
-									profile: "list",
-									context: "listPods",
-								}),
-								"listPods query failed",
-							),
-							mapExecError(
-								warehouse
-									.compiledQueryFirst(tenant, countCompiled, {
-										profile: "aggregation",
-										context: "listPodsCount",
-									})
-									.pipe(Effect.map(Option.getOrNull)),
-								"listPods count query failed",
-							),
+							runQuery(Queries.listPods, tenant, payload),
+							runQueryFirst(Queries.listPodsCount, tenant, payload),
 						],
 						{ concurrency: 2 },
 					)
-					const typedRows = rows
 					return new ListPodsResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							podName: row.podName,
 							namespace: row.namespace,
 							nodeName: row.nodeName,
@@ -1746,7 +1687,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 												: countRow?.totalPods,
 							) ||
 							// A failed count must not render as "0 of 0" under a list with rows.
-							typedRows.length,
+							rows.length,
 					})
 				}),
 			)
