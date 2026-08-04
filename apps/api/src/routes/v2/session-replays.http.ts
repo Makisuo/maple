@@ -4,6 +4,7 @@ import {
 	MAX_REPLAY_CHUNKS_PER_REQUEST,
 	MAX_REPLAY_EVENTS_RESPONSE_BYTES,
 	MAX_REPLAY_MANIFEST_CHUNKS,
+	LIST_LIMIT_DEFAULT,
 	MapleApiV2,
 	dependencyUnavailable,
 	invalidRequest,
@@ -38,14 +39,6 @@ const decodeTraceId = Schema.decodeSync(TraceId)
 const mapWarehouseError = warehouseToV2("session_replay_query")
 
 /**
- * As above, plus the bounded-read refusal.
- *
- * `range_too_large` keeps its message verbatim across the public boundary: it
- * carries no database diagnostics — only the range asked for — and unlike the
- * warehouse faults it is entirely actionable, so redacting it would strip the
- * one useful thing it says.
- */
-/**
  * Refuse a chunk range whose payload would blow the response budget, before a
  * byte of it is fetched.
  *
@@ -68,6 +61,14 @@ const assertRangeFitsBudget = (rows: ReadonlyArray<{ readonly byteSize: number }
 			)
 }
 
+/**
+ * Warehouse errors → the v2 envelope, plus the bounded-read refusal.
+ *
+ * `range_too_large` keeps its message verbatim across the public boundary: it
+ * carries no database diagnostics — only the range asked for — and unlike the
+ * warehouse faults it is entirely actionable, so redacting it would strip the
+ * one useful thing it says.
+ */
 const mapReplayReadError = (error: WarehouseError | WarehouseResponseLimitError) =>
 	error._tag === "@maple/query-engine/execution/WarehouseResponseLimitError"
 		? payloadTooLarge(
@@ -333,7 +334,17 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					// Pagination is pushed into SQL. It used to be applied to an
 					// already-materialized array, so every page paid for the whole
 					// session's payload — the read this endpoint could never survive.
-					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) => {
+					//
+					// The page size is clamped to the same cap the SQL enforces. Left
+					// unclamped, `limit=100` would ask the lookahead for 101 rows, get
+					// the SQL cap of 41, and conclude 41 <= 100 means "no more pages" —
+					// silently returning a short page with `has_more: false` and
+					// dropping the rest of the recording.
+					const pageQuery = {
+						...query,
+						limit: Math.min(query.limit ?? LIST_LIMIT_DEFAULT, MAX_REPLAY_CHUNKS_PER_REQUEST),
+					}
+					const page = yield* paginateOffsetQuery(pageQuery, ({ limit, offset }) => {
 						const compiled = CH.compile(
 							CH.sessionReplayEventsQuery({
 								startTime: windowStart,

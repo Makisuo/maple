@@ -162,6 +162,33 @@ describe("seeking", () => {
 	})
 })
 
+describe("live sessions", () => {
+	it("grows only the trailing range as chunks arrive", () => {
+		// While a recording is still being written its last range is partial, so
+		// it is the one boundary that moves. Everything before it must not.
+		const grown = Array.from({ length: 60 }, (_, seq) => chunk(seq))
+		const early = planRanges(grown.slice(0, 45))
+		const later = planRanges(grown)
+		expect(later.slice(0, early.length - 1)).toEqual(early.slice(0, early.length - 1))
+		expect(later[early.length - 1]).not.toEqual(early[early.length - 1])
+	})
+
+	it("re-requests the grown trailing range under a new key", () => {
+		// Which is why the loader must drop chunks it already holds when that
+		// range comes back: without it, the overlap is fed to `addEvent` twice
+		// and those mutations replay into the live engine a second time.
+		const grown = Array.from({ length: 60 }, (_, seq) => chunk(seq))
+		const early = planRanges(grown.slice(0, 45))
+		const later = planRanges(grown)
+		const tailBefore = early[early.length - 1]!
+		const tailAfter = rangeContaining(later, tailBefore.toChunkSeq + 1)!
+		expect(rangeKey(tailAfter)).not.toBe(rangeKey(tailBefore))
+		expect(tailAfter.fromChunkSeq).toBe(tailBefore.fromChunkSeq)
+		// The overlap the loader has to filter out.
+		expect(tailAfter.toChunkSeq).toBeGreaterThan(tailBefore.toChunkSeq)
+	})
+})
+
 describe("request volume", () => {
 	it("replaces one unbounded request with a bounded request per range", () => {
 		// The load-bearing property. Before: 1 request, entire payload, no ceiling.

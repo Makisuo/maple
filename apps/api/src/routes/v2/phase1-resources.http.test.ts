@@ -1245,6 +1245,38 @@ describe("v2 session_replays over HTTP", () => {
 			await harness.dispose()
 		})
 
+		it("keeps pagination honest when the caller asks for more than the cap", async () => {
+			// `limit=100` is inside the public 1–100 range but above the per-request
+			// chunk cap. Unclamped, the lookahead asks for 101 rows, gets the SQL
+			// cap of 41, and concludes 41 <= 100 means "no more pages" — a short
+			// page reported as complete, silently dropping the rest of the session.
+			// 60 chunks: more than one capped page, so a page that claims to be the
+			// last one is provably wrong.
+			const manyRows = Array.from({ length: 60 }, (_, seq) => ({ ...chunkRows[0]!, chunkSeq: seq }))
+			const harness = makeHarness({
+				...warehouseStub,
+				compiledQueryBounded: (_tenant, compiled) => {
+					const limit = Number(/LIMIT\s+(\d+)/i.exec(compiled.sql)?.[1] ?? manyRows.length)
+					const offset = Number(/OFFSET\s+(\d+)/i.exec(compiled.sql)?.[1] ?? 0)
+					return compiled.decodeRows(manyRows.slice(offset, offset + limit)).pipe(Effect.orDie)
+				},
+			})
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_bigpage")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/events?limit=100`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(200)
+			expect(response.body.data.length).toBeLessThanOrEqual(40)
+			// 60 chunks exist and the page is capped at 40, so there is a next page.
+			expect(response.body.has_more).toBe(true)
+			expect(response.body.next_cursor).not.toBeNull()
+			await harness.dispose()
+		})
+
 		it("refuses an over-budget range of blob-backed chunks before hydrating", async () => {
 			// The seam between this change and the R2 move. Once payloads live in
 			// the blob store the warehouse response is only an index — `events` is

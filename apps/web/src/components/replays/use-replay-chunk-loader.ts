@@ -143,10 +143,10 @@ export function useReplayChunkLoader({
 	// range to fetch it re-reads the last one, which the 10-minute atom TTL serves
 	// from cache — chunk rows are immutable, so a repeat read is free.
 	//
-	// Before the manifest lands there is no range at all. Subscribing to a
-	// placeholder would fire a real request for a chunk window we have no reason
-	// to believe exists, so hold at the first grid slot: that is where playback
-	// starts for most sessions, making it a prefetch rather than a wasted call.
+	// Before the manifest lands there is no range at all. Subscribing to an
+	// invented window would fire a request for chunks we have no reason to think
+	// exist, so hold at the plan's first range once there is one — that is where
+	// playback starts for most sessions, making it a prefetch rather than waste.
 	const subscribedRange =
 		activeRange ?? loaded[loaded.length - 1]?.range ?? plan[0] ?? { fromChunkSeq: 0, toChunkSeq: 0 }
 	const rangeResult = useAtomValue(
@@ -175,12 +175,30 @@ export function useReplayChunkLoader({
 			.onSuccess((result) => result)
 			.orElse(() => null)
 		if (committed === null) return
-		const rows = committed.chunks as ReadonlyArray<{ chunk_seq: number; events: string }>
+		const all = committed.chunks as ReadonlyArray<{ chunk_seq: number; events: string }>
+		// Take only chunks this range is responsible for and that aren't already
+		// loaded.
+		//
+		// The overlap is real on a LIVE session: the plan's last range is partial
+		// while the recording is still being written, so a range loaded as 40–45
+		// becomes 40–55 once more chunks land. That is a different key, so it is
+		// fetched again — and without this filter chunks 40–45 would be handed to
+		// `addEvent` a second time, replaying those mutations into the live engine.
+		//
+		// The range check also means a result that somehow belongs to a different
+		// range is dropped rather than committed under this one's key.
+		const alreadyThrough = loaded.reduce((max, entry) => Math.max(max, entry.lastChunkSeq), -1)
+		const rows = all.filter(
+			(row) =>
+				row.chunk_seq >= activeRange.fromChunkSeq &&
+				row.chunk_seq <= activeRange.toChunkSeq &&
+				row.chunk_seq > alreadyThrough,
+		)
 		const events = decodeRange(rows)
-		const lastChunkSeq = rows.reduce((max, row) => Math.max(max, row.chunk_seq), activeRange.fromChunkSeq)
+		const lastChunkSeq = rows.reduce((max, row) => Math.max(max, row.chunk_seq), alreadyThrough)
 		setLoaded((current) => [...current, { key, range: activeRange, events, lastChunkSeq }])
 		setQueue((current) => current.slice(1))
-	}, [rangeResult, activeRange, loadedKeys])
+	}, [rangeResult, activeRange, loadedKeys, loaded])
 
 	// The seed is everything loaded before the queue first drains; after that,
 	// arrivals are trailing and get fed to the live engine.
