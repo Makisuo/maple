@@ -311,6 +311,7 @@ const planetScaleTick = Effect.gen(function* () {
 				refreshed: result.refreshed,
 				skipped: result.skipped,
 				failures: result.failures,
+				deployEvents: result.deployEvents,
 			}),
 		)
 	}

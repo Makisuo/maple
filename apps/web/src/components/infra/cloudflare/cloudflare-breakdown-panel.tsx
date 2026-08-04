@@ -37,6 +37,7 @@ import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refresha
 import { formatNumber } from "@maple/ui/lib/format"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { ColumnHead, DataTable, useTableSort } from "../primitives/data-table"
+import { shareTint } from "../primitives/share-tint"
 import { formatBytes, formatPercent } from "@maple/ui/lib/format"
 import { StackedBreakdownChart } from "./cloudflare-zone-detail-charts"
 import {
@@ -115,22 +116,6 @@ const ROW_CLASS =
 
 const CHIP_CLASS =
 	"inline-flex items-center rounded-sm border border-border/70 bg-background/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
-
-/**
- * Rank made visible: a tint filling the row to its share of listed requests. The scale is linear —
- * a path at 40% is twice the block of one at 20% — so scrolling the list traces the decay curve.
- *
- * It fades out over its last fifth rather than stopping on a hard edge: a crisp rectangle in the
- * primary hue reads as a selected row, which is a state this table also has. Below half a percent
- * the bar would be a sliver of noise, so it doesn't render at all.
- */
-const shareTint = (share: number): string | undefined => {
-	const pct = Math.min(100, share * 100)
-	if (!Number.isFinite(pct) || pct < 0.5) return undefined
-	const solid = pct * 0.8
-	const tint = "color-mix(in oklab, var(--primary) 8%, transparent)"
-	return `linear-gradient(to right, ${tint} 0%, ${tint} ${solid}%, transparent ${pct}%)`
-}
 
 /** ISO-8601 UTC → "Jul 28". */
 const formatCollectedFrom = (iso: string) => {

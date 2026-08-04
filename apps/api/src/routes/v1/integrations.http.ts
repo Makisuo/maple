@@ -28,6 +28,7 @@ import {
 	PlanetScaleDisconnectResponse,
 	PlanetScaleOrganizationsResponse,
 	PlanetScaleOrganizationSummary,
+	PlanetScaleEventsResponse,
 	PlanetScaleQueryInsightsResponse,
 	PlanetScaleStartConnectResponse,
 	PlanetScaleWebhookConfigResponse,
@@ -528,6 +529,67 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 								endTime: endMs,
 								limit,
 							}),
+						)
+						return cached.value
+					}),
+				)
+				// No admin gate — the timeline is the same class of read as the inventory.
+				.handle("planetscaleEvents", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						if (payload.endTime <= payload.startTime) {
+							return yield* Effect.fail(
+								new IntegrationsValidationError({
+									message: "endTime must be after startTime",
+								}),
+							)
+						}
+						const limit = Math.min(Math.max(Math.floor(payload.limit ?? 100), 1), 500)
+						const MINUTE = 60_000
+						const startMs = Math.floor(payload.startTime / MINUTE) * MINUTE
+						const endMs = Math.max(Math.ceil(payload.endTime / MINUTE) * MINUTE, startMs + MINUTE)
+						const categories = payload.categories ?? []
+						const cached = yield* edgeCache.getOrCompute(
+							{
+								bucket: "ps-events",
+								key: `${tenant.orgId}:${payload.database ?? ""}:${payload.branch ?? ""}:${startMs}:${endMs}:${categories.join(",")}:${limit}:${payload.cursor ?? ""}`,
+								// Shorter than query-insights' 60s: a deploy marker landing a
+								// minute after the deploy is the visible failure mode here.
+								ttlSeconds: 30,
+								schema: PlanetScaleEventsResponse,
+							},
+							planetscaleInventory
+								.listEvents(tenant.orgId, {
+									database: payload.database,
+									branch: payload.branch,
+									startTime: startMs,
+									endTime: endMs,
+									categories: categories.length > 0 ? categories : undefined,
+									limit,
+									cursor: payload.cursor,
+								})
+								.pipe(
+									Effect.map(
+										({ events, nextCursor }) =>
+											new PlanetScaleEventsResponse({
+												events: events.map((row) => ({
+													id: row.id,
+													databaseName: row.databaseName,
+													branchName: row.branchName,
+													category: row.category,
+													eventType: row.eventType,
+													state: row.state,
+													externalId: row.externalId,
+													title: row.title,
+													source: row.source,
+													actorLogin: row.actorLogin,
+													url: row.url,
+													occurredAt: row.occurredAt.getTime(),
+												})),
+												nextCursor,
+											}),
+									),
+								),
 						)
 						return cached.value
 					}),

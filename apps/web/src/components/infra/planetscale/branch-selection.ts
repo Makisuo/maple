@@ -13,8 +13,11 @@
 //
 // Pure — no React, no atoms — so the precedence rules are testable on their own.
 
+import { matchesGlob } from "@maple/domain/glob"
 import type { PlanetScaleBranchSummary } from "@maple/domain/http"
 import type { PlanetScaleBranchStat } from "@/api/warehouse/service-map"
+
+export { matchesGlob }
 
 export interface BranchCandidate {
 	readonly name: string
@@ -29,16 +32,12 @@ export interface BranchCandidate {
 }
 
 /**
- * PlanetScale's branch filters are shell-style globs (`pr-*`, `preview-*`).
- * Anchored, `*` only — matching what the scraper's discovery config applies.
+ * Whether the scrape target's branch filters keep this branch out. Shares
+ * `matchesGlob` with the scraper's discovery config (`@maple/domain/glob`) —
+ * these two previously had independent glob implementations that disagreed on
+ * `?`, so the preview and the scraper collected different branch sets.
  */
-export function matchesGlob(pattern: string, value: string): boolean {
-	if (pattern === "") return false
-	const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")
-	return new RegExp(`^${escaped}$`).test(value)
-}
-
-const isExcluded = (
+export const isExcluded = (
 	name: string,
 	includeBranches: ReadonlyArray<string>,
 	excludeBranches: ReadonlyArray<string>,

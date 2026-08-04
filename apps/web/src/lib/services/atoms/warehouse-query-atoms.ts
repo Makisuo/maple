@@ -77,7 +77,11 @@ import {
 	getCloudflareZoneSecurity,
 	getCloudflareZoneTimeseries,
 } from "@/api/warehouse/cloudflare-infra"
-import { getPlanetScaleInfraTimeseries, getPlanetScaleQueryInsights } from "@/api/warehouse/planetscale-infra"
+import {
+	getPlanetScaleEvents,
+	getPlanetScaleInfraTimeseries,
+	getPlanetScaleQueryInsights,
+} from "@/api/warehouse/planetscale-infra"
 import {
 	getServiceHealthBaseline,
 	getServiceHealthSnapshot,
@@ -501,6 +505,12 @@ export const planetscaleInfraTimeseriesResultAtom = makeQueryAtomFamily(getPlane
 export const planetscaleQueryInsightsResultAtom = makeQueryAtomFamily(getPlanetScaleQueryInsights, {
 	// Server-side edge cache is 60s; match it so refreshes don't hammer PlanetScale.
 	staleTime: 60_000,
+})
+
+export const planetscaleEventsResultAtom = makeQueryAtomFamily(getPlanetScaleEvents, {
+	// Server-side edge cache is 30s — a deploy marker showing up late is the
+	// visible failure mode, so this stays tighter than the other PlanetScale reads.
+	staleTime: 30_000,
 })
 
 export const getPlanetScaleBranchStatsResultAtom = makeQueryAtomFamily(getPlanetScaleBranchStats, {

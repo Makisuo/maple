@@ -1,7 +1,14 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import type { IssueSeverity, OrgId, WorkflowState } from "@maple/domain/http"
 import { ActorId, ErrorIssueEventId, ErrorIssueId } from "@maple/domain/primitives"
-import { actors, errorIssues, errorIssueEvents, type ErrorIssueRow } from "@maple/db"
+import {
+	actors,
+	errorIssues,
+	errorIssueEvents,
+	planetscaleDatabases,
+	planetscaleEvents,
+	type ErrorIssueRow,
+} from "@maple/db"
 import { and, eq, sql } from "drizzle-orm"
 import { Clock, Effect, Schema } from "effect"
 import { Database, type DatabaseError } from "@/platform/DatabaseLive"
@@ -54,26 +61,64 @@ export const decodePlanetScaleWebhookPayload = Schema.decodeUnknownEffect(
 // Classification
 // ---------------------------------------------------------------------------
 
+/** Where an event belongs on the timeline. Mirrored by the web vocabulary table. */
+export type PlanetScaleEventCategory = "deploy_request" | "branch" | "database" | "cluster" | "keyspace"
+
+export interface PlanetScaleTimelineSpec {
+	readonly category: PlanetScaleEventCategory
+	/** Normalized lifecycle state; null when the event isn't a state transition. */
+	readonly state: string | null
+	readonly title: (payload: PlanetScaleWebhookPayload) => string
+}
+
+/**
+ * `issue` carries a `timeline` too: a branch running out of memory belongs in
+ * the triage hub *and* on the chart next to the CPU spike it caused.
+ */
 export type PlanetScaleEventAction =
 	| {
 			readonly action: "issue"
 			readonly severity: IssueSeverity
 			readonly title: string
 			readonly describe: (payload: PlanetScaleWebhookPayload) => string
+			readonly timeline: PlanetScaleTimelineSpec
 	  }
+	| { readonly action: "timeline"; readonly timeline: PlanetScaleTimelineSpec }
 	| { readonly action: "log" }
 	| { readonly action: "test" }
 
-const branchName = (payload: PlanetScaleWebhookPayload): string => {
+export const planetScaleBranchName = (payload: PlanetScaleWebhookPayload): string => {
 	const name = payload.resource?.name
 	return typeof name === "string" && name.length > 0 ? name : "unknown-branch"
 }
 
+const branchName = planetScaleBranchName
+
 /**
- * Exhaustive event map. Health events become triage issues; lifecycle events
- * (deploys, branch state changes) are observability noise at issue granularity
- * and are logged only — surfacing them as deploy-timeline annotations is a
- * follow-up once a generic annotation store exists.
+ * Deploy-request identity, so a webhook delivery and the REST backfill of the
+ * same transition collapse onto one timeline row. `number` is what PlanetScale
+ * shows in its UI; `id` is the fallback for payload shapes that omit it.
+ */
+export const deployRequestNumber = (payload: PlanetScaleWebhookPayload): string => {
+	const number = payload.resource?.number
+	if (typeof number === "number" || typeof number === "string") return String(number)
+	const id = payload.resource?.id
+	return typeof id === "string" || typeof id === "number" ? String(id) : ""
+}
+
+/** The lifecycle state a `deploy_request.*` / `branch.*` event represents. */
+const stateFromEvent = (event: string): string | null => {
+	const dot = event.indexOf(".")
+	return dot === -1 ? null : event.slice(dot + 1)
+}
+
+/**
+ * Exhaustive event map.
+ *
+ * Health events become triage issues *and* timeline markers. Lifecycle events
+ * (deploys, branch state changes) are too low-signal to be issues but are
+ * exactly what makes a chart readable — "CPU tripled" is noise until it sits
+ * next to "schema applied" — so they are persisted as timeline rows.
  */
 export const classifyPlanetScaleEvent = (event: string): PlanetScaleEventAction => {
 	switch (event) {
@@ -84,6 +129,11 @@ export const classifyPlanetScaleEvent = (event: string): PlanetScaleEventAction 
 				title: "PlanetScale branch out of memory",
 				describe: (payload) =>
 					`Branch ${branchName(payload)} of ${payload.database ?? "unknown"} was restarted after running out of memory.`,
+				timeline: {
+					category: "branch",
+					state: "out_of_memory",
+					title: (payload) => `${branchName(payload)} restarted — out of memory`,
+				},
 			}
 		case "branch.anomaly":
 			return {
@@ -92,6 +142,11 @@ export const classifyPlanetScaleEvent = (event: string): PlanetScaleEventAction 
 				title: "PlanetScale detected an anomaly",
 				describe: (payload) =>
 					`PlanetScale detected a performance anomaly on branch ${branchName(payload)} of ${payload.database ?? "unknown"}.`,
+				timeline: {
+					category: "branch",
+					state: "anomaly",
+					title: (payload) => `Anomaly detected on ${branchName(payload)}`,
+				},
 			}
 		case "cluster.storage":
 		case "keyspace.storage":
@@ -101,6 +156,11 @@ export const classifyPlanetScaleEvent = (event: string): PlanetScaleEventAction 
 				title: "PlanetScale storage threshold reached",
 				describe: (payload) =>
 					`${payload.database ?? "A database"} crossed a storage usage threshold — review retention or scale the cluster.`,
+				timeline: {
+					category: event === "cluster.storage" ? "cluster" : "keyspace",
+					state: "storage_threshold",
+					title: () => "Storage threshold crossed",
+				},
 			}
 		case "deploy_request.opened":
 		case "deploy_request.queued":
@@ -110,12 +170,40 @@ export const classifyPlanetScaleEvent = (event: string): PlanetScaleEventAction 
 		case "deploy_request.errored":
 		case "deploy_request.reverted":
 		case "deploy_request.closed":
+			return {
+				action: "timeline",
+				timeline: {
+					category: "deploy_request",
+					state: stateFromEvent(event),
+					title: (payload) => {
+						const number = deployRequestNumber(payload)
+						const label = number === "" ? "Deploy request" : `Deploy request #${number}`
+						return `${label} ${DEPLOY_STATE_VERB[event] ?? stateFromEvent(event)}`
+					},
+				},
+			}
 		case "branch.ready":
 		case "branch.sleeping":
 		case "branch.primary_promoted":
 		case "branch.start_maintenance":
+			return {
+				action: "timeline",
+				timeline: {
+					category: "branch",
+					state: stateFromEvent(event),
+					title: (payload) =>
+						`${branchName(payload)} ${BRANCH_STATE_VERB[event] ?? stateFromEvent(event)}`,
+				},
+			}
 		case "database.access_request":
-			return { action: "log" }
+			return {
+				action: "timeline",
+				timeline: {
+					category: "database",
+					state: "access_request",
+					title: (payload) => `Access requested for ${payload.database ?? "the database"}`,
+				},
+			}
 		case "webhook.test":
 			return { action: "test" }
 		default:
@@ -124,6 +212,106 @@ export const classifyPlanetScaleEvent = (event: string): PlanetScaleEventAction 
 			return { action: "log" }
 	}
 }
+
+const DEPLOY_STATE_VERB: Record<string, string> = {
+	"deploy_request.opened": "opened",
+	"deploy_request.queued": "queued",
+	"deploy_request.in_progress": "deploying",
+	"deploy_request.pending_cutover": "pending cutover",
+	"deploy_request.schema_applied": "applied its schema",
+	"deploy_request.errored": "failed",
+	"deploy_request.reverted": "was reverted",
+	"deploy_request.closed": "closed",
+}
+
+const BRANCH_STATE_VERB: Record<string, string> = {
+	"branch.ready": "is ready",
+	"branch.sleeping": "went to sleep",
+	"branch.primary_promoted": "was promoted to primary",
+	"branch.start_maintenance": "entered maintenance",
+}
+
+// ---------------------------------------------------------------------------
+// Timeline rows
+// ---------------------------------------------------------------------------
+
+/**
+ * PlanetScale webhook `timestamp` is epoch SECONDS; the deploy-request REST
+ * backfill carries milliseconds. Both are truncated to the second so the same
+ * transition from either source lands on one row under the dedupe index.
+ */
+export const truncateToSecond = (epochMs: number): Date => new Date(Math.floor(epochMs / 1000) * 1000)
+
+export interface InsertPlanetScaleEventInput {
+	readonly orgId: OrgId
+	readonly databaseName: string
+	readonly branchName: string
+	readonly category: PlanetScaleEventCategory
+	readonly eventType: string
+	readonly state: string | null
+	readonly externalId: string
+	readonly title: string
+	readonly source: "webhook" | "backfill"
+	readonly actorLogin?: string | null
+	readonly url?: string | null
+	readonly payload?: Record<string, unknown> | null
+	readonly occurredAtMs: number
+	readonly createdAtMs: number
+}
+
+/**
+ * Append one lifecycle event, idempotently. Queue redelivery and repeated
+ * backfills both land on the dedupe index and become no-ops, so callers can
+ * retry freely — `inserted` reports whether the row was new.
+ *
+ * `databaseId` is resolved best-effort from the inventory; a miss leaves it ""
+ * because the read path keys on `databaseName` anyway, and the webhook payload
+ * carries only the name.
+ */
+export const insertPlanetScaleEvent: (
+	input: InsertPlanetScaleEventInput,
+) => Effect.Effect<{ readonly inserted: boolean }, DatabaseError, Database> = Effect.fn(
+	"planetscaleWebhook.insertEvent",
+)(function* (input: InsertPlanetScaleEventInput) {
+	const database = yield* Database
+	return yield* database.execute(async (db) => {
+		const known = await db
+			.select({ databaseId: planetscaleDatabases.databaseId })
+			.from(planetscaleDatabases)
+			.where(
+				and(
+					eq(planetscaleDatabases.orgId, input.orgId),
+					eq(planetscaleDatabases.name, input.databaseName),
+				),
+			)
+			.limit(1)
+
+		const rows = await db
+			.insert(planetscaleEvents)
+			.values({
+				id: randomUUID(),
+				orgId: input.orgId,
+				databaseId: known[0]?.databaseId ?? "",
+				databaseName: input.databaseName,
+				branchName: input.branchName,
+				category: input.category,
+				eventType: input.eventType,
+				state: input.state,
+				externalId: input.externalId,
+				title: input.title,
+				source: input.source,
+				actorLogin: input.actorLogin ?? null,
+				url: input.url ?? null,
+				payloadJson: input.payload ?? null,
+				occurredAt: truncateToSecond(input.occurredAtMs),
+				createdAt: new Date(input.createdAtMs),
+			})
+			.onConflictDoNothing()
+			.returning({ id: planetscaleEvents.id })
+
+		return { inserted: rows.length > 0 }
+	})
+})
 
 // ---------------------------------------------------------------------------
 // Issue upsert (kind="integration")
