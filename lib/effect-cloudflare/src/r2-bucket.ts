@@ -7,6 +7,7 @@
 import type * as runtime from "@cloudflare/workers-types"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import { WorkerEnvironment } from "./worker-environment.ts"
 
@@ -193,4 +194,29 @@ const makeClient = (token: R2BucketToken): R2BucketClient => {
 export const R2Bucket = Object.assign((logicalId: string): R2BucketToken => makeToken(logicalId), {
 	bind: (token: R2BucketToken): Effect.Effect<R2BucketClient, never, never> =>
 		Effect.succeed(makeClient(token)),
+	/**
+	 * `Some` only when the binding actually exists on the worker env.
+	 *
+	 * `bind` resolves lazily, so it hands back a client whose every call fails
+	 * at use time when the binding is missing. That is the wrong shape for a
+	 * deployment where absence is *expected* rather than a misconfiguration —
+	 * the API also ships as a Docker image, and self-hosted installs have no
+	 * R2 at all. Those callers need to branch on presence once, at layer
+	 * construction, not rescue an error per request.
+	 */
+	bindOptional: (
+		token: R2BucketToken,
+	): Effect.Effect<Option.Option<R2BucketClient>, never, WorkerEnvironment> =>
+		WorkerEnvironment.pipe(
+			Effect.map((env) => {
+				// The env itself can be absent, not just the binding: outside a
+				// Worker isolate `cloudflare-workers.ts` falls back to a stub, and
+				// under vitest that stub's `env` may be undefined rather than `{}`.
+				// Both mean the same thing here.
+				const bindings = env as Record<string, unknown> | undefined | null
+				return bindings?.[token.LogicalId] === undefined
+					? Option.none()
+					: Option.some(makeClient(token))
+			}),
+		),
 })

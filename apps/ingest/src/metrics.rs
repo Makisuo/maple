@@ -71,6 +71,13 @@ static REPLAY_SESSION_CHUNK_DROPPED_TOTAL: LazyLock<Counter<u64>> = LazyLock::ne
         .build()
 });
 
+static REPLAY_BLOB_PUT_FAILED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_replay_blob_put_failed_total")
+        .with_description("Replay chunks rejected because their payload could not be stored")
+        .build()
+});
+
 static CLOUDFLARE_BATCHES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("ingest_cloudflare_batches_total")
@@ -429,6 +436,14 @@ pub fn replay_session_truncated(org_id: &str) {
 /// after it stopped being stored — worth an SDK-side sampling conversation.
 pub fn replay_session_chunk_dropped(org_id: &str) {
     REPLAY_SESSION_CHUNK_DROPPED_TOTAL.add(1, &[KeyValue::new("org_id", org_id.to_string())]);
+}
+
+/// A replay chunk's payload could not be written to the blob store, so the
+/// chunk was rejected and no index row was enqueued. The SDK does not retry, so
+/// every increment here is a permanent gap in a recording — this should sit at
+/// zero, and it is the signal to watch during the R2 cutover.
+pub fn replay_blob_put_failed(org_id: &str) {
+    REPLAY_BLOB_PUT_FAILED_TOTAL.add(1, &[KeyValue::new("org_id", org_id.to_string())]);
 }
 
 /// Current in-flight request count for an org.

@@ -9,9 +9,10 @@ import { warehouseHttpErrors } from "./warehouse"
 // ---------------------------------------------------------------------------
 // Session replay endpoint schemas
 //
-// Backed by the session_replays (metadata) + session_replay_events (rrweb event
-// payloads) datasources, both in ClickHouse. `getReplayEvents` returns the rrweb
-// event arrays inline (read straight from the warehouse — no R2, no signed URLs).
+// Backed by the session_replays (metadata) + session_replay_events (chunk index)
+// datasources in ClickHouse. `getReplayEvents` returns the rrweb event arrays
+// inline; the API hydrates them from R2 first when the row is blob-backed, so
+// the wire shape is the same either way — no signed URLs, no client-side fetch.
 // ---------------------------------------------------------------------------
 
 // --- List ---

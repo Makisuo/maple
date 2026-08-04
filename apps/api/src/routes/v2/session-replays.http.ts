@@ -18,8 +18,9 @@ import type {
 	V2SessionTranscriptEvent,
 } from "@maple/domain/http/v2"
 import { CH, formatWarehouseDateTime } from "@maple/query-engine"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { ReplayBlobStore, ReplayBlobStoreLive } from "@/platform/ReplayBlobStore"
 import { warehouseToV2 } from "./warehouse-error-map"
 
 const decodeSessionId = Schema.decodeSync(SessionId)
@@ -51,9 +52,10 @@ const chToIsoOrNull = (value: string | null): Timestamp | null => (value === nul
 
 const nullableUserId = (value: string | null): string | null => (value ? value : null)
 
-export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessionReplays", (handlers) =>
+const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionReplays", (handlers) =>
 	Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService
+		const blobs = yield* ReplayBlobStore
 
 		const requireSession = Effect.fn("HttpV2SessionReplays.requireSession")(function* (
 			tenant: CurrentTenant.TenantSchema,
@@ -218,12 +220,20 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 						CH.sessionReplayEventsQuery({ startTime: windowStart, endTime: windowEnd }),
 						{ orgId: tenant.orgId, sessionId: params.id },
 					)
-					const rows = yield* warehouse
+					const stored = yield* warehouse
 						.compiledQuery(tenant, compiled, { profile: "list", context: "v2GetReplayEvents" })
 						.pipe(Effect.mapError(mapWarehouseError))
-					if (rows.length === 0) {
+					if (stored.length === 0) {
 						yield* requireSession(tenant, params.id, windowStart, windowEnd)
 					}
+					// Paginate before hydrating: the warehouse query has no LIMIT, so
+					// this is the only place a page's payload cost gets bounded. Doing
+					// it the other way round would fetch every chunk of the session
+					// from the blob store to then throw all but `limit` away.
+					const page = yield* paginateArray(stored, query)
+					// Blob-backed rows (empty `events`) get their payload from R2;
+					// pre-cutover rows already carry it inline.
+					const rows = yield* blobs.hydrate(tenant.orgId, params.id, page.data)
 					const chunks = rows.map(
 						(row) =>
 							({
@@ -237,8 +247,7 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 								events: row.events,
 							}) satisfies V2SessionReplayChunk,
 					)
-					const page = yield* paginateArray(chunks, query)
-					return { object: "list" as const, ...page }
+					return { object: "list" as const, ...page, data: chunks }
 				}),
 			)
 			.handle("transcript", ({ params, query }) =>
@@ -340,3 +349,10 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 			)
 	}),
 )
+
+// Self-contained: the blob store resolves from the worker env (and degrades to
+// a no-op hydrator when the R2 binding is absent), so it is provided here
+// rather than pushed onto every caller that builds this group — the v2 route
+// tests construct their own layer stack and would otherwise have to know about
+// a storage detail of one handler.
+export const HttpV2SessionReplaysLive = HttpV2SessionReplaysGroup.pipe(Layer.provide(ReplayBlobStoreLive))

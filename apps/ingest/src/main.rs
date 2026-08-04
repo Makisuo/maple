@@ -38,6 +38,7 @@ use maple_ingest::otel::{
     record_stage_error, rejection_loses_data, resolve_config_internal_span, ResourceConfig,
 };
 use maple_ingest::otlp_json;
+use maple_ingest::r2::{replay_object_key, ReplayBlobStore};
 use maple_ingest::session_analytics::{
     derive_referrer_host, sanitize_session_event, sanitize_session_meta,
 };
@@ -99,6 +100,17 @@ fn is_sentinel_token(token: &str) -> bool {
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Credentials for the S3-compatible endpoint that holds replay chunk payloads.
+#[derive(Clone)]
+struct ReplayBlobStoreConfig {
+    endpoint: String,
+    bucket: String,
+    access_key_id: String,
+    secret_access_key: String,
+    region: String,
+    timeout: Duration,
+}
+
 #[derive(Clone)]
 struct AppConfig {
     port: u16,
@@ -123,6 +135,11 @@ struct AppConfig {
     /// Ceiling on the total decompressed rrweb payload a single replay session
     /// may accumulate. 0 disables the cap. See `ReplaySessionBudget`.
     replay_max_session_bytes: u64,
+    /// Where replay chunk payloads are stored. `None` — the default, and the
+    /// only option for self-hosted and BYO-ClickHouse deployments — keeps the
+    /// rrweb JSON inline in the `session_replay_events` row. `Some` diverts the
+    /// payload to R2 and writes a thin index row with an empty `events`.
+    replay_blob_store: Option<ReplayBlobStoreConfig>,
     /// Whether `Cf-IPCountry` on an inbound request can be believed.
     ///
     /// Off by default, and that default is the safe one: this gateway is a
@@ -417,6 +434,51 @@ impl AppConfig {
             1024 * 1024 * 1024,
         )?;
 
+        // Replay payload storage. An unset endpoint is the signal for "keep the
+        // rrweb JSON inline in ClickHouse" — that is what self-hosted and
+        // BYO-ClickHouse deployments run, and it is also how this ships dark on
+        // the managed path until the credentials are set. Anything half-set is a
+        // misconfiguration we refuse to boot on rather than silently falling
+        // back to inline, which would look identical in metrics until someone
+        // noticed the warehouse bill hadn't moved.
+        let replay_blob_store = {
+            let endpoint = std::env::var("INGEST_REPLAY_R2_ENDPOINT")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
+            match endpoint {
+                None => None,
+                Some(endpoint) => {
+                    let required = |name: &str| -> Result<String, String> {
+                        std::env::var(name)
+                            .ok()
+                            .map(|v| v.trim().to_string())
+                            .filter(|v| !v.is_empty())
+                            .ok_or_else(|| {
+                                format!("{name} is required when INGEST_REPLAY_R2_ENDPOINT is set")
+                            })
+                    };
+                    let timeout_ms = parse_u64(
+                        "INGEST_REPLAY_R2_TIMEOUT_MS",
+                        std::env::var("INGEST_REPLAY_R2_TIMEOUT_MS").ok(),
+                        5_000,
+                    )?;
+                    Some(ReplayBlobStoreConfig {
+                        endpoint,
+                        bucket: required("INGEST_REPLAY_R2_BUCKET")?,
+                        access_key_id: required("INGEST_REPLAY_R2_ACCESS_KEY_ID")?,
+                        secret_access_key: required("INGEST_REPLAY_R2_SECRET_ACCESS_KEY")?,
+                        region: std::env::var("INGEST_REPLAY_R2_REGION")
+                            .ok()
+                            .map(|v| v.trim().to_string())
+                            .filter(|v| !v.is_empty())
+                            .unwrap_or_else(|| "auto".to_string()),
+                        timeout: Duration::from_millis(timeout_ms),
+                    })
+                }
+            }
+        };
+
         // Default off — see the field doc. Set it on services that are only
         // reachable through Cloudflare.
         let trust_proxy_geo = parse_bool(
@@ -446,6 +508,7 @@ impl AppConfig {
             ingest_key_cache_ttl_secs,
             org_routing_cache_ttl_secs,
             replay_max_session_bytes,
+            replay_blob_store,
             trust_proxy_geo,
         })
     }
@@ -831,6 +894,9 @@ struct AppState {
     /// (local dev, or a loopback endpoint).
     usage_metrics: Option<Arc<UsageMetrics>>,
     replay_session_budget: ReplaySessionBudget,
+    /// `Some` when replay payloads go to R2; `None` keeps them inline in the
+    /// `session_replay_events` row. See `AppConfig::replay_blob_store`.
+    replay_blob_store: Option<ReplayBlobStore>,
 }
 
 #[derive(Clone)]
@@ -1600,6 +1666,10 @@ async fn main() {
         last_known: DashMap::new(),
     });
 
+    // Same pooled client as every other outbound call; `http_client` itself is
+    // moved into the state below.
+    let http_client_for_blobs = http_client.clone();
+
     let state = Arc::new(AppState {
         resolver: IngestKeyResolver {
             store: Arc::clone(&store),
@@ -1629,6 +1699,17 @@ async fn main() {
         autumn_entitlements,
         usage_metrics: usage_metrics.clone(),
         replay_session_budget: ReplaySessionBudget::new(config.replay_max_session_bytes),
+        replay_blob_store: config.replay_blob_store.as_ref().map(|blob| {
+            ReplayBlobStore::new(
+                http_client_for_blobs,
+                blob.endpoint.clone(),
+                blob.bucket.clone(),
+                blob.access_key_id.clone(),
+                blob.secret_access_key.clone(),
+                blob.region.clone(),
+                blob.timeout,
+            )
+        }),
     });
 
     let cors = CorsLayer::new()
@@ -2538,6 +2619,30 @@ async fn handle_session_events_inner(
     Ok(count)
 }
 
+/// Decompressed length of a gzip payload, without materializing it.
+///
+/// Same number `read_to_string(...).len()` would produce, and the same
+/// rejection of malformed gzip — it just doesn't keep the bytes. Used on the
+/// blob-store path, where the decompressed text is never needed but `ByteSize`
+/// and the per-session budget are still denominated in decompressed bytes.
+fn decompressed_len(body: &[u8]) -> Result<u64, ApiError> {
+    use std::io::Read as _;
+    let mut decoder = flate2::read::GzDecoder::new(body);
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total: u64 = 0;
+    loop {
+        match decoder.read(&mut buffer) {
+            Ok(0) => return Ok(total),
+            Ok(n) => total += n as u64,
+            Err(e) => {
+                return Err(ApiError::bad_request(format!(
+                    "failed to gunzip replay chunk: {e}"
+                )))
+            }
+        }
+    }
+}
+
 async fn handle_replay_blob(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -2562,6 +2667,9 @@ async fn handle_replay_blob(
         "maple.ingest.clickhouse_ready" = tracing::field::Empty,
         "maple.ingest.destination" = tracing::field::Empty,
         "maple.replay.truncated" = tracing::field::Empty,
+        "maple.replay.storage" = tracing::field::Empty,
+        "maple.replay.object_key" = tracing::field::Empty,
+        "maple.replay.blob_put_ms" = tracing::field::Empty,
     );
     let span_handle = span.clone();
     match handle_replay_blob_inner(&state, &headers, body)
@@ -2631,6 +2739,15 @@ async fn handle_replay_blob_inner(
     if !is_safe_replay_id(&session_id) {
         return Err(ApiError::bad_request("invalid x-maple-session-id"));
     }
+    // The org id comes from the resolved key rather than the request, so this is
+    // a guard against a malformed key row, not against the caller. It matters
+    // because the id is now a path segment in a signed URL, not just a quoted
+    // SQL param.
+    if state.replay_blob_store.is_some() && !is_safe_replay_id(&org_id) {
+        return Err(ApiError::service_unavailable(
+            "organization id is not storage-key safe",
+        ));
+    }
     let chunk_seq: u32 = replay_header(headers, "x-maple-chunk-seq")
         .and_then(|v| v.parse().ok())
         .ok_or_else(|| ApiError::bad_request("missing or invalid x-maple-chunk-seq header"))?;
@@ -2658,16 +2775,27 @@ async fn handle_replay_blob_inner(
         ));
     }
 
-    // The SDK gzips the rrweb event array (native CompressionStream). Decompress
-    // here so the events land in ClickHouse as queryable JSON text (the column is
-    // ZSTD-compressed by the warehouse) — no R2 blob store on the replay path.
-    use std::io::Read as _;
-    let mut decoder = flate2::read::GzDecoder::new(&body[..]);
-    let mut events_json = String::new();
-    decoder
-        .read_to_string(&mut events_json)
-        .map_err(|e| ApiError::bad_request(format!("failed to gunzip replay chunk: {e}")))?;
-    let byte_size = events_json.len() as u64;
+    // The SDK gzips the rrweb event array (native CompressionStream).
+    //
+    // With a blob store configured we never need the decompressed text — the
+    // gzip is stored verbatim — but we still decode it, for two reasons: this is
+    // what rejects malformed gzip from a hostile client, and `byte_size` is a
+    // published API field and the input to `ReplaySessionBudget`, whose ceiling
+    // is denominated in *decompressed* bytes. So decode and discard, counting.
+    // What that avoids is the part that actually cost: materializing a
+    // multi-megabyte String, JSON-escaping it, and pushing it through the WAL.
+    let (events_json, byte_size) = if state.replay_blob_store.is_some() {
+        (None, decompressed_len(&body)?)
+    } else {
+        use std::io::Read as _;
+        let mut decoder = flate2::read::GzDecoder::new(&body[..]);
+        let mut events_json = String::new();
+        decoder
+            .read_to_string(&mut events_json)
+            .map_err(|e| ApiError::bad_request(format!("failed to gunzip replay chunk: {e}")))?;
+        let byte_size = events_json.len() as u64;
+        (Some(events_json), byte_size)
+    };
 
     // Accept the chunk that crosses the ceiling so the recording truncates on a
     // chunk boundary; `is_exhausted` rejects everything after it.
@@ -2687,6 +2815,57 @@ async fn handle_replay_blob_inner(
         Span::current().record("maple.replay.truncated", true);
         metrics::replay_session_truncated(&org_id);
     }
+
+    // Store the payload before the row that indexes it. The ordering is the
+    // invariant: a row must never point at an object that isn't there, and a
+    // failed PUT returns non-2xx so the SDK drops the chunk (it already does not
+    // retry) rather than leaving an unplayable gap in a listed session. The
+    // reverse — an object with no row — is harmless and gets swept by the
+    // bucket's lifecycle rule.
+    let events_json = match (&state.replay_blob_store, events_json) {
+        (Some(store), _) => {
+            let key = replay_object_key(&org_id, &session_id, chunk_seq);
+            Span::current().record("maple.replay.storage", "r2");
+            Span::current().record("maple.replay.object_key", key.as_str());
+            let started = Instant::now();
+            // Verbatim gzip: ~10x smaller at rest than the JSON text, no
+            // recompression, and the Content-Encoding lets a reader hand the
+            // bytes to a browser to inflate.
+            store
+                .put_object(&key, body.to_vec(), "application/json", Some("gzip"))
+                .await
+                .map_err(|e| {
+                    warn!(
+                        org_id = %org_id,
+                        session_id = %session_id,
+                        chunk_seq,
+                        error = %e,
+                        "replay chunk blob upload failed"
+                    );
+                    metrics::replay_blob_put_failed(&org_id);
+                    ApiError::service_unavailable("failed to store replay chunk")
+                })?;
+            Span::current().record(
+                "maple.replay.blob_put_ms",
+                started.elapsed().as_millis() as i64,
+            );
+            // The index row carries the chunk's metadata; the payload lives in
+            // R2 under a key derived from (OrgId, SessionId, ChunkSeq). An empty
+            // `events` is what marks the row as blob-backed on read — the SDK
+            // never posts an empty chunk, so it cannot occur otherwise.
+            String::new()
+        }
+        (None, Some(events_json)) => {
+            Span::current().record("maple.replay.storage", "inline");
+            events_json
+        }
+        // Unreachable: `events_json` is only `None` when a store is configured.
+        (None, None) => {
+            return Err(ApiError::service_unavailable(
+                "replay chunk was neither stored nor decoded",
+            ))
+        }
+    };
 
     // Row → session_replay_events. Tinybird parses the space-separated datetime
     // into DateTime64(9); `events` is stored verbatim as a String column.
@@ -6099,6 +6278,7 @@ mod tests {
                 ingest_key_cache_ttl_secs: 60,
                 org_routing_cache_ttl_secs: 5,
                 replay_max_session_bytes: 1024 * 1024 * 1024,
+                replay_blob_store: None,
                 trust_proxy_geo: false,
             },
             http_client,
@@ -6140,7 +6320,32 @@ mod tests {
             autumn_entitlements: None,
             usage_metrics: None,
             replay_session_budget: ReplaySessionBudget::new(1024 * 1024 * 1024),
+            replay_blob_store: None,
         }
+    }
+
+    /// Point a state's replay payloads at a fake S3 endpoint. Mirrors what
+    /// `INGEST_REPLAY_R2_*` does in `Config::from_env`.
+    fn with_replay_blob_store(mut state: AppState, endpoint: String) -> AppState {
+        let config = ReplayBlobStoreConfig {
+            endpoint,
+            bucket: "replays".to_string(),
+            access_key_id: "test-access-key".to_string(),
+            secret_access_key: "test-secret-key".to_string(),
+            region: "auto".to_string(),
+            timeout: Duration::from_secs(5),
+        };
+        state.replay_blob_store = Some(ReplayBlobStore::new(
+            state.http_client.clone(),
+            config.endpoint.clone(),
+            config.bucket.clone(),
+            config.access_key_id.clone(),
+            config.secret_access_key.clone(),
+            config.region.clone(),
+            config.timeout,
+        ));
+        state.config.replay_blob_store = Some(config);
+        state
     }
 
     #[tokio::test]
@@ -6291,6 +6496,267 @@ mod tests {
         // `state.autumn_tracker` is None in tests, so the assertion that matters
         // is structural: the gate returns before the metering block is reached.
         let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    /// What a fake R2 recorded for one PUT.
+    #[derive(Debug)]
+    struct CapturedPut {
+        path: String,
+        authorization: String,
+        content_type: String,
+        content_encoding: String,
+        body: Vec<u8>,
+    }
+
+    async fn fake_r2_put(
+        axum::extract::State(tx): axum::extract::State<
+            tokio::sync::mpsc::UnboundedSender<CapturedPut>,
+        >,
+        Path(path): Path<String>,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> StatusCode {
+        let header = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_string()
+        };
+        let _ = tx.send(CapturedPut {
+            path,
+            authorization: header("authorization"),
+            content_type: header("content-type"),
+            content_encoding: header("content-encoding"),
+            body: body.to_vec(),
+        });
+        StatusCode::OK
+    }
+
+    async fn always_500() -> StatusCode {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+
+    fn gzip_bytes(plain: &str) -> Bytes {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(plain.as_bytes()).unwrap();
+        Bytes::from(encoder.finish().unwrap())
+    }
+
+    fn replay_blob_headers(raw_key: &str, session_id: &str, chunk_seq: u32) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            format!("Bearer {raw_key}").parse().unwrap(),
+        );
+        headers.insert("x-maple-session-id", session_id.parse().unwrap());
+        headers.insert("x-maple-chunk-seq", chunk_seq.to_string().parse().unwrap());
+        headers.insert("x-maple-event-count", "3".parse().unwrap());
+        headers.insert("x-maple-duration-ms", "1200".parse().unwrap());
+        headers
+    }
+
+    /// Total bytes the pipeline has committed to disk. The WAL is appended
+    /// before a frame reaches the export channel, so this growing is the
+    /// observable "a row was enqueued".
+    fn queue_dir_bytes(dir: &PathBuf) -> u64 {
+        fn walk(dir: &std::path::Path) -> u64 {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return 0;
+            };
+            entries
+                .flatten()
+                .map(|entry| match entry.metadata() {
+                    Ok(meta) if meta.is_dir() => walk(&entry.path()),
+                    Ok(meta) => meta.len(),
+                    Err(_) => 0,
+                })
+                .sum()
+        }
+        walk(dir)
+    }
+
+    async fn replay_blob_test_state(
+        raw_key: &str,
+        org_id: &str,
+        queue_dir: PathBuf,
+    ) -> AppState {
+        let store = Arc::new(FakeKeyStore::default());
+        store.insert_private(
+            raw_key,
+            KeyRow {
+                org_id: org_id.to_string(),
+                // Routes to ClickHouse. The fixture's `WriteMode::Forward` has no
+                // Tinybird pipeline, so a Tinybird-destined chunk would 503 in
+                // `native_rows_pipeline_for` before reaching the blob path.
+                self_managed: true,
+                clickhouse_ready: true,
+                spend_paused: false,
+                paused_features: Vec::new(),
+            },
+        );
+        test_app_state(
+            store,
+            queue_dir,
+            "http://127.0.0.1:1".to_string(),
+            Duration::from_secs(30),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn replay_chunk_payload_goes_to_the_blob_store_verbatim() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/{*path}", axum::routing::put(fake_r2_put))
+            .with_state(tx);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let queue_dir = unique_main_test_dir("replay-blob-put");
+        let state = replay_blob_test_state(
+            "maple_sk_test_replay_blob",
+            "org_replay_blob",
+            queue_dir.clone(),
+        )
+        .await;
+        let state = with_replay_blob_store(state, format!("http://{addr}"));
+
+        let events = r#"[{"type":2,"timestamp":1}]"#;
+        let gzipped = gzip_bytes(events);
+        handle_replay_blob_inner(
+            &state,
+            &replay_blob_headers("maple_sk_test_replay_blob", "sess_42", 7),
+            gzipped.clone(),
+        )
+        .await
+        .expect("blob upload should succeed");
+
+        let captured = rx.recv().await.expect("the blob store should see a PUT");
+
+        // Key scheme: bucket first, then the v1/{org}/{session}/{seq}.json.gz
+        // that the API side reconstructs from the ClickHouse row.
+        assert_eq!(
+            captured.path,
+            "replays/v1/org_replay_blob/sess_42/00000007.json.gz"
+        );
+        // Stored verbatim — not re-gzipped, not the decompressed text. A
+        // recompression here would silently double ingest CPU and break the
+        // Content-Encoding contract the reader depends on.
+        assert_eq!(captured.body, gzipped.to_vec());
+        assert_eq!(captured.content_type, "application/json");
+        assert_eq!(captured.content_encoding, "gzip");
+        assert!(
+            captured.authorization.starts_with(
+                "AWS4-HMAC-SHA256 Credential=test-access-key/"
+            ),
+            "expected a SigV4 authorization header, got {:?}",
+            captured.authorization
+        );
+        assert!(captured.authorization.contains("/auto/s3/aws4_request"));
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    #[tokio::test]
+    async fn a_failed_blob_upload_rejects_the_chunk_and_enqueues_no_row() {
+        // The orphan-prevention invariant. A row whose payload never landed is
+        // an unplayable gap in a session that still lists as recorded; the SDK
+        // does not retry, so the only safe failure is to drop the chunk whole.
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new().route("/{*path}", axum::routing::put(always_500));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let queue_dir = unique_main_test_dir("replay-blob-fail");
+        let state = replay_blob_test_state(
+            "maple_sk_test_replay_fail",
+            "org_replay_fail",
+            queue_dir.clone(),
+        )
+        .await;
+        let state = with_replay_blob_store(state, format!("http://{addr}"));
+
+        let before = queue_dir_bytes(&queue_dir);
+        let error = handle_replay_blob_inner(
+            &state,
+            &replay_blob_headers("maple_sk_test_replay_fail", "sess_fail", 1),
+            gzip_bytes(r#"[{"type":2,"timestamp":1}]"#),
+        )
+        .await
+        .expect_err("a blob store 500 must reject the chunk");
+
+        assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            queue_dir_bytes(&queue_dir),
+            before,
+            "no index row may be committed when the payload was not stored"
+        );
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    #[tokio::test]
+    async fn replay_chunks_stay_inline_when_no_blob_store_is_configured() {
+        // The self-hosted / BYO-ClickHouse path, and the pre-cutover managed
+        // path: unset credentials must behave exactly as before.
+        let queue_dir = unique_main_test_dir("replay-blob-inline");
+        let state = replay_blob_test_state(
+            "maple_sk_test_replay_inline",
+            "org_replay_inline",
+            queue_dir.clone(),
+        )
+        .await;
+        assert!(state.replay_blob_store.is_none());
+
+        let before = queue_dir_bytes(&queue_dir);
+        handle_replay_blob_inner(
+            &state,
+            &replay_blob_headers("maple_sk_test_replay_inline", "sess_inline", 0),
+            gzip_bytes(r#"[{"type":2,"timestamp":1}]"#),
+        )
+        .await
+        .expect("the inline path should accept the chunk");
+
+        assert!(
+            queue_dir_bytes(&queue_dir) > before,
+            "the inline path must still enqueue a row carrying the payload"
+        );
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    #[test]
+    fn decompressed_len_matches_read_to_string_and_rejects_garbage() {
+        // `byte_size` is a published API field and the input to the per-session
+        // budget, both denominated in decompressed bytes — the streaming counter
+        // must not quietly redefine it as compressed bytes.
+        for payload in [
+            "[]",
+            r#"[{"type":2,"timestamp":1}]"#,
+            &"x".repeat(256 * 1024),
+        ] {
+            let gzipped = gzip_bytes(payload);
+            assert_eq!(
+                decompressed_len(&gzipped).expect("valid gzip should decode"),
+                payload.len() as u64,
+                "byte count drifted for a {}-byte payload",
+                payload.len()
+            );
+        }
+
+        let error = decompressed_len(b"not gzip at all")
+            .expect_err("malformed gzip must still be rejected");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
