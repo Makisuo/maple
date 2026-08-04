@@ -8,6 +8,7 @@ import { PlanetScaleConnectionService } from "./PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
 import { PlanetScaleService, deployRequestTimelineRows } from "./PlanetScaleService"
+import { insertPlanetScaleEvent } from "./planetscale/webhook-events"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"
 
 const trackedDbs: TestDb[] = []
@@ -59,6 +60,7 @@ const asUserId = Schema.decodeUnknownSync(UserId)
 const stubApi = (fixtures: {
 	databases: Array<{ id: string; name: string; kind?: string }>
 	branchesByDatabase: Record<string, Array<{ id: string; name: string; production?: boolean }>>
+	deployRequestsByDatabase?: Record<string, Array<Record<string, unknown>>>
 }) => {
 	const stub = (async (input: string | URL | Request) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
@@ -84,6 +86,15 @@ const stubApi = (fixtures: {
 		const branchesMatch = url.match(/\/databases\/([^/?]+)\/branches/)
 		if (branchesMatch) {
 			return json({ data: fixtures.branchesByDatabase[decodeURIComponent(branchesMatch[1])] ?? [] })
+		}
+		// Must precede the /databases catch-all, which would otherwise serve the
+		// databases fixture to the deploy-request poller — the poller would decode
+		// that as deploy requests and silently record nothing.
+		const deployRequestsMatch = url.match(/\/databases\/([^/?]+)\/deploy-requests/)
+		if (deployRequestsMatch) {
+			return json({
+				data: fixtures.deployRequestsByDatabase?.[decodeURIComponent(deployRequestsMatch[1])] ?? [],
+			})
 		}
 		if (url.includes("/databases")) {
 			return json({ data: fixtures.databases })
@@ -455,6 +466,424 @@ describe("PlanetScaleService", () => {
 				rows.map((row) => row.name),
 				["main-db"],
 			)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
+})
+
+describe("PlanetScaleService.listEvents", () => {
+	const T0 = Date.parse("2026-08-04T12:00:00.000Z")
+
+	/** Insert directly — listEvents is the unit under test, not the writer. */
+	const seed = (
+		testDb: TestDb,
+		row: {
+			id: string
+			orgId?: string
+			database?: string
+			branch?: string
+			category?: string
+			eventType?: string
+			offsetMs: number
+		},
+	) =>
+		Effect.promise(() =>
+			executeSql(
+				testDb,
+				`INSERT INTO planetscale_events
+				 (id, org_id, database_id, database_name, branch_name, category, event_type, state,
+				  external_id, title, source, occurred_at, created_at)
+				 VALUES ($1, $2, '', $3, $4, $5, $6, 'x', $1, $1, 'webhook', $7, $7)`,
+				[
+					row.id,
+					row.orgId ?? "org_1",
+					row.database ?? "main-db",
+					row.branch ?? "",
+					row.category ?? "deploy_request",
+					row.eventType ?? "deploy_request.schema_applied",
+					new Date(T0 + row.offsetMs).toISOString(),
+				],
+			),
+		)
+
+	const window = { startTime: T0 - 60 * 60_000, endTime: T0 + 60 * 60_000 }
+
+	it.effect("returns newest first and never leaks another org's rows", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* seed(testDb, { id: "a", offsetMs: 0 })
+			yield* seed(testDb, { id: "b", offsetMs: 1000 })
+			yield* seed(testDb, { id: "c", offsetMs: -1000 })
+			yield* seed(testDb, { id: "other", orgId: "org_2", offsetMs: 500 })
+
+			const service = yield* PlanetScaleService
+			const page = yield* service.listEvents(asOrgId("org_1"), { ...window, limit: 100 })
+			assert.deepStrictEqual(
+				page.events.map((event) => event.id),
+				["b", "a", "c"],
+			)
+			assert.isNull(page.nextCursor)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("excludes events outside the window", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* seed(testDb, { id: "inside", offsetMs: 0 })
+			yield* seed(testDb, { id: "before", offsetMs: -2 * 60 * 60_000 })
+			yield* seed(testDb, { id: "after", offsetMs: 2 * 60 * 60_000 })
+
+			const service = yield* PlanetScaleService
+			const page = yield* service.listEvents(asOrgId("org_1"), { ...window, limit: 100 })
+			assert.deepStrictEqual(
+				page.events.map((event) => event.id),
+				["inside"],
+			)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("narrows by database and by category", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* seed(testDb, { id: "main-deploy", offsetMs: 0 })
+			yield* seed(testDb, { id: "other-db", database: "analytics", offsetMs: 1000 })
+			yield* seed(testDb, {
+				id: "main-branch",
+				branch: "dev",
+				category: "branch",
+				eventType: "branch.ready",
+				offsetMs: 2000,
+			})
+
+			const service = yield* PlanetScaleService
+			const byDatabase = yield* service.listEvents(asOrgId("org_1"), {
+				...window,
+				database: "main-db",
+				limit: 100,
+			})
+			assert.deepStrictEqual([...byDatabase.events.map((e) => e.id)].sort(), [
+				"main-branch",
+				"main-deploy",
+			])
+
+			const byCategory = yield* service.listEvents(asOrgId("org_1"), {
+				...window,
+				database: "main-db",
+				categories: ["branch"],
+				limit: 100,
+			})
+			assert.deepStrictEqual(
+				byCategory.events.map((event) => event.id),
+				["main-branch"],
+			)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("keeps deploy requests visible under a branch filter", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			// A deploy request spans two branches and carries none, so a branch
+			// filter must narrow branch-scoped rows WITHOUT hiding the deploy that
+			// most likely explains what that branch did.
+			yield* seed(testDb, { id: "deploy", branch: "", offsetMs: 0 })
+			yield* seed(testDb, {
+				id: "main-ready",
+				branch: "main",
+				category: "branch",
+				eventType: "branch.ready",
+				offsetMs: 1000,
+			})
+			yield* seed(testDb, {
+				id: "dev-ready",
+				branch: "dev",
+				category: "branch",
+				eventType: "branch.ready",
+				offsetMs: 2000,
+			})
+
+			const service = yield* PlanetScaleService
+			const page = yield* service.listEvents(asOrgId("org_1"), {
+				...window,
+				branch: "main",
+				limit: 100,
+			})
+			assert.deepStrictEqual([...page.events.map((e) => e.id)].sort(), ["deploy", "main-ready"])
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("pages by keyset with no overlap and no gap", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			for (let i = 0; i < 5; i++) {
+				yield* seed(testDb, { id: `e${i}`, offsetMs: i * 1000 })
+			}
+
+			const service = yield* PlanetScaleService
+			const first = yield* service.listEvents(asOrgId("org_1"), { ...window, limit: 2 })
+			assert.deepStrictEqual(
+				first.events.map((event) => event.id),
+				["e4", "e3"],
+			)
+			assert.isNotNull(first.nextCursor)
+
+			const second = yield* service.listEvents(asOrgId("org_1"), {
+				...window,
+				limit: 2,
+				cursor: first.nextCursor ?? undefined,
+			})
+			assert.deepStrictEqual(
+				second.events.map((event) => event.id),
+				["e2", "e1"],
+			)
+
+			const third = yield* service.listEvents(asOrgId("org_1"), {
+				...window,
+				limit: 2,
+				cursor: second.nextCursor ?? undefined,
+			})
+			assert.deepStrictEqual(
+				third.events.map((event) => event.id),
+				["e0"],
+			)
+			// Last page: the limit+1 probe found nothing beyond it.
+			assert.isNull(third.nextCursor)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("breaks a same-timestamp tie by id so paging can't loop or skip", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			// occurredAt is truncated to the second, so ties are routine, not exotic.
+			yield* seed(testDb, { id: "aaa", offsetMs: 0 })
+			yield* seed(testDb, { id: "bbb", offsetMs: 0 })
+			yield* seed(testDb, { id: "ccc", offsetMs: 0 })
+
+			const service = yield* PlanetScaleService
+			const first = yield* service.listEvents(asOrgId("org_1"), { ...window, limit: 2 })
+			assert.deepStrictEqual(
+				first.events.map((event) => event.id),
+				["ccc", "bbb"],
+			)
+			const second = yield* service.listEvents(asOrgId("org_1"), {
+				...window,
+				limit: 2,
+				cursor: first.nextCursor ?? undefined,
+			})
+			assert.deepStrictEqual(
+				second.events.map((event) => event.id),
+				["aaa"],
+			)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("treats a malformed cursor as page one rather than an error", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* seed(testDb, { id: "a", offsetMs: 0 })
+			const service = yield* PlanetScaleService
+			// A stale or hand-edited link should show the first page, not a 500.
+			const page = yield* service.listEvents(asOrgId("org_1"), {
+				...window,
+				limit: 10,
+				cursor: "garbage",
+			})
+			assert.deepStrictEqual(
+				page.events.map((event) => event.id),
+				["a"],
+			)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+})
+
+describe("PlanetScaleService deploy-request backfill", () => {
+	const deployRequest = (over: Record<string, unknown> = {}) => ({
+		number: 42,
+		state: "closed",
+		branch: "feature",
+		into_branch: "main",
+		html_url: "https://app.planetscale.com/acme/main-db/deploy-requests/42",
+		actor: { display_name: "ada" },
+		created_at: "2026-08-04T10:00:00Z",
+		updated_at: "2026-08-04T10:20:00Z",
+		closed_at: "2026-08-04T10:20:00Z",
+		deployment: {
+			state: "complete",
+			started_at: "2026-08-04T10:10:00Z",
+			finished_at: "2026-08-04T10:15:00Z",
+		},
+		...over,
+	})
+
+	const countEvents = (testDb: TestDb) =>
+		Effect.promise(() =>
+			queryFirstRow<{ n: number }>(testDb, "SELECT count(*)::int AS n FROM planetscale_events"),
+		)
+
+	it.effect("fans a deploy request into its transitions, then re-polls idempotently", () => {
+		const testDb = createTestDb(trackedDbs)
+		const stub = stubApi({
+			databases: [{ id: "db_1", name: "main-db" }],
+			branchesByDatabase: { "main-db": [{ id: "br_1", name: "main", production: true }] },
+			deployRequestsByDatabase: { "main-db": [deployRequest()] },
+		})
+
+		return Effect.gen(function* () {
+			yield* connect("org_1")
+			const service = yield* PlanetScaleService
+
+			// The backfill runs BEFORE the inventory claim, so the first tick has no
+			// databases to walk — the timeline fills on the following tick.
+			const first = yield* service.pollAllOrgs()
+			assert.strictEqual(first.deployEvents, 0)
+			assert.strictEqual(first.refreshed, 1)
+
+			const second = yield* service.pollAllOrgs()
+			assert.strictEqual(second.deployEvents, 4)
+
+			const states = yield* Effect.promise(() =>
+				queryFirstRow<{ states: string }>(
+					testDb,
+					`SELECT string_agg(state, ',' ORDER BY occurred_at) AS states
+					 FROM planetscale_events WHERE org_id = 'org_1'`,
+				),
+			)
+			assert.strictEqual(states?.states, "opened,in_progress,schema_applied,closed")
+
+			const detail = yield* Effect.promise(() =>
+				queryFirstRow<{
+					external_id: string
+					source: string
+					actor_login: string | null
+					url: string | null
+					branch_name: string
+					database_id: string
+				}>(
+					testDb,
+					`SELECT external_id, source, actor_login, url, branch_name, database_id
+					 FROM planetscale_events WHERE state = 'schema_applied'`,
+				),
+			)
+			assert.strictEqual(detail?.external_id, "42")
+			assert.strictEqual(detail?.source, "backfill")
+			assert.strictEqual(detail?.actor_login, "ada")
+			assert.isNotNull(detail?.url)
+			// A deploy request spans two branches, so it is pinned to neither.
+			assert.strictEqual(detail?.branch_name, "")
+			// Inventory ran on the first tick, so identity resolves by now.
+			assert.strictEqual(detail?.database_id, "db_1")
+
+			// Same upstream on a third tick: the watermark and the dedupe index
+			// between them must add nothing.
+			const third = yield* service.pollAllOrgs()
+			assert.strictEqual(third.deployEvents, 0)
+			assert.strictEqual((yield* countEvents(testDb))?.n, 4)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
+
+	it.effect("converges with a webhook delivery of the same transition", () => {
+		const testDb = createTestDb(trackedDbs)
+		const stub = stubApi({
+			databases: [{ id: "db_1", name: "main-db" }],
+			branchesByDatabase: { "main-db": [{ id: "br_1", name: "main", production: true }] },
+			deployRequestsByDatabase: {
+				"main-db": [
+					deployRequest({
+						created_at: null,
+						closed_at: null,
+						deployment: { state: "complete", finished_at: "2026-08-04T10:15:00Z" },
+					}),
+				],
+			},
+		})
+
+		return Effect.gen(function* () {
+			yield* connect("org_1")
+			const service = yield* PlanetScaleService
+			yield* service.pollAllOrgs()
+
+			// A webhook already recorded this exact transition, at the second
+			// precision PlanetScale delivers.
+			yield* insertPlanetScaleEvent({
+				orgId: asOrgId("org_1"),
+				databaseName: "main-db",
+				branchName: "",
+				category: "deploy_request",
+				eventType: "deploy_request.schema_applied",
+				state: "schema_applied",
+				externalId: "42",
+				title: "Deploy request #42 applied its schema",
+				source: "webhook",
+				occurredAtMs: Date.parse("2026-08-04T10:15:00Z"),
+				createdAtMs: Date.parse("2026-08-04T10:15:00Z"),
+			})
+
+			yield* service.pollAllOrgs()
+			// One marker, not two: the dedupe index is what makes the live and the
+			// backfilled source converge instead of double-drawing every deploy.
+			assert.strictEqual((yield* countEvents(testDb))?.n, 1)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			// testDb.layer is merged in as well as provided to the services:
+			// insertPlanetScaleEvent is called directly here, so the test body needs
+			// Database in its own context, not just inside the service graph.
+			Effect.provide(
+				Layer.mergeAll(makeLayer(testDb), testDb.layer, Layer.succeed(FetchHttpClient.Fetch, stub)),
+			),
+		)
+	})
+
+	it.effect("records nothing for a deploy request the payload never timestamps", () => {
+		const testDb = createTestDb(trackedDbs)
+		const stub = stubApi({
+			databases: [{ id: "db_1", name: "main-db" }],
+			branchesByDatabase: { "main-db": [{ id: "br_1", name: "main", production: true }] },
+			// An open deploy request with no deployment yet. A marker here would sit
+			// at a guessed moment, inviting the wrong deploy to be blamed for a cliff.
+			deployRequestsByDatabase: {
+				"main-db": [{ number: 7, state: "open", updated_at: "2026-08-04T10:00:00Z" }],
+			},
+		})
+
+		return Effect.gen(function* () {
+			yield* connect("org_1")
+			const service = yield* PlanetScaleService
+			yield* service.pollAllOrgs()
+			yield* service.pollAllOrgs()
+			assert.strictEqual((yield* countEvents(testDb))?.n, 0)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
+
+	it.effect("keeps the inventory refresh alive when the payload shape is wrong", () => {
+		const testDb = createTestDb(trackedDbs)
+		const stub = stubApi({
+			databases: [{ id: "db_1", name: "main-db" }],
+			branchesByDatabase: { "main-db": [{ id: "br_1", name: "main", production: true }] },
+			// The REST shape came from public docs, not a captured response. A wrong
+			// guess must cost markers, never the inventory the service map depends on.
+			deployRequestsByDatabase: { "main-db": [{ unexpected: "shape" }] },
+		})
+
+		return Effect.gen(function* () {
+			yield* connect("org_1")
+			const service = yield* PlanetScaleService
+			const first = yield* service.pollAllOrgs()
+			assert.strictEqual(first.refreshed, 1)
+			assert.strictEqual(first.failures, 0)
+
+			const second = yield* service.pollAllOrgs()
+			assert.strictEqual(second.failures, 0)
+			assert.strictEqual((yield* countEvents(testDb))?.n, 0)
+			// The inventory still landed despite the unusable deploy payload.
+			const rows = yield* service.listDatabases(asOrgId("org_1"))
+			assert.strictEqual(rows.length, 1)
 		}).pipe(
 			Effect.provideService(FetchHttpClient.Fetch, stub),
 			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
