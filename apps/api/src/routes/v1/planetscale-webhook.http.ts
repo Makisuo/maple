@@ -165,7 +165,9 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 				return textResponse("ok", 200)
 			}
 
-			if (classified.action === "issue") {
+			// Both issue-worthy and timeline-only events go through the queue: the
+			// durable retry is what makes a missed deploy marker recoverable.
+			if (classified.action === "issue" || classified.action === "timeline") {
 				const now = yield* Clock.currentTimeMillis
 				const enqueued = yield* webhookQueue
 					.send({

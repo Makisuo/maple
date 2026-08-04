@@ -28,3 +28,5 @@ export {
 	planetscaleInfraTimeseriesSQL,
 	type PlanetScaleInfraTimeseriesOutput,
 } from "./planetscale-infra"
+
+export { PLANETSCALE_STORAGE_RUNWAY_SQL, PLANETSCALE_STORAGE_USED_SQL } from "./planetscale-alerts"

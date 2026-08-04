@@ -1,5 +1,9 @@
 import { Clock, Effect, Schema } from "effect"
-import { PlanetScaleInfraTimeseriesRequest, PlanetScaleQueryInsightsRequest } from "@maple/domain/http"
+import {
+	PlanetScaleEventsRequest,
+	PlanetScaleInfraTimeseriesRequest,
+	PlanetScaleQueryInsightsRequest,
+} from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
@@ -109,6 +113,45 @@ export const getPlanetScaleQueryInsights = Effect.fn("Integrations.getPlanetScal
 			}),
 		),
 	}
+})
+
+const GetPlanetScaleEventsInputSchema = Schema.Struct({
+	/** Omit for the org-wide feed. */
+	database: Schema.optional(Schema.String),
+	branch: Schema.optional(Schema.String),
+	/** Window bounds, epoch ms. */
+	startTime: Schema.Number,
+	endTime: Schema.Number,
+	limit: Schema.optional(Schema.Number),
+})
+
+export type GetPlanetScaleEventsInput = (typeof GetPlanetScaleEventsInputSchema)["Encoded"]
+
+/**
+ * The PlanetScale lifecycle timeline for a window — deploy transitions, branch
+ * state changes, health events. Backs the chart markers and the activity feed.
+ */
+export const getPlanetScaleEvents = Effect.fn("Integrations.getPlanetScaleEvents")(function* ({
+	data,
+}: {
+	data: GetPlanetScaleEventsInput
+}) {
+	const input = yield* decodeInput(GetPlanetScaleEventsInputSchema, data, "getPlanetScaleEvents")
+	const result = yield* runWarehouseQuery("planetscaleEvents", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.integrations.planetscaleEvents({
+				payload: new PlanetScaleEventsRequest({
+					...(input.database === undefined ? {} : { database: input.database }),
+					...(input.branch === undefined ? {} : { branch: input.branch }),
+					startTime: input.startTime,
+					endTime: input.endTime,
+					...(input.limit === undefined ? {} : { limit: input.limit }),
+				}),
+			})
+		}),
+	)
+	return { events: result.events, nextCursor: result.nextCursor }
 })
 
 export const getPlanetScaleInfraTimeseries = Effect.fn("QueryEngine.getPlanetScaleInfraTimeseries")(

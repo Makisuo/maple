@@ -4,9 +4,13 @@ import { Effect, Schema } from "effect"
 import { OrgId } from "@maple/domain/http"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import {
+	PlanetScaleWebhookPayload,
 	classifyPlanetScaleEvent,
 	decodePlanetScaleWebhookPayload,
+	deployRequestNumber,
+	insertPlanetScaleEvent,
 	planetScaleIssueFingerprint,
+	truncateToSecond,
 	upsertPlanetScaleIssue,
 	verifyPlanetScaleSignature,
 } from "./webhook-events"
@@ -43,16 +47,152 @@ describe("verifyPlanetScaleSignature", () => {
 })
 
 describe("classifyPlanetScaleEvent", () => {
-	it("maps health events to issues and lifecycle events to logs", () => {
+	it("maps health events to issues and lifecycle events to timeline rows", () => {
 		assert.strictEqual(classifyPlanetScaleEvent("branch.out_of_memory").action, "issue")
 		assert.strictEqual(classifyPlanetScaleEvent("branch.anomaly").action, "issue")
 		assert.strictEqual(classifyPlanetScaleEvent("cluster.storage").action, "issue")
 		assert.strictEqual(classifyPlanetScaleEvent("keyspace.storage").action, "issue")
-		assert.strictEqual(classifyPlanetScaleEvent("deploy_request.opened").action, "log")
-		assert.strictEqual(classifyPlanetScaleEvent("branch.ready").action, "log")
+		assert.strictEqual(classifyPlanetScaleEvent("deploy_request.opened").action, "timeline")
+		assert.strictEqual(classifyPlanetScaleEvent("deploy_request.schema_applied").action, "timeline")
+		assert.strictEqual(classifyPlanetScaleEvent("branch.ready").action, "timeline")
+		assert.strictEqual(classifyPlanetScaleEvent("database.access_request").action, "timeline")
 		assert.strictEqual(classifyPlanetScaleEvent("webhook.test").action, "test")
 		// Forward-compatible: unknown events are acknowledged, never rejected.
 		assert.strictEqual(classifyPlanetScaleEvent("branch.some_future_event").action, "log")
+	})
+
+	it("gives health events a timeline spec too — they belong on the chart as well as in triage", () => {
+		const oom = classifyPlanetScaleEvent("branch.out_of_memory")
+		assert.strictEqual(oom.action, "issue")
+		if (oom.action !== "issue") return
+		assert.strictEqual(oom.timeline.category, "branch")
+		assert.strictEqual(oom.timeline.state, "out_of_memory")
+	})
+
+	it("derives the lifecycle state from the event name", () => {
+		const applied = classifyPlanetScaleEvent("deploy_request.schema_applied")
+		assert.strictEqual(applied.action, "timeline")
+		if (applied.action !== "timeline") return
+		assert.strictEqual(applied.timeline.category, "deploy_request")
+		assert.strictEqual(applied.timeline.state, "schema_applied")
+	})
+})
+
+describe("deployRequestNumber", () => {
+	const payload = (resource: Record<string, unknown> | null) =>
+		Schema.decodeUnknownSync(PlanetScaleWebhookPayload)({
+			event: "deploy_request.opened",
+			database: "main-db",
+			resource,
+		})
+
+	it("prefers the deploy-request number the PlanetScale UI shows", () => {
+		assert.strictEqual(deployRequestNumber(payload({ number: 42, id: "dr_x" })), "42")
+		assert.strictEqual(deployRequestNumber(payload({ number: "42" })), "42")
+	})
+
+	it("falls back to the id, then to empty", () => {
+		assert.strictEqual(deployRequestNumber(payload({ id: "dr_x" })), "dr_x")
+		assert.strictEqual(deployRequestNumber(payload({})), "")
+		assert.strictEqual(deployRequestNumber(payload(null)), "")
+	})
+})
+
+describe("truncateToSecond", () => {
+	it("collapses the webhook's second precision and the backfill's millisecond precision", () => {
+		// Same transition, two sources — must produce one dedupe key.
+		assert.strictEqual(truncateToSecond(1_698_252_879_000).getTime(), 1_698_252_879_000)
+		assert.strictEqual(truncateToSecond(1_698_252_879_412).getTime(), 1_698_252_879_000)
+	})
+})
+
+describe("insertPlanetScaleEvent", () => {
+	const input = (over: Record<string, unknown> = {}) => ({
+		orgId: asOrgId("org_events"),
+		databaseName: "main-db",
+		branchName: "",
+		category: "deploy_request" as const,
+		eventType: "deploy_request.schema_applied",
+		state: "schema_applied",
+		externalId: "42",
+		title: "Deploy request #42 applied its schema",
+		source: "webhook" as const,
+		occurredAtMs: 1_698_252_879_000,
+		createdAtMs: 1_698_252_880_000,
+		...over,
+	})
+
+	const countRows = (testDb: TestDb) =>
+		Effect.promise(() =>
+			queryFirstRow<{ n: number }>(testDb, "SELECT count(*)::int AS n FROM planetscale_events"),
+		)
+
+	it.effect("inserts once, and queue redelivery of the same transition is a no-op", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const first = yield* insertPlanetScaleEvent(input())
+			assert.isTrue(first.inserted)
+
+			const second = yield* insertPlanetScaleEvent(input())
+			assert.isFalse(second.inserted)
+
+			assert.strictEqual((yield* countRows(testDb))?.n, 1)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("collapses a webhook row and a backfill row of the same transition", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* insertPlanetScaleEvent(input())
+			// The REST backfill carries millisecond precision for the same second;
+			// without truncation this would insert a duplicate marker.
+			const backfilled = yield* insertPlanetScaleEvent(
+				input({ source: "backfill", occurredAtMs: 1_698_252_879_631 }),
+			)
+			assert.isFalse(backfilled.inserted)
+			assert.strictEqual((yield* countRows(testDb))?.n, 1)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("keeps distinct transitions of the same deploy request apart", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* insertPlanetScaleEvent(input())
+			yield* insertPlanetScaleEvent(input({ eventType: "deploy_request.closed", state: "closed" }))
+			assert.strictEqual((yield* countRows(testDb))?.n, 2)
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("resolves the database id from the inventory, and tolerates its absence", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			// Unknown to the inventory: the read path keys on the name anyway.
+			yield* insertPlanetScaleEvent(input())
+			const unresolved = yield* Effect.promise(() =>
+				queryFirstRow<{ database_id: string }>(
+					testDb,
+					"SELECT database_id FROM planetscale_events LIMIT 1",
+				),
+			)
+			assert.strictEqual(unresolved?.database_id, "")
+
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`INSERT INTO planetscale_databases
+					 (id, org_id, database_id, name, kind, created_at, updated_at)
+					 VALUES ('row1', 'org_events', 'db_abc', 'main-db', 'mysql', now(), now())`,
+				),
+			)
+			yield* insertPlanetScaleEvent(input({ eventType: "deploy_request.closed", state: "closed" }))
+			const resolved = yield* Effect.promise(() =>
+				queryFirstRow<{ database_id: string }>(
+					testDb,
+					"SELECT database_id FROM planetscale_events WHERE event_type = 'deploy_request.closed'",
+				),
+			)
+			assert.strictEqual(resolved?.database_id, "db_abc")
+		}).pipe(Effect.provide(testDb.layer))
 	})
 })
 

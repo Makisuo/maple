@@ -7,6 +7,7 @@
 		".": "./src/index.ts",
 		"./anticipated-errors": "./src/anticipated-errors.ts",
 		"./billing": "./src/billing.ts",
+		"./glob": "./src/glob.ts",
 		"./http": "./src/http/index.ts",
 		"./http/v2": "./src/http/v2/index.ts",
 		"./internal-rpc": "./src/internal-rpc.ts",

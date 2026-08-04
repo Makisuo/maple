@@ -378,10 +378,19 @@ const handleScheduled = async (
 	if (event.cron === SCRAPE_RETENTION_CRON) {
 		const { buildScrapeRetentionLayer, flushVcsTelemetry } = await import("./vcs-sync-runtime")
 		const { runScrapeCheckRetention } = await import("@/services/integrations/scrape-check-retention")
+		const { runPlanetScaleEventRetention } =
+			await import("@/services/integrations/planetscale-event-retention")
 		try {
-			await runScheduledEffect(buildScrapeRetentionLayer(env), runScrapeCheckRetention, ctx, {
-				onInterrupt: "graceful",
-			})
+			// Both sweeps ride this one cron: each new cron string costs an entry in
+			// wrangler.jsonc and alchemy.run.ts, and neither needs its own beat.
+			// Sequential, not concurrent — they share a Database layer whose
+			// `execute` dials a client per call.
+			await runScheduledEffect(
+				buildScrapeRetentionLayer(env),
+				Effect.andThen(runScrapeCheckRetention, runPlanetScaleEventRetention),
+				ctx,
+				{ onInterrupt: "graceful" },
+			)
 		} finally {
 			ctx.waitUntil(flushVcsTelemetry(env))
 		}

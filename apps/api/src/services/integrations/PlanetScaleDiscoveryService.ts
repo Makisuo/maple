@@ -5,6 +5,7 @@ import {
 	ScrapeTargetPersistenceError,
 	ScrapeTargetUpstreamError,
 } from "@maple/domain/http"
+import { globToRegExp } from "@maple/domain/glob"
 import type { scrapeTargets } from "@maple/db"
 import { Clock, Context, Deferred, Duration, Effect, Layer, Redacted, Ref, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
@@ -172,15 +173,6 @@ const branchNameForFilter = (entry: PlanetScaleSubTarget): string =>
 	entry.labels.planetscale_branch ??
 	entry.labels.planetscale_database_branch_id ??
 	entry.subTargetKey
-
-/** Glob → anchored RegExp supporting `*` (any run) and `?` (one char). */
-const globToRegExp = (pattern: string): RegExp => {
-	const escaped = pattern
-		.replace(/[.+^${}()|[\]\\]/g, "\\$&")
-		.replace(/\*/g, ".*")
-		.replace(/\?/g, ".")
-	return new RegExp(`^${escaped}$`)
-}
 
 interface BranchFilters {
 	readonly include: ReadonlyArray<string>

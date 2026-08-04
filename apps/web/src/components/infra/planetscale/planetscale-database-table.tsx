@@ -43,11 +43,20 @@ interface DatabaseRow {
 	replicaLagMaxSeconds: number
 }
 
-const headerCells = (sort?: {
-	sortKey: SortKey | null
-	sortDir: "asc" | "desc"
-	handleSort: (k: SortKey) => void
-}) => (
+/**
+ * `metricsPaused` drops the five metric columns entirely rather than filling
+ * them with dashes. A hidden column says "we don't collect this yet"; a dashed
+ * one says "we collect this and it's broken", and only one of those is true
+ * before a metrics token exists.
+ */
+const headerCells = (
+	sort?: {
+		sortKey: SortKey | null
+		sortDir: "asc" | "desc"
+		handleSort: (k: SortKey) => void
+	},
+	metricsPaused = false,
+) => (
 	<>
 		<ColumnHead<SortKey>
 			label="Database"
@@ -67,52 +76,56 @@ const headerCells = (sort?: {
 			width="w-[80px]"
 			hidden="hidden md:flex"
 		/>
-		<ColumnHead<SortKey>
-			label="Connections"
-			sortKey={sort ? "connectionsAvg" : undefined}
-			currentKey={sort?.sortKey}
-			dir={sort?.sortDir}
-			onSort={sort?.handleSort}
-			align="right"
-			width="w-[96px]"
-		/>
-		<ColumnHead<SortKey>
-			label="CPU (max)"
-			sortKey={sort ? "cpuMaxPercent" : undefined}
-			currentKey={sort?.sortKey}
-			dir={sort?.sortDir}
-			onSort={sort?.handleSort}
-			align="right"
-			width="w-[88px]"
-		/>
-		<ColumnHead<SortKey>
-			label="Memory (max)"
-			sortKey={sort ? "memMaxPercent" : undefined}
-			currentKey={sort?.sortKey}
-			dir={sort?.sortDir}
-			onSort={sort?.handleSort}
-			align="right"
-			width="w-[104px]"
-			hidden="hidden md:flex"
-		/>
-		<ColumnHead<SortKey>
-			label="Storage"
-			sortKey={sort ? "storageUsedPercent" : undefined}
-			currentKey={sort?.sortKey}
-			dir={sort?.sortDir}
-			onSort={sort?.handleSort}
-			align="right"
-			width="w-[80px]"
-		/>
-		<ColumnHead<SortKey>
-			label="Replica lag"
-			sortKey={sort ? "replicaLagMaxSeconds" : undefined}
-			currentKey={sort?.sortKey}
-			dir={sort?.sortDir}
-			onSort={sort?.handleSort}
-			align="right"
-			width="w-[88px]"
-		/>
+		{metricsPaused ? null : (
+			<>
+				<ColumnHead<SortKey>
+					label="Connections"
+					sortKey={sort ? "connectionsAvg" : undefined}
+					currentKey={sort?.sortKey}
+					dir={sort?.sortDir}
+					onSort={sort?.handleSort}
+					align="right"
+					width="w-[96px]"
+				/>
+				<ColumnHead<SortKey>
+					label="CPU (max)"
+					sortKey={sort ? "cpuMaxPercent" : undefined}
+					currentKey={sort?.sortKey}
+					dir={sort?.sortDir}
+					onSort={sort?.handleSort}
+					align="right"
+					width="w-[88px]"
+				/>
+				<ColumnHead<SortKey>
+					label="Memory (max)"
+					sortKey={sort ? "memMaxPercent" : undefined}
+					currentKey={sort?.sortKey}
+					dir={sort?.sortDir}
+					onSort={sort?.handleSort}
+					align="right"
+					width="w-[104px]"
+					hidden="hidden md:flex"
+				/>
+				<ColumnHead<SortKey>
+					label="Storage"
+					sortKey={sort ? "storageUsedPercent" : undefined}
+					currentKey={sort?.sortKey}
+					dir={sort?.sortDir}
+					onSort={sort?.handleSort}
+					align="right"
+					width="w-[80px]"
+				/>
+				<ColumnHead<SortKey>
+					label="Replica lag"
+					sortKey={sort ? "replicaLagMaxSeconds" : undefined}
+					currentKey={sort?.sortKey}
+					dir={sort?.sortDir}
+					onSort={sort?.handleSort}
+					align="right"
+					width="w-[88px]"
+				/>
+			</>
+		)}
 	</>
 )
 
@@ -144,11 +157,14 @@ export function PlanetScaleDatabaseTable({
 	databases,
 	statsByName,
 	waiting,
+	metricsPaused = false,
 	emptyMessage = "No databases in the inventory.",
 }: {
 	databases: ReadonlyArray<PlanetScaleDatabaseSummary>
 	statsByName: ReadonlyMap<string, PlanetScaleDatabaseStat>
 	waiting?: boolean
+	/** Metrics have never been collected — hide the metric columns rather than dash them. */
+	metricsPaused?: boolean
 	/** Overridden when the dashes have a cause worth naming (metrics paused, say). */
 	emptyMessage?: string
 }) {
@@ -176,13 +192,15 @@ export function PlanetScaleDatabaseTable({
 	)
 
 	const { sorted, sortKey, sortDir, handleSort } = useTableSort<DatabaseRow, SortKey>(rows, {
-		initialKey: "connectionsAvg",
+		// Sorting by a column that isn't rendered is a phantom order — fall back
+		// to the name when the metric columns are hidden.
+		initialKey: metricsPaused ? "name" : "connectionsAvg",
 		stringKeys: ["name"],
 	})
 
 	return (
 		<DataTable.Root ariaLabel="PlanetScale databases" waiting={waiting}>
-			<DataTable.Head>{headerCells({ sortKey, sortDir, handleSort })}</DataTable.Head>
+			<DataTable.Head>{headerCells({ sortKey, sortDir, handleSort }, metricsPaused)}</DataTable.Head>
 			{sorted.length === 0 && <DataTable.Empty>{emptyMessage}</DataTable.Empty>}
 
 			{sorted.map((row) => {
@@ -212,44 +230,48 @@ export function PlanetScaleDatabaseTable({
 						<div className="hidden w-[80px] text-right font-mono text-[12px] tabular-nums text-foreground/80 md:block">
 							{row.branchCount}
 						</div>
-						<div className="w-[96px] text-right font-mono text-[12px] tabular-nums text-foreground/80">
-							{row.hasStats ? formatNumber(row.connectionsAvg) : "—"}
-						</div>
-						<div
-							className={cn(
-								"w-[88px] text-right font-mono text-[12px] tabular-nums text-foreground/80",
-								row.hasStats && utilizationClass(row.cpuMaxPercent),
-							)}
-						>
-							{row.hasStats ? `${row.cpuMaxPercent.toFixed(0)}%` : "—"}
-						</div>
-						<div
-							className={cn(
-								"hidden w-[104px] text-right font-mono text-[12px] tabular-nums text-foreground/80 md:block",
-								row.hasStats && utilizationClass(row.memMaxPercent),
-							)}
-						>
-							{row.hasStats ? `${row.memMaxPercent.toFixed(0)}%` : "—"}
-						</div>
-						<div
-							className={cn(
-								"w-[80px] text-right font-mono text-[12px] tabular-nums text-foreground/80",
-								row.storageUsedPercent !== MISSING &&
-									utilizationClass(row.storageUsedPercent),
-							)}
-						>
-							{row.storageUsedPercent === MISSING
-								? "—"
-								: formatStoragePercent(row.storageUsedPercent)}
-						</div>
-						<div
-							className={cn(
-								"w-[88px] text-right font-mono text-[12px] tabular-nums text-foreground/80",
-								row.hasStats && lagClass(row.replicaLagMaxSeconds),
-							)}
-						>
-							{row.hasStats ? formatLag(row.replicaLagMaxSeconds) : "—"}
-						</div>
+						{metricsPaused ? null : (
+							<>
+								<div className="w-[96px] text-right font-mono text-[12px] tabular-nums text-foreground/80">
+									{row.hasStats ? formatNumber(row.connectionsAvg) : "—"}
+								</div>
+								<div
+									className={cn(
+										"w-[88px] text-right font-mono text-[12px] tabular-nums text-foreground/80",
+										row.hasStats && utilizationClass(row.cpuMaxPercent),
+									)}
+								>
+									{row.hasStats ? `${row.cpuMaxPercent.toFixed(0)}%` : "—"}
+								</div>
+								<div
+									className={cn(
+										"hidden w-[104px] text-right font-mono text-[12px] tabular-nums text-foreground/80 md:block",
+										row.hasStats && utilizationClass(row.memMaxPercent),
+									)}
+								>
+									{row.hasStats ? `${row.memMaxPercent.toFixed(0)}%` : "—"}
+								</div>
+								<div
+									className={cn(
+										"w-[80px] text-right font-mono text-[12px] tabular-nums text-foreground/80",
+										row.storageUsedPercent !== MISSING &&
+											utilizationClass(row.storageUsedPercent),
+									)}
+								>
+									{row.storageUsedPercent === MISSING
+										? "—"
+										: formatStoragePercent(row.storageUsedPercent)}
+								</div>
+								<div
+									className={cn(
+										"w-[88px] text-right font-mono text-[12px] tabular-nums text-foreground/80",
+										row.hasStats && lagClass(row.replicaLagMaxSeconds),
+									)}
+								>
+									{row.hasStats ? formatLag(row.replicaLagMaxSeconds) : "—"}
+								</div>
+							</>
+						)}
 					</Link>
 				)
 			})}

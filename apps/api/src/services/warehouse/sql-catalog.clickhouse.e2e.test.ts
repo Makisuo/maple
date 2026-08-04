@@ -111,7 +111,11 @@ describe.skipIf(!clickhouseE2eEnabled)("SQL catalog analyzer sweep", () => {
 			// `Schema.Number` rejects the quoted shape.
 			if (wideColumns.length > 0 && entry.compiled) {
 				for (const quote64Bit of [false, true]) {
-					const row = syntheticRow(columns, { quote64Bit })
+					// `sampleValues` covers columns whose schema narrows what the
+					// ClickHouse type allows — the synthetic row is built from column
+					// TYPES alone, so a literal union over a String would otherwise be
+					// handed "" and fail a check that is about integer quoting.
+					const row = { ...syntheticRow(columns, { quote64Bit }), ...entry.sampleValues }
 					const decoded = await Effect.runPromise(Effect.exit(entry.compiled.decodeRows([row])))
 					if (decoded._tag === "Failure") {
 						assert.fail(
