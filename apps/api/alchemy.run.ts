@@ -246,9 +246,15 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				QE_BUCKET_CACHE_TTL_SECONDS: process.env.QE_BUCKET_CACHE_TTL_SECONDS?.trim() || "86400",
 				QE_BUCKET_CACHE_FLUX_SECONDS: process.env.QE_BUCKET_CACHE_FLUX_SECONDS?.trim() || "60",
 				QE_BUCKET_CACHE_SEGMENT_BUCKETS: process.env.QE_BUCKET_CACHE_SEGMENT_BUCKETS?.trim() || "120",
-				QE_BUCKET_CACHE_READ_CONCURRENCY:
-					process.env.QE_BUCKET_CACHE_READ_CONCURRENCY?.trim() || "16",
-				EDGE_CACHE_READ_TIMEOUT_MS: process.env.EDGE_CACHE_READ_TIMEOUT_MS?.trim() || "250",
+				// Both of the next two knobs are bounded by Cloudflare's
+				// six-simultaneous-connection limit, which `cache.match()` counts
+				// against while it waits for response headers. Keep the deploy-time
+				// values in step with the reasoning in `bucket-cache.ts` and
+				// `edge-cache.ts` — a stale override here silently defeats a tuned
+				// default, which is exactly what happened when these were pinned to
+				// 16/250 and the code defaults moved to 6/40 underneath them.
+				QE_BUCKET_CACHE_READ_CONCURRENCY: process.env.QE_BUCKET_CACHE_READ_CONCURRENCY?.trim() || "6",
+				EDGE_CACHE_READ_TIMEOUT_MS: process.env.EDGE_CACHE_READ_TIMEOUT_MS?.trim() || "40",
 				SERVICE_OPERATIONS_ROLLUP_ENABLED:
 					process.env.SERVICE_OPERATIONS_ROLLUP_ENABLED?.trim() || "false",
 				...optionalPlain("MAPLE_ENDPOINT"),

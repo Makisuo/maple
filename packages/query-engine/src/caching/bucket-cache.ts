@@ -1,5 +1,6 @@
 import type { OrgId } from "@maple/domain"
 import type { TimeseriesPoint } from "@maple/domain/query-engine"
+import { canonicalJSON } from "../canonical-json"
 import { parseWarehouseDateTime } from "../datetime"
 import { Clock, Config, Context, Effect, Layer, Option } from "effect"
 import { EdgeCacheService } from "@maple/cache"
@@ -71,36 +72,6 @@ const CACHE_VERSION = 2 as const
 const EMPTY_BUCKETS: ReadonlyArray<CachedBucket> = []
 
 // --- Fingerprint helpers -------------------------------------------------
-
-/**
- * Deterministically stringify `value` by recursively sorting object keys and
- * dropping `undefined`. Arrays preserve order. Non-serializable values are
- * coerced to `String(...)`.
- */
-const canonicalJSON = (value: unknown): string => {
-	const seen = new WeakSet<object>()
-	const walk = (v: unknown): unknown => {
-		if (v === null) return null
-		if (v === undefined) return undefined
-		const t = typeof v
-		if (t === "string" || t === "number" || t === "boolean") return v
-		if (t === "bigint") return v.toString()
-		if (Array.isArray(v)) {
-			return v.map((item) => walk(item))
-		}
-		if (t === "object") {
-			if (seen.has(v as object)) return null
-			seen.add(v as object)
-			const entries = Object.entries(v as Record<string, unknown>)
-				.filter(([, nested]) => nested !== undefined)
-				.map(([key, nested]) => [key, walk(nested)] as const)
-				.sort(([a], [b]) => a.localeCompare(b))
-			return Object.fromEntries(entries)
-		}
-		return String(v)
-	}
-	return JSON.stringify(walk(value))
-}
 
 const sha256Hex = async (input: string): Promise<string> => {
 	const bytes = new TextEncoder().encode(input)
@@ -430,7 +401,12 @@ const segmentBucketsConfig = Config.number("QE_BUCKET_CACHE_SEGMENT_BUCKETS").pi
 // self-queues, and the wait is charged to `EDGE_CACHE_READ_TIMEOUT_MS` — the
 // read gets abandoned before it ever reaches the cache.
 // https://developers.cloudflare.com/workers/platform/limits/
-const readConcurrencyConfig = Config.number("QE_BUCKET_CACHE_READ_CONCURRENCY").pipe(Config.withDefault(16))
+//
+// The same limit bounds this knob, not just the segment count: 13 segment reads
+// issued at concurrency 16 are still 13 simultaneous `cache.match()` calls. Six
+// is the ceiling that keeps every read in a connection slot instead of queueing
+// behind its own siblings and being abandoned at `EDGE_CACHE_READ_TIMEOUT_MS`.
+const readConcurrencyConfig = Config.number("QE_BUCKET_CACHE_READ_CONCURRENCY").pipe(Config.withDefault(6))
 // Cap how many missing sub-ranges fan out to the warehouse per cache miss. A
 // single cold dashboard request only ever splits into a few ranges, but
 // "unbounded" let a burst of concurrent misses multiply into a warehouse
@@ -588,11 +564,27 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 						[...freshBySegment.entries()],
 						([segmentStartMs, freshBuckets]) => {
 							const readStatus = readStatusBySegment.get(segmentStartMs) ?? "miss"
-							if (readStatus === "timeout" || readStatus === "error") return Effect.void
-							const merged = mergeAndDeduplicateBuckets(
-								existingBySegment.get(segmentStartMs) ?? EMPTY_BUCKETS,
-								freshBuckets,
-							)
+							// A read we never got an answer from tells us nothing about what
+							// is stored, so we must not merge against `existingBySegment`
+							// (empty, but only because the read failed) and present the
+							// result as the whole segment. Skipping the write entirely is
+							// the wrong correction though: under sustained connection
+							// pressure every read for a hot segment times out, so the
+							// segment is never repopulated and every subsequent request
+							// times out too — the cache holds itself cold.
+							//
+							// Write the fresh buckets alone instead. Every bucket here is
+							// fully settled (past the flux boundary) and therefore
+							// immutable, so overwriting an unread entry with them cannot
+							// lose correct data — at worst it drops buckets we couldn't see,
+							// which the next request refetches and merges back.
+							const merged =
+								readStatus === "timeout" || readStatus === "error"
+									? [...freshBuckets].sort((a, b) => a.startMs - b.startMs)
+									: mergeAndDeduplicateBuckets(
+											existingBySegment.get(segmentStartMs) ?? EMPTY_BUCKETS,
+											freshBuckets,
+										)
 							const key = `v${CACHE_VERSION}:${request.orgId}:${fingerprint}:${segmentStartMs}`
 							const payload: BucketCacheSegmentData = {
 								version: CACHE_VERSION,
