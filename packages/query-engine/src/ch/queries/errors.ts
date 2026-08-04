@@ -12,7 +12,6 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
-import { compileCH } from "@maple-dev/clickhouse-builder"
 import {
 	ErrorEvents,
 	ErrorEventsByTime,
