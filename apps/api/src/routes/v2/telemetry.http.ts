@@ -81,7 +81,7 @@ const toWarehouseDateTime = (value: string, param: string) => {
 	const ms = Date.parse(value)
 	return Number.isNaN(ms)
 		? Effect.fail(invalidRequest("parameter_invalid", `Invalid ISO-8601 timestamp for ${param}.`, param))
-		: Effect.succeed(formatWarehouseDateTimeMs(ms))
+		: Effect.succeed(formatWarehouseDateTime(ms))
 }
 
 const parseWindow = (

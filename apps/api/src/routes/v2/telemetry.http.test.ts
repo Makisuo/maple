@@ -459,7 +459,7 @@ describe("v2 telemetry reads over HTTP", () => {
 		await harness.dispose()
 	})
 
-	it("preserves fractional bounds and reads complete traces by their sorting-key identity", async () => {
+	it("normalizes warehouse bounds to second precision and reads complete traces by sorting-key identity", async () => {
 		const observedSql: string[] = []
 		const observingWarehouse: WarehouseQueryServiceShape = {
 			...warehouseStub,
@@ -481,8 +481,8 @@ describe("v2 telemetry reads over HTTP", () => {
 		})
 		expect(logs.status).toBe(200)
 		const logSql = observedSql.find((sql) => sql.includes("FROM logs"))
-		expect(logSql).toContain("'2026-07-15 12:00:00.900'")
-		expect(logSql).toContain("'2026-07-15 12:00:01.100'")
+		expect(logSql).toContain("'2026-07-15 12:00:00'")
+		expect(logSql).toContain("'2026-07-15 12:00:01'")
 
 		observedSql.length = 0
 		const trace = await harness.request("GET", `/v2/traces/${TRACE_ID}`, key.secret)
