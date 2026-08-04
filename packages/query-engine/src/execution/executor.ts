@@ -407,18 +407,27 @@ WHERE name = 'enable_full_text_index'`,
 		)
 		const attemptTimeoutMs = clientTimeoutMs(options?.profile, settings?.maxExecutionTime)
 		const retryAttempts = yield* Ref.make(0)
+		// A caller-supplied budget wins: a trusted query that knows its own response
+		// can blow the Worker heap (session replay's rrweb payloads) opts in
+		// explicitly. Raw SQL keeps its standing caps.
 		const responseLimits =
-			execution === "raw"
+			options?.responseLimits ??
+			(execution === "raw"
 				? { maxRows: MAX_RAW_SQL_RESULT_ROWS, maxBytes: MAX_RAW_SQL_RESULT_BYTES }
-				: undefined
+				: undefined)
 		const queryAttempt = Effect.tryPromise({
 			try: () => client.sql(finalSql, responseLimits === undefined ? undefined : { responseLimits }),
 			catch: (error) =>
 				error instanceof WarehouseResponseLimitError
-					? new RawSqlValidationError({
-							code: "ResourceLimit",
-							message: error.message,
-						})
+					? // Only raw SQL restates this as a validation error — there the
+						// oversized result IS the caller's query problem. For a trusted
+						// query the limit is ours, so it propagates unchanged and the
+						// caller maps it to a domain error. Either way it never becomes a
+						// WarehouseUpstreamError, so the transient retry loop skips it
+						// instead of re-running a read that already exhausted the heap.
+						execution === "raw"
+						? new RawSqlValidationError({ code: "ResourceLimit", message: error.message })
+						: error
 					: // `execution` decides authorship: raw SQL comes from the caller (the
 						// raw_sql widget, the `run_sql` MCP tool), so an analyzer complaint
 						// about it is their typo and must keep the database's own message.
@@ -528,6 +537,31 @@ WHERE name = 'enable_full_text_index'`,
 			"maple.query.plan.trace_attributes": attributeIndexMode(capabilities, "traces"),
 			"maple.query.plan.full_text_setting": capabilities.fullTextSearchSetting,
 		})
+
+	// --- Response-limit narrowing ------------------------------------------
+	//
+	// `executeSql` can raise WarehouseResponseLimitError, but only when a caller
+	// passed `responseLimits`. `compiledQueryBounded` is the one entry point that
+	// does; every other one strips the option (`withoutResponseLimits`) and then
+	// narrows the error away (`unbounded`). Types can't see that the strip makes
+	// the error unreachable, hence the explicit pair — and hence `Effect.die`
+	// rather than a mapping: if it ever fires, a caller reached the limit path
+	// without declaring it, which is a bug here and not a condition to handle.
+
+	const withoutResponseLimits = (options?: SqlQueryOptions): SqlQueryOptions | undefined => {
+		if (options?.responseLimits === undefined) return options
+		const { responseLimits: _optedOut, ...rest } = options
+		return rest
+	}
+
+	const unbounded = <A, E, R>(
+		effect: Effect.Effect<A, E | WarehouseResponseLimitError, R>,
+	): Effect.Effect<A, E, R> =>
+		Effect.catchIf(
+			effect,
+			(error): error is WarehouseResponseLimitError => error instanceof WarehouseResponseLimitError,
+			(error) => Effect.die(error),
+		)
 
 	const query = Effect.fn("WarehouseQueryService.query")(function* (
 		tenant: ExecutionTenant,
@@ -696,13 +730,29 @@ WHERE name = 'enable_full_text_index'`,
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
+	) => unbounded(executeCompiledQuery(tenant, compiled, withoutResponseLimits(options)))
+
+	/**
+	 * Read with an explicit ceiling on the response we're willing to materialize.
+	 *
+	 * The limit error propagates to the caller instead of being retried: it is a
+	 * statement about the size of the answer, so re-running the query produces
+	 * the same oversized response. Callers map it to a domain error that tells
+	 * the user to ask for less.
+	 */
+	const compiledQueryBounded = <T>(
+		tenant: ExecutionTenant,
+		compiled: CompiledQuery<T>,
+		options: SqlQueryOptions & {
+			readonly responseLimits: { readonly maxRows: number; readonly maxBytes: number }
+		},
 	) => executeCompiledQuery(tenant, compiled, options)
 
 	const compiledQueryWithCapabilities = <T>(
 		tenant: ExecutionTenant,
 		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
 		options?: SqlQueryOptions,
-	) => executeCompiledQuery(tenant, compile, options)
+	) => unbounded(executeCompiledQuery(tenant, compile, withoutResponseLimits(options)))
 
 	/**
 	 * Deliberately read across every tenant.
@@ -882,25 +932,34 @@ WHERE name = 'enable_full_text_index'`,
 	const asExecutor = (tenant: ExecutionTenant): WarehouseExecutorShape => ({
 		orgId: tenant.orgId,
 		query: <T>(pipe: WarehouseQueryName, params: Record<string, unknown>, options?: SqlQueryOptions) =>
-			query(tenant, { pipeName: pipe, params }, { context: `pipe:${pipe}`, ...options }).pipe(
-				Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> })),
-			),
+			unbounded(
+				query(
+					tenant,
+					{ pipeName: pipe, params },
+					{ context: `pipe:${pipe}`, ...withoutResponseLimits(options) },
+				),
+			).pipe(Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> }))),
 		compiledQuery: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
 			compiledQuery(tenant, compiled, { context: "warehouseExecutor.compiledQuery", ...options }),
 		compiledQueryFirst: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
-			compiledQueryFirst(tenant, compiled, {
-				context: "warehouseExecutor.compiledQueryFirst",
-				...options,
-			}),
+			unbounded(
+				compiledQueryFirst(tenant, compiled, {
+					context: "warehouseExecutor.compiledQueryFirst",
+					...withoutResponseLimits(options),
+				}),
+			),
 	})
 
 	return {
-		query,
-		crossOrgQuery,
-		rawSqlQuery,
+		query: (tenant, payload, options) => unbounded(query(tenant, payload, withoutResponseLimits(options))),
+		crossOrgQuery: (tenant, compiled, options) =>
+			unbounded(crossOrgQuery(tenant, compiled, { ...withoutResponseLimits(options), justification: options.justification })),
+		rawSqlQuery: (tenant, sql, options) => unbounded(rawSqlQuery(tenant, sql, options)),
 		compiledQuery,
+		compiledQueryBounded,
 		compiledQueryWithCapabilities,
-		compiledQueryFirst,
+		compiledQueryFirst: (tenant, compiled, options) =>
+			unbounded(compiledQueryFirst(tenant, compiled, withoutResponseLimits(options))),
 		ingest,
 		asExecutor,
 	} satisfies WarehouseQueryServiceShape

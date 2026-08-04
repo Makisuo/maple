@@ -41,6 +41,7 @@ import {
 	UserId,
 } from "@maple/domain/http"
 import { MapleApiV2, encodePublicId } from "@maple/domain/http/v2"
+import { WarehouseResponseLimitError } from "@maple/query-engine/execution"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -299,6 +300,9 @@ const warehouseStub: WarehouseQueryServiceShape = {
 	sqlQuery: () => Effect.succeed([]),
 	rawSqlQuery: () => Effect.succeed([]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
+	// Replay payload reads go through the bounded variant (they carry an explicit
+	// response-byte ceiling), so the stub has to answer it too.
+	compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.succeed(Option.none()),
 	ingest: () => Effect.void,
 	asExecutor: () => {
@@ -1083,5 +1087,274 @@ describe("v2 session_replays over HTTP", () => {
 			expect(response.body.error.type).toBe("not_found_error")
 		}
 		await harness.dispose()
+	})
+
+	// A session's rrweb payload is unbounded by construction — ingest accepts up
+	// to 1 GiB and the p99 is ~594 MB. Reading it all at once buffered the whole
+	// payload into a 128 MB Worker; the abort was classified as a transient
+	// warehouse fault, retried twice more, and returned "service unavailable".
+	// These pin the shape that replaced it.
+	describe("bounded replay reads", () => {
+		const chunkRows = Array.from({ length: 40 }, (_, seq) => ({
+			chunkSeq: seq,
+			timestamp: "2026-05-26 08:29:26.243",
+			durationMs: 5_000,
+			eventCount: 10,
+			byteSize: 100_000,
+			events: "[]",
+			isCheckpoint: seq % 20 === 0 ? 1 : 0,
+		}))
+
+		/** Serves rows honouring the ChunkSeq predicates + LIMIT/OFFSET in the SQL. */
+		const chunkWarehouse = (): WarehouseQueryServiceShape => {
+			const serve = (sql: string) => {
+				const from = Number(/ChunkSeq >= (\d+)/.exec(sql)?.[1] ?? 0)
+				const to = Number(/ChunkSeq <= (\d+)/.exec(sql)?.[1] ?? Number.MAX_SAFE_INTEGER)
+				const limit = Number(/LIMIT\s+(\d+)/i.exec(sql)?.[1] ?? chunkRows.length)
+				const offset = Number(/OFFSET\s+(\d+)/i.exec(sql)?.[1] ?? 0)
+				return chunkRows
+					.filter((row) => row.chunkSeq >= from && row.chunkSeq <= to)
+					.slice(offset, offset + limit)
+			}
+			return {
+				...warehouseStub,
+				compiledQuery: (_tenant, compiled) =>
+					compiled.decodeRows(serve(compiled.sql)).pipe(Effect.orDie),
+				compiledQueryBounded: (_tenant, compiled) =>
+					compiled.decodeRows(serve(compiled.sql)).pipe(Effect.orDie),
+			}
+		}
+
+		it("serves a manifest with no payloads, and the caps a client must size against", async () => {
+			const harness = makeHarness(chunkWarehouse())
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_manifest")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/manifest`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(200)
+			expect(response.body.object).toBe("session_replay.manifest")
+			expect(response.body.chunk_count).toBe(40)
+			expect(response.body.total_byte_size).toBe(4_000_000)
+			expect(response.body.truncated).toBe(false)
+			// The whole point: the timeline arrives without the payload.
+			expect(response.body.chunks[0]).not.toHaveProperty("events")
+			// Playback anchors on the recording's own clock, not the receipt time.
+			expect(response.body.chunks[0].is_checkpoint).toBe(true)
+			// Echoed so a client never hardcodes a cap that can drift from ours.
+			expect(response.body.max_chunks_per_request).toBe(40)
+			await harness.dispose()
+		})
+
+		it("returns only the requested chunk range", async () => {
+			const harness = makeHarness(chunkWarehouse())
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_ranged")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/events?from_chunk_seq=16&to_chunk_seq=31&limit=16`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(200)
+			expect(response.body.data).toHaveLength(16)
+			expect(response.body.data[0].chunk_seq).toBe(16)
+			expect(response.body.data[15].chunk_seq).toBe(31)
+			await harness.dispose()
+		})
+
+		it("clamps a range wider than the per-request cap instead of rejecting it", async () => {
+			// One chunk over the cap should still return data — only an oversized
+			// *payload* is refused, and that is the warehouse's call, not arithmetic.
+			const harness = makeHarness(chunkWarehouse())
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_clamped")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/events?from_chunk_seq=0&to_chunk_seq=9999&limit=100`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(200)
+			expect(response.body.data.length).toBeLessThanOrEqual(40)
+			expect(response.body.data[0].chunk_seq).toBe(0)
+			await harness.dispose()
+		})
+
+		it("serves a session that never produced a checkpoint", async () => {
+			// The SDK's over-cap buffer guard drops the batch holding the opening
+			// snapshot, so some existing recordings have no checkpoint anywhere.
+			// The manifest must still describe them — the client anchors on chunk 0.
+			const legacyRows = chunkRows.map((row) => ({ ...row, isCheckpoint: 0 }))
+			const harness = makeHarness({
+				...warehouseStub,
+				compiledQuery: (_tenant, compiled) => compiled.decodeRows(legacyRows).pipe(Effect.orDie),
+				compiledQueryBounded: (_tenant, compiled) =>
+					compiled.decodeRows(legacyRows).pipe(Effect.orDie),
+			})
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_legacy")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/manifest`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(200)
+			expect(response.body.chunk_count).toBe(40)
+			expect(response.body.chunks.every((c: { is_checkpoint: boolean }) => !c.is_checkpoint)).toBe(true)
+			await harness.dispose()
+		})
+
+		it("coerces JSON-quoted 64-bit ints from the ClickHouse wire format", async () => {
+			// Backends that refuse `output_format_json_quote_64bit_integers=0` return
+			// UInt64s as strings. Schema.Number rejects those, which would surface as
+			// a bodyless 500 — hence the Number() coercion in both handlers.
+			const quotedRows = chunkRows.slice(0, 2).map((row) => ({
+				...row,
+				byteSize: String(row.byteSize) as unknown as number,
+				eventCount: String(row.eventCount) as unknown as number,
+			}))
+			const harness = makeHarness({
+				...warehouseStub,
+				compiledQuery: (_tenant, compiled) => compiled.decodeRows(quotedRows).pipe(Effect.orDie),
+				compiledQueryBounded: (_tenant, compiled) =>
+					compiled.decodeRows(quotedRows).pipe(Effect.orDie),
+			})
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_quoted")
+
+			const manifest = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/manifest`,
+				{ token: key.secret },
+			)
+			expect(manifest.status).toBe(200)
+			expect(manifest.body.total_byte_size).toBe(200_000)
+
+			const events = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/events?from_chunk_seq=0&to_chunk_seq=1`,
+				{ token: key.secret },
+			)
+			expect(events.status).toBe(200)
+			expect(events.body.data[0].byte_size).toBe(100_000)
+			await harness.dispose()
+		})
+
+		it("keeps pagination honest when the caller asks for more than the cap", async () => {
+			// `limit=100` is inside the public 1–100 range but above the per-request
+			// chunk cap. Unclamped, the lookahead asks for 101 rows, gets the SQL
+			// cap of 41, and concludes 41 <= 100 means "no more pages" — a short
+			// page reported as complete, silently dropping the rest of the session.
+			// 60 chunks: more than one capped page, so a page that claims to be the
+			// last one is provably wrong.
+			const manyRows = Array.from({ length: 60 }, (_, seq) => ({ ...chunkRows[0]!, chunkSeq: seq }))
+			const harness = makeHarness({
+				...warehouseStub,
+				compiledQueryBounded: (_tenant, compiled) => {
+					const limit = Number(/LIMIT\s+(\d+)/i.exec(compiled.sql)?.[1] ?? manyRows.length)
+					const offset = Number(/OFFSET\s+(\d+)/i.exec(compiled.sql)?.[1] ?? 0)
+					return compiled.decodeRows(manyRows.slice(offset, offset + limit)).pipe(Effect.orDie)
+				},
+			})
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_bigpage")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/events?limit=100`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(200)
+			expect(response.body.data.length).toBeLessThanOrEqual(40)
+			// 60 chunks exist and the page is capped at 40, so there is a next page.
+			expect(response.body.has_more).toBe(true)
+			expect(response.body.next_cursor).not.toBeNull()
+			await harness.dispose()
+		})
+
+		it("refuses an over-budget range of blob-backed chunks before hydrating", async () => {
+			// The seam between this change and the R2 move. Once payloads live in
+			// the blob store the warehouse response is only an index — `events` is
+			// "" — so the `responseLimits` ceiling on that read measures almost
+			// nothing and would wave this through. `byteSize` is the uncompressed
+			// payload size and is right there in the index, so the range is refused
+			// without fetching a single object.
+			const hugeBlobRows = chunkRows.slice(0, 4).map((row) => ({
+				...row,
+				events: "",
+				byteSize: 5_000_000,
+			}))
+			const harness = makeHarness({
+				...warehouseStub,
+				compiledQueryBounded: (_tenant, compiled) =>
+					compiled.decodeRows(hugeBlobRows).pipe(Effect.orDie),
+			})
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_blobs_toobig")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/events?from_chunk_seq=0&to_chunk_seq=3`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(413)
+			expect(response.body.error.code).toBe("range_too_large")
+			await harness.dispose()
+		})
+
+		it("serves a blob-backed range that fits the budget", async () => {
+			const blobRows = chunkRows.slice(0, 4).map((row) => ({ ...row, events: "", byteSize: 100_000 }))
+			const harness = makeHarness({
+				...warehouseStub,
+				compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows(blobRows).pipe(Effect.orDie),
+			})
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_blobs_ok")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/events?from_chunk_seq=0&to_chunk_seq=3`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(200)
+			expect(response.body.data).toHaveLength(4)
+			// No R2 binding in tests, so hydration is a no-op passthrough — the
+			// point here is that the budget guard let the range through.
+			expect(response.body.data[0].byte_size).toBe(100_000)
+			await harness.dispose()
+		})
+
+		it("refuses an over-budget range with 413 range_too_large, not a 503", async () => {
+			// The regression that motivated all of this: the old failure claimed the
+			// database was unavailable and invited a retry that could only fail the
+			// same way. This one names the cause and says what to change.
+			const harness = makeHarness({
+				...warehouseStub,
+				compiledQueryBounded: () =>
+					Effect.fail(
+						new WarehouseResponseLimitError({ kind: "bytes", message: "response too large" }),
+					),
+			})
+			const key = await harness.bootstrapKey()
+			const sessionId = encodePublicId("srep", "sess_toobig")
+
+			const response = await harness.request(
+				"GET",
+				`/v2/session_replays/${sessionId}/events?from_chunk_seq=0&to_chunk_seq=39`,
+				{ token: key.secret },
+			)
+			expect(response.status).toBe(413)
+			expect(response.body.error.code).toBe("range_too_large")
+			expect(response.body.error.param).toBe("to_chunk_seq")
+			// The message survives the public boundary verbatim — it carries no
+			// database diagnostics, and it is the only actionable thing here.
+			expect(response.body.error.message).toContain("narrower chunk range")
+			await harness.dispose()
+		})
 	})
 })

@@ -4,6 +4,7 @@ import {
 	getSessionReplayQuery,
 	sessionReplaysFacetsQuery,
 	sessionReplaysListQuery,
+	sessionReplayChunkIndexQuery,
 	sessionReplayEventsQuery,
 	sessionsForTraceQuery,
 	sessionTraceSummariesQuery,
@@ -70,6 +71,56 @@ describe("sessionReplayEventsQuery", () => {
 		const q = sessionReplayEventsQuery()
 		const { sql } = compileCH(q, sessionParams)
 		expect(sql).not.toContain("Timestamp >=")
+	})
+
+	it("bounds the read to a chunk range so a session is fetched in slices", () => {
+		const q = sessionReplayEventsQuery({ ...WINDOW, fromChunkSeq: 16, toChunkSeq: 31, limit: 40 })
+		const { sql } = compileCH(q, sessionParams)
+		expect(sql).toContain("ChunkSeq >= 16")
+		expect(sql).toContain("ChunkSeq <= 31")
+		expect(sql).toContain("LIMIT 40")
+	})
+
+	it("omits the chunk range when absent, so existing callers keep their SQL", () => {
+		const { sql } = compileCH(sessionReplayEventsQuery(WINDOW), sessionParams)
+		expect(sql).not.toContain("ChunkSeq >=")
+		expect(sql).not.toContain("ChunkSeq <=")
+		expect(sql).not.toContain("LIMIT")
+	})
+
+	it("keeps chunk 0 as a real lower bound rather than a falsy no-op", () => {
+		// `if (opts.fromChunkSeq)` would silently drop this — and chunk 0 is the
+		// single most-requested range (the initial playback window).
+		const { sql } = compileCH(sessionReplayEventsQuery({ fromChunkSeq: 0, toChunkSeq: 15 }), sessionParams)
+		expect(sql).toContain("ChunkSeq >= 0")
+	})
+})
+
+describe("sessionReplayChunkIndexQuery", () => {
+	it("never reads the payload column — that is the whole point of the index", () => {
+		const { sql } = compileCH(sessionReplayChunkIndexQuery(WINDOW), sessionParams)
+		expect(sql).toContain("FROM session_replay_events")
+		expect(sql).not.toContain("Events")
+		expect(sql).toContain("AS byteSize")
+		expect(sql).toContain("AS isCheckpoint")
+	})
+
+	it("projects only columns every existing recording already has", () => {
+		// Deliberately no stored first-event timestamp: a column the deployed
+		// cluster lacks fails every read with schema drift (and every insert), so
+		// adding one would have broken all replay until a migration landed. The
+		// ingest timestamp positions a chunk closely enough to pick it.
+		const { sql } = compileCH(sessionReplayChunkIndexQuery(WINDOW), sessionParams)
+		expect(sql).toContain("Timestamp AS timestamp")
+		expect(sql).toContain("DurationMs AS durationMs")
+		expect(sql).not.toContain("FirstEventMs")
+	})
+
+	it("orders by chunk sequence and scopes to org + session", () => {
+		const { sql } = compileCH(sessionReplayChunkIndexQuery(WINDOW), sessionParams)
+		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("SessionId = 'sess_1'")
+		expect(sql).toContain("ORDER BY chunkSeq ASC")
 	})
 })
 

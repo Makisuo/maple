@@ -6,7 +6,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ReplayStudio } from "@/components/replays/replay-studio"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import {
-	getReplayEventsResultAtom,
+	getReplayManifestResultAtom,
 	getReplayResultAtom,
 	getSessionTranscriptResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -29,7 +29,11 @@ export const Route = createFileRoute("/replays/$sessionId")({
 		const window = replayPartitionWindow(typeof deps.t === "string" ? deps.t : undefined)
 		const data = { sessionId: params.sessionId, ...window }
 		context.effectRegistry.mount(getReplayResultAtom({ data }))
-		context.effectRegistry.mount(getReplayEventsResultAtom({ data }))
+		// The manifest, not the payload: which payload range to fetch depends on
+		// where the first checkpoint is, which the manifest is what tells us. That
+		// costs one extra round-trip on a cold load and saves fetching a session
+		// that can run to hundreds of megabytes.
+		context.effectRegistry.mount(getReplayManifestResultAtom({ data }))
 		context.effectRegistry.mount(getSessionTranscriptResultAtom({ data }))
 	},
 })

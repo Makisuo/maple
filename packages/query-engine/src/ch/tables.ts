@@ -570,6 +570,8 @@ export const SessionReplayEvents = table("session_replay_events", {
 	OrgId: T.string,
 	SessionId: T.string,
 	ChunkSeq: T.uint32,
+	// Gateway receipt time — partitioning, TTL, and the anchor the chunk index
+	// resolves a seek target against.
 	Timestamp: T.dateTime64,
 	DurationMs: T.uint32,
 	EventCount: T.uint32,

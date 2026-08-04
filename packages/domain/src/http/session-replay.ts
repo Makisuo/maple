@@ -185,31 +185,7 @@ export class GetReplayResponse extends Schema.Class<GetReplayResponse>("GetRepla
 	),
 }) {}
 
-// --- Events (rrweb chunks, payload inline) ---
-
-export class GetReplayEventsRequest extends Schema.Class<GetReplayEventsRequest>("GetReplayEventsRequest")({
-	sessionId: SessionId,
-	// See GetReplayRequest — optional partition-pruning window.
-	windowStart: Schema.optional(TinybirdDateTime),
-	windowEnd: Schema.optional(TinybirdDateTime),
-}) {}
-
-export const SessionReplayChunk = Schema.Struct({
-	chunkSeq: Schema.Number,
-	timestamp: Schema.String,
-	durationMs: Schema.Number,
-	eventCount: Schema.Number,
-	byteSize: Schema.Number,
-	isCheckpoint: Schema.Number,
-	/** The rrweb event array for this chunk, serialized as a JSON string. */
-	events: Schema.String,
-})
-
-export class GetReplayEventsResponse extends Schema.Class<GetReplayEventsResponse>("GetReplayEventsResponse")(
-	{
-		chunks: Schema.Array(SessionReplayChunk),
-	},
-) {}
+// Replay chunk payloads are not served here — see the API group below.
 
 // --- Reverse correlation (trace → sessions) ---
 
@@ -332,13 +308,11 @@ export class SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays")
 			error: sessionReplayEndpointErrors,
 		}),
 	)
-	.add(
-		HttpApiEndpoint.post("getReplayEvents", "/events", {
-			payload: GetReplayEventsRequest,
-			success: GetReplayEventsResponse,
-			error: sessionReplayEndpointErrors,
-		}),
-	)
+	// Replay payload reads live on v2 only: `GET /v2/session_replays/:id/manifest`
+	// then `GET /v2/session_replays/:id/events?from_chunk_seq=…`. There is no v1
+	// equivalent on purpose — the v1 endpoint fetched a whole session's rrweb
+	// payload in one unbounded response, which is the bug, and keeping a second
+	// surface would have kept a way to reintroduce it.
 	.add(
 		HttpApiEndpoint.post("replaysForTrace", "/for-trace", {
 			payload: ReplaysForTraceRequest,

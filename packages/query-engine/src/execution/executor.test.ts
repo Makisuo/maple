@@ -806,6 +806,86 @@ describe("makeWarehouseExecutor raw response limits", () => {
 			assert.strictEqual(error.code, "ResourceLimit")
 		}),
 	)
+
+	it.effect("propagates the limit error unchanged for a trusted bounded query", () =>
+		Effect.gen(function* () {
+			// A trusted query's oversized response is OUR budget being exceeded, not
+			// the caller writing bad SQL — so it must not be restated as a
+			// validation error the way the raw path does above.
+			const executor = makeWarehouseExecutor({
+				...makeDeps([]),
+				createClient: () => ({
+					sql: async () => {
+						throw new WarehouseResponseLimitError({
+							kind: "bytes",
+							message: "response too large",
+						})
+					},
+					insert: async () => {},
+				}),
+			})
+			const error = yield* Effect.flip(
+				executor.compiledQueryBounded(tenant, compiled, {
+					context: "test",
+					responseLimits: { maxRows: 40, maxBytes: 8_000_000 },
+				}),
+			)
+			assert.instanceOf(error, WarehouseResponseLimitError)
+		}),
+	)
+
+	it.effect("runs an oversized bounded read exactly once instead of retrying it", () =>
+		Effect.gen(function* () {
+			// The regression this whole change exists for: an over-budget response
+			// used to surface as an aborted subrequest, which the transient
+			// classifier read as a flaky upstream and retried — re-running a read
+			// that had already exhausted the heap, twice more, before 503ing.
+			let attempts = 0
+			const executor = makeWarehouseExecutor({
+				...makeDeps([]),
+				createClient: () => ({
+					sql: async () => {
+						attempts++
+						throw new WarehouseResponseLimitError({
+							kind: "bytes",
+							message: "response too large",
+						})
+					},
+					insert: async () => {},
+				}),
+			})
+			yield* Effect.flip(
+				executor.compiledQueryBounded(tenant, compiled, {
+					context: "test",
+					responseLimits: { maxRows: 40, maxBytes: 8_000_000 },
+				}),
+			)
+			assert.strictEqual(attempts, 1)
+		}),
+	)
+
+	it.effect("forwards the caller's budget to the driver", () =>
+		Effect.gen(function* () {
+			let seen: unknown
+			const executor = makeWarehouseExecutor({
+				...makeDeps([]),
+				createClient: () => ({
+					sql: async (_sql: string, options?: unknown) => {
+						seen = options
+						return { data: [] }
+					},
+					insert: async () => {},
+				}),
+			})
+			yield* executor.compiledQueryBounded(tenant, compiled, {
+				context: "test",
+				responseLimits: { maxRows: 40, maxBytes: 8_000_000 },
+			})
+			assert.deepStrictEqual(seen, {
+				responseLimits: { maxRows: 40, maxBytes: 8_000_000 },
+			})
+		}),
+	)
 })
 
 describe("makeWarehouseExecutor client cache partitions", () => {
