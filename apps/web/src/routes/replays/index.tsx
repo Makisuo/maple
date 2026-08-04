@@ -8,10 +8,10 @@ import { ActiveUserFilter } from "@/components/replays/active-user-filter"
 import { ReplaysFilterSidebar } from "@/components/replays/replays-filter-sidebar"
 import { ReplaysToolbar } from "@/components/replays/replays-toolbar"
 import { BooleanFromStringParam, NumberFromStringParam } from "@/lib/search-params"
-import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { useInfiniteReplays } from "@/hooks/use-infinite-replays"
+import { replaysFilterInputs } from "@/components/replays/replays-filter-inputs"
+import { REPLAYS_PAGE_SIZE, useInfiniteReplays } from "@/hooks/use-infinite-replays"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { replaysFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { listReplaysResultAtom, replaysFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -43,38 +43,31 @@ const replaysSearchSchema = Schema.Struct({
 export const Route = createFileRoute("/replays/")({
 	component: ReplaysPage,
 	validateSearch: Schema.toStandardSchemaV1(replaysSearchSchema),
+	loaderDeps: ({ search }) => search,
+	// Both queries are on the critical path and neither is cached server-side, so
+	// starting them here rather than on mount is worth real time: the router runs
+	// `defaultPreload: "intent"`, which fires this on hover — ahead of the route
+	// chunk evaluating and React committing. Mount is fire-and-forget; the
+	// component reads the same entries and renders its skeleton meanwhile.
+	loader: ({ context, deps }) => {
+		const filterInputs = replaysFilterInputs(deps)
+		context.effectRegistry.mount(
+			listReplaysResultAtom({ data: { ...filterInputs, limit: REPLAYS_PAGE_SIZE, offset: 0 } }),
+		)
+		context.effectRegistry.mount(replaysFacetsResultAtom({ data: filterInputs }))
+	},
 })
 
 function ReplaysPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
-	const { startTime, endTime } = useEffectiveTimeRange(
-		search.startTime,
-		search.endTime,
-		search.timePreset ?? "24h",
-	)
 
 	const filterInputs = useMemo(
-		() => ({
-			startTime,
-			endTime,
-			serviceName: search.service,
-			browser: search.browser,
-			country: search.country,
-			deviceType: search.deviceType,
-			userId: search.userId,
-			visitorId: search.visitorId,
-			hasErrors: search.hasErrors,
-			search: search.q,
-			// URL params are whole seconds; the warehouse filters in ms.
-			durationMinMs: search.durationMin != null ? search.durationMin * 1000 : undefined,
-			durationMaxMs: search.durationMax != null ? search.durationMax * 1000 : undefined,
-			activeTimeMinMs: search.activeMin != null ? search.activeMin * 1000 : undefined,
-			activeTimeMaxMs: search.activeMax != null ? search.activeMax * 1000 : undefined,
-		}),
+		() => replaysFilterInputs(search),
 		[
-			startTime,
-			endTime,
+			search.startTime,
+			search.endTime,
+			search.timePreset,
 			search.service,
 			search.browser,
 			search.country,
@@ -89,6 +82,7 @@ function ReplaysPage() {
 			search.activeMax,
 		],
 	)
+	const { startTime, endTime } = filterInputs
 
 	const { firstPageResult, allData, hasNextPage, isCapped, isFetchingNextPage, fetchNextPage } =
 		useInfiniteReplays(filterInputs)

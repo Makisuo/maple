@@ -62,6 +62,19 @@ type RuntimeBackendConfig = {
 
 type ActiveRow = typeof orgClickHouseSettings.$inferSelect
 
+/** The columns `resolveRuntimeConfig` actually caches — see `selectCachedRow`. */
+type CachedSettingsRow = Pick<
+	ActiveRow,
+	| "schemaVersion"
+	| "syncStatus"
+	| "chUrl"
+	| "chUser"
+	| "chDatabase"
+	| "chPasswordCiphertext"
+	| "chPasswordIv"
+	| "chPasswordTag"
+>
+
 // Edge-cache bucket + TTL for the per-org runtime ClickHouse config lookup.
 // `resolveRuntimeConfig` runs on the hot path of every warehouse SQL execution
 // (and once per missing bucket in the cache fan-out), so a long-lived
@@ -104,7 +117,7 @@ const CachedChSettings = Schema.Struct({
 type CachedChSettings = typeof CachedChSettings.Type
 const CachedChSettingsOrNull = Schema.NullOr(CachedChSettings)
 
-const toCachedChSettings = (row: ActiveRow): CachedChSettings => ({
+const toCachedChSettings = (row: CachedSettingsRow): CachedChSettings => ({
 	schemaVersion: row.schemaVersion,
 	chUrl: row.chUrl,
 	chUser: row.chUser,
@@ -772,6 +785,34 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			return Option.fromNullishOr(rows[0])
 		})
 
+		// The hot-path read: only the columns that end up in `CachedChSettings`.
+		// `selectActiveRow`'s `SELECT *` pulls all 14 including the encrypted
+		// password blobs and the migration bookkeeping, none of which this path
+		// looks at — and this is the read that runs on every warehouse query.
+		const selectCachedRow = Effect.fn("OrgClickHouseSettingsService.selectCachedRow")(function* (
+			orgId: OrgId,
+		) {
+			const rows = yield* database
+				.execute((db) =>
+					db
+						.select({
+							schemaVersion: orgClickHouseSettings.schemaVersion,
+							syncStatus: orgClickHouseSettings.syncStatus,
+							chUrl: orgClickHouseSettings.chUrl,
+							chUser: orgClickHouseSettings.chUser,
+							chDatabase: orgClickHouseSettings.chDatabase,
+							chPasswordCiphertext: orgClickHouseSettings.chPasswordCiphertext,
+							chPasswordIv: orgClickHouseSettings.chPasswordIv,
+							chPasswordTag: orgClickHouseSettings.chPasswordTag,
+						})
+						.from(orgClickHouseSettings)
+						.where(eq(orgClickHouseSettings.orgId, orgId))
+						.limit(1),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+			return Option.fromNullishOr(rows[0])
+		})
+
 		// Bust the cached runtime config for an org after any write to its settings
 		// row, so the next warehouse query re-resolves rather than serving a stale
 		// value. Clears both the in-isolate memo (this isolate only — other isolates
@@ -1166,52 +1207,65 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			})
 		})
 
-		const resolveRuntimeConfig = Effect.fn("OrgClickHouseSettingsService.resolveRuntimeConfig")(
+		// The cached settings row behind both `resolveRuntimeConfig` and
+		// `isWarehouseWriteReady`.
+		//
+		// `selectCachedRow` is a Postgres round-trip on the hot path of EVERY
+		// warehouse SQL execution, and the bucket-cache fan-out re-runs it once per
+		// missing range. Two cache layers sit in front: a module-scoped in-isolate
+		// memo (zero network on a warm isolate) and, on a memo miss, the shared edge
+		// cache (a 1h entry, removing the cold round-trip on repeat loads).
+		//
+		// Note there is NO single-flight: `EdgeCacheService.getOrCompute` deliberately
+		// refuses to share an in-flight Effect across requests, because Cloudflare ties
+		// I/O objects to the request that created them. Concurrent cold misses each pay
+		// their own lookup and converge through the cache afterwards.
+		//
+		// Both layers store the ENCRYPTED row projection (or `null`) and decryption
+		// happens per-request in `resolveRuntimeConfig`, so plaintext credentials never
+		// enter a cache.
+		const resolveCachedSettings = Effect.fn("OrgClickHouseSettingsService.resolveCachedSettings")(
 			function* (orgId: OrgId) {
-				// `selectActiveRow` is a Postgres round-trip on the hot path of EVERY
-				// warehouse SQL execution, and the bucket-cache fan-out re-runs it once
-				// per missing range. Two cache layers sit in front: a module-scoped
-				// in-isolate memo (zero network on a warm isolate) and, on a memo miss,
-				// the shared edge cache (its in-flight single-flight collapses the
-				// concurrent fan-out into one lookup; the 5-min entry removes the cold
-				// round-trip on repeat loads). Both store the ENCRYPTED row projection
-				// (or `null`) and decrypt per-request below, so plaintext credentials
-				// never enter a cache.
 				const nowMs = yield* Clock.currentTimeMillis
 				const memoized = runtimeConfigMemo.get(orgId)
-				let cached: CachedChSettings | null
 				if (memoized !== undefined && memoized.expiresAt > nowMs) {
 					yield* Effect.annotateCurrentSpan("clickhouse.config.memoHit", true)
-					cached = memoized.value
-				} else {
-					yield* Effect.annotateCurrentSpan("clickhouse.config.memoHit", false)
-					const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
-					const lookup = selectActiveRow(orgId).pipe(
-						Effect.map((row) => (Option.isSome(row) ? toCachedChSettings(row.value) : null)),
-					)
-					cached = Option.isNone(edgeCache)
-						? yield* lookup
-						: yield* edgeCache.value
-								.getOrCompute(
-									{
-										bucket: ORG_CH_CONFIG_BUCKET,
-										key: orgId,
-										ttlSeconds: ORG_CH_CONFIG_TTL_SECONDS,
-										schema: CachedChSettingsOrNull,
-									},
-									lookup,
-								)
-								.pipe(
-									Effect.tap((result) =>
-										Effect.annotateCurrentSpan("clickhouse.config.cacheHit", result.hit),
-									),
-									Effect.map((result) => result.value),
-								)
-					runtimeConfigMemo.set(orgId, {
-						value: cached,
-						expiresAt: nowMs + ORG_CH_CONFIG_MEMO_TTL_MS,
-					})
+					return memoized.value
 				}
+				yield* Effect.annotateCurrentSpan("clickhouse.config.memoHit", false)
+				const edgeCache = yield* Effect.serviceOption(EdgeCacheService)
+				const lookup = selectCachedRow(orgId).pipe(
+					Effect.map((row) => (Option.isSome(row) ? toCachedChSettings(row.value) : null)),
+				)
+				const cached: CachedChSettings | null = Option.isNone(edgeCache)
+					? yield* lookup
+					: yield* edgeCache.value
+							.getOrCompute(
+								{
+									bucket: ORG_CH_CONFIG_BUCKET,
+									key: orgId,
+									ttlSeconds: ORG_CH_CONFIG_TTL_SECONDS,
+									schema: CachedChSettingsOrNull,
+								},
+								lookup,
+							)
+							.pipe(
+								Effect.tap((result) =>
+									Effect.annotateCurrentSpan("clickhouse.config.cacheHit", result.hit),
+								),
+								Effect.map((result) => result.value),
+							)
+				runtimeConfigMemo.set(orgId, {
+					value: cached,
+					expiresAt: nowMs + ORG_CH_CONFIG_MEMO_TTL_MS,
+				})
+				return cached
+			},
+		)
+
+		const resolveRuntimeConfig = Effect.fn("OrgClickHouseSettingsService.resolveRuntimeConfig")(
+			function* (orgId: OrgId) {
+				const cached = yield* resolveCachedSettings(orgId)
 
 				if (cached === null) {
 					return Option.none<RuntimeBackendConfig>()
@@ -1250,9 +1304,17 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// Unlike `resolveRuntimeConfig` — which deliberately ignores readiness because
 		// the org's own collector writes traces/logs straight to its CH regardless —
 		// this gate matters for data whose ONLY writer is the readiness-aware gateway.
+		//
+		// Deliberately NOT behind `resolveCachedSettings`, even though it is the same
+		// row. That path memoizes per isolate for 5 minutes, and this gate decides
+		// which warehouse a read is answered from: a stale `false` right after
+		// onboarding flips sends reads to Tinybird while the gateway is already
+		// writing to the org's ClickHouse, so the data silently goes missing until the
+		// memo expires. It reads the narrow projection rather than `SELECT *`, but it
+		// reads it fresh.
 		const isWarehouseWriteReady = Effect.fn("OrgClickHouseSettingsService.isWarehouseWriteReady")(
 			function* (orgId: OrgId) {
-				const row = yield* selectActiveRow(orgId)
+				const row = yield* selectCachedRow(orgId)
 				return (
 					Option.isSome(row) &&
 					row.value.syncStatus === "connected" &&
