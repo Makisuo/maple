@@ -50,8 +50,12 @@ export interface QueryDef<Payload, Row> {
 	 * Extra settings merged over the profile — e.g. `LOGS_BODY_SEARCH_SETTINGS`
 	 * for log body search, whose `maxBlockSize: 512` is the difference between a
 	 * sub-2s query and an OOM on a large-body org.
+	 *
+	 * May be a function of the payload, because whether a query needs them can
+	 * depend on the request: `listLogs` only wants the body-search settings when
+	 * the caller actually passed a search term.
 	 */
-	readonly settings?: WarehouseQuerySettings
+	readonly settings?: WarehouseQuerySettings | ((payload: Payload) => WarehouseQuerySettings | undefined)
 
 	/**
 	 * Edge cache policy, or `undefined` for deliberately uncached.

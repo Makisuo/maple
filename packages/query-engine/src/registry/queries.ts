@@ -1,11 +1,30 @@
 import type {
+	ErrorDetailTracesRequest,
 	ErrorRateByServiceRequest,
 	ErrorsByTypeRequest,
 	ErrorsSummaryRequest,
 	ErrorsTimeseriesRequest,
+	HostDetailSummaryRequest,
+	ListHostsRequest,
+	ListLogsRequest,
+	ListMetricsRequest,
+	ListNodesRequest,
+	ListWorkloadsRequest,
+	MetricsSummaryRequest,
+	NodeDetailSummaryRequest,
+	PodDetailSummaryRequest,
+	PodsSummaryRequest,
+	ServiceApdexRequest,
+	ServiceDbEdgesForServiceRequest,
+	ServiceDependenciesForServiceRequest,
+	ServiceHealthBaselineRequest,
+	ServiceHealthSnapshotRequest,
 	ServiceOverviewRequest,
+	WorkloadDetailSummaryRequest,
 } from "@maple/domain/http"
+import { Match } from "effect"
 import * as CH from "../ch"
+import { LOGS_BODY_SEARCH_SETTINGS } from "../profiles"
 import { makeDirectRouteCachePolicy } from "../runtime/query-engine"
 import { defineQuery } from "./query-def"
 
@@ -110,6 +129,286 @@ export const serviceOverview = defineQuery({
 				environments: payload.environments,
 				namespaces: payload.namespaces,
 				commitShas: payload.commitShas,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const errorDetailTraces = defineQuery({
+	id: "errorDetailTraces",
+	profile: "list",
+	cache: undefined,
+	compile: (payload: ErrorDetailTracesRequest, orgId: string) =>
+		CH.compile(
+			CH.errorDetailTracesQuery({
+				fingerprintHash: payload.fingerprintHash,
+				rootOnly: payload.rootOnly,
+				services: payload.services,
+				limit: payload.limit,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const serviceHealthSnapshot = defineQuery({
+	id: "serviceHealthSnapshot",
+	profile: "aggregation",
+	cache: 15,
+	compile: (payload: ServiceHealthSnapshotRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceHealthSnapshotQuery({ environments: payload.environments }),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+			{ rowSchema: CH.serviceHealthSnapshotRowSchema },
+		),
+})
+
+export const serviceHealthBaseline = defineQuery({
+	id: "serviceHealthBaseline",
+	profile: "aggregation",
+	cache: 3600,
+	compile: (payload: ServiceHealthBaselineRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceHealthBaselineQuery({
+				environments: payload.environments,
+				namespaces: payload.namespaces,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const serviceApdex = defineQuery({
+	id: "serviceApdex",
+	profile: "aggregation",
+	cache: 15,
+	compile: (payload: ServiceApdexRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceApdexTimeseriesQuery({
+				serviceName: payload.serviceName,
+				apdexThresholdMs: payload.apdexThresholdMs,
+			}),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				bucketSeconds: payload.bucketSeconds ?? 60,
+			},
+		),
+})
+
+export const serviceDependenciesForService = defineQuery({
+	id: "serviceDependenciesForService",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceDependenciesForServiceRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceDependenciesForServiceQuery({
+				serviceName: payload.serviceName,
+				deploymentEnv: payload.deploymentEnv,
+			}),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+			},
+		),
+})
+
+export const serviceDbEdgesForService = defineQuery({
+	id: "serviceDbEdgesForService",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceDbEdgesForServiceRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceDbEdgesForServiceQuery({
+				serviceName: payload.serviceName,
+				deploymentEnv: payload.deploymentEnv,
+			}),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+			},
+		),
+})
+
+export const listLogs = defineQuery({
+	id: "listLogs",
+	profile: "list",
+	settings: (payload) => (payload.search ? LOGS_BODY_SEARCH_SETTINGS : undefined),
+	cache: 15,
+	compile: (payload: ListLogsRequest, orgId: string) =>
+		CH.compile(
+			CH.logsListQuery({
+				serviceName: payload.service,
+				severity: payload.severity,
+				minSeverity: payload.minSeverity,
+				traceId: payload.traceId,
+				spanId: payload.spanId,
+				cursor: payload.cursor,
+				search: payload.search,
+				environments: payload.deploymentEnv ? [payload.deploymentEnv] : undefined,
+				namespaces: payload.namespace ? [payload.namespace] : undefined,
+				matchModes: Match.value([
+					payload.deploymentEnvMatchMode,
+					payload.namespaceMatchMode,
+				] as const).pipe(
+					Match.when([undefined, undefined], () => undefined),
+					Match.orElse(([deploymentEnv, serviceNamespace]) => ({
+						deploymentEnv,
+						serviceNamespace,
+					})),
+				),
+				limit: payload.limit,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const listMetrics = defineQuery({
+	id: "listMetrics",
+	profile: "discovery",
+	cache: undefined,
+	compile: (payload: ListMetricsRequest, orgId: string) =>
+		CH.compile(
+			CH.listMetricsQuery({
+				serviceName: payload.service,
+				metricType: payload.metricType,
+				search: payload.search,
+				limit: payload.limit,
+				offset: payload.offset,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const metricsSummary = defineQuery({
+	id: "metricsSummary",
+	profile: "discovery",
+	cache: undefined,
+	compile: (payload: MetricsSummaryRequest, orgId: string) =>
+		CH.compile(CH.metricsSummaryQuery({ serviceName: payload.service }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+export const listHosts = defineQuery({
+	id: "listHosts",
+	profile: "list",
+	cache: undefined,
+	compile: (payload: ListHostsRequest, orgId: string) =>
+		CH.compile(
+			CH.listHostsQuery({
+				search: payload.search,
+				limit: payload.limit,
+				offset: payload.offset,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const hostDetailSummary = defineQuery({
+	id: "hostDetailSummary",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: HostDetailSummaryRequest, orgId: string) =>
+		CH.compile(CH.hostDetailSummaryQuery({ hostName: payload.hostName }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+export const podsSummary = defineQuery({
+	id: "podsSummary",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: PodsSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.listPodsSummaryQuery({
+				namespaces: payload.namespaces,
+				clusters: payload.clusters,
+				environments: payload.environments,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+			{ rowSchema: CH.ListPodsSummaryOutputSchema },
+		),
+})
+
+export const podDetailSummary = defineQuery({
+	id: "podDetailSummary",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: PodDetailSummaryRequest, orgId: string) =>
+		CH.compile(CH.podDetailSummaryQuery({ podName: payload.podName, namespace: payload.namespace }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+export const listNodes = defineQuery({
+	id: "listNodes",
+	profile: "list",
+	cache: undefined,
+	compile: (payload: ListNodesRequest, orgId: string) =>
+		CH.compile(
+			CH.listNodesQuery({
+				search: payload.search,
+				nodeNames: payload.nodeNames,
+				clusters: payload.clusters,
+				environments: payload.environments,
+				limit: payload.limit,
+				offset: payload.offset,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const nodeDetailSummary = defineQuery({
+	id: "nodeDetailSummary",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: NodeDetailSummaryRequest, orgId: string) =>
+		CH.compile(CH.nodeDetailSummaryQuery({ nodeName: payload.nodeName }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+export const listWorkloads = defineQuery({
+	id: "listWorkloads",
+	profile: "list",
+	cache: undefined,
+	compile: (payload: ListWorkloadsRequest, orgId: string) =>
+		CH.compile(
+			CH.listWorkloadsQuery({
+				kind: payload.kind,
+				search: payload.search,
+				workloadNames: payload.workloadNames,
+				namespaces: payload.namespaces,
+				clusters: payload.clusters,
+				environments: payload.environments,
+				computeTypes: payload.computeTypes,
+				limit: payload.limit,
+				offset: payload.offset,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const workloadDetailSummary = defineQuery({
+	id: "workloadDetailSummary",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: WorkloadDetailSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.workloadDetailSummaryQuery({
+				kind: payload.kind,
+				workloadName: payload.workloadName,
+				namespace: payload.namespace,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
 		),

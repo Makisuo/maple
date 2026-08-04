@@ -377,25 +377,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("errorDetailTraces", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.errorDetailTracesQuery({
-							fingerprintHash: payload.fingerprintHash,
-							rootOnly: payload.rootOnly,
-							services: payload.services,
-							limit: payload.limit,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "list",
-							context: "errorDetailTraces",
-						}),
-						"errorDetailTraces query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.errorDetailTraces, tenant, payload)
 					return new ErrorDetailTracesResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							traceId: decodeTraceId(row.traceId),
 							startTime: String(row.startTime),
 							durationMicros: Number(row.durationMicros),
@@ -431,23 +415,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceHealthSnapshot", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.serviceHealthSnapshotQuery({ environments: payload.environments }),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-						{ rowSchema: CH.serviceHealthSnapshotRowSchema },
-					)
-					const rows = yield* queryEngine.cachedDirect(
-						tenant,
-						"serviceHealthSnapshot",
-						payload,
-						mapExecError(
-							warehouse.compiledQuery(tenant, compiled, {
-								profile: "aggregation",
-								context: "serviceHealthSnapshot",
-							}),
-							"serviceHealthSnapshot query failed",
-						),
-					)
+					const rows = yield* runQuery(Queries.serviceHealthSnapshot, tenant, payload)
 					return new ServiceHealthSnapshotResponse({
 						data: rows.map((row) => ({
 							serviceName: decodeServiceName(row.serviceName),
@@ -462,31 +430,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceHealthBaseline", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.serviceHealthBaselineQuery({
-							environments: payload.environments,
-							namespaces: payload.namespaces,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* queryEngine.cachedDirect(
-						tenant,
-						"serviceHealthBaseline",
-						payload,
-						mapExecError(
-							warehouse.compiledQuery(tenant, compiled, {
-								profile: "aggregation",
-								context: "serviceHealthBaseline",
-							}),
-							"serviceHealthBaseline query failed",
-						),
-						// The payload's start/end are floored to the hour upstream
-						// (`floorToHour`) and this is a trailing 7-day baseline that
-						// changes at most hourly, so the cache key already rotates once
-						// an hour — a 1h TTL yields ≤1 recompute/hour per (org, env, ns)
-						// instead of every 15s for an ~900ms query.
-						3600,
-					)
+					const rows = yield* runQuery(Queries.serviceHealthBaseline, tenant, payload)
 					return new ServiceHealthBaselineResponse({
 						data: rows.map((row) => ({
 							serviceName: decodeServiceName(String(row.serviceName ?? "")),
@@ -501,33 +445,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceApdex", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.serviceApdexTimeseriesQuery({
-							serviceName: payload.serviceName,
-							apdexThresholdMs: payload.apdexThresholdMs,
-						}),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds: payload.bucketSeconds ?? 60,
-						},
-					)
-					const rows = yield* queryEngine.cachedDirect(
-						tenant,
-						"serviceApdex",
-						payload,
-						mapExecError(
-							warehouse.compiledQuery(tenant, compiled, {
-								profile: "aggregation",
-								context: "serviceApdex",
-							}),
-							"serviceApdex query failed",
-						),
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.serviceApdex, tenant, payload)
 					return new ServiceApdexResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							bucket: String(row.bucket),
 							totalCount: Number(row.totalCount),
 							satisfiedCount: Number(row.satisfiedCount),
@@ -557,24 +477,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceDependenciesForService", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.serviceDependenciesForServiceQuery({
-							serviceName: payload.serviceName,
-							deploymentEnv: payload.deploymentEnv,
-						}),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-						},
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "serviceDependenciesForService",
-						}),
-						"serviceDependenciesForService query failed",
-					)
+					const rows = yield* runQuery(Queries.serviceDependenciesForService, tenant, payload)
 					return new ServiceDependenciesResponse({ data: rows })
 				}),
 			)
@@ -598,24 +501,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceDbEdgesForService", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.serviceDbEdgesForServiceQuery({
-							serviceName: payload.serviceName,
-							deploymentEnv: payload.deploymentEnv,
-						}),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-						},
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "serviceDbEdgesForService",
-						}),
-						"serviceDbEdgesForService query failed",
-					)
+					const rows = yield* runQuery(Queries.serviceDbEdgesForService, tenant, payload)
 					return new ServiceDbEdgesResponse({ data: rows })
 				}),
 			)
@@ -1991,47 +1877,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("listLogs", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.logsListQuery({
-							serviceName: payload.service,
-							severity: payload.severity,
-							minSeverity: payload.minSeverity,
-							traceId: payload.traceId,
-							spanId: payload.spanId,
-							cursor: payload.cursor,
-							search: payload.search,
-							environments: payload.deploymentEnv ? [payload.deploymentEnv] : undefined,
-							namespaces: payload.namespace ? [payload.namespace] : undefined,
-							matchModes: Match.value([
-								payload.deploymentEnvMatchMode,
-								payload.namespaceMatchMode,
-							] as const).pipe(
-								Match.when([undefined, undefined], () => undefined),
-								Match.orElse(([deploymentEnv, serviceNamespace]) => ({
-									deploymentEnv,
-									serviceNamespace,
-								})),
-							),
-							limit: payload.limit,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* queryEngine.cachedDirect(
-						tenant,
-						"listLogs",
-						payload,
-						mapExecError(
-							warehouse.compiledQuery(tenant, compiled, {
-								profile: "list",
-								context: "listLogs",
-								// Body search reads the wide Body column for the ILIKE
-								// filter — cap the read block size (see
-								// WarehouseQuerySettings.maxBlockSize).
-								settings: payload.search ? LOGS_BODY_SEARCH_SETTINGS : undefined,
-							}),
-							"listLogs query failed",
-						),
-					)
+					const rows = yield* runQuery(Queries.listLogs, tenant, payload)
 					return new ListLogsResponse({ data: rows })
 				}),
 			)
@@ -2063,44 +1909,16 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("listMetrics", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.listMetricsQuery({
-							serviceName: payload.service,
-							metricType: payload.metricType,
-							search: payload.search,
-							limit: payload.limit,
-							offset: payload.offset,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "discovery",
-							context: "listMetrics",
-						}),
-						"listMetrics query failed",
-					)
+					const rows = yield* runQuery(Queries.listMetrics, tenant, payload)
 					return new ListMetricsResponse({ data: rows })
 				}),
 			)
 			.handle("metricsSummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(CH.metricsSummaryQuery({ serviceName: payload.service }), {
-						orgId: tenant.orgId,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-					})
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "discovery",
-							context: "metricsSummary",
-						}),
-						"metricsSummary query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.metricsSummary, tenant, payload)
 					return new MetricsSummaryResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							metricType: row.metricType,
 							metricCount: Number(row.metricCount),
 							dataPointCount: Number(row.dataPointCount),
@@ -2260,21 +2078,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("listHosts", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.listHostsQuery({
-							search: payload.search,
-							limit: payload.limit,
-							offset: payload.offset,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, { profile: "list", context: "listHosts" }),
-						"listHosts query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.listHosts, tenant, payload)
 					return new ListHostsResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							hostName: row.hostName,
 							osType: row.osType,
 							hostArch: row.hostArch,
@@ -2291,20 +2097,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("hostDetailSummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(CH.hostDetailSummaryQuery({ hostName: payload.hostName }), {
-						orgId: tenant.orgId,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-					})
-					const row = yield* mapExecError(
-						warehouse
-							.compiledQueryFirst(tenant, compiled, {
-								profile: "aggregation",
-								context: "hostDetailSummary",
-							})
-							.pipe(Effect.map(Option.getOrNull)),
-						"hostDetailSummary query failed",
-					)
+					const row = yield* runQueryFirst(Queries.hostDetailSummary, tenant, payload)
 					return new HostDetailSummaryResponse({
 						data: row
 							? {
@@ -2574,27 +2367,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("podsSummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					// Scope only — no row filters. The browse band is what tells you how
-					// much of the fleet your filters just hid, so narrowing it too would
-					// defeat the point.
-					const compiled = CH.compile(
-						CH.listPodsSummaryQuery({
-							namespaces: payload.namespaces,
-							clusters: payload.clusters,
-							environments: payload.environments,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-						{ rowSchema: CH.ListPodsSummaryOutputSchema },
-					)
-					const row = yield* mapExecError(
-						warehouse
-							.compiledQueryFirst(tenant, compiled, {
-								profile: "aggregation",
-								context: "podsSummary",
-							})
-							.pipe(Effect.map(Option.getOrNull)),
-						"podsSummary query failed",
-					)
+					const row = yield* runQueryFirst(Queries.podsSummary, tenant, payload)
 					return new PodsSummaryResponse({
 						totalPods: Number(row?.totalPods) || 0,
 						saturatedPods: Number(row?.saturatedPods) || 0,
@@ -2607,19 +2380,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("podDetailSummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.podDetailSummaryQuery({ podName: payload.podName, namespace: payload.namespace }),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const row = yield* mapExecError(
-						warehouse
-							.compiledQueryFirst(tenant, compiled, {
-								profile: "aggregation",
-								context: "podDetailSummary",
-							})
-							.pipe(Effect.map(Option.getOrNull)),
-						"podDetailSummary query failed",
-					)
+					const row = yield* runQueryFirst(Queries.podDetailSummary, tenant, payload)
 					return new PodDetailSummaryResponse({
 						data: row
 							? {
@@ -2711,24 +2472,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("listNodes", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.listNodesQuery({
-							search: payload.search,
-							nodeNames: payload.nodeNames,
-							clusters: payload.clusters,
-							environments: payload.environments,
-							limit: payload.limit,
-							offset: payload.offset,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, { profile: "list", context: "listNodes" }),
-						"listNodes query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.listNodes, tenant, payload)
 					return new ListNodesResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							nodeName: row.nodeName,
 							nodeUid: row.nodeUid,
 							clusterName: row.clusterName,
@@ -2744,20 +2490,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("nodeDetailSummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(CH.nodeDetailSummaryQuery({ nodeName: payload.nodeName }), {
-						orgId: tenant.orgId,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-					})
-					const row = yield* mapExecError(
-						warehouse
-							.compiledQueryFirst(tenant, compiled, {
-								profile: "aggregation",
-								context: "nodeDetailSummary",
-							})
-							.pipe(Effect.map(Option.getOrNull)),
-						"nodeDetailSummary query failed",
-					)
+					const row = yield* runQueryFirst(Queries.nodeDetailSummary, tenant, payload)
 					return new NodeDetailSummaryResponse({
 						data: row
 							? {
@@ -2821,30 +2554,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("listWorkloads", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.listWorkloadsQuery({
-							kind: payload.kind,
-							search: payload.search,
-							workloadNames: payload.workloadNames,
-							namespaces: payload.namespaces,
-							clusters: payload.clusters,
-							environments: payload.environments,
-							computeTypes: payload.computeTypes,
-							limit: payload.limit,
-							offset: payload.offset,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "list",
-							context: "listWorkloads",
-						}),
-						"listWorkloads query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.listWorkloads, tenant, payload)
 					return new ListWorkloadsResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							workloadName: row.workloadName,
 							namespace: row.namespace,
 							clusterName: row.clusterName,
@@ -2861,23 +2573,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("workloadDetailSummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.workloadDetailSummaryQuery({
-							kind: payload.kind,
-							workloadName: payload.workloadName,
-							namespace: payload.namespace,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const row = yield* mapExecError(
-						warehouse
-							.compiledQueryFirst(tenant, compiled, {
-								profile: "aggregation",
-								context: "workloadDetailSummary",
-							})
-							.pipe(Effect.map(Option.getOrNull)),
-						"workloadDetailSummary query failed",
-					)
+					const row = yield* runQueryFirst(Queries.workloadDetailSummary, tenant, payload)
 					return new WorkloadDetailSummaryResponse({
 						data: row
 							? {

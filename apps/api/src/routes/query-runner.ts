@@ -18,6 +18,17 @@ import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryServic
  */
 
 /**
+ * Settings may be static or payload-dependent. Resolved to a spread so an
+ * absent/undefined result omits the key entirely rather than passing an
+ * explicit `settings: undefined`, which would read as "clear the profile
+ * defaults" downstream.
+ */
+const resolveSettings = <Payload, Row>(def: QueryDef<Payload, Row>, payload: Payload) => {
+	const settings = typeof def.settings === "function" ? def.settings(payload) : def.settings
+	return settings === undefined ? {} : { settings }
+}
+
+/**
  * Shared tail: annotate failures with the query id, then apply the declared
  * cache policy (or don't). `cachedDirect` wraps the whole execution so a hit
  * skips the warehouse entirely, and it takes the raw payload as key input —
@@ -69,7 +80,7 @@ export const runQuery = <Payload, Row>(
 			payload,
 			warehouse.compiledQuery(tenant, def.compile(payload, tenant.orgId), {
 				profile: def.profile,
-				...(def.settings === undefined ? {} : { settings: def.settings }),
+				...resolveSettings(def, payload),
 				context: def.id,
 			}),
 		)
@@ -95,7 +106,7 @@ export const runQueryFirst = <Payload, Row>(
 			warehouse
 				.compiledQueryFirst(tenant, def.compile(payload, tenant.orgId), {
 					profile: def.profile,
-					...(def.settings === undefined ? {} : { settings: def.settings }),
+					...resolveSettings(def, payload),
 					context: def.id,
 				})
 				.pipe(Effect.map(Option.getOrNull)),
