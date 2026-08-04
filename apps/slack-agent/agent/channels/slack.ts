@@ -1,7 +1,7 @@
 import { slackChannel } from "eve/channels/slack"
 import type { SlackWebhookVerifier } from "eve/channels/slack"
 import { acknowledgeIncomingMessage } from "#lib/ack-reaction.js"
-import { describeActionsFriendly, truncateTypingStatus } from "#lib/action-status.js"
+import { describeActions, truncateTypingStatus } from "#lib/action-status.js"
 import { resolveBotToken, verifySlackV0Signature, type SlackTokenContext } from "#lib/maple.js"
 import { promoteThreadFollowUp } from "#lib/thread-follow-up.js"
 import { forwardUninstallEvent } from "#lib/uninstall-detection.js"
@@ -88,17 +88,15 @@ export default slackChannel({
 	threadContext: { since: "last-agent-reply" },
 	events: {
 		// Eve's default flashes the raw tool-call label (`maple__list_services
-		// startTime=...`) into the typing status. Replace it with a random
-		// human phrase per action category (#lib/action-status.js), keeping
-		// the default's one nicety: if the model narrated its own reason for
+		// startTime=...`) into the typing status. Replace it with a plain
+		// descriptive phrase per tool (#lib/action-status.js), keeping the
+		// default's one nicety: if the model narrated its own reason for
 		// the tool calls (`pendingToolCallMessage`, set by the default
 		// `message.completed` handler), that text wins over our phrase.
 		async "actions.requested"(event, channel) {
 			const narrated = channel.state.pendingToolCallMessage
 			channel.state.pendingToolCallMessage = null
-			await channel.thread.startTyping(
-				narrated ? truncateTypingStatus(narrated) : describeActionsFriendly(event.actions),
-			)
+			await channel.thread.startTyping(narrated ? truncateTypingStatus(narrated) : describeActions(event.actions))
 		},
 	},
 })
