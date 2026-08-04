@@ -89,12 +89,30 @@ const sha256Hex = async (input: string): Promise<string> => {
 }
 
 /**
+ * Deadline for a single backend read before it is abandoned and treated as a
+ * miss.
+ *
+ * Sized from prod telemetry (`cache.read_ms` on `EdgeCacheService.getOrCompute`,
+ * 7 days), which is sharply bimodal rather than long-tailed:
+ *
+ *   <10ms   3170 reads     40-80ms      6 reads
+ *   10-20ms  623 reads     80-150ms    12 reads
+ *   20-40ms   65 reads     150-249ms    8 reads
+ *   >=249ms 1255 reads (1145 of them abandoned at the deadline)
+ *
+ * A read that is going to succeed has done so by ~20ms; the 40-249ms band holds
+ * 26 reads out of ~5,100 (0.5%). Reads past that are hung, not slow, so the old
+ * 250ms deadline bought almost no extra hits and charged the full 250ms to every
+ * hung read — 22% of all reads. 40ms sits above the real read distribution and
+ * below the hang floor.
+ */
+export const DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS = 40
+
+/**
  * Build an `EdgeCacheServiceShape` against a specific backend. Exported for
  * tests so they can substitute a fake backend (e.g. a JSON-roundtripping one)
  * without going through `detectWorkersCache`.
  */
-export const DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS = 250
-
 export const makeEdgeCacheService = (
 	backend: EdgeCacheBackend,
 	readTimeoutMs = DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS,
