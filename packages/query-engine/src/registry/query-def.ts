@@ -66,8 +66,17 @@ export interface QueryDef<Payload, Row> {
 	 *
 	 * Be careful raising a TTL on anything live-tailing: a stale entry there is a
 	 * user-visible correctness bug that presents as "the dashboard is frozen".
+	 *
+	 * May be a function of the payload and the current time. `spanDetail` needs
+	 * that: a trace that finished long ago is immutable and can be cached hard,
+	 * while one still receiving spans must not be — so its TTL is computed from
+	 * the requested end time against now. `nowMs` is supplied by the runner from
+	 * the Effect `Clock` rather than read here, so it stays testable.
 	 */
-	readonly cache: DirectRouteCachePolicyInput | undefined
+	readonly cache:
+		| DirectRouteCachePolicyInput
+		| undefined
+		| ((payload: Payload, nowMs: number) => DirectRouteCachePolicyInput | undefined)
 
 	/**
 	 * Build the compiled query from the request payload.

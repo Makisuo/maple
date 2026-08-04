@@ -83,7 +83,14 @@ import {
 	parseWarehouseDateTime,
 } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
-import { Queries } from "@maple/query-engine/registry"
+import {
+	nodeMetricSpec,
+	partitionWindowAround,
+	podMetricSpec,
+	toCloudflareFilters,
+	workloadMetricSpec,
+} from "@/routes/query-helpers"
+import { Queries } from "@/routes/queries"
 import { runQuery, runQueryFirst } from "@/routes/query-runner"
 import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
 import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
@@ -105,37 +112,6 @@ const mapExecError = <A, E, R>(effect: Effect.Effect<A, E, R>, context: string):
  * `Integrations.cloudflareIgnoredFiltersFor` answers that, and the answer ships in the response so the UI can
  * mark a panel zone-wide instead of pretending the filter applied.
  */
-const toCloudflareFilters = (payload: {
-	readonly hosts?: ReadonlyArray<string> | undefined
-	readonly cacheStatuses?: ReadonlyArray<string> | undefined
-	readonly statusClasses?: ReadonlyArray<string> | undefined
-	readonly paths?: ReadonlyArray<string> | undefined
-	readonly pathContains?: string | undefined
-	readonly countries?: ReadonlyArray<string> | undefined
-	readonly methods?: ReadonlyArray<string> | undefined
-	readonly protocols?: ReadonlyArray<string> | undefined
-	readonly deviceTypes?: ReadonlyArray<string> | undefined
-	readonly firewallActions?: ReadonlyArray<string> | undefined
-	readonly firewallSources?: ReadonlyArray<string> | undefined
-	readonly firewallRuleIds?: ReadonlyArray<string> | undefined
-	readonly dnsQueryNames?: ReadonlyArray<string> | undefined
-	readonly dnsResponseCodes?: ReadonlyArray<string> | undefined
-}): Integrations.CloudflareFilterOpts => ({
-	hosts: payload.hosts,
-	cacheStatuses: payload.cacheStatuses,
-	statusClasses: payload.statusClasses,
-	paths: payload.paths,
-	pathContains: payload.pathContains,
-	countries: payload.countries,
-	methods: payload.methods,
-	protocols: payload.protocols,
-	deviceTypes: payload.deviceTypes,
-	firewallActions: payload.firewallActions,
-	firewallSources: payload.firewallSources,
-	firewallRuleIds: payload.firewallRuleIds,
-	dnsQueryNames: payload.dnsQueryNames,
-	dnsResponseCodes: payload.dnsResponseCodes,
-})
 
 const isMissingServiceOperationsRollup = (error: unknown): boolean => {
 	if (typeof error !== "object" || error === null) return false
@@ -164,15 +140,6 @@ const decodeCommitSha = Schema.decodeUnknownSync(CommitSha)
 const decodeStatusCodeOption = Schema.decodeUnknownOption(StatusCode)
 const coerceStatusCode = (value: string): StatusCode =>
 	Option.getOrElse(decodeStatusCodeOption(value), () => "Unset" as const)
-
-// Build a ±1h partition-pruning window around a ClickHouse datetime string.
-const partitionWindowAround = (timestamp: string): { startTime: string; endTime: string } => {
-	const ms = parseWarehouseDateTime(timestamp)
-	return {
-		startTime: formatWarehouseDateTime(ms - 3_600_000),
-		endTime: formatWarehouseDateTime(ms + 3_600_000),
-	}
-}
 
 // Most traces opened without a timestamp are still recent (list rows carry
 // `?t=`; it's direct/shared/AI links that don't, and those overwhelmingly
@@ -290,33 +257,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("spanDetail", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const nowMs = yield* Clock.currentTimeMillis
-					const narrowByTime = payload.startTime != null && payload.endTime != null
-					const compiled = CH.compile(
-						CH.spanDetailQuery({
-							traceId: payload.traceId,
-							spanId: payload.spanId,
-							narrowByTime,
-						}),
-						narrowByTime
-							? { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime }
-							: { orgId: tenant.orgId },
-					)
-					const row = yield* queryEngine.cachedDirect(
-						tenant,
-						"spanDetail",
-						payload,
-						mapExecError(
-							warehouse
-								.compiledQueryFirst(tenant, compiled, {
-									profile: "discovery",
-									context: "spanDetail",
-								})
-								.pipe(Effect.map(Option.getOrNull)),
-							"spanDetail query failed",
-						),
-						traceCacheTtlSeconds(payload.endTime, nowMs),
-					)
+					const row = yield* runQueryFirst(Queries.spanDetail, tenant, payload)
 					return new SpanDetailResponse({
 						data: row
 							? {
@@ -799,23 +740,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const filters = toCloudflareFilters(payload)
-					const compiled = CH.compile(
-						Integrations.cloudflareZoneTimeseriesSQL(filters),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds: payload.bucketSeconds,
-						},
-						{ rowSchema: Integrations.cloudflareZoneTimeseriesRowSchema },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "cloudflareInfraZoneTimeseries",
-						}),
-						"cloudflareInfraZoneTimeseries query failed",
-					)
+					const rows = yield* runQuery(Queries.cloudflareInfraZoneTimeseries, tenant, payload)
 					return new CloudflareInfraZoneTimeseriesResponse({
 						data: rows.map((row) => ({ ...row })),
 						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
@@ -1325,23 +1250,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("cloudflareInfraWorkerTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						Integrations.cloudflareWorkerTimeseriesSQL(),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds: payload.bucketSeconds,
-						},
-						{ rowSchema: Integrations.cloudflareWorkerTimeseriesRowSchema },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "cloudflareInfraWorkerTimeseries",
-						}),
-						"cloudflareInfraWorkerTimeseries query failed",
-					)
+					const rows = yield* runQuery(Queries.cloudflareInfraWorkerTimeseries, tenant, payload)
 					return new CloudflareInfraWorkerTimeseriesResponse({
 						data: rows.map((row) => ({ ...row })),
 					})
@@ -1884,25 +1793,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("getLog", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					// Bound the scan to a ±1h window around the requested log so
-					// ClickHouse can prune partitions instead of reading every
-					// retained daily partition for an exact-timestamp match.
-					const { startTime, endTime } = partitionWindowAround(payload.timestamp)
-					const compiled = CH.compile(
-						CH.getLogByKeyQuery({
-							serviceName: payload.serviceName,
-							traceId: payload.traceId,
-							spanId: payload.spanId,
-						}),
-						{ orgId: tenant.orgId, startTime, endTime, timestamp: payload.timestamp },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "list",
-							context: "getLog",
-						}),
-						"getLog query failed",
-					)
+					const rows = yield* runQuery(Queries.getLog, tenant, payload)
 					return new GetLogResponse({ data: rows })
 				}),
 			)
@@ -2120,23 +2011,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("fleetUtilizationTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const bucketSeconds = payload.bucketSeconds ?? 300
-					const compiled = CH.compile(CH.fleetUtilizationTimeseriesQuery(), {
-						orgId: tenant.orgId,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-						bucketSeconds,
-					})
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "fleetUtilizationTimeseries",
-						}),
-						"fleetUtilizationTimeseries query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.fleetUtilizationTimeseries, tenant, payload)
 					return new FleetUtilizationTimeseriesResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							bucket: String(row.bucket),
 							avgCpu: Number(row.avgCpu) || 0,
 							avgMemory: Number(row.avgMemory) || 0,
@@ -2409,58 +2286,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("podInfraTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const bucketSeconds = payload.bucketSeconds ?? 60
-
-					const spec = (() => {
-						switch (payload.metric) {
-							case "cpu_usage":
-								return { metricName: "k8s.pod.cpu.usage", unit: "cores" as const }
-							case "cpu_limit":
-								return {
-									metricName: "k8s.pod.cpu_limit_utilization",
-									unit: "percent" as const,
-								}
-							case "cpu_request":
-								return {
-									metricName: "k8s.pod.cpu_request_utilization",
-									unit: "percent" as const,
-								}
-							case "memory_limit":
-								return {
-									metricName: "k8s.pod.memory_limit_utilization",
-									unit: "percent" as const,
-								}
-							case "memory_request":
-								return {
-									metricName: "k8s.pod.memory_request_utilization",
-									unit: "percent" as const,
-								}
-						}
-					})()
-
-					const compiled = CH.compile(
-						CH.podGaugeTimeseriesQuery({
-							podName: payload.podName,
-							namespace: payload.namespace,
-							metricName: spec.metricName,
-						}),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds,
-						},
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "podInfraTimeseries",
-						}),
-						"podInfraTimeseries query failed",
-					)
-					const typedRows = rows
+					const spec = podMetricSpec(payload.metric)
+					const rows = yield* runQuery(Queries.podInfraTimeseries, tenant, payload)
 					return new PodInfraTimeseriesResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							bucket: String(row.bucket),
 							attributeValue: String(row.attributeValue ?? ""),
 							value: Number(row.avgValue) || 0,
@@ -2510,39 +2339,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("nodeInfraTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const bucketSeconds = payload.bucketSeconds ?? 60
-
-					const spec = (() => {
-						switch (payload.metric) {
-							case "cpu_usage":
-								return { metricName: "k8s.node.cpu.usage", unit: "cores" as const }
-							case "uptime":
-								return { metricName: "k8s.node.uptime", unit: "seconds" as const }
-						}
-					})()
-
-					const compiled = CH.compile(
-						CH.nodeGaugeTimeseriesQuery({
-							nodeName: payload.nodeName,
-							metricName: spec.metricName,
-						}),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds,
-						},
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "nodeInfraTimeseries",
-						}),
-						"nodeInfraTimeseries query failed",
-					)
-					const typedRows = rows
+					const spec = nodeMetricSpec(payload.metric)
+					const rows = yield* runQuery(Queries.nodeInfraTimeseries, tenant, payload)
 					return new NodeInfraTimeseriesResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							bucket: String(row.bucket),
 							attributeValue: String(row.attributeValue ?? ""),
 							value: Number(row.avgValue) || 0,
@@ -2594,50 +2394,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("workloadInfraTimeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const bucketSeconds = payload.bucketSeconds ?? 60
-
-					const spec = (() => {
-						switch (payload.metric) {
-							case "cpu_usage":
-								return { metricName: "k8s.pod.cpu.usage", unit: "cores" as const }
-							case "cpu_limit":
-								return {
-									metricName: "k8s.pod.cpu_limit_utilization",
-									unit: "percent" as const,
-								}
-							case "memory_limit":
-								return {
-									metricName: "k8s.pod.memory_limit_utilization",
-									unit: "percent" as const,
-								}
-						}
-					})()
-
-					const compiled = CH.compile(
-						CH.workloadGaugeTimeseriesQuery({
-							kind: payload.kind,
-							workloadName: payload.workloadName,
-							namespace: payload.namespace,
-							metricName: spec.metricName,
-							groupByPod: payload.groupByPod,
-						}),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds,
-						},
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "workloadInfraTimeseries",
-						}),
-						"workloadInfraTimeseries query failed",
-					)
-					const typedRows = rows
+					const spec = workloadMetricSpec(payload.metric)
+					const rows = yield* runQuery(Queries.workloadInfraTimeseries, tenant, payload)
 					return new WorkloadInfraTimeseriesResponse({
-						data: typedRows.map((row) => ({
+						data: rows.map((row) => ({
 							bucket: String(row.bucket),
 							attributeValue: String(row.attributeValue ?? ""),
 							value: Number(row.avgValue) || 0,

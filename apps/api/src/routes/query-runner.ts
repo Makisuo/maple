@@ -1,6 +1,6 @@
 import type { QueryDef } from "@maple/query-engine/registry"
 import type { QueryEngineDirectError } from "@maple/query-engine/runtime"
-import { Effect, Option } from "effect"
+import { Clock, Effect, Option } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -43,6 +43,12 @@ const withPolicy = <Payload, Row, A, E extends QueryEngineDirectError>(
 ) =>
 	Effect.gen(function* () {
 		const queryEngine = yield* QueryEngineService
+		// Only read the clock when a def actually needs it — a static policy must
+		// not pay for, or depend on, a Clock read.
+		const cache =
+			typeof def.cache === "function"
+				? def.cache(payload, yield* Clock.currentTimeMillis)
+				: def.cache
 		const labelled = execute.pipe(
 			// Same annotation the old inline `mapExecError` produced, with the label
 			// derived from `def.id` rather than a hand-written string that could
@@ -53,10 +59,10 @@ const withPolicy = <Payload, Row, A, E extends QueryEngineDirectError>(
 				}),
 			),
 		)
-		if (def.cache === undefined) {
+		if (cache === undefined) {
 			return yield* labelled
 		}
-		return yield* queryEngine.cachedDirect(tenant, def.id, payload, labelled, def.cache)
+		return yield* queryEngine.cachedDirect(tenant, def.id, payload, labelled, cache)
 	})
 
 /**
