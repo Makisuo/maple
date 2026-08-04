@@ -1,4 +1,6 @@
 import type {
+	ServiceDbQuerySummaryRequest,
+	ServicePlatformsRequest,
 	ServiceDbEdgesRequest,
 	ServiceDependenciesRequest,
 	ServiceWorkloadsRequest,
@@ -569,4 +571,56 @@ export const serviceWorkloads = defineQuery({
 			{ services: payload.services },
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
 		),
+})
+
+export const servicePlatforms = defineQuery({
+	id: "servicePlatforms",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServicePlatformsRequest, orgId: string) =>
+		CH.servicePlatformsSQL(
+			{ deploymentEnv: payload.deploymentEnv },
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+// --- serviceDbQuerySummary's three sub-queries ----------------------------
+// All three take the identical params object, so it is built once per def from
+// the payload rather than threaded in from the handler.
+
+const dbQueryParams = (payload: ServiceDbQuerySummaryRequest, orgId: string) => ({
+	orgId,
+	dbSystem: payload.dbSystem,
+	dbNamespace: payload.dbNamespace,
+	startTime: payload.startTime,
+	endTime: payload.endTime,
+	sourceService: payload.sourceService,
+	deploymentEnv: payload.deploymentEnv,
+	bucketSeconds: payload.bucketSeconds,
+	topN: payload.topN,
+})
+
+/** Single-row: read through `runQueryFirst`. */
+export const serviceDbQuerySummary = defineQuery({
+	id: "serviceDbQuerySummary",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceDbQuerySummaryRequest, orgId: string) =>
+		CH.serviceDbQuerySummarySQL(dbQueryParams(payload, orgId)),
+})
+
+export const serviceDbQueryTimeseries = defineQuery({
+	id: "serviceDbQueryTimeseries",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceDbQuerySummaryRequest, orgId: string) =>
+		CH.serviceDbQueryTimeseriesSQL(dbQueryParams(payload, orgId)),
+})
+
+export const serviceDbTopQueries = defineQuery({
+	id: "serviceDbTopQueries",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceDbQuerySummaryRequest, orgId: string) =>
+		CH.serviceDbTopQueriesSQL(dbQueryParams(payload, orgId)),
 })

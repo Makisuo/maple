@@ -1103,46 +1103,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceDbQuerySummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const params = {
-						orgId: tenant.orgId,
-						dbSystem: payload.dbSystem,
-						dbNamespace: payload.dbNamespace,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-						sourceService: payload.sourceService,
-						deploymentEnv: payload.deploymentEnv,
-						bucketSeconds: payload.bucketSeconds,
-						topN: payload.topN,
-					}
-					const summaryCompiled = CH.serviceDbQuerySummarySQL(params)
-					const timeseriesCompiled = CH.serviceDbQueryTimeseriesSQL(params)
-					const topQueriesCompiled = CH.serviceDbTopQueriesSQL(params)
 
 					const [summary, timeseriesRows, topQueryRows] = yield* Effect.all(
 						[
-							mapExecError(
-								warehouse
-									.compiledQueryFirst(tenant, summaryCompiled, {
-										profile: "aggregation",
-										context: "serviceDbQuerySummary",
-									})
-									.pipe(Effect.map(Option.getOrNull)),
-								"serviceDbQuerySummary query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, timeseriesCompiled, {
-									profile: "aggregation",
-									context: "serviceDbQueryTimeseries",
-								}),
-								"serviceDbQueryTimeseries query failed",
-							),
-							mapExecError(
-								warehouse.compiledQuery(tenant, topQueriesCompiled, {
-									profile: "aggregation",
-									context: "serviceDbTopQueries",
-								}),
-								"serviceDbTopQueries query failed",
-							),
+							runQueryFirst(Queries.serviceDbQuerySummary, tenant, payload),
+							runQuery(Queries.serviceDbQueryTimeseries, tenant, payload),
+							runQuery(Queries.serviceDbTopQueries, tenant, payload),
 						],
 						{ concurrency: 3 },
 					)
@@ -1201,17 +1167,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("servicePlatforms", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.servicePlatformsSQL(
-						{ deploymentEnv: payload.deploymentEnv },
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "servicePlatforms",
-						}),
-						"servicePlatforms query failed",
-					)
+					const rows = yield* runQuery(Queries.servicePlatforms, tenant, payload)
 					return new ServicePlatformsResponse({
 						data: rows.map((row) => {
 							const k8sCluster = String(row.k8sCluster ?? "")
