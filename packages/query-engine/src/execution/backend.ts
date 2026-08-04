@@ -28,6 +28,57 @@ export interface ClickHouseProtocolBackendConfig {
 /** Resolved upstream connection config for a tenant's queries. */
 export type ResolvedWarehouseConfig = TinybirdBackendConfig | ClickHouseProtocolBackendConfig
 
+/**
+ * OTel target identity of a resolved backend: what `db.namespace` and
+ * `server.address` a query span against it should carry.
+ *
+ * These are what make a query span join the SAME service-map node as the
+ * ingest gateway's writes to the same warehouse. A span with a `db.system.name`
+ * but no namespace and no address collapses into the per-system generic node,
+ * so `alerting` reading Tinybird used to appear as a second, nameless
+ * "tinybird" database sitting next to the one `ingest` writes to.
+ */
+export interface WarehouseTargetIdentity {
+	/** Empty when the backend has no database concept (Tinybird: the workspace rides the token). */
+	readonly namespace: string
+	readonly address: string
+}
+
+/**
+ * Bare hostname of a URL, or the input unchanged when it isn't one.
+ *
+ * Normalizing matters for node identity: the gateway records `api.tinybird.co`
+ * (host only), so a config carrying `https://api.tinybird.co` has to reduce to
+ * the same string or the two sides land on different nodes again.
+ */
+const hostOf = (urlOrHost: string): string => {
+	const trimmed = urlOrHost.trim()
+	if (trimmed === "") return ""
+	try {
+		return new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).host
+	} catch {
+		return trimmed
+	}
+}
+
+export const warehouseTargetIdentity = (config: ResolvedWarehouseConfig): WarehouseTargetIdentity =>
+	config.kind === "tinybird"
+		? { namespace: "", address: hostOf(config.host) }
+		: { namespace: config.database, address: hostOf(config.url) }
+
+/**
+ * `warehouseTargetIdentity` as span attributes, empty values omitted — an
+ * explicit `""` would defeat the read side's `nullIf(...)` coalesce chain and
+ * still land the span on the generic node.
+ */
+export const warehouseTargetAttributes = (config: ResolvedWarehouseConfig): Record<string, string> => {
+	const { namespace, address } = warehouseTargetIdentity(config)
+	return {
+		...(namespace === "" ? {} : { "db.namespace": namespace }),
+		...(address === "" ? {} : { "server.address": address }),
+	}
+}
+
 export interface WarehouseBackendDialect {
 	readonly driver: "tinybird-sdk" | "clickhouse-web"
 	/** Legacy driver label emitted as `db.client` on canonical query spans. */

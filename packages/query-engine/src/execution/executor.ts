@@ -27,7 +27,7 @@ import {
 	normalizeSqlForClickHouseClient,
 	truncateSql,
 } from "./fingerprint"
-import { BackendDialect } from "./backend"
+import { BackendDialect, warehouseTargetAttributes } from "./backend"
 import { findIngestPinnedTable } from "./datasource-routing"
 import type {
 	ExecutionTenant,
@@ -301,6 +301,7 @@ WHERE name = 'enable_full_text_index'`,
 					"db.client": dialect.dbClient,
 					"db.system.name": dialect.dbSystemName,
 					"peer.service": dialect.peerService,
+					...warehouseTargetAttributes(resolved.config),
 					"warehouse.backend": resolved.config.kind,
 					"warehouse.route": purpose,
 					"warehouse.config_source": resolved.source,
@@ -388,6 +389,9 @@ WHERE name = 'enable_full_text_index'`,
 		yield* Effect.annotateCurrentSpan("db.client", dialect.dbClient)
 		yield* Effect.annotateCurrentSpan("db.system.name", dialect.dbSystemName)
 		yield* Effect.annotateCurrentSpan("peer.service", dialect.peerService)
+		// Target identity, so a read joins the same service-map node the ingest
+		// gateway writes to instead of collapsing into a nameless per-system one.
+		yield* Effect.annotateCurrentSpan(warehouseTargetAttributes(resolved.config))
 		const settings = dialect.stripTinybirdRestrictedSettings
 			? stripTinybirdRestrictedSettings(resolveSettings(options))
 			: resolveSettings(options)
@@ -867,6 +871,7 @@ WHERE name = 'enable_full_text_index'`,
 					"db.client": dialect.dbClient,
 					"db.system.name": dialect.dbSystemName,
 					"peer.service": dialect.peerService,
+					...warehouseTargetAttributes(resolved.config),
 					"warehouse.backend": resolved.config.kind,
 					"warehouse.route": "ingest",
 					"warehouse.config_source": resolved.source,
