@@ -189,11 +189,7 @@ describe("useMapleChat stream reader", () => {
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
 		assert.equal(screen.getByTestId("status").textContent, "ready")
-		assert.equal(
-			eventsRequests().length,
-			afterStop,
-			"a stopped stream must not open another connection",
-		)
+		assert.equal(eventsRequests().length, afterStop, "a stopped stream must not open another connection")
 	})
 
 	it("surfaces a 409 as a turn-in-flight message, not a raw status", async () => {

@@ -6,9 +6,7 @@ rows back:
 ```ts
 import { Effect } from "effect"
 
-const rows = await Effect.runPromise(
-	compiled.decodeRows(await runOnClickHouse(compiled.sql)),
-)
+const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(compiled.sql)))
 ```
 
 ## Declare a `rowSchema`
@@ -34,7 +32,7 @@ numbers. Accepting both — and letting the schema coerce — is what stops that
 becoming a runtime bug. This is the exact class of drift a plain cast used to hide, which is
 why there is no `castRows`.
 
-*(Backed by `docs/decoding-results.md > decodeRows validates every row`.)*
+_(Backed by `docs/decoding-results.md > decodeRows validates every row`.)_
 
 ## Without a schema, nothing is checked
 
@@ -52,7 +50,7 @@ so a caller — or a lint over your query catalog — can tell the two apart.
 
 Declare a schema for anything whose shape you do not fully control.
 
-*(Backed by `docs/decoding-results.md > Without a rowSchema decoding is a pass-through`.)*
+_(Backed by `docs/decoding-results.md > Without a rowSchema decoding is a pass-through`.)_
 
 ## `decodeFirstRow`
 
@@ -65,27 +63,25 @@ Option.getOrNull(first) // Output | null
 
 An empty input yields `Option.none()`.
 
-*(Backed by `docs/decoding-results.md > decodeFirstRow returns an Option`.)*
+_(Backed by `docs/decoding-results.md > decodeFirstRow returns an Option`.)_
 
 ## Decode failures
 
 Both decoders fail with `CompiledQueryDecodeError`, carrying the index of the offending row:
 
 ```ts
-const error = await Effect.runPromise(
-	Effect.flip(compiled.decodeRows([{ name: 42, count: 1 }])),
-)
+const error = await Effect.runPromise(Effect.flip(compiled.decodeRows([{ name: 42, count: 1 }])))
 
-error._tag      // "@maple-dev/clickhouse-builder/CompiledQueryDecodeError"
-error.rowIndex  // 0
-error.message   // "Compiled query row 0 did not match its declared output schema"
-error.cause     // the underlying Schema parse error
+error._tag // "@maple-dev/clickhouse-builder/CompiledQueryDecodeError"
+error.rowIndex // 0
+error.message // "Compiled query row 0 did not match its declared output schema"
+error.cause // the underlying Schema parse error
 ```
 
 It is an Effect `Schema.TaggedErrorClass`, so `Effect.catchTag` works on it directly. Decoding
 stops at the first bad row rather than accumulating.
 
-*(Backed by `docs/decoding-results.md > A bad row fails with CompiledQueryDecodeError`.)*
+_(Backed by `docs/decoding-results.md > A bad row fails with CompiledQueryDecodeError`.)_
 
 ## Choosing schema types
 

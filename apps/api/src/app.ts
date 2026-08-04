@@ -245,13 +245,7 @@ const SetupAuditServiceLive = SetupAuditService.layer.pipe(Layer.provideMerge(Wa
 // AnomalyDetectionService reads it via Effect.serviceOption, so it degrades
 // gracefully when absent and is provided at worker scope where needed.
 const AnomalyDetectionServiceLive = AnomalyDetectionService.layer.pipe(
-	Layer.provideMerge(
-		Layer.mergeAll(
-			CoreServicesLive,
-			WarehouseQueryServiceLive,
-			EdgeCacheServiceLive,
-		),
-	),
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive, EdgeCacheServiceLive)),
 )
 
 const AiTriageServiceLive = AiTriageService.layer.pipe(Layer.provideMerge(CoreServicesLive))

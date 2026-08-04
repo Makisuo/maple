@@ -13,7 +13,8 @@ describe("active-org discovery queries", () => {
 		expect(sql).toContain("GROUP BY orgId")
 		// Cross-org: must NOT pin to a single org.
 		expect(sql).not.toContain("OrgId =")
-		// Required by WarehouseQueryService.sqlQuery's `sql.includes("OrgId")` guard.
+		// Deliberately cross-org: the executor refuses these on the ordinary read
+		// path, so they must go through `crossOrgQuery`.
 		expect(sql).toContain("OrgId")
 	})
 

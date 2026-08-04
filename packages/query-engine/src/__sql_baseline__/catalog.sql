@@ -503,6 +503,574 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
+-- builder:service-map-rollup:serviceMapEdgesExistingHoursSQL:default  [6a2a284a]
+SELECT
+          toUnixTimestamp(Hour) AS hourTs
+        FROM service_map_edges_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= '2026-01-01 10:30:00'
+          AND Hour < '2026-01-03 14:15:00'
+        GROUP BY hourTs
+        FORMAT JSON
+
+-- builder:service-map-rollup:serviceMapEdgesRollupSQL:default  [739f1f00]
+SELECT
+          p.OrgId AS OrgId,
+          toStartOfHour(p.Timestamp) AS Hour,
+          p.ServiceName AS SourceService,
+          c.ServiceName AS TargetService,
+          p.DeploymentEnv AS DeploymentEnv,
+          count() AS CallCount,
+          countIf(c.StatusCode = 'Error') AS ErrorCount,
+          sum(c.Duration / 1000000) AS DurationSumMs,
+          max(c.Duration / 1000000) AS MaxDurationMs,
+          countIf(match(c.TraceState, 'th:[0-9a-f]+')) AS SampledSpanCount,
+          countIf(NOT (match(c.TraceState, 'th:[0-9a-f]+'))) AS UnsampledSpanCount,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS SampleRateSum
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv
+        FORMAT JSON
+
+-- builder:service-map:serviceDependenciesForServiceQuery:default  [32f3ee6f]
+SELECT
+          sourceService AS sourceService,
+          targetService AS targetService,
+          sum(bucketCallCount) AS callCount,
+          sum(bucketErrorCount) AS errorCount,
+          sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+          max(bucketMaxDurationMs) AS p95DurationMs,
+          sum(bucketEstimatedSpanCount) AS estimatedSpanCount
+        FROM (
+SELECT
+          SourceService AS sourceService,
+          TargetService AS targetService,
+          sum(CallCount) AS bucketCallCount,
+          sum(ErrorCount) AS bucketErrorCount,
+          sum(DurationSumMs) AS bucketDurationSumMs,
+          max(MaxDurationMs) AS bucketMaxDurationMs,
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+        FROM service_map_edges_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND SourceService = 'web'
+          AND Hour >= least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY sourceService, targetService
+UNION ALL
+SELECT
+          p.ServiceName AS sourceService,
+          c.ServiceName AS targetService,
+          count() AS bucketCallCount,
+          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
+          sum(c.Duration / 1000000) AS bucketDurationSumMs,
+          max(c.Duration / 1000000) AS bucketMaxDurationMs,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND OrgId = 'org_sql_catalog'
+          AND ServiceName = 'web') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND OrgId = 'org_sql_catalog') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY sourceService, targetService
+UNION ALL
+SELECT
+          p.ServiceName AS sourceService,
+          c.ServiceName AS targetService,
+          count() AS bucketCallCount,
+          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
+          sum(c.Duration / 1000000) AS bucketDurationSumMs,
+          max(c.Duration / 1000000) AS bucketMaxDurationMs,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog'
+          AND ServiceName = 'web') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY sourceService, targetService
+) AS edges
+        GROUP BY sourceService, targetService
+        ORDER BY callCount DESC
+        LIMIT 200
+        FORMAT JSON
+
+-- builder:service-map:serviceDependenciesSQL:default  [cb71f1fc]
+SELECT
+          sourceService AS sourceService,
+          targetService AS targetService,
+          sum(bucketCallCount) AS callCount,
+          sum(bucketErrorCount) AS errorCount,
+          sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+          max(bucketMaxDurationMs) AS p95DurationMs,
+          sum(bucketEstimatedSpanCount) AS estimatedSpanCount
+        FROM (
+SELECT
+          SourceService AS sourceService,
+          TargetService AS targetService,
+          sum(CallCount) AS bucketCallCount,
+          sum(ErrorCount) AS bucketErrorCount,
+          sum(DurationSumMs) AS bucketDurationSumMs,
+          max(MaxDurationMs) AS bucketMaxDurationMs,
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+        FROM service_map_edges_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY sourceService, targetService
+UNION ALL
+SELECT
+          p.ServiceName AS sourceService,
+          c.ServiceName AS targetService,
+          count() AS bucketCallCount,
+          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
+          sum(c.Duration / 1000000) AS bucketDurationSumMs,
+          max(c.Duration / 1000000) AS bucketMaxDurationMs,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND OrgId = 'org_sql_catalog') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND OrgId = 'org_sql_catalog') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY sourceService, targetService
+UNION ALL
+SELECT
+          p.ServiceName AS sourceService,
+          c.ServiceName AS targetService,
+          count() AS bucketCallCount,
+          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
+          sum(c.Duration / 1000000) AS bucketDurationSumMs,
+          max(c.Duration / 1000000) AS bucketMaxDurationMs,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY sourceService, targetService
+) AS edges
+        GROUP BY sourceService, targetService
+        ORDER BY callCount DESC
+        LIMIT 200
+        FORMAT JSON
+
+-- builder:service-map:serviceDependenciesSQL:env-scoped  [6f861053]
+SELECT
+          sourceService AS sourceService,
+          targetService AS targetService,
+          sum(bucketCallCount) AS callCount,
+          sum(bucketErrorCount) AS errorCount,
+          sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+          max(bucketMaxDurationMs) AS p95DurationMs,
+          sum(bucketEstimatedSpanCount) AS estimatedSpanCount
+        FROM (
+SELECT
+          SourceService AS sourceService,
+          TargetService AS targetService,
+          sum(CallCount) AS bucketCallCount,
+          sum(ErrorCount) AS bucketErrorCount,
+          sum(DurationSumMs) AS bucketDurationSumMs,
+          max(MaxDurationMs) AS bucketMaxDurationMs,
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+        FROM service_map_edges_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND DeploymentEnv = 'production'
+        GROUP BY sourceService, targetService
+UNION ALL
+SELECT
+          p.ServiceName AS sourceService,
+          c.ServiceName AS targetService,
+          count() AS bucketCallCount,
+          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
+          sum(c.Duration / 1000000) AS bucketDurationSumMs,
+          max(c.Duration / 1000000) AS bucketMaxDurationMs,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND OrgId = 'org_sql_catalog'
+          AND DeploymentEnv = 'production') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND OrgId = 'org_sql_catalog'
+          AND DeploymentEnv = 'production') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY sourceService, targetService
+UNION ALL
+SELECT
+          p.ServiceName AS sourceService,
+          c.ServiceName AS targetService,
+          count() AS bucketCallCount,
+          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
+          sum(c.Duration / 1000000) AS bucketDurationSumMs,
+          max(c.Duration / 1000000) AS bucketMaxDurationMs,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog'
+          AND DeploymentEnv = 'production') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog'
+          AND DeploymentEnv = 'production') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY sourceService, targetService
+) AS edges
+        GROUP BY sourceService, targetService
+        ORDER BY callCount DESC
+        LIMIT 200
+        FORMAT JSON
+
+-- builder:service-map:serviceExternalEdgesSQL:default  [4894e4c9]
+SELECT
+          sourceService AS sourceService,
+          targetType AS targetType,
+          targetSystem AS targetSystem,
+          targetName AS targetName,
+          sum(bucketCallCount) AS callCount,
+          sum(bucketErrorCount) AS errorCount,
+          sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+          max(bucketMaxDurationMs) AS p95DurationMs,
+          sum(bucketEstimatedSpanCount) AS estimatedSpanCount
+        FROM (
+SELECT
+          ServiceName AS sourceService,
+          TargetType AS targetType,
+          TargetSystem AS targetSystem,
+          TargetName AS targetName,
+          sum(CallCount) AS bucketCallCount,
+          sum(ErrorCount) AS bucketErrorCount,
+          sum(DurationSumMs) AS bucketDurationSumMs,
+          max(MaxDurationMs) AS bucketMaxDurationMs,
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+        FROM service_external_edges_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'web'
+          AND Hour >= toStartOfHour(toDateTime('2026-01-01 10:30:00'))
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND TargetName != ''
+        GROUP BY sourceService, targetType, targetSystem, targetName
+UNION ALL
+SELECT
+          ServiceName AS sourceService,
+          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), 'messaging', (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), 'rpc', 'http') AS targetType,
+          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), SpanAttributes['messaging.system'], (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), SpanAttributes['rpc.system'], '') AS targetSystem,
+          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), if(SpanAttributes['messaging.destination'] != '', SpanAttributes['messaging.destination'], SpanAttributes['messaging.system']), (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']), if(SpanAttributes['server.address'] != '', SpanAttributes['server.address'], if(SpanAttributes['http.host'] != '', SpanAttributes['http.host'], SpanAttributes['url.authority']))) AS targetName,
+          count() AS bucketCallCount,
+          countIf(StatusCode = 'Error') AS bucketErrorCount,
+          sum(Duration / 1000000) AS bucketDurationSumMs,
+          max(Duration / 1000000) AS bucketMaxDurationMs,
+          sum(SampleRate) AS bucketEstimatedSpanCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'web'
+          AND Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanKind IN ('Client', 'Producer')
+          AND SpanAttributes['db.system.name'] = ''
+          AND ((((((SpanAttributes['server.address'] != '' OR SpanAttributes['http.host'] != '') OR SpanAttributes['url.authority'] != '') OR SpanAttributes['messaging.destination'] != '') OR SpanAttributes['messaging.system'] != '') OR SpanAttributes['rpc.service'] != '') OR SpanAttributes['rpc.system'] != '')
+        GROUP BY sourceService, targetType, targetSystem, targetName
+        HAVING targetName != ''
+) AS edges
+        WHERE NOT ((targetType = 'http' AND targetName IN (SELECT
+          ParentServerAddress AS ParentServerAddress
+        FROM service_address_resolutions_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND SourceService = 'web'
+          AND Hour >= toStartOfHour(toDateTime('2026-01-01 10:30:00'))
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND ParentServerAddress != ''
+        GROUP BY ParentServerAddress)))
+        GROUP BY sourceService, targetType, targetSystem, targetName
+        ORDER BY callCount DESC
+        LIMIT 200
+        FORMAT JSON
+
+-- builder:service-map:serviceExternalEdgesSQL:env-scoped  [2a7ffabc]
+SELECT
+          sourceService AS sourceService,
+          targetType AS targetType,
+          targetSystem AS targetSystem,
+          targetName AS targetName,
+          sum(bucketCallCount) AS callCount,
+          sum(bucketErrorCount) AS errorCount,
+          sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+          max(bucketMaxDurationMs) AS p95DurationMs,
+          sum(bucketEstimatedSpanCount) AS estimatedSpanCount
+        FROM (
+SELECT
+          ServiceName AS sourceService,
+          TargetType AS targetType,
+          TargetSystem AS targetSystem,
+          TargetName AS targetName,
+          sum(CallCount) AS bucketCallCount,
+          sum(ErrorCount) AS bucketErrorCount,
+          sum(DurationSumMs) AS bucketDurationSumMs,
+          max(MaxDurationMs) AS bucketMaxDurationMs,
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+        FROM service_external_edges_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'web'
+          AND Hour >= toStartOfHour(toDateTime('2026-01-01 10:30:00'))
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND TargetName != ''
+          AND DeploymentEnv = 'production'
+        GROUP BY sourceService, targetType, targetSystem, targetName
+UNION ALL
+SELECT
+          ServiceName AS sourceService,
+          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), 'messaging', (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), 'rpc', 'http') AS targetType,
+          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), SpanAttributes['messaging.system'], (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), SpanAttributes['rpc.system'], '') AS targetSystem,
+          multiIf((SpanAttributes['messaging.destination'] != '' OR SpanAttributes['messaging.system'] != ''), if(SpanAttributes['messaging.destination'] != '', SpanAttributes['messaging.destination'], SpanAttributes['messaging.system']), (SpanAttributes['rpc.service'] != '' OR SpanAttributes['rpc.system'] != ''), if(SpanAttributes['rpc.service'] != '', SpanAttributes['rpc.service'], SpanAttributes['rpc.system']), if(SpanAttributes['server.address'] != '', SpanAttributes['server.address'], if(SpanAttributes['http.host'] != '', SpanAttributes['http.host'], SpanAttributes['url.authority']))) AS targetName,
+          count() AS bucketCallCount,
+          countIf(StatusCode = 'Error') AS bucketErrorCount,
+          sum(Duration / 1000000) AS bucketDurationSumMs,
+          max(Duration / 1000000) AS bucketMaxDurationMs,
+          sum(SampleRate) AS bucketEstimatedSpanCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'web'
+          AND Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanKind IN ('Client', 'Producer')
+          AND SpanAttributes['db.system.name'] = ''
+          AND ((((((SpanAttributes['server.address'] != '' OR SpanAttributes['http.host'] != '') OR SpanAttributes['url.authority'] != '') OR SpanAttributes['messaging.destination'] != '') OR SpanAttributes['messaging.system'] != '') OR SpanAttributes['rpc.service'] != '') OR SpanAttributes['rpc.system'] != '')
+          AND ResourceAttributes['deployment.environment'] = 'production'
+        GROUP BY sourceService, targetType, targetSystem, targetName
+        HAVING targetName != ''
+) AS edges
+        WHERE NOT ((targetType = 'http' AND targetName IN (SELECT
+          ParentServerAddress AS ParentServerAddress
+        FROM service_address_resolutions_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND SourceService = 'web'
+          AND Hour >= toStartOfHour(toDateTime('2026-01-01 10:30:00'))
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND ParentServerAddress != ''
+          AND DeploymentEnv = 'production'
+        GROUP BY ParentServerAddress)))
+        GROUP BY sourceService, targetType, targetSystem, targetName
+        ORDER BY callCount DESC
+        LIMIT 200
+        FORMAT JSON
+
+-- builder:service-map:serviceMapEdgeJoinQuery:rollup-hour  [739f1f00]
+SELECT
+          p.OrgId AS OrgId,
+          toStartOfHour(p.Timestamp) AS Hour,
+          p.ServiceName AS SourceService,
+          c.ServiceName AS TargetService,
+          p.DeploymentEnv AS DeploymentEnv,
+          count() AS CallCount,
+          countIf(c.StatusCode = 'Error') AS ErrorCount,
+          sum(c.Duration / 1000000) AS DurationSumMs,
+          max(c.Duration / 1000000) AS MaxDurationMs,
+          countIf(match(c.TraceState, 'th:[0-9a-f]+')) AS SampledSpanCount,
+          countIf(NOT (match(c.TraceState, 'th:[0-9a-f]+'))) AS UnsampledSpanCount,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS SampleRateSum
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv
+        FORMAT JSON
+
+-- builder:service-map:serviceMapEdgeJoinQuery:scoped-to-service  [184fee2b]
+SELECT
+          p.OrgId AS OrgId,
+          toStartOfHour(p.Timestamp) AS Hour,
+          p.ServiceName AS SourceService,
+          c.ServiceName AS TargetService,
+          p.DeploymentEnv AS DeploymentEnv,
+          count() AS CallCount,
+          countIf(c.StatusCode = 'Error') AS ErrorCount,
+          sum(c.Duration / 1000000) AS DurationSumMs,
+          max(c.Duration / 1000000) AS MaxDurationMs,
+          countIf(match(c.TraceState, 'th:[0-9a-f]+')) AS SampledSpanCount,
+          countIf(NOT (match(c.TraceState, 'th:[0-9a-f]+'))) AS UnsampledSpanCount,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS SampleRateSum
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog'
+          AND DeploymentEnv = 'production'
+          AND ServiceName = 'web') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog'
+          AND DeploymentEnv = 'production') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv
+        FORMAT JSON
+
 -- builder:service-operations:serviceOperationsSummaryQuery:default  [6845b233]
 SELECT
           bSpanName AS spanName,
@@ -1455,7 +2023,7 @@ SELECT
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:error_detail_traces:default:baseline  [365ebaf7]
+-- pipe:error_detail_traces:default:baseline  [99fb32db]
 SELECT
           TraceId AS traceId,
           min(Timestamp) AS startTime,
@@ -1466,7 +2034,9 @@ SELECT
           any(StatusMessage) AS errorMessage
         FROM trace_detail_spans
         WHERE OrgId = 'org_sql_catalog'
-          AND TraceId IN (SELECT TraceId FROM (SELECT
+          AND TraceId IN (SELECT
+          TraceId AS TraceId
+        FROM (SELECT
           TraceId AS TraceId,
           max(Timestamp) AS lastErrorSeen
         FROM error_events
@@ -1476,7 +2046,7 @@ SELECT
           AND Timestamp <= '2026-01-03 14:15:00'
         GROUP BY TraceId
         ORDER BY lastErrorSeen DESC
-        LIMIT 10))
+        LIMIT 10) AS matching_traces)
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
         GROUP BY traceId
@@ -2864,135 +3434,107 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- pipe:service_dependencies:default:baseline  [8cda870b]
+-- pipe:service_dependencies:default:baseline  [6f861053]
 SELECT
-  sourceService,
-  targetService,
-  sum(bucketCallCount) AS callCount,
-  sum(bucketErrorCount) AS errorCount,
-  sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-  max(bucketMaxDurationMs) AS p95DurationMs,
-  sum(bucketEstimatedSpanCount) AS estimatedSpanCount
-FROM (
-  SELECT
-      SourceService AS sourceService,
-      TargetService AS targetService,
-      sum(CallCount) AS bucketCallCount,
-      sum(ErrorCount) AS bucketErrorCount,
-      sum(DurationSumMs) AS bucketDurationSumMs,
-      max(MaxDurationMs) AS bucketMaxDurationMs,
-      sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
-    FROM service_map_edges_hourly
-    WHERE OrgId = 'org_sql_catalog'
-	  AND Hour >= least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
-	  AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
-      AND DeploymentEnv = 'production'
-    GROUP BY sourceService, targetService
-  UNION ALL
-  SELECT
-      SourceService AS sourceService,
-      TargetService AS targetService,
-      sum(CallCount) AS bucketCallCount,
-      sum(ErrorCount) AS bucketErrorCount,
-      sum(DurationSumMs) AS bucketDurationSumMs,
-      max(MaxDurationMs) AS bucketMaxDurationMs,
-      sum(SampleRateSum) AS bucketEstimatedSpanCount
-    FROM (
-      SELECT
-      p.OrgId AS OrgId,
-      toStartOfHour(p.Timestamp) AS Hour,
-      p.ServiceName AS SourceService,
-      c.ServiceName AS TargetService,
-      p.DeploymentEnv AS DeploymentEnv,
-      count() AS CallCount,
-      countIf(c.StatusCode = 'Error') AS ErrorCount,
-      sum(c.Duration / 1000000) AS DurationSumMs,
-      max(c.Duration / 1000000) AS MaxDurationMs,
-      countIf(match(c.TraceState, 'th:[0-9a-f]+')) AS SampledSpanCount,
-      countIf(NOT match(c.TraceState, 'th:[0-9a-f]+')) AS UnsampledSpanCount,
-      sum(multiIf(
-        match(c.TraceState, 'th:[0-9a-f]+'),
-        1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001),
-        1.0
-      )) AS SampleRateSum
-    FROM (
-      SELECT OrgId, Timestamp, TraceId, SpanId, ServiceName, DeploymentEnv
-      FROM service_map_spans
-      WHERE SpanKind IN ('Client', 'Producer')
-        AND Timestamp >= toDateTime('2026-01-01 10:30:00')
-        AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
-        AND OrgId = 'org_sql_catalog'
-        AND DeploymentEnv = 'production'
-        
-    ) AS p
-    INNER JOIN (
-      SELECT TraceId, ParentSpanId, ServiceName, Duration, StatusCode, TraceState
-      FROM service_map_children
-      WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
-        AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
-        AND OrgId = 'org_sql_catalog'
-        AND DeploymentEnv = 'production'
-    ) AS c
-    ON p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId
-    WHERE p.ServiceName != c.ServiceName
-    GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv
-    )
-    GROUP BY sourceService, targetService
-  UNION ALL
-  SELECT
-      SourceService AS sourceService,
-      TargetService AS targetService,
-      sum(CallCount) AS bucketCallCount,
-      sum(ErrorCount) AS bucketErrorCount,
-      sum(DurationSumMs) AS bucketDurationSumMs,
-      max(MaxDurationMs) AS bucketMaxDurationMs,
-      sum(SampleRateSum) AS bucketEstimatedSpanCount
-    FROM (
-      SELECT
-      p.OrgId AS OrgId,
-      toStartOfHour(p.Timestamp) AS Hour,
-      p.ServiceName AS SourceService,
-      c.ServiceName AS TargetService,
-      p.DeploymentEnv AS DeploymentEnv,
-      count() AS CallCount,
-      countIf(c.StatusCode = 'Error') AS ErrorCount,
-      sum(c.Duration / 1000000) AS DurationSumMs,
-      max(c.Duration / 1000000) AS MaxDurationMs,
-      countIf(match(c.TraceState, 'th:[0-9a-f]+')) AS SampledSpanCount,
-      countIf(NOT match(c.TraceState, 'th:[0-9a-f]+')) AS UnsampledSpanCount,
-      sum(multiIf(
-        match(c.TraceState, 'th:[0-9a-f]+'),
-        1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001),
-        1.0
-      )) AS SampleRateSum
-    FROM (
-      SELECT OrgId, Timestamp, TraceId, SpanId, ServiceName, DeploymentEnv
-      FROM service_map_spans
-      WHERE SpanKind IN ('Client', 'Producer')
-        AND Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        AND Timestamp < toDateTime('2026-01-03 14:15:00')
-        AND OrgId = 'org_sql_catalog'
-        AND DeploymentEnv = 'production'
-        
-    ) AS p
-    INNER JOIN (
-      SELECT TraceId, ParentSpanId, ServiceName, Duration, StatusCode, TraceState
-      FROM service_map_children
-      WHERE Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-        AND Timestamp < toDateTime('2026-01-03 14:15:00')
-        AND OrgId = 'org_sql_catalog'
-        AND DeploymentEnv = 'production'
-    ) AS c
-    ON p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId
-    WHERE p.ServiceName != c.ServiceName
-    GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv
-    )
-    GROUP BY sourceService, targetService
-)
-GROUP BY sourceService, targetService
-ORDER BY callCount DESC
-LIMIT 200
-FORMAT JSON
+          sourceService AS sourceService,
+          targetService AS targetService,
+          sum(bucketCallCount) AS callCount,
+          sum(bucketErrorCount) AS errorCount,
+          sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+          max(bucketMaxDurationMs) AS p95DurationMs,
+          sum(bucketEstimatedSpanCount) AS estimatedSpanCount
+        FROM (
+SELECT
+          SourceService AS sourceService,
+          TargetService AS targetService,
+          sum(CallCount) AS bucketCallCount,
+          sum(ErrorCount) AS bucketErrorCount,
+          sum(DurationSumMs) AS bucketDurationSumMs,
+          max(MaxDurationMs) AS bucketMaxDurationMs,
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+        FROM service_map_edges_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND DeploymentEnv = 'production'
+        GROUP BY sourceService, targetService
+UNION ALL
+SELECT
+          p.ServiceName AS sourceService,
+          c.ServiceName AS targetService,
+          count() AS bucketCallCount,
+          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
+          sum(c.Duration / 1000000) AS bucketDurationSumMs,
+          max(c.Duration / 1000000) AS bucketMaxDurationMs,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND OrgId = 'org_sql_catalog'
+          AND DeploymentEnv = 'production') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND OrgId = 'org_sql_catalog'
+          AND DeploymentEnv = 'production') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY sourceService, targetService
+UNION ALL
+SELECT
+          p.ServiceName AS sourceService,
+          c.ServiceName AS targetService,
+          count() AS bucketCallCount,
+          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
+          sum(c.Duration / 1000000) AS bucketDurationSumMs,
+          max(c.Duration / 1000000) AS bucketMaxDurationMs,
+          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
+        FROM (SELECT
+          OrgId AS OrgId,
+          Timestamp AS Timestamp,
+          TraceId AS TraceId,
+          SpanId AS SpanId,
+          ServiceName AS ServiceName,
+          DeploymentEnv AS DeploymentEnv
+        FROM service_map_spans
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog'
+          AND DeploymentEnv = 'production') AS p
+        INNER JOIN (SELECT
+          TraceId AS TraceId,
+          ParentSpanId AS ParentSpanId,
+          ServiceName AS ServiceName,
+          Duration AS Duration,
+          StatusCode AS StatusCode,
+          TraceState AS TraceState
+        FROM service_map_children
+        WHERE Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog'
+          AND DeploymentEnv = 'production') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY sourceService, targetService
+) AS edges
+        GROUP BY sourceService, targetService
+        ORDER BY callCount DESC
+        LIMIT 200
+        FORMAT JSON
 
 -- pipe:service_overview_compare:default:baseline  [ae5f3c76]
 SELECT 'current' AS period, * FROM (
@@ -5056,7 +5598,7 @@ ORDER BY count DESC
 LIMIT 500
 FORMAT JSON
 
--- spec:logs-timeseries-grouped:baseline  [a6200cf2]
+-- spec:logs-timeseries-grouped:baseline  [f594ac7f]
 WITH __series_base AS (
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS bucket,
@@ -5076,13 +5618,15 @@ SELECT
           groupName AS groupName,
           count AS count
         FROM __series_base
-        WHERE groupName IN (SELECT groupName FROM (SELECT
+        WHERE groupName IN (SELECT
+          groupName AS groupName
+        FROM (SELECT
           groupName AS groupName,
           max(count) AS rank
         FROM __series_base
         GROUP BY groupName
         ORDER BY rank DESC
-        LIMIT 5))
+        LIMIT 5) AS ranked)
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
@@ -6365,7 +6909,7 @@ SELECT
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-series-cap:baseline  [6cd85f46]
+-- spec:traces-timeseries-series-cap:baseline  [4bec4bd3]
 WITH __series_base AS (
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
@@ -6405,12 +6949,14 @@ SELECT
           apdexScore AS apdexScore,
           estimatedSpanCount AS estimatedSpanCount
         FROM __series_base
-        WHERE groupName IN (SELECT groupName FROM (SELECT
+        WHERE groupName IN (SELECT
+          groupName AS groupName
+        FROM (SELECT
           groupName AS groupName,
           max(count) AS rank
         FROM __series_base
         GROUP BY groupName
         ORDER BY rank DESC
-        LIMIT 10))
+        LIMIT 10) AS ranked)
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON

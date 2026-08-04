@@ -17,11 +17,7 @@ import type {
 } from "@/components/dashboard-builder/types"
 import type { LegendPosition } from "@/components/dashboard-builder/config/settings-fields"
 import type { HeatmapColorScale, HeatmapScaleType } from "@maple/domain/http"
-import {
-	normalizeKey,
-	parseBoolean,
-	parseWhereClause as parseWhereClauses,
-} from "@maple/domain/where-clause"
+import { normalizeKey, parseBoolean, parseWhereClause as parseWhereClauses } from "@maple/domain/where-clause"
 
 // ---------------------------------------------------------------------------
 // Shared widget-builder vocabulary.

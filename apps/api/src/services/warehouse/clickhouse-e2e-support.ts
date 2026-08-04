@@ -27,7 +27,8 @@ const findRepoRoot = (): string => {
 	let dir = dirname(fileURLToPath(import.meta.url))
 	while (!existsSync(join(dir, "turbo.json"))) {
 		const parent = dirname(dir)
-		if (parent === dir) throw new Error("Could not locate the workspace root: no turbo.json above this file")
+		if (parent === dir)
+			throw new Error("Could not locate the workspace root: no turbo.json above this file")
 		dir = parent
 	}
 	return dir

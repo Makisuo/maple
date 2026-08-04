@@ -202,9 +202,7 @@ describe("InvestigationService", () => {
 				history: async () => [],
 				beginTurn: async (input: { messageId: string; text: string }) => {
 					beginTurns.push({ messageId: input.messageId, text: input.text })
-					return options?.busy === true
-						? undefined
-						: { cursor: 0, messageId: input.messageId }
+					return options?.busy === true ? undefined : { cursor: 0, messageId: input.messageId }
 				},
 				append: async () => 1,
 				endTurn: async () => undefined,

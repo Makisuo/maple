@@ -12,8 +12,7 @@ import { Effect } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { isWorkersAiBinding, workersAiHttpClient } from "./WorkersAiHttpClient"
 
-const WORKERS_AI_URL =
-	"https://api.cloudflare.com/client/v4/accounts/abc123/ai/v1/chat/completions"
+const WORKERS_AI_URL = "https://api.cloudflare.com/client/v4/accounts/abc123/ai/v1/chat/completions"
 const GATEWAY_URL = "https://gateway.ai.cloudflare.com/v1/abc/maple/compat/chat/completions"
 
 /** A client that records what reached it, standing in for the REST fallback. */

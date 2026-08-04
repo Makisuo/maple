@@ -239,8 +239,8 @@ describe("PlanetScaleWebhookRouter", () => {
 			}
 
 			yield* Effect.gen(function* () {
-				// A deploy transition is not an issue, but it IS a chart marker.
-				// Before the timeline existed this returned 202 and enqueued nothing.
+				// A deploy transition is not an issue, but it IS a chart marker —
+				// before the timeline existed this returned 202 and enqueued nothing.
 				const deploy = yield* post({
 					event: "deploy_request.schema_applied",
 					organization: "acme",

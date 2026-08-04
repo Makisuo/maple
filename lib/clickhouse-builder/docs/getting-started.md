@@ -45,10 +45,7 @@ const query = CH.from(Events)
 		p95: CH.quantile(0.95)($.DurationMs),
 		count: CH.count(),
 	}))
-	.where(($) => [
-		$.OrgId.eq(CH.param.string("orgId")),
-		$.Timestamp.gte(CH.param.dateTime("startTime")),
-	])
+	.where(($) => [$.OrgId.eq(CH.param.string("orgId")), $.Timestamp.gte(CH.param.dateTime("startTime"))])
 	.groupBy("name")
 	.orderBy(["count", "desc"])
 	.limit(50)
@@ -80,7 +77,7 @@ The second argument resolves the `param.*` placeholders. Values are escaped and 
 into the SQL text at compile time — this is not server-side parameter binding. See
 [Params and compilation](./params-and-compilation.md).
 
-*(Backed by `docs/getting-started.md > Your first query`.)*
+_(Backed by `docs/getting-started.md > Your first query`.)_
 
 ## Run and decode
 
@@ -97,9 +94,7 @@ const compiled = CH.compile(query, params, {
 	}),
 })
 
-const rows = await Effect.runPromise(
-	compiled.decodeRows(await runOnClickHouse(compiled.sql)),
-)
+const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(compiled.sql)))
 ```
 
 Passing a `rowSchema` gets you real validation of what came back off the wire. Without one,
@@ -107,7 +102,7 @@ Passing a `rowSchema` gets you real validation of what came back off the wire. W
 tells you which you got. There is deliberately no `castRows`; see
 [Decoding results](./decoding-results.md).
 
-*(Backed by `docs/getting-started.md > Decoding the results`.)*
+_(Backed by `docs/getting-started.md > Decoding the results`.)_
 
 ## Where to next
 

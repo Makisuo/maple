@@ -6,7 +6,11 @@ import type { TestDb } from "@/platform/test-pglite"
 import { Env } from "@/platform/Env"
 import { GithubHttp, type GithubHttpShape } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
-import { clampQueueDelaySeconds, VcsSyncQueue, type VcsSyncQueueShape } from "@/services/integrations/vcs/VcsSyncQueue"
+import {
+	clampQueueDelaySeconds,
+	VcsSyncQueue,
+	type VcsSyncQueueShape,
+} from "@/services/integrations/vcs/VcsSyncQueue"
 
 // ---------------------------------------------------------------------------
 // Shared test harness for the GitHub / VCS integration. The id-resolver

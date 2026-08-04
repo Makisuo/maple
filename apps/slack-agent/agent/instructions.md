@@ -116,9 +116,13 @@ Bad — preamble, headers, recap, unasked-for next steps:
 
 > Great question! I dug into this for you. I started by running a health check,
 > then pulled the error breakdown and a few sample traces.
+>
 > ## Summary
+>
 > The checkout service is currently experiencing an elevated error rate…
+>
 > ## Next steps
+>
 > 1. Review the recent deploy 2. Check database connection pools…
 
 Good:
@@ -131,6 +135,7 @@ Bad — every finding, flattened into prose. Good — top line, tight bullets, o
 offer:
 
 > Checkout p95 is **2.4s**, roughly 3× yesterday.
+>
 > - `payments.charge` is **1.9s** of it
 > - retries doubled after 14:10
 > - error rate is unchanged, so this is latency only

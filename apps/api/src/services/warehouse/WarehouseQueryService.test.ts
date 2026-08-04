@@ -86,7 +86,13 @@ const makeTenant = (): TenantContext => ({
 // A scoped stand-in for the removed `sqlQuery(tenant, sql)` entry point: these
 // tests exercise retry/routing/caching, not scope, so the SQL travels wrapped in
 // a compiled query that declares it.
-const scopedSql = (sql: string) => unsafeCompiledQuery<Record<string, unknown>>({ sql, tenantScope: "org" })
+const scopedSql = (sql: string) =>
+	unsafeCompiledQuery<Record<string, unknown>>({
+		sql,
+		tenantScope: "org",
+		reason: "test-fixture",
+		note: "Synthetic SQL asserting executor behaviour, not a product query.",
+	})
 
 const transient503 = () => new Error("HTTP status 503 service temporarily unavailable")
 
@@ -388,6 +394,8 @@ describe("WarehouseQueryService.compiledQuery", () => {
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
 		const compiled = unsafeCompiledQuery<{ readonly serviceName: string; readonly count: number }>({
+			reason: "test-fixture",
+			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 			tenantScope: "org",
 			sql: "SELECT ServiceName AS serviceName, count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ serviceName: Schema.String, count: RowNumber }),
@@ -411,6 +419,8 @@ describe("WarehouseQueryService.compiledQuery", () => {
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			reason: "test-fixture",
+			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 			tenantScope: "org",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
@@ -439,6 +449,8 @@ describe("WarehouseQueryService.compiledQuery", () => {
 		// substring "OrgId"; scope is now a property of the compiled query, so a
 		// query that merely mentions the column can no longer sneak through.
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			reason: "test-fixture",
+			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 			sql: "SELECT count() AS count, 'x' AS OrgId FROM traces",
 			tenantScope: "cross-org",
 			rowSchema: Schema.Struct({ count: RowNumber }),
@@ -477,6 +489,8 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
 		const compiled = unsafeCompiledQuery<{ readonly serviceName: string; readonly count: number }>({
+			reason: "test-fixture",
+			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 			tenantScope: "org",
 			sql: "SELECT ServiceName AS serviceName, count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ serviceName: Schema.String, count: RowNumber }),
@@ -503,6 +517,8 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			reason: "test-fixture",
+			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 			tenantScope: "org",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
@@ -526,6 +542,8 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
 		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+			reason: "test-fixture",
+			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 			tenantScope: "org",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),

@@ -55,7 +55,7 @@ export type QueryProfileName =
 
 /**
  * The shared profile/settings selector carried by every warehouse query path
- * (the `WarehouseExecutor` interface, `WarehouseQueryService.sqlQuery`, and the
+ * (the `WarehouseExecutor` interface, `WarehouseQueryService.compiledQuery`, and the
  * CLI executors). Profile defaults are overridden by explicit `settings`.
  */
 export type WarehouseQueryOptions = {

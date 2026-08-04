@@ -23,7 +23,10 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/cache"
-import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "@/services/warehouse/warehouse-org-quarantine"
+import {
+	isOrgWarehouseQuarantined,
+	quarantineOnConfigClassCause,
+} from "@/services/warehouse/warehouse-org-quarantine"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
 const SYSTEM_DIGEST_USER = UserId.make("system-digest")

@@ -18,6 +18,7 @@ export interface SqlQuery {
 	readonly joins?: ReadonlyArray<SqlJoin>
 	readonly where: ReadonlyArray<SqlFragment>
 	readonly groupBy: ReadonlyArray<SqlFragment>
+	readonly having?: ReadonlyArray<SqlFragment>
 	readonly orderBy: ReadonlyArray<SqlFragment>
 	readonly limit?: SqlFragment
 	readonly offset?: SqlFragment
@@ -56,6 +57,12 @@ export function compileQuery(q: SqlQuery): string {
 	// GROUP BY
 	if (q.groupBy.length > 0) {
 		parts.push(`GROUP BY ${q.groupBy.map(compile).join(", ")}`)
+	}
+
+	// HAVING
+	const havingClauses = (q.having ?? []).map(compile).filter(Boolean)
+	if (havingClauses.length > 0) {
+		parts.push(`HAVING ${havingClauses.join("\n          AND ")}`)
 	}
 
 	// ORDER BY

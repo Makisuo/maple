@@ -26,21 +26,21 @@ query time. Treat the declaration as a contract you keep in sync with your migra
 
 The type constructors are values, not calls (except the parameterised ones):
 
-| Constructor | ClickHouse type | TypeScript type |
-| --- | --- | --- |
-| `T.string` | `String` | `string` |
-| `T.uint8` | `UInt8` | `number` |
-| `T.uint16` | `UInt16` | `number` |
-| `T.uint32` | `UInt32` | `number` |
-| `T.uint64` | `UInt64` | `number` |
-| `T.int32` | `Int32` | `number` |
-| `T.float64` | `Float64` | `number` |
-| `T.bool` | `Bool` | `boolean` |
-| `T.dateTime` | `DateTime` | `string` |
-| `T.dateTime64` | `DateTime64` | `string` |
-| `T.map(k, v)` | `Map(K, V)` | `Record<string, V>` |
-| `T.array(e)` | `Array(E)` | `ReadonlyArray<E>` |
-| `T.nullable(t)` | `Nullable(T)` | `T \| null` |
+| Constructor     | ClickHouse type | TypeScript type     |
+| --------------- | --------------- | ------------------- |
+| `T.string`      | `String`        | `string`            |
+| `T.uint8`       | `UInt8`         | `number`            |
+| `T.uint16`      | `UInt16`        | `number`            |
+| `T.uint32`      | `UInt32`        | `number`            |
+| `T.uint64`      | `UInt64`        | `number`            |
+| `T.int32`       | `Int32`         | `number`            |
+| `T.float64`     | `Float64`       | `number`            |
+| `T.bool`        | `Bool`          | `boolean`           |
+| `T.dateTime`    | `DateTime`      | `string`            |
+| `T.dateTime64`  | `DateTime64`    | `string`            |
+| `T.map(k, v)`   | `Map(K, V)`     | `Record<string, V>` |
+| `T.array(e)`    | `Array(E)`      | `ReadonlyArray<E>`  |
+| `T.nullable(t)` | `Nullable(T)`   | `T \| null`         |
 
 Date/time columns are typed as `string` on purpose: ClickHouse returns them as strings over
 JSON, and the builder does not parse them for you.
@@ -49,7 +49,7 @@ JSON, and the builder does not parse them for you.
 > `T.bool` are reachable only through `@maple-dev/clickhouse-builder/types`. Importing the
 > whole namespace as `T` — as above — is the simplest way to avoid the distinction entirely.
 
-*(Backed by `docs/tables-and-types.md > Types outside the curated barrel come from /types`.)*
+_(Backed by `docs/tables-and-types.md > Types outside the curated barrel come from /types`.)_
 
 ## `InferTS`
 
@@ -82,7 +82,7 @@ const query = CH.from(Events)
 `mapKeys`, `mapValues`, `mapGet`, `mapLiteral` — see the
 [API reference](./reference.md#map).
 
-*(Backed by `docs/tables-and-types.md > Reading a Map column`.)*
+_(Backed by `docs/tables-and-types.md > Reading a Map column`.)_
 
 ## Aliasing a table
 

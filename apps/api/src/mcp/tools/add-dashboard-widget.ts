@@ -20,7 +20,11 @@ import {
 	withDashboardMutation,
 	type DashboardWidget,
 } from "@/mcp/lib/dashboard-mutations"
-import { buildRawSqlDataSource, validateRawSqlMacro, visualizationToDisplayType } from "@/mcp/lib/raw-sql-widget"
+import {
+	buildRawSqlDataSource,
+	validateRawSqlMacro,
+	visualizationToDisplayType,
+} from "@/mcp/lib/raw-sql-widget"
 import {
 	collectBlockingBuilderWarnings,
 	formatValidationSummary,

@@ -88,8 +88,8 @@ const stubApi = (fixtures: {
 			return json({ data: fixtures.branchesByDatabase[decodeURIComponent(branchesMatch[1])] ?? [] })
 		}
 		// Must precede the /databases catch-all, which would otherwise serve the
-		// databases fixture to the deploy-request poller — the poller would decode
-		// that as deploy requests and silently record nothing.
+		// databases fixture to the deploy-request poller — the poller would then
+		// decode it as deploy requests and silently record nothing.
 		const deployRequestsMatch = url.match(/\/databases\/([^/?]+)\/deploy-requests/)
 		if (deployRequestsMatch) {
 			return json({

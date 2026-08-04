@@ -234,6 +234,13 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				MAPLE_ENVIRONMENT: resolveDeploymentEnvironment(stage),
 				...optionalPlain("COMMIT_SHA"),
 				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
+				// Agent LLM path. `MAPLE_LLM_PROVIDER` flips between OpenRouter (default) and
+				// Workers AI; both stay wired, so a switch is this one var plus a redeploy.
+				// See `@/platform/Llm` for the provider-scoped model overrides.
+				...optionalPlain("MAPLE_LLM_PROVIDER"),
+				...optionalPlain("MAPLE_TRIAGE_MODEL_OPENROUTER"),
+				...optionalPlain("MAPLE_TRIAGE_MODEL_WORKERS_AI"),
+				...optionalSecret("OPENROUTER_API_KEY"),
 				...optionalSecret("MAPLE_ROOT_PASSWORD"),
 				...optionalSecret("CLERK_SECRET_KEY"),
 				...optionalPlain("CLERK_PUBLISHABLE_KEY"),

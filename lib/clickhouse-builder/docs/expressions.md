@@ -8,11 +8,11 @@ column, a literal, a function call. A **`Condition`** is a boolean predicate, wh
 
 Every `Expr<T>` carries:
 
-| Method | SQL |
-| --- | --- |
-| `.eq(x)` / `.neq(x)` | `= x` / `!= x` |
-| `.gt(x)` / `.gte(x)` | `> x` / `>= x` |
-| `.lt(x)` / `.lte(x)` | `< x` / `<= x` |
+| Method                          | SQL                     |
+| ------------------------------- | ----------------------- |
+| `.eq(x)` / `.neq(x)`            | `= x` / `!= x`          |
+| `.gt(x)` / `.gte(x)`            | `> x` / `>= x`          |
+| `.lt(x)` / `.lte(x)`            | `< x` / `<= x`          |
 | `.in_(...xs)` / `.notIn(...xs)` | `IN (…)` / `NOT IN (…)` |
 
 Each accepts a raw value or another `Expr<T>`. String literals are escaped; booleans emit as
@@ -42,7 +42,7 @@ Prefer listing predicates as separate array entries over `.and()`-chaining them 
 AND-joined anyway, and [tenant scoping](./tenant-scoping.md) is only detected on top-level
 entries.
 
-*(Backed by `docs/expressions.md > Combining conditions with and/or`.)*
+_(Backed by `docs/expressions.md > Combining conditions with and/or`.)_
 
 ## Optional predicates
 
@@ -53,10 +53,7 @@ This is how you build filters from optional inputs without string-concatenating 
 const build = (nameFilter?: string) =>
 	CH.from(Events)
 		.select(($) => ({ name: $.Name }))
-		.where(($) => [
-			$.OrgId.eq("org_123"),
-			CH.when(nameFilter, (n) => $.Name.eq(n)),
-		])
+		.where(($) => [$.OrgId.eq("org_123"), CH.when(nameFilter, (n) => $.Name.eq(n))])
 
 // build("checkout") -> … WHERE OrgId = 'org_123' AND Name = 'checkout'
 // build()           -> … WHERE OrgId = 'org_123'
@@ -65,7 +62,7 @@ const build = (nameFilter?: string) =>
 `when` skips `undefined`, `null`, and `false`, and narrows the value for the callback.
 `whenTrue(flag, () => cond)` is the variant for a plain boolean gate.
 
-*(Backed by `docs/expressions.md > Optional predicates with when`.)*
+_(Backed by `docs/expressions.md > Optional predicates with when`.)_
 
 ## Arithmetic
 
@@ -83,7 +80,7 @@ const build = (nameFilter?: string) =>
 > subquery. This is a deliberate trade — the emitted SQL stays readable — but it is the most
 > common source of quietly wrong numbers.
 
-*(Backed by `docs/expressions.md > Arithmetic does not parenthesise`.)*
+_(Backed by `docs/expressions.md > Arithmetic does not parenthesise`.)_
 
 ## Literals and raw escape hatches
 
@@ -116,7 +113,7 @@ The `*If` family takes a `Condition` as its last argument:
 CH.quantile(0.95)($.DurationMs) // quantile(0.95)(DurationMs)
 ```
 
-*(Backed by `docs/expressions.md > Conditional aggregation`.)*
+_(Backed by `docs/expressions.md > Conditional aggregation`.)_
 
 ## Conditionals
 

@@ -19,7 +19,7 @@ CH.from(Events)
 Arguments are compiled through the same escaping path as everything else, so raw values are
 safe to pass. This is the right tool almost every time.
 
-*(Backed by `docs/extending.md > defineFn declares a missing function`.)*
+_(Backed by `docs/extending.md > defineFn declares a missing function`.)_
 
 ### `defineCondFn` — for predicates
 
@@ -28,11 +28,11 @@ Same, but returning a `Condition` so it can go straight into `where`:
 ```ts
 const matchesRegex = CH.defineCondFn<[CH.Expr<string>, string]>("match")
 
-.where(($) => [$.OrgId.eq("org_123"), matchesRegex($.Name, "^checkout")])
+	.where(($) => [$.OrgId.eq("org_123"), matchesRegex($.Name, "^checkout")])
 // match(Name, '^checkout')
 ```
 
-*(Backed by `docs/extending.md > defineCondFn declares a predicate`.)*
+_(Backed by `docs/extending.md > defineCondFn declares a predicate`.)_
 
 ## `compileFnCall` — variadic or generic shapes
 
@@ -79,7 +79,7 @@ CH.from(Events)
 `dynamicColumn<T>(name)` (on the `/expr` subpath) is the same idea for a column name only known
 at runtime.
 
-*(Backed by `docs/extending.md > rawExpr and rawCond are the last resort`.)*
+_(Backed by `docs/extending.md > rawExpr and rawCond are the last resort`.)_
 
 ## Handwritten queries: `unsafeCompiledQuery`
 
@@ -90,16 +90,35 @@ sees a uniform `CompiledQuery`:
 const compiled = CH.unsafeCompiledQuery<{ readonly name: string }>({
 	sql: "SELECT Name AS name FROM events WHERE OrgId = 'org_123'",
 	tenantScope: "org",
+	reason: "user-authored-sql",
+	note: "The SQL came from a user; there is no AST to build.",
 	rowSchema: Schema.Struct({ name: Schema.String }),
 })
 ```
 
 `tenantScope` is **required** — it cannot be inferred from a string, and whatever you assert is
-taken at face value. Supply a `rowSchema` too: handwritten SQL is exactly where schema drift
-goes unnoticed, and without one `decodeRows` validates nothing. See
-[Decoding results](./decoding-results.md).
+taken at face value. That is the whole hazard: this is the one place tenant scope is asserted
+rather than derived, so a query that forgot its tenant predicate would be positively _claimed_
+as scoped and sail through an executor's gate.
 
-*(Backed by `docs/extending.md > unsafeCompiledQuery wraps handwritten SQL`.)*
+`reason` is therefore required too, and its type — `RawSqlReason` — **is** the boundary between
+legitimate raw SQL and raw SQL nobody got round to converting:
+
+| reason                 | when                                                                                                                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"user-authored-sql"`  | The SQL came from a user. There is no AST to build; isolation comes from the credential layer.                                                                             |
+| `"empty-result-stub"`  | A constant zero-row result reading no table (`SELECT … WHERE 0`). The builder always emits a FROM.                                                                         |
+| `"param-varied-union"` | A `UNION ALL` of one builder over two parameter sets. Params substitute once per compile, so one `CHQuery` cannot carry both. Derive the scope from the compiled branches. |
+| `"test-fixture"`       | A test asserting executor behaviour on synthetic SQL.                                                                                                                      |
+
+Adding a member is the review gate — a one-line diff in `compile.ts` that a reviewer cannot
+miss. There is deliberately no `"legacy"` or `"todo"` member: with one, the gate is decorative.
+If your query doesn't fit a member, the answer is almost always to express it in the builder.
+
+Supply a `rowSchema` too: handwritten SQL is exactly where schema drift goes unnoticed, and
+without one `decodeRows` validates nothing. See [Decoding results](./decoding-results.md).
+
+_(Backed by `docs/extending.md > unsafeCompiledQuery wraps handwritten SQL`.)_
 
 ## The fragment AST
 

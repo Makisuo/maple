@@ -1,6 +1,6 @@
 ---
 name: maple-telemetry-conventions
-description: Maple's OpenTelemetry conventions — custom span attribute keys (`maple.*` vendor namespace, `query.context`, `db.query.*`, `result.*`, `cache.*`, `tenant.*`), Title Case status codes (`Ok`/`Error`/`Unset`), resource attribute dual-emit (`deployment.environment` + `deployment.environment.name`), span kinds, Tinybird MV pre-extracted columns, loop-prevention filters, and sampling. Use whenever writing or reviewing instrumentation code in any language (TypeScript, Rust, Python) in this repo — adding `setAttribute`/`setAttributes`/`record`/`#[instrument(fields(...))]` calls, setting span status, configuring an OTLP exporter, defining a new resource attribute, or wiring a new query through `WarehouseQueryService.sqlQuery()`.
+description: Maple's OpenTelemetry conventions — custom span attribute keys (`maple.*` vendor namespace, `query.context`, `db.query.*`, `result.*`, `cache.*`, `tenant.*`), Title Case status codes (`Ok`/`Error`/`Unset`), resource attribute dual-emit (`deployment.environment` + `deployment.environment.name`), span kinds, Tinybird MV pre-extracted columns, loop-prevention filters, and sampling. Use whenever writing or reviewing instrumentation code in any language (TypeScript, Rust, Python) in this repo — adding `setAttribute`/`setAttributes`/`record`/`#[instrument(fields(...))]` calls, setting span status, configuring an OTLP exporter, defining a new resource attribute, or wiring a new query through `WarehouseQueryService.compiledQuery()`.
 version: "1.0.0"
 ---
 
@@ -12,7 +12,7 @@ Reference for the **language-agnostic** OpenTelemetry conventions Maple uses acr
 
 - Adding `setAttribute` / `Effect.annotateCurrentSpan` / `Span::current().record(...)` / `#[instrument(fields(...))]` to any code path
 - Setting span status (Ok / Error / Unset)
-- Wiring a new query through `WarehouseQueryService.sqlQuery()` (the `context` and `profile` options become span attributes)
+- Wiring a new query through `WarehouseQueryService.compiledQuery()` (the `context` and `profile` options become span attributes)
 - Configuring an OTLP exporter, tracer provider, or resource builder
 - Introducing a new pre-extracted MV column or a new vendor attribute under `maple.*`
 - Reviewing a PR that touches `apps/api/src/services/WarehouseQueryService.ts`, `apps/ingest/src/main.rs`, `apps/api/src/app.ts`, `packages/effect-sdk/src/cloudflare/`, or `packages/domain/src/tinybird/materializations.ts`

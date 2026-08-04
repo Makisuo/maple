@@ -14,9 +14,10 @@
 // stay byte-identical.
 // ---------------------------------------------------------------------------
 
-import { compileCH } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import { from, type CHQuery } from "@maple-dev/clickhouse-builder"
+// From the root, not `/expr`: takes a `CHQuery`, so the subquery stays typed.
+import { inSubquery } from "@maple-dev/clickhouse-builder"
+import { from, fromQuery, type CHQuery } from "@maple-dev/clickhouse-builder"
 import { table } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 
@@ -53,11 +54,6 @@ export function finalizeTimeseries<Output extends Record<string, unknown>>(
 		return inner.format("JSON")
 	}
 
-	// Compile the inner query with placeholders intact ({} params, skipFormat) so
-	// the outer `CH.compile()` substitutes them once — same pattern as the
-	// list-query cutoff and the metrics-rate CTE.
-	const innerCompiled = compileCH(inner, {}, { skipFormat: true })
-	const innerSql = innerCompiled.sql
 	const baseTable = table(SERIES_BASE_ALIAS, outputColumns)
 
 	// Top-N group names, ranked by the max of `rankColumn` across all buckets.
@@ -69,11 +65,8 @@ export function finalizeTimeseries<Output extends Record<string, unknown>>(
 		.groupBy("groupName")
 		.orderBy(["rank", "desc"])
 		.limit(Math.floor(limit))
-	// Project down to just `groupName` so it can drive an `IN (...)` filter (the
-	// IN subquery must return a single column). Wrapping the compiled SQL string
-	// mirrors the list-query `cutoffSql` pattern.
-	const rankedSql = compileCH(ranked, {}, { skipFormat: true }).sql
-	const topGroupsSql = `SELECT groupName FROM (${rankedSql})`
+	// Project down to just `groupName`: an IN subquery must return one column.
+	const topGroups = fromQuery(ranked, "ranked").select(($) => ({ groupName: $.groupName }))
 
 	const passthrough: Record<string, CH.Expr<unknown>> = {}
 	for (const key of Object.keys(outputColumns)) {
@@ -82,10 +75,10 @@ export function finalizeTimeseries<Output extends Record<string, unknown>>(
 
 	const capped = from(baseTable)
 		// The capped query reads only from this CTE, so it inherits the inner
-		// query's tenant scope — which the opaque SQL string can't carry.
-		.withCTE(SERIES_BASE_ALIAS, innerSql, { tenantScope: innerCompiled.tenantScope })
+		// query's tenant scope — derived at compile time, not asserted here.
+		.withCTE(SERIES_BASE_ALIAS, inner)
 		.select(() => passthrough)
-		.where(() => [CH.inSubquery(CH.dynamicColumn<string>("groupName"), topGroupsSql)])
+		.where(() => [inSubquery(CH.dynamicColumn<string>("groupName"), topGroups)])
 		.orderBy(["bucket", "asc"], ["groupName", "asc"])
 		.format("JSON")
 
