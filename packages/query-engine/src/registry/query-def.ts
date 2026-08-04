@@ -1,4 +1,5 @@
 import type { CompiledQuery } from "@maple-dev/clickhouse-builder"
+import type { WarehouseCapabilities } from "../capabilities"
 import type { QueryProfileName, WarehouseQuerySettings } from "../profiles/query-profile"
 import type { DirectRouteCachePolicyInput } from "../runtime/query-engine"
 
@@ -79,14 +80,38 @@ export interface QueryDef<Payload, Row> {
 		| ((payload: Payload, nowMs: number) => DirectRouteCachePolicyInput | undefined)
 
 	/**
+	 * Resolve the backend's skip-index capabilities and hand them to `compile`.
+	 *
+	 * Off by default because it is not free: on BYO ClickHouse it costs a live
+	 * `system.*` probe (measured p50 262ms), and only queries that can actually
+	 * exploit bloom/tokenbf indices get anything back for it. Managed backends
+	 * answer from a static snapshot, so for them it is free.
+	 *
+	 * Set it on the queries the executor already treats as capability-aware —
+	 * log and trace list/search shapes, whose `attributeIndexMode` and
+	 * `bodySearchMode` decide whether the emitted SQL can use an index at all.
+	 * Declaring it changes the SQL those queries emit, so the SQL baseline moves
+	 * with the change.
+	 */
+	readonly capabilityAware?: boolean
+
+	/**
 	 * Build the compiled query from the request payload.
 	 *
 	 * `orgId` is passed separately rather than read off the payload because it
 	 * comes from the authenticated tenant, never from user input — every query
 	 * must filter `OrgId`, and that guarantee should not depend on a client
 	 * sending the right value.
+	 *
+	 * `capabilities` is the backend's index support. It is the BASELINE (all
+	 * indices assumed absent) unless the def sets `capabilityAware`, so a query
+	 * that ignores the argument keeps emitting exactly the SQL it did before.
 	 */
-	readonly compile: (payload: Payload, orgId: string) => CompiledQuery<Row>
+	readonly compile: (
+		payload: Payload,
+		orgId: string,
+		capabilities: WarehouseCapabilities,
+	) => CompiledQuery<Row>
 }
 
 /**

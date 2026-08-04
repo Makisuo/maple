@@ -34,6 +34,7 @@ import type {
 	WorkloadDetailSummaryRequest,
 } from "@maple/domain/http"
 import { Match } from "effect"
+import { attributeIndexMode, logBodySearchMode } from "../capabilities"
 import * as CH from "../ch"
 import { LOGS_BODY_SEARCH_SETTINGS } from "../profiles"
 import { makeDirectRouteCachePolicy } from "../runtime/query-engine"
@@ -258,14 +259,28 @@ export const serviceDbEdgesForService = defineQuery({
 		),
 })
 
+/**
+ * Log search.
+ *
+ * `capabilityAware` closes a real gap rather than adding a nicety. The pipe path
+ * (`list_logs`, which the `maple` CLI uses) has always passed these two modes,
+ * so CLI log search gets bloom/tokenbf index acceleration while the dashboard's
+ * HTTP path — compiling without capabilities — silently did full scans of the
+ * same data. Same builder, same table, different plans.
+ */
 export const listLogs = defineQuery({
 	id: "listLogs",
 	profile: "list",
-	settings: (payload) => (payload.search ? LOGS_BODY_SEARCH_SETTINGS : undefined),
+	// Annotated rather than inferred: with a three-parameter `compile`, TS
+	// resolves this callback before it can pin `Payload` from `compile`.
+	settings: (payload: ListLogsRequest) => (payload.search ? LOGS_BODY_SEARCH_SETTINGS : undefined),
 	cache: 15,
-	compile: (payload: ListLogsRequest, orgId: string) =>
+	capabilityAware: true,
+	compile: (payload: ListLogsRequest, orgId: string, capabilities) =>
 		CH.compile(
 			CH.logsListQuery({
+				attributeIndexMode: attributeIndexMode(capabilities, "logs"),
+				bodySearchMode: logBodySearchMode(capabilities),
 				serviceName: payload.service,
 				severity: payload.severity,
 				minSeverity: payload.minSeverity,

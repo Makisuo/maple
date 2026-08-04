@@ -1,3 +1,4 @@
+import { baselineWarehouseCapabilities } from "@maple/query-engine"
 import type { QueryDef } from "@maple/query-engine/registry"
 import type { QueryEngineDirectError } from "@maple/query-engine/runtime"
 import { Clock, Effect, Option } from "effect"
@@ -88,17 +89,32 @@ export const makeQueryRunners = ({ warehouse, queryEngine }: QueryRunnerDeps) =>
 		def: QueryDef<Payload, Row>,
 		tenant: TenantContext,
 		payload: Payload,
-	) =>
-		withPolicy(
+	) => {
+		const options = {
+			profile: def.profile,
+			...resolveSettings(def, payload),
+			context: def.id,
+		}
+		return withPolicy(
 			def,
 			tenant,
 			payload,
-			warehouse.compiledQuery(tenant, def.compile(payload, tenant.orgId), {
-				profile: def.profile,
-				...resolveSettings(def, payload),
-				context: def.id,
-			}),
+			// Capability-aware defs get the backend's real index support, which
+			// costs a `system.*` probe on BYO ClickHouse; everything else compiles
+			// against the baseline and so emits exactly the SQL it did before.
+			def.capabilityAware
+				? warehouse.compiledQueryWithCapabilities(
+						tenant,
+						(capabilities) => def.compile(payload, tenant.orgId, capabilities),
+						options,
+					)
+				: warehouse.compiledQuery(
+						tenant,
+						def.compile(payload, tenant.orgId, baselineWarehouseCapabilities()),
+						options,
+					),
 		)
+	}
 
 	/**
 	 * Run a `QueryDef` that returns at most one row, as `Row | null`.
@@ -116,7 +132,7 @@ export const makeQueryRunners = ({ warehouse, queryEngine }: QueryRunnerDeps) =>
 			tenant,
 			payload,
 			warehouse
-				.compiledQueryFirst(tenant, def.compile(payload, tenant.orgId), {
+				.compiledQueryFirst(tenant, def.compile(payload, tenant.orgId, baselineWarehouseCapabilities()), {
 					profile: def.profile,
 					...resolveSettings(def, payload),
 					context: def.id,
