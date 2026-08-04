@@ -136,7 +136,11 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	const program = Effect.gen(function* () {
 		const investigations = yield* InvestigationService
 		const history = input.session.history()
-		const model = resolveTriageModel(input.env)
+		const model = resolveTriageModel(input.env, {
+			surface: "chat",
+			orgId: tenant.orgId,
+			sessionId: input.sessionId,
+		})
 		// Shared with the turn so `submit_diagnosis` can report what the investigation cost. See
 		// `TurnUsage` — the tool is invoked mid-turn, so there is no later moment to hand it a total.
 		const usage = agent.makeTurnUsage()

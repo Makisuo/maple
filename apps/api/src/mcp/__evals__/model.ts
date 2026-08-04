@@ -2,9 +2,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import type { LanguageModel } from "ai"
 
 /**
- * Default eval model — matches apps/chat-agent's prod default
- * (`DEFAULT_MODEL_ID` in apps/chat-agent/src/lib/openrouter.ts), so evals
- * reflect what real users run. Override with `MCP_EVAL_MODEL`.
+ * Default eval model. Override with `MCP_EVAL_MODEL`.
  */
 const DEFAULT_EVAL_MODEL = "moonshotai/kimi-k2.7-code"
 
@@ -14,8 +12,11 @@ const evalModelId = (): string => process.env.MCP_EVAL_MODEL ?? DEFAULT_EVAL_MOD
 export const hasEvalCredentials = (): boolean => Boolean(process.env.OPENROUTER_API_KEY)
 
 /**
- * Build the eval model via OpenRouter — same wiring as
- * apps/chat-agent/src/lib/openrouter.ts `createChatModel`.
+ * Build the eval model via OpenRouter.
+ *
+ * Deliberately *not* app-attributed or tagged the way `apps/api/src/platform/Llm.ts` is: this is
+ * CI-only traffic, and keeping it off Maple's OpenRouter app page keeps eval spend out of the
+ * product's numbers. See `docs/openrouter-tracing.md`.
  */
 export const createEvalModel = (): LanguageModel => {
 	const apiKey = process.env.OPENROUTER_API_KEY

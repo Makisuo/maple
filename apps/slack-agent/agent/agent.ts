@@ -3,9 +3,18 @@ import { defineAgent } from "eve"
 
 /**
  * OpenRouter over its REST API.
+ *
+ * `appUrl`/`appName` set `HTTP-Referer`/`X-OpenRouter-Title`, which is what attributes this
+ * traffic to Maple's app page on openrouter.ai. Same URL and title as `apps/api` on purpose: the
+ * referer is the app's identity, so a different one here would mint a second app entry and split
+ * the rankings. Surfaces are told apart by `trace.trace_name` instead — static, because this
+ * process only ever is the Slack agent.
  */
 const openrouter = createOpenRouter({
 	apiKey: process.env.OPENROUTER_API_KEY ?? "",
+	appUrl: "https://maple.dev",
+	appName: "Maple",
+	extraBody: { trace: { trace_name: "slack" } },
 })
 
 /**
