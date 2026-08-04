@@ -25,7 +25,6 @@ import {
 	runSetupAudit,
 } from "@maple/domain/setup-audit"
 import { CH, formatWarehouseDateTime } from "@maple/query-engine"
-import { CHNumber } from "@maple/query-engine/ch"
 import { and, eq, sql } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
@@ -56,20 +55,6 @@ export interface SetupAuditServiceShape {
 }
 
 const msOrNull = (value: Date | null | undefined): number | null => value?.getTime() ?? null
-
-/**
- * `serviceUsageQuery` ships without a row schema; the audit needs one because every column is a
- * 64-bit sum, which BYO-ClickHouse serializes as a JSON string.
- */
-const serviceUsageRowSchema = Schema.Struct({
-	serviceName: Schema.String,
-	totalLogCount: CHNumber,
-	totalTraceCount: CHNumber,
-	totalSumMetricCount: CHNumber,
-	totalGaugeMetricCount: CHNumber,
-	totalHistogramMetricCount: CHNumber,
-	totalExpHistogramMetricCount: CHNumber,
-})
 
 const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQueryService> = Effect.gen(
 	function* () {
@@ -427,7 +412,7 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 			const results = yield* Effect.all(
 				{
 					usage: run(
-						CH.compile(CH.serviceUsageQuery({}), window, { rowSchema: serviceUsageRowSchema }),
+						CH.compile(CH.serviceUsageQuery({}), window, { rowSchema: CH.serviceUsageRowSchema }),
 						"discovery",
 					),
 					attributeKeys: run(
