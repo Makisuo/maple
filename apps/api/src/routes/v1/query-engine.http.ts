@@ -401,17 +401,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceDependencies", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.serviceDependenciesSQL(
-						{ deploymentEnv: payload.deploymentEnv },
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "serviceDependencies",
-						}),
-						"serviceDependencies query failed",
-					)
+					const rows = yield* runQuery(Queries.serviceDependencies, tenant, payload)
 					return new ServiceDependenciesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
 			)
@@ -425,17 +415,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceDbEdges", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.serviceDbEdgesSQL(
-						{ deploymentEnv: payload.deploymentEnv },
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "serviceDbEdges",
-						}),
-						"serviceDbEdges query failed",
-					)
+					const rows = yield* runQuery(Queries.serviceDbEdges, tenant, payload)
 					return new ServiceDbEdgesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
 			)
@@ -1406,20 +1386,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceExternalEdges", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.serviceExternalEdgesSQL(
-						{
-							deploymentEnv: payload.deploymentEnv,
-							serviceName: payload.serviceName,
-						},
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "serviceExternalEdges",
-						}),
-						"serviceExternalEdges query failed",
-					)
+					const rows = yield* runQuery(Queries.serviceExternalEdges, tenant, payload)
 					return new ServiceExternalEdgesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
 			)
@@ -1482,17 +1449,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					if (payload.services.length === 0) {
 						return new ServiceWorkloadsResponse({ data: [] })
 					}
-					const compiled = CH.serviceWorkloadsSQL(
-						{ services: payload.services },
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "aggregation",
-							context: "serviceWorkloads",
-						}),
-						"serviceWorkloads query failed",
-					)
+					const rows = yield* runQuery(Queries.serviceWorkloads, tenant, payload)
 					return new ServiceWorkloadsResponse({
 						data: rows.map((row) => ({
 							serviceName: decodeServiceName(String(row.serviceName ?? "")),

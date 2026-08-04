@@ -1,4 +1,7 @@
 import type {
+	ServiceDbEdgesRequest,
+	ServiceDependenciesRequest,
+	ServiceWorkloadsRequest,
 	ServiceUsageRequest,
 	ErrorDetailTracesRequest,
 	ErrorRateByServiceRequest,
@@ -522,4 +525,48 @@ export const serviceUsage = defineQuery({
 					endTime: payload.endTime,
 				})
 	},
+})
+
+// --- Service-map edge queries ---------------------------------------------
+// These use `*SQL(opts, params)` builders, which return a CompiledQuery
+// directly instead of going through `CH.compile`.
+
+export const serviceDependencies = defineQuery({
+	id: "serviceDependencies",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceDependenciesRequest, orgId: string) =>
+		CH.serviceDependenciesSQL(
+			{ deploymentEnv: payload.deploymentEnv },
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const serviceDbEdges = defineQuery({
+	id: "serviceDbEdges",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceDbEdgesRequest, orgId: string) =>
+		CH.serviceDbEdgesSQL(
+			{ deploymentEnv: payload.deploymentEnv },
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+/**
+ * Workloads backing a set of services.
+ *
+ * The caller must skip this entirely for an empty service list — that guard
+ * stays in the handler because it avoids issuing a query at all, which a def
+ * cannot express.
+ */
+export const serviceWorkloads = defineQuery({
+	id: "serviceWorkloads",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceWorkloadsRequest, orgId: string) =>
+		CH.serviceWorkloadsSQL(
+			{ services: payload.services },
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
 })
