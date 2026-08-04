@@ -101,7 +101,6 @@ const makeInstrumentedBackend = (inner: EdgeCacheBackend = makeMemoryBackend()) 
 		backend,
 		calls,
 		peakInFlight: () => peakInFlight,
-		keys: (op: BackendCall["op"]) => calls.filter((c) => c.op === op).map((c) => c.key),
 	}
 }
 
