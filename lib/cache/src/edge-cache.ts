@@ -105,6 +105,21 @@ const sha256Hex = async (input: string): Promise<string> => {
  * 250ms deadline bought almost no extra hits and charged the full 250ms to every
  * hung read — 22% of all reads. 40ms sits above the real read distribution and
  * below the hang floor.
+ *
+ * The gap is empty because of how Cloudflare meters connections, not because
+ * the cache is bimodally slow: `cache.match()` counts against the Worker's
+ * six-simultaneous-connection limit while it waits for response headers, and a
+ * seventh call is queued until one of the six gets its headers. So a read
+ * either finds a free slot and returns in ~10ms, or it queues behind whatever
+ * holds the slots — usually warehouse `fetch()` calls, which take 110ms to
+ * several seconds to return headers. There is no middle. Measured: reads issued
+ * while a warehouse query is in flight time out 29.9% of the time vs 16.6%
+ * otherwise, and the rate climbs with the number of cache reads in the request
+ * (1 read 8.4%, 4 reads 35.9%).
+ *
+ * Lowering this deadline therefore costs almost no hits: a queued read was
+ * never going to arrive at 45ms. It does NOT fix the queueing itself.
+ * https://developers.cloudflare.com/workers/platform/limits/
  */
 export const DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS = 40
 

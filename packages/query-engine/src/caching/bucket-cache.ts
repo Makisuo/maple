@@ -419,8 +419,17 @@ const ttlSecondsConfig = Config.number("QE_BUCKET_CACHE_TTL_SECONDS").pipe(Confi
 const fluxSecondsConfig = Config.number("QE_BUCKET_CACHE_FLUX_SECONDS").pipe(Config.withDefault(60))
 const segmentBucketsConfig = Config.number("QE_BUCKET_CACHE_SEGMENT_BUCKETS").pipe(Config.withDefault(120))
 // A validated query contains at most 1,500 points, so 120-bucket segments
-// produce at most 13 reads. Sixteen keeps the normal path within one shared
-// edge-read deadline while still bounding malformed/internal callers.
+// produce at most 13 reads. In practice 98% of prod requests read one or two
+// segments (measured 2026-08-04: 1 segment 70.2%, 2 segments 27.8%), so this
+// cap is a guard against malformed/internal callers, not a tuning knob for the
+// normal path.
+//
+// Do not raise it. Cloudflare counts `cache.match()` against the Worker's
+// six-simultaneous-connection limit for as long as it is waiting for response
+// headers, and queues the seventh until a slot frees. Anything above ~6 here
+// self-queues, and the wait is charged to `EDGE_CACHE_READ_TIMEOUT_MS` — the
+// read gets abandoned before it ever reaches the cache.
+// https://developers.cloudflare.com/workers/platform/limits/
 const readConcurrencyConfig = Config.number("QE_BUCKET_CACHE_READ_CONCURRENCY").pipe(Config.withDefault(16))
 // Cap how many missing sub-ranges fan out to the warehouse per cache miss. A
 // single cold dashboard request only ever splits into a few ranges, but
