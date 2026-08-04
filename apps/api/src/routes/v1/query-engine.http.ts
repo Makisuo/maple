@@ -152,6 +152,16 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 	Effect.gen(function* () {
 		const queryEngine = yield* QueryEngineService
 		const warehouse = yield* WarehouseQueryService
+
+		// `cachedDirect` takes an Effect with no requirements, but `runQuery` reads
+		// its services from context. Supplying the ones already bound above lets a
+		// registry query run INSIDE a cache wrapper — needed by spanHierarchy,
+		// where the probe must only fire on an outer cache miss.
+		const withDeps = <A, E>(effect: Effect.Effect<A, E, WarehouseQueryService | QueryEngineService>) =>
+			effect.pipe(
+				Effect.provideService(WarehouseQueryService, warehouse),
+				Effect.provideService(QueryEngineService, queryEngine),
+			)
 		const serviceOperationsRollupEnabled = yield* Config.boolean(
 			"SERVICE_OPERATIONS_ROLLUP_ENABLED",
 		).pipe(Config.withDefault(false))
@@ -182,65 +192,33 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						// shared link, AI link), resolve one via a cheap LIMIT-1 probe and
 						// derive a ±1h window so the main query can prune. The probe itself
 						// tries the recent window first (see PROBE_RECENT_WINDOW_MS).
-						Effect.gen(function* () {
-							let startTime = payload.startTime
-							let endTime = payload.endTime
-							if (startTime == null || endTime == null) {
-								const runProbe = (narrowByTime: boolean) =>
-									mapExecError(
-										warehouse
-											.compiledQueryFirst(
-												tenant,
-												CH.compile(
-													CH.traceTimeProbeQuery({
-														traceId: payload.traceId,
-														narrowByTime,
-													}),
-													narrowByTime
-														? {
-																orgId: tenant.orgId,
-																startTime: formatWarehouseDateTime(
-																	nowMs - PROBE_RECENT_WINDOW_MS,
-																),
-															}
-														: { orgId: tenant.orgId },
-												),
-												{
-													profile: "discovery",
-													context: narrowByTime
-														? "spanHierarchyProbeRecent"
-														: "spanHierarchyProbe",
-												},
-											)
-											.pipe(Effect.map(Option.getOrNull)),
-										"spanHierarchy probe failed",
-									)
-								const probe = (yield* runProbe(true)) ?? (yield* runProbe(false))
-								if (probe?.timestamp != null) {
-									const window = partitionWindowAround(probe.timestamp)
-									startTime = window.startTime
-									endTime = window.endTime
+						withDeps(
+							Effect.gen(function* () {
+								let startTime = payload.startTime
+								let endTime = payload.endTime
+								if (startTime == null || endTime == null) {
+									const probe =
+										(yield* runQueryFirst(Queries.spanHierarchyProbeRecent, tenant, {
+											traceId: payload.traceId,
+											startTime: formatWarehouseDateTime(
+												nowMs - PROBE_RECENT_WINDOW_MS,
+											),
+										})) ??
+										(yield* runQueryFirst(Queries.spanHierarchyProbe, tenant, payload))
+									if (probe?.timestamp != null) {
+										const window = partitionWindowAround(probe.timestamp)
+										startTime = window.startTime
+										endTime = window.endTime
+									}
 								}
-							}
-							const narrowByTime = startTime != null && endTime != null
-							const compiled = CH.compile(
-								CH.spanHierarchyQuery({
+								return yield* runQuery(Queries.spanHierarchy, tenant, {
 									traceId: payload.traceId,
 									spanId: payload.spanId,
-									narrowByTime,
-								}),
-								narrowByTime
-									? { orgId: tenant.orgId, startTime, endTime }
-									: { orgId: tenant.orgId },
-							)
-							return yield* mapExecError(
-								warehouse.compiledQuery(tenant, compiled, {
-									profile: "list",
-									context: "spanHierarchy",
-								}),
-								"spanHierarchy query failed",
-							)
-						}),
+									startTime,
+									endTime,
+								})
+							}),
+						),
 						traceCacheTtlSeconds(payload.endTime, nowMs),
 					)
 					const typedRows = rows.map((row) => ({
