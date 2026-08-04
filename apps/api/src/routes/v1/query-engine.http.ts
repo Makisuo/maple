@@ -2028,34 +2028,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("podFacets", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compileUnion(
-						CH.podFacetsQuery({
-							search: payload.search,
-							podNames: payload.podNames,
-							namespaces: payload.namespaces,
-							nodeNames: payload.nodeNames,
-							clusters: payload.clusters,
-							deployments: payload.deployments,
-							statefulsets: payload.statefulsets,
-							daemonsets: payload.daemonsets,
-							jobs: payload.jobs,
-							environments: payload.environments,
-							computeTypes: payload.computeTypes,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "discovery",
-							// 10 UNION branches each re-read the wide ResourceAttributes Map column;
-							// cap read-thread concurrency so the per-thread decompression buffers stay
-							// inside the discovery memory budget (bound is ~independent of time range).
-							settings: { maxThreads: 4 },
-							context: "podFacets",
-						}),
-						"podFacets query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.podFacets, tenant, payload)
 					const buckets = {
 						pods: [] as Array<{ name: string; count: number }>,
 						namespaces: [] as Array<{ name: string; count: number }>,
@@ -2068,7 +2041,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						environments: [] as Array<{ name: string; count: number }>,
 						computeTypes: [] as Array<{ name: string; count: number }>,
 					}
-					for (const row of typedRows) {
+					for (const row of rows) {
 						const entry = { name: String(row.name), count: Number(row.count) || 0 }
 						switch (row.facetType) {
 							case "pod":
@@ -2109,32 +2082,13 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("nodeFacets", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compileUnion(
-						CH.nodeFacetsQuery({
-							search: payload.search,
-							nodeNames: payload.nodeNames,
-							clusters: payload.clusters,
-							environments: payload.environments,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "discovery",
-							// See podFacets: cap read-thread concurrency to bound Map-column
-							// decompression memory across the fan-out of UNION branches.
-							settings: { maxThreads: 4 },
-							context: "nodeFacets",
-						}),
-						"nodeFacets query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.nodeFacets, tenant, payload)
 					const buckets = {
 						nodes: [] as Array<{ name: string; count: number }>,
 						clusters: [] as Array<{ name: string; count: number }>,
 						environments: [] as Array<{ name: string; count: number }>,
 					}
-					for (const row of typedRows) {
+					for (const row of rows) {
 						const entry = { name: String(row.name), count: Number(row.count) || 0 }
 						switch (row.facetType) {
 							case "node":
@@ -2154,29 +2108,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("workloadFacets", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compileUnion(
-						CH.workloadFacetsQuery({
-							kind: payload.kind,
-							search: payload.search,
-							workloadNames: payload.workloadNames,
-							namespaces: payload.namespaces,
-							clusters: payload.clusters,
-							environments: payload.environments,
-							computeTypes: payload.computeTypes,
-						}),
-						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "discovery",
-							// See podFacets: cap read-thread concurrency to bound Map-column
-							// decompression memory across the fan-out of UNION branches.
-							settings: { maxThreads: 4 },
-							context: "workloadFacets",
-						}),
-						"workloadFacets query failed",
-					)
-					const typedRows = rows
+					const rows = yield* runQuery(Queries.workloadFacets, tenant, payload)
 					const buckets = {
 						workloads: [] as Array<{ name: string; count: number }>,
 						namespaces: [] as Array<{ name: string; count: number }>,
@@ -2184,7 +2116,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						environments: [] as Array<{ name: string; count: number }>,
 						computeTypes: [] as Array<{ name: string; count: number }>,
 					}
-					for (const row of typedRows) {
+					for (const row of rows) {
 						const entry = { name: String(row.name), count: Number(row.count) || 0 }
 						switch (row.facetType) {
 							case "workload":

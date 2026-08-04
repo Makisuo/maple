@@ -1,4 +1,7 @@
 import type {
+	NodeFacetsRequest,
+	PodFacetsRequest,
+	WorkloadFacetsRequest,
 	ServiceDbQuerySummaryRequest,
 	ServicePlatformsRequest,
 	ServiceDbEdgesRequest,
@@ -623,4 +626,73 @@ export const serviceDbTopQueries = defineQuery({
 	cache: undefined,
 	compile: (payload: ServiceDbQuerySummaryRequest, orgId: string) =>
 		CH.serviceDbTopQueriesSQL(dbQueryParams(payload, orgId)),
+})
+
+// --- Facet queries (UNION of per-dimension branches) ----------------------
+
+export const podFacets = defineQuery({
+	id: "podFacets",
+	profile: "discovery",
+	// Cap read-thread concurrency to bound Map-column decompression memory
+	// across the fan-out of UNION branches.
+	settings: { maxThreads: 4 },
+	cache: undefined,
+	compile: (payload: PodFacetsRequest, orgId: string) =>
+		CH.compileUnion(
+			CH.podFacetsQuery({
+				search: payload.search,
+				podNames: payload.podNames,
+				namespaces: payload.namespaces,
+				nodeNames: payload.nodeNames,
+				clusters: payload.clusters,
+				deployments: payload.deployments,
+				statefulsets: payload.statefulsets,
+				daemonsets: payload.daemonsets,
+				jobs: payload.jobs,
+				environments: payload.environments,
+				computeTypes: payload.computeTypes,
+			}),
+			{ orgId: orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const nodeFacets = defineQuery({
+	id: "nodeFacets",
+	profile: "discovery",
+	// Cap read-thread concurrency to bound Map-column decompression memory
+	// across the fan-out of UNION branches.
+	settings: { maxThreads: 4 },
+	cache: undefined,
+	compile: (payload: NodeFacetsRequest, orgId: string) =>
+		CH.compileUnion(
+			CH.nodeFacetsQuery({
+				search: payload.search,
+				nodeNames: payload.nodeNames,
+				clusters: payload.clusters,
+				environments: payload.environments,
+			}),
+			{ orgId: orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const workloadFacets = defineQuery({
+	id: "workloadFacets",
+	profile: "discovery",
+	// Cap read-thread concurrency to bound Map-column decompression memory
+	// across the fan-out of UNION branches.
+	settings: { maxThreads: 4 },
+	cache: undefined,
+	compile: (payload: WorkloadFacetsRequest, orgId: string) =>
+		CH.compileUnion(
+			CH.workloadFacetsQuery({
+				kind: payload.kind,
+				search: payload.search,
+				workloadNames: payload.workloadNames,
+				namespaces: payload.namespaces,
+				clusters: payload.clusters,
+				environments: payload.environments,
+				computeTypes: payload.computeTypes,
+			}),
+			{ orgId: orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
 })
