@@ -205,22 +205,35 @@ export function InvestigationView({
 							/>
 						</DashboardLayout.Fill>
 					) : (
-						<DashboardLayout.Scroll>
-							<div className="flex min-h-full flex-col gap-7 pb-2">
-								{tab === "evidence" ? (
-									<EvidenceTab investigation={investigation} />
-								) : tab === "hypotheses" ? (
-									<HypothesesTab investigation={investigation} />
-								) : (
-									<>
-										<VerdictCard investigation={investigation} />
-										<ImpactStrip investigation={investigation} />
-										<NextActions investigation={investigation} />
-									</>
-								)}
-								{isResolved ? null : <FollowUpComposer onSubmit={handleFollowUp} />}
-							</div>
-						</DashboardLayout.Scroll>
+						<>
+							<DashboardLayout.Scroll>
+								<div className="flex flex-col gap-7">
+									{tab === "evidence" ? (
+										<EvidenceTab investigation={investigation} />
+									) : tab === "hypotheses" ? (
+										<HypothesesTab investigation={investigation} />
+									) : (
+										<>
+											<VerdictCard investigation={investigation} />
+											<ImpactStrip investigation={investigation} />
+											<NextActions investigation={investigation} />
+										</>
+									)}
+								</div>
+							</DashboardLayout.Scroll>
+							{/*
+							 * A sibling of `Scroll`, not its last child. Inside it, `mt-auto` only
+							 * reached the bottom while the tab was shorter than the viewport — on
+							 * any real diagnosis the composer sat below the fold and scrolled away,
+							 * which is the opposite of docked. `Content` is a flex column, so a
+							 * `shrink-0` footer here is the same shape as the sticky header above.
+							 */}
+							{isResolved ? null : (
+								<div className="shrink-0 px-4 pb-4">
+									<FollowUpComposer onSubmit={handleFollowUp} />
+								</div>
+							)}
+						</>
 					)}
 				</DashboardLayout.Content>
 				<DashboardLayout.RightPanel title="Investigation context" width="w-80">

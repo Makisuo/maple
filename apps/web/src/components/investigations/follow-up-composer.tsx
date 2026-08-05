@@ -1,7 +1,8 @@
 import { ArrowUpIcon, ChatBubbleSparkleIcon } from "@/components/icons"
 
 /**
- * The docked follow-up, pinned to the bottom of every document tab.
+ * The docked follow-up. The page pins it: it renders as a `shrink-0` sibling
+ * below the scroll area, so it stays put while the tab scrolls behind it.
  *
  * It looks like a composer but it is a button, and that is deliberate. The real
  * composer belongs to `ChatConversation`, which owns the session, the approval
@@ -14,7 +15,7 @@ export function FollowUpComposer({ onSubmit }: { onSubmit: () => void }) {
 		<button
 			type="button"
 			onClick={onSubmit}
-			className="mt-auto flex h-10.5 w-full items-center gap-3 rounded-lg border border-input bg-card px-3.5 text-left transition-colors hover:border-ring hover:bg-accent/40"
+			className="flex h-10.5 w-full items-center gap-3 rounded-lg border border-input bg-card px-3.5 text-left transition-colors hover:border-ring hover:bg-accent/40"
 		>
 			<ChatBubbleSparkleIcon size={14} className="shrink-0 text-primary" />
 			<span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
