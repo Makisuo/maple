@@ -53,9 +53,112 @@ const TRACE_ID = "0af7651916cd43dd8448eb211c80319c"
 const SPAN_ID = "b7ad6b7169203331"
 const FINGERPRINT = "11640393269246331608"
 
+const JOURNEY_ID = "conv_0af7651916cd43dd"
+
 const window = { orgId: ORG_ID, startTime: START_TIME, endTime: END_TIME }
 
 export const builderFixtures: ReadonlyArray<BuilderFixture> = [
+	// ----- genai journeys (routes/v1/genai.http.ts) -----
+	// Four shapes the analyzer has never seen elsewhere in the catalog: a window
+	// function feeding a GROUP BY, a HAVING over aggregate aliases, and a UNION
+	// that mixes uniq()'s UInt64 with a tuple-packed quantile branch. Exactly the
+	// class of SQL that compiles to the expected text and is then rejected.
+	{
+		module: "genai",
+		name: "journeyListQuery",
+		label: "default",
+		compile: () => CH.compile(CH.journeyListQuery({}), window, { rowSchema: CH.journeyListRowSchema }),
+	},
+	{
+		// Every journey-level filter at once — all of them are HAVING predicates
+		// over aggregate aliases, which is where a type mismatch would surface.
+		module: "genai",
+		name: "journeyListQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compile(
+				CH.journeyListQuery({
+					model: "gpt-4o",
+					requestedModel: "gpt-4o",
+					provider: "openai",
+					agent: "planner",
+					workflow: "triage",
+					serviceName: "agent-service",
+					status: "error",
+					finishReason: "length",
+					hasTools: true,
+					contentRedacted: false,
+					search: "checkout",
+					durationMinMs: 1_000,
+					durationMaxMs: 600_000,
+					turnMin: 2,
+					turnMax: 50,
+					tokenMin: 100,
+					tokenMax: 100_000,
+					costMin: 0.001,
+					costMax: 10,
+					sort: "cost",
+					limit: 50,
+				}),
+				window,
+				{ rowSchema: CH.journeyListRowSchema },
+			),
+	},
+	{
+		module: "genai",
+		name: "journeyFacetsQuery",
+		label: "default",
+		compile: () => CH.compileUnion(CH.journeyFacetsQuery({}), window),
+	},
+	{
+		// Each branch drops its own dimension, so a filtered facets run is a
+		// structurally different UNION from the unfiltered one. `contentRedacted`
+		// and the numeric bounds are here deliberately: those are the two branches
+		// whose self-exclusion was wrong, and their fixed shape (a branch whose
+		// WHERE and inherited HAVING no longer contradict) only exists when the
+		// corresponding filter is set.
+		module: "genai",
+		name: "journeyFacetsQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compileUnion(
+				CH.journeyFacetsQuery({
+					model: "gpt-4o",
+					status: "error",
+					hasTools: true,
+					contentRedacted: false,
+					durationMinMs: 1_000,
+					costMax: 5,
+				}),
+				window,
+			),
+	},
+	{
+		module: "genai",
+		name: "journeySummaryQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(
+				CH.journeySummaryQuery(),
+				{ ...window, journeyId: JOURNEY_ID },
+				{
+					rowSchema: CH.journeySummaryRowSchema,
+				},
+			),
+	},
+	{
+		module: "genai",
+		name: "journeyTimelineQuery",
+		label: "default",
+		compile: () =>
+			CH.compile(
+				CH.journeyTimelineQuery(),
+				{ ...window, journeyId: JOURNEY_ID },
+				{
+					rowSchema: CH.journeyTimelineRowSchema,
+				},
+			),
+	},
 	// ----- session-replays (routes/session-replay.http.ts, routes/v2/session-replays.http.ts) -----
 	{
 		module: "session-replays",

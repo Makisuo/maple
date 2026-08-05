@@ -138,6 +138,41 @@ export {
 	type SessionTraceSummaryOutput,
 } from "./queries/session-replays"
 
+// Queries — GenAI Agentic Journeys (list / facets / summary / timeline)
+export {
+	journeyListQuery,
+	journeyListRowSchema,
+	journeyFacetsQuery,
+	journeyFacetsRowSchema,
+	journeySummaryQuery,
+	journeySummaryRowSchema,
+	journeyTimelineQuery,
+	journeyTimelineRowSchema,
+	GENAI_INFERENCE_OPERATIONS,
+	GENAI_TOOL_OPERATION,
+	JOURNEY_RUNNING_GRACE_SECONDS,
+	type JourneyFilterOpts,
+	type JourneyListOpts,
+	type JourneyListOutput,
+	type JourneyFacetsOpts,
+	type JourneyFacetsOutput,
+	type JourneySortKey,
+	type JourneyStatus,
+	type JourneySpanScanOpts,
+	type JourneySummaryOutput,
+	type JourneyTimelineOpts,
+	type JourneyTimelineOutput,
+} from "./queries/genai"
+export {
+	buildJourneyTimeline,
+	parseGenAiMessages,
+	type JourneyTimelineEvent,
+	type JourneyTimelineEventKind,
+	type JourneyMessageRole,
+	type JourneyEventStatus,
+	type JourneyContentSource,
+} from "./queries/genai-timeline"
+
 // Queries — Session Events (distilled stream)
 export {
 	sessionTranscriptQuery,

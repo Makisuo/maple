@@ -46,6 +46,8 @@ import { Route as InfraIndexRouteImport } from './routes/infra/index'
 import { Route as InfraHostNameRouteImport } from './routes/infra/$hostName'
 import { Route as InvestigationsIndexRouteImport } from './routes/investigations/index'
 import { Route as InvestigationsIdRouteImport } from './routes/investigations/$id'
+import { Route as JourneysIndexRouteImport } from './routes/journeys/index'
+import { Route as JourneysJourneyIdRouteImport } from './routes/journeys/$journeyId'
 import { Route as LogsIndexRouteImport } from './routes/logs/index'
 import { Route as LogsLogIdRouteImport } from './routes/logs/$logId'
 import { Route as MetricsIndexRouteImport } from './routes/metrics/index'
@@ -258,6 +260,16 @@ const InvestigationsIdRoute = InvestigationsIdRouteImport.update({
   path: '/investigations/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JourneysIndexRoute = JourneysIndexRouteImport.update({
+  id: '/journeys/',
+  path: '/journeys/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JourneysJourneyIdRoute = JourneysJourneyIdRouteImport.update({
+  id: '/journeys/$journeyId',
+  path: '/journeys/$journeyId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LogsIndexRoute = LogsIndexRouteImport.update({
   id: '/logs/',
   path: '/logs/',
@@ -430,6 +442,7 @@ export interface FileRoutesByFullPath {
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
+  '/journeys/$journeyId': typeof JourneysJourneyIdRoute
   '/logs/$logId': typeof LogsLogIdRoute
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
@@ -443,6 +456,7 @@ export interface FileRoutesByFullPath {
   '/errors/': typeof ErrorsIndexRoute
   '/infra/': typeof InfraIndexRoute
   '/investigations/': typeof InvestigationsIndexRoute
+  '/journeys/': typeof JourneysIndexRoute
   '/logs/': typeof LogsIndexRoute
   '/metrics/': typeof MetricsIndexRoute
   '/replays/': typeof ReplaysIndexRoute
@@ -495,6 +509,7 @@ export interface FileRoutesByTo {
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
+  '/journeys/$journeyId': typeof JourneysJourneyIdRoute
   '/logs/$logId': typeof LogsLogIdRoute
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
@@ -508,6 +523,7 @@ export interface FileRoutesByTo {
   '/errors': typeof ErrorsIndexRoute
   '/infra': typeof InfraIndexRoute
   '/investigations': typeof InvestigationsIndexRoute
+  '/journeys': typeof JourneysIndexRoute
   '/logs': typeof LogsIndexRoute
   '/metrics': typeof MetricsIndexRoute
   '/replays': typeof ReplaysIndexRoute
@@ -561,6 +577,7 @@ export interface FileRoutesById {
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
+  '/journeys/$journeyId': typeof JourneysJourneyIdRoute
   '/logs/$logId': typeof LogsLogIdRoute
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
@@ -574,6 +591,7 @@ export interface FileRoutesById {
   '/errors/': typeof ErrorsIndexRoute
   '/infra/': typeof InfraIndexRoute
   '/investigations/': typeof InvestigationsIndexRoute
+  '/journeys/': typeof JourneysIndexRoute
   '/logs/': typeof LogsIndexRoute
   '/metrics/': typeof MetricsIndexRoute
   '/replays/': typeof ReplaysIndexRoute
@@ -628,6 +646,7 @@ export interface FileRouteTypes {
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
+    | '/journeys/$journeyId'
     | '/logs/$logId'
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
@@ -641,6 +660,7 @@ export interface FileRouteTypes {
     | '/errors/'
     | '/infra/'
     | '/investigations/'
+    | '/journeys/'
     | '/logs/'
     | '/metrics/'
     | '/replays/'
@@ -693,6 +713,7 @@ export interface FileRouteTypes {
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
+    | '/journeys/$journeyId'
     | '/logs/$logId'
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
@@ -706,6 +727,7 @@ export interface FileRouteTypes {
     | '/errors'
     | '/infra'
     | '/investigations'
+    | '/journeys'
     | '/logs'
     | '/metrics'
     | '/replays'
@@ -758,6 +780,7 @@ export interface FileRouteTypes {
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
+    | '/journeys/$journeyId'
     | '/logs/$logId'
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
@@ -771,6 +794,7 @@ export interface FileRouteTypes {
     | '/errors/'
     | '/infra/'
     | '/investigations/'
+    | '/journeys/'
     | '/logs/'
     | '/metrics/'
     | '/replays/'
@@ -824,6 +848,7 @@ export interface RootRouteChildren {
   ErrorsErrorTypeRoute: typeof ErrorsErrorTypeRoute
   InfraHostNameRoute: typeof InfraHostNameRoute
   InvestigationsIdRoute: typeof InvestigationsIdRoute
+  JourneysJourneyIdRoute: typeof JourneysJourneyIdRoute
   LogsLogIdRoute: typeof LogsLogIdRoute
   MetricsMetricNameRoute: typeof MetricsMetricNameRoute
   RecommendationsRecommendationKeyRoute: typeof RecommendationsRecommendationKeyRoute
@@ -837,6 +862,7 @@ export interface RootRouteChildren {
   ErrorsIndexRoute: typeof ErrorsIndexRoute
   InfraIndexRoute: typeof InfraIndexRoute
   InvestigationsIndexRoute: typeof InvestigationsIndexRoute
+  JourneysIndexRoute: typeof JourneysIndexRoute
   LogsIndexRoute: typeof LogsIndexRoute
   MetricsIndexRoute: typeof MetricsIndexRoute
   ReplaysIndexRoute: typeof ReplaysIndexRoute
@@ -1119,6 +1145,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InvestigationsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/journeys/': {
+      id: '/journeys/'
+      path: '/journeys'
+      fullPath: '/journeys/'
+      preLoaderRoute: typeof JourneysIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/journeys/$journeyId': {
+      id: '/journeys/$journeyId'
+      path: '/journeys/$journeyId'
+      fullPath: '/journeys/$journeyId'
+      preLoaderRoute: typeof JourneysJourneyIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/logs/': {
       id: '/logs/'
       path: '/logs'
@@ -1336,6 +1376,7 @@ const rootRouteChildren: RootRouteChildren = {
   ErrorsErrorTypeRoute: ErrorsErrorTypeRoute,
   InfraHostNameRoute: InfraHostNameRoute,
   InvestigationsIdRoute: InvestigationsIdRoute,
+  JourneysJourneyIdRoute: JourneysJourneyIdRoute,
   LogsLogIdRoute: LogsLogIdRoute,
   MetricsMetricNameRoute: MetricsMetricNameRoute,
   RecommendationsRecommendationKeyRoute: RecommendationsRecommendationKeyRoute,
@@ -1349,6 +1390,7 @@ const rootRouteChildren: RootRouteChildren = {
   ErrorsIndexRoute: ErrorsIndexRoute,
   InfraIndexRoute: InfraIndexRoute,
   InvestigationsIndexRoute: InvestigationsIndexRoute,
+  JourneysIndexRoute: JourneysIndexRoute,
   LogsIndexRoute: LogsIndexRoute,
   MetricsIndexRoute: MetricsIndexRoute,
   ReplaysIndexRoute: ReplaysIndexRoute,

@@ -102,6 +102,7 @@ import {
 } from "@/api/warehouse/traces"
 import { getQueryBuilderTimeseries } from "@/api/warehouse/query-builder-timeseries"
 import { getQueryBuilderBreakdown } from "@/api/warehouse/query-builder-breakdown"
+import { getJourneyFacets, getJourneySummary, getJourneyTimeline, listJourneys } from "@/api/warehouse/genai"
 import {
 	getReplay,
 	getReplayEvents,
@@ -272,6 +273,28 @@ export const getSessionTranscriptResultAtom = makeQueryAtomFamily(getSessionTran
 })
 
 export const getReplaysForTraceResultAtom = makeQueryAtomFamily(getReplaysForTrace, {
+	staleTime: 60_000,
+})
+
+// --- Agentic journeys -------------------------------------------------------
+// Same cadence as the replays list/facets pair they mirror.
+
+export const listJourneysResultAtom = makeQueryAtomFamily(listJourneys, {
+	staleTime: 30_000,
+})
+
+export const journeyFacetsResultAtom = makeQueryAtomFamily(getJourneyFacets, {
+	staleTime: 30_000,
+})
+
+export const getJourneySummaryResultAtom = makeQueryAtomFamily(getJourneySummary, {
+	staleTime: 60_000,
+})
+
+// A journey's spans are near-immutable once ingested (a running journey grows,
+// but only at the tail), so hold the assembled timeline across back-navigation
+// rather than refetching on every mount.
+export const getJourneyTimelineResultAtom = makeQueryAtomFamily(getJourneyTimeline, {
 	staleTime: 60_000,
 })
 

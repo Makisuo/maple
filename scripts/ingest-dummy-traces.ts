@@ -17,6 +17,14 @@
  * Pass real 40-char SHAs (`--shas`) — or let it pull recent ones from `git log` —
  * so the hover card can resolve them to actual commit messages via the GitHub app.
  *
+ * The second use case is the **agentic journeys** UI: a fixed set of synthetic
+ * GenAI journeys (`gen_ai.*` spans on `service.name=agent-service`) covering every
+ * state the journey view has to render — cumulative multi-turn message arrays,
+ * parallel tool calls with one failure, fully redacted content, a mid-conversation
+ * model switch, agent/workflow handoffs, legacy attribute names, and a still-running
+ * journey. `--journeys <n>` emits the whole set n times (default 1, `--no-journeys`
+ * to skip); the run prints each fixture's journey id so you can open it by URL.
+ *
  * Examples:
  *   # The "improve the commit-SHAs UI" scenario: 3 SHAs 10 min apart, each with a
  *   # varying number of traces, anchored at now.
@@ -29,6 +37,9 @@
  *
  *   # Inspect the payload without sending anything:
  *   bun scripts/ingest-dummy.ts --traces-per-sha 2 --dry-run
+ *
+ *   # Just the GenAI journey fixtures (no commit-SHA traces):
+ *   bun scripts/ingest-dummy.ts --traces-per-sha 0 --journeys 1
  *
  * Wire format (verified against opentelemetry-proto 0.31 `with-serde`, the crate
  * the gateway decodes JSON with): camelCase keys, trace/span ids are lowercase
@@ -162,6 +173,7 @@ interface Options {
 	errorRate: number
 	spread: number
 	anchor: number
+	journeySets: number
 	dryRun: boolean
 	quiet: boolean
 }
@@ -332,6 +344,923 @@ const generateForSha = (sha: string, at: number, opts: Options): GeneratedSha =>
 	return { sha, at, spans, logs, traceCount, errorCount }
 }
 
+// ── GenAI "agentic journey" fixtures ────────────────────────────────────────
+// A *journey* is one end-to-end agent conversation. The warehouse query
+// (`packages/query-engine/src/ch/queries/genai.ts`) reconstructs it from raw
+// spans: it keeps every span whose `gen_ai.operation.name` is non-empty — so
+// EVERY span below sets it — and groups them by a derived JourneyId that
+// coalesces `gen_ai.conversation.id` → `session.id` → `TraceId`, resolved per
+// trace. The fixtures below deliberately exercise all three rungs of that
+// ladder, `session.id` in both the span and the resource map, and both
+// generations of the churning attribute names.
+//
+// Attribute names are NOT invented here: they are exactly the keys that query
+// reads. Token counts are ints (`intValue`); cost is a decimal *string*
+// (`gen_ai.usage.cost`), which is what real emitters send and what
+// `toFloat64OrZero` expects.
+
+const JOURNEY_SERVICE = "agent-service"
+/** A journey whose last span is inside this window renders as "running". */
+const JOURNEY_RUNNING_GRACE_MS = 120_000
+
+/** Which rung of the JourneyId ladder a fixture lands on. */
+type JourneyIdKind = "conversation" | "session" | "trace"
+
+interface GeneratedJourney {
+	fixture: string
+	/** What a dev opens the journey by — the derived JourneyId. */
+	id: string
+	idKind: JourneyIdKind
+	note: string
+	/** Extra *resource* attributes for this journey (e.g. a resource `session.id`). */
+	resourceExtra: Record<string, unknown>[]
+	spans: Record<string, unknown>[]
+	logs: Record<string, unknown>[]
+	traceCount: number
+	errorCount: number
+	startedAt: number
+}
+
+// ── message-content helpers (the `gen_ai.{input,output}.messages` JSON shape) ─
+interface TextPart {
+	type: "text"
+	content: string
+}
+interface ToolCallPart {
+	type: "tool_call"
+	id: string
+	name: string
+	arguments: Record<string, unknown>
+}
+interface ChatMessage {
+	role: string
+	parts: Array<TextPart | ToolCallPart>
+}
+
+const textMessage = (role: string, content: string): ChatMessage => ({
+	role,
+	parts: [{ type: "text", content }],
+})
+const messagesJson = (messages: readonly ChatMessage[]): string => JSON.stringify(messages)
+
+// Per-span durations and the user "think time" between turns, so the timeline
+// shows real gaps rather than a solid block of spans.
+const spanDuration = (): number => randInt(300, 8000)
+const thinkTime = (): number => randInt(3000, 40_000)
+
+const conversationId = (): string => `conv_${randomBytes(8).toString("hex")}`
+const sessionIdValue = (): string => `sess_${randomBytes(8).toString("hex")}`
+
+interface JourneySpanSpec {
+	traceId: string
+	spanId?: string
+	parentSpanId?: string
+	name: string
+	kind?: number
+	startMs: number
+	durationMs: number
+	attributes: Record<string, unknown>[]
+	/** Non-empty ⇒ status ERROR with this message. Otherwise UNSET (never OK). */
+	error?: string
+	events?: Record<string, unknown>[]
+}
+
+const journeySpan = (spec: JourneySpanSpec): Record<string, unknown> => {
+	const span: Record<string, unknown> = {
+		traceId: spec.traceId,
+		spanId: spec.spanId ?? spanId(),
+		name: spec.name,
+		kind: spec.kind ?? SPAN_KIND_CLIENT,
+		startTimeUnixNano: nano(spec.startMs),
+		endTimeUnixNano: nano(spec.startMs + spec.durationMs),
+		attributes: spec.attributes,
+		status: spec.error ? { code: STATUS_ERROR, message: spec.error } : { code: STATUS_UNSET },
+	}
+	if (spec.parentSpanId) span.parentSpanId = spec.parentSpanId
+	if (spec.events) span.events = spec.events
+	return span
+}
+
+const exceptionEvent = (at: number, type: string, message: string): Record<string, unknown> => ({
+	timeUnixNano: nano(at),
+	name: "exception",
+	attributes: [
+		attr("exception.type", type),
+		attr("exception.message", message),
+		attr("exception.stacktrace", `${type}: ${message}\n    at executeTool (agent-service.ts:87)`),
+	],
+})
+
+/** Cost as the decimal string real emitters send (never a number). */
+const costAttr = (inputTokens: number, outputTokens: number): Record<string, unknown> =>
+	attr("gen_ai.usage.cost", (inputTokens * 0.0000025 + outputTokens * 0.00001).toFixed(5))
+
+interface InferenceAttrOpts {
+	provider?: string
+	requestModel: string
+	responseModel?: string
+	inputTokens: number
+	outputTokens: number
+	cachedInputTokens?: number
+	reasoningTokens?: number
+	finishReason?: string
+	input?: string
+	output?: string
+	systemInstructions?: string
+	extra?: Record<string, unknown>[]
+}
+
+/** The attribute set of one `chat` span, minus identity (added per fixture). */
+const inferenceAttrs = (o: InferenceAttrOpts): Record<string, unknown>[] => [
+	attr("gen_ai.operation.name", "chat"),
+	attr("gen_ai.provider.name", o.provider ?? "openai"),
+	attr("gen_ai.request.model", o.requestModel),
+	attr("gen_ai.response.model", o.responseModel ?? o.requestModel),
+	attr("gen_ai.usage.input_tokens", o.inputTokens),
+	attr("gen_ai.usage.output_tokens", o.outputTokens),
+	attr("gen_ai.usage.cached_input_tokens", o.cachedInputTokens ?? 0),
+	attr("gen_ai.usage.reasoning_tokens", o.reasoningTokens ?? 0),
+	costAttr(o.inputTokens, o.outputTokens),
+	...(o.finishReason ? [attr("gen_ai.response.finish_reasons", o.finishReason)] : []),
+	...(o.input ? [attr("gen_ai.input.messages", o.input)] : []),
+	...(o.output ? [attr("gen_ai.output.messages", o.output)] : []),
+	...(o.systemInstructions ? [attr("gen_ai.system_instructions", o.systemInstructions)] : []),
+	...(o.extra ?? []),
+]
+
+const SYSTEM_PROMPT =
+	"You are Maple's observability copilot. Answer with concrete spans, services and metrics; " +
+	"call tools before speculating."
+
+/** Scatter a journey's start somewhere in the last ~2h (before the anchor). */
+const journeyStart = (opts: Options): number => opts.anchor - randInt(10, 115) * 60_000
+
+/** Earliest `startTimeUnixNano` across a fixture's spans, back in epoch ms. */
+const journeyStartOf = (spans: Record<string, unknown>[]): number => {
+	let min = Number.POSITIVE_INFINITY
+	for (const s of spans) min = Math.min(min, Number(BigInt(s.startTimeUnixNano as string) / 1_000_000n))
+	return Number.isFinite(min) ? min : Date.now()
+}
+
+// ── (a) multi-turn, cumulative input.messages — the N² dedupe trap ───────────
+const CUMULATIVE_TURNS: ReadonlyArray<{ user: string; assistant: string }> = [
+	{
+		user: "Checkout p95 doubled after this morning's deploy. Where do I look?",
+		assistant:
+			"p95 on `POST /api/orders` went 410ms → 890ms at 09:12, right on deploy ea0466f. " +
+			"The extra time is all in the `INSERT payments` child span.",
+	},
+	{
+		user: "Is it every request or a subset?",
+		assistant:
+			"A subset: 18% of requests, all from org shards 3 and 7. The rest are unchanged at ~400ms.",
+	},
+	{
+		user: "What changed in that deploy for those shards?",
+		assistant:
+			"ea0466f added a per-row `SELECT ... FOR UPDATE` in the payment writer. On shards 3 and 7 " +
+			"it serializes behind the nightly reconciliation job.",
+	},
+	{
+		user: "Give me the smallest fix that unblocks the release.",
+		assistant:
+			"Batch the lock acquisition per order instead of per line item — one statement, no schema " +
+			"change. That drops the contention window from ~450ms to ~20ms.",
+	},
+]
+
+const journeyMultiTurnCumulative = (opts: Options): GeneratedJourney => {
+	const convId = conversationId()
+	const spans: Record<string, unknown>[] = []
+	const logs: Record<string, unknown>[] = []
+	// The conversation as the model sees it: every turn's input repeats ALL of it.
+	const history: ChatMessage[] = []
+	let at = journeyStart(opts)
+
+	CUMULATIVE_TURNS.forEach((turn, i) => {
+		history.push(textMessage("user", turn.user))
+		const input = messagesJson(history) // snapshot: prior turns + the new user message
+		const output = messagesJson([textMessage("assistant", turn.assistant)])
+		history.push(textMessage("assistant", turn.assistant))
+
+		// Each turn is its OWN trace; only the conversation id ties them together.
+		const tid = traceId()
+		const sid = spanId()
+		const duration = spanDuration()
+		// Input tokens grow with the (cumulative) history — that's the whole point.
+		const inputTokens = 320 + i * 460 + randInt(0, 40)
+		const outputTokens = randInt(90, 260)
+		spans.push(
+			journeySpan({
+				traceId: tid,
+				spanId: sid,
+				name: "chat gpt-4o",
+				startMs: at,
+				durationMs: duration,
+				attributes: [
+					...inferenceAttrs({
+						requestModel: "gpt-4o",
+						inputTokens,
+						outputTokens,
+						cachedInputTokens: i === 0 ? 0 : 256 * i,
+						finishReason: "stop",
+						input,
+						output,
+						systemInstructions: SYSTEM_PROMPT,
+					}),
+					attr("gen_ai.conversation.id", convId),
+				],
+			}),
+		)
+		logs.push({
+			timeUnixNano: nano(at + duration),
+			severityNumber: SEVERITY_INFO,
+			severityText: "INFO",
+			body: { stringValue: `turn ${i + 1}/${CUMULATIVE_TURNS.length} completed (${outputTokens} output tokens)` },
+			traceId: tid,
+			spanId: sid,
+			attributes: [attr("gen_ai.conversation.id", convId)],
+		})
+		at += duration + thinkTime()
+	})
+
+	return {
+		fixture: "multi-turn-cumulative",
+		id: convId,
+		idKind: "conversation",
+		note: "4 turns, 4 traces, input.messages repeats every prior turn (N² dedupe trap)",
+		resourceExtra: [],
+		spans,
+		logs,
+		traceCount: CUMULATIVE_TURNS.length,
+		errorCount: 0,
+		startedAt: journeyStartOf(spans),
+	}
+}
+
+// ── (b) parallel tool calls, one failing — session.id as a SPAN attribute ────
+const journeyParallelTools = (opts: Options): GeneratedJourney => {
+	const sessId = sessionIdValue()
+	const sessionAttr = attr("session.id", sessId)
+	const spans: Record<string, unknown>[] = []
+	const logs: Record<string, unknown>[] = []
+	const tid = traceId()
+	const inferenceId = spanId()
+	const start = journeyStart(opts)
+
+	const userText = "Compare our error budget burn to last week and pull the runbook for checkout."
+	const assistantWithToolCalls: ChatMessage = {
+		role: "assistant",
+		parts: [
+			{
+				type: "tool_call",
+				id: "call_a",
+				name: "query_error_budget",
+				arguments: { service: "checkout-api", window: "7d", compareTo: "previous_period" },
+			},
+			{
+				type: "tool_call",
+				id: "call_b",
+				name: "search_docs",
+				arguments: { query: "checkout runbook rollback", limit: 3 },
+			},
+			{ type: "text", content: "Pulling both now." },
+		],
+	}
+
+	const inferenceDuration = randInt(900, 2600)
+	spans.push(
+		journeySpan({
+			traceId: tid,
+			spanId: inferenceId,
+			name: "chat claude-sonnet-4",
+			startMs: start,
+			durationMs: inferenceDuration,
+			attributes: [
+				...inferenceAttrs({
+					provider: "anthropic",
+					requestModel: "claude-sonnet-4",
+					inputTokens: 780,
+					outputTokens: 180,
+					finishReason: "tool_calls",
+					input: messagesJson([textMessage("user", userText)]),
+					output: messagesJson([assistantWithToolCalls]),
+					systemInstructions: SYSTEM_PROMPT,
+				}),
+				sessionAttr,
+			],
+		}),
+	)
+
+	// Two siblings of the SAME inference span, deliberately OVERLAPPING in time.
+	const toolsStart = start + inferenceDuration
+	const toolA = { start: toolsStart + 40, duration: randInt(1800, 4200) }
+	const toolB = { start: toolsStart + 220, duration: randInt(2400, 6000) }
+
+	spans.push(
+		journeySpan({
+			traceId: tid,
+			spanId: spanId(),
+			parentSpanId: inferenceId,
+			name: "execute_tool query_error_budget",
+			kind: SPAN_KIND_INTERNAL,
+			startMs: toolA.start,
+			durationMs: toolA.duration,
+			attributes: [
+				attr("gen_ai.operation.name", "execute_tool"),
+				attr("gen_ai.provider.name", "anthropic"),
+				attr("gen_ai.request.tool.name", "query_error_budget"),
+				attr("gen_ai.request.tool.type", "function"),
+				attr("gen_ai.tool.call.id", "call_a"),
+				attr(
+					"gen_ai.tool.call.arguments",
+					JSON.stringify({ service: "checkout-api", window: "7d", compareTo: "previous_period" }),
+				),
+				attr(
+					"gen_ai.tool.call.result",
+					JSON.stringify({ burnedPct: 62.4, previousPct: 28.1, budgetRemainingMinutes: 41 }),
+				),
+				sessionAttr,
+			],
+		}),
+	)
+
+	const failAt = toolB.start + toolB.duration - 5
+	spans.push(
+		journeySpan({
+			traceId: tid,
+			spanId: spanId(),
+			parentSpanId: inferenceId,
+			name: "execute_tool search_docs",
+			kind: SPAN_KIND_INTERNAL,
+			startMs: toolB.start,
+			durationMs: toolB.duration,
+			error: "tool call failed: docs index unavailable",
+			events: [exceptionEvent(failAt, "ToolExecutionError", "docs index unavailable (503 from search-svc)")],
+			attributes: [
+				attr("gen_ai.operation.name", "execute_tool"),
+				attr("gen_ai.provider.name", "anthropic"),
+				attr("gen_ai.request.tool.name", "search_docs"),
+				attr("gen_ai.request.tool.type", "function"),
+				attr("gen_ai.tool.call.id", "call_b"),
+				attr(
+					"gen_ai.tool.call.arguments",
+					JSON.stringify({ query: "checkout runbook rollback", limit: 3 }),
+				),
+				sessionAttr,
+			],
+		}),
+	)
+	logs.push({
+		timeUnixNano: nano(failAt),
+		severityNumber: SEVERITY_ERROR,
+		severityText: "ERROR",
+		body: { stringValue: "tool call_b (search_docs) failed: docs index unavailable" },
+		traceId: tid,
+		spanId: inferenceId,
+		attributes: [attr("session.id", sessId), attr("gen_ai.tool.call.id", "call_b")],
+	})
+
+	// The follow-up turn, in the same trace, that reasons about the half-failure.
+	const followStart = Math.max(toolA.start + toolA.duration, toolB.start + toolB.duration) + 120
+	spans.push(
+		journeySpan({
+			traceId: tid,
+			spanId: spanId(),
+			parentSpanId: inferenceId,
+			name: "chat claude-sonnet-4",
+			startMs: followStart,
+			durationMs: spanDuration(),
+			attributes: [
+				...inferenceAttrs({
+					provider: "anthropic",
+					requestModel: "claude-sonnet-4",
+					inputTokens: 1120,
+					outputTokens: 210,
+					finishReason: "stop",
+					input: messagesJson([
+						textMessage("user", userText),
+						assistantWithToolCalls,
+						textMessage("tool", JSON.stringify({ burnedPct: 62.4, previousPct: 28.1 })),
+					]),
+					output: messagesJson([
+						textMessage(
+							"assistant",
+							"Burn is 62% vs 28% last week — mostly the 09:12 deploy. The runbook lookup failed " +
+								"(docs index 503), so here's the rollback from memory: revert ea0466f, then re-run the " +
+								"payment reconciliation.",
+						),
+					]),
+					systemInstructions: SYSTEM_PROMPT,
+				}),
+				sessionAttr,
+			],
+		}),
+	)
+
+	return {
+		fixture: "parallel-tools-one-failing",
+		id: sessId,
+		idKind: "session",
+		note: "2 overlapping execute_tool siblings under one turn, call_b ERROR (session.id on the SPAN)",
+		resourceExtra: [],
+		spans,
+		logs,
+		traceCount: 1,
+		errorCount: 1,
+		startedAt: start,
+	}
+}
+
+// ── (c) fully content-redacted (privacy mode) ───────────────────────────────
+const journeyRedacted = (opts: Options): GeneratedJourney => {
+	const convId = conversationId()
+	const spans: Record<string, unknown>[] = []
+	let at = journeyStart(opts)
+
+	for (let i = 0; i < 3; i++) {
+		const duration = spanDuration()
+		spans.push(
+			journeySpan({
+				traceId: traceId(),
+				name: "chat gpt-4o-mini",
+				startMs: at,
+				durationMs: duration,
+				// Timing, model, tokens and cost survive; every content attribute is
+				// stripped — no input.messages / output.messages / system_instructions.
+				attributes: [
+					...inferenceAttrs({
+						requestModel: "gpt-4o-mini",
+						inputTokens: 410 + i * 380,
+						outputTokens: randInt(80, 220),
+						cachedInputTokens: i * 128,
+						finishReason: "stop",
+					}),
+					attr("gen_ai.conversation.id", convId),
+				],
+			}),
+		)
+		at += duration + thinkTime()
+	}
+
+	return {
+		fixture: "content-redacted",
+		id: convId,
+		idKind: "conversation",
+		note: "3 turns with tokens/cost/timing but NO message content at all",
+		resourceExtra: [],
+		spans,
+		logs: [],
+		traceCount: 3,
+		errorCount: 0,
+		startedAt: journeyStartOf(spans),
+	}
+}
+
+// ── (d) multi-model, mid-conversation switch + router divergence ─────────────
+const journeyMultiModel = (opts: Options): GeneratedJourney => {
+	const convId = conversationId()
+	const spans: Record<string, unknown>[] = []
+	const history: ChatMessage[] = []
+	let at = journeyStart(opts)
+
+	const turns: ReadonlyArray<{
+		user: string
+		assistant: string
+		requestModel: string
+		responseModel: string
+	}> = [
+		{
+			user: "Summarize the last 24h of alerts for checkout-api.",
+			assistant: "17 alerts, 3 distinct rules; 11 of them are the latency rule flapping between 09:00 and 11:00.",
+			requestModel: "gpt-4o-mini",
+			responseModel: "gpt-4o-mini",
+		},
+		{
+			user: "Which rule is noisiest and why?",
+			assistant: "`checkout p95 > 800ms` — a 1-minute window with no for-duration, so every spike pages.",
+			// Router divergence: asked for the cheap tier, served an -0718 build.
+			requestModel: "gpt-4o-mini",
+			responseModel: "gpt-4o-mini-2024-07-18",
+		},
+		{
+			user: "Escalate: draft the rule change and explain the trade-off properly.",
+			assistant:
+				"Move to a 5-minute window with `for: 10m`. You lose ~4 minutes of detection latency and drop " +
+				"11 pages/day to about 1.",
+			requestModel: "o3",
+			responseModel: "o3",
+		},
+		{
+			user: "What breaks if traffic triples on Black Friday?",
+			assistant:
+				"The 5-minute window still holds, but the static 800ms threshold won't — switch it to a burn-rate " +
+				"alert on the 99.5% SLO before the event.",
+			// Second divergence, on the escalated model.
+			requestModel: "o3",
+			responseModel: "o3-2025-04-16",
+		},
+	]
+
+	turns.forEach((turn, i) => {
+		history.push(textMessage("user", turn.user))
+		const input = messagesJson(history)
+		const output = messagesJson([textMessage("assistant", turn.assistant)])
+		history.push(textMessage("assistant", turn.assistant))
+		const duration = i >= 2 ? randInt(3000, 8000) : spanDuration()
+		spans.push(
+			journeySpan({
+				traceId: traceId(),
+				name: `chat ${turn.requestModel}`,
+				startMs: at,
+				durationMs: duration,
+				attributes: [
+					...inferenceAttrs({
+						provider: "openrouter",
+						requestModel: turn.requestModel,
+						responseModel: turn.responseModel,
+						inputTokens: 300 + i * 420,
+						outputTokens: randInt(120, 340),
+						reasoningTokens: i >= 2 ? randInt(400, 1800) : 0,
+						finishReason: "stop",
+						input,
+						output,
+						systemInstructions: SYSTEM_PROMPT,
+					}),
+					attr("gen_ai.conversation.id", convId),
+				],
+			}),
+		)
+		at += duration + thinkTime()
+	})
+
+	return {
+		fixture: "multi-model-switch",
+		id: convId,
+		idKind: "conversation",
+		note: "4 turns: gpt-4o-mini → o3 mid-conversation, requested ≠ served on 2 spans",
+		resourceExtra: [],
+		spans,
+		logs: [],
+		traceCount: turns.length,
+		errorCount: 0,
+		startedAt: journeyStartOf(spans),
+	}
+}
+
+// ── (e) agent / workflow journey with non-message operations + a handoff ─────
+const journeyAgentWorkflow = (opts: Options): GeneratedJourney => {
+	const convId = conversationId()
+	const workflow = "incident-triage"
+	const triageAgent = [attr("gen_ai.agent.name", "triage-agent"), attr("gen_ai.agent.id", "agent_triage_01")]
+	const remediationAgent = [
+		attr("gen_ai.agent.name", "remediation-agent"),
+		attr("gen_ai.agent.id", "agent_remediation_02"),
+	]
+	const shared = [attr("gen_ai.workflow.name", workflow), attr("gen_ai.conversation.id", convId)]
+	const spans: Record<string, unknown>[] = []
+	const logs: Record<string, unknown>[] = []
+
+	// Trace 1 — triage agent: a turn, a retrieval, then a turn using what it found.
+	const t1 = traceId()
+	let at = journeyStart(opts)
+	const openingUser = "Incident INC-4821: checkout error rate 12%. Triage it."
+	const turn1Duration = spanDuration()
+	const turn1Span = spanId()
+	spans.push(
+		journeySpan({
+			traceId: t1,
+			spanId: turn1Span,
+			name: "chat gpt-4o",
+			startMs: at,
+			durationMs: turn1Duration,
+			attributes: [
+				...inferenceAttrs({
+					requestModel: "gpt-4o",
+					inputTokens: 640,
+					outputTokens: 190,
+					finishReason: "stop",
+					input: messagesJson([textMessage("user", openingUser)]),
+					output: messagesJson([
+						textMessage("assistant", "Pulling similar past incidents before I conclude anything."),
+					]),
+					systemInstructions: SYSTEM_PROMPT,
+				}),
+				...triageAgent,
+				...shared,
+			],
+		}),
+	)
+	at += turn1Duration + 150
+
+	const retrievalDuration = randInt(300, 1400)
+	spans.push(
+		journeySpan({
+			traceId: t1,
+			parentSpanId: turn1Span,
+			name: "retrieval incident_history",
+			kind: SPAN_KIND_INTERNAL,
+			startMs: at,
+			durationMs: retrievalDuration,
+			// A non-message operation: no messages, but still a first-class GenAI span.
+			attributes: [
+				attr("gen_ai.operation.name", "retrieval"),
+				attr("gen_ai.provider.name", "openai"),
+				attr("gen_ai.request.model", "text-embedding-3-large"),
+				attr("gen_ai.response.model", "text-embedding-3-large"),
+				attr("gen_ai.usage.input_tokens", 96),
+				attr("gen_ai.usage.output_tokens", 0),
+				attr("retrieval.documents.count", 5),
+				...triageAgent,
+				...shared,
+			],
+		}),
+	)
+	at += retrievalDuration + 200
+
+	const turn2Duration = spanDuration()
+	spans.push(
+		journeySpan({
+			traceId: t1,
+			name: "chat gpt-4o",
+			startMs: at,
+			durationMs: turn2Duration,
+			attributes: [
+				...inferenceAttrs({
+					requestModel: "gpt-4o",
+					inputTokens: 1480,
+					outputTokens: 300,
+					cachedInputTokens: 512,
+					finishReason: "stop",
+					input: messagesJson([
+						textMessage("user", openingUser),
+						textMessage("assistant", "Pulling similar past incidents before I conclude anything."),
+						textMessage("tool", "5 similar incidents; 4 resolved by rolling back a payment-writer change."),
+					]),
+					output: messagesJson([
+						textMessage(
+							"assistant",
+							"Same signature as INC-4102 and INC-4390: payment-writer lock contention. Handing off to " +
+								"remediation-agent to prepare the rollback.",
+						),
+					]),
+					systemInstructions: SYSTEM_PROMPT,
+				}),
+				...triageAgent,
+				...shared,
+			],
+		}),
+	)
+	at += turn2Duration + thinkTime()
+
+	// Trace 2 — the handoff itself, then the second agent's turn.
+	const t2 = traceId()
+	const invokeSpan = spanId()
+	const invokeDuration = randInt(1200, 5000)
+	spans.push(
+		journeySpan({
+			traceId: t2,
+			spanId: invokeSpan,
+			name: "invoke_agent remediation-agent",
+			startMs: at,
+			durationMs: invokeDuration,
+			attributes: [
+				attr("gen_ai.operation.name", "invoke_agent"),
+				attr("gen_ai.provider.name", "openai"),
+				// The handoff target: a SECOND agent name inside the same journey.
+				...remediationAgent,
+				...shared,
+				attr("gen_ai.request.model", "gpt-4o"),
+			],
+		}),
+	)
+	logs.push({
+		timeUnixNano: nano(at),
+		severityNumber: SEVERITY_WARN,
+		severityText: "WARN",
+		body: { stringValue: `${workflow}: handing off triage-agent → remediation-agent (INC-4821)` },
+		traceId: t2,
+		spanId: invokeSpan,
+		attributes: [attr("gen_ai.workflow.name", workflow), attr("gen_ai.conversation.id", convId)],
+	})
+	at += 200
+
+	spans.push(
+		journeySpan({
+			traceId: t2,
+			parentSpanId: invokeSpan,
+			name: "chat gpt-4o",
+			startMs: at,
+			durationMs: Math.max(300, invokeDuration - 400),
+			attributes: [
+				...inferenceAttrs({
+					requestModel: "gpt-4o",
+					inputTokens: 890,
+					outputTokens: 260,
+					finishReason: "stop",
+					input: messagesJson([
+						textMessage("user", "Prepare a rollback plan for ea0466f on checkout-api."),
+					]),
+					output: messagesJson([
+						textMessage(
+							"assistant",
+							"Rollback drafted: revert ea0466f, redeploy 3 shards at a time, re-run reconciliation. " +
+								"Estimated 6 minutes to full recovery.",
+						),
+					]),
+					systemInstructions: SYSTEM_PROMPT,
+				}),
+				...remediationAgent,
+				...shared,
+			],
+		}),
+	)
+
+	return {
+		fixture: "agent-workflow-handoff",
+		id: convId,
+		idKind: "conversation",
+		note: "workflow incident-triage: retrieval + invoke_agent handoff triage-agent → remediation-agent",
+		resourceExtra: [],
+		spans,
+		logs,
+		traceCount: 2,
+		errorCount: 0,
+		startedAt: journeyStartOf(spans),
+	}
+}
+
+// ── (f) legacy attribute names — no conversation/session id ⇒ TraceId is the id ─
+const journeyLegacyAttributes = (opts: Options): GeneratedJourney => {
+	// This fixture MUST stay inside one trace: with neither `gen_ai.conversation.id`
+	// nor `session.id`, the JourneyId falls all the way back to `TraceId`, and a
+	// second trace would be a second journey.
+	const tid = traceId()
+	const spans: Record<string, unknown>[] = []
+	const rootId = spanId()
+	let at = journeyStart(opts)
+
+	const turns: ReadonlyArray<{ prompt: string; completion: string }> = [
+		{
+			prompt: "Which service owns the `orders.created` topic?",
+			completion: "`checkout-api` publishes it; `fulfilment-worker` and `analytics-ingest` consume it.",
+		},
+		{
+			prompt: "Show me the consumer lag for fulfilment-worker.",
+			completion: "Peak lag today was 4,120 messages at 09:14, back to <50 by 09:31.",
+		},
+	]
+
+	turns.forEach((turn, i) => {
+		const duration = spanDuration()
+		spans.push(
+			journeySpan({
+				traceId: tid,
+				spanId: i === 0 ? rootId : undefined,
+				parentSpanId: i === 0 ? undefined : rootId,
+				name: "openai.chat",
+				startMs: at,
+				durationMs: duration,
+				// Every name here is the OLD generation — the query coalesces each of
+				// them onto its modern counterpart, and this is what proves it.
+				attributes: [
+					attr("gen_ai.operation.name", "chat"),
+					attr("gen_ai.system", "openai"),
+					attr("gen_ai.request.model", "gpt-4-turbo"),
+					attr("gen_ai.response.model", "gpt-4-turbo"),
+					attr("gen_ai.usage.prompt_tokens", 260 + i * 310),
+					attr("gen_ai.usage.completion_tokens", randInt(70, 190)),
+					attr("gen_ai.prompt", messagesJson([textMessage("user", turn.prompt)])),
+					attr("gen_ai.completion", messagesJson([textMessage("assistant", turn.completion)])),
+					attr("gen_ai.response.finish_reasons", "stop"),
+				],
+			}),
+		)
+		at += duration + thinkTime()
+	})
+
+	// A legacy tool span too: `gen_ai.tool.name` instead of `gen_ai.request.tool.name`.
+	const toolDuration = randInt(400, 2500)
+	spans.push(
+		journeySpan({
+			traceId: tid,
+			parentSpanId: rootId,
+			name: "openai.tool",
+			kind: SPAN_KIND_INTERNAL,
+			startMs: at,
+			durationMs: toolDuration,
+			attributes: [
+				attr("gen_ai.operation.name", "execute_tool"),
+				attr("gen_ai.system", "openai"),
+				attr("gen_ai.tool.name", "consumer_lag"),
+				attr("gen_ai.tool.call.id", "call_legacy_1"),
+				attr("gen_ai.tool.call.arguments", JSON.stringify({ topic: "orders.created" })),
+				attr("gen_ai.tool.call.result", JSON.stringify({ peakLag: 4120, at: "09:14" })),
+			],
+		}),
+	)
+
+	return {
+		fixture: "legacy-attribute-names",
+		id: tid,
+		idKind: "trace",
+		note: "gen_ai.system / prompt_tokens / prompt / completion / tool.name — single trace, id = TraceId",
+		resourceExtra: [],
+		spans,
+		logs: [],
+		traceCount: 1,
+		errorCount: 0,
+		startedAt: journeyStartOf(spans),
+	}
+}
+
+// ── (g) in-progress — session.id as a RESOURCE attribute, ends ~now ──────────
+const journeyRunning = (opts: Options): GeneratedJourney => {
+	const sessId = sessionIdValue()
+	const spans: Record<string, unknown>[] = []
+	const history: ChatMessage[] = []
+
+	const turns: ReadonlyArray<{ user: string; assistant?: string }> = [
+		{
+			user: "Start a cost review of last month's LLM spend.",
+			assistant: "Pulling per-model spend for the last 30 days.",
+		},
+		{
+			user: "Break it down by workflow, not by model.",
+			assistant: "incident-triage is 61% of spend, chat 27%, batch summarization 12%.",
+		},
+		// The last turn is still streaming: no assistant reply, no finish_reasons.
+		{ user: "Where's the cheapest 20% to cut without hurting triage quality?" },
+	]
+
+	// Anchor the tail at ~15s ago so the journey lands inside the running grace
+	// window (the backend has no in-progress marker — recency is the signal).
+	const lastDuration = randInt(4000, 8000)
+	const lastStart = opts.anchor - 15_000 - lastDuration
+	let at = lastStart
+	for (let i = turns.length - 2; i >= 0; i--) at -= spanDuration() + thinkTime()
+
+	turns.forEach((turn, i) => {
+		history.push(textMessage("user", turn.user))
+		const input = messagesJson(history)
+		const isLast = i === turns.length - 1
+		const duration = isLast ? lastDuration : spanDuration()
+		const startMs = isLast ? lastStart : at
+		if (turn.assistant) history.push(textMessage("assistant", turn.assistant))
+		spans.push(
+			journeySpan({
+				traceId: traceId(),
+				name: "chat claude-sonnet-4",
+				startMs,
+				durationMs: duration,
+				attributes: inferenceAttrs({
+					provider: "anthropic",
+					requestModel: "claude-sonnet-4",
+					inputTokens: 380 + i * 430,
+					outputTokens: turn.assistant ? randInt(110, 260) : 0,
+					// No finish_reasons on the in-flight turn, and no output messages.
+					finishReason: turn.assistant ? "stop" : undefined,
+					input,
+					output: turn.assistant ? messagesJson([textMessage("assistant", turn.assistant)]) : undefined,
+					systemInstructions: SYSTEM_PROMPT,
+				}),
+			}),
+		)
+		if (!isLast) at += duration + thinkTime()
+	})
+
+	return {
+		fixture: "in-progress",
+		id: sessId,
+		idKind: "session",
+		// The resource map is the other place `session.id` legitimately lives.
+		resourceExtra: [attr("session.id", sessId)],
+		note: `3 turns, last span ends ~15s ago (< ${JOURNEY_RUNNING_GRACE_MS / 1000}s grace), session.id on the RESOURCE`,
+		spans,
+		logs: [],
+		traceCount: turns.length,
+		errorCount: 0,
+		startedAt: journeyStartOf(spans),
+	}
+}
+
+const JOURNEY_FIXTURES: ReadonlyArray<(opts: Options) => GeneratedJourney> = [
+	journeyMultiTurnCumulative,
+	journeyParallelTools,
+	journeyRedacted,
+	journeyMultiModel,
+	journeyAgentWorkflow,
+	journeyLegacyAttributes,
+	journeyRunning,
+]
+
+/** The whole fixture set, `sets` times over (fresh ids and timings each round). */
+const generateJourneys = (opts: Options): GeneratedJourney[] => {
+	const out: GeneratedJourney[] = []
+	for (let i = 0; i < opts.journeySets; i++) for (const make of JOURNEY_FIXTURES) out.push(make(opts))
+	return out.sort((a, b) => a.startedAt - b.startedAt)
+}
+
 const resourceAttrs = (opts: Options, sha: string): Record<string, unknown>[] => [
 	attr("service.name", opts.service),
 	// Dual-emitted like every real Maple producer: `deployment.environment.name` is
@@ -340,6 +1269,18 @@ const resourceAttrs = (opts: Options, sha: string): Record<string, unknown>[] =>
 	attr("deployment.environment.name", opts.env),
 	attr("deployment.environment", opts.env),
 	attr("deployment.commit_sha", sha),
+]
+
+/**
+ * Same shape as `resourceAttrs`, minus the commit SHA (journeys aren't a deploy
+ * story) and on the agent service. `resourceExtra` is where a fixture puts a
+ * RESOURCE-level `session.id` — the other map the JourneyId coalesce reads.
+ */
+const journeyResourceAttrs = (opts: Options, j: GeneratedJourney): Record<string, unknown>[] => [
+	attr("service.name", JOURNEY_SERVICE),
+	attr("deployment.environment.name", opts.env),
+	attr("deployment.environment", opts.env),
+	...j.resourceExtra,
 ]
 
 const chunk = <T>(xs: T[], size: number): T[][] => {
@@ -393,6 +1334,49 @@ const summarize = (generated: GeneratedSha[], opts: Options): void => {
 	)
 }
 
+const summarizeJourneys = (journeys: GeneratedJourney[], opts: Options): void => {
+	if (journeys.length === 0) return
+	const totalSpans = journeys.reduce((n, j) => n + j.spans.length, 0)
+	const totalLogs = journeys.reduce((n, j) => n + j.logs.length, 0)
+	const totalTraces = journeys.reduce((n, j) => n + j.traceCount, 0)
+	const totalErrors = journeys.reduce((n, j) => n + j.errorCount, 0)
+
+	console.log(`\n  GenAI journeys — service: ${JOURNEY_SERVICE}   env: ${opts.env}`)
+	console.log(
+		`  ${"fixture".padEnd(26)} ${"when".padEnd(20)} ${"traces".padStart(6)} ${"spans".padStart(6)} ${"logs".padStart(5)} ${"err".padStart(4)}`,
+	)
+	for (const j of journeys) {
+		console.log(
+			`  ${j.fixture.padEnd(26)} ${new Date(j.startedAt).toISOString().slice(0, 19).replace("T", " ").padEnd(20)} ` +
+				`${String(j.traceCount).padStart(6)} ${String(j.spans.length).padStart(6)} ${String(j.logs.length).padStart(5)} ${String(j.errorCount).padStart(4)}`,
+		)
+		console.log(`  ${"".padEnd(26)} ${j.note}`)
+	}
+	console.log(`  ${"─".repeat(72)}`)
+	console.log(
+		`  ${"total".padEnd(26)} ${"".padEnd(20)} ${String(totalTraces).padStart(6)} ${String(totalSpans).padStart(6)} ${String(totalLogs).padStart(5)} ${String(totalErrors).padStart(4)}`,
+	)
+}
+
+/**
+ * The bit a dev actually needs: the derived JourneyId per fixture, and the URL
+ * to open it. Nothing links to the journey route yet — hand-built URLs are the
+ * entry point.
+ */
+const printJourneyIds = (journeys: GeneratedJourney[]): void => {
+	if (journeys.length === 0) return
+	// Nothing links to the journey route yet — these hand-built URLs are the entry point.
+	console.log("\n  ── journey ids (open each at /journeys/<id>) ──")
+	console.log(`  ${"fixture".padEnd(26)} ${"id from".padEnd(16)} id`)
+	for (const j of journeys) {
+		console.log(`  ${j.fixture.padEnd(26)} ${`${j.idKind} id`.padEnd(16)} ${j.id}`)
+	}
+	console.log("")
+	for (const j of journeys) {
+		console.log(`  https://web.localhost/journeys/${encodeURIComponent(j.id)}   # ${j.fixture}`)
+	}
+}
+
 const HELP = `
 ingest-dummy — push dummy OTLP traces + logs to the local ingest gateway
 
@@ -414,6 +1398,16 @@ Shape:
   --error-rate <0..1>     fraction of traces that error (default 0.08)
   --spread <dur>          scatter window per SHA, s/m/h (default 90s)
   --anchor <when>         time of the newest SHA: "now" or ISO-8601 (default now)
+
+GenAI journeys (service "${JOURNEY_SERVICE}"):
+  --journeys <n>          emit the whole journey fixture set n times (default 1;
+                          0 or --no-journeys to skip). Fixtures: multi-turn-cumulative,
+                          parallel-tools-one-failing, content-redacted, multi-model-switch,
+                          agent-workflow-handoff, legacy-attribute-names, in-progress.
+                          Journeys are scattered over the ~2h before --anchor (except
+                          in-progress, which is anchored at it) and their ids are printed
+                          at the end of the run.
+  --no-journeys           skip the journey fixtures entirely
 
 Control:
   --seed <n>              seed the shape RNG for reproducible counts/latencies
@@ -438,6 +1432,8 @@ const main = async (): Promise<void> => {
 			"error-rate": { type: "string" },
 			spread: { type: "string" },
 			anchor: { type: "string" },
+			journeys: { type: "string" },
+			"no-journeys": { type: "boolean" },
 			seed: { type: "string" },
 			"dry-run": { type: "boolean" },
 			quiet: { type: "boolean" },
@@ -476,6 +1472,11 @@ const main = async (): Promise<void> => {
 			)
 	}
 
+	// Journeys are on by default (one full fixture set); --journeys 0 / --no-journeys opt out.
+	const journeySets = values["no-journeys"] ? 0 : values.journeys ? Number(values.journeys) : 1
+	if (!Number.isInteger(journeySets) || journeySets < 0)
+		fail(`--journeys: expected a non-negative integer, got "${values.journeys}"`)
+
 	const anchorRaw = values.anchor?.trim()
 	const anchor = !anchorRaw || anchorRaw === "now" ? Date.now() : Date.parse(anchorRaw)
 	if (Number.isNaN(anchor))
@@ -494,6 +1495,7 @@ const main = async (): Promise<void> => {
 		errorRate: values["error-rate"] ? Number(values["error-rate"]) : 0.08,
 		spread: parseDurationMs(values.spread ?? "90s", "--spread"),
 		anchor,
+		journeySets,
 		dryRun: Boolean(values["dry-run"]),
 		quiet: Boolean(values.quiet),
 	}
@@ -504,7 +1506,12 @@ const main = async (): Promise<void> => {
 		generateForSha(sha, opts.anchor - (opts.shas.length - 1 - i) * opts.shaInterval, opts),
 	)
 
-	if (!opts.quiet) summarize(generated, opts)
+	const journeys = generateJourneys(opts)
+
+	if (!opts.quiet) {
+		summarize(generated, opts)
+		summarizeJourneys(journeys, opts)
+	}
 
 	if (opts.dryRun) {
 		const sample = generated.find((g) => g.spans.length > 0)
@@ -524,6 +1531,29 @@ const main = async (): Promise<void> => {
 					.join("\n"),
 			)
 		}
+		const journeySample = journeys[0]
+		if (journeySample) {
+			console.log(`\n  ── sample journey resourceSpans (${journeySample.fixture}, dry-run) ──`)
+			console.log(
+				JSON.stringify(
+					{
+						resource: { attributes: journeyResourceAttrs(opts, journeySample) },
+						scopeSpans: [
+							{
+								scope: { name: "ingest-dummy-genai" },
+								spans: journeySample.spans.slice(0, 2),
+							},
+						],
+					},
+					null,
+					2,
+				)
+					.split("\n")
+					.map((l) => `  ${l}`)
+					.join("\n"),
+			)
+		}
+		if (!opts.quiet) printJourneyIds(journeys)
 		console.log("\n  (dry run — re-run without --dry-run to send)\n")
 		return
 	}
@@ -545,6 +1575,23 @@ const main = async (): Promise<void> => {
 		}
 	}
 
+	// Journeys: one resourceSpans per journey — each carries its own resource map
+	// (a fixture may put `session.id` there), so they can't share one.
+	for (const j of journeys) {
+		if (j.spans.length === 0) continue
+		for (const batch of chunk(j.spans, MAX_SPANS_PER_REQUEST)) {
+			await postOtlp(opts, "/v1/traces", {
+				resourceSpans: [
+					{
+						resource: { attributes: journeyResourceAttrs(opts, j) },
+						scopeSpans: [{ scope: { name: "ingest-dummy-genai" }, spans: batch }],
+					},
+				],
+			})
+			traceReqs++
+		}
+	}
+
 	// Logs: one request carrying all SHAs' resourceLogs (logs are small).
 	const resourceLogs = generated
 		.filter((g) => g.logs.length > 0)
@@ -552,11 +1599,21 @@ const main = async (): Promise<void> => {
 			resource: { attributes: resourceAttrs(opts, g.sha) },
 			scopeLogs: [{ scope: { name: "ingest-dummy" }, logRecords: g.logs }],
 		}))
+		.concat(
+			journeys
+				.filter((j) => j.logs.length > 0)
+				.map((j) => ({
+					resource: { attributes: journeyResourceAttrs(opts, j) },
+					scopeLogs: [{ scope: { name: "ingest-dummy-genai" }, logRecords: j.logs }],
+				})),
+		)
 	if (resourceLogs.length > 0) await postOtlp(opts, "/v1/logs", { resourceLogs })
 
 	if (!opts.quiet) {
-		const totalSpans = generated.reduce((n, g) => n + g.spans.length, 0)
-		const totalLogs = generated.reduce((n, g) => n + g.logs.length, 0)
+		const totalSpans =
+			generated.reduce((n, g) => n + g.spans.length, 0) + journeys.reduce((n, j) => n + j.spans.length, 0)
+		const totalLogs =
+			generated.reduce((n, g) => n + g.logs.length, 0) + journeys.reduce((n, j) => n + j.logs.length, 0)
 		console.log(
 			`\n✓ sent ${totalSpans} spans (${traceReqs} request(s)) + ${totalLogs} logs to ${opts.endpoint}`,
 		)
@@ -564,6 +1621,8 @@ const main = async (): Promise<void> => {
 			`  View at https://web.localhost → service "${opts.service}" (last ~${Math.ceil((opts.shaInterval * (opts.shas.length - 1) + opts.spread) / 60000)}m).`,
 		)
 		console.log("  Data lands async via the collector → Tinybird; give it a few seconds to appear.\n")
+		printJourneyIds(journeys)
+		if (journeys.length > 0) console.log("")
 	}
 }
 

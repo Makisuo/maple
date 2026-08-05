@@ -130,6 +130,2555 @@ SELECT
         LIMIT 1
         FORMAT JSON
 
+-- builder:genai:journeyFacetsQuery:default  [66a10916]
+SELECT
+          arrayJoin(models) AS name,
+          uniq(journeyId) AS count,
+          'model' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(providers) AS name,
+          uniq(journeyId) AS count,
+          'provider' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(agents) AS name,
+          uniq(journeyId) AS count,
+          'agent' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(finishReasons) AS name,
+          uniq(journeyId) AS count,
+          'finishReason' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          workflowName AS name,
+          uniq(journeyId) AS count,
+          'workflow' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        WHERE workflowName != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          serviceName AS name,
+          uniq(journeyId) AS count,
+          'service' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        WHERE serviceName != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          'error' AS name,
+          uniq(journeyId) AS count,
+          'status' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        WHERE errorCount > 0
+UNION ALL
+SELECT
+          'running' AS name,
+          uniq(journeyId) AS count,
+          'status' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        WHERE (errorCount = 0 AND isRunning = 1)
+UNION ALL
+SELECT
+          'ok' AS name,
+          uniq(journeyId) AS count,
+          'status' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        WHERE (errorCount = 0 AND isRunning = 0)
+UNION ALL
+SELECT
+          'tools' AS name,
+          uniq(journeyId) AS count,
+          'tools' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        WHERE toolCallCount > 0
+UNION ALL
+SELECT
+          'redacted' AS name,
+          uniq(journeyId) AS count,
+          'redacted' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        WHERE contentSpanCount = 0
+UNION ALL
+SELECT
+          toString(toUInt64(round(pow(2, floor(log2(greatest(durationMs, 1000) / 1000) * 2) / 2) * 1000))) AS name,
+          uniq(journeyId) AS count,
+          'durationBucket' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j
+        GROUP BY name
+        LIMIT 40
+UNION ALL
+SELECT
+          tupleElement(stat, 1) AS name,
+          toUInt64(ifNotFinite(round(tupleElement(stat, 3)), 0)) AS count,
+          tupleElement(stat, 2) AS facetType
+        FROM (SELECT
+          arrayJoin([tuple('p50', 'durationStat', durationP50), tuple('p95', 'durationStat', durationP95), tuple('p50', 'turnStat', turnP50), tuple('p95', 'turnStat', turnP95), tuple('p50', 'tokenStat', tokenP50), tuple('p95', 'tokenStat', tokenP95), tuple('p50', 'costStat', costP50), tuple('p95', 'costStat', costP95)]) AS stat
+        FROM (SELECT
+          quantile(0.5)(durationMs) AS durationP50,
+          quantile(0.95)(durationMs) AS durationP95,
+          quantile(0.5)(turnCount) AS turnP50,
+          quantile(0.95)(turnCount) AS turnP95,
+          quantile(0.5)(totalTokens) AS tokenP50,
+          quantile(0.95)(totalTokens) AS tokenP95,
+          quantileIf(0.5)(cost, costSpanCount > 0) * 1000000 AS costP50,
+          quantileIf(0.95)(cost, costSpanCount > 0) * 1000000 AS costP95
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId) AS j) AS q) AS r
+FORMAT JSON
+
+-- builder:genai:journeyFacetsQuery:filtered  [fe7b3a62]
+SELECT
+          arrayJoin(models) AS name,
+          uniq(journeyId) AS count,
+          'model' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING errorCount > 0
+          AND toolCallCount > 0
+          AND contentSpanCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(providers) AS name,
+          uniq(journeyId) AS count,
+          'provider' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND errorCount > 0
+          AND toolCallCount > 0
+          AND contentSpanCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(agents) AS name,
+          uniq(journeyId) AS count,
+          'agent' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND errorCount > 0
+          AND toolCallCount > 0
+          AND contentSpanCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(finishReasons) AS name,
+          uniq(journeyId) AS count,
+          'finishReason' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND errorCount > 0
+          AND toolCallCount > 0
+          AND contentSpanCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          workflowName AS name,
+          uniq(journeyId) AS count,
+          'workflow' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND errorCount > 0
+          AND toolCallCount > 0
+          AND contentSpanCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        WHERE workflowName != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          serviceName AS name,
+          uniq(journeyId) AS count,
+          'service' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND errorCount > 0
+          AND toolCallCount > 0
+          AND contentSpanCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        WHERE serviceName != ''
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          'error' AS name,
+          uniq(journeyId) AS count,
+          'status' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND toolCallCount > 0
+          AND contentSpanCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        WHERE errorCount > 0
+UNION ALL
+SELECT
+          'running' AS name,
+          uniq(journeyId) AS count,
+          'status' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND toolCallCount > 0
+          AND contentSpanCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        WHERE (errorCount = 0 AND isRunning = 1)
+UNION ALL
+SELECT
+          'ok' AS name,
+          uniq(journeyId) AS count,
+          'status' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND toolCallCount > 0
+          AND contentSpanCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        WHERE (errorCount = 0 AND isRunning = 0)
+UNION ALL
+SELECT
+          'tools' AS name,
+          uniq(journeyId) AS count,
+          'tools' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND errorCount > 0
+          AND contentSpanCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        WHERE toolCallCount > 0
+UNION ALL
+SELECT
+          'redacted' AS name,
+          uniq(journeyId) AS count,
+          'redacted' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND errorCount > 0
+          AND toolCallCount > 0
+          AND durationMs >= 1000
+          AND (cost <= 5 AND costSpanCount > 0)) AS j
+        WHERE contentSpanCount = 0
+UNION ALL
+SELECT
+          toString(toUInt64(round(pow(2, floor(log2(greatest(durationMs, 1000) / 1000) * 2) / 2) * 1000))) AS name,
+          uniq(journeyId) AS count,
+          'durationBucket' AS facetType
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND errorCount > 0
+          AND toolCallCount > 0
+          AND contentSpanCount > 0) AS j
+        GROUP BY name
+        LIMIT 40
+UNION ALL
+SELECT
+          tupleElement(stat, 1) AS name,
+          toUInt64(ifNotFinite(round(tupleElement(stat, 3)), 0)) AS count,
+          tupleElement(stat, 2) AS facetType
+        FROM (SELECT
+          arrayJoin([tuple('p50', 'durationStat', durationP50), tuple('p95', 'durationStat', durationP95), tuple('p50', 'turnStat', turnP50), tuple('p95', 'turnStat', turnP95), tuple('p50', 'tokenStat', tokenP50), tuple('p95', 'tokenStat', tokenP95), tuple('p50', 'costStat', costP50), tuple('p95', 'costStat', costP95)]) AS stat
+        FROM (SELECT
+          quantile(0.5)(durationMs) AS durationP50,
+          quantile(0.95)(durationMs) AS durationP95,
+          quantile(0.5)(turnCount) AS turnP50,
+          quantile(0.95)(turnCount) AS turnP95,
+          quantile(0.5)(totalTokens) AS tokenP50,
+          quantile(0.95)(totalTokens) AS tokenP95,
+          quantileIf(0.5)(cost, costSpanCount > 0) * 1000000 AS costP50,
+          quantileIf(0.95)(cost, costSpanCount > 0) * 1000000 AS costP95
+        FROM (SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND errorCount > 0
+          AND toolCallCount > 0
+          AND contentSpanCount > 0) AS j) AS q) AS r
+FORMAT JSON
+
+-- builder:genai:journeyListQuery:default  [bc8b5ca4]
+SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        ORDER BY startTime DESC, journeyId DESC
+        LIMIT 50
+        OFFSET 0
+        FORMAT JSON
+
+-- builder:genai:journeyListQuery:filtered  [29dcc2ba]
+SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != ''
+          AND ServiceName = 'agent-service') AS s
+        GROUP BY journeyId
+        HAVING has(models, 'gpt-4o')
+          AND has(requestedModels, 'gpt-4o')
+          AND has(providers, 'openai')
+          AND has(agents, 'planner')
+          AND workflowName = 'triage'
+          AND serviceName = 'agent-service'
+          AND has(finishReasons, 'length')
+          AND errorCount > 0
+          AND toolCallCount > 0
+          AND contentSpanCount > 0
+          AND (positionCaseInsensitive(titleSource, 'checkout') > 0 OR positionCaseInsensitive(journeyId, 'checkout') > 0)
+          AND durationMs >= 1000
+          AND durationMs <= 600000
+          AND turnCount >= 2
+          AND turnCount <= 50
+          AND totalTokens >= 100
+          AND totalTokens <= 100000
+          AND (cost >= 0.001 AND costSpanCount > 0)
+          AND (cost <= 10 AND costSpanCount > 0)
+        ORDER BY cost DESC, journeyId DESC
+        LIMIT 50
+        OFFSET 0
+        FORMAT JSON
+
+-- builder:genai:journeySummaryQuery:default  [5f240115]
+SELECT
+          journeyId AS journeyId,
+          left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
+          min(timestamp) AS startTime,
+          max(timestamp) AS endTime,
+          max(endNs) / 1000000 - min(startNs) / 1000000 AS durationMs,
+          uniq(traceId) AS traceCount,
+          count() AS spanCount,
+          countIf(operation IN ('chat', 'text_completion', 'generate_content', 'completion', 'invoke_model')) AS turnCount,
+          countIf(operation = 'execute_tool') AS toolCallCount,
+          countIf((operation = 'execute_tool' AND statusCode = 'Error')) AS toolErrorCount,
+          countIf(statusCode = 'Error') AS errorCount,
+          sum(spanInputTokens) AS inputTokens,
+          sum(spanOutputTokens) AS outputTokens,
+          sum(spanCachedInputTokens) AS cachedInputTokens,
+          sum(spanReasoningTokens) AS reasoningTokens,
+          sum(spanInputTokens) + sum(spanOutputTokens) AS totalTokens,
+          sum(spanCost) AS cost,
+          countIf(costRaw != '') AS costSpanCount,
+          groupUniqArrayIf(10)(servedModel, servedModel != '') AS models,
+          groupUniqArrayIf(10)(requestModel, requestModel != '') AS requestedModels,
+          groupUniqArrayIf(5)(provider, provider != '') AS providers,
+          groupUniqArrayIf(10)(agentName, agentName != '') AS agents,
+          max(workflowName) AS workflowName,
+          groupUniqArrayIf(5)(finishReason, finishReason != '') AS finishReasons,
+          max(serviceName) AS serviceName,
+          countIf(((inputMessages != '' OR outputMessages != '') OR systemInstructions != '')) AS contentSpanCount,
+          countIf(contentEventCount > 0) AS contentEventSpanCount,
+          if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        GROUP BY journeyId
+        HAVING journeyId = 'conv_0af7651916cd43dd'
+        LIMIT 1
+        FORMAT JSON
+
+-- builder:genai:journeyTimelineQuery:default  [f909f0b4]
+SELECT
+          journeyId AS journeyId,
+          traceId AS traceId,
+          spanId AS spanId,
+          parentSpanId AS parentSpanId,
+          timestamp AS timestamp,
+          durationMs AS durationMs,
+          spanName AS spanName,
+          serviceName AS serviceName,
+          statusCode AS statusCode,
+          statusMessage AS statusMessage,
+          operation AS operation,
+          provider AS provider,
+          requestModel AS requestModel,
+          responseModel AS responseModel,
+          servedModel AS servedModel,
+          spanInputTokens AS inputTokens,
+          spanOutputTokens AS outputTokens,
+          spanCachedInputTokens AS cachedInputTokens,
+          spanReasoningTokens AS reasoningTokens,
+          spanCost AS cost,
+          costRaw AS costRaw,
+          finishReason AS finishReason,
+          agentName AS agentName,
+          agentId AS agentId,
+          workflowName AS workflowName,
+          conversationId AS conversationId,
+          sessionId AS sessionId,
+          toolName AS toolName,
+          toolCallId AS toolCallId,
+          toolType AS toolType,
+          toolArguments AS toolArguments,
+          toolResult AS toolResult,
+          inputMessages AS inputMessages,
+          outputMessages AS outputMessages,
+          systemInstructions AS systemInstructions,
+          contentEventCount AS contentEventCount
+        FROM (SELECT
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          TraceId AS traceId,
+          SpanId AS spanId,
+          ParentSpanId AS parentSpanId,
+          Timestamp AS timestamp,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) AS startNs,
+          toFloat64(toUnixTimestamp64Nano(Timestamp)) + toFloat64(Duration) AS endNs,
+          toFloat64(Duration) / 1000000 AS durationMs,
+          SpanName AS spanName,
+          ServiceName AS serviceName,
+          StatusCode AS statusCode,
+          StatusMessage AS statusMessage,
+          SpanAttributes['gen_ai.operation.name'] AS operation,
+          if(SpanAttributes['gen_ai.provider.name'] != '', SpanAttributes['gen_ai.provider.name'], SpanAttributes['gen_ai.system']) AS provider,
+          SpanAttributes['gen_ai.request.model'] AS requestModel,
+          SpanAttributes['gen_ai.response.model'] AS responseModel,
+          if(SpanAttributes['gen_ai.response.model'] != '', SpanAttributes['gen_ai.response.model'], SpanAttributes['gen_ai.request.model']) AS servedModel,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.input_tokens'] != '', SpanAttributes['gen_ai.usage.input_tokens'], SpanAttributes['gen_ai.usage.prompt_tokens'])) AS spanInputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.output_tokens'] != '', SpanAttributes['gen_ai.usage.output_tokens'], SpanAttributes['gen_ai.usage.completion_tokens'])) AS spanOutputTokens,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cached_input_tokens'] != '', SpanAttributes['gen_ai.usage.cached_input_tokens'], SpanAttributes['gen_ai.usage.cache_read_input_tokens'])) AS spanCachedInputTokens,
+          toFloat64OrZero(SpanAttributes['gen_ai.usage.reasoning_tokens']) AS spanReasoningTokens,
+          if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost']))) AS costRaw,
+          toFloat64OrZero(if(SpanAttributes['gen_ai.usage.cost'] != '', SpanAttributes['gen_ai.usage.cost'], if(SpanAttributes['gen_ai.usage.total_cost'] != '', SpanAttributes['gen_ai.usage.total_cost'], if(SpanAttributes['gen_ai.response.cost'] != '', SpanAttributes['gen_ai.response.cost'], SpanAttributes['llm.usage.total_cost'])))) AS spanCost,
+          SpanAttributes['gen_ai.response.finish_reasons'] AS finishReason,
+          if(SpanAttributes['gen_ai.agent.name'] != '', SpanAttributes['gen_ai.agent.name'], ResourceAttributes['gen_ai.agent.name']) AS agentName,
+          if(SpanAttributes['gen_ai.agent.id'] != '', SpanAttributes['gen_ai.agent.id'], ResourceAttributes['gen_ai.agent.id']) AS agentId,
+          if(SpanAttributes['gen_ai.workflow.name'] != '', SpanAttributes['gen_ai.workflow.name'], ResourceAttributes['gen_ai.workflow.name']) AS workflowName,
+          if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id']) AS conversationId,
+          if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id']) AS sessionId,
+          if(SpanAttributes['gen_ai.request.tool.name'] != '', SpanAttributes['gen_ai.request.tool.name'], SpanAttributes['gen_ai.tool.name']) AS toolName,
+          SpanAttributes['gen_ai.tool.call.id'] AS toolCallId,
+          if(SpanAttributes['gen_ai.request.tool.type'] != '', SpanAttributes['gen_ai.request.tool.type'], SpanAttributes['gen_ai.tool.type']) AS toolType,
+          SpanAttributes['gen_ai.tool.call.arguments'] AS toolArguments,
+          SpanAttributes['gen_ai.tool.call.result'] AS toolResult,
+          if(SpanAttributes['gen_ai.input.messages'] != '', SpanAttributes['gen_ai.input.messages'], SpanAttributes['gen_ai.prompt']) AS inputMessages,
+          if(SpanAttributes['gen_ai.output.messages'] != '', SpanAttributes['gen_ai.output.messages'], SpanAttributes['gen_ai.completion']) AS outputMessages,
+          SpanAttributes['gen_ai.system_instructions'] AS systemInstructions,
+          length(arrayFilter(x -> x LIKE 'gen_ai.%', EventsName)) AS contentEventCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND SpanAttributes['gen_ai.operation.name'] != '') AS s
+        WHERE journeyId = 'conv_0af7651916cd43dd'
+        ORDER BY timestamp ASC, spanId ASC
+        LIMIT 500
+        OFFSET 0
+        FORMAT JSON
+
 -- builder:infra:hostGaugeTimeseriesQuery:default  [7d9ca740]
 SELECT
           toStartOfInterval(TimeUnix, INTERVAL 300 SECOND) AS bucket,
