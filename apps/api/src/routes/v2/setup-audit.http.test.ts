@@ -78,6 +78,9 @@ const warehouseStub = (
 		return compiled.decodeRows(table === undefined ? [] : rowsByTable[table]!).pipe(Effect.orDie)
 	},
 	compiledQueryFirst: () => Effect.die(new Error("unexpected compiled query")),
+	// `fetchWarehouseInputs` / `fetchTraceCompleteness` warm the route before
+	// their fan-outs; nothing to resolve against a stub.
+	warmRoute: () => Effect.void,
 	ingest: () => Effect.void,
 	asExecutor: () => {
 		throw new Error("asExecutor is not supported by this test stub")

@@ -305,6 +305,9 @@ const warehouseStub: WarehouseQueryServiceShape = {
 	// response-byte ceiling), so the stub has to answer it too.
 	compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.succeed(Option.none()),
+	// Handlers warm the org route before fanning out; the real one resolves
+	// route + capabilities, which this stub has nothing to resolve.
+	warmRoute: () => Effect.void,
 	ingest: () => Effect.void,
 	asExecutor: () => {
 		throw new Error("asExecutor is not supported by this test stub")
