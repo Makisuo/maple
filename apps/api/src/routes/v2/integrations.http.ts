@@ -1,7 +1,24 @@
 import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { CurrentTenant } from "@maple/domain/http"
 import type {
+	IntegrationsNotConnectedError,
+	IntegrationsPersistenceError,
+	IntegrationsRevokedError,
+	IntegrationsUpstreamError,
+	IntegrationsValidationError,
+	PlanetScaleIntegrationStatus,
+	PlanetScaleQueryInsightsResponse,
+} from "@maple/domain/http"
+import { CurrentTenant } from "@maple/domain/http"
+import type { PlanetScaleDatabaseRow } from "@maple/db"
+import type {
+	V2PlanetScaleConnectResponse,
+	V2PlanetScaleDatabase,
+	V2PlanetScaleDatabaseList,
+	V2PlanetScaleDisconnectResponse,
+	V2PlanetScaleIntegration,
+	V2PlanetScaleOrganizationList,
+	V2PlanetScaleWebhookConfig,
 	V2SlackChannelList,
 	V2SlackIntegrationStatus,
 	V2SlackInstallResponse,
@@ -9,6 +26,10 @@ import type {
 } from "@maple/domain/http/v2"
 import {
 	MapleApiV2,
+	V2PlanetScaleEventList,
+	V2PlanetScaleQueryInsightList,
+	invalidRequest,
+	isoTimestamp,
 	isoTimestampOrNull,
 	notFound,
 	permissionError,
@@ -18,6 +39,10 @@ import {
 import { Array as Arr, Effect, Option } from "effect"
 import { requireAdmin } from "@/services/auth/auth"
 import { Env } from "@/platform/Env"
+import { EdgeCacheService } from "@maple/cache"
+import { PLANETSCALE_CALLBACK_PATH, PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
+import { PlanetScaleConnectionService } from "@/services/integrations/PlanetScaleConnectionService"
+import { PlanetScaleService } from "@/services/integrations/PlanetScaleService"
 import type { SlackChannelList, SlackInstallStatus } from "@/services/integrations/SlackIntegrationService"
 import { SLACK_CALLBACK_PATH, SlackIntegrationService } from "@/services/integrations/SlackIntegrationService"
 
@@ -88,7 +113,7 @@ export const isTrustedCallbackOrigin = (origin: string, appBaseUrl: string): boo
 	return parent.includes(".") && parent === parentDomain(appHost)
 }
 
-const toStatus = (status: SlackInstallStatus): V2SlackIntegrationStatus => ({
+const toSlackStatus = (status: SlackInstallStatus): V2SlackIntegrationStatus => ({
 	object: "slack_integration",
 	installed: status.installed,
 	team_id: status.teamId,
@@ -100,6 +125,125 @@ const toStatus = (status: SlackInstallStatus): V2SlackIntegrationStatus => ({
 	disconnected_at: isoTimestampOrNull(status.disconnectedAt),
 	missing_scopes: status.missingScopes,
 })
+
+const toPlanetScaleStatus = (status: PlanetScaleIntegrationStatus): V2PlanetScaleIntegration => ({
+	object: "planetscale_integration",
+	connected: status.connected,
+	pending_org_selection: status.pendingOrgSelection,
+	organization: status.organization,
+	connected_by_user_id: status.connectedByUserId,
+	detected_permissions: status.detectedPermissions,
+	metrics_auth: status.metricsAuth,
+	scrape_target:
+		status.scrapeTarget === null
+			? null
+			: {
+					id: status.scrapeTarget.id,
+					object: "planetscale_integration.scrape_target",
+					enabled: status.scrapeTarget.enabled,
+					scrape_interval_seconds: status.scrapeTarget.scrapeIntervalSeconds,
+					include_branches: status.scrapeTarget.includeBranches,
+					exclude_branches: status.scrapeTarget.excludeBranches,
+					last_scrape_at: isoTimestampOrNull(status.scrapeTarget.lastScrapeAt),
+					last_scrape_error: status.scrapeTarget.lastScrapeError,
+				},
+	last_inventory_at: isoTimestampOrNull(status.lastInventoryAt),
+	last_inventory_error: status.lastInventoryError,
+	revoked_at: isoTimestampOrNull(status.revokedAt),
+	expires_at: isoTimestampOrNull(status.expiresAt),
+})
+
+const toPlanetScaleDatabase = (row: PlanetScaleDatabaseRow): V2PlanetScaleDatabase => ({
+	id: row.databaseId,
+	object: "planetscale_integration.database",
+	name: row.name,
+	kind: row.kind,
+	state: row.state,
+	region: row.region,
+	plan: row.plan,
+	branches: Arr.map(row.branchesJson ?? [], (branch) => ({
+		id: branch.id,
+		name: branch.name,
+		production: branch.production,
+		ready: branch.ready,
+	})),
+})
+
+const toQueryInsightList = (
+	response: PlanetScaleQueryInsightsResponse,
+): typeof V2PlanetScaleQueryInsightList.Type => ({
+	object: "planetscale_integration.query_insight_list",
+	branch: response.branch,
+	data: Arr.map(response.rows, (row) => ({
+		object: "planetscale_integration.query_insight" as const,
+		fingerprint: row.fingerprint,
+		normalized_sql: row.normalizedSql,
+		statement_type: row.statementType,
+		query_count: row.queryCount,
+		error_count: row.errorCount,
+		total_duration_millis: row.totalDurationMillis,
+		time_per_query_millis: row.timePerQueryMillis,
+		p50_latency_millis: row.p50LatencyMillis,
+		p99_latency_millis: row.p99LatencyMillis,
+		rows_read_per_query: row.rowsReadPerQuery,
+		rows_returned_per_query: row.rowsReturnedPerQuery,
+		last_run_at: isoTimestampOrNull(row.lastRunAt),
+	})),
+	unavailable_reason: response.unavailableReason,
+})
+
+/**
+ * The PlanetScale service failures, mapped once. Every OAuth-backed call can
+ * fail the same five ways, and the mapping is uniform: a missing connection or a
+ * revoked grant is a 404 (the resource isn't there for this org), a rejected
+ * input is a 400, PlanetScale itself failing is a 502, and our own persistence
+ * failing is a 503.
+ */
+const mapPlanetScaleErrors = <A, R>(
+	effect: Effect.Effect<
+		A,
+		| IntegrationsNotConnectedError
+		| IntegrationsRevokedError
+		| IntegrationsValidationError
+		| IntegrationsUpstreamError
+		| IntegrationsPersistenceError,
+		R
+	>,
+) =>
+	effect.pipe(
+		Effect.catchTags({
+			"@maple/http/errors/IntegrationsNotConnectedError": (error) =>
+				Effect.fail(notFound(error.message)),
+			"@maple/http/errors/IntegrationsRevokedError": (error) => Effect.fail(notFound(error.message)),
+			"@maple/http/errors/IntegrationsValidationError": (error) =>
+				Effect.fail(invalidRequest("planetscale_request_rejected", error.message)),
+			"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+				Effect.fail(upstreamError("planetscale_upstream_error", error.message)),
+			"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+				Effect.fail(serviceUnavailable(error.message)),
+		}),
+	)
+
+/**
+ * Minute-aligned window, so panel refreshes inside the cache TTL share an entry.
+ * Also the only place the ISO-8601 wire format meets the epoch-ms the services
+ * speak. Rejects an inverted window before any of that.
+ */
+const resolveWindow = (startTime: string, endTime: string) => {
+	const startMs = new Date(startTime).getTime()
+	const endMs = new Date(endTime).getTime()
+	if (endMs <= startMs) {
+		return Effect.fail(
+			invalidRequest("invalid_time_range", "end_time must be after start_time", "end_time"),
+		)
+	}
+	const MINUTE = 60_000
+	const alignedStart = Math.floor(startMs / MINUTE) * MINUTE
+	return Effect.succeed({
+		startMs: alignedStart,
+		endMs: Math.max(Math.ceil(endMs / MINUTE) * MINUTE, alignedStart + MINUTE),
+	})
+}
 
 const toChannelList = (list: SlackChannelList): V2SlackChannelList => ({
 	object: "slack_integration.channel_list",
@@ -133,7 +277,7 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 								Effect.fail(serviceUnavailable(error.message)),
 						}),
 					)
-					return toStatus(status)
+					return toSlackStatus(status)
 				}),
 			)
 			.handle("install", () =>
@@ -225,4 +369,318 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 				}),
 			)
 	}),
+)
+
+export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
+	MapleApiV2,
+	"planetscaleIntegration",
+	(handlers) =>
+		Effect.gen(function* () {
+			const planetscale = yield* PlanetScaleConnectionService
+			const planetscaleOAuth = yield* PlanetScaleOAuthService
+			const inventory = yield* PlanetScaleService
+			const edgeCache = yield* EdgeCacheService
+			const env = yield* Env
+
+			return (
+				handlers
+					.handle("status", () =>
+						Effect.gen(function* () {
+							const tenant = yield* CurrentTenant.Context
+							const status = yield* planetscale.getStatus(tenant.orgId).pipe(
+								Effect.catchTags({
+									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+										Effect.fail(serviceUnavailable(error.message)),
+								}),
+							)
+							return toPlanetScaleStatus(status)
+						}),
+					)
+					.handle("connect", ({ payload }) =>
+						Effect.gen(function* () {
+							const tenant = yield* CurrentTenant.Context
+							yield* requireAdmin(tenant.roles, () =>
+								permissionError(
+									"insufficient_permissions",
+									"Only org admins can connect PlanetScale",
+								),
+							)
+							const req = yield* HttpServerRequest.HttpServerRequest
+							const origin = resolveRequestOrigin(req)
+							// v1 skipped this check. The callback URL is persisted as
+							// `oauth_auth_states.redirectUri` and replayed as `redirect_uri` in
+							// the token exchange, and `resolveRequestOrigin` reads the
+							// client-settable `x-forwarded-host` — so an untrusted origin mints
+							// an authorize URL pointing at a host the caller controls.
+							if (!isTrustedCallbackOrigin(origin, env.MAPLE_APP_BASE_URL)) {
+								yield* Effect.logError(
+									"Rejected PlanetScale connect: untrusted callback origin",
+									{
+										origin,
+									},
+								)
+								return yield* Effect.fail(
+									serviceUnavailable(
+										"PlanetScale connections are not available from this host",
+									),
+								)
+							}
+							const result = yield* planetscaleOAuth
+								.startConnect(tenant.orgId, tenant.userId, {
+									callbackUrl: `${origin}${PLANETSCALE_CALLBACK_PATH}`,
+									returnTo: payload.return_to,
+								})
+								.pipe(
+									Effect.catchTags({
+										// Both are misconfiguration or storage failures on our side —
+										// there is no caller input that produces either, so neither is
+										// a 4xx. `startConnect` cannot fail upstream: nothing is sent
+										// to PlanetScale until the browser follows the authorize URL.
+										"@maple/http/errors/IntegrationsValidationError": (error) =>
+											Effect.fail(serviceUnavailable(error.message)),
+										"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+											Effect.fail(serviceUnavailable(error.message)),
+									}),
+								)
+							return {
+								object: "planetscale_integration.connect" as const,
+								redirect_url: result.redirectUrl,
+								state: result.state,
+							} satisfies V2PlanetScaleConnectResponse
+						}),
+					)
+					.handle("organizations", () =>
+						Effect.gen(function* () {
+							const tenant = yield* CurrentTenant.Context
+							// Admin-gated like `select_organization`: this drives the org picker
+							// while the connection is pending, and both are admin-only flows.
+							yield* requireAdmin(tenant.roles, () =>
+								permissionError(
+									"insufficient_permissions",
+									"Only org admins can manage the PlanetScale integration",
+								),
+							)
+							const organizations = yield* mapPlanetScaleErrors(
+								planetscaleOAuth.listOrganizations(tenant.orgId),
+							)
+							return {
+								object: "planetscale_integration.organization_list" as const,
+								organizations: Arr.map(organizations, (org) => ({
+									id: org.id,
+									name: org.name,
+								})),
+							} satisfies V2PlanetScaleOrganizationList
+						}),
+					)
+					.handle("selectOrganization", ({ payload }) =>
+						Effect.gen(function* () {
+							const tenant = yield* CurrentTenant.Context
+							yield* requireAdmin(tenant.roles, () =>
+								permissionError(
+									"insufficient_permissions",
+									"Only org admins can manage the PlanetScale integration",
+								),
+							)
+							const status = yield* mapPlanetScaleErrors(
+								planetscale.finalizeOrgSelection(tenant.orgId, {
+									organization: payload.organization,
+									includeBranches: payload.include_branches,
+									excludeBranches: payload.exclude_branches,
+								}),
+							)
+							return toPlanetScaleStatus(status)
+						}),
+					)
+					.handle("setMetricsToken", ({ payload }) =>
+						Effect.gen(function* () {
+							const tenant = yield* CurrentTenant.Context
+							yield* requireAdmin(tenant.roles, () =>
+								permissionError(
+									"insufficient_permissions",
+									"Only org admins can manage the PlanetScale integration",
+								),
+							)
+							const status = yield* mapPlanetScaleErrors(
+								planetscale.setMetricsToken(tenant.orgId, {
+									tokenId: payload.token_id,
+									tokenSecret: payload.token_secret,
+								}),
+							)
+							return toPlanetScaleStatus(status)
+						}),
+					)
+					.handle("disconnect", () =>
+						Effect.gen(function* () {
+							const tenant = yield* CurrentTenant.Context
+							yield* requireAdmin(tenant.roles, () =>
+								permissionError(
+									"insufficient_permissions",
+									"Only org admins can disconnect PlanetScale",
+								),
+							)
+							yield* planetscale.disconnect(tenant.orgId).pipe(
+								Effect.tapError((error) =>
+									Effect.logError("PlanetScale disconnect failed", {
+										tag: error._tag,
+										message: error.message,
+									}),
+								),
+								Effect.catchTags({
+									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+										Effect.fail(serviceUnavailable(error.message)),
+								}),
+							)
+							return {
+								object: "planetscale_integration" as const,
+								connected: false as const,
+							} satisfies V2PlanetScaleDisconnectResponse
+						}),
+					)
+					// No admin gate — any org member may read the inventory (the service map
+					// needs it to brand database nodes).
+					.handle("databases", () =>
+						Effect.gen(function* () {
+							const tenant = yield* CurrentTenant.Context
+							const [rows, connection] = yield* Effect.all([
+								inventory.listDatabases(tenant.orgId),
+								planetscale.loadConnection(tenant.orgId),
+							]).pipe(
+								Effect.catchTags({
+									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+										Effect.fail(serviceUnavailable(error.message)),
+								}),
+							)
+							return {
+								object: "planetscale_integration.database_list" as const,
+								databases: Arr.map(rows, toPlanetScaleDatabase),
+								last_inventory_at: isoTimestampOrNull(
+									connection?.lastInventoryAt?.getTime() ?? null,
+								),
+							} satisfies V2PlanetScaleDatabaseList
+						}),
+					)
+					.handle("webhookConfig", () =>
+						Effect.gen(function* () {
+							const tenant = yield* CurrentTenant.Context
+							// Admin-only: the response carries the webhook HMAC secret.
+							yield* requireAdmin(tenant.roles, () =>
+								permissionError(
+									"insufficient_permissions",
+									"Only org admins can read the PlanetScale webhook configuration",
+								),
+							)
+							const req = yield* HttpServerRequest.HttpServerRequest
+							const config = yield* planetscale.webhookConfig(tenant.orgId).pipe(
+								Effect.catchTags({
+									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+										Effect.fail(serviceUnavailable(error.message)),
+								}),
+							)
+							return {
+								object: "planetscale_integration.webhook_config" as const,
+								configured: config.configured,
+								// Still a `/api/…` URL: the receiver is a provider-facing raw
+								// route, and this exact path is already registered in customers'
+								// PlanetScale webhook settings.
+								url:
+									config.path === null
+										? null
+										: `${resolveRequestOrigin(req)}${config.path}`,
+								secret: config.secret,
+							} satisfies V2PlanetScaleWebhookConfig
+						}),
+					)
+					.handle("queryInsights", ({ payload }) =>
+						Effect.gen(function* () {
+							const tenant = yield* CurrentTenant.Context
+							const { startMs, endMs } = yield* resolveWindow(
+								payload.start_time,
+								payload.end_time,
+							)
+							const limit = Math.min(Math.max(Math.floor(payload.limit ?? 10), 1), 25)
+							const cached = yield* edgeCache.getOrCompute(
+								{
+									// `-v2` because the cached value is the v2 wire shape now; a
+									// v1-shaped entry would fail to decode (a miss, so harmless,
+									// but the split keeps both readable during the rollout).
+									bucket: "ps-query-insights-v2",
+									key: `${tenant.orgId}:${payload.database}:${payload.branch ?? ""}:${startMs}:${endMs}:${limit}`,
+									ttlSeconds: 60,
+									schema: V2PlanetScaleQueryInsightList,
+								},
+								mapPlanetScaleErrors(
+									inventory
+										.queryInsights(tenant.orgId, {
+											database: payload.database,
+											branch: payload.branch,
+											startTime: startMs,
+											endTime: endMs,
+											limit,
+										})
+										.pipe(Effect.map(toQueryInsightList)),
+								),
+							)
+							return cached.value
+						}),
+					)
+					// No admin gate — the timeline is the same class of read as the inventory.
+					.handle("events", ({ payload }) =>
+						Effect.gen(function* () {
+							const tenant = yield* CurrentTenant.Context
+							const { startMs, endMs } = yield* resolveWindow(
+								payload.start_time,
+								payload.end_time,
+							)
+							const limit = Math.min(Math.max(Math.floor(payload.limit ?? 100), 1), 500)
+							const categories = payload.categories ?? []
+							const cached = yield* edgeCache.getOrCompute(
+								{
+									bucket: "ps-events-v2",
+									key: `${tenant.orgId}:${payload.database ?? ""}:${payload.branch ?? ""}:${startMs}:${endMs}:${categories.join(",")}:${limit}:${payload.cursor ?? ""}`,
+									// Shorter than query-insights' 60s: a deploy marker landing a
+									// minute after the deploy is the visible failure mode here.
+									ttlSeconds: 30,
+									schema: V2PlanetScaleEventList,
+								},
+								inventory
+									.listEvents(tenant.orgId, {
+										database: payload.database,
+										branch: payload.branch,
+										startTime: startMs,
+										endTime: endMs,
+										categories: categories.length > 0 ? categories : undefined,
+										limit,
+										cursor: payload.cursor,
+									})
+									.pipe(
+										Effect.map(({ events, nextCursor }) => ({
+											object: "planetscale_integration.event_list" as const,
+											data: Arr.map(events, (row) => ({
+												id: row.id,
+												object: "planetscale_integration.event" as const,
+												database_name: row.databaseName,
+												branch_name: row.branchName,
+												category: row.category,
+												event_type: row.eventType,
+												state: row.state,
+												external_id: row.externalId,
+												title: row.title,
+												source: row.source,
+												actor_login: row.actorLogin,
+												url: row.url,
+												occurred_at: isoTimestamp(row.occurredAt.getTime()),
+											})),
+											next_cursor: nextCursor,
+										})),
+										Effect.catchTags({
+											"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+												Effect.fail(serviceUnavailable(error.message)),
+										}),
+									),
+							)
+							return cached.value
+						}),
+					)
+			)
+		}),
 )

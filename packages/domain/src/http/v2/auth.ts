@@ -86,6 +86,10 @@ const READ_ONLY_POST_PATHS = new Set([
 	"/v2/logs/breakdown",
 	"/v2/metrics/timeseries",
 	"/v2/metrics/breakdown",
+	// Live proxies to PlanetScale, POST because the window + filters make a long
+	// key that belongs in a body — reads, not writes.
+	"/v2/integrations/planetscale/query_insights",
+	"/v2/integrations/planetscale/events",
 ])
 
 /** Same, for read-only POST endpoints whose path carries a resource id. */

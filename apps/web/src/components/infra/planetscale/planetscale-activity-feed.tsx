@@ -1,4 +1,4 @@
-import type { PlanetScaleEventSummary } from "@maple/domain/http"
+import type { PlanetScaleEventEntry } from "@/api/warehouse/planetscale-infra"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { cn } from "@maple/ui/lib/utils"
@@ -24,7 +24,7 @@ export function PlanetScaleActivityFeed({
 	emptyMessage = "No deploys or branch events in this window.",
 	onSelectBranch,
 }: {
-	events: ReadonlyArray<PlanetScaleEventSummary>
+	events: ReadonlyArray<PlanetScaleEventEntry>
 	waiting?: boolean
 	emptyMessage?: string
 	onSelectBranch?: (branch: string) => void

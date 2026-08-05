@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react"
 import { Cause, Exit } from "effect"
-import { PlanetScaleSelectOrganizationRequest } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -22,7 +21,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { isExcluded } from "@/components/infra/planetscale/branch-selection"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { IntegrationIconPlate, catalogEntry } from "./integration-catalog"
 import { useIntegrationConnect } from "./integration-connect"
 import {
@@ -55,13 +54,13 @@ const parsePatternList = (value: string): string[] =>
  * as a single status row — the machinery stays out of the UI.
  */
 export function PlanetScaleIntegrationCard() {
-	const statusQuery = MapleApiAtomClient.query("integrations", "planetscaleStatus", {
-		reactivityKeys: ["planetscaleIntegrationStatus"],
+	const statusQuery = MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+		reactivityKeys: ["planetscaleIntegration"],
 	})
 	const statusResult = useAtomValue(statusQuery)
 	const refreshStatus = useAtomRefresh(statusQuery)
 
-	const disconnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "planetscaleDisconnect"), {
+	const disconnect = useAtomSet(MapleApiV2AtomClient.mutation("planetscaleIntegration", "disconnect"), {
 		mode: "promiseExit",
 	})
 
@@ -80,7 +79,7 @@ export function PlanetScaleIntegrationCard() {
 		.onSuccess((s) => s)
 		.orElse(() => null)
 	const isConnected = status?.connected === true
-	const pendingOrgSelection = status?.pendingOrgSelection === true
+	const pendingOrgSelection = status?.pending_org_selection === true
 
 	// Recomputed on every render (including each poll tick), so the elapsed-time
 	// copy below advances without a second timer.
@@ -99,7 +98,7 @@ export function PlanetScaleIntegrationCard() {
 	async function handleDisconnect() {
 		setDisconnectBusy(true)
 		const result = await disconnect({
-			reactivityKeys: ["planetscaleIntegrationStatus", "scrapeTargets"],
+			reactivityKeys: ["planetscaleIntegration", "scrapeTargets"],
 		})
 		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
@@ -290,7 +289,7 @@ export function PlanetScaleIntegrationCard() {
 								),
 								"first-metrics": (
 									<FirstMetricsDetail
-										scrapeError={status.scrapeTarget?.lastScrapeError ?? null}
+										scrapeError={status.scrape_target?.last_scrape_error ?? null}
 										watchedForMs={watchedForMs}
 										onRotate={() => setRotateOpen(true)}
 									/>
@@ -300,12 +299,12 @@ export function PlanetScaleIntegrationCard() {
 					</div>
 				) : null}
 
-				{status !== null && status.scrapeTarget !== null && setup?.complete === true ? (
+				{status !== null && status.scrape_target !== null && setup?.complete === true ? (
 					<PlanetScaleMetricsHealth
-						target={status.scrapeTarget}
-						metricsAuth={status.metricsAuth}
+						target={status.scrape_target}
+						metricsAuth={status.metrics_auth}
 						action={
-							status.metricsAuth === "service_token" && !rotateOpen ? (
+							status.metrics_auth === "service_token" && !rotateOpen ? (
 								<button
 									type="button"
 									onClick={() => setRotateOpen(true)}
@@ -349,8 +348,8 @@ export function PlanetScaleIntegrationCard() {
 					<DialogPanel>
 						<PlanetScaleOrgPicker
 							initialOrganization={status?.organization ?? null}
-							initialIncludeBranches={status?.scrapeTarget?.includeBranches.join(", ") ?? ""}
-							initialExcludeBranches={status?.scrapeTarget?.excludeBranches.join(", ") ?? ""}
+							initialIncludeBranches={status?.scrape_target?.include_branches.join(", ") ?? ""}
+							initialExcludeBranches={status?.scrape_target?.exclude_branches.join(", ") ?? ""}
 							onDone={() => {
 								setPickerOpen(false)
 								refreshStatus()
@@ -429,19 +428,19 @@ function PlanetScaleOrgPicker(props: {
 	cancelLabel: string
 }) {
 	const organizationsResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleOrganizations", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "organizations", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	// Powers the live filter preview. Empty before the first inventory poll, which
 	// is exactly the pending-org-selection case — the preview then stays quiet.
 	const inventoryResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleDatabases", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "databases", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	const selectOrganization = useAtomSet(
-		MapleApiAtomClient.mutation("integrations", "planetscaleSelectOrganization"),
+		MapleApiV2AtomClient.mutation("planetscaleIntegration", "selectOrganization"),
 		{ mode: "promiseExit" },
 	)
 
@@ -473,13 +472,13 @@ function PlanetScaleOrgPicker(props: {
 		const include = parsePatternList(includeBranches)
 		const exclude = parsePatternList(excludeBranches)
 		const result = await selectOrganization({
-			payload: new PlanetScaleSelectOrganizationRequest({
+			payload: {
 				organization: selected,
-				...(include.length > 0 ? { includeBranches: include } : {}),
-				...(exclude.length > 0 ? { excludeBranches: exclude } : {}),
-			}),
+				...(include.length > 0 ? { include_branches: include } : {}),
+				...(exclude.length > 0 ? { exclude_branches: exclude } : {}),
+			},
 			// finalizeOrgSelection re-parents the managed scrape target — refresh the list below.
-			reactivityKeys: ["planetscaleIntegrationStatus", "scrapeTargets"],
+			reactivityKeys: ["planetscaleIntegration", "scrapeTargets"],
 		})
 		setSubmitting(false)
 		if (Exit.isSuccess(result)) {
@@ -621,8 +620,8 @@ function PlanetScaleWebhookSetup() {
 
 function PlanetScaleWebhookConfig() {
 	const configResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleWebhookConfig", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "webhookConfig", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	if (Result.isInitial(configResult)) {

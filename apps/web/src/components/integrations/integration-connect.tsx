@@ -5,13 +5,13 @@ import {
 	CloudflareStartConnectRequest,
 	GithubStartConnectRequest,
 	HazelStartConnectRequest,
-	PlanetScaleStartConnectRequest,
 } from "@maple/domain/http"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { trackProduct } from "@/lib/analytics"
 import { useAtomRefresh, useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import type { IntegrationId } from "./integration-catalog"
 
 /**
@@ -289,11 +289,11 @@ function GithubConnectBoundary({ children }: { children: React.ReactNode }) {
 
 function PlanetscaleConnectBoundary({ children }: { children: React.ReactNode }) {
 	const refreshStatus = useAtomRefresh(
-		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
-	const startConnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "planetscaleStart"), {
+	const startConnect = useAtomSet(MapleApiV2AtomClient.mutation("planetscaleIntegration", "connect"), {
 		mode: "promiseExit",
 	})
 
@@ -308,11 +308,13 @@ function PlanetscaleConnectBoundary({ children }: { children: React.ReactNode })
 	const value = useOAuthPopupFlow({
 		windowName: "maple-planetscale-connect",
 		windowFeatures: "popup,width=520,height=680",
+		// PlanetScale is the one provider on v2, whose wire format is snake_case —
+		// adapt at the boundary rather than teaching the shared hook two shapes.
 		start: () =>
 			startConnect({
-				payload: new PlanetScaleStartConnectRequest({ returnTo: window.location.href }),
-				reactivityKeys: ["planetscaleIntegrationStatus"],
-			}),
+				payload: { return_to: window.location.href },
+				reactivityKeys: ["planetscaleIntegration"],
+			}).then(Exit.map(({ redirect_url }) => ({ redirectUrl: redirect_url }))),
 		startErrorMessage: (result) =>
 			extractErrorMessage(result) ?? "Failed to start PlanetScale connect flow",
 		onClosed: refreshStatus,

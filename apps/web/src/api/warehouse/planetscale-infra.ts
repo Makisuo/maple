@@ -1,11 +1,13 @@
 import { Clock, Effect, Schema } from "effect"
-import {
-	PlanetScaleEventsRequest,
-	PlanetScaleInfraTimeseriesRequest,
-	PlanetScaleQueryInsightsRequest,
-} from "@maple/domain/http"
+import { PlanetScaleInfraTimeseriesRequest } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import {
+	WarehouseDateTimeString,
+	decodeInput,
+	runWarehouseQuery,
+	runWarehouseQueryV2,
+} from "@/api/warehouse/effect-utils"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
 /**
@@ -40,6 +42,30 @@ const defaultTimeRange = (nowMillis: number) => {
 		startTime: formatWarehouseDateTime(nowMillis - 24 * 60 * 60 * 1000),
 		endTime: formatWarehouseDateTime(nowMillis),
 	}
+}
+
+/** The v2 wire format is ISO-8601; every caller in here still speaks epoch ms. */
+const toIso = (epochMs: number) => new Date(epochMs).toISOString()
+
+/**
+ * One lifecycle event, in the camelCase/epoch-ms shape the infra components
+ * consume. Mapped here rather than passing the wire object through, so the
+ * activity feed and chart markers stay insulated from the API's field casing.
+ */
+export interface PlanetScaleEventEntry {
+	id: string
+	databaseName: string
+	branchName: string
+	category: string
+	eventType: string
+	state: string | null
+	externalId: string
+	title: string
+	source: string
+	actorLogin: string | null
+	url: string | null
+	/** Epoch ms. */
+	occurredAt: number
 }
 
 export interface PlanetScaleQueryInsightEntry {
@@ -79,37 +105,37 @@ export const getPlanetScaleQueryInsights = Effect.fn("Integrations.getPlanetScal
 		data,
 		"getPlanetScaleQueryInsights",
 	)
-	const result = yield* runWarehouseQuery("planetscaleQueryInsights", () =>
+	const result = yield* runWarehouseQueryV2("planetscaleQueryInsights", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.integrations.planetscaleQueryInsights({
-				payload: new PlanetScaleQueryInsightsRequest({
+			const client = yield* MapleApiV2AtomClient
+			return yield* client.planetscaleIntegration.queryInsights({
+				payload: {
 					database: input.database,
 					...(input.branch === undefined ? {} : { branch: input.branch }),
-					startTime: input.startTime,
-					endTime: input.endTime,
+					start_time: toIso(input.startTime),
+					end_time: toIso(input.endTime),
 					...(input.limit === undefined ? {} : { limit: input.limit }),
-				}),
+				},
 			})
 		}),
 	)
 	return {
 		branch: result.branch,
-		unavailableReason: result.unavailableReason,
-		rows: result.rows.map(
+		unavailableReason: result.unavailable_reason,
+		rows: result.data.map(
 			(row): PlanetScaleQueryInsightEntry => ({
 				fingerprint: row.fingerprint,
-				normalizedSql: row.normalizedSql,
-				statementType: row.statementType,
-				queryCount: row.queryCount,
-				errorCount: row.errorCount,
-				errorRate: row.queryCount > 0 ? row.errorCount / row.queryCount : 0,
-				totalDurationMillis: row.totalDurationMillis,
-				timePerQueryMillis: row.timePerQueryMillis,
-				p50LatencyMillis: row.p50LatencyMillis,
-				p99LatencyMillis: row.p99LatencyMillis,
-				rowsReadPerQuery: row.rowsReadPerQuery,
-				lastRunAt: row.lastRunAt,
+				normalizedSql: row.normalized_sql,
+				statementType: row.statement_type,
+				queryCount: row.query_count,
+				errorCount: row.error_count,
+				errorRate: row.query_count > 0 ? row.error_count / row.query_count : 0,
+				totalDurationMillis: row.total_duration_millis,
+				timePerQueryMillis: row.time_per_query_millis,
+				p50LatencyMillis: row.p50_latency_millis,
+				p99LatencyMillis: row.p99_latency_millis,
+				rowsReadPerQuery: row.rows_read_per_query,
+				lastRunAt: row.last_run_at === null ? null : Date.parse(row.last_run_at),
 			}),
 		),
 	}
@@ -137,21 +163,39 @@ export const getPlanetScaleEvents = Effect.fn("Integrations.getPlanetScaleEvents
 	data: GetPlanetScaleEventsInput
 }) {
 	const input = yield* decodeInput(GetPlanetScaleEventsInputSchema, data, "getPlanetScaleEvents")
-	const result = yield* runWarehouseQuery("planetscaleEvents", () =>
+	const result = yield* runWarehouseQueryV2("planetscaleEvents", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.integrations.planetscaleEvents({
-				payload: new PlanetScaleEventsRequest({
+			const client = yield* MapleApiV2AtomClient
+			return yield* client.planetscaleIntegration.events({
+				payload: {
 					...(input.database === undefined ? {} : { database: input.database }),
 					...(input.branch === undefined ? {} : { branch: input.branch }),
-					startTime: input.startTime,
-					endTime: input.endTime,
+					start_time: toIso(input.startTime),
+					end_time: toIso(input.endTime),
 					...(input.limit === undefined ? {} : { limit: input.limit }),
-				}),
+				},
 			})
 		}),
 	)
-	return { events: result.events, nextCursor: result.nextCursor }
+	return {
+		events: result.data.map(
+			(row): PlanetScaleEventEntry => ({
+				id: row.id,
+				databaseName: row.database_name,
+				branchName: row.branch_name,
+				category: row.category,
+				eventType: row.event_type,
+				state: row.state,
+				externalId: row.external_id,
+				title: row.title,
+				source: row.source,
+				actorLogin: row.actor_login,
+				url: row.url,
+				occurredAt: Date.parse(row.occurred_at),
+			}),
+		),
+		nextCursor: result.next_cursor,
+	}
 })
 
 export const getPlanetScaleInfraTimeseries = Effect.fn("QueryEngine.getPlanetScaleInfraTimeseries")(

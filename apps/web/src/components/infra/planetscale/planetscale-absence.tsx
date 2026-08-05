@@ -82,7 +82,8 @@ export function PlanetScaleInventoryNotice({
 	lastInventoryAt,
 	lastInventoryError,
 }: {
-	lastInventoryAt: number | null
+	/** ISO-8601 timestamp from the API, or `null` before the first refresh. */
+	lastInventoryAt: string | null
 	lastInventoryError: string | null
 }) {
 	const failing = lastInventoryError !== null
@@ -96,9 +97,7 @@ export function PlanetScaleInventoryNotice({
 				{failing
 					? "The database and branch list may be out of date. Metrics are unaffected."
 					: `The database and branch list may be out of date — last refreshed ${
-							lastInventoryAt === null
-								? "never"
-								: formatRelativeTime(new Date(lastInventoryAt).toISOString())
+							lastInventoryAt === null ? "never" : formatRelativeTime(lastInventoryAt)
 						}.`}
 			</AlertDescription>
 		</Alert>
@@ -108,8 +107,8 @@ export function PlanetScaleInventoryNotice({
 /** Inventory refreshes hourly; past this the list is stale enough to caveat. */
 export const INVENTORY_STALE_MS = 90 * 60 * 1000
 
-export function inventoryIsStale(lastInventoryAt: number | null, now: number): boolean {
-	return lastInventoryAt !== null && now - lastInventoryAt > INVENTORY_STALE_MS
+export function inventoryIsStale(lastInventoryAt: string | null, now: number): boolean {
+	return lastInventoryAt !== null && now - Date.parse(lastInventoryAt) > INVENTORY_STALE_MS
 }
 
 /**
