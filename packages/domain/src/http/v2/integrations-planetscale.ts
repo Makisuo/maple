@@ -29,6 +29,11 @@ const wireExample = <A>(example: object): A => example as A
 // service tokens rather than OAuth bearers — and a scripted caller needs a
 // scoped API key, which only v2 has.
 //
+// The v1 endpoints (`/api/integrations/planetscale/*`) are still mounted and
+// marked deprecated: the dashboard is off them, but customers may not be, and
+// nothing in this repo would notice if they broke. This group is the surface new
+// work targets; v1 gets deleted once its access logs go quiet.
+//
 // What did NOT move, deliberately: the OAuth *callback* and the webhook
 // *receiver*. Both are browser/provider-facing raw `HttpRouter` routes under
 // `/api/...` (see apps/api/src/routes/v1/integrations.http.ts and

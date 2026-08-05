@@ -29,7 +29,8 @@ const wireExample = <A>(example: object): A => example as A
 //     it goes straight onto v2 rather than extending a v1 group that is slated
 //     for deletion. The older providers stay on v1 until something public needs
 //     them — PlanetScale reached that point and now lives in
-//     `integrations-planetscale.ts`; Cloudflare, GitHub, and Hazel have not.
+//     `integrations-planetscale.ts` (its v1 endpoints stay mounted, deprecated,
+//     until external callers drain); Cloudflare, GitHub, and Hazel have not.
 //   - It is public rather than internal because `/v2/alerts/destinations`
 //     accepts `type: "slack-bot"` with a required `channel_id` and the bot token
 //     never leaves the server: `GET /v2/integrations/slack/channels` is the only

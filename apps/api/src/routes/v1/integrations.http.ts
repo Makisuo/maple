@@ -24,6 +24,14 @@ import {
 	IntegrationsUpstreamError,
 	IntegrationsValidationError,
 	MapleApi,
+	PlanetScaleDatabasesResponse,
+	PlanetScaleDisconnectResponse,
+	PlanetScaleEventsResponse,
+	PlanetScaleOrganizationsResponse,
+	PlanetScaleOrganizationSummary,
+	PlanetScaleQueryInsightsResponse,
+	PlanetScaleStartConnectResponse,
+	PlanetScaleWebhookConfigResponse,
 	RoleName,
 	UserId,
 	VcsCommitDetailResponse,
@@ -47,6 +55,7 @@ import {
 	type TopTrafficGroupShape,
 } from "@/services/integrations/cloudflare-analytics/queries"
 import { PlanetScaleConnectionService } from "@/services/integrations/PlanetScaleConnectionService"
+import { PlanetScaleService } from "@/services/integrations/PlanetScaleService"
 import { PLANETSCALE_CALLBACK_PATH, PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
 import { GithubConnectService } from "@/services/integrations/vcs/vendor/github/GithubConnectService"
 import { VcsCommitService } from "@/services/integrations/vcs/VcsCommitService"
@@ -90,6 +99,9 @@ const resolveGithubCallbackUrl = (req: HttpServerRequest.HttpServerRequest): str
 const resolveCloudflareCallbackUrl = (req: HttpServerRequest.HttpServerRequest): string =>
 	`${resolveRequestOrigin(req)}${CLOUDFLARE_CALLBACK_PATH}`
 
+const resolvePlanetScaleCallbackUrl = (req: HttpServerRequest.HttpServerRequest): string =>
+	`${resolveRequestOrigin(req)}${PLANETSCALE_CALLBACK_PATH}`
+
 const requireAdmin = (roles: ReadonlyArray<RoleName>) =>
 	requireAdminRole(
 		roles,
@@ -103,6 +115,9 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 		const vcsCommits = yield* VcsCommitService
 		const cloudflare = yield* CloudflareOAuthService
 		const cloudflareAnalytics = yield* CloudflareAnalyticsService
+		const planetscale = yield* PlanetScaleConnectionService
+		const planetscaleOAuth = yield* PlanetScaleOAuthService
+		const planetscaleInventory = yield* PlanetScaleService
 		const database = yield* Database
 		const edgeCache = yield* EdgeCacheService
 		const env = yield* Env
@@ -413,6 +428,191 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						yield* requireAdmin(tenant.roles)
 						const result = yield* cloudflare.disconnect(tenant.orgId)
 						return new CloudflareDisconnectResponse(result)
+					}),
+				)
+				.handle("planetscaleStatus", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						return yield* planetscale.getStatus(tenant.orgId)
+					}),
+				)
+				.handle("planetscaleStart", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						const req = yield* HttpServerRequest.HttpServerRequest
+						const result = yield* planetscaleOAuth.startConnect(tenant.orgId, tenant.userId, {
+							callbackUrl: resolvePlanetScaleCallbackUrl(req),
+							returnTo: payload.returnTo,
+						})
+						return new PlanetScaleStartConnectResponse(result)
+					}),
+				)
+				// Admin-gated: drives the org picker while pendingOrgSelection (and
+				// "change organization" re-binding), both admin-only flows.
+				.handle("planetscaleOrganizations", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						const organizations = yield* planetscaleOAuth.listOrganizations(tenant.orgId)
+						return new PlanetScaleOrganizationsResponse({
+							organizations: organizations.map(
+								(org) => new PlanetScaleOrganizationSummary({ id: org.id, name: org.name }),
+							),
+						})
+					}),
+				)
+				.handle("planetscaleSelectOrganization", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						return yield* planetscale.finalizeOrgSelection(tenant.orgId, payload)
+					}),
+				)
+				.handle("planetscaleSetMetricsToken", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						return yield* planetscale.setMetricsToken(tenant.orgId, payload)
+					}),
+				)
+				.handle("planetscaleDisconnect", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						const result = yield* planetscale.disconnect(tenant.orgId)
+						return new PlanetScaleDisconnectResponse(result)
+					}),
+				)
+				.handle("planetscaleWebhookConfig", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						// Admin-only: the response carries the webhook HMAC secret.
+						yield* requireAdmin(tenant.roles)
+						const req = yield* HttpServerRequest.HttpServerRequest
+						const config = yield* planetscale.webhookConfig(tenant.orgId)
+						return new PlanetScaleWebhookConfigResponse({
+							configured: config.configured,
+							url: config.path === null ? null : `${resolveRequestOrigin(req)}${config.path}`,
+							secret: config.secret,
+						})
+					}),
+				)
+				.handle("planetscaleQueryInsights", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						if (payload.endTime <= payload.startTime) {
+							return yield* Effect.fail(
+								new IntegrationsValidationError({
+									message: "endTime must be after startTime",
+								}),
+							)
+						}
+						const limit = Math.min(Math.max(Math.floor(payload.limit ?? 10), 1), 25)
+						// Minute-align so panel refreshes within the TTL share a cache entry
+						// (same shape as cloudflareTopTraffic above).
+						const MINUTE = 60_000
+						const startMs = Math.floor(payload.startTime / MINUTE) * MINUTE
+						const endMs = Math.max(Math.ceil(payload.endTime / MINUTE) * MINUTE, startMs + MINUTE)
+						const cached = yield* edgeCache.getOrCompute(
+							{
+								bucket: "ps-query-insights",
+								key: `${tenant.orgId}:${payload.database}:${payload.branch ?? ""}:${startMs}:${endMs}:${limit}`,
+								ttlSeconds: 60,
+								schema: PlanetScaleQueryInsightsResponse,
+							},
+							planetscaleInventory.queryInsights(tenant.orgId, {
+								database: payload.database,
+								branch: payload.branch,
+								startTime: startMs,
+								endTime: endMs,
+								limit,
+							}),
+						)
+						return cached.value
+					}),
+				)
+				// No admin gate — the timeline is the same class of read as the inventory.
+				.handle("planetscaleEvents", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						if (payload.endTime <= payload.startTime) {
+							return yield* Effect.fail(
+								new IntegrationsValidationError({
+									message: "endTime must be after startTime",
+								}),
+							)
+						}
+						const limit = Math.min(Math.max(Math.floor(payload.limit ?? 100), 1), 500)
+						const MINUTE = 60_000
+						const startMs = Math.floor(payload.startTime / MINUTE) * MINUTE
+						const endMs = Math.max(Math.ceil(payload.endTime / MINUTE) * MINUTE, startMs + MINUTE)
+						const categories = payload.categories ?? []
+						const cached = yield* edgeCache.getOrCompute(
+							{
+								bucket: "ps-events",
+								key: `${tenant.orgId}:${payload.database ?? ""}:${payload.branch ?? ""}:${startMs}:${endMs}:${categories.join(",")}:${limit}:${payload.cursor ?? ""}`,
+								// Shorter than query-insights' 60s: a deploy marker landing a
+								// minute after the deploy is the visible failure mode here.
+								ttlSeconds: 30,
+								schema: PlanetScaleEventsResponse,
+							},
+							planetscaleInventory
+								.listEvents(tenant.orgId, {
+									database: payload.database,
+									branch: payload.branch,
+									startTime: startMs,
+									endTime: endMs,
+									categories: categories.length > 0 ? categories : undefined,
+									limit,
+									cursor: payload.cursor,
+								})
+								.pipe(
+									Effect.map(
+										({ events, nextCursor }) =>
+											new PlanetScaleEventsResponse({
+												events: events.map((row) => ({
+													id: row.id,
+													databaseName: row.databaseName,
+													branchName: row.branchName,
+													category: row.category,
+													eventType: row.eventType,
+													state: row.state,
+													externalId: row.externalId,
+													title: row.title,
+													source: row.source,
+													actorLogin: row.actorLogin,
+													url: row.url,
+													occurredAt: row.occurredAt.getTime(),
+												})),
+												nextCursor,
+											}),
+									),
+								),
+						)
+						return cached.value
+					}),
+				)
+				// No admin gate — any org member may read the inventory (service map needs it).
+				.handle("planetscaleDatabases", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const [rows, connection] = yield* Effect.all([
+							planetscaleInventory.listDatabases(tenant.orgId),
+							planetscale.loadConnection(tenant.orgId),
+						])
+						return new PlanetScaleDatabasesResponse({
+							databases: rows.map((row) => ({
+								id: row.databaseId,
+								name: row.name,
+								kind: row.kind,
+								state: row.state,
+								region: row.region,
+								plan: row.plan,
+								branches: (row.branchesJson ?? []).map((branch) => ({ ...branch })),
+							})),
+							lastInventoryAt: connection?.lastInventoryAt?.getTime() ?? null,
+						})
 					}),
 				)
 				.handle("githubStatus", () =>

@@ -1,4 +1,4 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ExternalUserId, ScrapeTargetId, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
@@ -238,14 +238,19 @@ export class CloudflareDisconnectResponse extends Schema.Class<CloudflareDisconn
 
 // ---- PlanetScale (OAuth integration) ----------------------------------------
 //
-// The PlanetScale HTTP surface lives on v2 now
-// (`packages/domain/src/http/v2/integrations-planetscale.ts`). What is left here
-// is *internal*: the shapes `PlanetScaleConnectionService` and
-// `PlanetScaleService` speak, which the v2 handlers map to the wire format —
-// the same arrangement as Slack, whose service types live next to the service.
-// They stay in this file because the OAuth callback route imports them too.
-// Nothing below is a wire contract; snake_case and ISO timestamps start at the
-// v2 boundary.
+// These shapes now serve two callers at once, which is why they are camelCase
+// with epoch-ms timestamps and the v2 file is not:
+//
+//   1. The deprecated v1 endpoints at the bottom of this file, which are still
+//      mounted for external callers. This is their wire contract, frozen.
+//   2. `PlanetScaleConnectionService` / `PlanetScaleService`, whose method
+//      signatures they are — the v2 handlers map them to the snake_case/ISO
+//      wire format at the boundary, the same way the Slack handlers map
+//      `SlackInstallStatus`.
+//
+// So (1) can be deleted once no customer is calling it, and (2) will keep these
+// alive afterwards as plain service types. Do not reshape them to match v2:
+// that would break the v1 wire format while it still has callers.
 
 /**
  * The managed scrape target this connection auto-provisioned — surfaced on the
@@ -302,6 +307,33 @@ export class PlanetScaleIntegrationStatus extends Schema.Class<PlanetScaleIntegr
 	expiresAt: Schema.NullOr(Schema.Number),
 }) {}
 
+export class PlanetScaleStartConnectRequest extends Schema.Class<PlanetScaleStartConnectRequest>(
+	"PlanetScaleStartConnectRequest",
+)({
+	returnTo: Schema.optionalKey(Schema.String),
+}) {}
+
+export class PlanetScaleStartConnectResponse extends Schema.Class<PlanetScaleStartConnectResponse>(
+	"PlanetScaleStartConnectResponse",
+)({
+	redirectUrl: Schema.String,
+	state: Schema.String,
+}) {}
+
+/** One PlanetScale organization the OAuth grant can access — org-picker material. */
+export class PlanetScaleOrganizationSummary extends Schema.Class<PlanetScaleOrganizationSummary>(
+	"PlanetScaleOrganizationSummary",
+)({
+	id: Schema.String,
+	name: Schema.String,
+}) {}
+
+export class PlanetScaleOrganizationsResponse extends Schema.Class<PlanetScaleOrganizationsResponse>(
+	"PlanetScaleOrganizationsResponse",
+)({
+	organizations: Schema.Array(PlanetScaleOrganizationSummary),
+}) {}
+
 /**
  * Bind the stored OAuth grant to one PlanetScale organization and provision the
  * managed scrape target. Called automatically from the OAuth callback when the
@@ -319,6 +351,12 @@ export class PlanetScaleSelectOrganizationRequest extends Schema.Class<PlanetSca
 	excludeBranches: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
+export class PlanetScaleDisconnectResponse extends Schema.Class<PlanetScaleDisconnectResponse>(
+	"PlanetScaleDisconnectResponse",
+)({
+	disconnected: Schema.Boolean,
+}) {}
+
 /**
  * Attach a service token (permission: read_metrics_endpoints only) to the
  * managed scrape target. PlanetScale's Prometheus discovery + branch metrics
@@ -330,6 +368,38 @@ export class PlanetScaleMetricsTokenRequest extends Schema.Class<PlanetScaleMetr
 )({
 	tokenId: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
 	tokenSecret: Schema.String.check(Schema.isMinLength(1)),
+}) {}
+
+export class PlanetScaleBranchSummary extends Schema.Class<PlanetScaleBranchSummary>(
+	"PlanetScaleBranchSummary",
+)({
+	id: Schema.String,
+	name: Schema.String,
+	production: Schema.Boolean,
+	ready: Schema.Boolean,
+}) {}
+
+/** One database from the org's polled PlanetScale inventory. */
+export class PlanetScaleDatabaseSummary extends Schema.Class<PlanetScaleDatabaseSummary>(
+	"PlanetScaleDatabaseSummary",
+)({
+	/** PlanetScale's database id. */
+	id: Schema.String,
+	name: Schema.String,
+	/** Product kind: "mysql" (Vitess) or "postgresql". */
+	kind: Schema.String,
+	state: Schema.NullOr(Schema.String),
+	region: Schema.NullOr(Schema.String),
+	plan: Schema.NullOr(Schema.String),
+	branches: Schema.Array(PlanetScaleBranchSummary),
+}) {}
+
+export class PlanetScaleDatabasesResponse extends Schema.Class<PlanetScaleDatabasesResponse>(
+	"PlanetScaleDatabasesResponse",
+)({
+	databases: Schema.Array(PlanetScaleDatabaseSummary),
+	/** Epoch ms of the last successful inventory refresh; null before the first. */
+	lastInventoryAt: Schema.NullOr(Schema.Number),
 }) {}
 
 /**
@@ -357,6 +427,39 @@ export class CloudflareHyperdrivesResponse extends Schema.Class<CloudflareHyperd
 	"CloudflareHyperdrivesResponse",
 )({
 	configs: Schema.Array(CloudflareHyperdriveConfigSummary),
+}) {}
+
+/**
+ * Manual webhook setup material (admin-only): the endpoint path to register in
+ * PlanetScale's per-database webhook settings, and the HMAC secret Maple
+ * verifies deliveries with.
+ */
+export class PlanetScaleWebhookConfigResponse extends Schema.Class<PlanetScaleWebhookConfigResponse>(
+	"PlanetScaleWebhookConfigResponse",
+)({
+	configured: Schema.Boolean,
+	/** Absolute webhook URL to paste into PlanetScale (built from the API origin). */
+	url: Schema.NullOr(Schema.String),
+	secret: Schema.NullOr(Schema.String),
+}) {}
+
+/**
+ * Live top-queries lookup for one database branch, proxied to PlanetScale's
+ * Query Insights API — per-fingerprint cardinality is far too high to store as
+ * metrics, so this is computed on demand (and edge-cached briefly), mirroring
+ * the Cloudflare top-traffic pattern.
+ */
+export class PlanetScaleQueryInsightsRequest extends Schema.Class<PlanetScaleQueryInsightsRequest>(
+	"PlanetScaleQueryInsightsRequest",
+)({
+	database: Schema.String.check(Schema.isMinLength(1)),
+	/** Branch to inspect; defaults to the database's production branch. */
+	branch: Schema.optionalKey(Schema.String),
+	/** Window bounds, epoch ms. */
+	startTime: Schema.Number,
+	endTime: Schema.Number,
+	/** Top-N by total time; defaults to 10, capped at 25. */
+	limit: Schema.optionalKey(Schema.Number),
 }) {}
 
 export class PlanetScaleQueryInsightRow extends Schema.Class<PlanetScaleQueryInsightRow>(
@@ -388,6 +491,76 @@ export class PlanetScaleQueryInsightsResponse extends Schema.Class<PlanetScaleQu
 	 * missing read_database, unknown branch) — the UI renders it inline.
 	 */
 	unavailableReason: Schema.NullOr(Schema.String),
+}) {}
+
+/**
+ * The PlanetScale lifecycle timeline for a window: deploy-request transitions
+ * and branch state changes. Backs both the chart markers on the database
+ * drill-in and the activity feed under them.
+ */
+export const PlanetScaleEventCategory = Schema.Literals([
+	"deploy_request",
+	"branch",
+	"database",
+	"cluster",
+	"keyspace",
+])
+
+export class PlanetScaleEventsRequest extends Schema.Class<PlanetScaleEventsRequest>(
+	"PlanetScaleEventsRequest",
+)({
+	/** Omit for the org-wide feed. */
+	database: Schema.optionalKey(Schema.String),
+	/**
+	 * Narrows branch-scoped rows. Deploy requests span two branches and carry no
+	 * single one, so they are never filtered out by this.
+	 */
+	branch: Schema.optionalKey(Schema.String),
+	/** Window bounds, epoch ms. */
+	startTime: Schema.Number,
+	endTime: Schema.Number,
+	categories: Schema.optionalKey(Schema.Array(PlanetScaleEventCategory)),
+	/** Defaults to 100, capped at 500. */
+	limit: Schema.optionalKey(Schema.Number),
+	/** Keyset cursor from the previous page's `nextCursor`. */
+	cursor: Schema.optionalKey(Schema.String),
+}) {}
+
+export class PlanetScaleEventSummary extends Schema.Class<PlanetScaleEventSummary>("PlanetScaleEventSummary")(
+	{
+		id: Schema.String,
+		databaseName: Schema.String,
+		/** "" for events that belong to no single branch (deploy requests). */
+		branchName: Schema.String,
+		/**
+		 * One of `PlanetScaleEventCategory` in practice, but typed as a plain string
+		 * on the way out: the classifier is deliberately forward-compatible, so a
+		 * category added by a newer poller must render as an unknown row in the feed
+		 * rather than fail the whole response's decode.
+		 */
+		category: Schema.String,
+		/** Raw PlanetScale event string, e.g. "deploy_request.schema_applied". */
+		eventType: Schema.String,
+		state: Schema.NullOr(Schema.String),
+		/** Deploy-request number or branch id; "" when the event has none. */
+		externalId: Schema.String,
+		title: Schema.String,
+		/** "webhook" (live) or "backfill" (REST history). */
+		source: Schema.String,
+		actorLogin: Schema.NullOr(Schema.String),
+		url: Schema.NullOr(Schema.String),
+		/** Epoch ms, truncated to the second. */
+		occurredAt: Schema.Number,
+	},
+) {}
+
+export class PlanetScaleEventsResponse extends Schema.Class<PlanetScaleEventsResponse>(
+	"PlanetScaleEventsResponse",
+)({
+	/** Newest first. */
+	events: Schema.Array(PlanetScaleEventSummary),
+	/** Null when this is the last page. */
+	nextCursor: Schema.NullOr(Schema.String),
 }) {}
 
 // ---- GitHub (VCS App installation) ----------------------------------------
@@ -565,6 +738,19 @@ export class IntegrationsPersistenceError extends Schema.TaggedErrorClass<Integr
 	{ httpApiStatus: 503 },
 ) {}
 
+/**
+ * Every `/api/integrations/planetscale/*` operation below is superseded by the
+ * `/v2/integrations/planetscale` group (`http/v2/integrations-planetscale.ts`),
+ * which is where new work goes: scoped API keys, snake_case + ISO wire format,
+ * and the documented error envelope.
+ *
+ * v1 stays mounted because customers may still be calling it — the dashboard no
+ * longer does, so nothing in this repo will notice if it breaks. Marking the
+ * operations deprecated puts that in `/docs` rather than leaving it as tribal
+ * knowledge. Delete them only once the access logs show no external traffic.
+ */
+const PLANETSCALE_V1_DEPRECATED = OpenApi.annotations({ deprecated: true })
+
 export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 	.add(
 		HttpApiEndpoint.get("hazelStatus", "/hazel/status", {
@@ -667,6 +853,113 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			success: CloudflareHyperdrivesResponse,
 			error: IntegrationsPersistenceError,
 		}),
+	)
+	.add(
+		HttpApiEndpoint.get("planetscaleStatus", "/planetscale/status", {
+			success: PlanetScaleIntegrationStatus,
+			error: IntegrationsPersistenceError,
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
+	)
+	.add(
+		HttpApiEndpoint.post("planetscaleStart", "/planetscale/start", {
+			payload: PlanetScaleStartConnectRequest,
+			success: PlanetScaleStartConnectResponse,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsValidationError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
+	)
+	.add(
+		// Organizations the stored OAuth grant can access — drives the org picker
+		// while the connection is pendingOrgSelection (and "change organization").
+		HttpApiEndpoint.get("planetscaleOrganizations", "/planetscale/organizations", {
+			success: PlanetScaleOrganizationsResponse,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsValidationError,
+				IntegrationsNotConnectedError,
+				IntegrationsRevokedError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
+	)
+	.add(
+		// Binds the OAuth grant to one PlanetScale organization: probes API
+		// permissions, then auto-provisions (or adopts) the managed scrape target.
+		// Re-binding is an upsert.
+		HttpApiEndpoint.post("planetscaleSelectOrganization", "/planetscale/select-organization", {
+			payload: PlanetScaleSelectOrganizationRequest,
+			success: PlanetScaleIntegrationStatus,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsValidationError,
+				IntegrationsNotConnectedError,
+				IntegrationsRevokedError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
+	)
+	.add(
+		// Validates the token against the metrics discovery endpoint before
+		// storing it on the managed scrape target (re-submitting rotates it).
+		HttpApiEndpoint.post("planetscaleSetMetricsToken", "/planetscale/metrics-token", {
+			payload: PlanetScaleMetricsTokenRequest,
+			success: PlanetScaleIntegrationStatus,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsNotConnectedError,
+				IntegrationsValidationError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
+	)
+	.add(
+		HttpApiEndpoint.delete("planetscaleDisconnect", "/planetscale", {
+			success: PlanetScaleDisconnectResponse,
+			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
+	)
+	.add(
+		// The org's polled database/branch inventory — consumed by the service map
+		// (node branding + metric-overlay matching) and the infra page.
+		HttpApiEndpoint.get("planetscaleDatabases", "/planetscale/databases", {
+			success: PlanetScaleDatabasesResponse,
+			error: IntegrationsPersistenceError,
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
+	)
+	.add(
+		HttpApiEndpoint.get("planetscaleWebhookConfig", "/planetscale/webhook-config", {
+			success: PlanetScaleWebhookConfigResponse,
+			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
+	)
+	.add(
+		HttpApiEndpoint.post("planetscaleQueryInsights", "/planetscale/query-insights", {
+			payload: PlanetScaleQueryInsightsRequest,
+			success: PlanetScaleQueryInsightsResponse,
+			error: [
+				IntegrationsNotConnectedError,
+				IntegrationsValidationError,
+				IntegrationsRevokedError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
+	)
+	.add(
+		// POST, matching query-insights: the window + filters make a long key that
+		// belongs in a body, and the handler edge-caches on a computed key anyway.
+		HttpApiEndpoint.post("planetscaleEvents", "/planetscale/events", {
+			payload: PlanetScaleEventsRequest,
+			success: PlanetScaleEventsResponse,
+			error: [IntegrationsValidationError, IntegrationsPersistenceError],
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		HttpApiEndpoint.get("githubStatus", "/github/status", {
