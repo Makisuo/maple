@@ -28,6 +28,7 @@ import {
 	MapleApiV2,
 	V2PlanetScaleEventList,
 	V2PlanetScaleQueryInsightList,
+	dependencyUnavailable,
 	invalidRequest,
 	isoTimestamp,
 	isoTimestampOrNull,
@@ -219,8 +220,15 @@ const mapPlanetScaleErrors = <A, R>(
 				Effect.fail(invalidRequest("planetscale_request_rejected", error.message)),
 			"@maple/http/errors/IntegrationsUpstreamError": (error) =>
 				Effect.fail(upstreamError("planetscale_upstream_error", error.message)),
+			// Sanitized, not `serviceUnavailable(error.message)`: a persistence
+			// failure's message is the driver's, and postgres.js puts the full
+			// failing SQL in it. That is fine in a v1 body the dashboard reads and
+			// wrong in a public one. Log the cause, return a stable code.
 			"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-				Effect.fail(serviceUnavailable(error.message)),
+				Effect.logError("PlanetScale persistence failure", {
+					tag: error._tag,
+					message: error.message,
+				}).pipe(Effect.andThen(Effect.fail(dependencyUnavailable("planetscale_unavailable")))),
 		}),
 	)
 
@@ -390,7 +398,14 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							const status = yield* planetscale.getStatus(tenant.orgId).pipe(
 								Effect.catchTags({
 									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-										Effect.fail(serviceUnavailable(error.message)),
+										Effect.logError("PlanetScale persistence failure", {
+											tag: error._tag,
+											message: error.message,
+										}).pipe(
+											Effect.andThen(
+												Effect.fail(dependencyUnavailable("planetscale_unavailable")),
+											),
+										),
 								}),
 							)
 							return toPlanetScaleStatus(status)
@@ -434,12 +449,31 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									Effect.catchTags({
 										// Both are misconfiguration or storage failures on our side —
 										// there is no caller input that produces either, so neither is
-										// a 4xx. `startConnect` cannot fail upstream: nothing is sent
-										// to PlanetScale until the browser follows the authorize URL.
+										// a 4xx, and neither message is the caller's business.
+										// `startConnect` cannot fail upstream: nothing is sent to
+										// PlanetScale until the browser follows the authorize URL.
 										"@maple/http/errors/IntegrationsValidationError": (error) =>
-											Effect.fail(serviceUnavailable(error.message)),
+											Effect.logError("PlanetScale connect misconfigured", {
+												tag: error._tag,
+												message: error.message,
+											}).pipe(
+												Effect.andThen(
+													Effect.fail(
+														dependencyUnavailable("planetscale_unavailable"),
+													),
+												),
+											),
 										"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-											Effect.fail(serviceUnavailable(error.message)),
+											Effect.logError("PlanetScale persistence failure", {
+												tag: error._tag,
+												message: error.message,
+											}).pipe(
+												Effect.andThen(
+													Effect.fail(
+														dependencyUnavailable("planetscale_unavailable"),
+													),
+												),
+											),
 									}),
 								)
 							return {
@@ -527,7 +561,14 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 								),
 								Effect.catchTags({
 									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-										Effect.fail(serviceUnavailable(error.message)),
+										Effect.logError("PlanetScale persistence failure", {
+											tag: error._tag,
+											message: error.message,
+										}).pipe(
+											Effect.andThen(
+												Effect.fail(dependencyUnavailable("planetscale_unavailable")),
+											),
+										),
 								}),
 							)
 							return {
@@ -547,7 +588,14 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							]).pipe(
 								Effect.catchTags({
 									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-										Effect.fail(serviceUnavailable(error.message)),
+										Effect.logError("PlanetScale persistence failure", {
+											tag: error._tag,
+											message: error.message,
+										}).pipe(
+											Effect.andThen(
+												Effect.fail(dependencyUnavailable("planetscale_unavailable")),
+											),
+										),
 								}),
 							)
 							return {
@@ -573,7 +621,14 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							const config = yield* planetscale.webhookConfig(tenant.orgId).pipe(
 								Effect.catchTags({
 									"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-										Effect.fail(serviceUnavailable(error.message)),
+										Effect.logError("PlanetScale persistence failure", {
+											tag: error._tag,
+											message: error.message,
+										}).pipe(
+											Effect.andThen(
+												Effect.fail(dependencyUnavailable("planetscale_unavailable")),
+											),
+										),
 								}),
 							)
 							return {
@@ -674,7 +729,16 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 										})),
 										Effect.catchTags({
 											"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-												Effect.fail(serviceUnavailable(error.message)),
+												Effect.logError("PlanetScale persistence failure", {
+													tag: error._tag,
+													message: error.message,
+												}).pipe(
+													Effect.andThen(
+														Effect.fail(
+															dependencyUnavailable("planetscale_unavailable"),
+														),
+													),
+												),
 										}),
 									),
 							)

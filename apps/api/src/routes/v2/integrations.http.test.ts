@@ -957,6 +957,40 @@ describe("v2 planetscale integration over HTTP", () => {
 		await harness.dispose()
 	})
 
+	it("never puts a persistence failure's message in the public body", async () => {
+		// postgres.js puts the whole failing SQL in the error message, so echoing
+		// it — which is what the v1 body does — publishes the schema. Found by
+		// calling the endpoint against a database missing the events table.
+		const harness = makeHarness(
+			{},
+			{
+				inventory: {
+					listEvents: () =>
+						Effect.fail(
+							new IntegrationsPersistenceError({
+								message:
+									'Failed query: select "id", "org_id" from "planetscale_events" [caused by: relation "planetscale_events" does not exist]',
+							}),
+						),
+				},
+			},
+		)
+		const key = await harness.bootstrapAdminKey()
+
+		const { status, body } = await harness.request(
+			"POST",
+			"/v2/integrations/planetscale/events",
+			key.secret,
+			{ body: { start_time: "2026-08-05T11:00:00.000Z", end_time: "2026-08-05T12:00:00.000Z" } },
+		)
+		expect(status).toBe(503)
+		expect(body.error.code).toBe("planetscale_unavailable")
+		const serialized = JSON.stringify(body)
+		expect(serialized).not.toContain("select")
+		expect(serialized).not.toContain("planetscale_events")
+		await harness.dispose()
+	})
+
 	it("rejects an inverted window with 400 and names the offending field", async () => {
 		const harness = makeHarness({}, {})
 		const key = await harness.bootstrapAdminKey()
