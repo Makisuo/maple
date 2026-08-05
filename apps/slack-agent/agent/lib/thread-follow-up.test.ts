@@ -3,6 +3,7 @@ import { installFetchStub } from "./fetch-stub.js"
 import {
 	fetchThreadRepliesFromSlack,
 	promoteThreadFollowUp,
+	recordThreadEngagement,
 	resetThreadEngagementCacheForTests,
 	type ThreadFollowUpDeps,
 	type ThreadReplyMessage,
@@ -331,6 +332,40 @@ describe("promotion deadline", () => {
 		}
 		expect(await promoteThreadFollowUp(envelope({}), deps)).toBeNull()
 	})
+
+	test("expiry is logged: it is the one path that drops a message with no other trace", async () => {
+		// No turn is created, eve drops the event as `unsupported` without a line
+		// of its own, and the :eyes: ack never fires — so unless this logs, the
+		// bot going quiet leaves nothing behind to find. hooks/outcome-log.ts
+		// cannot cover it: there is no turn for it to report on.
+		const warnings: string[] = []
+		const realWarn = console.warn
+		console.warn = (line: unknown) => {
+			warnings.push(String(line))
+		}
+		try {
+			const deps: ThreadFollowUpDeps = {
+				resolveBotToken: async () => "xoxb-test",
+				fetchThreadReplies: () =>
+					new Promise((resolve) => setTimeout(() => resolve(ENGAGED_THREAD), 200)),
+				promotionDeadlineMs: 20,
+			}
+			expect(await promoteThreadFollowUp(envelope({}), deps)).toBeNull()
+		} finally {
+			console.warn = realWarn
+		}
+
+		const logged = warnings.map((line) => JSON.parse(line) as Record<string, unknown>)
+		const timeout = logged.find(
+			(entry) => entry["maple.agent.event"] === "follow_up_promotion_timeout",
+		)
+		expect(timeout).toBeDefined()
+		// Enough to find the thread in Slack; never the message text.
+		expect(timeout?.["maple.slack.team_id"]).toBe("T123")
+		expect(timeout?.["maple.slack.channel_id"]).toBe("C123")
+		expect(timeout?.["maple.slack.thread_ts"]).toBe("1700000000.000100")
+		expect(timeout?.["maple.agent.deadline_ms"]).toBe(20)
+	})
 })
 
 // ── caching ─────────────────────────────────────────────────────────────────
@@ -398,5 +433,153 @@ describe("engagement cache", () => {
 		const otherTeam = envelope({ envelope: { team_id: "T999" } })
 		expect(await promoteThreadFollowUp(otherTeam, deps)).toBeNull()
 		expect(call).toBe(2)
+	})
+})
+
+// ── engagement learned from the event stream ────────────────────────────────
+
+// The cold path (conversations.replies) is the one that has to fit inside
+// Slack's webhook budget, and the one that drops a user's message when it
+// doesn't. Everything the bot does in a thread already comes back through the
+// events stream, so most threads should never reach it at all.
+
+/** The bot's own post echoing back: `bot_id` set AND `user` = the bot. */
+function botPost(overrides: Record<string, unknown> = {}): string {
+	return envelope({
+		event: {
+			bot_id: "B0BOT",
+			user: BOT_USER_ID,
+			text: "Here are the reasons why...",
+			ts: "1700000001.000100",
+			...overrides,
+		},
+	})
+}
+
+describe("recordThreadEngagement", () => {
+	test("the bot's own post warms the thread, so the next follow-up needs no fetch", async () => {
+		recordThreadEngagement(botPost())
+
+		const { deps, calls } = makeDeps(UNRELATED_THREAD)
+		expect(await promoteThreadFollowUp(envelope({}), deps)).not.toBeNull()
+		// Promoted purely from what the event stream already told us.
+		expect(calls()).toBe(0)
+	})
+
+	test("an @mention of the bot warms the thread too", async () => {
+		recordThreadEngagement(
+			envelope({
+				event: { text: `<@${BOT_USER_ID}> why is error rate up?`, ts: "1700000001.000100" },
+			}),
+		)
+
+		const { deps, calls } = makeDeps(UNRELATED_THREAD)
+		expect(await promoteThreadFollowUp(envelope({}), deps)).not.toBeNull()
+		expect(calls()).toBe(0)
+	})
+
+	test("a root-level mention is keyed by its own ts — the ts that becomes the thread", async () => {
+		// No thread_ts yet: the thread does not exist until the bot replies.
+		recordThreadEngagement(
+			envelope({
+				event: {
+					type: "app_mention",
+					channel_type: undefined,
+					thread_ts: undefined,
+					text: `<@${BOT_USER_ID}> take a look`,
+					ts: "1700000000.000100",
+				},
+			}),
+		)
+
+		// The default envelope replies in thread 1700000000.000100 — the mention's
+		// own ts. Its very first follow-up is already warm.
+		const { deps, calls } = makeDeps(UNRELATED_THREAD)
+		expect(await promoteThreadFollowUp(envelope({}), deps)).not.toBeNull()
+		expect(calls()).toBe(0)
+	})
+
+	test("the regression: a follow-up 3 minutes after the bot's last post stays warm", async () => {
+		// The incident. Engagement had only ever been written by the cold path, so
+		// it aged out 5 minutes after the last *promotion* rather than after the
+		// bot's last post — and the next follow-up paid the full round-trip inside
+		// Slack's webhook budget, missed the deadline, and was dropped in silence.
+		setSystemTime(new Date("2026-08-05T19:27:44Z"))
+		recordThreadEngagement(botPost({ ts: "1785958064.000100" }))
+
+		setSystemTime(new Date("2026-08-05T19:30:38Z"))
+		const { deps, calls } = makeDeps(UNRELATED_THREAD)
+		const followUp = envelope({ event: { ts: "1785958238.000200" } })
+		expect(await promoteThreadFollowUp(followUp, deps)).not.toBeNull()
+		expect(calls()).toBe(0)
+	})
+
+	test("a stranger's message teaches nothing", async () => {
+		recordThreadEngagement(envelope({ event: { text: "lunch?" } }))
+
+		const { deps, calls } = makeDeps(UNRELATED_THREAD)
+		expect(await promoteThreadFollowUp(envelope({}), deps)).toBeNull()
+		// Fell through to the cold path rather than caching a false positive.
+		expect(calls()).toBe(1)
+	})
+
+	test("another bot's post teaches nothing (it is not our engagement)", async () => {
+		recordThreadEngagement(botPost({ user: "U0OTHERBOT", bot_id: "B0GITHUB" }))
+
+		const { deps, calls } = makeDeps(UNRELATED_THREAD)
+		expect(await promoteThreadFollowUp(envelope({}), deps)).toBeNull()
+		expect(calls()).toBe(1)
+	})
+
+	test("engagement never moves backwards when Slack redelivers an older event", async () => {
+		recordThreadEngagement(botPost({ ts: "1700001000.000100" }))
+		// A retry of a much older post must not un-freshen the newer engagement.
+		recordThreadEngagement(botPost({ ts: "1700000001.000100" }))
+
+		const { deps, calls } = makeDeps(UNRELATED_THREAD)
+		// 20 minutes after the NEWER post; >30 min after the older one, so if the
+		// replay had won this would fall outside the recency bound.
+		const followUp = envelope({ event: { ts: "1700002200.000200" } })
+		expect(await promoteThreadFollowUp(followUp, deps)).not.toBeNull()
+		expect(calls()).toBe(0)
+	})
+
+	test("recorded engagement is still subject to the recency bound", async () => {
+		recordThreadEngagement(botPost({ ts: "1700000001.000100" }))
+
+		const { deps } = makeDeps(UNRELATED_THREAD)
+		// 31 minutes later: a warm cache does not make a dead thread live.
+		const followUp = envelope({ event: { ts: "1700001861.000200" } })
+		expect(await promoteThreadFollowUp(followUp, deps)).toBeNull()
+	})
+
+	test("teams stay isolated", async () => {
+		recordThreadEngagement(botPost())
+
+		const { deps, calls } = makeDeps(UNRELATED_THREAD)
+		const otherTeam = envelope({ envelope: { team_id: "T999" } })
+		expect(await promoteThreadFollowUp(otherTeam, deps)).toBeNull()
+		expect(calls()).toBe(1)
+	})
+
+	test("edits, DMs, non-events and unreadable bodies are all no-ops", async () => {
+		recordThreadEngagement(botPost({ subtype: "message_changed" }))
+		recordThreadEngagement(botPost({ channel_type: "im" }))
+		recordThreadEngagement(botPost({ type: "reaction_added" }))
+		recordThreadEngagement(botPost({ ts: undefined }))
+		recordThreadEngagement("not json")
+		recordThreadEngagement(JSON.stringify({ type: "url_verification", challenge: "x" }))
+
+		const { deps, calls } = makeDeps(UNRELATED_THREAD)
+		expect(await promoteThreadFollowUp(envelope({}), deps)).toBeNull()
+		expect(calls()).toBe(1)
+	})
+
+	test("a file_share post (the bot uploading a chart) counts", async () => {
+		recordThreadEngagement(botPost({ subtype: "file_share" }))
+
+		const { deps, calls } = makeDeps(UNRELATED_THREAD)
+		expect(await promoteThreadFollowUp(envelope({}), deps)).not.toBeNull()
+		expect(calls()).toBe(0)
 	})
 })

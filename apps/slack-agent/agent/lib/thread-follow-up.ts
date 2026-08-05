@@ -1,5 +1,6 @@
 import { botUserIdFromEnvelope } from "./bot-identity.js"
 import { resolveBotToken } from "./maple.js"
+import { emitAgentLog } from "./telemetry-log.js"
 import { createTtlCache } from "./ttl-cache.js"
 
 /**
@@ -30,6 +31,14 @@ import { createTtlCache } from "./ttl-cache.js"
  *     mentioned it there (covers the follow-up racing ahead of the bot's
  *     first reply) — and that engagement is still RECENT (see
  *     `ENGAGEMENT_MAX_AGE_SECONDS` / `ENGAGEMENT_RECENT_MESSAGE_WINDOW`).
+ *
+ * Engagement is learned two ways, and the cheap one carries the load:
+ * `recordThreadEngagement` reads it straight off events that already prove it
+ * (the bot's own post echoing back, an @mention of it), while
+ * `isBotEngagedInThread` falls back to a `conversations.replies` round-trip for
+ * threads no such event has taught us about. The fallback is what has to fit
+ * inside Slack's webhook budget, so the fewer threads reach it, the fewer
+ * follow-ups are lost to `PROMOTION_DEADLINE_MS`.
  *
  * Requires the Slack app to subscribe to `message.channels` (public) /
  * `message.groups` (private) bot events; the engagement check reuses the
@@ -79,6 +88,13 @@ const defaultDeps: ThreadFollowUpDeps = {
 // a thread the bot joins moments later is picked up quickly. What the cache
 // stores is the *timestamp* of the engagement, not a boolean, so the recency
 // bound below is re-applied on every hit instead of being frozen for the TTL.
+//
+// The TTL is measured from the last time we LEARNED of engagement, and
+// `recordThreadEngagement` keeps that in step with what the bot is actually
+// doing: every post of its own that echoes back through the webhook refreshes
+// the entry. So a thread the bot is actively replying in never goes cold, and
+// this TTL only governs threads that have genuinely gone quiet — which are
+// exactly the ones worth re-verifying against Slack.
 const ENGAGED_TTL_MS = 5 * 60_000
 const NOT_ENGAGED_TTL_MS = 20_000
 const CACHE_MAX_ENTRIES = 500
@@ -126,6 +142,109 @@ const engagementCache = createTtlCache<EngagementCacheEntry>({
 /** Test-only: clears the engagement cache so each test starts cold. */
 export function resetThreadEngagementCacheForTests(): void {
 	engagementCache.clear()
+}
+
+/**
+ * The cache is process-global and this app serves every workspace that
+ * installed the Slack app. Slack channel ids are only unique per workspace, so
+ * a bare `channel:thread` key would let one tenant's engagement decide
+ * another tenant's dispatch.
+ */
+function engagementCacheKey(
+	teamId: string | undefined,
+	channelId: string,
+	threadTs: string,
+): string {
+	return `${teamId ?? "-"}:${channelId}:${threadTs}`
+}
+
+/**
+ * Refreshes the engagement cache from an event that already *proves* the bot is
+ * engaged — its own post echoing back through the events stream, or someone
+ * @-mentioning it. Free: the envelope in hand carries exactly what the
+ * `conversations.replies` round-trip would have gone to Slack to find out.
+ *
+ * Why this exists: engagement used to be learned only by the cold path in
+ * `isBotEngagedInThread`, so an entry aged out `ENGAGED_TTL_MS` after the last
+ * *promotion* rather than after the last thing the bot actually did. A thread
+ * the bot was still actively replying in could therefore hand the next
+ * un-mentioned follow-up a cold cache, making it pay the full two-call
+ * round-trip inside Slack's ~3s webhook budget — and a follow-up that misses
+ * `PROMOTION_DEADLINE_MS` is dropped outright, with no reply and no retry.
+ * That is a real incident, not a hypothetical: a follow-up was lost this way
+ * three minutes after the bot's own last post in the same thread.
+ *
+ * Call it on every verified inbound body, before promotion. Never throws — an
+ * envelope we cannot read simply teaches us nothing.
+ */
+export function recordThreadEngagement(rawBody: string): void {
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(rawBody)
+	} catch {
+		return
+	}
+	if (!isRecord(parsed) || parsed.type !== "event_callback") return
+
+	const event = parsed.event
+	if (!isRecord(event)) return
+	if (event.type !== "message" && event.type !== "app_mention") return
+
+	// Promotion only ever applies to channel threads, so nothing else is worth
+	// caching. `app_mention` carries no `channel_type`, and only arrives from a
+	// channel the app is in — so the filter applies to `message` events only.
+	const channelType = event.channel_type
+	if (
+		event.type === "message" &&
+		channelType !== "channel" &&
+		channelType !== "group" &&
+		channelType !== "mpim"
+	) {
+		return
+	}
+
+	// Edits and deletions carry the original under a nested `message`; their
+	// top-level ts is not a new engagement. Same filter as the dispatch path.
+	const subtype = event.subtype
+	if (typeof subtype === "string" && subtype.length > 0 && subtype !== "file_share") return
+
+	const channelId = typeof event.channel === "string" ? event.channel : ""
+	const ts = typeof event.ts === "string" ? event.ts : ""
+	if (!channelId || !ts) return
+
+	const botUserId = botUserIdFromEnvelope(parsed)
+	if (!botUserId) return
+
+	// The same predicate `latestEngagementSeconds` applies to fetched replies —
+	// the two must agree, or whether a thread counts as engaged would depend on
+	// which path happened to observe it.
+	//
+	// `bot_id` is deliberately NOT rejected here. `parseFollowUpCandidate` drops
+	// bot-authored messages to stop the bot dispatching a turn on its own reply;
+	// that is a rule about *dispatch*. For *learning*, the bot's own post is the
+	// single most reliable engagement signal there is.
+	const text = typeof event.text === "string" ? event.text : ""
+	const isOwnPost = typeof event.user === "string" && event.user === botUserId
+	if (!isOwnPost && !text.includes(`<@${botUserId}>`)) return
+
+	const seconds = Number(ts)
+	if (!Number.isFinite(seconds)) return
+
+	// A root-level mention has no `thread_ts` yet — its own ts is what becomes
+	// the thread's id once the bot replies, so key on that and the thread is
+	// already warm for its very first follow-up.
+	const threadTs =
+		typeof event.thread_ts === "string" && event.thread_ts.length > 0 ? event.thread_ts : ts
+	const teamId = typeof parsed.team_id === "string" ? parsed.team_id : undefined
+	const key = engagementCacheKey(teamId, channelId, threadTs)
+
+	// Never move engagement backwards: Slack redelivers, and a retry carrying an
+	// older event must not un-freshen what a newer one has already established.
+	const known = engagementCache.get(key)?.engagedAtSeconds ?? null
+	engagementCache.set(key, {
+		engagedAtSeconds: known === null ? seconds : Math.max(known, seconds),
+		expiresAt: Date.now() + ENGAGED_TTL_MS,
+	})
 }
 
 /**
@@ -222,11 +341,7 @@ async function isBotEngagedInThread(
 	candidate: FollowUpCandidate,
 	deps: ThreadFollowUpDeps,
 ): Promise<boolean> {
-	// teamId is part of the key: the cache is process-global and this app serves
-	// every workspace that installed the Slack app. Slack channel ids are only
-	// unique per workspace, so a bare `channel:thread` key lets one tenant's
-	// engagement decide another tenant's dispatch.
-	const cacheKey = `${candidate.teamId ?? "-"}:${candidate.channelId}:${candidate.threadTs}`
+	const cacheKey = engagementCacheKey(candidate.teamId, candidate.channelId, candidate.threadTs)
 	const cached = engagementCache.get(cacheKey)
 	if (cached) return isEngagementRecent(cached.engagedAtSeconds, candidate)
 
@@ -256,7 +371,23 @@ async function isBotEngagedInThread(
 	} catch (error) {
 		// Deadline expiry is an expected cold-cache outcome, not a failure: fall
 		// through unpromoted (nothing cached — the next reply retries, warmer).
-		if (deadline.aborted) return false
+		//
+		// Expected, but never silent. This is the one path that costs a user their
+		// message outright: no turn is created, eve drops the event as
+		// `unsupported` without a line of its own, and the `:eyes:` ack does not
+		// fire either — so from the outside the bot simply says nothing. Left
+		// unlogged it is invisible to `hooks/outcome-log.ts`, which can only ever
+		// report on turns that exist.
+		if (deadline.aborted) {
+			emitAgentLog("warn", "follow_up_promotion_timeout", {
+				"maple.agent.event": "follow_up_promotion_timeout",
+				"maple.slack.team_id": candidate.teamId,
+				"maple.slack.channel_id": candidate.channelId,
+				"maple.slack.thread_ts": candidate.threadTs,
+				"maple.agent.deadline_ms": deps.promotionDeadlineMs ?? PROMOTION_DEADLINE_MS,
+			})
+			return false
+		}
 		throw error
 	}
 
