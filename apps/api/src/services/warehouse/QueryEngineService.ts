@@ -399,11 +399,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 						yield* recordCacheOutcome(hit)
 						yield* Effect.annotateCurrentSpan("cache.hit", hit)
 						return value
-					}).pipe(
-						Effect.withSpan("QueryEngineService.cachedEvaluate", {
-							attributes: { orgId: tenant.orgId },
-						}),
-					),
+					}),
 				)
 			})
 
@@ -414,6 +410,12 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				effect: Effect.Effect<A, QueryEngineDirectError>,
 				policyInput: DirectRouteCachePolicyInput = 15,
 			) {
+				// Attributes go on the `Effect.fn` span, not an inner `withSpan` of the
+				// same name. Wrapping the body in a second same-named span emitted two
+				// spans per call: the inner one closed interrupt-only as `Ok` while the
+				// outer recorded the real `Error`, so every timed-out request showed up
+				// twice — once at 30s `Ok`, once at 30s `Error`.
+				yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, routeName })
 				return yield* withTimeout(
 					Effect.gen(function* () {
 						const startMs = yield* Clock.currentTimeMillis
@@ -435,11 +437,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 							(yield* Clock.currentTimeMillis) - startMs,
 						)
 						return value
-					}).pipe(
-						Effect.withSpan("QueryEngineService.cachedDirect", {
-							attributes: { orgId: tenant.orgId, routeName },
-						}),
-					),
+					}),
 				)
 			})
 

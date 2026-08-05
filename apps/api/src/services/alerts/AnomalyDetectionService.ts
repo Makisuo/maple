@@ -295,6 +295,7 @@ const make = Effect.gen(function* () {
 
 		const startTime = formatWarehouseDateTime(nowMs - ANOMALY_ACTIVE_DISCOVERY_WINDOW_MS)
 		const routingTenant = systemTenant(knownOrgs[0])
+		yield* warehouse.warmRoute(routingTenant)
 		return yield* Effect.all(
 			[
 				warehouse.crossOrgQuery(
@@ -1135,6 +1136,10 @@ const make = Effect.gen(function* () {
 		const elapsedMinutes = Math.floor((nowMs - currentHourStartMs) / 60_000)
 		const config = { sensitivity, elapsedMinutes }
 
+		// Warm this org's route before the three-way fan-out. Deliberately here and
+		// not at the outer per-org `Effect.forEach`: the route is per-org, so
+		// warming at the outer level would resolve the wrong org's config.
+		yield* warehouse.warmRoute(tenant)
 		const [goldenSeries, logSeries, spikes] = yield* Effect.all(
 			[
 				fetchGoldenSeries(tenant, nowMs, currentHourStartMs),

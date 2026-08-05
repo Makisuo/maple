@@ -59,6 +59,8 @@ const warehouseStub = Layer.succeed(WarehouseQueryService, {
 	rawSqlQuery: () => Effect.die("rawSqlQuery not used by DigestService tests"),
 	compiledQuery: () => Effect.die("compiledQuery not used by DigestService tests"),
 	compiledQueryFirst: () => Effect.die("compiledQueryFirst not used by DigestService tests"),
+	// The digest warms the route before its five-way fan-out.
+	warmRoute: () => Effect.void,
 	ingest: () => Effect.die("ingest not used by DigestService tests"),
 	asExecutor: () => {
 		throw new Error("asExecutor not used by DigestService tests")

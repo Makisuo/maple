@@ -221,6 +221,8 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 						CH.sessionActivityQuery({ startTime: windowStart, endTime: windowEnd }),
 						{ orgId: tenant.orgId, sessionId: params.id },
 					)
+					// Warm the route before fanning out — see the v1 handler for why.
+					yield* warehouse.warmRoute(tenant)
 					const [maybeData, maybeActivity] = yield* Effect.all(
 						[
 							warehouse.compiledQueryFirst(tenant, detailCompiled, {

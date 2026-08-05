@@ -240,6 +240,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			// into a single Tinybird query, tagging rows with a `period` column.
 			// The daily timeseries drives the trend sparkline; the previous-week
 			// errors give us a fingerprint set so we can flag genuinely NEW errors.
+			// Warm the route once before the five-way fan-out, so the org-config read
+			// isn't racing five concurrent warehouse fetches for a connection slot.
+			yield* warehouse.warmRoute(systemTenant)
 			const [overviewResponse, usageResponse, seriesResponse, topErrors, prevErrorsResponse] =
 				yield* Effect.all(
 					[
