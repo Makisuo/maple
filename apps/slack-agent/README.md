@@ -43,6 +43,8 @@ agent/
   tools/render_chart.ts # renders a PNG chart in-process and posts it into the thread
   tools/{bash,glob,grep,read_file,write_file,web_fetch,web_search}.ts
                       # `disableTool()` sentinels — see Framework tools below
+  lib/thread-context.ts # full-thread turn context (renders Block Kit / alert cards too)
+  lib/bot-identity.ts # per-team bot user id learned from the webhook envelope
   lib/chart.ts        # pure SVG chart renderer + unicode-sparkline fallback
   lib/slack-upload.ts # Slack external-upload flow (files.getUploadURLExternal → complete)
   lib/env.ts          # shared is-this-deployed predicate (route auth + token fallback)
@@ -337,7 +339,8 @@ eve's native idiom:
 - **Modes → skills:** the web chat's dashboard-builder and investigate modes are progressive-
   disclosure skills (`agent/skills/dashboard-builder/`, `agent/skills/incident-investigation/`)
   the model loads via `load_skill`. Alert context comes from the Slack thread (Maple delivers
-  alert notifications into Slack), not from a request payload.
+  alert notifications into Slack), not from a request payload — including the alert card itself,
+  which `agent/lib/thread-context.ts` renders out of its Block Kit attachment (see Notes).
 - **Approvals — both sides now interrupt, by different mechanisms:** the web chat stops the turn on
   a gated tool and emits a `tool-call` with `proposed: true` and no result
   (`apps/api/src/chat/agent.ts`); the user approves and `POST /api/chat/apply` performs the
@@ -490,6 +493,19 @@ and **activate public distribution** so the app can be installed into any worksp
     The SSE must carry `delta.tool_calls`, not a JSON blob inside the text content. Also set
     `OPENROUTER_CONTEXT_WINDOW` to the new model's window.
 
+- **Thread context is ours, not `slackChannel({ threadContext })`.** Every mention and DM ships the
+  whole thread transcript with the turn, rendered by `agent/lib/thread-context.ts` and returned as
+  the mention result's `context` from `onAppMention` / `onDirectMessage`. eve's built-in option
+  couldn't carry an alert thread — the case that matters most, since the user is replying to
+  something Maple posted rather than opening a topic. It reads a message's content from `text`
+  alone, and Maple's alert notifications have none: the blocks ride inside a colored attachment
+  (`apps/api/src/services/alerts/AlertDeliveryDispatch.ts`), so the model saw an empty
+  `<content></content>`. Worse, `since: "last-agent-reply"` counted the alert as the agent's own
+  reply (eve's `isMe` is `bot_id !== undefined` — any bot) and cut context off _after_ it, dropping
+  the alert entirely. The user had to hand the bot a recap of the alert it had just sent. Ours
+  falls back to blocks/attachments for content, keeps the full thread (which also survives a
+  session lost to a redeploy), and attributes speakers with the workspace's real bot user id from
+  `agent/lib/bot-identity.ts` so a third-party app in the channel isn't quoted back as the agent.
 - **Auth:** `agent/channels/eve.ts` fails closed in deployed environments (`RAILWAY_ENVIRONMENT_NAME`
   set, or `NODE_ENV=production`): the browser/API routes always require HTTP Basic there. With
   `ROUTE_AUTH_BASIC_PASSWORD` set that's your stable credential; without it, a random per-boot
