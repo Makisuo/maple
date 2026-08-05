@@ -399,6 +399,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// concurrently, then merge by ServiceName. Routed through the org's
 					// configured warehouse exactly like the metric explorer reads these
 					// same `cloudflare.*` metrics — no special ingest pin needed.
+					yield* warehouse.warmRoute(tenant)
 					const [counterRows, latencyRows] = yield* Effect.all(
 						[
 							runQuery(Queries.cloudflareServiceCounters, tenant, payload),
@@ -428,6 +429,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// concurrently, then merge by database(+branch). Routed through the
 					// org's configured warehouse like the metric explorer reads the same
 					// scraped `planetscale_*` metrics.
+					yield* warehouse.warmRoute(tenant)
 					const [gaugeRows, connectionRows, storageRows] = yield* Effect.all(
 						[
 							runQuery(Queries.planetscaleServiceGauges, tenant, payload),
@@ -527,6 +529,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// concurrently, then merge by ServiceName — same shape as
 					// serviceCloudflareStats above.
 					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
 					const [counterRows, latencyRows] = yield* Effect.all(
 						[
 							runQuery(Queries.cloudflareInfraZoneCounters, tenant, payload),
@@ -581,6 +584,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
 					const [statusRows, cacheRows, latencyRows] = yield* Effect.all(
 						[
 							runQuery(Queries.cloudflareInfraZoneDetailStatus, tenant, payload),
@@ -607,6 +611,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
 					const [totalRows, bucketRows] = yield* Effect.all(
 						[
 							runQuery(Queries.cloudflareInfraZoneHostTotals, tenant, payload),
@@ -627,6 +632,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
 					const [bucketRows, topRows] = yield* Effect.all(
 						[
 							runQuery(Queries.cloudflareInfraZoneFirewallTimeseries, tenant, payload),
@@ -647,6 +653,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
 					const [bucketRows, nameRows] = yield* Effect.all(
 						[
 							runQuery(Queries.cloudflareInfraZoneDnsTimeseries, tenant, payload),
@@ -667,6 +674,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
 					const [totalRows, coverageRows, zoneRows] = yield* Effect.all(
 						[
 							runQuery(Queries.cloudflareInfraZoneBreakdownTotals, tenant, payload),
@@ -760,6 +768,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("cloudflareInfraPlatformResources", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					yield* warehouse.warmRoute(tenant)
 					const [queueRows, doRows] = yield* Effect.all(
 						[
 							runQuery(Queries.cloudflareInfraQueueGauges, tenant, payload),
@@ -776,6 +785,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("cloudflareInfraWorkers", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					yield* warehouse.warmRoute(tenant)
 					const [counterRows, latencyRows] = yield* Effect.all(
 						[
 							runQuery(Queries.cloudflareInfraWorkerCounters, tenant, payload),
@@ -818,6 +828,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// browser->Worker round-trips. The primary chart keeps its own
 					// execute-path cache; releases is uncached (mirrors the standalone
 					// handler); environments is edge-cached on a service-scoped key.
+					yield* warehouse.warmRoute(tenant)
 					const [timeseries, releaseRows, environmentRows] = yield* Effect.all(
 						[
 							queryEngine.execute(tenant, payload.timeseries),
@@ -850,6 +861,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// Dependencies tab in one Worker invocation: the three service-map
 					// edge queries run concurrently and share a single config
 					// resolution, replacing three independent round-trips.
+					yield* warehouse.warmRoute(tenant)
 					const [dependencyRows, dbEdgeRows, externalEdgeRows] = yield* Effect.all(
 						[
 							runQuery(Queries.serviceDependenciesForService, tenant, payload),
@@ -869,6 +881,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 
+					yield* warehouse.warmRoute(tenant)
 					const [summary, timeseriesRows, topQueryRows] = yield* Effect.all(
 						[
 							runQueryFirst(Queries.serviceDbQuerySummary, tenant, payload),
@@ -1386,6 +1399,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("listPods", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					yield* warehouse.warmRoute(tenant)
 					const [rows, countRow] = yield* Effect.all(
 						[
 							runQuery(Queries.listPods, tenant, payload),
