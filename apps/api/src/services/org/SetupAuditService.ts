@@ -357,6 +357,10 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 				traceSampleModulus: Integrations.auditTraceSampleModulus(spanCountOverLookback),
 			}
 
+			// Warm the route before fanning out, so the org-config read happens on an
+			// empty connection pool rather than queueing behind a sibling's warehouse
+			// fetch. No-op on a warm memo.
+			yield* warehouse.warmRoute(tenant)
 			const joined = yield* Effect.all(
 				{
 					orphans: warehouse.compiledQuery(tenant, Integrations.auditOrphanSpansSQL(window), {
@@ -409,6 +413,10 @@ const make: Effect.Effect<SetupAuditServiceShape, never, Database | WarehouseQue
 				profile: "discovery" | "list",
 			) => warehouse.compiledQuery(tenant, compiled, { profile, context: "setupAudit" })
 
+			// Same reason as `fetchTraceCompleteness`. Both are independent entry
+			// points, so each warms; whichever runs second finds the memo warm and
+			// pays nothing.
+			yield* warehouse.warmRoute(tenant)
 			const results = yield* Effect.all(
 				{
 					usage: run(

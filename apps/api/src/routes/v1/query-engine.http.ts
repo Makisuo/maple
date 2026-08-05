@@ -1192,6 +1192,14 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						// but collect positionally: Effect.forEach returns results in input
 						// order regardless of concurrency, so series naming/merge order stays
 						// deterministic instead of depending on which query finishes first.
+						//
+						// Warm first, like the other fan-outs. `queryEngine.execute` warms
+						// inside the bucket cache, but only when a fill splits into more than
+						// one range — so a cold 4-way fan-out here still raced four config
+						// reads, each contending for a connection slot with its siblings'
+						// warehouse fetches. Measured cost of that contention: a cache read
+						// abandoned at its 40ms deadline whose span still runs ~2.3s.
+						yield* warehouse.warmRoute(tenant)
 						const outcomes: QueryOutcome[] = yield* Effect.forEach(
 							enabledQueries,
 							(query) =>
