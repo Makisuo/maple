@@ -227,7 +227,7 @@ export interface ChatTranscriptProps {
 	focusMessageId?: string
 	permalinkFor?: (messageId: string) => string
 	/** Why the thread can't be replied to — the marker says which. */
-	readOnly: false | "shared" | "resolved"
+	readOnly: false | "shared" | "resolved" | "transcript"
 	emptyState: ReactNode
 }
 
@@ -242,9 +242,10 @@ const isMachineTurn = (message: UIMessage): boolean =>
 	message.parts.every((part) => part.type === "text" && stripContextPreamble(part.text).length === 0)
 
 /** Leading marker for a thread that can't be continued. */
-const READ_ONLY_LABEL: Record<"shared" | "resolved", string> = {
+const READ_ONLY_LABEL: Record<"shared" | "resolved" | "transcript", string> = {
 	shared: "Shared conversation · read-only",
 	resolved: "Investigation resolved · read-only",
+	transcript: "Agent reasoning log · read-only",
 }
 
 /**

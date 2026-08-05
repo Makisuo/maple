@@ -2,144 +2,126 @@ import type { ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import type { IssueEscalationAttemptDocument } from "@maple/domain/http"
-import { Button } from "@maple/ui/components/ui/button"
 import { cn } from "@maple/ui/lib/utils"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { formatRelativeTime, toEpochMs } from "@maple/ui/lib/time-format"
 
-import { DetailRail } from "@maple/ui/components/detail-rail"
-import { SEVERITY_LABEL, SEVERITY_TONE } from "@/components/errors/severity-badge"
-import { ConfidenceMeter } from "./confidence-meter"
+import { ChecksRail } from "./checks-rail"
+import { placeholderRunSteps } from "./fanout-placeholder"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { investigationOriginLabel } from "./investigation-status"
 
 /**
- * What the transcript doesn't say. The transcript is the investigation's
- * argument; this rail is its record — who opened it, how long the pass took,
- * what it cost, what it points at, and whether anyone was told.
+ * The evidence and the record, in that order.
  *
- * Most of this was on the wire and rendered nowhere: `created_at`,
- * `diagnosed_at`, the token counts, `report.severityAssessment`, the incident
- * and issue IDs, and — worst — `error`, so a failed pass offered a Retry button
- * and never said what went wrong.
+ * Checks lead, because "3 of 5 held" is the fastest read of whether the verdict
+ * deserves trust — the full findings are a tab away, this is the summary. Below
+ * it, the run as the sequence it actually was, then what the investigation points
+ * at, then what it cost.
+ *
+ * The Actions group that used to sit at the top is gone: Resolve / Retry moved to
+ * the page header, beside the subject they act on.
  */
-export function InvestigationRail({
-	investigation,
-	busy,
-	onResolve,
-	onRestart,
-}: {
-	investigation: V2Investigation
-	busy: boolean
-	onResolve: () => void
-	onRestart: () => void
-}) {
-	const { snapshot, subject, report } = investigation
-	const isResolved = investigation.status === "resolved"
+export function InvestigationRail({ investigation }: { investigation: V2Investigation }) {
+	const { snapshot, subject } = investigation
 	const issueId = subject.type === "incident" ? subject.issue_id : null
 
 	return (
-		<div className="flex flex-col">
-			<DetailRail.Group label="Actions">
-				{isResolved || investigation.status === "failed" ? (
-					<Button size="sm" className="w-full" onClick={onRestart} disabled={busy}>
-						{isResolved ? "Reopen" : "Retry"}
-					</Button>
-				) : (
-					<Button
-						size="sm"
-						variant="outline"
-						className="w-full"
-						onClick={onResolve}
-						disabled={busy}
-					>
-						Resolve
-					</Button>
-				)}
-			</DetailRail.Group>
+		// `RightPanel` supplies no padding of its own — the old rail got its gutters
+		// from `DetailRail.Group`'s `p-4`, and dropping that component dropped them
+		// too, so the checks sat flush against the window edge.
+		<div className="flex min-h-full flex-col gap-6 p-4">
+			<ChecksRail investigation={investigation} />
 
-			<DetailRail.Group label="Run">
+			<section className="flex flex-col gap-3.5">
+				<h3 className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+					Run
+				</h3>
 				{issueId ? (
 					<EscalatedRunSpine investigation={investigation} issueId={issueId} />
 				) : (
 					<RunSpine investigation={investigation} attempt={null} />
 				)}
-			</DetailRail.Group>
+			</section>
 
-			{report ? (
-				<DetailRail.Group label="Diagnosis">
-					<DetailRail.Row label="Confidence">
-						<ConfidenceMeter confidence={report.confidence} />
-					</DetailRail.Row>
-					<DetailRail.Row label="AI severity">
-						<span
-							className={cn(
-								"rounded px-1.5 py-0.5 text-xs font-medium",
-								SEVERITY_TONE[report.severityAssessment],
-							)}
-						>
-							{SEVERITY_LABEL[report.severityAssessment]}
-						</span>
-					</DetailRail.Row>
-					{investigation.model ? (
-						<DetailRail.Row label="Model" title={investigation.model}>
-							<code className="block max-w-full truncate font-mono text-xs text-muted-foreground">
-								{investigation.model}
-							</code>
-						</DetailRail.Row>
-					) : null}
-					<TokenRow investigation={investigation} />
-				</DetailRail.Group>
-			) : null}
-
-			<DetailRail.Group label="Subject">
-				<DetailRail.Row label="Origin">
-					<span className="text-sm text-foreground">
+			<section className="flex flex-col gap-3 border-t pt-5.5">
+				<h3 className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+					Linked
+				</h3>
+				<LinkedRow label="Origin">
+					<span className="text-foreground">
 						{investigationOriginLabel(investigation.seeded_by)}
 					</span>
-				</DetailRail.Row>
-				{subject.type === "incident" ? (
-					<DetailRail.Row label="Incident" title={subject.incident_id}>
-						<code className="block max-w-full truncate font-mono text-xs text-muted-foreground">
-							{subject.incident_id}
-						</code>
-					</DetailRail.Row>
-				) : null}
+				</LinkedRow>
 				{issueId ? (
-					<DetailRail.Row label="Issue" title={issueId}>
+					<LinkedRow label="Issue">
 						<Link
 							to="/errors/issues/$issueId"
 							params={{ issueId }}
-							className="block max-w-full truncate font-mono text-xs text-primary hover:underline"
+							title={issueId}
+							className="block truncate font-mono text-primary hover:underline"
 						>
 							{issueId}
 						</Link>
-					</DetailRail.Row>
+					</LinkedRow>
 				) : null}
-				{snapshot.references.length > 0 ? (
-					<div className="mt-1 flex flex-col gap-1">
-						{snapshot.references.map((reference) => (
-							<ReferenceLink key={reference.url} label={reference.label} url={reference.url} />
-						))}
-					</div>
+				{subject.type === "incident" ? (
+					<LinkedRow label="Incident">
+						<code
+							title={subject.incident_id}
+							className="block truncate font-mono text-foreground"
+						>
+							{subject.incident_id}
+						</code>
+					</LinkedRow>
 				) : null}
-			</DetailRail.Group>
+				{snapshot.references.map((reference) => (
+					<LinkedRow key={reference.url} label={reference.label}>
+						<ReferenceLink label={reference.label} url={reference.url} />
+					</LinkedRow>
+				))}
+			</section>
+
+			<Provenance investigation={investigation} />
 		</div>
 	)
 }
 
-/** Both counts or neither — a lone number reads as a total and misleads. */
-function TokenRow({ investigation }: { investigation: V2Investigation }) {
-	const { input_tokens: input, output_tokens: output } = investigation
-	if (input === null && output === null) return null
+function LinkedRow({ label, children }: { label: string; children: ReactNode }) {
 	return (
-		<DetailRail.Row label="Tokens">
-			<span className="truncate font-mono text-xs text-muted-foreground tabular-nums">
-				{input === null ? "—" : formatNumber(input)} in ·{" "}
-				{output === null ? "—" : formatNumber(output)} out
+		<div className="flex items-baseline gap-2 text-xs">
+			<span className="w-16 shrink-0 truncate text-muted-foreground" title={label}>
+				{label}
 			</span>
-		</DetailRail.Row>
+			<span className="min-w-0 flex-1">{children}</span>
+		</div>
+	)
+}
+
+/**
+ * Model and token spend, and who opened this. Deliberately the last thing in the
+ * rail and deliberately quiet — it qualifies the verdict without competing with
+ * it, but a diagnosis with no cost attached is an unaudited one.
+ */
+function Provenance({ investigation }: { investigation: V2Investigation }) {
+	const { model, input_tokens: input, output_tokens: output } = investigation
+	const tokens =
+		input === null && output === null
+			? null
+			: `${input === null ? "—" : formatNumber(input)} in · ${output === null ? "—" : formatNumber(output)} out`
+
+	return (
+		<div className="mt-auto flex flex-col gap-1 border-t pt-5 text-[11px] text-muted-foreground">
+			{model || tokens ? (
+				<p className="break-words">{[model, tokens].filter(Boolean).join(" · ")}</p>
+			) : null}
+			<p>
+				{investigation.seeded_by === "system"
+					? "Opened automatically by Maple"
+					: "Opened by a member of your team"}
+			</p>
+		</div>
 	)
 }
 
@@ -158,14 +140,22 @@ interface SpineNode {
 	detail?: ReactNode
 }
 
+const STEP_DOT: Record<string, string> = {
+	muted: "bg-muted-foreground/50",
+	active: "bg-primary animate-pulse",
+	success: "bg-success",
+	failed: "bg-destructive",
+}
+
 /**
  * The diagnostic pass as the sequence it actually is. The elapsed time sits on
  * the connector between Opened and Diagnosed rather than in a stat row, because
- * that is what it is — the gap between two events, not a standalone metric. It
- * is also the number the product is about, and until now nothing rendered it.
+ * that is what it is — the gap between two events.
  *
- * Escalation is the spine's terminal event rather than a separate card: it is
- * the last thing that happened in the same run.
+ * The middle of the spine (dispatch → report → validate) comes from
+ * `placeholderRunSteps` and is the only invented part; the endpoints are real
+ * timestamps. Escalation is the spine's terminal event rather than a separate
+ * card: it is the last thing that happened in the same run.
  */
 function RunSpine({
 	investigation,
@@ -188,15 +178,27 @@ function RunSpine({
 		label: "Opened",
 		at: investigation.created_at,
 		dot: "bg-muted-foreground/50",
-		...(elapsed ? { gap: elapsed } : {}),
+		detail: (
+			<p className="mt-0.5 text-[11px] text-muted-foreground">
+				{investigationOriginLabel(investigation.seeded_by)} ·{" "}
+				{investigation.subject.type === "freeform"
+					? "question"
+					: `${investigation.subject.incident_kind} incident`}
+			</p>
+		),
 	})
 
-	if (investigation.status === "investigating") {
+	for (const step of placeholderRunSteps(investigation)) {
 		nodes.push({
-			key: "investigating",
-			label: "Investigating…",
-			dot: "bg-primary animate-pulse",
+			key: step.key,
+			label: step.label,
+			dot: STEP_DOT[step.tone] ?? "bg-muted-foreground/50",
+			detail: <p className="mt-0.5 text-[11px] text-muted-foreground">{step.detail}</p>,
 		})
+	}
+
+	if (investigation.status === "investigating" && nodes.length === 1) {
+		nodes.push({ key: "investigating", label: "Investigating…", dot: "bg-primary animate-pulse" })
 	}
 
 	if (investigation.diagnosed_at) {
@@ -205,6 +207,7 @@ function RunSpine({
 			label: "Diagnosed",
 			at: investigation.diagnosed_at,
 			dot: "bg-success",
+			...(elapsed ? { gap: elapsed } : {}),
 		})
 	}
 
@@ -225,9 +228,9 @@ function RunSpine({
 			at: investigation.updated_at,
 			dot: "bg-destructive",
 			detail: investigation.error ? (
-				<p className="mt-1 break-words text-xs text-destructive">{investigation.error}</p>
+				<p className="mt-1 break-words text-[11px] text-destructive">{investigation.error}</p>
 			) : (
-				<p className="mt-1 text-xs text-muted-foreground">
+				<p className="mt-1 text-[11px] text-muted-foreground">
 					No failure reason was recorded. Retry to run the pass again.
 				</p>
 			),
@@ -248,7 +251,7 @@ function RunSpine({
 			{nodes.map((node, index) => {
 				const isLast = index === nodes.length - 1
 				return (
-					<li key={node.key} className={cn("relative flex gap-3", isLast ? "pb-0" : "pb-3")}>
+					<li key={node.key} className={cn("relative flex gap-3", isLast ? "pb-0" : "pb-4")}>
 						{isLast ? null : (
 							<span
 								className="absolute bottom-0 left-[3px] top-3.5 w-px bg-border"
@@ -371,7 +374,7 @@ function ReferenceLink({ label, url }: { label: string; url: string }) {
 			<a
 				href={url}
 				rel="noreferrer"
-				className="block truncate text-xs text-primary hover:underline"
+				className="block truncate text-primary hover:underline"
 				target="_blank"
 			>
 				{label}
@@ -379,7 +382,7 @@ function ReferenceLink({ label, url }: { label: string; url: string }) {
 		)
 	}
 	return (
-		<Link to={url} className="block truncate text-xs text-primary hover:underline">
+		<Link to={url} className="block truncate text-primary hover:underline">
 			{label}
 		</Link>
 	)

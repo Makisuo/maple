@@ -1,92 +1,39 @@
-import type { MouseEvent, ReactNode } from "react"
-import { TableSkeleton } from "@maple/ui/components/ui/table-skeleton"
+import type { MouseEvent } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import type { V2Investigation } from "@maple/domain/http/v2"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 import { formatRelativeTime, toEpochMs } from "@maple/ui/lib/time-format"
 
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "@/components/icons"
 import { SeverityBadge } from "@/components/errors/severity-badge"
 import { ConfidenceMeter } from "./confidence-meter"
+import { hasFanout, lensTally, placeholderLenses } from "./fanout-placeholder"
 import {
 	investigationFinding,
 	investigationHeadline,
 	investigationScope,
 	investigationSeverity,
-	type InvestigationSortKey,
-	type SortDirection,
 } from "./investigation-display"
 import { InvestigationKindMarker, InvestigationStatusBadge } from "./investigation-status"
 
-export interface InvestigationSort {
-	readonly key: InvestigationSortKey
-	readonly direction: SortDirection
-}
-
 /**
- * The fixed columns come to 420px, and Subject and Finding need room to say
- * anything at all. `min-width` on a `th` is ignored under `table-layout: fixed`
- * — the floor has to live on the table, so a narrow viewport scrolls the
- * wrapper instead of crushing the two prose columns to nothing.
+ * Not a table any more.
+ *
+ * The old grid gave Subject and Finding a column each and then had to truncate
+ * both to fit five more, so the one thing worth reading — what Maple concluded —
+ * arrived as half a sentence. Stacking the finding under the subject gives it the
+ * full width of the row, and the remaining columns shrink to what they actually
+ * need: a meter, a badge, a word, a timestamp.
+ *
+ * Sorting moved to the toolbar's select, which is why no header row survives.
  */
-const TABLE_LAYOUT = "table-fixed min-w-[56rem]"
-
-/**
- * Left to right: what happened → how bad → what Maple concluded → how sure it
- * is → where the run stands → when. Severity and confidence used to sit as two
- * interchangeable word columns; confidence now sits against the finding it
- * qualifies, and kind and origin fold into the subject's marker rather than
- * spending a column each on one repeated word.
- */
-export function InvestigationTable({
-	investigations,
-	sort,
-	onSort,
-}: {
-	investigations: ReadonlyArray<V2Investigation>
-	sort: InvestigationSort
-	onSort: (key: InvestigationSortKey) => void
-}) {
+export function InvestigationTable({ investigations }: { investigations: ReadonlyArray<V2Investigation> }) {
 	return (
-		<div className="overflow-x-auto">
-			<Table className={TABLE_LAYOUT}>
-				<TableHeader>
-					<TableRow>
-						<TableHead className="w-[30%]">Subject</TableHead>
-						<SortableHead
-							label="Severity"
-							sortKey="severity"
-							sort={sort}
-							onSort={onSort}
-							className="w-[100px]"
-						/>
-						<TableHead>Finding</TableHead>
-						<SortableHead
-							label="Confidence"
-							sortKey="confidence"
-							sort={sort}
-							onSort={onSort}
-							className="w-[116px]"
-						/>
-						<TableHead className="w-[116px]">Status</TableHead>
-						<SortableHead
-							label="Updated"
-							sortKey="updated"
-							sort={sort}
-							onSort={onSort}
-							align="right"
-							className="w-[92px]"
-						/>
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{investigations.map((investigation) => (
-						<InvestigationRow key={investigation.id} investigation={investigation} />
-					))}
-				</TableBody>
-			</Table>
-		</div>
+		<ul className="flex flex-col">
+			{investigations.map((investigation) => (
+				<InvestigationRow key={investigation.id} investigation={investigation} />
+			))}
+		</ul>
 	)
 }
 
@@ -96,152 +43,119 @@ function InvestigationRow({ investigation }: { investigation: V2Investigation })
 	const scope = investigationScope(investigation)
 	const finding = investigationFinding(investigation)
 
-	// The headline stays a real link so cmd-click and "open in new tab" work;
-	// the row handler is the convenience path and must not double-fire on it.
-	const openRow = (event: MouseEvent<HTMLTableRowElement>) => {
+	// The headline stays a real link so cmd-click and "open in new tab" work; the
+	// row handler is the convenience path and must not double-fire on it.
+	const openRow = (event: MouseEvent<HTMLLIElement>) => {
 		if (event.defaultPrevented) return
 		if ((event.target as HTMLElement).closest("a")) return
 		void navigate({ to: "/investigations/$id", params: { id: investigation.id } })
 	}
 
 	return (
-		<TableRow className="cursor-pointer" onClick={openRow}>
-			<TableCell className="align-top">
-				<div className="flex items-start gap-2">
-					<InvestigationKindMarker
-						subject={investigation.subject}
-						seededBy={investigation.seeded_by}
-						className="mt-[3px]"
-					/>
-					<div className="min-w-0 flex-1">
-						<Link
-							to="/investigations/$id"
-							params={{ id: investigation.id }}
-							className="block truncate font-medium text-foreground hover:underline"
-							title={headline}
-						>
-							{headline}
-						</Link>
-						{scope ? (
-							<p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{scope}</p>
-						) : null}
-					</div>
-				</div>
-			</TableCell>
-			<TableCell className="align-top">
-				<SeverityBadge severity={investigationSeverity(investigation)} />
-			</TableCell>
-			<TableCell className="align-top">
-				{finding.kind === "none" ? (
-					<span className="text-xs text-muted-foreground/60">—</span>
-				) : (
-					<span className="flex min-w-0 items-center gap-1.5" title={finding.text}>
-						{finding.kind === "pending" ? (
-							<span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
-						) : null}
-						<span
-							className={cn(
-								"truncate text-xs",
-								finding.kind === "failure"
-									? "text-destructive"
-									: finding.kind === "pending"
-										? "text-muted-foreground"
-										: "text-foreground",
-							)}
-						>
-							{finding.text}
-						</span>
-					</span>
-				)}
-			</TableCell>
-			<TableCell className="align-top">
-				<ConfidenceMeter confidence={investigation.confidence} />
-			</TableCell>
-			<TableCell className="align-top">
-				<InvestigationStatusBadge status={investigation.status} />
-			</TableCell>
-			<TableCell className="text-right align-top text-xs text-muted-foreground">
-				<time
-					dateTime={investigation.updated_at}
-					title={new Date(toEpochMs(investigation.updated_at)).toLocaleString()}
-				>
-					{formatRelativeTime(investigation.updated_at)}
-				</time>
-			</TableCell>
-		</TableRow>
-	)
-}
-
-function SortableHead({
-	label,
-	sortKey,
-	sort,
-	onSort,
-	align = "left",
-	className,
-}: {
-	label: string
-	sortKey: InvestigationSortKey
-	sort: InvestigationSort
-	onSort: (key: InvestigationSortKey) => void
-	align?: "left" | "right"
-	className?: string
-}) {
-	const isActive = sort.key === sortKey
-	return (
-		<TableHead
-			className={className}
-			aria-sort={isActive ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+		<li
+			className="flex cursor-pointer items-center gap-3.5 border-b px-4 py-3.5 transition-colors last:border-b-0 hover:bg-accent/40"
+			onClick={openRow}
 		>
-			<button
-				type="button"
-				onClick={() => onSort(sortKey)}
-				className={cn(
-					"group -mx-1 inline-flex w-[calc(100%+0.5rem)] items-center gap-1 rounded px-1 py-0.5 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-					align === "right" && "justify-end",
-					isActive && "text-foreground",
-				)}
+			<span className="flex w-5 shrink-0 items-center justify-center">
+				<InvestigationKindMarker subject={investigation.subject} seededBy={investigation.seeded_by} />
+			</span>
+			<div className="flex min-w-0 flex-1 flex-col gap-1">
+				<div className="flex min-w-0 items-baseline gap-2">
+					<Link
+						to="/investigations/$id"
+						params={{ id: investigation.id }}
+						className="truncate font-medium text-sm text-foreground hover:underline"
+						title={headline}
+					>
+						{headline}
+					</Link>
+					{scope ? (
+						<span className="shrink-0 truncate text-xs text-muted-foreground" title={scope}>
+							{scope}
+						</span>
+					) : null}
+				</div>
+				<RowFinding investigation={investigation} finding={finding} />
+			</div>
+			<span className="w-20 shrink-0 max-md:hidden">
+				<ConfidenceMeter confidence={investigation.confidence} />
+			</span>
+			<span className="w-18 shrink-0 max-sm:hidden">
+				<SeverityBadge severity={investigationSeverity(investigation)} />
+			</span>
+			<span className="w-24 shrink-0 max-lg:hidden">
+				<InvestigationStatusBadge status={investigation.status} />
+			</span>
+			<time
+				dateTime={investigation.updated_at}
+				title={new Date(toEpochMs(investigation.updated_at)).toLocaleString()}
+				className="w-13 shrink-0 text-right text-xs text-muted-foreground"
 			>
-				{label}
-				<SortGlyph active={isActive} direction={sort.direction} />
-			</button>
-		</TableHead>
+				{formatRelativeTime(investigation.updated_at)}
+			</time>
+		</li>
 	)
 }
 
-function SortGlyph({ active, direction }: { active: boolean; direction: SortDirection }): ReactNode {
-	if (!active) {
+/**
+ * The row's second line. A running pass says how far through the fan-out it is
+ * rather than a generic "gathering evidence…" — that is the one thing someone
+ * watching a live investigation actually wants from a list.
+ */
+function RowFinding({
+	investigation,
+	finding,
+}: {
+	investigation: V2Investigation
+	finding: ReturnType<typeof investigationFinding>
+}) {
+	if (finding.kind === "pending" && hasFanout(investigation)) {
+		const tally = lensTally(placeholderLenses(investigation))
 		return (
-			<ArrowUpDownIcon
-				className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60"
-				aria-hidden
-			/>
+			<span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+				<span aria-hidden className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+				<span className="truncate">
+					{tally.reported} of {tally.total} lenses reported · validator blocked
+				</span>
+			</span>
 		)
 	}
-	return direction === "desc" ? (
-		<ArrowDownIcon className="size-3 shrink-0" aria-hidden />
-	) : (
-		<ArrowUpIcon className="size-3 shrink-0" aria-hidden />
+	if (finding.kind === "none") {
+		return <span className="text-xs text-muted-foreground/60">—</span>
+	}
+	return (
+		<span
+			className={cn(
+				"flex min-w-0 items-center gap-1.5 text-xs",
+				finding.kind === "failure" ? "text-destructive" : "text-muted-foreground",
+			)}
+			title={finding.text}
+		>
+			{finding.kind === "pending" ? (
+				<span aria-hidden className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+			) : null}
+			<span className="truncate">{finding.text}</span>
+		</span>
 	)
 }
 
-/** Ghosts the real column widths, so the table doesn't reflow when rows land. */
+/** Ghosts the real row rhythm, so the list doesn't reflow when rows land. */
 export function InvestigationTableSkeleton() {
 	return (
-		<div aria-label="Loading investigations">
-			<TableSkeleton
-				rows={5}
-				tableClassName={TABLE_LAYOUT}
-				className="overflow-x-auto rounded-none border-0"
-				columns={[
-					{ header: "Subject", headClassName: "w-[30%]", skeleton: "w-[70%]" },
-					{ header: "Severity", headClassName: "w-[100px]", skeleton: "w-14" },
-					{ header: "Finding", skeleton: "w-[80%]" },
-					{ header: "Confidence", headClassName: "w-[116px]", skeleton: "w-16" },
-					{ header: "Status", headClassName: "w-[116px]", skeleton: "w-20" },
-					{ header: "Updated", headClassName: "w-[92px] text-right", skeleton: "ml-auto w-10" },
-				]}
-			/>
-		</div>
+		<ul aria-label="Loading investigations" className="flex flex-col">
+			{Array.from({ length: 5 }, (_, index) => (
+				<li key={index} className="flex items-center gap-3.5 border-b px-4 py-3.5 last:border-b-0">
+					<Skeleton className="size-3.5 shrink-0 rounded-full" />
+					<div className="flex min-w-0 flex-1 flex-col gap-2">
+						<Skeleton className="h-3.5 w-[45%]" />
+						<Skeleton className="h-3 w-[70%]" />
+					</div>
+					<Skeleton className="h-3 w-20 shrink-0 max-md:hidden" />
+					<Skeleton className="h-4 w-14 shrink-0 max-sm:hidden" />
+					<Skeleton className="h-4 w-20 shrink-0 max-lg:hidden" />
+					<Skeleton className="h-3 w-10 shrink-0" />
+				</li>
+			))}
+		</ul>
 	)
 }
