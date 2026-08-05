@@ -6,7 +6,7 @@ import { botUserIdForTeam, rememberBotUserId } from "#lib/bot-identity.js"
 import { loadChannelContext } from "#lib/channel-context.js"
 import { resolveBotToken, verifySlackV0Signature, type SlackTokenContext } from "#lib/maple.js"
 import { loadThreadContext } from "#lib/thread-context.js"
-import { promoteThreadFollowUp } from "#lib/thread-follow-up.js"
+import { promoteThreadFollowUp, recordThreadEngagement } from "#lib/thread-follow-up.js"
 import { forwardUninstallEvent } from "#lib/uninstall-detection.js"
 
 /**
@@ -45,6 +45,13 @@ const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
 	// `authorizations`, so thread-context attribution gets it for free — no
 	// auth.test round-trip (#lib/bot-identity.js).
 	rememberBotUserId(body)
+
+	// Learn engagement from events that already prove it — the bot's own posts
+	// echoing back, and @mentions of it — so the promotion below can answer from
+	// cache instead of spending Slack's webhook budget on `conversations.replies`
+	// in a thread the bot is demonstrably active in (#lib/thread-follow-up.js).
+	// Synchronous and network-free; must run before the promotion.
+	recordThreadEngagement(body)
 
 	// app_uninstalled / tokens_revoked: eve only dispatches app_mention + DM
 	// events downstream, so it would otherwise drop these as "unsupported".
