@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { useAuth, useOrganization, useOrganizationList } from "@clerk/clerk-react"
 import { Exit } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
@@ -97,10 +97,10 @@ export function OrganizationSection() {
 		setIsSavingName(true)
 		try {
 			await organization.update({ name: trimmedName })
-			toast.success("Organization renamed")
+			toastManager.add({ title: "Organization renamed", type: "success" })
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Failed to rename organization"
-			toast.error(message)
+			toastManager.add({ title: message, type: "error" })
 		} finally {
 			setIsSavingName(false)
 		}
@@ -109,20 +109,20 @@ export function OrganizationSection() {
 	async function handleLogoSelect(file: File | undefined | null) {
 		if (!organization || !isAdmin || isSavingLogo || !file) return
 		if (!file.type.startsWith("image/")) {
-			toast.error("Please choose an image file")
+			toastManager.add({ title: "Please choose an image file", type: "error" })
 			return
 		}
 		if (file.size > MAX_LOGO_BYTES) {
-			toast.error("Image must be 10 MB or smaller")
+			toastManager.add({ title: "Image must be 10 MB or smaller", type: "error" })
 			return
 		}
 		setIsSavingLogo(true)
 		try {
 			await organization.setLogo({ file })
-			toast.success("Organization logo updated")
+			toastManager.add({ title: "Organization logo updated", type: "success" })
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Failed to update logo"
-			toast.error(message)
+			toastManager.add({ title: message, type: "error" })
 		} finally {
 			setIsSavingLogo(false)
 			if (fileInputRef.current) fileInputRef.current.value = ""
@@ -134,10 +134,10 @@ export function OrganizationSection() {
 		setIsSavingLogo(true)
 		try {
 			await organization.setLogo({ file: null })
-			toast.success("Organization logo removed")
+			toastManager.add({ title: "Organization logo removed", type: "success" })
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Failed to remove logo"
-			toast.error(message)
+			toastManager.add({ title: message, type: "error" })
 		} finally {
 			setIsSavingLogo(false)
 		}
@@ -169,7 +169,7 @@ export function OrganizationSection() {
 			} catch {
 				// fall through to navigation; Clerk session will refresh on next load
 			}
-			toast.success("Organization deleted")
+			toastManager.add({ title: "Organization deleted", type: "success" })
 			setIsDeleting(false)
 			setDeleteOpen(false)
 			setConfirmText("")
@@ -177,7 +177,7 @@ export function OrganizationSection() {
 			return
 		}
 		setIsDeleting(false)
-		toast.error("Failed to delete organization")
+		toastManager.add({ title: "Failed to delete organization", type: "error" })
 	}
 
 	function handleDialogChange(open: boolean) {

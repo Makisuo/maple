@@ -14,7 +14,7 @@ import {
 	WarpStreamIcon,
 } from "@/components/icons"
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
@@ -181,8 +181,8 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 	)
 	const scrapeResult = useAtomValue(scrapeTargetsListAtom)
 	const planetscaleResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	const hazelResult = useAtomValue(
@@ -230,7 +230,7 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 	const planetscale: CardStatus | null = Result.builder(planetscaleResult)
 		.onSuccess((status): CardStatus | null => {
 			if (!status.connected) return scrapeStatus("planetscale")
-			const failing = status.scrapeTarget?.lastScrapeError != null
+			const failing = status.scrape_target?.last_scrape_error != null
 			return {
 				label: status.organization ?? "Connected",
 				variant: failing ? "warning" : "success",
@@ -413,14 +413,14 @@ export function useIntegrationOverviews(): Record<IntegrationId, IntegrationOver
 	)
 	const scrapeResult = useAtomValue(scrapeTargetsListAtom)
 	const planetscaleResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	// Poller-inventory read (no warehouse) — feeds the "N databases tracked" stat.
 	const planetscaleDbResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleDatabases", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "databases", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	const hazelResult = useAtomValue(
@@ -506,13 +506,13 @@ export function useIntegrationOverviews(): Record<IntegrationId, IntegrationOver
 		.onSuccess((status): IntegrationOverview => {
 			// Manual (user-created scrape target) escape hatch — derive from targets.
 			if (!status.connected) return scrapeOverview("planetscale")
-			const issue = status.pendingOrgSelection
+			const issue = status.pending_org_selection
 				? "Finish org selection"
-				: status.metricsAuth === "missing"
+				: status.metrics_auth === "missing"
 					? "Metrics setup pending"
-					: status.scrapeTarget?.lastScrapeError != null
+					: status.scrape_target?.last_scrape_error != null
 						? "Scrape failing"
-						: status.lastInventoryError != null
+						: status.last_inventory_error != null
 							? "Inventory failing"
 							: null
 			return {
@@ -523,11 +523,15 @@ export function useIntegrationOverviews(): Record<IntegrationId, IntegrationOver
 				stat:
 					planetscaleDbCount != null && planetscaleDbCount > 0
 						? `${plural(planetscaleDbCount, "database")} tracked`
-						: status.scrapeTarget?.enabled
+						: status.scrape_target?.enabled
 							? "Metrics scraping on"
 							: null,
 				lastSyncLabel: syncedLabel(
-					maxMs([status.scrapeTarget?.lastScrapeAt, status.lastInventoryAt]),
+					maxMs(
+						[status.scrape_target?.last_scrape_at, status.last_inventory_at].map((iso) =>
+							iso ? Date.parse(iso) : null,
+						),
+					),
 				),
 				issue,
 			}

@@ -18,14 +18,15 @@
 		"effect": "catalog:effect",
 		"react": "catalog:react",
 		"react-dom": "catalog:react",
-		"sonner": "^2.0.7",
 		"sugar-high": "^1.2.1"
 	},
 	"devDependencies": {
 		"@tailwindcss/vite": "catalog:tailwind",
+		"@testing-library/react": "^16.3.2",
 		"@types/react": "catalog:react",
 		"@types/react-dom": "catalog:react",
 		"@vitejs/plugin-react": "^6.0.2",
+		"jsdom": "^29.1.1",
 		"tailwindcss": "catalog:tailwind",
 		"tw-animate-css": "catalog:tailwind",
 		"typescript": "catalog:tooling",

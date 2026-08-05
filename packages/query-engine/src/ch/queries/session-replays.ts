@@ -25,6 +25,7 @@ import { from, fromQuery, type ColumnAccessor, type CHQuery } from "@maple-dev/c
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { SessionReplays, SessionReplayEvents, TraceDetailSpans } from "../tables"
 import { sessionActivityAggregateQuery, sessionEventMatchQuery } from "./session-events"
+import type { FacetOutput } from "./query-helpers"
 
 // argMax(value, ordering) — finalize a ReplacingMergeTree column to its latest
 // version. Generic per call site, so declared here rather than via defineFn.
@@ -86,6 +87,22 @@ export interface SessionReplaysListOpts {
 	deviceType?: string
 	/** Exact match on the session's end-user id. */
 	userId?: string
+	/**
+	 * Substring match (case-insensitive) on the identified user's name or email.
+	 * Complements `userId`: the id is opaque and matched exactly, while the name
+	 * and email are what a human types. Sessions recorded before `identify()`
+	 * carry `''` in both columns and so never match — expected, not a bug.
+	 */
+	userSearch?: string
+	/** Exact match on the identified group (company / team / tenant) name. */
+	groupName?: string
+	/**
+	 * Exact match on the persistent visitor id. This is the join that walks from
+	 * an anonymous marketing session to the signed-in product sessions of the
+	 * same browser — the two have different SessionIds and often different
+	 * ServiceNames, and only VisitorId links them.
+	 */
+	visitorId?: string
 	/** When true, only sessions with at least one recorded error. */
 	hasErrors?: boolean
 	/** Substring match on the initial page URL. */
@@ -131,6 +148,18 @@ export interface SessionReplaysListOutput {
 	readonly durationMs: number | null
 	readonly status: string
 	readonly userId: string
+	// identify() identity (migration 0011). `''` when the session was never
+	// identified — the list renders its existing session-id/host line in that case,
+	// so pre-identify sessions are unaffected.
+	readonly userName: string
+	readonly userEmail: string
+	readonly groupId: string
+	readonly groupName: string
+	/** Persistent per-browser id; equal across a visitor's marketing and app sessions. */
+	readonly visitorId: string
+	/** Acquisition source of the session, for scanning a visitor's history. */
+	readonly utmSource: string
+	readonly entryPath: string
 	readonly urlInitial: string
 	readonly browserName: string
 	readonly osName: string
@@ -176,6 +205,17 @@ export function sessionReplaysListQuery(
 			durationMs: argMax($.DurationMs, $.Version),
 			status: argMax($.Status, $.Version),
 			userId: argMax($.UserId, $.Version),
+			// identify() writes these on every row version (see meta-row.ts) — the
+			// ReplacingMergeTree replaces whole rows, so anything written on only one
+			// version would be lost. argMax picks the latest, which is what a
+			// mid-session identify() lands on.
+			userName: argMax($.UserName, $.Version),
+			userEmail: argMax($.UserEmail, $.Version),
+			groupId: argMax($.GroupId, $.Version),
+			groupName: argMax($.GroupName, $.Version),
+			visitorId: argMax($.VisitorId, $.Version),
+			utmSource: argMax($.UtmSource, $.Version),
+			entryPath: argMax($.EntryPath, $.Version),
 			urlInitial: argMax($.UrlInitial, $.Version),
 			browserName: argMax($.BrowserName, $.Version),
 			osName: argMax($.OsName, $.Version),
@@ -205,6 +245,17 @@ export function sessionReplaysListQuery(
 			// each matching session once — same row-level-filter reasoning as
 			// hasErrors/ErrorCount above (see this file's header).
 			CH.when(opts.userId, (v: string) => $.UserId.eq(v)),
+			// Version-invariant like the facets above: VisitorId is written on every
+			// row version of a session, so this is safe pre-GROUP BY.
+			CH.when(opts.visitorId, (v: string) => $.VisitorId.eq(v)),
+			// Name/email and group ride the same row-level reasoning as UserId above —
+			// identify() writes them on every row version, so filtering pre-GROUP BY is
+			// safe. One ILIKE spanning both name and email: the reader has a single box
+			// and doesn't know which column their input lives in.
+			CH.when(opts.userSearch, (v: string) =>
+				$.UserName.ilike(`%${v}%`).or($.UserEmail.ilike(`%${v}%`)),
+			),
+			CH.when(opts.groupName, (v: string) => $.GroupName.eq(v)),
 			CH.whenTrue(opts.hasErrors, () => $.ErrorCount.gt(0)),
 			CH.when(opts.search, (v: string) => $.UrlInitial.ilike(`%${v}%`)),
 			CH.when(opts.cursor, (v: string) => $.StartTime.lt(v)),
@@ -247,6 +298,13 @@ export function sessionReplaysListQuery(
 				durationMs: $.durationMs,
 				status: $.status,
 				userId: $.userId,
+				userName: $.userName,
+				userEmail: $.userEmail,
+				groupId: $.groupId,
+				groupName: $.groupName,
+				visitorId: $.visitorId,
+				utmSource: $.utmSource,
+				entryPath: $.entryPath,
 				urlInitial: $.urlInitial,
 				browserName: $.browserName,
 				osName: $.osName,
@@ -304,6 +362,13 @@ export function sessionReplaysListQuery(
 				durationMs: $.durationMs,
 				status: $.status,
 				userId: $.userId,
+				userName: $.userName,
+				userEmail: $.userEmail,
+				groupId: $.groupId,
+				groupName: $.groupName,
+				visitorId: $.visitorId,
+				utmSource: $.utmSource,
+				entryPath: $.entryPath,
 				urlInitial: $.urlInitial,
 				browserName: $.browserName,
 				osName: $.osName,
@@ -346,6 +411,13 @@ export function sessionReplaysListQuery(
 			durationMs: $.durationMs,
 			status: $.status,
 			userId: $.userId,
+			userName: $.userName,
+			userEmail: $.userEmail,
+			groupId: $.groupId,
+			groupName: $.groupName,
+			visitorId: $.visitorId,
+			utmSource: $.utmSource,
+			entryPath: $.entryPath,
 			urlInitial: $.urlInitial,
 			browserName: $.browserName,
 			osName: $.osName,
@@ -388,17 +460,17 @@ export interface SessionReplaysFacetsOpts {
 	deviceType?: string
 	/** Exact match on the session's end-user id (narrows every facet branch). */
 	userId?: string
+	/** Substring match on the identified user's name or email (narrows every branch). */
+	userSearch?: string
+	/** Exact match on the identified group name — excluded from its own branch. */
+	groupName?: string
 	hasErrors?: boolean
 	search?: string
 }
 
-export interface SessionReplaysFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type SessionReplaysFacetsOutput = FacetOutput
 
-type SessionFacetKey = "service" | "browser" | "country" | "device"
+type SessionFacetKey = "service" | "browser" | "country" | "device" | "group"
 
 export function sessionReplaysFacetsQuery(
 	opts: SessionReplaysFacetsOpts,
@@ -414,6 +486,9 @@ export function sessionReplaysFacetsQuery(
 		exclude === "browser" ? undefined : CH.when(opts.browser, (v: string) => $.BrowserName.eq(v)),
 		exclude === "country" ? undefined : CH.when(opts.country, (v: string) => $.Country.eq(v)),
 		exclude === "device" ? undefined : CH.when(opts.deviceType, (v: string) => $.DeviceType.eq(v)),
+		exclude === "group" ? undefined : CH.when(opts.groupName, (v: string) => $.GroupName.eq(v)),
+		// Like UserId below: no facet branch of its own, so it narrows every dimension.
+		CH.when(opts.userSearch, (v: string) => $.UserName.ilike(`%${v}%`).or($.UserEmail.ilike(`%${v}%`))),
 		// UserId has no facet branch (high cardinality), so it's never excluded — it
 		// narrows every dimension's counts to the selected user.
 		CH.when(opts.userId, (v: string) => $.UserId.eq(v)),
@@ -485,6 +560,10 @@ export function sessionReplaysFacetsQuery(
 		makeFacet("browser", ($) => $.BrowserName),
 		makeFacet("country", ($) => $.Country),
 		makeFacet("device", ($) => $.DeviceType),
+		// GroupName is the company/team a session belongs to. makeFacet already drops
+		// the `= ''` rows, so sessions recorded before identify() never surface as a
+		// blank option.
+		makeFacet("group", ($) => $.GroupName),
 		durationHistogram,
 		durationStat("p50", 0.5),
 		durationStat("p95", 0.95),
@@ -505,6 +584,10 @@ export function sessionReplaysFacetsQuery(
 				CH.when(opts.country, (v: string) => $.Country.eq(v)),
 				CH.when(opts.deviceType, (v: string) => $.DeviceType.eq(v)),
 				CH.when(opts.userId, (v: string) => $.UserId.eq(v)),
+				CH.when(opts.groupName, (v: string) => $.GroupName.eq(v)),
+				CH.when(opts.userSearch, (v: string) =>
+					$.UserName.ilike(`%${v}%`).or($.UserEmail.ilike(`%${v}%`)),
+				),
 				CH.when(opts.search, (v: string) => $.UrlInitial.ilike(`%${v}%`)),
 				$.ErrorCount.gt(0),
 			]),
@@ -571,6 +654,28 @@ export function getSessionReplayQuery(opts: SessionReplayDetailOpts = {}) {
 			errorCount: $.ErrorCount,
 			traceIds: $.TraceIds,
 			resourceAttributes: CH.toJSONString($.ResourceAttributes),
+			// Analytics dimensions (migration 0011). Selected on the detail row only:
+			// this is where "who was this and where did they come from" is rendered,
+			// and the list pays for every column on every page.
+			visitorId: $.VisitorId,
+			visitorIsNew: $.VisitorIsNew,
+			userEmail: $.UserEmail,
+			userName: $.UserName,
+			groupId: $.GroupId,
+			groupName: $.GroupName,
+			userTraits: CH.toJSONString($.UserTraits),
+			referrer: $.Referrer,
+			referrerHost: $.ReferrerHost,
+			utmSource: $.UtmSource,
+			utmMedium: $.UtmMedium,
+			utmCampaign: $.UtmCampaign,
+			utmTerm: $.UtmTerm,
+			utmContent: $.UtmContent,
+			host: $.Host,
+			entryPath: $.EntryPath,
+			exitPath: $.ExitPath,
+			language: $.Language,
+			lastActivityAt: $.LastActivityAt,
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -584,7 +689,13 @@ export function getSessionReplayQuery(opts: SessionReplayDetailOpts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Chunk index for one session (ordered for playback)
+// Chunk reads for one session (ordered for playback)
+//
+// Two builders, deliberately split: `sessionReplayChunkIndexQuery` returns the
+// timeline without payloads, and `sessionReplayEventsQuery` returns payloads for
+// a bounded chunk range. Playback fetches the index once, then pulls ranges on
+// demand. Reading every chunk's `Events` in one go is what made large sessions
+// fail — see the range opts below.
 //
 // session_replay_events is a plain MergeTree — each chunk is written exactly
 // once, so no dedup is needed. Sorted by (OrgId, SessionId, ChunkSeq) so the
@@ -597,10 +708,73 @@ export function getSessionReplayQuery(opts: SessionReplayDetailOpts = {}) {
 // the session's time window) prune to the 1-2 partitions the session spans.
 // ---------------------------------------------------------------------------
 
+export interface SessionReplayChunkIndexOpts {
+	/** Optional session time window — prunes daily partitions. Omit to scan all. */
+	startTime?: string
+	endTime?: string
+}
+
+export interface SessionReplayChunkIndexOutput {
+	readonly chunkSeq: number
+	/**
+	 * Gateway receipt time — the chunk's position on the playback timeline.
+	 *
+	 * It trails the recording's own clock by the upload latency, which is well
+	 * inside one chunk's duration, so it resolves a seek to the right chunk. The
+	 * exact offset within that chunk comes from its rrweb events once loaded.
+	 */
+	readonly timestamp: string
+	readonly durationMs: number
+	readonly eventCount: number
+	readonly byteSize: number
+	readonly isCheckpoint: number
+}
+
+/**
+ * Every chunk of a session EXCEPT its payload — the playback timeline and byte
+ * budget in one cheap read.
+ *
+ * This is what makes bounded playback possible: the player learns how many
+ * chunks exist, how big each one is, where the checkpoints (seek anchors) are,
+ * and which chunk covers a given moment — all without touching `Events`. On a
+ * MergeTree, omitting the wide column means its granules are never read, so
+ * this stays milliseconds even on a session whose payload is hundreds of MB.
+ */
+export function sessionReplayChunkIndexQuery(opts: SessionReplayChunkIndexOpts = {}) {
+	return from(SessionReplayEvents)
+		.select(($) => ({
+			chunkSeq: $.ChunkSeq,
+			timestamp: $.Timestamp,
+			durationMs: $.DurationMs,
+			eventCount: $.EventCount,
+			byteSize: $.ByteSize,
+			isCheckpoint: $.IsCheckpoint,
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.SessionId.eq(param.string("sessionId")),
+			CH.when(opts.startTime, (v: string) => $.Timestamp.gte(v)),
+			CH.when(opts.endTime, (v: string) => $.Timestamp.lte(v)),
+		])
+		.orderBy(["chunkSeq", "asc"])
+		.format("JSON")
+}
+
 export interface SessionReplayEventsOpts {
 	/** Optional session time window — prunes daily partitions. Omit to scan all. */
 	startTime?: string
 	endTime?: string
+	/**
+	 * Inclusive chunk-sequence window. Callers get these from the chunk index and
+	 * fetch a session in bounded slices — selecting `Events` for a whole session
+	 * buffers the entire payload (p99 ~594 MB) into a 128 MB Worker.
+	 */
+	fromChunkSeq?: number
+	toChunkSeq?: number
+	/** Row cap — the last line of defence if the range is miscomputed. */
+	limit?: number
+	/** Page within the range, for the public cursor-paginated surface. */
+	offset?: number
 }
 
 export interface SessionReplayEventsOutput {
@@ -615,7 +789,7 @@ export interface SessionReplayEventsOutput {
 }
 
 export function sessionReplayEventsQuery(opts: SessionReplayEventsOpts = {}) {
-	return from(SessionReplayEvents)
+	const query = from(SessionReplayEvents)
 		.select(($) => ({
 			chunkSeq: $.ChunkSeq,
 			timestamp: $.Timestamp,
@@ -630,9 +804,15 @@ export function sessionReplayEventsQuery(opts: SessionReplayEventsOpts = {}) {
 			$.SessionId.eq(param.string("sessionId")),
 			CH.when(opts.startTime, (v: string) => $.Timestamp.gte(v)),
 			CH.when(opts.endTime, (v: string) => $.Timestamp.lte(v)),
+			opts.fromChunkSeq === undefined ? undefined : $.ChunkSeq.gte(opts.fromChunkSeq),
+			opts.toChunkSeq === undefined ? undefined : $.ChunkSeq.lte(opts.toChunkSeq),
 		])
 		.orderBy(["chunkSeq", "asc"])
-		.format("JSON")
+	// `ORDER BY chunkSeq ASC` makes the truncation deterministic: a clipped range
+	// loses the tail, never a hole in the middle.
+	if (opts.limit === undefined) return query.format("JSON")
+	const limited = query.limit(opts.limit)
+	return (opts.offset === undefined ? limited : limited.offset(opts.offset)).format("JSON")
 }
 
 // ---------------------------------------------------------------------------

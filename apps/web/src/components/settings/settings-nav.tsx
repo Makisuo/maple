@@ -22,7 +22,7 @@ import {
 	UserIcon,
 	type IconComponent,
 } from "@/components/icons"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 export const settingsTabValues = [
 	"organization",

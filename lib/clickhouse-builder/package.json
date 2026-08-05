@@ -9,12 +9,24 @@
 		"sql",
 		"typescript"
 	],
+	"homepage": "https://github.com/MapleTechLabs/maple/tree/main/lib/clickhouse-builder#readme",
+	"bugs": {
+		"url": "https://github.com/MapleTechLabs/maple/issues"
+	},
 	"license": "MIT",
+	"author": "Maple Tech Labs",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/MapleTechLabs/maple.git",
+		"directory": "lib/clickhouse-builder"
+	},
 	"files": [
 		"dist",
+		"docs",
 		"README.md"
 	],
 	"type": "module",
+	"sideEffects": false,
 	"exports": {
 		".": {
 			"types": "./dist/index.d.mts",
@@ -33,6 +45,9 @@
 			"import": "./dist/sql.mjs"
 		}
 	},
+	"publishConfig": {
+		"access": "public"
+	},
 	"scripts": {
 		"build": "tsdown",
 		"typecheck": "tsc --noEmit",
@@ -44,7 +59,7 @@
 		"@types/node": "catalog:tooling",
 		"effect": "catalog:effect",
 		"expect-type": "^1.3.0",
-		"tsdown": "^0.21.7",
+		"tsdown": "^0.22.14",
 		"typescript": "catalog:tooling",
 		"vitest": "catalog:"
 	},

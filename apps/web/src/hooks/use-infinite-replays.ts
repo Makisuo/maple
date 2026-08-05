@@ -7,7 +7,9 @@ import { listReplaysResultAtom } from "@/lib/services/atoms/warehouse-query-atom
 import type { SessionRow } from "@/components/replays/sessions-list"
 import { logClientError } from "@/lib/services/common/telemetry"
 
-const PAGE_SIZE = 50
+/** Exported so the route loader prefetches the exact first-page key this hook reads. */
+export const REPLAYS_PAGE_SIZE = 50
+const PAGE_SIZE = REPLAYS_PAGE_SIZE
 export const MAX_RETAINED_REPLAYS = 500
 
 /**
@@ -23,6 +25,8 @@ export interface ReplaysFilterInputs {
 	country?: string
 	deviceType?: string
 	userId?: string
+	userSearch?: string
+	groupName?: string
 	hasErrors?: boolean
 	search?: string
 	durationMinMs?: number

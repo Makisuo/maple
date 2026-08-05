@@ -3,7 +3,14 @@ import { Schema } from "effect"
 import { SessionId, TraceId } from "../../primitives"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
+import {
+	V2InvalidRequestError,
+	V2NotFoundError,
+	V2PayloadTooLargeError,
+	V2RateLimitError,
+	V2ServiceUnavailableError,
+	V2UpstreamError,
+} from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
@@ -36,6 +43,21 @@ const sessionReplayBaseFields = {
 	user_id: Schema.NullOr(Schema.String).annotate({
 		description: "The identified user, or `null` if anonymous.",
 	}),
+	// From the browser SDK's identify(). Empty string when the session was never
+	// identified — including every session recorded before the SDK had identify().
+	user_name: Schema.String.annotate({
+		description: 'The identified user\'s display name, or `""` if unknown.',
+	}),
+	user_email: Schema.String.annotate({
+		description:
+			"The identified user's email, or `\"\"` if unknown or suppressed by the SDK's `captureUserEmail` setting.",
+	}),
+	group_id: Schema.String.annotate({
+		description: 'The identified group (company / team / tenant) ID, or `""` if unknown.',
+	}),
+	group_name: Schema.String.annotate({
+		description: 'The identified group\'s display name, or `""` if unknown.',
+	}),
 	url_initial: Schema.String.annotate({ description: "The first URL of the session." }),
 	browser_name: Schema.String.annotate({ description: "Browser name." }),
 	os_name: Schema.String.annotate({ description: "Operating system name." }),
@@ -61,6 +83,10 @@ export const V2SessionReplayListItem = Schema.Struct(sessionReplayBaseFields).an
 			duration_ms: 390000,
 			status: "ended",
 			user_id: "user_2abc",
+			user_name: "Ada Lovelace",
+			user_email: "ada@acme.com",
+			group_id: "acme",
+			group_name: "Acme Inc",
 			url_initial: "https://app.example.com/dashboard",
 			browser_name: "Chrome",
 			os_name: "macOS",
@@ -100,6 +126,10 @@ export const V2SessionReplay = Schema.Struct({
 			duration_ms: 390000,
 			status: "ended",
 			user_id: "user_2abc",
+			user_name: "Ada Lovelace",
+			user_email: "ada@acme.com",
+			group_id: "acme",
+			group_name: "Acme Inc",
 			url_initial: "https://app.example.com/dashboard",
 			browser_name: "Chrome",
 			os_name: "macOS",
@@ -120,18 +150,70 @@ export const V2SessionReplay = Schema.Struct({
 })
 export type V2SessionReplay = Schema.Schema.Type<typeof V2SessionReplay>
 
-export const V2SessionReplayChunk = Schema.Struct({
-	object: Schema.Literal("session_replay.event_chunk").annotate({
-		description: 'The object type — always `"session_replay.event_chunk"`.',
-	}),
+/**
+ * A chunk's metadata without its payload.
+ *
+ * A session's rrweb payload is unbounded by construction, so it cannot be
+ * fetched in one response. The manifest carries every chunk's position and size
+ * cheaply, which is what lets a client decide which payload ranges to request —
+ * and lets a player start on a couple of MB regardless of session length.
+ */
+export const V2SessionReplayChunkMeta = Schema.Struct({
 	chunk_seq: Schema.Number.annotate({ description: "Ordinal of the chunk within the session." }),
-	timestamp: Timestamp.annotate({ description: "When the chunk's events start." }),
+	timestamp: Timestamp.annotate({
+		description:
+			"When the ingest gateway received the chunk — the chunk's position on the playback timeline. It trails the recording's own clock by the upload latency, which is well inside one chunk's duration, so it resolves a seek to the right chunk; the exact offset within that chunk comes from its rrweb events.",
+	}),
 	duration_ms: Schema.Number.annotate({ description: "Duration covered by the chunk in ms." }),
 	event_count: Schema.Number.annotate({ description: "Number of rrweb events in the chunk." }),
 	byte_size: Schema.Number.annotate({ description: "Serialized size of the chunk in bytes." }),
 	is_checkpoint: Schema.Boolean.annotate({
-		description: "Whether the chunk is a full-snapshot checkpoint.",
+		description:
+			"Whether the chunk contains a full DOM snapshot. Only a checkpoint can seed a player, so seeking means loading the nearest checkpoint at or before the target.",
 	}),
+}).annotate({
+	identifier: "SessionReplayChunkMeta",
+	title: "Session replay chunk metadata",
+	description: "One chunk's position and size, without its payload.",
+})
+export type V2SessionReplayChunkMeta = Schema.Schema.Type<typeof V2SessionReplayChunkMeta>
+
+export const V2SessionReplayManifest = Schema.Struct({
+	object: Schema.Literal("session_replay.manifest").annotate({
+		description: 'The object type — always `"session_replay.manifest"`.',
+	}),
+	session_id: SessionReplayPublicId,
+	chunks: Schema.Array(V2SessionReplayChunkMeta).annotate({
+		description: "Every chunk in the session, ordered by `chunk_seq`.",
+	}),
+	chunk_count: Schema.Number.annotate({ description: "Number of chunks in the session." }),
+	total_byte_size: Schema.Number.annotate({
+		description: "Sum of every chunk's `byte_size` — the session's full payload size.",
+	}),
+	max_chunks_per_request: Schema.Number.annotate({
+		description: "Server cap on how many chunks one events request may return.",
+	}),
+	max_bytes_per_request: Schema.Number.annotate({
+		description:
+			"Server cap on the encoded size of one events response. A range whose payload exceeds this is refused with `range_too_large`.",
+	}),
+	truncated: Schema.Boolean.annotate({
+		description:
+			"Whether the chunk list was cut off at the manifest ceiling. `false` for any session recordable under the current ingest limits.",
+	}),
+}).annotate({
+	identifier: "SessionReplayManifest",
+	title: "Session replay manifest",
+	description:
+		"The session's chunk timeline without payloads — fetch this first, then request payload ranges against it.",
+})
+export type V2SessionReplayManifest = Schema.Schema.Type<typeof V2SessionReplayManifest>
+
+export const V2SessionReplayChunk = Schema.Struct({
+	object: Schema.Literal("session_replay.event_chunk").annotate({
+		description: 'The object type — always `"session_replay.event_chunk"`.',
+	}),
+	...V2SessionReplayChunkMeta.fields,
 	events: Schema.String.annotate({
 		description: "The rrweb event array for this chunk, serialized as a JSON string.",
 	}),
@@ -213,6 +295,14 @@ export const V2SessionReplaySearchParams = Schema.Struct({
 	country: Schema.optionalKey(Schema.String.annotate({ description: "Filter by country." })),
 	device_type: Schema.optionalKey(Schema.String.annotate({ description: "Filter by device type." })),
 	user_id: Schema.optionalKey(Schema.String.annotate({ description: "Filter by identified user." })),
+	user_search: Schema.optionalKey(
+		Schema.String.annotate({
+			description: "Case-insensitive substring match on the identified user's name or email.",
+		}),
+	),
+	group_name: Schema.optionalKey(
+		Schema.String.annotate({ description: "Filter by identified group (company / team) name." }),
+	),
 	has_errors: Schema.optionalKey(
 		Schema.Boolean.annotate({ description: "Only sessions with (or without) errors." }),
 	),
@@ -275,6 +365,46 @@ export const V2SessionReplayCollectionQuery = Schema.Struct({
 	description: "Pagination plus an optional time window for replay child collections.",
 })
 
+/** Chunks one events request may return. */
+export const MAX_REPLAY_CHUNKS_PER_REQUEST = 40
+
+/**
+ * Encoded-response ceiling for one events request.
+ *
+ * Sits far below both the Worker heap and the platform's own body limit, so an
+ * over-wide range is refused by us — a `range_too_large` naming the range — and
+ * never dies as a platform abort, which the transient-error classifier reads as
+ * a flaky warehouse and retries before reporting the service as unavailable.
+ */
+export const MAX_REPLAY_EVENTS_RESPONSE_BYTES = 8_000_000
+
+/**
+ * Hard ceiling on manifest rows. Well beyond reach: ingest caps a session at
+ * 1 GiB and chunks flush at ~100 KB, so a session tops out around 10k chunks.
+ */
+export const MAX_REPLAY_MANIFEST_CHUNKS = 20_000
+
+export const V2SessionReplayEventsQuery = Schema.Struct({
+	...V2SessionReplayCollectionQuery.fields,
+	from_chunk_seq: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)).annotate({
+			description:
+				"Only return chunks at or after this `chunk_seq`. Take it from the manifest — chunk sequences are stable identities, unlike offsets, which shift if a chunk uploads out of order.",
+		}),
+	),
+	to_chunk_seq: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)).annotate({
+			description: "Only return chunks at or before this `chunk_seq` (inclusive).",
+		}),
+	),
+}).annotate({
+	identifier: "SessionReplayEventsQuery",
+	title: "Session replay events query",
+	description:
+		"Pagination, an optional time window, and an optional chunk range. The range selects which part of the recording to load; pagination then pages within it.",
+})
+export type V2SessionReplayEventsQuery = Schema.Schema.Type<typeof V2SessionReplayEventsQuery>
+
 export const V2SessionReplaysForTraceParams = Schema.Struct({
 	trace_id: TraceId.annotate({ description: "The trace ID to find sessions for." }),
 	start_time: Timestamp.annotate({ description: "Window start (ISO-8601)." }),
@@ -294,7 +424,13 @@ export const V2SessionReplaysForTraceParams = Schema.Struct({
 })
 export type V2SessionReplaysForTraceParams = Schema.Schema.Type<typeof V2SessionReplaysForTraceParams>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+// Full warehouse outcome range — see the matching comment in ./telemetry.ts.
+const commonErrors = [
+	V2InvalidRequestError,
+	V2RateLimitError,
+	V2ServiceUnavailableError,
+	V2UpstreamError,
+] as const
 
 const SessionReplayList = ListOf(V2SessionReplayListItem).annotate({
 	identifier: "SessionReplayList",
@@ -351,17 +487,32 @@ export class V2SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays"
 		),
 	)
 	.add(
+		HttpApiEndpoint.get("manifest", "/:id/manifest", {
+			params: { id: SessionReplayPublicId },
+			query: V2SessionReplayWindowQuery,
+			success: V2SessionReplayManifest,
+			error: [...commonErrors, V2NotFoundError],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "getSessionReplayManifest",
+				summary: "Retrieve a session replay manifest",
+				description:
+					"Returns every chunk's position and size without payloads — the session's timeline in one cheap read. Fetch this before `/events`: a session's payload can run to hundreds of megabytes, so it must be pulled a range at a time, and the manifest is what tells you which ranges exist and where the seekable checkpoints are. Requires the `session_replays:read` scope.",
+			}),
+		),
+	)
+	.add(
 		HttpApiEndpoint.get("events", "/:id/events", {
 			params: { id: SessionReplayPublicId },
-			query: V2SessionReplayCollectionQuery,
+			query: V2SessionReplayEventsQuery,
 			success: SessionReplayChunkList,
-			error: [...commonErrors, V2NotFoundError],
+			error: [...commonErrors, V2NotFoundError, V2PayloadTooLargeError],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "getSessionReplayEvents",
 				summary: "List session replay events",
 				description:
-					"Returns the session's rrweb event chunks (player payload) in order. Cursor-paginated. Requires the `session_replays:read` scope.",
+					"Returns the session's rrweb event chunks (player payload) in order. Scope the read with `from_chunk_seq`/`to_chunk_seq` from the manifest; the response is capped, and a range whose payload exceeds the cap is refused with `range_too_large` rather than truncated silently. Cursor-paginated within the range. Requires the `session_replays:read` scope.",
 			}),
 		),
 	)

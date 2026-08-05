@@ -1,6 +1,6 @@
 import { cn } from "@maple/ui/lib/utils"
 import { severityLevel, type SeverityLevel } from "./format"
-import { formatPercent } from "@maple/ui/format"
+import { formatPercent } from "@maple/ui/lib/format"
 
 interface UsageBarProps {
 	fraction: number

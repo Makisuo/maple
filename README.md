@@ -13,11 +13,10 @@ Maple is now organized as a monorepo with a SPA frontend and an Effect-based bac
 ## Workspace Layout
 
 - `apps/web`: TanStack Router SPA (Vite)
-- `apps/api`: Effect HTTP API (Tinybird proxy + MCP server code)
+- `apps/api`: Effect HTTP API (Tinybird proxy + MCP server code + AI chat/triage on `@maple/llm`)
 - `apps/ingest`: OTLP ingest gateway (key auth + org enrichment + collector forwarding)
 - `apps/landing`: Astro landing site
 - `apps/alerting`: Alert evaluation worker
-- `apps/chat-flue`: Flue + Workers AI chat backend (agent + triage workflow)
 - `apps/cli`: CLI utilities
 - `apps/mobile`: Expo mobile app
 - `packages/domain`: Shared Effect HTTP contracts and domain types
@@ -101,19 +100,19 @@ Deployments run on **Alchemy v2** (Effect-based): the root `alchemy.run.ts` expo
 single `Alchemy.Stack("maple", …)` whose program composes per-app factories:
 
 - `apps/api/alchemy.run.ts` — Hyperdrive (PlanetScale Postgres) `MAPLE_DB`, KV, queue,
-  workflows + api Worker with all env bindings
+  workflows, the `ChatSession` Durable Object + api Worker with all env bindings
 - `apps/alerting/alchemy.run.ts` — cron-driven alerting Worker (cross-script workflow ref)
-- `apps/chat-flue/alchemy.run.ts` — Flue chat Worker (prebuilt bundle, Durable Objects, AI)
 - `apps/electric-sync/alchemy.run.ts` — ElectricSQL shape-proxy Worker
 - `apps/web/alchemy.run.ts` / `apps/landing/alchemy.run.ts` / `apps/local-ui/alchemy.run.ts`
   — static builds via `Command.Build` + asset-serving Workers
 
 Stage grammar is `prd` / `stg` / `pr-<number>` / dev names, resolved via
 `@maple/infra/cloudflare` (`parseMapleStage`, `resolveMapleDomains`, `resolveWorkerName`,
-`resolveHyperdriveName`, `resolveHyperdriveRefId`). stg/prd bind the dashboard-managed
-Hyperdrive by config ID (`resolveHyperdriveRefId`) — origin credentials never touch a
-deploy and `MAPLE_PG_URL` is only needed for pr/dev stages, whose per-branch Hyperdrive
-alchemy manages itself.
+`resolveHyperdriveName`, `resolveHyperdriveRefId`, `resolveDatabaseMode`). stg/prd bind the
+dashboard-managed Hyperdrive by config ID (`resolveHyperdriveRefId`) — origin credentials
+never touch a deploy. `MAPLE_PG_URL` is only needed for dev stages, whose Hyperdrive alchemy
+manages itself. PR previews bind **no database at all** (`resolveDatabaseMode` → `"none"`):
+DB-backed routes 500, everything else in the preview works.
 
 Run locally:
 

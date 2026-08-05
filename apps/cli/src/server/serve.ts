@@ -7,6 +7,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime"
 import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
 import { isLoopbackHostname } from "../lib/local-address"
+import { MAPLE_VERSION } from "../version"
 import {
 	acquireChdb,
 	type Chdb,
@@ -23,8 +24,9 @@ import {
 	decodeTraceRequest,
 	encodeExportResponse,
 } from "./otlp/proto"
-import schemaSql from "./schema/local-schema.sql" with { type: "text" }
-import { schemaFingerprint } from "./store-version"
+import { CURRENT_LOCAL_SCHEMA, LOCAL_SCHEMA_SQL, SCHEMA_FINGERPRINT } from "./schema-identity"
+import { assertCurrentPhysicalSchema } from "./schema-physical"
+import { ensureStoreMarkerDurable } from "./store-version"
 import {
 	ensureMaintenanceToken,
 	maintenanceTokenMatches,
@@ -32,9 +34,9 @@ import {
 	retireLiveDayInServer,
 } from "./archives/retention"
 
-/** Fingerprint of the schema this build bootstraps stores with. Stamped into the
- *  store marker so `maple start` can rebuild a store left on an older schema. */
-export const SCHEMA_FINGERPRINT = schemaFingerprint(schemaSql)
+/** Fingerprint of the schema this build bootstraps stores with. Re-exported
+ * from this module for the existing archive/checkpoint metadata seam. */
+export { SCHEMA_FINGERPRINT }
 
 /** Resolves a request path to a static asset (the bundled SPA). Returns
  *  `undefined` to fall through to the SPA shell (client-side routing). */
@@ -622,9 +624,36 @@ export const startServer = (
 		})
 		const db = yield* acquireChdb({
 			dataDir: options.dataDir,
-			schemaSql,
+			schemaSql: LOCAL_SCHEMA_SQL,
 			configFile: options.configFile,
 			rawTelemetryRetentionDays: retention.effective,
+		})
+		// `CREATE ... IF NOT EXISTS` does not repair a table whose physical
+		// definition was altered out of band. Inspect the opened store before the
+		// listener is bound; a mismatch fails startup rather than allowing new
+		// query code to run against a partially old layout.
+		yield* Effect.try({
+			try: () => assertCurrentPhysicalSchema(db),
+			catch: (error) =>
+				new ChdbError({
+					message: `local physical-schema verification failed: ${error instanceof Error ? error.message : String(error)}`,
+				}),
+		})
+		yield* Effect.tryPromise({
+			try: () =>
+				ensureStoreMarkerDurable(
+					options.dataDir,
+					{
+						version: CURRENT_LOCAL_SCHEMA.version,
+						digest: CURRENT_LOCAL_SCHEMA.digest,
+						fingerprint: SCHEMA_FINGERPRINT,
+					},
+					MAPLE_VERSION,
+				),
+			catch: (error) =>
+				new ChdbError({
+					message: `could not durably record local-store identity: ${error instanceof Error ? error.message : String(error)}`,
+				}),
 		})
 		// The ALTER statements have now been accepted by the running database.
 		// Only after that validation succeeds does a requested value become the

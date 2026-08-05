@@ -4,8 +4,12 @@ import { Checkbox } from "@maple/ui/components/ui/checkbox"
 import { Input } from "@maple/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Textarea } from "@maple/ui/components/ui/textarea"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
+import { HEATMAP_COLOR_SCALES, type HeatmapColorScale } from "@maple/domain/http"
 import type { ValueUnit } from "@/components/dashboard-builder/types"
+import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
+import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
+import { resolveTimeRange } from "@/atoms/dashboard-time-range-atoms"
 import { WidgetBuilderForm } from "@/atoms/widget-query-builder-atoms"
 import { useAtom } from "@/lib/effect-atom"
 import { PANEL_TYPES, fromPanelType, toPanelType } from "@/lib/query-builder/panel-types"
@@ -216,8 +220,22 @@ function Curve() {
 	)
 }
 
-const HEATMAP_COLOR_SCALES = ["blues", "reds", "viridis", "magma", "cividis"] as const
 const titleCase = (value: string) => value[0]!.toUpperCase() + value.slice(1)
+
+/** The ramp itself, so picking a palette is a visual choice rather than a word. */
+function RampSwatch({ scale }: { scale: HeatmapColorScale }) {
+	return (
+		<span className="flex shrink-0 gap-px">
+			{[0, 1, 2, 3, 4].map((stop) => (
+				<span
+					key={stop}
+					className="size-2 rounded-[2px]"
+					style={{ backgroundColor: `var(--heatmap-${scale}-${stop})` }}
+				/>
+			))}
+		</span>
+	)
+}
 
 function HeatmapColors() {
 	const { state, set } = useSettings()
@@ -232,12 +250,18 @@ function HeatmapColors() {
 					}
 				>
 					<SelectTrigger className="w-full">
-						<SelectValue />
+						<span className="flex items-center gap-2">
+							<RampSwatch scale={state.heatmapColorScale} />
+							<SelectValue />
+						</span>
 					</SelectTrigger>
 					<SelectContent>
 						{HEATMAP_COLOR_SCALES.map((scale) => (
 							<SelectItem key={scale} value={scale}>
-								{titleCase(scale)}
+								<span className="flex items-center gap-2">
+									<RampSwatch scale={scale} />
+									{titleCase(scale)}
+								</span>
 							</SelectItem>
 						))}
 					</SelectContent>
@@ -312,7 +336,12 @@ function Unit({ label = "Unit" }: { label?: string }) {
 	)
 }
 
-function Legend() {
+/**
+ * `seriesStats` is the Min/Max/Mean/Last table, which only time-series legends
+ * render — a categorical legend (pie) has one value per row and nothing to
+ * reduce over time, so those panels pass `seriesStats={false}`.
+ */
+function Legend({ seriesStats = true }: { seriesStats?: boolean }) {
 	const { state, set } = useSettings()
 	return (
 		<Field label="Legend">
@@ -325,23 +354,25 @@ function Legend() {
 					{ value: "hidden", label: "Hidden" },
 				]}
 			/>
-			<div className="pt-0.5">
-				<CheckboxRow
-					id="qb-series-stats"
-					label="Show Min/Max/Mean/Last stats"
-					checked={state.seriesStatsEnabled}
-					onChange={(checked) =>
-						// Stats live inside the legend, so enabling them with the legend
-						// hidden would have no visible effect — turn the legend on
-						// (bottom) in the same change.
-						set(
-							checked && state.legendPosition === "hidden"
-								? { seriesStatsEnabled: true, legendPosition: "bottom" }
-								: { seriesStatsEnabled: checked },
-						)
-					}
-				/>
-			</div>
+			{seriesStats && (
+				<div className="pt-0.5">
+					<CheckboxRow
+						id="qb-series-stats"
+						label="Show Min/Max/Mean/Last stats"
+						checked={state.seriesStatsEnabled}
+						onChange={(checked) =>
+							// Stats live inside the legend, so enabling them with the legend
+							// hidden would have no visible effect — turn the legend on
+							// (bottom) in the same change.
+							set(
+								checked && state.legendPosition === "hidden"
+									? { seriesStatsEnabled: true, legendPosition: "bottom" }
+									: { seriesStatsEnabled: checked },
+							)
+						}
+					/>
+				</div>
+			)}
 		</Field>
 	)
 }
@@ -565,6 +596,76 @@ function QueryOptions() {
 }
 
 /**
+ * Pins the widget to a window of its own instead of the dashboard's — the
+ * "Active in the last 30 minutes" tile on a board scoped to the last 7 days.
+ * Notes never query, so they don't offer it.
+ *
+ * A relative override ("30m") rebases against "now" on every dashboard refresh,
+ * exactly like the board's own relative range; an absolute one stays put.
+ */
+function WidgetTimeRange() {
+	const { state, set } = useSettings()
+	const {
+		state: { resolvedTimeRange: dashboardResolved },
+	} = useDashboardTimeRange()
+
+	if (state.visualization === "markdown") return null
+
+	const override = state.timeRange
+	const resolved = override ? resolveTimeRange(override) : null
+
+	return (
+		<Field label="Time range">
+			<div className="space-y-1.5">
+				<Segments
+					value={override ? "custom" : "dashboard"}
+					onSelect={(next) =>
+						set({
+							// Seed a new override from whatever the board is showing, so the
+							// tile doesn't jump to some unrelated window the moment you
+							// detach it.
+							timeRange:
+								next === "dashboard"
+									? null
+									: dashboardResolved
+										? {
+												type: "absolute",
+												startTime: dashboardResolved.startTime,
+												endTime: dashboardResolved.endTime,
+											}
+										: { type: "relative", value: "1h" },
+						})
+					}
+					options={[
+						{ value: "dashboard", label: "Dashboard" },
+						{ value: "custom", label: "Custom" },
+					]}
+				/>
+				{override && (
+					<TimeRangePicker
+						startTime={resolved?.startTime}
+						endTime={resolved?.endTime}
+						presetValue={override.type === "relative" ? override.value : undefined}
+						onChange={(range) => {
+							if (!range.startTime || !range.endTime) return
+							set({
+								timeRange: range.presetValue
+									? { type: "relative", value: range.presetValue }
+									: {
+											type: "absolute",
+											startTime: range.startTime,
+											endTime: range.endTime,
+										},
+							})
+						}}
+					/>
+				)}
+			</div>
+		</Field>
+	)
+}
+
+/**
  * The rail's field vocabulary. A panel type's `ConfigPanel` composes these; none
  * of them takes the widget state as a prop.
  */
@@ -572,6 +673,7 @@ export const WidgetSettings = {
 	Divider,
 	Name,
 	Description,
+	TimeRange: WidgetTimeRange,
 	TypePicker,
 	Stacked,
 	Curve,

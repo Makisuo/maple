@@ -1,4 +1,5 @@
 import { HttpApi, OpenApi } from "effect/unstable/httpapi"
+import { V2AlertDeliveriesApiGroup } from "./alert-deliveries"
 import { V2AlertDestinationsApiGroup } from "./alert-destinations"
 import { V2AnomaliesApiGroup } from "./anomalies"
 import { V2AlertIncidentsApiGroup } from "./alert-incidents"
@@ -8,6 +9,7 @@ import { V2AttributeMappingsApiGroup } from "./attribute-mappings"
 import { V2DashboardsApiGroup } from "./dashboards"
 import { V2IngestKeysApiGroup } from "./ingest-keys"
 import { V2SlackIntegrationsApiGroup } from "./integrations"
+import { V2PlanetScaleIntegrationsApiGroup } from "./integrations-planetscale"
 import { V2ErrorIssuesApiGroup } from "./error-issues"
 import { V2InvestigationsApiGroup } from "./investigations"
 import { V2OrganizationApiGroup } from "./organization"
@@ -64,10 +66,12 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2ApiKeysApiGroup)
 	.add(V2DashboardsApiGroup)
 	.add(V2AlertRulesApiGroup)
+	.add(V2AlertDeliveriesApiGroup)
 	.add(V2AlertDestinationsApiGroup)
 	.add(V2AlertIncidentsApiGroup)
 	.add(V2IngestKeysApiGroup)
 	.add(V2SlackIntegrationsApiGroup)
+	.add(V2PlanetScaleIntegrationsApiGroup)
 	.add(V2ErrorIssuesApiGroup)
 	.add(V2AttributeMappingsApiGroup)
 	.add(V2ScrapeTargetsApiGroup)

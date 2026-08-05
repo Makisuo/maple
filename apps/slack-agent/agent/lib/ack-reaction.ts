@@ -89,7 +89,8 @@ export function parseAckReactionTarget(rawBody: string): AckReactionTarget | nul
 		return null
 	}
 
-	const threadTs = typeof event.thread_ts === "string" && event.thread_ts.length > 0 ? event.thread_ts : undefined
+	const threadTs =
+		typeof event.thread_ts === "string" && event.thread_ts.length > 0 ? event.thread_ts : undefined
 	return {
 		teamId: typeof parsed.team_id === "string" ? parsed.team_id : undefined,
 		channelId,
@@ -125,4 +126,3 @@ export async function acknowledgeIncomingMessage(
 		console.warn("[slack-webhook] Acknowledgement reaction failed — ignored.", error)
 	}
 }
-

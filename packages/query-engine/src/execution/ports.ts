@@ -5,6 +5,7 @@ import type {
 	WarehouseQueryRequest,
 	WarehouseQueryResponse,
 	WarehouseValidationError,
+	WarehouseSchemaDriftError,
 } from "@maple/domain/http"
 import type { ResolvedWarehouseConfig } from "./backend"
 import type { CompiledQuery } from "../ch"
@@ -12,6 +13,7 @@ import type { WarehouseCapabilities } from "../capabilities"
 import type { WarehouseExecutorShape } from "../observability"
 import type { SqlQueryOptions } from "../profiles"
 import type { WarehouseSqlError } from "./errors"
+import type { WarehouseResponseLimitError } from "./response-limits"
 
 /** The minimal tenant surface the executor reads (org scope + identity for spans). */
 export interface ExecutionTenant {
@@ -86,11 +88,23 @@ export interface WarehouseQueryServiceShape {
 		payload: WarehouseQueryRequest,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<WarehouseQueryResponse, WarehouseSqlError | WarehouseValidationError>
-	readonly sqlQuery: (
+	/**
+	 * Execute a query that deliberately spans every tenant. The compiled query
+	 * must declare `.crossOrg()`, and `justification` is recorded on the span so
+	 * cross-tenant reads are auditable from the traces.
+	 *
+	 * There is deliberately no general `sqlQuery(tenant, sql)` on this shape:
+	 * arbitrary strings cannot carry a `tenantScope`, so accepting them would
+	 * reintroduce the substring guard this replaced.
+	 */
+	readonly crossOrgQuery: <T>(
 		tenant: ExecutionTenant,
-		sql: string,
-		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseSqlError | WarehouseValidationError>
+		compiled: CompiledQuery<T>,
+		options: SqlQueryOptions & { readonly justification: string },
+	) => Effect.Effect<
+		ReadonlyArray<T>,
+		WarehouseSqlError | WarehouseValidationError | WarehouseSchemaDriftError
+	>
 	/** Execute validated user-authored SQL with tenant-scoped credentials and hard response limits. */
 	readonly rawSqlQuery: (
 		tenant: ExecutionTenant,
@@ -102,6 +116,24 @@ export interface WarehouseQueryServiceShape {
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<T>, WarehouseSqlError | WarehouseValidationError>
+	/**
+	 * `compiledQuery` with an explicit ceiling on how much of the response we are
+	 * willing to materialize, failing with `WarehouseResponseLimitError` past it.
+	 *
+	 * Separate from `compiledQuery` on purpose: the extra failure mode belongs in
+	 * the signature of the handful of call sites that can actually hit it, not in
+	 * the error union of the ~30 endpoints that cannot.
+	 */
+	readonly compiledQueryBounded: <T>(
+		tenant: ExecutionTenant,
+		compiled: CompiledQuery<T>,
+		options: SqlQueryOptions & {
+			readonly responseLimits: { readonly maxRows: number; readonly maxBytes: number }
+		},
+	) => Effect.Effect<
+		ReadonlyArray<T>,
+		WarehouseSqlError | WarehouseValidationError | WarehouseResponseLimitError
+	>
 	readonly compiledQueryWithCapabilities: <T>(
 		tenant: ExecutionTenant,
 		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
@@ -112,6 +144,24 @@ export interface WarehouseQueryServiceShape {
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
 	) => Effect.Effect<Option.Option<T>, WarehouseSqlError | WarehouseValidationError>
+	/**
+	 * Resolve this tenant's route and capabilities once, so a fan-out that
+	 * follows finds them memoized instead of each branch deriving them itself.
+	 *
+	 * Exists because route resolution reads per-org ClickHouse config from
+	 * Postgres, and that read has been measured at ~2.9s cold. A fan-out that
+	 * starts every branch at once has every branch miss the in-isolate memo:
+	 * one prod trace of a single dashboard panel resolved the identical config
+	 * twice concurrently at 2.90s each, while the two warehouse queries the
+	 * fan-out existed to run took 428ms and 1179ms. The lookup cost more than
+	 * double the work it was preparing for.
+	 *
+	 * Cheap and idempotent on a warm memo, so callers may invoke it
+	 * unconditionally. Errors are swallowed: this is a warm-up, and the real
+	 * query behind it reports failures with proper context. Never let this
+	 * change the error semantics of the path it precedes.
+	 */
+	readonly warmRoute: (tenant: ExecutionTenant, options?: SqlQueryOptions) => Effect.Effect<void>
 	readonly ingest: <T>(
 		tenant: ExecutionTenant,
 		datasource: string,

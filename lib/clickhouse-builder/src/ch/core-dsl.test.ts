@@ -237,6 +237,21 @@ describe("compile edge cases", () => {
 		expect(() => compileCH(q, {})).toThrow()
 	})
 
+	// `.orderBy("id", "desc")` instead of `.orderBy(["id", "desc"])` is the
+	// natural slip. TypeScript rejects it, but untyped callers used to get
+	// `ORDER BY i D` — a string destructures into its first two characters.
+	it("throws QueryBuilderError on a non-tuple orderBy spec", () => {
+		const q = CH.from(TestTable).select(($) => ({ id: $.Id }))
+		const bad = (q as any).orderBy("id", "desc")
+		expect(() => compileCH(bad, {})).toThrow(/orderBy\(\) takes \[column, direction\] tuples/)
+	})
+
+	it("throws QueryBuilderError on an unknown orderBy direction", () => {
+		const q = CH.from(TestTable).select(($) => ({ id: $.Id }))
+		const bad = (q as any).orderBy(["id", "descending"])
+		expect(() => compileCH(bad, {})).toThrow(/direction must be "asc" or "desc"/)
+	})
+
 	it("compiles CTE with withCTE", () => {
 		const q = CH.from(TestTable)
 			.withCTE("my_cte", "SELECT 1 AS x")

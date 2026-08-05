@@ -1,6 +1,7 @@
 import { Atom } from "@/lib/effect-atom"
 import { Effect, Schema } from "effect"
-import { encodeKey } from "@/lib/cache-key"
+import { encodeOrgScopedKey, orgScopedKeyPayload } from "@/lib/cache-key"
+import { getActiveOrgId } from "@/lib/services/common/auth-headers"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { BackendError, WarehouseApiError } from "@/api/warehouse/effect-utils"
 import {
@@ -77,7 +78,11 @@ import {
 	getCloudflareZoneSecurity,
 	getCloudflareZoneTimeseries,
 } from "@/api/warehouse/cloudflare-infra"
-import { getPlanetScaleInfraTimeseries, getPlanetScaleQueryInsights } from "@/api/warehouse/planetscale-infra"
+import {
+	getPlanetScaleEvents,
+	getPlanetScaleInfraTimeseries,
+	getPlanetScaleQueryInsights,
+} from "@/api/warehouse/planetscale-infra"
 import {
 	getServiceHealthBaseline,
 	getServiceHealthSnapshot,
@@ -100,6 +105,7 @@ import { getQueryBuilderBreakdown } from "@/api/warehouse/query-builder-breakdow
 import {
 	getReplay,
 	getReplayEvents,
+	getReplayManifest,
 	getReplaysFacets,
 	getReplaysForTrace,
 	getSessionTranscript,
@@ -156,7 +162,7 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 		// shipped). The inner query spans already export by re-providing this same
 		// (memoized) layer; this lifts the parent onto the same tracer.
 		let resultAtom = MapleApiAtomClient.runtime.atom(
-			Schema.decodeUnknownEffect(UnknownFromJson)(key).pipe(
+			Schema.decodeUnknownEffect(UnknownFromJson)(orgScopedKeyPayload(key)).pipe(
 				Effect.flatMap((input) => query(input as Input)),
 				Effect.mapError(toQueryAtomError),
 			),
@@ -169,7 +175,7 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 		return resultAtom
 	})
 
-	return (input: Input) => family(encodeKey(input))
+	return (input: Input) => family(encodeOrgScopedKey(getActiveOrgId(), input))
 }
 
 export const getServiceUsageResultAtom = makeQueryAtomFamily(getServiceUsage, {
@@ -244,12 +250,20 @@ export const getSessionTraceSummariesResultAtom = makeQueryAtomFamily(getSession
 	staleTime: 60_000,
 })
 
-// Idle TTL keeps the chunks (and their inline rrweb events) stable across the
-// player's frequent re-renders so the decode memo in the player context isn't
-// thrown away and re-run. Events come straight from ClickHouse — no R2, no
-// signed URLs, no client-side fetch/gunzip.
-export const getReplayEventsResultAtom = makeQueryAtomFamily(getReplayEvents, {
+// The session's chunk timeline without payloads. Cheap enough to fetch on every
+// replay open, and the prerequisite for every payload range.
+export const getReplayManifestResultAtom = makeQueryAtomFamily(getReplayManifest, {
 	staleTime: 240_000,
+})
+
+// One entry per chunk range. Held far longer than a normal list query because a
+// chunk row is immutable once written (plain MergeTree, 30-day TTL) — so
+// scrubbing back over an already-played stretch must never refetch it.
+//
+// Idle TTL also keeps the chunks stable across the player's frequent
+// re-renders, so the decode memo in the player context isn't thrown away.
+export const getReplayEventsResultAtom = makeQueryAtomFamily(getReplayEvents, {
+	staleTime: 600_000,
 })
 
 // Distilled session transcript (console/network/error/nav/click) for the panels.
@@ -501,6 +515,12 @@ export const planetscaleInfraTimeseriesResultAtom = makeQueryAtomFamily(getPlane
 export const planetscaleQueryInsightsResultAtom = makeQueryAtomFamily(getPlanetScaleQueryInsights, {
 	// Server-side edge cache is 60s; match it so refreshes don't hammer PlanetScale.
 	staleTime: 60_000,
+})
+
+export const planetscaleEventsResultAtom = makeQueryAtomFamily(getPlanetScaleEvents, {
+	// Server-side edge cache is 30s — a deploy marker showing up late is the
+	// visible failure mode, so this stays tighter than the other PlanetScale reads.
+	staleTime: 30_000,
 })
 
 export const getPlanetScaleBranchStatsResultAtom = makeQueryAtomFamily(getPlanetScaleBranchStats, {

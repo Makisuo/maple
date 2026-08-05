@@ -4,7 +4,6 @@
 	"type": "module",
 	"exports": {
 		"./weekly-digest": "./src/weekly-digest.tsx",
-		"./onboarding": "./src/onboarding.tsx",
 		"./alert-notification": "./src/alert-notification.tsx"
 	},
 	"scripts": {

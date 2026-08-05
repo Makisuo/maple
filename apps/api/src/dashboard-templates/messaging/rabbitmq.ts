@@ -9,8 +9,8 @@ import {
 	paramValue,
 	serviceWhereClause,
 	templateId,
-} from "../helpers"
-import type { TemplateDefinition, WidgetDef } from "../types"
+} from "@/dashboard-templates/helpers"
+import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 // Queue identity lives on the RESOURCE for the rabbitmqreceiver (`rabbitmq.queue.name`), not on
 // the datapoint — `attr.queue` matched nothing. Its level metrics are non-monotonic Sums, not

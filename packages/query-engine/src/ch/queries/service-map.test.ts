@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileCH, param, toDateTime } from "@maple-dev/clickhouse-builder"
 import {
 	serviceDbEdgesSQL,
 	serviceDbEdgesForServiceQuery,
@@ -10,9 +10,11 @@ import {
 	serviceDependenciesSQL,
 	serviceDependenciesForServiceQuery,
 	serviceExternalEdgesSQL,
+	serviceMapEdgeJoinQuery,
 	servicePlatformsSQL,
 } from "./service-map"
-import { serviceMapResolutionsRollupSQL } from "./service-map-rollup"
+import { serviceMapEdgesRollupSQL, serviceMapResolutionsRollupSQL } from "./service-map-rollup"
+import { ServiceMapEdgesHourly } from "../tables"
 import { DB_NAMESPACE_ATTR_SQL } from "@maple/domain/tinybird/db-query-shape-sql"
 
 // The read side must derive `DbNamespace` byte-identically to the write side's
@@ -42,6 +44,28 @@ describe("serviceExternalEdgesSQL", () => {
 		expect(sql).toContain("ServiceName = 'artifacts-api'")
 		expect(sql).toContain("toStartOfHour(toDateTime('2024-01-01 00:00:00'))")
 		expect(sql).toContain("toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
+	})
+
+	it("derives tenant scope from its union branches, not from the anti-join", () => {
+		const compiled = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		// The outer query carries no OrgId predicate of its own — both branches do.
+		// The `NOT IN (…)` subquery is scoped too, but a subquery never confines
+		// its outer scan, so it must not be what makes this pass.
+		expect(compiled.tenantScope).toBe("org")
+	})
+
+	it("suppresses internal-service overlap only for http targets", () => {
+		const { sql } = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		expect(sql).toContain("targetType = 'http'")
+		expect(sql).toContain("targetName IN (")
+		expect(sql).toContain("FROM service_address_resolutions_hourly")
+		expect(sql).toContain("NOT (")
+	})
+
+	it("filters the computed targetName in HAVING, after the GROUP BY", () => {
+		const { sql } = serviceExternalEdgesSQL({ serviceName: "artifacts-api" }, baseParams)
+		expect(sql).toContain("HAVING targetName != ''")
+		expect(sql.indexOf("HAVING")).toBeGreaterThan(sql.indexOf("GROUP BY"))
 	})
 
 	it("unions hourly MV branch with raw-traces fallback for the in-progress hour", () => {
@@ -264,6 +288,82 @@ describe("serviceDependenciesSQL", () => {
 			])
 		}),
 	)
+
+	// The outer SELECT re-aggregates over a UNION ALL. If an inner branch reused
+	// an outer alias, ClickHouse's UNION-ALL + GROUP-BY optimizer rewrites the
+	// outer as `sum(sum(CallCount))` and rejects the query outright. The `bucket*`
+	// prefix on every inner aggregate is what keeps the two alias sets disjoint.
+	it("never nests an aggregate inside another aggregate", () => {
+		for (const opts of [{}, { deploymentEnv: "production" }]) {
+			const { sql } = serviceDependenciesSQL(opts, baseParams)
+			expect(sql).not.toContain("sum(sum(")
+			expect(sql).not.toContain("max(max(")
+			expect(sql).not.toContain("count(count(")
+		}
+	})
+
+	it("keeps the union branches' aliases disjoint from the outer aggregates", () => {
+		const { sql } = serviceDependenciesSQL({}, baseParams)
+		// Inner branches project `bucket*`; the outer projects the public names.
+		for (const outerAlias of ["callCount", "errorCount", "p95DurationMs", "estimatedSpanCount"]) {
+			expect(sql).toContain(`AS ${outerAlias}`)
+			expect(sql).not.toContain(`AS bucket${outerAlias}`)
+		}
+		for (const innerAlias of [
+			"bucketCallCount",
+			"bucketErrorCount",
+			"bucketDurationSumMs",
+			"bucketMaxDurationMs",
+			"bucketEstimatedSpanCount",
+		]) {
+			expect(sql).toContain(`AS ${innerAlias}`)
+		}
+	})
+
+	it("derives tenant scope from its branches rather than asserting it", () => {
+		// The outer query has no OrgId predicate — every union branch carries one.
+		expect(serviceDependenciesSQL({}, baseParams).tenantScope).toBe("org")
+	})
+})
+
+describe("serviceMapEdgeJoinQuery", () => {
+	const compiledRollup = () =>
+		serviceMapEdgesRollupSQL({
+			orgId: "org_1",
+			hourStart: "2024-01-01 10:00:00",
+			hourEnd: "2024-01-01 11:00:00",
+		})
+
+	// These rows are `ingest`ed into service_map_edges_hourly verbatim. A renamed
+	// or dropped output column corrupts the rollup table, and nothing downstream
+	// would notice — the ingest just writes defaults.
+	it("projects exactly the service_map_edges_hourly column set", () => {
+		const { sql } = compiledRollup()
+		const selectClause = sql.slice(0, sql.indexOf("FROM ("))
+		const aliases = [...selectClause.matchAll(/ AS (\w+)/g)].map((m) => m[1])
+
+		expect(new Set(aliases)).toEqual(new Set(Object.keys(ServiceMapEdgesHourly.columns)))
+	})
+
+	it("filters OrgId on both join sides, so the scope is derived", () => {
+		const compiled = compiledRollup()
+		expect(compiled.sql.match(/OrgId = 'org_1'/g)).toHaveLength(2)
+		expect(compiled.tenantScope).toBe("org")
+	})
+
+	it("pushes a source-service filter into the parent subquery, not the outer WHERE", () => {
+		const { sql } = compileCH(
+			serviceMapEdgeJoinQuery({
+				rangeStart: toDateTime(param.dateTime("hourStart")),
+				rangeEnd: toDateTime(param.dateTime("hourEnd")),
+				parentServiceName: "web",
+			}),
+			{ orgId: "org_1", hourStart: "2024-01-01 10:00:00", hourEnd: "2024-01-01 11:00:00" },
+		)
+		// Inside the parent subquery — before the JOIN — so ClickHouse can skip
+		// the full Client/Producer scan rather than filtering after the join.
+		expect(sql.indexOf("ServiceName = 'web'")).toBeLessThan(sql.indexOf("INNER JOIN"))
+	})
 })
 
 describe("serviceDependenciesForServiceQuery", () => {

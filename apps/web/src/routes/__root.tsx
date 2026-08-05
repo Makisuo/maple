@@ -8,12 +8,11 @@ import {
 	redirect,
 	useRouterState,
 } from "@tanstack/react-router"
-import { toast } from "sonner"
 import { selectedPlanKnownAtomFor } from "@/atoms/selected-plan-atoms"
 import { useAtom } from "@/lib/effect-atom"
 import { hasSelectedPlan, isUsableCustomer } from "@/lib/billing/plan-gating"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
-import { Toaster } from "@maple/ui/components/ui/sonner"
+import { AnchoredToastProvider, ToastProvider } from "@maple/ui/components/ui/toast"
 import { AttributesProvider } from "@maple/ui/components/attributes/context"
 import { BootSplash } from "@/components/boot-splash"
 import { highlightCode } from "@/lib/sugar-high"
@@ -46,6 +45,10 @@ const PUBLIC_PATHS = new Set([
 	"/sign-in",
 	"/sign-up",
 	"/org-required",
+	// Fixture-only dev surfaces. They render `scenarios.ts` / generated data and
+	// never touch a warehouse or the app database, so gating them on a session
+	// only made the widget gallery unreachable without a running API.
+	"/widget-lab",
 	"/service-map-bench",
 	"/service-detail-bench",
 	"/infra-bench",
@@ -56,10 +59,6 @@ const PUBLIC_PATHS = new Set([
 // Routes that render their own onboarding/billing UI and so must never be
 // gated on plan selection (neither redirected away nor blocked while loading).
 const ALLOWED_WITHOUT_PLAN = ["/select-plan", "/quick-start", "/cli-login", "/mcp-authorize"]
-
-// Stable references so the AttributesProvider context value never changes
-// identity across renders (avoids re-rendering every CopyableValue consumer).
-const notifyCopied = (message?: string) => toast.success(message ?? "Copied to clipboard")
 
 export const Route = createRootRouteWithContext<{ auth: RouterAuthContext } & EffectRouterContext>()({
 	beforeLoad: ({ context, location }) => {
@@ -93,20 +92,19 @@ const AppFrame = memo(function AppFrame() {
 		captureChatReferrer(pathname)
 	}, [pathname])
 	return (
-		<AttributesProvider
-			notifyCopied={notifyCopied}
-			highlightJson={highlightCode}
-			renderValue={renderAttributeValue}
-		>
-			<Outlet />
-			<Toaster />
-			{!PUBLIC_PATHS.has(pathname) && <IdleRoutePrefetch />}
-			{!PUBLIC_PATHS.has(pathname) && (
-				<>
-					<GlobalShortcuts />
-					<GlobalChatSheet />
-				</>
-			)}
+		<AttributesProvider highlightJson={highlightCode} renderValue={renderAttributeValue}>
+			<ToastProvider position="bottom-right">
+				<AnchoredToastProvider>
+					<Outlet />
+					{!PUBLIC_PATHS.has(pathname) && <IdleRoutePrefetch />}
+					{!PUBLIC_PATHS.has(pathname) && (
+						<>
+							<GlobalShortcuts />
+							<GlobalChatSheet />
+						</>
+					)}
+				</AnchoredToastProvider>
+			</ToastProvider>
 		</AttributesProvider>
 	)
 })

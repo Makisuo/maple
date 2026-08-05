@@ -258,39 +258,6 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 		return best
 	}, [subItems, currentPath])
 
-	// The sub-list can't render at 48px, so the rail turns the row into a menu.
-	// Without this, every child route is stranded while the sidebar is collapsed
-	// — which is the state Infrastructure ships in today.
-	if (collapsed && subItems && subItems.length > 0) {
-		return (
-			<SidebarMenuItem>
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={<SidebarMenuButton className={ACTIVE_RAIL} isActive={isActive} />}
-					>
-						<item.icon size={18} />
-						<span>{item.title}</span>
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="start" className="min-w-44" side="right" sideOffset={4}>
-						{/* Base UI scopes labels to a group — a bare DropdownMenuLabel
-						    throws MenuGroupContext is missing. */}
-						<DropdownMenuGroup>
-							<DropdownMenuLabel>{item.title}</DropdownMenuLabel>
-							{subItems.map((sub) => (
-								<DropdownMenuItem key={sub.title} render={<Link to={sub.href} />}>
-									{sub.icon ? (
-										<sub.icon size={16} style={{ color: sub.iconColor }} />
-									) : null}
-									{sub.title}
-								</DropdownMenuItem>
-							))}
-						</DropdownMenuGroup>
-					</DropdownMenuContent>
-				</DropdownMenu>
-			</SidebarMenuItem>
-		)
-	}
-
 	// While a section is open the rail belongs to the child you're actually on,
 	// not the parent — otherwise two amber bars compete and neither points at
 	// the current page. The open parent keeps the fill.
@@ -314,6 +281,37 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 		}
 		return unique
 	}, [isOpen, subItems])
+
+	// The sub-list can't render at 48px, so the rail turns the row into a menu.
+	// Without this, every child route is stranded while the sidebar is collapsed
+	// — which is the state Infrastructure ships in today.
+	if (collapsed && subItems && subItems.length > 0) {
+		return (
+			<SidebarMenuItem>
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						render={<SidebarMenuButton className={ACTIVE_RAIL} isActive={isActive} />}
+					>
+						<item.icon size={18} />
+						<span>{item.title}</span>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="start" className="min-w-44" side="right" sideOffset={4}>
+						<DropdownMenuGroup>
+							<DropdownMenuLabel>{item.title}</DropdownMenuLabel>
+							{subItems.map((sub) => (
+								<DropdownMenuItem key={sub.title} render={<Link to={sub.href} />}>
+									{sub.icon ? (
+										<sub.icon size={16} style={{ color: sub.iconColor }} />
+									) : null}
+									{sub.title}
+								</DropdownMenuItem>
+							))}
+						</DropdownMenuGroup>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			</SidebarMenuItem>
+		)
+	}
 
 	return (
 		<SidebarMenuItem>

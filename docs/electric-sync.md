@@ -164,9 +164,22 @@ a build-time constant, so a Vite restart is needed after changing it.
    With `ELECTRIC_URL` unset the proxy returns 503 and the synced lists fail to load.
 6. Validate initial per-org snapshot sizes before deploying a new synced table.
 
-## PR previews (per-PR Electric Cloud environment)
+## PR previews (no Electric source — dormant since 2026-08)
 
-PR previews provision an ephemeral Electric Cloud **environment** `pr-<n>` + a
+**PR previews no longer have an Electric source.** They stopped provisioning a
+PlanetScale branch (see `resolveDatabaseMode` in
+`packages/infra/src/cloudflare/stage.ts`), and with no Postgres to replicate from
+there is nothing for Electric to point at. `apps/electric-sync/alchemy.run.ts`
+therefore withholds `ELECTRIC_URL`/`ELECTRIC_SOURCE_ID`/`ELECTRIC_SECRET` on the
+`pr` stage — deliberately, so a preview can never inherit the shared `dev`
+credentials and proxy its shapes at another stage's data. The sync worker deploys
+unconfigured, returns 503, and the web app falls back to its effect-atom fetches.
+
+The `down`/`sweep` paths below still run: they reap environments left over from
+PRs opened before the cutover (each still holds a plan max-databases slot). The
+`up` path described here is dormant and documents the reverse path.
+
+The former lifecycle: an ephemeral Electric Cloud **environment** `pr-<n>` + a
 Postgres **source** per PR, mirroring the PlanetScale/Tinybird branch lifecycle.
 `scripts/electric-pr-branch.ts` (`up`/`down <pr-number>`, driven from
 `.github/workflows/deploy-pr-preview.yml`) uses `@electric-sql/cli`
@@ -183,8 +196,9 @@ the electric-sync worker by alchemy). On close it deletes the environment
 (cascades the source). Steps are gated on `ELECTRIC_API_TOKEN`, so previews stay
 green (and the worker 503s) until the token lands in Infisical.
 
-- The web build always reads through the sync path — provisioning the source is
-  what makes it work in previews.
+- The web build always reads through the sync path, so with no source provisioned
+  a preview's synced lists fall back to their effect-atom fetches. Provisioning
+  the source is what would make live sync work in previews again.
 - **Publication:** the migrate step runs `0009` (creates
   `electric_publication_default`) before the source is created. The script passes
   `--manual-table-publishing` by default (prod parity; Electric reads that
@@ -212,6 +226,40 @@ green (and the worker 503s) until the token lands in Infisical.
    register it in `org-collections.ts` (constructor + `cleanup()`), and point the
    consumer read at the collection.
 4. Update `SYNCED_TABLES` in `packages/db/src/migrations.test.ts`.
+
+### `REPLICA IDENTITY FULL` is not optional, and it is the main egress cost
+
+Electric **refuses to serve a shape** over a table whose replica identity is not
+`FULL`, answering every request for it with:
+
+```
+{"message":"Database table \"public.<t>\" does not have its replica identity set to FULL"}
+```
+
+This was checked empirically against `electricsql/electric:latest`, and it is
+unconditional — it holds with and without a `where`, with and without a `columns`
+projection, and with `(org_id, id)` present via `REPLICA IDENTITY USING INDEX`.
+
+So `0009`'s stated rationale is wrong in its details (`DEFAULT` keys deletes on the
+primary key perfectly well, composite or not) but binding in its conclusion. What has
+_not_ held up is its other claim — "these are low-write control-plane tables, so the
+extra WAL volume is negligible." `FULL` writes the entire old row into the WAL on top
+of the new one, and since Electric Cloud consumes the slot over a direct connection,
+every one of those bytes is billed PlanetScale egress.
+
+Because the per-write multiplier is not negotiable, **the only lever on a synced table
+is its write rate.** Before adding a hot writer to one, gate it:
+
+- the alerting scheduler's per-minute claim lock lives in the _unpublished_
+  `alert_rule_claims` table (`0027`), not in `alert_rules`;
+- `alert_rules.last_scheduled_at` is refreshed on a 5-minute heartbeat, SQL-gated so
+  the off-beat ticks are zero-row updates that write no WAL tuple at all;
+- `api_keys.last_used_at` is gated the same way in `ApiKeysService`, so an
+  authenticated request no longer writes on the hot path;
+- `alert_rule_states` has had `STATE_HEARTBEAT_MS` for the same reason.
+
+Do not try to reclaim this by relaxing the replica identity — Electric will reject the
+shape and the synced lists will fail to load outright, with no fetch fallback.
 
 ## Removing a synced table
 

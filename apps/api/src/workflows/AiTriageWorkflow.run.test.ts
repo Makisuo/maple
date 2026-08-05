@@ -13,7 +13,7 @@ import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
 import { AiTriageRunId, AnomalyIncidentId, ErrorIssueId, OrgId } from "@maple/domain/primitives"
 import { eq } from "drizzle-orm"
 import { Schema } from "effect"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { type AiTriageRunDeps, runAiTriage, type AiTriageWorkflowPayload } from "./AiTriageWorkflow.run"
 import type { WorkflowStepLike } from "./ClickHouseSchemaApplyWorkflow.run"
 
@@ -55,7 +55,7 @@ const validResult = {
 	confidence: "high",
 }
 
-/** Stub the Flue triage invocation: return a fixed structured result + usage. */
+/** Stub the investigation: return a fixed structured result + usage. */
 const fakeInvokeTriage =
 	(result: unknown = validResult): AiTriageRunDeps["invokeTriage"] =>
 	async () => ({
@@ -118,13 +118,12 @@ beforeEach(async () => {
 	}
 })
 
-// The gate checks for the CHAT_FLUE service binding (the investigation runs on
-// chat-flue); a stub `fetch` satisfies it. The actual call is stubbed via
-// `deps.invokeTriage`, so the binding is never exercised in these tests.
+// The gate checks that a model is reachable — either the Workers AI binding or a
+// Cloudflare API key. A stub binding with a `run` method satisfies it. The actual
+// investigation is stubbed via `deps.invokeTriage`, so the binding is never called.
 const env = {
 	MAPLE_DB: undefined,
-	INTERNAL_SERVICE_TOKEN: "test-token",
-	CHAT_FLUE: { fetch: (async () => new Response("{}")) as typeof fetch },
+	AI: { run: async () => new Response("{}") },
 }
 
 const loadRun = async () => {
@@ -338,7 +337,7 @@ describe("runAiTriage", () => {
 			{
 				db: harness.db,
 				invokeTriage: async () => {
-					throw new Error("flue_unreachable")
+					throw new Error("model_unreachable")
 				},
 				now: () => FIXED_NOW,
 			},
@@ -347,7 +346,7 @@ describe("runAiTriage", () => {
 
 		const run = await loadRun()
 		expect(run?.status).toBe("failed")
-		expect(run?.error).toBe("flue_unreachable")
+		expect(run?.error).toBe("model_unreachable")
 		expect(run?.completedAt?.getTime()).toBe(FIXED_NOW)
 		expect(run?.updatedAt.getTime()).toBe(FIXED_NOW)
 
@@ -405,29 +404,37 @@ describe("runAiTriage", () => {
 		expect(byFeature.get("ai_output_tokens")?.idempotency_key).toBe(`${harness.runId}:triage:output`)
 	})
 
-	it("fails the run when the Flue investigation errors", async () => {
+	it("fails the run when the investigation errors", async () => {
 		const result = await runAiTriage(env, { payload: harness.payload }, fakeStep, {
 			db: harness.db,
 			invokeTriage: async () => {
-				throw new Error("flue_triage_no_result")
+				throw new Error("triage_agent_failed")
 			},
 		})
 		expect(result.status).toBe("failed")
 		const run = await loadRun()
 		expect(run?.status).toBe("failed")
-		expect(run?.error).toBe("flue_triage_no_result")
+		expect(run?.error).toBe("triage_agent_failed")
 	})
 
-	it("fails the run when the CHAT_FLUE binding is unavailable", async () => {
+	it("fails the run when no model is reachable", async () => {
+		const result = await runAiTriage({ MAPLE_DB: undefined }, { payload: harness.payload }, fakeStep, {
+			db: harness.db,
+			invokeTriage: fakeInvokeTriage(),
+		})
+		expect(result.status).toBe("failed")
+		const run = await loadRun()
+		expect(run?.status).toBe("failed")
+		expect(run?.error).toBe("llm_unavailable")
+	})
+
+	it("proceeds on a Cloudflare API key when there is no AI binding", async () => {
 		const result = await runAiTriage(
-			{ MAPLE_DB: undefined, INTERNAL_SERVICE_TOKEN: "test-token" },
+			{ MAPLE_DB: undefined, CLOUDFLARE_API_KEY: "cf-test-key" },
 			{ payload: harness.payload },
 			fakeStep,
 			{ db: harness.db, invokeTriage: fakeInvokeTriage() },
 		)
-		expect(result.status).toBe("failed")
-		const run = await loadRun()
-		expect(run?.status).toBe("failed")
-		expect(run?.error).toBe("chat_flue_unavailable")
+		expect(result.status).toBe("completed")
 	})
 })

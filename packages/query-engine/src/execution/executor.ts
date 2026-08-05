@@ -10,7 +10,7 @@ import {
 	WarehouseValidationError,
 } from "@maple/domain/http"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
-import { compilePipeQuery, type CompiledQuery } from "../ch"
+import { compilePipeQuery, type CompiledQuery, type TenantScope } from "../ch"
 import type { WarehouseExecutorShape } from "../observability"
 import {
 	appendSettings,
@@ -27,7 +27,8 @@ import {
 	normalizeSqlForClickHouseClient,
 	truncateSql,
 } from "./fingerprint"
-import { BackendDialect } from "./backend"
+import { BackendDialect, warehouseTargetAttributes } from "./backend"
+import { managedWarehouseCapabilities } from "./managed-capabilities"
 import { findIngestPinnedTable } from "./datasource-routing"
 import type {
 	ExecutionTenant,
@@ -44,25 +45,21 @@ import {
 	deriveWarehouseCapabilities,
 	logBodySearchMode,
 	type WarehouseCapabilities,
-	type WarehouseProjectionMetadataRow,
-	type WarehouseSettingMetadataRow,
 	WarehouseColumnMetadataSchema,
 	WarehouseIndexMetadataSchema,
-	WarehouseProjectionMetadataSchema,
 	WarehouseSettingMetadataSchema,
 	WarehouseVersionMetadataSchema,
 } from "../capabilities"
 
 const CLIENT_CACHE_TTL_MS = 30_000
-const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000
+/**
+ * Only BYO ClickHouse is probed now, and its answer changes solely when the
+ * user migrates their cluster. The cache is isolate-local (and there are two
+ * per isolate), so the TTL — not the map — is what bounds probe volume.
+ */
+const CAPABILITIES_CACHE_TTL_MS = 60 * 60_000
 const CAPABILITIES_INSPECTION_TIMEOUT = Duration.seconds(2)
-const WarehouseCapabilityMetadataTarget = Schema.Literals([
-	"version",
-	"indexes",
-	"columns",
-	"projections",
-	"settings",
-])
+const WarehouseCapabilityMetadataTarget = Schema.Literals(["version", "indexes", "columns", "settings"])
 type WarehouseCapabilityMetadataTarget = Schema.Schema.Type<typeof WarehouseCapabilityMetadataTarget>
 
 class WarehouseCapabilityProbeError extends Schema.TaggedErrorClass<WarehouseCapabilityProbeError>()(
@@ -186,89 +183,90 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 				}),
 			)
 
+		// Every probe degrades to an empty result rather than failing the whole
+		// inspection. A backend that denies one `system.*` table (Tinybird answers
+		// `403` for `system.columns` and `system.data_skipping_indices` but serves
+		// `system.settings`) should lose only the features that depend on that
+		// table: collapsing to `baselineWarehouseCapabilities()` silently disables
+		// the bloom and tokenbf prefilters on a backend that does have them.
+		const degradeToEmpty = <A>(
+			effect: Effect.Effect<ReadonlyArray<A>, WarehouseCapabilityProbeError>,
+		): Effect.Effect<ReadonlyArray<A>> =>
+			effect.pipe(
+				Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
+					logProbeFailure(error).pipe(Effect.as<ReadonlyArray<A>>([])),
+				),
+			)
+
 		const inspection = Effect.all(
 			[
-				queryRows("version", "SELECT version() AS version").pipe(
-					Effect.flatMap((rows) =>
-						Schema.decodeUnknownEffect(WarehouseVersionMetadataSchema)(rows),
+				degradeToEmpty(
+					queryRows("version", "SELECT version() AS version").pipe(
+						Effect.flatMap((rows) =>
+							Schema.decodeUnknownEffect(WarehouseVersionMetadataSchema)(rows),
+						),
+						Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("version", cause))),
 					),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("version", cause))),
 				),
-				queryRows(
-					"indexes",
-					`SELECT table, name, type, expr AS expression
+				degradeToEmpty(
+					queryRows(
+						"indexes",
+						`SELECT table, name, type, expr AS expression
 FROM system.data_skipping_indices
 WHERE database = currentDatabase() AND table IN ('logs', 'traces')`,
-				).pipe(
-					Effect.flatMap((rows) => Schema.decodeUnknownEffect(WarehouseIndexMetadataSchema)(rows)),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("indexes", cause))),
+					).pipe(
+						Effect.flatMap((rows) =>
+							Schema.decodeUnknownEffect(WarehouseIndexMetadataSchema)(rows),
+						),
+						Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("indexes", cause))),
+					),
 				),
-				queryRows(
-					"columns",
-					`SELECT table, name
+				degradeToEmpty(
+					queryRows(
+						"columns",
+						`SELECT table, name
 FROM system.columns
 WHERE database = currentDatabase() AND table IN ('logs', 'traces')`,
-				).pipe(
-					Effect.flatMap((rows) => Schema.decodeUnknownEffect(WarehouseColumnMetadataSchema)(rows)),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("columns", cause))),
-				),
-				queryRows(
-					"projections",
-					`SELECT table, name
-FROM system.projections
-WHERE database = currentDatabase() AND table = 'logs'`,
-				).pipe(
-					Effect.flatMap((rows) =>
-						Schema.decodeUnknownEffect(WarehouseProjectionMetadataSchema)(rows),
-					),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("projections", cause))),
-					Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
-						logProbeFailure(error).pipe(
-							Effect.as<ReadonlyArray<WarehouseProjectionMetadataRow>>([]),
+					).pipe(
+						Effect.flatMap((rows) =>
+							Schema.decodeUnknownEffect(WarehouseColumnMetadataSchema)(rows),
 						),
+						Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("columns", cause))),
 					),
 				),
-				queryRows(
-					"settings",
-					`SELECT name, value
+				degradeToEmpty(
+					queryRows(
+						"settings",
+						`SELECT name, value
 FROM system.settings
 WHERE name = 'enable_full_text_index'`,
-				).pipe(
-					Effect.flatMap((rows) =>
-						Schema.decodeUnknownEffect(WarehouseSettingMetadataSchema)(rows),
-					),
-					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("settings", cause))),
-					Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
-						logProbeFailure(error).pipe(
-							Effect.as<ReadonlyArray<WarehouseSettingMetadataRow>>([]),
+					).pipe(
+						Effect.flatMap((rows) =>
+							Schema.decodeUnknownEffect(WarehouseSettingMetadataSchema)(rows),
 						),
+						Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("settings", cause))),
 					),
 				),
 			],
 			{ concurrency: "unbounded" },
 		).pipe(
-			Effect.map(([versions, indexes, columns, projections, settings]) =>
+			Effect.map(([versions, indexes, columns, settings]) =>
 				deriveWarehouseCapabilities({
 					serverVersion: versions[0]?.version,
 					indexes,
 					columns,
-					projections,
 					settings,
 					allowSettingOverrides,
 				}),
 			),
 		)
 
-		const timed: Effect.Effect<
-			WarehouseCapabilities,
-			WarehouseCapabilityProbeError | Cause.TimeoutError
-		> = inspection.pipe(Effect.timeout(CAPABILITIES_INSPECTION_TIMEOUT))
-		const probeRecovered: Effect.Effect<WarehouseCapabilities, Cause.TimeoutError> = timed.pipe(
-			Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
-				logProbeFailure(error).pipe(Effect.as(baselineWarehouseCapabilities())),
-			),
+		// Individual probe failures are already absorbed by `degradeToEmpty`, so
+		// only a whole-inspection timeout can still reach the conservative plan.
+		const timed: Effect.Effect<WarehouseCapabilities, Cause.TimeoutError> = inspection.pipe(
+			Effect.timeout(CAPABILITIES_INSPECTION_TIMEOUT),
 		)
-		return probeRecovered.pipe(
+		return timed.pipe(
 			Effect.catchTag("TimeoutError", (error) =>
 				Effect.logWarning("Warehouse capability inspection fell back to conservative plan").pipe(
 					Effect.annotateLogs({ target: "inspection", error: error.message }),
@@ -284,6 +282,23 @@ WHERE name = 'enable_full_text_index'`,
 	) {
 		const purpose: RoutePurpose = options?.route === "ingest" ? "ingest" : "read"
 		const resolved = yield* deps.resolveRoute(tenant, purpose, "capabilities")
+
+		// Backends running the schema we deploy answer from the generated
+		// snapshot: no client, no round-trip, no cache entry, and no way to fall
+		// back to a conservative plan because a `system.*` probe was denied.
+		if (BackendDialect[resolved.config.kind].managedSchema) {
+			const capabilities = managedWarehouseCapabilities()
+			yield* Effect.annotateCurrentSpan({
+				"maple.query.capabilities.cache": "static",
+				"maple.query.capabilities.metadata_available": capabilities.metadataAvailable,
+				"warehouse.backend": resolved.config.kind,
+				"warehouse.route": purpose,
+				"warehouse.config_source": resolved.source,
+				orgId: tenant.orgId,
+			})
+			return capabilities
+		}
+
 		const nowMs = yield* Clock.currentTimeMillis
 		const configKey = sqlClientCacheKey(resolved.config)
 		const cache = yield* Ref.get(capabilitiesCache)
@@ -321,6 +336,7 @@ WHERE name = 'enable_full_text_index'`,
 					"db.client": dialect.dbClient,
 					"db.system.name": dialect.dbSystemName,
 					"peer.service": dialect.peerService,
+					...warehouseTargetAttributes(resolved.config),
 					"warehouse.backend": resolved.config.kind,
 					"warehouse.route": purpose,
 					"warehouse.config_source": resolved.source,
@@ -408,6 +424,9 @@ WHERE name = 'enable_full_text_index'`,
 		yield* Effect.annotateCurrentSpan("db.client", dialect.dbClient)
 		yield* Effect.annotateCurrentSpan("db.system.name", dialect.dbSystemName)
 		yield* Effect.annotateCurrentSpan("peer.service", dialect.peerService)
+		// Target identity, so a read joins the same service-map node the ingest
+		// gateway writes to instead of collapsing into a nameless per-system one.
+		yield* Effect.annotateCurrentSpan(warehouseTargetAttributes(resolved.config))
 		const settings = dialect.stripTinybirdRestrictedSettings
 			? stripTinybirdRestrictedSettings(resolveSettings(options))
 			: resolveSettings(options)
@@ -428,19 +447,31 @@ WHERE name = 'enable_full_text_index'`,
 		)
 		const attemptTimeoutMs = clientTimeoutMs(options?.profile, settings?.maxExecutionTime)
 		const retryAttempts = yield* Ref.make(0)
+		// A caller-supplied budget wins: a trusted query that knows its own response
+		// can blow the Worker heap (session replay's rrweb payloads) opts in
+		// explicitly. Raw SQL keeps its standing caps.
 		const responseLimits =
-			execution === "raw"
+			options?.responseLimits ??
+			(execution === "raw"
 				? { maxRows: MAX_RAW_SQL_RESULT_ROWS, maxBytes: MAX_RAW_SQL_RESULT_BYTES }
-				: undefined
+				: undefined)
 		const queryAttempt = Effect.tryPromise({
 			try: () => client.sql(finalSql, responseLimits === undefined ? undefined : { responseLimits }),
 			catch: (error) =>
 				error instanceof WarehouseResponseLimitError
-					? new RawSqlValidationError({
-							code: "ResourceLimit",
-							message: error.message,
-						})
-					: mapWarehouseError(pipe, error),
+					? // Only raw SQL restates this as a validation error — there the
+						// oversized result IS the caller's query problem. For a trusted
+						// query the limit is ours, so it propagates unchanged and the
+						// caller maps it to a domain error. Either way it never becomes a
+						// WarehouseUpstreamError, so the transient retry loop skips it
+						// instead of re-running a read that already exhausted the heap.
+						execution === "raw"
+						? new RawSqlValidationError({ code: "ResourceLimit", message: error.message })
+						: error
+					: // `execution` decides authorship: raw SQL comes from the caller (the
+						// raw_sql widget, the `run_sql` MCP tool), so an analyzer complaint
+						// about it is their typo and must keep the database's own message.
+						mapWarehouseError(pipe, error, execution === "raw" ? "caller" : "maple"),
 		})
 		// `db.duration_ms` measures warehouse execution only — captured here, after
 		// config resolution + settings/client-cache preamble, immediately before the
@@ -547,6 +578,31 @@ WHERE name = 'enable_full_text_index'`,
 			"maple.query.plan.full_text_setting": capabilities.fullTextSearchSetting,
 		})
 
+	// --- Response-limit narrowing ------------------------------------------
+	//
+	// `executeSql` can raise WarehouseResponseLimitError, but only when a caller
+	// passed `responseLimits`. `compiledQueryBounded` is the one entry point that
+	// does; every other one strips the option (`withoutResponseLimits`) and then
+	// narrows the error away (`unbounded`). Types can't see that the strip makes
+	// the error unreachable, hence the explicit pair — and hence `Effect.die`
+	// rather than a mapping: if it ever fires, a caller reached the limit path
+	// without declaring it, which is a bug here and not a condition to handle.
+
+	const withoutResponseLimits = (options?: SqlQueryOptions): SqlQueryOptions | undefined => {
+		if (options?.responseLimits === undefined) return options
+		const { responseLimits: _optedOut, ...rest } = options
+		return rest
+	}
+
+	const unbounded = <A, E, R>(
+		effect: Effect.Effect<A, E | WarehouseResponseLimitError, R>,
+	): Effect.Effect<A, E, R> =>
+		Effect.catchIf(
+			effect,
+			(error): error is WarehouseResponseLimitError => error instanceof WarehouseResponseLimitError,
+			(error) => Effect.die(error),
+		)
+
 	const query = Effect.fn("WarehouseQueryService.query")(function* (
 		tenant: ExecutionTenant,
 		payload: WarehouseQueryRequest,
@@ -582,9 +638,13 @@ WHERE name = 'enable_full_text_index'`,
 			})
 		}
 
-		const rows = yield* executeTrustedSql(
+		// The pipe path used to call `executeTrustedSql` directly, with no scope
+		// assertion of any kind — it relied on `compilePipeQuery` always threading
+		// `org_id`. Same gate as the compiled path now.
+		const rows = yield* executeScopedSql(
 			tenant,
 			compiled.sql,
+			compiled.tenantScope,
 			payload.pipeName,
 			withCapabilitySettings(capabilities, options),
 		)
@@ -594,6 +654,7 @@ WHERE name = 'enable_full_text_index'`,
 					new WarehouseSchemaDriftError({
 						pipeName: payload.pipeName,
 						message: error.message,
+						kind: "decode",
 						cause: error,
 					}),
 			),
@@ -604,24 +665,37 @@ WHERE name = 'enable_full_text_index'`,
 		})
 	})
 
-	const sqlQuery = Effect.fn("WarehouseQueryService.sqlQuery")(function* (
+	/**
+	 * Run SQL that a `CompiledQuery` has already vouched for.
+	 *
+	 * Callers must pass the compiled query's `tenantScope`, not a string they
+	 * assembled themselves. The old gate here was `sql.includes("OrgId")`, which
+	 * `SELECT count() AS OrgId …` and `WHERE OrgId = 'x' OR 1=1` both satisfy —
+	 * so scoping is now decided by the builder when it sees an `OrgId` predicate
+	 * in a top-level WHERE, and this only enforces the decision.
+	 */
+	const executeScopedSql = Effect.fn("WarehouseQueryService.executeScopedSql")(function* (
 		tenant: ExecutionTenant,
 		sql: string,
+		tenantScope: TenantScope,
+		context: string,
 		options?: SqlQueryOptions,
 	) {
 		if (!tenant.orgId || tenant.orgId.trim() === "") {
 			return yield* new WarehouseValidationError({
-				pipeName: "sqlQuery",
-				message: "org_id must not be empty (sqlQuery)",
+				pipeName: context,
+				message: `org_id must not be empty (${context})`,
 			})
 		}
-		if (!sql.includes("OrgId")) {
+		if (tenantScope !== "org") {
 			return yield* new WarehouseValidationError({
-				pipeName: "sqlQuery",
-				message: "SQL query must contain OrgId filter (sqlQuery)",
+				pipeName: context,
+				message:
+					`compiled query is not tenant-scoped: no top-level OrgId predicate (${context}). ` +
+					`Deliberate cross-tenant reads must declare .crossOrg() and run through crossOrgQuery.`,
 			})
 		}
-		return yield* executeTrustedSql(tenant, sql, "sqlQuery", options)
+		return yield* executeTrustedSql(tenant, sql, context, options)
 	})
 
 	const rawSqlQuery = Effect.fn("WarehouseQueryService.rawSqlQuery")(function* (
@@ -629,12 +703,12 @@ WHERE name = 'enable_full_text_index'`,
 		sql: string,
 		options?: Pick<SqlQueryOptions, "profile" | "context">,
 	) {
-		if (!sql.includes("OrgId")) {
-			return yield* new RawSqlValidationError({
-				code: "MissingOrgFilter",
-				message: "Raw SQL must contain the expanded OrgId filter",
-			})
-		}
+		// No OrgId assertion here on purpose. This path runs user-authored SQL,
+		// whose isolation is enforced upstream at the credential layer — a
+		// per-org datasource-scoped JWT on managed Tinybird, the org's own
+		// cluster credentials on BYO ClickHouse. `prepareRawSql` has already
+		// expanded and validated `$__orgFilter`; a substring check on top of that
+		// asserts nothing and invites the belief that it does.
 		return yield* executeSql(tenant, sql, "rawSqlQuery", options, "raw")
 	})
 
@@ -647,11 +721,22 @@ WHERE name = 'enable_full_text_index'`,
 	): SqlQueryOptions | undefined =>
 		compiled.routing === "ingest" ? { ...options, route: "ingest" } : options
 
+	// Every compiled query runs under a cost profile: an omitted `profile` used to
+	// mean "no SETTINGS clause at all" (no server-side memory/time budget, flat
+	// 30s client cap), which ~20 call sites hit by accident. Default to
+	// "aggregation" like the QuerySpec lowering does; "unbounded" stays the
+	// explicit opt-out.
+	const withDefaultProfile = (options?: SqlQueryOptions): SqlQueryOptions => ({
+		...options,
+		profile: options?.profile ?? "aggregation",
+	})
+
 	const executeCompiledQuery = Effect.fn("WarehouseQueryService.executeCompiledQuery")(function* <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
-		options?: SqlQueryOptions,
+		rawOptions?: SqlQueryOptions,
 	) {
+		const options = withDefaultProfile(rawOptions)
 		const capabilities =
 			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
@@ -661,13 +746,20 @@ WHERE name = 'enable_full_text_index'`,
 			"query.optimization.capabilityAware",
 			typeof compiled === "function",
 		)
-		const rows = yield* sqlQuery(tenant, selected.sql, withCompiledRouting(selected, executionOptions))
+		const rows = yield* executeScopedSql(
+			tenant,
+			selected.sql,
+			selected.tenantScope,
+			options.context ?? "compiledQuery",
+			withCompiledRouting(selected, executionOptions),
+		)
 		return yield* selected.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
 					new WarehouseSchemaDriftError({
-						pipeName: "compiledQuery",
+						pipeName: options.context ?? "compiledQuery",
 						message: error.message,
+						kind: "decode",
 						cause: error,
 					}),
 			),
@@ -678,19 +770,83 @@ WHERE name = 'enable_full_text_index'`,
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
+	) => unbounded(executeCompiledQuery(tenant, compiled, withoutResponseLimits(options)))
+
+	/**
+	 * Read with an explicit ceiling on the response we're willing to materialize.
+	 *
+	 * The limit error propagates to the caller instead of being retried: it is a
+	 * statement about the size of the answer, so re-running the query produces
+	 * the same oversized response. Callers map it to a domain error that tells
+	 * the user to ask for less.
+	 */
+	const compiledQueryBounded = <T>(
+		tenant: ExecutionTenant,
+		compiled: CompiledQuery<T>,
+		options: SqlQueryOptions & {
+			readonly responseLimits: { readonly maxRows: number; readonly maxBytes: number }
+		},
 	) => executeCompiledQuery(tenant, compiled, options)
 
 	const compiledQueryWithCapabilities = <T>(
 		tenant: ExecutionTenant,
 		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
 		options?: SqlQueryOptions,
-	) => executeCompiledQuery(tenant, compile, options)
+	) => unbounded(executeCompiledQuery(tenant, compile, withoutResponseLimits(options)))
+
+	/**
+	 * Deliberately read across every tenant.
+	 *
+	 * A separate method rather than a flag on `compiledQuery`, so that grepping
+	 * for cross-tenant reads returns a finite, reviewable list. The compiled
+	 * query must have declared `.crossOrg()`; a scoped query arriving here is
+	 * just as much a bug as an unscoped one on the normal path, so both
+	 * directions are rejected.
+	 */
+	const crossOrgQuery = Effect.fn("WarehouseQueryService.crossOrgQuery")(function* <T>(
+		tenant: ExecutionTenant,
+		compiled: CompiledQuery<T>,
+		rawOptions: SqlQueryOptions & { readonly justification: string },
+	) {
+		const options = withDefaultProfile(rawOptions)
+		const context = options.context ?? "crossOrgQuery"
+		if (compiled.tenantScope !== "cross-org") {
+			return yield* new WarehouseValidationError({
+				pipeName: context,
+				message:
+					`tenant-scoped query routed through crossOrgQuery (${context}). ` +
+					`Use compiledQuery — the cross-org path skips scope enforcement.`,
+			})
+		}
+		// Annotated so "who reads across tenants, and why" is answerable from the
+		// traces themselves rather than from code review alone.
+		yield* Effect.annotateCurrentSpan("tenant.scope", "cross-org")
+		yield* Effect.annotateCurrentSpan("tenant.crossOrg.justification", rawOptions.justification)
+		const rows = yield* executeTrustedSql(
+			tenant,
+			compiled.sql,
+			context,
+			withCompiledRouting(compiled, options),
+		)
+		return yield* compiled.decodeRows(rows).pipe(
+			Effect.mapError(
+				(error) =>
+					new WarehouseSchemaDriftError({
+						pipeName: context,
+						message: error.message,
+						kind: "decode",
+						cause: error,
+					}),
+			),
+		)
+	})
 
 	const compiledQueryFirst = Effect.fn("WarehouseQueryService.compiledQueryFirst")(function* <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
-		options?: SqlQueryOptions,
+		rawOptions?: SqlQueryOptions,
 	) {
+		const options = withDefaultProfile(rawOptions)
 		const capabilities =
 			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
 		if (capabilities) yield* annotateCapabilityPlan(capabilities)
@@ -700,13 +856,20 @@ WHERE name = 'enable_full_text_index'`,
 			"query.optimization.capabilityAware",
 			typeof compiled === "function",
 		)
-		const rows = yield* sqlQuery(tenant, selected.sql, withCompiledRouting(selected, executionOptions))
+		const rows = yield* executeScopedSql(
+			tenant,
+			selected.sql,
+			selected.tenantScope,
+			options.context ?? "compiledQueryFirst",
+			withCompiledRouting(selected, executionOptions),
+		)
 		return yield* selected.decodeFirstRow(rows).pipe(
 			Effect.mapError(
 				(error) =>
 					new WarehouseSchemaDriftError({
-						pipeName: "compiledQueryFirst",
+						pipeName: options.context ?? "compiledQueryFirst",
 						message: error.message,
+						kind: "decode",
 						cause: error,
 					}),
 			),
@@ -752,6 +915,9 @@ WHERE name = 'enable_full_text_index'`,
 			try: () => client.insert(datasource, rows),
 			// Classify like the read path so an auth failure or quota breach on
 			// insert surfaces with its real tag instead of a generic query error.
+			// Authorship stays the default "caller": inserts are not DSL-generated
+			// SQL, and a rejection here usually means the rows are wrong, not that
+			// Maple composed a bad statement.
 			catch: (error) => mapWarehouseError(label, error),
 		}).pipe(
 			Effect.tap(() =>
@@ -790,6 +956,7 @@ WHERE name = 'enable_full_text_index'`,
 					"db.client": dialect.dbClient,
 					"db.system.name": dialect.dbSystemName,
 					"peer.service": dialect.peerService,
+					...warehouseTargetAttributes(resolved.config),
 					"warehouse.backend": resolved.config.kind,
 					"warehouse.route": "ingest",
 					"warehouse.config_source": resolved.source,
@@ -805,29 +972,51 @@ WHERE name = 'enable_full_text_index'`,
 	const asExecutor = (tenant: ExecutionTenant): WarehouseExecutorShape => ({
 		orgId: tenant.orgId,
 		query: <T>(pipe: WarehouseQueryName, params: Record<string, unknown>, options?: SqlQueryOptions) =>
-			query(tenant, { pipeName: pipe, params }, { context: `pipe:${pipe}`, ...options }).pipe(
-				Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> })),
-			),
-		sqlQuery: <T>(sql: string, options?: SqlQueryOptions) =>
-			sqlQuery(tenant, sql, { context: "warehouseExecutor.sqlQuery", ...options }).pipe(
-				Effect.map((rows) => rows as unknown as ReadonlyArray<T>),
-			),
+			unbounded(
+				query(
+					tenant,
+					{ pipeName: pipe, params },
+					{ context: `pipe:${pipe}`, ...withoutResponseLimits(options) },
+				),
+			).pipe(Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> }))),
 		compiledQuery: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
 			compiledQuery(tenant, compiled, { context: "warehouseExecutor.compiledQuery", ...options }),
 		compiledQueryFirst: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
-			compiledQueryFirst(tenant, compiled, {
-				context: "warehouseExecutor.compiledQueryFirst",
-				...options,
-			}),
+			unbounded(
+				compiledQueryFirst(tenant, compiled, {
+					context: "warehouseExecutor.compiledQueryFirst",
+					...withoutResponseLimits(options),
+				}),
+			),
 	})
 
 	return {
-		query,
-		sqlQuery,
-		rawSqlQuery,
+		query: (tenant, payload, options) =>
+			unbounded(query(tenant, payload, withoutResponseLimits(options))),
+		crossOrgQuery: (tenant, compiled, options) =>
+			unbounded(
+				crossOrgQuery(tenant, compiled, {
+					...withoutResponseLimits(options),
+					justification: options.justification,
+				}),
+			),
+		rawSqlQuery: (tenant, sql, options) => unbounded(rawSqlQuery(tenant, sql, options)),
 		compiledQuery,
+		compiledQueryBounded,
 		compiledQueryWithCapabilities,
-		compiledQueryFirst,
+		compiledQueryFirst: (tenant, compiled, options) =>
+			unbounded(compiledQueryFirst(tenant, compiled, withoutResponseLimits(options))),
+		// `resolveCapabilities` resolves the route on its way through, so warming
+		// it warms both. `ignore` keeps a failed warm-up invisible — the real
+		// query behind it fails with its own context a moment later.
+		warmRoute: (tenant, options) =>
+			resolveCapabilities(tenant, options).pipe(
+				Effect.asVoid,
+				Effect.ignore,
+				Effect.withSpan("WarehouseQueryService.warmRoute", {
+					attributes: { orgId: tenant.orgId },
+				}),
+			),
 		ingest,
 		asExecutor,
 	} satisfies WarehouseQueryServiceShape

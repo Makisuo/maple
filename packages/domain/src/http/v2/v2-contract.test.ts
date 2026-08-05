@@ -8,6 +8,11 @@ import { V2DashboardMutation } from "./dashboards"
 import { V2ErrorIssue, V2ErrorIssueDetail } from "./error-issues"
 import { requiredScopeForRequest, scopeAllows, V2Scope } from "./auth"
 import {
+	V2PlanetScaleIntegration,
+	V2PlanetScaleMetricsTokenRequest,
+	V2PlanetScaleScrapeTarget,
+} from "./integrations-planetscale"
+import {
 	decodeOffsetCursor,
 	encodeOffsetCursor,
 	isoTimestamp,
@@ -26,6 +31,66 @@ import {
 } from "./telemetry"
 
 const UUID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+
+describe("V2PlanetScaleIntegration wire format", () => {
+	it("decodes snake_case fields, ISO timestamps, and a scrp_ public ID", () => {
+		const status = Schema.decodeUnknownSync(V2PlanetScaleIntegration)({
+			object: "planetscale_integration",
+			connected: true,
+			pending_org_selection: false,
+			organization: "acme",
+			connected_by_user_id: "user_123",
+			detected_permissions: { readMetricsEndpoints: true },
+			metrics_auth: "service_token",
+			scrape_target: {
+				id: encodePublicId("scrp", UUID),
+				object: "planetscale_integration.scrape_target",
+				enabled: true,
+				scrape_interval_seconds: 60,
+				include_branches: ["main"],
+				exclude_branches: ["pr-*"],
+				last_scrape_at: "2026-08-05T12:00:00.000Z",
+				last_scrape_error: null,
+			},
+			last_inventory_at: "2026-08-05T12:00:00.000Z",
+			last_inventory_error: null,
+			revoked_at: null,
+			expires_at: null,
+		})
+		expect(status.scrape_target?.id).toBe(UUID) // decoded to the internal ID
+		expect(status.metrics_auth).toBe("service_token")
+	})
+
+	it("rejects a scrape target ID carrying the wrong prefix", () => {
+		expect(() =>
+			Schema.decodeUnknownSync(V2PlanetScaleScrapeTarget)({
+				id: encodePublicId("key", UUID),
+				object: "planetscale_integration.scrape_target",
+				enabled: true,
+				scrape_interval_seconds: 60,
+				include_branches: [],
+				exclude_branches: [],
+				last_scrape_at: null,
+				last_scrape_error: null,
+			}),
+		).toThrow()
+	})
+
+	it("requires a non-empty token id and secret", () => {
+		expect(() =>
+			Schema.decodeUnknownSync(V2PlanetScaleMetricsTokenRequest)({
+				token_id: "",
+				token_secret: "pscale_tkn_x",
+			}),
+		).toThrow()
+		expect(
+			Schema.decodeUnknownSync(V2PlanetScaleMetricsTokenRequest)({
+				token_id: "tok_1",
+				token_secret: "pscale_tkn_x",
+			}).token_id,
+		).toBe("tok_1")
+	})
+})
 
 describe("V2ApiKey wire format", () => {
 	it("encodes snake_case fields, an object type, and a key_ public ID", () => {
@@ -262,9 +327,6 @@ describe("V2 alerts wire format", () => {
 		consecutive_breaches_required: 2,
 		consecutive_healthy_required: 3,
 		renotify_interval_minutes: 60,
-		metric_name: null,
-		metric_type: null,
-		metric_aggregation: null,
 		apdex_threshold_ms: null,
 		query_builder_draft: { queries: [{ signalType: "traces", attributeKey: "service.name" }] },
 		raw_query_sql: null,
@@ -310,12 +372,12 @@ describe("V2 alerts wire format", () => {
 
 	it("decodes destination create params per union arm and rejects mismatched configs", () => {
 		const slack = Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
-			type: "slack",
+			type: "slack-bot",
 			name: "On-call",
-			webhook_url: "https://hooks.slack.com/services/T/B/X",
-			channel_label: "#incidents",
+			channel_id: "C123",
+			channel_name: "incidents",
 		})
-		expect(slack.type).toBe("slack")
+		expect(slack.type).toBe("slack-bot")
 
 		const email = Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
 			type: "email",
@@ -461,6 +523,29 @@ describe("scopes", () => {
 			["/v2/metrics/breakdown", "metrics"],
 		] as const) {
 			expect(requiredScopeForRequest("POST", path)).toEqual({ family, access: "read" })
+		}
+		// Every /v2/integrations/<provider> group shares one family, and the two
+		// PlanetScale proxies are POSTs only because their filters need a body.
+		expect(requiredScopeForRequest("GET", "/v2/integrations/planetscale")).toEqual({
+			family: "integrations",
+			access: "read",
+		})
+		expect(requiredScopeForRequest("POST", "/v2/integrations/planetscale/metrics_token")).toEqual({
+			family: "integrations",
+			access: "write",
+		})
+		expect(requiredScopeForRequest("DELETE", "/v2/integrations/planetscale")).toEqual({
+			family: "integrations",
+			access: "write",
+		})
+		for (const path of [
+			"/v2/integrations/planetscale/query_insights",
+			"/v2/integrations/planetscale/events",
+		]) {
+			expect(requiredScopeForRequest("POST", path)).toEqual({
+				family: "integrations",
+				access: "read",
+			})
 		}
 		expect(requiredScopeForRequest("GET", "/api/api-keys")).toBeNull()
 	})

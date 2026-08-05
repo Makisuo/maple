@@ -62,9 +62,23 @@ const compiled = compile(listRuleChecksQuery({ limit: 1 }), {
 	ruleId: "rule_test",
 })
 
+// The old `sqlQuery(tenant, sql)` entry point took a raw string; scope now
+// travels on the compiled query, so these execution/span/retry tests wrap their
+// SQL in a compiled value that declares it.
+const scoped = (sql: string) =>
+	unsafeCompiledQuery<Record<string, unknown>>({
+		sql,
+		tenantScope: "org",
+		reason: "test-fixture",
+		note: "Synthetic SQL asserting executor behaviour, not a product query.",
+	})
+
 // A plain query with no routing declaration follows the default read route.
 const untaggedCompiled = unsafeCompiledQuery<{ readonly c: number }>({
+	reason: "test-fixture",
+	note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 	sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
+	tenantScope: "org",
 })
 
 // Records the backend each constructed client was wired to, so a test can assert
@@ -114,7 +128,7 @@ describe("makeWarehouseExecutor ingest routing", () => {
 		Effect.gen(function* () {
 			const created: Array<ResolvedWarehouseConfig["kind"]> = []
 			const executor = makeWarehouseExecutor(makeDeps(created))
-			yield* executor.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", {
+			yield* executor.compiledQuery(tenant, scoped("SELECT 1 WHERE OrgId = 'org_test'"), {
 				context: "test",
 				route: "ingest",
 			})
@@ -130,7 +144,7 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 			const executor = makeWarehouseExecutor(makeDeps([]))
 
 			yield* executor
-				.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", {
+				.compiledQuery(tenant, scoped("SELECT 1 WHERE OrgId = 'org_test'"), {
 					profile: "list",
 					context: "spanContract",
 				})
@@ -162,7 +176,7 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 			)
 
 			yield* executor
-				.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", { context: "localSpan" })
+				.compiledQuery(tenant, scoped("SELECT 1 WHERE OrgId = 'org_test'"), { context: "localSpan" })
 				.pipe(Effect.withTracer(tracer))
 
 			const span = spans.find((candidate) => candidate.name === "WarehouseQueryService.executeSql")
@@ -203,7 +217,10 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 					tenant,
 					() =>
 						unsafeCompiledQuery<{ readonly c: number }>({
+							reason: "test-fixture",
+							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+							tenantScope: "org",
 						}),
 					{ context: "capabilitySpan" },
 				)
@@ -237,7 +254,7 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 			})
 
 			const exit = yield* executor
-				.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", { context: "retrySpan" })
+				.compiledQuery(tenant, scoped("SELECT 1 WHERE OrgId = 'org_test'"), { context: "retrySpan" })
 				.pipe(Effect.withTracer(tracer), Effect.exit)
 
 			assert.strictEqual(exit._tag, "Failure")
@@ -270,6 +287,65 @@ const makeRecordingDeps = (
 			config: resolved.config,
 			clientCacheKey: purpose === "raw" ? "raw:org_test" : resolved.clientCacheKey,
 		}),
+})
+
+describe("makeWarehouseExecutor compiled-query defaults", () => {
+	it.effect("defaults the profile to 'aggregation' when none is passed", () =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: clickhouseConfig, clientCacheKey: "read:org_test" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, untaggedCompiled, { context: "test" })
+			// aggregation = { maxExecutionTime: 30, maxMemoryUsage: 4GB }; previously a
+			// profile-less call emitted no SETTINGS clause at all.
+			assert.isTrue(sqls[0]?.includes("max_execution_time=30"))
+			assert.isTrue(sqls[0]?.includes("max_memory_usage=4000000000"))
+		}),
+	)
+
+	it.effect("an explicit profile still wins over the default", () =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: clickhouseConfig, clientCacheKey: "read:org_test" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, untaggedCompiled, { context: "test", profile: "list" })
+			assert.isTrue(sqls[0]?.includes("max_execution_time=15"))
+			assert.isFalse(sqls[0]?.includes("max_execution_time=30"))
+		}),
+	)
+
+	it.effect("reports the caller's context as pipeName when row decode fails", () =>
+		Effect.gen(function* () {
+			const badRowDeps: WarehouseExecutorDeps = {
+				createClient: () => ({
+					sql: async () => ({ data: [{ c: "not-a-number" }] }),
+					insert: async () => {},
+				}),
+				resolveRoute: () =>
+					Effect.succeed({
+						source: "managed" as const,
+						config: clickhouseConfig,
+						clientCacheKey: "read:org_test",
+					}),
+			}
+			const withSchema = unsafeCompiledQuery<{ readonly c: number }>({
+				reason: "test-fixture",
+				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
+				tenantScope: "org",
+				rowSchema: Schema.Struct({ c: Schema.Number }),
+			})
+			const executor = makeWarehouseExecutor(badRowDeps)
+			const error = yield* executor
+				.compiledQuery(tenant, withSchema, { context: "serviceOverview" })
+				.pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/WarehouseSchemaDriftError")
+			// The real query identity, not the old constant "compiledQuery".
+			assert.strictEqual(error.pipeName, "serviceOverview")
+		}),
+	)
 })
 
 describe("makeWarehouseExecutor restricted-settings strip", () => {
@@ -374,7 +450,10 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 
 			const factory = (capabilities: WarehouseCapabilities) =>
 				unsafeCompiledQuery<{ readonly c: number }>({
+					reason: "test-fixture",
+					note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 					sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'text' FORMAT JSON`,
+					tenantScope: "org",
 				})
 
 			yield* executor.compiledQuery(tenant, factory, { context: "capability-test" })
@@ -427,7 +506,10 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 					tenant,
 					() =>
 						unsafeCompiledQuery<{ readonly c: number }>({
+							reason: "test-fixture",
+							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+							tenantScope: "org",
 						}),
 					{ context: "capability-request-local" },
 				)
@@ -435,7 +517,27 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const leader = yield* Effect.forkChild(query())
 			yield* Effect.promise(() => versionQueryStarted)
 			const follower = yield* Effect.forkChild(query())
-			yield* Effect.promise(() => new Promise<void>((resolve) => globalThis.setTimeout(resolve, 10)))
+			// Wait for the follower to actually reach its own probe rather than
+			// assuming a fixed delay is long enough for it to get scheduled. The
+			// leader is parked on `versionQueryGate`, so a second probe can only
+			// appear if the follower genuinely issued one — which is what this test
+			// asserts. Under a loaded runner a fixed 10ms window expired before the
+			// follower ran, the gate released, and the leader's now-cached
+			// capabilities made the follower skip its probe: a failure that meant
+			// "CI was busy", not "requests coalesced". Bounded, so a regression that
+			// really does coalesce them still fails the assertion below rather than
+			// hanging here.
+			yield* Effect.promise(
+				() =>
+					new Promise<void>((resolve) => {
+						const deadlineAt = Date.now() + 5_000
+						const poll = () => {
+							if (versionQueries >= 2 || Date.now() >= deadlineAt) resolve()
+							else globalThis.setTimeout(poll, 5)
+						}
+						poll()
+					}),
+			)
 			releaseVersionQuery?.()
 			yield* Fiber.join(leader)
 			yield* Fiber.join(follower)
@@ -470,7 +572,10 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 				tenant,
 				(capabilities) =>
 					unsafeCompiledQuery<{ readonly c: number }>({
+						reason: "test-fixture",
+						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+						tenantScope: "org",
 					}),
 				{ context: "capability-fallback-test" },
 			)
@@ -481,29 +586,16 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 		}),
 	)
 
-	it.effect("does not select text indexes when the Tinybird gateway rejects setting overrides", () =>
+	it.effect("answers Tinybird gateway capabilities from the deployed schema, not a probe", () =>
 		Effect.gen(function* () {
 			const sqls: string[] = []
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
 					sql: async (sql) => {
 						sqls.push(sql)
-						if (sql.includes("SELECT version()")) return { data: [{ version: "26.2.1" }] }
-						if (sql.includes("system.data_skipping_indices")) {
-							return {
-								data: [
-									{
-										table: "logs",
-										name: "idx_lower_body_text",
-										type: "text",
-										expression: "lower(Body)",
-									},
-								],
-							}
-						}
-						if (sql.includes("system.settings")) {
-							return { data: [{ name: "enable_full_text_index", value: "0" }] }
-						}
+						// A probe here would be a bug: Tinybird answers `403` for
+						// `system.columns` / `system.data_skipping_indices`, so any
+						// live inspection collapses to the conservative plan.
 						return { data: [] }
 					},
 					insert: async () => {},
@@ -520,15 +612,22 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 				tenant,
 				(capabilities) =>
 					unsafeCompiledQuery<{ readonly c: number }>({
-						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+						reason: "test-fixture",
+						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'tokenbf' FORMAT JSON`,
+						tenantScope: "org",
 					}),
 				{ context: "tinybird-gateway-capabilities" },
 			)
 
+			// The tokenbf prefilter is selected because `logs.idx_lower_body` is in
+			// the deployed schema — the whole point of resolving statically.
 			const executed = sqls.find((sql) => sql.includes("FROM logs WHERE"))
 			assert.isDefined(executed)
-			assert.include(executed!, "'scan' = 'scan'")
+			assert.include(executed!, "'tokenbf' = 'tokenbf'")
+			// Managed backends reject inline setting overrides, so no text plan.
 			assert.notInclude(executed!, "enable_full_text_index")
+			assert.isEmpty(sqls.filter((sql) => sql.includes("system.")))
 		}),
 	)
 
@@ -561,7 +660,10 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 						tenant,
 						(capabilities) =>
 							unsafeCompiledQuery<{ readonly c: number }>({
+								reason: "test-fixture",
+								note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 								sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+								tenantScope: "org",
 							}),
 						{ context: "hung-capability-probe" },
 					)
@@ -695,6 +797,86 @@ describe("makeWarehouseExecutor raw response limits", () => {
 			assert.strictEqual(error.code, "ResourceLimit")
 		}),
 	)
+
+	it.effect("propagates the limit error unchanged for a trusted bounded query", () =>
+		Effect.gen(function* () {
+			// A trusted query's oversized response is OUR budget being exceeded, not
+			// the caller writing bad SQL — so it must not be restated as a
+			// validation error the way the raw path does above.
+			const executor = makeWarehouseExecutor({
+				...makeDeps([]),
+				createClient: () => ({
+					sql: async () => {
+						throw new WarehouseResponseLimitError({
+							kind: "bytes",
+							message: "response too large",
+						})
+					},
+					insert: async () => {},
+				}),
+			})
+			const error = yield* Effect.flip(
+				executor.compiledQueryBounded(tenant, compiled, {
+					context: "test",
+					responseLimits: { maxRows: 40, maxBytes: 8_000_000 },
+				}),
+			)
+			assert.instanceOf(error, WarehouseResponseLimitError)
+		}),
+	)
+
+	it.effect("runs an oversized bounded read exactly once instead of retrying it", () =>
+		Effect.gen(function* () {
+			// The regression this whole change exists for: an over-budget response
+			// used to surface as an aborted subrequest, which the transient
+			// classifier read as a flaky upstream and retried — re-running a read
+			// that had already exhausted the heap, twice more, before 503ing.
+			let attempts = 0
+			const executor = makeWarehouseExecutor({
+				...makeDeps([]),
+				createClient: () => ({
+					sql: async () => {
+						attempts++
+						throw new WarehouseResponseLimitError({
+							kind: "bytes",
+							message: "response too large",
+						})
+					},
+					insert: async () => {},
+				}),
+			})
+			yield* Effect.flip(
+				executor.compiledQueryBounded(tenant, compiled, {
+					context: "test",
+					responseLimits: { maxRows: 40, maxBytes: 8_000_000 },
+				}),
+			)
+			assert.strictEqual(attempts, 1)
+		}),
+	)
+
+	it.effect("forwards the caller's budget to the driver", () =>
+		Effect.gen(function* () {
+			let seen: unknown
+			const executor = makeWarehouseExecutor({
+				...makeDeps([]),
+				createClient: () => ({
+					sql: async (_sql: string, options?: unknown) => {
+						seen = options
+						return { data: [] }
+					},
+					insert: async () => {},
+				}),
+			})
+			yield* executor.compiledQueryBounded(tenant, compiled, {
+				context: "test",
+				responseLimits: { maxRows: 40, maxBytes: 8_000_000 },
+			})
+			assert.deepStrictEqual(seen, {
+				responseLimits: { maxRows: 40, maxBytes: 8_000_000 },
+			})
+		}),
+	)
 })
 
 describe("makeWarehouseExecutor client cache partitions", () => {
@@ -728,10 +910,10 @@ describe("makeWarehouseExecutor client cache partitions", () => {
 					}),
 			})
 
-			yield* executor.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'")
+			yield* executor.compiledQuery(tenant, scoped("SELECT 1 WHERE OrgId = 'org_test'"))
 			yield* executor.rawSqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'")
 			yield* executor.ingest(tenant, "traces", [{ TraceId: "trace" }])
-			yield* executor.sqlQuery(tenant, "SELECT 2 WHERE OrgId = 'org_test'")
+			yield* executor.compiledQuery(tenant, scoped("SELECT 2 WHERE OrgId = 'org_test'"))
 
 			assert.strictEqual(nextClientId, 3)
 			assert.deepStrictEqual(calls, [

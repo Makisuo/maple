@@ -1,7 +1,17 @@
 {
 	"extends": "expo/tsconfig.base",
 	"compilerOptions": {
-		"strict": true
+		"strict": true,
+		// `expo-ui-ext` is in-repo source (`file:./modules/expo-ui-ext`, `"types": "index.ts"`, no
+		// build step), so point TypeScript straight at it instead of at the `node_modules` symlink
+		// bun materializes. That symlink is an install artifact: it lives outside the `node_modules`
+		// sticky disk CI mounts, and any change to this app's dependency list makes the incremental
+		// `bun install --frozen-lockfile` rewrite `apps/mobile/node_modules` without recreating it —
+		// which failed `mobile#typecheck` with `TS2307: Cannot find module 'expo-ui-ext'` on every
+		// run. Metro resolves the module through package.json at runtime and is unaffected.
+		"paths": {
+			"expo-ui-ext": ["./modules/expo-ui-ext/index.ts"]
+		}
 	},
 	"include": ["**/*.ts", "**/*.tsx"],
 	"exclude": ["**/__tests__/**"]

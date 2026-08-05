@@ -1,6 +1,6 @@
 import { Marker, MarkerContent, MarkerIcon } from "@maple/ui/components/ui/marker"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 interface StatusMarkerProps {
 	children?: string

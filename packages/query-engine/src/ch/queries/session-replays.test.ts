@@ -4,6 +4,7 @@ import {
 	getSessionReplayQuery,
 	sessionReplaysFacetsQuery,
 	sessionReplaysListQuery,
+	sessionReplayChunkIndexQuery,
 	sessionReplayEventsQuery,
 	sessionsForTraceQuery,
 	sessionTraceSummariesQuery,
@@ -70,6 +71,59 @@ describe("sessionReplayEventsQuery", () => {
 		const q = sessionReplayEventsQuery()
 		const { sql } = compileCH(q, sessionParams)
 		expect(sql).not.toContain("Timestamp >=")
+	})
+
+	it("bounds the read to a chunk range so a session is fetched in slices", () => {
+		const q = sessionReplayEventsQuery({ ...WINDOW, fromChunkSeq: 16, toChunkSeq: 31, limit: 40 })
+		const { sql } = compileCH(q, sessionParams)
+		expect(sql).toContain("ChunkSeq >= 16")
+		expect(sql).toContain("ChunkSeq <= 31")
+		expect(sql).toContain("LIMIT 40")
+	})
+
+	it("omits the chunk range when absent, so existing callers keep their SQL", () => {
+		const { sql } = compileCH(sessionReplayEventsQuery(WINDOW), sessionParams)
+		expect(sql).not.toContain("ChunkSeq >=")
+		expect(sql).not.toContain("ChunkSeq <=")
+		expect(sql).not.toContain("LIMIT")
+	})
+
+	it("keeps chunk 0 as a real lower bound rather than a falsy no-op", () => {
+		// `if (opts.fromChunkSeq)` would silently drop this — and chunk 0 is the
+		// single most-requested range (the initial playback window).
+		const { sql } = compileCH(
+			sessionReplayEventsQuery({ fromChunkSeq: 0, toChunkSeq: 15 }),
+			sessionParams,
+		)
+		expect(sql).toContain("ChunkSeq >= 0")
+	})
+})
+
+describe("sessionReplayChunkIndexQuery", () => {
+	it("never reads the payload column — that is the whole point of the index", () => {
+		const { sql } = compileCH(sessionReplayChunkIndexQuery(WINDOW), sessionParams)
+		expect(sql).toContain("FROM session_replay_events")
+		expect(sql).not.toContain("Events")
+		expect(sql).toContain("AS byteSize")
+		expect(sql).toContain("AS isCheckpoint")
+	})
+
+	it("projects only columns every existing recording already has", () => {
+		// Deliberately no stored first-event timestamp: a column the deployed
+		// cluster lacks fails every read with schema drift (and every insert), so
+		// adding one would have broken all replay until a migration landed. The
+		// ingest timestamp positions a chunk closely enough to pick it.
+		const { sql } = compileCH(sessionReplayChunkIndexQuery(WINDOW), sessionParams)
+		expect(sql).toContain("Timestamp AS timestamp")
+		expect(sql).toContain("DurationMs AS durationMs")
+		expect(sql).not.toContain("FirstEventMs")
+	})
+
+	it("orders by chunk sequence and scopes to org + session", () => {
+		const { sql } = compileCH(sessionReplayChunkIndexQuery(WINDOW), sessionParams)
+		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("SessionId = 'sess_1'")
+		expect(sql).toContain("ORDER BY chunkSeq ASC")
 	})
 })
 
@@ -139,18 +193,79 @@ describe("sessionReplaysFacetsQuery userId filter", () => {
 	it("narrows every facet branch by the exact UserId", () => {
 		const q = sessionReplaysFacetsQuery({ userId: "user_123" })
 		const { sql } = compileUnion(q, { ...baseParams, ...WINDOW })
-		// Branches: service / browser / country / device / error count / duration
-		// histogram / p50 / p95 — userId is applied to all of them (never excluded,
-		// unlike each branch's own dimension), so the distribution reflects the
-		// selected user rather than the whole org.
+		// Branches: service / browser / country / device / group / error count /
+		// duration histogram / p50 / p95 — userId is applied to all of them (never
+		// excluded, unlike each branch's own dimension), so the distribution
+		// reflects the selected user rather than the whole org.
 		const occurrences = sql.split("UserId = 'user_123'").length - 1
-		expect(occurrences).toBe(8)
+		expect(occurrences).toBe(9)
 	})
 
 	it("omits the UserId predicate when absent", () => {
 		const q = sessionReplaysFacetsQuery({})
 		const { sql } = compileUnion(q, { ...baseParams, ...WINDOW })
 		expect(sql).not.toContain("UserId =")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// identify() identity (migration 0011): UserName / UserEmail / GroupId /
+// GroupName. These columns default to '' on sessions recorded before identify()
+// existed, so every path here must stay additive — an un-identified session
+// selects empty strings rather than dropping out.
+// ---------------------------------------------------------------------------
+
+describe("session replay identity columns", () => {
+	// Every branch produces the same row shape; a missing column in one of them is
+	// a decode failure the type annotation on the return type cannot catch.
+	it("projects name / email / group on all four list branches", () => {
+		const branches = [{}, { durationMinMs: 1_000 }, { activeTimeMinMs: 1_000 }, { eventType: "error" }]
+		for (const opts of branches) {
+			const { sql } = compileCH(sessionReplaysListQuery(opts), { ...baseParams, ...WINDOW })
+			for (const column of ["userName", "userEmail", "groupId", "groupName"]) {
+				expect(sql, JSON.stringify(opts)).toContain(`AS ${column}`)
+			}
+		}
+	})
+
+	it("matches userSearch against name OR email, case-insensitively", () => {
+		const { sql } = compileCH(sessionReplaysListQuery({ userSearch: "ada" }), {
+			...baseParams,
+			...WINDOW,
+		})
+		expect(sql).toContain("UserName ILIKE '%ada%'")
+		expect(sql).toContain("UserEmail ILIKE '%ada%'")
+		expect(sql).toContain("OR")
+	})
+
+	it("matches groupName exactly", () => {
+		const { sql } = compileCH(sessionReplaysListQuery({ groupName: "Acme Inc" }), {
+			...baseParams,
+			...WINDOW,
+		})
+		expect(sql).toContain("GroupName = 'Acme Inc'")
+	})
+
+	it("omits both identity predicates when unset", () => {
+		const { sql } = compileCH(sessionReplaysListQuery({}), { ...baseParams, ...WINDOW })
+		expect(sql).not.toContain("ILIKE")
+		expect(sql).not.toContain("GroupName =")
+	})
+
+	// The group facet must exclude its own dimension, or selecting a group would
+	// collapse the option list to just that group.
+	it("excludes the selected group from the group facet branch only", () => {
+		const q = sessionReplaysFacetsQuery({ groupName: "Acme Inc" })
+		const { sql } = compileUnion(q, { ...baseParams, ...WINDOW })
+		expect(sql).toContain("GroupName AS name")
+		// 9 branches, minus the group branch itself.
+		expect(sql.split("GroupName = 'Acme Inc'").length - 1).toBe(8)
+	})
+
+	it("never offers an empty group as a facet option", () => {
+		const q = sessionReplaysFacetsQuery({})
+		const { sql } = compileUnion(q, { ...baseParams, ...WINDOW })
+		expect(sql).toContain("GroupName != ''")
 	})
 })
 

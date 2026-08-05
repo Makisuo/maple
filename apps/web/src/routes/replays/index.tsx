@@ -8,10 +8,10 @@ import { ActiveUserFilter } from "@/components/replays/active-user-filter"
 import { ReplaysFilterSidebar } from "@/components/replays/replays-filter-sidebar"
 import { ReplaysToolbar } from "@/components/replays/replays-toolbar"
 import { BooleanFromStringParam, NumberFromStringParam } from "@/lib/search-params"
-import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { useInfiniteReplays } from "@/hooks/use-infinite-replays"
+import { replaysFilterInputs } from "@/components/replays/replays-filter-inputs"
+import { REPLAYS_PAGE_SIZE, useInfiniteReplays } from "@/hooks/use-infinite-replays"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { replaysFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { listReplaysResultAtom, replaysFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -26,6 +26,13 @@ const replaysSearchSchema = Schema.Struct({
 	country: Schema.optional(Schema.String),
 	deviceType: Schema.optional(Schema.String),
 	userId: Schema.optional(Schema.String),
+	/** Substring match on the identified user's name or email — the human-typed
+	 *  counterpart to the exact `userId`. */
+	user: Schema.optional(Schema.String),
+	/** Identified group (company / team) name, from the sidebar facet. */
+	group: Schema.optional(Schema.String),
+	/** Scope to one browser — spans signed-out marketing and signed-in app sessions. */
+	visitorId: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
 	// Session-time range filters, in whole seconds (human-friendly URLs). Mapped
 	// to ms before hitting the warehouse. Union accepts a JS-set number or a
@@ -41,42 +48,39 @@ const replaysSearchSchema = Schema.Struct({
 export const Route = createFileRoute("/replays/")({
 	component: ReplaysPage,
 	validateSearch: Schema.toStandardSchemaV1(replaysSearchSchema),
+	loaderDeps: ({ search }) => search,
+	// Both queries are on the critical path and neither is cached server-side, so
+	// starting them here rather than on mount is worth real time: the router runs
+	// `defaultPreload: "intent"`, which fires this on hover — ahead of the route
+	// chunk evaluating and React committing. Mount is fire-and-forget; the
+	// component reads the same entries and renders its skeleton meanwhile.
+	loader: ({ context, deps }) => {
+		const filterInputs = replaysFilterInputs(deps)
+		context.effectRegistry.mount(
+			listReplaysResultAtom({ data: { ...filterInputs, limit: REPLAYS_PAGE_SIZE, offset: 0 } }),
+		)
+		context.effectRegistry.mount(replaysFacetsResultAtom({ data: filterInputs }))
+	},
 })
 
 function ReplaysPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
-	const { startTime, endTime } = useEffectiveTimeRange(
-		search.startTime,
-		search.endTime,
-		search.timePreset ?? "24h",
-	)
 
 	const filterInputs = useMemo(
-		() => ({
-			startTime,
-			endTime,
-			serviceName: search.service,
-			browser: search.browser,
-			country: search.country,
-			deviceType: search.deviceType,
-			userId: search.userId,
-			hasErrors: search.hasErrors,
-			search: search.q,
-			// URL params are whole seconds; the warehouse filters in ms.
-			durationMinMs: search.durationMin != null ? search.durationMin * 1000 : undefined,
-			durationMaxMs: search.durationMax != null ? search.durationMax * 1000 : undefined,
-			activeTimeMinMs: search.activeMin != null ? search.activeMin * 1000 : undefined,
-			activeTimeMaxMs: search.activeMax != null ? search.activeMax * 1000 : undefined,
-		}),
+		() => replaysFilterInputs(search),
 		[
-			startTime,
-			endTime,
+			search.startTime,
+			search.endTime,
+			search.timePreset,
 			search.service,
 			search.browser,
 			search.country,
 			search.deviceType,
 			search.userId,
+			search.user,
+			search.group,
+			search.visitorId,
 			search.hasErrors,
 			search.q,
 			search.durationMin,
@@ -85,6 +89,7 @@ function ReplaysPage() {
 			search.activeMax,
 		],
 	)
+	const { startTime, endTime } = filterInputs
 
 	const { firstPageResult, allData, hasNextPage, isCapped, isFetchingNextPage, fetchNextPage } =
 		useInfiniteReplays(filterInputs)
@@ -103,6 +108,10 @@ function ReplaysPage() {
 
 	const handleUserFilter = (value: string | undefined) => {
 		navigate({ search: (prev) => ({ ...prev, userId: value }) })
+	}
+
+	const handleVisitorFilter = (value: string | undefined) => {
+		navigate({ search: (prev) => ({ ...prev, visitorId: value }) })
 	}
 
 	const sessions = allData
@@ -176,6 +185,15 @@ function ReplaysPage() {
 									userId={search.userId}
 									count={sessions.length}
 									onClear={() => handleUserFilter(undefined)}
+								/>
+							)}
+							{search.visitorId && (
+								<ActiveUserFilter
+									userId={search.visitorId}
+									count={sessions.length}
+									label="Sessions from visitor"
+									clearLabel="Clear visitor filter"
+									onClear={() => handleVisitorFilter(undefined)}
 								/>
 							)}
 							{Result.builder(firstPageResult)

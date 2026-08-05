@@ -1,11 +1,19 @@
 import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 /**
- * Poll-state for the PlanetScale management-API poller (inventory + insights
- * datasets), mirroring `cloudflare_analytics_state`. One row per
- * `(org, dataset, databaseId)`: the inventory dataset uses `databaseId = ""`
- * (the org-wide anchor row that also carries the tick-overlap lease); the
- * insights dataset (Phase 3) gets one row per database.
+ * Poll-state for the PlanetScale management-API poller, mirroring
+ * `cloudflare_analytics_state`. One row per `(org, dataset, databaseId)`:
+ *
+ *  - `inventory` uses `databaseId = ""` — the org-wide anchor row that also
+ *    carries the tick-overlap lease.
+ *  - `deploy_requests` uses the PlanetScale database id; `watermarkAt` tracks
+ *    the newest `updated_at` already fanned into `planetscale_events`.
+ *  - `insights` is branch-scoped, so its key is `"{databaseId}:{branchName}"` —
+ *    query insights are reported per branch and one row per database would
+ *    collapse them.
+ *
+ * There is deliberately no `backfillAt`: unlike Cloudflare analytics, none of
+ * these datasets walks history downward.
  */
 export const planetscalePollState = pgTable(
 	"planetscale_poll_state",
@@ -82,3 +90,73 @@ export const planetscaleDatabases = pgTable(
 
 export type PlanetScaleDatabaseRow = typeof planetscaleDatabases.$inferSelect
 export type PlanetScaleDatabaseInsert = typeof planetscaleDatabases.$inferInsert
+
+/**
+ * The PlanetScale lifecycle timeline: deploy-request state transitions and
+ * branch lifecycle events, which the charts render as markers and the drill-in
+ * renders as an activity feed.
+ *
+ * Two convergent sources write here — the webhook queue (live) and the
+ * deploy-request REST backfill (history, and orgs that connected after the
+ * fact) — so idempotency is the load-bearing requirement, not volume. The
+ * dedupe index plus `onConflictDoNothing` makes queue redelivery and repeated
+ * backfills no-ops. That is also why this is Postgres and not the warehouse:
+ * ClickHouse would need ReplacingMergeTree + FINAL to say the same thing, for a
+ * dataset of tens of rows per org per day whose only read is "the last N for
+ * database X in [start, end]".
+ *
+ * Health events (OOM, storage, anomaly) land here *as well as* creating their
+ * `kind="integration"` issue, so the timeline is the whole story.
+ *
+ * Not a generic annotation store: that needs a source registry, cross-source
+ * ordering and per-source ACLs, and has no second consumer yet. Extract one
+ * when a second provider (Cloudflare deploys, GitHub releases) arrives.
+ * `service_releases_timeline` is the other marker source and stays separate
+ * because it is trace-derived rather than delivered.
+ */
+export const planetscaleEvents = pgTable(
+	"planetscale_events",
+	{
+		id: text("id").notNull().primaryKey(),
+		orgId: text("org_id").notNull(),
+		/** PlanetScale's database id when resolvable; "" for webhooks that carry only the name. */
+		databaseId: text("database_id").notNull().default(""),
+		databaseName: text("database_name").notNull(),
+		branchName: text("branch_name").notNull().default(""),
+		/** "deploy_request" | "branch" | "database" | "cluster" | "keyspace" */
+		category: text("category").notNull(),
+		/** Raw PlanetScale event string, e.g. "deploy_request.schema_applied". */
+		eventType: text("event_type").notNull(),
+		/** Normalized lifecycle state; null for events that aren't state transitions. */
+		state: text("state"),
+		/** Upstream identity — deploy-request number, branch id. "" when the event has none. */
+		externalId: text("external_id").notNull().default(""),
+		title: text("title").notNull(),
+		/** "webhook" | "backfill" */
+		source: text("source").notNull(),
+		actorLogin: text("actor_login"),
+		url: text("url"),
+		payloadJson: jsonb("payload_json").$type<Record<string, unknown>>(),
+		/**
+		 * Truncated to whole seconds. PlanetScale's webhook `timestamp` is epoch
+		 * SECONDS while the REST backfill carries millisecond precision; without
+		 * truncation the same transition inserts twice under the dedupe index.
+		 */
+		occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "date" }).notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+	},
+	(table) => [
+		uniqueIndex("planetscale_events_dedupe_idx").on(
+			table.orgId,
+			table.databaseName,
+			table.eventType,
+			table.externalId,
+			table.occurredAt,
+		),
+		index("planetscale_events_org_db_time_idx").on(table.orgId, table.databaseName, table.occurredAt),
+		index("planetscale_events_org_time_idx").on(table.orgId, table.occurredAt),
+	],
+)
+
+export type PlanetScaleEventRow = typeof planetscaleEvents.$inferSelect
+export type PlanetScaleEventInsert = typeof planetscaleEvents.$inferInsert

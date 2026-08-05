@@ -1,8 +1,8 @@
 import { Exit, Option } from "effect"
 import { Fragment, useState, type Dispatch, type SetStateAction } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
-import type { AlertDeliveryEventDocument, AlertDestinationDocument } from "@maple/domain/http"
+import type { AlertDestinationDocument } from "@maple/domain/http"
 
 import { DestinationCard } from "@/components/alerts/destination-card"
 import { DestinationDialog } from "@/components/alerts/destination-dialog"
@@ -19,11 +19,11 @@ import {
 	formatAlertTime,
 	getExitErrorMessage,
 	groupDeliveryEventsByDay,
+	v2DeliveryToDocument,
 	type DestinationFormState,
 } from "@/lib/alerts/form-utils"
 import { v2ErrorInfo } from "@/lib/error-messages"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -33,7 +33,7 @@ import { Separator } from "@maple/ui/components/ui/separator"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 /**
  * Destination CRUD state + handlers, lifted into a hook so the route header's
@@ -100,10 +100,16 @@ export function useDestinationManager(): DestinationManager {
 				})
 
 		if (Exit.isSuccess(result)) {
-			toast.success(editing ? "Destination updated" : "Destination created")
+			toastManager.add({
+				title: editing ? "Destination updated" : "Destination created",
+				type: "success",
+			})
 			setDialogOpen(false)
 		} else {
-			toast.error(getExitErrorMessage(result, "Failed to save destination"))
+			toastManager.add({
+				title: getExitErrorMessage(result, "Failed to save destination"),
+				type: "error",
+			})
 		}
 		setSaving(false)
 	}
@@ -116,12 +122,15 @@ export function useDestinationManager(): DestinationManager {
 		})
 		if (Exit.isSuccess(result)) {
 			if (result.value.success) {
-				toast.success(result.value.message)
+				toastManager.add({ title: result.value.message, type: "success" })
 			} else {
-				toast.error(result.value.message)
+				toastManager.add({ title: result.value.message, type: "error" })
 			}
 		} else {
-			toast.error(getExitErrorMessage(result, "Failed to send test notification"))
+			toastManager.add({
+				title: getExitErrorMessage(result, "Failed to send test notification"),
+				type: "error",
+			})
 		}
 		setTestingId(null)
 	}
@@ -136,7 +145,10 @@ export function useDestinationManager(): DestinationManager {
 			reactivityKeys: ["alertDestinations"],
 		})
 		if (!Exit.isSuccess(result)) {
-			toast.error(getExitErrorMessage(result, "Failed to update destination"))
+			toastManager.add({
+				title: getExitErrorMessage(result, "Failed to update destination"),
+				type: "error",
+			})
 		}
 	}
 
@@ -147,16 +159,19 @@ export function useDestinationManager(): DestinationManager {
 			reactivityKeys: ["alertDestinations", "alertRules"],
 		})
 		if (Exit.isSuccess(result)) {
-			toast.success("Destination deleted")
+			toastManager.add({ title: "Destination deleted", type: "success" })
 		} else {
 			// A destination still referenced by rules deletes with a 409
 			// conflict_error whose message already names the referencing rules.
 			const failure = Option.getOrUndefined(Exit.findErrorOption(result))
 			const v2 = v2ErrorInfo(failure)
 			if (v2 !== null && v2.type === "conflict_error") {
-				toast.error(v2.message)
+				toastManager.add({ title: v2.message, type: "error" })
 			} else {
-				toast.error(getExitErrorMessage(result, "Failed to delete destination"))
+				toastManager.add({
+					title: getExitErrorMessage(result, "Failed to delete destination"),
+					type: "error",
+				})
 			}
 		}
 		setDeletingId(null)
@@ -186,17 +201,18 @@ export function useDestinationManager(): DestinationManager {
  */
 export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationManager; isAdmin: boolean }) {
 	const { result: destinationsResult } = useAlertDestinationsList()
-	// TODO(v2): delivery events have no v2 endpoint (internal delivery-audit
-	// schema); the proper follow-up is an Electric shape for alert_delivery_events.
 	const deliveryEventsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listDeliveryEvents", { reactivityKeys: ["alertDeliveryEvents"] }),
+		MapleApiV2AtomClient.query("alertDeliveries", "list", {
+			query: { limit: 100 },
+			reactivityKeys: ["alertDeliveryEvents"],
+		}),
 	)
 
 	const destinations = Result.builder(destinationsResult)
 		.onSuccess((response) => [...response.destinations] as AlertDestinationDocument[])
 		.orElse(() => [])
 	const deliveryEvents = Result.builder(deliveryEventsResult)
-		.onSuccess((response) => [...response.events] as AlertDeliveryEventDocument[])
+		.onSuccess((response) => response.data.map(v2DeliveryToDocument))
 		.orElse(() => [])
 	const deliveryEventGroups = groupDeliveryEventsByDay(deliveryEvents)
 

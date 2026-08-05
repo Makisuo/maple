@@ -23,7 +23,13 @@ That control surface is public v2 when a **public v2 resource depends on it**, a
 
 Within that group the role requirement is not uniform. `install`, `uninstall`, and `channels` require the org-admin role; `status` does not, because the dashboard renders install state for every member. `channels` is gated because it lists private channels the bot has joined, which is workspace membership information rather than Maple state. The consequence is deliberate: a non-admin can still create a `slack-bot` destination through the API if they already know a `channel_id`, but they cannot enumerate ids to find one.
 
-Cloudflare, PlanetScale, GitHub, and Hazel stay on the v1 `integrations` group (`/api/integrations`) — they predate v2, nothing public depends on them, and per the rule above they get promoted individually if and when a v2 resource needs them. Scope families are derived mechanically from the first path segment under `/v2`, so every provider mounted at `/v2/integrations/<provider>` shares the `integrations:read` / `integrations:write` family.
+PlanetScale was the first promotion under that rule, and it shows what "a public dependency" means in practice: infrastructure-as-code setups drive `POST /v2/integrations/planetscale/metrics_token` — the one step the OAuth flow cannot cover, because PlanetScale's metrics endpoints authenticate with service tokens rather than OAuth bearers — and a scripted caller needs a scoped API key, which only v2 has. Once one operation of a provider is public the rest follows: splitting one provider across two tiers costs more than it buys, so the whole surface moved (status, connect, organization binding, disconnect, inventory, webhook config, query insights, events). The role split matches Slack's — `status`, `databases`, `query_insights`, and `events` are ungated because the dashboard and service map render them for every member; everything that writes, plus `organizations` and `webhook_config` (it carries the signing secret), requires org-admin.
+
+Promotion does not imply deletion. PlanetScale's v1 endpoints stay mounted and are marked `deprecated` in the v1 OpenAPI: the dashboard is off them, so nothing in this repo would notice if they broke, but customers may still be calling them. The general rule in the tier table above — "each v1 group is deleted once nothing consumes it" — means _nothing_, including callers outside this repo, so a promoted provider's v1 surface is removed only once its access logs go quiet. Until then both surfaces are live over the same services, and only v2 gets new work.
+
+Cloudflare, GitHub, and Hazel stay on the v1 `integrations` group (`/api/integrations`) with no v2 counterpart — they predate v2, nothing public depends on them, and per the rule above they get promoted individually if and when something does. Scope families are derived mechanically from the first path segment under `/v2`, so every provider mounted at `/v2/integrations/<provider>` shares the `integrations:read` / `integrations:write` family.
+
+Two things never move with a provider, no matter how much of it is promoted: the OAuth **callback** and any webhook **receiver**. Both are raw `HttpRouter` routes under `/api/…` serving a browser redirect or a provider POST, and a receiver URL is already registered in the provider's settings. So `POST /v2/integrations/planetscale/connect` still mints a `/api/integrations/planetscale/callback` URL, and `webhook_config` still reports a `/api/…` receiver. That is the intended end state, not leftover v1.
 
 ## Conventions
 
@@ -44,7 +50,7 @@ POST   /v2/traces/search         complex reads are POST .../search
 
 Every v2 object has a prefixed public ID (`key_4CzLmR…`, `dash_…`, `alrt_…`). Public IDs are opaque; internally they are a reversible base58 encoding of the internal ID, computed at the API boundary (`packages/domain/src/http/v2/public-id.ts` — the prefix registry lives there and is the single source of truth). No database migration: rows keep their raw UUIDs / internal strings.
 
-Prefixes: `key` (API key), `ingk` (ingest key), `dash` (dashboard), `dbv` (dashboard version), `dtpl` (dashboard template), `alrt` (alert rule), `dest` (alert destination), `inc` (alert incident), `einc` (error incident), `iss` (error issue), `inv` (investigation), `anom` (anomaly incident), `scrp` (scrape target), `rec` (recommendation), `amap` (attribute mapping), `srep` (session replay), and `log` (synthetic log identity); `evt` and `we` are reserved for events/webhooks.
+Prefixes: `key` (API key), `ingk` (ingest key), `dash` (dashboard), `dbv` (dashboard version), `dtpl` (dashboard template), `alrt` (alert rule), `dest` (alert destination), `inc` (alert incident), `evt` (alert delivery event), `einc` (error incident), `iss` (error issue), `inv` (investigation), `anom` (anomaly incident), `scrp` (scrape target), `rec` (recommendation), `amap` (attribute mapping), `srep` (session replay), and `log` (synthetic log identity); `we` is reserved for webhooks.
 
 Exception: Clerk-issued `org_…` / `user_…` IDs are already prefixed public IDs and pass through unchanged.
 
@@ -91,7 +97,7 @@ Every error response body is exactly:
 
 - `type` is closed: `invalid_request_error` (400), `authentication_error` (401), `permission_error` (403), `not_found_error` (404), `conflict_error` (409), `rate_limit_error` (429), `api_error` (5xx).
 - `code` is a stable machine-readable string (`api_key_not_found`, `alert_destination_in_use`, `api_key_lookup_unavailable`, `insufficient_scope`, `parameter_invalid`, …). Resource and dependency failures identify the affected resource and operation. Codes are append-only.
-- `param` names the offending parameter when applicable; `doc_url` may link to reference docs.
+- `param` names the offending parameter when applicable; `doc_url` may link to reference docs. On a request-decode failure it carries the full JSON path of the bad value (`widgets[3].display.chart_presentation.fill_nulls`), and for a path inside a `widgets[]` array the `message` also names the enclosing widget's `id`.
 - No internal tags or stack traces ever appear on the wire.
 - Expected internal failures use operation-specific tagged errors. Unexpected defects are logged with the group and operation, then returned as a sanitized `api_error` / `internal_error`; dependency messages are never copied to public 5xx responses.
 
@@ -138,31 +144,33 @@ Stripe-style `expand[]` is deliberately omitted: responses embed the small, alwa
 
 Implemented in phases; the pilot (`api_keys`) ships first and proves every convention.
 
-| Resource                             | Endpoints                                                                                        | Backing v1 group / service               |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------ | ---------------------------------------- |
-| `api_keys` ✅ pilot                  | list/create/retrieve/roll/revoke, `scopes` param                                                 | `apiKeys` / `ApiKeysService`             |
-| `ingest_keys` ✅                     | retrieve, `POST …/public/roll`, `POST …/private/roll`                                            | `ingestKeys`                             |
-| `dashboards` ✅                      | CRUD + `versions` (list/retrieve/restore) + `templates` (list/preview/instantiate) + Perses import | `dashboards`                             |
-| `alerts/rules` ✅                    | CRUD + `test` + `preview` + `checks`                                                             | `alerts`                                 |
-| `alerts/destinations` ✅             | CRUD + `test`                                                                                    | `alerts`                                 |
-| `alerts/incidents` ✅                | list/retrieve                                                                                    | `alerts`                                 |
-| `error_issues` 🟡                    | list/retrieve ✅; `events`, `comments`, `transitions`, `assignee`, `severity` deferred           | `errors`                                 |
-| `investigations` ✅                  | list/retrieve/create/status                                                                      | `investigations`                         |
-| `anomalies` ✅                       | incidents list/retrieve/timeseries/resolve/link-issue + `PATCH` settings                         | `anomalies`                              |
-| `instrumentation/recommendations` ✅ | list + dismiss/reopen                                                                            | `recommendationIssues`                   |
-| `instrumentation/audit` ✅           | retrieve (singleton report, recomputed per request)                                              | `SetupAuditService`                      |
-| `scrape_targets` ✅                  | CRUD + `probe` + `checks`                                                                        | `scrapeTargets`                          |
-| `attribute_mappings` ✅              | CRUD                                                                                             | `ingestAttributeMappings`                |
-| `integrations/slack` ✅              | status + admin-only install/uninstall/`channels` (channel ids for `slack-bot` destinations)      | `SlackIntegrationService`                |
-| `session_replays` ✅                 | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred) | `sessionReplays`                         |
-| `organization` 🟡                    | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred           | `organizations`, `orgClickHouseSettings` |
-| `traces` ✅                          | search/timeseries/breakdown + direct trace/span reads                                            | `queryEngine`, `observability`           |
-| `logs` ✅                            | search/timeseries/breakdown + direct log reads                                                   | `queryEngine`                            |
-| `metrics` ✅                         | catalog + timeseries/breakdown                                                                   | `queryEngine`                            |
-| `services` ✅                        | `GET /v2/services`, `GET /v2/services/{name}`                                                    | `queryEngine`                            |
-| `service_map` ✅                     | `GET /v2/service_map`                                                                            | `queryEngine`                            |
+| Resource                             | Endpoints                                                                                                                              | Backing service                                                                 |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `api_keys` ✅ pilot                  | list/create/retrieve/roll/revoke, `scopes` param                                                                                       | `apiKeys` / `ApiKeysService`                                                    |
+| `ingest_keys` ✅                     | retrieve, `POST …/public/roll`, `POST …/private/roll`                                                                                  | `ingestKeys`                                                                    |
+| `dashboards` ✅                      | CRUD + `versions` (list/retrieve/restore) + `templates` (list/preview/instantiate) + Perses import                                     | `dashboards`                                                                    |
+| `alerts/rules` ✅                    | CRUD + `test` + `preview` + `checks`                                                                                                   | `AlertsService`                                                                 |
+| `alerts/destinations` ✅             | CRUD + `test`                                                                                                                          | `AlertsService`                                                                 |
+| `alerts/incidents` ✅                | list/retrieve                                                                                                                          | `AlertsService`                                                                 |
+| `alerts/deliveries` ✅               | list delivery attempts                                                                                                                 | `AlertsService`                                                                 |
+| `error_issues` 🟡                    | list/retrieve ✅; `events`, `comments`, `transitions`, `assignee`, `severity` deferred                                                 | `errors`                                                                        |
+| `investigations` ✅                  | list/retrieve/create/status                                                                                                            | `investigations`                                                                |
+| `anomalies` ✅                       | incidents list/retrieve/timeseries/resolve/link-issue + `PATCH` settings                                                               | `anomalies`                                                                     |
+| `instrumentation/recommendations` ✅ | list + dismiss/reopen                                                                                                                  | `recommendationIssues`                                                          |
+| `instrumentation/audit` ✅           | retrieve (singleton report, recomputed per request)                                                                                    | `SetupAuditService`                                                             |
+| `scrape_targets` ✅                  | CRUD + `probe` + `checks`                                                                                                              | `scrapeTargets`                                                                 |
+| `attribute_mappings` ✅              | CRUD                                                                                                                                   | `ingestAttributeMappings`                                                       |
+| `integrations/slack` ✅              | status + admin-only install/uninstall/`channels` (channel ids for `slack-bot` destinations)                                            | `SlackIntegrationService`                                                       |
+| `integrations/planetscale` ✅        | status + connect/organizations/`select_organization`/`metrics_token`/disconnect + databases/`webhook_config`/`query_insights`/`events` | `PlanetScaleConnectionService`, `PlanetScaleOAuthService`, `PlanetScaleService` |
+| `session_replays` ✅                 | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred)                                       | `sessionReplays`                                                                |
+| `organization` 🟡                    | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred                                                 | `organizations`, `orgClickHouseSettings`                                        |
+| `traces` ✅                          | search/timeseries/breakdown + direct trace/span reads                                                                                  | `queryEngine`, `observability`                                                  |
+| `logs` ✅                            | search/timeseries/breakdown + direct log reads                                                                                         | `queryEngine`                                                                   |
+| `metrics` ✅                         | catalog + timeseries/breakdown                                                                                                         | `queryEngine`                                                                   |
+| `services` ✅                        | `GET /v2/services`, `GET /v2/services/{name}`                                                                                          | `queryEngine`                                                                   |
+| `service_map` ✅                     | `GET /v2/service_map`                                                                                                                  | `queryEngine`                                                                   |
 
-The long tail of ~40 query-engine RPC endpoints (facets, infra hosts/pods/nodes/workloads, Cloudflare/PlanetScale infra) starts in the internal RPC tier and is promoted into `/v2` individually as shapes stabilize.
+The long tail of ~40 query-engine RPC endpoints (facets, infra hosts/pods/nodes/workloads, Cloudflare infra, the PlanetScale infra timeseries) starts in the internal RPC tier and is promoted into `/v2` individually as shapes stabilize.
 
 ### Telemetry reads
 

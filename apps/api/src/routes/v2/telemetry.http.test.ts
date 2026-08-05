@@ -5,20 +5,24 @@ import { QueryEngineExecuteResponse, type QueryEngineExecuteRequest } from "@map
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { Env } from "../../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
-import { WarehouseQueryService, type WarehouseQueryServiceShape } from "../../lib/WarehouseQueryService"
-import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import { QueryEngineService, type QueryEngineServiceShape } from "../../services/QueryEngineService"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import {
+	WarehouseQueryService,
+	type WarehouseQueryServiceShape,
+} from "@/services/warehouse/WarehouseQueryService"
+import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { QueryEngineService, type QueryEngineServiceShape } from "@/services/warehouse/QueryEngineService"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 } from "./v2-test-support"
 
@@ -233,6 +237,7 @@ const makeHarness = (
 		Layer.provide(telemetryLive),
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
+		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(ConfigResourceServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
@@ -642,7 +647,7 @@ describe("v2 telemetry reads over HTTP", () => {
 		await harness.dispose()
 	})
 
-	it("sanitizes warehouse failures as operation-specific 503 errors", async () => {
+	it("sanitizes warehouse failures without collapsing them to a 503", async () => {
 		const failure = new WarehouseQueryError({
 			message: "SECRET_CLICKHOUSE_DIAGNOSTIC",
 			pipeName: "traceSummaries",
@@ -656,8 +661,11 @@ describe("v2 telemetry reads over HTTP", () => {
 			start_time: START,
 			end_time: END,
 		})
-		expect(response.status).toBe(503)
-		expect(response.body.error.code).toBe("trace_search_unavailable")
+		// A generic query fault is a 502 with a stable per-tag code (503 is
+		// reserved for genuinely retryable outages) — and the raw ClickHouse
+		// diagnostic must never cross the public API boundary.
+		expect(response.status).toBe(502)
+		expect(response.body.error.code).toBe("warehouse_query_failed")
 		expect(JSON.stringify(response.body)).not.toContain("SECRET_CLICKHOUSE_DIAGNOSTIC")
 		await harness.dispose()
 	})

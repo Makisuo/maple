@@ -8,7 +8,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@maple/ui/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { ToolbarSearch } from "@maple/ui/components/toolbar"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { ErrorState } from "@/components/common/error-state"
 import { ListToolbar } from "@/components/common/list-toolbar"
@@ -147,7 +147,7 @@ function InvestigationsHub() {
 			setSubject("")
 			void navigate({ to: "/investigations/$id", params: { id: created.value.id } })
 		} else {
-			toast.error("Investigation could not be started")
+			toastManager.add({ title: "Investigation could not be started", type: "error" })
 		}
 	}
 

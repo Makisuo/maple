@@ -58,9 +58,19 @@ export const createElectricSyncWorker = ({ stage, domains }: CreateElectricSyncW
 				...optionalSecret("CLERK_JWT_KEY"),
 				// ElectricSQL upstream: base URL (Electric Cloud in prod) + Cloud source
 				// credentials. The shape proxy 503s if URL is unset.
-				...optionalPlain("ELECTRIC_URL"),
-				...optionalPlain("ELECTRIC_SOURCE_ID"),
-				...optionalSecret("ELECTRIC_SECRET"),
+				//
+				// PR previews get none of the three on purpose: they no longer have a
+				// PlanetScale branch, so there is no per-PR Electric source to point at,
+				// and inheriting the shared `dev` credentials would proxy preview shapes
+				// against another stage's data. Absent ELECTRIC_URL → 503 → the web app
+				// falls back to its effect-atom fetches.
+				...(stage.kind === "pr"
+					? {}
+					: {
+							...optionalPlain("ELECTRIC_URL"),
+							...optionalPlain("ELECTRIC_SOURCE_ID"),
+							...optionalSecret("ELECTRIC_SECRET"),
+						}),
 				// Self-observability (OTLP export through the ingest gateway).
 				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 				...optionalPlain("MAPLE_ENDPOINT"),

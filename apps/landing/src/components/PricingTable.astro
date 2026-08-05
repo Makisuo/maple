@@ -18,149 +18,21 @@
  * "From $2,000" anchor — that number is what makes $39 read as nothing — but a
  * "call us" card given equal weight costs self-serve conversion.
  */
-import { Autumn } from "autumn-js"
 import * as m from "../paraglide/messages";
+import {
+    getOffer,
+    money,
+    platformFeatures,
+    rateLabel,
+    volume,
+    type Allotment,
+} from "../lib/pricing-offer";
 
-const HIDDEN_FEATURE_IDS = new Set<string>(["ai_input_tokens", "ai_output_tokens"])
-
-// Capitalized, localized labels for the metered rows, keyed by Autumn featureId
-// (Autumn returns lowercase names like "logs").
-const DATA_FEATURE_LABELS: Record<string, string> = {
-    logs: m.pricing_logs(),
-    traces: m.pricing_traces(),
-    metrics: m.pricing_metrics(),
-    browser_sessions: m.nav_browser_sessions(),
-}
-
-// Canonical row order — Autumn can return items in any order.
-const DATA_FEATURE_ORDER = ["logs", "traces", "metrics", "browser_sessions"]
-const dataFeatureRank = (id: string | undefined) => {
-    const i = id ? DATA_FEATURE_ORDER.indexOf(id) : -1
-    return i === -1 ? DATA_FEATURE_ORDER.length : i
-}
-
-// Everything the plan carries, as one run. With a single plan there is nothing
-// to compare against, so this is a "and all of this too" line rather than a
-// checklist — a checklist implies some rows might have been withheld.
-const PLATFORM_FEATURES: string[] = [
-    m.pricing_30day_retention(),
-    m.pricing_private_channel(),
-    m.pricing_unlimited_dashboards(),
-    m.pricing_advanced_alerting(),
-    m.pricing_mcp_server(),
-    m.pricing_ai_chat(),
-    m.pricing_ai_triage(),
-    m.pricing_full_api(),
-]
-
-// browser_sessions is metered per session; every other signal is per GB.
-type Unit = "gb" | "count"
-
-interface Allotment {
-    featureId: string
-    label: string
-    unit: Unit
-    included: number
-    /** Price per unit once `included` is used up. */
-    rate?: number
-}
-
-interface Offer {
-    name: string
-    price: number
-    interval?: string
-    hasTrial: boolean
-    trialDuration?: number
-    allotments: Allotment[]
-    ctaLabel: string
-}
-
-const unitFor = (featureId: string): Unit => (featureId === "browser_sessions" ? "count" : "gb")
-
-let offer: Offer | null = null
-
-try {
-    const autumn = new Autumn({ secretKey: import.meta.env.AUTUMN_SECRET_KEY })
-    const result = await autumn.plans.list()
-    const products = (result.list ?? []).filter((p) => !p.addOn)
-
-    if (products.length > 1) {
-        // The layout renders one offer. A second tier must fail loudly at build
-        // time rather than silently vanishing off the pricing page.
-        console.warn(
-            `[PricingTable] Autumn returned ${products.length} non-add-on plans (${products
-                .map((p) => p.id)
-                .join(", ")}); only the first is rendered. Update this component for multiple tiers.`,
-        )
-    }
-
-    const product = products[0]
-
-    if (product) {
-        offer = {
-            name: product.name,
-            price: product.price?.amount ?? 0,
-            interval: product.price?.interval ? `/${product.price.interval}` : undefined,
-            hasTrial: !!product.freeTrial,
-            trialDuration: product.freeTrial?.durationLength,
-            allotments: product.items
-                .filter((item) => item.featureId && !HIDDEN_FEATURE_IDS.has(item.featureId))
-                .map((item) => {
-                    const featureId = item.featureId as string
-                    return {
-                        featureId,
-                        label: DATA_FEATURE_LABELS[featureId] ?? item.feature?.name ?? featureId,
-                        unit: unitFor(featureId),
-                        included: Number(item.included ?? 0),
-                        rate: item.price?.amount ?? undefined,
-                    }
-                })
-                .sort((a, b) => dataFeatureRank(a.featureId) - dataFeatureRank(b.featureId)),
-            ctaLabel: product.freeTrial
-                ? m.pricing_start_trial({ duration: String(product.freeTrial.durationLength) })
-                : m.cta_get_started(),
-        }
-    }
-} catch (e) {
-    console.error("Failed to fetch pricing from Autumn:", e)
-}
-
-// Fallback mirrors autumn.config.ts exactly, browser sessions included — a
-// short fallback would render a meter that disagrees with the live one.
-if (!offer) {
-    offer = {
-        name: "Startup",
-        price: 39,
-        interval: "/month",
-        hasTrial: true,
-        trialDuration: 14,
-        allotments: [
-            { featureId: "logs", label: m.pricing_logs(), unit: "gb", included: 100, rate: 0.3 },
-            { featureId: "traces", label: m.pricing_traces(), unit: "gb", included: 100, rate: 0.3 },
-            { featureId: "metrics", label: m.pricing_metrics(), unit: "gb", included: 100, rate: 0.3 },
-            {
-                featureId: "browser_sessions",
-                label: m.nav_browser_sessions(),
-                unit: "count",
-                included: 5000,
-                rate: 0.002,
-            },
-        ],
-        ctaLabel: m.pricing_start_trial({ duration: "14" }),
-    }
-}
-
-// ── Formatting ───────────────────────────────────────────────────────────────
-// Every number on this surface is money or volume, so it all runs through one
-// of these three and lands in font-mono tabular-nums in the template.
-const round2 = (n: number) => Math.round(n * 100) / 100
-const money = (n: number) => {
-    const r = round2(n)
-    return Number.isInteger(r) ? `$${r}` : `$${r.toFixed(2)}`
-}
-/** Sub-cent rates (per session) need three places; per-GB rates need two. */
-const rateLabel = (n: number) => `$${n < 0.01 ? n.toFixed(3) : n.toFixed(2)}`
-const volume = (a: Allotment, n: number) => (a.unit === "gb" ? `${n} GB` : n.toLocaleString("en-US"))
+// The offer, the meter and the formatters live in `lib/pricing-offer.ts` so
+// `/pricing.md` — the agent-readable twin of this page — renders the same
+// numbers from the same Autumn call. Everything below is layout.
+const offer = await getOffer()
+const PLATFORM_FEATURES = platformFeatures()
 
 // Each row states its own rate, in its own unit. A shared summary line below the
 // list read as detached from the rows it described, and it can't carry two units
@@ -265,6 +137,8 @@ const containerClass = variant === "home" ? "shell" : "mx-auto max-w-5xl px-6"
 
                     <a
                         href="https://app.maple.dev"
+                        data-track="pricing_plan_selected"
+                        data-track-plan={offer.name}
                         class="mt-8 flex h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                     >
                         {offer.ctaLabel}

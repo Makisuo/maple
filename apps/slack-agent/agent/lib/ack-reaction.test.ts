@@ -87,7 +87,9 @@ describe("parseAckReactionTarget", () => {
 	})
 
 	test("ignores the url_verification handshake", () => {
-		expect(parseAckReactionTarget(JSON.stringify({ type: "url_verification", challenge: "x" }))).toBeNull()
+		expect(
+			parseAckReactionTarget(JSON.stringify({ type: "url_verification", challenge: "x" })),
+		).toBeNull()
 	})
 
 	test("ignores malformed JSON", () => {

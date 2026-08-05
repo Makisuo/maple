@@ -1,6 +1,6 @@
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 
-import { buildQueryDraftFromForm, rawSqlHasValueColumn, type RuleFormState } from "@/lib/alerts/form-utils"
+import { normalizeRuleQueryDraft, rawSqlHasValueColumn, type RuleFormState } from "@/lib/alerts/form-utils"
 import { buildTimeseriesQuerySpec } from "@/lib/query-builder/model"
 
 export type WidgetAlertPrefillNotice = {
@@ -86,22 +86,17 @@ function queryToForm(
 	widget: AlertableDashboardWidget,
 	query: QueryBuilderQueryDraftPayload,
 ): RuleFormState {
+	const queryBuilderDraft = normalizeRuleQueryDraft(query)
 	return {
 		...base,
 		name: widgetAlertName(widget),
 		signalType: "builder_query",
-		queryBuilderDraft: query,
-		queryDataSource: query.dataSource,
-		queryAggregation: query.aggregation,
-		queryWhereClause: query.whereClause ?? "",
+		queryBuilderDraft,
 		// Builder thresholds compare against the query's raw output. error_rate
 		// is a 0–1 ratio, so the blank-form default of "5" (tuned for the
 		// percent-entry error_rate signal) would mean a 500% error rate.
 		threshold: query.aggregation === "error_rate" ? "0.05" : base.threshold,
 		groupBy: [],
-		metricName: query.dataSource === "metrics" ? (query.metricName ?? "") : base.metricName,
-		metricType:
-			query.dataSource === "metrics" && query.metricType != null ? query.metricType : base.metricType,
 	}
 }
 
@@ -200,7 +195,7 @@ export function createWidgetAlertPrefill(
 		}
 
 		const form = queryToForm(base, widget, selected)
-		const built = buildTimeseriesQuerySpec(buildQueryDraftFromForm(form))
+		const built = buildTimeseriesQuerySpec(form.queryBuilderDraft)
 		if (built.error != null || built.query == null) {
 			notices.push({
 				severity: "warning",

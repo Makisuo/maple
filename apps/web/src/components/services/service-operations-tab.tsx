@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Sparkline } from "@maple/ui/components/ui/gradient-chart"

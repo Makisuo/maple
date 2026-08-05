@@ -1,0 +1,591 @@
+---
+/**
+ * LiveAlertFiring — an error-rate rule evaluating, breaching its threshold
+ * twice, flipping to FIRING, and the Slack notification arriving.
+ *
+ * Pure CSS: every animated element runs the same 14s loop, so the choreography
+ * is percentage windows on one shared timeline — no JS island. Base (unanimated)
+ * state is authored as the FINAL frame — breached, firing, notified — which is
+ * exactly what `prefers-reduced-motion` shows when the scoped media query turns
+ * the animations off.
+ *
+ * The notification mirrors what dispatch actually sends: header, observed value
+ * vs threshold, View/Chat buttons. There is deliberately no "Acknowledge" —
+ * incidents are open/resolved only, and the old (deleted) section's mockup
+ * advertised an action the product doesn't have.
+ */
+
+/** Per-window observed error rate, as % of chart height. Threshold sits at 55. */
+const HEIGHTS = [18, 22, 15, 20, 26, 19, 24, 21, 17, 23, 28, 25, 31, 27, 34, 38, 72, 88];
+const THRESHOLD_PCT = 55;
+const BREACH_START = HEIGHTS.length - 2;
+
+const DESTINATIONS = ["slack", "discord", "pagerduty", "email", "webhook", "hazel"];
+---
+
+<div class="live-frame">
+	<div class="live-frame__head">
+		<span>alerts · rule high-error-rate</span>
+		<span class="live-frame__live">
+			<span class="live-frame__live-dot"></span>
+			LIVE
+		</span>
+	</div>
+
+	<div class="af-grid">
+		<!-- The rule evaluating -->
+		<div class="af-pane">
+			<div class="af-pane__head">
+				<span class="af-pane__label">rule</span>
+				<span class="af-chip af-chip--critical">critical</span>
+			</div>
+
+			<div class="af-facts">
+				<div class="af-fact"><span>signal</span><span class="af-fact__v">error_rate</span></div>
+				<div class="af-fact"><span>condition</span><span class="af-fact__v">error_rate &gt; <b>5%</b></span></div>
+				<div class="af-fact"><span>window</span><span class="af-fact__v">5 min · 2 consecutive</span></div>
+				<div class="af-fact"><span>group by</span><span class="af-fact__v">service.name</span></div>
+			</div>
+
+			<div class="af-chart" style={`--threshold: ${THRESHOLD_PCT}%;`}>
+				{
+					HEIGHTS.map((h, i) => (
+						<div class="af-bar">
+							<div
+								class:list={[
+									"af-bar__fill",
+									i === BREACH_START && "af-anim af-bar__fill--breach-a",
+									i === BREACH_START + 1 && "af-anim af-bar__fill--breach-b",
+									i >= BREACH_START && "af-bar__fill--over",
+								]}
+								style={`--h: ${h}%;`}
+							/>
+						</div>
+					))
+				}
+				<div class="af-threshold"><span>5%</span></div>
+			</div>
+
+			<div class="af-status">
+				<span class="af-pills">
+					<span class="af-pill af-pill--ok af-anim">OK</span>
+					<span class="af-pill af-pill--firing af-anim">
+						<span class="af-pill__dot"></span>
+						FIRING
+					</span>
+				</span>
+				<span class="af-count">
+					breaches
+					<span class="af-count__stack">
+						<span class="af-count__n af-count__n--0 af-anim">0/2</span>
+						<span class="af-count__n af-count__n--1 af-anim">1/2</span>
+						<span class="af-count__n af-count__n--2 af-anim">2/2</span>
+					</span>
+					· eval every 60s
+				</span>
+			</div>
+		</div>
+
+		<!-- The notification arriving -->
+		<div class="af-pane">
+			<div class="af-pane__head">
+				<span class="af-pane__label">#alerts</span>
+				<span class="af-pane__via">via slack</span>
+			</div>
+
+			<div class="af-notif af-anim">
+				<div class="af-notif__msg">
+					<span class="af-notif__avatar">M</span>
+					<div class="af-notif__body">
+						<div class="af-notif__meta">
+							<span class="af-notif__app">Maple</span>
+							<span class="af-notif__badge">APP</span>
+							<span class="af-notif__time">14:32</span>
+						</div>
+						<div class="af-notif__attach">
+							<div class="af-notif__title">High error rate — checkout</div>
+							<div class="af-notif__line">
+								error_rate at <b>8.4%</b> · threshold 5% · window 5 min
+							</div>
+							<div class="af-notif__line">service checkout · env production · severity critical</div>
+						</div>
+						<div class="af-notif__actions">
+							<span class="af-btn af-btn--primary">View in Maple</span>
+							<span class="af-btn">Chat</span>
+						</div>
+					</div>
+				</div>
+				<div class="af-notif__delivery">delivered · 200 · attempt 1/5</div>
+			</div>
+
+			<div class="af-dests">
+				{DESTINATIONS.map((d) => <span class="af-dest">{d}</span>)}
+			</div>
+		</div>
+	</div>
+
+	<div
+		class="px-3.5 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted flex justify-between gap-4"
+	>
+		<span>evaluated every 60s · auto-resolve after 2 healthy</span>
+		<span class="hidden sm:inline">renotify 30m while open</span>
+	</div>
+</div>
+
+<style>
+	.af-grid {
+		display: grid;
+		gap: 1px;
+		background: var(--border);
+	}
+	@media (min-width: 768px) {
+		.af-grid {
+			grid-template-columns: 1.05fr 0.95fr;
+		}
+	}
+	.af-pane {
+		background: var(--bg-deep);
+		padding: 16px;
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		min-width: 0;
+	}
+	.af-pane__head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+	.af-pane__label,
+	.af-pane__via {
+		font-size: 10px;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+
+	.af-chip {
+		font-size: 9px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		padding: 2px 7px;
+		border-radius: 999px;
+		border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+	}
+	.af-chip--critical {
+		color: var(--severity-error);
+		border-color: color-mix(in oklab, var(--severity-error) 40%, transparent);
+		background: color-mix(in oklab, var(--severity-error) 8%, transparent);
+	}
+
+	/* ── Rule facts ───────────────────────────────────────────────── */
+	.af-facts {
+		display: flex;
+		flex-direction: column;
+	}
+	.af-fact {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 5px 0;
+		font-size: 11px;
+		color: var(--muted-foreground);
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+	}
+	.af-fact:last-child {
+		border-bottom: none;
+	}
+	.af-fact__v {
+		color: var(--foreground);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.af-fact__v b {
+		font-weight: 600;
+		color: var(--severity-error);
+	}
+
+	/* ── Chart ────────────────────────────────────────────────────── */
+	.af-chart {
+		position: relative;
+		display: flex;
+		align-items: flex-end;
+		gap: 3px;
+		height: 96px;
+		padding-top: 8px;
+	}
+	.af-bar {
+		flex: 1;
+		height: 100%;
+		display: flex;
+		align-items: flex-end;
+	}
+	.af-bar__fill {
+		width: 100%;
+		height: var(--h);
+		border-radius: 2px 2px 0 0;
+		background: color-mix(in oklab, var(--foreground) 22%, transparent);
+		transform-origin: bottom center;
+	}
+	.af-bar__fill--over {
+		background: var(--severity-error);
+	}
+	.af-threshold {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: var(--threshold);
+		border-top: 1px dashed color-mix(in oklab, var(--severity-error) 55%, transparent);
+		pointer-events: none;
+	}
+	.af-threshold span {
+		position: absolute;
+		right: 0;
+		bottom: 2px;
+		font-size: 9px;
+		color: color-mix(in oklab, var(--severity-error) 70%, transparent);
+	}
+
+	/* ── Status row ───────────────────────────────────────────────── */
+	.af-status {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding-top: 10px;
+		border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+	}
+	.af-pills {
+		display: grid;
+	}
+	.af-pills > * {
+		grid-area: 1 / 1;
+	}
+	.af-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		width: fit-content;
+		font-size: 9px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		padding: 2px 8px;
+		border-radius: 999px;
+		border: 1px solid;
+	}
+	.af-pill--ok {
+		color: var(--muted-foreground);
+		border-color: color-mix(in oklab, var(--border) 80%, transparent);
+		opacity: 0;
+	}
+	.af-pill--firing {
+		color: var(--severity-error);
+		border-color: color-mix(in oklab, var(--severity-error) 45%, transparent);
+		background: color-mix(in oklab, var(--severity-error) 10%, transparent);
+		opacity: 1;
+	}
+	.af-pill__dot {
+		width: 5px;
+		height: 5px;
+		border-radius: 999px;
+		background: var(--severity-error);
+	}
+	.af-count {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 5px;
+		font-size: 10px;
+		color: var(--muted-foreground);
+		white-space: nowrap;
+	}
+	.af-count__stack {
+		display: grid;
+		color: var(--foreground);
+	}
+	.af-count__stack > * {
+		grid-area: 1 / 1;
+	}
+	.af-count__n--0,
+	.af-count__n--1 {
+		opacity: 0;
+	}
+	.af-count__n--2 {
+		opacity: 1;
+	}
+
+	/* ── Notification ─────────────────────────────────────────────── */
+	.af-notif {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	.af-notif__msg {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+		border-radius: 8px;
+		background: color-mix(in oklab, var(--bg-elevated) 70%, transparent);
+		padding: 12px;
+	}
+	.af-notif__avatar {
+		flex-shrink: 0;
+		width: 22px;
+		height: 22px;
+		border-radius: 5px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--primary-foreground, var(--background));
+		background: var(--primary);
+	}
+	.af-notif__body {
+		min-width: 0;
+		flex: 1;
+	}
+	.af-notif__meta {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 10px;
+		color: var(--muted-foreground);
+	}
+	.af-notif__app {
+		color: var(--foreground);
+		font-weight: 600;
+	}
+	.af-notif__badge {
+		font-size: 8px;
+		letter-spacing: 0.04em;
+		padding: 1px 4px;
+		border-radius: 3px;
+		background: color-mix(in oklab, var(--border) 60%, transparent);
+	}
+	.af-notif__attach {
+		margin-top: 7px;
+		padding: 2px 0 2px 10px;
+		border-left: 2px solid var(--severity-error);
+	}
+	.af-notif__title {
+		font-size: 11.5px;
+		color: var(--foreground);
+	}
+	.af-notif__line {
+		margin-top: 3px;
+		font-size: 10.5px;
+		color: var(--muted-foreground);
+	}
+	.af-notif__line b {
+		font-weight: 600;
+		color: var(--severity-error);
+	}
+	.af-notif__actions {
+		display: flex;
+		gap: 6px;
+		margin-top: 9px;
+	}
+	.af-btn {
+		font-size: 10px;
+		padding: 3px 9px;
+		border-radius: 5px;
+		border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+		color: var(--muted-foreground);
+		cursor: default;
+	}
+	.af-btn--primary {
+		color: var(--foreground);
+		border-color: color-mix(in oklab, var(--foreground) 25%, transparent);
+	}
+	.af-notif__delivery {
+		margin-top: 8px;
+		font-size: 9px;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+
+	.af-dests {
+		margin-top: auto;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 5px;
+		padding-top: 10px;
+		border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+	}
+	.af-dest {
+		font-size: 9px;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+		border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+		border-radius: 999px;
+		padding: 2px 8px;
+	}
+
+	/* ── Choreography — one shared 14s loop ───────────────────────────
+	   0–10%   quiet: bars low, 0/2, OK
+	   12–16%  first breach grows in, counter ticks 1/2
+	   22–26%  second breach grows in, counter ticks 2/2
+	   30–34%  pill flips OK → FIRING
+	   38–44%  notification slides in
+	   94–100% everything rewinds for the next loop                    */
+	.af-anim {
+		animation-duration: 14s;
+		animation-timing-function: linear;
+		animation-iteration-count: infinite;
+	}
+	.af-bar__fill--breach-a {
+		animation-name: af-breach-a;
+	}
+	.af-bar__fill--breach-b {
+		animation-name: af-breach-b;
+	}
+	@keyframes af-breach-a {
+		0%,
+		12% {
+			transform: scaleY(0.42);
+			background: color-mix(in oklab, var(--foreground) 22%, transparent);
+		}
+		16%,
+		94% {
+			transform: scaleY(1);
+			background: var(--severity-error);
+		}
+		100% {
+			transform: scaleY(0.42);
+			background: color-mix(in oklab, var(--foreground) 22%, transparent);
+		}
+	}
+	@keyframes af-breach-b {
+		0%,
+		22% {
+			transform: scaleY(0.34);
+			background: color-mix(in oklab, var(--foreground) 22%, transparent);
+		}
+		26%,
+		94% {
+			transform: scaleY(1);
+			background: var(--severity-error);
+		}
+		100% {
+			transform: scaleY(0.34);
+			background: color-mix(in oklab, var(--foreground) 22%, transparent);
+		}
+	}
+
+	.af-count__n--0 {
+		animation-name: af-count-0;
+	}
+	.af-count__n--1 {
+		animation-name: af-count-1;
+	}
+	.af-count__n--2 {
+		animation-name: af-count-2;
+	}
+	@keyframes af-count-0 {
+		0%,
+		14% {
+			opacity: 1;
+		}
+		15%,
+		96% {
+			opacity: 0;
+		}
+		100% {
+			opacity: 1;
+		}
+	}
+	@keyframes af-count-1 {
+		0%,
+		14% {
+			opacity: 0;
+		}
+		15%,
+		24% {
+			opacity: 1;
+		}
+		25%,
+		100% {
+			opacity: 0;
+		}
+	}
+	@keyframes af-count-2 {
+		0%,
+		24% {
+			opacity: 0;
+		}
+		25%,
+		96% {
+			opacity: 1;
+		}
+		100% {
+			opacity: 0;
+		}
+	}
+
+	.af-pill--ok {
+		animation-name: af-pill-ok;
+	}
+	.af-pill--firing {
+		animation-name: af-pill-firing;
+	}
+	@keyframes af-pill-ok {
+		0%,
+		30% {
+			opacity: 1;
+		}
+		34%,
+		96% {
+			opacity: 0;
+		}
+		100% {
+			opacity: 1;
+		}
+	}
+	@keyframes af-pill-firing {
+		0%,
+		30% {
+			opacity: 0;
+		}
+		34%,
+		96% {
+			opacity: 1;
+		}
+		100% {
+			opacity: 0;
+		}
+	}
+
+	.af-notif {
+		animation-name: af-notif-in;
+	}
+	@keyframes af-notif-in {
+		0%,
+		38% {
+			opacity: 0;
+			transform: translateY(5px);
+		}
+		44%,
+		96% {
+			opacity: 1;
+			transform: translateY(0);
+		}
+		100% {
+			opacity: 0;
+			transform: translateY(5px);
+		}
+	}
+
+	/* Reduced motion: the base state above is authored as the final frame —
+	   breached, firing, notified — so switching the loop off leaves the story's
+	   conclusion, not a blank card. */
+	@media (prefers-reduced-motion: reduce) {
+		.af-anim {
+			animation: none !important;
+		}
+	}
+</style>

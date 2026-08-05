@@ -1,8 +1,8 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ChevronRightIcon, CopyIcon } from "../icons"
-import { useClipboard } from "../../hooks/use-clipboard"
+import { ChevronRightIcon } from "../icons"
+import { CopyButton } from "../ui/copy-button"
 import { useAttributesConfig } from "./context"
 
 interface CollapsibleJsonValueProps {
@@ -17,8 +17,7 @@ interface CollapsibleJsonValueProps {
  * renders as plain text.
  */
 export function CollapsibleJsonValue({ value, parsed }: CollapsibleJsonValueProps) {
-	const clipboard = useClipboard()
-	const { notifyCopied, highlightJson } = useAttributesConfig()
+	const { highlightJson } = useAttributesConfig()
 	const [expanded, setExpanded] = useState(false)
 
 	const pretty = useMemo(() => (expanded ? JSON.stringify(parsed, null, 2) : ""), [expanded, parsed])
@@ -47,18 +46,14 @@ export function CollapsibleJsonValue({ value, parsed }: CollapsibleJsonValueProp
 			{expanded && (
 				<div className="mt-1 rounded-md bg-muted/30 border overflow-hidden">
 					<div className="flex items-center justify-end px-2 py-1 border-b">
-						<button
-							type="button"
-							className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-							onClick={(e) => {
-								e.stopPropagation()
-								clipboard.copy(value)
-								notifyCopied?.()
-							}}
-						>
-							<CopyIcon size={10} />
-							Copy
-						</button>
+						<CopyButton
+							value={value}
+							label="JSON"
+							idleLabel="Copy"
+							size="xs"
+							iconSize={10}
+							onClick={(e) => e.stopPropagation()}
+						/>
 					</div>
 					<div className="max-h-64 overflow-auto p-2">
 						<pre className="text-xs leading-relaxed">

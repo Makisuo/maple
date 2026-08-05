@@ -3,8 +3,8 @@ import { Effect } from "effect"
 import type { SpendLimits } from "@maple/domain/http"
 import { SpendLimits as SpendLimitsClass } from "@maple/domain/http"
 import { evaluateOrg } from "./spend-limit-runtime"
-import type { makeCallAutumn } from "./lib/autumn-client"
-import type { ConfiguredSpendLimits, SpendEvaluationRecord } from "./services/SpendLimitsService"
+import type { makeCallAutumn } from "@/services/billing/autumn-client"
+import type { ConfiguredSpendLimits, SpendEvaluationRecord } from "./services/billing/SpendLimitsService"
 
 // What the cron writes back is the whole contract with the gateway: `breached`
 // becomes `pausedAt` and `exceededCaps` becomes `pausedFeatures`, both read on

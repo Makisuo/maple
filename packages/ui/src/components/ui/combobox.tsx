@@ -353,6 +353,7 @@ export function ComboboxChips({
 
 export function ComboboxChip({
 	children,
+	className,
 	removeProps,
 	...props
 }: ComboboxPrimitive.Chip.Props & {
@@ -360,7 +361,15 @@ export function ComboboxChip({
 }): React.ReactElement {
 	return (
 		<ComboboxPrimitive.Chip
-			className="flex items-center rounded-[calc(var(--radius-md)-1px)] bg-accent ps-2 font-medium text-accent-foreground text-sm outline-none sm:text-xs/(--text-xs--line-height) [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5"
+			className={cn(
+				// A translucent foreground tint rather than `bg-accent`: in this theme
+				// --accent, --muted and --secondary are all the same value as the
+				// chips field's own surface, so a solid token renders the chip
+				// invisible. Tinting toward the foreground lifts it in dark mode and
+				// darkens it in light, so the chip reads as a tag in both.
+				"flex items-center gap-1 rounded-[calc(var(--radius-md)-1px)] border border-border/80 bg-foreground/8 ps-2 font-medium text-foreground text-sm outline-none dark:bg-foreground/12 sm:text-xs/(--text-xs--line-height) [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5",
+				className,
+			)}
 			data-slot="combobox-chip"
 			{...props}
 		>

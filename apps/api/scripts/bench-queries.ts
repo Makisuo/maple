@@ -39,6 +39,7 @@ import {
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { CH } from "@maple/query-engine"
+import * as Integrations from "@maple/query-engine-integrations"
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -574,7 +575,7 @@ const fetchHandler = Effect.fn("bench.fetch")(function* (config: FetchConfig) {
 	const host = yield* tinybird.host
 
 	const compiled = CH.compile(
-		CH.dbStatementSamplesQuery({
+		Integrations.dbStatementSamplesQuery({
 			contextFilter: Option.getOrUndefined(config.context),
 			profileFilter: Option.getOrUndefined(config.profile),
 			limit: topN,

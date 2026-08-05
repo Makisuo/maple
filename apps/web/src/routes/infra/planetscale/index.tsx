@@ -30,9 +30,15 @@ import {
 	lagTone,
 	utilizationTone,
 } from "@/components/infra/planetscale/metrics"
+import { PlanetScaleSetupState } from "@/components/infra/planetscale/planetscale-setup-state"
+import {
+	derivePlanetScaleSetup,
+	metricsNeverCollected,
+	type SetupStep,
+} from "@/components/integrations/planetscale-setup-steps"
 import { getServiceMapPlanetScaleResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { formatNumber } from "@maple/ui/format"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { formatNumber } from "@maple/ui/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -70,8 +76,8 @@ function PlanetScalePage() {
 	// Integration-gated: the page is useful exactly when the org has the
 	// PlanetScale integration connected.
 	const statusResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 
@@ -113,9 +119,11 @@ function PlanetScalePage() {
 											<PlanetScaleData
 												startTime={startTime}
 												endTime={endTime}
-												metricsPaused={status.metricsAuth === "missing"}
-												revoked={status.revokedAt !== null}
-												lastInventoryError={status.lastInventoryError}
+												metricsPaused={status.metrics_auth === "missing"}
+												neverCollected={metricsNeverCollected(status)}
+												setupSteps={derivePlanetScaleSetup(status, Date.now()).steps}
+												revoked={status.revoked_at !== null}
+												lastInventoryError={status.last_inventory_error}
 											/>
 										)
 									})
@@ -133,18 +141,23 @@ function PlanetScaleData({
 	startTime,
 	endTime,
 	metricsPaused,
+	neverCollected,
+	setupSteps,
 	revoked,
 	lastInventoryError,
 }: {
 	startTime: string
 	endTime: string
 	metricsPaused: boolean
+	/** No scrape has ever landed — the page leads with setup instead of dashes. */
+	neverCollected: boolean
+	setupSteps: ReadonlyArray<SetupStep>
 	revoked: boolean
 	lastInventoryError: string | null
 }) {
 	const inventoryResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleDatabases", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "databases", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	// Retained so changing the time range dims the numbers instead of replacing
@@ -192,14 +205,17 @@ function PlanetScaleData({
 		.onSuccess((inventory) => {
 			const branchTotal = inventory.databases.reduce((sum, db) => sum + db.branches.length, 0)
 			const showInventoryNotice =
-				lastInventoryError !== null || inventoryIsStale(inventory.lastInventoryAt, Date.now())
+				lastInventoryError !== null || inventoryIsStale(inventory.last_inventory_at, Date.now())
 			return (
 				<div className="space-y-6">
 					{revoked ? <PlanetScaleRevokedNotice /> : null}
-					{metricsPaused ? <PlanetScaleMetricsNotice /> : null}
+					{/* Setup replaces the notice entirely while nothing has ever been
+					    collected — one screen saying one thing, not a warning stacked
+					    on top of a page pretending to work. */}
+					{metricsPaused && !neverCollected ? <PlanetScaleMetricsNotice /> : null}
 					{showInventoryNotice ? (
 						<PlanetScaleInventoryNotice
-							lastInventoryAt={inventory.lastInventoryAt}
+							lastInventoryAt={inventory.last_inventory_at}
 							lastInventoryError={lastInventoryError}
 						/>
 					) : null}
@@ -209,6 +225,7 @@ function PlanetScaleData({
 							className="flex flex-col gap-1 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs"
 						/>
 					) : null}
+					{neverCollected ? <PlanetScaleSetupState steps={setupSteps} /> : null}
 					{/* Inventory counts have no time series, so no sparkline slot to reserve. */}
 					<StatRail>
 						<StatRailItem
@@ -217,32 +234,46 @@ function PlanetScaleData({
 							value={String(inventory.databases.length)}
 						/>
 						<StatRailItem compact eyebrow="Branches" value={String(branchTotal)} />
-						<StatRailItem
-							compact
-							eyebrow="Worst storage"
-							value={totals.storageMax === null ? "—" : formatStoragePercent(totals.storageMax)}
-							tone={totals.storageMax === null ? "neutral" : utilizationTone(totals.storageMax)}
-							subline={
-								metricsPaused
-									? METRICS_PAUSED_SHORT
-									: totals.storageOwner !== null
-										? totals.storageOwner
-										: undefined
-							}
-						/>
-						<StatRailItem
-							compact
-							eyebrow="Worst replica lag"
-							value={metricsPaused && stats.length === 0 ? "—" : formatLag(totals.lagMax)}
-							tone={lagTone(totals.lagMax)}
-							subline={
-								metricsPaused
-									? METRICS_PAUSED_SHORT
-									: totals.lagOwner !== null && totals.lagMax > 0
-										? totals.lagOwner
-										: `${formatNumber(totals.connections)} connections`
-							}
-						/>
+						{neverCollected ? null : (
+							<>
+								<StatRailItem
+									compact
+									eyebrow="Worst storage"
+									value={
+										totals.storageMax === null
+											? "—"
+											: formatStoragePercent(totals.storageMax)
+									}
+									tone={
+										totals.storageMax === null
+											? "neutral"
+											: utilizationTone(totals.storageMax)
+									}
+									subline={
+										metricsPaused
+											? METRICS_PAUSED_SHORT
+											: totals.storageOwner !== null
+												? totals.storageOwner
+												: undefined
+									}
+								/>
+								<StatRailItem
+									compact
+									eyebrow="Worst replica lag"
+									value={
+										metricsPaused && stats.length === 0 ? "—" : formatLag(totals.lagMax)
+									}
+									tone={lagTone(totals.lagMax)}
+									subline={
+										metricsPaused
+											? METRICS_PAUSED_SHORT
+											: totals.lagOwner !== null && totals.lagMax > 0
+												? totals.lagOwner
+												: `${formatNumber(totals.connections)} connections`
+									}
+								/>
+							</>
+						)}
 					</StatRail>
 					{inventory.databases.length === 0 ? (
 						<Empty className="py-16">
@@ -263,6 +294,7 @@ function PlanetScaleData({
 							databases={inventory.databases}
 							statsByName={statsByName}
 							waiting={Boolean(statsResult.waiting)}
+							metricsPaused={neverCollected}
 							emptyMessage={
 								metricsPaused ? METRICS_PAUSED_MESSAGE : "No databases in the inventory."
 							}

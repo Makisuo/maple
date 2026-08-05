@@ -1,11 +1,11 @@
 import { useState } from "react"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import type { CatalogPlan } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { billingCustomerAtom, billingPlansAtom } from "@/lib/services/atoms/billing-atoms"
@@ -160,10 +160,13 @@ export function PlanOffer({
 				window.location.href = result.paymentUrl
 				return
 			}
-			toast.success("Plan updated successfully.")
+			toastManager.add({ title: "Plan updated successfully.", type: "success" })
 			refreshCustomer()
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : "Something went wrong. Please try again.")
+			toastManager.add({
+				title: error instanceof Error ? error.message : "Something went wrong. Please try again.",
+				type: "error",
+			})
 		} finally {
 			setAttaching(null)
 		}

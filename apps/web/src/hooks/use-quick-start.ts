@@ -1,6 +1,7 @@
 import { useCallback } from "react"
 import { useAtom } from "@/lib/effect-atom"
 import type { FrameworkId } from "@/components/quick-start/sdk-snippets"
+import { trackProduct } from "@/lib/analytics"
 import {
 	DEFAULT_QUICK_START_STATE,
 	quickStartAtomFamily,
@@ -24,6 +25,9 @@ export function useQuickStart(orgId?: string | null) {
 
 	const completeStep = useCallback(
 		(id: StepId) => {
+			// Outside the updater: `setState` reducers run under StrictMode twice, and
+			// an event emitted from one would double-count the funnel step.
+			trackProduct("onboarding_step_completed", { step: id })
 			setState((prev) => {
 				const currentIndex = STEP_IDS.indexOf(id)
 				const onThisStep = prev.activeStep === id

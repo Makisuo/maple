@@ -4,19 +4,20 @@ import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { API_CORS_OPTIONS } from "../../lib/api-cors"
-import { Env } from "../../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
-import { ApiV2RateLimiter, type ApiV2RateLimiterShape } from "../../services/ApiV2RateLimiter"
+import { API_CORS_OPTIONS } from "@/http/api-cors"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
+import { ApiV2RateLimiter, type ApiV2RateLimiterShape } from "@/services/auth/ApiV2RateLimiter"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
 	ConfigResourceServiceStubsLayer,
+	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
@@ -61,6 +62,7 @@ const makeHarness = (
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
+		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(ConfigResourceServiceStubsLayer),
 		Layer.provide(TelemetryServiceStubsLayer),

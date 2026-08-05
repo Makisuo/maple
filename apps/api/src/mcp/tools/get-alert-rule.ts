@@ -1,9 +1,9 @@
 import { McpQueryError, requiredStringParam, type McpToolRegistrar } from "./types"
-import { formatNextSteps } from "../lib/next-steps"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-warehouse"
-import { AlertsService } from "@/services/AlertsService"
+import { AlertsService } from "@/services/alerts/AlertsService"
 
 const comparatorLabel: Record<string, string> = {
 	gt: ">",
@@ -88,14 +88,6 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 			lines.push(``)
 
 			// Signal-specific fields
-			if (rule.metricName || rule.metricType || rule.metricAggregation) {
-				lines.push(`### Metric Configuration`)
-				if (rule.metricName) lines.push(`Metric Name: ${rule.metricName}`)
-				if (rule.metricType) lines.push(`Metric Type: ${rule.metricType}`)
-				if (rule.metricAggregation) lines.push(`Metric Aggregation: ${rule.metricAggregation}`)
-				lines.push(``)
-			}
-
 			if (rule.apdexThresholdMs) {
 				lines.push(`### Apdex Configuration`)
 				lines.push(`Apdex Threshold: ${rule.apdexThresholdMs}ms`)
@@ -171,9 +163,6 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 							consecutiveBreachesRequired: rule.consecutiveBreachesRequired,
 							consecutiveHealthyRequired: rule.consecutiveHealthyRequired,
 							renotifyIntervalMinutes: rule.renotifyIntervalMinutes,
-							metricName: rule.metricName,
-							metricType: rule.metricType,
-							metricAggregation: rule.metricAggregation,
 							apdexThresholdMs: rule.apdexThresholdMs,
 							queryBuilderDraft: rule.queryBuilderDraft,
 							rawQuerySql: rule.rawQuerySql,

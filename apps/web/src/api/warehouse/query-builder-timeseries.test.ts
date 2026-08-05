@@ -38,7 +38,7 @@ describe("query-builder timeseries strategy", () => {
 			return
 		}
 
-		expect(resolved.bucketSeconds).toBe(3600)
+		expect(resolved.bucketSeconds).toBe(900)
 	})
 
 	it("does not mutate explicit bucket seconds", () => {
@@ -108,8 +108,8 @@ describe("query-builder timeseries strategy", () => {
 			return
 		}
 
-		expect(primary.bucketSeconds).toBe(120)
-		expect(fallback.bucketSeconds).toBe(3600)
+		expect(primary.bucketSeconds).toBe(60)
+		expect(fallback.bucketSeconds).toBe(900)
 	})
 
 	it("widens explicit bucket on fallback windows to stay within point budget", () => {
@@ -138,7 +138,7 @@ describe("query-builder timeseries strategy", () => {
 		}
 
 		expect(primary.bucketSeconds).toBe(60)
-		expect(fallback.bucketSeconds).toBe(3600)
+		expect(fallback.bucketSeconds).toBe(900)
 	})
 
 	it.effect("continues fallback execution after an error and recomputes window buckets", () =>
@@ -188,7 +188,7 @@ describe("query-builder timeseries strategy", () => {
 					}),
 			)
 
-			assert.deepStrictEqual(seenBucketSeconds, [120, 3600, 14400])
+			assert.deepStrictEqual(seenBucketSeconds, [60, 900, 3600])
 			assert.isTrue(result.fallbackUsed)
 			assert.lengthOf(result.attempts, 3)
 			assert.include(result.attempts[1]?.error ?? "", "too expensive")
@@ -203,8 +203,8 @@ describe("query-builder timeseries strategy", () => {
 
 	it("uses the shared auto bucket ladder", () => {
 		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-01 00:30:00")).toBe(60)
-		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-01 06:00:00")).toBe(900)
-		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-08 00:00:00")).toBe(14400)
+		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-01 06:00:00")).toBe(300)
+		expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-08 00:00:00")).toBe(3600)
 	})
 
 	it("counts only query results with real series data", () => {

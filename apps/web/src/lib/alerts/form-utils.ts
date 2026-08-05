@@ -1,5 +1,6 @@
 import {
 	AlertCheckDocument,
+	AlertDeliveryEventDocument,
 	AlertDestinationDocument,
 	AlertIncidentDocument,
 	AlertRuleDocument,
@@ -12,19 +13,17 @@ import {
 	IsoDateTimeString,
 	UserId,
 	type AlertComparator,
-	type AlertDeliveryEventDocument,
 	type AlertDeliveryStatus,
 	type AlertDestinationId,
 	type AlertDestinationType,
 	type AlertEventType,
-	type AlertMetricAggregation,
-	type AlertMetricType,
 	type AlertSeverity,
 	type AlertSignalType,
 	type QueryBuilderQueryDraftPayload,
 } from "@maple/domain/http"
 import type {
 	V2AlertCheck,
+	V2AlertDelivery,
 	V2AlertDestinationCreateParams,
 	V2AlertDestinationUpdateParams,
 	V2AlertRuleCreateParams,
@@ -34,8 +33,12 @@ import type {
 import type { QueryEngineAlertReducer } from "@maple/query-engine"
 import { Cause, Exit, Option, Schema } from "effect"
 import { v2ErrorInfo } from "@/lib/error-messages"
-import { buildTimeseriesQuerySpec, createQueryDraft } from "@/lib/query-builder/model"
-import { formatErrorRate, formatLatency, formatNumber } from "@maple/ui/format"
+import {
+	buildTimeseriesQuerySpec,
+	createQueryDraft,
+	type QueryBuilderQueryDraft,
+} from "@/lib/query-builder/model"
+import { formatErrorRate, formatLatency, formatNumber } from "@maple/ui/lib/format"
 
 const asHazelOrganizationId = Schema.decodeUnknownSync(HazelOrganizationId)
 const asHazelChannelId = Schema.decodeUnknownSync(HazelChannelId)
@@ -76,19 +79,12 @@ export type RuleFormState = {
 	consecutiveBreachesRequired: string
 	consecutiveHealthyRequired: string
 	renotifyIntervalMinutes: string
-	metricName: string
-	metricType: AlertMetricType
-	metricAggregation: AlertMetricAggregation
 	apdexThresholdMs: string
 	/**
-	 * Editing fields for the `builder_query` signal. They map 1:1 to a
-	 * `QueryBuilderQueryDraftPayload` — the same draft dashboard query-builder
-	 * charts use — which `buildRuleRequest` assembles at submit time.
+	 * The normalized query-builder draft. It is the sole editable query state and
+	 * is submitted verbatim after the wire payload is normalized on read.
 	 */
-	queryDataSource: "traces" | "logs" | "metrics"
-	queryAggregation: string
-	queryWhereClause: string
-	queryBuilderDraft: QueryBuilderQueryDraftPayload
+	queryBuilderDraft: QueryBuilderQueryDraft
 	/** Editing fields for the `raw_query` signal. */
 	rawQuerySql: string
 	rawQueryReducer: QueryEngineAlertReducer
@@ -108,7 +104,6 @@ export const signalLabels: Record<AlertSignalType, string> = {
 	p99_latency: "P99 latency",
 	apdex: "Apdex",
 	throughput: "Throughput",
-	metric: "Metric",
 	builder_query: "Query builder",
 	raw_query: "Raw SQL",
 }
@@ -181,7 +176,6 @@ export function formatSignalValue(signalType: AlertSignalType, value: number | n
 		case "apdex":
 			return value.toFixed(3)
 		case "throughput":
-		case "metric":
 		case "builder_query":
 		case "raw_query":
 			return formatNumber(value)
@@ -217,6 +211,41 @@ function parseNonNegativeNumber(value: string, fallback: number): number {
 	return parsed
 }
 
+export function normalizeRuleQueryDraft(draft: QueryBuilderQueryDraftPayload | null): QueryBuilderQueryDraft {
+	const base = createQueryDraft(0)
+	if (draft == null) return base
+
+	const shared = {
+		...base,
+		...draft,
+		enabled: draft.enabled ?? base.enabled,
+		hidden: draft.hidden ?? base.hidden,
+		whereClause: draft.whereClause ?? base.whereClause,
+		stepInterval: draft.stepInterval ?? base.stepInterval,
+		orderByDirection: draft.orderByDirection ?? base.orderByDirection,
+		addOns: { ...base.addOns, ...draft.addOns },
+		groupBy: [...(draft.groupBy ?? base.groupBy)],
+		having: draft.having ?? base.having,
+		orderBy: draft.orderBy ?? base.orderBy,
+		limit: draft.limit ?? base.limit,
+		legend: draft.legend ?? base.legend,
+	}
+
+	if (draft.dataSource === "metrics") {
+		return {
+			...shared,
+			dataSource: "metrics",
+			signalSource: draft.signalSource ?? "default",
+			metricName: draft.metricName ?? "",
+			metricType: draft.metricType ?? "gauge",
+			isMonotonic: draft.isMonotonic ?? draft.metricType === "sum",
+		}
+	}
+	return draft.dataSource === "logs"
+		? { ...shared, dataSource: "logs" }
+		: { ...shared, dataSource: "traces" }
+}
+
 export function defaultRuleForm(serviceName?: string): RuleFormState {
 	const queryBuilderDraft = createQueryDraft(0)
 	return {
@@ -238,13 +267,7 @@ export function defaultRuleForm(serviceName?: string): RuleFormState {
 		consecutiveBreachesRequired: "2",
 		consecutiveHealthyRequired: "2",
 		renotifyIntervalMinutes: "30",
-		metricName: "",
-		metricType: "gauge",
-		metricAggregation: "avg",
 		apdexThresholdMs: "500",
-		queryDataSource: "traces",
-		queryAggregation: "count",
-		queryWhereClause: "",
 		queryBuilderDraft,
 		rawQuerySql: DEFAULT_RAW_QUERY_SQL,
 		rawQueryReducer: "identity",
@@ -254,29 +277,8 @@ export function defaultRuleForm(serviceName?: string): RuleFormState {
 	}
 }
 
-function metricRuleToQueryBuilderDraft(rule: AlertRuleDocument): QueryBuilderQueryDraftPayload {
-	return {
-		...createQueryDraft(0),
-		dataSource: "metrics",
-		aggregation: rule.metricAggregation ?? "avg",
-		metricName: rule.metricName ?? "",
-		metricType: rule.metricType ?? "gauge",
-		isMonotonic: rule.metricType === "sum",
-		groupBy: rule.groupBy ? [...rule.groupBy] : [],
-		addOns: {
-			groupBy: (rule.groupBy?.length ?? 0) > 0,
-			having: false,
-			orderBy: false,
-			limit: false,
-			legend: false,
-		},
-	}
-}
-
 export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
-	const queryBuilderDraft =
-		rule.queryBuilderDraft ??
-		(rule.signalType === "metric" ? metricRuleToQueryBuilderDraft(rule) : createQueryDraft(0))
+	const queryBuilderDraft = normalizeRuleQueryDraft(rule.queryBuilderDraft)
 	return {
 		name: rule.name,
 		notes: rule.notes ?? "",
@@ -287,7 +289,7 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
 		environments: rule.environments?.length > 0 ? [...rule.environments] : [],
 		tags: rule.tags?.length > 0 ? [...rule.tags] : [],
 		groupBy: rule.groupBy ? [...rule.groupBy] : [],
-		signalType: rule.signalType === "metric" ? "builder_query" : rule.signalType,
+		signalType: rule.signalType,
 		comparator: rule.comparator,
 		threshold: domainThresholdToForm(rule.signalType, rule.threshold),
 		thresholdUpper:
@@ -297,13 +299,7 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
 		consecutiveBreachesRequired: String(rule.consecutiveBreachesRequired),
 		consecutiveHealthyRequired: String(rule.consecutiveHealthyRequired),
 		renotifyIntervalMinutes: String(rule.renotifyIntervalMinutes),
-		metricName: rule.metricName ?? "",
-		metricType: rule.metricType ?? "gauge",
-		metricAggregation: rule.metricAggregation ?? "avg",
 		apdexThresholdMs: rule.apdexThresholdMs == null ? "500" : String(rule.apdexThresholdMs),
-		queryDataSource: rule.queryBuilderDraft?.dataSource ?? "traces",
-		queryAggregation: rule.queryBuilderDraft?.aggregation ?? "count",
-		queryWhereClause: rule.queryBuilderDraft?.whereClause ?? "",
 		queryBuilderDraft,
 		rawQuerySql: rule.rawQuerySql ?? DEFAULT_RAW_QUERY_SQL,
 		rawQueryReducer: rule.rawQueryReducer ?? "identity",
@@ -311,48 +307,6 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
 		notificationTitle: rule.notificationTemplate?.title ?? "",
 		notificationBody: rule.notificationTemplate?.body ?? "",
 	}
-}
-
-/**
- * Assemble a `QueryBuilderQueryDraftPayload` from the simple builder_query form
- * fields. This is the same draft shape dashboard query-builder charts use, so
- * the alert evaluates through the identical compiler.
- */
-export function buildQueryDraftFromForm(form: RuleFormState): QueryBuilderQueryDraftPayload {
-	if (form.signalType === "builder_query") return form.queryBuilderDraft
-
-	// Fold a single selected service into the where clause — builder_query draws
-	// all filtering from the draft, not the rule-level service scope.
-	const userWhere = form.queryWhereClause.trim()
-	const whereClause =
-		form.serviceNames.length === 1
-			? [`service.name = "${form.serviceNames[0]}"`, userWhere]
-					.filter((s) => s.length > 0)
-					.join(" AND ")
-			: userWhere
-	const base = {
-		id: "alert-query",
-		name: "A",
-		aggregation: form.queryAggregation,
-		whereClause,
-		groupBy: [...form.groupBy],
-		addOns: {
-			groupBy: form.groupBy.length > 0,
-			having: false,
-			orderBy: false,
-			limit: false,
-			legend: false,
-		},
-	}
-	if (form.queryDataSource === "metrics") {
-		return {
-			...base,
-			dataSource: "metrics",
-			metricName: form.metricName.trim(),
-			metricType: form.metricType,
-		}
-	}
-	return { ...base, dataSource: form.queryDataSource }
 }
 
 export function rawSqlHasValueColumn(sql: string): boolean {
@@ -369,7 +323,7 @@ export function rawSqlHasValueColumn(sql: string): boolean {
 export function deriveRuleQueryIssues(form: RuleFormState): string[] {
 	const issues: string[] = []
 	if (form.signalType === "builder_query") {
-		const built = buildTimeseriesQuerySpec(buildQueryDraftFromForm(form))
+		const built = buildTimeseriesQuerySpec(form.queryBuilderDraft)
 		if (built.error != null || built.query == null) {
 			issues.push(`Query: ${built.error ?? "failed to build query"}`)
 		}
@@ -427,15 +381,11 @@ export function buildRuleCreateParamsV2(form: RuleFormState): V2AlertRuleCreateP
 		consecutive_breaches_required: parsePositiveNumber(form.consecutiveBreachesRequired, 2),
 		consecutive_healthy_required: parsePositiveNumber(form.consecutiveHealthyRequired, 2),
 		renotify_interval_minutes: parsePositiveNumber(form.renotifyIntervalMinutes, 30),
-		// Always null: `ruleToFormState` rewrites a stored `metric` rule to
-		// `builder_query` on load and nothing in the form can produce `"metric"`
-		// again, so these can never be populated from here. A legacy metric rule
-		// therefore converts to a builder_query rule the first time it is saved.
-		metric_name: null,
-		metric_type: null,
-		metric_aggregation: null,
 		apdex_threshold_ms: signalType === "apdex" ? parsePositiveNumber(form.apdexThresholdMs, 500) : null,
-		query_builder_draft: signalType === "builder_query" ? buildQueryDraftFromForm(form) : null,
+		query_builder_draft:
+			signalType === "builder_query"
+				? Object.fromEntries(Object.entries(form.queryBuilderDraft))
+				: null,
 		raw_query_sql: signalType === "raw_query" ? form.rawQuerySql.trim() || null : null,
 		raw_query_reducer: signalType === "raw_query" ? form.rawQueryReducer : null,
 		// Dedupe so the same destination is never persisted twice (e.g. when editing a
@@ -478,8 +428,7 @@ export type DestinationFormState = {
 	type: AlertDestinationType
 	name: string
 	enabled: boolean
-	channelLabel: string
-	/** Slack and Discord both use this incoming-webhook URL field. */
+	/** Discord incoming-webhook URL. */
 	webhookUrl: string
 	/**
 	 * Slack (bot) destination: the channel the installed Maple bot posts to.
@@ -492,7 +441,6 @@ export type DestinationFormState = {
 	integrationKey: string
 	url: string
 	signingSecret: string
-	hazelWebhookUrl: string
 	hazelOrganizationId: string
 	hazelOrganizationName: string
 	hazelOrganizationLogoUrl: string | null
@@ -504,23 +452,18 @@ export type DestinationFormState = {
 
 export const MAX_EMAIL_MEMBER_RECIPIENTS = 10
 
-/**
- * Defaults to `slack-bot` — the recommended flow, and the tile the dialog lists
- * first (`DESTINATION_TYPES`); the legacy `slack` webhook trails it.
- */
+/** Defaults to `slack-bot` — the tile the dialog lists first. */
 export function defaultDestinationForm(type: AlertDestinationType = "slack-bot"): DestinationFormState {
 	return {
 		type,
 		name: "",
 		enabled: true,
-		channelLabel: "",
 		webhookUrl: "",
 		slackChannelId: "",
 		slackChannelName: "",
 		integrationKey: "",
 		url: "",
 		signingSecret: "",
-		hazelWebhookUrl: "",
 		hazelOrganizationId: "",
 		hazelOrganizationName: "",
 		hazelOrganizationLogoUrl: null,
@@ -535,7 +478,6 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 		type: destination.type,
 		name: destination.name,
 		enabled: destination.enabled,
-		channelLabel: destination.channelLabel ?? "",
 		webhookUrl: "",
 		// slack-bot hydrates `channelLabel` as `#name`; keep the current channel
 		// visible on edit (its id isn't returned — an empty id keeps the stored one).
@@ -545,7 +487,6 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 		integrationKey: "",
 		url: "",
 		signingSecret: "",
-		hazelWebhookUrl: "",
 		hazelOrganizationId: "",
 		hazelOrganizationName: "",
 		hazelOrganizationLogoUrl: null,
@@ -557,16 +498,6 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 
 export function buildDestinationCreateParamsV2(form: DestinationFormState): V2AlertDestinationCreateParams {
 	switch (form.type) {
-		case "slack": {
-			const channelLabel = form.channelLabel.trim()
-			return {
-				type: "slack",
-				name: form.name.trim(),
-				enabled: form.enabled,
-				webhook_url: form.webhookUrl.trim(),
-				...(channelLabel ? { channel_label: channelLabel } : {}),
-			}
-		}
 		case "slack-bot": {
 			const channelName = form.slackChannelName.trim()
 			return {
@@ -591,16 +522,6 @@ export function buildDestinationCreateParamsV2(form: DestinationFormState): V2Al
 				name: form.name.trim(),
 				enabled: form.enabled,
 				url: form.url.trim(),
-				...(signingSecret ? { signing_secret: signingSecret } : {}),
-			}
-		}
-		case "hazel": {
-			const signingSecret = form.signingSecret.trim()
-			return {
-				type: "hazel",
-				name: form.name.trim(),
-				enabled: form.enabled,
-				webhook_url: form.hazelWebhookUrl.trim(),
 				...(signingSecret ? { signing_secret: signingSecret } : {}),
 			}
 		}
@@ -643,17 +564,6 @@ export function buildDestinationCreateParamsV2(form: DestinationFormState): V2Al
 export function buildDestinationUpdateParamsV2(form: DestinationFormState): V2AlertDestinationUpdateParams {
 	const name = form.name.trim()
 	switch (form.type) {
-		case "slack": {
-			const channelLabel = form.channelLabel.trim()
-			const webhookUrl = form.webhookUrl.trim()
-			return {
-				type: "slack",
-				enabled: form.enabled,
-				...(name ? { name } : {}),
-				...(channelLabel ? { channel_label: channelLabel } : {}),
-				...(webhookUrl ? { webhook_url: webhookUrl } : {}),
-			}
-		}
 		case "slack-bot": {
 			const channelId = form.slackChannelId.trim()
 			const channelName = form.slackChannelName.trim()
@@ -682,17 +592,6 @@ export function buildDestinationUpdateParamsV2(form: DestinationFormState): V2Al
 				enabled: form.enabled,
 				...(name ? { name } : {}),
 				...(url ? { url } : {}),
-				...(signingSecret ? { signing_secret: signingSecret } : {}),
-			}
-		}
-		case "hazel": {
-			const webhookUrl = form.hazelWebhookUrl.trim()
-			const signingSecret = form.signingSecret.trim()
-			return {
-				type: "hazel",
-				enabled: form.enabled,
-				...(name ? { name } : {}),
-				...(webhookUrl ? { webhook_url: webhookUrl } : {}),
 				...(signingSecret ? { signing_secret: signingSecret } : {}),
 			}
 		}
@@ -806,6 +705,27 @@ export function v2CheckToDocument(check: V2AlertCheck): AlertCheckDocument {
 		evaluationDurationMs: check.evaluation_duration_ms,
 		errorMessage: check.error_message,
 		errorCategory: check.error_category,
+	})
+}
+
+export function v2DeliveryToDocument(delivery: V2AlertDelivery): AlertDeliveryEventDocument {
+	return new AlertDeliveryEventDocument({
+		id: delivery.id,
+		incidentId: delivery.incident_id,
+		ruleId: delivery.rule_id,
+		destinationId: delivery.destination_id,
+		destinationName: delivery.destination_name,
+		destinationType: delivery.destination_type,
+		deliveryKey: delivery.delivery_key,
+		eventType: delivery.event_type,
+		attemptNumber: delivery.attempt_number,
+		status: delivery.status,
+		scheduledAt: asIso(delivery.scheduled_at),
+		attemptedAt: asIsoOrNull(delivery.attempted_at),
+		providerMessage: delivery.provider_message,
+		providerReference: delivery.provider_reference,
+		responseCode: delivery.response_code,
+		errorMessage: delivery.error_message,
 	})
 }
 

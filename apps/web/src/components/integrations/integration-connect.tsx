@@ -5,12 +5,13 @@ import {
 	CloudflareStartConnectRequest,
 	GithubStartConnectRequest,
 	HazelStartConnectRequest,
-	PlanetScaleStartConnectRequest,
 } from "@maple/domain/http"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
+import { trackProduct } from "@/lib/analytics"
 import { useAtomRefresh, useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import type { IntegrationId } from "./integration-catalog"
 
 /**
@@ -142,7 +143,7 @@ function useOAuthPopupFlow({
 			popup?.close()
 			popupRef.current = null
 			setPopupOpen(false)
-			toast.error(startErrorMessage(result))
+			toastManager.add({ title: startErrorMessage(result), type: "error" })
 		}
 	}
 
@@ -159,7 +160,13 @@ function useIntegrationMessage(
 	handlerRef.current = onMessage
 	useEffect(() => {
 		function listener(event: MessageEvent) {
-			if (event.data?.type === type) handlerRef.current(event.data)
+			if (event.data?.type !== type) return
+			// Every provider's popup posts back through here, so the activation event
+			// is recorded once rather than in each card's success branch.
+			if (event.data?.status === "success") {
+				trackProduct("integration_connected", { provider: type.split(":").pop() ?? type })
+			}
+			handlerRef.current(event.data)
 		}
 		window.addEventListener("message", listener)
 		return () => window.removeEventListener("message", listener)
@@ -183,11 +190,11 @@ function CloudflareConnectBoundary({ children }: { children: React.ReactNode }) 
 
 	useIntegrationMessage("maple:integration:cloudflare", (data) => {
 		if (data.status === "success") {
-			toast.success("Cloudflare account connected")
+			toastManager.add({ title: "Cloudflare account connected", type: "success" })
 			refreshStatus()
 			refreshUsage()
 		} else if (data.status === "error") {
-			toast.error(data.message ?? "Cloudflare connection failed")
+			toastManager.add({ title: data.message ?? "Cloudflare connection failed", type: "error" })
 		}
 	})
 
@@ -221,10 +228,10 @@ function HazelConnectBoundary({ children }: { children: React.ReactNode }) {
 
 	useIntegrationMessage("maple:integration:hazel", (data) => {
 		if (data.status === "success") {
-			toast.success("Hazel connected")
+			toastManager.add({ title: "Hazel connected", type: "success" })
 			refreshStatus()
 		} else if (data.status === "error") {
-			toast.error(data.message ?? "Hazel connection failed")
+			toastManager.add({ title: data.message ?? "Hazel connection failed", type: "error" })
 		}
 	})
 
@@ -255,10 +262,10 @@ function GithubConnectBoundary({ children }: { children: React.ReactNode }) {
 
 	useIntegrationMessage("maple:integration:github", (data) => {
 		if (data.status === "success") {
-			toast.success("GitHub connected")
+			toastManager.add({ title: "GitHub connected", type: "success" })
 			refreshStatus()
 		} else if (data.status === "error") {
-			toast.error(data.message ?? "GitHub connection failed")
+			toastManager.add({ title: data.message ?? "GitHub connection failed", type: "error" })
 		}
 	})
 
@@ -282,11 +289,11 @@ function GithubConnectBoundary({ children }: { children: React.ReactNode }) {
 
 function PlanetscaleConnectBoundary({ children }: { children: React.ReactNode }) {
 	const refreshStatus = useAtomRefresh(
-		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
-	const startConnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "planetscaleStart"), {
+	const startConnect = useAtomSet(MapleApiV2AtomClient.mutation("planetscaleIntegration", "connect"), {
 		mode: "promiseExit",
 	})
 
@@ -294,18 +301,20 @@ function PlanetscaleConnectBoundary({ children }: { children: React.ReactNode })
 		if (data.status === "success") {
 			refreshStatus()
 		} else if (data.status === "error") {
-			toast.error(data.message ?? "PlanetScale connection failed")
+			toastManager.add({ title: data.message ?? "PlanetScale connection failed", type: "error" })
 		}
 	})
 
 	const value = useOAuthPopupFlow({
 		windowName: "maple-planetscale-connect",
 		windowFeatures: "popup,width=520,height=680",
+		// PlanetScale is the one provider on v2, whose wire format is snake_case —
+		// adapt at the boundary rather than teaching the shared hook two shapes.
 		start: () =>
 			startConnect({
-				payload: new PlanetScaleStartConnectRequest({ returnTo: window.location.href }),
-				reactivityKeys: ["planetscaleIntegrationStatus"],
-			}),
+				payload: { return_to: window.location.href },
+				reactivityKeys: ["planetscaleIntegration"],
+			}).then(Exit.map(({ redirect_url }) => ({ redirectUrl: redirect_url }))),
 		startErrorMessage: (result) =>
 			extractErrorMessage(result) ?? "Failed to start PlanetScale connect flow",
 		onClosed: refreshStatus,

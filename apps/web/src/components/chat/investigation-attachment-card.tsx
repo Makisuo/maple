@@ -1,4 +1,4 @@
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import type { InvestigationContext, InvestigationKind } from "./investigation-context"
 
 const ACCENT: Record<string, { stripe: string; tint: string }> = {

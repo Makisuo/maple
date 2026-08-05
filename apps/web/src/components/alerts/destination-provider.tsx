@@ -2,7 +2,7 @@ import type { AlertDestinationType } from "@maple/domain/http"
 import { useState, type ReactNode } from "react"
 import { CodeIcon, DiscordIcon, EnvelopeIcon, HazelIcon, SlackIcon } from "@/components/icons"
 import { SLACK_ACCENT, SLACK_ACCENT_ON_LIGHT } from "@/components/integrations/integration-catalog"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 const BRANDFETCH_CLIENT_ID = "1id0IQ-4i8Z46-n-DfQ"
 
@@ -78,23 +78,6 @@ export type DestinationProvider = {
 }
 
 export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
-	slack: {
-		type: "slack",
-		label: "Slack (webhook)",
-		description: "Post alerts to a Slack channel via an incoming webhook you manage.",
-		accent: SLACK_ACCENT,
-		accentBg: SLACK_ACCENT_BG,
-		accentText: SLACK_ACCENT_TEXT,
-		// White clears both halves of the aubergine pair: 14.0:1 on #4A154B (light),
-		// 4.65:1 on #AD51A7 (dark) — the dark stand-in was picked for this margin.
-		accentOn: INK_ON_DARK_ACCENT,
-		// Deliberately no `brandfetchDomain`: the bot entry renders the local
-		// SlackIcon and the two rows sit next to each other — a remote CDN bitmap
-		// here would make the same product look like two.
-		fallbackIcon: ({ size = 22, className }) => <SlackIcon size={size} className={className} />,
-		docsUrl: "https://api.slack.com/messaging/webhooks",
-		docsLabel: "Slack webhook docs",
-	},
 	"slack-bot": {
 		type: "slack-bot",
 		label: "Slack (bot)",
@@ -102,7 +85,7 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		accent: SLACK_ACCENT,
 		accentBg: SLACK_ACCENT_BG,
 		accentText: SLACK_ACCENT_TEXT,
-		// Same aubergine pair as the webhook row — 14.0:1 light / 4.65:1 dark.
+		// 14.0:1 light / 4.65:1 dark.
 		accentOn: INK_ON_DARK_ACCENT,
 		fallbackIcon: ({ size = 22, className }) => <SlackIcon size={size} className={className} />,
 		docsUrl: "https://maple.dev/docs/integrations/slack",
@@ -137,19 +120,6 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		accentOn: INK_ON_BRIGHT_ACCENT,
 		fallbackIcon: ({ size = 22, className }) => <CodeIcon size={size} className={className} />,
 	},
-	hazel: {
-		type: "hazel",
-		label: "Hazel (webhook)",
-		description: "Legacy webhook integration — paste the URL Hazel issues you.",
-		accent: "#F46F0F",
-		accentBg: "rgba(244,111,15,0.16)",
-		accentText: HAZEL_ACCENT_TEXT,
-		// White on Hazel's orange is 2.95:1; #1E1B17 is 5.82:1.
-		accentOn: INK_ON_BRIGHT_ACCENT,
-		fallbackIcon: ({ size = 22, className }) => <HazelIcon size={size} className={className} />,
-		docsUrl: "https://hazel.sh/docs/integrations/maple",
-		docsLabel: "Hazel integration guide",
-	},
 	"hazel-oauth": {
 		type: "hazel-oauth",
 		label: "Hazel",
@@ -157,7 +127,7 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		accent: "#F46F0F",
 		accentBg: "rgba(244,111,15,0.16)",
 		accentText: HAZEL_ACCENT_TEXT,
-		// Same orange as the webhook row — 2.95:1 white, 5.82:1 on #1E1B17.
+		// 2.95:1 white, 5.82:1 on #1E1B17.
 		accentOn: INK_ON_BRIGHT_ACCENT,
 		fallbackIcon: ({ size = 22, className }) => <HazelIcon size={size} className={className} />,
 		docsUrl: "https://hazel.sh/docs/integrations/maple",
@@ -195,16 +165,13 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 	},
 }
 
-// The recommended bot flow leads; the legacy webhook entry trails it.
 export const DESTINATION_TYPES: ReadonlyArray<AlertDestinationType> = [
 	"slack-bot",
-	"slack",
 	"discord",
 	"email",
 	"pagerduty",
 	"webhook",
 	"hazel-oauth",
-	"hazel",
 ]
 
 interface ProviderLogoProps {

@@ -3,7 +3,7 @@ import { useMemo } from "react"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card } from "@maple/ui/components/ui/card"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import type { AlertRulePreviewResponse } from "@maple/domain/http"
 import { AlertRuleChart } from "@/components/alerts/alert-rule-chart"

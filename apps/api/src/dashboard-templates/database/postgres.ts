@@ -8,8 +8,8 @@ import {
 	paramValue,
 	serviceWhereClause,
 	templateId,
-} from "../helpers"
-import type { TemplateDefinition, WidgetDef } from "../types"
+} from "@/dashboard-templates/helpers"
+import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 // The postgresreceiver puts database identity on the RESOURCE, not on the datapoint
 // (`postgresql.database.name`), and reports its level metrics — backends, db_size — as

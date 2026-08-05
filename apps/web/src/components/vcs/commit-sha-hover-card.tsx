@@ -1,15 +1,15 @@
-import { formatRelativeFrom, formatRelativeShortFrom } from "@maple/ui/time-format"
+import { formatRelativeFrom, formatRelativeShortFrom } from "@maple/ui/lib/time-format"
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
-import { CheckIcon, CopyIcon } from "@/components/icons"
 import type { VcsCommitDetailResponse } from "@maple/domain/http"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@maple/ui/components/ui/hover-card"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
-import { cn } from "@maple/ui/utils"
+import { CopyIndicator } from "@maple/ui/components/ui/copy-button"
+import { useCopy } from "@maple/ui/hooks/use-copy"
+import { cn } from "@maple/ui/lib/utils"
 
 // A full 40-hex git SHA. Telemetry `deployment.commit_sha` is unguarded OTel
 // data, so a value may be a short SHA, a tag, or arbitrary text — those never
@@ -78,7 +78,7 @@ export function CommitShaHoverCard({
 	anchor,
 }: CommitShaHoverCardProps) {
 	const isFullSha = FULL_SHA.test(sha)
-	const shaCopy = useCopyToClipboard(copy?.label ?? "Value")
+	const shaCopy = useCopy({ label: copy?.label ?? "Value" })
 	// Once armed we keep it armed: the in-flight/cached result should survive the
 	// cursor leaving, so a re-hover is instant.
 	const [armed, setArmed] = useState(false)
@@ -91,7 +91,7 @@ export function CommitShaHoverCard({
 		[],
 	)
 
-	const handleCopy = copy ? () => shaCopy.copy(copy.value) : undefined
+	const handleCopy = copy ? () => void shaCopy.copy(copy.value) : undefined
 
 	// Non-resolvable SHA (short/tag/arbitrary telemetry): no card, no fetch. Still
 	// copyable where a copy affordance was requested.
@@ -432,25 +432,21 @@ function ExternalText({
 // The short SHA, rendered as a copy button (copies the full SHA). Replaces the
 // bare badge so the value is actually useful instead of just decorative.
 function CopyableSha({ sha }: { sha: string }) {
-	// Silent: the inline check icon is the feedback.
-	const { copied, copy } = useCopyToClipboard("Commit SHA", { silent: true })
+	const { copy, status } = useCopy({ label: "Commit SHA", toast: false })
 
 	return (
 		<button
 			type="button"
-			onClick={() => copy(sha)}
+			onClick={() => void copy(sha)}
 			aria-label="Copy commit SHA"
 			className="group inline-flex items-center gap-1.5 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground/80 transition-colors hover:bg-muted/70"
 		>
 			{sha.slice(0, 7)}
-			{copied ? (
-				<CheckIcon size={11} className="text-success" />
-			) : (
-				<CopyIcon
-					size={11}
-					className="text-muted-foreground transition-colors group-hover:text-foreground/80"
-				/>
-			)}
+			<CopyIndicator
+				status={status}
+				size={11}
+				className="text-muted-foreground transition-colors group-hover:text-foreground/80"
+			/>
 		</button>
 	)
 }

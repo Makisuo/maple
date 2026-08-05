@@ -13,7 +13,6 @@ export type WarehouseSearchFeature =
 	| "logs.attributes.text"
 	| "traces.attributes.bloom"
 	| "traces.attributes.text"
-	| "logs.time_projection"
 
 export interface WarehouseIndexCapability {
 	readonly table: string
@@ -44,11 +43,6 @@ export interface WarehouseColumnMetadataRow {
 	readonly name: string
 }
 
-export interface WarehouseProjectionMetadataRow {
-	readonly table: string
-	readonly name: string
-}
-
 export interface WarehouseSettingMetadataRow {
 	readonly name: string
 	readonly value: string | number
@@ -65,9 +59,6 @@ export const WarehouseIndexMetadataSchema = Schema.Array(
 	}),
 )
 export const WarehouseColumnMetadataSchema = Schema.Array(
-	Schema.Struct({ table: Schema.String, name: Schema.String }),
-)
-export const WarehouseProjectionMetadataSchema = Schema.Array(
 	Schema.Struct({ table: Schema.String, name: Schema.String }),
 )
 export const WarehouseSettingMetadataSchema = Schema.Array(
@@ -100,7 +91,6 @@ export const deriveWarehouseCapabilities = (input: {
 	readonly serverVersion?: string
 	readonly indexes: ReadonlyArray<WarehouseIndexMetadataRow>
 	readonly columns: ReadonlyArray<WarehouseColumnMetadataRow>
-	readonly projections?: ReadonlyArray<WarehouseProjectionMetadataRow>
 	readonly settings?: ReadonlyArray<WarehouseSettingMetadataRow>
 	/** Managed gateways may expose settings metadata but reject inline overrides. */
 	readonly allowSettingOverrides?: boolean
@@ -115,7 +105,6 @@ export const deriveWarehouseCapabilities = (input: {
 		})
 	}
 	const columns = new Set(input.columns.map((row) => columnKey(row.table, row.name)))
-	const projections = new Set((input.projections ?? []).map((row) => indexKey(row.table, row.name)))
 	const features = new Set<WarehouseSearchFeature>()
 	const fullTextSetting = input.settings?.find((row) => row.name === "enable_full_text_index")
 	const fullTextSearchSetting =
@@ -185,8 +174,6 @@ export const deriveWarehouseCapabilities = (input: {
 	) {
 		features.add("traces.attributes.text")
 	}
-
-	if (projections.has("logs.logs_by_time")) features.add("logs.time_projection")
 
 	return {
 		serverVersion: input.serverVersion,

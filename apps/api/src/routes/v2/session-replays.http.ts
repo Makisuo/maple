@@ -1,38 +1,88 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, SessionId, TraceId } from "@maple/domain/http"
 import {
+	MAX_REPLAY_CHUNKS_PER_REQUEST,
+	MAX_REPLAY_EVENTS_RESPONSE_BYTES,
+	MAX_REPLAY_MANIFEST_CHUNKS,
+	LIST_LIMIT_DEFAULT,
 	MapleApiV2,
 	dependencyUnavailable,
 	invalidRequest,
 	paginateArray,
 	paginateOffsetQuery,
+	payloadTooLarge,
 	resourceNotFound,
 	timestamp,
 } from "@maple/domain/http/v2"
 import type { Timestamp } from "@maple/domain/http/v2"
+import type { WarehouseError } from "@maple/domain/http"
+import type { WarehouseResponseLimitError } from "@maple/query-engine/execution"
 import type {
 	V2SessionReplay,
 	V2SessionReplayChunk,
+	V2SessionReplayChunkMeta,
 	V2SessionReplayListItem,
+	V2SessionReplayManifest,
 	V2SessionReplayRef,
 	V2SessionTranscriptEvent,
 } from "@maple/domain/http/v2"
-import { CH } from "@maple/query-engine"
-import { Effect, Option, Schema } from "effect"
-import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
+import { CH, formatWarehouseDateTime } from "@maple/query-engine"
+import { Effect, Layer, Option, Schema } from "effect"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { ReplayBlobStore, ReplayBlobStoreLive } from "@/platform/ReplayBlobStore"
+import { warehouseToV2 } from "./warehouse-error-map"
 
 const decodeSessionId = Schema.decodeSync(SessionId)
 const decodeTraceId = Schema.decodeSync(TraceId)
 
-/** Warehouse/query-engine errors → a uniform 503 (all reads). */
-const mapWarehouseError = () => dependencyUnavailable("session_replay_query_unavailable")
+/** Warehouse errors → the proper v2 envelope (400/429/502/503 per tag). */
+const mapWarehouseError = warehouseToV2("session_replay_query")
+
+/**
+ * Refuse a chunk range whose payload would blow the response budget, before a
+ * byte of it is fetched.
+ *
+ * Once payloads live in R2 the warehouse response is only an index — `Events` is
+ * empty — so the `responseLimits` ceiling on that read stops measuring anything
+ * that matters, and the memory cost moves to hydration. `ByteSize` is the
+ * uncompressed payload size and is right there in the index, so the range can be
+ * rejected without touching the blob store at all. Cheaper and more honest than
+ * discovering the problem mid-hydration.
+ */
+const assertRangeFitsBudget = (rows: ReadonlyArray<{ readonly byteSize: number }>) => {
+	const total = rows.reduce((sum, row) => sum + Number(row.byteSize), 0)
+	return total <= MAX_REPLAY_EVENTS_RESPONSE_BYTES
+		? Effect.void
+		: Effect.fail(
+				payloadTooLarge(
+					"That part of the recording is too large to load in one request. Request a narrower chunk range.",
+					"to_chunk_seq",
+				),
+			)
+}
+
+/**
+ * Warehouse errors → the v2 envelope, plus the bounded-read refusal.
+ *
+ * `range_too_large` keeps its message verbatim across the public boundary: it
+ * carries no database diagnostics — only the range asked for — and unlike the
+ * warehouse faults it is entirely actionable, so redacting it would strip the
+ * one useful thing it says.
+ */
+const mapReplayReadError = (error: WarehouseError | WarehouseResponseLimitError) =>
+	error._tag === "@maple/query-engine/execution/WarehouseResponseLimitError"
+		? payloadTooLarge(
+				"That part of the recording is too large to load in one request. Request a narrower chunk range.",
+				"to_chunk_seq",
+			)
+		: mapWarehouseError(error)
 
 /** ISO-8601 → Tinybird `YYYY-MM-DD HH:mm:ss` (UTC), validated. */
 const toTinybird = (value: string, param: string) => {
 	const ms = Date.parse(value)
 	return Number.isNaN(ms)
 		? Effect.fail(invalidRequest("parameter_invalid", `Invalid ISO-8601 timestamp for ${param}.`, param))
-		: Effect.succeed(new Date(ms).toISOString().slice(0, 19).replace("T", " "))
+		: Effect.succeed(formatWarehouseDateTime(ms))
 }
 
 const optTinybird = (value: string | undefined, param: string) =>
@@ -50,9 +100,10 @@ const chToIsoOrNull = (value: string | null): Timestamp | null => (value === nul
 
 const nullableUserId = (value: string | null): string | null => (value ? value : null)
 
-export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessionReplays", (handlers) =>
+const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionReplays", (handlers) =>
 	Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService
+		const blobs = yield* ReplayBlobStore
 
 		const requireSession = Effect.fn("HttpV2SessionReplays.requireSession")(function* (
 			tenant: CurrentTenant.TenantSchema,
@@ -91,6 +142,12 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 									? { deviceType: payload.device_type }
 									: {}),
 								...(payload.user_id !== undefined ? { userId: payload.user_id } : {}),
+								...(payload.user_search !== undefined
+									? { userSearch: payload.user_search }
+									: {}),
+								...(payload.group_name !== undefined
+									? { groupName: payload.group_name }
+									: {}),
 								...(payload.has_errors !== undefined
 									? { hasErrors: payload.has_errors }
 									: {}),
@@ -126,6 +183,10 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 											duration_ms: row.durationMs,
 											status: row.status,
 											user_id: nullableUserId(row.userId),
+											user_name: row.userName,
+											user_email: row.userEmail,
+											group_id: row.groupId,
+											group_name: row.groupName,
 											url_initial: row.urlInitial,
 											browser_name: row.browserName,
 											os_name: row.osName,
@@ -188,6 +249,10 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 						duration_ms: data.durationMs,
 						status: data.status,
 						user_id: nullableUserId(data.userId),
+						user_name: data.userName,
+						user_email: data.userEmail,
+						group_id: data.groupId,
+						group_name: data.groupName,
 						url_initial: data.urlInitial,
 						browser_name: data.browserName,
 						os_name: data.osName,
@@ -208,35 +273,144 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 					return replay
 				}),
 			)
-			.handle("events", ({ params, query }) =>
+			.handle("manifest", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const windowStart = yield* optTinybird(query.window_start, "window_start")
 					const windowEnd = yield* optTinybird(query.window_end, "window_end")
 					const compiled = CH.compile(
-						CH.sessionReplayEventsQuery({ startTime: windowStart, endTime: windowEnd }),
+						CH.sessionReplayChunkIndexQuery({ startTime: windowStart, endTime: windowEnd }),
 						{ orgId: tenant.orgId, sessionId: params.id },
 					)
+					// `discovery` is enough — this never reads the `Events` column, and
+					// with payloads in R2 there is nothing to hydrate here either: the
+					// manifest is a pure index read whatever the storage backend.
 					const rows = yield* warehouse
-						.compiledQuery(tenant, compiled, { profile: "list", context: "v2GetReplayEvents" })
+						.compiledQuery(tenant, compiled, {
+							profile: "discovery",
+							context: "v2GetReplayManifest",
+						})
 						.pipe(Effect.mapError(mapWarehouseError))
 					if (rows.length === 0) {
 						yield* requireSession(tenant, params.id, windowStart, windowEnd)
 					}
-					const chunks = rows.map(
+					const truncated = rows.length > MAX_REPLAY_MANIFEST_CHUNKS
+					// ClickHouse JSON-quotes 64-bit ints on backends that refuse the
+					// unquote setting; coerce before Schema.Number validates.
+					const chunks = rows.slice(0, MAX_REPLAY_MANIFEST_CHUNKS).map(
 						(row) =>
 							({
-								object: "session_replay.event_chunk" as const,
-								chunk_seq: row.chunkSeq,
+								chunk_seq: Number(row.chunkSeq),
 								timestamp: chToIso(row.timestamp),
-								duration_ms: row.durationMs,
-								event_count: row.eventCount,
-								byte_size: row.byteSize,
+								duration_ms: Number(row.durationMs),
+								event_count: Number(row.eventCount),
+								byte_size: Number(row.byteSize),
 								is_checkpoint: Number(row.isCheckpoint) !== 0,
-								events: row.events,
-							}) satisfies V2SessionReplayChunk,
+							}) satisfies V2SessionReplayChunkMeta,
 					)
-					const page = yield* paginateArray(chunks, query)
+					yield* Effect.annotateCurrentSpan({
+						"maple.replay.chunk_count": chunks.length,
+						"maple.replay.truncated": truncated,
+					})
+					return {
+						object: "session_replay.manifest" as const,
+						session_id: params.id,
+						chunks,
+						chunk_count: chunks.length,
+						total_byte_size: chunks.reduce((sum, chunk) => sum + chunk.byte_size, 0),
+						max_chunks_per_request: MAX_REPLAY_CHUNKS_PER_REQUEST,
+						max_bytes_per_request: MAX_REPLAY_EVENTS_RESPONSE_BYTES,
+						truncated,
+					} satisfies V2SessionReplayManifest
+				}),
+			)
+			.handle("events", ({ params, query }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const windowStart = yield* optTinybird(query.window_start, "window_start")
+					const windowEnd = yield* optTinybird(query.window_end, "window_end")
+					// Clamp rather than reject: asking for a chunk past the cap should
+					// still return data. Only a range whose *payload* blows the byte
+					// budget is refused, below.
+					const fromChunkSeq = query.from_chunk_seq
+					const toChunkSeq =
+						fromChunkSeq === undefined
+							? query.to_chunk_seq
+							: Math.min(
+									query.to_chunk_seq ?? Number.POSITIVE_INFINITY,
+									fromChunkSeq + MAX_REPLAY_CHUNKS_PER_REQUEST - 1,
+								)
+					yield* Effect.annotateCurrentSpan({
+						"maple.session.id": params.id,
+						"maple.replay.chunk_from": fromChunkSeq ?? -1,
+						"maple.replay.chunk_to": toChunkSeq ?? -1,
+					})
+					// Pagination is pushed into SQL. It used to be applied to an
+					// already-materialized array, so every page paid for the whole
+					// session's payload — the read this endpoint could never survive.
+					//
+					// The page size is clamped to the same cap the SQL enforces. Left
+					// unclamped, `limit=100` would ask the lookahead for 101 rows, get
+					// the SQL cap of 41, and conclude 41 <= 100 means "no more pages" —
+					// silently returning a short page with `has_more: false` and
+					// dropping the rest of the recording.
+					const pageQuery = {
+						...query,
+						limit: Math.min(query.limit ?? LIST_LIMIT_DEFAULT, MAX_REPLAY_CHUNKS_PER_REQUEST),
+					}
+					const page = yield* paginateOffsetQuery(pageQuery, ({ limit, offset }) => {
+						const compiled = CH.compile(
+							CH.sessionReplayEventsQuery({
+								startTime: windowStart,
+								endTime: windowEnd,
+								fromChunkSeq,
+								toChunkSeq: toChunkSeq === Number.POSITIVE_INFINITY ? undefined : toChunkSeq,
+								limit: Math.min(limit, MAX_REPLAY_CHUNKS_PER_REQUEST + 1),
+								offset,
+							}),
+							{ orgId: tenant.orgId, sessionId: params.id },
+						)
+						// Two ceilings, because there are two places the payload can come
+						// from. `responseLimits` bounds what the warehouse hands back —
+						// the only guard for pre-cutover rows, which still carry `events`
+						// inline. Blob-backed rows make that response nearly empty, so it
+						// would pass anything; `assertRangeFitsBudget` below bounds the
+						// hydration instead, using sizes the index already knows.
+						return warehouse
+							.compiledQueryBounded(tenant, compiled, {
+								profile: "list",
+								context: "v2GetReplayEvents",
+								responseLimits: {
+									maxRows: MAX_REPLAY_CHUNKS_PER_REQUEST + 1,
+									maxBytes: MAX_REPLAY_EVENTS_RESPONSE_BYTES,
+								},
+							})
+							.pipe(
+								Effect.mapError(mapReplayReadError),
+								Effect.tap((rows) =>
+									rows.length === 0 && offset === 0
+										? requireSession(tenant, params.id, windowStart, windowEnd)
+										: Effect.void,
+								),
+								Effect.tap(assertRangeFitsBudget),
+								// Blob-backed rows (empty `events`) get their payload from
+								// R2; pre-cutover rows already carry it inline.
+								Effect.flatMap((rows) => blobs.hydrate(tenant.orgId, params.id, rows)),
+								Effect.map(
+									(rows): ReadonlyArray<V2SessionReplayChunk> =>
+										rows.map((row) => ({
+											object: "session_replay.event_chunk" as const,
+											chunk_seq: Number(row.chunkSeq),
+											timestamp: chToIso(row.timestamp),
+											duration_ms: Number(row.durationMs),
+											event_count: Number(row.eventCount),
+											byte_size: Number(row.byteSize),
+											is_checkpoint: Number(row.isCheckpoint) !== 0,
+											events: row.events,
+										})),
+								),
+							)
+					})
 					return { object: "list" as const, ...page }
 				}),
 			)
@@ -339,3 +513,10 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 			)
 	}),
 )
+
+// Self-contained: the blob store resolves from the worker env (and degrades to
+// a no-op hydrator when the R2 binding is absent), so it is provided here
+// rather than pushed onto every caller that builds this group — the v2 route
+// tests construct their own layer stack and would otherwise have to know about
+// a storage detail of one handler.
+export const HttpV2SessionReplaysLive = HttpV2SessionReplaysGroup.pipe(Layer.provide(ReplayBlobStoreLive))

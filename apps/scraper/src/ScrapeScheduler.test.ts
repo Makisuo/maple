@@ -605,17 +605,32 @@ describe("sendResultsInChunks", () => {
 })
 
 describe("nextScrapeDelayMs", () => {
-	const ok: ScrapeOutcome = { error: null, rateLimited: false, authFailed: false, retryAfterMs: null }
+	const ok: ScrapeOutcome = {
+		error: null,
+		rateLimited: false,
+		authFailed: false,
+		deliveryBlocked: false,
+		retryAfterMs: null,
+	}
 	const limited = (retryAfterMs: number | null = null): ScrapeOutcome => ({
 		error: "target returned HTTP 429",
 		rateLimited: true,
 		authFailed: false,
+		deliveryBlocked: false,
 		retryAfterMs,
 	})
 	const authRejected: ScrapeOutcome = {
 		error: "target returned HTTP 403",
 		rateLimited: false,
 		authFailed: true,
+		deliveryBlocked: false,
+		retryAfterMs: null,
+	}
+	const deliveryBlocked: ScrapeOutcome = {
+		error: "ingest gateway rejected metrics: billing limit reached (HTTP 402)",
+		rateLimited: false,
+		authFailed: false,
+		deliveryBlocked: true,
 		retryAfterMs: null,
 	}
 
@@ -635,6 +650,24 @@ describe("nextScrapeDelayMs", () => {
 		assert.strictEqual(
 			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 3 }),
 			80_000,
+		)
+	})
+
+	// Regression: a 402 from our own gateway used to flatten into the generic
+	// "some error" outcome with both backoff flags false, so the target kept
+	// scraping at full cadence and re-POSTing data the gateway would refuse again.
+	it("escalates exponentially when the ingest gateway refuses delivery (402)", () => {
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: deliveryBlocked, consecutiveBackoffs: 0 }),
+			10_000,
+		)
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: deliveryBlocked, consecutiveBackoffs: 3 }),
+			80_000,
+		)
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 60_000, outcome: deliveryBlocked, consecutiveBackoffs: 5 }),
+			Duration.toMillis(Duration.minutes(5)),
 		)
 	})
 

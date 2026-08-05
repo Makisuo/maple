@@ -6,7 +6,7 @@ import { signalLabels } from "@/lib/alerts/form-utils"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { TableCell, TableRow } from "@maple/ui/components/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 /* -------------------------------------------------------------------------- */
 /*  Signal badge tone                                                         */
@@ -20,8 +20,8 @@ const signalBadgeClass: Record<string, string> = {
 	// Throughput rides the dedicated chart-throughput hue so the chip stays
 	// distinguishable from the amber p95/apdex chips (see DESIGN.md).
 	throughput: "border-[var(--chart-throughput)]/30 text-[var(--chart-throughput)]",
-	metric: "border-muted-foreground/30 text-muted-foreground",
-	query: "border-muted-foreground/30 text-muted-foreground",
+	builder_query: "border-muted-foreground/30 text-muted-foreground",
+	raw_query: "border-muted-foreground/30 text-muted-foreground",
 }
 
 export function SignalBadge({ signalType }: { signalType: string }) {

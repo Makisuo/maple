@@ -4,25 +4,31 @@ import {
 	optionalStringParam,
 	type McpToolRegistrar,
 } from "./types"
-import { warehouseToMcpHandlers } from "../lib/map-warehouse-error"
-import { withTenantExecutor, resolveTenant } from "../lib/query-warehouse"
-import { resolveTimeRange, formatClampNote } from "../lib/time"
-import { clampLimit, clampOffset } from "../lib/limits"
-import { formatTable, truncate } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
+import { withTenantExecutor, resolveTenant } from "@/mcp/lib/query-warehouse"
+import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
+import { clampLimit, clampOffset } from "@/mcp/lib/limits"
+import { formatTable, truncate } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, Schema, pipe } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { searchSessions } from "@maple/query-engine/observability"
 
 export function registerSearchSessionsTool(server: McpToolRegistrar) {
 	server.tool(
 		"search_sessions",
-		"List and filter browser session replays. Filter by WHO (user_id — the app's end-user id), by client (browser, country, device_type), by whether the session errored (has_errors), by how long it lasted (duration/active bounds), and/or by WHAT HAPPENED inside it (event_type, level, http_status_min, url_contains, message_contains, trace_id). Returns each session's metadata including the end-user id. All filters are ANDed. Follow up with `get_session_transcript` to read a session's events or `get_session_traces` to see the backend traces it produced.",
+		"List and filter browser session replays. Filter by WHO (user_id — the app's end-user id; user_search — their name or email; group_name — their company/team), by client (browser, country, device_type), by whether the session errored (has_errors), by how long it lasted (duration/active bounds), and/or by WHAT HAPPENED inside it (event_type, level, http_status_min, url_contains, message_contains, trace_id). Returns each session's metadata including the end-user id. All filters are ANDed. Follow up with `get_session_transcript` to read a session's events or `get_session_traces` to see the backend traces it produced.",
 		Schema.Struct({
 			start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
 			end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
 			// Session metadata filters (who / where / how long)
 			user_id: optionalStringParam("Exact match on the session's end-user id (e.g. 4632)"),
+			user_search: optionalStringParam(
+				"Case-insensitive substring match on the identified user's name or email (e.g. ada, @acme.com)",
+			),
+			group_name: optionalStringParam(
+				"Exact match on the identified group (company / team) name (e.g. Acme Inc)",
+			),
 			service: optionalStringParam("Exact match on the session's service name"),
 			browser: optionalStringParam("Exact match on browser name (e.g. Chrome)"),
 			country: optionalStringParam("Exact match on country"),
@@ -49,8 +55,11 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 			limit: optionalNumberParam("Max results (default 25)"),
 		}),
 		Effect.fn("McpTool.searchSessions")(function* (params) {
-			const range = resolveTimeRange(params.start_time, params.end_time, { maxHours: 24 * 7 })
+			const range = resolveTimeRange(params.start_time, params.end_time, {
+				maxHours: MCP_SEARCH_MAX_HOURS,
+			})
 			const { st, et } = range
+			if (range.exceeded) return rangeExceededResult(range, "search_sessions")
 			const lim = clampLimit(params.limit, { defaultValue: 25, max: 200 })
 			const off = clampOffset(params.offset, { max: 10_000 })
 
@@ -81,6 +90,8 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 					startTime: st,
 					endTime: et,
 					userId: params.user_id ?? undefined,
+					userSearch: params.user_search ?? undefined,
+					groupName: params.group_name ?? undefined,
 					serviceName: params.service ?? undefined,
 					browser: params.browser ?? undefined,
 					country: params.country ?? undefined,
@@ -129,7 +140,9 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 				const errorCount = Number(s.errorCount)
 				const device = [s.osName, s.deviceType].filter(Boolean).join(" / ")
 				const row = [
-					s.userId || "Anonymous",
+					// Same fallback chain as the web list: a name is more useful to an agent
+					// summarizing sessions than an opaque id.
+					s.userName || s.userEmail || s.userId || "Anonymous",
 					s.startTime,
 					s.durationMs != null ? `${Math.round(Number(s.durationMs))}ms` : "—",
 					s.browserName || "—",
@@ -144,7 +157,7 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 
 			const lines: string[] = [
 				`## Sessions (showing ${off + 1}–${off + sessions.length})`,
-				`Time range: ${st} — ${et}${formatClampNote(range)}`,
+				`Time range: ${st} — ${et}`,
 				``,
 				formatTable(headers, rows),
 			]
@@ -171,6 +184,10 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 							Arr.map((s) => ({
 								sessionId: s.sessionId,
 								userId: s.userId,
+								userName: s.userName,
+								userEmail: s.userEmail,
+								groupId: s.groupId,
+								groupName: s.groupName,
 								startTime: s.startTime,
 								durationMs: s.durationMs != null ? Number(s.durationMs) : null,
 								status: s.status,

@@ -168,11 +168,14 @@ chDB's single-writer requirement.
 The on-disk store at `~/.maple/data` is guarded by two sentinels beside it
 (`apps/cli/src/server/store-version.ts`):
 
-- **`maple-store-version.json`** — the chDB version that bootstrapped the store.
-  A different chDB build can't be trusted to reload another's persisted
-  materialized views (it may crash the C++ runtime natively, which JS can't
-  catch), so `maple start` **refuses up front** when the version differs.
-  Recover with `maple start --reset`.
+- **`maple-store-version.json`** — the chDB version and versioned Maple schema
+  identity that bootstrapped the store. A different chDB build can't be trusted
+  to reload another's persisted materialized views (it may crash the C++ runtime
+  natively, which JS can't catch), so `maple start` **refuses up front** when the
+  version differs. Current markers also carry a stable store id, immutable
+  creation provenance, a full schema digest, and an `active`/`staging` state.
+  Recover a store with an unsupported schema using `maple start --reset` only
+  when losing its live telemetry is acceptable.
 - **`maple-store-open`** — a clean-shutdown sentinel (not a concurrency lock; the
   PID file already guards that). It's written right after chDB opens and removed
   as the last step of a clean close. If `maple start` finds it still present over
@@ -181,6 +184,103 @@ The on-disk store at `~/.maple/data` is guarded by two sentinels beside it
   risk the crash, `maple start` **auto-wipes the store and bootstraps fresh**,
   printing a warning. Local telemetry data is **not recoverable** after an
   unclean kill of chDB; re-ingest to repopulate.
+
+### Versioned local-store migrations
+
+`maple start` never mutates a populated store in place when its schema identity
+is stale. Inspect a supported path before choosing it:
+
+```bash
+maple schema status
+maple schema plan
+maple schema migrate --dry-run
+maple schema migrate --yes
+# If a pre-promotion target is dirty or incomplete:
+maple schema abandon --yes
+```
+
+The supported legacy path is a stopped, side-by-side rebuild. It records a
+cutoff, copies the six authoritative raw telemetry tables with explicit column
+lists and bounded resumable batches, and replays the v1 materialized views from
+rows inside each table's retention horizon. Source/target inventories
+(row count, time bounds, and order-independent hashes) are compared before
+promotion. The source is retained under `.maple-migrations/<id>/source/data` as
+a pre-cutover rollback and inspection point; it is never deleted automatically.
+Promotion is a durable multi-step rename within one filesystem. A source
+directory mounted on another filesystem is rejected before cutover with an
+`EXDEV`-safe retry message; the staged target and source remain available.
+
+The migration journal beside the data directory is durable and fail-closed.
+Each journal records the complete selected chain, current module step, frozen
+source/target identities, typed module state, and resumable progress. A
+migration connection writes `maple-store-open` before native connect/bootstrap
+and clears it only after a clean close; a dirty source is never silently
+reopened. Startup refuses to open an unfinished transaction until `maple
+schema migrate --yes` resumes it. If the failure is before promotion, `maple
+schema abandon --yes` validates the journal and source marker, then moves only
+the journal-owned target and journal into a recoverable `.abandoned-*`
+quarantine. The active source, its marker, checkpoints, and any retained
+rollback source are left in place. A `promotion-started` journal is never
+abandoned by this command because it may already contain a cutover; resume it
+or use the explicit reset path after inspection. Promotion recovery runs from
+the journal before ordinary active-marker compatibility checks, including the
+crash window where the active marker is still `staging`.
+
+After successful promotion, the canonical journal is archived under the
+migration root as `journal.json`, so a completed v0 → v1 transaction cannot
+short-circuit a later v1 → v2 migration. `maple start --reset` or `maple reset
+--yes` can explicitly abandon an incomplete transaction, but preserves the
+journal under an `maple-store-migration-abandoned-*` name for inspection.
+Existing checkpoints remain attached to the retained source and are not
+advertised as restorable by the new schema; create a fresh checkpoint after
+promotion. Every persisted module state and progress value is decoded by its
+own migration module before resume, and malformed journal topology fails
+closed. A step marked `verified` is commit-pending: recovery may rewrite its
+staging marker, but no module lifecycle handler runs again, including
+`recover()`. Verified and completed steps must retain both decoded state and
+progress. Target-only abandonment validates the coordinator-owned journal
+structure and filesystem proofs without requiring the historical executable
+module or its state decoder to remain available.
+
+Migration edges are statically registered typed modules in
+`apps/cli/src/server/local-store-migrations/`. The coordinator owns locking,
+journaling, chain progression, staging, and promotion. Each module owns its
+frozen schema identities, target preparation, transforms, semantic
+verification, and typed recovery state. Adding a later edge should add a new
+module and registry entry; the coordinator must not gain transition-specific
+table names or branches. Later modules receive the previous staged target as
+their `sourceDataDir` and the same staged store as `targetDataDir`, so their
+transforms must be explicitly safe for this shared in-place topology. The
+coordinator test seam exercises a two-edge chain, a resumed verified edge, and
+one final promotion.
+
+Structural identities live in the append-only history at
+`apps/cli/src/server/local-schema-history.ts`. The schema gate checks the
+current identity against the history tip, preserves the base branch's prior
+entries in CI, and requires every historical identity to reach the current one
+through registered migration edges. Changing a schema digest or manifest
+therefore requires a new versioned entry and executable edge together.
+
+The Linux native probe `apps/cli/test/native-local-store-migration.sh` uses a
+native chDB setup helper to create a stopped historical raw-table fixture,
+applies the legacy marker, runs the public migration command, checks rebuilt
+service-namespace and database aggregates, and reopens the promoted store in
+a fresh process. It reports `SKIP` when no native `libchdb` is available (for
+example, on a development machine without the platform bundle); the Linux CI
+bundle runs it alongside the checkpoint smoke test. The fixture covers the
+authoritative v0 raw tables; retained derived objects remain rollback-only
+rather than being treated as migrated history.
+
+Every start also checks the opened physical schema against the generated local
+schema manifest, including objects, columns/types/defaults/codecs, engines,
+keys, TTLs, skipping indexes (with a DDL fallback on older chDB builds), and
+materialized-view definitions.
+This catches out-of-band or partially applied DDL even when a marker's bundle
+digest looks current.
+If a future migration needs a different chDB reader, its module must provide a
+version-matched reader, a prior Maple binary/export path, or an explicit
+unsupported boundary; the current binary never guesses by opening an
+incompatible source.
 
 ## The `/local/query` contract
 

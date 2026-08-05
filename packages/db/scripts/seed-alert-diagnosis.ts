@@ -1,6 +1,6 @@
 /**
  * Local-only helper to preview the alert AI-diagnosis readout without the
- * deployed CHAT_FLUE / Workers-AI binding.
+ * deployed Workers-AI binding.
  *
  * It seeds an OPEN alert incident + a COMPLETED `ai_triage_runs` row (with a
  * realistic structured result) for the most recent alert rule in your dev

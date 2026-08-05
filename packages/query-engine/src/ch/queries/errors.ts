@@ -5,11 +5,13 @@
 // ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
+// From the root, not `/expr`: these overloads take a `CHQuery`, keeping the
+// subquery's params, table names and column types checked.
+import { exists, inSubquery } from "@maple-dev/clickhouse-builder"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
-import { compileCH } from "@maple-dev/clickhouse-builder"
 import {
 	ErrorEvents,
 	ErrorEventsByTime,
@@ -18,7 +20,13 @@ import {
 	TraceListMv,
 	Traces,
 } from "../tables"
-import { buildProjectedMapExpr, inclusionValues, inclusionCondition } from "./query-helpers"
+import {
+	buildProjectedMapExpr,
+	inclusionValues,
+	inclusionCondition,
+	matchOrIn,
+	type FacetOutput,
+} from "./query-helpers"
 import { httpDisplaySpanName } from "../../traces-shared"
 
 function errorEventsTableForRecentScan(opts: {
@@ -426,14 +434,10 @@ export function tracesDurationStatsQuery(opts: TracesDurationStatsOpts) {
 			$.Timestamp.gte(param.dateTime("startTime")),
 			$.Timestamp.lte(param.dateTime("endTime")),
 			CH.when(services, (v: readonly string[]) =>
-				mm?.serviceName === "contains" && v.length === 1
-					? CH.positionCaseInsensitive($.ServiceName, CH.lit(v[0]!)).gt(0)
-					: inclusionCondition($.ServiceName, v),
+				matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 			),
 			CH.when(spanNames, (v: readonly string[]) =>
-				mm?.spanName === "contains" && v.length === 1
-					? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!)).gt(0)
-					: inclusionCondition($.SpanName, v),
+				matchOrIn($.SpanName, v, mm?.spanName === "contains"),
 			),
 			CH.whenTrue(!!opts.hasError, () => $.HasError.eq(1)),
 			CH.when(opts.minDurationMs, (v: number) => $.Duration.gte(v * 1000000)),
@@ -441,14 +445,10 @@ export function tracesDurationStatsQuery(opts: TracesDurationStatsOpts) {
 			CH.when(httpMethods, (v: readonly string[]) => inclusionCondition($.HttpMethod, v)),
 			CH.when(httpStatusCodes, (v: readonly string[]) => inclusionCondition($.HttpStatusCode, v)),
 			CH.when(envs, (v: readonly string[]) =>
-				mm?.deploymentEnv === "contains" && v.length === 1
-					? CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(v[0]!)).gt(0)
-					: inclusionCondition($.DeploymentEnv, v),
+				matchOrIn($.DeploymentEnv, v, mm?.deploymentEnv === "contains"),
 			),
 			CH.when(namespaces, (v: readonly string[]) =>
-				mm?.serviceNamespace === "contains" && v.length === 1
-					? CH.positionCaseInsensitive($.ServiceNamespace, CH.lit(v[0]!)).gt(0)
-					: inclusionCondition($.ServiceNamespace, v),
+				matchOrIn($.ServiceNamespace, v, mm?.serviceNamespace === "contains"),
 			),
 		])
 		.format("JSON")
@@ -502,11 +502,7 @@ export interface TracesFacetsOpts {
 	facet?: TracesFacetDimension
 }
 
-export interface TracesFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type TracesFacetsOutput = FacetOutput
 
 export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFacetsOutput> {
 	const baseWhere = ($: ColumnAccessor<typeof TraceListMv.columns>): Array<CH.Condition | undefined> => {
@@ -524,18 +520,10 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 		const namespaces = inclusionValues(opts.namespace, opts.namespaces)
 
 		if (services) {
-			conditions.push(
-				opts.matchModes?.serviceName === "contains" && services.length === 1
-					? CH.positionCaseInsensitive($.ServiceName, CH.lit(services[0]!)).gt(0)
-					: inclusionCondition($.ServiceName, services),
-			)
+			conditions.push(matchOrIn($.ServiceName, services, opts.matchModes?.serviceName === "contains"))
 		}
 		if (spanNames) {
-			conditions.push(
-				opts.matchModes?.spanName === "contains" && spanNames.length === 1
-					? CH.positionCaseInsensitive($.SpanName, CH.lit(spanNames[0]!)).gt(0)
-					: inclusionCondition($.SpanName, spanNames),
-			)
+			conditions.push(matchOrIn($.SpanName, spanNames, opts.matchModes?.spanName === "contains"))
 		}
 		if (opts.hasError) conditions.push($.HasError.eq(1))
 		if (opts.minDurationMs != null) conditions.push($.Duration.gte(opts.minDurationMs * 1000000))
@@ -543,17 +531,11 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 		if (httpMethods) conditions.push(inclusionCondition($.HttpMethod, httpMethods))
 		if (httpStatusCodes) conditions.push(inclusionCondition($.HttpStatusCode, httpStatusCodes))
 		if (envs) {
-			conditions.push(
-				opts.matchModes?.deploymentEnv === "contains" && envs.length === 1
-					? CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(envs[0]!)).gt(0)
-					: inclusionCondition($.DeploymentEnv, envs),
-			)
+			conditions.push(matchOrIn($.DeploymentEnv, envs, opts.matchModes?.deploymentEnv === "contains"))
 		}
 		if (namespaces) {
 			conditions.push(
-				opts.matchModes?.serviceNamespace === "contains" && namespaces.length === 1
-					? CH.positionCaseInsensitive($.ServiceNamespace, CH.lit(namespaces[0]!)).gt(0)
-					: inclusionCondition($.ServiceNamespace, namespaces),
+				matchOrIn($.ServiceNamespace, namespaces, opts.matchModes?.serviceNamespace === "contains"),
 			)
 		}
 
@@ -567,20 +549,19 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 				opts.attributeFilterValueMatchMode === "contains"
 					? CH.positionCaseInsensitive(attrCol, CH.lit(opts.attributeFilterValue ?? "")).gt(0)
 					: attrCol.eq(opts.attributeFilterValue ?? "")
-			const innerSql = compileCH(
-				from(Traces, "t_attr")
-					.select(() => ({ _: CH.lit(1) }))
-					.where(() => [
-						CH.dynamicColumn("t_attr.TraceId").eq(CH.outerRef("TraceId")),
-						CH.dynamicColumn("t_attr.OrgId").eq(param.string("orgId")),
-						CH.dynamicColumn<string>("t_attr.Timestamp").gte(param.dateTime("startTime")),
-						CH.dynamicColumn<string>("t_attr.Timestamp").lte(param.dateTime("endTime")),
-						matchCond,
-					]),
-				{},
-				{ skipFormat: true },
+			conditions.push(
+				exists(
+					from(Traces, "t_attr")
+						.select(() => ({ _: CH.lit(1) }))
+						.where(() => [
+							CH.dynamicColumn("t_attr.TraceId").eq(CH.outerRef("TraceId")),
+							CH.dynamicColumn("t_attr.OrgId").eq(param.string("orgId")),
+							CH.dynamicColumn<string>("t_attr.Timestamp").gte(param.dateTime("startTime")),
+							CH.dynamicColumn<string>("t_attr.Timestamp").lte(param.dateTime("endTime")),
+							matchCond,
+						]),
+				),
 			)
-			conditions.push(CH.exists(innerSql.sql))
 		}
 		if (opts.resourceFilterKey) {
 			const resCol = CH.mapGet(
@@ -591,20 +572,19 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 				opts.resourceFilterValueMatchMode === "contains"
 					? CH.positionCaseInsensitive(resCol, CH.lit(opts.resourceFilterValue ?? "")).gt(0)
 					: resCol.eq(opts.resourceFilterValue ?? "")
-			const innerSql = compileCH(
-				from(Traces, "t_res")
-					.select(() => ({ _: CH.lit(1) }))
-					.where(() => [
-						CH.dynamicColumn("t_res.TraceId").eq(CH.outerRef("TraceId")),
-						CH.dynamicColumn("t_res.OrgId").eq(param.string("orgId")),
-						CH.dynamicColumn<string>("t_res.Timestamp").gte(param.dateTime("startTime")),
-						CH.dynamicColumn<string>("t_res.Timestamp").lte(param.dateTime("endTime")),
-						matchCond,
-					]),
-				{},
-				{ skipFormat: true },
+			conditions.push(
+				exists(
+					from(Traces, "t_res")
+						.select(() => ({ _: CH.lit(1) }))
+						.where(() => [
+							CH.dynamicColumn("t_res.TraceId").eq(CH.outerRef("TraceId")),
+							CH.dynamicColumn("t_res.OrgId").eq(param.string("orgId")),
+							CH.dynamicColumn<string>("t_res.Timestamp").gte(param.dateTime("startTime")),
+							CH.dynamicColumn<string>("t_res.Timestamp").lte(param.dateTime("endTime")),
+							matchCond,
+						]),
+				),
 			)
-			conditions.push(CH.exists(innerSql.sql))
 		}
 
 		return conditions
@@ -670,11 +650,7 @@ export interface ErrorsFacetsOpts {
 	fingerprintHashes?: readonly string[]
 }
 
-export interface ErrorsFacetsOutput {
-	readonly name: string
-	readonly count: number
-	readonly facetType: string
-}
+export type ErrorsFacetsOutput = FacetOutput
 
 export function errorsFacetsQuery(opts: ErrorsFacetsOpts): CHUnionQuery<ErrorsFacetsOutput> {
 	const table = errorEventsTableForRecentScan(opts)
@@ -1032,8 +1008,6 @@ export function errorDetailTracesQuery(opts: ErrorDetailTracesOpts) {
 		.orderBy(["lastErrorSeen", "desc"])
 		.limit(limit)
 
-	const errorSubSql = compileCH(errorSub, {}, { skipFormat: true }).sql
-
 	// Outer query: fetch all spans for the matching traces. Use an IN-filtered
 	// small subquery instead of an INNER JOIN so ClickHouse can apply the
 	// trace-detail projection's (OrgId, TraceId, SpanId) sort key while reading
@@ -1050,7 +1024,10 @@ export function errorDetailTracesQuery(opts: ErrorDetailTracesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			CH.inSubquery($.TraceId, `SELECT TraceId FROM (${errorSubSql})`),
+			inSubquery(
+				$.TraceId,
+				fromQuery(errorSub, "matching_traces").select(($$) => ({ TraceId: $$.TraceId })),
+			),
 			$.Timestamp.gte(param.dateTime("startTime")),
 			$.Timestamp.lte(param.dateTime("endTime")),
 		])

@@ -4,29 +4,32 @@ import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
-import { CacheBackendLive } from "../../lib/CacheBackendLive"
-import { EmailService } from "../../lib/EmailService"
-import { Env } from "../../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
-import type { WarehouseQueryServiceShape } from "../../lib/WarehouseQueryService"
-import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
-import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import { AlertRuntime, AlertsService } from "../../services/AlertsService"
-import { HazelOAuthService } from "../../services/HazelOAuthService"
-import { OrgMembersService } from "../../services/OrgMembersService"
-import { QueryEngineService } from "../../services/QueryEngineService"
+import { BucketCacheService } from "@maple/query-engine/caching"
+import { EdgeCacheService } from "@maple/cache"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import { EmailService } from "@/platform/EmailService"
+import { Env } from "@/platform/Env"
+import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
+import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { AlertRuntime, AlertsService } from "@/services/alerts/AlertsService"
+import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
+import { OrgMembersService } from "@/services/org/OrgMembersService"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
+import { InvestigationService } from "@/services/errors/InvestigationService"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
@@ -89,6 +92,11 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 	const orgMembersLive = Layer.succeed(OrgMembersService, {
 		resolveMembers: () => Effect.succeed([]),
 	})
+	// Held by AlertsService only to hand an autonomous investigation turn its `submit_diagnosis`
+	// tool; nothing in these tests starts one. The real layer is cheap — Env plus the database.
+	const investigationsLive = InvestigationService.layer.pipe(
+		Layer.provide(Layer.mergeAll(envLive, testDb.layer)),
+	)
 	const alertsLive = AlertsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -100,6 +108,7 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 				hazelOAuthLive,
 				emailLive,
 				orgMembersLive,
+				investigationsLive,
 			),
 		),
 	)
@@ -116,6 +125,7 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
+		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
 		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
@@ -154,6 +164,7 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 	return {
 		bootstrapKey,
 		request,
+		testDb,
 		dispose: async () => {
 			await disposeHandler()
 			await runtime.dispose()
@@ -162,6 +173,24 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 }
 
 describe("v2 alerts over HTTP", () => {
+	const createWebhookAndRule = async (harness: ReturnType<typeof makeHarness>, token: string) => {
+		const destination = await harness.request("POST", "/v2/alerts/destinations", token, {
+			type: "webhook",
+			name: "Ops hook",
+			url: "https://example.com/hooks/maple",
+		})
+		const rule = await harness.request("POST", "/v2/alerts/rules", token, {
+			name: "Checkout error rate",
+			severity: "critical",
+			signal_type: "error_rate",
+			comparator: "gt",
+			threshold: 0.05,
+			window_minutes: 5,
+			destination_ids: [destination.body.id],
+		})
+		return { destination, rule }
+	}
+
 	it("supports destination + rule CRUD with v2 wire conventions", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey(["alerts:write"])
@@ -272,6 +301,73 @@ describe("v2 alerts over HTTP", () => {
 		const missing = await harness.request("GET", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(missing.status).toBe(404)
 		expect(missing.body.error).toMatchObject({ type: "not_found_error", code: "alert_rule_not_found" })
+
+		await harness.dispose()
+	})
+
+	it("paginates delivery history beyond the first 100 rows", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+		await createWebhookAndRule(harness, key.secret)
+
+		await executeSql(
+			harness.testDb,
+			`insert into alert_delivery_events (
+				id, org_id, rule_id, destination_id, delivery_key, event_type,
+				attempt_number, status, scheduled_at, payload_json, created_at, updated_at
+			)
+			select
+				'00000000-0000-4000-8000-' || lpad(series::text, 12, '0'),
+				rules.org_id, rules.id, destinations.id, 'delivery-' || series,
+				'trigger', 1, 'success',
+				timestamp '2026-07-31 12:00:00+00' - series * interval '1 second',
+				'{}'::jsonb,
+				timestamp '2026-07-31 12:00:00+00' - series * interval '1 second',
+				timestamp '2026-07-31 12:00:00+00' - series * interval '1 second'
+			from generate_series(1, 105) as series
+			cross join lateral (
+				select id, org_id from alert_rules where org_id = 'org_alerts_e2e' limit 1
+			) as rules
+			cross join lateral (
+				select id from alert_destinations where org_id = 'org_alerts_e2e' limit 1
+			) as destinations`,
+		)
+		await executeSql(
+			harness.testDb,
+			`insert into alert_delivery_events (
+				id, org_id, rule_id, destination_id, delivery_key, event_type,
+				attempt_number, status, scheduled_at, payload_json, created_at, updated_at
+			) values (
+				'00000000-0000-4000-9000-000000000001', 'org_other',
+				'00000000-0000-4000-9000-000000000002', '00000000-0000-4000-9000-000000000003',
+				'foreign-delivery', 'trigger', 1, 'success', timestamp '2026-08-01 12:00:00+00',
+				'{}'::jsonb, timestamp '2026-08-01 12:00:00+00', timestamp '2026-08-01 12:00:00+00'
+			)`,
+		)
+
+		const first = await harness.request("GET", "/v2/alerts/deliveries?limit=60", key.secret)
+		expect(first.status).toBe(200)
+		expect(first.body.data).toHaveLength(60)
+		expect(first.body.has_more).toBe(true)
+		expect(first.body.next_cursor).toEqual(expect.any(String))
+		expect(first.body.data[0].id).toMatch(/^evt_/)
+		expect(first.body.data[0].scheduled_at > first.body.data[1].scheduled_at).toBe(true)
+
+		const second = await harness.request(
+			"GET",
+			`/v2/alerts/deliveries?limit=60&cursor=${encodeURIComponent(first.body.next_cursor)}`,
+			key.secret,
+		)
+		expect(second.status).toBe(200)
+		expect(second.body.data).toHaveLength(45)
+		expect(second.body.has_more).toBe(false)
+		expect(second.body.next_cursor).toBeNull()
+		expect(new Set([...first.body.data, ...second.body.data].map((item) => item.id)).size).toBe(105)
+		expect(
+			[...first.body.data, ...second.body.data].some(
+				(item) => item.delivery_key === "foreign-delivery",
+			),
+		).toBe(false)
 
 		await harness.dispose()
 	})

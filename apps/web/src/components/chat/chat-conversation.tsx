@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import type { FailedSend } from "@flue/react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Exit } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { useFlueChat } from "@/hooks/use-flue-chat"
+import { useMapleChat, type FailedSend } from "@/hooks/use-maple-chat"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
 import {
 	investigationNoun,
@@ -34,6 +33,7 @@ import {
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
 import { StatusMarker } from "@/components/ai-elements/status-marker"
 import { Button } from "@maple/ui/components/ui/button"
+import { trackProduct } from "@/lib/analytics"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { AiTriageResult } from "@maple/domain/http"
 
@@ -142,8 +142,8 @@ export function ChatConversation({
 		return base
 	}, [subjectSeededByServer, mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
 
-	const { messages, status, isLoading, historyReady, failedSends, sendMessage, stop, canStop } =
-		useFlueChat({ tabId, context })
+	const { sessionId, messages, status, isLoading, historyReady, failedSends, sendMessage, stop, canStop } =
+		useMapleChat({ tabId, context })
 	const diagnosisMessageId = useMemo(() => findDiagnosisMessageId(messages), [messages])
 
 	// Apply an approved proposal via Maple's authenticated API (propose-then-apply).
@@ -153,25 +153,40 @@ export function ChatConversation({
 	const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, "applied" | "denied">>(
 		() => new Map(),
 	)
-	const resolveApproval = (toolCallId: string, outcome: "applied" | "denied") =>
+	// These three reach `ChatTranscript`'s memoized rows as props, so a fresh identity per render
+	// would defeat the memo and re-render the whole transcript on every streamed batch.
+	const resolveApproval = useCallback((toolCallId: string, outcome: "applied" | "denied") => {
 		setResolvedApprovals((prev) => {
 			const next = new Map(prev)
 			next.set(toolCallId, outcome)
 			return next
 		})
-	const handleApprove = async (toolCallId: string, tool: string, input: unknown) => {
-		const exit = await applyProposal({ payload: makeChatApplyPayload(tool, input) })
-		if (Exit.isSuccess(exit)) {
-			if (exit.value.isError) {
-				toast.error(exit.value.content || `Couldn't apply ${tool}`)
-				return
+	}, [])
+	const handleDeny = useCallback(
+		(toolCallId: string) => resolveApproval(toolCallId, "denied"),
+		[resolveApproval],
+	)
+	const handleApprove = useCallback(
+		async (messageId: string, toolCallId: string, tool: string, input: unknown) => {
+			// `sessionId` + `messageId` + `toolCallId` are what let the server settle the proposal in the
+			// durable transcript, so the card resolves on every device and the model's next turn knows
+			// the mutation happened.
+			const exit = await applyProposal({
+				payload: makeChatApplyPayload(tool, input, { sessionId, messageId, toolCallId }),
+			})
+			if (Exit.isSuccess(exit)) {
+				if (exit.value.isError) {
+					toastManager.add({ title: exit.value.content || `Couldn't apply ${tool}`, type: "error" })
+					return
+				}
+				resolveApproval(toolCallId, "applied")
+				toastManager.add({ title: "Change applied", type: "success" })
+			} else {
+				toastManager.add({ title: `Failed to apply ${tool}`, type: "error" })
 			}
-			resolveApproval(toolCallId, "applied")
-			toast.success("Change applied")
-		} else {
-			toast.error(`Failed to apply ${tool}`)
-		}
-	}
+		},
+		[applyProposal, sessionId, resolveApproval],
+	)
 
 	useEffect(() => {
 		onLoadingChange?.(tabId, isLoading)
@@ -193,6 +208,10 @@ export function ChatConversation({
 		if (messages.length === 0 && onFirstMessage) {
 			onFirstMessage(tabId, text.trim().slice(0, 40))
 		}
+		// The message text stays out of the event — the transcript already has it,
+		// and a prompt is the last thing that should be duplicated into a
+		// LowCardinality-adjacent analytics column.
+		trackProduct("chat_message_sent", { turn: messages.length === 0 ? "first" : "followup" })
 		sendMessage(text.trim())
 	}
 
@@ -217,7 +236,7 @@ export function ChatConversation({
 				isLoading={isLoading}
 				resolvedApprovals={resolvedApprovals}
 				onApprove={handleApprove}
-				onDeny={(toolCallId) => resolveApproval(toolCallId, "denied")}
+				onDeny={handleDeny}
 				fallbackDiagnosis={fallbackDiagnosis && !diagnosisMessageId ? fallbackDiagnosis : null}
 				diagnosisMessageId={diagnosisMessageId}
 				focusMessageId={focusMessageId}
@@ -330,7 +349,7 @@ function InvestigationLead({ ctx }: { ctx: InvestigationContext }) {
 }
 
 /**
- * A send that never reached the server. `@flue/react` keeps the optimistic
+ * A send that never reached the server. `useMapleChat` keeps the optimistic
  * message in the transcript rather than dropping it, so the only thing missing is
  * a way to try again.
  */

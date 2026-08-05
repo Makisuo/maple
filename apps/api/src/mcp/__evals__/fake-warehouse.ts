@@ -1,4 +1,4 @@
-import { __testables } from "@/lib/WarehouseQueryService"
+import { __testables } from "@/services/warehouse/WarehouseQueryService"
 import { makeLargeTraceSpans, makeTraceLogs } from "./fixtures"
 
 export interface FixtureRule {

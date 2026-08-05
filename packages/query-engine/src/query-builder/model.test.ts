@@ -192,7 +192,15 @@ describe("metrics resource.* support", () => {
 		expect(filters?.serviceName).toBe("api")
 	})
 
-	it("warns (blocking) when the 5 resource-filter cap is exceeded", () => {
+	it("lowers deployment environments into the metrics filter", () => {
+		const { warnings, filters } = metricsFiltersOf({
+			whereClause: 'deployment.environment = "production,staging"',
+		})
+		expect(warnings).toEqual([])
+		expect(filters?.environments).toEqual(["production", "staging"])
+	})
+
+	it("warns when the 5 resource-filter cap is exceeded", () => {
 		const clause = ["a", "b", "c", "d", "e", "f"].map((k) => `resource.${k} = "1"`).join(" AND ")
 		const { warnings, filters } = metricsFiltersOf({ whereClause: clause })
 		expect(filters?.resourceAttributeFilters).toHaveLength(5)
@@ -207,6 +215,18 @@ describe("metrics resource.* support", () => {
 		expect(warnings).toEqual([])
 		expect(groupBy).toEqual(["resource_attribute"])
 		expect(filters?.groupByResourceAttributeKey).toBe("k8s.pod.name")
+	})
+
+	it("keeps the first attr.* group-by and warns about later dimensions", () => {
+		const { warnings, groupBy, filters } = metricsFiltersOf({
+			addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+			groupBy: ["attr.http.method", "attr.http.route"],
+		})
+		expect(groupBy).toEqual(["attribute"])
+		expect(filters?.groupByAttributeKey).toBe("http.method")
+		expect(warnings).toEqual([
+			"Metrics queries support a single attr.* group by; ignoring attr.http.route",
+		])
 	})
 
 	it("keeps the first dimension and warns when attr.* and resource.* group-bys are combined", () => {

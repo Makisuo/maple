@@ -4,9 +4,9 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { LatencyValue } from "@maple/ui/components/latency-value"
 
 import type { CloudflareZoneRow } from "@/api/warehouse/cloudflare-infra"
-import { formatLatency, formatNumber } from "@maple/ui/format"
+import { formatLatency, formatNumber } from "@maple/ui/lib/format"
 import { ColumnHead, DataTable, ROW_LINK_CLASS, useTableSort } from "../primitives/data-table"
-import { formatBytes, formatPercent } from "@maple/ui/format"
+import { formatBytes, formatPercent } from "@maple/ui/lib/format"
 import { errorRateClass } from "./constants"
 
 // Zone latency percentiles are plan-dependent (the poller only gets quantiles

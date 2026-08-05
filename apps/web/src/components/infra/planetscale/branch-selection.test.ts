@@ -4,6 +4,7 @@ import type { PlanetScaleBranchStat } from "@/api/warehouse/service-map"
 import {
 	absenceReason,
 	defaultBranch,
+	isExcluded,
 	matchesGlob,
 	mergeBranchCandidates,
 	orderBranches,
@@ -44,6 +45,38 @@ describe("matchesGlob", () => {
 	it("treats regex metacharacters as literals", () => {
 		expect(matchesGlob("v1.0", "v1.0")).toBe(true)
 		expect(matchesGlob("v1.0", "v1x0")).toBe(false)
+	})
+
+	// `?` is a single-character wildcard on the scraper side. The client used to
+	// escape it as a literal, so a `pr-?` filter collected different branches
+	// than the preview showed. Both now share @maple/domain/glob.
+	it("treats `?` as a one-character wildcard, matching the scraper", () => {
+		expect(matchesGlob("pr-?", "pr-1")).toBe(true)
+		expect(matchesGlob("pr-?", "pr-12")).toBe(false)
+		expect(matchesGlob("pr-?", "pr-")).toBe(false)
+		expect(matchesGlob("main?", "main?")).toBe(true)
+		expect(matchesGlob("main?", "mainx")).toBe(true)
+	})
+
+	it("matches nothing for an empty pattern", () => {
+		expect(matchesGlob("", "main")).toBe(false)
+		expect(matchesGlob("", "")).toBe(false)
+	})
+})
+
+describe("isExcluded", () => {
+	it("treats a non-empty include list as authoritative", () => {
+		expect(isExcluded("main", ["main", "staging"], [])).toBe(false)
+		expect(isExcluded("pr-1", ["main", "staging"], [])).toBe(true)
+	})
+
+	it("applies exclusions on top of an include list", () => {
+		expect(isExcluded("pr-1", ["pr-*"], ["pr-1"])).toBe(true)
+		expect(isExcluded("pr-2", ["pr-*"], ["pr-1"])).toBe(false)
+	})
+
+	it("collects everything when both lists are empty", () => {
+		expect(isExcluded("anything", [], [])).toBe(false)
 	})
 })
 

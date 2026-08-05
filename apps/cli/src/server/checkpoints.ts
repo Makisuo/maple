@@ -19,6 +19,7 @@ import {
 	syncTree,
 } from "./durable-files"
 import { SCHEMA_FINGERPRINT } from "./serve"
+import { CURRENT_LOCAL_SCHEMA } from "./schema-identity"
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
 import {
 	markStoreClosedDurable,
@@ -1788,7 +1789,10 @@ const finalizeRestoreMarkers = async (
 	if (!readyIdentityMatches(dataDir, transaction)) {
 		throw new Error("restored live store identity is missing or does not match the transaction")
 	}
-	await writeStoreMarkerDurable(dataDir, MAPLE_VERSION, new Date().toISOString(), SCHEMA_FINGERPRINT)
+	await writeStoreMarkerDurable(dataDir, MAPLE_VERSION, new Date().toISOString(), SCHEMA_FINGERPRINT, {
+		schemaVersion: CURRENT_LOCAL_SCHEMA.version,
+		schemaDigest: CURRENT_LOCAL_SCHEMA.digest,
+	})
 	await faults.afterStoreMarkerWrite?.()
 	await markStoreClosedDurable(dataDir)
 	await faults.afterOpenMarkerRemoval?.()

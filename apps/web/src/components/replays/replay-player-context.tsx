@@ -2,9 +2,11 @@ import * as React from "react"
 import { Replayer } from "@rrweb/replay"
 import { EventType, IncrementalSource, MouseInteractions, ReplayerEvents } from "@rrweb/types"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { getReplayEventsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { getReplayManifestResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { normalizeEvents } from "./replay-events"
 import type { ReplayPartitionWindow } from "./replay-format"
+import { manifestDurationMs, type ReplayChunkMeta } from "./replay-range"
+import { useReplayChunkLoader } from "./use-replay-chunk-loader"
 import { buildTimeline, type InactiveInterval, type Timeline } from "./replay-timeline"
 
 // ---------------------------------------------------------------------------
@@ -17,25 +19,7 @@ import { buildTimeline, type InactiveInterval, type Timeline } from "./replay-ti
 // `<ReplaySurface>` and `<ReplayEditorTimeline>` are both consumers.
 // ---------------------------------------------------------------------------
 
-interface ReplayChunk {
-	readonly chunkSeq: number
-	readonly events: string
-}
-
-/** Sort chunks by sequence, parse each chunk's inline rrweb event JSON, and normalize. */
-function decodeChunks(chunks: ReadonlyArray<ReplayChunk>): unknown[] {
-	const ordered = [...chunks].sort((a, b) => a.chunkSeq - b.chunkSeq)
-	const all: unknown[] = []
-	for (const chunk of ordered) {
-		try {
-			const parsed: unknown = JSON.parse(chunk.events)
-			if (Array.isArray(parsed)) all.push(...parsed)
-		} catch {
-			// Skip a malformed chunk rather than failing the whole replay.
-		}
-	}
-	return normalizeEvents(all)
-}
+const EMPTY_CHUNKS: ReadonlyArray<ReplayChunkMeta> = []
 
 /** A user interaction worth flagging on the scrubber. */
 export type ActionKind = "click" | "input" | "scroll" | "nav"
@@ -295,10 +279,25 @@ export function ReplayPlayerProvider({
 	/** Whether the session is still open (`status === "active"`), i.e. chunks may still arrive. */
 	sessionActive?: boolean
 }) {
-	// Chunks carry their rrweb events inline (read straight from ClickHouse); parse
-	// + concatenate them in order. Memoized on the (referentially stable) result so
-	// deriveMeta/engine memos hold across the player's frequent re-renders.
-	const eventsResult = useAtomValue(getReplayEventsResultAtom({ data: { sessionId, ...window } }))
+	// The manifest — every chunk's position and size, no payloads. Cheap on any
+	// session, and the prerequisite for deciding which payload ranges to fetch.
+	const manifestResult = useAtomValue(getReplayManifestResultAtom({ data: { sessionId, ...window } }))
+
+	const manifestChunks = React.useMemo<ReadonlyArray<ReplayChunkMeta>>(
+		() =>
+			Result.builder(manifestResult)
+				.onSuccess((result) => result.chunks as ReadonlyArray<ReplayChunkMeta>)
+				.orElse(() => EMPTY_CHUNKS),
+		[manifestResult],
+	)
+
+	const loader = useReplayChunkLoader({
+		sessionId,
+		window,
+		chunks: manifestChunks,
+		// The preview route supplies events directly and must not hit the network.
+		enabled: previewEvents === undefined,
+	})
 
 	const { status, error, events } = React.useMemo<{
 		status: ReplayLoadStatus
@@ -320,24 +319,45 @@ export function ReplayPlayerProvider({
 				events: EMPTY_EVENTS,
 			}
 		}
-		return Result.builder(eventsResult)
+		if (loader.loadError !== null) {
+			return { status: "error" as const, error: loader.loadError, events: EMPTY_EVENTS }
+		}
+		return Result.builder(manifestResult)
 			.onInitial(() => ({ status: "loading" as const, error: null, events: EMPTY_EVENTS }))
 			.onError((e) => ({ status: "error" as const, error: e, events: EMPTY_EVENTS }))
 			.onSuccess((result) => {
-				const chunks = result.chunks as ReadonlyArray<ReplayChunk>
-				const decoded = decodeChunks(chunks)
-				if (decoded.length >= 2) {
-					return { status: "ready" as const, error: null, events: decoded }
+				// Emptiness is now decided from the manifest — no longer requiring a
+				// download of the whole session just to discover there's nothing in it.
+				const chunkCount = result.chunks.length
+				if (chunkCount === 0) {
+					return {
+						status: classifyUnplayable({ recorded, chunkCount, sessionActive }),
+						error: null,
+						events: EMPTY_EVENTS,
+					}
 				}
-				// Nothing playable — say which kind of nothing.
-				return {
-					status: classifyUnplayable({ recorded, chunkCount: chunks.length, sessionActive }),
-					error: null,
-					events: EMPTY_EVENTS,
+				if (loader.seedEvents.length >= 2) {
+					return { status: "ready" as const, error: null, events: [...loader.seedEvents] }
 				}
+				// Manifest says there are chunks; the opening window is still in
+				// flight, or every chunk in it was unparseable.
+				return loader.seedEvents.length > 0
+					? {
+							status: classifyUnplayable({ recorded, chunkCount, sessionActive }),
+							error: null,
+							events: EMPTY_EVENTS,
+						}
+					: { status: "loading" as const, error: null, events: EMPTY_EVENTS }
 			})
 			.orElse(() => ({ status: "loading" as const, error: null, events: EMPTY_EVENTS }))
-	}, [eventsResult, previewEvents, recorded, sessionActive])
+	}, [manifestResult, previewEvents, recorded, sessionActive, loader.seedEvents, loader.loadError])
+
+	// Playable length from the manifest — known before any payload is fetched.
+	const manifestTotalMs = React.useMemo(() => manifestDurationMs(manifestChunks), [manifestChunks])
+	const seekTargetMs = loader.seekTargetMs
+	const { requestSeek, reportProgress } = loader
+	/** How many trailing events have been handed to the engine already. */
+	const fedCountRef = React.useRef(0)
 
 	const figureRef = React.useRef<HTMLElement | null>(null)
 	const surfaceRef = React.useRef<HTMLDivElement | null>(null)
@@ -445,6 +465,7 @@ export function ReplayPlayerProvider({
 		setCurrentMs(0)
 		setFinished(false)
 		setIsPlaying(false)
+		fedCountRef.current = 0
 
 		// rrweb's own transport events are unreliable in @rrweb/replay (Start/Resume
 		// often don't fire); play/pause state is driven from our handlers. We still
@@ -469,7 +490,48 @@ export function ReplayPlayerProvider({
 			replayerRef.current = null
 			mount.innerHTML = ""
 		}
+		// Keyed on the SEED, and on nothing else that moves.
+		//
+		// `events` here is the loader's seed, which only changes on first load or a
+		// seek that needs a new anchor. Anything else in this list — the manifest
+		// total, a seek target — rebuilds the engine whenever it moves, and for a
+		// live session the manifest moves constantly: the iframe flashes and the
+		// playhead snaps back to 0 every few seconds, which reads as "playback is
+		// frozen". Trailing events and the total are applied by the effects below.
 	}, [events, status, applyScale])
+
+	// The manifest knows the full length before the payload is loaded, so the
+	// scrubber shows the real duration from the first frame. `getMetaData()` would
+	// report only the loaded span and visibly stretch as chunks stream in — but it
+	// is still the right answer for the preview route, which has no manifest.
+	React.useEffect(() => {
+		if (manifestTotalMs > 0) setTotalMs(manifestTotalMs)
+	}, [manifestTotalMs])
+
+	// Resume where the user asked after a seek-driven rebuild. Separate from the
+	// mount effect so that a new seek target never reconstructs the engine.
+	React.useEffect(() => {
+		const replayer = replayerRef.current
+		if (!replayer || status !== "ready" || seekTargetMs === null) return
+		replayer.pause(seekTargetMs)
+		setCurrentMs(seekTargetMs)
+	}, [seekTargetMs, status])
+
+	// Feed newly-arrived events into the live engine.
+	//
+	// Only ever forward: every trailing event postdates the seed, so rrweb
+	// binary-inserts it and queues it on its own timer. An event that predates
+	// the baseline would instead be applied synchronously and out of DOM order —
+	// which is why a backward seek rebuilds (see `requestSeek`) rather than
+	// arriving here.
+	React.useEffect(() => {
+		const replayer = replayerRef.current
+		if (!replayer || status !== "ready") return
+		const pending = loader.trailingEvents.slice(fedCountRef.current)
+		if (pending.length === 0) return
+		for (const event of pending) replayer.addEvent(event as never)
+		fedCountRef.current = loader.trailingEvents.length
+	}, [loader.trailingEvents, status])
 
 	// Recompute scale when entering/leaving fullscreen.
 	React.useEffect(() => {
@@ -500,12 +562,34 @@ export function ReplayPlayerProvider({
 					lastJumpedEnd = -1
 					setCurrentMs(Math.min(Math.max(0, cur), totalMs))
 				}
+				// Keep the loader ahead of the playhead — this is what turns the
+				// opening window into continuous playback.
+				reportProgress(cur)
 			}
 			raf = requestAnimationFrame(tick)
 		}
 		raf = requestAnimationFrame(tick)
 		return () => cancelAnimationFrame(raf)
-	}, [isPlaying, totalMs, inactiveIntervals, skipInactive])
+	}, [isPlaying, totalMs, inactiveIntervals, skipInactive, reportProgress])
+
+	// Hold playback when the playhead outruns the loaded events, and release it
+	// when the next range lands. Without this the engine plays into an empty
+	// timeline and reports "finished" halfway through the recording.
+	// Gated on an actual stall having happened: an unconditional `play()` on every
+	// idle render would re-issue playback the user never paused, and double up on
+	// the transport controls' own play calls.
+	const stalledRef = React.useRef(false)
+	React.useEffect(() => {
+		const replayer = replayerRef.current
+		if (!replayer || !isPlaying) return
+		if (loader.bufferState === "buffering") {
+			stalledRef.current = true
+			replayer.pause()
+		} else if (loader.bufferState === "idle" && stalledRef.current) {
+			stalledRef.current = false
+			replayer.play(engineTimeMs(replayer))
+		}
+	}, [loader.bufferState, isPlaying])
 
 	const togglePlay = React.useCallback(() => {
 		const replayer = replayerRef.current
@@ -551,9 +635,13 @@ export function ReplayPlayerProvider({
 		const clamped = Math.max(0, Math.min(pending.timeline.toReal(pending.displayMs), pending.totalMs))
 		setCurrentMs(clamped)
 		if (clamped < pending.totalMs) setFinished(false)
+		// Seeking outside the loaded span rebuilds the engine from the nearest
+		// preceding checkpoint (the only thing rrweb can start from). The rebuild
+		// resumes at this offset, so don't also drive the doomed current engine.
+		if (requestSeek(clamped)) return
 		if (pending.isPlaying && clamped < pending.totalMs) replayer.play(clamped)
 		else replayer.pause(clamped)
-	}, [])
+	}, [requestSeek])
 
 	const seekDisplay = React.useCallback(
 		(displayMs: number) => {

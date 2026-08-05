@@ -9,9 +9,10 @@ import { warehouseHttpErrors } from "./warehouse"
 // ---------------------------------------------------------------------------
 // Session replay endpoint schemas
 //
-// Backed by the session_replays (metadata) + session_replay_events (rrweb event
-// payloads) datasources, both in ClickHouse. `getReplayEvents` returns the rrweb
-// event arrays inline (read straight from the warehouse — no R2, no signed URLs).
+// Backed by the session_replays (metadata) + session_replay_events (chunk index)
+// datasources in ClickHouse. `getReplayEvents` returns the rrweb event arrays
+// inline; the API hydrates them from R2 first when the row is blob-backed, so
+// the wire shape is the same either way — no signed URLs, no client-side fetch.
 // ---------------------------------------------------------------------------
 
 // --- List ---
@@ -31,6 +32,12 @@ export class ListReplaysRequest extends Schema.Class<ListReplaysRequest>("ListRe
 	// Plain string (not the branded UserId) — matches the other optional filters and
 	// avoids brand validation rejecting partial input the client constructs JS-side.
 	userId: Schema.optional(Schema.String),
+	/** Substring match on the identified user's name or email (one input, both columns). */
+	userSearch: Schema.optional(Schema.String),
+	/** Exact match on the identified group (company / team) name. */
+	groupName: Schema.optional(Schema.String),
+	/** Every session from one browser — how a marketing visit links to a signup. */
+	visitorId: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Boolean),
 	search: Schema.optional(Schema.String),
 	cursor: Schema.optional(Schema.String),
@@ -53,6 +60,19 @@ export const SessionReplayListItem = Schema.Struct({
 	durationMs: Schema.NullOr(Schema.Number),
 	status: Schema.String,
 	userId: Schema.NullOr(UserId),
+	// identify() identity. `""` when the session was never identified (including
+	// every session recorded before the SDK had identify()) — the list falls back
+	// to its session-id/host line, so an empty value is a display state, not a gap.
+	userName: Schema.String,
+	userEmail: Schema.String,
+	groupId: Schema.String,
+	groupName: Schema.String,
+	/** Persistent per-browser id — equal across a visitor's marketing and app sessions. */
+	visitorId: Schema.String,
+	/** Acquisition source captured at session start; `""` when there was none. */
+	utmSource: Schema.String,
+	/** Entry pathname (no query/hash). Note `urlInitial` is the *latest* URL. */
+	entryPath: Schema.String,
 	urlInitial: Schema.String,
 	browserName: Schema.String,
 	osName: Schema.String,
@@ -84,6 +104,8 @@ export class ReplaysFacetsRequest extends Schema.Class<ReplaysFacetsRequest>("Re
 	country: Schema.optional(Schema.String),
 	deviceType: Schema.optional(Schema.String),
 	userId: Schema.optional(Schema.String),
+	userSearch: Schema.optional(Schema.String),
+	groupName: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Boolean),
 	search: Schema.optional(Schema.String),
 }) {}
@@ -98,6 +120,9 @@ export class ReplaysFacetsResponse extends Schema.Class<ReplaysFacetsResponse>("
 	browsers: Schema.Array(ReplayFacetItem),
 	countries: Schema.Array(ReplayFacetItem),
 	devices: Schema.Array(ReplayFacetItem),
+	/** Identified groups (company / team), by session count. Empty for orgs that
+	 *  never call `identify()` with a group — the sidebar hides the section then. */
+	groups: Schema.Array(ReplayFacetItem),
 	/** Distinct sessions with at least one recorded error, within the current filter. */
 	errorCount: Schema.Number,
 	/** Session-length distribution: `name` is the bucket floor in ms, `count` the
@@ -144,6 +169,30 @@ export class GetReplayResponse extends Schema.Class<GetReplayResponse>("GetRepla
 			errorCount: Schema.Number,
 			traceIds: Schema.Array(TraceId),
 			resourceAttributes: Schema.String,
+			// Analytics dimensions (migration 0011). `visitorId` is the cross-surface
+			// join key; the rest answer "who was this and where did they come from".
+			visitorId: Schema.String,
+			visitorIsNew: Schema.Boolean,
+			userEmail: Schema.String,
+			userName: Schema.String,
+			groupId: Schema.String,
+			groupName: Schema.String,
+			/** `identify()` traits, JSON-encoded `Record<string, string>`. */
+			userTraits: Schema.String,
+			referrer: Schema.String,
+			/** Gateway-normalized referrer host; `""` is direct *or* suppressed. */
+			referrerHost: Schema.String,
+			utmSource: Schema.String,
+			utmMedium: Schema.String,
+			utmCampaign: Schema.String,
+			utmTerm: Schema.String,
+			utmContent: Schema.String,
+			host: Schema.String,
+			entryPath: Schema.String,
+			exitPath: Schema.String,
+			language: Schema.String,
+			/** Heartbeat-refreshed; recovers duration when the tab died without an unload. */
+			lastActivityAt: Schema.NullOr(Schema.String),
 			// Active/idle breakdown from session_events gaps (null when the session
 			// has no distilled events). active + idle ≈ event span ≤ durationMs.
 			activeTimeMs: Schema.NullOr(Schema.Number),
@@ -152,31 +201,7 @@ export class GetReplayResponse extends Schema.Class<GetReplayResponse>("GetRepla
 	),
 }) {}
 
-// --- Events (rrweb chunks, payload inline) ---
-
-export class GetReplayEventsRequest extends Schema.Class<GetReplayEventsRequest>("GetReplayEventsRequest")({
-	sessionId: SessionId,
-	// See GetReplayRequest — optional partition-pruning window.
-	windowStart: Schema.optional(TinybirdDateTime),
-	windowEnd: Schema.optional(TinybirdDateTime),
-}) {}
-
-export const SessionReplayChunk = Schema.Struct({
-	chunkSeq: Schema.Number,
-	timestamp: Schema.String,
-	durationMs: Schema.Number,
-	eventCount: Schema.Number,
-	byteSize: Schema.Number,
-	isCheckpoint: Schema.Number,
-	/** The rrweb event array for this chunk, serialized as a JSON string. */
-	events: Schema.String,
-})
-
-export class GetReplayEventsResponse extends Schema.Class<GetReplayEventsResponse>("GetReplayEventsResponse")(
-	{
-		chunks: Schema.Array(SessionReplayChunk),
-	},
-) {}
+// Replay chunk payloads are not served here — see the API group below.
 
 // --- Reverse correlation (trace → sessions) ---
 
@@ -257,6 +282,8 @@ export const SessionEventItem = Schema.Struct({
 	netStatus: Schema.Number,
 	netDurationMs: Schema.Number,
 	errorStack: Schema.String,
+	/** `track()` props for a `custom` event, JSON-encoded `Record<string, string>`. */
+	attributes: Schema.String,
 })
 
 export class SessionTranscriptResponse extends Schema.Class<SessionTranscriptResponse>(
@@ -297,13 +324,11 @@ export class SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays")
 			error: sessionReplayEndpointErrors,
 		}),
 	)
-	.add(
-		HttpApiEndpoint.post("getReplayEvents", "/events", {
-			payload: GetReplayEventsRequest,
-			success: GetReplayEventsResponse,
-			error: sessionReplayEndpointErrors,
-		}),
-	)
+	// Replay payload reads live on v2 only: `GET /v2/session_replays/:id/manifest`
+	// then `GET /v2/session_replays/:id/events?from_chunk_seq=…`. There is no v1
+	// equivalent on purpose — the v1 endpoint fetched a whole session's rrweb
+	// payload in one unbounded response, which is the bug, and keeping a second
+	// surface would have kept a way to reintroduce it.
 	.add(
 		HttpApiEndpoint.post("replaysForTrace", "/for-trace", {
 			payload: ReplaysForTraceRequest,

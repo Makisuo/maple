@@ -31,11 +31,7 @@ export function ScopeSection({
 	autocompleteValues,
 }: ScopeSectionProps) {
 	const hasSpecificServices = form.serviceNames.length > 0
-	const queryOwnsGrouping = form.signalType === "builder_query"
-
-	const effectiveDataSource = form.signalType === "builder_query" ? form.queryDataSource : "traces"
-
-	const groupByAttributeKeys = autocompleteValues[effectiveDataSource]?.attributeKeys
+	const groupByAttributeKeys = autocompleteValues.traces?.attributeKeys
 
 	return (
 		<Card className="p-4">
@@ -54,8 +50,7 @@ export function ScopeSection({
 								serviceNames: values,
 								// Clear group/exclude when narrowing to specific services so the
 								// disabled fields don't carry stale state into the submitted rule.
-								groupBy:
-									values.length > 0 && c.signalType !== "builder_query" ? [] : c.groupBy,
+								groupBy: values.length > 0 ? [] : c.groupBy,
 								excludeServiceNames: values.length > 0 ? [] : c.excludeServiceNames,
 							}))
 						}
@@ -76,26 +71,24 @@ export function ScopeSection({
 					</p>
 				</div>
 
-				{!queryOwnsGrouping && (
-					<div className="space-y-1.5">
-						<Label htmlFor="rule-group-by">Group by</Label>
-						<GroupByMultiSelect
-							id="rule-group-by"
-							dataSource={effectiveDataSource}
-							value={form.groupBy}
-							onChange={(values) => onChange((c) => ({ ...c, groupBy: values }))}
-							attributeKeys={groupByAttributeKeys}
-							placeholder="service.name"
-							className="w-full"
-							disabled={hasSpecificServices}
-						/>
-						{hasSpecificServices && (
-							<p className="text-muted-foreground text-xs">
-								Disabled: each selected service is already its own group.
-							</p>
-						)}
-					</div>
-				)}
+				<div className="space-y-1.5">
+					<Label htmlFor="rule-group-by">Group by</Label>
+					<GroupByMultiSelect
+						id="rule-group-by"
+						dataSource="traces"
+						value={form.groupBy}
+						onChange={(values) => onChange((c) => ({ ...c, groupBy: values }))}
+						attributeKeys={groupByAttributeKeys}
+						placeholder="service.name"
+						className="w-full"
+						disabled={hasSpecificServices}
+					/>
+					{hasSpecificServices && (
+						<p className="text-muted-foreground text-xs">
+							Disabled: each selected service is already its own group.
+						</p>
+					)}
+				</div>
 
 				<div className="space-y-1.5">
 					<Label htmlFor="rule-exclude">Exclude services</Label>

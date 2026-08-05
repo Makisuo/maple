@@ -169,6 +169,23 @@ export function getHttpInfo({ spanName, spanAttributes, spanKind }: HttpSpanInpu
 	}
 }
 
+/**
+ * Raw hex per HTTP method — the single source of truth for method colors.
+ * Chart series, badges, and the mobile app all derive from these values.
+ */
+export const HTTP_METHOD_HEX: Record<string, string> = {
+	GET: "#4A9EFF",
+	POST: "#E8872B",
+	PUT: "#4AA865",
+	PATCH: "#8A7F72",
+	DELETE: "#E85D4A",
+	HEAD: "#8A7F72",
+	OPTIONS: "#5A5248",
+}
+
+// Kept as literals (not derived from HTTP_METHOD_HEX) because Tailwind's JIT
+// scanner can't see class names built from template strings. A colocated test
+// asserts the two maps agree.
 export const HTTP_METHOD_COLORS: Record<string, string> = {
 	GET: "bg-[#4A9EFF]",
 	POST: "bg-[#E8872B]",

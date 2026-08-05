@@ -2,12 +2,12 @@ import { HttpServerRequest } from "effect/unstable/http"
 import type { WarehouseQueryName } from "@maple/domain"
 import { Context, Effect } from "effect"
 import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
-import type { TenantContext } from "@/lib/tenant-context"
+import type { TenantContext } from "@/services/auth/tenant-context"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { McpAuthMissingError } from "@/mcp/tools/types"
-import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { WarehouseExecutor } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
+import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export class CurrentMcpTenant extends Context.Service<CurrentMcpTenant, TenantContext>()(
 	"@maple/api/mcp/CurrentMcpTenant",

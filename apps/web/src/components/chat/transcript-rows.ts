@@ -1,5 +1,4 @@
 import { parseDiagnosisMarker } from "./diagnosis-marker"
-import { parseToolProposal } from "./tool-proposal"
 import type { UIMessage } from "@/components/ai-elements/types"
 
 export type ToolPart = {
@@ -33,8 +32,10 @@ export function deriveToolStatus(state: string): "running" | "completed" | "erro
  * so they never disappear into a `Used N tools` header.
  */
 function rendersOwnCard(part: ToolPart): boolean {
+	// A proposal has no output to inspect — the tool never ran — so the state IS the signal.
+	if (part.state === "proposed") return true
 	if (part.state !== "output-available") return false
-	return parseDiagnosisMarker(part.output) != null || parseToolProposal(part.output) != null
+	return parseDiagnosisMarker(part.output) != null
 }
 
 /**

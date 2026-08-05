@@ -1,13 +1,13 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
-import { toMcpQueryError } from "../lib/map-warehouse-error"
-import { resolveTenant } from "../lib/query-warehouse"
-import { resolveTimeRange, formatClampNote } from "../lib/time"
-import { truncate, formatNumber } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
+import { resolveTimeRange, rangeExceededResult, MCP_LOG_PATTERN_MAX_HOURS } from "@/mcp/lib/time"
+import { truncate, formatNumber } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 import { mineLogPatterns } from "@maple/query-engine/observability"
-import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
+import { makeWarehouseExecutorFromTenant } from "@/services/warehouse/WarehouseQueryService"
 
 export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -37,8 +37,9 @@ export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 			sample_size,
 			limit,
 		}) {
-			const range = resolveTimeRange(start_time, end_time, { maxHours: 24 })
+			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_LOG_PATTERN_MAX_HOURS })
 			const { st, et } = range
+			if (range.exceeded) return rangeExceededResult(range, "mine_log_patterns")
 			const sampleSize = Math.min(Math.max(Number(sample_size) || 10_000, 1), 50_000)
 			const lim = Math.min(Math.max(Number(limit) || 50, 1), 200)
 			const tenant = yield* resolveTenant
@@ -70,7 +71,7 @@ export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 					content: [
 						{
 							type: "text" as const,
-							text: `No logs found to cluster in ${st} — ${et}${formatClampNote(range)}`,
+							text: `No logs found to cluster in ${st} — ${et}`,
 						},
 					],
 				}
@@ -78,7 +79,7 @@ export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 
 			const lines: string[] = [
 				`## Log Patterns (${result.patterns.length} templates from ${formatNumber(result.totalSampled)} sampled logs)`,
-				`Time range: ${st} — ${et}${formatClampNote(range)}`,
+				`Time range: ${st} — ${et}`,
 			]
 
 			const filters: string[] = []

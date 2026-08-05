@@ -38,6 +38,10 @@ use maple_ingest::otel::{
     record_stage_error, rejection_loses_data, resolve_config_internal_span, ResourceConfig,
 };
 use maple_ingest::otlp_json;
+use maple_ingest::r2::{replay_object_key, ReplayBlobStore};
+use maple_ingest::session_analytics::{
+    derive_referrer_host, sanitize_session_event, sanitize_session_meta,
+};
 use maple_ingest::telemetry::{
     AttributeMappingRule, ClickHouseBreakerConfig, ClickHouseTarget, ClickHouseTargetProvider,
     DatasourceNames, ExportDestination, MappingOperation, MappingSourceContext, PipelineError,
@@ -96,6 +100,17 @@ fn is_sentinel_token(token: &str) -> bool {
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Credentials for the S3-compatible endpoint that holds replay chunk payloads.
+#[derive(Clone)]
+struct ReplayBlobStoreConfig {
+    endpoint: String,
+    bucket: String,
+    access_key_id: String,
+    secret_access_key: String,
+    region: String,
+    timeout: Duration,
+}
+
 #[derive(Clone)]
 struct AppConfig {
     port: u16,
@@ -120,6 +135,20 @@ struct AppConfig {
     /// Ceiling on the total decompressed rrweb payload a single replay session
     /// may accumulate. 0 disables the cap. See `ReplaySessionBudget`.
     replay_max_session_bytes: u64,
+    /// Where replay chunk payloads are stored. `None` — the default, and the
+    /// only option for self-hosted and BYO-ClickHouse deployments — keeps the
+    /// rrweb JSON inline in the `session_replay_events` row. `Some` diverts the
+    /// payload to R2 and writes a thin index row with an empty `events`.
+    replay_blob_store: Option<ReplayBlobStoreConfig>,
+    /// Whether `Cf-IPCountry` on an inbound request can be believed.
+    ///
+    /// Off by default, and that default is the safe one: this gateway is a
+    /// Railway container, so it is reachable directly on its
+    /// `*.up.railway.app` origin and any client can set the header itself.
+    /// Enable it only on deployments where every path to the process is
+    /// terminated by Cloudflare. Off simply writes `''`, which is what the
+    /// column held before this existed — it cannot regress anything.
+    trust_proxy_geo: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -405,6 +434,59 @@ impl AppConfig {
             1024 * 1024 * 1024,
         )?;
 
+        // Replay payload storage. An unset endpoint is the signal for "keep the
+        // rrweb JSON inline in ClickHouse" — that is what self-hosted and
+        // BYO-ClickHouse deployments run, and it is also how this ships dark on
+        // the managed path until the credentials are set. Anything half-set is a
+        // misconfiguration we refuse to boot on rather than silently falling
+        // back to inline, which would look identical in metrics until someone
+        // noticed the warehouse bill hadn't moved.
+        let replay_blob_store = {
+            let endpoint = std::env::var("INGEST_REPLAY_R2_ENDPOINT")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
+            match endpoint {
+                None => None,
+                Some(endpoint) => {
+                    let required = |name: &str| -> Result<String, String> {
+                        std::env::var(name)
+                            .ok()
+                            .map(|v| v.trim().to_string())
+                            .filter(|v| !v.is_empty())
+                            .ok_or_else(|| {
+                                format!("{name} is required when INGEST_REPLAY_R2_ENDPOINT is set")
+                            })
+                    };
+                    let timeout_ms = parse_u64(
+                        "INGEST_REPLAY_R2_TIMEOUT_MS",
+                        std::env::var("INGEST_REPLAY_R2_TIMEOUT_MS").ok(),
+                        5_000,
+                    )?;
+                    Some(ReplayBlobStoreConfig {
+                        endpoint,
+                        bucket: required("INGEST_REPLAY_R2_BUCKET")?,
+                        access_key_id: required("INGEST_REPLAY_R2_ACCESS_KEY_ID")?,
+                        secret_access_key: required("INGEST_REPLAY_R2_SECRET_ACCESS_KEY")?,
+                        region: std::env::var("INGEST_REPLAY_R2_REGION")
+                            .ok()
+                            .map(|v| v.trim().to_string())
+                            .filter(|v| !v.is_empty())
+                            .unwrap_or_else(|| "auto".to_string()),
+                        timeout: Duration::from_millis(timeout_ms),
+                    })
+                }
+            }
+        };
+
+        // Default off — see the field doc. Set it on services that are only
+        // reachable through Cloudflare.
+        let trust_proxy_geo = parse_bool(
+            "MAPLE_INGEST_TRUST_PROXY_GEO",
+            std::env::var("MAPLE_INGEST_TRUST_PROXY_GEO").ok(),
+            false,
+        )?;
+
         Ok(Self {
             port,
             otlp_grpc_port,
@@ -426,6 +508,8 @@ impl AppConfig {
             ingest_key_cache_ttl_secs,
             org_routing_cache_ttl_secs,
             replay_max_session_bytes,
+            replay_blob_store,
+            trust_proxy_geo,
         })
     }
 }
@@ -810,6 +894,9 @@ struct AppState {
     /// (local dev, or a loopback endpoint).
     usage_metrics: Option<Arc<UsageMetrics>>,
     replay_session_budget: ReplaySessionBudget,
+    /// `Some` when replay payloads go to R2; `None` keeps them inline in the
+    /// `session_replay_events` row. See `AppConfig::replay_blob_store`.
+    replay_blob_store: Option<ReplayBlobStore>,
 }
 
 #[derive(Clone)]
@@ -1579,6 +1666,10 @@ async fn main() {
         last_known: DashMap::new(),
     });
 
+    // Same pooled client as every other outbound call; `http_client` itself is
+    // moved into the state below.
+    let http_client_for_blobs = http_client.clone();
+
     let state = Arc::new(AppState {
         resolver: IngestKeyResolver {
             store: Arc::clone(&store),
@@ -1608,6 +1699,17 @@ async fn main() {
         autumn_entitlements,
         usage_metrics: usage_metrics.clone(),
         replay_session_budget: ReplaySessionBudget::new(config.replay_max_session_bytes),
+        replay_blob_store: config.replay_blob_store.as_ref().map(|blob| {
+            ReplayBlobStore::new(
+                http_client_for_blobs,
+                blob.endpoint.clone(),
+                blob.bucket.clone(),
+                blob.access_key_id.clone(),
+                blob.secret_access_key.clone(),
+                blob.region.clone(),
+                blob.timeout,
+            )
+        }),
     });
 
     let cors = CorsLayer::new()
@@ -2121,6 +2223,37 @@ fn is_safe_replay_id(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
+/// Two-letter ISO country for a session, derived from `Cf-IPCountry`.
+///
+/// Server-derived on purpose: the client never gets a say, so `Country` cannot
+/// be spoofed into a competitor's dashboard. The strict shape check also bounds
+/// the `LowCardinality(String)` dictionary to ~250 values no matter what
+/// arrives — an unbounded dictionary on that column would degrade every query
+/// on the table for that org.
+///
+/// Returns `""` (the column default) when geo is untrusted, absent, or
+/// unrecognized. Cloudflare's `XX` (unknown) and `T1` (Tor exit) are mapped to
+/// `""` as well: they are not countries, and leaving them in makes every
+/// breakdown carry two junk buckets.
+///
+/// The client IP is deliberately never read or stored — country is all we take.
+fn derive_country(headers: &HeaderMap, trust_proxy_geo: bool) -> String {
+    if !trust_proxy_geo {
+        return String::new();
+    }
+    let Some(raw) = replay_header(headers, "cf-ipcountry") else {
+        return String::new();
+    };
+    if raw.len() != 2 || !raw.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return String::new();
+    }
+    let code = raw.to_ascii_uppercase();
+    if code == "XX" || code == "T1" {
+        return String::new();
+    }
+    code
+}
+
 /// Auth shared by both replay endpoints. `Ok(None)` is the sentinel token —
 /// silently dropped like the OTLP path.
 async fn resolve_replay_key(
@@ -2245,6 +2378,7 @@ async fn handle_replay_meta_inner(
     // and re-posts a start row for the same SessionId, so reloads can slightly
     // over-count — consistent with the at-least-once metering used for the
     // logs/traces/metrics signals.
+    let country = derive_country(headers, state.config.trust_proxy_geo);
     let mut rows: Vec<Vec<u8>> = Vec::new();
     let mut session_starts: u64 = 0;
     for line in body.split(|&b| b == b'\n') {
@@ -2260,6 +2394,34 @@ async fn handle_replay_meta_inner(
             "org_id".to_string(),
             serde_json::Value::String(org_id.clone()),
         );
+        // Server-derived fields, forced alongside org_id so the three stay
+        // visibly paired: whatever the client sent is overwritten, including
+        // with an empty string. Both the active and ended rows get them, which
+        // matters because ReplacingMergeTree replaces the whole row — a country
+        // present only on v1 would be erased by the v2 merge.
+        obj.insert(
+            "country".to_string(),
+            serde_json::Value::String(country.clone()),
+        );
+        let referrer = obj
+            .get("referrer")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let current_host = obj
+            .get("host")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let referrer_host = derive_referrer_host(&referrer, &current_host);
+        obj.insert(
+            "referrer_host".to_string(),
+            serde_json::Value::String(referrer_host),
+        );
+        // Everything else on this row is client-supplied, including six
+        // LowCardinality columns. Clamp before it reaches the warehouse — the
+        // SDK's own trimming ships in customer JavaScript.
+        sanitize_session_meta(obj);
         if obj.get("version").and_then(|v| v.as_u64()) == Some(1) {
             session_starts += 1;
         }
@@ -2323,6 +2485,7 @@ async fn handle_session_events(
         "maple.org_id" = tracing::field::Empty,
         "maple.ingest.clickhouse_ready" = tracing::field::Empty,
         "maple.ingest.destination" = tracing::field::Empty,
+        "maple.session_events.dropped" = tracing::field::Empty,
     );
     let span_handle = span.clone();
     match handle_session_events_inner(&state, &headers, body)
@@ -2367,11 +2530,13 @@ async fn handle_session_events_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
-    // Spend pause only, no entitlement check: distilled session events are not
-    // metered to Autumn, so gating them on a balance they never decrement would
-    // be incoherent. The customer's own pause is different — they asked us to
-    // stop writing their data, and honouring that only on the metadata endpoint
-    // would keep storing the bulk of the session anyway.
+    // Same two gates as the metadata endpoint, in the same order. Session events
+    // are not separately metered — `browser_sessions` remains the billed unit,
+    // and introducing a `browser_events` meter is a pricing decision, not a
+    // schema one — but they must still be entitlement-gated: an out-of-quota org
+    // whose metadata rows are rejected while its event stream keeps writing is
+    // the incoherent half of the old design, and it only widens now that custom
+    // events are a promoted feature.
     if org_id != SENTINEL_ORG_ID {
         if let Some(error) = spend_limit_rejection(
             &org_id,
@@ -2379,6 +2544,11 @@ async fn handle_session_events_inner(
             &resolved_key.paused_features,
             BROWSER_SESSIONS_FEATURE_ID,
         ) {
+            return Err(error);
+        }
+        if let Some(error) =
+            entitlement_rejection(state, &org_id, BROWSER_SESSIONS_FEATURE_ID).await
+        {
             return Err(error);
         }
     }
@@ -2392,6 +2562,7 @@ async fn handle_session_events_inner(
     // NDJSON: one distilled session-event object per line. As with replay
     // metadata, org_id is taken from the authenticated key, never the body.
     let mut rows: Vec<Vec<u8>> = Vec::new();
+    let mut dropped: u64 = 0;
     for line in body.split(|&b| b == b'\n') {
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
@@ -2401,6 +2572,14 @@ async fn handle_session_events_inner(
         let obj = value
             .as_object_mut()
             .ok_or_else(|| ApiError::bad_request("session event must be a JSON object"))?;
+        // Unknown `Type` values and oversized message/attribute payloads would
+        // bloat this table's LowCardinality dictionaries, which degrades every
+        // query on it for that org. Drop or clamp the row rather than failing
+        // the batch — see `sanitize_session_event`.
+        if !sanitize_session_event(obj) {
+            dropped += 1;
+            continue;
+        }
         obj.insert(
             "org_id".to_string(),
             serde_json::Value::String(org_id.clone()),
@@ -2408,6 +2587,15 @@ async fn handle_session_events_inner(
         rows.push(
             serde_json::to_vec(&value)
                 .map_err(|e| ApiError::bad_request(format!("failed to re-serialize event: {e}")))?,
+        );
+    }
+
+    if dropped > 0 {
+        Span::current().record("maple.session_events.dropped", dropped);
+        warn!(
+            org_id = %org_id,
+            dropped,
+            "dropped session events with an unrecognized type"
         );
     }
 
@@ -2429,6 +2617,30 @@ async fn handle_session_events_inner(
             api_error_from_pipeline(&e)
         })?;
     Ok(count)
+}
+
+/// Decompressed length of a gzip payload, without materializing it.
+///
+/// Same number `read_to_string(...).len()` would produce, and the same
+/// rejection of malformed gzip — it just doesn't keep the bytes. Used on the
+/// blob-store path, where the decompressed text is never needed but `ByteSize`
+/// and the per-session budget are still denominated in decompressed bytes.
+fn decompressed_len(body: &[u8]) -> Result<u64, ApiError> {
+    use std::io::Read as _;
+    let mut decoder = flate2::read::GzDecoder::new(body);
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total: u64 = 0;
+    loop {
+        match decoder.read(&mut buffer) {
+            Ok(0) => return Ok(total),
+            Ok(n) => total += n as u64,
+            Err(e) => {
+                return Err(ApiError::bad_request(format!(
+                    "failed to gunzip replay chunk: {e}"
+                )))
+            }
+        }
+    }
 }
 
 async fn handle_replay_blob(
@@ -2455,6 +2667,9 @@ async fn handle_replay_blob(
         "maple.ingest.clickhouse_ready" = tracing::field::Empty,
         "maple.ingest.destination" = tracing::field::Empty,
         "maple.replay.truncated" = tracing::field::Empty,
+        "maple.replay.storage" = tracing::field::Empty,
+        "maple.replay.object_key" = tracing::field::Empty,
+        "maple.replay.blob_put_ms" = tracing::field::Empty,
     );
     let span_handle = span.clone();
     match handle_replay_blob_inner(&state, &headers, body)
@@ -2524,6 +2739,15 @@ async fn handle_replay_blob_inner(
     if !is_safe_replay_id(&session_id) {
         return Err(ApiError::bad_request("invalid x-maple-session-id"));
     }
+    // The org id comes from the resolved key rather than the request, so this is
+    // a guard against a malformed key row, not against the caller. It matters
+    // because the id is now a path segment in a signed URL, not just a quoted
+    // SQL param.
+    if state.replay_blob_store.is_some() && !is_safe_replay_id(&org_id) {
+        return Err(ApiError::service_unavailable(
+            "organization id is not storage-key safe",
+        ));
+    }
     let chunk_seq: u32 = replay_header(headers, "x-maple-chunk-seq")
         .and_then(|v| v.parse().ok())
         .ok_or_else(|| ApiError::bad_request("missing or invalid x-maple-chunk-seq header"))?;
@@ -2551,16 +2775,27 @@ async fn handle_replay_blob_inner(
         ));
     }
 
-    // The SDK gzips the rrweb event array (native CompressionStream). Decompress
-    // here so the events land in ClickHouse as queryable JSON text (the column is
-    // ZSTD-compressed by the warehouse) — no R2 blob store on the replay path.
-    use std::io::Read as _;
-    let mut decoder = flate2::read::GzDecoder::new(&body[..]);
-    let mut events_json = String::new();
-    decoder
-        .read_to_string(&mut events_json)
-        .map_err(|e| ApiError::bad_request(format!("failed to gunzip replay chunk: {e}")))?;
-    let byte_size = events_json.len() as u64;
+    // The SDK gzips the rrweb event array (native CompressionStream).
+    //
+    // With a blob store configured we never need the decompressed text — the
+    // gzip is stored verbatim — but we still decode it, for two reasons: this is
+    // what rejects malformed gzip from a hostile client, and `byte_size` is a
+    // published API field and the input to `ReplaySessionBudget`, whose ceiling
+    // is denominated in *decompressed* bytes. So decode and discard, counting.
+    // What that avoids is the part that actually cost: materializing a
+    // multi-megabyte String, JSON-escaping it, and pushing it through the WAL.
+    let (events_json, byte_size) = if state.replay_blob_store.is_some() {
+        (None, decompressed_len(&body)?)
+    } else {
+        use std::io::Read as _;
+        let mut decoder = flate2::read::GzDecoder::new(&body[..]);
+        let mut events_json = String::new();
+        decoder
+            .read_to_string(&mut events_json)
+            .map_err(|e| ApiError::bad_request(format!("failed to gunzip replay chunk: {e}")))?;
+        let byte_size = events_json.len() as u64;
+        (Some(events_json), byte_size)
+    };
 
     // Accept the chunk that crosses the ceiling so the recording truncates on a
     // chunk boundary; `is_exhausted` rejects everything after it.
@@ -2580,6 +2815,57 @@ async fn handle_replay_blob_inner(
         Span::current().record("maple.replay.truncated", true);
         metrics::replay_session_truncated(&org_id);
     }
+
+    // Store the payload before the row that indexes it. The ordering is the
+    // invariant: a row must never point at an object that isn't there, and a
+    // failed PUT returns non-2xx so the SDK drops the chunk (it already does not
+    // retry) rather than leaving an unplayable gap in a listed session. The
+    // reverse — an object with no row — is harmless and gets swept by the
+    // bucket's lifecycle rule.
+    let events_json = match (&state.replay_blob_store, events_json) {
+        (Some(store), _) => {
+            let key = replay_object_key(&org_id, &session_id, chunk_seq);
+            Span::current().record("maple.replay.storage", "r2");
+            Span::current().record("maple.replay.object_key", key.as_str());
+            let started = Instant::now();
+            // Verbatim gzip: ~10x smaller at rest than the JSON text, no
+            // recompression, and the Content-Encoding lets a reader hand the
+            // bytes to a browser to inflate.
+            store
+                .put_object(&key, body.to_vec(), "application/json", Some("gzip"))
+                .await
+                .map_err(|e| {
+                    warn!(
+                        org_id = %org_id,
+                        session_id = %session_id,
+                        chunk_seq,
+                        error = %e,
+                        "replay chunk blob upload failed"
+                    );
+                    metrics::replay_blob_put_failed(&org_id);
+                    ApiError::service_unavailable("failed to store replay chunk")
+                })?;
+            Span::current().record(
+                "maple.replay.blob_put_ms",
+                started.elapsed().as_millis() as i64,
+            );
+            // The index row carries the chunk's metadata; the payload lives in
+            // R2 under a key derived from (OrgId, SessionId, ChunkSeq). An empty
+            // `events` is what marks the row as blob-backed on read — the SDK
+            // never posts an empty chunk, so it cannot occur otherwise.
+            String::new()
+        }
+        (None, Some(events_json)) => {
+            Span::current().record("maple.replay.storage", "inline");
+            events_json
+        }
+        // Unreachable: `events_json` is only `None` when a store is configured.
+        (None, None) => {
+            return Err(ApiError::service_unavailable(
+                "replay chunk was neither stored nor decoded",
+            ))
+        }
+    };
 
     // Row → session_replay_events. Tinybird parses the space-separated datetime
     // into DateTime64(9); `events` is stored verbatim as a String column.
@@ -4286,6 +4572,49 @@ impl AttributeMappingResolver {
     }
 }
 
+/// The schema revision this binary needs an org's ClickHouse to be at, as a
+/// number. Non-numeric (legacy hash) revisions parse to 0, which is older than
+/// every real migration — the same "not ready" answer they get today.
+fn required_schema_revision() -> i32 {
+    CLICKHOUSE_SCHEMA_VERSION.parse().unwrap_or(0)
+}
+
+/// Is an org's stamped schema revision new enough for this binary to write to?
+///
+/// Deliberately `>=` rather than `==`. Migrations only ever add columns or widen
+/// types, and every INSERT names its columns explicitly, so an older binary
+/// writing into a newer schema is safe — the columns it doesn't know about take
+/// their DEFAULT. Equality instead made *any* skew a routing change: between
+/// stamping an org at the new revision and rolling out the matching binary, the
+/// org fell back to Tinybird and its own ClickHouse silently missed that window.
+/// With `>=` the org keeps writing to its own cluster throughout the rollout.
+///
+/// The comparison is numeric on purpose: these are stored as text, and as text
+/// "12" sorts before "9", so a string `>=` would strand every org.
+fn schema_revision_is_compatible(stamped: &str) -> bool {
+    schema_revision_at_least(stamped, required_schema_revision())
+}
+
+/// The comparison itself, with `needed` passed in so it is testable without
+/// depending on whatever revision this binary happens to be pinned to.
+fn schema_revision_at_least(stamped: &str, needed: i32) -> bool {
+    stamped.parse::<i32>().unwrap_or(-1) >= needed
+}
+
+/// SQL predicate matching `schema_revision_is_compatible`, for the routing
+/// queries. Kept next to it so the two can never drift — if they disagree,
+/// routing sends frames down the ClickHouse path that the target resolver then
+/// refuses, and the export worker drops the batch.
+///
+/// `CASE` rather than `regex AND cast`: legacy revisions were content hashes,
+/// and `'2967fa9b'::int` raises rather than returning false. Postgres does not
+/// promise to evaluate `AND` left-to-right — it may reorder on cost, and a
+/// regex match costs more than a cast — so the guard has to be `CASE`, which
+/// *is* defined to short-circuit. Getting this wrong fails the whole query,
+/// which would take down every ingest-key lookup, not just one org's routing.
+const SCHEMA_REVISION_COMPATIBLE_SQL: &str =
+    "(CASE WHEN s.schema_version ~ '^[0-9]+$' THEN s.schema_version::int ELSE -1 END >= $1)";
+
 #[async_trait::async_trait]
 impl ClickHouseTargetProvider for ClickHouseTargetResolver {
     async fn resolve_clickhouse_target(
@@ -4299,7 +4628,7 @@ impl ClickHouseTargetProvider for ClickHouseTargetResolver {
         let Some(row) = self.store.fetch_clickhouse_target(org_id).await? else {
             return Ok(None);
         };
-        if row.schema_version != CLICKHOUSE_SCHEMA_VERSION {
+        if !schema_revision_is_compatible(&row.schema_version) {
             return Ok(None);
         }
 
@@ -4353,14 +4682,62 @@ impl ClickHouseTargetProvider for ClickHouseTargetResolver {
 /// fingerprinting sit upstream.
 struct PostgresKeyStore {
     pool: deadpool_postgres::Pool,
+    /// Target identity for the DB client spans, read off the parsed connection
+    /// string once at startup. Without a `db.namespace` these spans collapse
+    /// into the per-system generic node on the service map instead of naming
+    /// the database they actually hit.
+    target: PostgresTarget,
 }
 
-fn postgres_client_span(operation: &'static str) -> Span {
+/// The `db.namespace` / `server.address` / `server.port` of the configured
+/// origin. Derived from `MAPLE_PG_URL` rather than hardcoded so self-hosted and
+/// local deployments report the database they really talk to.
+#[derive(Clone, Debug, Default)]
+struct PostgresTarget {
+    namespace: String,
+    address: String,
+    port: u16,
+}
+
+impl PostgresTarget {
+    fn from_config(config: &tokio_postgres::Config) -> Self {
+        let address = match config.get_hosts().first() {
+            Some(tokio_postgres::config::Host::Tcp(host)) => host.clone(),
+            Some(tokio_postgres::config::Host::Unix(path)) => path.to_string_lossy().into_owned(),
+            None => String::new(),
+        };
+        Self {
+            namespace: config.get_dbname().unwrap_or_default().to_string(),
+            address,
+            port: config.get_ports().first().copied().unwrap_or_default(),
+        }
+    }
+}
+
+/// One Postgres client span.
+///
+/// `operation`/`collection` are the SQL verb and primary table, NOT the Rust
+/// method name: `db.operation.name` composes with `db.collection.name` into the
+/// query-shape label the warehouse groups on, so a method name there produces a
+/// label like "fetch_ingest_key" that no SQL-shaped view can line up with the
+/// same table hit from the API. The method name rides on `code.function.name`,
+/// which keeps existing log/dashboard filters working.
+fn postgres_client_span(
+    method: &'static str,
+    operation: &'static str,
+    collection: &'static str,
+    target: &PostgresTarget,
+) -> Span {
     tracing::info_span!(
         "postgres.query",
         otel.kind = "client",
         "db.system.name" = "postgresql",
         "db.operation.name" = operation,
+        "db.collection.name" = collection,
+        "db.namespace" = %target.namespace,
+        "server.address" = %target.address,
+        "server.port" = target.port,
+        "code.function.name" = method,
         "peer.service" = "planetscale-postgres",
     )
 }
@@ -4381,6 +4758,9 @@ impl PostgresKeyStore {
             .with_no_client_auth();
         let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
 
+        // Read the target identity before the config is moved into the manager.
+        let target = PostgresTarget::from_config(&pg_config);
+
         let mgr = deadpool_postgres::Manager::from_config(
             pg_config,
             tls,
@@ -4393,7 +4773,7 @@ impl PostgresKeyStore {
             .build()
             .map_err(|error| format!("postgres pool build failed: {error}"))?;
 
-        Ok(Self { pool })
+        Ok(Self { pool, target })
     }
 
     async fn client(&self) -> Result<deadpool_postgres::Object, String> {
@@ -4422,7 +4802,7 @@ impl PostgresKeyStore {
                  WHERE k.private_key_hash = $1 LIMIT 1",
                 &[&"__ingest_probe_no_match__"],
             )
-            .instrument(postgres_client_span("probe"))
+            .instrument(postgres_client_span("probe", "SELECT", "org_ingest_keys", &self.target))
             .await
             .map(|_| ())
             .map_err(|error| format!("postgres probe query failed: {error}"))
@@ -4438,11 +4818,11 @@ impl KeyStore for PostgresKeyStore {
     ) -> Result<Option<KeyRow>, String> {
         // hash_column is a compile-time constant chosen by the resolver, never
         // user input — safe to interpolate.
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let sql = format!(
             "SELECT k.org_id, \
                     COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                    COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
+                    COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
                     COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
                     COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
              FROM org_ingest_keys k \
@@ -4453,7 +4833,12 @@ impl KeyStore for PostgresKeyStore {
         let client = self.client().await?;
         let rows = client
             .query(&sql, &[&revision, &key_hash])
-            .instrument(postgres_client_span("fetch_ingest_key"))
+            .instrument(postgres_client_span(
+                "fetch_ingest_key",
+                "SELECT",
+                "org_ingest_keys",
+                &self.target,
+            ))
             .await
             .map_err(|error| format!("postgres fetch_ingest_key failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -4473,22 +4858,27 @@ impl KeyStore for PostgresKeyStore {
         connector_id: &str,
         secret_hash: &str,
     ) -> Result<Option<ConnectorRow>, String> {
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let client = self.client().await?;
+        let sql = format!(
+            "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
+                    COALESCE(s.sync_status = 'connected', false) AS self_managed, \
+                    COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
+                    COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
+                    COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
+             FROM cloudflare_logpush_connectors c \
+             LEFT JOIN org_clickhouse_settings s ON s.org_id = c.org_id \
+             LEFT JOIN org_spend_limits l ON l.org_id = c.org_id \
+             WHERE c.id = $2 AND c.secret_hash = $3 AND c.enabled = true LIMIT 1"
+        );
         let rows = client
-            .query(
-                "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
-                        COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                        COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
-                        COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
-                        COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{}')::text[] AS paused_features \
-                 FROM cloudflare_logpush_connectors c \
-                 LEFT JOIN org_clickhouse_settings s ON s.org_id = c.org_id \
-                 LEFT JOIN org_spend_limits l ON l.org_id = c.org_id \
-                 WHERE c.id = $2 AND c.secret_hash = $3 AND c.enabled = true LIMIT 1",
-                &[&revision, &connector_id, &secret_hash],
-            )
-            .instrument(postgres_client_span("fetch_connector"))
+            .query(&sql, &[&revision, &connector_id, &secret_hash])
+            .instrument(postgres_client_span(
+                "fetch_connector",
+                "SELECT",
+                "cloudflare_logpush_connectors",
+                &self.target,
+            ))
             .await
             .map_err(|error| format!("postgres fetch_connector failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -4517,7 +4907,12 @@ impl KeyStore for PostgresKeyStore {
                  FROM org_ingest_sampling_policies WHERE org_id = $1 LIMIT 1",
                 &[&org_id],
             )
-            .instrument(postgres_client_span("fetch_sampling_policy"))
+            .instrument(postgres_client_span(
+                "fetch_sampling_policy",
+                "SELECT",
+                "org_ingest_sampling_policies",
+                &self.target,
+            ))
             .await
             .map_err(|error| format!("postgres fetch_sampling_policy failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -4542,7 +4937,12 @@ impl KeyStore for PostgresKeyStore {
                  FROM org_ingest_attribute_mappings WHERE org_id = $1 AND enabled = true",
                 &[&org_id],
             )
-            .instrument(postgres_client_span("fetch_attribute_mappings"))
+            .instrument(postgres_client_span(
+                "fetch_attribute_mappings",
+                "SELECT",
+                "org_ingest_attribute_mappings",
+                &self.target,
+            ))
             .await
             .map_err(|error| format!("postgres fetch_attribute_mappings failed: {error}"))?;
         Ok(rows
@@ -4560,17 +4960,24 @@ impl KeyStore for PostgresKeyStore {
         &self,
         org_id: &str,
     ) -> Result<Option<ClickHouseTargetRow>, String> {
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let client = self.client().await?;
         let rows = client
             .query(
                 "SELECT ch_url, ch_user, ch_password_ciphertext, ch_password_iv, ch_password_tag, \
                         ch_database, schema_version \
                  FROM org_clickhouse_settings \
-                 WHERE org_id = $1 AND sync_status = 'connected' AND schema_version = $2 LIMIT 1",
+                 WHERE org_id = $1 AND sync_status = 'connected' \
+                   AND CASE WHEN schema_version ~ '^[0-9]+$' \
+                            THEN schema_version::int ELSE -1 END >= $2 LIMIT 1",
                 &[&org_id, &revision],
             )
-            .instrument(postgres_client_span("fetch_clickhouse_target"))
+            .instrument(postgres_client_span(
+                "fetch_clickhouse_target",
+                "SELECT",
+                "org_clickhouse_settings",
+                &self.target,
+            ))
             .await
             .map_err(|error| format!("postgres fetch_clickhouse_target failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -4588,7 +4995,7 @@ impl KeyStore for PostgresKeyStore {
     }
 
     async fn fetch_org_routing(&self, org_id: &str) -> Result<Option<OrgRouting>, String> {
-        let revision = CLICKHOUSE_SCHEMA_VERSION;
+        let revision = required_schema_revision();
         let client = self.client().await?;
         let rows = client
             .query(
@@ -4596,16 +5003,18 @@ impl KeyStore for PostgresKeyStore {
                 // org_clickhouse_settings: an org can have spend limits and no
                 // BYO-ClickHouse config, and the old FROM would return no row at
                 // all for it — reading as "never paused".
-                "SELECT COALESCE(s.sync_status = 'connected', false) AS self_managed, \
-                        COALESCE(s.sync_status = 'connected' AND s.schema_version = $1, false) AS clickhouse_ready, \
-                        COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
-                        COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{}')::text[] AS paused_features \
-                 FROM (SELECT $2::text AS org_id) o \
-                 LEFT JOIN org_clickhouse_settings s ON s.org_id = o.org_id \
-                 LEFT JOIN org_spend_limits l ON l.org_id = o.org_id LIMIT 1",
+                &format!(
+                    "SELECT COALESCE(s.sync_status = 'connected', false) AS self_managed, \
+                            COALESCE(s.sync_status = 'connected' AND {SCHEMA_REVISION_COMPATIBLE_SQL}, false) AS clickhouse_ready, \
+                            COALESCE(l.paused_at IS NOT NULL, false) AS spend_paused, \
+                            COALESCE(ARRAY(SELECT jsonb_array_elements_text(l.paused_features)), '{{}}')::text[] AS paused_features \
+                     FROM (SELECT $2::text AS org_id) o \
+                     LEFT JOIN org_clickhouse_settings s ON s.org_id = o.org_id \
+                     LEFT JOIN org_spend_limits l ON l.org_id = o.org_id LIMIT 1"
+                ),
                 &[&revision, &org_id],
             )
-            .instrument(postgres_client_span("fetch_org_routing"))
+            .instrument(postgres_client_span("fetch_org_routing", "SELECT", "org_clickhouse_settings", &self.target))
             .await
             .map_err(|error| format!("postgres fetch_org_routing failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -4634,7 +5043,12 @@ impl KeyStore for PostgresKeyStore {
                  WHERE id = $2",
                 &[&now_ms, &connector_id],
             )
-            .instrument(postgres_client_span("record_connector_success"))
+            .instrument(postgres_client_span(
+                "record_connector_success",
+                "UPDATE",
+                "cloudflare_logpush_connectors",
+                &self.target,
+            ))
             .await
             .map(|_| ())
             .map_err(|error| format!("postgres record_connector_success failed: {error}"))
@@ -4654,7 +5068,12 @@ impl KeyStore for PostgresKeyStore {
                  WHERE id = $3",
                 &[&error, &now_ms, &connector_id],
             )
-            .instrument(postgres_client_span("record_connector_failure"))
+            .instrument(postgres_client_span(
+                "record_connector_failure",
+                "UPDATE",
+                "cloudflare_logpush_connectors",
+                &self.target,
+            ))
             .await
             .map(|_| ())
             .map_err(|err| format!("postgres record_connector_failure failed: {err}"))
@@ -4945,6 +5364,42 @@ mod tests {
     // top-level import avoids an unused-import warning in non-test bin builds.
     use opentelemetry_proto::tonic::metrics::v1::metric;
     use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn postgres_target_is_derived_from_the_connection_string() {
+        let config = "postgres://user:pw@psbouncer.example.com:6432/maple_prod"
+            .parse::<tokio_postgres::Config>()
+            .unwrap();
+        let target = PostgresTarget::from_config(&config);
+        assert_eq!(target.namespace, "maple_prod");
+        assert_eq!(target.address, "psbouncer.example.com");
+        assert_eq!(target.port, 6432);
+    }
+
+    #[test]
+    fn postgres_client_span_declares_db_identity() {
+        // A field that isn't declared here can't be filtered or grouped on, and
+        // an absent `db.namespace` drops the span into the generic per-system
+        // node on the service map instead of naming the database.
+        let target = PostgresTarget {
+            namespace: "maple_prod".to_string(),
+            address: "psbouncer.example.com".to_string(),
+            port: 6432,
+        };
+        let span = postgres_client_span("fetch_ingest_key", "SELECT", "org_ingest_keys", &target);
+        for field in [
+            "db.system.name",
+            "db.operation.name",
+            "db.collection.name",
+            "db.namespace",
+            "server.address",
+            "server.port",
+            "peer.service",
+            "code.function.name",
+        ] {
+            assert!(span.has_field(field), "span is missing field `{field}`");
+        }
+    }
 
     #[test]
     fn hash_is_deterministic() {
@@ -5406,6 +5861,36 @@ mod tests {
         ));
     }
 
+    fn geo_headers(country: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-ipcountry", country.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn country_is_empty_unless_the_proxy_is_trusted() {
+        // The gateway is reachable directly on its Railway origin, so an
+        // untrusted deployment must ignore the header entirely rather than let
+        // a client label its own traffic.
+        assert_eq!(derive_country(&geo_headers("DE"), false), "");
+        assert_eq!(derive_country(&HeaderMap::new(), true), "");
+    }
+
+    #[test]
+    fn country_normalizes_and_rejects_non_countries() {
+        assert_eq!(derive_country(&geo_headers("de"), true), "DE");
+        assert_eq!(derive_country(&geo_headers(" us "), true), "US");
+        // Cloudflare's unknown/Tor sentinels are not countries — keeping them
+        // would put two junk buckets in every breakdown.
+        assert_eq!(derive_country(&geo_headers("XX"), true), "");
+        assert_eq!(derive_country(&geo_headers("T1"), true), "");
+        // Anything off-shape is dropped, which is what bounds the LowCardinality
+        // dictionary to ~250 values.
+        assert_eq!(derive_country(&geo_headers("DE; DROP"), true), "");
+        assert_eq!(derive_country(&geo_headers("DEU"), true), "");
+        assert_eq!(derive_country(&geo_headers("1"), true), "");
+    }
+
     #[test]
     fn tinybird_destination_keeps_forward_mode_on_forward_path() {
         assert!(!uses_native_pipeline_for(
@@ -5793,6 +6278,8 @@ mod tests {
                 ingest_key_cache_ttl_secs: 60,
                 org_routing_cache_ttl_secs: 5,
                 replay_max_session_bytes: 1024 * 1024 * 1024,
+                replay_blob_store: None,
+                trust_proxy_geo: false,
             },
             http_client,
             telemetry_pipeline: Some(telemetry_pipeline),
@@ -5833,7 +6320,32 @@ mod tests {
             autumn_entitlements: None,
             usage_metrics: None,
             replay_session_budget: ReplaySessionBudget::new(1024 * 1024 * 1024),
+            replay_blob_store: None,
         }
+    }
+
+    /// Point a state's replay payloads at a fake S3 endpoint. Mirrors what
+    /// `INGEST_REPLAY_R2_*` does in `Config::from_env`.
+    fn with_replay_blob_store(mut state: AppState, endpoint: String) -> AppState {
+        let config = ReplayBlobStoreConfig {
+            endpoint,
+            bucket: "replays".to_string(),
+            access_key_id: "test-access-key".to_string(),
+            secret_access_key: "test-secret-key".to_string(),
+            region: "auto".to_string(),
+            timeout: Duration::from_secs(5),
+        };
+        state.replay_blob_store = Some(ReplayBlobStore::new(
+            state.http_client.clone(),
+            config.endpoint.clone(),
+            config.bucket.clone(),
+            config.access_key_id.clone(),
+            config.secret_access_key.clone(),
+            config.region.clone(),
+            config.timeout,
+        ));
+        state.config.replay_blob_store = Some(config);
+        state
     }
 
     #[tokio::test]
@@ -5984,6 +6496,267 @@ mod tests {
         // `state.autumn_tracker` is None in tests, so the assertion that matters
         // is structural: the gate returns before the metering block is reached.
         let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    /// What a fake R2 recorded for one PUT.
+    #[derive(Debug)]
+    struct CapturedPut {
+        path: String,
+        authorization: String,
+        content_type: String,
+        content_encoding: String,
+        body: Vec<u8>,
+    }
+
+    async fn fake_r2_put(
+        axum::extract::State(tx): axum::extract::State<
+            tokio::sync::mpsc::UnboundedSender<CapturedPut>,
+        >,
+        Path(path): Path<String>,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> StatusCode {
+        let header = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_string()
+        };
+        let _ = tx.send(CapturedPut {
+            path,
+            authorization: header("authorization"),
+            content_type: header("content-type"),
+            content_encoding: header("content-encoding"),
+            body: body.to_vec(),
+        });
+        StatusCode::OK
+    }
+
+    async fn always_500() -> StatusCode {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+
+    fn gzip_bytes(plain: &str) -> Bytes {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(plain.as_bytes()).unwrap();
+        Bytes::from(encoder.finish().unwrap())
+    }
+
+    fn replay_blob_headers(raw_key: &str, session_id: &str, chunk_seq: u32) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            format!("Bearer {raw_key}").parse().unwrap(),
+        );
+        headers.insert("x-maple-session-id", session_id.parse().unwrap());
+        headers.insert("x-maple-chunk-seq", chunk_seq.to_string().parse().unwrap());
+        headers.insert("x-maple-event-count", "3".parse().unwrap());
+        headers.insert("x-maple-duration-ms", "1200".parse().unwrap());
+        headers
+    }
+
+    /// Total bytes the pipeline has committed to disk. The WAL is appended
+    /// before a frame reaches the export channel, so this growing is the
+    /// observable "a row was enqueued".
+    fn queue_dir_bytes(dir: &PathBuf) -> u64 {
+        fn walk(dir: &std::path::Path) -> u64 {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return 0;
+            };
+            entries
+                .flatten()
+                .map(|entry| match entry.metadata() {
+                    Ok(meta) if meta.is_dir() => walk(&entry.path()),
+                    Ok(meta) => meta.len(),
+                    Err(_) => 0,
+                })
+                .sum()
+        }
+        walk(dir)
+    }
+
+    async fn replay_blob_test_state(
+        raw_key: &str,
+        org_id: &str,
+        queue_dir: PathBuf,
+    ) -> AppState {
+        let store = Arc::new(FakeKeyStore::default());
+        store.insert_private(
+            raw_key,
+            KeyRow {
+                org_id: org_id.to_string(),
+                // Routes to ClickHouse. The fixture's `WriteMode::Forward` has no
+                // Tinybird pipeline, so a Tinybird-destined chunk would 503 in
+                // `native_rows_pipeline_for` before reaching the blob path.
+                self_managed: true,
+                clickhouse_ready: true,
+                spend_paused: false,
+                paused_features: Vec::new(),
+            },
+        );
+        test_app_state(
+            store,
+            queue_dir,
+            "http://127.0.0.1:1".to_string(),
+            Duration::from_secs(30),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn replay_chunk_payload_goes_to_the_blob_store_verbatim() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/{*path}", axum::routing::put(fake_r2_put))
+            .with_state(tx);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let queue_dir = unique_main_test_dir("replay-blob-put");
+        let state = replay_blob_test_state(
+            "maple_sk_test_replay_blob",
+            "org_replay_blob",
+            queue_dir.clone(),
+        )
+        .await;
+        let state = with_replay_blob_store(state, format!("http://{addr}"));
+
+        let events = r#"[{"type":2,"timestamp":1}]"#;
+        let gzipped = gzip_bytes(events);
+        handle_replay_blob_inner(
+            &state,
+            &replay_blob_headers("maple_sk_test_replay_blob", "sess_42", 7),
+            gzipped.clone(),
+        )
+        .await
+        .expect("blob upload should succeed");
+
+        let captured = rx.recv().await.expect("the blob store should see a PUT");
+
+        // Key scheme: bucket first, then the v1/{org}/{session}/{seq}.json.gz
+        // that the API side reconstructs from the ClickHouse row.
+        assert_eq!(
+            captured.path,
+            "replays/v1/org_replay_blob/sess_42/00000007.json.gz"
+        );
+        // Stored verbatim — not re-gzipped, not the decompressed text. A
+        // recompression here would silently double ingest CPU and break the
+        // Content-Encoding contract the reader depends on.
+        assert_eq!(captured.body, gzipped.to_vec());
+        assert_eq!(captured.content_type, "application/json");
+        assert_eq!(captured.content_encoding, "gzip");
+        assert!(
+            captured.authorization.starts_with(
+                "AWS4-HMAC-SHA256 Credential=test-access-key/"
+            ),
+            "expected a SigV4 authorization header, got {:?}",
+            captured.authorization
+        );
+        assert!(captured.authorization.contains("/auto/s3/aws4_request"));
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    #[tokio::test]
+    async fn a_failed_blob_upload_rejects_the_chunk_and_enqueues_no_row() {
+        // The orphan-prevention invariant. A row whose payload never landed is
+        // an unplayable gap in a session that still lists as recorded; the SDK
+        // does not retry, so the only safe failure is to drop the chunk whole.
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new().route("/{*path}", axum::routing::put(always_500));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let queue_dir = unique_main_test_dir("replay-blob-fail");
+        let state = replay_blob_test_state(
+            "maple_sk_test_replay_fail",
+            "org_replay_fail",
+            queue_dir.clone(),
+        )
+        .await;
+        let state = with_replay_blob_store(state, format!("http://{addr}"));
+
+        let before = queue_dir_bytes(&queue_dir);
+        let error = handle_replay_blob_inner(
+            &state,
+            &replay_blob_headers("maple_sk_test_replay_fail", "sess_fail", 1),
+            gzip_bytes(r#"[{"type":2,"timestamp":1}]"#),
+        )
+        .await
+        .expect_err("a blob store 500 must reject the chunk");
+
+        assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            queue_dir_bytes(&queue_dir),
+            before,
+            "no index row may be committed when the payload was not stored"
+        );
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    #[tokio::test]
+    async fn replay_chunks_stay_inline_when_no_blob_store_is_configured() {
+        // The self-hosted / BYO-ClickHouse path, and the pre-cutover managed
+        // path: unset credentials must behave exactly as before.
+        let queue_dir = unique_main_test_dir("replay-blob-inline");
+        let state = replay_blob_test_state(
+            "maple_sk_test_replay_inline",
+            "org_replay_inline",
+            queue_dir.clone(),
+        )
+        .await;
+        assert!(state.replay_blob_store.is_none());
+
+        let before = queue_dir_bytes(&queue_dir);
+        handle_replay_blob_inner(
+            &state,
+            &replay_blob_headers("maple_sk_test_replay_inline", "sess_inline", 0),
+            gzip_bytes(r#"[{"type":2,"timestamp":1}]"#),
+        )
+        .await
+        .expect("the inline path should accept the chunk");
+
+        assert!(
+            queue_dir_bytes(&queue_dir) > before,
+            "the inline path must still enqueue a row carrying the payload"
+        );
+
+        let _ = std::fs::remove_dir_all(&queue_dir);
+    }
+
+    #[test]
+    fn decompressed_len_matches_read_to_string_and_rejects_garbage() {
+        // `byte_size` is a published API field and the input to the per-session
+        // budget, both denominated in decompressed bytes — the streaming counter
+        // must not quietly redefine it as compressed bytes.
+        for payload in [
+            "[]",
+            r#"[{"type":2,"timestamp":1}]"#,
+            &"x".repeat(256 * 1024),
+        ] {
+            let gzipped = gzip_bytes(payload);
+            assert_eq!(
+                decompressed_len(&gzipped).expect("valid gzip should decode"),
+                payload.len() as u64,
+                "byte count drifted for a {}-byte payload",
+                payload.len()
+            );
+        }
+
+        let error = decompressed_len(b"not gzip at all")
+            .expect_err("malformed gzip must still be rejected");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -6599,6 +7372,36 @@ mod tests {
         )
         .expect("fixture decrypts");
         assert_eq!(plaintext, "ch-secret-123");
+    }
+
+    #[test]
+    fn schema_revision_accepts_newer_schemas_and_rejects_older_ones() {
+        let needed = required_schema_revision();
+        assert!(needed > 0, "generated SCHEMA_VERSION should be numeric");
+
+        // Exactly current, and ahead of this binary: both writable. The second
+        // is the rollout window — an org stamped at the new revision before the
+        // matching binary ships keeps writing to its own ClickHouse instead of
+        // silently falling back to Tinybird.
+        assert!(schema_revision_is_compatible(&needed.to_string()));
+        assert!(schema_revision_is_compatible(&(needed + 1).to_string()));
+
+        // Behind this binary: the columns genuinely are not there yet.
+        assert!(!schema_revision_is_compatible(&(needed - 1).to_string()));
+
+        // Legacy content-hash revisions are not comparable — treated as older.
+        assert!(!schema_revision_is_compatible("old-revision"));
+        assert!(!schema_revision_is_compatible(""));
+    }
+
+    #[test]
+    fn schema_revision_compares_numerically_not_lexicographically() {
+        // Revisions are stored as text, where "12" sorts *before* "9". A string
+        // comparison would call an org at revision 12 "behind" revision 9 and
+        // strand every org the moment the count reached double digits.
+        assert!(schema_revision_at_least("12", 9), "12 is ahead of 9");
+        assert!(!schema_revision_at_least("9", 12), "9 is behind 12");
+        assert!(schema_revision_at_least("100", 99), "100 is ahead of 99");
     }
 
     #[tokio::test]

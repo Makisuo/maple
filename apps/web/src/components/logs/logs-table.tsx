@@ -3,7 +3,7 @@ import { Result } from "@/lib/effect-atom"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "@tanstack/react-hotkeys"
 
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type Log } from "@/api/warehouse/logs"
 import { LogDetailSheet } from "./log-detail-sheet"
@@ -14,7 +14,7 @@ import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { useLogsViewPreferences, type LogsDensity } from "@/hooks/use-logs-view-preferences"
 import { formatCompactTimeInTimezone } from "@/lib/timezone-format"
 import { getSeverityColor } from "@maple/ui/lib/severity"
-import { isDialogOpen } from "@/lib/keyboard"
+import { isDialogOpen } from "@maple/ui/lib/keyboard"
 import { useInfiniteLogs, FETCH_THRESHOLD } from "@/hooks/use-infinite-logs"
 import { useListNavigation } from "@/hooks/use-list-navigation"
 import { pickImportantAttributes } from "@/lib/log-attributes"
@@ -468,7 +468,7 @@ export function LogsTable({ filters, embedded }: LogsTableProps) {
 		useInfiniteLogs(filters)
 	const { wrap, density } = useLogsViewPreferences()
 
-	const columnsKey = (filters?.columns ?? EMPTY_COLUMNS).join(" ")
+	const columnsKey = (filters?.columns ?? EMPTY_COLUMNS).join("\x00")
 	const pinnedColumns = React.useMemo(
 		() => filters?.columns ?? EMPTY_COLUMNS,
 		// eslint-disable-next-line react-hooks/exhaustive-deps

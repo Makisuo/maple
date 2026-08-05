@@ -12,7 +12,7 @@ import { Card } from "@maple/ui/components/ui/card"
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import { AlertSegmentedSelect } from "@/components/alerts/alert-segmented-select"
 import { SectionHeader } from "@/components/layout/section-header"
@@ -23,6 +23,7 @@ import {
 	BracketsCurlyIcon,
 	ChartLineIcon,
 	ChevronDownIcon,
+	CircleWarningIcon,
 	CirclePercentageIcon,
 	FireIcon,
 	PulseIcon,
@@ -37,6 +38,7 @@ import {
 } from "@/lib/alerts/form-utils"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import {
+	buildTimeseriesQuerySpec,
 	resetAggregationForMetricType,
 	resetQueryForDataSource,
 	type QueryBuilderDataSource,
@@ -51,7 +53,7 @@ interface SignalAndThresholdSectionProps {
 	autocompleteValues: AutocompleteValuesContextType
 }
 
-/* Eight signal types is too many for a single segmented bar — they wrap and
+/* Seven signal types is too many for a single segmented bar — they wrap and
    every option looks equally weighted even though five of them are "I want a
    common metric" and the other two are "I'll define my own". We split the
    choice into two tiers:
@@ -64,7 +66,7 @@ interface SignalAndThresholdSectionProps {
 type SignalKind = "builtin" | "builder_query" | "raw_query"
 
 function signalTypeToKind(signalType: AlertSignalType): SignalKind {
-	if (signalType === "builder_query" || signalType === "metric") return "builder_query"
+	if (signalType === "builder_query") return "builder_query"
 	if (signalType === "raw_query") return "raw_query"
 	return "builtin"
 }
@@ -397,43 +399,50 @@ function BuiltinSignalChips({
 	onChange: (next: AlertSignalType) => void
 }) {
 	return (
-		<div
-			role="radiogroup"
-			aria-label="Built-in signal"
-			className="-mt-1 flex flex-wrap items-center gap-1 rounded-md border border-dashed border-border/60 bg-muted/20 p-1"
-			data-slot="builtin-signal-chips"
-		>
-			{BUILTIN_SIGNAL_OPTIONS.map((opt) => {
-				const selected = value === opt.value
-				const Icon = opt.icon
-				return (
-					<button
-						key={opt.value}
-						type="button"
-						role="radio"
-						aria-checked={selected}
-						onClick={() => onChange(opt.value)}
-						className={cn(
-							"inline-flex h-7 items-center gap-1.5 rounded-sm border border-transparent px-2 text-xs font-medium",
-							"transition-[background-color,border-color,color] duration-150",
-							"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-							selected
-								? opt.selectedClass
-								: "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
-						)}
-					>
-						<Icon
-							size={12}
+		<div className="-mt-1 flex flex-col gap-1.5">
+			<div
+				role="radiogroup"
+				aria-label="Built-in signal"
+				className="flex flex-wrap items-center gap-1 rounded-md border border-dashed border-border/60 bg-muted/20 p-1"
+				data-slot="builtin-signal-chips"
+			>
+				{BUILTIN_SIGNAL_OPTIONS.map((opt) => {
+					const selected = value === opt.value
+					const Icon = opt.icon
+					return (
+						<button
+							key={opt.value}
+							type="button"
+							role="radio"
+							aria-checked={selected}
+							onClick={() => onChange(opt.value)}
 							className={cn(
-								"transition-opacity",
-								opt.iconClass,
-								selected ? "opacity-100" : "opacity-70",
+								"inline-flex h-7 items-center gap-1.5 rounded-sm border border-transparent px-2 text-xs font-medium",
+								"transition-[background-color,border-color,color] duration-150",
+								"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+								selected
+									? opt.selectedClass
+									: "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
 							)}
-						/>
-						{opt.label}
-					</button>
-				)
-			})}
+						>
+							<Icon
+								size={12}
+								className={cn(
+									"transition-opacity",
+									opt.iconClass,
+									selected ? "opacity-100" : "opacity-70",
+								)}
+							/>
+							{opt.label}
+						</button>
+					)
+				})}
+			</div>
+			<p className="text-[11px] leading-snug text-muted-foreground">
+				Built-in signals measure entry-point (root) spans only. A service that records failures on
+				child spans and returns success from its entry point — cron jobs and workers typically do —
+				stays healthy here at any threshold. Use Raw SQL for those, or rely on error notifications.
+			</p>
 		</div>
 	)
 }
@@ -531,24 +540,6 @@ type MetricRow = {
 	isMonotonic: boolean
 }
 
-function applyQueryDraftToForm(
-	current: RuleFormState,
-	queryBuilderDraft: QueryBuilderQueryDraft,
-): RuleFormState {
-	return {
-		...current,
-		signalType: "builder_query",
-		queryBuilderDraft,
-		queryDataSource: queryBuilderDraft.dataSource,
-		queryAggregation: queryBuilderDraft.aggregation,
-		queryWhereClause: queryBuilderDraft.whereClause,
-		metricName:
-			queryBuilderDraft.dataSource === "metrics" ? queryBuilderDraft.metricName : current.metricName,
-		metricType:
-			queryBuilderDraft.dataSource === "metrics" ? queryBuilderDraft.metricType : current.metricType,
-	}
-}
-
 function useAlertMetricSelectionOptions(query: QueryBuilderQueryDraft) {
 	const [metricSearch, setMetricSearch] = useState("")
 	const deferredMetricSearch = useDeferredValue(metricSearch)
@@ -594,50 +585,64 @@ function useAlertMetricSelectionOptions(query: QueryBuilderQueryDraft) {
 }
 
 function AlertQueryPanel({ form, onChange, autocompleteValues }: SignalAndThresholdSectionProps) {
-	const query = form.queryBuilderDraft as QueryBuilderQueryDraft
+	const query = form.queryBuilderDraft
+	const warnings = useMemo(() => buildTimeseriesQuerySpec(query).warnings, [query])
 	const { metricSelectionOptions, setMetricSearch } = useAlertMetricSelectionOptions(query)
 
 	const updateQuery = (updater: (query: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => {
-		onChange((current) =>
-			applyQueryDraftToForm(current, updater(current.queryBuilderDraft as QueryBuilderQueryDraft)),
-		)
+		onChange((current) => ({
+			...current,
+			queryBuilderDraft: updater(current.queryBuilderDraft),
+		}))
 	}
 
 	return (
-		<QueryPanel
-			query={query}
-			index={0}
-			canRemove={false}
-			metricSelectionOptions={metricSelectionOptions}
-			onMetricSearch={setMetricSearch}
-			autocompleteValues={autocompleteValues}
-			onUpdate={updateQuery}
-			onAggregationChange={(aggregation) => updateQuery((current) => ({ ...current, aggregation }))}
-			onMetricSelectionChange={(selection) =>
-				updateQuery((current) =>
-					current.dataSource === "metrics"
-						? {
-								...current,
-								metricName: selection.metricName,
-								metricType: selection.metricType,
-								isMonotonic: selection.isMonotonic,
-								aggregation: resetAggregationForMetricType(
-									current.aggregation,
-									selection.metricType,
-									selection.isMonotonic,
-								),
-							}
-						: current,
-				)
-			}
-			onClone={() => {}}
-			onRemove={() => {}}
-			onDataSourceChange={(dataSource: QueryBuilderDataSource) =>
-				updateQuery((current) => resetQueryForDataSource(current, dataSource))
-			}
-			showHeaderActions={false}
-			showVisibilityToggle={false}
-		/>
+		<div className="space-y-2">
+			<QueryPanel
+				query={query}
+				index={0}
+				canRemove={false}
+				metricSelectionOptions={metricSelectionOptions}
+				onMetricSearch={setMetricSearch}
+				autocompleteValues={autocompleteValues}
+				onUpdate={updateQuery}
+				onAggregationChange={(aggregation) => updateQuery((current) => ({ ...current, aggregation }))}
+				onMetricSelectionChange={(selection) =>
+					updateQuery((current) =>
+						current.dataSource === "metrics"
+							? {
+									...current,
+									metricName: selection.metricName,
+									metricType: selection.metricType,
+									isMonotonic: selection.isMonotonic,
+									aggregation: resetAggregationForMetricType(
+										current.aggregation,
+										selection.metricType,
+										selection.isMonotonic,
+									),
+								}
+							: current,
+					)
+				}
+				onClone={() => {}}
+				onRemove={() => {}}
+				onDataSourceChange={(dataSource: QueryBuilderDataSource) =>
+					updateQuery((current) => resetQueryForDataSource(current, dataSource))
+				}
+				showHeaderActions={false}
+				showVisibilityToggle={false}
+			/>
+			{warnings.length > 0 && (
+				<div className="flex gap-2 border border-warning/30 bg-warning/10 p-2 text-xs text-warning-foreground">
+					<CircleWarningIcon size={14} className="mt-0.5 shrink-0" />
+					<ul className="space-y-1">
+						{warnings.map((warning) => (
+							<li key={warning}>{warning}</li>
+						))}
+					</ul>
+				</div>
+			)}
+		</div>
 	)
 }
 

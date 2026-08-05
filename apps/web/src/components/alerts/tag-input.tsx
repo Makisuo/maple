@@ -1,6 +1,6 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react"
 
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { Badge } from "@maple/ui/components/ui/badge"
 
 import { XmarkIcon } from "@/components/icons"

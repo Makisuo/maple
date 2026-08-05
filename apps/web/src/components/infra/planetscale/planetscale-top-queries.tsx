@@ -8,8 +8,8 @@ import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { planetscaleQueryInsightsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { formatNumber } from "@maple/ui/format"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatNumber } from "@maple/ui/lib/format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 /** Bordered like the query rows, so an explanation keeps the section's rhythm. */
 function InsightsNotice({ children, className }: { children: React.ReactNode; className?: string }) {

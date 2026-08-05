@@ -5,8 +5,8 @@
 // These define the ClickHouse table schemas used by the query DSL.
 // ---------------------------------------------------------------------------
 
-import * as T from "@maple-dev/clickhouse-builder/types"
 import { table } from "@maple-dev/clickhouse-builder"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 export const Traces = table("traces", {
 	OrgId: T.string,
@@ -387,6 +387,34 @@ export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
 	SampleRateSum: T.float64,
 })
 
+// Reached only from the raw-SQL builders in queries/service-map.ts, which
+// interpolate `.name` rather than going through the DSL — the `multiIf` ladders
+// they emit are what the DSL can't express. Declared here anyway so
+// tables.test.ts drift-checks the columns those builders read.
+export const ServiceExternalEdgesHourly = table("service_external_edges_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	ServiceName: T.string,
+	TargetType: T.string,
+	TargetSystem: T.string,
+	TargetName: T.string,
+	DeploymentEnv: T.string,
+	CallCount: T.uint64,
+	ErrorCount: T.uint64,
+	DurationSumMs: T.float64,
+	MaxDurationMs: T.float64,
+	SampleRateSum: T.float64,
+})
+
+export const ServiceAddressResolutionsHourly = table("service_address_resolutions_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	SourceService: T.string,
+	ParentServerAddress: T.string,
+	ResolvedTargetService: T.string,
+	DeploymentEnv: T.string,
+})
+
 export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 	OrgId: T.string,
 	Hour: T.dateTime,
@@ -500,18 +528,57 @@ export const SessionReplays = table("session_replays", {
 	TraceIds: T.array(T.string),
 	ResourceAttributes: T.map(T.string, T.string),
 	Version: T.uint32,
+	// Analytics dimensions (migration 0011). Hand-mirrored from
+	// packages/domain/src/tinybird/datasources.ts; `tables.test.ts` asserts the
+	// mirror against the generated warehouse DDL, so drift fails the build instead
+	// of surfacing as a runtime "unknown column".
+	//
+	// Persistent per-browser id: uniq(VisitorId) = unique visitors. VisitorIsNew
+	// is client-asserted because a self-join against earlier sessions is both a
+	// second full scan and wrong past the 30-day TTL.
+	VisitorId: T.string,
+	VisitorIsNew: T.uint8,
+	UserEmail: T.string,
+	UserName: T.string,
+	GroupId: T.string,
+	GroupName: T.string,
+	// Trait keys are arbitrary customer-defined dimensions, so the warehouse map
+	// deliberately uses plain String keys rather than a shared LC dictionary.
+	UserTraits: T.map(T.string, T.string),
+	Referrer: T.string,
+	// Gateway-normalized (lowercased, `www.` stripped). '' = direct, internal, or
+	// suppressed by Referrer-Policy — not the same thing as "direct traffic".
+	ReferrerHost: T.string,
+	UtmSource: T.string,
+	UtmMedium: T.string,
+	UtmCampaign: T.string,
+	UtmTerm: T.string,
+	UtmContent: T.string,
+	Host: T.string,
+	// Pathname only, no query string or hash. Note UrlInitial above is a misnomer
+	// — the SDK sets it from location.href at post time, so it tracks the latest
+	// URL; EntryPath is the real entry page.
+	EntryPath: T.string,
+	ExitPath: T.string,
+	Language: T.string,
+	// Heartbeat-refreshed. Recovers duration for sessions killed without an
+	// unload beacon, where EndTime is null.
+	LastActivityAt: T.nullable(T.dateTime64),
 })
 
 export const SessionReplayEvents = table("session_replay_events", {
 	OrgId: T.string,
 	SessionId: T.string,
 	ChunkSeq: T.uint32,
+	// Gateway receipt time — partitioning, TTL, and the anchor the chunk index
+	// resolves a seek target against.
 	Timestamp: T.dateTime64,
 	DurationMs: T.uint32,
 	EventCount: T.uint32,
 	ByteSize: T.uint32,
-	// The rrweb event array for this chunk, stored as a JSON string. ClickHouse
-	// ZSTD-compresses this column; playback reads it back directly (no R2).
+	// The rrweb event array for this chunk as a JSON string — inline for
+	// pre-cutover rows and blob-store-less deployments, empty when the payload
+	// lives in R2 (the API refills it on read).
 	Events: T.string,
 	IsCheckpoint: T.uint8,
 })
@@ -527,7 +594,9 @@ export const SessionEvents = table("session_events", {
 	Timestamp: T.dateTime64,
 	// Monotonic per-session ordering tiebreaker (events can share a ms timestamp).
 	Seq: T.uint32,
-	// "navigation" | "click" | "input" | "console" | "network" | "error"
+	// "navigation" | "click" | "input" | "console" | "network" | "error" | "custom"
+	// "custom" rows come from the SDK's track(name, props): Message = event name,
+	// Attributes = props. The gateway enforces this allowlist.
 	Type: T.string,
 	Url: T.string,
 	// OTel trace id active when the event fired (links network/error → traces).

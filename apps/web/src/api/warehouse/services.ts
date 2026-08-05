@@ -1,5 +1,5 @@
 import { Clock, Effect, Schema } from "effect"
-import { QueryEngineExecuteRequest } from "@maple/query-engine"
+import { QueryEngineExecuteRequest, formatWarehouseDateTime } from "@maple/query-engine"
 import {
 	CommitSha,
 	DeploymentEnvironment,
@@ -361,8 +361,6 @@ const floorToHour = (dateTime: string) => `${dateTime.slice(0, 13)}:00:00`
 
 const warehouseDateTimeToMs = (dateTime: string) => new Date(`${dateTime.replace(" ", "T")}Z`).getTime()
 
-const msToWarehouseDateTime = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-
 export function getServiceHealthBaseline({ data }: { data: GetServiceHealthBaselineInput }) {
 	return getServiceHealthBaselineEffect({ data })
 }
@@ -373,10 +371,10 @@ const getServiceHealthBaselineEffect = Effect.fn("QueryEngine.getServiceHealthBa
 	data: GetServiceHealthBaselineInput
 }) {
 	const input = yield* decodeInput(GetServiceHealthBaselineInput, data ?? {}, "getServiceHealthBaseline")
-	const nowDateTime = msToWarehouseDateTime(yield* Clock.currentTimeMillis)
+	const nowDateTime = formatWarehouseDateTime(yield* Clock.currentTimeMillis)
 
 	const endTime = floorToHour(input.rangeStartTime ?? nowDateTime)
-	const startTime = msToWarehouseDateTime(warehouseDateTimeToMs(endTime) - BASELINE_WINDOW_MS)
+	const startTime = formatWarehouseDateTime(warehouseDateTimeToMs(endTime) - BASELINE_WINDOW_MS)
 
 	const response = yield* runWarehouseQuery("serviceHealthBaseline", () =>
 		Effect.gen(function* () {
@@ -477,8 +475,10 @@ const GetServicesFacetsInput = Schema.Struct({
 export type GetServicesFacetsInput = Schema.Schema.Type<typeof GetServicesFacetsInput>
 
 const defaultServicesTimeRange = (nowMillis: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMillis - 24 * 60 * 60 * 1000), endTime: fmt(nowMillis) }
+	return {
+		startTime: formatWarehouseDateTime(nowMillis - 24 * 60 * 60 * 1000),
+		endTime: formatWarehouseDateTime(nowMillis),
+	}
 }
 
 export function getServicesFacets({ data }: { data: GetServicesFacetsInput }) {

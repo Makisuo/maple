@@ -8,7 +8,8 @@ import {
 } from "@maple/query-engine"
 import { Effect, Schema } from "effect"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { mapleApiClientLayer } from "@/lib/registry"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { mapleApiClientLayer, mapleApiV2ClientLayer } from "@/lib/registry"
 
 export const WarehouseDateTimeString = TinybirdDateTime
 
@@ -97,6 +98,35 @@ export function runWarehouseQuery<A>(
 	return Effect.suspend(execute).pipe(
 		Effect.withSpan(operation),
 		Effect.provide(mapleApiClientLayer),
+		Effect.mapError((cause) => {
+			if (isTaggedBackendError(cause)) {
+				return cause
+			}
+			return new WarehouseQueryError({
+				operation,
+				message: toMessage(cause, `Warehouse query failed for ${operation}`),
+				cause,
+			})
+		}),
+	)
+}
+
+/**
+ * `runWarehouseQuery` against the v2 client.
+ *
+ * Same span + error normalization, different client layer and a wider input
+ * error type: the v2 endpoints fail with the public envelope union
+ * (`V2InvalidRequestError`, `V2PayloadTooLargeError`, …) rather than the v1
+ * warehouse tags, and all of those collapse into `WarehouseQueryError` here so
+ * callers keep one error shape.
+ */
+export function runWarehouseQueryV2<A, E>(
+	operation: string,
+	execute: () => Effect.Effect<A, E, MapleApiV2AtomClient>,
+): Effect.Effect<A, WarehouseApiError | BackendError> {
+	return Effect.suspend(execute).pipe(
+		Effect.withSpan(operation),
+		Effect.provide(mapleApiV2ClientLayer),
 		Effect.mapError((cause) => {
 			if (isTaggedBackendError(cause)) {
 				return cause

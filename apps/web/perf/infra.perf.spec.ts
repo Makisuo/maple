@@ -59,12 +59,22 @@ test("infra chart grids' linked cursor avoids synchronized chart render work", a
 	console.log(`[perf] infra React render reduction: ${(reduction * 100).toFixed(1)}%`)
 
 	expect(recharts.react.totalActualDurationMs, "synchronized baseline render work").toBeGreaterThan(0)
-	// Measured ratio is ~0.44 (vs ~0.25 on /service-detail-bench): the residual
-	// work is the hovered chart's own tooltip ticks, and the infra stacked-area
-	// charts pay relatively more per tick than the service-detail charts. 0.55
-	// still locks in a ≥45% reduction with margin for CI noise.
+	// COMMITS are the regression signal, not duration. A sync storm is "every chart
+	// re-renders per pointer tick", which is a commit count: the baseline sits at
+	// 1118 commits run after run while cursor mode stays at 257-375 (ratio
+	// 0.23-0.34). That spread is stable because it is structural.
+	//
+	// The duration ratio is not. It ranged 0.36-0.60 over the same runs, and it
+	// worsens when the runner is FAST: cursor mode has a floor — the hovered
+	// chart's own tooltip ticks — that does not shrink with the machine, so a
+	// cheap baseline shrinks the numerator's lead. Every observed failure had a
+	// baseline under ~1350ms (its fastest measurements) with commits and dropped
+	// frames at their best. Gating on it fails a quiet runner for being quiet.
+	expect(cursor.react.commits, "linked cursor commits").toBeLessThanOrEqual(recharts.react.commits * 0.45)
+	// Duration stays as a loose sanity ceiling: it rejects an order-of-magnitude
+	// per-commit regression that a commit count alone would miss.
 	expect(cursor.react.totalActualDurationMs, "linked cursor render work").toBeLessThanOrEqual(
-		recharts.react.totalActualDurationMs * 0.55,
+		recharts.react.totalActualDurationMs * 0.75,
 	)
 	// The long-task COUNT is environmental on GitHub's GPU-less runners, not a
 	// regression signal: the synchronized baseline swings 2→12 tasks run to run

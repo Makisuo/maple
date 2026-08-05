@@ -21,6 +21,7 @@ import type { RawSqlDisplayType } from "./query-engine"
 export type PanelType =
 	| "line"
 	| "bar"
+	| "hbar"
 	| "area"
 	| "stat"
 	| "gauge"
@@ -38,6 +39,7 @@ export type PanelType =
  */
 export type WidgetVisualization =
 	| "chart"
+	| "hbar"
 	| "stat"
 	| "gauge"
 	| "table"
@@ -149,7 +151,7 @@ const chartPanel = (
  * A panel type that is its own `visualization` and also mounts a chart component.
  */
 const breakdownPanel = (
-	panelType: "pie" | "histogram" | "heatmap" | "funnel",
+	panelType: "pie" | "histogram" | "heatmap" | "funnel" | "hbar",
 	label: string,
 	options: {
 		requiresGroupBy: boolean
@@ -251,7 +253,19 @@ export const WIDGET_TYPES: Record<PanelType, WidgetTypeMeta> = {
 		ownedDisplayKeys: ["chartId", "heatmap"],
 		persesKinds: ["HeatMap", "HeatMapChart", "Heatmap"],
 	}),
+	// A funnel implies sequential stages with a monotonic drop-off, and it labels
+	// each bar as a share of the *largest* bar. A ranked "top N by volume"
+	// breakdown is neither — four unrelated operations of equal size all read
+	// "100%". `hbar` is that panel: rows sorted by value, each labelled with its
+	// share of the **total**.
 	funnel: breakdownPanel("funnel", "Funnel", { requiresGroupBy: true }),
+	hbar: breakdownPanel("hbar", "Horizontal Bar", {
+		requiresGroupBy: true,
+		// Perses' BarChart is horizontal, but `bar` has imported it since the
+		// importer existed and re-pointing it would silently restyle every
+		// imported dashboard. New imports stay on `bar`.
+		persesKinds: [],
+	}),
 
 	markdown: {
 		panelType: "markdown",
@@ -272,6 +286,7 @@ export const PANEL_TYPES: ReadonlyArray<WidgetTypeMeta> = [
 	// Ordered as the Type picker shows them, not alphabetically.
 	WIDGET_TYPES.line,
 	WIDGET_TYPES.bar,
+	WIDGET_TYPES.hbar,
 	WIDGET_TYPES.area,
 	WIDGET_TYPES.pie,
 	WIDGET_TYPES.stat,
@@ -336,3 +351,22 @@ export const rawSqlDisplayTypeFor = (visualization: string, chartId?: string): R
 	}
 	return widgetTypeByVisualization(visualization)?.rawSqlDisplayType ?? "line"
 }
+
+/**
+ * The heatmap widget's sequential colour ramps. The actual OKLCH stops live in
+ * `packages/ui/src/styles/tokens.css` as `--heatmap-<name>-0..4` (theme-aware —
+ * each ramp starts clear of `--heatmap-grout` and climbs to a saturated hot end,
+ * so it inverts between light and dark).
+ *
+ * This list is the single source of truth: the persisted schemas
+ * (`dashboards.ts`, `v2/dashboards.ts`), the chart's prop type, the builder
+ * state and the settings Select all derive from it. `amber` leads because it is
+ * the default — it's Maple's brand hue, so an unconfigured heatmap reads as ours.
+ */
+export const HEATMAP_COLOR_SCALES = ["amber", "blues", "reds", "viridis", "magma", "cividis"] as const
+
+export type HeatmapColorScale = (typeof HEATMAP_COLOR_SCALES)[number]
+
+export const HEATMAP_SCALE_TYPES = ["linear", "log"] as const
+
+export type HeatmapScaleType = (typeof HEATMAP_SCALE_TYPES)[number]

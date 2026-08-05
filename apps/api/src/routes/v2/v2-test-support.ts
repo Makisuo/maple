@@ -1,18 +1,23 @@
 import { Effect, Layer } from "effect"
-import { AlertsService } from "../../services/AlertsService"
-import { AnomalyDetectionService } from "../../services/AnomalyDetectionService"
-import { ErrorsService } from "../../services/ErrorsService"
-import { IngestAttributeMappingService } from "../../services/IngestAttributeMappingService"
-import { InvestigationService } from "../../services/InvestigationService"
-import { OrganizationService } from "../../services/OrganizationService"
-import { OrgIngestKeysService } from "../../services/OrgIngestKeysService"
-import { RecommendationIssueService } from "../../services/RecommendationIssueService"
-import { ScrapeTargetsService } from "../../services/ScrapeTargetsService"
-import { SlackIntegrationService } from "../../services/SlackIntegrationService"
-import { SetupAuditService } from "../../services/SetupAuditService"
-import { ApiV2RateLimiter } from "../../services/ApiV2RateLimiter"
-import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
-import { QueryEngineService } from "../../services/QueryEngineService"
+import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
+import { AlertsService } from "@/services/alerts/AlertsService"
+import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
+import { ErrorsService } from "@/services/errors/ErrorsService"
+import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
+import { InvestigationService } from "@/services/errors/InvestigationService"
+import { OrganizationService } from "@/services/org/OrganizationService"
+import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
+import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
+import { PlanetScaleConnectionService } from "@/services/integrations/PlanetScaleConnectionService"
+import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
+import { PlanetScaleService } from "@/services/integrations/PlanetScaleService"
+import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
+import { SlackIntegrationService } from "@/services/integrations/SlackIntegrationService"
+import { SetupAuditService } from "@/services/org/SetupAuditService"
+import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
+import { HttpV2AlertDeliveriesLive } from "./alert-deliveries.http"
 import { HttpV2AlertDestinationsLive } from "./alert-destinations.http"
 import { HttpV2AlertIncidentsLive } from "./alert-incidents.http"
 import { HttpV2AlertRulesLive } from "./alert-rules.http"
@@ -20,7 +25,7 @@ import { HttpV2ApiKeysLive } from "./api-keys.http"
 import { HttpV2AttributeMappingsLive } from "./attribute-mappings.http"
 import { HttpV2DashboardsLive } from "./dashboards.http"
 import { HttpV2IngestKeysLive } from "./ingest-keys.http"
-import { HttpV2SlackIntegrationsLive } from "./integrations.http"
+import { HttpV2PlanetScaleIntegrationsLive, HttpV2SlackIntegrationsLive } from "./integrations.http"
 import { HttpV2ErrorIssuesLive } from "./error-issues.http"
 import { HttpV2AnomaliesLive } from "./anomalies.http"
 import { HttpV2InvestigationsLive } from "./investigations.http"
@@ -47,7 +52,9 @@ import {
 export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2ApiKeysLive,
 	HttpV2SlackIntegrationsLive,
+	HttpV2PlanetScaleIntegrationsLive,
 	HttpV2DashboardsLive,
+	HttpV2AlertDeliveriesLive,
 	HttpV2AlertRulesLive,
 	HttpV2AlertDestinationsLive,
 	HttpV2AlertIncidentsLive,
@@ -143,11 +150,15 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 /** Inert WarehouseQueryService for harnesses that never touch warehouse-backed groups. */
 export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
 	query: die,
-	sqlQuery: die,
+	crossOrgQuery: die,
 	rawSqlQuery: die,
 	compiledQuery: die,
+	compiledQueryBounded: die,
 	compiledQueryWithCapabilities: die,
 	compiledQueryFirst: die,
+	// Not `die`: warming is best-effort and silent by contract, so a stub that
+	// throws would fail a path that only tried to warm up.
+	warmRoute: () => Effect.void,
 	ingest: die,
 	asExecutor: dieSync,
 })
@@ -202,6 +213,41 @@ export const ConfigResourceServiceStubsLayer = Layer.mergeAll(
 	}),
 	Phase1ResourceStubsLayer,
 	WarehouseServiceStubLayer,
+)
+
+/**
+ * Inert PlanetScale services for harnesses that never touch the PlanetScale
+ * integration group. `EdgeCacheService` comes along because two of that group's
+ * handlers cache through it.
+ */
+export const PlanetScaleServiceStubsLayer = Layer.mergeAll(
+	Layer.succeed(PlanetScaleConnectionService, {
+		getStatus: die,
+		finalizeOrgSelection: die,
+		setMetricsToken: die,
+		disconnect: die,
+		loadConnection: die,
+		webhookConfig: die,
+	}),
+	Layer.succeed(PlanetScaleOAuthService, {
+		startConnect: die,
+		completeConnect: die,
+		getValidAccessToken: die,
+		listOrganizations: die,
+		hasConnection: die,
+		connectedByUserId: die,
+		grantStatus: die,
+		disconnect: die,
+	}),
+	Layer.succeed(PlanetScaleService, {
+		pollAllOrgs: die,
+		listDatabases: die,
+		listEvents: die,
+		queryInsights: die,
+	}),
+	// A real edge cache over the in-memory backend: `getOrCompute` must actually
+	// round-trip so the cached wire shape is exercised, and nothing here needs KV.
+	EdgeCacheService.layer.pipe(Layer.provide(MemoryCacheBackendLive)),
 )
 
 /** Inert SlackIntegrationService for harnesses that never touch the slack integration group. */

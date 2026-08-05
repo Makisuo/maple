@@ -1,6 +1,6 @@
 import * as React from "react"
 import "@rrweb/replay/dist/style.css"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { type DisplayMarker, type IdleBand, errorMessage, useReplayPlayer } from "./replay-player-context"
 import {
 	GlobeIcon,

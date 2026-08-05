@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
-import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
+import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 import { ToolbarSearch } from "@maple/ui/components/toolbar"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import { Button } from "@maple/ui/components/ui/button"
 import { Badge } from "@maple/ui/components/ui/badge"
+import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import {
 	AlertDialog,
@@ -20,7 +21,6 @@ import {
 } from "@maple/ui/components/ui/alert-dialog"
 import {
 	DropdownMenu,
-	DropdownMenuCheckboxItem,
 	DropdownMenuContent,
 	DropdownMenuGroup,
 	DropdownMenuItem,
@@ -31,7 +31,7 @@ import {
 	DropdownMenuTrigger,
 } from "@maple/ui/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 
 import {
 	ArrowRightIcon,
@@ -610,9 +610,6 @@ function TagFilterMenu({
 	selected: ReadonlyArray<string>
 	onChange: (tags: ReadonlyArray<string>) => void
 }) {
-	const toggle = (tag: string) =>
-		onChange(selected.includes(tag) ? selected.filter((t) => t !== tag) : [...selected, tag])
-
 	// Always rendered so the toolbar keeps its shape between orgs — an org with no
 	// tags gets a disabled control that says why, not a missing one.
 	if (allTags.length === 0) {
@@ -626,37 +623,26 @@ function TagFilterMenu({
 	}
 
 	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger render={<Button variant="outline" size="sm" className="shrink-0" />}>
-				Tags
-				{selected.length > 0 && (
-					<Badge className="ml-1.5 h-4 px-1.5 py-0 font-mono text-[9px]">{selected.length}</Badge>
-				)}
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start">
-				{/* The label renders Base UI's GroupLabel, which throws without a Group
-				    ancestor — so the label and its items are one Group. */}
-				<DropdownMenuGroup>
-					<DropdownMenuLabel>Filter by tag</DropdownMenuLabel>
-					{allTags.map((tag) => (
-						<DropdownMenuCheckboxItem
-							key={tag}
-							checked={selected.includes(tag)}
-							closeOnClick={false}
-							onClick={() => toggle(tag)}
-						>
-							{tag}
-						</DropdownMenuCheckboxItem>
-					))}
-				</DropdownMenuGroup>
-				{selected.length > 0 && (
-					<>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem onClick={() => onChange([])}>Clear tags</DropdownMenuItem>
-					</>
-				)}
-			</DropdownMenuContent>
-		</DropdownMenu>
+		<MultiSelectCombobox
+			clearLabel={() => "Clear tags"}
+			emptyMessage="No matching tags"
+			mode="trigger"
+			onChange={onChange}
+			options={allTags.map((tag) => ({ value: tag }))}
+			searchPlaceholder="Filter tags…"
+			triggerAriaLabel="Tags"
+			triggerLabel={
+				<>
+					Tags
+					{selected.length > 0 && (
+						<Badge className="ml-1.5 h-4 px-1.5 py-0 font-mono text-[9px]">
+							{selected.length}
+						</Badge>
+					)}
+				</>
+			}
+			value={selected}
+		/>
 	)
 }
 

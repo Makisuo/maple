@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { formatValueByUnit } from "@maple/ui/format"
+import { formatValueByUnit } from "@maple/ui/lib/format"
 
-import { formatCellValue } from "./table-widget"
+import { buildRowKeys, formatCellValue } from "./table-widget"
 
 describe("formatCellValue", () => {
 	it("formats percent cells from the canonical 0–1 ratio (matching formatValueByUnit)", () => {
@@ -38,5 +38,23 @@ describe("formatCellValue", () => {
 		for (const unit of ["bytes", "number", "percent", "duration_ms", "duration_s", "requests_per_sec"]) {
 			expect(formatCellValue(1536, unit), unit).toBe(formatValueByUnit(1536, unit))
 		}
+	})
+})
+
+describe("buildRowKeys", () => {
+	it("keys rows by the first column so a re-sort moves rows instead of rewriting cells", () => {
+		const rows = [{ name: "api" }, { name: "auth" }]
+		expect(buildRowKeys(rows, "name")).toEqual(["api", "auth"])
+		// Same rows, opposite order — the keys travel with their rows.
+		expect(buildRowKeys([rows[1], rows[0]], "name")).toEqual(["auth", "api"])
+	})
+
+	it("disambiguates repeated values by occurrence, not row index", () => {
+		const rows = [{ name: "api" }, { name: "auth" }, { name: "api" }]
+		expect(buildRowKeys(rows, "name")).toEqual(["api", "auth", "api#1"])
+	})
+
+	it("falls back to the index when there is no column to key on", () => {
+		expect(buildRowKeys([{ a: 1 }, { a: 2 }], undefined)).toEqual(["0", "1"])
 	})
 })

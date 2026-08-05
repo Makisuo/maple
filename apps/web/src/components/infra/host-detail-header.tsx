@@ -6,8 +6,8 @@ import { HostStatusBadge } from "./status-badge"
 import { HeroChip, PageHero } from "./primitives/page-hero"
 import { StatRail, StatRailItem, StatRailLoading } from "./primitives/stat-rail"
 import { severityLevel } from "./format"
-import { formatLoad, formatPercent } from "@maple/ui/format"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatLoad, formatPercent } from "@maple/ui/lib/format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 interface HostDetailHeaderProps {
 	summary: HostDetailSummaryResponse["data"]

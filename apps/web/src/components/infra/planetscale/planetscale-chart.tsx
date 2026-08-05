@@ -11,9 +11,14 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
 import type { PlanetScaleInfraTimeseriesRow } from "@/api/warehouse/planetscale-infra"
-import { formatNumber } from "@maple/ui/format"
+import { formatNumber } from "@maple/ui/lib/format"
 import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler } from "../chart-utils"
-import { formatPercent } from "@maple/ui/format"
+import {
+	renderChartEventMarkers,
+	snapMarkersToBuckets,
+	type ChartEventMarker,
+} from "../primitives/chart-event-markers"
+import { formatPercent } from "@maple/ui/lib/format"
 import { CHART_HEIGHT, ChartCard, ChartCardMessage } from "../primitives/chart-card"
 import { formatLag, formatStoragePercent } from "./metrics"
 
@@ -68,6 +73,7 @@ export function PlanetScaleChart({
 	waiting,
 	syncId,
 	scope,
+	markers,
 	emptyMessage,
 	className,
 }: {
@@ -76,6 +82,8 @@ export function PlanetScaleChart({
 	waiting?: boolean
 	syncId?: string
 	scope?: ReactNode
+	/** Deploys and branch events drawn onto the plot — what explains a cliff. */
+	markers?: ReadonlyArray<ChartEventMarker>
 	/** Overridden when the emptiness has a cause worth naming (metrics paused, say). */
 	emptyMessage?: ReactNode
 	className?: string
@@ -84,6 +92,15 @@ export function PlanetScaleChart({
 		const labeler = makeBucketLabeler(buckets.map((row) => row.bucket))
 		return buckets.map((row) => ({ time: labeler(row.bucket), value: row[metric] }))
 	}, [buckets, metric])
+
+	// The x-axis is categorical (bucket labels), so markers snap by index and
+	// read their label back — see chart-event-markers.
+	const snapped = useMemo(() => {
+		if (markers === undefined || markers.length === 0) return []
+		const isos = buckets.map((row) => row.bucket)
+		const labeler = makeBucketLabeler(isos)
+		return snapMarkersToBuckets(markers, isos, labeler)
+	}, [markers, buckets])
 
 	// Storage can be null for buckets the volume gauges never reported. Those are
 	// gaps in the line, not zeroes — but a series of only gaps is an empty chart.
@@ -115,6 +132,7 @@ export function PlanetScaleChart({
 							stroke="var(--border)"
 							vertical={false}
 						/>
+						{renderChartEventMarkers(snapped)}
 						<XAxis
 							dataKey="time"
 							tickLine={false}

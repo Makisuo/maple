@@ -5,6 +5,7 @@ import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu
 
 import { cn } from "../../lib/utils"
 import { ChevronRightIcon, CheckIcon } from "../icons"
+import { InMenuGroupContext, useInMenuGroup } from "./menu-group-context"
 
 function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props) {
 	return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />
@@ -56,7 +57,11 @@ function ContextMenuContent({
 }
 
 function ContextMenuGroup({ ...props }: ContextMenuPrimitive.Group.Props) {
-	return <ContextMenuPrimitive.Group data-slot="context-menu-group" {...props} />
+	return (
+		<InMenuGroupContext.Provider value={true}>
+			<ContextMenuPrimitive.Group data-slot="context-menu-group" {...props} />
+		</InMenuGroupContext.Provider>
+	)
 }
 
 function ContextMenuLabel({
@@ -66,7 +71,7 @@ function ContextMenuLabel({
 }: ContextMenuPrimitive.GroupLabel.Props & {
 	inset?: boolean
 }) {
-	return (
+	const label = (
 		<ContextMenuPrimitive.GroupLabel
 			data-slot="context-menu-label"
 			data-inset={inset}
@@ -74,6 +79,10 @@ function ContextMenuLabel({
 			{...props}
 		/>
 	)
+
+	// Same crash as the dropdown label — context-menu re-exports the very same
+	// Base UI group parts. See menu-group-context.tsx.
+	return useInMenuGroup() ? label : <ContextMenuPrimitive.Group>{label}</ContextMenuPrimitive.Group>
 }
 
 function ContextMenuItem({
@@ -165,7 +174,11 @@ function ContextMenuCheckboxItem({
 }
 
 function ContextMenuRadioGroup({ ...props }: ContextMenuPrimitive.RadioGroup.Props) {
-	return <ContextMenuPrimitive.RadioGroup data-slot="context-menu-radio-group" {...props} />
+	return (
+		<InMenuGroupContext.Provider value={true}>
+			<ContextMenuPrimitive.RadioGroup data-slot="context-menu-radio-group" {...props} />
+		</InMenuGroupContext.Provider>
+	)
 }
 
 function ContextMenuRadioItem({ className, children, ...props }: ContextMenuPrimitive.RadioItem.Props) {

@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 // The capture modules install real DOM/global hooks; here we only need the
 // `emit` callback they are handed, so we can drive events through the same
-// path the browser would.
+// path the browser would. Console is the hook we borrow — navigation is no
+// longer a capture module (the sink observes it, so page views are counted even
+// when replay is unsampled).
 type EmitFn = (ev: { type: string; level?: string }) => void
 let emitRef: EmitFn | undefined
 
@@ -11,30 +13,43 @@ const captureStub = (fn: (emit: EmitFn) => void) => (emit: EmitFn) => {
 	return () => {}
 }
 
-vi.mock("./capture/navigation", () => ({
-	installNavigationCapture: captureStub((emit) => {
+vi.mock("./capture/console", () => ({
+	installConsoleCapture: captureStub((emit) => {
 		emitRef = emit
 	}),
 }))
-vi.mock("./capture/interactions", () => ({ installInteractionCapture: () => () => {} }))
-vi.mock("./capture/console", () => ({ installConsoleCapture: () => () => {} }))
+vi.mock("./capture/interactions", () => ({
+	installInteractionCapture: () => () => {},
+}))
 vi.mock("./capture/network", () => ({ installNetworkCapture: () => () => {} }))
 vi.mock("./capture/errors", () => ({ installErrorCapture: () => () => {} }))
 
-vi.mock("../session", () => ({ markActivity: vi.fn() }))
+vi.mock("../session", () => ({
+	markActivity: vi.fn(),
+	noteNavigation: vi.fn(),
+}))
 vi.mock("./transport", () => ({ postSessionEvents: vi.fn(async () => {}) }))
 
 const { startEventCapture } = await import("./events")
+const { getActiveSink, resetSinkForTests } = await import("../events-sink")
 
-const CONFIG = { endpoint: "https://ingest.test", ingestKey: "k", maskAllInputs: false, maskAllText: false }
+const CONFIG = {
+	endpoint: "https://ingest.test",
+	ingestKey: "k",
+	maskAllInputs: false,
+	maskAllText: false,
+}
 
 describe("startEventCapture session counters", () => {
 	beforeEach(() => {
 		emitRef = undefined
+		resetSinkForTests()
 	})
 
 	it("counts navigations as page views and errors as errors", () => {
 		const capture = startEventCapture(CONFIG, "sess-1")
+		const sink = getActiveSink()
+		if (!sink) throw new Error("capture never started a sink")
 		const emit = emitRef
 		if (!emit) throw new Error("capture module never received emit")
 
@@ -46,16 +61,17 @@ describe("startEventCapture session counters", () => {
 		emit({ type: "console", level: "log" })
 		emit({ type: "click" })
 		emit({ type: "network" })
+		emit({ type: "custom" })
 
-		expect(capture.getPageViews()).toBe(2)
-		expect(capture.getErrorCount()).toBe(2)
+		expect(sink.getPageViews()).toBe(2)
+		expect(sink.getErrorCount()).toBe(2)
 		capture.stop()
 	})
 
 	it("starts both counters at zero", () => {
 		const capture = startEventCapture(CONFIG, "sess-2")
-		expect(capture.getPageViews()).toBe(0)
-		expect(capture.getErrorCount()).toBe(0)
+		expect(getActiveSink()?.getPageViews()).toBe(0)
+		expect(getActiveSink()?.getErrorCount()).toBe(0)
 		capture.stop()
 	})
 
@@ -70,8 +86,16 @@ describe("startEventCapture session counters", () => {
 
 		// The `ended` metadata row is posted after a flush, so the counters must be
 		// cumulative for the session rather than per-batch.
-		expect(capture.getPageViews()).toBe(1)
-		expect(capture.getErrorCount()).toBe(1)
+		expect(getActiveSink()?.getPageViews()).toBe(1)
+		expect(getActiveSink()?.getErrorCount()).toBe(1)
 		capture.stop()
+	})
+
+	it("keeps the sink alive after capture stops, so track() still works", () => {
+		const capture = startEventCapture(CONFIG, "sess-4")
+		capture.stop()
+		// stop() uninstalls the listeners only. The sink outlives them, because a
+		// custom event fired while the tab is tearing down still has to land.
+		expect(getActiveSink()).toBeDefined()
 	})
 })

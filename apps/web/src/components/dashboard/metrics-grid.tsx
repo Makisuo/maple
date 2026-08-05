@@ -1,6 +1,6 @@
 import { Suspense, type ReactNode } from "react"
 
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { getChartById } from "@maple/ui/components/charts/registry"
 import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleton"
 import { ChartTooltipSuppressionProvider } from "@maple/ui/components/ui/chart"

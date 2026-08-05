@@ -16,7 +16,6 @@
 		"@expo-google-fonts/geist-mono": "^0.4.1",
 		"@expo/metro-runtime": "^55.0.9",
 		"@expo/ui": "~55.0.10",
-		"@flue/sdk": "1.0.0-beta.1",
 		"@legendapp/list": "^2.0.19",
 		"@opentelemetry/api": "^1.9.0",
 		"@opentelemetry/api-logs": "^0.205.0",
@@ -56,6 +55,6 @@
 	"devDependencies": {
 		"@types/react": "~19.2.14",
 		"babel-preset-expo": "^55.0.16",
-		"typescript": "^6.0.3"
+		"typescript": "catalog:tooling"
 	}
 }

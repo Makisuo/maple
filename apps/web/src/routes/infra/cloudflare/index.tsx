@@ -26,8 +26,8 @@ import {
 	CloudflareZoneTable,
 	CloudflareZoneTableLoading,
 } from "@/components/infra/cloudflare/cloudflare-zone-table"
-import { COLOR_PALETTE } from "@/components/infra/chart-utils"
-import { OTHER_ZONES_COLOR } from "@/components/infra/cloudflare/constants"
+import { MAX_ZONE_SERIES, OTHER_ZONES_COLOR } from "@/components/infra/cloudflare/constants"
+import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import { chartBucketSeconds } from "@/components/infra/chart-utils"
 import {
 	cloudflareWorkersResultAtom,
@@ -162,8 +162,8 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 			totals.set(row.zoneName, (totals.get(row.zoneName) ?? 0) + row.requests)
 		}
 		const ordered = [...totals.entries()].toSorted((a, b) => b[1] - a[1]).map(([name]) => name)
-		const top = ordered.slice(0, COLOR_PALETTE.length)
-		return { top, otherCount: ordered.length - top.length }
+		const top = ordered.slice(0, MAX_ZONE_SERIES)
+		return { top, otherCount: ordered.length - top.length, colors: resolveSeriesColors(top) }
 	}, [timeseries])
 
 	// Zones (HTTP edge analytics) and Workers (invocation analytics) are
@@ -217,7 +217,7 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 									<div className="space-y-2">
 										{(zoneSeries.top.length > 1 || zoneSeries.otherCount > 0) && (
 											<div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1">
-												{zoneSeries.top.map((name, idx) => (
+												{zoneSeries.top.map((name) => (
 													<Link
 														key={name}
 														to="/infra/cloudflare/$zoneName"
@@ -228,8 +228,7 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 															aria-hidden
 															className="size-1.5 rounded-full"
 															style={{
-																background:
-																	COLOR_PALETTE[idx % COLOR_PALETTE.length],
+																background: zoneSeries.colors.get(name),
 															}}
 														/>
 														<span className="text-[11px] text-muted-foreground transition-colors group-hover:text-foreground">

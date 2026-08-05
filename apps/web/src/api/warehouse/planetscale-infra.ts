@@ -1,8 +1,15 @@
 import { Clock, Effect, Schema } from "effect"
-import { PlanetScaleInfraTimeseriesRequest, PlanetScaleQueryInsightsRequest } from "@maple/domain/http"
+import { PlanetScaleInfraTimeseriesRequest } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import {
+	WarehouseDateTimeString,
+	decodeInput,
+	runWarehouseQuery,
+	runWarehouseQueryV2,
+} from "@/api/warehouse/effect-utils"
 
+import { formatWarehouseDateTime } from "@maple/query-engine"
 /**
  * /infra/planetscale data access. The fleet view composes the polled inventory
  * (integrations `planetscaleDatabases`) with the service-map stat rollups; the
@@ -31,8 +38,34 @@ const GetPlanetScaleInfraTimeseriesInputSchema = Schema.Struct({
 export type GetPlanetScaleInfraTimeseriesInput = (typeof GetPlanetScaleInfraTimeseriesInputSchema)["Encoded"]
 
 const defaultTimeRange = (nowMillis: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMillis - 24 * 60 * 60 * 1000), endTime: fmt(nowMillis) }
+	return {
+		startTime: formatWarehouseDateTime(nowMillis - 24 * 60 * 60 * 1000),
+		endTime: formatWarehouseDateTime(nowMillis),
+	}
+}
+
+/** The v2 wire format is ISO-8601; every caller in here still speaks epoch ms. */
+const toIso = (epochMs: number) => new Date(epochMs).toISOString()
+
+/**
+ * One lifecycle event, in the camelCase/epoch-ms shape the infra components
+ * consume. Mapped here rather than passing the wire object through, so the
+ * activity feed and chart markers stay insulated from the API's field casing.
+ */
+export interface PlanetScaleEventEntry {
+	id: string
+	databaseName: string
+	branchName: string
+	category: string
+	eventType: string
+	state: string | null
+	externalId: string
+	title: string
+	source: string
+	actorLogin: string | null
+	url: string | null
+	/** Epoch ms. */
+	occurredAt: number
 }
 
 export interface PlanetScaleQueryInsightEntry {
@@ -72,39 +105,96 @@ export const getPlanetScaleQueryInsights = Effect.fn("Integrations.getPlanetScal
 		data,
 		"getPlanetScaleQueryInsights",
 	)
-	const result = yield* runWarehouseQuery("planetscaleQueryInsights", () =>
+	const result = yield* runWarehouseQueryV2("planetscaleQueryInsights", () =>
 		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.integrations.planetscaleQueryInsights({
-				payload: new PlanetScaleQueryInsightsRequest({
+			const client = yield* MapleApiV2AtomClient
+			return yield* client.planetscaleIntegration.queryInsights({
+				payload: {
 					database: input.database,
 					...(input.branch === undefined ? {} : { branch: input.branch }),
-					startTime: input.startTime,
-					endTime: input.endTime,
+					start_time: toIso(input.startTime),
+					end_time: toIso(input.endTime),
 					...(input.limit === undefined ? {} : { limit: input.limit }),
-				}),
+				},
 			})
 		}),
 	)
 	return {
 		branch: result.branch,
-		unavailableReason: result.unavailableReason,
-		rows: result.rows.map(
+		unavailableReason: result.unavailable_reason,
+		rows: result.data.map(
 			(row): PlanetScaleQueryInsightEntry => ({
 				fingerprint: row.fingerprint,
-				normalizedSql: row.normalizedSql,
-				statementType: row.statementType,
-				queryCount: row.queryCount,
-				errorCount: row.errorCount,
-				errorRate: row.queryCount > 0 ? row.errorCount / row.queryCount : 0,
-				totalDurationMillis: row.totalDurationMillis,
-				timePerQueryMillis: row.timePerQueryMillis,
-				p50LatencyMillis: row.p50LatencyMillis,
-				p99LatencyMillis: row.p99LatencyMillis,
-				rowsReadPerQuery: row.rowsReadPerQuery,
-				lastRunAt: row.lastRunAt,
+				normalizedSql: row.normalized_sql,
+				statementType: row.statement_type,
+				queryCount: row.query_count,
+				errorCount: row.error_count,
+				errorRate: row.query_count > 0 ? row.error_count / row.query_count : 0,
+				totalDurationMillis: row.total_duration_millis,
+				timePerQueryMillis: row.time_per_query_millis,
+				p50LatencyMillis: row.p50_latency_millis,
+				p99LatencyMillis: row.p99_latency_millis,
+				rowsReadPerQuery: row.rows_read_per_query,
+				lastRunAt: row.last_run_at === null ? null : Date.parse(row.last_run_at),
 			}),
 		),
+	}
+})
+
+const GetPlanetScaleEventsInputSchema = Schema.Struct({
+	/** Omit for the org-wide feed. */
+	database: Schema.optional(Schema.String),
+	branch: Schema.optional(Schema.String),
+	/** Window bounds, epoch ms. */
+	startTime: Schema.Number,
+	endTime: Schema.Number,
+	limit: Schema.optional(Schema.Number),
+})
+
+export type GetPlanetScaleEventsInput = (typeof GetPlanetScaleEventsInputSchema)["Encoded"]
+
+/**
+ * The PlanetScale lifecycle timeline for a window — deploy transitions, branch
+ * state changes, health events. Backs the chart markers and the activity feed.
+ */
+export const getPlanetScaleEvents = Effect.fn("Integrations.getPlanetScaleEvents")(function* ({
+	data,
+}: {
+	data: GetPlanetScaleEventsInput
+}) {
+	const input = yield* decodeInput(GetPlanetScaleEventsInputSchema, data, "getPlanetScaleEvents")
+	const result = yield* runWarehouseQueryV2("planetscaleEvents", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiV2AtomClient
+			return yield* client.planetscaleIntegration.events({
+				payload: {
+					...(input.database === undefined ? {} : { database: input.database }),
+					...(input.branch === undefined ? {} : { branch: input.branch }),
+					start_time: toIso(input.startTime),
+					end_time: toIso(input.endTime),
+					...(input.limit === undefined ? {} : { limit: input.limit }),
+				},
+			})
+		}),
+	)
+	return {
+		events: result.data.map(
+			(row): PlanetScaleEventEntry => ({
+				id: row.id,
+				databaseName: row.database_name,
+				branchName: row.branch_name,
+				category: row.category,
+				eventType: row.event_type,
+				state: row.state,
+				externalId: row.external_id,
+				title: row.title,
+				source: row.source,
+				actorLogin: row.actor_login,
+				url: row.url,
+				occurredAt: Date.parse(row.occurred_at),
+			}),
+		),
+		nextCursor: result.next_cursor,
 	}
 })
 

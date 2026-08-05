@@ -28,7 +28,9 @@ const wireExample = <A>(example: object): A => example as A
 //   - Slack is the first integration built after the v2 migration started, so
 //     it goes straight onto v2 rather than extending a v1 group that is slated
 //     for deletion. The older providers stay on v1 until something public needs
-//     them.
+//     them — PlanetScale reached that point and now lives in
+//     `integrations-planetscale.ts` (its v1 endpoints stay mounted, deprecated,
+//     until external callers drain); Cloudflare, GitHub, and Hazel have not.
 //   - It is public rather than internal because `/v2/alerts/destinations`
 //     accepts `type: "slack-bot"` with a required `channel_id` and the bot token
 //     never leaves the server: `GET /v2/integrations/slack/channels` is the only
@@ -39,10 +41,11 @@ const wireExample = <A>(example: object): A => example as A
 // 302s back to the web app. Same for the service-to-service bot-resolution
 // endpoint the Slack agent calls.
 //
-// Provider-agnostic filename with a provider-scoped group is intentional:
-// scope families are derived from the first path segment under `/v2`, so every
-// future `/v2/integrations/<provider>` group belongs in this file and shares
-// the `integrations:read` / `integrations:write` family.
+// One file per provider (`integrations.ts` is Slack's, despite the name;
+// `integrations-planetscale.ts` is PlanetScale's). Scope families are derived
+// from the first path segment under `/v2`, so every `/v2/integrations/<provider>`
+// group shares the `integrations:read` / `integrations:write` family no matter
+// which file it is declared in — the split is about file size, nothing else.
 // ---------------------------------------------------------------------------
 
 export const V2SlackIntegrationStatus = Schema.Struct({
@@ -173,17 +176,24 @@ export const V2SlackChannelList = Schema.Struct({
 		description: 'The object type — always `"slack_integration.channel_list"`.',
 	}),
 	channels: Schema.Array(V2SlackChannel).annotate({
-		description: "The channels the installed bot can see, most recently listed first.",
+		description:
+			"The channels the installed bot can see, ordered with the channels the bot has joined (`is_member`) first, then alphabetically by name within each half.",
+	}),
+	truncated: Schema.Boolean.annotate({
+		description:
+			"Whether the workspace has more channels than this response could reach. `true` means `channels` is a prefix of the inventory, not the whole of it — the bot must be invited to a missing channel for it to appear.",
+		examples: [false],
 	}),
 }).annotate({
 	identifier: "SlackChannelList",
 	title: "Slack channel list",
 	description:
-		'The channels visible to the installed Slack bot. Note: unlike every other v2 collection this response is **not** the standard `{ object: "list", data, has_more, next_cursor }` envelope — Maple walks Slack\'s `conversations.list` cursors server-side and returns the whole bounded set in one response, so there is nothing to paginate and it stays a bespoke `{ object, channels }` shape.',
+		'The channels visible to the installed Slack bot. Note: unlike every other v2 collection this response is **not** the standard `{ object: "list", data, has_more, next_cursor }` envelope — Maple walks Slack\'s `conversations.list` cursors server-side and returns the set in one response, so there is no cursor for a client to follow. The walk is page-capped; `truncated` reports whether it hit that cap.',
 	examples: [
 		wireExample({
 			object: "slack_integration.channel_list",
 			channels: [{ id: "C0789CHAN", name: "incidents", is_private: false, is_member: true }],
+			truncated: false,
 		}),
 	],
 })

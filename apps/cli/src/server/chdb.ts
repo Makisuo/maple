@@ -212,6 +212,10 @@ export const chdbArgv = (options: Pick<ChdbOptions, "dataDir" | "configFile">): 
 	"--tables_loader_foreground_pool_size=1",
 	"--tables_loader_background_pool_size=1",
 	"--restore_threads=1",
+	// Wire-format parity with the cloud read paths (BackendDialect
+	// unquote64BitIntegers): emit 64-bit ints as JSON numbers, not strings, so
+	// local mode decodes rows exactly like managed Tinybird / BYO ClickHouse.
+	"--output_format_json_quote_64bit_integers=0",
 	`--path=${options.dataDir}`,
 	...(options.configFile ? [`--config-file=${options.configFile}`] : []),
 ]

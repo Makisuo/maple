@@ -1,4 +1,4 @@
-import { Clock, Effect, Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { FileSystem } from "effect/FileSystem"
 import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
@@ -6,14 +6,10 @@ import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { openSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { SCHEMA_FINGERPRINT, startServer } from "../server/serve"
-import {
-	checkStoreCompatible,
-	isSchemaStale,
-	isStoreDirty,
-	storeMarkerJson,
-	storeMarkerPath,
-} from "../server/store-version"
+import { startServer } from "../server/serve"
+import { CURRENT_LOCAL_SCHEMA } from "../server/schema-identity"
+import { checkStoreCompatible, isSchemaIdentityStale, isStoreDirty } from "../server/store-version"
+import { abandonLocalStoreMigration, localMigrationIsIncomplete } from "../server/local-store-migrations"
 import {
 	createCheckpoint,
 	parseCheckpointId,
@@ -23,7 +19,6 @@ import {
 } from "../server/checkpoints"
 import { resolveUiAssets } from "../server/ui-assets"
 import { amber, bold, cyan, dim, green, underline } from "../lib/style"
-import { MAPLE_VERSION } from "../version"
 import {
 	buildDetachedChildArgs,
 	canonicalUrlHostname,
@@ -351,6 +346,30 @@ export const start = Command.make("start", {
 				Effect.mapError((e) => new ServerError({ message: e.message })),
 			)
 
+			const migrationIncomplete = yield* Effect.tryPromise({
+				try: () => localMigrationIsIncomplete(dataDir),
+				catch: (error) =>
+					new ServerError({
+						message: `cannot read the local migration journal: ${error instanceof Error ? error.message : String(error)}`,
+					}),
+			})
+			if (migrationIncomplete && !a.reset) {
+				return yield* new ServerError({
+					message:
+						`the local store has an unfinished schema migration. ` +
+						`Resume or inspect it with \`${bold("maple schema migrate --yes")}\`; ordinary startup remains fail-closed.`,
+				})
+			}
+			if (migrationIncomplete) {
+				yield* Effect.tryPromise({
+					try: () => abandonLocalStoreMigration(dataDir),
+					catch: (error) =>
+						new ServerError({
+							message: `could not preserve the unfinished migration before reset: ${error instanceof Error ? error.message : String(error)}`,
+						}),
+				})
+			}
+
 			// `--reset`: wipe the store (and its version marker) so we bootstrap fresh.
 			// Preserve the checkpoint registry under dataDir/backups.
 			if (a.reset) {
@@ -426,12 +445,14 @@ export const start = Command.make("start", {
 			// never lands and facet queries referencing it fail. Rebuild from the
 			// current schema. Do not silently delete telemetry or checkpoints:
 			// require an explicit reset, which preserves the checkpoint registry.
-			if (isSchemaStale(dataDir, SCHEMA_FINGERPRINT)) {
+			if (isSchemaIdentityStale(dataDir, CURRENT_LOCAL_SCHEMA)) {
 				return yield* new ServerError({
 					message:
-						`the local store at ${prettyPath(dataDir)} was built from an older schema. ` +
-						`Maple preserved it and its checkpoints; explicitly rebuild live data with ` +
-						`\`${bold("maple start --reset")}\` or \`${bold("maple reset --yes")}\`.`,
+						`the local store at ${prettyPath(dataDir)} was built from a different schema identity. ` +
+						`Maple preserved it and its checkpoints. Inspect the supported path with ` +
+						`\`${bold("maple schema plan")}\`; run \`${bold("maple schema migrate --yes")}\` ` +
+						`when the printed preservation envelope is acceptable. If no path is registered, ` +
+						`use the explicit destructive \`${bold("maple start --reset")}\` or \`${bold("maple reset --yes")}\`.`,
 				})
 			}
 
@@ -494,16 +515,6 @@ export const start = Command.make("start", {
 						Effect.mapError((e) => new ServerError({ message: `failed to start: ${e.message}` })),
 					)
 					started = true
-
-					// Bootstrap succeeded — stamp the store so a later start over an
-					// incompatible binary upgrade is detected instead of crashing.
-					const stampedAtIso = new Date(yield* Clock.currentTimeMillis).toISOString()
-					yield* fs
-						.writeFileString(
-							storeMarkerPath(dataDir),
-							storeMarkerJson(MAPLE_VERSION, stampedAtIso, SCHEMA_FINGERPRINT),
-						)
-						.pipe(Effect.ignore)
 
 					yield* Effect.acquireRelease(fs.writeFileString(pidPath, String(process.pid)), () =>
 						fs.remove(pidPath, { force: true }).pipe(Effect.ignore),
@@ -619,12 +630,22 @@ export const reset = Command.make("reset", { dataDir: dataDirFlag, yes: yesFlag 
 				return
 			}
 
+			const abandonedMigration = yield* Effect.tryPromise({
+				try: () => abandonLocalStoreMigration(dataDir),
+				catch: (error) =>
+					new ServerError({
+						message: `could not preserve the unfinished migration before reset: ${error instanceof Error ? error.message : String(error)}`,
+					}),
+			})
 			yield* resetLiveStorePreservingCheckpoints(dataDir).pipe(
 				Effect.mapError((e) => new ServerError({ message: e.message })),
 			)
 			yield* Effect.sync(() =>
 				process.stderr.write(
-					`${green("✓")} reset — cleared live data and preserved checkpoints at ${prettyPath(dataDir)}\n`,
+					`${green("✓")} reset — cleared live data and preserved checkpoints at ${prettyPath(dataDir)}\n` +
+						(abandonedMigration === null
+							? ""
+							: `${dim("  migration")} preserved at ${prettyPath(abandonedMigration)}\n`),
 				),
 			)
 		}),

@@ -7,7 +7,7 @@ import {
 	EscalationPolicyEvaluationRequest,
 	type IssueSeverity,
 } from "@maple/domain/http"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { Button } from "@maple/ui/components/ui/button"
 import { Badge } from "@maple/ui/components/ui/badge"
 
@@ -16,7 +16,7 @@ import { EscalationPolicySection } from "./escalation-policy-section"
 import { SectionHeader } from "@/components/layout/section-header"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
-import { formatRelativeTime } from "@maple/ui/time-format"
+import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 const SEVERITIES: ReadonlyArray<IssueSeverity> = ["critical", "high", "medium", "low"]
 const CONFIDENCES: ReadonlyArray<EscalationConfidence> = ["high", "medium", "low"]
@@ -80,7 +80,7 @@ function PolicySimulator() {
 		if (Exit.isSuccess(result)) {
 			setDecision(result.value)
 		} else {
-			toast.error("Policy evaluation failed")
+			toastManager.add({ title: "Policy evaluation failed", type: "error" })
 		}
 	}
 

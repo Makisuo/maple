@@ -1,16 +1,16 @@
 import { useRef } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { Unitflow, View } from "@maple/unitflow/react"
 import { Button } from "@maple/ui/components/ui/button"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
-import { formatRelativeTimeOrDate } from "@maple/ui/time-format"
+import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
 import { DashboardList, type DashboardScope } from "@/components/dashboard-builder/list/dashboard-list"
 import { headerSummary } from "@/components/dashboard-builder/list/dashboard-summary"
 import { DashboardListSkeleton } from "@/components/dashboard-builder/loading-skeletons"
+import { SyncDegradedBanner, SyncUnavailable } from "@/components/common/sync-unavailable"
 import {
 	downloadPortableDashboard,
 	isPersesDashboardJson,
@@ -23,6 +23,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { isDashboardSortOption, type DashboardSortOption } from "@/atoms/dashboard-preferences-atoms"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useDashboardMutations } from "@/hooks/use-dashboard-store"
+import { retryOrgCollections } from "@/lib/collections/org-collections"
 import { DashboardsListModel } from "@/lib/models/dashboards-list-model"
 import { unitflowRuntime } from "@/lib/models/runtime"
 
@@ -81,16 +82,18 @@ function DashboardListPage() {
 					if (isPersesDashboardJson(parsed)) {
 						const { dashboard, warnings } = await importPersesDashboard(parsed)
 						navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: dashboard.id } })
-						toast.success(`Dashboard "${dashboard.name}" imported from Perses`)
+						toastManager.add({
+							title: `Dashboard "${dashboard.name}" imported from Perses`,
+							type: "success",
+						})
 						if (warnings.length > 0) {
 							const preview = warnings.slice(0, 3).join("\n")
 							const suffix = warnings.length > 3 ? `\n+${warnings.length - 3} more` : ""
-							toast.warning(
-								`Imported with ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`,
-								{
-									description: `${preview}${suffix}`,
-								},
-							)
+							toastManager.add({
+								title: `Imported with ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`,
+								description: `${preview}${suffix}`,
+								type: "warning",
+							})
 						}
 						return
 					}
@@ -98,9 +101,12 @@ function DashboardListPage() {
 					const imported = parsePortableDashboardJson(raw)
 					const dashboard = await importDashboard(imported)
 					navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: dashboard.id } })
-					toast.success(`Dashboard "${dashboard.name}" imported`)
+					toastManager.add({ title: `Dashboard "${dashboard.name}" imported`, type: "success" })
 				} catch (error) {
-					toast.error(error instanceof Error ? error.message : "Failed to parse dashboard file")
+					toastManager.add({
+						title: error instanceof Error ? error.message : "Failed to parse dashboard file",
+						type: "error",
+					})
 				}
 			})()
 		}
@@ -118,7 +124,10 @@ function DashboardListPage() {
 					search: { mode: "edit" },
 				})
 			} catch (error) {
-				toast.error(error instanceof Error ? error.message : "Failed to create dashboard")
+				toastManager.add({
+					title: error instanceof Error ? error.message : "Failed to create dashboard",
+					type: "error",
+				})
 			}
 		})()
 	}
@@ -135,9 +144,12 @@ function DashboardListPage() {
 				const portable = toPortableDashboard(dashboard)
 				const copy = await importDashboard({ ...portable, name: `${dashboard.name} copy` })
 				navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: copy.id } })
-				toast.success(`Duplicated as "${copy.name}"`)
+				toastManager.add({ title: `Duplicated as "${copy.name}"`, type: "success" })
 			} catch (error) {
-				toast.error(error instanceof Error ? error.message : "Failed to duplicate dashboard")
+				toastManager.add({
+					title: error instanceof Error ? error.message : "Failed to duplicate dashboard",
+					type: "error",
+				})
 			}
 		})()
 	}
@@ -284,17 +296,11 @@ function PageShell({
 
 function ListLoadError() {
 	return (
-		<Empty className="py-12">
-			<EmptyHeader>
-				<EmptyMedia variant="icon">
-					<CircleWarningIcon size={18} />
-				</EmptyMedia>
-				<EmptyTitle>Couldn’t load dashboards</EmptyTitle>
-				<EmptyDescription>
-					The sync stream dropped. Your dashboards are safe — this is a read problem.
-				</EmptyDescription>
-			</EmptyHeader>
-		</Empty>
+		<SyncUnavailable
+			title="Couldn’t load dashboards"
+			description="The sync stream dropped and the list couldn’t be read over HTTP either. Your dashboards are safe — this is a read problem."
+			onRetry={retryOrgCollections}
+		/>
 	)
 }
 
@@ -321,7 +327,12 @@ const ModelPage = View.make(
 				actions={props.actions}
 				persistenceError={props.persistenceError}
 			>
-				<DashboardList dashboards={list.dashboards} {...props.list} />
+				{list.degraded && <SyncDegradedBanner onRetry={retryOrgCollections} />}
+				<DashboardList
+					dashboards={list.dashboards}
+					{...props.list}
+					readOnly={props.list.readOnly || list.degraded}
+				/>
 			</PageShell>
 		)
 	},

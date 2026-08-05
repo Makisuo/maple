@@ -1,6 +1,6 @@
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
-import type { QuerySpec } from "../query-engine"
-import { normalizeKey, parseBoolean, parseWhereClause, splitCsv } from "../where-clause"
+import type { QuerySpec } from "@maple/domain/query-engine"
+import { normalizeKey, parseBoolean, parseWhereClause, splitCsv } from "@maple/domain/where-clause"
 import { Match } from "effect"
 
 export type QueryBuilderDataSource = "traces" | "logs" | "metrics"
@@ -457,6 +457,7 @@ interface MetricsFilterAccumulator {
 	metricName: string
 	metricType: QueryBuilderMetricType
 	serviceName?: string
+	environments?: string[]
 	groupByAttributeKey?: string
 	groupByResourceAttributeKey?: string
 	attributeFilters: AccumulatedAttributeFilter[]
@@ -513,6 +514,10 @@ function applyMetricsClause(
 
 	return Match.value(key).pipe(
 		Match.when("service.name", () => ({ ...filters, serviceName: clause.value })),
+		Match.when("deployment.environment", () => ({
+			...filters,
+			environments: splitCsv(clause.value),
+		})),
 		Match.when("metric.type", () => {
 			if (QUERY_BUILDER_METRIC_TYPES.includes(clause.value as QueryBuilderMetricType)) {
 				return { ...filters, metricType: clause.value as QueryBuilderMetricType }
@@ -603,6 +608,15 @@ function resolveMetricsGroupByToken(
 					warnings.push("Invalid attr.* group by ignored")
 					return null
 				}
+				if (
+					metricsFilters.groupByAttributeKey !== undefined &&
+					metricsFilters.groupByAttributeKey !== attributeKey
+				) {
+					warnings.push(
+						`Metrics queries support a single attr.* group by; ignoring attr.${attributeKey}`,
+					)
+					return null
+				}
 				metricsFilters.groupByAttributeKey = attributeKey
 				return "attribute" as const
 			}
@@ -610,6 +624,15 @@ function resolveMetricsGroupByToken(
 				const resourceKey = t.slice(9)
 				if (!resourceKey) {
 					warnings.push("Invalid resource.* group by ignored")
+					return null
+				}
+				if (
+					metricsFilters.groupByResourceAttributeKey !== undefined &&
+					metricsFilters.groupByResourceAttributeKey !== resourceKey
+				) {
+					warnings.push(
+						`Metrics queries support a single resource.* group by; ignoring resource.${resourceKey}`,
+					)
 					return null
 				}
 				metricsFilters.groupByResourceAttributeKey = resourceKey
@@ -1035,7 +1058,27 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 	}
 }
 
-export function buildBreakdownQuerySpec(query: QueryBuilderQueryDraftPayload): BuildSpecResult {
+/**
+ * Rows to fetch for a breakdown that collapses its long tail into an "Other"
+ * bucket, when the author set no explicit limit.
+ *
+ * The warehouse default is 10, which is also roughly what a pie can *draw* — so
+ * the chart received exactly the rows it wanted to show and had no idea a tail
+ * existed. Its "Other" bucket therefore never fired and the panel silently
+ * claimed the top 10 was everything.
+ *
+ * `LIMIT` only bounds the rows returned, not the scan: the GROUP BY has already
+ * aggregated every group, so 50 rows costs the same query as 10. Fetching past
+ * what we render is what makes "Other" a real number and lets the legend say how
+ * many categories it stands for. Panels that plot every row they receive
+ * (funnel, heatmap) keep the warehouse default instead.
+ */
+export const BREAKDOWN_TAIL_LIMIT = 50
+
+export function buildBreakdownQuerySpec(
+	query: QueryBuilderQueryDraftPayload,
+	options?: { defaultLimit?: number },
+): BuildSpecResult {
 	const timeseriesResult = buildTimeseriesQuerySpec(query)
 	if (!timeseriesResult.query) return timeseriesResult
 
@@ -1057,7 +1100,7 @@ export function buildBreakdownQuerySpec(query: QueryBuilderQueryDraftPayload): B
 	const limit =
 		parsedLimit && Number.isFinite(parsedLimit) && parsedLimit > 0 && parsedLimit <= 100
 			? parsedLimit
-			: undefined
+			: options?.defaultLimit
 
 	return {
 		query: {

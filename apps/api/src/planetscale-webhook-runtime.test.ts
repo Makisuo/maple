@@ -1,10 +1,10 @@
 import type { MessageBatch } from "@cloudflare/workers-types"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { Database, DatabaseError } from "./lib/DatabaseLive"
-import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "./lib/test-pglite"
+import { Database, DatabaseError } from "@/platform/DatabaseLive"
+import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { processPlanetScaleWebhookBatch } from "./planetscale-webhook-runtime"
-import type { PlanetScaleWebhookJob } from "./services/planetscale/PlanetScaleWebhookQueue"
+import type { PlanetScaleWebhookJob } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
 
 const trackedDbs: TestDb[] = []
 
@@ -84,7 +84,7 @@ describe("PlanetScale webhook queue consumer", () => {
 		)
 	})
 
-	it.effect("reclassifies lifecycle events and acknowledges them without persistence", () => {
+	it.effect("writes a lifecycle event to the timeline but not to the issue hub", () => {
 		const testDb = createTestDb(trackedDbs)
 		const delivery = makeBatch({
 			...job,
@@ -94,14 +94,71 @@ describe("PlanetScale webhook queue consumer", () => {
 			yield* processPlanetScaleWebhookBatch(delivery.batch)
 			assert.isTrue(delivery.acknowledged())
 			assert.isFalse(delivery.retried())
-			const row = yield* Effect.promise(() =>
+
+			const issues = yield* Effect.promise(() =>
 				queryFirstRow<{ count: number }>(
 					testDb,
 					"SELECT count(*)::int AS count FROM error_issues WHERE org_id = $1",
 					["org_1"],
 				),
 			)
-			assert.strictEqual(row?.count, 0)
+			assert.strictEqual(issues?.count, 0)
+
+			const event = yield* Effect.promise(() =>
+				queryFirstRow<{ category: string; state: string; branch_name: string }>(
+					testDb,
+					"SELECT category, state, branch_name FROM planetscale_events WHERE org_id = $1",
+					["org_1"],
+				),
+			)
+			assert.strictEqual(event?.category, "branch")
+			assert.strictEqual(event?.state, "ready")
+			assert.strictEqual(event?.branch_name, "main")
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("writes a health event to BOTH the timeline and the issue hub", () => {
+		const testDb = createTestDb(trackedDbs)
+		const delivery = makeBatch(job)
+		return Effect.gen(function* () {
+			yield* processPlanetScaleWebhookBatch(delivery.batch)
+			const event = yield* Effect.promise(() =>
+				queryFirstRow<{ category: string; state: string }>(
+					testDb,
+					"SELECT category, state FROM planetscale_events WHERE org_id = $1",
+					["org_1"],
+				),
+			)
+			// The OOM issue is what pages someone; the marker is what explains the
+			// CPU cliff next to it.
+			assert.strictEqual(event?.category, "branch")
+			assert.strictEqual(event?.state, "out_of_memory")
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("carries the deploy-request number so redelivery dedupes", () => {
+		const testDb = createTestDb(trackedDbs)
+		const delivery = makeBatch({
+			...job,
+			payload: {
+				...job.payload,
+				event: "deploy_request.schema_applied",
+				resource: { number: 42 },
+			},
+		})
+		return Effect.gen(function* () {
+			yield* processPlanetScaleWebhookBatch(delivery.batch)
+			const event = yield* Effect.promise(() =>
+				queryFirstRow<{ external_id: string; title: string; branch_name: string }>(
+					testDb,
+					"SELECT external_id, title, branch_name FROM planetscale_events WHERE org_id = $1",
+					["org_1"],
+				),
+			)
+			assert.strictEqual(event?.external_id, "42")
+			assert.strictEqual(event?.title, "Deploy request #42 applied its schema")
+			// A deploy request spans branches; pinning it to one would be a guess.
+			assert.strictEqual(event?.branch_name, "")
 		}).pipe(Effect.provide(testDb.layer))
 	})
 

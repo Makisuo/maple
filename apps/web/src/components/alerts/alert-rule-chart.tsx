@@ -27,9 +27,12 @@ import {
 	ChartTooltipContent,
 } from "@maple/ui/components/ui/chart"
 import { formatBucketLabel } from "@maple/ui/lib/format"
+import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { cn } from "@maple/ui/utils"
-import { SERIES_COLORS } from "./chart-colors"
+import { cn } from "@maple/ui/lib/utils"
+
+/** The single-series signal line and its area fill — one fixed accent, never hashed. */
+const SIGNAL_COLOR = "var(--chart-1)"
 
 /**
  * THE alert rule chart — shared by the create form's live hero and the rule
@@ -55,6 +58,19 @@ interface AlertRuleChartProps {
 	signalType: AlertSignalType
 	/** Page time window in epoch ms — the shared domain for the axis, bands, and rail. */
 	window: { min: number; max: number }
+	/**
+	 * Which series to plot: the rule's query replayed now (`preview`) or the
+	 * values the evaluator actually recorded (`checks`). When the requested
+	 * source has no points the other one is drawn instead — and the swap is
+	 * stated in the caption rather than happening silently, which is what the
+	 * old auto-pick did.
+	 */
+	source?: SignalSource
+	/** Sentence describing what the rail spans, e.g. "60 buckets · full 24h window". */
+	railCoverage?: string
+	/** Index of the highlighted rail bucket; clicking a cell calls back with it. */
+	selectedBucket?: number | null
+	onSelectBucket?: (index: number | null, bucket: { start: number; end: number }) => void
 	loading?: boolean
 	/** Preview-query failure; non-fatal when recorded checks can still draw the chart. */
 	error?: string | null
@@ -62,10 +78,19 @@ interface AlertRuleChartProps {
 }
 
 const SINGLE_KEY = "value"
+/** The unselected source, drawn dashed behind the selected one for comparison. */
+const GHOST_KEY = "__ghost"
 const CHART_HEIGHT = 300
 
 type ChartPoint = { t: number } & Record<string, number | null>
-type SignalSource = "preview" | "checks" | "none"
+export type SignalSource = "preview" | "checks"
+type ResolvedSource = SignalSource | "none"
+
+export const SIGNAL_SOURCE_LABEL: Record<SignalSource, string> = {
+	preview: "Query",
+	checks: "Evaluated",
+}
+
 const Y_AXIS_WIDTH = 72
 const PLOT_RIGHT = 12
 const RAIL_CELLS = 60
@@ -91,6 +116,7 @@ function clamp01(value: number): number {
 
 const NO_CHECKS: ReadonlyArray<AlertCheckDocument> = []
 const NO_INCIDENTS: ReadonlyArray<AlertIncidentDocument> = []
+const EMPTY_BANDS: Array<{ x1: number; x2: number }> = []
 
 // Recharts reconciliation cost is linear in plotted points, and beyond ~1
 // point per 2 horizontal pixels extra points are invisible at our widths.
@@ -117,27 +143,21 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 	comparator,
 	signalType,
 	window: domain,
+	source: requestedSource,
+	railCoverage,
+	selectedBucket = null,
+	onSelectBucket,
 	loading,
 	error,
 	className,
 }: AlertRuleChartProps) {
-	// The preview series is the preferred source; when it's empty/unavailable the
-	// recorded checks become the series instead, so a rule whose preview fails
-	// still gets a chart from its evaluation history.
-	const {
-		chartData,
-		seriesKeys,
-		isMultiSeries,
-		source,
-		sampleCounts,
-		statuses,
-		noDataBands,
-		provisionalTs,
-	} = React.useMemo((): {
-		chartData: ChartPoint[]
+	// The two sources are built independently so the toggle can switch between
+	// them, and so the unselected one can be drawn as a comparison ghost.
+	const previewChart = React.useMemo((): {
+		rows: ChartPoint[]
 		seriesKeys: string[]
 		isMultiSeries: boolean
-		source: SignalSource
+		hasPoints: boolean
 		/** t → total samples across groups (tooltip). */
 		sampleCounts: Map<number, number>
 		/** t → worst per-bucket status across groups (tooltip). */
@@ -155,7 +175,20 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 		// useful — fall through to checks/placeholder instead of an empty grid.
 		const hasPreviewPoints = previewSeries.some((s) => s.points.some((p) => p.value != null))
 
-		if (hasPreviewPoints) {
+		if (!hasPreviewPoints) {
+			return {
+				rows: [],
+				seriesKeys: [SINGLE_KEY],
+				isMultiSeries: false,
+				hasPoints: false,
+				sampleCounts,
+				statuses,
+				noDataBands: [],
+				provisionalTs,
+			}
+		}
+
+		{
 			const keys = previewSeries.map((s) => s.groupKey)
 			const single = keys.length === 1
 			const byT = new Map<number, ChartPoint>()
@@ -206,50 +239,89 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 			}
 			const rows = downsample(Array.from(byT.values()).sort((a, b) => a.t - b.t))
 			return {
-				chartData: rows,
+				rows,
 				seriesKeys: single ? [SINGLE_KEY] : keys,
 				isMultiSeries: !single,
-				source: "preview",
+				hasPoints: true,
 				sampleCounts,
 				statuses,
 				noDataBands,
 				provisionalTs,
 			}
 		}
+	}, [preview, domain.max])
 
-		if (checks.length > 0) {
-			const rows: ChartPoint[] = downsample(
-				checks
-					.map((check) => ({
-						t: new Date(normalizeTimestampInput(check.timestamp)).getTime(),
-						[SINGLE_KEY]: check.observedValue,
-					}))
-					.filter((row) => Number.isFinite(row.t))
-					.sort((a, b) => a.t - b.t),
-			)
-			return {
-				chartData: rows,
-				seriesKeys: [SINGLE_KEY],
-				isMultiSeries: false,
-				source: "checks",
-				sampleCounts,
-				statuses,
-				noDataBands: [],
-				provisionalTs,
+	/** The values the evaluator actually recorded, one point per check. */
+	const checksChart = React.useMemo((): { rows: ChartPoint[]; hasPoints: boolean } => {
+		const rows: ChartPoint[] = checks
+			.map((check) => ({
+				t: new Date(normalizeTimestampInput(check.timestamp)).getTime(),
+				[SINGLE_KEY]: check.observedValue,
+			}))
+			.filter((row) => Number.isFinite(row.t))
+			.sort((a, b) => a.t - b.t)
+		return { rows: downsample(rows), hasPoints: rows.some((r) => r[SINGLE_KEY] != null) }
+	}, [checks])
+
+	// The requested source wins when it has points; otherwise we fall back to the
+	// other one. `fellBack` drives the caption, so the swap is never silent.
+	const resolvedSource: ResolvedSource = previewChart.hasPoints
+		? requestedSource === "checks" && checksChart.hasPoints
+			? "checks"
+			: "preview"
+		: checksChart.hasPoints
+			? "checks"
+			: "none"
+	const fellBack =
+		requestedSource != null && resolvedSource !== "none" && resolvedSource !== requestedSource
+	const bothSourcesAvailable = previewChart.hasPoints && checksChart.hasPoints
+
+	const source = resolvedSource
+	const { sampleCounts, statuses, provisionalTs } = previewChart
+	const seriesKeys = source === "preview" ? previewChart.seriesKeys : [SINGLE_KEY]
+	const isMultiSeries = source === "preview" && previewChart.isMultiSeries
+	const noDataBands = source === "preview" ? previewChart.noDataBands : EMPTY_BANDS
+
+	// The unselected source, aligned onto the selected series' own timestamps so
+	// it can share the dataset without shredding the primary line with nulls.
+	// Grouped rules skip the ghost — N series plus N ghosts is unreadable.
+	const { chartData, divergence } = React.useMemo(() => {
+		const primary = source === "preview" ? previewChart.rows : checksChart.rows
+		if (source === "none" || isMultiSeries || !bothSourcesAvailable) {
+			return { chartData: primary, divergence: null as number | null }
+		}
+		const ghostRows = source === "preview" ? checksChart.rows : previewChart.rows
+		const ghostPoints = ghostRows
+			.map((row) => ({ t: row.t, v: row[SINGLE_KEY] }))
+			.filter((p): p is { t: number; v: number } => typeof p.v === "number")
+		if (ghostPoints.length === 0) return { chartData: primary, divergence: null }
+		// Half the primary spacing: close enough to be the same window, far enough
+		// that a coarser summary bucket still lands on its neighbour.
+		const spacing =
+			primary.length >= 2
+				? Math.abs(primary[1]!.t - primary[0]!.t)
+				: (domain.max - domain.min) / RAIL_CELLS
+		const tolerance = Math.max(spacing, 1)
+		let cursor = 0
+		let maxGap: number | null = null
+		const merged = primary.map((row) => {
+			while (
+				cursor + 1 < ghostPoints.length &&
+				Math.abs(ghostPoints[cursor + 1]!.t - row.t) <= Math.abs(ghostPoints[cursor]!.t - row.t)
+			) {
+				cursor += 1
 			}
-		}
-
-		return {
-			chartData: [],
-			seriesKeys: [SINGLE_KEY],
-			isMultiSeries: false,
-			source: "none",
-			sampleCounts,
-			statuses,
-			noDataBands: [],
-			provisionalTs,
-		}
-	}, [preview, checks, domain.max])
+			const candidate = ghostPoints[cursor]!
+			if (Math.abs(candidate.t - row.t) > tolerance) return row
+			const own = row[SINGLE_KEY]
+			if (typeof own === "number") {
+				const gap = Math.abs(own - candidate.v)
+				if (maxGap == null || gap > maxGap) maxGap = gap
+			}
+			return { ...row, [GHOST_KEY]: candidate.v }
+		})
+		return { chartData: merged, divergence: maxGap }
+	}, [source, isMultiSeries, bothSourcesAvailable, previewChart, checksChart, domain])
 
 	const hasSignal = chartData.length > 0
 
@@ -271,22 +343,38 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 		[axisContext],
 	)
 
+	// Keyed by group name, so a group keeps its color when a wider time range
+	// (or a different sort) changes which other groups are on screen — and it
+	// matches that service's ServiceDot everywhere else in the product.
+	const seriesColors = React.useMemo(() => resolveSeriesColors(seriesKeys), [seriesKeys])
+
+	const otherSource: SignalSource = source === "preview" ? "checks" : "preview"
+	const hasGhost = source !== "none" && !isMultiSeries && bothSourcesAvailable
+
 	const chartConfig: ChartConfig = React.useMemo(() => {
 		const config: ChartConfig = {}
-		seriesKeys.forEach((key, i) => {
+		for (const key of seriesKeys) {
 			config[key] = {
-				label: isMultiSeries ? key : "Observed",
-				color: SERIES_COLORS[i % SERIES_COLORS.length]!,
+				label: isMultiSeries ? key : source === "none" ? "Observed" : SIGNAL_SOURCE_LABEL[source],
+				color: seriesColors.get(key),
 			}
-		})
+		}
+		if (hasGhost) {
+			config[GHOST_KEY] = {
+				label: SIGNAL_SOURCE_LABEL[otherSource],
+				color: "var(--muted-foreground)",
+			}
+		}
 		return config
-	}, [seriesKeys, isMultiSeries])
+	}, [seriesKeys, isMultiSeries, seriesColors, source, hasGhost, otherSource])
 
 	const yDomain = React.useMemo<[number, number]>(() => {
 		let maxVal = threshold
 		if (thresholdUpper != null) maxVal = Math.max(maxVal, thresholdUpper)
 		for (const point of chartData) {
 			for (const key of seriesKeys) maxVal = Math.max(maxVal, num(point[key]))
+			// The ghost shares the axis — clipping it would misrepresent the gap.
+			if (point[GHOST_KEY] != null) maxVal = Math.max(maxVal, num(point[GHOST_KEY]))
 		}
 		const upper = Math.max(maxVal * 1.15, threshold * 1.3)
 		return [0, upper > 0 ? upper : 1]
@@ -392,11 +480,35 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 				total === 0
 					? `${window} · no checks`
 					: `${window} · ${counts}${bucket.opened ? " · incident opened" : ""}${bucket.errorMessage != null ? ` · ${bucket.errorMessage}` : ""}`
-			return { status, opened: bucket.opened, title }
+			return { status, opened: bucket.opened, title, start, end }
 		})
 	}, [checks, domain, formatTime])
 
-	const hasErrorChecks = React.useMemo(() => checks.some((c) => c.status === "error"), [checks])
+	/** Window-wide status counts — the rail legend doubles as the tally. */
+	const railTotals = React.useMemo(() => {
+		let breached = 0
+		let healthy = 0
+		let skipped = 0
+		let errored = 0
+		for (const check of checks) {
+			if (check.status === "breached") breached += 1
+			else if (check.status === "healthy") healthy += 1
+			else if (check.status === "error") errored += 1
+			else skipped += 1
+		}
+		return { breached, healthy, skipped, errored }
+	}, [checks])
+
+	// Incident spans as percentages of the domain, so the lane under the rail
+	// lines up with the bands painted on the plot above it.
+	const incidentSpans = React.useMemo(() => {
+		const range = Math.max(1, domain.max - domain.min)
+		return incidentBands.map((band) => ({
+			left: (clamp01((band.x1 - domain.min) / range) * 100).toFixed(4),
+			width: (clamp01((Math.max(band.x2, band.x1) - band.x1) / range) * 100).toFixed(4),
+			open: band.open,
+		}))
+	}, [incidentBands, domain])
 
 	const chartArea = hasSignal ? (
 		<ChartContainer config={chartConfig} className="aspect-auto w-full" style={{ height: CHART_HEIGHT }}>
@@ -415,13 +527,13 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 									stopColor="var(--destructive)"
 									stopOpacity={0.08}
 								/>
-								<stop offset={splitOffset} stopColor={SERIES_COLORS[0]} stopOpacity={0.12} />
-								<stop offset={1} stopColor={SERIES_COLORS[0]} stopOpacity={0.02} />
+								<stop offset={splitOffset} stopColor={SIGNAL_COLOR} stopOpacity={0.12} />
+								<stop offset={1} stopColor={SIGNAL_COLOR} stopOpacity={0.02} />
 							</>
 						) : breachBelow ? (
 							<>
-								<stop offset={0} stopColor={SERIES_COLORS[0]} stopOpacity={0.12} />
-								<stop offset={splitOffset} stopColor={SERIES_COLORS[0]} stopOpacity={0.05} />
+								<stop offset={0} stopColor={SIGNAL_COLOR} stopOpacity={0.12} />
+								<stop offset={splitOffset} stopColor={SIGNAL_COLOR} stopOpacity={0.05} />
 								<stop
 									offset={splitOffset}
 									stopColor="var(--destructive)"
@@ -431,8 +543,8 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 							</>
 						) : (
 							<>
-								<stop offset={0.05} stopColor={SERIES_COLORS[0]} stopOpacity={0.45} />
-								<stop offset={0.95} stopColor={SERIES_COLORS[0]} stopOpacity={0.04} />
+								<stop offset={0.05} stopColor={SIGNAL_COLOR} stopOpacity={0.45} />
+								<stop offset={0.95} stopColor={SIGNAL_COLOR} stopOpacity={0.04} />
 							</>
 						)}
 					</linearGradient>
@@ -584,13 +696,29 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 					/>
 				)}
 
+				{/* The unselected source, behind the primary: same shape, dashed and
+				    muted, so "the query says one thing, the evaluator recorded
+				    another" is visible instead of inferred. */}
+				{hasGhost && (
+					<Line
+						type="monotone"
+						dataKey={GHOST_KEY}
+						stroke="var(--muted-foreground)"
+						strokeWidth={1.5}
+						strokeDasharray="5 3"
+						dot={false}
+						connectNulls
+						isAnimationActive={false}
+					/>
+				)}
+
 				{isMultiSeries ? (
-					seriesKeys.map((key, i) => (
+					seriesKeys.map((key) => (
 						<Line
 							key={key}
 							type="monotone"
 							dataKey={key}
-							stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
+							stroke={seriesColors.get(key)}
 							strokeWidth={1.5}
 							dot={false}
 							// Skipped/no-data windows stay visible as gaps — connecting
@@ -603,7 +731,7 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 					<Area
 						type="monotone"
 						dataKey={SINGLE_KEY}
-						stroke={SERIES_COLORS[0]}
+						stroke={SIGNAL_COLOR}
 						strokeWidth={2}
 						fill="url(#alert-signal-fill)"
 						connectNulls={source !== "preview"}
@@ -651,10 +779,39 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 				</div>
 			)}
 
-			{hasSignal && error != null && source === "checks" && (
-				<p className="text-[11px] text-muted-foreground">
-					Live signal preview unavailable — showing recorded checks.
-				</p>
+			{/* Always rendered when the source swapped — the old caption was gated
+			    on `error`, so an empty-but-successful preview silently changed
+			    what the chart meant. */}
+			{hasSignal && fellBack && (
+				<div className="flex items-start gap-2.5 border-l-2 border-warning py-0.5 pl-2.5">
+					<div className="space-y-0.5">
+						<p className="text-foreground text-xs">
+							Showing{" "}
+							<span className="font-medium">{SIGNAL_SOURCE_LABEL[source as SignalSource]}</span>{" "}
+							— {SIGNAL_SOURCE_LABEL[otherSource].toLowerCase()} has no points in this window.
+						</p>
+						{error != null && (
+							<p className="line-clamp-2 text-[11px] text-muted-foreground">{error}</p>
+						)}
+					</div>
+				</div>
+			)}
+
+			{hasSignal && hasGhost && (
+				<div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+					<span className="flex items-center gap-1.5">
+						<span
+							aria-hidden
+							className="inline-block h-0 w-4 shrink-0 border-t-[1.5px] border-dashed border-muted-foreground"
+						/>
+						{SIGNAL_SOURCE_LABEL[otherSource]}
+					</span>
+					{divergence != null && divergence > Math.abs(threshold) * 0.05 && (
+						<span className="rounded border border-warning/50 px-1.5 py-px text-warning">
+							Sources differ by up to {formatSignalValue(signalType, divergence)}
+						</span>
+					)}
+				</div>
 			)}
 
 			{showWouldFire && wouldFireBands.length > 0 && (
@@ -674,25 +831,65 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 				</p>
 			)}
 
+			{/* One rail, two lanes. Evaluations are discrete cells; incidents are a
+			    continuous bar — different *shapes*, so the lanes can't be mistaken
+			    for each other the way the old duplicate strips were. */}
 			{checks.length > 0 && (
-				<div className="space-y-1" style={{ paddingLeft: Y_AXIS_WIDTH, paddingRight: PLOT_RIGHT }}>
-					<div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
-						<span className="font-medium uppercase tracking-wider">Evaluations</span>
-						<RailLegend hasIncidents={incidentBands.length > 0} hasErrors={hasErrorChecks} />
+				<div className="space-y-1.5 pt-1" style={{ paddingRight: PLOT_RIGHT }}>
+					<div className="flex items-center">
+						<RailGutter>Eval</RailGutter>
+						<div className="flex h-3.5 flex-1 gap-px">
+							{railCells.map((cell, i) => {
+								const selected = selectedBucket === i
+								return (
+									<button
+										// biome-ignore lint/suspicious/noArrayIndexKey: fixed-length positional rail
+										key={i}
+										type="button"
+										title={cell.title}
+										aria-label={cell.title}
+										aria-pressed={selected}
+										disabled={onSelectBucket == null}
+										onClick={() =>
+											onSelectBucket?.(selected ? null : i, {
+												start: cell.start,
+												end: cell.end,
+											})
+										}
+										className={cn(
+											"h-full flex-1 rounded-[1px] p-0",
+											RAIL_COLOR[cell.status],
+											onSelectBucket != null && "cursor-pointer",
+											cell.opened && "ring-1 ring-inset ring-destructive",
+											selected && "ring-2 ring-foreground ring-offset-0",
+										)}
+									/>
+								)
+							})}
+						</div>
 					</div>
-					<div className="flex h-2.5 gap-px">
-						{railCells.map((cell, i) => (
-							<div
-								// biome-ignore lint/suspicious/noArrayIndexKey: fixed-length positional rail
-								key={i}
-								title={cell.title}
-								className={cn(
-									"h-full flex-1 rounded-[1px]",
-									RAIL_COLOR[cell.status],
-									cell.opened && "ring-1 ring-inset ring-destructive",
-								)}
-							/>
-						))}
+					<div className="flex items-center">
+						<RailGutter>Incident</RailGutter>
+						<div className="relative h-1 flex-1 rounded-[1px] bg-muted/60">
+							{incidentSpans.map((span, i) => (
+								<div
+									// biome-ignore lint/suspicious/noArrayIndexKey: positional overlay
+									key={i}
+									className={cn(
+										"absolute inset-y-0 rounded-[1px] bg-destructive",
+										!span.open && "opacity-60",
+									)}
+									style={{ left: `${span.left}%`, width: `${span.width}%` }}
+								/>
+							))}
+						</div>
+					</div>
+					<div
+						className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 pt-0.5 text-[11px] text-muted-foreground"
+						style={{ paddingLeft: Y_AXIS_WIDTH }}
+					>
+						<RailLegend totals={railTotals} />
+						{railCoverage != null && <span>{railCoverage}</span>}
 					</div>
 				</div>
 			)}
@@ -716,17 +913,31 @@ function Placeholder({ children, tone }: { children: React.ReactNode; tone?: "de
 	)
 }
 
-function RailLegend({ hasIncidents, hasErrors }: { hasIncidents: boolean; hasErrors: boolean }) {
+/** Fixed-width label column that keeps both lanes aligned to the plot area. */
+function RailGutter({ children }: { children: React.ReactNode }) {
 	return (
-		<div className="flex items-center gap-3">
-			<LegendChip className="bg-destructive">Breached</LegendChip>
-			<LegendChip className="bg-chart-apdex/70">Healthy</LegendChip>
-			<LegendChip className="bg-muted-foreground/30">Skipped</LegendChip>
-			{hasErrors && <LegendChip className="bg-warning">Failed</LegendChip>}
-			{hasIncidents && (
-				<LegendChip className="bg-destructive/15 ring-1 ring-inset ring-destructive/40">
-					Incident
-				</LegendChip>
+		<span
+			className="shrink-0 pr-3 text-right text-[10px] text-muted-foreground uppercase tracking-wider"
+			style={{ width: Y_AXIS_WIDTH }}
+		>
+			{children}
+		</span>
+	)
+}
+
+/** Doubles as the window-wide tally, so the rail states its own totals. */
+function RailLegend({
+	totals,
+}: {
+	totals: { breached: number; healthy: number; skipped: number; errored: number }
+}) {
+	return (
+		<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+			<LegendChip className="bg-chart-apdex/70">Healthy {totals.healthy}</LegendChip>
+			<LegendChip className="bg-destructive">Breached {totals.breached}</LegendChip>
+			{totals.errored > 0 && <LegendChip className="bg-warning">Failed {totals.errored}</LegendChip>}
+			{totals.skipped > 0 && (
+				<LegendChip className="bg-muted-foreground/30">Skipped {totals.skipped}</LegendChip>
 			)}
 		</div>
 	)

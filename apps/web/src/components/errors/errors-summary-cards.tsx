@@ -1,4 +1,4 @@
-import { formatErrorRate, formatNumber } from "@maple/ui/format"
+import { formatErrorRate, formatNumber } from "@maple/ui/lib/format"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { CircleWarningIcon, CirclePercentageIcon, ServerIcon, PulseIcon } from "@/components/icons"
 import { ErrorState } from "@/components/common/error-state"

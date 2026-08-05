@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Exit, Schema } from "effect"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { DashboardTemplateId } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -125,13 +125,13 @@ function TemplatesPage() {
 
 		if (Exit.isFailure(result)) {
 			const { title, description } = formatBackendError(result)
-			toast.error(title, { description })
+			toastManager.add({ title, description, type: "error" })
 			return
 		}
 
 		const dashboard = result.value
 		void reconcileTxid(dashboard.txid)
-		toast.success(`Dashboard "${dashboard.name}" created`)
+		toastManager.add({ title: `Dashboard "${dashboard.name}" created`, type: "success" })
 		void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: dashboard.id } })
 	}
 

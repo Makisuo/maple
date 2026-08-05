@@ -56,13 +56,13 @@ jobs:
               run: bun install --frozen-lockfile
 
             # NOTE: prod schema migrations are applied OUT OF BAND (manually, via
-            # `MAPLE_PG_RUNTIME_ROLE=<role> bun run --cwd packages/db ps:apply-schema main`
-            # against the direct 5432 port), NOT by this workflow — so a deploy never
-            # touches the prod database and needs no MAPLE_PG_URL/admin credential. The
-            # worker binds to the pre-configured `maple-prd` Hyperdrive (see
-            # apps/api/alchemy.run.ts); MAPLE_PG_RUNTIME_ROLE must be the role embedded
-            # in that Hyperdrive's connection so apply-schema re-grants it table access
-            # after any rebuild (without it the alerting worker hits "permission denied
-            # for table …"). Run `ps:apply-schema main` separately to apply grants alone.
+            # `bun run migrate:prod` → `ps:apply-schema main`, against the direct 5432
+            # port), NOT by this workflow — so a deploy never touches the prod database
+            # and needs no MAPLE_PG_URL/admin credential. The worker binds to the
+            # pre-configured `maple-prd` Hyperdrive (see apps/api/alchemy.run.ts).
+            # apply-schema installs default privileges granting PUBLIC before it
+            # migrates, so new and rebuilt tables are readable by every consumer —
+            # including the ingest gateway, which reaches Postgres through PSBouncer as
+            # a role that does NOT inherit `postgres`.
             - name: Deploy PRD stack with Alchemy
               run: bun run alchemy:deploy:prd

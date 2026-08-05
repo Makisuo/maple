@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { TimeseriesPoint } from "../query-engine"
+import type { TimeseriesPoint } from "@maple/domain/query-engine"
 import { decodeEvalPoints, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
 
 const B0 = "2026-06-01T00:00:00.000Z"

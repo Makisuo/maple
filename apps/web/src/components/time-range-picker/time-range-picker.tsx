@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react"
 import { Button } from "@maple/ui/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
-import { toast } from "sonner"
+import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { ClockIcon } from "@/components/icons"
 import { useAppHotkey } from "@/hooks/use-app-hotkey"
@@ -45,7 +45,10 @@ export function TimeRangePicker({
 		(range: { startTime: string; endTime: string }) => {
 			if (maxRangeSeconds == null) return true
 			if (isTimeRangeWithin(range, maxRangeSeconds)) return true
-			toast.error(`This page supports a maximum range of ${Math.round(maxRangeSeconds / 86400)} days`)
+			toastManager.add({
+				title: `This page supports a maximum range of ${Math.round(maxRangeSeconds / 86400)} days`,
+				type: "error",
+			})
 			return false
 		},
 		[maxRangeSeconds],

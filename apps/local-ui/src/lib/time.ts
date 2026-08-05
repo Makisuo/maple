@@ -4,9 +4,12 @@
 // strings (`'YYYY-MM-DD HH:MM:SS'`); `resolveParam` quotes them inline. chDB
 // parses the quoted string into a DateTime for the partition-pruning filters.
 
+import { formatRelativeFrom } from "@maple/ui/lib/time-format"
+
+import { formatWarehouseDateTime } from "@maple/query-engine"
 /** Format an epoch-ms instant as a ClickHouse DateTime string (UTC, second precision). */
 export function toClickHouseDateTime(epochMs: number): string {
-	return new Date(epochMs).toISOString().replace("T", " ").slice(0, 19)
+	return formatWarehouseDateTime(epochMs)
 }
 
 export interface TimeBounds {
@@ -36,25 +39,12 @@ export const TIME_RANGES: ReadonlyArray<TimeRange> = [
 export const DEFAULT_RANGE = "30d"
 
 /** Resolve a range key to ClickHouse DateTime bounds, padding the upper bound for clock skew. */
-export function boundsForRange(key: string | undefined): TimeBounds {
+export function boundsForRange(key: string | undefined, anchorMs = Date.now()): TimeBounds {
 	const range = TIME_RANGES.find((r) => r.key === key) ?? TIME_RANGES[TIME_RANGES.length - 1]
-	const now = Date.now()
 	return {
-		startTime: toClickHouseDateTime(now - range.minutes * 60 * 1000),
-		endTime: toClickHouseDateTime(now + 60 * 60 * 1000),
+		startTime: toClickHouseDateTime(anchorMs - range.minutes * 60 * 1000),
+		endTime: toClickHouseDateTime(anchorMs + 60 * 60 * 1000),
 	}
-}
-
-/** Compact relative-time label (`12s ago`, `4m ago`, `3h ago`, `2d ago`) from an epoch-ms instant. */
-export function formatRelativeMs(epochMs: number): string {
-	const deltaSec = Math.max(0, Math.round((Date.now() - epochMs) / 1000))
-	if (deltaSec < 60) return `${deltaSec}s ago`
-	const min = Math.round(deltaSec / 60)
-	if (min < 60) return `${min}m ago`
-	const hr = Math.round(min / 60)
-	if (hr < 24) return `${hr}h ago`
-	const day = Math.round(hr / 24)
-	return `${day}d ago`
 }
 
 /**
@@ -70,11 +60,10 @@ export function parseClickHouseDateTime(chDateTime: string | null | undefined): 
 }
 
 /**
- * Compact relative-time label from a ClickHouse DateTime string. chDB emits UTC
- * second-precision strings without a timezone marker, so we append `Z` before
- * parsing.
+ * Compact relative-time label from a ClickHouse DateTime string. Keeps the
+ * chDB null/zero-date guard, then defers to the shared relative-time ladder.
  */
 export function formatRelativeTime(chDateTime: string | null | undefined): string {
 	const ms = parseClickHouseDateTime(chDateTime)
-	return ms === null ? "—" : formatRelativeMs(ms)
+	return ms === null ? "—" : formatRelativeFrom(ms)
 }

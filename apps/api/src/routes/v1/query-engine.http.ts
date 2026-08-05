@@ -1,0 +1,1788 @@
+import { HttpApiBuilder } from "effect/unstable/httpapi"
+import {
+	CurrentTenant,
+	ExecuteQueryBuilderResponse,
+	MapleApi,
+	QueryEngineExecutionError,
+	QueryEngineValidationError,
+	RawSqlExecuteResponse,
+	type RawSqlValidationError,
+	SpanHierarchyResponse,
+	SpanDetailResponse,
+	ErrorsByTypeResponse,
+	ErrorsTimeseriesResponse,
+	ErrorsSummaryResponse,
+	ErrorDetailTracesResponse,
+	ErrorRateByServiceResponse,
+	ServiceOverviewResponse,
+	ServiceHealthSnapshotResponse,
+	ServiceHealthBaselineResponse,
+	ServiceApdexResponse,
+	ServiceDependenciesResponse,
+	ServiceDbEdgesResponse,
+	PlanetScaleInfraTimeseriesResponse,
+	ServiceCloudflareStatsResponse,
+	ServicePlanetScaleStatsResponse,
+	CloudflareInfraZonesResponse,
+	CloudflareInfraZoneTimeseriesResponse,
+	CloudflareInfraZoneDetailResponse,
+	CloudflareInfraZoneHostsResponse,
+	CloudflareInfraZoneSecurityResponse,
+	CloudflareInfraZoneBreakdownResponse,
+	CloudflareInfraZoneDnsResponse,
+	CloudflareInfraZoneFacetsResponse,
+	CloudflareInfraPlatformResourcesResponse,
+	CloudflareInfraWorkersResponse,
+	CloudflareInfraWorkerTimeseriesResponse,
+	ServiceDbQuerySummaryResponse,
+	ServiceExternalEdgesResponse,
+	ServiceDetailOverviewResponse,
+	ServiceDependenciesBundleResponse,
+	ServicePlatformsResponse,
+	ServiceWorkloadsResponse,
+	ServiceUsageResponse,
+	ServiceOperationsResponse,
+	ListLogsResponse,
+	GetLogResponse,
+	ListMetricsResponse,
+	MetricsSummaryResponse,
+	ListHostsResponse,
+	HostDetailSummaryResponse,
+	HostInfraTimeseriesResponse,
+	FleetUtilizationTimeseriesResponse,
+	ListPodsResponse,
+	PodsSummaryResponse,
+	PodDetailSummaryResponse,
+	PodInfraTimeseriesResponse,
+	PodFacetsResponse,
+	ListNodesResponse,
+	NodeDetailSummaryResponse,
+	NodeInfraTimeseriesResponse,
+	NodeFacetsResponse,
+	ListWorkloadsResponse,
+	WorkloadDetailSummaryResponse,
+	WorkloadInfraTimeseriesResponse,
+	WorkloadFacetsResponse,
+	CommitSha,
+	FingerprintHash,
+	ServiceName,
+	SpanName,
+	StatusCode,
+	TraceId,
+	SpanId,
+} from "@maple/domain/http"
+import { Clock, Config, Effect, Match, Option, Schema } from "effect"
+import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
+import { makeDirectRouteCachePolicy, makeExecuteRawSql } from "@maple/query-engine/runtime"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
+import {
+	CH,
+	QueryEngineExecuteRequest,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+} from "@maple/query-engine"
+import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
+import {
+	hostMetricSpec,
+	nodeMetricSpec,
+	partitionWindowAround,
+	podMetricSpec,
+	toCloudflareFilters,
+	workloadMetricSpec,
+} from "@/routes/query-helpers"
+import { Queries } from "@/routes/queries"
+import { makeQueryRunners } from "@/routes/query-runner"
+import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
+import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
+import * as Integrations from "@maple/query-engine-integrations"
+
+// `warehouse.sqlQuery` fails with the warehouse error union (distinct tagged
+// classes per failure mode). The typed error channel threads through unchanged
+// so HTTP status mapping stays accurate — every endpoint declares the full set
+// via `warehouseHttpErrors`; on failure the context string lands on the route
+// span so a failed request names which sub-query broke.
+const mapExecError = <A, E, R>(effect: Effect.Effect<A, E, R>, context: string): Effect.Effect<A, E, R> =>
+	effect.pipe(
+		Effect.tapError(() => Effect.annotateCurrentSpan({ "maple.query_engine.failed_step": context })),
+	)
+
+/**
+ * Payload → query-engine filter opts. Every Cloudflare zone endpoint carries the same optional
+ * filter bag, and which of them a given panel can honor depends on the metric families it reads —
+ * `Integrations.cloudflareIgnoredFiltersFor` answers that, and the answer ships in the response so the UI can
+ * mark a panel zone-wide instead of pretending the filter applied.
+ */
+
+const isMissingServiceOperationsRollup = (error: unknown): boolean => {
+	if (typeof error !== "object" || error === null) return false
+	const candidate = error as {
+		readonly _tag?: unknown
+		readonly clickhouseType?: unknown
+		readonly message?: unknown
+	}
+	return (
+		candidate._tag === "@maple/http/errors/WarehouseConfigError" &&
+		(candidate.clickhouseType === "UNKNOWN_TABLE" ||
+			(typeof candidate.message === "string" &&
+				/service_operations_(?:minutely|hourly)/i.test(candidate.message)))
+	)
+}
+
+const decodeTraceId = Schema.decodeSync(TraceId)
+const decodeSpanId = Schema.decodeSync(SpanId)
+const decodeServiceName = Schema.decodeUnknownSync(ServiceName)
+const decodeSpanName = Schema.decodeUnknownSync(SpanName)
+const decodeFingerprintHash = Schema.decodeUnknownSync(FingerprintHash)
+const decodeCommitSha = Schema.decodeUnknownSync(CommitSha)
+
+// Warehouse stores span status in Title Case (Ok/Error/Unset). Coerce any
+// unexpected/empty value to "Unset" rather than throwing during response build.
+const decodeStatusCodeOption = Schema.decodeUnknownOption(StatusCode)
+const coerceStatusCode = (value: string): StatusCode =>
+	Option.getOrElse(decodeStatusCodeOption(value), () => "Unset" as const)
+
+// Most traces opened without a timestamp are still recent (list rows carry
+// `?t=`; it's direct/shared/AI links that don't, and those overwhelmingly
+// point at fresh traces). Probing the last 48h first prunes to ~2 daily
+// partitions; only older traces fall back to the unbounded every-partition
+// probe.
+const PROBE_RECENT_WINDOW_MS = 48 * 3_600_000
+
+export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine", (handlers) =>
+	Effect.gen(function* () {
+		const queryEngine = yield* QueryEngineService
+		const warehouse = yield* WarehouseQueryService
+		const { runQuery, runQueryFirst } = makeQueryRunners({ warehouse, queryEngine })
+
+		const serviceOperationsRollupEnabled = yield* Config.boolean(
+			"SERVICE_OPERATIONS_ROLLUP_ENABLED",
+		).pipe(Config.withDefault(false))
+		const executeRawSql = makeExecuteRawSql<ExecutionTenant, WarehouseSqlError | RawSqlValidationError>(
+			warehouse,
+		)
+
+		return handlers
+			.handle("execute", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					return yield* queryEngine.execute(tenant, payload)
+				}),
+			)
+			.handle("spanHierarchy", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const nowMs = yield* Clock.currentTimeMillis
+					const rows = yield* queryEngine.cachedDirect(
+						tenant,
+						"spanHierarchy",
+						payload,
+						// Wrapped in cachedDirect's effect so the probe only fires on a
+						// cache miss. `trace_detail_spans` is partitioned by
+						// `toDate(Timestamp)`. Without a time predicate the hierarchy query
+						// seeks across every daily partition (~30) — p95 ~8.8s vs ~2.3s when
+						// pruned to one. When the caller has no timestamp (direct URL,
+						// shared link, AI link), resolve one via a cheap LIMIT-1 probe and
+						// derive a ±1h window so the main query can prune. The probe itself
+						// tries the recent window first (see PROBE_RECENT_WINDOW_MS).
+						Effect.gen(function* () {
+							let startTime = payload.startTime
+							let endTime = payload.endTime
+							if (startTime == null || endTime == null) {
+								const probe =
+									(yield* runQueryFirst(Queries.spanHierarchyProbeRecent, tenant, {
+										traceId: payload.traceId,
+										startTime: formatWarehouseDateTime(nowMs - PROBE_RECENT_WINDOW_MS),
+									})) ?? (yield* runQueryFirst(Queries.spanHierarchyProbe, tenant, payload))
+								if (probe?.timestamp != null) {
+									const window = partitionWindowAround(probe.timestamp)
+									startTime = window.startTime
+									endTime = window.endTime
+								}
+							}
+							return yield* runQuery(Queries.spanHierarchy, tenant, {
+								traceId: payload.traceId,
+								spanId: payload.spanId,
+								startTime,
+								endTime,
+							})
+						}),
+						traceCacheTtlSeconds(payload.endTime, nowMs),
+					)
+					const typedRows = rows.map((row) => ({
+						...row,
+						traceId: decodeTraceId(row.traceId),
+						spanId: decodeSpanId(row.spanId),
+						spanName: decodeSpanName(row.spanName),
+						serviceName: decodeServiceName(row.serviceName),
+						statusCode: coerceStatusCode(row.statusCode),
+					}))
+					return new SpanHierarchyResponse({ data: typedRows })
+				}),
+			)
+			.handle("spanDetail", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const row = yield* runQueryFirst(Queries.spanDetail, tenant, payload)
+					return new SpanDetailResponse({
+						data: row
+							? {
+									...row,
+									traceId: decodeTraceId(row.traceId),
+									spanId: decodeSpanId(row.spanId),
+								}
+							: null,
+					})
+				}),
+			)
+			.handle("errorsByType", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.errorsByType, tenant, payload)
+					return new ErrorsByTypeResponse({
+						data: rows.map((row) => ({
+							fingerprintHash: decodeFingerprintHash(row.fingerprintHash),
+							errorLabel: row.errorLabel,
+							sampleMessage: row.sampleMessage,
+							count: Number(row.count),
+							affectedServicesCount: Number(row.affectedServicesCount),
+							firstSeen: String(row.firstSeen),
+							lastSeen: String(row.lastSeen),
+						})),
+					})
+				}),
+			)
+			.handle("errorsTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.errorsTimeseries, tenant, payload)
+					return new ErrorsTimeseriesResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							count: Number(row.count),
+						})),
+					})
+				}),
+			)
+			.handle("errorsSummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const row = yield* runQueryFirst(Queries.errorsSummary, tenant, payload)
+					return new ErrorsSummaryResponse({
+						data: row
+							? {
+									totalErrors: Number(row.totalErrors),
+									totalSpans: Number(row.totalSpans),
+									errorRate: Number(row.errorRate),
+									affectedServicesCount: Number(row.affectedServicesCount),
+									affectedTracesCount: Number(row.affectedTracesCount),
+								}
+							: null,
+					})
+				}),
+			)
+			.handle("errorDetailTraces", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.errorDetailTraces, tenant, payload)
+					return new ErrorDetailTracesResponse({
+						data: rows.map((row) => ({
+							traceId: decodeTraceId(row.traceId),
+							startTime: String(row.startTime),
+							durationMicros: Number(row.durationMicros),
+							spanCount: Number(row.spanCount),
+							services: row.services.map((service) => decodeServiceName(service)),
+							rootSpanName: row.rootSpanName,
+							errorMessage: row.errorMessage,
+						})),
+					})
+				}),
+			)
+			.handle("errorRateByService", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.errorRateByService, tenant, payload)
+					return new ErrorRateByServiceResponse({
+						data: rows.map((row) => ({
+							serviceName: decodeServiceName(row.serviceName),
+							totalLogs: Number(row.totalLogs),
+							errorLogs: Number(row.errorLogs),
+							errorRate: Number(row.errorRate),
+						})),
+					})
+				}),
+			)
+			.handle("serviceOverview", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.serviceOverview, tenant, payload)
+					return new ServiceOverviewResponse({ data: rows })
+				}),
+			)
+			.handle("serviceHealthSnapshot", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.serviceHealthSnapshot, tenant, payload)
+					return new ServiceHealthSnapshotResponse({
+						data: rows.map((row) => ({
+							serviceName: decodeServiceName(row.serviceName),
+							environment: row.environment || "unknown",
+							requestCount: row.requestCount,
+							errorCount: row.errorCount,
+							p95LatencyMs: row.p95LatencyMs,
+						})),
+					})
+				}),
+			)
+			.handle("serviceHealthBaseline", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.serviceHealthBaseline, tenant, payload)
+					return new ServiceHealthBaselineResponse({
+						data: rows.map((row) => ({
+							serviceName: decodeServiceName(String(row.serviceName ?? "")),
+							serviceNamespace: String(row.serviceNamespace ?? ""),
+							environment: String(row.environment ?? "unknown"),
+							baselineP95LatencyMs: Number(row.baselineP95LatencyMs ?? 0),
+							baselineSpanCount: Number(row.baselineSpanCount ?? 0),
+						})),
+					})
+				}),
+			)
+			.handle("serviceApdex", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.serviceApdex, tenant, payload)
+					return new ServiceApdexResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							totalCount: Number(row.totalCount),
+							satisfiedCount: Number(row.satisfiedCount),
+							toleratingCount: Number(row.toleratingCount),
+							apdexScore: Number(row.apdexScore),
+						})),
+					})
+				}),
+			)
+			.handle("serviceDependencies", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.serviceDependencies, tenant, payload)
+					return new ServiceDependenciesResponse({ data: rows.map((row) => ({ ...row })) })
+				}),
+			)
+			.handle("serviceDependenciesForService", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.serviceDependenciesForService, tenant, payload)
+					return new ServiceDependenciesResponse({ data: rows })
+				}),
+			)
+			.handle("serviceDbEdges", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.serviceDbEdges, tenant, payload)
+					return new ServiceDbEdgesResponse({ data: rows.map((row) => ({ ...row })) })
+				}),
+			)
+			.handle("serviceDbEdgesForService", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.serviceDbEdgesForService, tenant, payload)
+					return new ServiceDbEdgesResponse({ data: rows })
+				}),
+			)
+			.handle("serviceCloudflareStats", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					// Counters (metrics_sum) + percentiles (metrics_gauge) run
+					// concurrently, then merge by ServiceName. Routed through the org's
+					// configured warehouse exactly like the metric explorer reads these
+					// same `cloudflare.*` metrics — no special ingest pin needed.
+					yield* warehouse.warmRoute(tenant)
+					const [counterRows, latencyRows] = yield* Effect.all(
+						[
+							runQuery(Queries.cloudflareServiceCounters, tenant, payload),
+							runQuery(Queries.cloudflareServiceLatency, tenant, payload),
+						],
+						{ concurrency: 2 },
+					)
+					const latencyByService = new Map(latencyRows.map((row) => [row.serviceName, row]))
+					const data = counterRows.map((row) => {
+						const latency = latencyByService.get(row.serviceName)
+						return {
+							serviceName: row.serviceName,
+							requests: row.requests,
+							errorCount: row.errorCount,
+							latencyP99Ms: latency?.latencyP99Ms ?? 0,
+							cpuP99Ms: latency?.cpuP99Ms ?? 0,
+						}
+					})
+					return new ServiceCloudflareStatsResponse({ data })
+				}),
+			)
+			.handle("servicePlanetScaleStats", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const byBranch = payload.database !== undefined
+					// Utilization gauges + the two-level connections rollup run
+					// concurrently, then merge by database(+branch). Routed through the
+					// org's configured warehouse like the metric explorer reads the same
+					// scraped `planetscale_*` metrics.
+					yield* warehouse.warmRoute(tenant)
+					const [gaugeRows, connectionRows, storageRows] = yield* Effect.all(
+						[
+							runQuery(Queries.planetscaleServiceGauges, tenant, payload),
+							runQuery(Queries.planetscaleServiceConnections, tenant, payload),
+							runQuery(Queries.planetscaleServiceStorage, tenant, payload),
+						],
+						{ concurrency: 3 },
+					)
+					const keyOf = (row: { database: string; branch?: string }) =>
+						byBranch ? `${row.database}\x00${row.branch ?? ""}` : row.database
+					const connectionsByKey = new Map(connectionRows.map((row) => [keyOf(row), row]))
+					const storageByKey = new Map(storageRows.map((row) => [keyOf(row), row]))
+					const seen = new Set<string>()
+					type MergedStatsRow = {
+						readonly database: string
+						readonly branch?: string
+						readonly cpuMaxPercent: number
+						readonly memMaxPercent: number
+						readonly replicaLagMaxSeconds: number
+						readonly connectionsAvg: number
+						readonly connectionsMax: number
+						readonly storageUsedPercent: number
+						/** 0 = the volume gauges never reported; the client must not render 0% used. */
+						readonly storageSamples: number
+					}
+					const storageFor = (key: string) => {
+						const storage = storageByKey.get(key)
+						return {
+							storageUsedPercent: storage?.storageUsedPercent ?? 0,
+							storageSamples: storage?.storageSamples ?? 0,
+						}
+					}
+					// The storage rollup is per-database or per-branch depending on the
+					// request; only the latter carries a branch to forward.
+					const branchOf = (
+						row:
+							| { readonly database: string }
+							| { readonly database: string; readonly branch: string },
+					): { readonly branch?: string } => ("branch" in row ? { branch: row.branch } : {})
+					const data: Array<MergedStatsRow> = gaugeRows.map((row) => {
+						const key = keyOf(row)
+						seen.add(key)
+						const connections = connectionsByKey.get(key)
+						return {
+							...row,
+							connectionsAvg: connections?.connectionsAvg ?? 0,
+							connectionsMax: connections?.connectionsMax ?? 0,
+							...storageFor(key),
+						}
+					})
+					// Databases with connection samples but no utilization gauges still
+					// deserve a row (e.g. filtered scrape sets).
+					for (const row of connectionRows) {
+						const key = keyOf(row)
+						if (seen.has(key)) continue
+						seen.add(key)
+						data.push({
+							...row,
+							cpuMaxPercent: 0,
+							memMaxPercent: 0,
+							replicaLagMaxSeconds: 0,
+							...storageFor(key),
+						})
+					}
+					// …and so do volumes reporting with no gauges or connections at all —
+					// an idle branch still filling its disk is exactly what to surface.
+					for (const row of storageRows) {
+						const key = keyOf(row)
+						if (seen.has(key)) continue
+						seen.add(key)
+						data.push({
+							database: row.database,
+							...branchOf(row),
+							cpuMaxPercent: 0,
+							memMaxPercent: 0,
+							replicaLagMaxSeconds: 0,
+							connectionsAvg: 0,
+							connectionsMax: 0,
+							storageUsedPercent: row.storageUsedPercent,
+							storageSamples: row.storageSamples,
+						})
+					}
+					return new ServicePlanetScaleStatsResponse({ data })
+				}),
+			)
+			.handle("planetscaleInfraTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.planetscaleInfraTimeseries, tenant, payload)
+					return new PlanetScaleInfraTimeseriesResponse({ data: rows.map((row) => ({ ...row })) })
+				}),
+			)
+			.handle("cloudflareInfraZones", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					// Counters (metrics_sum) + percentiles (metrics_gauge) run
+					// concurrently, then merge by ServiceName — same shape as
+					// serviceCloudflareStats above.
+					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
+					const [counterRows, latencyRows] = yield* Effect.all(
+						[
+							runQuery(Queries.cloudflareInfraZoneCounters, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneLatency, tenant, payload),
+						],
+						{ concurrency: 2 },
+					)
+					const latencyByService = new Map(latencyRows.map((row) => [row.serviceName, row]))
+					const data = counterRows.map((row) => {
+						const latency = latencyByService.get(row.serviceName)
+						return {
+							serviceName: row.serviceName,
+							requests: row.requests,
+							errors5xx: row.errors5xx,
+							cacheHits: row.cacheHits,
+							bytes: row.bytes,
+							visits: row.visits,
+							ttfbP50Ms: latency?.ttfbP50Ms ?? 0,
+							ttfbP95Ms: latency?.ttfbP95Ms ?? 0,
+							ttfbP99Ms: latency?.ttfbP99Ms ?? 0,
+							originP50Ms: latency?.originP50Ms ?? 0,
+							originP95Ms: latency?.originP95Ms ?? 0,
+							originP99Ms: latency?.originP99Ms ?? 0,
+						}
+					})
+					return new CloudflareInfraZonesResponse({
+						data,
+						// The latency columns are zone-wide by construction, so a dimension filter
+						// narrows the counters but never the percentiles beside them.
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.requests,
+							Integrations.CF_METRIC.bytes,
+							Integrations.CF_METRIC.visits,
+						]),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const filters = toCloudflareFilters(payload)
+					const rows = yield* runQuery(Queries.cloudflareInfraZoneTimeseries, tenant, payload)
+					return new CloudflareInfraZoneTimeseriesResponse({
+						data: rows.map((row) => ({ ...row })),
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.requests,
+						]),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneDetail", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
+					const [statusRows, cacheRows, latencyRows] = yield* Effect.all(
+						[
+							runQuery(Queries.cloudflareInfraZoneDetailStatus, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneDetailCache, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneDetailLatency, tenant, payload),
+						],
+						{ concurrency: 3 },
+					)
+					return new CloudflareInfraZoneDetailResponse({
+						statusBuckets: statusRows.map((row) => ({ ...row })),
+						cacheBuckets: cacheRows.map((row) => ({ ...row })),
+						latencyBuckets: latencyRows.map((row) => ({ ...row })),
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.requests,
+						]),
+						latencyIgnoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.edgeTtfb,
+							Integrations.CF_METRIC.originDuration,
+						]),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneHosts", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
+					const [totalRows, bucketRows] = yield* Effect.all(
+						[
+							runQuery(Queries.cloudflareInfraZoneHostTotals, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneHostTimeseries, tenant, payload),
+						],
+						{ concurrency: 2 },
+					)
+					return new CloudflareInfraZoneHostsResponse({
+						totals: totalRows.map((row) => ({ ...row })),
+						buckets: bucketRows.map((row) => ({ ...row })),
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.requests,
+						]),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneSecurity", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
+					const [bucketRows, topRows] = yield* Effect.all(
+						[
+							runQuery(Queries.cloudflareInfraZoneFirewallTimeseries, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneFirewallTop, tenant, payload),
+						],
+						{ concurrency: 2 },
+					)
+					return new CloudflareInfraZoneSecurityResponse({
+						buckets: bucketRows.map((row) => ({ ...row })),
+						top: topRows.map((row) => ({ ...row })),
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.firewallEvents,
+						]),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneDns", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
+					const [bucketRows, nameRows] = yield* Effect.all(
+						[
+							runQuery(Queries.cloudflareInfraZoneDnsTimeseries, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneDnsBreakdown, tenant, payload),
+						],
+						{ concurrency: 2 },
+					)
+					return new CloudflareInfraZoneDnsResponse({
+						buckets: bucketRows.map((row) => ({ ...row })),
+						names: nameRows.map((row) => ({ ...row })),
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(filters, [
+							Integrations.CF_METRIC.dnsQueries,
+						]),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneBreakdown", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const filters = toCloudflareFilters(payload)
+					yield* warehouse.warmRoute(tenant)
+					const [totalRows, coverageRows, zoneRows] = yield* Effect.all(
+						[
+							runQuery(Queries.cloudflareInfraZoneBreakdownTotals, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneBreakdownCoverage, tenant, payload),
+							runQuery(Queries.cloudflareInfraZoneBreakdownZoneTotal, tenant, payload),
+						],
+						{ concurrency: 3 },
+					)
+					const topKeys = totalRows
+						.filter((row) => row.key !== Integrations.CLOUDFLARE_BREAKDOWN_OTHER_KEY)
+						.slice(0, Integrations.CLOUDFLARE_BREAKDOWN_SERIES_LIMIT)
+						.map((row) => row.key)
+					const bucketRows: ReadonlyArray<Integrations.CloudflareZoneBreakdownTimeseriesOutput> =
+						topKeys.length === 0
+							? []
+							: yield* runQuery(Queries.cloudflareInfraZoneBreakdownTimeseries, tenant, {
+									...payload,
+									topKeys,
+								})
+					const coverage = coverageRows[0]
+					const zoneRequests = zoneRows.find((row) => row.serviceName === payload.serviceName)
+					// Breakdown metrics are a per-window top-N fold of what Cloudflare returned, so
+					// they can only ever undercount the zone. Clamp rather than surface a negative.
+					const unattributed = Math.max(
+						0,
+						(zoneRequests?.requests ?? 0) - (coverage?.attributedRequests ?? 0),
+					)
+					return new CloudflareInfraZoneBreakdownResponse({
+						totals: totalRows.map((row) => ({ ...row })),
+						buckets: bucketRows.map((row) => ({ ...row })),
+						unattributed,
+						coverageStart:
+							coverage?.coverageStart != null && coverage.coverageStart !== ""
+								? coverage.coverageStart
+								: null,
+						ignoredFilters: Integrations.cloudflareIgnoredFiltersFor(
+							filters,
+							Integrations.cloudflareBreakdownMetrics(payload.dimension),
+						),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneFacets", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.cloudflareInfraZoneFacets, tenant, payload)
+					const buckets = {
+						hosts: [] as Array<{ name: string; count: number }>,
+						cacheStatuses: [] as Array<{ name: string; count: number }>,
+						statusClasses: [] as Array<{ name: string; count: number }>,
+						paths: [] as Array<{ name: string; count: number }>,
+						countries: [] as Array<{ name: string; count: number }>,
+						methods: [] as Array<{ name: string; count: number }>,
+						protocols: [] as Array<{ name: string; count: number }>,
+						deviceTypes: [] as Array<{ name: string; count: number }>,
+					}
+					for (const row of rows) {
+						// BYO-ClickHouse returns sum() as a JSON string; compileUnion has no
+						// rowSchema hook, so coerce here — same as podFacets.
+						const entry = { name: String(row.name), count: Number(row.count) || 0 }
+						switch (row.facetType) {
+							case "host":
+								buckets.hosts.push(entry)
+								break
+							case "cacheStatus":
+								buckets.cacheStatuses.push(entry)
+								break
+							case "statusClass":
+								buckets.statusClasses.push(entry)
+								break
+							case "path":
+								buckets.paths.push(entry)
+								break
+							case "country":
+								buckets.countries.push(entry)
+								break
+							case "method":
+								buckets.methods.push(entry)
+								break
+							case "protocol":
+								buckets.protocols.push(entry)
+								break
+							case "deviceType":
+								buckets.deviceTypes.push(entry)
+								break
+						}
+					}
+					return new CloudflareInfraZoneFacetsResponse({ data: buckets })
+				}),
+			)
+			.handle("cloudflareInfraPlatformResources", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					yield* warehouse.warmRoute(tenant)
+					const [queueRows, doRows] = yield* Effect.all(
+						[
+							runQuery(Queries.cloudflareInfraQueueGauges, tenant, payload),
+							runQuery(Queries.cloudflareInfraDurableObjects, tenant, payload),
+						],
+						{ concurrency: 2 },
+					)
+					return new CloudflareInfraPlatformResourcesResponse({
+						queues: queueRows.map((row) => ({ ...row })),
+						durableObjects: doRows.map((row) => ({ ...row })),
+					})
+				}),
+			)
+			.handle("cloudflareInfraWorkers", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					yield* warehouse.warmRoute(tenant)
+					const [counterRows, latencyRows] = yield* Effect.all(
+						[
+							runQuery(Queries.cloudflareInfraWorkerCounters, tenant, payload),
+							runQuery(Queries.cloudflareInfraWorkerLatency, tenant, payload),
+						],
+						{ concurrency: 2 },
+					)
+					const latencyByService = new Map(latencyRows.map((row) => [row.serviceName, row]))
+					const data = counterRows.map((row) => {
+						const latency = latencyByService.get(row.serviceName)
+						return {
+							serviceName: row.serviceName,
+							requests: row.requests,
+							errors: row.errors,
+							subrequests: row.subrequests,
+							cpuP50Ms: latency?.cpuP50Ms ?? 0,
+							cpuP99Ms: latency?.cpuP99Ms ?? 0,
+							durationP50Ms: latency?.durationP50Ms ?? 0,
+							durationP99Ms: latency?.durationP99Ms ?? 0,
+						}
+					})
+					return new CloudflareInfraWorkersResponse({ data })
+				}),
+			)
+			.handle("cloudflareInfraWorkerTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.cloudflareInfraWorkerTimeseries, tenant, payload)
+					return new CloudflareInfraWorkerTimeseriesResponse({
+						data: rows.map((row) => ({ ...row })),
+					})
+				}),
+			)
+			.handle("serviceDetailOverview", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					// One Worker invocation for the whole Overview tab: per-org config
+					// resolves once (the first sub-query warms the in-isolate memo) and
+					// the three queries run concurrently, replacing three separate
+					// browser->Worker round-trips. The primary chart keeps its own
+					// execute-path cache; releases is uncached (mirrors the standalone
+					// handler); environments is edge-cached on a service-scoped key.
+					yield* warehouse.warmRoute(tenant)
+					const [timeseries, releaseRows, environmentRows] = yield* Effect.all(
+						[
+							queryEngine.execute(tenant, payload.timeseries),
+							runQuery(Queries.serviceReleases, tenant, payload),
+							runQuery(Queries.serviceEnvironments, tenant, {
+								serviceName: payload.serviceName,
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+							}),
+						],
+						{ concurrency: 3 },
+					)
+					return new ServiceDetailOverviewResponse({
+						timeseries,
+						releases: releaseRows.map((row) => ({
+							bucket: String(row.bucket),
+							commitSha: decodeCommitSha(row.commitSha),
+							count: Number(row.count),
+							errorCount: Number(row.errorCount),
+						})),
+						environments: environmentRows
+							.map((row) => String(row.environment ?? ""))
+							.filter((env) => env !== ""),
+					})
+				}),
+			)
+			.handle("serviceDependenciesBundle", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					// Dependencies tab in one Worker invocation: the three service-map
+					// edge queries run concurrently and share a single config
+					// resolution, replacing three independent round-trips.
+					yield* warehouse.warmRoute(tenant)
+					const [dependencyRows, dbEdgeRows, externalEdgeRows] = yield* Effect.all(
+						[
+							runQuery(Queries.serviceDependenciesForService, tenant, payload),
+							runQuery(Queries.serviceDbEdgesForService, tenant, payload),
+							runQuery(Queries.serviceExternalEdges, tenant, payload),
+						],
+						{ concurrency: 3 },
+					)
+					return new ServiceDependenciesBundleResponse({
+						dependencies: dependencyRows.map((row) => ({ ...row })),
+						dbEdges: dbEdgeRows.map((row) => ({ ...row })),
+						externalEdges: externalEdgeRows.map((row) => ({ ...row })),
+					})
+				}),
+			)
+			.handle("serviceDbQuerySummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+
+					yield* warehouse.warmRoute(tenant)
+					const [summary, timeseriesRows, topQueryRows] = yield* Effect.all(
+						[
+							runQueryFirst(Queries.serviceDbQuerySummary, tenant, payload),
+							runQuery(Queries.serviceDbQueryTimeseries, tenant, payload),
+							runQuery(Queries.serviceDbTopQueries, tenant, payload),
+						],
+						{ concurrency: 3 },
+					)
+
+					const toNumber = (value: unknown) => Number(value ?? 0)
+					return new ServiceDbQuerySummaryResponse({
+						summary:
+							summary && toNumber(summary.queryCount) > 0
+								? {
+										queryCount: toNumber(summary.queryCount),
+										estimatedQueryCount: toNumber(summary.estimatedQueryCount),
+										errorCount: toNumber(summary.errorCount),
+										estimatedErrorCount: toNumber(summary.estimatedErrorCount),
+										errorRate: toNumber(summary.errorRate),
+										avgDurationMs: toNumber(summary.avgDurationMs),
+										p50DurationMs: toNumber(summary.p50DurationMs),
+										p95DurationMs: toNumber(summary.p95DurationMs),
+										activeServiceCount: toNumber(summary.activeServiceCount),
+									}
+								: null,
+						timeseries: timeseriesRows.map((row) => ({
+							bucket: String(row.bucket),
+							queryCount: toNumber(row.queryCount),
+							estimatedQueryCount: toNumber(row.estimatedQueryCount),
+							errorCount: toNumber(row.errorCount),
+							errorRate: toNumber(row.errorRate),
+							avgDurationMs: toNumber(row.avgDurationMs),
+							p50DurationMs: toNumber(row.p50DurationMs),
+							p95DurationMs: toNumber(row.p95DurationMs),
+						})),
+						topQueries: topQueryRows.map((row) => ({
+							queryKey: String(row.queryKey),
+							queryLabel: String(row.queryLabel),
+							sampleStatement: String(row.sampleStatement),
+							sampleService: String(row.sampleService),
+							serviceCount: toNumber(row.serviceCount),
+							queryCount: toNumber(row.queryCount),
+							estimatedQueryCount: toNumber(row.estimatedQueryCount),
+							errorCount: toNumber(row.errorCount),
+							errorRate: toNumber(row.errorRate),
+							avgDurationMs: toNumber(row.avgDurationMs),
+							p50DurationMs: toNumber(row.p50DurationMs),
+							p95DurationMs: toNumber(row.p95DurationMs),
+							lastSeen: String(row.lastSeen),
+						})),
+					})
+				}),
+			)
+			.handle("serviceExternalEdges", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.serviceExternalEdges, tenant, payload)
+					return new ServiceExternalEdgesResponse({ data: rows.map((row) => ({ ...row })) })
+				}),
+			)
+			.handle("servicePlatforms", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.servicePlatforms, tenant, payload)
+					return new ServicePlatformsResponse({
+						data: rows.map((row) => {
+							const k8sCluster = String(row.k8sCluster ?? "")
+							const k8sPodName = String(row.k8sPodName ?? "")
+							const k8sDeploymentName = String(row.k8sDeploymentName ?? "")
+							const cloudPlatform = String(row.cloudPlatform ?? "")
+							const cloudProvider = String(row.cloudProvider ?? "")
+							const faasName = String(row.faasName ?? "")
+							const mapleSdkType = String(row.mapleSdkType ?? "")
+							const processRuntimeName = String(row.processRuntimeName ?? "")
+							// Require pod/deployment, not just cluster.name — see SQL comment.
+							const isKubernetes = k8sPodName !== "" || k8sDeploymentName !== ""
+							// Infrastructure signals win over SDK self-report so a server SDK on
+							// cloudflare/lambda still classifies by host. Pure browser apps never
+							// set k8s/cloud/faas, so they fall through to web.
+							const platform: "kubernetes" | "cloudflare" | "lambda" | "web" | "unknown" =
+								cloudPlatform === "cloudflare.workers" || cloudProvider === "cloudflare"
+									? "cloudflare"
+									: faasName !== "" || cloudPlatform === "aws_lambda"
+										? "lambda"
+										: isKubernetes
+											? "kubernetes"
+											: mapleSdkType === "client"
+												? "web"
+												: "unknown"
+							return {
+								serviceName: decodeServiceName(String(row.serviceName ?? "")),
+								platform,
+								k8sCluster,
+								cloudPlatform,
+								cloudProvider,
+								faasName,
+								mapleSdkType,
+								processRuntimeName,
+							}
+						}),
+					})
+				}),
+			)
+			.handle("serviceWorkloads", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					if (payload.services.length === 0) {
+						return new ServiceWorkloadsResponse({ data: [] })
+					}
+					const rows = yield* runQuery(Queries.serviceWorkloads, tenant, payload)
+					return new ServiceWorkloadsResponse({
+						data: rows.map((row) => ({
+							serviceName: decodeServiceName(String(row.serviceName ?? "")),
+							workloadKind: row.workloadKind,
+							workloadName: String(row.workloadName ?? ""),
+							namespace: String(row.namespace ?? ""),
+							clusterName: String(row.clusterName ?? ""),
+							podCount: Number(row.podCount) || 0,
+							avgCpuLimitUtilization:
+								row.avgCpuLimitUtilization == null
+									? null
+									: Number(row.avgCpuLimitUtilization),
+							avgMemoryLimitUtilization:
+								row.avgMemoryLimitUtilization == null
+									? null
+									: Number(row.avgMemoryLimitUtilization),
+						})),
+					})
+				}),
+			)
+			.handle("serviceUsage", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.serviceUsage, tenant, payload)
+					return new ServiceUsageResponse({ data: rows })
+				}),
+			)
+			.handle("serviceOperations", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const toNumber = (value: unknown) => Number(value ?? 0)
+					const data = yield* queryEngine.cachedDirect(
+						tenant,
+						"serviceOperations",
+						payload,
+						Effect.gen(function* () {
+							yield* Effect.annotateCurrentSpan(
+								"query.rollup.enabled",
+								serviceOperationsRollupEnabled,
+							)
+							// The rollout flag stays off until migration 0008 is deployed,
+							// backfilled, and parity-checked. Disabling it restores the all-raw
+							// rollback path without changing the endpoint contract.
+							const runRawSummary = () =>
+								runQuery(Queries.serviceOperationsSummaryRaw, tenant, payload)
+							let useRollup = serviceOperationsRollupEnabled
+							const summaryEffect = useRollup
+								? runQuery(Queries.serviceOperationsSummary, tenant, payload).pipe(
+										Effect.catch((error) => {
+											if (!isMissingServiceOperationsRollup(error))
+												return Effect.fail(error)
+											useRollup = false
+											return Effect.gen(function* () {
+												yield* Effect.logWarning(
+													"Service operations rollup is unavailable; using raw rollback path",
+												).pipe(Effect.annotateLogs({ orgId: tenant.orgId }))
+												yield* Effect.annotateCurrentSpan(
+													"query.rollup.fallback",
+													true,
+												)
+												return yield* runRawSummary()
+											})
+										}),
+									)
+								: runRawSummary()
+							const summaryRows = yield* mapExecError(
+								summaryEffect,
+								"serviceOperations query failed",
+							)
+							if (summaryRows.length === 0) {
+								return []
+							}
+
+							const spanNames = summaryRows.map((row) => String(row.spanName))
+							// The rollup is minute-grain, so every sparkline interval must be
+							// a whole-minute multiple. Nearest-minute rounding keeps ~50 points.
+							const windowSeconds = Math.max(
+								0,
+								(Date.parse(`${payload.endTime.replace(" ", "T")}Z`) -
+									Date.parse(`${payload.startTime.replace(" ", "T")}Z`)) /
+									1000,
+							)
+							const requestedBucketSeconds = payload.bucketSeconds ?? windowSeconds / 50
+							const bucketSeconds = Math.max(1, Math.round(requestedBucketSeconds / 60)) * 60
+							const timeseriesInput = { ...payload, spanNames, bucketSeconds }
+							const runRawTimeseries = () =>
+								runQuery(Queries.serviceOperationsTimeseriesRaw, tenant, timeseriesInput)
+							const timeseriesEffect = useRollup
+								? runQuery(Queries.serviceOperationsTimeseries, tenant, timeseriesInput).pipe(
+										Effect.catch((error) =>
+											isMissingServiceOperationsRollup(error)
+												? Effect.gen(function* () {
+														yield* Effect.annotateCurrentSpan(
+															"query.rollup.fallback",
+															true,
+														)
+														return yield* runRawTimeseries()
+													})
+												: Effect.fail(error),
+										),
+									)
+								: runRawTimeseries()
+							const timeseriesRows = yield* mapExecError(
+								timeseriesEffect,
+								"serviceOperationsTimeseries query failed",
+							)
+
+							const sparklines = new Map<string, Array<{ bucket: string; count: number }>>()
+							for (const row of timeseriesRows) {
+								const key = String(row.spanName)
+								const points = sparklines.get(key) ?? []
+								points.push({ bucket: String(row.bucket), count: toNumber(row.count) })
+								sparklines.set(key, points)
+							}
+
+							return summaryRows.map((row) => ({
+								spanName: String(row.spanName),
+								spanCount: toNumber(row.spanCount),
+								estimatedSpanCount: toNumber(row.estimatedSpanCount),
+								errorCount: toNumber(row.errorCount),
+								estimatedErrorCount: toNumber(row.estimatedErrorCount),
+								errorRate: toNumber(row.errorRate),
+								avgDurationMs: toNumber(row.avgDurationMs),
+								p50DurationMs: toNumber(row.p50DurationMs),
+								p95DurationMs: toNumber(row.p95DurationMs),
+								sparkline: sparklines.get(String(row.spanName)) ?? [],
+							}))
+						}),
+						30,
+					)
+					return new ServiceOperationsResponse({ data })
+				}),
+			)
+			.handle("listLogs", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.listLogs, tenant, payload)
+					return new ListLogsResponse({ data: rows })
+				}),
+			)
+			.handle("getLog", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.getLog, tenant, payload)
+					return new GetLogResponse({ data: rows })
+				}),
+			)
+			.handle("listMetrics", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.listMetrics, tenant, payload)
+					return new ListMetricsResponse({ data: rows })
+				}),
+			)
+			.handle("metricsSummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.metricsSummary, tenant, payload)
+					return new MetricsSummaryResponse({
+						data: rows.map((row) => ({
+							metricType: row.metricType,
+							metricCount: Number(row.metricCount),
+							dataPointCount: Number(row.dataPointCount),
+						})),
+					})
+				}),
+			)
+			.handle("executeQueryBuilder", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const enabledQueries = payload.queries.filter((q) => q.enabled)
+
+					if (enabledQueries.length === 0) {
+						return yield* Effect.fail(
+							new QueryEngineValidationError({
+								message: "No enabled queries in request",
+								details: ["At least one query must be enabled"],
+							}),
+						)
+					}
+
+					const allWarnings: string[] = []
+
+					if (payload.kind === "timeseries") {
+						// Build a spec per query, execute each, then merge series across queries.
+						// Series names are namespaced by the query's display name when there are
+						// multiple queries, otherwise we keep the raw group names from the query
+						// engine result so single-query widgets render naturally.
+						type Point = { bucket: string; series: Record<string, number> }
+						type QueryOutcome = {
+							warnings: string[]
+							entry: { name: string; points: Point[] } | null
+						}
+
+						// Execute each query concurrently (independent warehouse round-trips)
+						// but collect positionally: Effect.forEach returns results in input
+						// order regardless of concurrency, so series naming/merge order stays
+						// deterministic instead of depending on which query finishes first.
+						const outcomes: QueryOutcome[] = yield* Effect.forEach(
+							enabledQueries,
+							(query) =>
+								Effect.gen(function* () {
+									const built = buildTimeseriesQuerySpec(query)
+									const warnings = built.warnings.map((w) => `${query.name}: ${w}`)
+
+									if (!built.query) {
+										if (built.error) warnings.push(`${query.name}: ${built.error}`)
+										return { warnings, entry: null }
+									}
+
+									const request = new QueryEngineExecuteRequest({
+										startTime: payload.startTime,
+										endTime: payload.endTime,
+										query: built.query,
+									})
+
+									const response = yield* queryEngine.execute(tenant, request)
+									if (response.result.kind !== "timeseries") {
+										warnings.push(`${query.name}: unexpected non-timeseries result`)
+										return { warnings, entry: null }
+									}
+
+									return {
+										warnings,
+										entry: {
+											name: query.legend?.trim() || query.name,
+											points: response.result.data.map((p) => ({
+												bucket: p.bucket,
+												series: { ...p.series },
+											})),
+										},
+									}
+								}),
+							{ concurrency: 4 },
+						)
+
+						const perQueryPoints: Array<{ name: string; points: Point[] }> = []
+						for (const outcome of outcomes) {
+							allWarnings.push(...outcome.warnings)
+							if (outcome.entry) perQueryPoints.push(outcome.entry)
+						}
+
+						const multiQuery = perQueryPoints.length > 1
+						const rowsByBucket = new Map<string, Record<string, number>>()
+						for (const { name: queryName, points } of perQueryPoints) {
+							for (const point of points) {
+								const row = rowsByBucket.get(point.bucket) ?? {}
+								for (const [groupName, value] of Object.entries(point.series)) {
+									if (typeof value !== "number" || !Number.isFinite(value)) continue
+									const isAllGroup = groupName.toLowerCase() === "all"
+									const seriesKey = multiQuery
+										? isAllGroup
+											? queryName
+											: `${queryName}: ${groupName}`
+										: isAllGroup
+											? queryName
+											: groupName
+									row[seriesKey] = value
+								}
+								rowsByBucket.set(point.bucket, row)
+							}
+						}
+
+						const merged = [...rowsByBucket.entries()]
+							.sort(([a], [b]) => a.localeCompare(b))
+							.map(([bucket, series]) => ({ bucket, series }))
+
+						return new ExecuteQueryBuilderResponse({
+							result: { kind: "timeseries", data: merged },
+							warnings: allWarnings.length > 0 ? allWarnings : undefined,
+						})
+					}
+
+					// Breakdown: take just the first enabled query (matches the web's behaviour
+					// for single-query breakdown widgets — multi-query breakdowns aren't a thing
+					// in the dashboard builder yet).
+					const primary = enabledQueries[0]
+					const built = buildBreakdownQuerySpec(primary)
+					for (const w of built.warnings) allWarnings.push(`${primary.name}: ${w}`)
+
+					if (!built.query) {
+						return yield* Effect.fail(
+							new QueryEngineValidationError({
+								message: built.error ?? "Failed to build breakdown query",
+								details: built.error ? [built.error] : [],
+							}),
+						)
+					}
+
+					const request = new QueryEngineExecuteRequest({
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+						query: built.query,
+					})
+
+					const response = yield* queryEngine.execute(tenant, request)
+					if (response.result.kind !== "breakdown") {
+						return yield* Effect.fail(
+							new QueryEngineExecutionError({
+								message: "Unexpected non-breakdown result",
+							}),
+						)
+					}
+
+					return new ExecuteQueryBuilderResponse({
+						result: {
+							kind: "breakdown",
+							data: response.result.data.map((item) => ({
+								name: item.name,
+								value: item.value,
+							})),
+						},
+						warnings: allWarnings.length > 0 ? allWarnings : undefined,
+					})
+				}),
+			)
+			.handle("listHosts", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.listHosts, tenant, payload)
+					return new ListHostsResponse({
+						data: rows.map((row) => ({
+							hostName: row.hostName,
+							osType: row.osType,
+							hostArch: row.hostArch,
+							cloudProvider: row.cloudProvider,
+							lastSeen: String(row.lastSeen),
+							cpuPct: Number(row.cpuPct) || 0,
+							memoryPct: Number(row.memoryPct) || 0,
+							diskPct: Number(row.diskPct) || 0,
+							load15: Number(row.load15) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("hostDetailSummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const row = yield* runQueryFirst(Queries.hostDetailSummary, tenant, payload)
+					return new HostDetailSummaryResponse({
+						data: row
+							? {
+									hostName: row.hostName,
+									osType: row.osType,
+									hostArch: row.hostArch,
+									cloudProvider: row.cloudProvider,
+									cloudRegion: row.cloudRegion,
+									firstSeen: String(row.firstSeen),
+									lastSeen: String(row.lastSeen),
+									cpuPct: Number(row.cpuPct) || 0,
+									memoryPct: Number(row.memoryPct) || 0,
+									diskPct: Number(row.diskPct) || 0,
+									load15: Number(row.load15) || 0,
+								}
+							: null,
+					})
+				}),
+			)
+			.handle("fleetUtilizationTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.fleetUtilizationTimeseries, tenant, payload)
+					return new FleetUtilizationTimeseriesResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							avgCpu: Number(row.avgCpu) || 0,
+							avgMemory: Number(row.avgMemory) || 0,
+							activeHosts: Number(row.activeHosts) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("hostInfraTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const bucketSeconds = payload.bucketSeconds ?? 60
+
+					const spec = hostMetricSpec(payload.metric)
+
+					if (spec.isNetwork) {
+						const rows = yield* runQuery(Queries.hostInfraNetworkTimeseries, tenant, payload)
+						return new HostInfraTimeseriesResponse({
+							data: rows.map((row) => ({
+								bucket: String(row.bucket),
+								attributeValue: String(row.attributeValue ?? ""),
+								value: Number(row.sumValue) || 0,
+							})),
+							groupByAttributeKey: spec.groupByAttributeKey,
+							unit: spec.unit,
+						})
+					}
+
+					const rows = yield* runQuery(Queries.hostInfraGaugeTimeseries, tenant, payload)
+					return new HostInfraTimeseriesResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							attributeValue: String(row.attributeValue ?? ""),
+							value: Number(row.avgValue) || 0,
+						})),
+						groupByAttributeKey: spec.groupByAttributeKey,
+						unit: spec.unit,
+					})
+				}),
+			)
+			.handle("listPods", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					yield* warehouse.warmRoute(tenant)
+					const [rows, countRow] = yield* Effect.all(
+						[
+							runQuery(Queries.listPods, tenant, payload),
+							runQueryFirst(Queries.listPodsCount, tenant, payload),
+						],
+						{ concurrency: 2 },
+					)
+					return new ListPodsResponse({
+						data: rows.map((row) => ({
+							podName: row.podName,
+							namespace: row.namespace,
+							nodeName: row.nodeName,
+							clusterName: row.clusterName,
+							environment: row.environment,
+							deploymentName: row.deploymentName,
+							statefulsetName: row.statefulsetName,
+							daemonsetName: row.daemonsetName,
+							jobName: row.jobName,
+							qosClass: row.qosClass,
+							podUid: row.podUid,
+							computeType: row.computeType,
+							lastSeen: String(row.lastSeen),
+							cpuUsage: Number(row.cpuUsage) || 0,
+							cpuLimitPct: Number(row.cpuLimitPct) || 0,
+							memoryLimitPct: Number(row.memoryLimitPct) || 0,
+							cpuRequestPct: Number(row.cpuRequestPct) || 0,
+							memoryRequestPct: Number(row.memoryRequestPct) || 0,
+							cpuUsagePeak: Number(row.cpuUsagePeak) || 0,
+							cpuLimitPctPeak: Number(row.cpuLimitPctPeak) || 0,
+							memoryLimitPctPeak: Number(row.memoryLimitPctPeak) || 0,
+							saturation: Number(row.saturation) || 0,
+						})),
+						// The denominator has to match the predicate the list ran, or a scoped
+						// view reads "Top 17 of 541". The scope counts are already computed.
+						totalCount:
+							Number(
+								payload.scope === "saturated"
+									? countRow?.saturatedPods
+									: payload.scope === "elevated"
+										? countRow?.elevatedPods
+										: payload.scope === "unbounded"
+											? countRow?.unboundedPods
+											: payload.scope === "stale"
+												? countRow?.stalePods
+												: countRow?.totalPods,
+							) ||
+							// A failed count must not render as "0 of 0" under a list with rows.
+							rows.length,
+					})
+				}),
+			)
+			.handle("podsSummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const row = yield* runQueryFirst(Queries.podsSummary, tenant, payload)
+					return new PodsSummaryResponse({
+						totalPods: Number(row?.totalPods) || 0,
+						saturatedPods: Number(row?.saturatedPods) || 0,
+						elevatedPods: Number(row?.elevatedPods) || 0,
+						unboundedPods: Number(row?.unboundedPods) || 0,
+						stalePods: Number(row?.stalePods) || 0,
+					})
+				}),
+			)
+			.handle("podDetailSummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const row = yield* runQueryFirst(Queries.podDetailSummary, tenant, payload)
+					return new PodDetailSummaryResponse({
+						data: row
+							? {
+									podName: row.podName,
+									namespace: row.namespace,
+									nodeName: row.nodeName,
+									deploymentName: row.deploymentName,
+									statefulsetName: row.statefulsetName,
+									daemonsetName: row.daemonsetName,
+									qosClass: row.qosClass,
+									podUid: row.podUid,
+									computeType: row.computeType,
+									podStartTime: row.podStartTime,
+									firstSeen: String(row.firstSeen),
+									lastSeen: String(row.lastSeen),
+									cpuUsage: Number(row.cpuUsage) || 0,
+									cpuLimitPct: Number(row.cpuLimitPct) || 0,
+									memoryLimitPct: Number(row.memoryLimitPct) || 0,
+									cpuRequestPct: Number(row.cpuRequestPct) || 0,
+									memoryRequestPct: Number(row.memoryRequestPct) || 0,
+								}
+							: null,
+					})
+				}),
+			)
+			.handle("podInfraTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const spec = podMetricSpec(payload.metric)
+					const rows = yield* runQuery(Queries.podInfraTimeseries, tenant, payload)
+					return new PodInfraTimeseriesResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							attributeValue: String(row.attributeValue ?? ""),
+							value: Number(row.avgValue) || 0,
+						})),
+						unit: spec.unit,
+					})
+				}),
+			)
+			.handle("listNodes", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.listNodes, tenant, payload)
+					return new ListNodesResponse({
+						data: rows.map((row) => ({
+							nodeName: row.nodeName,
+							nodeUid: row.nodeUid,
+							clusterName: row.clusterName,
+							environment: row.environment,
+							kubeletVersion: row.kubeletVersion,
+							lastSeen: String(row.lastSeen),
+							cpuUsage: Number(row.cpuUsage) || 0,
+							uptime: Number(row.uptime) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("nodeDetailSummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const row = yield* runQueryFirst(Queries.nodeDetailSummary, tenant, payload)
+					return new NodeDetailSummaryResponse({
+						data: row
+							? {
+									nodeName: row.nodeName,
+									nodeUid: row.nodeUid,
+									kubeletVersion: row.kubeletVersion,
+									containerRuntime: row.containerRuntime,
+									firstSeen: String(row.firstSeen),
+									lastSeen: String(row.lastSeen),
+									cpuUsage: Number(row.cpuUsage) || 0,
+									uptime: Number(row.uptime) || 0,
+								}
+							: null,
+					})
+				}),
+			)
+			.handle("nodeInfraTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const spec = nodeMetricSpec(payload.metric)
+					const rows = yield* runQuery(Queries.nodeInfraTimeseries, tenant, payload)
+					return new NodeInfraTimeseriesResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							attributeValue: String(row.attributeValue ?? ""),
+							value: Number(row.avgValue) || 0,
+						})),
+						unit: spec.unit,
+					})
+				}),
+			)
+			.handle("listWorkloads", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.listWorkloads, tenant, payload)
+					return new ListWorkloadsResponse({
+						data: rows.map((row) => ({
+							workloadName: row.workloadName,
+							namespace: row.namespace,
+							clusterName: row.clusterName,
+							environment: row.environment,
+							podCount: Number(row.podCount) || 0,
+							lastSeen: String(row.lastSeen),
+							avgCpuLimitPct: Number(row.avgCpuLimitPct) || 0,
+							avgMemoryLimitPct: Number(row.avgMemoryLimitPct) || 0,
+							avgCpuUsage: Number(row.avgCpuUsage) || 0,
+						})),
+					})
+				}),
+			)
+			.handle("workloadDetailSummary", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const row = yield* runQueryFirst(Queries.workloadDetailSummary, tenant, payload)
+					return new WorkloadDetailSummaryResponse({
+						data: row
+							? {
+									workloadName: row.workloadName,
+									kind: payload.kind,
+									namespace: row.namespace,
+									podCount: Number(row.podCount) || 0,
+									firstSeen: String(row.firstSeen),
+									lastSeen: String(row.lastSeen),
+									avgCpuLimitPct: Number(row.avgCpuLimitPct) || 0,
+									avgMemoryLimitPct: Number(row.avgMemoryLimitPct) || 0,
+									avgCpuUsage: Number(row.avgCpuUsage) || 0,
+								}
+							: null,
+					})
+				}),
+			)
+			.handle("workloadInfraTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const spec = workloadMetricSpec(payload.metric)
+					const rows = yield* runQuery(Queries.workloadInfraTimeseries, tenant, payload)
+					return new WorkloadInfraTimeseriesResponse({
+						data: rows.map((row) => ({
+							bucket: String(row.bucket),
+							attributeValue: String(row.attributeValue ?? ""),
+							value: Number(row.avgValue) || 0,
+						})),
+						unit: spec.unit,
+					})
+				}),
+			)
+			.handle("podFacets", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.podFacets, tenant, payload)
+					const buckets = {
+						pods: [] as Array<{ name: string; count: number }>,
+						namespaces: [] as Array<{ name: string; count: number }>,
+						nodes: [] as Array<{ name: string; count: number }>,
+						clusters: [] as Array<{ name: string; count: number }>,
+						deployments: [] as Array<{ name: string; count: number }>,
+						statefulsets: [] as Array<{ name: string; count: number }>,
+						daemonsets: [] as Array<{ name: string; count: number }>,
+						jobs: [] as Array<{ name: string; count: number }>,
+						environments: [] as Array<{ name: string; count: number }>,
+						computeTypes: [] as Array<{ name: string; count: number }>,
+					}
+					for (const row of rows) {
+						const entry = { name: String(row.name), count: Number(row.count) || 0 }
+						switch (row.facetType) {
+							case "pod":
+								buckets.pods.push(entry)
+								break
+							case "namespace":
+								buckets.namespaces.push(entry)
+								break
+							case "node":
+								buckets.nodes.push(entry)
+								break
+							case "cluster":
+								buckets.clusters.push(entry)
+								break
+							case "deployment":
+								buckets.deployments.push(entry)
+								break
+							case "statefulset":
+								buckets.statefulsets.push(entry)
+								break
+							case "daemonset":
+								buckets.daemonsets.push(entry)
+								break
+							case "job":
+								buckets.jobs.push(entry)
+								break
+							case "environment":
+								buckets.environments.push(entry)
+								break
+							case "computeType":
+								buckets.computeTypes.push(entry)
+								break
+						}
+					}
+					return new PodFacetsResponse({ data: buckets })
+				}),
+			)
+			.handle("nodeFacets", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.nodeFacets, tenant, payload)
+					const buckets = {
+						nodes: [] as Array<{ name: string; count: number }>,
+						clusters: [] as Array<{ name: string; count: number }>,
+						environments: [] as Array<{ name: string; count: number }>,
+					}
+					for (const row of rows) {
+						const entry = { name: String(row.name), count: Number(row.count) || 0 }
+						switch (row.facetType) {
+							case "node":
+								buckets.nodes.push(entry)
+								break
+							case "cluster":
+								buckets.clusters.push(entry)
+								break
+							case "environment":
+								buckets.environments.push(entry)
+								break
+						}
+					}
+					return new NodeFacetsResponse({ data: buckets })
+				}),
+			)
+			.handle("workloadFacets", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const rows = yield* runQuery(Queries.workloadFacets, tenant, payload)
+					const buckets = {
+						workloads: [] as Array<{ name: string; count: number }>,
+						namespaces: [] as Array<{ name: string; count: number }>,
+						clusters: [] as Array<{ name: string; count: number }>,
+						environments: [] as Array<{ name: string; count: number }>,
+						computeTypes: [] as Array<{ name: string; count: number }>,
+					}
+					for (const row of rows) {
+						const entry = { name: String(row.name), count: Number(row.count) || 0 }
+						switch (row.facetType) {
+							case "workload":
+								buckets.workloads.push(entry)
+								break
+							case "namespace":
+								buckets.namespaces.push(entry)
+								break
+							case "cluster":
+								buckets.clusters.push(entry)
+								break
+							case "environment":
+								buckets.environments.push(entry)
+								break
+							case "computeType":
+								buckets.computeTypes.push(entry)
+								break
+						}
+					}
+					return new WorkloadFacetsResponse({ data: buckets })
+				}),
+			)
+			.handle("executeRawSql", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+
+					const autoBucketSeconds = computeAutoBucketSeconds(payload.startTime, payload.endTime)
+					const granularitySeconds = payload.granularitySeconds ?? autoBucketSeconds
+
+					const result = yield* mapExecError(
+						executeRawSql(tenant, {
+							sql: payload.sql,
+							orgId: tenant.orgId,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+							granularitySeconds,
+							workload: "interactive",
+							context: "rawSql",
+						}),
+						"rawSql query failed",
+					)
+
+					return new RawSqlExecuteResponse({
+						data: result.rows,
+						meta: {
+							rowCount: result.rowCount,
+							columns: result.columns,
+							granularitySeconds: result.granularitySeconds,
+						},
+					})
+				}),
+			)
+	}),
+)
+
+// ---------------------------------------------------------------------------
+// Auto-bucket helper for raw-SQL $__interval_s when the user didn't supply
+// granularitySeconds. Mirrors apps/web/src/api/tinybird/timeseries-utils.ts so
+// the backend can compute it without depending on the web package.
+// ---------------------------------------------------------------------------
+
+const TARGET_POINTS = 30
+const AUTO_BUCKET_LADDER = [300, 900, 1800, 3600, 14400, 86400] as const
+
+function computeAutoBucketSeconds(startTime: string, endTime: string): number {
+	const toEpochMs = (value: string) => new Date(value.replace(" ", "T") + "Z").getTime()
+	const startMs = toEpochMs(startTime)
+	const endMs = toEpochMs(endTime)
+	if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
+		return 300
+	}
+	const rangeSeconds = Math.max((endMs - startMs) / 1000, 1)
+	const raw = Math.ceil(rangeSeconds / TARGET_POINTS)
+	return AUTO_BUCKET_LADDER.reduce(
+		(best, candidate) => (Math.abs(candidate - raw) < Math.abs(best - raw) ? candidate : best),
+		AUTO_BUCKET_LADDER[0],
+	)
+}

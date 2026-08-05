@@ -1,7 +1,7 @@
 import { McpQueryError, requiredStringParam, type McpToolRegistrar } from "./types"
 import { Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
-import { withDashboardMutation } from "../lib/dashboard-mutations"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { withDashboardMutation } from "@/mcp/lib/dashboard-mutations"
 
 const TOOL = "reorder_dashboard_widgets"
 

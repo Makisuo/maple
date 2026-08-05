@@ -297,7 +297,7 @@ describe("buildWidgetDataSource for list", () => {
 				parseWhereClause,
 				normalizeKey: normKey,
 				parseBoolean: parseBool,
-			} = yield* Effect.promise(() => import("@maple/query-engine/where-clause"))
+			} = yield* Effect.promise(() => import("@maple/domain/where-clause"))
 
 			function buildListEndpointParams(
 				dataSource: "traces" | "logs",

@@ -1,11 +1,11 @@
 import { optionalNumberParam, optionalStringParam, type McpToolRegistrar } from "./types"
-import { queryWarehouse, resolveTenant } from "../lib/query-warehouse"
-import { resolveTimeRange, formatClampNote } from "../lib/time"
-import { clampLimit, clampOffset } from "../lib/limits"
-import { formatNumber, formatTable } from "../lib/format"
-import { formatNextSteps } from "../lib/next-steps"
+import { queryWarehouse, resolveTenant } from "@/mcp/lib/query-warehouse"
+import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
+import { clampLimit, clampOffset } from "@/mcp/lib/limits"
+import { formatNumber, formatTable } from "@/mcp/lib/format"
+import { formatNextSteps } from "@/mcp/lib/next-steps"
 import { Array as Arr, Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
+import { createDualContent } from "@/mcp/lib/structured-output"
 
 export function registerListMetricsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -31,8 +31,9 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
 			offset,
 			limit,
 		}) {
-			const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 30 })
+			const range = resolveTimeRange(start_time, end_time, { maxHours: MCP_DISCOVERY_MAX_HOURS })
 			const { st, et } = range
+			if (range.exceeded) return rangeExceededResult(range, "list_metrics")
 			const lim = clampLimit(limit, { defaultValue: 50, max: 500 })
 			const off = clampOffset(offset, { max: 10_000 })
 			const tenant = yield* resolveTenant
@@ -69,10 +70,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
 
 			yield* Effect.annotateCurrentSpan("result.rowCount", metrics.length)
 
-			const lines: string[] = [
-				`## Available Metrics`,
-				`Time range: ${st} — ${et}${formatClampNote(range)}`,
-			]
+			const lines: string[] = [`## Available Metrics`, `Time range: ${st} — ${et}`]
 
 			// `metrics_summary` is scoped only by service, NOT by search/metric_type.
 			// Printing those totals next to an empty filtered result reads as a

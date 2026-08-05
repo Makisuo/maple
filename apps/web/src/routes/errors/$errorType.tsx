@@ -21,8 +21,8 @@ import {
 	formatNumber,
 	inferBucketSeconds,
 	inferRangeMs,
-} from "@maple/ui/format"
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+} from "@maple/ui/lib/format"
+import { useCopy } from "@maple/ui/hooks/use-copy"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
@@ -73,8 +73,11 @@ function ErrorDetailContent() {
 	// Prefer the human label passed from the list; fall back to the hash.
 	const displayLabel = search.label ?? fingerprintHash
 	const navigate = useNavigate({ from: Route.fullPath })
-	const messageCopy = useCopyToClipboard("Error message")
-	const promptCopy = useCopyToClipboard("Agent prompt")
+	const messageCopy = useCopy({ label: "Error message" })
+	const promptCopy = useCopy({
+		label: "Agent prompt",
+		successMessage: "Agent prompt copied — paste it into your MCP agent",
+	})
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
@@ -202,7 +205,7 @@ function ErrorDetailContent() {
 							<button
 								type="button"
 								className="text-xs text-primary hover:underline"
-								onClick={() => messageCopy.copy(error.sampleMessage)}
+								onClick={() => void messageCopy.copy(error.sampleMessage)}
 							>
 								Copy error message
 							</button>
@@ -210,7 +213,7 @@ function ErrorDetailContent() {
 								type="button"
 								className="text-xs text-primary hover:underline"
 								onClick={() =>
-									promptCopy.copy(
+									void promptCopy.copy(
 										formatAgentDebugPrompt({
 											fingerprintHash,
 											label: displayLabel,
@@ -222,10 +225,6 @@ function ErrorDetailContent() {
 											firstSeen: error.firstSeen.toISOString(),
 											lastSeen: error.lastSeen.toISOString(),
 										}),
-										{
-											successMessage:
-												"Agent prompt copied — paste it into your MCP agent",
-										},
 									)
 								}
 							>

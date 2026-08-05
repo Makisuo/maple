@@ -4,5 +4,10 @@
 	"printWidth": 110,
 	"useTabs": true,
 	"tabWidth": 4,
-	"ignorePatterns": [".context", "deploy", "skills"],
+	// packages/db/drizzle is drizzle-kit output — the next `db:generate` rewrites
+	// it in drizzle's own style, so formatting it is churn that only obscures the
+	// migration-snapshot diff.
+	// lib/llm is vendored upstream source in prettier style; reformatting it would turn
+	// every `bun run llm:sync` into a whole-file conflict.
+	"ignorePatterns": [".context", "deploy", "skills", "packages/db/drizzle", "lib/llm"],
 }

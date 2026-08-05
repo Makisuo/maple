@@ -4,26 +4,27 @@ import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, ScrapeTargetId, UserId } from "@maple/domain/http"
 import { decodePublicId, MapleApiV2 } from "@maple/domain/http/v2"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
-import type { WarehouseQueryServiceShape } from "../../lib/WarehouseQueryService"
-import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
-import { Env } from "../../lib/Env"
-import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
-import { ApiKeysService } from "../../services/ApiKeysService"
-import { AuthService } from "../../services/AuthService"
-import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import { IngestAttributeMappingService } from "../../services/IngestAttributeMappingService"
-import { OrgIngestKeysService } from "../../services/OrgIngestKeysService"
-import { PlanetScaleDiscoveryService } from "../../services/PlanetScaleDiscoveryService"
-import { PlanetScaleOAuthService } from "../../services/PlanetScaleOAuthService"
-import { RecommendationIssueService } from "../../services/RecommendationIssueService"
-import { ScrapeTargetsService } from "../../services/ScrapeTargetsService"
+import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import type { WarehouseQueryServiceShape } from "@/services/warehouse/WarehouseQueryService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { Env } from "@/platform/Env"
+import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
+import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuthService } from "@/services/auth/AuthService"
+import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
+import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
+import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
+import { PlanetScaleDiscoveryService } from "@/services/integrations/PlanetScaleDiscoveryService"
+import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
+import { RecommendationIssueService } from "@/services/errors/RecommendationIssueService"
+import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
 	ApiV2RateLimiterAllowAllLayer,
 	Phase1ResourceStubsLayer,
+	PlanetScaleServiceStubsLayer,
 	SlackIntegrationServiceStubLayer,
 	SetupAuditServiceStubLayer,
 	TelemetryServiceStubsLayer,
@@ -106,6 +107,7 @@ const makeHarness = () => {
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provide(SlackIntegrationServiceStubLayer),
+		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(Phase1ResourceStubsLayer),
 		Layer.provide(SetupAuditServiceStubLayer),

@@ -1,13 +1,13 @@
 import { McpQueryError, requiredStringParam, validationError, type McpToolRegistrar } from "./types"
 import { Effect, Schema } from "effect"
-import { createDualContent } from "../lib/structured-output"
-import { decodeWidgetJson, withDashboardMutation } from "../lib/dashboard-mutations"
+import { createDualContent } from "@/mcp/lib/structured-output"
+import { decodeWidgetJson, withDashboardMutation } from "@/mcp/lib/dashboard-mutations"
 import {
 	collectBlockingBuilderWarnings,
 	formatValidationSummary,
 	inspectWidgetsAfterMutation,
-} from "../lib/inspect-widget"
-import { resolveTenant } from "../lib/query-warehouse"
+} from "@/mcp/lib/inspect-widget"
+import { resolveTenant } from "@/mcp/lib/query-warehouse"
 
 const TOOL = "update_dashboard_widget"
 
@@ -23,7 +23,7 @@ export function registerUpdateDashboardWidgetTool(server: McpToolRegistrar) {
 				"ID of the widget to replace (use get_dashboard to see existing widget ids)",
 			),
 			widget_json: requiredStringParam(
-				"Full JSON for the replacement widget: { id, visualization, dataSource, display, layout }. Any `id` field inside this JSON is ignored in favor of widget_id.",
+				'Full JSON for the replacement widget: { id, visualization, dataSource, display, layout, timeRange? }. Any `id` field inside this JSON is ignored in favor of widget_id. `timeRange` pins the widget to its own window (`{"type":"relative","value":"30m"}` or `{"type":"absolute","startTime":"...","endTime":"..."}`); omitting it means "follow the dashboard\'s range", so leaving it out of an update REMOVES an existing override.',
 			),
 		}),
 		Effect.fn("McpTool.updateDashboardWidget")(function* ({ dashboard_id, widget_id, widget_json }) {

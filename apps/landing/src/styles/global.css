@@ -1221,6 +1221,15 @@
 	@apply text-fg font-semibold;
 }
 
+/*
+ * Release/section art in prose. Markdown images can't carry width/height, so
+ * the source aspect (1280 × 660, exported @2x) plus this ratio box is what
+ * keeps them from shifting layout as they decode.
+ */
+.docs-content img {
+	@apply w-full h-auto aspect-[1280/660] object-cover bg-bg-deep border border-border rounded-xl my-8;
+}
+
 /* details/summary toggle arrow for mobile nav */
 details[open] > summary .details-open\:rotate-180 {
 	transform: rotate(180deg);

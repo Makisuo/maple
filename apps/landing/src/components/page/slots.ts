@@ -15,6 +15,7 @@
  * this map has no import path and cannot take a `client:*` directive.
  */
 import type { ArtifactId, SectionId } from "../../lib/page-registry"
+import LiveAlertFiring from "../live/LiveAlertFiring.astro"
 import LiveBrowserSessions from "../live/LiveBrowserSessions.astro"
 import LiveK8sHeatmap from "../live/LiveK8sHeatmap.astro"
 import LiveLogStream from "../live/LiveLogStream.astro"
@@ -41,6 +42,7 @@ export const ARTIFACTS = {
 	"service-map": LiveServiceMap,
 	"mcp-transcript": LiveMcpTranscript,
 	"k8s-heatmap": LiveK8sHeatmap,
+	"alert-firing": LiveAlertFiring,
 } satisfies Record<ArtifactId, unknown>
 
 export const EXTRA_SECTIONS = {

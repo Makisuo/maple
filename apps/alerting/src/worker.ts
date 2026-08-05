@@ -15,8 +15,6 @@ import {
 	HazelOAuthService,
 	layerPg,
 	NotificationDispatcher,
-	OnboardingEmailService,
-	OnboardingService,
 	OrgClickHouseSettingsService,
 	OrgIngestKeysService,
 	OrgMembersService,
@@ -135,14 +133,6 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		),
 	)
 
-	const OnboardingServiceLive = OnboardingService.layer.pipe(Layer.provide(BaseLive))
-
-	const OnboardingEmailServiceLive = OnboardingEmailService.layer.pipe(
-		Layer.provide(
-			Layer.mergeAll(BaseLive, EmailServiceLive, OnboardingServiceLive, WarehouseQueryServiceLive),
-		),
-	)
-
 	const ServiceMapRollupServiceLive = ServiceMapRollupService.layer.pipe(
 		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive)),
 	)
@@ -175,7 +165,6 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		CloudflareAnalyticsServiceLive,
 		PlanetScaleServiceLive,
 		DigestServiceLive,
-		OnboardingEmailServiceLive,
 		ErrorsServiceLive,
 		EscalationServiceLive,
 		ServiceMapRollupServiceLive,
@@ -254,19 +243,10 @@ const digestTick = Effect.gen(function* () {
 	)
 }).pipe(Effect.withSpan("alerting.digest_tick"), catchTickFailure("Digest tick failed"))
 
-const onboardingTick = Effect.gen(function* () {
-	const onboardingEmails = yield* OnboardingEmailService
-	const result = yield* onboardingEmails.runOnboardingTick()
-	yield* Effect.logInfo("Onboarding tick complete").pipe(
-		Effect.annotateLogs({
-			ensuredCount: result.ensuredCount,
-			sentCount: result.sentCount,
-			errorCount: result.errorCount,
-			firstDataDetected: result.firstDataDetected,
-			skipped: result.skipped,
-		}),
-	)
-}).pipe(Effect.withSpan("alerting.onboarding_tick"), catchTickFailure("Onboarding tick failed"))
+// The onboarding drip moved to maple-portal (`camp_onboarding`), which owns the
+// sequence, its send log and its suppression list. `org_onboarding_state` stays
+// here — the in-app checklist still uses the rest of that table — and so do its
+// four `*_email_sent_at` columns, which are what the portal's backfill reads.
 
 const serviceMapRollupTick = Effect.gen(function* () {
 	const rollup = yield* ServiceMapRollupService
@@ -331,6 +311,7 @@ const planetScaleTick = Effect.gen(function* () {
 				refreshed: result.refreshed,
 				skipped: result.skipped,
 				failures: result.failures,
+				deployEvents: result.deployEvents,
 			}),
 		)
 	}
@@ -374,7 +355,6 @@ export default {
 			),
 			Match.when("*/15 * * * *", () => digestTick),
 			Match.when("0 * * * *", () => serviceMapRollupTick),
-			Match.when("0 9 * * *", () => onboardingTick),
 			Match.orElse(() =>
 				Effect.all([alertTick, errorTick, escalationTick], {
 					concurrency: 2,

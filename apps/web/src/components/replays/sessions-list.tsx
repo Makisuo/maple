@@ -1,8 +1,8 @@
-import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/time-format"
+import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
 import { useCallback, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { cn } from "@maple/ui/utils"
+import { cn } from "@maple/ui/lib/utils"
 import { EyeIcon } from "@/components/icons"
 import { browserIconFor, deviceIconFor } from "./session-icons"
 import { formatSessionDuration, gradientFor, hostFromUrl } from "./replay-format"
@@ -13,6 +13,11 @@ export interface SessionRow {
 	readonly durationMs: number | null
 	readonly status: string
 	readonly userId: string | null
+	/** identify() identity. `""` on sessions that were never identified. */
+	readonly userName: string
+	readonly userEmail: string
+	readonly groupId: string
+	readonly groupName: string
 	readonly urlInitial: string
 	readonly browserName: string
 	readonly osName: string
@@ -33,12 +38,36 @@ function absoluteTs(startTime: string): string {
 	return Number.isNaN(parsed) ? startTime : new Date(parsed).toLocaleString()
 }
 
-function identity(session: SessionRow): { label: string; initial: string; gradient: string } {
-	const label = session.userId || "Anonymous"
+interface RowIdentity {
+	readonly label: string
+	readonly initial: string
+	readonly gradient: string
+	/** The second line under the label. */
+	readonly secondary: string
+	/** True when `secondary` is the identity line rather than the session/host
+	 *  fallback — the two are typeset differently (prose vs mono). */
+	readonly identified: boolean
+	/** Session id · host, kept as a hover target when identity took the line. */
+	readonly origin: string
+}
+
+// A person is easier to recognize by name than by an opaque id, so the label
+// walks down to the most human value available. Sessions recorded before
+// identify() (or by users who never call it) carry `""` in every identity column
+// and fall all the way through to the original userId/Anonymous rendering.
+function identity(session: SessionRow): RowIdentity {
+	const label = session.userName || session.userEmail || session.userId || "Anonymous"
+	const origin = `${session.sessionId.slice(0, 8)} · ${hostFromUrl(session.urlInitial)}`
+	// Don't repeat the label on the line below it — when the email *is* the label,
+	// the group alone carries the second line.
+	const details = [session.userEmail === label ? "" : session.userEmail, session.groupName].filter(Boolean)
 	return {
 		label,
 		initial: (label[0] ?? "?").toUpperCase(),
 		gradient: gradientFor(session.sessionId),
+		secondary: details.length > 0 ? details.join(" · ") : origin,
+		identified: details.length > 0,
+		origin,
 	}
 }
 
@@ -200,8 +229,14 @@ export function SessionsList({
 											{formatRelativeTimeOrDate(session.startTime)}
 										</span>
 									</div>
-									<div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-										{session.sessionId.slice(0, 8)} · {hostFromUrl(session.urlInitial)}
+									<div
+										className={cn(
+											"mt-0.5 truncate text-xs text-muted-foreground",
+											!id.identified && "font-mono",
+										)}
+										title={id.identified ? id.origin : undefined}
+									>
+										{id.secondary}
 									</div>
 									{(session.traceCount > 0 || hasErrors || isUnrecorded) && (
 										<div className="mt-1.5 flex items-center gap-1.5 @2xl:hidden">

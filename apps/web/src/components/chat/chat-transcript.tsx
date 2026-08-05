@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { memo, useMemo, type ReactNode } from "react"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Bubble, BubbleContent } from "@maple/ui/components/ui/bubble"
@@ -24,7 +24,6 @@ import { ApprovalCard } from "./approval-card"
 import { DiagnosisReportCard } from "./diagnosis-report-card"
 import { MessageActions, messageText } from "./message-actions"
 import { parseDiagnosisMarker } from "./diagnosis-marker"
-import { parseToolProposal } from "./tool-proposal"
 import { stripContextPreamble } from "./context-preamble"
 import {
 	buildTranscriptRows,
@@ -33,6 +32,7 @@ import {
 	toolNameFor,
 	toolPartsOf,
 	type ToolPart,
+	type TranscriptRow,
 } from "./transcript-rows"
 import type { UIMessage } from "@/components/ai-elements/types"
 import type { AiTriageResult } from "@maple/domain/http"
@@ -114,7 +114,7 @@ function renderToolNodes(buf: readonly ToolPart[], keyHint: string): ReactNode {
 interface RenderPartsOptions {
 	message: UIMessage
 	resolvedApprovals: Map<string, "applied" | "denied">
-	onApprove: (toolCallId: string, tool: string, input: unknown) => void
+	onApprove: (messageId: string, toolCallId: string, tool: string, input: unknown) => void
 	onDeny: (toolCallId: string) => void
 }
 
@@ -159,16 +159,18 @@ function renderMessageParts({
 			)
 			continue
 		}
-		const proposal = tp.state === "output-available" ? parseToolProposal(tp.output) : null
-		if (proposal) {
+		// The turn stopped on an approval-gated tool. There is no output to parse — the tool did
+		// not run — so the part's own state carries it.
+		if (tp.state === "proposed") {
+			const toolName = toolNameFor(tp)
 			flushTools()
 			nodes.push(
 				<ApprovalCard
 					key={tp.toolCallId ?? `approval-${i}`}
-					toolName={proposal.tool}
-					input={proposal.input}
+					toolName={toolName}
+					input={tp.input}
 					resolved={resolvedApprovals.get(tp.toolCallId)}
-					onApprove={() => onApprove(tp.toolCallId, proposal.tool, proposal.input)}
+					onApprove={() => onApprove(message.id, tp.toolCallId, toolName, tp.input)}
 					onDeny={() => onDeny(tp.toolCallId)}
 				/>,
 			)
@@ -203,7 +205,7 @@ export interface ChatTranscriptProps {
 	messages: readonly UIMessage[]
 	isLoading: boolean
 	resolvedApprovals: Map<string, "applied" | "denied">
-	onApprove: (toolCallId: string, tool: string, input: unknown) => void
+	onApprove: (messageId: string, toolCallId: string, tool: string, input: unknown) => void
 	onDeny: (toolCallId: string) => void
 	fallbackDiagnosis: AiTriageResult | null
 	diagnosisMessageId?: string
@@ -231,6 +233,101 @@ const READ_ONLY_LABEL: Record<"shared" | "resolved", string> = {
 }
 
 /**
+ * One transcript row, memoized.
+ *
+ * The memo barrier is the point of this component existing. Rendering the rows inline meant every
+ * streamed batch re-ran `renderMessageParts` for the *whole* thread — a `stripContextPreamble`
+ * regex over every text part, a `parseDiagnosisMarker` over every tool output, and (via `ToolRow`)
+ * a `split` + `JSON.parse` over every settled tool result. Maple's threads are tool-heavy, so that
+ * cost grew with the conversation and was paid again on every token.
+ *
+ * Everything derived from sibling rows is passed in already reduced to a primitive — `showThinking`
+ * rather than `isLoading` + `lastMessageId`, `permalink` rather than `permalinkFor` — so a row's
+ * props only change when that row's own content does.
+ */
+interface TranscriptMessageRowProps {
+	message: UIMessage
+	showThinking: boolean
+	resolvedApprovals: Map<string, "applied" | "denied">
+	onApprove: (messageId: string, toolCallId: string, tool: string, input: unknown) => void
+	onDeny: (toolCallId: string) => void
+	permalink: string | undefined
+}
+
+const TranscriptMessageRow = memo(function TranscriptMessageRow({
+	message,
+	showThinking,
+	resolvedApprovals,
+	onApprove,
+	onDeny,
+	permalink,
+}: TranscriptMessageRowProps) {
+	const isUser = message.role === "user"
+	if (isUser && isMachineTurn(message)) {
+		return (
+			<MessageScrollerItem messageId={message.id} className={TRANSCRIPT_ITEM}>
+				<Marker variant="separator">
+					<MarkerContent>Investigation started</MarkerContent>
+				</Marker>
+			</MessageScrollerItem>
+		)
+	}
+	return (
+		<MessageScrollerItem messageId={message.id} scrollAnchor={isUser} className={TRANSCRIPT_ITEM}>
+			<Message align={isUser ? "end" : "start"} className="text-sm">
+				<MessageContent>
+					<Bubble variant={isUser ? "secondary" : "ghost"} align={isUser ? "end" : "start"}>
+						<BubbleContent className={isUser ? "rounded-lg px-4 py-3 text-sm" : "text-sm"}>
+							<div className={PART_STACK}>
+								{renderMessageParts({ message, resolvedApprovals, onApprove, onDeny })}
+								{showThinking ? <StatusMarker /> : null}
+							</div>
+						</BubbleContent>
+					</Bubble>
+					{/* An empty footer still reserves the height of the hover actions, so only
+					    text-bearing turns get one. */}
+					{isUser || !messageText(message) ? null : (
+						<MessageFooter>
+							<MessageActions message={message} permalink={permalink} />
+						</MessageFooter>
+					)}
+				</MessageContent>
+			</Message>
+		</MessageScrollerItem>
+	)
+})
+
+interface TranscriptToolRunRowProps {
+	/** The row itself, not its flattened parts: `rows` is memoized, so this identity is stable and
+	 *  the flattening can happen behind the memo instead of in front of it. */
+	row: Extract<TranscriptRow, { kind: "tool-run" }>
+	showThinking: boolean
+}
+
+const TranscriptToolRunRow = memo(function TranscriptToolRunRow({
+	row,
+	showThinking,
+}: TranscriptToolRunRowProps) {
+	const toolParts = useMemo(() => toolPartsOf(row), [row])
+	return (
+		<MessageScrollerItem messageId={row.id} className={TRANSCRIPT_ITEM}>
+			<Message align="start" className="text-sm">
+				<MessageContent>
+					<Bubble variant="ghost" align="start">
+						<BubbleContent className="text-sm">
+							<div className={PART_STACK}>
+								{renderToolNodes(toolParts, row.id)}
+								{showThinking ? <StatusMarker /> : null}
+							</div>
+						</BubbleContent>
+					</Bubble>
+				</MessageContent>
+			</Message>
+		</MessageScrollerItem>
+	)
+})
+
+/**
  * The scrolling transcript. `MessageScroller` owns the behaviour that used to be
  * `use-stick-to-bottom`'s job plus the parts it never covered: it anchors each new
  * user turn near the top of the viewport (so a long reply reads top-down instead of
@@ -254,6 +351,10 @@ export function ChatTranscript({
 	readOnly,
 	emptyState,
 }: ChatTranscriptProps) {
+	// Grouping the whole thread into rows is O(messages × parts) and used to run inline in JSX, so
+	// it repeated on every streamed batch even though only the last message had changed.
+	const rows = useMemo(() => buildTranscriptRows(messages), [messages])
+
 	if (messages.length === 0 && !fallbackDiagnosis) {
 		return <div className="flex min-h-0 flex-1 items-center justify-center px-4 py-6">{emptyState}</div>
 	}
@@ -278,99 +379,36 @@ export function ChatTranscript({
 								<DiagnosisReportCard report={fallbackDiagnosis} />
 							</MessageScrollerItem>
 						) : null}
-						{buildTranscriptRows(messages).map((row) => {
+						{rows.map((row) => {
 							if (row.kind === "tool-run") {
 								const last = row.messages[row.messages.length - 1]!
 								return (
-									<MessageScrollerItem
+									<TranscriptToolRunRow
 										key={row.id}
-										messageId={row.id}
-										className={TRANSCRIPT_ITEM}
-									>
-										<Message align="start" className="text-sm">
-											<MessageContent>
-												<Bubble variant="ghost" align="start">
-													<BubbleContent className="text-sm">
-														<div className={PART_STACK}>
-															{renderToolNodes(toolPartsOf(row), row.id)}
-															{shouldShowThinkingIndicator(
-																last,
-																isLoading,
-																last.id === lastMessageId,
-															) ? (
-																<StatusMarker />
-															) : null}
-														</div>
-													</BubbleContent>
-												</Bubble>
-											</MessageContent>
-										</Message>
-									</MessageScrollerItem>
+										row={row}
+										showThinking={shouldShowThinkingIndicator(
+											last,
+											isLoading,
+											last.id === lastMessageId,
+										)}
+									/>
 								)
 							}
 							const message = row.message
-							const isUser = message.role === "user"
-							if (isUser && isMachineTurn(message)) {
-								return (
-									<MessageScrollerItem
-										key={message.id}
-										messageId={message.id}
-										className={TRANSCRIPT_ITEM}
-									>
-										<Marker variant="separator">
-											<MarkerContent>Investigation started</MarkerContent>
-										</Marker>
-									</MessageScrollerItem>
-								)
-							}
 							return (
-								<MessageScrollerItem
+								<TranscriptMessageRow
 									key={message.id}
-									messageId={message.id}
-									scrollAnchor={isUser}
-									className={TRANSCRIPT_ITEM}
-								>
-									<Message align={isUser ? "end" : "start"} className="text-sm">
-										<MessageContent>
-											<Bubble
-												variant={isUser ? "secondary" : "ghost"}
-												align={isUser ? "end" : "start"}
-											>
-												<BubbleContent
-													className={
-														isUser ? "rounded-lg px-4 py-3 text-sm" : "text-sm"
-													}
-												>
-													<div className={PART_STACK}>
-														{renderMessageParts({
-															message,
-															resolvedApprovals,
-															onApprove,
-															onDeny,
-														})}
-														{shouldShowThinkingIndicator(
-															message,
-															isLoading,
-															message.id === lastMessageId,
-														) ? (
-															<StatusMarker />
-														) : null}
-													</div>
-												</BubbleContent>
-											</Bubble>
-											{/* An empty footer still reserves the height of the
-											    hover actions, so only text-bearing turns get one. */}
-											{isUser || !messageText(message) ? null : (
-												<MessageFooter>
-													<MessageActions
-														message={message}
-														permalink={permalinkFor?.(message.id)}
-													/>
-												</MessageFooter>
-											)}
-										</MessageContent>
-									</Message>
-								</MessageScrollerItem>
+									message={message}
+									showThinking={shouldShowThinkingIndicator(
+										message,
+										isLoading,
+										message.id === lastMessageId,
+									)}
+									resolvedApprovals={resolvedApprovals}
+									onApprove={onApprove}
+									onDeny={onDeny}
+									permalink={permalinkFor?.(message.id)}
+								/>
 							)
 						})}
 						{awaitingFirstToken ? (

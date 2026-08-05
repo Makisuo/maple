@@ -2,8 +2,11 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { MAX_RAW_SQL_RESULT_ROWS } from "@maple/domain/http"
 import { runRawSql, autoBucketSeconds } from "./run-raw-sql"
-import { WarehouseQueryService, type WarehouseQueryServiceShape } from "@/lib/WarehouseQueryService"
-import type { TenantContext } from "@/lib/tenant-context"
+import {
+	WarehouseQueryService,
+	type WarehouseQueryServiceShape,
+} from "@/services/warehouse/WarehouseQueryService"
+import type { TenantContext } from "@/services/auth/tenant-context"
 
 const tenant = { orgId: "org_test" } as TenantContext
 
