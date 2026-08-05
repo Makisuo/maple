@@ -273,22 +273,28 @@ async function isBotEngagedInThread(
  * Resolves/rejects with `promise`, but rejects as soon as `signal` aborts —
  * even when the underlying work ignores the signal. The work itself is not
  * cancelled; we just stop waiting for it.
+ *
+ * The abort listener is deliberately NOT removed once `promise` settles, which
+ * looks like a leak and is not one: `{ once: true }` drops it when it fires,
+ * the signal is created per promotion and lives at most
+ * `PROMOTION_DEADLINE_MS`, and rejecting an already-settled promise is a no-op.
+ *
+ * Removing it explicitly — the obvious tidier version — breaks this outright
+ * under Bun (1.3.14): taking the last `abort` listener off a signal from
+ * `AbortSignal.timeout()` stops its timer for good, so `.aborted` never
+ * becomes true and the deadline silently ceases to exist. Node is unaffected,
+ * so production behaved correctly and only the test runner saw it — which is
+ * precisely why it went unnoticed. Both calls below share one signal and the
+ * first one almost always settles fast, so the tidier version disarmed the
+ * deadline for the second, slower call: the one it exists to bound.
  */
 function withDeadline<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 	if (signal.aborted) return Promise.reject(abortReason(signal))
 	return new Promise<T>((resolve, reject) => {
-		const onAbort = () => reject(abortReason(signal))
-		signal.addEventListener("abort", onAbort, { once: true })
-		promise.then(
-			(value) => {
-				signal.removeEventListener("abort", onAbort)
-				resolve(value)
-			},
-			(error: unknown) => {
-				signal.removeEventListener("abort", onAbort)
-				reject(error instanceof Error ? error : new Error(String(error)))
-			},
-		)
+		signal.addEventListener("abort", () => reject(abortReason(signal)), { once: true })
+		promise.then(resolve, (error: unknown) => {
+			reject(error instanceof Error ? error : new Error(String(error)))
+		})
 	})
 }
 
