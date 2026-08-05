@@ -880,10 +880,27 @@ export const serviceOperationsSummary = defineQuery({
 		),
 })
 
+/**
+ * Ceiling for the two all-raw rollback shapes.
+ *
+ * These full-scan `traces` and compute the display-name rewrite per row, so on a
+ * cluster without the 0008 rollup they are unbounded in practice: measured on a
+ * BYO org, `serviceOperations` ran a p50 of 12.8s and 8 of 19 requests were
+ * killed outright by the `aggregation` profile's 30s cap — returning nothing
+ * after holding the tab for the full budget.
+ *
+ * 10s converts that into a fast, visible failure. It is deliberately below the
+ * profile default rather than above it: a raw scan that has not finished in 10s
+ * is not going to produce a usable interactive result, and the actionable fix is
+ * applying migration 0008 to that cluster, not waiting longer.
+ */
+const SERVICE_OPERATIONS_RAW_SETTINGS = { maxExecutionTime: 10 }
+
 /** Rollback path, used when the rollup table is absent or the flag is off. */
 export const serviceOperationsSummaryRaw = defineQuery({
 	id: "serviceOperations",
 	profile: "aggregation",
+	settings: SERVICE_OPERATIONS_RAW_SETTINGS,
 	cache: undefined,
 	compile: (payload: ServiceOperationsRequest, orgId: string) =>
 		CH.compile(
@@ -926,6 +943,7 @@ export const serviceOperationsTimeseries = defineQuery({
 export const serviceOperationsTimeseriesRaw = defineQuery({
 	id: "serviceOperationsTimeseries",
 	profile: "aggregation",
+	settings: SERVICE_OPERATIONS_RAW_SETTINGS,
 	cache: undefined,
 	compile: (payload: ServiceOperationsTimeseriesInput, orgId: string) =>
 		CH.compile(

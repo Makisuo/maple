@@ -1032,9 +1032,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								"query.rollup.enabled",
 								serviceOperationsRollupEnabled,
 							)
-							// The rollout flag stays off until migration 0008 is deployed,
-							// backfilled, and parity-checked. Disabling it restores the all-raw
-							// rollback path without changing the endpoint contract.
+							// Migration 0008 is deployed, backfilled, and parity-checked, so
+							// deployed stages ship this on (`alchemy.run.ts`). The Config
+							// default stays `false` for local/test, where the rollup tables
+							// may not exist. Disabling it restores the all-raw rollback path
+							// without changing the endpoint contract.
 							const runRawSummary = () =>
 								runQuery(Queries.serviceOperationsSummaryRaw, tenant, payload)
 							let useRollup = serviceOperationsRollupEnabled
