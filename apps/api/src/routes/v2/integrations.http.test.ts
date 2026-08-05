@@ -315,7 +315,7 @@ describe("v2 slack integration over HTTP", () => {
 
 		const { status, body } = await harness.request("GET", "/v2/integrations/slack", key.secret)
 		expect(status).toBe(503)
-		expect(body.error).toMatchObject({ type: "api_error", code: "service_unavailable" })
+		expect(body.error).toMatchObject({ type: "api_error", code: "slack_unavailable" })
 		await harness.dispose()
 	})
 
@@ -404,7 +404,7 @@ describe("v2 slack integration over HTTP", () => {
 			unconfiguredKey.secret,
 		)
 		expect(validation.status).toBe(503)
-		expect(validation.body.error.code).toBe("service_unavailable")
+		expect(validation.body.error.code).toBe("slack_unavailable")
 		await unconfigured.dispose()
 
 		const broken = makeHarness({
@@ -466,7 +466,7 @@ describe("v2 slack integration over HTTP", () => {
 
 		const { status, body } = await harness.request("DELETE", "/v2/integrations/slack", key.secret)
 		expect(status).toBe(503)
-		expect(body.error.code).toBe("service_unavailable")
+		expect(body.error.code).toBe("slack_unavailable")
 		await harness.dispose()
 	})
 
@@ -617,8 +617,32 @@ describe("v2 slack integration over HTTP", () => {
 			persistenceKey.secret,
 		)
 		expect(unavailable.status).toBe(503)
-		expect(unavailable.body.error.code).toBe("service_unavailable")
+		expect(unavailable.body.error.code).toBe("slack_unavailable")
 		await persistence.dispose()
+	})
+
+	it("never puts a persistence failure's message in the public body", async () => {
+		// postgres.js puts the whole failing SQL in the error message, so echoing
+		// it — which is what the v1 body does — publishes the schema. Confirmed on
+		// the PlanetScale endpoints against a database missing a table.
+		const harness = makeHarness({
+			getStatus: () =>
+				Effect.fail(
+					new IntegrationsPersistenceError({
+						message:
+							'Failed query: select "id", "org_id" from "slack_installations" [caused by: relation "slack_installations" does not exist]',
+					}),
+				),
+		})
+		const key = await harness.bootstrapAdminKey()
+
+		const { status, body } = await harness.request("GET", "/v2/integrations/slack", key.secret)
+		expect(status).toBe(503)
+		expect(body.error.code).toBe("slack_unavailable")
+		const serialized = JSON.stringify(body)
+		expect(serialized).not.toContain("select")
+		expect(serialized).not.toContain("slack_installations")
+		await harness.dispose()
 	})
 
 	it("enforces the integrations read/write scope family", async () => {

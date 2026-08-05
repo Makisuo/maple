@@ -281,8 +281,11 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 							}),
 						),
 						Effect.catchTags({
-							"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-								Effect.fail(serviceUnavailable(error.message)),
+							// Sanitized like the PlanetScale group: the message is the
+							// driver's, and postgres.js puts the full failing SQL in it.
+							// The `tapError` above already logged the real cause.
+							"@maple/http/errors/IntegrationsPersistenceError": () =>
+								Effect.fail(dependencyUnavailable("slack_unavailable")),
 						}),
 					)
 					return toSlackStatus(status)
@@ -311,9 +314,19 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 					const result = yield* slack.startInstall(tenant.orgId, tenant.userId, callbackUrl).pipe(
 						Effect.catchTags({
 							"@maple/http/errors/IntegrationsValidationError": (error) =>
-								Effect.fail(serviceUnavailable(error.message)),
+								Effect.logError("Slack install misconfigured", {
+									tag: error._tag,
+									message: error.message,
+								}).pipe(
+									Effect.andThen(Effect.fail(dependencyUnavailable("slack_unavailable"))),
+								),
 							"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-								Effect.fail(serviceUnavailable(error.message)),
+								Effect.logError("Slack persistence failure", {
+									tag: error._tag,
+									message: error.message,
+								}).pipe(
+									Effect.andThen(Effect.fail(dependencyUnavailable("slack_unavailable"))),
+								),
 						}),
 					)
 					return {
@@ -339,8 +352,9 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 							}),
 						),
 						Effect.catchTags({
-							"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-								Effect.fail(serviceUnavailable(error.message)),
+							// Sanitized; the `tapError` above logged the real cause.
+							"@maple/http/errors/IntegrationsPersistenceError": () =>
+								Effect.fail(dependencyUnavailable("slack_unavailable")),
 						}),
 					)
 					return {
@@ -370,7 +384,12 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 							"@maple/http/errors/IntegrationsUpstreamError": (error) =>
 								Effect.fail(upstreamError("slack_upstream_error", error.message)),
 							"@maple/http/errors/IntegrationsPersistenceError": (error) =>
-								Effect.fail(serviceUnavailable(error.message)),
+								Effect.logError("Slack persistence failure", {
+									tag: error._tag,
+									message: error.message,
+								}).pipe(
+									Effect.andThen(Effect.fail(dependencyUnavailable("slack_unavailable"))),
+								),
 						}),
 					)
 					return toChannelList(list)
