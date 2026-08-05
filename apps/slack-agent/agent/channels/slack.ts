@@ -7,6 +7,7 @@ import { loadChannelContext } from "#lib/channel-context.js"
 import { resolveBotToken, verifySlackV0Signature, type SlackTokenContext } from "#lib/maple.js"
 import { loadThreadContext } from "#lib/thread-context.js"
 import { promoteThreadFollowUp, recordThreadEngagement } from "#lib/thread-follow-up.js"
+import { formatTurnTime } from "#lib/turn-time.js"
 import { forwardUninstallEvent } from "#lib/uninstall-detection.js"
 
 /**
@@ -109,6 +110,11 @@ const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
  * without replying in either one's thread. The model cannot ask for context it
  * has never been shown a trace of, so this cannot wait for it to notice.
  *
+ * The turn also carries the clock (#lib/turn-time.js). Nothing else in the
+ * prompt does, and without it the model took the oldest `message_ts` in the
+ * transcript for "now" — so a follow-up an hour into an alert thread charted
+ * the alert's window instead of the current one.
+ *
  * Runs after eve has already returned 200 to Slack (`waitUntil`), so the Slack
  * fetches are off the webhook's delivery budget. It must not throw: eve drops
  * the whole mention when this handler does, so both loads degrade to no context
@@ -123,8 +129,13 @@ async function dispatchWithConversationContext(
 		loadThreadContext(ctx.thread, message, { botUserId: botUserIdForTeam(message.teamId) }),
 		loadChannelContext(message),
 	])
-	// Channel first: it is the background the thread happens in.
-	return { auth: defaultSlackAuth(message, ctx), context: [...channelContext, ...threadContext] }
+	// Channel first: it is the background the thread happens in. The clock last,
+	// so it sits closest to the message being answered — and so that in a thread
+	// with several turns' worth of these, the newest is the one nearest the ask.
+	return {
+		auth: defaultSlackAuth(message, ctx),
+		context: [...channelContext, ...threadContext, formatTurnTime(message)],
+	}
 }
 
 export default slackChannel({

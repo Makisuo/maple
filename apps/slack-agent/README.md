@@ -47,6 +47,7 @@ agent/
   lib/thread-context.ts # full-thread turn context (renders Block Kit / alert cards too)
   lib/channel-context.ts # channel turn context for a mention that starts its own thread
   lib/slack-context-format.ts # shared renderer for both (blocks/attachments + attribution)
+  lib/turn-time.ts    # per-turn `<current_time>` block (nothing else dates the prompt)
   lib/bot-identity.ts # per-team bot user id learned from the webhook envelope
   lib/chart.ts        # pure SVG chart renderer + unicode-sparkline fallback
   lib/slack-upload.ts # Slack external-upload flow (files.getUploadURLExternal → complete)
@@ -522,6 +523,17 @@ and **activate public distribution** so the app can be installed into any worksp
   `groups:history` / `im:history` are already installed. `mpim:history` is not requested, so a
   group DM answers `missing_scope`; that degrades to a note telling the model not to retry, and
   adding the scope would make every existing install report missing scopes until reinstalled.
+- **Every turn carries the clock.** Nothing else in the prompt dates it: eve injects no current
+  date, `instructions.md` is compiled at build time, and dynamic instructions resolve on
+  `session.started` — which for Slack is the *first* mention in a thread, since sessions are keyed
+  `channelId:threadTs`. The model's only temporal signal was the `message_ts` values in the
+  transcript, and it read the oldest as "about now", so "chart that now" an hour into an alert
+  thread came back anchored to when the alert fired. `agent/lib/turn-time.ts` appends a
+  `<current_time>` block (now in UTC + unix seconds, plus the thread's age) to each turn's
+  `context`, and `instructions.md` § Time says the last one is now. Deliberately turn `context`
+  rather than a `turn.started` dynamic instruction: instructions lower into the system prompt, and
+  a value that changes every turn would invalidate the prompt cache at its first token and
+  re-ingest the whole conversation each turn.
 - **Auth:** `agent/channels/eve.ts` fails closed in deployed environments (`RAILWAY_ENVIRONMENT_NAME`
   set, or `NODE_ENV=production`): the browser/API routes always require HTTP Basic there. With
   `ROUTE_AUTH_BASIC_PASSWORD` set that's your stable credential; without it, a random per-boot
