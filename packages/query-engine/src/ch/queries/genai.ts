@@ -1,22 +1,22 @@
 // ---------------------------------------------------------------------------
-// Typed GenAI "Agentic Journey" Queries
+// Typed GenAI "Agentic Agent trace" Queries
 //
-// A **journey** is one end-to-end agent conversation, reconstructed from raw
+// An **agent trace** is one end-to-end agent conversation, reconstructed from raw
 // `traces` rows carrying the OTel GenAI semantic conventions (`gen_ai.*`).
 // There is no materialized view and no new datasource: every `gen_ai.*`
 // attribute already lands in `SpanAttributes`, so this is a read model.
 //
-// Four queries, all built on ONE per-span projection (`journeySpans`) so the
+// Four queries, all built on ONE per-span projection (`agentTraceSpans`) so the
 // list, the facet sidebar, the detail header, and the timeline can never
-// disagree about what a journey is or which spans belong to it — the
+// disagree about what an agent trace is or which spans belong to it — the
 // facet/filter invariant that has bitten trace facets before.
 //
-//   journeyListQuery      — paginated journey list (overview page)
-//   journeyFacetsQuery    — facet values + counts for the sidebar
-//   journeySummaryQuery   — one row for the detail header
-//   journeyTimelineQuery  — every span of one journey, ordered by Timestamp
+//   agentTraceListQuery      — paginated agent trace list (overview page)
+//   agentTraceFacetsQuery    — facet values + counts for the sidebar
+//   agentTraceSummaryQuery   — one row for the detail header
+//   agentTraceTimelineQuery  — every span of one agent trace, ordered by Timestamp
 //
-// ## Journey identity
+// ## Agent trace identity
 //
 // Three attributes compete for "which conversation is this span part of", and
 // which one is present depends entirely on who instrumented the caller:
@@ -28,7 +28,7 @@
 //   3. `TraceId`                — always present, but only covers one turn
 //
 // The coalesce is resolved **per trace, not per span**: if only some spans of a
-// conversation carry `conversation.id`, a per-span coalesce splits one journey
+// conversation carry `conversation.id`, a per-span coalesce splits one agent trace
 // into fragments (the bare spans fall back to their own `TraceId`). All spans of
 // a trace share a `TraceId`, so `max(...) OVER (PARTITION BY TraceId)` picks the
 // best key present *anywhere* in the trace before the fallback is considered —
@@ -54,7 +54,7 @@
 // `SpanAttributes['gen_ai.operation.name'] != ''`. That is deliberate for the
 // first cut: a materialized view only populates going forward, so an MV-first
 // build means waiting for data. When this gets slow, add `genai_spans_mv`
-// sorted by `(OrgId, JourneyId, Timestamp)` and move the coalescing into the MV
+// sorted by `(OrgId, AgentTraceId, Timestamp)` and move the coalescing into the MV
 // SQL — and keep the raw-table filter path normalizing identically, or filters
 // will return zero rows against MV-derived facet counts.
 // ---------------------------------------------------------------------------
@@ -173,12 +173,12 @@ export const GENAI_INFERENCE_OPERATIONS = [
 export const GENAI_TOOL_OPERATION = "execute_tool"
 
 /**
- * A journey whose last span landed within this many seconds of *now* is
+ * An agent trace whose last span landed within this many seconds of *now* is
  * reported as still running. GenAI spans are written when the operation ends,
  * so "no span for two minutes" is the only provider-agnostic signal available
  * — there is no in-progress marker in the conventions.
  */
-export const JOURNEY_RUNNING_GRACE_SECONDS = 120
+export const AGENT_TRACE_RUNNING_GRACE_SECONDS = 120
 
 /** Cost keys, most-standard first. None of these is semconv-blessed (see header). */
 const COST_ATTRIBUTE_KEYS = [
@@ -245,11 +245,11 @@ const contentEventCountExpr = ($: TracesAccessor) =>
 	arrayLength(CH.arrayFilter("x -> x LIKE 'gen_ai.%'", $.EventsName))
 
 /**
- * The derived `JourneyId`, resolved at TRACE granularity — see the header.
+ * The derived `AgentTraceId`, resolved at TRACE granularity — see the header.
  * `$.TraceId` is the last resort, so a single-turn trace with no conversation
- * or session id is still a (one-turn) journey.
+ * or session id is still a (one-turn) agent trace.
  */
-function journeyIdExpr($: TracesAccessor): CH.Expr<string> {
+function agentTraceIdExpr($: TracesAccessor): CH.Expr<string> {
 	const perTrace = CH.windowSpec({ partitionBy: [$.TraceId] })
 	const conversation = CH.over(CH.max_(anyAttr($, "gen_ai.conversation.id")), perTrace)
 	const session = CH.over(CH.max_(anyAttr($, "session.id")), perTrace)
@@ -263,14 +263,14 @@ function journeyIdExpr($: TracesAccessor): CH.Expr<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Per-span projection (the one source every journey query builds on)
+// Per-span projection (the one source every agent trace query builds on)
 // ---------------------------------------------------------------------------
 
-export interface JourneySpanScanOpts {
+export interface AgentTraceSpanScanOpts {
 	/**
 	 * Narrow the scan to spans of one service — the only *row-level* filter here.
-	 * Every journey-level filter is a HAVING (see `journeyHavingConditions`):
-	 * dropping spans pre-aggregation would silently change a journey's token
+	 * Every agent-trace-level filter is a HAVING (see `agentTraceHavingConditions`):
+	 * dropping spans pre-aggregation would silently change an agent trace's token
 	 * totals and turn count.
 	 */
 	serviceName?: string
@@ -278,20 +278,20 @@ export interface JourneySpanScanOpts {
 
 /**
  * Every GenAI span in the window, with the attribute churn normalized and the
- * derived `journeyId` attached.
+ * derived `agentTraceId` attached.
  *
  * Timestamps ride along as float nanoseconds (`startNs` / `endNs`) so the
  * aggregate can compute wall-clock duration across spans without a second
  * conversion; the float loses sub-microsecond precision at epoch-nanosecond
  * magnitudes, which is invisible in a millisecond output.
  */
-function journeySpans(opts: JourneySpanScanOpts = {}) {
+function agentTraceSpans(opts: AgentTraceSpanScanOpts = {}) {
 	return from(Traces)
 		.select(($) => {
 			const startNs = CH.toFloat64(CH.toUnixTimestamp64Nano($.Timestamp))
 			const costRaw = costRawExpr($)
 			return {
-				journeyId: journeyIdExpr($),
+				agentTraceId: agentTraceIdExpr($),
 				traceId: $.TraceId,
 				spanId: $.SpanId,
 				parentSpanId: $.ParentSpanId,
@@ -308,7 +308,7 @@ function journeySpans(opts: JourneySpanScanOpts = {}) {
 				requestModel: requestModelExpr($),
 				responseModel: responseModelExpr($),
 				servedModel: servedModelExpr($),
-				// `span`-prefixed because the journey aggregate sums these into
+				// `span`-prefixed because the agent trace aggregate sums these into
 				// columns the API calls `inputTokens` / `cost` / …. Reusing the name
 				// (`sum(inputTokens) AS inputTokens`) makes ClickHouse resolve the
 				// alias — not the column — inside any OTHER aggregate expression that
@@ -352,20 +352,20 @@ function journeySpans(opts: JourneySpanScanOpts = {}) {
 }
 
 /**
- * Accessor over `journeySpans`' output aliases. The DSL infers a subquery's
+ * Accessor over `agentTraceSpans`' output aliases. The DSL infers a subquery's
  * column types from its SELECT, but the aggregate and the timeline are written
  * against alias names rather than table columns, so this stays intentionally
  * loose — the compiled row shape is pinned by the exported `rowSchema`s instead.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type JourneySpanAccessor = any
+type AgentTraceSpanAccessor = any
 
 // ---------------------------------------------------------------------------
-// Journey-level aggregate
+// Agent trace-level aggregate
 // ---------------------------------------------------------------------------
 
-export interface JourneyAggregateOutput {
-	readonly journeyId: string
+export interface AgentTraceAggregateOutput {
+	readonly agentTraceId: string
 	/** Sample of the earliest span's `gen_ai.input.messages` (JSON, truncated).
 	 *  The API derives the row title from it — the first *user* message — and
 	 *  falls back down the ladder (agent → model → id) when it is `''`. */
@@ -403,18 +403,18 @@ export interface JourneyAggregateOutput {
 	readonly isRunning: number
 }
 
-function journeyAggregateSelect($: JourneySpanAccessor) {
+function agentTraceAggregateSelect($: AgentTraceSpanAccessor) {
 	const isInference = CH.inList($.operation, GENAI_INFERENCE_OPERATIONS as unknown as readonly string[])
 	const isTool = $.operation.eq(GENAI_TOOL_OPERATION)
 	const isError = $.statusCode.eq("Error")
 	const hasContent = $.inputMessages.neq("").or($.outputMessages.neq("")).or($.systemInstructions.neq(""))
 	// The earliest span that actually carries input content wins the title.
 	// Content-less spans are excluded rather than ranked last, so a fully
-	// redacted journey yields `''` — and the API falls back down the title
+	// redacted agent trace yields `''` — and the API falls back down the title
 	// ladder — instead of an empty string that merely happened to be earliest.
 	const hasInput = $.inputMessages.neq("")
 	return {
-		journeyId: $.journeyId,
+		agentTraceId: $.agentTraceId,
 		titleSource: CH.left_(argMinIf($.inputMessages, $.startNs, hasInput), CH.lit(2000)),
 		startTime: CH.min_($.timestamp),
 		endTime: CH.max_($.timestamp),
@@ -447,7 +447,7 @@ function journeyAggregateSelect($: JourneySpanAccessor) {
 		contentEventSpanCount: CH.countIf($.contentEventCount.gt(0)),
 		isRunning: CH.if_(
 			CH.max_($.timestamp).gte(
-				CH.rawExpr<string>(`now() - INTERVAL ${JOURNEY_RUNNING_GRACE_SECONDS} SECOND`),
+				CH.rawExpr<string>(`now() - INTERVAL ${AGENT_TRACE_RUNNING_GRACE_SECONDS} SECOND`),
 			),
 			CH.lit(1),
 			CH.lit(0),
@@ -455,38 +455,38 @@ function journeyAggregateSelect($: JourneySpanAccessor) {
 	}
 }
 
-/** One row per journey, before any journey-level filter. */
-function journeyAggregate(opts: JourneySpanScanOpts = {}) {
-	return fromQuery(journeySpans(opts), "s")
-		.select((($: any) => journeyAggregateSelect($)) as any)
-		.groupBy("journeyId")
+/** One row per agent trace, before any agent-trace-level filter. */
+function agentTraceAggregate(opts: AgentTraceSpanScanOpts = {}) {
+	return fromQuery(agentTraceSpans(opts), "s")
+		.select((($: any) => agentTraceAggregateSelect($)) as any)
+		.groupBy("agentTraceId")
 }
 
 // ---------------------------------------------------------------------------
-// Journey-level filters (HAVING — see JourneySpanScanOpts)
+// Agent trace-level filters (HAVING — see AgentTraceSpanScanOpts)
 // ---------------------------------------------------------------------------
 
-export type JourneyStatus = "ok" | "error" | "running"
+export type AgentTraceStatus = "ok" | "error" | "running"
 
-export interface JourneyFilterOpts {
+export interface AgentTraceFilterOpts {
 	/** Served model (`gen_ai.response.model`, falling back to the request model). */
 	model?: string
 	/** Requested model (`gen_ai.request.model`) — the router-divergence side. */
 	requestedModel?: string
 	provider?: string
-	/** `gen_ai.agent.name` present anywhere in the journey. */
+	/** `gen_ai.agent.name` present anywhere in the agent trace. */
 	agent?: string
 	/** `gen_ai.workflow.name`. */
 	workflow?: string
 	serviceName?: string
-	status?: JourneyStatus
+	status?: AgentTraceStatus
 	/** `gen_ai.response.finish_reasons` — `length` is a silent truncation. */
 	finishReason?: string
-	/** Only journeys that executed at least one tool. */
+	/** Only agent traces that executed at least one tool. */
 	hasTools?: boolean
-	/** Only journeys whose message content was stripped (privacy modes). */
+	/** Only agent traces whose message content was stripped (privacy modes). */
 	contentRedacted?: boolean
-	/** Case-insensitive substring over the title sample and the journey id. */
+	/** Case-insensitive substring over the title sample and the agent trace id. */
 	search?: string
 	durationMinMs?: number
 	durationMaxMs?: number
@@ -500,7 +500,7 @@ export interface JourneyFilterOpts {
 
 /**
  * Which filter a facet branch must drop so its own selection doesn't collapse
- * it. Every filter in `JourneyFilterOpts` belongs to exactly one of these keys
+ * it. Every filter in `AgentTraceFilterOpts` belongs to exactly one of these keys
  * — a filter with no key is one no branch can exclude, which is how a branch
  * ends up contradicting itself (its WHERE says "redacted", the inherited HAVING
  * says "not redacted", the count is 0 forever).
@@ -511,7 +511,7 @@ export interface JourneyFilterOpts {
  * describe the population narrowed by the CATEGORICAL filters only, which is
  * what makes a range selection always widenable back out.
  */
-type JourneyFacetKey =
+type AgentTraceFacetKey =
 	| "model"
 	| "requestedModel"
 	| "provider"
@@ -527,14 +527,14 @@ type JourneyFacetKey =
 const agg = <T>(alias: string): CH.Expr<T> => CH.dynamicColumn<T>(alias)
 
 /**
- * The journey-level predicate set, as HAVING conditions over the aggregate's
+ * The agent-trace-level predicate set, as HAVING conditions over the aggregate's
  * output aliases. Shared verbatim by the list and every facet branch (each
  * dropping its own dimension) — that shared construction IS the facet/filter
  * invariant, not a convention someone has to remember.
  */
-function journeyHavingConditions(
-	opts: JourneyFilterOpts,
-	exclude?: JourneyFacetKey,
+function agentTraceHavingConditions(
+	opts: AgentTraceFilterOpts,
+	exclude?: AgentTraceFacetKey,
 ): Array<CH.Condition | undefined> {
 	const models = agg<ReadonlyArray<string>>("models")
 	const requestedModels = agg<ReadonlyArray<string>>("requestedModels")
@@ -550,7 +550,7 @@ function journeyHavingConditions(
 	const totalTokens = agg<number>("totalTokens")
 	const cost = agg<number>("cost")
 	const title = agg<string>("titleSource")
-	const journeyId = agg<string>("journeyId")
+	const agentTraceId = agg<string>("agentTraceId")
 	const numeric = exclude !== "numeric"
 
 	return [
@@ -569,7 +569,7 @@ function journeyHavingConditions(
 		exclude === "finishReason"
 			? undefined
 			: CH.when(opts.finishReason, (v: string) => CH.has(finishReasons, v)),
-		// A running journey outranks its (so far) clean status; an errored one
+		// A running agent trace outranks its (so far) clean status; an errored one
 		// outranks running, so the three buckets partition the list exactly.
 		exclude === "status"
 			? undefined
@@ -591,16 +591,16 @@ function journeyHavingConditions(
 		CH.when(opts.search, (v: string) =>
 			CH.positionCaseInsensitive(title, CH.lit(v))
 				.gt(0)
-				.or(CH.positionCaseInsensitive(journeyId, CH.lit(v)).gt(0)),
+				.or(CH.positionCaseInsensitive(agentTraceId, CH.lit(v)).gt(0)),
 		),
-		// The four range filters are one exclusion group — see JourneyFacetKey.
+		// The four range filters are one exclusion group — see AgentTraceFacetKey.
 		numeric && opts.durationMinMs != null ? durationMs.gte(opts.durationMinMs) : undefined,
 		numeric && opts.durationMaxMs != null ? durationMs.lte(opts.durationMaxMs) : undefined,
 		numeric && opts.turnMin != null ? turnCount.gte(opts.turnMin) : undefined,
 		numeric && opts.turnMax != null ? turnCount.lte(opts.turnMax) : undefined,
 		numeric && opts.tokenMin != null ? totalTokens.gte(opts.tokenMin) : undefined,
 		numeric && opts.tokenMax != null ? totalTokens.lte(opts.tokenMax) : undefined,
-		// A cost bound implicitly excludes journeys with no cost attribute at all:
+		// A cost bound implicitly excludes agent traces with no cost attribute at all:
 		// an unknown cost cannot be said to fall within a bound (same reasoning as
 		// the replays duration filter and its NULL in-progress sessions).
 		numeric && opts.costMin != null
@@ -616,20 +616,20 @@ function journeyHavingConditions(
 // List query (overview page)
 // ---------------------------------------------------------------------------
 
-export type JourneySortKey = "startTime" | "duration" | "cost" | "turns" | "tokens"
+export type AgentTraceSortKey = "startTime" | "duration" | "cost" | "turns" | "tokens"
 
-export interface JourneyListOpts extends JourneyFilterOpts {
+export interface AgentTraceListOpts extends AgentTraceFilterOpts {
 	/** "most expensive" / "slowest" / "most turns" are the natural entry points
 	 *  into this data, so unlike replays the list is sortable. */
-	sort?: JourneySortKey
+	sort?: AgentTraceSortKey
 	sortDirection?: "asc" | "desc"
 	limit?: number
 	offset?: number
 }
 
-export type JourneyListOutput = JourneyAggregateOutput
+export type AgentTraceListOutput = AgentTraceAggregateOutput
 
-const SORT_COLUMN: Record<JourneySortKey, keyof JourneyAggregateOutput & string> = {
+const SORT_COLUMN: Record<AgentTraceSortKey, keyof AgentTraceAggregateOutput & string> = {
 	startTime: "startTime",
 	duration: "durationMs",
 	cost: "cost",
@@ -637,19 +637,19 @@ const SORT_COLUMN: Record<JourneySortKey, keyof JourneyAggregateOutput & string>
 	tokens: "totalTokens",
 }
 
-export function journeyListQuery(opts: JourneyListOpts = {}): CHQuery<any, JourneyListOutput, {}> {
+export function agentTraceListQuery(opts: AgentTraceListOpts = {}): CHQuery<any, AgentTraceListOutput, {}> {
 	const sortColumn = SORT_COLUMN[opts.sort ?? "startTime"]
 	const direction = opts.sortDirection ?? "desc"
-	return journeyAggregate({ serviceName: opts.serviceName })
-		.having((() => journeyHavingConditions(opts)) as any)
-		.orderBy([sortColumn, direction], ["journeyId", "desc"])
+	return agentTraceAggregate({ serviceName: opts.serviceName })
+		.having((() => agentTraceHavingConditions(opts)) as any)
+		.orderBy([sortColumn, direction], ["agentTraceId", "desc"])
 		.limit(opts.limit ?? 50)
 		.offset(opts.offset ?? 0)
-		.format("JSON") as CHQuery<any, JourneyListOutput, {}>
+		.format("JSON") as CHQuery<any, AgentTraceListOutput, {}>
 }
 
-export const journeyListRowSchema: CompiledQueryRowSchema<JourneyListOutput> = Schema.Struct({
-	journeyId: Schema.String,
+export const agentTraceListRowSchema: CompiledQueryRowSchema<AgentTraceListOutput> = Schema.Struct({
+	agentTraceId: Schema.String,
 	titleSource: Schema.String,
 	startTime: Schema.String,
 	endTime: Schema.String,
@@ -680,39 +680,39 @@ export const journeyListRowSchema: CompiledQueryRowSchema<JourneyListOutput> = S
 })
 
 // ---------------------------------------------------------------------------
-// Summary (detail header) — the same aggregate, pinned to one journey
+// Summary (detail header) — the same aggregate, pinned to one agent trace
 // ---------------------------------------------------------------------------
 
-export type JourneySummaryOutput = JourneyAggregateOutput
+export type AgentTraceSummaryOutput = AgentTraceAggregateOutput
 
 /**
  * Deliberately the *same* aggregate the list runs, filtered to one derived
- * `journeyId`: the header and the row can then never report different token
- * totals or a different turn count for the same journey.
+ * `agentTraceId`: the header and the row can then never report different token
+ * totals or a different turn count for the same agent trace.
  *
- * `journeyId` binds as a param, so the scan is still bounded only by the
+ * `agentTraceId` binds as a param, so the scan is still bounded only by the
  * caller's time window — pass the narrowest window the route knows.
  */
-export function journeySummaryQuery(opts: JourneySpanScanOpts = {}) {
-	return journeyAggregate(opts)
-		.having((() => [agg<string>("journeyId").eq(param.string("journeyId"))]) as any)
+export function agentTraceSummaryQuery(opts: AgentTraceSpanScanOpts = {}) {
+	return agentTraceAggregate(opts)
+		.having((() => [agg<string>("agentTraceId").eq(param.string("agentTraceId"))]) as any)
 		.limit(1)
-		.format("JSON") as CHQuery<any, JourneySummaryOutput, {}>
+		.format("JSON") as CHQuery<any, AgentTraceSummaryOutput, {}>
 }
 
-export const journeySummaryRowSchema: CompiledQueryRowSchema<JourneySummaryOutput> = journeyListRowSchema
+export const agentTraceSummaryRowSchema: CompiledQueryRowSchema<AgentTraceSummaryOutput> = agentTraceListRowSchema
 
 // ---------------------------------------------------------------------------
-// Timeline (detail page) — every span of one journey, in order
+// Timeline (detail page) — every span of one agent trace, in order
 // ---------------------------------------------------------------------------
 
-export interface JourneyTimelineOpts extends JourneySpanScanOpts {
+export interface AgentTraceTimelineOpts extends AgentTraceSpanScanOpts {
 	limit?: number
 	offset?: number
 }
 
-export interface JourneyTimelineOutput {
-	readonly journeyId: string
+export interface AgentTraceTimelineOutput {
+	readonly agentTraceId: string
 	readonly traceId: string
 	readonly spanId: string
 	readonly parentSpanId: string
@@ -746,7 +746,7 @@ export interface JourneyTimelineOutput {
 	readonly toolResult: string
 	/** `gen_ai.input.messages` (or legacy `gen_ai.prompt`). **Cumulative** — each
 	 *  inference span repeats the whole prior conversation. Never render verbatim
-	 *  across spans; see `buildJourneyTimeline`. `''` when redacted. */
+	 *  across spans; see `buildAgentTraceTimeline`. `''` when redacted. */
 	readonly inputMessages: string
 	readonly outputMessages: string
 	readonly systemInstructions: string
@@ -754,15 +754,15 @@ export interface JourneyTimelineOutput {
 }
 
 /**
- * All spans of one journey, ordered by `Timestamp` — messages, tool calls,
+ * All spans of one agent trace, ordered by `Timestamp` — messages, tool calls,
  * retrievals, plans, agent invocations alike. The row model stays polymorphic
  * (one row per span, `operation` discriminating) precisely so non-message
  * operations and multi-agent handoffs slot in without a rewrite.
  */
-export function journeyTimelineQuery(opts: JourneyTimelineOpts = {}) {
-	return fromQuery(journeySpans(opts), "s")
+export function agentTraceTimelineQuery(opts: AgentTraceTimelineOpts = {}) {
+	return fromQuery(agentTraceSpans(opts), "s")
 		.select((($: any) => ({
-			journeyId: $.journeyId,
+			agentTraceId: $.agentTraceId,
 			traceId: $.traceId,
 			spanId: $.spanId,
 			parentSpanId: $.parentSpanId,
@@ -799,15 +799,15 @@ export function journeyTimelineQuery(opts: JourneyTimelineOpts = {}) {
 			systemInstructions: $.systemInstructions,
 			contentEventCount: $.contentEventCount,
 		})) as any)
-		.where((($: any) => [$.journeyId.eq(param.string("journeyId"))]) as any)
+		.where((($: any) => [$.agentTraceId.eq(param.string("agentTraceId"))]) as any)
 		.orderBy(["timestamp", "asc"], ["spanId", "asc"])
 		.limit(opts.limit ?? 500)
 		.offset(opts.offset ?? 0)
-		.format("JSON") as CHQuery<any, JourneyTimelineOutput, {}>
+		.format("JSON") as CHQuery<any, AgentTraceTimelineOutput, {}>
 }
 
-export const journeyTimelineRowSchema: CompiledQueryRowSchema<JourneyTimelineOutput> = Schema.Struct({
-	journeyId: Schema.String,
+export const agentTraceTimelineRowSchema: CompiledQueryRowSchema<AgentTraceTimelineOutput> = Schema.Struct({
+	agentTraceId: Schema.String,
 	traceId: Schema.String,
 	spanId: Schema.String,
 	parentSpanId: Schema.String,
@@ -850,14 +850,14 @@ export const journeyTimelineRowSchema: CompiledQueryRowSchema<JourneyTimelineOut
 //
 // Same shape as the replays sidebar: one UNION ALL, `{name, count, facetType}`
 // per row, each categorical branch dropping its OWN dimension's filter so a
-// selected value still shows its alternatives. Counts are journeys, not spans —
-// every branch aggregates to journeys first, then counts distinct `journeyId`.
+// selected value still shows its alternatives. Counts are agent traces, not spans —
+// every branch aggregates to agent traces first, then counts distinct `agentTraceId`.
 //
-// Multi-valued dimensions (a journey can use three models) are exploded with
-// `arrayJoin` over the aggregate's array, so a journey contributes one count to
+// Multi-valued dimensions (an agent trace can use three models) are exploded with
+// `arrayJoin` over the aggregate's array, so an agent trace contributes one count to
 // each model it actually used.
 //
-// COST: twelve branches, each re-running the journey aggregate over raw
+// COST: twelve branches, each re-running the agent trace aggregate over raw
 // `traces` — and the per-span projection is repeated in each, so the compiled
 // SQL is ~90 KB (it lands verbatim in the `db.query.text` span attribute). The
 // numeric percentiles are already collapsed into one branch (see
@@ -869,9 +869,9 @@ export const journeyTimelineRowSchema: CompiledQueryRowSchema<JourneyTimelineOut
 // more dimensions.
 // ---------------------------------------------------------------------------
 
-export type JourneyFacetsOpts = JourneyFilterOpts
+export type AgentTraceFacetsOpts = AgentTraceFilterOpts
 
-export type JourneyFacetsOutput = FacetOutput
+export type AgentTraceFacetsOutput = FacetOutput
 
 /**
  * `uniq()` and `toUInt64()` are UInt64, which ClickHouse's `FORMAT JSON` quotes
@@ -880,28 +880,28 @@ export type JourneyFacetsOutput = FacetOutput
  * edge, and any wire drift degrades to a silent `NaN` instead of a tagged
  * decode error.
  */
-export const journeyFacetsRowSchema: CompiledQueryRowSchema<JourneyFacetsOutput> = Schema.Struct({
+export const agentTraceFacetsRowSchema: CompiledQueryRowSchema<AgentTraceFacetsOutput> = Schema.Struct({
 	name: Schema.String,
 	count: CHNumber,
 	facetType: Schema.String,
 })
 
-export function journeyFacetsQuery(opts: JourneyFacetsOpts = {}): CHUnionQuery<JourneyFacetsOutput> {
+export function agentTraceFacetsQuery(opts: AgentTraceFacetsOpts = {}): CHUnionQuery<AgentTraceFacetsOutput> {
 	// `serviceName` is the one filter that is also a row-level scan narrowing;
 	// its own facet branch has to drop it in BOTH places or the branch collapses.
-	const scan = (exclude?: JourneyFacetKey) => ({
+	const scan = (exclude?: AgentTraceFacetKey) => ({
 		serviceName: exclude === "service" ? undefined : opts.serviceName,
 	})
 
-	const journeys = (exclude?: JourneyFacetKey) =>
-		journeyAggregate(scan(exclude)).having((() => journeyHavingConditions(opts, exclude)) as any)
+	const agentTraces = (exclude?: AgentTraceFacetKey) =>
+		agentTraceAggregate(scan(exclude)).having((() => agentTraceHavingConditions(opts, exclude)) as any)
 
 	/** Facet over an array-valued dimension (models, providers, agents, …). */
-	const arrayFacet = (facetType: string, exclude: JourneyFacetKey, column: string, limit = 50) =>
-		fromQuery(journeys(exclude), "j")
+	const arrayFacet = (facetType: string, exclude: AgentTraceFacetKey, column: string, limit = 50) =>
+		fromQuery(agentTraces(exclude), "j")
 			.select((($: any) => ({
 				name: CH.arrayJoin<string>($[column]),
-				count: CH.uniq($.journeyId),
+				count: CH.uniq($.agentTraceId),
 				facetType: CH.lit(facetType),
 			})) as any)
 			.groupBy("name")
@@ -909,11 +909,11 @@ export function journeyFacetsQuery(opts: JourneyFacetsOpts = {}): CHUnionQuery<J
 			.limit(limit)
 
 	/** Facet over a scalar dimension. */
-	const scalarFacet = (facetType: string, exclude: JourneyFacetKey, column: string, limit = 50) =>
-		fromQuery(journeys(exclude), "j")
+	const scalarFacet = (facetType: string, exclude: AgentTraceFacetKey, column: string, limit = 50) =>
+		fromQuery(agentTraces(exclude), "j")
 			.select((($: any) => ({
 				name: $[column],
-				count: CH.uniq($.journeyId),
+				count: CH.uniq($.agentTraceId),
 				facetType: CH.lit(facetType),
 			})) as any)
 			.where((($: any) => [$[column].neq("")]) as any)
@@ -923,10 +923,10 @@ export function journeyFacetsQuery(opts: JourneyFacetsOpts = {}): CHUnionQuery<J
 
 	/** One row per status bucket, from a single pass over the unfiltered-by-status set. */
 	const statusFacet = (name: string, predicate: ($: any) => CH.Condition) =>
-		fromQuery(journeys("status"), "j")
+		fromQuery(agentTraces("status"), "j")
 			.select((($: any) => ({
 				name: CH.lit(name),
-				count: CH.uniq($.journeyId),
+				count: CH.uniq($.agentTraceId),
 				facetType: CH.lit("status"),
 			})) as any)
 			.where((($: any) => [predicate($)]) as any)
@@ -939,12 +939,12 @@ export function journeyFacetsQuery(opts: JourneyFacetsOpts = {}): CHUnionQuery<J
 			pow(2, floor_(log2(CH.greatest_($.durationMs, CH.lit(1000)).div(1000)).mul(2)).div(2)).mul(1000),
 		)
 
-	// Excludes the numeric group: a histogram drawn from journeys that already
+	// Excludes the numeric group: a histogram drawn from agent traces that already
 	// passed the duration filter shows one occupied bucket and no way back out.
-	const durationHistogram = fromQuery(journeys("numeric"), "j")
+	const durationHistogram = fromQuery(agentTraces("numeric"), "j")
 		.select((($: any) => ({
 			name: CH.toString_(CH.toUInt64(bucketFloorMs($))),
-			count: CH.uniq($.journeyId),
+			count: CH.uniq($.agentTraceId),
 			facetType: CH.lit("durationBucket"),
 		})) as any)
 		.groupBy("name")
@@ -961,35 +961,35 @@ export function journeyFacetsQuery(opts: JourneyFacetsOpts = {}): CHUnionQuery<J
 		statusFacet("running", ($) => $.errorCount.eq(0).and($.isRunning.eq(1))),
 		statusFacet("ok", ($) => $.errorCount.eq(0).and($.isRunning.eq(0))),
 		// Toggle counts. Each drops only its own filter, like the status branches.
-		fromQuery(journeys("tools"), "j")
+		fromQuery(agentTraces("tools"), "j")
 			.select((($: any) => ({
 				name: CH.lit("tools"),
-				count: CH.uniq($.journeyId),
+				count: CH.uniq($.agentTraceId),
 				facetType: CH.lit("tools"),
 			})) as any)
 			.where((($: any) => [$.toolCallCount.gt(0)]) as any),
 		// Its own `contentRedacted` filter is dropped here for the same reason the
 		// status branches drop theirs: with `contentRedacted: false` active, an
 		// inherited `contentSpanCount > 0` would contradict this branch's own
-		// `contentSpanCount = 0` and the toggle would read 0 journeys forever.
-		fromQuery(journeys("redacted"), "j")
+		// `contentSpanCount = 0` and the toggle would read 0 agent traces forever.
+		fromQuery(agentTraces("redacted"), "j")
 			.select((($: any) => ({
 				name: CH.lit("redacted"),
-				count: CH.uniq($.journeyId),
+				count: CH.uniq($.agentTraceId),
 				facetType: CH.lit("redacted"),
 			})) as any)
 			.where((($: any) => [$.contentSpanCount.eq(0)]) as any),
 		durationHistogram,
-		numericStatsBranch(journeys("numeric")),
-	).format("JSON") as CHUnionQuery<JourneyFacetsOutput>
+		numericStatsBranch(agentTraces("numeric")),
+	).format("JSON") as CHUnionQuery<AgentTraceFacetsOutput>
 }
 
 /**
  * All eight numeric percentiles — duration, turns, tokens, cost — as one branch
- * over ONE pass of the journey aggregate.
+ * over ONE pass of the agent trace aggregate.
  *
  * The obvious spelling is eight `quantile` branches, but every branch of this
- * UNION re-runs the whole journey aggregate (a full `traces` scan over the
+ * UNION re-runs the whole agent trace aggregate (a full `traces` scan over the
  * window), and they all describe the *same* population. So the quantiles are
  * computed together, packed into an array of `(name, facetType, value)` tuples,
  * and unpacked with a single `arrayJoin` — 8 scans become 1, and the compiled
@@ -1005,16 +1005,16 @@ export function journeyFacetsQuery(opts: JourneyFacetsOpts = {}): CHUnionQuery<J
  * to 0. The client divides by 1e6. `ifNotFinite` guards the empty window, where
  * `quantile` returns nan and the cast would throw.
  */
-function numericStatsBranch(journeys: any) {
-	const stats = fromQuery(journeys, "j").select((($: any) => ({
+function numericStatsBranch(agentTraces: any) {
+	const stats = fromQuery(agentTraces, "j").select((($: any) => ({
 		durationP50: CH.quantile(0.5)($.durationMs),
 		durationP95: CH.quantile(0.95)($.durationMs),
 		turnP50: CH.quantile(0.5)($.turnCount),
 		turnP95: CH.quantile(0.95)($.turnCount),
 		tokenP50: CH.quantile(0.5)($.totalTokens),
 		tokenP95: CH.quantile(0.95)($.totalTokens),
-		// Cost percentiles describe only journeys whose emitter sent a cost at
-		// all — a journey with unknown cost is not a $0 journey.
+		// Cost percentiles describe only agent traces whose emitter sent a cost at
+		// all — an agent trace with unknown cost is not a $0 agent trace.
 		costP50: quantileIf(0.5, $.cost, $.costSpanCount.gt(0)).mul(1_000_000),
 		costP95: quantileIf(0.95, $.cost, $.costSpanCount.gt(0)).mul(1_000_000),
 	})) as any)

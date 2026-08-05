@@ -1,12 +1,12 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CurrentTenant,
-	JOURNEY_DETAIL_WINDOW_MS,
-	JOURNEY_TIMELINE_SPAN_CAP,
-	JourneyFacetsResponse,
-	JourneySummaryResponse,
-	JourneyTimelineResponse,
-	ListJourneysResponse,
+	AGENT_TRACE_DETAIL_WINDOW_MS,
+	AGENT_TRACE_TIMELINE_SPAN_CAP,
+	AgentTraceFacetsResponse,
+	AgentTraceSummaryResponse,
+	AgentTraceTimelineResponse,
+	ListAgentTracesResponse,
 	MapleApi,
 } from "@maple/domain/http"
 import { Clock, Effect } from "effect"
@@ -14,17 +14,17 @@ import { CH } from "@maple/query-engine"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
 // ---------------------------------------------------------------------------
-// Agentic Journeys read API
+// Agent Traces read API
 //
-// Four endpoints over the derived-journey queries in `@maple/query-engine/ch`.
-// No datasource of its own: a journey is `traces` rows grouped by a `JourneyId`
+// Four endpoints over the derived-agent trace queries in `@maple/query-engine/ch`.
+// No datasource of its own: an agent trace is `traces` rows grouped by an `AgentTraceId`
 // derived at query time (`gen_ai.conversation.id` → `session.id` → `TraceId`).
 //
 // Three things this layer owns, because every client would otherwise redo them:
 //
 //   - the **title ladder** (first user message → agent → model → id),
 //   - **cost presence** (no cost attribute ⇒ `null`, never `0`),
-//   - the **cumulative-input dedupe** and tool-call nesting (`buildJourneyTimeline`).
+//   - the **cumulative-input dedupe** and tool-call nesting (`buildAgentTraceTimeline`).
 // ---------------------------------------------------------------------------
 
 const warehouseDateTime = (ms: number): string => new Date(ms).toISOString().slice(0, 19).replace("T", " ")
@@ -32,12 +32,12 @@ const warehouseDateTime = (ms: number): string => new Date(ms).toISOString().sli
 const truncate = (value: string, max: number) => (value.length <= max ? value : `${value.slice(0, max)}…`)
 
 /**
- * The first *user* message of the journey, from the earliest span's (cumulative)
+ * The first *user* message of the agent trace, from the earliest span's (cumulative)
  * `gen_ai.input.messages`.
  *
  * Returns `null` — not `""` — when there is none, which is the common case:
  * privacy modes strip exactly this. The row then falls back to agent → model →
- * journey id client-side, so no row ever renders as blank.
+ * agent trace id client-side, so no row ever renders as blank.
  */
 const deriveTitle = (titleSource: string): string | null => {
 	const messages = CH.parseGenAiMessages(titleSource, "user")
@@ -48,13 +48,13 @@ const deriveTitle = (titleSource: string): string | null => {
 }
 
 /**
- * Numbers arrive already decoded — `journeyListRowSchema` runs every aggregate
+ * Numbers arrive already decoded — `agentTraceListRowSchema` runs every aggregate
  * through `CH.CHNumber`, which accepts both the quoted and unquoted 64-bit wire
  * shapes. Re-coercing with `Number(...)` here would only hide a future drift as
  * `NaN` instead of failing the decode with a tagged error.
  */
-const toListItem = (row: CH.JourneyListOutput) => ({
-	journeyId: row.journeyId,
+const toListItem = (row: CH.AgentTraceListOutput) => ({
+	agentTraceId: row.agentTraceId,
 	title: deriveTitle(row.titleSource),
 	startTime: row.startTime,
 	endTime: row.endTime,
@@ -70,7 +70,7 @@ const toListItem = (row: CH.JourneyListOutput) => ({
 	totalTokens: row.totalTokens,
 	cachedInputTokens: row.cachedInputTokens,
 	reasoningTokens: row.reasoningTokens,
-	// Presence, not magnitude, decides null: a journey whose emitter never sent
+	// Presence, not magnitude, decides null: an agent trace whose emitter never sent
 	// a cost is unknown-cost, and the header omits the stat instead of $0.00.
 	cost: row.costSpanCount > 0 ? row.cost : null,
 	models: row.models,
@@ -80,7 +80,7 @@ const toListItem = (row: CH.JourneyListOutput) => ({
 	workflowName: row.workflowName,
 	finishReasons: row.finishReasons,
 	serviceName: row.serviceName,
-	// Error wins over running: a journey that already failed is not "in progress"
+	// Error wins over running: an agent trace that already failed is not "in progress"
 	// just because a span landed a minute ago. Same precedence as the SQL filter.
 	status:
 		row.errorCount > 0
@@ -92,17 +92,17 @@ const toListItem = (row: CH.JourneyListOutput) => ({
 	contentInEvents: row.contentSpanCount === 0 && row.contentEventSpanCount > 0,
 })
 
-export const HttpGenAiJourneysLive = HttpApiBuilder.group(MapleApi, "genaiJourneys", (handlers) =>
+export const HttpGenAiAgentTracesLive = HttpApiBuilder.group(MapleApi, "genaiAgentTraces", (handlers) =>
 	Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService
 
 		return handlers
-			.handle("listJourneys", ({ payload }) =>
+			.handle("listAgentTraces", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
 					const compiled = CH.compile(
-						CH.journeyListQuery({
+						CH.agentTraceListQuery({
 							model: payload.model,
 							requestedModel: payload.requestedModel,
 							provider: payload.provider,
@@ -128,13 +128,13 @@ export const HttpGenAiJourneysLive = HttpApiBuilder.group(MapleApi, "genaiJourne
 							offset: payload.offset,
 						}),
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-						{ rowSchema: CH.journeyListRowSchema },
+						{ rowSchema: CH.agentTraceListRowSchema },
 					)
 					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 						profile: "list",
-						context: "listJourneys",
+						context: "listAgentTraces",
 					})
-					return new ListJourneysResponse({ data: rows.map(toListItem) })
+					return new ListAgentTracesResponse({ data: rows.map(toListItem) })
 				}),
 			)
 			.handle("facets", ({ payload }) =>
@@ -142,7 +142,7 @@ export const HttpGenAiJourneysLive = HttpApiBuilder.group(MapleApi, "genaiJourne
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
 					const compiled = CH.compileUnion(
-						CH.journeyFacetsQuery({
+						CH.agentTraceFacetsQuery({
 							model: payload.model,
 							requestedModel: payload.requestedModel,
 							provider: payload.provider,
@@ -164,13 +164,13 @@ export const HttpGenAiJourneysLive = HttpApiBuilder.group(MapleApi, "genaiJourne
 							costMax: payload.costMax,
 						}),
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
-						{ rowSchema: CH.journeyFacetsRowSchema },
+						{ rowSchema: CH.agentTraceFacetsRowSchema },
 					)
 					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 						profile: "list",
-						context: "journeyFacets",
+						context: "agentTraceFacets",
 					})
-					// Counts arrive decoded: the query declares `journeyFacetsRowSchema`,
+					// Counts arrive decoded: the query declares `agentTraceFacetsRowSchema`,
 					// whose `CH.CHNumber` accepts both wire shapes (ClickHouse quotes
 					// 64-bit aggregates as JSON strings, Tinybird returns numbers). A
 					// `Number(...)` at the edge would turn any future drift into a
@@ -183,7 +183,7 @@ export const HttpGenAiJourneysLive = HttpApiBuilder.group(MapleApi, "genaiJourne
 						rows.find((r) => r.facetType === facetType && r.name === name)?.count ?? 0
 					const toggle = (facetType: string) =>
 						rows.find((r) => r.facetType === facetType)?.count ?? 0
-					return new JourneyFacetsResponse({
+					return new AgentTraceFacetsResponse({
 						models: pick("model"),
 						providers: pick("provider"),
 						agents: pick("agent"),
@@ -207,71 +207,71 @@ export const HttpGenAiJourneysLive = HttpApiBuilder.group(MapleApi, "genaiJourne
 					})
 				}),
 			)
-			.handle("journeySummary", ({ payload }) =>
+			.handle("agentTraceSummary", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({
 						orgId: tenant.orgId,
-						"maple.journey.id": payload.journeyId,
+						"maple.agent_trace.id": payload.agentTraceId,
 					})
 					const now = yield* Clock.currentTimeMillis
-					const startTime = payload.startTime ?? warehouseDateTime(now - JOURNEY_DETAIL_WINDOW_MS)
+					const startTime = payload.startTime ?? warehouseDateTime(now - AGENT_TRACE_DETAIL_WINDOW_MS)
 					const endTime = payload.endTime ?? warehouseDateTime(now)
 					const compiled = CH.compile(
-						CH.journeySummaryQuery(),
-						{ orgId: tenant.orgId, startTime, endTime, journeyId: payload.journeyId },
-						{ rowSchema: CH.journeySummaryRowSchema },
+						CH.agentTraceSummaryQuery(),
+						{ orgId: tenant.orgId, startTime, endTime, agentTraceId: payload.agentTraceId },
+						{ rowSchema: CH.agentTraceSummaryRowSchema },
 					)
 					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 						profile: "aggregation",
-						context: "journeySummary",
+						context: "agentTraceSummary",
 					})
 					const row = rows[0]
-					return new JourneySummaryResponse({ data: row ? toListItem(row) : null })
+					return new AgentTraceSummaryResponse({ data: row ? toListItem(row) : null })
 				}),
 			)
-			.handle("journeyTimeline", ({ payload }) =>
+			.handle("agentTraceTimeline", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({
 						orgId: tenant.orgId,
-						"maple.journey.id": payload.journeyId,
+						"maple.agent_trace.id": payload.agentTraceId,
 					})
 					const now = yield* Clock.currentTimeMillis
-					const startTime = payload.startTime ?? warehouseDateTime(now - JOURNEY_DETAIL_WINDOW_MS)
+					const startTime = payload.startTime ?? warehouseDateTime(now - AGENT_TRACE_DETAIL_WINDOW_MS)
 					const endTime = payload.endTime ?? warehouseDateTime(now)
 					const limit = Math.min(
-						payload.limit ?? JOURNEY_TIMELINE_SPAN_CAP,
-						JOURNEY_TIMELINE_SPAN_CAP,
+						payload.limit ?? AGENT_TRACE_TIMELINE_SPAN_CAP,
+						AGENT_TRACE_TIMELINE_SPAN_CAP,
 					)
 					const compiled = CH.compile(
-						CH.journeyTimelineQuery({ limit, offset: payload.offset }),
-						{ orgId: tenant.orgId, startTime, endTime, journeyId: payload.journeyId },
-						{ rowSchema: CH.journeyTimelineRowSchema },
+						CH.agentTraceTimelineQuery({ limit, offset: payload.offset }),
+						{ orgId: tenant.orgId, startTime, endTime, agentTraceId: payload.agentTraceId },
+						{ rowSchema: CH.agentTraceTimelineRowSchema },
 					)
 					const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 						profile: "list",
-						context: "journeyTimeline",
+						context: "agentTraceTimeline",
 					})
 					// Cumulative-input dedupe + tool-call nesting happen here, once,
-					// rather than in every client that reads a journey. It is a
+					// rather than in every client that reads an agent trace. It is a
 					// multi-megabyte JSON.parse over every message-bearing span, so it
-					// gets its own span — otherwise a slow journey detail looks like a
+					// gets its own span — otherwise a slow agent trace detail looks like a
 					// slow warehouse query and the CPU time is invisible.
-					const events = yield* Effect.sync(() => CH.buildJourneyTimeline(rows)).pipe(
-						Effect.withSpan("buildJourneyTimeline", {
+					const events = yield* Effect.sync(() => CH.buildAgentTraceTimeline(rows)).pipe(
+						Effect.withSpan("buildAgentTraceTimeline", {
 							attributes: {
-								"maple.journey.id": payload.journeyId,
-								"maple.journey.span_count": rows.length,
+								"maple.agent_trace.id": payload.agentTraceId,
+								"maple.agentTrace.span_count": rows.length,
 							},
 						}),
 					)
 					yield* Effect.annotateCurrentSpan({
-						"maple.journey.span_count": rows.length,
-						"maple.journey.event_count": events.length,
-						"maple.journey.truncated": rows.length >= limit,
+						"maple.agentTrace.span_count": rows.length,
+						"maple.agentTrace.event_count": events.length,
+						"maple.agentTrace.truncated": rows.length >= limit,
 					})
-					return new JourneyTimelineResponse({
+					return new AgentTraceTimelineResponse({
 						events,
 						spanCount: rows.length,
 						truncated: rows.length >= limit,

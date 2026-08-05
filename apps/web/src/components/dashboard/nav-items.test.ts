@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest"
-import { isNavItemActive, isPathActive, navGroups, paletteNavItems, type NavItem } from "./nav-items"
+import {
+	isNavItemActive,
+	isPathActive,
+	navGroups,
+	paletteNavItems,
+	type NavFlags,
+	type NavItem,
+} from "./nav-items"
 
-const enabled = { infraEnabled: true }
-const gated = { infraEnabled: false }
+const enabled = { infraEnabled: true, agentTracingEnabled: true }
+const gated = { infraEnabled: false, agentTracingEnabled: false }
 
-function findItem(flags: { infraEnabled: boolean }, title: string): NavItem {
+function findItem(flags: NavFlags, title: string): NavItem {
 	const item = navGroups(flags)
 		.flatMap((group) => group.items)
 		.find((candidate) => candidate.title === title)
@@ -34,7 +41,7 @@ describe("isPathActive", () => {
 describe("isNavItemActive", () => {
 	it("keeps Explore active on every signal, not just its own href", () => {
 		const explore = findItem(enabled, "Explore")
-		for (const path of ["/traces", "/logs", "/metrics", "/replays"]) {
+		for (const path of ["/traces", "/logs", "/metrics", "/replays", "/agent-traces"]) {
 			expect(isNavItemActive(path, explore)).toBe(true)
 		}
 		expect(isNavItemActive("/services", explore)).toBe(false)
@@ -97,6 +104,20 @@ describe("navGroups", () => {
 		expect(infra.subItems?.map((sub) => sub.title)).toEqual(["Cloudflare", "PlanetScale"])
 		expect(infra.href).toBe("/infra/cloudflare")
 	})
+
+	it("drops only Agent Traces from Explore when the agent_tracing flag is off", () => {
+		// Explore is not the gated thing — it keeps its href (the Traces page) and
+		// its other four signals, so the section behaves identically for an org
+		// that never gets the flag.
+		const explore = findItem(gated, "Explore")
+		expect(explore.subItems?.map((sub) => sub.title)).toEqual(["Traces", "Logs", "Metrics", "Replays"])
+		expect(explore.href).toBe("/traces")
+	})
+
+	it("offers Agent Traces once the flag is on", () => {
+		const explore = findItem(enabled, "Explore")
+		expect(explore.subItems?.map((sub) => sub.href)).toContain("/agent-traces")
+	})
 })
 
 describe("paletteNavItems", () => {
@@ -107,6 +128,7 @@ describe("paletteNavItems", () => {
 			"Logs",
 			"Metrics",
 			"Replays",
+			"Agent Traces",
 			"Hosts",
 			"K8s Pods",
 			"K8s Nodes",
@@ -133,5 +155,13 @@ describe("paletteNavItems", () => {
 		const titles = paletteNavItems(gated).map((entry) => entry.title)
 		expect(titles).not.toContain("K8s Pods")
 		expect(titles).toContain("Cloudflare")
+	})
+
+	it("drops Agent Traces when the agent_tracing flag is off", () => {
+		// ⌘K is the other way into a page the sidebar hides — leaving the entry
+		// here would land a gated org on the route's redirect.
+		const titles = paletteNavItems(gated).map((entry) => entry.title)
+		expect(titles).not.toContain("Agent Traces")
+		expect(titles).toContain("Traces")
 	})
 })

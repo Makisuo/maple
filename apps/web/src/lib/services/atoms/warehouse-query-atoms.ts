@@ -102,7 +102,7 @@ import {
 } from "@/api/warehouse/traces"
 import { getQueryBuilderTimeseries } from "@/api/warehouse/query-builder-timeseries"
 import { getQueryBuilderBreakdown } from "@/api/warehouse/query-builder-breakdown"
-import { getJourneyFacets, getJourneySummary, getJourneyTimeline, listJourneys } from "@/api/warehouse/genai"
+import { getAgentTraceFacets, getAgentTraceSummary, getAgentTraceTimeline, listAgentTraces } from "@/api/warehouse/genai"
 import {
 	getReplay,
 	getReplayEvents,
@@ -276,25 +276,25 @@ export const getReplaysForTraceResultAtom = makeQueryAtomFamily(getReplaysForTra
 	staleTime: 60_000,
 })
 
-// --- Agentic journeys -------------------------------------------------------
+// --- Agentic agent traces -------------------------------------------------------
 // Same cadence as the replays list/facets pair they mirror.
 
-export const listJourneysResultAtom = makeQueryAtomFamily(listJourneys, {
+export const listAgentTracesResultAtom = makeQueryAtomFamily(listAgentTraces, {
 	staleTime: 30_000,
 })
 
-export const journeyFacetsResultAtom = makeQueryAtomFamily(getJourneyFacets, {
+export const agentTraceFacetsResultAtom = makeQueryAtomFamily(getAgentTraceFacets, {
 	staleTime: 30_000,
 })
 
-export const getJourneySummaryResultAtom = makeQueryAtomFamily(getJourneySummary, {
+export const getAgentTraceSummaryResultAtom = makeQueryAtomFamily(getAgentTraceSummary, {
 	staleTime: 60_000,
 })
 
-// A journey's spans are near-immutable once ingested (a running journey grows,
+// An agent trace's spans are near-immutable once ingested (a running agent trace grows,
 // but only at the tail), so hold the assembled timeline across back-navigation
 // rather than refetching on every mount.
-export const getJourneyTimelineResultAtom = makeQueryAtomFamily(getJourneyTimeline, {
+export const getAgentTraceTimelineResultAtom = makeQueryAtomFamily(getAgentTraceTimeline, {
 	staleTime: 60_000,
 })
 

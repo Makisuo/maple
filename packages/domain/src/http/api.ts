@@ -9,7 +9,7 @@ import { DashboardsApiGroup } from "./dashboards"
 import { DemoApiGroup } from "./demo"
 import { DigestApiGroup } from "./digest"
 import { ErrorsApiGroup } from "./errors"
-import { GenAiJourneysApiGroup } from "./genai"
+import { GenAiAgentTracesApiGroup } from "./genai"
 import { IngestAttributeMappingsApiGroup } from "./ingest-attribute-mappings"
 import { IngestKeysApiGroup } from "./ingest-keys"
 import { IntegrationsApiGroup } from "./integrations"
@@ -36,7 +36,7 @@ export class MapleApi extends HttpApi.make("MapleApi")
 	.add(DemoApiGroup)
 	.add(DigestApiGroup)
 	.add(ErrorsApiGroup)
-	.add(GenAiJourneysApiGroup)
+	.add(GenAiAgentTracesApiGroup)
 	.add(IngestAttributeMappingsApiGroup)
 	.add(IngestKeysApiGroup)
 	.add(IntegrationsApiGroup)

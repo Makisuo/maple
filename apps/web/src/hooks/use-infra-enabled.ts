@@ -1,5 +1,4 @@
-import { useOrganization } from "@clerk/clerk-react"
-import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
+import { useOrgFeatureFlag } from "@/hooks/use-org-feature-flag"
 
 /**
  * Gates the Infrastructure feature.
@@ -9,15 +8,5 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
  * publicMetadata.
  */
 export function useInfraEnabled(): boolean {
-	if (import.meta.env.DEV) return true
-	if (!isClerkAuthEnabled) return true
-
-	// Guarded by the build-time `isClerkAuthEnabled` constant above: in
-	// self-hosted builds there is no ClerkProvider, so calling this hook
-	// unconditionally would crash. The branch is statically resolved per build.
-	// oxlint-disable-next-line react-doctor/rules-of-hooks
-	const { organization, isLoaded } = useOrganization()
-	if (!isLoaded) return false
-
-	return organization?.publicMetadata?.infra_monitoring === true
+	return useOrgFeatureFlag("infra_monitoring")
 }

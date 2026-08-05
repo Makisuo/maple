@@ -29,6 +29,7 @@ import { paletteNavItems } from "@/components/dashboard/nav-items"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
+import { useAgentTracingEnabled } from "@/hooks/use-agent-tracing-enabled"
 import { useAtomValue } from "@/lib/effect-atom"
 import { Result } from "@/lib/effect-atom"
 import { getTracesFacetValuesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -115,6 +116,7 @@ function PaletteContent({
 	const { dashboards } = useDashboardsRead()
 	const { favorites } = useDashboardPreferences()
 	const infraEnabled = useInfraEnabled()
+	const agentTracingEnabled = useAgentTracingEnabled()
 	const servicesFacetResult = useAtomValue(getTracesFacetValuesResultAtom({ data: { facet: "service" } }))
 	const serviceNames = Result.builder(servicesFacetResult)
 		.onSuccess((r) => r.data.map((item) => item.name))
@@ -142,7 +144,7 @@ function PaletteContent({
 		// the K8s lists and the integration pages are all reachable by name here,
 		// which is what lets the sidebar fold them into two sections.
 		const navigation: PaletteEntry[] = [
-			...paletteNavItems({ infraEnabled }).map((item) => ({
+			...paletteNavItems({ infraEnabled, agentTracingEnabled }).map((item) => ({
 				id: item.id,
 				title: item.title,
 				group: "Navigation" as const,
@@ -213,7 +215,16 @@ function PaletteContent({
 		]
 
 		return [...navigation, ...serviceEntries, ...dashboardEntries, ...actions]
-	}, [dashboards, favorites, infraEnabled, serviceNames, theme, setTheme, onShowShortcuts])
+	}, [
+		dashboards,
+		favorites,
+		infraEnabled,
+		agentTracingEnabled,
+		serviceNames,
+		theme,
+		setTheme,
+		onShowShortcuts,
+	])
 
 	const fuse = useMemo(() => new Fuse(entries, FUSE_OPTIONS), [entries])
 

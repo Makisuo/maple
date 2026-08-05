@@ -17,13 +17,13 @@
  * Pass real 40-char SHAs (`--shas`) — or let it pull recent ones from `git log` —
  * so the hover card can resolve them to actual commit messages via the GitHub app.
  *
- * The second use case is the **agentic journeys** UI: a fixed set of synthetic
- * GenAI journeys (`gen_ai.*` spans on `service.name=agent-service`) covering every
- * state the journey view has to render — cumulative multi-turn message arrays,
+ * The second use case is the **agent traces** UI: a fixed set of synthetic
+ * GenAI agent traces (`gen_ai.*` spans on `service.name=agent-service`) covering every
+ * state the agent trace view has to render — cumulative multi-turn message arrays,
  * parallel tool calls with one failure, fully redacted content, a mid-conversation
  * model switch, agent/workflow handoffs, legacy attribute names, and a still-running
- * journey. `--journeys <n>` emits the whole set n times (default 1, `--no-journeys`
- * to skip); the run prints each fixture's journey id so you can open it by URL.
+ * agent trace. `--agent traces <n>` emits the whole set n times (default 1, `--no-agent traces`
+ * to skip); the run prints each fixture's agent trace id so you can open it by URL.
  *
  * Examples:
  *   # The "improve the commit-SHAs UI" scenario: 3 SHAs 10 min apart, each with a
@@ -38,8 +38,8 @@
  *   # Inspect the payload without sending anything:
  *   bun scripts/ingest-dummy.ts --traces-per-sha 2 --dry-run
  *
- *   # Just the GenAI journey fixtures (no commit-SHA traces):
- *   bun scripts/ingest-dummy.ts --traces-per-sha 0 --journeys 1
+ *   # Just the GenAI agent trace fixtures (no commit-SHA traces):
+ *   bun scripts/ingest-dummy.ts --traces-per-sha 0 --agent traces 1
  *
  * Wire format (verified against opentelemetry-proto 0.31 `with-serde`, the crate
  * the gateway decodes JSON with): camelCase keys, trace/span ids are lowercase
@@ -173,7 +173,7 @@ interface Options {
 	errorRate: number
 	spread: number
 	anchor: number
-	journeySets: number
+	agentTraceSets: number
 	dryRun: boolean
 	quiet: boolean
 }
@@ -344,11 +344,11 @@ const generateForSha = (sha: string, at: number, opts: Options): GeneratedSha =>
 	return { sha, at, spans, logs, traceCount, errorCount }
 }
 
-// ── GenAI "agentic journey" fixtures ────────────────────────────────────────
-// A *journey* is one end-to-end agent conversation. The warehouse query
+// ── GenAI "agentic agent trace" fixtures ────────────────────────────────────────
+// A *agent trace* is one end-to-end agent conversation. The warehouse query
 // (`packages/query-engine/src/ch/queries/genai.ts`) reconstructs it from raw
 // spans: it keeps every span whose `gen_ai.operation.name` is non-empty — so
-// EVERY span below sets it — and groups them by a derived JourneyId that
+// EVERY span below sets it — and groups them by a derived AgentTraceId that
 // coalesces `gen_ai.conversation.id` → `session.id` → `TraceId`, resolved per
 // trace. The fixtures below deliberately exercise all three rungs of that
 // ladder, `session.id` in both the span and the resource map, and both
@@ -359,20 +359,20 @@ const generateForSha = (sha: string, at: number, opts: Options): GeneratedSha =>
 // (`gen_ai.usage.cost`), which is what real emitters send and what
 // `toFloat64OrZero` expects.
 
-const JOURNEY_SERVICE = "agent-service"
-/** A journey whose last span is inside this window renders as "running". */
-const JOURNEY_RUNNING_GRACE_MS = 120_000
+const AGENT_TRACE_SERVICE = "agent-service"
+/** An agent trace whose last span is inside this window renders as "running". */
+const AGENT_TRACE_RUNNING_GRACE_MS = 120_000
 
-/** Which rung of the JourneyId ladder a fixture lands on. */
-type JourneyIdKind = "conversation" | "session" | "trace"
+/** Which rung of the AgentTraceId ladder a fixture lands on. */
+type AgentTraceIdKind = "conversation" | "session" | "trace"
 
-interface GeneratedJourney {
+interface GeneratedAgentTrace {
 	fixture: string
-	/** What a dev opens the journey by — the derived JourneyId. */
+	/** What a dev opens the agent trace by — the derived AgentTraceId. */
 	id: string
-	idKind: JourneyIdKind
+	idKind: AgentTraceIdKind
 	note: string
-	/** Extra *resource* attributes for this journey (e.g. a resource `session.id`). */
+	/** Extra *resource* attributes for this agent trace (e.g. a resource `session.id`). */
 	resourceExtra: Record<string, unknown>[]
 	spans: Record<string, unknown>[]
 	logs: Record<string, unknown>[]
@@ -411,7 +411,7 @@ const thinkTime = (): number => randInt(3000, 40_000)
 const conversationId = (): string => `conv_${randomBytes(8).toString("hex")}`
 const sessionIdValue = (): string => `sess_${randomBytes(8).toString("hex")}`
 
-interface JourneySpanSpec {
+interface AgentTraceSpanSpec {
 	traceId: string
 	spanId?: string
 	parentSpanId?: string
@@ -425,7 +425,7 @@ interface JourneySpanSpec {
 	events?: Record<string, unknown>[]
 }
 
-const journeySpan = (spec: JourneySpanSpec): Record<string, unknown> => {
+const agentTraceSpan = (spec: AgentTraceSpanSpec): Record<string, unknown> => {
 	const span: Record<string, unknown> = {
 		traceId: spec.traceId,
 		spanId: spec.spanId ?? spanId(),
@@ -492,11 +492,11 @@ const SYSTEM_PROMPT =
 	"You are Maple's observability copilot. Answer with concrete spans, services and metrics; " +
 	"call tools before speculating."
 
-/** Scatter a journey's start somewhere in the last ~2h (before the anchor). */
-const journeyStart = (opts: Options): number => opts.anchor - randInt(10, 115) * 60_000
+/** Scatter an agent trace's start somewhere in the last ~2h (before the anchor). */
+const agentTraceStart = (opts: Options): number => opts.anchor - randInt(10, 115) * 60_000
 
 /** Earliest `startTimeUnixNano` across a fixture's spans, back in epoch ms. */
-const journeyStartOf = (spans: Record<string, unknown>[]): number => {
+const agentTraceStartOf = (spans: Record<string, unknown>[]): number => {
 	let min = Number.POSITIVE_INFINITY
 	for (const s of spans) min = Math.min(min, Number(BigInt(s.startTimeUnixNano as string) / 1_000_000n))
 	return Number.isFinite(min) ? min : Date.now()
@@ -529,13 +529,13 @@ const CUMULATIVE_TURNS: ReadonlyArray<{ user: string; assistant: string }> = [
 	},
 ]
 
-const journeyMultiTurnCumulative = (opts: Options): GeneratedJourney => {
+const agentTraceMultiTurnCumulative = (opts: Options): GeneratedAgentTrace => {
 	const convId = conversationId()
 	const spans: Record<string, unknown>[] = []
 	const logs: Record<string, unknown>[] = []
 	// The conversation as the model sees it: every turn's input repeats ALL of it.
 	const history: ChatMessage[] = []
-	let at = journeyStart(opts)
+	let at = agentTraceStart(opts)
 
 	CUMULATIVE_TURNS.forEach((turn, i) => {
 		history.push(textMessage("user", turn.user))
@@ -551,7 +551,7 @@ const journeyMultiTurnCumulative = (opts: Options): GeneratedJourney => {
 		const inputTokens = 320 + i * 460 + randInt(0, 40)
 		const outputTokens = randInt(90, 260)
 		spans.push(
-			journeySpan({
+			agentTraceSpan({
 				traceId: tid,
 				spanId: sid,
 				name: "chat gpt-4o",
@@ -594,19 +594,19 @@ const journeyMultiTurnCumulative = (opts: Options): GeneratedJourney => {
 		logs,
 		traceCount: CUMULATIVE_TURNS.length,
 		errorCount: 0,
-		startedAt: journeyStartOf(spans),
+		startedAt: agentTraceStartOf(spans),
 	}
 }
 
 // ── (b) parallel tool calls, one failing — session.id as a SPAN attribute ────
-const journeyParallelTools = (opts: Options): GeneratedJourney => {
+const agentTraceParallelTools = (opts: Options): GeneratedAgentTrace => {
 	const sessId = sessionIdValue()
 	const sessionAttr = attr("session.id", sessId)
 	const spans: Record<string, unknown>[] = []
 	const logs: Record<string, unknown>[] = []
 	const tid = traceId()
 	const inferenceId = spanId()
-	const start = journeyStart(opts)
+	const start = agentTraceStart(opts)
 
 	const userText = "Compare our error budget burn to last week and pull the runbook for checkout."
 	const assistantWithToolCalls: ChatMessage = {
@@ -630,7 +630,7 @@ const journeyParallelTools = (opts: Options): GeneratedJourney => {
 
 	const inferenceDuration = randInt(900, 2600)
 	spans.push(
-		journeySpan({
+		agentTraceSpan({
 			traceId: tid,
 			spanId: inferenceId,
 			name: "chat claude-sonnet-4",
@@ -658,7 +658,7 @@ const journeyParallelTools = (opts: Options): GeneratedJourney => {
 	const toolB = { start: toolsStart + 220, duration: randInt(2400, 6000) }
 
 	spans.push(
-		journeySpan({
+		agentTraceSpan({
 			traceId: tid,
 			spanId: spanId(),
 			parentSpanId: inferenceId,
@@ -687,7 +687,7 @@ const journeyParallelTools = (opts: Options): GeneratedJourney => {
 
 	const failAt = toolB.start + toolB.duration - 5
 	spans.push(
-		journeySpan({
+		agentTraceSpan({
 			traceId: tid,
 			spanId: spanId(),
 			parentSpanId: inferenceId,
@@ -724,7 +724,7 @@ const journeyParallelTools = (opts: Options): GeneratedJourney => {
 	// The follow-up turn, in the same trace, that reasons about the half-failure.
 	const followStart = Math.max(toolA.start + toolA.duration, toolB.start + toolB.duration) + 120
 	spans.push(
-		journeySpan({
+		agentTraceSpan({
 			traceId: tid,
 			spanId: spanId(),
 			parentSpanId: inferenceId,
@@ -773,15 +773,15 @@ const journeyParallelTools = (opts: Options): GeneratedJourney => {
 }
 
 // ── (c) fully content-redacted (privacy mode) ───────────────────────────────
-const journeyRedacted = (opts: Options): GeneratedJourney => {
+const agentTraceRedacted = (opts: Options): GeneratedAgentTrace => {
 	const convId = conversationId()
 	const spans: Record<string, unknown>[] = []
-	let at = journeyStart(opts)
+	let at = agentTraceStart(opts)
 
 	for (let i = 0; i < 3; i++) {
 		const duration = spanDuration()
 		spans.push(
-			journeySpan({
+			agentTraceSpan({
 				traceId: traceId(),
 				name: "chat gpt-4o-mini",
 				startMs: at,
@@ -813,16 +813,16 @@ const journeyRedacted = (opts: Options): GeneratedJourney => {
 		logs: [],
 		traceCount: 3,
 		errorCount: 0,
-		startedAt: journeyStartOf(spans),
+		startedAt: agentTraceStartOf(spans),
 	}
 }
 
 // ── (d) multi-model, mid-conversation switch + router divergence ─────────────
-const journeyMultiModel = (opts: Options): GeneratedJourney => {
+const agentTraceMultiModel = (opts: Options): GeneratedAgentTrace => {
 	const convId = conversationId()
 	const spans: Record<string, unknown>[] = []
 	const history: ChatMessage[] = []
-	let at = journeyStart(opts)
+	let at = agentTraceStart(opts)
 
 	const turns: ReadonlyArray<{
 		user: string
@@ -869,7 +869,7 @@ const journeyMultiModel = (opts: Options): GeneratedJourney => {
 		history.push(textMessage("assistant", turn.assistant))
 		const duration = i >= 2 ? randInt(3000, 8000) : spanDuration()
 		spans.push(
-			journeySpan({
+			agentTraceSpan({
 				traceId: traceId(),
 				name: `chat ${turn.requestModel}`,
 				startMs: at,
@@ -904,12 +904,12 @@ const journeyMultiModel = (opts: Options): GeneratedJourney => {
 		logs: [],
 		traceCount: turns.length,
 		errorCount: 0,
-		startedAt: journeyStartOf(spans),
+		startedAt: agentTraceStartOf(spans),
 	}
 }
 
-// ── (e) agent / workflow journey with non-message operations + a handoff ─────
-const journeyAgentWorkflow = (opts: Options): GeneratedJourney => {
+// ── (e) agent / workflow agent trace with non-message operations + a handoff ─────
+const agentTraceAgentWorkflow = (opts: Options): GeneratedAgentTrace => {
 	const convId = conversationId()
 	const workflow = "incident-triage"
 	const triageAgent = [attr("gen_ai.agent.name", "triage-agent"), attr("gen_ai.agent.id", "agent_triage_01")]
@@ -923,12 +923,12 @@ const journeyAgentWorkflow = (opts: Options): GeneratedJourney => {
 
 	// Trace 1 — triage agent: a turn, a retrieval, then a turn using what it found.
 	const t1 = traceId()
-	let at = journeyStart(opts)
+	let at = agentTraceStart(opts)
 	const openingUser = "Incident INC-4821: checkout error rate 12%. Triage it."
 	const turn1Duration = spanDuration()
 	const turn1Span = spanId()
 	spans.push(
-		journeySpan({
+		agentTraceSpan({
 			traceId: t1,
 			spanId: turn1Span,
 			name: "chat gpt-4o",
@@ -955,7 +955,7 @@ const journeyAgentWorkflow = (opts: Options): GeneratedJourney => {
 
 	const retrievalDuration = randInt(300, 1400)
 	spans.push(
-		journeySpan({
+		agentTraceSpan({
 			traceId: t1,
 			parentSpanId: turn1Span,
 			name: "retrieval incident_history",
@@ -980,7 +980,7 @@ const journeyAgentWorkflow = (opts: Options): GeneratedJourney => {
 
 	const turn2Duration = spanDuration()
 	spans.push(
-		journeySpan({
+		agentTraceSpan({
 			traceId: t1,
 			name: "chat gpt-4o",
 			startMs: at,
@@ -1018,7 +1018,7 @@ const journeyAgentWorkflow = (opts: Options): GeneratedJourney => {
 	const invokeSpan = spanId()
 	const invokeDuration = randInt(1200, 5000)
 	spans.push(
-		journeySpan({
+		agentTraceSpan({
 			traceId: t2,
 			spanId: invokeSpan,
 			name: "invoke_agent remediation-agent",
@@ -1027,7 +1027,7 @@ const journeyAgentWorkflow = (opts: Options): GeneratedJourney => {
 			attributes: [
 				attr("gen_ai.operation.name", "invoke_agent"),
 				attr("gen_ai.provider.name", "openai"),
-				// The handoff target: a SECOND agent name inside the same journey.
+				// The handoff target: a SECOND agent name inside the same agent trace.
 				...remediationAgent,
 				...shared,
 				attr("gen_ai.request.model", "gpt-4o"),
@@ -1046,7 +1046,7 @@ const journeyAgentWorkflow = (opts: Options): GeneratedJourney => {
 	at += 200
 
 	spans.push(
-		journeySpan({
+		agentTraceSpan({
 			traceId: t2,
 			parentSpanId: invokeSpan,
 			name: "chat gpt-4o",
@@ -1086,19 +1086,19 @@ const journeyAgentWorkflow = (opts: Options): GeneratedJourney => {
 		logs,
 		traceCount: 2,
 		errorCount: 0,
-		startedAt: journeyStartOf(spans),
+		startedAt: agentTraceStartOf(spans),
 	}
 }
 
 // ── (f) legacy attribute names — no conversation/session id ⇒ TraceId is the id ─
-const journeyLegacyAttributes = (opts: Options): GeneratedJourney => {
+const agentTraceLegacyAttributes = (opts: Options): GeneratedAgentTrace => {
 	// This fixture MUST stay inside one trace: with neither `gen_ai.conversation.id`
-	// nor `session.id`, the JourneyId falls all the way back to `TraceId`, and a
-	// second trace would be a second journey.
+	// nor `session.id`, the AgentTraceId falls all the way back to `TraceId`, and a
+	// second trace would be a second agent trace.
 	const tid = traceId()
 	const spans: Record<string, unknown>[] = []
 	const rootId = spanId()
-	let at = journeyStart(opts)
+	let at = agentTraceStart(opts)
 
 	const turns: ReadonlyArray<{ prompt: string; completion: string }> = [
 		{
@@ -1114,7 +1114,7 @@ const journeyLegacyAttributes = (opts: Options): GeneratedJourney => {
 	turns.forEach((turn, i) => {
 		const duration = spanDuration()
 		spans.push(
-			journeySpan({
+			agentTraceSpan({
 				traceId: tid,
 				spanId: i === 0 ? rootId : undefined,
 				parentSpanId: i === 0 ? undefined : rootId,
@@ -1142,7 +1142,7 @@ const journeyLegacyAttributes = (opts: Options): GeneratedJourney => {
 	// A legacy tool span too: `gen_ai.tool.name` instead of `gen_ai.request.tool.name`.
 	const toolDuration = randInt(400, 2500)
 	spans.push(
-		journeySpan({
+		agentTraceSpan({
 			traceId: tid,
 			parentSpanId: rootId,
 			name: "openai.tool",
@@ -1170,12 +1170,12 @@ const journeyLegacyAttributes = (opts: Options): GeneratedJourney => {
 		logs: [],
 		traceCount: 1,
 		errorCount: 0,
-		startedAt: journeyStartOf(spans),
+		startedAt: agentTraceStartOf(spans),
 	}
 }
 
 // ── (g) in-progress — session.id as a RESOURCE attribute, ends ~now ──────────
-const journeyRunning = (opts: Options): GeneratedJourney => {
+const agentTraceRunning = (opts: Options): GeneratedAgentTrace => {
 	const sessId = sessionIdValue()
 	const spans: Record<string, unknown>[] = []
 	const history: ChatMessage[] = []
@@ -1193,7 +1193,7 @@ const journeyRunning = (opts: Options): GeneratedJourney => {
 		{ user: "Where's the cheapest 20% to cut without hurting triage quality?" },
 	]
 
-	// Anchor the tail at ~15s ago so the journey lands inside the running grace
+	// Anchor the tail at ~15s ago so the agent trace lands inside the running grace
 	// window (the backend has no in-progress marker — recency is the signal).
 	const lastDuration = randInt(4000, 8000)
 	const lastStart = opts.anchor - 15_000 - lastDuration
@@ -1208,7 +1208,7 @@ const journeyRunning = (opts: Options): GeneratedJourney => {
 		const startMs = isLast ? lastStart : at
 		if (turn.assistant) history.push(textMessage("assistant", turn.assistant))
 		spans.push(
-			journeySpan({
+			agentTraceSpan({
 				traceId: traceId(),
 				name: "chat claude-sonnet-4",
 				startMs,
@@ -1235,29 +1235,29 @@ const journeyRunning = (opts: Options): GeneratedJourney => {
 		idKind: "session",
 		// The resource map is the other place `session.id` legitimately lives.
 		resourceExtra: [attr("session.id", sessId)],
-		note: `3 turns, last span ends ~15s ago (< ${JOURNEY_RUNNING_GRACE_MS / 1000}s grace), session.id on the RESOURCE`,
+		note: `3 turns, last span ends ~15s ago (< ${AGENT_TRACE_RUNNING_GRACE_MS / 1000}s grace), session.id on the RESOURCE`,
 		spans,
 		logs: [],
 		traceCount: turns.length,
 		errorCount: 0,
-		startedAt: journeyStartOf(spans),
+		startedAt: agentTraceStartOf(spans),
 	}
 }
 
-const JOURNEY_FIXTURES: ReadonlyArray<(opts: Options) => GeneratedJourney> = [
-	journeyMultiTurnCumulative,
-	journeyParallelTools,
-	journeyRedacted,
-	journeyMultiModel,
-	journeyAgentWorkflow,
-	journeyLegacyAttributes,
-	journeyRunning,
+const AGENT_TRACE_FIXTURES: ReadonlyArray<(opts: Options) => GeneratedAgentTrace> = [
+	agentTraceMultiTurnCumulative,
+	agentTraceParallelTools,
+	agentTraceRedacted,
+	agentTraceMultiModel,
+	agentTraceAgentWorkflow,
+	agentTraceLegacyAttributes,
+	agentTraceRunning,
 ]
 
 /** The whole fixture set, `sets` times over (fresh ids and timings each round). */
-const generateJourneys = (opts: Options): GeneratedJourney[] => {
-	const out: GeneratedJourney[] = []
-	for (let i = 0; i < opts.journeySets; i++) for (const make of JOURNEY_FIXTURES) out.push(make(opts))
+const generateAgentTraces = (opts: Options): GeneratedAgentTrace[] => {
+	const out: GeneratedAgentTrace[] = []
+	for (let i = 0; i < opts.agentTraceSets; i++) for (const make of AGENT_TRACE_FIXTURES) out.push(make(opts))
 	return out.sort((a, b) => a.startedAt - b.startedAt)
 }
 
@@ -1272,12 +1272,12 @@ const resourceAttrs = (opts: Options, sha: string): Record<string, unknown>[] =>
 ]
 
 /**
- * Same shape as `resourceAttrs`, minus the commit SHA (journeys aren't a deploy
+ * Same shape as `resourceAttrs`, minus the commit SHA (agent traces aren't a deploy
  * story) and on the agent service. `resourceExtra` is where a fixture puts a
- * RESOURCE-level `session.id` — the other map the JourneyId coalesce reads.
+ * RESOURCE-level `session.id` — the other map the AgentTraceId coalesce reads.
  */
-const journeyResourceAttrs = (opts: Options, j: GeneratedJourney): Record<string, unknown>[] => [
-	attr("service.name", JOURNEY_SERVICE),
+const agentTraceResourceAttrs = (opts: Options, j: GeneratedAgentTrace): Record<string, unknown>[] => [
+	attr("service.name", AGENT_TRACE_SERVICE),
 	attr("deployment.environment.name", opts.env),
 	attr("deployment.environment", opts.env),
 	...j.resourceExtra,
@@ -1334,18 +1334,18 @@ const summarize = (generated: GeneratedSha[], opts: Options): void => {
 	)
 }
 
-const summarizeJourneys = (journeys: GeneratedJourney[], opts: Options): void => {
-	if (journeys.length === 0) return
-	const totalSpans = journeys.reduce((n, j) => n + j.spans.length, 0)
-	const totalLogs = journeys.reduce((n, j) => n + j.logs.length, 0)
-	const totalTraces = journeys.reduce((n, j) => n + j.traceCount, 0)
-	const totalErrors = journeys.reduce((n, j) => n + j.errorCount, 0)
+const summarizeAgentTraces = (agentTraces: GeneratedAgentTrace[], opts: Options): void => {
+	if (agentTraces.length === 0) return
+	const totalSpans = agentTraces.reduce((n, j) => n + j.spans.length, 0)
+	const totalLogs = agentTraces.reduce((n, j) => n + j.logs.length, 0)
+	const totalTraces = agentTraces.reduce((n, j) => n + j.traceCount, 0)
+	const totalErrors = agentTraces.reduce((n, j) => n + j.errorCount, 0)
 
-	console.log(`\n  GenAI journeys — service: ${JOURNEY_SERVICE}   env: ${opts.env}`)
+	console.log(`\n  GenAI agent traces — service: ${AGENT_TRACE_SERVICE}   env: ${opts.env}`)
 	console.log(
 		`  ${"fixture".padEnd(26)} ${"when".padEnd(20)} ${"traces".padStart(6)} ${"spans".padStart(6)} ${"logs".padStart(5)} ${"err".padStart(4)}`,
 	)
-	for (const j of journeys) {
+	for (const j of agentTraces) {
 		console.log(
 			`  ${j.fixture.padEnd(26)} ${new Date(j.startedAt).toISOString().slice(0, 19).replace("T", " ").padEnd(20)} ` +
 				`${String(j.traceCount).padStart(6)} ${String(j.spans.length).padStart(6)} ${String(j.logs.length).padStart(5)} ${String(j.errorCount).padStart(4)}`,
@@ -1359,21 +1359,21 @@ const summarizeJourneys = (journeys: GeneratedJourney[], opts: Options): void =>
 }
 
 /**
- * The bit a dev actually needs: the derived JourneyId per fixture, and the URL
- * to open it. Nothing links to the journey route yet — hand-built URLs are the
+ * The bit a dev actually needs: the derived AgentTraceId per fixture, and the URL
+ * to open it. Nothing links to the agent trace route yet — hand-built URLs are the
  * entry point.
  */
-const printJourneyIds = (journeys: GeneratedJourney[]): void => {
-	if (journeys.length === 0) return
-	// Nothing links to the journey route yet — these hand-built URLs are the entry point.
-	console.log("\n  ── journey ids (open each at /journeys/<id>) ──")
+const printAgentTraceIds = (agentTraces: GeneratedAgentTrace[]): void => {
+	if (agentTraces.length === 0) return
+	// Nothing links to the agent trace route yet — these hand-built URLs are the entry point.
+	console.log("\n  ── agent trace ids (open each at /agent-traces/<id>) ──")
 	console.log(`  ${"fixture".padEnd(26)} ${"id from".padEnd(16)} id`)
-	for (const j of journeys) {
+	for (const j of agentTraces) {
 		console.log(`  ${j.fixture.padEnd(26)} ${`${j.idKind} id`.padEnd(16)} ${j.id}`)
 	}
 	console.log("")
-	for (const j of journeys) {
-		console.log(`  https://web.localhost/journeys/${encodeURIComponent(j.id)}   # ${j.fixture}`)
+	for (const j of agentTraces) {
+		console.log(`  https://web.localhost/agent-traces/${encodeURIComponent(j.id)}   # ${j.fixture}`)
 	}
 }
 
@@ -1399,15 +1399,15 @@ Shape:
   --spread <dur>          scatter window per SHA, s/m/h (default 90s)
   --anchor <when>         time of the newest SHA: "now" or ISO-8601 (default now)
 
-GenAI journeys (service "${JOURNEY_SERVICE}"):
-  --journeys <n>          emit the whole journey fixture set n times (default 1;
-                          0 or --no-journeys to skip). Fixtures: multi-turn-cumulative,
+GenAI agent traces (service "${AGENT_TRACE_SERVICE}"):
+  --agent-traces <n>        emit the whole agent-trace fixture set n times (default 1;
+                          0 or --no-agentTraces to skip). Fixtures: multi-turn-cumulative,
                           parallel-tools-one-failing, content-redacted, multi-model-switch,
                           agent-workflow-handoff, legacy-attribute-names, in-progress.
-                          Journeys are scattered over the ~2h before --anchor (except
+                          AgentTraces are scattered over the ~2h before --anchor (except
                           in-progress, which is anchored at it) and their ids are printed
                           at the end of the run.
-  --no-journeys           skip the journey fixtures entirely
+  --no-agent-traces         skip the agent-trace fixtures entirely
 
 Control:
   --seed <n>              seed the shape RNG for reproducible counts/latencies
@@ -1432,8 +1432,8 @@ const main = async (): Promise<void> => {
 			"error-rate": { type: "string" },
 			spread: { type: "string" },
 			anchor: { type: "string" },
-			journeys: { type: "string" },
-			"no-journeys": { type: "boolean" },
+			"agent-traces": { type: "string" },
+			"no-agent-traces": { type: "boolean" },
 			seed: { type: "string" },
 			"dry-run": { type: "boolean" },
 			quiet: { type: "boolean" },
@@ -1472,10 +1472,10 @@ const main = async (): Promise<void> => {
 			)
 	}
 
-	// Journeys are on by default (one full fixture set); --journeys 0 / --no-journeys opt out.
-	const journeySets = values["no-journeys"] ? 0 : values.journeys ? Number(values.journeys) : 1
-	if (!Number.isInteger(journeySets) || journeySets < 0)
-		fail(`--journeys: expected a non-negative integer, got "${values.journeys}"`)
+	// Agent traces are on by default (one full fixture set); --agent traces 0 / --no-agent traces opt out.
+	const agentTraceSets = values["no-agent-traces"] ? 0 : values["agent-traces"] ? Number(values["agent-traces"]) : 1
+	if (!Number.isInteger(agentTraceSets) || agentTraceSets < 0)
+		fail(`--agent-traces: expected a non-negative integer, got "${values["agent-traces"]}"`)
 
 	const anchorRaw = values.anchor?.trim()
 	const anchor = !anchorRaw || anchorRaw === "now" ? Date.now() : Date.parse(anchorRaw)
@@ -1495,7 +1495,7 @@ const main = async (): Promise<void> => {
 		errorRate: values["error-rate"] ? Number(values["error-rate"]) : 0.08,
 		spread: parseDurationMs(values.spread ?? "90s", "--spread"),
 		anchor,
-		journeySets,
+		agentTraceSets,
 		dryRun: Boolean(values["dry-run"]),
 		quiet: Boolean(values.quiet),
 	}
@@ -1506,11 +1506,11 @@ const main = async (): Promise<void> => {
 		generateForSha(sha, opts.anchor - (opts.shas.length - 1 - i) * opts.shaInterval, opts),
 	)
 
-	const journeys = generateJourneys(opts)
+	const agentTraces = generateAgentTraces(opts)
 
 	if (!opts.quiet) {
 		summarize(generated, opts)
-		summarizeJourneys(journeys, opts)
+		summarizeAgentTraces(agentTraces, opts)
 	}
 
 	if (opts.dryRun) {
@@ -1531,17 +1531,17 @@ const main = async (): Promise<void> => {
 					.join("\n"),
 			)
 		}
-		const journeySample = journeys[0]
-		if (journeySample) {
-			console.log(`\n  ── sample journey resourceSpans (${journeySample.fixture}, dry-run) ──`)
+		const agentTraceSample = agentTraces[0]
+		if (agentTraceSample) {
+			console.log(`\n  ── sample agent trace resourceSpans (${agentTraceSample.fixture}, dry-run) ──`)
 			console.log(
 				JSON.stringify(
 					{
-						resource: { attributes: journeyResourceAttrs(opts, journeySample) },
+						resource: { attributes: agentTraceResourceAttrs(opts, agentTraceSample) },
 						scopeSpans: [
 							{
 								scope: { name: "ingest-dummy-genai" },
-								spans: journeySample.spans.slice(0, 2),
+								spans: agentTraceSample.spans.slice(0, 2),
 							},
 						],
 					},
@@ -1553,7 +1553,7 @@ const main = async (): Promise<void> => {
 					.join("\n"),
 			)
 		}
-		if (!opts.quiet) printJourneyIds(journeys)
+		if (!opts.quiet) printAgentTraceIds(agentTraces)
 		console.log("\n  (dry run — re-run without --dry-run to send)\n")
 		return
 	}
@@ -1575,15 +1575,15 @@ const main = async (): Promise<void> => {
 		}
 	}
 
-	// Journeys: one resourceSpans per journey — each carries its own resource map
+	// Agent traces: one resourceSpans per agent trace — each carries its own resource map
 	// (a fixture may put `session.id` there), so they can't share one.
-	for (const j of journeys) {
+	for (const j of agentTraces) {
 		if (j.spans.length === 0) continue
 		for (const batch of chunk(j.spans, MAX_SPANS_PER_REQUEST)) {
 			await postOtlp(opts, "/v1/traces", {
 				resourceSpans: [
 					{
-						resource: { attributes: journeyResourceAttrs(opts, j) },
+						resource: { attributes: agentTraceResourceAttrs(opts, j) },
 						scopeSpans: [{ scope: { name: "ingest-dummy-genai" }, spans: batch }],
 					},
 				],
@@ -1600,10 +1600,10 @@ const main = async (): Promise<void> => {
 			scopeLogs: [{ scope: { name: "ingest-dummy" }, logRecords: g.logs }],
 		}))
 		.concat(
-			journeys
+			agentTraces
 				.filter((j) => j.logs.length > 0)
 				.map((j) => ({
-					resource: { attributes: journeyResourceAttrs(opts, j) },
+					resource: { attributes: agentTraceResourceAttrs(opts, j) },
 					scopeLogs: [{ scope: { name: "ingest-dummy-genai" }, logRecords: j.logs }],
 				})),
 		)
@@ -1611,9 +1611,9 @@ const main = async (): Promise<void> => {
 
 	if (!opts.quiet) {
 		const totalSpans =
-			generated.reduce((n, g) => n + g.spans.length, 0) + journeys.reduce((n, j) => n + j.spans.length, 0)
+			generated.reduce((n, g) => n + g.spans.length, 0) + agentTraces.reduce((n, j) => n + j.spans.length, 0)
 		const totalLogs =
-			generated.reduce((n, g) => n + g.logs.length, 0) + journeys.reduce((n, j) => n + j.logs.length, 0)
+			generated.reduce((n, g) => n + g.logs.length, 0) + agentTraces.reduce((n, j) => n + j.logs.length, 0)
 		console.log(
 			`\n✓ sent ${totalSpans} spans (${traceReqs} request(s)) + ${totalLogs} logs to ${opts.endpoint}`,
 		)
@@ -1621,8 +1621,8 @@ const main = async (): Promise<void> => {
 			`  View at https://web.localhost → service "${opts.service}" (last ~${Math.ceil((opts.shaInterval * (opts.shas.length - 1) + opts.spread) / 60000)}m).`,
 		)
 		console.log("  Data lands async via the collector → Tinybird; give it a few seconds to appear.\n")
-		printJourneyIds(journeys)
-		if (journeys.length > 0) console.log("")
+		printAgentTraceIds(agentTraces)
+		if (agentTraces.length > 0) console.log("")
 	}
 }
 

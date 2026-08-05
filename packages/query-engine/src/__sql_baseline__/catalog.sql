@@ -130,13 +130,13 @@ SELECT
         LIMIT 1
         FORMAT JSON
 
--- builder:genai:journeyFacetsQuery:default  [66a10916]
+-- builder:genai:agentTraceFacetsQuery:default  [e9253132]
 SELECT
           arrayJoin(models) AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'model' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -165,7 +165,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -208,17 +208,17 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
           arrayJoin(providers) AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'provider' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -247,7 +247,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -290,17 +290,17 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
           arrayJoin(agents) AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'agent' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -329,7 +329,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -372,17 +372,17 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
           arrayJoin(finishReasons) AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'finishReason' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -411,7 +411,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -454,17 +454,17 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
 UNION ALL
 SELECT
           workflowName AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'workflow' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -493,7 +493,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -536,7 +536,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         WHERE workflowName != ''
         GROUP BY name
         ORDER BY count DESC
@@ -544,10 +544,10 @@ SELECT
 UNION ALL
 SELECT
           serviceName AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'service' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -576,7 +576,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -619,7 +619,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         WHERE serviceName != ''
         GROUP BY name
         ORDER BY count DESC
@@ -627,10 +627,10 @@ SELECT
 UNION ALL
 SELECT
           'error' AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'status' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -659,7 +659,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -702,15 +702,15 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         WHERE errorCount > 0
 UNION ALL
 SELECT
           'running' AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'status' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -739,7 +739,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -782,15 +782,15 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         WHERE (errorCount = 0 AND isRunning = 1)
 UNION ALL
 SELECT
           'ok' AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'status' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -819,7 +819,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -862,15 +862,15 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         WHERE (errorCount = 0 AND isRunning = 0)
 UNION ALL
 SELECT
           'tools' AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'tools' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -899,7 +899,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -942,15 +942,15 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         WHERE toolCallCount > 0
 UNION ALL
 SELECT
           'redacted' AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'redacted' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -979,7 +979,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1022,15 +1022,15 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         WHERE contentSpanCount = 0
 UNION ALL
 SELECT
           toString(toUInt64(round(pow(2, floor(log2(greatest(durationMs, 1000) / 1000) * 2) / 2) * 1000))) AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'durationBucket' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1059,7 +1059,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1102,7 +1102,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j
+        GROUP BY agentTraceId) AS j
         GROUP BY name
         LIMIT 40
 UNION ALL
@@ -1122,7 +1122,7 @@ SELECT
           quantileIf(0.5)(cost, costSpanCount > 0) * 1000000 AS costP50,
           quantileIf(0.95)(cost, costSpanCount > 0) * 1000000 AS costP95
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1151,7 +1151,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1194,16 +1194,16 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId) AS j) AS q) AS r
+        GROUP BY agentTraceId) AS j) AS q) AS r
 FORMAT JSON
 
--- builder:genai:journeyFacetsQuery:filtered  [fe7b3a62]
+-- builder:genai:agentTraceFacetsQuery:filtered  [ef721b40]
 SELECT
           arrayJoin(models) AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'model' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1232,7 +1232,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1275,7 +1275,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING errorCount > 0
           AND toolCallCount > 0
           AND contentSpanCount > 0
@@ -1287,10 +1287,10 @@ SELECT
 UNION ALL
 SELECT
           arrayJoin(providers) AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'provider' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1319,7 +1319,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1362,7 +1362,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND errorCount > 0
           AND toolCallCount > 0
@@ -1375,10 +1375,10 @@ SELECT
 UNION ALL
 SELECT
           arrayJoin(agents) AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'agent' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1407,7 +1407,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1450,7 +1450,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND errorCount > 0
           AND toolCallCount > 0
@@ -1463,10 +1463,10 @@ SELECT
 UNION ALL
 SELECT
           arrayJoin(finishReasons) AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'finishReason' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1495,7 +1495,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1538,7 +1538,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND errorCount > 0
           AND toolCallCount > 0
@@ -1551,10 +1551,10 @@ SELECT
 UNION ALL
 SELECT
           workflowName AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'workflow' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1583,7 +1583,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1626,7 +1626,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND errorCount > 0
           AND toolCallCount > 0
@@ -1640,10 +1640,10 @@ SELECT
 UNION ALL
 SELECT
           serviceName AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'service' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1672,7 +1672,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1715,7 +1715,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND errorCount > 0
           AND toolCallCount > 0
@@ -1729,10 +1729,10 @@ SELECT
 UNION ALL
 SELECT
           'error' AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'status' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1761,7 +1761,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1804,7 +1804,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND toolCallCount > 0
           AND contentSpanCount > 0
@@ -1814,10 +1814,10 @@ SELECT
 UNION ALL
 SELECT
           'running' AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'status' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1846,7 +1846,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1889,7 +1889,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND toolCallCount > 0
           AND contentSpanCount > 0
@@ -1899,10 +1899,10 @@ SELECT
 UNION ALL
 SELECT
           'ok' AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'status' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -1931,7 +1931,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -1974,7 +1974,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND toolCallCount > 0
           AND contentSpanCount > 0
@@ -1984,10 +1984,10 @@ SELECT
 UNION ALL
 SELECT
           'tools' AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'tools' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -2016,7 +2016,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -2059,7 +2059,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND errorCount > 0
           AND contentSpanCount > 0
@@ -2069,10 +2069,10 @@ SELECT
 UNION ALL
 SELECT
           'redacted' AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'redacted' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -2101,7 +2101,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -2144,7 +2144,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND errorCount > 0
           AND toolCallCount > 0
@@ -2154,10 +2154,10 @@ SELECT
 UNION ALL
 SELECT
           toString(toUInt64(round(pow(2, floor(log2(greatest(durationMs, 1000) / 1000) * 2) / 2) * 1000))) AS name,
-          uniq(journeyId) AS count,
+          uniq(agentTraceId) AS count,
           'durationBucket' AS facetType
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -2186,7 +2186,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -2229,7 +2229,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND errorCount > 0
           AND toolCallCount > 0
@@ -2253,7 +2253,7 @@ SELECT
           quantileIf(0.5)(cost, costSpanCount > 0) * 1000000 AS costP50,
           quantileIf(0.95)(cost, costSpanCount > 0) * 1000000 AS costP95
         FROM (SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -2282,7 +2282,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -2325,16 +2325,16 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND errorCount > 0
           AND toolCallCount > 0
           AND contentSpanCount > 0) AS j) AS q) AS r
 FORMAT JSON
 
--- builder:genai:journeyListQuery:default  [bc8b5ca4]
+-- builder:genai:agentTraceListQuery:default  [2ce7fd3c]
 SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -2363,7 +2363,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -2406,15 +2406,15 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
-        ORDER BY startTime DESC, journeyId DESC
+        GROUP BY agentTraceId
+        ORDER BY startTime DESC, agentTraceId DESC
         LIMIT 50
         OFFSET 0
         FORMAT JSON
 
--- builder:genai:journeyListQuery:filtered  [29dcc2ba]
+-- builder:genai:agentTraceListQuery:filtered  [37a9bf32]
 SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -2443,7 +2443,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -2487,7 +2487,7 @@ SELECT
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != ''
           AND ServiceName = 'agent-service') AS s
-        GROUP BY journeyId
+        GROUP BY agentTraceId
         HAVING has(models, 'gpt-4o')
           AND has(requestedModels, 'gpt-4o')
           AND has(providers, 'openai')
@@ -2498,7 +2498,7 @@ SELECT
           AND errorCount > 0
           AND toolCallCount > 0
           AND contentSpanCount > 0
-          AND (positionCaseInsensitive(titleSource, 'checkout') > 0 OR positionCaseInsensitive(journeyId, 'checkout') > 0)
+          AND (positionCaseInsensitive(titleSource, 'checkout') > 0 OR positionCaseInsensitive(agentTraceId, 'checkout') > 0)
           AND durationMs >= 1000
           AND durationMs <= 600000
           AND turnCount >= 2
@@ -2507,14 +2507,14 @@ SELECT
           AND totalTokens <= 100000
           AND (cost >= 0.001 AND costSpanCount > 0)
           AND (cost <= 10 AND costSpanCount > 0)
-        ORDER BY cost DESC, journeyId DESC
+        ORDER BY cost DESC, agentTraceId DESC
         LIMIT 50
         OFFSET 0
         FORMAT JSON
 
--- builder:genai:journeySummaryQuery:default  [5f240115]
+-- builder:genai:agentTraceSummaryQuery:default  [c2817be9]
 SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           left(argMinIf(inputMessages, startNs, inputMessages != ''), 2000) AS titleSource,
           min(timestamp) AS startTime,
           max(timestamp) AS endTime,
@@ -2543,7 +2543,7 @@ SELECT
           countIf(contentEventCount > 0) AS contentEventSpanCount,
           if(max(timestamp) >= now() - INTERVAL 120 SECOND, 1, 0) AS isRunning
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -2586,14 +2586,14 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        GROUP BY journeyId
-        HAVING journeyId = 'conv_0af7651916cd43dd'
+        GROUP BY agentTraceId
+        HAVING agentTraceId = 'conv_0af7651916cd43dd'
         LIMIT 1
         FORMAT JSON
 
--- builder:genai:journeyTimelineQuery:default  [f909f0b4]
+-- builder:genai:agentTraceTimelineQuery:default  [71e3bda2]
 SELECT
-          journeyId AS journeyId,
+          agentTraceId AS agentTraceId,
           traceId AS traceId,
           spanId AS spanId,
           parentSpanId AS parentSpanId,
@@ -2630,7 +2630,7 @@ SELECT
           systemInstructions AS systemInstructions,
           contentEventCount AS contentEventCount
         FROM (SELECT
-          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS journeyId,
+          multiIf(max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['gen_ai.conversation.id'] != '', SpanAttributes['gen_ai.conversation.id'], ResourceAttributes['gen_ai.conversation.id'])) OVER (PARTITION BY TraceId), max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId) != '', max(if(SpanAttributes['session.id'] != '', SpanAttributes['session.id'], ResourceAttributes['session.id'])) OVER (PARTITION BY TraceId), TraceId) AS agentTraceId,
           TraceId AS traceId,
           SpanId AS spanId,
           ParentSpanId AS parentSpanId,
@@ -2673,7 +2673,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND SpanAttributes['gen_ai.operation.name'] != '') AS s
-        WHERE journeyId = 'conv_0af7651916cd43dd'
+        WHERE agentTraceId = 'conv_0af7651916cd43dd'
         ORDER BY timestamp ASC, spanId ASC
         LIMIT 500
         OFFSET 0

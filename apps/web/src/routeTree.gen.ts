@@ -32,6 +32,8 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as WidgetLabRouteImport } from './routes/widget-lab'
+import { Route as AgentTracesIndexRouteImport } from './routes/agent-traces/index'
+import { Route as AgentTracesAgentTraceIdRouteImport } from './routes/agent-traces/$agentTraceId'
 import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
 import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
@@ -46,8 +48,6 @@ import { Route as InfraIndexRouteImport } from './routes/infra/index'
 import { Route as InfraHostNameRouteImport } from './routes/infra/$hostName'
 import { Route as InvestigationsIndexRouteImport } from './routes/investigations/index'
 import { Route as InvestigationsIdRouteImport } from './routes/investigations/$id'
-import { Route as JourneysIndexRouteImport } from './routes/journeys/index'
-import { Route as JourneysJourneyIdRouteImport } from './routes/journeys/$journeyId'
 import { Route as LogsIndexRouteImport } from './routes/logs/index'
 import { Route as LogsLogIdRouteImport } from './routes/logs/$logId'
 import { Route as MetricsIndexRouteImport } from './routes/metrics/index'
@@ -190,6 +190,16 @@ const WidgetLabRoute = WidgetLabRouteImport.update({
   path: '/widget-lab',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentTracesIndexRoute = AgentTracesIndexRouteImport.update({
+  id: '/agent-traces/',
+  path: '/agent-traces/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentTracesAgentTraceIdRoute = AgentTracesAgentTraceIdRouteImport.update({
+  id: '/agent-traces/$agentTraceId',
+  path: '/agent-traces/$agentTraceId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AlertsIndexRoute = AlertsIndexRouteImport.update({
   id: '/alerts/',
   path: '/alerts/',
@@ -258,16 +268,6 @@ const InvestigationsIndexRoute = InvestigationsIndexRouteImport.update({
 const InvestigationsIdRoute = InvestigationsIdRouteImport.update({
   id: '/investigations/$id',
   path: '/investigations/$id',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const JourneysIndexRoute = JourneysIndexRouteImport.update({
-  id: '/journeys/',
-  path: '/journeys/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const JourneysJourneyIdRoute = JourneysJourneyIdRouteImport.update({
-  id: '/journeys/$journeyId',
-  path: '/journeys/$journeyId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LogsIndexRoute = LogsIndexRouteImport.update({
@@ -434,6 +434,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/widget-lab': typeof WidgetLabRoute
+  '/agent-traces/$agentTraceId': typeof AgentTracesAgentTraceIdRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
@@ -442,7 +443,6 @@ export interface FileRoutesByFullPath {
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
-  '/journeys/$journeyId': typeof JourneysJourneyIdRoute
   '/logs/$logId': typeof LogsLogIdRoute
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
@@ -450,13 +450,13 @@ export interface FileRoutesByFullPath {
   '/replays/preview': typeof ReplaysPreviewRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/agent-traces/': typeof AgentTracesIndexRoute
   '/alerts/': typeof AlertsIndexRoute
   '/anomalies/': typeof AnomaliesIndexRoute
   '/dashboards/': typeof DashboardsIndexRoute
   '/errors/': typeof ErrorsIndexRoute
   '/infra/': typeof InfraIndexRoute
   '/investigations/': typeof InvestigationsIndexRoute
-  '/journeys/': typeof JourneysIndexRoute
   '/logs/': typeof LogsIndexRoute
   '/metrics/': typeof MetricsIndexRoute
   '/replays/': typeof ReplaysIndexRoute
@@ -501,6 +501,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/widget-lab': typeof WidgetLabRoute
+  '/agent-traces/$agentTraceId': typeof AgentTracesAgentTraceIdRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
@@ -509,7 +510,6 @@ export interface FileRoutesByTo {
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
-  '/journeys/$journeyId': typeof JourneysJourneyIdRoute
   '/logs/$logId': typeof LogsLogIdRoute
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
@@ -517,13 +517,13 @@ export interface FileRoutesByTo {
   '/replays/preview': typeof ReplaysPreviewRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/agent-traces': typeof AgentTracesIndexRoute
   '/alerts': typeof AlertsIndexRoute
   '/anomalies': typeof AnomaliesIndexRoute
   '/dashboards': typeof DashboardsIndexRoute
   '/errors': typeof ErrorsIndexRoute
   '/infra': typeof InfraIndexRoute
   '/investigations': typeof InvestigationsIndexRoute
-  '/journeys': typeof JourneysIndexRoute
   '/logs': typeof LogsIndexRoute
   '/metrics': typeof MetricsIndexRoute
   '/replays': typeof ReplaysIndexRoute
@@ -569,6 +569,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/widget-lab': typeof WidgetLabRoute
+  '/agent-traces/$agentTraceId': typeof AgentTracesAgentTraceIdRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/anomalies/$incidentId': typeof AnomaliesIncidentIdRoute
@@ -577,7 +578,6 @@ export interface FileRoutesById {
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
-  '/journeys/$journeyId': typeof JourneysJourneyIdRoute
   '/logs/$logId': typeof LogsLogIdRoute
   '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
@@ -585,13 +585,13 @@ export interface FileRoutesById {
   '/replays/preview': typeof ReplaysPreviewRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/agent-traces/': typeof AgentTracesIndexRoute
   '/alerts/': typeof AlertsIndexRoute
   '/anomalies/': typeof AnomaliesIndexRoute
   '/dashboards/': typeof DashboardsIndexRoute
   '/errors/': typeof ErrorsIndexRoute
   '/infra/': typeof InfraIndexRoute
   '/investigations/': typeof InvestigationsIndexRoute
-  '/journeys/': typeof JourneysIndexRoute
   '/logs/': typeof LogsIndexRoute
   '/metrics/': typeof MetricsIndexRoute
   '/replays/': typeof ReplaysIndexRoute
@@ -638,6 +638,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/widget-lab'
+    | '/agent-traces/$agentTraceId'
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/anomalies/$incidentId'
@@ -646,7 +647,6 @@ export interface FileRouteTypes {
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
-    | '/journeys/$journeyId'
     | '/logs/$logId'
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
@@ -654,13 +654,13 @@ export interface FileRouteTypes {
     | '/replays/preview'
     | '/services/$serviceName'
     | '/traces/$traceId'
+    | '/agent-traces/'
     | '/alerts/'
     | '/anomalies/'
     | '/dashboards/'
     | '/errors/'
     | '/infra/'
     | '/investigations/'
-    | '/journeys/'
     | '/logs/'
     | '/metrics/'
     | '/replays/'
@@ -705,6 +705,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/widget-lab'
+    | '/agent-traces/$agentTraceId'
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/anomalies/$incidentId'
@@ -713,7 +714,6 @@ export interface FileRouteTypes {
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
-    | '/journeys/$journeyId'
     | '/logs/$logId'
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
@@ -721,13 +721,13 @@ export interface FileRouteTypes {
     | '/replays/preview'
     | '/services/$serviceName'
     | '/traces/$traceId'
+    | '/agent-traces'
     | '/alerts'
     | '/anomalies'
     | '/dashboards'
     | '/errors'
     | '/infra'
     | '/investigations'
-    | '/journeys'
     | '/logs'
     | '/metrics'
     | '/replays'
@@ -772,6 +772,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/widget-lab'
+    | '/agent-traces/$agentTraceId'
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/anomalies/$incidentId'
@@ -780,7 +781,6 @@ export interface FileRouteTypes {
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/investigations/$id'
-    | '/journeys/$journeyId'
     | '/logs/$logId'
     | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
@@ -788,13 +788,13 @@ export interface FileRouteTypes {
     | '/replays/preview'
     | '/services/$serviceName'
     | '/traces/$traceId'
+    | '/agent-traces/'
     | '/alerts/'
     | '/anomalies/'
     | '/dashboards/'
     | '/errors/'
     | '/infra/'
     | '/investigations/'
-    | '/journeys/'
     | '/logs/'
     | '/metrics/'
     | '/replays/'
@@ -840,6 +840,7 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
   WidgetLabRoute: typeof WidgetLabRoute
+  AgentTracesAgentTraceIdRoute: typeof AgentTracesAgentTraceIdRoute
   AlertsRuleIdRoute: typeof AlertsRuleIdRoute
   AlertsCreateRoute: typeof AlertsCreateRoute
   AnomaliesIncidentIdRoute: typeof AnomaliesIncidentIdRoute
@@ -848,7 +849,6 @@ export interface RootRouteChildren {
   ErrorsErrorTypeRoute: typeof ErrorsErrorTypeRoute
   InfraHostNameRoute: typeof InfraHostNameRoute
   InvestigationsIdRoute: typeof InvestigationsIdRoute
-  JourneysJourneyIdRoute: typeof JourneysJourneyIdRoute
   LogsLogIdRoute: typeof LogsLogIdRoute
   MetricsMetricNameRoute: typeof MetricsMetricNameRoute
   RecommendationsRecommendationKeyRoute: typeof RecommendationsRecommendationKeyRoute
@@ -856,13 +856,13 @@ export interface RootRouteChildren {
   ReplaysPreviewRoute: typeof ReplaysPreviewRoute
   ServicesServiceNameRoute: typeof ServicesServiceNameRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
+  AgentTracesIndexRoute: typeof AgentTracesIndexRoute
   AlertsIndexRoute: typeof AlertsIndexRoute
   AnomaliesIndexRoute: typeof AnomaliesIndexRoute
   DashboardsIndexRoute: typeof DashboardsIndexRoute
   ErrorsIndexRoute: typeof ErrorsIndexRoute
   InfraIndexRoute: typeof InfraIndexRoute
   InvestigationsIndexRoute: typeof InvestigationsIndexRoute
-  JourneysIndexRoute: typeof JourneysIndexRoute
   LogsIndexRoute: typeof LogsIndexRoute
   MetricsIndexRoute: typeof MetricsIndexRoute
   ReplaysIndexRoute: typeof ReplaysIndexRoute
@@ -1047,6 +1047,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WidgetLabRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agent-traces/': {
+      id: '/agent-traces/'
+      path: '/agent-traces'
+      fullPath: '/agent-traces/'
+      preLoaderRoute: typeof AgentTracesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent-traces/$agentTraceId': {
+      id: '/agent-traces/$agentTraceId'
+      path: '/agent-traces/$agentTraceId'
+      fullPath: '/agent-traces/$agentTraceId'
+      preLoaderRoute: typeof AgentTracesAgentTraceIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/alerts/': {
       id: '/alerts/'
       path: '/alerts'
@@ -1143,20 +1157,6 @@ declare module '@tanstack/react-router' {
       path: '/investigations/$id'
       fullPath: '/investigations/$id'
       preLoaderRoute: typeof InvestigationsIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/journeys/': {
-      id: '/journeys/'
-      path: '/journeys'
-      fullPath: '/journeys/'
-      preLoaderRoute: typeof JourneysIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/journeys/$journeyId': {
-      id: '/journeys/$journeyId'
-      path: '/journeys/$journeyId'
-      fullPath: '/journeys/$journeyId'
-      preLoaderRoute: typeof JourneysJourneyIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/logs/': {
@@ -1368,6 +1368,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
   WidgetLabRoute: WidgetLabRoute,
+  AgentTracesAgentTraceIdRoute: AgentTracesAgentTraceIdRoute,
   AlertsRuleIdRoute: AlertsRuleIdRoute,
   AlertsCreateRoute: AlertsCreateRoute,
   AnomaliesIncidentIdRoute: AnomaliesIncidentIdRoute,
@@ -1376,7 +1377,6 @@ const rootRouteChildren: RootRouteChildren = {
   ErrorsErrorTypeRoute: ErrorsErrorTypeRoute,
   InfraHostNameRoute: InfraHostNameRoute,
   InvestigationsIdRoute: InvestigationsIdRoute,
-  JourneysJourneyIdRoute: JourneysJourneyIdRoute,
   LogsLogIdRoute: LogsLogIdRoute,
   MetricsMetricNameRoute: MetricsMetricNameRoute,
   RecommendationsRecommendationKeyRoute: RecommendationsRecommendationKeyRoute,
@@ -1384,13 +1384,13 @@ const rootRouteChildren: RootRouteChildren = {
   ReplaysPreviewRoute: ReplaysPreviewRoute,
   ServicesServiceNameRoute: ServicesServiceNameRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
+  AgentTracesIndexRoute: AgentTracesIndexRoute,
   AlertsIndexRoute: AlertsIndexRoute,
   AnomaliesIndexRoute: AnomaliesIndexRoute,
   DashboardsIndexRoute: DashboardsIndexRoute,
   ErrorsIndexRoute: ErrorsIndexRoute,
   InfraIndexRoute: InfraIndexRoute,
   InvestigationsIndexRoute: InvestigationsIndexRoute,
-  JourneysIndexRoute: JourneysIndexRoute,
   LogsIndexRoute: LogsIndexRoute,
   MetricsIndexRoute: MetricsIndexRoute,
   ReplaysIndexRoute: ReplaysIndexRoute,

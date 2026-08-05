@@ -1,13 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
-import { buildJourneyTimeline, parseGenAiMessages } from "./genai-timeline"
-import type { JourneyTimelineOutput } from "./genai"
+import { buildAgentTraceTimeline, parseGenAiMessages } from "./genai-timeline"
+import type { AgentTraceTimelineOutput } from "./genai"
 
 // ---------------------------------------------------------------------------
 // Fixture helpers — a span row as the warehouse returns it.
 // ---------------------------------------------------------------------------
 
-const EMPTY: JourneyTimelineOutput = {
-	journeyId: "conv_1",
+const EMPTY: AgentTraceTimelineOutput = {
+	agentTraceId: "conv_1",
 	traceId: "trace_1",
 	spanId: "span_1",
 	parentSpanId: "",
@@ -45,7 +45,7 @@ const EMPTY: JourneyTimelineOutput = {
 	contentEventCount: 0,
 }
 
-const span = (over: Partial<JourneyTimelineOutput>): JourneyTimelineOutput => ({ ...EMPTY, ...over })
+const span = (over: Partial<AgentTraceTimelineOutput>): AgentTraceTimelineOutput => ({ ...EMPTY, ...over })
 
 const text = (role: string, content: string) => JSON.stringify([{ role, parts: [{ type: "text", content }] }])
 
@@ -97,8 +97,8 @@ describe("parseGenAiMessages", () => {
 describe("cumulative input dedupe", () => {
 	// THE trap. Each inference span's input.messages repeats the entire prior
 	// conversation, so rendering every span verbatim gives N² duplication.
-	it("emits each turn exactly once across a multi-turn journey", () => {
-		const events = buildJourneyTimeline([
+	it("emits each turn exactly once across a multi-turn agent trace", () => {
+		const events = buildAgentTraceTimeline([
 			turn(1, [], "what is otel?", "a tracing standard"),
 			turn(2, [["what is otel?", "a tracing standard"]], "and spans?", "units of work"),
 			turn(
@@ -125,7 +125,7 @@ describe("cumulative input dedupe", () => {
 	// A plain "have I seen this text" set would collapse two identical replies
 	// into one; the prefix walk keeps both.
 	it("keeps repeated identical turns", () => {
-		const events = buildJourneyTimeline([turn(1, [], "yes", "ok"), turn(2, [["yes", "ok"]], "yes", "ok")])
+		const events = buildAgentTraceTimeline([turn(1, [], "yes", "ok"), turn(2, [["yes", "ok"]], "yes", "ok")])
 		expect(events.filter((e) => e.kind === "message" && e.content === "yes")).toHaveLength(2)
 	})
 
@@ -133,7 +133,7 @@ describe("cumulative input dedupe", () => {
 	// prefix with what we already emitted. Re-emitting the conversation would
 	// double the transcript; the set fallback catches it.
 	it("does not replay the conversation when the emitter compacts history", () => {
-		const events = buildJourneyTimeline([
+		const events = buildAgentTraceTimeline([
 			turn(1, [], "first", "one"),
 			turn(2, [["first", "one"]], "second", "two"),
 			span({
@@ -158,7 +158,7 @@ describe("cumulative input dedupe", () => {
 	// Metrics belong to the span, not to each message reconstructed from its
 	// cumulative input — otherwise summing a column multiplies the bill.
 	it("attaches span metrics to one event per span", () => {
-		const events = buildJourneyTimeline([turn(1, [], "hi", "hello")])
+		const events = buildAgentTraceTimeline([turn(1, [], "hi", "hello")])
 		const withTokens = events.filter((e) => e.outputTokens !== null)
 		expect(withTokens).toHaveLength(1)
 		expect(withTokens[0]!.role).toBe("assistant")
@@ -232,7 +232,7 @@ describe("cumulative dedupe with tool traffic", () => {
 	]
 
 	it("emits the tool-call and tool-result turns exactly once each", () => {
-		const events = buildJourneyTimeline(loopSpans)
+		const events = buildAgentTraceTimeline(loopSpans)
 		const messages = events.filter((e) => e.kind === "message")
 		expect(messages.map((m) => [m.role, m.content])).toEqual([
 			["user", "find docs"],
@@ -248,7 +248,7 @@ describe("cumulative dedupe with tool traffic", () => {
 	// The tool span must nest under the ORIGINAL assistant message, not a
 	// duplicate re-emitted from a later span's cumulative input.
 	it("keeps the tool call parented to the first emission of its message", () => {
-		const events = buildJourneyTimeline(loopSpans)
+		const events = buildAgentTraceTimeline(loopSpans)
 		const toolEvent = events.find((e) => e.kind === "toolCall")!
 		const owner = events.find((e) => e.id === toolEvent.parentEventId)!
 		expect(owner.spanId).toBe("span_1")
@@ -264,7 +264,7 @@ describe("cumulative dedupe with tool traffic", () => {
 			parts: [{ arguments: { q: "otel" }, name: "search_docs", type: "tool_call", id: "call_a" }],
 			role: "assistant",
 		}
-		const events = buildJourneyTimeline([
+		const events = buildAgentTraceTimeline([
 			loopSpans[0]!,
 			loopSpans[1]!,
 			span({
@@ -309,7 +309,7 @@ describe("tool calls", () => {
 	// Tool calls are sibling spans, not fields; the design nests them under the
 	// message that fired them.
 	it("nests tool spans under the assistant message by call id", () => {
-		const events = buildJourneyTimeline([
+		const events = buildAgentTraceTimeline([
 			assistantWithTools,
 			span({
 				spanId: "span_2",
@@ -335,7 +335,7 @@ describe("tool calls", () => {
 
 	// Not every emitter sends a call id; span parentage is the fallback.
 	it("falls back to span parentage when the call id is missing", () => {
-		const events = buildJourneyTimeline([
+		const events = buildAgentTraceTimeline([
 			span({ spanId: "span_1", outputMessages: text("assistant", "on it") }),
 			span({ spanId: "span_2", parentSpanId: "span_1", operation: "execute_tool", toolName: "grep" }),
 		])
@@ -346,7 +346,7 @@ describe("tool calls", () => {
 	// Parallel calls can be ordered ahead of their triggering message by clock
 	// skew between spans of the same turn.
 	it("resolves a tool span that arrives before its assistant message", () => {
-		const events = buildJourneyTimeline([
+		const events = buildAgentTraceTimeline([
 			span({
 				spanId: "span_2",
 				operation: "execute_tool",
@@ -364,7 +364,7 @@ describe("tool calls", () => {
 	// post-pass originally only re-resolved by call id, so this span stayed
 	// orphaned and rendered outside the turn that fired it.
 	it("resolves an early tool span that has no call id, via parentage", () => {
-		const events = buildJourneyTimeline([
+		const events = buildAgentTraceTimeline([
 			span({
 				spanId: "span_2",
 				parentSpanId: "span_1",
@@ -382,10 +382,10 @@ describe("tool calls", () => {
 	// legitimate state (a tool executed outside any turn we captured). It stays
 	// unparented rather than being attached to an unrelated message.
 	it("leaves a genuinely unattributable tool span unparented", () => {
-		const events = buildJourneyTimeline([
+		const events = buildAgentTraceTimeline([
 			span({
 				spanId: "span_9",
-				parentSpanId: "not_in_journey",
+				parentSpanId: "not_in_agentTrace",
 				operation: "execute_tool",
 				toolName: "ls",
 			}),
@@ -394,11 +394,11 @@ describe("tool calls", () => {
 	})
 })
 
-describe("content-redacted journeys", () => {
+describe("content-redacted agent traces", () => {
 	// Privacy modes strip exactly the message bodies while keeping timing, model,
 	// token and cost data. That is an expected state, not an error path.
 	it("keeps the turn, its metrics, and says the content is absent", () => {
-		const events = buildJourneyTimeline([
+		const events = buildAgentTraceTimeline([
 			span({ inputTokens: 800, outputTokens: 120, costRaw: "0.004", cost: 0.004 }),
 		])
 		expect(events).toHaveLength(1)
@@ -415,13 +415,13 @@ describe("content-redacted journeys", () => {
 	// Older OpenLLMetry SDKs put prompts/completions in span events. We don't
 	// read them yet — but the row must say so rather than look broken.
 	it("distinguishes content that lives in span events", () => {
-		const events = buildJourneyTimeline([span({ contentEventCount: 2 })])
+		const events = buildAgentTraceTimeline([span({ contentEventCount: 2 })])
 		expect(events[0]!.contentSource).toBe("events")
 	})
 
 	// Cost has no stable convention: absence must read as unknown, never $0.00.
 	it("reports an absent cost attribute as null", () => {
-		const events = buildJourneyTimeline([span({ costRaw: "", cost: 0 })])
+		const events = buildAgentTraceTimeline([span({ costRaw: "", cost: 0 })])
 		expect(events[0]!.cost).toBeNull()
 	})
 })
@@ -430,14 +430,14 @@ describe("non-message operations and handoffs", () => {
 	// `retrieval`, `plan`, memory ops and `invoke_agent` are first-class span
 	// types in the standard — the timeline admits them from the start.
 	it("emits an operation event for a non-inference span", () => {
-		const events = buildJourneyTimeline([
+		const events = buildAgentTraceTimeline([
 			span({ operation: "retrieval", spanName: "retrieval docs", durationMs: 42 }),
 		])
 		expect(events[0]).toMatchObject({ kind: "operation", operation: "retrieval", durationMs: 42 })
 	})
 
-	it("marks an agent handoff when the agent changes mid-journey", () => {
-		const events = buildJourneyTimeline([
+	it("marks an agent handoff when the agent changes mid-agentTrace", () => {
+		const events = buildAgentTraceTimeline([
 			span({ spanId: "s1", agentName: "planner", outputMessages: text("assistant", "delegating") }),
 			span({
 				spanId: "s2",
@@ -457,7 +457,7 @@ describe("non-message operations and handoffs", () => {
 
 	// A 4000-word system prompt repeated on 40 spans is one row, not 40.
 	it("emits the system prompt once and again only when it changes", () => {
-		const events = buildJourneyTimeline([
+		const events = buildAgentTraceTimeline([
 			span({ spanId: "s1", systemInstructions: "you are helpful" }),
 			span({ spanId: "s2", systemInstructions: "you are helpful" }),
 			span({ spanId: "s3", systemInstructions: "you are terse" }),
@@ -470,7 +470,7 @@ describe("non-message operations and handoffs", () => {
 })
 
 // ---------------------------------------------------------------------------
-// `withoutContent` — the shape of a journey without any of its text.
+// `withoutContent` — the shape of an agent trace without any of its text.
 //
 // Five sites strip content (system prompt, tool result, tool arguments,
 // operation output, message body). A miss in any one leaks message text to a
@@ -507,8 +507,8 @@ describe("withoutContent", () => {
 	]
 
 	it("keeps every event and every metric", () => {
-		const bare = buildJourneyTimeline(rows, { withoutContent: true })
-		expect(bare.map((e) => e.kind)).toEqual(buildJourneyTimeline(rows).map((e) => e.kind))
+		const bare = buildAgentTraceTimeline(rows, { withoutContent: true })
+		expect(bare.map((e) => e.kind)).toEqual(buildAgentTraceTimeline(rows).map((e) => e.kind))
 		expect(bare.find((e) => e.kind === "toolCall")).toMatchObject({
 			toolName: "search",
 			toolCallId: "call_a",
@@ -517,9 +517,9 @@ describe("withoutContent", () => {
 	})
 
 	it("leaks no text through any of the five content fields", () => {
-		const serialized = JSON.stringify(buildJourneyTimeline(rows, { withoutContent: true }))
+		const serialized = JSON.stringify(buildAgentTraceTimeline(rows, { withoutContent: true }))
 		expect(serialized).not.toContain("secret")
-		for (const event of buildJourneyTimeline(rows, { withoutContent: true })) {
+		for (const event of buildAgentTraceTimeline(rows, { withoutContent: true })) {
 			expect(event.content).toBeNull()
 			expect(event.toolArguments).toBeNull()
 			expect(event.toolResult).toBeNull()

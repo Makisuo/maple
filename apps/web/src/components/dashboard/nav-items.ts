@@ -1,6 +1,7 @@
 import {
 	BellIcon,
 	ChartLineIcon,
+	ChatBubbleSparkleIcon,
 	CircleWarningIcon,
 	CloudflareIcon,
 	ComputerIcon,
@@ -43,6 +44,12 @@ export interface NavItem {
 	 */
 	subItems?: NavSubItem[]
 	badge?: string
+}
+
+/** Per-org rollout flags the nav shape depends on (see `use-org-feature-flag`). */
+export interface NavFlags {
+	infraEnabled: boolean
+	agentTracingEnabled: boolean
 }
 
 export interface NavGroup {
@@ -90,15 +97,16 @@ const infrastructureItem: NavItem = {
 }
 
 /**
- * Traces, Logs, Metrics and Replays are one interaction — pick a time range,
- * filter, scan a list, open one — sharing a toolbar and a filter column. They
- * read as one section with four children rather than four top-level rows, using
- * the same reveal-when-active pattern Infrastructure already uses. The parent
- * href follows its first child; the underlying routes are unchanged.
+ * Traces, Logs, Metrics, Replays and Agent Traces are one interaction — pick a
+ * time range, filter, scan a list, open one — sharing a toolbar and a filter
+ * column. They read as one section with five children rather than five
+ * top-level rows, using the same reveal-when-active pattern Infrastructure
+ * already uses. The parent href follows its first child; the underlying routes
+ * are unchanged.
  *
  * Every child carries an icon so the closed row can preview what's inside it
- * (see `NavRow`) — a section named "Explore" says nothing about the four
- * signals it hides.
+ * (see `NavRow`) — a section named "Explore" says nothing about the signals it
+ * hides.
  */
 const exploreItem: NavItem = {
 	title: "Explore",
@@ -109,6 +117,7 @@ const exploreItem: NavItem = {
 		{ title: "Logs", href: "/logs", icon: FileIcon },
 		{ title: "Metrics", href: "/metrics", icon: ChartLineIcon },
 		{ title: "Replays", href: "/replays", icon: PlayRotateClockwiseIcon },
+		{ title: "Agent Traces", href: "/agent-traces", icon: ChatBubbleSparkleIcon },
 	],
 }
 
@@ -119,7 +128,7 @@ const exploreItem: NavItem = {
  * themselves on connection status). The row itself never disappears, so the
  * sidebar's shape does not change when the flag resolves.
  */
-function visibleInfrastructureItem(flags: { infraEnabled: boolean }): NavItem {
+function visibleInfrastructureItem(flags: NavFlags): NavItem {
 	if (flags.infraEnabled) return infrastructureItem
 	const subItems = infrastructureItem.subItems?.filter(
 		(sub) => sub.href.startsWith("/infra/cloudflare") || sub.href.startsWith("/infra/planetscale"),
@@ -130,11 +139,24 @@ function visibleInfrastructureItem(flags: { infraEnabled: boolean }): NavItem {
 }
 
 /**
+ * `agent_tracing` gates Agent Traces during rollout. Unlike Infrastructure, the
+ * section it lives in is not the gated thing — Explore keeps its href and its
+ * other four signals, it just loses one child.
+ */
+function visibleExploreItem(flags: NavFlags): NavItem {
+	if (flags.agentTracingEnabled) return exploreItem
+	return {
+		...exploreItem,
+		subItems: exploreItem.subItems?.filter((sub) => !sub.href.startsWith("/agent-traces")),
+	}
+}
+
+/**
  * The sidebar's information architecture, and the single source the command
  * palette flattens. Anomalies is reachable at /anomalies but stays out of both
  * until the detector has been validated against production baselines.
  */
-export function navGroups(flags: { infraEnabled: boolean }): NavGroup[] {
+export function navGroups(flags: NavFlags): NavGroup[] {
 	return [
 		{ id: "overview", items: [overviewItem] },
 		{
@@ -150,7 +172,7 @@ export function navGroups(flags: { infraEnabled: boolean }): NavGroup[] {
 			id: "analyze",
 			label: "Analyze",
 			items: [
-				exploreItem,
+				visibleExploreItem(flags),
 				{ title: "Dashboards", href: "/dashboards", icon: GridSquareCirclePlusIcon },
 			],
 		},
@@ -194,7 +216,7 @@ export interface PaletteNavEntry {
  * are the entries that keep muscle memory working, and they were never in the
  * palette before this.
  */
-export function paletteNavItems(flags: { infraEnabled: boolean }): PaletteNavEntry[] {
+export function paletteNavItems(flags: NavFlags): PaletteNavEntry[] {
 	const entries: PaletteNavEntry[] = []
 	const seen = new Set<string>()
 	const push = (entry: PaletteNavEntry) => {

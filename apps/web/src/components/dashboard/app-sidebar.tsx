@@ -56,6 +56,7 @@ import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-a
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
+import { useAgentTracingEnabled } from "@/hooks/use-agent-tracing-enabled"
 
 /**
  * A 2px lane is reserved on every row so icons share one vertical line whether
@@ -563,7 +564,11 @@ function FooterCluster() {
 export const AppSidebar = memo(function AppSidebar() {
 	const currentPath = useRouterState({ select: (s) => s.location.pathname })
 	const infraEnabled = useInfraEnabled()
-	const groups = useMemo(() => navGroups({ infraEnabled }), [infraEnabled])
+	const agentTracingEnabled = useAgentTracingEnabled()
+	const groups = useMemo(
+		() => navGroups({ infraEnabled, agentTracingEnabled }),
+		[infraEnabled, agentTracingEnabled],
+	)
 
 	return (
 		<Sidebar collapsible="icon">

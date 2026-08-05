@@ -53,31 +53,31 @@ const TRACE_ID = "0af7651916cd43dd8448eb211c80319c"
 const SPAN_ID = "b7ad6b7169203331"
 const FINGERPRINT = "11640393269246331608"
 
-const JOURNEY_ID = "conv_0af7651916cd43dd"
+const AGENT_TRACE_ID = "conv_0af7651916cd43dd"
 
 const window = { orgId: ORG_ID, startTime: START_TIME, endTime: END_TIME }
 
 export const builderFixtures: ReadonlyArray<BuilderFixture> = [
-	// ----- genai journeys (routes/v1/genai.http.ts) -----
+	// ----- genai agent traces (routes/v1/genai.http.ts) -----
 	// Four shapes the analyzer has never seen elsewhere in the catalog: a window
 	// function feeding a GROUP BY, a HAVING over aggregate aliases, and a UNION
 	// that mixes uniq()'s UInt64 with a tuple-packed quantile branch. Exactly the
 	// class of SQL that compiles to the expected text and is then rejected.
 	{
 		module: "genai",
-		name: "journeyListQuery",
+		name: "agentTraceListQuery",
 		label: "default",
-		compile: () => CH.compile(CH.journeyListQuery({}), window, { rowSchema: CH.journeyListRowSchema }),
+		compile: () => CH.compile(CH.agentTraceListQuery({}), window, { rowSchema: CH.agentTraceListRowSchema }),
 	},
 	{
-		// Every journey-level filter at once — all of them are HAVING predicates
+		// Every agent-trace-level filter at once — all of them are HAVING predicates
 		// over aggregate aliases, which is where a type mismatch would surface.
 		module: "genai",
-		name: "journeyListQuery",
+		name: "agentTraceListQuery",
 		label: "filtered",
 		compile: () =>
 			CH.compile(
-				CH.journeyListQuery({
+				CH.agentTraceListQuery({
 					model: "gpt-4o",
 					requestedModel: "gpt-4o",
 					provider: "openai",
@@ -101,14 +101,14 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 					limit: 50,
 				}),
 				window,
-				{ rowSchema: CH.journeyListRowSchema },
+				{ rowSchema: CH.agentTraceListRowSchema },
 			),
 	},
 	{
 		module: "genai",
-		name: "journeyFacetsQuery",
+		name: "agentTraceFacetsQuery",
 		label: "default",
-		compile: () => CH.compileUnion(CH.journeyFacetsQuery({}), window),
+		compile: () => CH.compileUnion(CH.agentTraceFacetsQuery({}), window),
 	},
 	{
 		// Each branch drops its own dimension, so a filtered facets run is a
@@ -118,11 +118,11 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		// WHERE and inherited HAVING no longer contradict) only exists when the
 		// corresponding filter is set.
 		module: "genai",
-		name: "journeyFacetsQuery",
+		name: "agentTraceFacetsQuery",
 		label: "filtered",
 		compile: () =>
 			CH.compileUnion(
-				CH.journeyFacetsQuery({
+				CH.agentTraceFacetsQuery({
 					model: "gpt-4o",
 					status: "error",
 					hasTools: true,
@@ -135,27 +135,27 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 	},
 	{
 		module: "genai",
-		name: "journeySummaryQuery",
+		name: "agentTraceSummaryQuery",
 		label: "default",
 		compile: () =>
 			CH.compile(
-				CH.journeySummaryQuery(),
-				{ ...window, journeyId: JOURNEY_ID },
+				CH.agentTraceSummaryQuery(),
+				{ ...window, agentTraceId: AGENT_TRACE_ID },
 				{
-					rowSchema: CH.journeySummaryRowSchema,
+					rowSchema: CH.agentTraceSummaryRowSchema,
 				},
 			),
 	},
 	{
 		module: "genai",
-		name: "journeyTimelineQuery",
+		name: "agentTraceTimelineQuery",
 		label: "default",
 		compile: () =>
 			CH.compile(
-				CH.journeyTimelineQuery(),
-				{ ...window, journeyId: JOURNEY_ID },
+				CH.agentTraceTimelineQuery(),
+				{ ...window, agentTraceId: AGENT_TRACE_ID },
 				{
-					rowSchema: CH.journeyTimelineRowSchema,
+					rowSchema: CH.agentTraceTimelineRowSchema,
 				},
 			),
 	},

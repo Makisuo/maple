@@ -57,7 +57,7 @@ import { VcsWebhookRouter } from "@/routes/v1/vcs-webhook.http"
 import { HttpQueryEngineLive } from "@/routes/v1/query-engine.http"
 import { HttpRecommendationIssuesLive } from "@/routes/v1/recommendation-issues.http"
 import { HttpScrapeTargetsLive } from "@/routes/v1/scrape-targets.http"
-import { HttpGenAiJourneysLive } from "@/routes/v1/genai.http"
+import { HttpGenAiAgentTracesLive } from "@/routes/v1/genai.http"
 import { HttpSessionReplaysLive } from "@/routes/v1/session-replay.http"
 import { HttpWarehouseLive } from "@/routes/v1/warehouse.http"
 import { AiTriageService } from "./services/errors/AiTriageService"
@@ -310,7 +310,7 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpApiKeysLive),
 	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
 	Layer.provide(HttpErrorsLive),
-	Layer.provide(HttpGenAiJourneysLive),
+	Layer.provide(HttpGenAiAgentTracesLive),
 	Layer.provide(HttpDashboardsLive),
 	Layer.provide(HttpDashboardSchemaErrorsLive),
 	Layer.provide(HttpDemoLive),

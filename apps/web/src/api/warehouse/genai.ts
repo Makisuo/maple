@@ -1,22 +1,22 @@
 import { Clock, Effect, Schema } from "effect"
 import {
-	JOURNEY_DETAIL_WINDOW_MS,
-	JourneyFacetsRequest,
-	JourneyPageLimit,
-	JourneyPageOffset,
-	JourneySortDirection,
-	JourneySortKey,
-	JourneySummaryRequest,
-	JourneyTimelineRequest,
-	ListJourneysRequest,
-	journeyFilterFields,
+	AGENT_TRACE_DETAIL_WINDOW_MS,
+	AgentTraceFacetsRequest,
+	AgentTracePageLimit,
+	AgentTracePageOffset,
+	AgentTraceSortDirection,
+	AgentTraceSortKey,
+	AgentTraceSummaryRequest,
+	AgentTraceTimelineRequest,
+	ListAgentTracesRequest,
+	agentTraceFilterFields,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 import { formatWarehouseDateTime } from "@maple/query-engine"
 
 // ---------------------------------------------------------------------------
-// Agentic Journeys read path
+// Agent Traces read path
 //
 // Mirrors `replays.ts`: one `Effect.fn` per endpoint, inputs decoded through an
 // Effect Schema, and a default time window applied here rather than in the
@@ -32,52 +32,52 @@ import { formatWarehouseDateTime } from "@maple/query-engine"
  * is how the sidebar and the list drift into describing different populations —
  * and the copy always looks right until someone adds a dimension to one of them.
  */
-const JourneyFilters = journeyFilterFields
+const AgentTraceFilters = agentTraceFilterFields
 
 const defaultTimeRange = (nowMs: number) => ({
 	startTime: formatWarehouseDateTime(nowMs - 24 * 60 * 60 * 1000),
 	endTime: formatWarehouseDateTime(nowMs),
 })
 
-/** Detail reads default wide — a journey id alone doesn't bound the scan, and a
+/** Detail reads default wide — an agent trace id alone doesn't bound the scan, and a
  *  deep link that 404s because it lacks a time param is worse than a wide one.
  *  The window itself comes from the domain package so the summary and the
  *  timeline under it can never read different ranges. */
 const detailTimeRange = (nowMs: number) => ({
-	startTime: formatWarehouseDateTime(nowMs - JOURNEY_DETAIL_WINDOW_MS),
+	startTime: formatWarehouseDateTime(nowMs - AGENT_TRACE_DETAIL_WINDOW_MS),
 	endTime: formatWarehouseDateTime(nowMs),
 })
 
 // ---------------------------------------------------------------------------
-// List journeys
+// List agent traces
 // ---------------------------------------------------------------------------
 
-const ListJourneysInput = Schema.Struct({
+const ListAgentTracesInput = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
-	...JourneyFilters,
-	sort: Schema.optional(JourneySortKey),
-	sortDirection: Schema.optional(JourneySortDirection),
+	...AgentTraceFilters,
+	sort: Schema.optional(AgentTraceSortKey),
+	sortDirection: Schema.optional(AgentTraceSortDirection),
 	// Same guards the request schema enforces — decoding here turns a bad page
 	// size into a client-side decode error instead of a throw inside the
 	// request constructor on the way out.
-	limit: Schema.optional(JourneyPageLimit),
-	offset: Schema.optional(JourneyPageOffset),
+	limit: Schema.optional(AgentTracePageLimit),
+	offset: Schema.optional(AgentTracePageOffset),
 })
-export type ListJourneysInput = Schema.Schema.Type<typeof ListJourneysInput>
+export type ListAgentTracesInput = Schema.Schema.Type<typeof ListAgentTracesInput>
 
-export const listJourneys = Effect.fn("GenAiJourneys.listJourneys")(function* ({
+export const listAgentTraces = Effect.fn("GenAiAgentTraces.listAgentTraces")(function* ({
 	data,
 }: {
-	data: ListJourneysInput
+	data: ListAgentTracesInput
 }) {
-	const input = yield* decodeInput(ListJourneysInput, data ?? {}, "listJourneys")
+	const input = yield* decodeInput(ListAgentTracesInput, data ?? {}, "listAgentTraces")
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
-	const result = yield* runWarehouseQuery("listJourneys", () =>
+	const result = yield* runWarehouseQuery("listAgentTraces", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleApiAtomClient
-			return yield* client.genaiJourneys.listJourneys({
-				payload: new ListJourneysRequest({
+			return yield* client.genaiAgentTraces.listAgentTraces({
+				payload: new ListAgentTracesRequest({
 					...input,
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
@@ -94,25 +94,25 @@ export const listJourneys = Effect.fn("GenAiJourneys.listJourneys")(function* ({
 // Facets (filter sidebar option counts)
 // ---------------------------------------------------------------------------
 
-const JourneyFacetsInput = Schema.Struct({
+const AgentTraceFacetsInput = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
-	...JourneyFilters,
+	...AgentTraceFilters,
 })
-export type JourneyFacetsInput = Schema.Schema.Type<typeof JourneyFacetsInput>
+export type AgentTraceFacetsInput = Schema.Schema.Type<typeof AgentTraceFacetsInput>
 
-export const getJourneyFacets = Effect.fn("GenAiJourneys.facets")(function* ({
+export const getAgentTraceFacets = Effect.fn("GenAiAgentTraces.facets")(function* ({
 	data,
 }: {
-	data: JourneyFacetsInput
+	data: AgentTraceFacetsInput
 }) {
-	const input = yield* decodeInput(JourneyFacetsInput, data ?? {}, "journeyFacets")
+	const input = yield* decodeInput(AgentTraceFacetsInput, data ?? {}, "agentTraceFacets")
 	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
-	return yield* runWarehouseQuery("journeyFacets", () =>
+	return yield* runWarehouseQuery("agentTraceFacets", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleApiAtomClient
-			return yield* client.genaiJourneys.facets({
-				payload: new JourneyFacetsRequest({
+			return yield* client.genaiAgentTraces.facets({
+				payload: new AgentTraceFacetsRequest({
 					...input,
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
@@ -123,29 +123,29 @@ export const getJourneyFacets = Effect.fn("GenAiJourneys.facets")(function* ({
 })
 
 // ---------------------------------------------------------------------------
-// Journey summary (detail header)
+// Agent trace summary (detail header)
 // ---------------------------------------------------------------------------
 
-const JourneySummaryInput = Schema.Struct({
-	journeyId: Schema.String,
+const AgentTraceSummaryInput = Schema.Struct({
+	agentTraceId: Schema.String,
 	windowStart: Schema.optional(WarehouseDateTimeString),
 	windowEnd: Schema.optional(WarehouseDateTimeString),
 })
-export type JourneySummaryInput = (typeof JourneySummaryInput)["Encoded"]
+export type AgentTraceSummaryInput = (typeof AgentTraceSummaryInput)["Encoded"]
 
-export const getJourneySummary = Effect.fn("GenAiJourneys.summary")(function* ({
+export const getAgentTraceSummary = Effect.fn("GenAiAgentTraces.summary")(function* ({
 	data,
 }: {
-	data: JourneySummaryInput
+	data: AgentTraceSummaryInput
 }) {
-	const input = yield* decodeInput(JourneySummaryInput, data ?? {}, "journeySummary")
+	const input = yield* decodeInput(AgentTraceSummaryInput, data ?? {}, "agentTraceSummary")
 	const fallback = detailTimeRange(yield* Clock.currentTimeMillis)
-	const result = yield* runWarehouseQuery("journeySummary", () =>
+	const result = yield* runWarehouseQuery("agentTraceSummary", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleApiAtomClient
-			return yield* client.genaiJourneys.journeySummary({
-				payload: new JourneySummaryRequest({
-					journeyId: input.journeyId,
+			return yield* client.genaiAgentTraces.agentTraceSummary({
+				payload: new AgentTraceSummaryRequest({
+					agentTraceId: input.agentTraceId,
 					startTime: input.windowStart ?? fallback.startTime,
 					endTime: input.windowEnd ?? fallback.endTime,
 				}),
@@ -156,38 +156,38 @@ export const getJourneySummary = Effect.fn("GenAiJourneys.summary")(function* ({
 })
 
 // ---------------------------------------------------------------------------
-// Journey timeline (detail body)
+// Agent trace timeline (detail body)
 //
 // The response is already assembled: cumulative `gen_ai.input.messages` are
 // deduped server-side and tool calls carry `parentEventId` pointing at the
 // assistant message that requested them. Render the list; don't re-derive it.
 // ---------------------------------------------------------------------------
 
-const JourneyTimelineInput = Schema.Struct({
-	journeyId: Schema.String,
+const AgentTraceTimelineInput = Schema.Struct({
+	agentTraceId: Schema.String,
 	windowStart: Schema.optional(WarehouseDateTimeString),
 	windowEnd: Schema.optional(WarehouseDateTimeString),
 	// Same guards the request schema enforces — decoding here turns a bad page
 	// size into a client-side decode error instead of a throw inside the
 	// request constructor on the way out.
-	limit: Schema.optional(JourneyPageLimit),
-	offset: Schema.optional(JourneyPageOffset),
+	limit: Schema.optional(AgentTracePageLimit),
+	offset: Schema.optional(AgentTracePageOffset),
 })
-export type JourneyTimelineInput = (typeof JourneyTimelineInput)["Encoded"]
+export type AgentTraceTimelineInput = (typeof AgentTraceTimelineInput)["Encoded"]
 
-export const getJourneyTimeline = Effect.fn("GenAiJourneys.timeline")(function* ({
+export const getAgentTraceTimeline = Effect.fn("GenAiAgentTraces.timeline")(function* ({
 	data,
 }: {
-	data: JourneyTimelineInput
+	data: AgentTraceTimelineInput
 }) {
-	const input = yield* decodeInput(JourneyTimelineInput, data ?? {}, "journeyTimeline")
+	const input = yield* decodeInput(AgentTraceTimelineInput, data ?? {}, "agentTraceTimeline")
 	const fallback = detailTimeRange(yield* Clock.currentTimeMillis)
-	const result = yield* runWarehouseQuery("journeyTimeline", () =>
+	const result = yield* runWarehouseQuery("agentTraceTimeline", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleApiAtomClient
-			return yield* client.genaiJourneys.journeyTimeline({
-				payload: new JourneyTimelineRequest({
-					journeyId: input.journeyId,
+			return yield* client.genaiAgentTraces.agentTraceTimeline({
+				payload: new AgentTraceTimelineRequest({
+					agentTraceId: input.agentTraceId,
 					startTime: input.windowStart ?? fallback.startTime,
 					endTime: input.windowEnd ?? fallback.endTime,
 					limit: input.limit,
