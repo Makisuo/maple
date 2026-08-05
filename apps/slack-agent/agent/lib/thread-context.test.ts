@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { SlackThreadMessage } from "eve/channels/slack"
 import { botUserIdForTeam, rememberBotUserId, resetBotUserIdCacheForTests } from "./bot-identity.js"
-import { formatThreadContext, loadThreadContext, slackMessageContent } from "./thread-context.js"
+import { slackMessageContent } from "./slack-context-format.js"
+import { formatThreadContext, loadThreadContext } from "./thread-context.js"
 
 afterEach(() => {
 	resetBotUserIdCacheForTests()

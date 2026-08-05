@@ -41,9 +41,12 @@ agent/
   channels/eve.ts     # auth policy for the browser/API routes
   connections/maple.ts # Maple MCP connection (per-workspace API key auth + approval gate)
   tools/render_chart.ts # renders a PNG chart in-process and posts it into the thread
+  tools/read_channel_history.ts # on-demand read of the channel's recent top-level messages
   tools/{bash,glob,grep,read_file,write_file,web_fetch,web_search}.ts
                       # `disableTool()` sentinels — see Framework tools below
   lib/thread-context.ts # full-thread turn context (renders Block Kit / alert cards too)
+  lib/channel-context.ts # channel turn context for a mention that starts its own thread
+  lib/slack-context-format.ts # shared renderer for both (blocks/attachments + attribution)
   lib/bot-identity.ts # per-team bot user id learned from the webhook envelope
   lib/chart.ts        # pure SVG chart renderer + unicode-sparkline fallback
   lib/slack-upload.ts # Slack external-upload flow (files.getUploadURLExternal → complete)
@@ -134,10 +137,10 @@ oauth_config:
             - chat:write # post replies
             - chat:write.public # post in channels the bot isn't a member of
             - channels:read # resolve public channel metadata
-            - channels:history
+            - channels:history # thread + channel context, follow-ups (no mpim:history — group DMs opt out)
             - files:write # upload rendered chart images (render_chart tool)
             - groups:read # resolve private channel metadata
-            - groups:history # thread context + follow-ups in private channels
+            - groups:history # thread + channel context + follow-ups in private channels
             - im:history # read DM history (message.im)
             - im:read # resolve DM conversation metadata
             - im:write # open/DM the user
@@ -506,6 +509,19 @@ and **activate public distribution** so the app can be installed into any worksp
   falls back to blocks/attachments for content, keeps the full thread (which also survives a
   session lost to a redeploy), and attributes speakers with the workspace's real bot user id from
   `agent/lib/bot-identity.ts` so a third-party app in the channel isn't quoted back as the agent.
+- **A mention that isn't in a thread gets the channel instead.** Maple posts alert cards to a
+  channel; people answer them by writing a new channel message ("the ship is sinking @Maple"), not
+  by replying inside a card's thread. That mention is its own thread root, so the thread transcript
+  is one message long — the user's own. `agent/lib/channel-context.ts` fills the gap with the
+  channel's last few top-level messages (`conversations.history`) as `<slack_channel_context>`,
+  rendered by the same code, on the same `waitUntil` path, degrading the same way. The trigger is
+  structural (`threadTs === ts`), not a model judgment call: the model cannot ask for context it
+  has never been shown a trace of. Inside a thread the same fetch is available on demand as the
+  `read_channel_history` tool. `conversations.history` returns top-level messages only, so the two
+  surfaces never quote the same message twice. Scope-wise this is free — `channels:history` /
+  `groups:history` / `im:history` are already installed. `mpim:history` is not requested, so a
+  group DM answers `missing_scope`; that degrades to a note telling the model not to retry, and
+  adding the scope would make every existing install report missing scopes until reinstalled.
 - **Auth:** `agent/channels/eve.ts` fails closed in deployed environments (`RAILWAY_ENVIRONMENT_NAME`
   set, or `NODE_ENV=production`): the browser/API routes always require HTTP Basic there. With
   `ROUTE_AUTH_BASIC_PASSWORD` set that's your stable credential; without it, a random per-boot
