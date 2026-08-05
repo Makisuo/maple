@@ -1,8 +1,10 @@
-import { slackChannel } from "eve/channels/slack"
-import type { SlackWebhookVerifier } from "eve/channels/slack"
+import { defaultSlackAuth, slackChannel } from "eve/channels/slack"
+import type { SlackContext, SlackMentionResult, SlackMessage, SlackWebhookVerifier } from "eve/channels/slack"
 import { acknowledgeIncomingMessage } from "#lib/ack-reaction.js"
 import { describeActions, truncateTypingStatus } from "#lib/action-status.js"
+import { botUserIdForTeam, rememberBotUserId } from "#lib/bot-identity.js"
 import { resolveBotToken, verifySlackV0Signature, type SlackTokenContext } from "#lib/maple.js"
+import { loadThreadContext } from "#lib/thread-context.js"
 import { promoteThreadFollowUp } from "#lib/thread-follow-up.js"
 import { forwardUninstallEvent } from "#lib/uninstall-detection.js"
 
@@ -37,6 +39,11 @@ const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
 		)
 		return false
 	}
+
+	// Every event_callback names this workspace's bot user under
+	// `authorizations`, so thread-context attribution gets it for free — no
+	// auth.test round-trip (#lib/bot-identity.js).
+	rememberBotUserId(body)
 
 	// app_uninstalled / tokens_revoked: eve only dispatches app_mention + DM
 	// events downstream, so it would otherwise drop these as "unsupported".
@@ -75,6 +82,34 @@ const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
 	return body
 }
 
+/**
+ * Stands in for eve's default mention/DM pipeline: same two steps — a
+ * "Thinking..." typing indicator and workspace-scoped auth derivation — plus
+ * the thread transcript as turn context.
+ *
+ * The context is ours rather than the channel's `threadContext` option because
+ * eve reads a message's content from `text` alone and treats every bot post as
+ * the agent's own last reply. Maple's alert notifications are Block Kit inside
+ * an attachment with no top-level text, so both rules misfired at once and an
+ * @mention in an alert thread reached the model with the alert blank and
+ * everything before it cut away — see #lib/thread-context.js.
+ *
+ * Runs after eve has already returned 200 to Slack (`waitUntil`), so the thread
+ * fetch is off the webhook's delivery budget. It must not throw: eve drops the
+ * whole mention when this handler does, so `loadThreadContext` degrades to no
+ * context instead.
+ */
+async function dispatchWithThreadContext(
+	ctx: SlackContext,
+	message: SlackMessage,
+): Promise<SlackMentionResult> {
+	await ctx.thread.startTyping("Thinking...")
+	const context = await loadThreadContext(ctx.thread, message, {
+		botUserId: botUserIdForTeam(message.teamId),
+	})
+	return { auth: defaultSlackAuth(message, ctx), context }
+}
+
 export default slackChannel({
 	credentials: {
 		webhookVerifier,
@@ -83,9 +118,10 @@ export default slackChannel({
 		// SLACK_BOT_TOKEN.
 		botToken: async (context?: SlackTokenContext) => resolveBotToken(context),
 	},
-	// Repeated mentions in a thread only inject what's new since the agent's
-	// last reply, instead of re-reading the whole thread each time.
-	threadContext: { since: "last-agent-reply" },
+	// Thread context is loaded by these two handlers, not by the channel's
+	// `threadContext` option — see dispatchWithThreadContext above.
+	onAppMention: dispatchWithThreadContext,
+	onDirectMessage: dispatchWithThreadContext,
 	events: {
 		// Eve's default flashes the raw tool-call label (`maple__list_services
 		// startTime=...`) into the typing status. Replace it with a plain

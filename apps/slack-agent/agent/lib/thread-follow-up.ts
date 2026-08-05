@@ -1,3 +1,4 @@
+import { botUserIdFromEnvelope } from "./bot-identity.js"
 import { resolveBotToken } from "./maple.js"
 import { createTtlCache } from "./ttl-cache.js"
 
@@ -215,21 +216,6 @@ function parseFollowUpCandidate(rawBody: string): FollowUpCandidate | null {
 		eventTs: ts,
 		eventTsSeconds,
 	}
-}
-
-/**
- * The event envelope's `authorizations` names the app's bot user — no
- * `auth.test` round-trip needed.
- */
-function botUserIdFromEnvelope(envelope: Record<string, unknown>): string | null {
-	const authorizations = envelope.authorizations
-	if (!Array.isArray(authorizations)) return null
-	for (const auth of authorizations) {
-		if (isRecord(auth) && typeof auth.user_id === "string" && auth.user_id.length > 0) {
-			return auth.user_id
-		}
-	}
-	return null
 }
 
 async function isBotEngagedInThread(
