@@ -14,7 +14,7 @@
 // Pure — no React, no atoms — so the precedence rules are testable on their own.
 
 import { matchesGlob } from "@maple/domain/glob"
-import type { PlanetScaleBranchSummary } from "@maple/domain/http"
+import type { V2PlanetScaleBranch } from "@maple/domain/http/v2"
 import type { PlanetScaleBranchStat } from "@/api/warehouse/service-map"
 
 export { matchesGlob }
@@ -53,7 +53,7 @@ export const isExcluded = (
  * caught up with.
  */
 export function mergeBranchCandidates(
-	inventoryBranches: ReadonlyArray<PlanetScaleBranchSummary>,
+	inventoryBranches: ReadonlyArray<V2PlanetScaleBranch>,
 	stats: ReadonlyArray<PlanetScaleBranchStat>,
 	includeBranches: ReadonlyArray<string> = [],
 	excludeBranches: ReadonlyArray<string> = [],

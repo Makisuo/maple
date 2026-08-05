@@ -26,9 +26,9 @@ import {
 	MapleApi,
 	PlanetScaleDatabasesResponse,
 	PlanetScaleDisconnectResponse,
+	PlanetScaleEventsResponse,
 	PlanetScaleOrganizationsResponse,
 	PlanetScaleOrganizationSummary,
-	PlanetScaleEventsResponse,
 	PlanetScaleQueryInsightsResponse,
 	PlanetScaleStartConnectResponse,
 	PlanetScaleWebhookConfigResponse,
@@ -55,8 +55,8 @@ import {
 	type TopTrafficGroupShape,
 } from "@/services/integrations/cloudflare-analytics/queries"
 import { PlanetScaleConnectionService } from "@/services/integrations/PlanetScaleConnectionService"
-import { PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
 import { PlanetScaleService } from "@/services/integrations/PlanetScaleService"
+import { PLANETSCALE_CALLBACK_PATH, PlanetScaleOAuthService } from "@/services/auth/PlanetScaleOAuthService"
 import { GithubConnectService } from "@/services/integrations/vcs/vendor/github/GithubConnectService"
 import { VcsCommitService } from "@/services/integrations/vcs/VcsCommitService"
 import { HazelOAuthService } from "@/services/auth/HazelOAuthService"
@@ -68,7 +68,6 @@ const asUserId = Schema.decodeUnknownSync(UserId)
 const HAZEL_CALLBACK_PATH = "/api/integrations/hazel/callback"
 const GITHUB_CALLBACK_PATH = "/api/integrations/github/callback"
 const CLOUDFLARE_CALLBACK_PATH = "/api/integrations/cloudflare/callback"
-const PLANETSCALE_CALLBACK_PATH = "/api/integrations/planetscale/callback"
 const HAZEL_MESSAGE_TYPE = "maple:integration:hazel"
 const GITHUB_MESSAGE_TYPE = "maple:integration:github"
 const CLOUDFLARE_MESSAGE_TYPE = "maple:integration:cloudflare"
@@ -1305,6 +1304,6 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 			)
 		})
 
-		yield* router.add("GET", "/api/integrations/planetscale/callback", handlePlanetScale)
+		yield* router.add("GET", PLANETSCALE_CALLBACK_PATH, handlePlanetScale)
 	}),
 )

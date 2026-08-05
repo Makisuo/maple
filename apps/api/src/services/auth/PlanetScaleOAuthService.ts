@@ -18,6 +18,16 @@ import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS, toUpstreamError } from 
 
 const PLANETSCALE_PROVIDER = "planetscale"
 
+/**
+ * Where PlanetScale redirects the browser after consent. Stays under `/api/…`
+ * even though the control surface moved to `/v2/integrations/planetscale`: the
+ * callback is a raw router route, not an API group (docs/api-v2.md), and this
+ * exact path is registered in the PlanetScale OAuth app. Owned here rather than
+ * by either route module so the v2 `connect` handler and the v1 callback
+ * registration cannot drift apart — same arrangement as `SLACK_CALLBACK_PATH`.
+ */
+export const PLANETSCALE_CALLBACK_PATH = "/api/integrations/planetscale/callback"
+
 const decodeOrgId = Schema.decodeUnknownSync(OrgId)
 
 /** OAuth access tokens use the standard Bearer scheme (service tokens used `token id:secret`). */

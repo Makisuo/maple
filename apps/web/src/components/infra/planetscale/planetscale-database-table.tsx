@@ -5,7 +5,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
-import type { PlanetScaleDatabaseSummary } from "@maple/domain/http"
+import type { V2PlanetScaleDatabase } from "@maple/domain/http/v2"
 import type { PlanetScaleDatabaseStat } from "@/api/warehouse/service-map"
 import { formatNumber } from "@maple/ui/lib/format"
 import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS, useTableSort } from "../primitives/data-table"
@@ -160,7 +160,7 @@ export function PlanetScaleDatabaseTable({
 	metricsPaused = false,
 	emptyMessage = "No databases in the inventory.",
 }: {
-	databases: ReadonlyArray<PlanetScaleDatabaseSummary>
+	databases: ReadonlyArray<V2PlanetScaleDatabase>
 	statsByName: ReadonlyMap<string, PlanetScaleDatabaseStat>
 	waiting?: boolean
 	/** Metrics have never been collected — hide the metric columns rather than dash them. */

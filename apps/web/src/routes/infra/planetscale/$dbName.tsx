@@ -71,14 +71,14 @@ import {
 	planetscaleEventsResultAtom,
 	planetscaleInfraTimeseriesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import type { PlanetScaleInfraTimeseriesRow } from "@/api/warehouse/planetscale-infra"
 import type { PlanetScaleBranchStat } from "@/api/warehouse/service-map"
-import type { PlanetScaleEventSummary } from "@maple/domain/http"
+import type { PlanetScaleEventEntry } from "@/api/warehouse/planetscale-infra"
 
 const planetscaleDbSearchSchema = Schema.Struct({
 	/**
@@ -100,7 +100,7 @@ export const Route = createFileRoute("/infra/planetscale/$dbName")({
 /** Stable empty fallbacks — a fresh `[]` per render busts every downstream memo. */
 const NO_BUCKETS: ReadonlyArray<PlanetScaleInfraTimeseriesRow> = []
 const NO_BRANCH_STATS: ReadonlyArray<PlanetScaleBranchStat> = []
-const NO_EVENTS: ReadonlyArray<PlanetScaleEventSummary> = []
+const NO_EVENTS: ReadonlyArray<PlanetScaleEventEntry> = []
 const EMPTY_SELECTION: ReadonlyArray<string> = []
 
 function PlanetScaleDatabasePage() {
@@ -168,13 +168,13 @@ function PlanetScaleDatabasePage() {
 	}
 
 	const statusResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	const inventoryResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleDatabases", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "databases", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	const database = Result.builder(inventoryResult)
@@ -202,8 +202,8 @@ function PlanetScaleDatabasePage() {
 				mergeBranchCandidates(
 					database?.branches ?? [],
 					branchStats,
-					status?.scrapeTarget?.includeBranches ?? [],
-					status?.scrapeTarget?.excludeBranches ?? [],
+					status?.scrape_target?.include_branches ?? [],
+					status?.scrape_target?.exclude_branches ?? [],
 				),
 			),
 		[database, branchStats, status],
@@ -317,10 +317,10 @@ function PlanetScaleDatabasePage() {
 									<PlanetScaleNotConnected />
 								) : (
 									<>
-										{status?.revokedAt != null ? <PlanetScaleRevokedNotice /> : null}
+										{status?.revoked_at != null ? <PlanetScaleRevokedNotice /> : null}
 										{/* Setup replaces the notice while nothing has ever been
 										    collected — one screen saying one thing. */}
-										{status?.metricsAuth === "missing" && !neverCollected ? (
+										{status?.metrics_auth === "missing" && !neverCollected ? (
 											<PlanetScaleMetricsNotice />
 										) : null}
 										{neverCollected ? <PlanetScaleSetupState steps={setupSteps} /> : null}
@@ -340,7 +340,7 @@ function PlanetScaleDatabasePage() {
 											branch={selectedBranch?.name}
 											startTime={startTime}
 											endTime={endTime}
-											metricsPaused={status?.metricsAuth === "missing"}
+											metricsPaused={status?.metrics_auth === "missing"}
 											neverCollected={neverCollected}
 											candidates={filteredCandidates}
 											selectedBranches={filters.branches ?? EMPTY_SELECTION}

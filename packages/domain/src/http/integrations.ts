@@ -1,4 +1,4 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ExternalUserId, ScrapeTargetId, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
@@ -237,6 +237,20 @@ export class CloudflareDisconnectResponse extends Schema.Class<CloudflareDisconn
 }) {}
 
 // ---- PlanetScale (OAuth integration) ----------------------------------------
+//
+// These shapes now serve two callers at once, which is why they are camelCase
+// with epoch-ms timestamps and the v2 file is not:
+//
+//   1. The deprecated v1 endpoints at the bottom of this file, which are still
+//      mounted for external callers. This is their wire contract, frozen.
+//   2. `PlanetScaleConnectionService` / `PlanetScaleService`, whose method
+//      signatures they are — the v2 handlers map them to the snake_case/ISO
+//      wire format at the boundary, the same way the Slack handlers map
+//      `SlackInstallStatus`.
+//
+// So (1) can be deleted once no customer is calling it, and (2) will keep these
+// alive afterwards as plain service types. Do not reshape them to match v2:
+// that would break the v1 wire format while it still has callers.
 
 /**
  * The managed scrape target this connection auto-provisioned — surfaced on the
@@ -724,6 +738,19 @@ export class IntegrationsPersistenceError extends Schema.TaggedErrorClass<Integr
 	{ httpApiStatus: 503 },
 ) {}
 
+/**
+ * Every `/api/integrations/planetscale/*` operation below is superseded by the
+ * `/v2/integrations/planetscale` group (`http/v2/integrations-planetscale.ts`),
+ * which is where new work goes: scoped API keys, snake_case + ISO wire format,
+ * and the documented error envelope.
+ *
+ * v1 stays mounted because customers may still be calling it — the dashboard no
+ * longer does, so nothing in this repo will notice if it breaks. Marking the
+ * operations deprecated puts that in `/docs` rather than leaving it as tribal
+ * knowledge. Delete them only once the access logs show no external traffic.
+ */
+const PLANETSCALE_V1_DEPRECATED = OpenApi.annotations({ deprecated: true })
+
 export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 	.add(
 		HttpApiEndpoint.get("hazelStatus", "/hazel/status", {
@@ -831,7 +858,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 		HttpApiEndpoint.get("planetscaleStatus", "/planetscale/status", {
 			success: PlanetScaleIntegrationStatus,
 			error: IntegrationsPersistenceError,
-		}),
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		HttpApiEndpoint.post("planetscaleStart", "/planetscale/start", {
@@ -843,7 +870,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 				IntegrationsUpstreamError,
 				IntegrationsPersistenceError,
 			],
-		}),
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		// Organizations the stored OAuth grant can access — drives the org picker
@@ -858,7 +885,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 				IntegrationsUpstreamError,
 				IntegrationsPersistenceError,
 			],
-		}),
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		// Binds the OAuth grant to one PlanetScale organization: probes API
@@ -875,7 +902,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 				IntegrationsUpstreamError,
 				IntegrationsPersistenceError,
 			],
-		}),
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		// Validates the token against the metrics discovery endpoint before
@@ -890,13 +917,13 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 				IntegrationsUpstreamError,
 				IntegrationsPersistenceError,
 			],
-		}),
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		HttpApiEndpoint.delete("planetscaleDisconnect", "/planetscale", {
 			success: PlanetScaleDisconnectResponse,
 			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
-		}),
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		// The org's polled database/branch inventory — consumed by the service map
@@ -904,13 +931,13 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 		HttpApiEndpoint.get("planetscaleDatabases", "/planetscale/databases", {
 			success: PlanetScaleDatabasesResponse,
 			error: IntegrationsPersistenceError,
-		}),
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		HttpApiEndpoint.get("planetscaleWebhookConfig", "/planetscale/webhook-config", {
 			success: PlanetScaleWebhookConfigResponse,
 			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
-		}),
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		HttpApiEndpoint.post("planetscaleQueryInsights", "/planetscale/query-insights", {
@@ -923,7 +950,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 				IntegrationsUpstreamError,
 				IntegrationsPersistenceError,
 			],
-		}),
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		// POST, matching query-insights: the window + filters make a long key that
@@ -932,7 +959,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			payload: PlanetScaleEventsRequest,
 			success: PlanetScaleEventsResponse,
 			error: [IntegrationsValidationError, IntegrationsPersistenceError],
-		}),
+		}).annotateMerge(PLANETSCALE_V1_DEPRECATED),
 	)
 	.add(
 		HttpApiEndpoint.get("githubStatus", "/github/status", {

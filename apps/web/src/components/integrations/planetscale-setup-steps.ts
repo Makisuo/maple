@@ -11,7 +11,7 @@
 // Pure — no React, no atoms — so the progression rules are testable on their own
 // (same shape as branch-selection.ts).
 
-import type { PlanetScaleIntegrationStatus, PlanetScaleScrapeTargetSummary } from "@maple/domain/http"
+import type { V2PlanetScaleIntegration, V2PlanetScaleScrapeTarget } from "@maple/domain/http/v2"
 
 export type MetricsAuth = "oauth" | "service_token" | "missing"
 
@@ -26,15 +26,16 @@ export type MetricsAuth = "oauth" | "service_token" | "missing"
 export type MetricsHealthState = "unconfigured" | "waiting" | "healthy" | "stalled" | "degraded"
 
 export function metricsHealthState(
-	target: PlanetScaleScrapeTargetSummary | null,
+	target: V2PlanetScaleScrapeTarget | null,
 	metricsAuth: MetricsAuth,
 	nowMs: number,
 ): MetricsHealthState {
 	if (metricsAuth === "missing" || target === null) return "unconfigured"
-	if (target.lastScrapeError !== null) return "degraded"
-	if (target.lastScrapeAt === null) return "waiting"
+	if (target.last_scrape_error !== null) return "degraded"
+	if (target.last_scrape_at === null) return "waiting"
 	// Three intervals of silence: one missed scrape is jitter, three is a fault.
-	if (nowMs - target.lastScrapeAt > 3 * target.scrapeIntervalSeconds * 1000) return "stalled"
+	const lastScrapeMs = Date.parse(target.last_scrape_at)
+	if (nowMs - lastScrapeMs > 3 * target.scrape_interval_seconds * 1000) return "stalled"
 	return "healthy"
 }
 
@@ -48,10 +49,10 @@ export function metricsHealthState(
  * scrape has landed the pages render normally forever after, and degradation is
  * carried by the inline notices instead.
  */
-export const metricsNeverCollected = (status: PlanetScaleIntegrationStatus): boolean =>
-	status.metricsAuth === "missing" ||
-	status.scrapeTarget === null ||
-	status.scrapeTarget.lastScrapeAt === null
+export const metricsNeverCollected = (status: V2PlanetScaleIntegration): boolean =>
+	status.metrics_auth === "missing" ||
+	status.scrape_target === null ||
+	status.scrape_target.last_scrape_at === null
 
 export type SetupStepId = "connected" | "permissions" | "metrics-token" | "first-metrics"
 
@@ -94,17 +95,14 @@ export interface PlanetScaleSetup {
  * Derive the four-step progression from the status the card already fetches.
  * Everything here is a function of `status` — no extra requests, no local state.
  */
-export function derivePlanetScaleSetup(
-	status: PlanetScaleIntegrationStatus,
-	nowMs: number,
-): PlanetScaleSetup {
-	const target = status.scrapeTarget
-	const health = metricsHealthState(target, status.metricsAuth, nowMs)
-	const revoked = status.revokedAt !== null
-	// `detectedPermissions` is null before the org is bound; absent is unknown,
+export function derivePlanetScaleSetup(status: V2PlanetScaleIntegration, nowMs: number): PlanetScaleSetup {
+	const target = status.scrape_target
+	const health = metricsHealthState(target, status.metrics_auth, nowMs)
+	const revoked = status.revoked_at !== null
+	// `detected_permissions` is null before the org is bound; absent is unknown,
 	// not denied — only an explicit `false` blocks.
-	const readDatabasesDenied = status.detectedPermissions?.readDatabases === false
-	const hasToken = status.metricsAuth !== "missing"
+	const readDatabasesDenied = status.detected_permissions?.readDatabases === false
+	const hasToken = status.metrics_auth !== "missing"
 
 	const step = (
 		id: SetupStepId,
@@ -149,7 +147,7 @@ export function derivePlanetScaleSetup(
 				"metrics-token",
 				"Branch metrics access",
 				"done",
-				status.metricsAuth === "oauth"
+				status.metrics_auth === "oauth"
 					? "The authorization covers the metrics endpoints — no token needed."
 					: "Authenticated with a service token.",
 			)

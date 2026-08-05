@@ -8,7 +8,7 @@
 // Pure: no React, no atoms, so the vocabulary is testable and shared by the
 // chart markers and the activity feed.
 
-import type { PlanetScaleEventSummary } from "@maple/domain/http"
+import type { PlanetScaleEventEntry } from "@/api/warehouse/planetscale-infra"
 import type { ChartEventMarker, ChartEventTone } from "@/components/infra/primitives/chart-event-markers"
 
 export type PlanetScaleEventKind = "deploy" | "branch" | "incident" | "maintenance"
@@ -88,7 +88,7 @@ export const presentEvent = (eventType: string): PlanetScaleEventPresentation =>
  * whose latency it moved would defeat the point.
  */
 export function eventsToChartMarkers(
-	events: ReadonlyArray<PlanetScaleEventSummary>,
+	events: ReadonlyArray<PlanetScaleEventEntry>,
 ): ReadonlyArray<ChartEventMarker> {
 	const markers: ChartEventMarker[] = []
 	for (const event of events) {

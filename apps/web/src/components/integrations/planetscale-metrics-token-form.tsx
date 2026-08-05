@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { Cause, Exit } from "effect"
 
-import { PlanetScaleMetricsTokenRequest } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
@@ -9,7 +8,7 @@ import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { ExternalLinkIcon, LoaderIcon } from "@/components/icons"
 import { useAtomSet } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
 /** PlanetScale prints service token secrets with this prefix. Advisory, not a contract. */
 const SECRET_PREFIX = "pscale_tkn_"
@@ -76,7 +75,7 @@ export function PlanetScaleMetricsTokenForm({
 	onCancel?: () => void
 }) {
 	const setMetricsToken = useAtomSet(
-		MapleApiAtomClient.mutation("integrations", "planetscaleSetMetricsToken"),
+		MapleApiV2AtomClient.mutation("planetscaleIntegration", "setMetricsToken"),
 		{ mode: "promiseExit" },
 	)
 	const [fields, setFields] = useState<TokenFields>({ id: "", secret: "" })
@@ -90,12 +89,12 @@ export function PlanetScaleMetricsTokenForm({
 		setSubmitting(true)
 		setError(null)
 		const result = await setMetricsToken({
-			payload: new PlanetScaleMetricsTokenRequest({
-				tokenId: fields.id.trim(),
-				tokenSecret: fields.secret,
-			}),
+			payload: {
+				token_id: fields.id.trim(),
+				token_secret: fields.secret,
+			},
 			// The managed scrape target flips authType/enabled — refresh that list too.
-			reactivityKeys: ["planetscaleIntegrationStatus", "scrapeTargets"],
+			reactivityKeys: ["planetscaleIntegration", "scrapeTargets"],
 		})
 		setSubmitting(false)
 		if (Exit.isSuccess(result)) {

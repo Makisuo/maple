@@ -28,7 +28,9 @@ const wireExample = <A>(example: object): A => example as A
 //   - Slack is the first integration built after the v2 migration started, so
 //     it goes straight onto v2 rather than extending a v1 group that is slated
 //     for deletion. The older providers stay on v1 until something public needs
-//     them.
+//     them — PlanetScale reached that point and now lives in
+//     `integrations-planetscale.ts` (its v1 endpoints stay mounted, deprecated,
+//     until external callers drain); Cloudflare, GitHub, and Hazel have not.
 //   - It is public rather than internal because `/v2/alerts/destinations`
 //     accepts `type: "slack-bot"` with a required `channel_id` and the bot token
 //     never leaves the server: `GET /v2/integrations/slack/channels` is the only
@@ -39,10 +41,11 @@ const wireExample = <A>(example: object): A => example as A
 // 302s back to the web app. Same for the service-to-service bot-resolution
 // endpoint the Slack agent calls.
 //
-// Provider-agnostic filename with a provider-scoped group is intentional:
-// scope families are derived from the first path segment under `/v2`, so every
-// future `/v2/integrations/<provider>` group belongs in this file and shares
-// the `integrations:read` / `integrations:write` family.
+// One file per provider (`integrations.ts` is Slack's, despite the name;
+// `integrations-planetscale.ts` is PlanetScale's). Scope families are derived
+// from the first path segment under `/v2`, so every `/v2/integrations/<provider>`
+// group shares the `integrations:read` / `integrations:write` family no matter
+// which file it is declared in — the split is about file size, nothing else.
 // ---------------------------------------------------------------------------
 
 export const V2SlackIntegrationStatus = Schema.Struct({

@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 
 import { cn } from "@maple/ui/lib/utils"
 
-import type { PlanetScaleScrapeTargetSummary } from "@maple/domain/http"
+import type { V2PlanetScaleScrapeTarget } from "@maple/domain/http/v2"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 import { metricsHealthState, type MetricsAuth, type MetricsHealthState } from "./planetscale-setup-steps"
 
@@ -22,7 +22,7 @@ export function PlanetScaleMetricsHealth({
 	metricsAuth,
 	action,
 }: {
-	target: PlanetScaleScrapeTargetSummary
+	target: V2PlanetScaleScrapeTarget
 	metricsAuth: MetricsAuth
 	/** Trailing affordance (e.g. Rotate token) rendered at the end of the row. */
 	action?: React.ReactNode
@@ -33,8 +33,7 @@ export function PlanetScaleMetricsHealth({
 	// The token-setup step owns the missing-auth state — don't show two messages.
 	if (state === "unconfigured") return null
 
-	const updatedAgo =
-		target.lastScrapeAt !== null ? formatRelativeTime(new Date(target.lastScrapeAt).toISOString()) : null
+	const updatedAgo = target.last_scrape_at !== null ? formatRelativeTime(target.last_scrape_at) : null
 
 	return (
 		<div className="border-t border-border/60 p-4">
@@ -57,8 +56,8 @@ export function PlanetScaleMetricsHealth({
 							: updatedAgo !== null
 								? `Last data ${updatedAgo}`
 								: null}
-					{state === "healthy" && target.excludeBranches.length > 0 ? (
-						<> · excluding {target.excludeBranches.join(", ")}</>
+					{state === "healthy" && target.exclude_branches.length > 0 ? (
+						<> · excluding {target.exclude_branches.join(", ")}</>
 					) : null}
 				</span>
 				{/* The payoff link: the point of finishing setup is the fleet page. */}
@@ -85,7 +84,7 @@ export function PlanetScaleMetricsHealth({
 			</div>
 			{state === "degraded" && detailsOpen ? (
 				<p className="mt-2 break-all rounded-md bg-muted/40 p-2 font-mono text-xs text-muted-foreground">
-					{target.lastScrapeError}
+					{target.last_scrape_error}
 				</p>
 			) : null}
 		</div>

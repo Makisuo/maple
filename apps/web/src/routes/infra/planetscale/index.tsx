@@ -37,7 +37,7 @@ import {
 	type SetupStep,
 } from "@/components/integrations/planetscale-setup-steps"
 import { getServiceMapPlanetScaleResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { formatNumber } from "@maple/ui/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
@@ -76,8 +76,8 @@ function PlanetScalePage() {
 	// Integration-gated: the page is useful exactly when the org has the
 	// PlanetScale integration connected.
 	const statusResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "status", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 
@@ -119,11 +119,11 @@ function PlanetScalePage() {
 											<PlanetScaleData
 												startTime={startTime}
 												endTime={endTime}
-												metricsPaused={status.metricsAuth === "missing"}
+												metricsPaused={status.metrics_auth === "missing"}
 												neverCollected={metricsNeverCollected(status)}
 												setupSteps={derivePlanetScaleSetup(status, Date.now()).steps}
-												revoked={status.revokedAt !== null}
-												lastInventoryError={status.lastInventoryError}
+												revoked={status.revoked_at !== null}
+												lastInventoryError={status.last_inventory_error}
 											/>
 										)
 									})
@@ -156,8 +156,8 @@ function PlanetScaleData({
 	lastInventoryError: string | null
 }) {
 	const inventoryResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "planetscaleDatabases", {
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+		MapleApiV2AtomClient.query("planetscaleIntegration", "databases", {
+			reactivityKeys: ["planetscaleIntegration"],
 		}),
 	)
 	// Retained so changing the time range dims the numbers instead of replacing
@@ -205,7 +205,7 @@ function PlanetScaleData({
 		.onSuccess((inventory) => {
 			const branchTotal = inventory.databases.reduce((sum, db) => sum + db.branches.length, 0)
 			const showInventoryNotice =
-				lastInventoryError !== null || inventoryIsStale(inventory.lastInventoryAt, Date.now())
+				lastInventoryError !== null || inventoryIsStale(inventory.last_inventory_at, Date.now())
 			return (
 				<div className="space-y-6">
 					{revoked ? <PlanetScaleRevokedNotice /> : null}
@@ -215,7 +215,7 @@ function PlanetScaleData({
 					{metricsPaused && !neverCollected ? <PlanetScaleMetricsNotice /> : null}
 					{showInventoryNotice ? (
 						<PlanetScaleInventoryNotice
-							lastInventoryAt={inventory.lastInventoryAt}
+							lastInventoryAt={inventory.last_inventory_at}
 							lastInventoryError={lastInventoryError}
 						/>
 					) : null}
