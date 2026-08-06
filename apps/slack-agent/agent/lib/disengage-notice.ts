@@ -108,12 +108,21 @@ export interface DisengageNoticeDeps {
 		readonly userId: string
 		readonly text: string
 	}): Promise<void>
+	/** In-thread, visible to one user only (`chat.postEphemeral` with a `thread_ts`). */
+	postEphemeral(options: {
+		readonly botToken: string
+		readonly channelId: string
+		readonly threadTs: string
+		readonly userId: string
+		readonly text: string
+	}): Promise<void>
 }
 
 export const defaultDisengageNoticeDeps: DisengageNoticeDeps = {
 	resolveBotToken,
 	getPermalink: getPermalinkFromSlack,
 	postDirectMessage: postDirectMessageViaSlack,
+	postEphemeral: postEphemeralViaSlack,
 }
 
 /**
@@ -213,10 +222,10 @@ export async function notifyThreadDisengagement(
 		await Promise.all(
 			recipients.map(async (userId) => {
 				try {
-					await deps.postDirectMessage({ botToken, userId, text })
+					await notifyOne(deps, userId, { botToken, text, disengagement })
 				} catch (error) {
 					console.warn(
-						`[slack-disengage-notice] Failed to DM ${userId} about a thread the bot stopped following.`,
+						`[slack-disengage-notice] Failed to notify ${userId} about a thread the bot stopped following.`,
 						error,
 					)
 				}
@@ -228,7 +237,56 @@ export async function notifyThreadDisengagement(
 }
 
 /**
- * The DM itself. Two things have to land: why the bot went quiet (so it does not
+ * Delivers the notice to one person, by whichever channel will actually reach
+ * them.
+ *
+ * The author of the unanswered reply just posted in the thread, so they are the
+ * one person we know is looking at it. An ephemeral reply lands in context —
+ * under the message it is about, in the conversation they are already reading —
+ * without pulling them into a DM for something that belongs in the thread.
+ *
+ * Everyone else is not looking at the thread at all; that is the whole reason
+ * they need telling. `chat.postEphemeral` renders nothing for a user who does
+ * not have the channel open and Slack never stores it, so for them a DM is the
+ * only thing that arrives.
+ *
+ * The same non-persistence is why an ephemeral failure falls back to a DM
+ * rather than being swallowed: Slack drops it outright if the user has left the
+ * channel, and a notice that evaporates is the silence this exists to prevent.
+ */
+async function notifyOne(
+	deps: DisengageNoticeDeps,
+	userId: string,
+	context: {
+		readonly botToken: string
+		readonly text: string
+		readonly disengagement: ThreadDisengagement
+	},
+): Promise<void> {
+	const { botToken, text, disengagement } = context
+	if (userId !== disengagement.replierUserId) {
+		await deps.postDirectMessage({ botToken, userId, text })
+		return
+	}
+	try {
+		await deps.postEphemeral({
+			botToken,
+			channelId: disengagement.channelId,
+			threadTs: disengagement.threadTs,
+			userId,
+			text,
+		})
+	} catch (error) {
+		console.warn(
+			`[slack-disengage-notice] Ephemeral notice to ${userId} failed; falling back to a DM.`,
+			error,
+		)
+		await deps.postDirectMessage({ botToken, userId, text })
+	}
+}
+
+/**
+ * The notice itself. Two things have to land: why the bot went quiet (so it does not
  * read as a bug), and the one action that undoes it. The thread link comes
  * second because the sentence has to make sense in a notification preview,
  * where the link is just text.
@@ -302,5 +360,44 @@ export async function postDirectMessageViaSlack(options: {
 	const payload = (await res.json()) as { ok: boolean; error?: string }
 	if (!payload.ok) {
 		throw new Error(`Slack chat.postMessage failed: ${payload.error ?? "unknown_error"}`)
+	}
+}
+
+/**
+ * `chat.postEphemeral` with a `thread_ts`: renders inside the thread, visible
+ * to `user` alone. Slack does not persist it — it is gone on the next client
+ * reload and never appears in thread history — so this is only ever used for
+ * someone we know is reading the thread right now, with a DM behind it.
+ *
+ * Exported for the request-shape tests; production reaches it through
+ * `defaultDisengageNoticeDeps`.
+ */
+export async function postEphemeralViaSlack(options: {
+	readonly botToken: string
+	readonly channelId: string
+	readonly threadTs: string
+	readonly userId: string
+	readonly text: string
+}): Promise<void> {
+	const res = await fetch(`${SLACK_API}/chat.postEphemeral`, {
+		method: "POST",
+		headers: {
+			authorization: `Bearer ${options.botToken}`,
+			"content-type": "application/json; charset=utf-8",
+		},
+		body: JSON.stringify({
+			channel: options.channelId,
+			thread_ts: options.threadTs,
+			user: options.userId,
+			text: options.text,
+		}),
+		signal: AbortSignal.timeout(SLACK_API_TIMEOUT_MS),
+	})
+	if (!res.ok) {
+		throw new Error(`Slack chat.postEphemeral failed: HTTP ${res.status}`)
+	}
+	const payload = (await res.json()) as { ok: boolean; error?: string }
+	if (!payload.ok) {
+		throw new Error(`Slack chat.postEphemeral failed: ${payload.error ?? "unknown_error"}`)
 	}
 }

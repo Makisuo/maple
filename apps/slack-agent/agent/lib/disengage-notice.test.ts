@@ -46,15 +46,31 @@ const disengagement = (overrides: Partial<ThreadDisengagement> = {}): ThreadDise
 function makeDeps(overrides: Partial<DisengageNoticeDeps> = {}): {
 	deps: DisengageNoticeDeps
 	dms: { userId: string; text: string }[]
+	ephemerals: { userId: string; text: string; threadTs: string }[]
+	/**
+	 * Everyone told, by whichever channel reached them. Tests about *who* was
+	 * notified and *what* they were told belong here; only tests about the
+	 * delivery split itself should read `dms` / `ephemerals` directly.
+	 */
+	notices: { userId: string; text: string }[]
 } {
 	const dms: { userId: string; text: string }[] = []
+	const ephemerals: { userId: string; text: string; threadTs: string }[] = []
+	const notices: { userId: string; text: string }[] = []
 	return {
 		dms,
+		ephemerals,
+		notices,
 		deps: {
 			resolveBotToken: async () => "xoxb-test",
 			getPermalink: async () => PERMALINK,
 			postDirectMessage: async ({ userId, text }) => {
 				dms.push({ userId, text })
+				notices.push({ userId, text })
+			},
+			postEphemeral: async ({ userId, text, threadTs }) => {
+				ephemerals.push({ userId, text, threadTs })
+				notices.push({ userId, text })
 			},
 			...overrides,
 		},
@@ -167,8 +183,44 @@ describe("noticeRecipients", () => {
 })
 
 describe("notifyThreadDisengagement", () => {
-	test("a buried engagement DMs only the replier, not the whole thread", async () => {
-		const { deps, dms } = makeDeps()
+	test("a buried engagement reaches only the replier, in the thread", async () => {
+		const { deps, dms, ephemerals } = makeDeps()
+		await notifyThreadDisengagement(
+			disengagement({ reason: "engagement-buried", replierUserId: "U789" }),
+			deps,
+		)
+		expect(ephemerals.map((e) => e.userId)).toEqual(["U789"])
+		expect(dms).toEqual([])
+	})
+
+	test("the replier gets it in-thread; everyone else gets a DM", async () => {
+		// The replier just posted, so they are the one person we know is reading
+		// the thread — the notice belongs there, not in a DM. Nobody else is
+		// looking at it, and Slack renders an ephemeral for them not at all.
+		const { deps, dms, ephemerals } = makeDeps()
+		await notifyThreadDisengagement(
+			disengagement({ reason: "thread-dormant", replierUserId: "U456" }),
+			deps,
+		)
+		expect(ephemerals.map((e) => e.userId)).toEqual(["U456"])
+		expect(dms.map((d) => d.userId)).toEqual(["U789"])
+	})
+
+	test("the in-thread notice is posted into the thread, not the channel", async () => {
+		const { deps, ephemerals } = makeDeps()
+		await notifyThreadDisengagement(disengagement({ replierUserId: "U456" }), deps)
+		expect(ephemerals[0]?.threadTs).toBe("1700000000.000100")
+	})
+
+	test("an ephemeral that Slack drops falls back to a DM", async () => {
+		// chat.postEphemeral renders nothing once the user has left the channel,
+		// and Slack never stores it. A notice that evaporates is the silence this
+		// whole path exists to prevent.
+		const { deps, dms } = makeDeps({
+			postEphemeral: async () => {
+				throw new Error("user_not_in_channel")
+			},
+		})
 		await notifyThreadDisengagement(
 			disengagement({ reason: "engagement-buried", replierUserId: "U789" }),
 			deps,
@@ -176,12 +228,12 @@ describe("notifyThreadDisengagement", () => {
 		expect(dms.map((d) => d.userId)).toEqual(["U789"])
 	})
 
-	test("DMs every human in the thread, with a permalink and how to resume", async () => {
-		const { deps, dms } = makeDeps()
+	test("tells every human in the thread, with a permalink and how to resume", async () => {
+		const { deps, notices } = makeDeps()
 		await notifyThreadDisengagement(disengagement(), deps)
 
-		expect(dms.map((dm) => dm.userId)).toEqual(["U456", "U789"])
-		for (const dm of dms) {
+		expect(notices.map((n) => n.userId).sort()).toEqual(["U456", "U789"])
+		for (const dm of notices) {
 			expect(dm.text).toContain(PERMALINK)
 			expect(dm.text).toContain("@-mention me")
 			expect(dm.text).toContain("quiet for over a day")
@@ -201,55 +253,55 @@ describe("notifyThreadDisengagement", () => {
 	})
 
 	test("a buried engagement is explained differently from a dormant thread", async () => {
-		const { deps, dms } = makeDeps()
+		const { deps, notices } = makeDeps()
 		await notifyThreadDisengagement(disengagement({ reason: "engagement-buried" }), deps)
-		expect(dms[0]?.text).toContain("moved well past")
+		expect(notices[0]?.text).toContain("moved well past")
 	})
 
 	test("notifies once per thread, however many replies follow", async () => {
 		// Otherwise every later reply in a thread the bot has left DMs everyone
 		// again — a helpful nudge turned into the noise that gets an app removed.
-		const { deps, dms } = makeDeps()
+		const { deps, notices } = makeDeps()
 		await notifyThreadDisengagement(disengagement(), deps)
 		await notifyThreadDisengagement(disengagement({ messageTs: "1700000003.000300" }), deps)
-		expect(dms.length).toBe(2)
+		expect(notices.length).toBe(2)
 	})
 
 	test("other threads are unaffected", async () => {
-		const { deps, dms } = makeDeps()
+		const { deps, notices } = makeDeps()
 		await notifyThreadDisengagement(disengagement(), deps)
 		await notifyThreadDisengagement(disengagement({ threadTs: "1700000009.000100" }), deps)
-		expect(dms.length).toBe(4)
+		expect(notices.length).toBe(4)
 	})
 
 	test("the guard is per workspace: Slack channel ids are only unique per team", async () => {
-		const { deps, dms } = makeDeps()
+		const { deps, notices } = makeDeps()
 		await notifyThreadDisengagement(disengagement(), deps)
 		await notifyThreadDisengagement(disengagement({ teamId: "T999" }), deps)
-		expect(dms.length).toBe(4)
+		expect(notices.length).toBe(4)
 	})
 
 	test("sends nothing when there is nobody to tell", async () => {
-		const { deps, dms } = makeDeps()
+		const { deps, notices } = makeDeps()
 		await notifyThreadDisengagement(disengagement({ messages: [], replierUserId: undefined }), deps)
-		expect(dms.length).toBe(0)
+		expect(notices.length).toBe(0)
 	})
 
 	test("still sends when Slack cannot produce a permalink", async () => {
-		const { deps, dms } = makeDeps({ getPermalink: async () => null })
+		const { deps, notices } = makeDeps({ getPermalink: async () => null })
 		await notifyThreadDisengagement(disengagement(), deps)
-		expect(dms.length).toBe(2)
-		expect(dms[0]?.text).toContain("a Slack thread")
+		expect(notices.length).toBe(2)
+		expect(notices[0]?.text).toContain("a Slack thread")
 	})
 
 	test("a permalink failure does not cost the notice", async () => {
-		const { deps, dms } = makeDeps({
+		const { deps, notices } = makeDeps({
 			getPermalink: async () => {
 				throw new Error("slack down")
 			},
 		})
 		await expect(notifyThreadDisengagement(disengagement(), deps)).resolves.toBeUndefined()
-		expect(dms.length).toBe(2)
+		expect(notices.length).toBe(2)
 	})
 
 	test("one closed DM does not cost the others theirs", async () => {
