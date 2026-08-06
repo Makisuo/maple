@@ -107,6 +107,65 @@ describe("ChatSession.history", () => {
 		assert.equal(call?.output, undefined)
 	})
 
+	it("retracts the text of a step that failed and was retried", () => {
+		const { session } = makeSession()
+		session.append({ type: "turn-start", messageId: "a1" })
+		session.append({ type: "text-delta", messageId: "a1", text: "Hello wo" })
+		session.append({
+			type: "turn-retry",
+			messageId: "a1",
+			attempt: 2,
+			retractChars: 8,
+			reason: "Transport",
+			delayMs: 1_000,
+		})
+		session.append({ type: "text-delta", messageId: "a1", text: "Hello world." })
+		session.append({ type: "turn-end", messageId: "a1", reason: "stop" })
+
+		// Without the retraction the transcript reads "Hello woHello world." — permanently, since
+		// the fold concatenates and the log is durable.
+		assert.equal(session.history()[0]?.text, "Hello world.")
+	})
+
+	it("clamps an over-retraction instead of producing a negative slice", () => {
+		// `Stream.takeWhile(holdsTurn)` can drop appends between a delta and the retraction that
+		// accounts for it, so `retractChars` legitimately exceeds what landed.
+		const { session } = makeSession()
+		session.append({ type: "turn-start", messageId: "a1" })
+		session.append({ type: "text-delta", messageId: "a1", text: "hi" })
+		session.append({
+			type: "turn-retry",
+			messageId: "a1",
+			attempt: 2,
+			retractChars: 999,
+			reason: "Transport",
+			delayMs: 1_000,
+		})
+
+		assert.equal(session.history()[0]?.text, "")
+	})
+
+	it("retracts only from the message that retried", () => {
+		const { session } = makeSession()
+		session.append({ type: "turn-start", messageId: "a1" })
+		session.append({ type: "text-delta", messageId: "a1", text: "first turn" })
+		session.append({ type: "turn-end", messageId: "a1", reason: "stop" })
+		session.append({ type: "turn-start", messageId: "a2" })
+		session.append({ type: "text-delta", messageId: "a2", text: "second" })
+		session.append({
+			type: "turn-retry",
+			messageId: "a2",
+			attempt: 2,
+			retractChars: 6,
+			reason: "Transport",
+			delayMs: 1_000,
+		})
+
+		const history = session.history()
+		assert.equal(history[0]?.text, "first turn")
+		assert.equal(history[1]?.text, "")
+	})
+
 	it("interleaves text around a tool call within one message", () => {
 		const { session } = makeSession()
 		session.append({ type: "turn-start", messageId: "a1" })
@@ -360,5 +419,188 @@ describe("ChatSession.subscribe", () => {
 		])
 
 		assert.equal(outcome, "still-open")
+	})
+})
+
+describe("ChatSession.history — sub-agent transcripts", () => {
+	/** The parent announces the `task` call before the sub-agent's own events arrive. */
+	const withTask = (session: ReturnType<typeof makeSession>["session"], callId = "t1") => {
+		session.append({ type: "turn-start", messageId: "a1" })
+		session.append({
+			type: "tool-call",
+			messageId: "a1",
+			callId,
+			name: "task",
+			input: { subagent_type: "explore", description: "trace checkout latency" },
+		})
+	}
+
+	const ref = (callId = "t1") => ({ id: callId, agent: "explore", parentMessageId: "a1" }) as const
+
+	it("nests a sub-agent's turn under the tool call that started it", () => {
+		const { session } = makeSession()
+		withTask(session)
+		session.append({ type: "turn-start", messageId: "c1", task: ref() })
+		session.append({ type: "text-delta", messageId: "c1", text: "p99 is 4.2s in ", task: ref() })
+		session.append({ type: "text-delta", messageId: "c1", text: "checkout-api.", task: ref() })
+		session.append({
+			type: "tool-call",
+			messageId: "c1",
+			callId: "x1",
+			name: "search_traces",
+			input: {},
+			task: ref(),
+		})
+		session.append({
+			type: "tool-result",
+			messageId: "c1",
+			callId: "x1",
+			output: "40k rows",
+			task: ref(),
+		})
+		session.append({ type: "turn-end", messageId: "c1", reason: "stop", task: ref() })
+		session.append({ type: "turn-end", messageId: "a1", reason: "stop" })
+
+		const history = session.history()
+
+		// One top-level assistant message, not one per sub-agent event.
+		assert.lengthOf(history, 1)
+		const task = history[0]?.toolCalls[0]?.task
+		assert.equal(task?.agent, "explore")
+		assert.equal(task?.status, "completed")
+		assert.lengthOf(task?.messages ?? [], 1)
+		assert.equal(task?.messages[0]?.text, "p99 is 4.2s in checkout-api.")
+		// The child's own tool call rides in the nested transcript, not the parent's.
+		assert.equal(task?.messages[0]?.toolCalls[0]?.output, "40k rows")
+		assert.lengthOf(history[0]!.toolCalls, 1)
+	})
+
+	it("shows a sub-agent still running before its turn ends", () => {
+		const { session } = makeSession()
+		withTask(session)
+		session.append({ type: "turn-start", messageId: "c1", task: ref() })
+		session.append({ type: "text-delta", messageId: "c1", text: "looking", task: ref() })
+
+		assert.equal(session.history()[0]?.toolCalls[0]?.task?.status, "running")
+	})
+
+	it("carries a failed sub-agent's status through", () => {
+		const { session } = makeSession()
+		withTask(session)
+		session.append({ type: "turn-start", messageId: "c1", task: ref() })
+		session.append({ type: "turn-end", messageId: "c1", reason: "error", error: "boom", task: ref() })
+
+		assert.equal(session.history()[0]?.toolCalls[0]?.task?.status, "error")
+	})
+
+	it("drops an orphaned sub-agent event rather than corrupting the transcript", () => {
+		// Deny by default. A child event whose parent message or tool call is missing must not
+		// materialise a stray top-level assistant message — that is what would leak into both the
+		// browser and the next turn's replay.
+		const { session } = makeSession()
+		session.append({ type: "user-message", id: "u1", text: "hi" })
+		session.append({
+			type: "text-delta",
+			messageId: "c1",
+			text: "orphan",
+			task: { id: "nope", agent: "explore", parentMessageId: "a-missing" },
+		})
+
+		const history = session.history()
+		assert.lengthOf(history, 1)
+		assert.equal(history[0]?.role, "user")
+	})
+
+	it("keeps two sibling sub-agents' transcripts apart", () => {
+		const { session } = makeSession()
+		session.append({ type: "turn-start", messageId: "a1" })
+		for (const callId of ["t1", "t2"]) {
+			session.append({ type: "tool-call", messageId: "a1", callId, name: "task", input: {} })
+		}
+		session.append({ type: "text-delta", messageId: "c1", text: "first", task: ref("t1") })
+		session.append({ type: "text-delta", messageId: "c2", text: "second", task: ref("t2") })
+
+		const calls = session.history()[0]!.toolCalls
+		assert.equal(calls[0]?.task?.messages[0]?.text, "first")
+		assert.equal(calls[1]?.task?.messages[0]?.text, "second")
+	})
+
+	it("retracts inside a sub-agent transcript, not the parent's", () => {
+		const { session } = makeSession()
+		session.append({ type: "turn-start", messageId: "a1" })
+		session.append({ type: "text-delta", messageId: "a1", text: "parent text" })
+		session.append({ type: "tool-call", messageId: "a1", callId: "t1", name: "task", input: {} })
+		session.append({ type: "text-delta", messageId: "c1", text: "partial", task: ref() })
+		session.append({
+			type: "turn-retry",
+			messageId: "c1",
+			attempt: 2,
+			retractChars: 7,
+			reason: "Transport",
+			delayMs: 1_000,
+			task: ref(),
+		})
+		session.append({ type: "text-delta", messageId: "c1", text: "the answer", task: ref() })
+
+		const message = session.history()[0]!
+		assert.equal(message.text, "parent text")
+		assert.equal(message.toolCalls[0]?.task?.messages[0]?.text, "the answer")
+	})
+})
+
+describe("ChatSession compaction", () => {
+	it("is inert for display — the user still sees what they actually said", () => {
+		// This is where Maple diverges from opencode. There, the transcript and the model input are
+		// the same list, so compaction reorders what the user sees. Here they are different things.
+		const { session } = makeSession()
+		session.append({ type: "user-message", id: "u1", text: "why is checkout slow?" })
+		session.append({ type: "turn-start", messageId: "a1" })
+		session.append({ type: "text-delta", messageId: "a1", text: "p99 is 4.2s." })
+		session.append({ type: "turn-end", messageId: "a1", reason: "stop" })
+		session.append({
+			type: "compaction",
+			messageId: "a1",
+			summary: "checkout p99 was 4.2s",
+			throughSeq: 4,
+		})
+
+		const history = session.history()
+		assert.lengthOf(history, 2)
+		assert.equal(history[0]?.text, "why is checkout slow?")
+		assert.equal(history[1]?.text, "p99 is 4.2s.")
+	})
+
+	it("returns the most recent compaction, not the first", () => {
+		const { session } = makeSession()
+		session.append({ type: "compaction", messageId: "a1", summary: "older", throughSeq: 1 })
+		session.append({ type: "user-message", id: "u1", text: "more" })
+		session.append({ type: "compaction", messageId: "a2", summary: "newer", throughSeq: 2 })
+
+		assert.deepEqual(session.compaction(), { summary: "newer", throughSeq: 2 })
+	})
+
+	it("reports no compaction on a fresh conversation", () => {
+		const { session } = makeSession()
+		session.append({ type: "user-message", id: "u1", text: "hi" })
+
+		assert.isUndefined(session.compaction())
+	})
+
+	it("stamps every message with the seq that opened it", () => {
+		// `toLlmMessages` splits the transcript on this. `createdAt` cannot do the job: it is a
+		// non-unique wall clock denominated in milliseconds, not in event sequence.
+		const { session } = makeSession()
+		session.append({ type: "user-message", id: "u1", text: "one" })
+		session.append({ type: "turn-start", messageId: "a1" })
+		session.append({ type: "text-delta", messageId: "a1", text: "two" })
+		session.append({ type: "user-message", id: "u2", text: "three" })
+
+		const seqs = session.history().map((message) => message.startSeq)
+		assert.deepEqual(seqs, [1, 2, 4])
+		// Monotonic, so the split is well defined.
+		assert.deepEqual(
+			[...seqs].sort((a, b) => a - b),
+			seqs,
+		)
 	})
 })

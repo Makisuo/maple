@@ -93,3 +93,31 @@ describe("buildTranscriptRows", () => {
 		expect(isToolOnlyMessage(text("u", "user", "hi"))).toBe(false)
 	})
 })
+
+describe("sub-agent parts", () => {
+	const task = (id: string): UIMessage =>
+		({
+			id,
+			role: "assistant",
+			parts: [
+				{
+					type: "task",
+					toolCallId: `${id}-t`,
+					agent: "explore",
+					description: "trace checkout latency",
+					status: "completed",
+					messages: [],
+				},
+			],
+		}) as unknown as UIMessage
+
+	it("is not tool-only, so it never disappears into a Used N tools header", () => {
+		// A sub-agent run is content: the reader delegated part of the investigation and should see
+		// that it happened, not have it folded away as plumbing.
+		expect(isToolOnlyMessage(task("m1"))).toBe(false)
+	})
+
+	it("breaks a run of tool-only turns", () => {
+		expect(kinds([tools("m1", 2), task("m2"), tools("m3", 2)])).toEqual(["message", "message", "message"])
+	})
+})
