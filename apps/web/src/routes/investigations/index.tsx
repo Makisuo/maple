@@ -317,7 +317,10 @@ function TriageStrip({ investigations }: { investigations: ReadonlyArray<V2Inves
 			(entry) => entry.status === "resolved" && toEpochMs(entry.updated_at) >= cutoff,
 		)
 
-		const lensesInFlight = running.reduce((total, entry) => total + entry.fanout.size, 0)
+		// Dispatched lenses, not the computed size: a single-pass run persists a
+		// size of 1 with zero lenses, so summing size reports lenses in flight for
+		// runs that never dispatched one.
+		const lensesInFlight = running.reduce((total, entry) => total + entry.lens_runs.length, 0)
 		const critical = review.filter(
 			(entry) => (entry.severity ?? entry.snapshot.severity) === "critical",
 		).length
@@ -331,7 +334,7 @@ function TriageStrip({ investigations }: { investigations: ReadonlyArray<V2Inves
 		const median = durations.length > 0 ? durations[Math.floor(durations.length / 2)]! : null
 		const avgLenses =
 			resolved.length > 0
-				? resolved.reduce((total, entry) => total + entry.fanout.size, 0) / resolved.length
+				? resolved.reduce((total, entry) => total + entry.lens_runs.length, 0) / resolved.length
 				: null
 
 		return { running, review, resolved, lensesInFlight, critical, median, avgLenses }

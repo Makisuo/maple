@@ -19,8 +19,11 @@ export function ChecksRail({ investigation }: { investigation: V2Investigation }
 	if (checks.length === 0) return null
 	const held = checksHeld(checks)
 	// "so far" is only honest while something is still running. A skipped check on
-	// a dead pass is settled — it is never going to report.
-	const pending = checks.filter((check) => check.state === "checking" || check.state === "queued").length
+	// a dead pass is settled — it is never going to report. A `pending` check has
+	// reported but is still being ranked, so the count is not final either.
+	const pending = checks.filter(
+		(check) => check.state === "checking" || check.state === "queued" || check.state === "pending",
+	).length
 
 	return (
 		<section className="flex flex-col gap-3">
@@ -71,6 +74,15 @@ function CheckGlyph({ state }: { state: CheckState }) {
 			return <XmarkIcon size={10} className="text-muted-foreground" aria-label="Did not hold" />
 		case "checking":
 			return <span aria-label="Checking" className="size-1.5 animate-pulse rounded-full bg-primary" />
+		case "pending":
+			// Reported, not yet ranked. Deliberately neutral: a tick or a cross here
+			// would state a verdict the validator has not reached.
+			return (
+				<span
+					aria-label="Reported, awaiting the validator"
+					className="size-1.5 rounded-full bg-muted-foreground/50"
+				/>
+			)
 		default:
 			return (
 				<span

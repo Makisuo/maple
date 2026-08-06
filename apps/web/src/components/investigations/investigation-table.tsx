@@ -111,11 +111,18 @@ function RowFinding({
 }) {
 	if (finding.kind === "pending" && hasFanout(investigation)) {
 		const tally = lensTally(investigation.lens_runs)
+		// `settled`, not `reported`: a crashed lens is a terminal `no_finding` lane
+		// and the run moves on, so counting only reporters leaves the row claiming
+		// lenses are still out when none are. And the validator is only blocked
+		// while that is true — once every lane has settled it is the one running.
+		const waiting = tally.settled < tally.total
 		return (
 			<span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
 				<span aria-hidden className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
 				<span className="truncate">
-					{tally.reported} of {tally.total} lenses reported · validator blocked
+					{waiting
+						? `${tally.settled} of ${tally.total} lenses reported · validator blocked`
+						: `All ${tally.total} lenses reported · ranking`}
 				</span>
 			</span>
 		)

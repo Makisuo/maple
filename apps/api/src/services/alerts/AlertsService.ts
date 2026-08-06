@@ -103,7 +103,10 @@ import {
 } from "effect"
 import * as AlertingMetrics from "@/observability/AlertingMetrics"
 import { warehouseHandlers } from "@/services/warehouse/warehouse-error-handlers"
-import { INVESTIGATION_AGENT_BINDING } from "@/services/errors/ai-triage-enqueue"
+import {
+	INVESTIGATION_AGENT_BINDING,
+	INVESTIGATION_FANOUT_BINDING,
+} from "@/services/errors/ai-triage-enqueue"
 import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
@@ -1178,6 +1181,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const investigationAgentBinding = Option.match(workerEnv, {
 				onNone: () => undefined,
 				onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
+			})
+			const investigationFanoutBinding = Option.match(workerEnv, {
+				onNone: () => undefined,
+				onSome: (e) => e[INVESTIGATION_FANOUT_BINDING],
 			})
 			const now = runtime.now
 			const makeUuid = () => runtime.makeUuid()
@@ -4199,6 +4206,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									: (normalized.serviceNames[0] ?? ""),
 							timestamp,
 							agentBinding: investigationAgentBinding,
+							fanoutBinding: investigationFanoutBinding,
 						}).pipe(Effect.provideService(Database, database))
 					} else {
 						yield* Effect.logWarning(

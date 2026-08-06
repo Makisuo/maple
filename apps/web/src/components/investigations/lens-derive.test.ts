@@ -65,6 +65,22 @@ describe("lensChecks", () => {
 		expect(checksHeld(lensChecks(lenses))).toBe(0)
 	})
 
+	/**
+	 * While the validator is reading the candidates every lane is `pending`.
+	 * Rendering those as "failed" put an ✗ and a "0 of 5 held" header beside a
+	 * card saying the validator was still blocked.
+	 */
+	it("does not rule against a lens the validator has not ranked yet", () => {
+		const checks = lensChecks([
+			lens({ verdict: "pending" }),
+			lens({ lensId: "traffic_shape", verdict: "pending" }),
+		])
+		expect(checks.map((check) => check.state)).toEqual(["pending", "pending"])
+		expect(checksHeld(checks)).toBe(0)
+		// It shows what the lens said, not a verdict nobody reached.
+		expect(checks[0]!.result).toBe("a deploy landed before the onset")
+	})
+
 	it("quotes the validator's own sentence rather than a canned one", () => {
 		const checks = lensChecks([lens({ reason: "callee percentiles stayed flat across the window" })])
 		expect(checks[0]!.result).toBe("callee percentiles stayed flat across the window")
@@ -99,7 +115,17 @@ describe("lensTally", () => {
 			lens({ verdict: "ruled_out" }),
 			lens({ verdict: "rejected", status: "no_finding" }),
 		])
-		expect(tally).toEqual({ total: 4, reported: 3, promoted: 1, merged: 1, ruledOut: 1, rejected: 1 })
+		expect(tally).toEqual({
+			total: 4,
+			reported: 3,
+			// The `no_finding` lane never reported a candidate, but it is terminal —
+			// it is what a crashed lens becomes, and the run proceeds past it.
+			settled: 4,
+			promoted: 1,
+			merged: 1,
+			ruledOut: 1,
+			rejected: 1,
+		})
 	})
 })
 
@@ -122,6 +148,27 @@ describe("fanoutRunSteps", () => {
 		)
 		expect(steps.map((step) => step.key)).toEqual(["dispatched", "reporting"])
 		expect(steps[1]!.label).toBe("1 of 2 reported")
+	})
+
+	/**
+	 * The wedge this file exists to prevent. A lens that crashes becomes a
+	 * terminal `no_finding` lane and the workflow ranks anyway — so gating on
+	 * "reported" left the spine pulsing "4 of 5 reported" on a run that had
+	 * already published a diagnosis.
+	 */
+	it("does not stall when a lens ended with no finding", () => {
+		const steps = fanoutRunSteps(
+			make({
+				lens_runs: [
+					lens({ verdict: "promoted" }),
+					lens({ lensId: "traffic_shape", status: "no_finding", verdict: "rejected" }),
+				],
+				validator: { status: "ranked", note: "1 promoted · 1 rejected", elapsed_seconds: 8.2 },
+				fanout: { state: "ranked", size: 2 },
+			} as never),
+		)
+		expect(steps.map((step) => step.key)).toEqual(["dispatched", "reported", "validated"])
+		expect(steps.at(-1)).toMatchObject({ tone: "success" })
 	})
 
 	it("marks a run whose validator promoted nothing as inconclusive", () => {

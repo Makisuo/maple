@@ -23,7 +23,17 @@ export const hasFanout = (investigation: V2Investigation): boolean => investigat
 
 export interface LensTally {
 	readonly total: number
+	/** Lenses that put a candidate forward. A `no_finding` lane is NOT one. */
 	readonly reported: number
+	/**
+	 * Lenses that will not change again — reported *or* no_finding.
+	 *
+	 * This, not `reported`, is what "is the fan-out still running?" means. A lens
+	 * that crashed is terminal: the workflow turns it into a `no_finding` lane and
+	 * proceeds to validate. Gating progress on `reported` wedges the run spine on
+	 * "4 of 5 reported" forever while the board shows a validated diagnosis.
+	 */
+	readonly settled: number
 	readonly promoted: number
 	readonly merged: number
 	readonly ruledOut: number
@@ -33,6 +43,7 @@ export interface LensTally {
 export const lensTally = (lenses: ReadonlyArray<LensRun>): LensTally => ({
 	total: lenses.length,
 	reported: lenses.filter((lens) => lens.status === "reported").length,
+	settled: lenses.filter((lens) => lens.status === "reported" || lens.status === "no_finding").length,
 	promoted: lenses.filter((lens) => lens.verdict === "promoted").length,
 	merged: lenses.filter((lens) => lens.verdict === "merged").length,
 	ruledOut: lenses.filter((lens) => lens.verdict === "ruled_out").length,
@@ -43,7 +54,12 @@ export const lensTally = (lenses: ReadonlyArray<LensRun>): LensTally => ({
  * Checks
  * -----------------------------------------------------------------------------------------------*/
 
-export type CheckState = "held" | "failed" | "checking" | "queued" | "skipped"
+/**
+ * `pending` is a lens that reported but has not been ranked yet. It is NOT
+ * `failed`: rendering an un-ranked candidate as "Did not hold" tells the reader
+ * the validator ruled against it while the validator is still reading it.
+ */
+export type CheckState = "held" | "failed" | "pending" | "checking" | "queued" | "skipped"
 
 export interface LensCheck {
 	readonly key: string
@@ -78,6 +94,13 @@ export const lensChecks = (lenses: ReadonlyArray<LensRun>): ReadonlyArray<LensCh
 					state: "skipped" as const,
 				}
 			default: {
+				if (lens.verdict === "pending") {
+					return {
+						...base,
+						result: lens.claim ?? "reported — awaiting the validator",
+						state: "pending" as const,
+					}
+				}
 				const held = lens.verdict === "promoted" || lens.verdict === "merged"
 				return {
 					...base,
@@ -124,10 +147,10 @@ export const fanoutRunSteps = (investigation: V2Investigation): ReadonlyArray<Ru
 		},
 	]
 
-	if (tally.reported < tally.total) {
+	if (tally.settled < tally.total) {
 		steps.push({
 			key: "reporting",
-			label: `${tally.reported} of ${tally.total} reported`,
+			label: `${tally.settled} of ${tally.total} reported`,
 			detail: validator?.note ?? "Validation blocked until every lens reports",
 			tone: "active",
 		})

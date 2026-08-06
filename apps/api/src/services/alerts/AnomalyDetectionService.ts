@@ -42,7 +42,11 @@ import {
 } from "@/services/warehouse/warehouse-org-quarantine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
-import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
+import {
+	INVESTIGATION_AGENT_BINDING,
+	INVESTIGATION_FANOUT_BINDING,
+	maybeEnqueueTriage,
+} from "@/services/errors/ai-triage-enqueue"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -235,6 +239,10 @@ const make = Effect.gen(function* () {
 	const investigationAgentBinding = Option.match(workerEnv, {
 		onNone: () => undefined,
 		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
+	})
+	const investigationFanoutBinding = Option.match(workerEnv, {
+		onNone: () => undefined,
+		onSome: (e) => e[INVESTIGATION_FANOUT_BINDING],
 	})
 
 	const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
@@ -1572,6 +1580,7 @@ const make = Effect.gen(function* () {
 								detectedAt: new Date(nowMs).toISOString(),
 							},
 							agentBinding: investigationAgentBinding,
+							fanoutBinding: investigationFanoutBinding,
 						}).pipe(Effect.provideService(Database, database))
 						if (triage.enqueued) {
 							yield* dbExecute((db) =>

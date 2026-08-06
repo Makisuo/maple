@@ -16,6 +16,12 @@ import { Cause, Clock, Data, Duration, Effect, Exit, Option, Redacted, Schema } 
 import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { Database } from "@/platform/DatabaseLive"
 import { isChatSessionNamespace } from "@/chat/session"
+import { fanoutPlan } from "@/services/errors/fanout-policy"
+import {
+	isInvestigationStale,
+	staleBudgetMs,
+	staleTimeoutMessage,
+} from "@/services/errors/investigation-stale"
 import { UserId } from "@maple/domain/primitives"
 
 /** Identity an autonomous investigation turn runs as — the same one the internal MCP RPC uses. */
@@ -32,6 +38,9 @@ class InvestigationStartError extends Data.TaggedError("@maple/api/Investigation
  * this Worker.
  */
 export const INVESTIGATION_AGENT_BINDING = "CHAT_SESSION"
+
+/** Cloudflare Workflow binding that runs a fan-out. Present only in a Worker isolate. */
+export const INVESTIGATION_FANOUT_BINDING = "INVESTIGATION_FANOUT_WORKFLOW"
 
 /**
  * Kept for the one-release migration window because the legacy workflow module
@@ -120,9 +129,27 @@ export interface MaybeEnqueueTriageInput {
 	readonly context: Record<string, unknown>
 	/** The `CHAT_SESSION` Durable Object namespace, read off the worker env by the caller. */
 	readonly agentBinding: unknown
+	/**
+	 * The `INVESTIGATION_FANOUT_WORKFLOW` binding, read off the worker env by the
+	 * caller. Absent means the fan-out cannot run and the row records why — it
+	 * does NOT silently fall back to the single pass, because a run that was
+	 * planned as a fan-out and quietly ran as one agent is a lie in the boards.
+	 */
+	readonly fanoutBinding?: unknown
 	/** Manual starts ignore the automation-enabled flag, but never the quota. */
 	readonly force?: boolean
 }
+
+class FanoutStartError extends Data.TaggedError("FanoutStartError")<{ readonly cause: string }> {}
+
+interface FanoutWorkflowBinding {
+	readonly create: (options: { id: string; params: unknown }) => Promise<{ id: string }>
+}
+
+const isFanoutWorkflowBinding = (value: unknown): value is FanoutWorkflowBinding =>
+	typeof value === "object" &&
+	value !== null &&
+	typeof (value as { create?: unknown }).create === "function"
 
 export interface MaybeEnqueueTriageResult {
 	readonly enqueued: boolean
@@ -159,24 +186,21 @@ export const maybeEnqueueTriage: (
 		)
 		const existing = existingRows[0]
 		if (existing) {
-			if (
-				existing.status === "investigating" &&
-				existing.startedAt !== null &&
-				existing.startedAt.getTime() < nowMs - STALE_INVESTIGATION_MS
-			) {
+			if (isInvestigationStale(existing, nowMs)) {
+				const budget = staleBudgetMs(existing.fanoutState)
 				yield* database.execute((db) =>
 					db
 						.update(investigations)
 						.set({
 							status: "failed",
-							error: "diagnosis_timeout: no diagnosis was submitted within 15 minutes; retry",
+							error: staleTimeoutMessage(budget),
 							updatedAt: new Date(nowMs),
 						})
 						.where(
 							and(
 								eq(investigations.orgId, input.orgId),
 								eq(investigations.id, existing.id),
-								lt(investigations.startedAt, new Date(nowMs - STALE_INVESTIGATION_MS)),
+								lt(investigations.startedAt, new Date(nowMs - budget)),
 							),
 						),
 				)
@@ -191,6 +215,20 @@ export const maybeEnqueueTriage: (
 		if (!input.force && (settings === undefined || !settings.enabled)) {
 			return { enqueued: false, reason: "disabled" as const }
 		}
+
+		// The gate lives in `fanoutPlan`, shared with the manual path, so "automatic
+		// high/critical incidents fan out" is one rule with one implementation.
+		const plan = fanoutPlan({
+			subject: new InvestigationIncidentSubject({
+				type: "incident",
+				incidentKind: input.incidentKind,
+				incidentId: input.incidentId,
+				...(input.issueId ? { issueId: input.issueId } : {}),
+			}),
+			snapshot: snapshotFor(input),
+			automatic: true,
+			enabled: settings?.fanoutEnabled ?? false,
+		})
 
 		const maxRunsPerDay = settings?.maxRunsPerDay ?? 20
 		const usageRows = yield* database.execute((db) =>
@@ -239,7 +277,9 @@ export const maybeEnqueueTriage: (
 					incidentId: input.incidentId,
 					issueId: input.issueId ?? null,
 					startedAt: new Date(nowMs),
-					autonomousTurns: 1,
+					fanoutState: plan.size > 1 ? "queued" : "none",
+					fanoutSize: plan.size,
+					autonomousTurns: plan.passCount,
 					createdAt: new Date(nowMs),
 					updatedAt: new Date(nowMs),
 				})
@@ -248,6 +288,65 @@ export const maybeEnqueueTriage: (
 		)
 		if (inserted.length === 0) {
 			return { enqueued: false, reason: "duplicate" as const }
+		}
+
+		const markFailed = (error: string) =>
+			database
+				.execute((db) =>
+					db
+						.update(investigations)
+						.set({ status: "failed", error, updatedAt: new Date(nowMs) })
+						.where(eq(investigations.id, investigationId)),
+				)
+				.pipe(Effect.asVoid)
+
+		// Fan-out branch: the run goes to the Cloudflare Workflow instead of the
+		// chat session's single turn. Failure discipline mirrors the chat path
+		// exactly — the row records why, and the caller gets a non-throwing reason.
+		if (plan.size > 1) {
+			const workflow = input.fanoutBinding
+			if (!isFanoutWorkflowBinding(workflow)) {
+				yield* markFailed(
+					"agent_unavailable: the investigation fan-out workflow is not configured; retry",
+				)
+				return { enqueued: false, investigationId, reason: "no_binding" as const }
+			}
+			// `Exit`, not `Effect.option`: the reason a create() failed is the whole
+			// diagnostic value here — an id collision means a live instance already
+			// owns this investigation, a network error means retry.
+			const created = yield* Effect.exit(
+				Effect.tryPromise({
+					try: () =>
+						workflow.create({
+							id: investigationId,
+							params: {
+								orgId: input.orgId,
+								investigationId,
+								lensIds: plan.lenses,
+								attempt: 0,
+							},
+						}),
+					catch: (cause) => new FanoutStartError({ cause: String(cause) }),
+				}),
+			)
+			if (Exit.isFailure(created)) {
+				yield* Effect.logWarning("Investigation fan-out could not be started").pipe(
+					Effect.annotateLogs({
+						orgId: input.orgId,
+						investigationId,
+						error: Cause.pretty(created.cause),
+					}),
+				)
+				yield* markFailed("start_failed: the investigation fan-out could not be started; retry")
+				return { enqueued: false, investigationId, reason: "error" as const }
+			}
+			yield* Effect.annotateCurrentSpan({
+				orgId: input.orgId,
+				"maple.investigation.id": investigationId,
+				"maple.investigation.start_result": "fanout_started",
+				"maple.investigation.fanout_size": plan.size,
+			})
+			return { enqueued: true, investigationId }
 		}
 
 		const namespace = input.agentBinding

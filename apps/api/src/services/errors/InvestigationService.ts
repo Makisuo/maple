@@ -40,6 +40,11 @@ import { Cause, Clock, Context, Duration, Effect, Layer, Option, Redacted, Schem
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
 import { fanoutPlan, type FanoutPlan } from "@/services/errors/fanout-policy"
+import {
+	STALE_BUDGETS,
+	isInvestigationStale,
+	staleTimeoutMessage,
+} from "@/services/errors/investigation-stale"
 import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 
@@ -120,30 +125,6 @@ const validatorFor = (
 		elapsedSeconds: elapsed,
 	})
 }
-
-/**
- * How long a run may sit in `investigating` before the sweep calls it timed out.
- *
- * A fan-out is genuinely slower than a single pass — N lens passes settle, then a
- * validator ranks them — so it gets its own budget. Applying the single-pass
- * budget to a fan-out is the bug that marks a healthy run failed seconds before
- * its diagnosis lands.
- */
-const SINGLE_PASS_STALE_MS = 15 * 60 * 1000
-const FANOUT_STALE_MS = 25 * 60 * 1000
-
-const FANOUT_IN_FLIGHT_STATES = ["queued", "running", "validating"] as const
-const SINGLE_PASS_STATES = ["none", "ranked", "rejected_all", "superseded"] as const
-
-const STALE_BUDGETS: ReadonlyArray<readonly [number, ReadonlyArray<InvestigationRow["fanoutState"]>]> = [
-	[SINGLE_PASS_STALE_MS, [...SINGLE_PASS_STATES]],
-	[FANOUT_STALE_MS, [...FANOUT_IN_FLIGHT_STATES]],
-]
-
-const staleBudgetMs = (fanoutState: InvestigationRow["fanoutState"]): number =>
-	(FANOUT_IN_FLIGHT_STATES as ReadonlyArray<string>).includes(fanoutState)
-		? FANOUT_STALE_MS
-		: SINGLE_PASS_STALE_MS
 
 const describeCause = (cause: unknown): string | undefined => {
 	if (cause == null) return undefined
@@ -382,9 +363,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			 * detail page polls every 3s, which otherwise turns every read into a write.
 			 */
 			const isStale = (row: InvestigationRow, nowMs: number): boolean =>
-				row.status === "investigating" &&
-				row.startedAt !== null &&
-				row.startedAt.getTime() < nowMs - staleBudgetMs(row.fanoutState)
+				isInvestigationStale(row, nowMs)
 
 			const failStaleInvestigations = Effect.fnUntraced(function* (orgId: OrgId, nowMs: number) {
 				// Two budgets, applied as two statements: a healthy five-lens fan-out
@@ -398,7 +377,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 							.update(investigations)
 							.set({
 								status: "failed",
-								error: `diagnosis_timeout: no diagnosis was submitted within ${Math.round(budget / 60_000)} minutes; retry`,
+								error: staleTimeoutMessage(budget),
 								updatedAt: new Date(nowMs),
 							})
 							.where(

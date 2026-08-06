@@ -277,6 +277,12 @@ function FailedVerdict({ investigation }: { investigation: V2Investigation }) {
 	const fanned = hasFanout(investigation)
 	const validator = investigation.validator
 	const ranFor = elapsedBetween(investigation.created_at, investigation.updated_at)
+	// A fan-out can fail two ways, and they are not the same claim. The validator
+	// ranking every candidate down is a *finding*. Dying before the validator ran
+	// — a stalled workflow swept by the timeout — is not, and saying "rejected
+	// every candidate" there states a ruling nobody made, beside a validator lane
+	// that still reads "blocked" and a `diagnosis_timeout` error box.
+	const rejectedAll = fanned && validator?.status === "rejected_all"
 
 	return (
 		<VerdictShell
@@ -298,7 +304,9 @@ function FailedVerdict({ investigation }: { investigation: V2Investigation }) {
 						</Stat>
 					) : null}
 					<Stat label="Validation">
-						<span className="text-foreground">{fanned ? "Rejected all" : "None"}</span>
+						<span className="text-foreground">
+							{rejectedAll ? "Rejected all" : fanned ? "Never ran" : "None"}
+						</span>
 					</Stat>
 					<Stat label="Confidence" last>
 						<span className="text-muted-foreground">None</span>
@@ -308,7 +316,7 @@ function FailedVerdict({ investigation }: { investigation: V2Investigation }) {
 		>
 			<Eyebrow tone="text-destructive">
 				No diagnosis
-				{fanned ? (
+				{rejectedAll ? (
 					<>
 						<span aria-hidden className="text-muted-foreground/40">
 							·
@@ -318,14 +326,18 @@ function FailedVerdict({ investigation }: { investigation: V2Investigation }) {
 				) : null}
 			</Eyebrow>
 			<h2 className="font-display text-xl font-semibold leading-7 tracking-[-0.01em] text-foreground">
-				{fanned
+				{rejectedAll
 					? `${countWord(tally.reported)} lenses reported, and none of them held up`
-					: "The pass ended without a diagnosis"}
+					: fanned
+						? "The fan-out ended before the validator could rank it"
+						: "The pass ended without a diagnosis"}
 			</h2>
 			<p className="text-sm leading-6 text-muted-foreground">
-				{fanned
+				{rejectedAll
 					? "The candidates contradicted each other, so Maple promoted nothing rather than guess. What each lens did gather is kept below — a retry re-runs the fan-out with a wider evidence budget."
-					: "Nothing was promoted. Retry to run the pass again."}
+					: fanned
+						? "Whatever the lenses gathered is kept below, but nothing ranked them. A retry re-runs the fan-out."
+						: "Nothing was promoted. Retry to run the pass again."}
 			</p>
 			{/* The raw error was on the wire and rendered nowhere but a toast. */}
 			{investigation.error ? (
