@@ -45,17 +45,6 @@ const fixtureFor = (input: string): DiagnosisFixture => {
 	return fixture
 }
 
-/**
- * Mirrors `InvestigationPlan`, in the shape the `ai` SDK wants.
- *
- * Hand-written rather than derived from the Effect schema: this suite exists to
- * catch the prompt drifting away from the contract, and deriving both from one
- * source would let a schema change silently move the target it is scored against.
- *
- * Expressed as JSON Schema via the SDK's own `jsonSchema()`, the way
- * `mcp/__evals__/tools.ts` does — `apps/api` carries no zod, and one eval file is
- * not a reason to add it.
- */
 const stringArray = { type: "array", items: { type: "string" } } as const
 
 interface PlanShape {
@@ -88,6 +77,17 @@ interface ReportShape {
 	readonly ruledOut: ReadonlyArray<string>
 }
 
+/**
+ * Mirrors `InvestigationPlan`, in the shape the `ai` SDK wants.
+ *
+ * Hand-written rather than derived from the Effect schema: this suite exists to
+ * catch the prompt drifting away from the contract, and deriving both from one
+ * source would let a schema change silently move the target it is scored against.
+ *
+ * Expressed as JSON Schema via the SDK's own `jsonSchema()`, the way
+ * `mcp/__evals__/tools.ts` does — `apps/api` carries no zod, and one eval file is
+ * not a reason to add it.
+ */
 const PLAN_SCHEMA = jsonSchema<PlanShape>({
 	type: "object",
 	additionalProperties: false,
@@ -100,15 +100,7 @@ const PLAN_SCHEMA = jsonSchema<PlanShape>({
 			items: {
 				type: "object",
 				additionalProperties: false,
-				required: [
-					"id",
-					"name",
-					"question",
-					"claimToTest",
-					"rationale",
-					"toolNames",
-					"priority",
-				],
+				required: ["id", "name", "question", "claimToTest", "rationale", "toolNames", "priority"],
 				properties: {
 					id: { type: "string" },
 					name: { type: "string" },
