@@ -293,3 +293,52 @@ describe("the task tool's description", () => {
 		assert.include(description ?? "", "sees NOTHING of this conversation")
 	})
 })
+
+describe("the task tool's wire schema", () => {
+	it("compiles to JSON Schema a provider will accept", async () => {
+		// The closest thing to provider-contract verification available without a live call. Every
+		// other test here stubs the model, so nothing else would notice if `Schema.Literals` over a
+		// runtime-built name list produced something a provider rejects.
+		let schema: Record<string, unknown> | undefined
+		const service = {
+			prepare: () => Effect.die(new Error("unused")),
+			generate: () => Effect.die(new Error("unused")),
+			stream: (request: LLMRequest) => {
+				schema = request.tools.find((tool) => tool.name === "task")?.inputSchema as
+					| Record<string, unknown>
+					| undefined
+				return Stream.fromIterable([textDelta("hi"), finish()])
+			},
+		}
+
+		await Effect.runPromise(
+			runChatTurn({
+				sessionId: "org_test:tab",
+				tenant: TENANT,
+				model: MODEL,
+				messages: [],
+				messageId: "m1",
+			}).pipe(Stream.runCollect, Effect.provide(Layer.succeed(LLMClient.Service, service as never))),
+		)
+
+		assert.equal(schema?.type, "object")
+		assert.deepEqual(schema?.required, ["description", "prompt", "subagent_type"])
+		assert.equal(schema?.additionalProperties, false)
+
+		// `subagent_type` must constrain the model to real agent names — a free-form string here
+		// would let it invent one and turn every delegation into a tool failure.
+		const properties = schema?.properties as Record<string, Record<string, unknown>>
+		const subagentType = properties.subagent_type!
+		const enumValues =
+			(subagentType.enum as ReadonlyArray<string> | undefined) ??
+			(subagentType.anyOf as ReadonlyArray<{ enum?: ReadonlyArray<string> }> | undefined)?.[0]?.enum ??
+			[]
+		assert.include([...enumValues], "explore")
+
+		// Known wart, pinned rather than fixed: Effect renders the literal union as a single-member
+		// `anyOf` wrapping the enum instead of a bare enum. Harmless on OpenRouter and Workers AI,
+		// but it is exactly the shape opencode's `tool/json-schema.ts` normalizes away because some
+		// providers reject a degenerate `anyOf`. If a provider ever does, collapse it here.
+		assert.isDefined(subagentType.anyOf ?? subagentType.enum)
+	})
+})
