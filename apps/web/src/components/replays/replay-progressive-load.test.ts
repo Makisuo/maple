@@ -48,8 +48,7 @@ const plan = planRanges(manifest)
  */
 const simulate = (chunks: ReadonlyArray<ReplayChunkMeta>, throughMs: number) => {
 	const fetched: Array<ReplayRange> = [...initialRanges(chunks, planRanges(chunks))]
-	const loadedThrough = () =>
-		Math.max(...fetched.map((r) => r.toChunkSeq), -1)
+	const loadedThrough = () => Math.max(...fetched.map((r) => r.toChunkSeq), -1)
 	const lastSeq = chunks[chunks.length - 1]!.chunk_seq
 	let playhead = 0
 	while (playhead <= throughMs) {

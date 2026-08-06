@@ -113,7 +113,10 @@ describe("initialRanges", () => {
 	it("loads exactly one range when chunks are large", () => {
 		// A 4 MB chunk (full snapshot of a dense DOM) blows the budget alone. The
 		// count-based version of this would have pulled 8 of them — 32 MB.
-		const ranges = initialRanges(manifest(64, () => ({ byte_size: 4_000_000 })), planRanges(manifest(64, () => ({ byte_size: 4_000_000 }))))
+		const ranges = initialRanges(
+			manifest(64, () => ({ byte_size: 4_000_000 })),
+			planRanges(manifest(64, () => ({ byte_size: 4_000_000 }))),
+		)
 		expect(ranges).toHaveLength(1)
 	})
 
@@ -131,7 +134,9 @@ describe("initialRanges", () => {
 	it("never runs past the end of a short session", () => {
 		// 3 chunks = 300 KB, well under the budget: it must stop at the manifest
 		// end rather than looping toward the budget forever.
-		expect(initialRanges(manifest(3), planRanges(manifest(3)))).toEqual([rangeContaining(planRanges(manifest(3)), 0)])
+		expect(initialRanges(manifest(3), planRanges(manifest(3)))).toEqual([
+			rangeContaining(planRanges(manifest(3)), 0),
+		])
 	})
 })
 

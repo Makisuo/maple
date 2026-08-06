@@ -2,7 +2,7 @@ import type { V2Investigation } from "@maple/domain/http/v2"
 import { cn } from "@maple/ui/lib/utils"
 
 import { CheckIcon, XmarkIcon } from "@/components/icons"
-import { type CheckState, checksHeld, placeholderChecks } from "./fanout-placeholder"
+import { type CheckState, checksHeld, lensChecks } from "./lens-derive"
 
 /**
  * The rail's lead, and the first thing anyone reads on the page: one line per
@@ -13,7 +13,7 @@ import { type CheckState, checksHeld, placeholderChecks } from "./fanout-placeho
  * how many *held* rather than how many ran.
  */
 export function ChecksRail({ investigation }: { investigation: V2Investigation }) {
-	const checks = placeholderChecks(investigation)
+	const checks = lensChecks(investigation.lens_runs)
 	// A single-agent run has no lens results to summarise, so the rail leads with
 	// the run spine instead of a panel of invented ticks.
 	if (checks.length === 0) return null

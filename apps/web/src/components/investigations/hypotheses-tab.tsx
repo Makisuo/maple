@@ -3,7 +3,9 @@ import { cn } from "@maple/ui/lib/utils"
 
 import { CauseRecap } from "./cause-recap"
 import { ConfidenceMeter } from "./confidence-meter"
-import { type LensVerdict, fanoutSize, lensTally, placeholderLenses } from "./fanout-placeholder"
+import type { LensVerdict } from "@maple/domain/http"
+import { lensCopy } from "./lens-catalogue"
+import { lensTally } from "./lens-derive"
 
 const VERDICT_LABEL: Record<LensVerdict, string> = {
 	promoted: "Promoted",
@@ -39,9 +41,9 @@ const VERDICT_DOT: Record<LensVerdict, string> = {
  * and `InvestigationTabs` drops the tab entirely.
  */
 export function HypothesesTab({ investigation }: { investigation: V2Investigation }) {
-	const lenses = placeholderLenses(investigation)
+	const lenses = investigation.lens_runs
 	const tally = lensTally(lenses)
-	const size = fanoutSize(investigation)
+	const size = investigation.fanout.size
 
 	return (
 		<div className="flex shrink-0 flex-col gap-6">
@@ -60,7 +62,7 @@ export function HypothesesTab({ investigation }: { investigation: V2Investigatio
 				</div>
 				<ul className="flex flex-col border-t">
 					{lenses.map((entry) => (
-						<li key={entry.lens.id} className="flex items-start gap-4 border-b px-1 py-4">
+						<li key={entry.lensId} className="flex items-start gap-4 border-b px-1 py-4">
 							<span className="flex w-24 shrink-0 items-center gap-1.5">
 								<span
 									aria-hidden
@@ -79,7 +81,9 @@ export function HypothesesTab({ investigation }: { investigation: V2Investigatio
 								</span>
 							</span>
 							<span className="w-40 shrink-0">
-								<span className="block text-sm text-foreground">{entry.lens.name}</span>
+								<span className="block text-sm text-foreground">
+									{lensCopy(entry.lensId).name}
+								</span>
 								<span className="block font-mono text-xs text-muted-foreground tabular-nums">
 									{entry.elapsedSeconds === null
 										? "queued"

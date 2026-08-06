@@ -7,7 +7,7 @@ import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { formatRelativeTime, toEpochMs } from "@maple/ui/lib/time-format"
 
 import { ChecksRail } from "./checks-rail"
-import { placeholderRunSteps } from "./fanout-placeholder"
+import { fanoutRunSteps } from "./lens-derive"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { investigationOriginLabel } from "./investigation-status"
@@ -188,7 +188,7 @@ function RunSpine({
 		),
 	})
 
-	for (const step of placeholderRunSteps(investigation)) {
+	for (const step of fanoutRunSteps(investigation)) {
 		nodes.push({
 			key: step.key,
 			label: step.label,

@@ -7,13 +7,8 @@ import { toEpochMs } from "@maple/ui/lib/time-format"
 import { SEVERITY_LABEL } from "@/components/errors/severity-badge"
 import { CheckIcon } from "@/components/icons"
 import { ConfidenceMeter } from "./confidence-meter"
-import {
-	type PlaceholderLens,
-	hasFanout,
-	lensTally,
-	placeholderLenses,
-	placeholderValidator,
-} from "./fanout-placeholder"
+import { lensCopy } from "./lens-catalogue"
+import { type LensRun, hasFanout, lensTally } from "./lens-derive"
 
 /**
  * What the investigation concluded, or how far it has got trying. One card, three
@@ -118,7 +113,7 @@ function Eyebrow({ children, tone }: { children: ReactNode; tone: string }) {
 function DiagnosedVerdict({ investigation }: { investigation: V2Investigation }) {
 	const report = investigation.report
 	const promoted = hasFanout(investigation)
-		? placeholderLenses(investigation).find((lens) => lens.verdict === "promoted")
+		? investigation.lens_runs.find((lens) => lens.verdict === "promoted")
 		: undefined
 
 	if (!report) {
@@ -176,7 +171,7 @@ function DiagnosedVerdict({ investigation }: { investigation: V2Investigation })
 							Validated
 						</span>
 						<span className="normal-case tracking-normal text-muted-foreground">
-							promoted from the {promoted.lens.name.toLowerCase()} lens
+							promoted from the {lensCopy(promoted.lensId).name.toLowerCase()} lens
 						</span>
 					</>
 				) : null}
@@ -206,9 +201,9 @@ const COUNT_WORD = ["No", "One", "Two", "Three", "Four", "Five"] as const
 const countWord = (n: number) => COUNT_WORD[n] ?? String(n)
 
 function InvestigatingVerdict({ investigation }: { investigation: V2Investigation }) {
-	const lenses = placeholderLenses(investigation)
+	const lenses = investigation.lens_runs
 	const tally = lensTally(lenses)
-	const validator = placeholderValidator(investigation)
+	const validator = investigation.validator
 	const fanned = hasFanout(investigation)
 	const elapsed = elapsedSince(investigation.created_at)
 
@@ -277,10 +272,10 @@ function InvestigatingVerdict({ investigation }: { investigation: V2Investigatio
  * -----------------------------------------------------------------------------------------------*/
 
 function FailedVerdict({ investigation }: { investigation: V2Investigation }) {
-	const lenses = placeholderLenses(investigation)
+	const lenses = investigation.lens_runs
 	const tally = lensTally(lenses)
 	const fanned = hasFanout(investigation)
-	const validator = placeholderValidator(investigation)
+	const validator = investigation.validator
 	const ranFor = elapsedBetween(investigation.created_at, investigation.updated_at)
 
 	return (
@@ -352,14 +347,14 @@ function FailedVerdict({ investigation }: { investigation: V2Investigation }) {
  * Lens lanes
  * -----------------------------------------------------------------------------------------------*/
 
-const LANE_DOT: Record<PlaceholderLens["status"], string> = {
+const LANE_DOT: Record<LensRun["status"], string> = {
 	reported: "bg-success",
 	checking: "bg-primary animate-pulse",
 	queued: "border border-muted-foreground/40",
 	no_finding: "bg-muted-foreground/40",
 }
 
-const LANE_NOTE: Record<PlaceholderLens["status"], string> = {
+const LANE_NOTE: Record<LensRun["status"], string> = {
 	reported: "reported a candidate",
 	checking: "checking",
 	queued: "queued",
@@ -375,8 +370,8 @@ function LensLanes({
 	lenses,
 	validator,
 }: {
-	lenses: ReadonlyArray<PlaceholderLens>
-	validator: ReturnType<typeof placeholderValidator>
+	lenses: ReadonlyArray<LensRun>
+	validator: V2Investigation["validator"]
 }) {
 	// `flex-wrap` + a `min-w-*` floor on the claim: with the rail open and the
 	// stat column showing, a fixed three-column lane crushes the claim to a
@@ -386,7 +381,7 @@ function LensLanes({
 		<ul className="mt-1 flex flex-col">
 			{lenses.map((entry) => (
 				<li
-					key={entry.lens.id}
+					key={entry.lensId}
 					className="flex flex-wrap items-start gap-x-4 gap-y-1 border-t py-3 first:border-t-0 first:pt-1"
 				>
 					<span
@@ -394,7 +389,7 @@ function LensLanes({
 						className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", LANE_DOT[entry.status])}
 					/>
 					<span className="w-40 shrink-0">
-						<span className="block text-sm text-foreground">{entry.lens.name}</span>
+						<span className="block text-sm text-foreground">{lensCopy(entry.lensId).name}</span>
 						<span
 							className={cn(
 								"block text-xs",

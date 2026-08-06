@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { cn } from "@maple/ui/lib/utils"
 
-import { hasFanout, placeholderLenses } from "./fanout-placeholder"
+import { hasFanout } from "./lens-derive"
 
 export const INVESTIGATION_TABS = ["overview", "evidence", "hypotheses", "chat", "transcript"] as const
 
@@ -26,7 +26,7 @@ export function InvestigationTabs({
 	// At a fan-out of one there are no rivals to rank, so the section would be an
 	// empty table with a heading — the design drops the tab entirely.
 	const showHypotheses = hasFanout(investigation)
-	const hypothesesCount = showHypotheses ? placeholderLenses(investigation).length : 0
+	const hypothesesCount = investigation.lens_runs.length
 
 	const tabs: ReadonlyArray<{ value: InvestigationTab; label: string; count?: number }> = [
 		{ value: "overview", label: "Overview" },

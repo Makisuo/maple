@@ -13,7 +13,7 @@ import { toEpochMs } from "@maple/ui/lib/time-format"
 
 import { ErrorState } from "@/components/common/error-state"
 import { ListToolbar } from "@/components/common/list-toolbar"
-import { fanoutSize } from "@/components/investigations/fanout-placeholder"
+
 import {
 	investigationKindKey,
 	matchesQuery,
@@ -317,7 +317,7 @@ function TriageStrip({ investigations }: { investigations: ReadonlyArray<V2Inves
 			(entry) => entry.status === "resolved" && toEpochMs(entry.updated_at) >= cutoff,
 		)
 
-		const lensesInFlight = running.reduce((total, entry) => total + fanoutSize(entry), 0)
+		const lensesInFlight = running.reduce((total, entry) => total + entry.fanout.size, 0)
 		const critical = review.filter(
 			(entry) => (entry.severity ?? entry.snapshot.severity) === "critical",
 		).length
@@ -331,7 +331,7 @@ function TriageStrip({ investigations }: { investigations: ReadonlyArray<V2Inves
 		const median = durations.length > 0 ? durations[Math.floor(durations.length / 2)]! : null
 		const avgLenses =
 			resolved.length > 0
-				? resolved.reduce((total, entry) => total + fanoutSize(entry), 0) / resolved.length
+				? resolved.reduce((total, entry) => total + entry.fanout.size, 0) / resolved.length
 				: null
 
 		return { running, review, resolved, lensesInFlight, critical, median, avgLenses }

@@ -1,15 +1,19 @@
 import type { ReactNode } from "react"
 import type { V2Investigation } from "@maple/domain/http/v2"
-import { formatDuration, formatNumber } from "@maple/ui/lib/format"
+import { formatDuration } from "@maple/ui/lib/format"
 import { getServiceColor } from "@maple/ui/lib/colors"
 import { toEpochMs } from "@maple/ui/lib/time-format"
 
-import { placeholderBlastRadius } from "./fanout-placeholder"
-
 /**
- * Four named lanes under the verdict. Three of them read fields that have been
- * on the wire the whole time and rendered nowhere — `report.affectedScope`, the
- * union of `evidence[].relatedServices`, and the snapshot's incident window.
+ * Three named lanes under the verdict, each reading a field that has been on the
+ * wire the whole time and rendered nowhere — `report.affectedScope`, the union of
+ * `evidence[].relatedServices`, and the snapshot's incident window.
+ *
+ * There was a fourth, "Blast radius", showing an events-and-users count. It was
+ * invented: those numbers belong to the incident, not the investigation, and
+ * nothing on the wire carries them. A fabricated user count sitting inside an
+ * impact strip is the most dangerous number that could be on this page, so the
+ * lane is gone until there is a real source for it.
  *
  * Fixed lane widths rather than `gap` alone: the lanes have to hold their
  * vertical rules in place as the rail widens and narrows, and a flex-only strip
@@ -21,7 +25,6 @@ export function ImpactStrip({ investigation }: { investigation: V2Investigation 
 
 	const services = servicesTouched(investigation)
 	const window = incidentWindow(snapshot)
-	const blast = placeholderBlastRadius(investigation)
 
 	return (
 		<div className={STRIP}>
@@ -50,25 +53,6 @@ export function ImpactStrip({ investigation }: { investigation: V2Investigation 
 			</Lane>
 			<Lane label="Incident window">
 				<span className="text-foreground tabular-nums">{window}</span>
-			</Lane>
-			<Lane label="Blast radius">
-				{/* Two nowrap groups rather than four flex children: as separate items
-				    the "·" is free to wrap onto a line of its own, which it did. */}
-				<span className="flex flex-wrap items-baseline gap-x-1.5 text-muted-foreground">
-					<span className="whitespace-nowrap">
-						<span className="font-medium text-destructive tabular-nums">
-							{formatNumber(blast.events)}
-						</span>{" "}
-						events
-					</span>
-					<span aria-hidden>·</span>
-					<span className="whitespace-nowrap">
-						<span className="font-medium text-foreground tabular-nums">
-							{formatNumber(blast.users)}
-						</span>{" "}
-						users
-					</span>
-				</span>
 			</Lane>
 		</div>
 	)

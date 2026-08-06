@@ -7,7 +7,7 @@ import { formatRelativeTime, toEpochMs } from "@maple/ui/lib/time-format"
 
 import { SeverityBadge } from "@/components/errors/severity-badge"
 import { ConfidenceMeter } from "./confidence-meter"
-import { hasFanout, lensTally, placeholderLenses } from "./fanout-placeholder"
+import { hasFanout, lensTally } from "./lens-derive"
 import {
 	investigationFinding,
 	investigationHeadline,
@@ -110,7 +110,7 @@ function RowFinding({
 	finding: ReturnType<typeof investigationFinding>
 }) {
 	if (finding.kind === "pending" && hasFanout(investigation)) {
-		const tally = lensTally(placeholderLenses(investigation))
+		const tally = lensTally(investigation.lens_runs)
 		return (
 			<span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
 				<span aria-hidden className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
