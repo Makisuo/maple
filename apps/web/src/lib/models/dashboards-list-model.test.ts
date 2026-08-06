@@ -141,4 +141,13 @@ describe("buildList", () => {
 			degraded: false,
 		})
 	})
+
+	it("keeps an empty org out of degraded even after the snapshot has latched", () => {
+		// The fallback store latches at `ready` for the whole session once it has
+		// loaded once. Treating "no rows" as "sync is down" made a healthy org with
+		// no dashboards read-only, which disables the only way out of that state:
+		// the "New dashboard" button.
+		const list = buildList(rowsReady([]), { status: "ready", dashboards: fallbackDashboards })
+		expect(list).toEqual({ phase: "ready", dashboards: [], degraded: false })
+	})
 })
