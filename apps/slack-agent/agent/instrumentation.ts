@@ -131,11 +131,13 @@ function setupTelemetry(): void {
 
 export default defineInstrumentation({
 	setup: () => setupTelemetry(),
-	// Customer telemetry content must not land in spans: no message history,
-	// no model outputs. Chat-flue's OTel observer omits content for the same
-	// reason.
-	recordInputs: false,
-	recordOutputs: false,
+	// Record full message content (prompts + model outputs) on the AI SDK
+	// telemetry spans. Deliberate reversal of the earlier privacy stance
+	// (2026-08-06): the agentic-tracing work needs real message payloads in
+	// the gen_ai spans. Note this puts customer Slack message history and
+	// model outputs into the telemetry warehouse.
+	recordInputs: true,
+	recordOutputs: true,
 	events: {
 		"step.started"(input) {
 			// Slack-only runtime context so per-workspace latency/failures are
