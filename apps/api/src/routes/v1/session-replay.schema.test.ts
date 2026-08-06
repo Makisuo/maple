@@ -140,4 +140,3 @@ describe("SessionTraceSummary.spanCount (ClickHouse UInt64-as-string)", () => {
 		expect(decodeSummary({ ...baseSummary, spanCount: Number("5") }).spanCount).toBe(5)
 	})
 })
-

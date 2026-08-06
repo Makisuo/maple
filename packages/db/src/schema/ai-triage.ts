@@ -11,6 +11,21 @@ export const aiTriageSettings = pgTable("ai_triage_settings", {
 	orgId: text("org_id").$type<OrgId>().notNull().primaryKey(),
 	enabled: boolean("enabled").notNull().default(false),
 	maxRunsPerDay: integer("max_runs_per_day").notNull().default(20),
+	/**
+	 * Fan-out kill switch. Ships dark: an org opts in, its cost and per-lens
+	 * no-finding rates get watched, and only then does the default move.
+	 */
+	fanoutEnabled: boolean("fanout_enabled").notNull().default(false),
+	/**
+	 * Daily budget in *model passes*, which is what actually costs money — a
+	 * five-lens fan-out is six passes inside one run.
+	 *
+	 * Deliberately a second column rather than a reinterpretation of
+	 * `maxRunsPerDay`: that one is org-configurable and user-visible, and silently
+	 * changing its unit from runs to passes would turn a configured 20 into about
+	 * three critical incidents a day with no warning and no failing test.
+	 */
+	maxPassesPerDay: integer("max_passes_per_day").notNull().default(60),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 	updatedBy: text("updated_by").$type<UserId>(),
 })

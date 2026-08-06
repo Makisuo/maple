@@ -85,11 +85,7 @@ export const makeQueryRunners = ({ warehouse, queryEngine }: QueryRunnerDeps) =>
 	 * `compiledQueryFirst` takes the identical `CompiledQuery`. Putting it in the
 	 * def would only let a caller disagree with it.
 	 */
-	const runQuery = <Payload, Row>(
-		def: QueryDef<Payload, Row>,
-		tenant: TenantContext,
-		payload: Payload,
-	) => {
+	const runQuery = <Payload, Row>(def: QueryDef<Payload, Row>, tenant: TenantContext, payload: Payload) => {
 		const options = {
 			profile: def.profile,
 			...resolveSettings(def, payload),
@@ -132,11 +128,15 @@ export const makeQueryRunners = ({ warehouse, queryEngine }: QueryRunnerDeps) =>
 			tenant,
 			payload,
 			warehouse
-				.compiledQueryFirst(tenant, def.compile(payload, tenant.orgId, baselineWarehouseCapabilities()), {
-					profile: def.profile,
-					...resolveSettings(def, payload),
-					context: def.id,
-				})
+				.compiledQueryFirst(
+					tenant,
+					def.compile(payload, tenant.orgId, baselineWarehouseCapabilities()),
+					{
+						profile: def.profile,
+						...resolveSettings(def, payload),
+						context: def.id,
+					},
+				)
 				.pipe(Effect.map(Option.getOrNull)),
 		)
 

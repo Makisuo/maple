@@ -39,8 +39,16 @@ import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
 import { Cause, Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
+import { fanoutPlan, type FanoutPlan } from "@/services/errors/fanout-policy"
 import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
+
+/**
+ * Cloudflare Workflow binding that runs a fan-out. Named here rather than read
+ * off `Env` because the binding is only present inside a Worker isolate — the
+ * same reason `CHAT_SESSION` is resolved this way.
+ */
+export const FANOUT_WORKFLOW_BINDING = "INVESTIGATION_FANOUT_WORKFLOW"
 
 const decodeIdSync = Schema.decodeUnknownSync(InvestigationId)
 const decodeSubjectSync = Schema.decodeUnknownSync(InvestigationSubject)
@@ -112,6 +120,30 @@ const validatorFor = (
 		elapsedSeconds: elapsed,
 	})
 }
+
+/**
+ * How long a run may sit in `investigating` before the sweep calls it timed out.
+ *
+ * A fan-out is genuinely slower than a single pass — N lens passes settle, then a
+ * validator ranks them — so it gets its own budget. Applying the single-pass
+ * budget to a fan-out is the bug that marks a healthy run failed seconds before
+ * its diagnosis lands.
+ */
+const SINGLE_PASS_STALE_MS = 15 * 60 * 1000
+const FANOUT_STALE_MS = 25 * 60 * 1000
+
+const FANOUT_IN_FLIGHT_STATES = ["queued", "running", "validating"] as const
+const SINGLE_PASS_STATES = ["none", "ranked", "rejected_all", "superseded"] as const
+
+const STALE_BUDGETS: ReadonlyArray<readonly [number, ReadonlyArray<InvestigationRow["fanoutState"]>]> = [
+	[SINGLE_PASS_STALE_MS, [...SINGLE_PASS_STATES]],
+	[FANOUT_STALE_MS, [...FANOUT_IN_FLIGHT_STATES]],
+]
+
+const staleBudgetMs = (fanoutState: InvestigationRow["fanoutState"]): number =>
+	(FANOUT_IN_FLIGHT_STATES as ReadonlyArray<string>).includes(fanoutState)
+		? FANOUT_STALE_MS
+		: SINGLE_PASS_STALE_MS
 
 const describeCause = (cause: unknown): string | undefined => {
 	if (cause == null) return undefined
@@ -209,7 +241,6 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				database.execute(fn).pipe(Effect.mapError(makePersistenceError))
 
 			const iso = (date: Date) => decodeIsoSync(date.toISOString())
-			const staleBeforeMs = 15 * 60 * 1000
 
 			const fallbackSnapshot = (subject: InvestigationSubject) =>
 				new InvestigationSubjectSnapshot({
@@ -353,25 +384,33 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			const isStale = (row: InvestigationRow, nowMs: number): boolean =>
 				row.status === "investigating" &&
 				row.startedAt !== null &&
-				row.startedAt.getTime() < nowMs - staleBeforeMs
+				row.startedAt.getTime() < nowMs - staleBudgetMs(row.fanoutState)
 
 			const failStaleInvestigations = Effect.fnUntraced(function* (orgId: OrgId, nowMs: number) {
-				yield* dbExecute((db) =>
-					db
-						.update(investigations)
-						.set({
-							status: "failed",
-							error: "diagnosis_timeout: no diagnosis was submitted within 15 minutes; retry",
-							updatedAt: new Date(nowMs),
-						})
-						.where(
-							and(
-								eq(investigations.orgId, orgId),
-								eq(investigations.status, "investigating"),
-								lt(investigations.startedAt, new Date(nowMs - staleBeforeMs)),
+				// Two budgets, applied as two statements: a healthy five-lens fan-out
+				// legitimately outlives the single-pass timeout, and sweeping it on the
+				// short budget would mark the row `failed` moments before the workflow
+				// wrote a diagnosis onto it — leaving `diagnosed` next to a
+				// `diagnosis_timeout` error and a failure card over a real finding.
+				for (const [budget, states] of STALE_BUDGETS) {
+					yield* dbExecute((db) =>
+						db
+							.update(investigations)
+							.set({
+								status: "failed",
+								error: `diagnosis_timeout: no diagnosis was submitted within ${Math.round(budget / 60_000)} minutes; retry`,
+								updatedAt: new Date(nowMs),
+							})
+							.where(
+								and(
+									eq(investigations.orgId, orgId),
+									eq(investigations.status, "investigating"),
+									inArray(investigations.fanoutState, states),
+									lt(investigations.startedAt, new Date(nowMs - budget)),
+								),
 							),
-						),
-				).pipe(Effect.asVoid)
+					).pipe(Effect.asVoid)
+				}
 			})
 
 			const startOfUtcDay = (nowMs: number) => {
@@ -379,15 +418,24 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
 			}
 
+			/**
+			 * Settings drive two independent decisions: whether an automatic start is
+			 * allowed at all, and whether the org has budget left. Returned so the
+			 * caller can also read `fanoutEnabled` without a second query.
+			 */
+			const loadSettings = (orgId: OrgId) =>
+				dbExecute((db) =>
+					db.select().from(aiTriageSettings).where(eq(aiTriageSettings.orgId, orgId)).limit(1),
+				).pipe(Effect.map((rows) => rows[0]))
+
 			const ensureStartAllowed = Effect.fnUntraced(function* (
 				orgId: OrgId,
 				automatic: boolean,
 				nowMs: number,
+				/** Model passes this start will consume. A fan-out of five is six. */
+				passCount: number,
 			) {
-				const settingsRows = yield* dbExecute((db) =>
-					db.select().from(aiTriageSettings).where(eq(aiTriageSettings.orgId, orgId)).limit(1),
-				)
-				const settings = settingsRows[0]
+				const settings = yield* loadSettings(orgId)
 				if (automatic && (settings === undefined || !settings.enabled)) {
 					return yield* Effect.fail(
 						new InvestigationUnavailableError({
@@ -398,7 +446,11 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					)
 				}
 
+				// Two ceilings, both counted in the same column. `autonomousTurns` is
+				// incremented by the pass count, so the run cap is enforced by comparing
+				// against a start that costs one, and the pass cap by the full cost.
 				const dailyLimit = settings?.maxRunsPerDay ?? 20
+				const passLimit = settings?.maxPassesPerDay ?? 60
 				const usageRows = yield* dbExecute((db) =>
 					db
 						.select({
@@ -412,7 +464,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 							),
 						),
 				)
-				if ((usageRows[0]?.count ?? 0) >= dailyLimit) {
+				const used = usageRows[0]?.count ?? 0
+				if (used >= dailyLimit || used + passCount > passLimit) {
 					const retryableAtMs = startOfUtcDay(nowMs) + 24 * 60 * 60 * 1000
 					yield* Effect.annotateCurrentSpan({
 						"maple.investigation.start_result": "quota_skipped",
@@ -440,6 +493,93 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						.set({ status: "failed", error: reason, updatedAt: new Date(nowMs) })
 						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, id))),
 				).pipe(Effect.asVoid)
+			})
+
+			/**
+			 * Kick off a fan-out run on the Cloudflare Workflow.
+			 *
+			 * Mirrors `sendAutonomousTurn`'s failure discipline exactly, because the
+			 * caller cannot tell which path it took: a missing binding writes
+			 * `agent_unavailable` onto the row and fails retryably, and a duplicate
+			 * instance id (Cloudflare throws on collision) becomes `start_failed` —
+			 * the same signal `beginTurn` returning `undefined` produces.
+			 *
+			 * The instance id carries the attempt so a restart can claim a fresh one;
+			 * without it Cloudflare would reject every retry of a finished run.
+			 */
+			const startFanout = Effect.fnUntraced(function* (
+				orgId: OrgId,
+				doc: InvestigationDocument,
+				plan: FanoutPlan,
+				attempt: number,
+				nowMs: number,
+			) {
+				const env = Option.getOrUndefined(workerEnv)
+				const binding = env?.[FANOUT_WORKFLOW_BINDING] as
+					| { create: (options: { id: string; params: unknown }) => Promise<{ id: string }> }
+					| undefined
+				if (!binding || typeof binding.create !== "function") {
+					yield* markStartFailed(
+						orgId,
+						doc.id,
+						"agent_unavailable: the investigation fan-out workflow is not configured; retry",
+						nowMs,
+					)
+					return yield* Effect.fail(
+						new InvestigationUnavailableError({
+							message: "The investigation fan-out workflow is not configured.",
+							reason: "agent_unavailable",
+							retryable: true,
+						}),
+					)
+				}
+
+				const instanceId = attempt === 0 ? doc.id : `${doc.id}:${attempt}`
+				yield* dbExecute((db) =>
+					db
+						.update(investigations)
+						.set({
+							fanoutState: "queued",
+							fanoutSize: plan.size,
+							workflowInstanceId: instanceId,
+							updatedAt: new Date(nowMs),
+						})
+						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, doc.id))),
+				)
+
+				const started = yield* Effect.tryPromise(() =>
+					binding.create({
+						id: instanceId,
+						params: {
+							orgId,
+							investigationId: doc.id,
+							lensIds: plan.lenses,
+							attempt,
+						},
+					}),
+				).pipe(Effect.option)
+
+				if (Option.isNone(started)) {
+					yield* markStartFailed(
+						orgId,
+						doc.id,
+						"start_failed: the investigation fan-out could not be started; retry",
+						nowMs,
+					)
+					return yield* Effect.fail(
+						new InvestigationUnavailableError({
+							message: "The investigation fan-out could not be started.",
+							reason: "start_failed",
+							retryable: true,
+						}),
+					)
+				}
+
+				yield* Effect.annotateCurrentSpan({
+					"maple.investigation.id": doc.id,
+					"maple.investigation.start_result": "fanout_started",
+					"maple.investigation.fanout_size": plan.size,
+				})
 			})
 
 			/**
@@ -684,14 +824,25 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								return yield* documentFor(orgId, existing)
 							}
 						}
-						yield* ensureStartAllowed(orgId, options.automatic, nowMs)
+						// The plan decides the cost, so it has to be known before the quota
+						// check and before the claim increments the counter.
+						const settings = yield* loadSettings(orgId)
+						const plan = fanoutPlan({
+							subject: request.subject,
+							snapshot: request.snapshot ?? null,
+							automatic: options.automatic,
+							enabled: settings?.fanoutEnabled ?? false,
+						})
+						yield* ensureStartAllowed(orgId, options.automatic, nowMs, plan.passCount)
 						const doc = yield* createInvestigation(orgId, userId, request)
 						const claimed = yield* dbExecute((db) =>
 							db
 								.update(investigations)
 								.set({
 									startedAt: new Date(nowMs),
-									autonomousTurns: sql`${investigations.autonomousTurns} + 1`,
+									// Counted in passes, not runs: a five-lens fan-out costs six
+									// model calls and must burn six units of the daily budget.
+									autonomousTurns: sql`${investigations.autonomousTurns} + ${plan.passCount}`,
 									updatedAt: new Date(nowMs),
 								})
 								.where(
@@ -705,7 +856,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								.returning({ id: investigations.id }),
 						)
 						if (claimed.length === 0) return doc
-						yield* sendAutonomousTurn(orgId, doc, nowMs)
+						if (plan.size > 1) yield* startFanout(orgId, doc, plan, 0, nowMs)
+						else yield* sendAutonomousTurn(orgId, doc, nowMs)
 						return yield* getInvestigation(orgId, doc.id).pipe(
 							Effect.catchTag("@maple/http/investigations/InvestigationNotFoundError", () =>
 								Effect.fail(
@@ -723,8 +875,27 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			)(function* (orgId, id) {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
 				const nowMs = yield* Clock.currentTimeMillis
-				yield* ensureStartAllowed(orgId, false, nowMs)
 				const existing = yield* getInvestigation(orgId, id)
+				const row = yield* loadRow(orgId, id)
+				const settings = yield* loadSettings(orgId)
+				const plan = fanoutPlan({
+					subject: existing.subject,
+					snapshot: existing.snapshot,
+					// A restart is always somebody pressing Retry, so it is never automatic.
+					automatic: false,
+					enabled: settings?.fanoutEnabled ?? false,
+				})
+				yield* ensureStartAllowed(orgId, false, nowMs, plan.passCount)
+
+				const attempt = (row?.fanoutAttempt ?? 0) + 1
+				// The previous attempt's lanes have to go: the unique index on
+				// (investigation_id, lens_id) would otherwise make every insert in the
+				// new run a no-op, and the board would render the old verdicts as if
+				// they belonged to the retry. There is no previous-attempt UI, so
+				// deleting is the honest option.
+				yield* dbExecute((db) =>
+					db.delete(investigationLensRuns).where(eq(investigationLensRuns.investigationId, id)),
+				)
 				yield* dbExecute((db) =>
 					db
 						.update(investigations)
@@ -732,7 +903,12 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 							status: "investigating",
 							error: null,
 							startedAt: new Date(nowMs),
-							autonomousTurns: sql`${investigations.autonomousTurns} + 1`,
+							autonomousTurns: sql`${investigations.autonomousTurns} + ${plan.passCount}`,
+							fanoutState: "none",
+							fanoutSize: plan.size,
+							fanoutAttempt: attempt,
+							validatorNote: null,
+							validatorElapsedMs: null,
 							updatedAt: new Date(nowMs),
 						})
 						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, id))),
@@ -743,7 +919,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					error: null,
 					updatedAt: decodeIsoSync(new Date(nowMs).toISOString()),
 				})
-				yield* sendAutonomousTurn(orgId, restarting, nowMs)
+				if (plan.size > 1) yield* startFanout(orgId, restarting, plan, attempt, nowMs)
+				else yield* sendAutonomousTurn(orgId, restarting, nowMs)
 				return yield* getInvestigation(orgId, id)
 			})
 
