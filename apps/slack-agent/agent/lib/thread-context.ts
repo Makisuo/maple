@@ -39,32 +39,36 @@ import { formatContextBlock, type ContextFormatOptions } from "./slack-context-f
  * thread pays for its history once per mention), and eve's `thread.refresh()`
  * fetches one oldest-first page of 50 replies, so past 50 the tail is the part
  * that goes missing. Alert threads are short; revisit if that stops holding.
+ *
+ * Loading and rendering are separate steps rather than one `loadThreadContext`
+ * call because this transcript now has a second reader: `confirmThreadFollowUp`
+ * (`#lib/thread-follow-up.js`) decides from these same messages whether an
+ * optimistically promoted follow-up becomes a turn at all. Fetching the thread
+ * twice for two questions about the same thread would be the easy mistake here
+ * — and one of them would be answering about a slightly different thread.
  */
 
 export type ThreadContextOptions = ContextFormatOptions
 
 /**
- * Loads the thread the triggering message belongs to and renders it as one
- * context string, or `[]` when there is nothing to add (thread root, empty
- * thread, or a Slack call that failed).
+ * Loads the thread the triggering message belongs to, oldest-first and without
+ * the triggering message itself. Returns `[]` for a thread root (there is
+ * nothing before it) and `null` when Slack could not be read at all — callers
+ * need those apart: "empty thread" is an answer, "no answer" is not.
  *
  * Never throws: eve drops the whole mention when an `onAppMention` handler
  * throws, and losing the reply entirely is far worse than losing its context.
  */
-export async function loadThreadContext(
+export async function loadThreadMessages(
 	thread: Pick<SlackThread, "recentMessages" | "refresh">,
 	message: { readonly threadTs: string; readonly ts: string },
-	options: ThreadContextOptions = {},
-): Promise<readonly string[]> {
-	let messages: readonly SlackThreadMessage[]
+): Promise<readonly SlackThreadMessage[] | null> {
 	try {
-		messages = await loadThreadContextMessages(thread, message, { since: "thread-root" })
+		return await loadThreadContextMessages(thread, message, { since: "thread-root" })
 	} catch (error) {
 		console.warn("[slack-thread-context] Failed to load thread context; dispatching without it.", error)
-		return []
+		return null
 	}
-	const rendered = formatThreadContext(messages, options)
-	return rendered === undefined ? [] : [rendered]
 }
 
 /**

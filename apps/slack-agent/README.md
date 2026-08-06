@@ -153,8 +153,9 @@ settings:
         bot_events:
             - app_mention
             - message.im
-            # Thread follow-ups without re-mentioning the bot: replies in threads the
-            # bot is engaged in are promoted to app_mention by the webhookVerifier
+            # Thread follow-ups without re-mentioning the bot: candidate thread
+            # replies are promoted to app_mention by the webhookVerifier, and
+            # confirmed (or dropped) after the 200 by the mention handler
             # (agent/lib/thread-follow-up.ts). Only channels the bot is a member of
             # deliver these events.
             - message.channels
@@ -288,11 +289,17 @@ Both should show a green **Verified ✓** next to the field once saved. Event Su
 `app_mention`, `message.im`, `message.channels`, and `message.groups` listed under _Subscribe to bot
 events_ — the manifest from step 1 sets these, so they should already be there. The two channel
 message events power thread follow-ups: once the bot has been mentioned (or replied) in a thread,
-further replies in that thread reach it without a new `@mention` — but only while the engagement is
-**recent**: within 30 minutes and within the last 15 messages of the thread (see
-`agent/lib/thread-follow-up.ts`). Past either bound, replies pass through untouched and the user
-@-mentions the bot again. Unbounded, one mention would turn every later reply by anyone into a full
-agent turn, forever.
+further replies in that thread reach it without a new `@mention` — but only while the thread is
+still **alive** (nobody has touched it for less than 24 hours) and the bot is still within its
+**last 15 messages**. Past either bound the reply is dropped, everyone who spoke in the thread gets
+a DM saying so, and one `@mention` brings the bot back (`agent/lib/thread-follow-up.ts`,
+`agent/lib/disengage-notice.ts`). Unbounded, one mention would turn every later reply by anyone into
+a full agent turn, forever.
+
+The decision deliberately does **not** happen in the webhook verifier — that is the only awaited work
+before eve's 200, so anything it fetches is spent out of Slack's ~3s delivery budget. Promotion there
+is parse-only and optimistic; the mention handler confirms it afterwards, against the thread it loads
+for turn context anyway.
 
 Changing a request URL does **not** require reinstalling the app; only changing _scopes_ does. (If
 you did edit scopes, the sidebar shows a yellow reinstall banner — follow it, and note that
