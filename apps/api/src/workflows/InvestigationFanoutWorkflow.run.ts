@@ -708,12 +708,14 @@ const meterTokens = async (
  * not a recording: individual tool calls are not in it.
  */
 const seedTranscript = async (input: SeedTranscriptInput): Promise<void> => {
-	const namespace = input.env.CHAT_SESSION
-	if (!namespace) return
+	if (!input.env.CHAT_SESSION) return
 	const [{ chatSessionStub }] = await Promise.all([import("../chat/session")])
 	const sessionId = `${input.orgId}:inv-${input.investigationId}`
+	// `chatSessionStub` returns undefined when the binding is not a chat-session
+	// namespace — a truthy `CHAT_SESSION` is not proof that it is one.
+	const stub = chatSessionStub(input.env as Record<string, unknown>, sessionId)
+	if (!stub) return
 	try {
-		const stub = chatSessionStub(input.env as never, sessionId)
 		await stub.append({
 			sessionId,
 			events: input.lines.map((text) => ({ type: "assistant-message" as const, text })),
