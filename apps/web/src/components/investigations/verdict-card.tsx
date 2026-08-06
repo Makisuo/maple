@@ -276,7 +276,13 @@ function FailedVerdict({ investigation }: { investigation: V2Investigation }) {
 	const tally = lensTally(lenses)
 	const fanned = hasFanout(investigation)
 	const validator = investigation.validator
-	const ranFor = elapsedBetween(investigation.created_at, investigation.updated_at)
+	// From `started_at`, not `created_at`: a restart re-stamps the former, and
+	// measuring from the latter reported a 20-day-old investigation as a
+	// 480-hour run.
+	const ranFor = elapsedBetween(
+		investigation.started_at ?? investigation.created_at,
+		investigation.updated_at,
+	)
 	// A fan-out can fail two ways, and they are not the same claim. The validator
 	// ranking every candidate down is a *finding*. Dying before the validator ran
 	// — a stalled workflow swept by the timeout — is not, and saying "rejected
@@ -327,7 +333,7 @@ function FailedVerdict({ investigation }: { investigation: V2Investigation }) {
 			</Eyebrow>
 			<h2 className="font-display text-xl font-semibold leading-7 tracking-[-0.01em] text-foreground">
 				{rejectedAll
-					? `${countWord(tally.reported)} lenses reported, and none of them held up`
+					? `${countWord(tally.reported)} ${tally.reported === 1 ? "lens" : "lenses"} reported, and none of them held up`
 					: fanned
 						? "The fan-out ended before the validator could rank it"
 						: "The pass ended without a diagnosis"}

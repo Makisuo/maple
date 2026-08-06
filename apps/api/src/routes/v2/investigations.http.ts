@@ -178,6 +178,7 @@ const toV2Investigation = Effect.fn("HttpV2Investigations.toV2Investigation")(fu
 		output_tokens: doc.outputTokens,
 		error: doc.error,
 		created_at: doc.createdAt,
+		started_at: doc.startedAt,
 		diagnosed_at: doc.diagnosedAt,
 		updated_at: doc.updatedAt,
 		// Ordering is a contract — `LENS_DISPATCH_ORDER` decides which lenses a

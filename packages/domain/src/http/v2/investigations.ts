@@ -271,6 +271,7 @@ const investigationExample = {
 	output_tokens: 800,
 	error: null,
 	created_at: "2026-07-15T09:12:00.000Z",
+	started_at: "2026-07-15T09:12:05.000Z",
 	diagnosed_at: "2026-07-15T09:12:42.000Z",
 	updated_at: "2026-07-15T09:12:42.000Z",
 	lens_runs: [
@@ -335,6 +336,10 @@ export const V2Investigation = Schema.Struct({
 		description: "The failure message if the diagnostic pass errored, or `null`.",
 	}),
 	created_at: Timestamp.annotate({ description: "When the investigation was opened." }),
+	started_at: Schema.NullOr(Timestamp).annotate({
+		description:
+			"When the current pass began, re-stamped on each restart. Use this rather than `created_at` to measure how long a run took.",
+	}),
 	diagnosed_at: Schema.NullOr(Timestamp).annotate({
 		description: "When a diagnosis was first attached, or `null`.",
 	}),

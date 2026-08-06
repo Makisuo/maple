@@ -297,6 +297,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					outputTokens: row.outputTokens ?? null,
 					error: row.error ?? null,
 					createdAt: iso(row.createdAt),
+					startedAt: row.startedAt ? iso(row.startedAt) : null,
 					diagnosedAt: row.diagnosedAt ? iso(row.diagnosedAt) : null,
 					updatedAt: iso(row.updatedAt),
 					lensRuns: lensRows.map(lensRowToDocument),
@@ -541,7 +542,11 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					)
 				}
 
-				const instanceId = attempt === 0 ? doc.id : `${doc.id}:${attempt}`
+				// Cloudflare rejects a colon in an instance id ("Workflow instance has
+				// invalid id"), so the attempt is appended with a dash. Attempt 0 keeps
+				// the bare investigation id, which is what gives a first start free
+				// duplicate-detection against a live instance.
+				const instanceId = attempt === 0 ? doc.id : `${doc.id}-a${attempt}`
 				yield* dbExecute((db) =>
 					db
 						.update(investigations)

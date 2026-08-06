@@ -261,6 +261,11 @@ export class InvestigationDocument extends Schema.Class<InvestigationDocument>("
 	outputTokens: Schema.NullOr(Schema.Number),
 	error: Schema.NullOr(Schema.String),
 	createdAt: IsoDateTimeString,
+	/**
+	 * When the current pass began. Re-stamped on every restart, which is what makes
+	 * it — and not `createdAt` — the right start for "how long did this run take".
+	 */
+	startedAt: Schema.NullOr(IsoDateTimeString),
 	diagnosedAt: Schema.NullOr(IsoDateTimeString),
 	updatedAt: IsoDateTimeString,
 	/**
