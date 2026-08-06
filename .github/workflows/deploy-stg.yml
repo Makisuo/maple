@@ -18,7 +18,7 @@ permissions:
 
 jobs:
     deploy-stg:
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 30
         if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
         environment: staging
