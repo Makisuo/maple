@@ -5,6 +5,8 @@ import {
 	type InvestigationConfidence,
 	InvestigationCreateRequest,
 	InvestigationDocument,
+	InvestigationFanout,
+	InvestigationLensRun,
 	InvestigationNotFoundError,
 	InvestigationPersistenceError,
 	InvestigationQuotaError,
@@ -12,6 +14,7 @@ import {
 	InvestigationSnapshotFact,
 	InvestigationSubjectSnapshot,
 	InvestigationUnavailableError,
+	InvestigationValidator,
 	InvestigationsListResponse,
 	type InvestigationStatus,
 	InvestigationSubject,
@@ -29,9 +32,16 @@ import { wrapChatContext } from "@maple/domain/chat-preamble"
 import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { chatSessionStub } from "@/chat/session"
 import type { TenantContext } from "@/services/auth/tenant-context"
-import { aiTriageSettings, errorIssueEvents, investigations, type InvestigationRow } from "@maple/db"
+import {
+	aiTriageSettings,
+	errorIssueEvents,
+	investigationLensRuns,
+	investigations,
+	type InvestigationLensRunRow,
+	type InvestigationRow,
+} from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
 import { Cause, Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { applyTriageSeverity } from "@/services/errors/issue-severity"
@@ -63,6 +73,69 @@ const deterministicEventId = (investigationId: string): string => {
 		`${((Number.parseInt(hex.slice(16, 17), 16) & 0x3) | 0x8).toString(16)}${hex.slice(17, 20)}`,
 		hex.slice(20, 32),
 	].join("-")
+}
+
+/**
+ * Milliseconds are what the column stores — seconds are a display unit, and the
+ * boards render one decimal. Rounding here rather than in five components keeps
+ * two lanes of the same run from disagreeing by a tenth.
+ */
+const elapsedSeconds = (ms: number | null): number | null =>
+	ms === null ? null : Math.round((ms / 1000) * 10) / 10
+
+const lensRowToDocument = (row: InvestigationLensRunRow): InvestigationLensRun =>
+	new InvestigationLensRun({
+		lensId: row.lensId,
+		status: row.status,
+		verdict: row.verdict,
+		claim: row.claim ?? null,
+		reason: row.reason ?? null,
+		progressNote: row.progressNote ?? null,
+		confidence: row.confidence ?? null,
+		toolCount: row.toolCount,
+		elapsedSeconds: elapsedSeconds(row.elapsedMs ?? null),
+	})
+
+/**
+ * The validator lane, derived rather than stored: its status is a function of
+ * how far the run got, and deriving it is what stops the rail from claiming a
+ * ranking that the lens rows contradict.
+ *
+ * Null on the single-pass path — there were never rivals to rank.
+ */
+const validatorFor = (
+	row: InvestigationRow,
+	lensRows: ReadonlyArray<InvestigationLensRunRow>,
+): InvestigationValidator | null => {
+	if (lensRows.length === 0) return null
+	const elapsed = elapsedSeconds(row.validatorElapsedMs ?? null)
+	if (row.fanoutState === "ranked" || row.fanoutState === "superseded") {
+		const promoted = lensRows.filter((lens) => lens.verdict === "promoted").length
+		const merged = lensRows.filter((lens) => lens.verdict === "merged").length
+		const ruledOut = lensRows.filter((lens) => lens.verdict === "ruled_out").length
+		return new InvestigationValidator({
+			status: "ranked",
+			note: row.validatorNote ?? `${promoted} promoted · ${merged} merged · ${ruledOut} ruled out`,
+			elapsedSeconds: elapsed,
+		})
+	}
+	if (row.fanoutState === "rejected_all") {
+		return new InvestigationValidator({
+			status: "rejected_all",
+			note:
+				row.validatorNote ??
+				"No candidate survived: each was contradicted by at least one other lens",
+			elapsedSeconds: elapsed,
+		})
+	}
+	const reported = lensRows.filter((lens) => lens.status === "reported").length
+	return new InvestigationValidator({
+		status: "blocked",
+		note:
+			row.validatorNote ??
+			`Starts once all ${lensRows.length} lenses report — then ranks the candidates and promotes one (${reported} in)`,
+		elapsedSeconds: elapsed,
+	})
 }
 
 const describeCause = (cause: unknown): string | undefined => {
@@ -201,7 +274,15 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				return decoded.value
 			})
 
-			const rowToDocument = Effect.fnUntraced(function* (row: InvestigationRow) {
+			/**
+			 * Lens rows arrive as a parameter rather than being fetched here: this runs
+			 * once per row from `listInvestigations`, so a query inside it is an N+1 on
+			 * every page load. The callers batch by `investigationId IN (…)`.
+			 */
+			const rowToDocument = Effect.fnUntraced(function* (
+				row: InvestigationRow,
+				lensRows: ReadonlyArray<InvestigationLensRunRow> = [],
+			) {
 				const subject = decodeSubjectSync(row.subjectJson)
 				const storedSnapshot = decodeSnapshotOption(row.snapshotJson)
 				return new InvestigationDocument({
@@ -224,6 +305,9 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					createdAt: iso(row.createdAt),
 					diagnosedAt: row.diagnosedAt ? iso(row.diagnosedAt) : null,
 					updatedAt: iso(row.updatedAt),
+					lensRuns: lensRows.map(lensRowToDocument),
+					validator: validatorFor(row, lensRows),
+					fanout: new InvestigationFanout({ state: row.fanoutState, size: row.fanoutSize }),
 				})
 			})
 
@@ -235,6 +319,38 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, id)))
 						.limit(1),
 				).pipe(Effect.map((rows) => rows[0]))
+
+			/**
+			 * Lens lanes for a set of investigations, in dispatch order. Ordering is a
+			 * contract — `LENS_DISPATCH_ORDER` decides which lenses a narrow run gets —
+			 * so it belongs in SQL rather than in each of the five components that
+			 * render a lane.
+			 *
+			 * Skips the query entirely when nothing in the set fanned out, which is the
+			 * common case on a list page.
+			 */
+			const loadLensRows = (orgId: OrgId, rows: ReadonlyArray<InvestigationRow>) => {
+				const ids = rows.filter((row) => row.fanoutState !== "none").map((row) => row.id)
+				if (ids.length === 0) return Effect.succeed([] as ReadonlyArray<InvestigationLensRunRow>)
+				return dbExecute((db) =>
+					db
+						.select()
+						.from(investigationLensRuns)
+						.where(
+							and(
+								eq(investigationLensRuns.orgId, orgId),
+								inArray(investigationLensRuns.investigationId, ids),
+							),
+						)
+						.orderBy(investigationLensRuns.investigationId, investigationLensRuns.ordinal),
+				)
+			}
+
+			/** `rowToDocument` for a single row, fetching its lanes if it has any. */
+			const documentFor = Effect.fnUntraced(function* (orgId: OrgId, row: InvestigationRow) {
+				const lensRows = yield* loadLensRows(orgId, [row])
+				return yield* rowToDocument(row, lensRows)
+			})
 
 			// Look up the single incident-anchored row (the partial unique index key).
 			// Used for both the dedup fast-path and the concurrent-insert race loser.
@@ -462,8 +578,19 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					yield* failStaleInvestigations(orgId, nowMs)
 					rows = yield* selectPage
 				}
+				// One extra query for the whole page, and none at all when nothing on it
+				// fanned out — the alternative is a query per row inside `rowToDocument`.
+				const lensRows = yield* loadLensRows(orgId, rows)
+				const byInvestigation = new Map<string, InvestigationLensRunRow[]>()
+				for (const lens of lensRows) {
+					const bucket = byInvestigation.get(lens.investigationId)
+					if (bucket) bucket.push(lens)
+					else byInvestigation.set(lens.investigationId, [lens])
+				}
 				return new InvestigationsListResponse({
-					investigations: yield* Effect.forEach(rows, rowToDocument),
+					investigations: yield* Effect.forEach(rows, (row) =>
+						rowToDocument(row, byInvestigation.get(row.id) ?? []),
+					),
 				})
 			})
 
@@ -478,11 +605,11 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					)
 				}
 				const nowMs = yield* Clock.currentTimeMillis
-				if (!isStale(row, nowMs)) return yield* rowToDocument(row)
+				if (!isStale(row, nowMs)) return yield* documentFor(orgId, row)
 				// This run timed out: settle it, then report the corrected status.
 				yield* failStaleInvestigations(orgId, nowMs)
 				const settled = yield* loadRow(orgId, id)
-				return yield* rowToDocument(settled ?? row)
+				return yield* documentFor(orgId, settled ?? row)
 			})
 
 			const createInvestigation: InvestigationServiceShape["createInvestigation"] = Effect.fn(
@@ -500,7 +627,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				// creating a duplicate. Free-form investigations are always new.
 				if (subject.type === "incident") {
 					const existing = yield* loadIncidentRow(orgId, subject.incidentKind, subject.incidentId)
-					if (existing) return yield* rowToDocument(existing)
+					if (existing) return yield* documentFor(orgId, existing)
 				}
 
 				const id = newInvestigationId()
@@ -539,7 +666,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				if (inserted.length === 0) {
 					if (subject.type === "incident") {
 						const winner = yield* loadIncidentRow(orgId, subject.incidentKind, subject.incidentId)
-						if (winner) return yield* rowToDocument(winner)
+						if (winner) return yield* documentFor(orgId, winner)
 					}
 					return yield* Effect.fail(
 						new InvestigationPersistenceError({
@@ -556,7 +683,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						}),
 					)
 				}
-				return yield* rowToDocument(row)
+				return yield* documentFor(orgId, row)
 			})
 
 			const createAndStartInvestigation: InvestigationServiceShape["createAndStartInvestigation"] =
@@ -579,7 +706,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								existing &&
 								(existing.status !== "investigating" || existing.startedAt !== null)
 							) {
-								return yield* rowToDocument(existing)
+								return yield* documentFor(orgId, existing)
 							}
 						}
 						yield* ensureStartAllowed(orgId, options.automatic, nowMs)
@@ -672,7 +799,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						new InvestigationNotFoundError({ message: `No such investigation: '${id}'` }),
 					)
 				}
-				return yield* rowToDocument(row)
+				return yield* documentFor(orgId, row)
 			})
 
 			/**
@@ -781,7 +908,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				}
 
 				const updated = yield* loadRow(orgId, id)
-				return yield* rowToDocument(updated ?? row)
+				return yield* documentFor(orgId, updated ?? row)
 			})
 
 			return {

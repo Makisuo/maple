@@ -211,6 +211,13 @@
       "when": 1785800580058,
       "tag": "0030_planetscale_events",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785975725201,
+      "tag": "0031_investigation_lens_runs",
+      "breakpoints": true
     }
   ]
 }
