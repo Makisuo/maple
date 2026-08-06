@@ -1,11 +1,12 @@
 import type { ReactNode } from "react"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { cn } from "@maple/ui/lib/utils"
-import { formatDuration } from "@maple/ui/lib/format"
 import { toEpochMs } from "@maple/ui/lib/time-format"
 
 import { SEVERITY_LABEL } from "@/components/errors/severity-badge"
 import { CheckIcon } from "@/components/icons"
+import { useTickingNow } from "@/hooks/use-ticking-now"
+import { type Elapsed, splitDuration } from "./investigation-display"
 import { ConfidenceMeter } from "./confidence-meter"
 import { lensCopy } from "./lens-catalogue"
 import { type LensRun, hasFanout, lensTally } from "./lens-derive"
@@ -205,7 +206,6 @@ function InvestigatingVerdict({ investigation }: { investigation: V2Investigatio
 	const tally = lensTally(lenses)
 	const validator = investigation.validator
 	const fanned = hasFanout(investigation)
-	const elapsed = elapsedSince(investigation.created_at)
 
 	return (
 		<VerdictShell
@@ -213,11 +213,7 @@ function InvestigatingVerdict({ investigation }: { investigation: V2Investigatio
 			stats={
 				<>
 					<Stat label="Elapsed">
-						{elapsed ? (
-							<BigStat value={elapsed.value} unit={elapsed.unit} />
-						) : (
-							<span className="text-muted-foreground">—</span>
-						)}
+						<LiveElapsedStat from={investigation.created_at} />
 					</Stat>
 					{fanned ? (
 						<Stat label="Lenses reported">
@@ -478,29 +474,6 @@ function LensLanes({
  * Elapsed helpers
  * -----------------------------------------------------------------------------------------------*/
 
-interface Elapsed {
-	value: string
-	unit: string
-}
-
-/**
- * `formatDuration` returns one string ("38s", "2m 4s"); the stat wants the number
- * and the unit apart so the number can carry the display weight.
- */
-const splitDuration = (ms: number): Elapsed => {
-	// A pass that died before it started is a real case (`workflow_binding_unavailable`
-	// fails in microseconds), and "0 µs" reads as a broken clock rather than an
-	// instant failure. Sub-second resolution buys nothing at this display size.
-	if (ms < 1000) return { value: "<1", unit: "s" }
-	// `formatDuration` is tuned for span durations and gives seconds two decimals
-	// ("7.04s"). At this display weight that reads as false precision, and on a live
-	// pass the hundredths churn on every 3s poll — whole seconds up to a minute.
-	if (ms < 60_000) return { value: String(Math.round(ms / 1000)), unit: "s" }
-	const formatted = formatDuration(ms)
-	const match = /^([\d.]+)\s*(.*)$/.exec(formatted)
-	return match ? { value: match[1]!, unit: match[2]! } : { value: formatted, unit: "" }
-}
-
 function elapsedBetween(from: string, to: string | null): Elapsed | null {
 	if (!to) return null
 	const start = toEpochMs(from)
@@ -510,12 +483,14 @@ function elapsedBetween(from: string, to: string | null): Elapsed | null {
 }
 
 /**
- * Recomputed on every render rather than ticked on a timer — the detail page
- * already polls every 3s while a pass runs, so the number advances without a
- * second interval fighting the first.
+ * The one live number on the page. Its own component so the 1s tick re-renders
+ * four characters rather than the whole verdict card — the card holds the lens
+ * lanes, and rebuilding those every second is wasted work.
  */
-function elapsedSince(from: string): Elapsed | null {
+function LiveElapsedStat({ from }: { from: string }) {
+	const now = useTickingNow(true)
 	const start = toEpochMs(from)
-	if (!Number.isFinite(start)) return null
-	return splitDuration(Math.max(0, Date.now() - start))
+	if (!Number.isFinite(start)) return <span className="text-muted-foreground">—</span>
+	const { value, unit } = splitDuration(Math.max(0, now - start))
+	return <BigStat value={value} unit={unit} />
 }
