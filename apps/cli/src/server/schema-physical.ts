@@ -1,10 +1,11 @@
-import { Chdb } from "./chdb"
+import { Chdb, RAW_TELEMETRY_TTL_COLUMNS } from "./chdb"
 import { LOCAL_SCHEMA_MANIFEST } from "./schema-identity"
 import {
 	comparePhysicalSchema,
 	type LocalSchemaColumn,
 	type PhysicalSchema,
 	type PhysicalSchemaObject,
+	withRawTelemetryRetentionFloor,
 } from "./schema-manifest"
 
 const parseJsonEachRow = <A>(value: string): A[] =>
@@ -142,4 +143,17 @@ export const assertPhysicalSchema = (db: Chdb, expected: typeof LOCAL_SCHEMA_MAN
 	}
 }
 
-export const assertCurrentPhysicalSchema = (db: Chdb): void => assertPhysicalSchema(db, LOCAL_SCHEMA_MANIFEST)
+/** Verify the opened store against the bundled schema. `retentionDays` is the
+ * effective raw-telemetry retention floor, which raises those tables' TTLs on
+ * the physical store and so must raise the expected manifest with them. */
+export const assertCurrentPhysicalSchema = (db: Chdb, retentionDays?: number): void =>
+	assertPhysicalSchema(
+		db,
+		retentionDays === undefined
+			? LOCAL_SCHEMA_MANIFEST
+			: withRawTelemetryRetentionFloor(
+					LOCAL_SCHEMA_MANIFEST,
+					RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table),
+					retentionDays,
+				),
+	)

@@ -91,7 +91,7 @@ export interface ChdbOptions {
 	readonly rawTelemetryRetentionDays?: number
 }
 
-const RAW_TELEMETRY_TTL_COLUMNS = [
+export const RAW_TELEMETRY_TTL_COLUMNS = [
 	["logs", "TimestampTime"],
 	["traces", "Timestamp"],
 	["metrics_sum", "TimeUnix"],

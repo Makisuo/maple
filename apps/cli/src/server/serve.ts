@@ -633,7 +633,7 @@ export const startServer = (
 		// listener is bound; a mismatch fails startup rather than allowing new
 		// query code to run against a partially old layout.
 		yield* Effect.try({
-			try: () => assertCurrentPhysicalSchema(db),
+			try: () => assertCurrentPhysicalSchema(db, retention.effective),
 			catch: (error) =>
 				new ChdbError({
 					message: `local physical-schema verification failed: ${error instanceof Error ? error.message : String(error)}`,

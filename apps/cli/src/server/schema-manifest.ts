@@ -224,6 +224,32 @@ export const buildLocalSchemaManifest = (schemaSql: string): LocalSchemaManifest
 	}
 }
 
+/** Raise the bundled raw-telemetry TTLs to a configured retention floor.
+ *
+ * `--minimum-raw-telemetry-retention-days` alters those TTLs in place on the
+ * opened store, so the physical definitions legitimately differ from the
+ * bundled DDL. Verification compares against this derived manifest instead, and
+ * still fails when the physical TTL is anything other than the floored value.
+ * The digest is deliberately carried over unchanged: this manifest is a
+ * comparison target, not a new schema identity. */
+export const withRawTelemetryRetentionFloor = (
+	manifest: LocalSchemaManifest,
+	tables: ReadonlyArray<string>,
+	days: number,
+): LocalSchemaManifest => {
+	const floored = new Set(tables)
+	return {
+		...manifest,
+		objects: manifest.objects.map((object) => {
+			if (!floored.has(object.name) || object.ttl === undefined) return object
+			const raised = object.ttl.replace(/\bINTERVAL\s+(\d+)\s+DAY\b/i, (match, value: string) =>
+				Number(value) >= days ? match : `INTERVAL ${days} DAY`,
+			)
+			return raised === object.ttl ? object : { ...object, ttl: raised }
+		}),
+	}
+}
+
 export const normalizedDefinition = (value: string): string => normalizedSchemaSql(value)
 
 export const schemaObject = (manifest: LocalSchemaManifest, name: string): LocalSchemaObject | undefined =>

@@ -31,7 +31,11 @@ import {
 	type MigrationModuleContext,
 	type MigrationJournal,
 } from "../src/server/local-store-migrations"
-import { comparePhysicalSchema, type LocalSchemaManifest } from "../src/server/schema-manifest"
+import {
+	comparePhysicalSchema,
+	type LocalSchemaManifest,
+	withRawTelemetryRetentionFloor,
+} from "../src/server/schema-manifest"
 import { ensureStoreMarkerDurable, readMarker, storeMarkerPath } from "../src/server/store-version"
 import { durableJson } from "../src/server/durable-files"
 import {
@@ -736,6 +740,103 @@ describe("physical-schema comparison", () => {
 				"missing index idx_expected",
 				"unexpected index idx_unexpected",
 			]),
+		)
+	})
+
+	it("expects the raised TTL once a retention floor is configured", () => {
+		const bundled: LocalSchemaManifest = {
+			objects: [
+				{
+					name: "logs",
+					kind: "table",
+					columns: [],
+					engine: "MergeTree",
+					ttl: "toDate(TimestampTime) + INTERVAL 30 DAY",
+					indexes: [],
+					definition: "CREATE TABLE logs",
+				},
+				{
+					name: "logs_aggregates_hourly",
+					kind: "table",
+					columns: [],
+					engine: "AggregatingMergeTree",
+					ttl: "toDate(Hour) + INTERVAL 30 DAY",
+					indexes: [],
+					definition: "CREATE TABLE logs_aggregates_hourly",
+				},
+			],
+			digest: "test",
+		}
+		const floored = withRawTelemetryRetentionFloor(bundled, ["logs"], 120)
+		// The floor only moves the raw-telemetry tables; a rollup keeps its own TTL.
+		expect(floored.objects.map((object) => object.ttl)).toEqual([
+			"toDate(TimestampTime) + INTERVAL 120 DAY",
+			"toDate(Hour) + INTERVAL 30 DAY",
+		])
+		// chDB reports the TTL as `toIntervalDay(n)`; the physical comparison
+		// already normalizes that form, so the floored day count is what matters.
+		expect(
+			comparePhysicalSchema(floored, {
+				objects: [
+					{
+						name: "logs",
+						kind: "table",
+						columns: [],
+						engine: "MergeTree",
+						ttl: "toDate(TimestampTime) + toIntervalDay(120)",
+					},
+					{
+						name: "logs_aggregates_hourly",
+						kind: "table",
+						columns: [],
+						engine: "AggregatingMergeTree",
+						ttl: "toDate(Hour) + toIntervalDay(30)",
+					},
+				],
+			}),
+		).toEqual([])
+		// Anything other than the floored value still fails closed.
+		expect(
+			comparePhysicalSchema(floored, {
+				objects: [
+					{
+						name: "logs",
+						kind: "table",
+						columns: [],
+						engine: "MergeTree",
+						ttl: "toDate(TimestampTime) + toIntervalDay(30)",
+					},
+					{
+						name: "logs_aggregates_hourly",
+						kind: "table",
+						columns: [],
+						engine: "AggregatingMergeTree",
+						ttl: "toDate(Hour) + toIntervalDay(30)",
+					},
+				],
+			}).map((mismatch) => mismatch.reason),
+		).toEqual([
+			"TTL differs (toDate(TimestampTime) + toIntervalDay(30) vs toDate(TimestampTime) + INTERVAL 120 DAY)",
+		])
+	})
+
+	it("leaves a longer bundled TTL alone", () => {
+		const bundled: LocalSchemaManifest = {
+			objects: [
+				{
+					name: "metrics_gauge",
+					kind: "table",
+					columns: [],
+					engine: "MergeTree",
+					ttl: "toDate(TimeUnix) + INTERVAL 365 DAY",
+					indexes: [],
+					definition: "CREATE TABLE metrics_gauge",
+				},
+			],
+			digest: "test",
+		}
+		expect(withRawTelemetryRetentionFloor(bundled, ["metrics_gauge"], 120).objects[0]?.ttl).toBe(
+			"toDate(TimeUnix) + INTERVAL 365 DAY",
 		)
 	})
 })
