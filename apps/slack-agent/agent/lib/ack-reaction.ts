@@ -13,11 +13,15 @@ import { ACK_REACTION_NAME, addReactionViaSlack, registerAckedTriggeringMessage 
  * throws — a failed reaction is cosmetic, the turn still runs.
  *
  * It reacts exactly to the bodies eve will dispatch as agent work:
- *   - `app_mention` events (including thread follow-ups promoted to
- *     `app_mention` by `promoteThreadFollowUp` — call this on the PROMOTED
- *     body; the unpromoted twin does not qualify, so no double reaction);
+ *   - real `app_mention` events;
  *   - user-authored DM `message` events (`channel_type: "im"`, no `bot_id`,
  *     no subtype except `file_share` — mirrors eve's own DM dispatch filter).
+ *
+ * Thread follow-ups promoted to `app_mention` by `promoteThreadFollowUp` are
+ * NOT ack'd from the webhook. That promotion is optimistic and the handler may
+ * still drop the message, and a `:eyes:` on a message the bot never answers is
+ * a promise broken in public — so `#channels/slack.js` acks them through
+ * `acknowledgeMessage` once the engagement check has confirmed the turn.
  *
  * Requires the Slack app's `reactions:write` scope.
  *
@@ -108,9 +112,22 @@ export async function acknowledgeIncomingMessage(
 	rawBody: string,
 	deps: AckReactionDeps = defaultDeps,
 ): Promise<void> {
+	const target = parseAckReactionTarget(rawBody)
+	if (!target) return
+	await acknowledgeMessage(target, deps)
+}
+
+/**
+ * Reacts with `:eyes:` on an already-identified message. The entry point for
+ * callers that no longer hold a raw webhook body — the thread-follow-up dispatch
+ * path, which only learns the turn is really happening after eve has parsed the
+ * event away. Never throws.
+ */
+export async function acknowledgeMessage(
+	target: AckReactionTarget,
+	deps: AckReactionDeps = defaultDeps,
+): Promise<void> {
 	try {
-		const target = parseAckReactionTarget(rawBody)
-		if (!target) return
 		// Registered before the reaction call: the `add_reaction` tool needs the
 		// triggering message's ts even when this ack itself fails (its remove of
 		// a never-added `:eyes:` is tolerated downstream).
