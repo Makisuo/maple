@@ -3,11 +3,12 @@
  *
  * The load-bearing case is `Transport` / `InvalidProviderOutput` with `retryable: false` — those
  * are what a mid-stream failure actually looks like, and a classifier that only trusted the
- * `retryable` flag would pass a naive test while doing nothing. See `llm-retry.ts`.
+ * `retryable` flag would pass a naive test while doing nothing. See `./retry.ts`.
  */
 import { LlmCallError } from "@maple/domain/llm"
 import { assert, describe, it } from "vitest"
-import { isRetryableStepFailure, MAX_STEP_ATTEMPTS, stepRetryDelayMs } from "./llm-retry"
+import { MAX_STEP_ATTEMPTS } from "./budgets"
+import { isRetryableStepFailure, stepRetryDelayMs } from "./retry"
 
 const error = (patch: { reason: string; retryable?: boolean; contextOverflow?: boolean }): LlmCallError =>
 	new LlmCallError({

@@ -22,6 +22,9 @@
  *   - **Replay.** `toLlmMessages` filters on top-level text, and child text lives nested inside a
  *     tool call, so the sub-agent's chatter never re-enters the next turn's context.
  *
+ * The caps this respects — depth, fan-out, per-turn count — live in `./budgets.ts` alongside every
+ * other ceiling, because they only make sense multiplied against the step caps.
+ *
  * ## The context firewall
  *
  * The parent gets back the child's **final assistant text only**, never its tool payloads. That is
@@ -29,58 +32,12 @@
  * in warehouse rows. A `task` that returned the child's transcript would be strictly worse than
  * just calling the tools inline.
  */
-import { Schema, Semaphore, Stream, Effect } from "effect"
+import { Schema, Stream, Effect } from "effect"
 import { Tool, ToolFailure, type Tools } from "@maple/llm"
 import { Message } from "@maple/llm"
-import { AGENTS, type AgentDefinition } from "./agents"
-import type { ChatTurnEvent, ChatTurnInput } from "./agent"
-
-/**
- * How deep nesting may go. 1 means the primary turn may spawn, and sub-agents may not.
- *
- * Capped twice, as opencode does: structurally, because every sub-agent's ruleset denies `task` so
- * `buildChatTools` never offers it; and numerically, here. Belt and braces, because the structural
- * cap silently disappears the moment someone writes a sub-agent ruleset with `{"*": allow}`.
- */
-const SUBAGENT_MAX_DEPTH = 1
-
-/** Concurrent sub-agent turns inside one Durable Object. */
-const TASK_CONCURRENCY = 2
-
-/** Total sub-agent turns one parent turn may start, across all its steps. */
-const TASK_BUDGET_PER_TURN = 4
-
-/**
- * Assistant turns across the parent and every descendant.
- *
- * A backstop against the multiplication: 10 parent steps × 4 tasks × 6 child steps is 240 model
- * calls and easily tens of minutes, which would reach `ChatSession`'s 15-minute `TURN_STALE_MS`
- * watchdog and have it declare the turn abandoned *underneath* a still-running turn. If real turns
- * start approaching that, lower `TASK_BUDGET_PER_TURN` — do not raise the watchdog.
- */
-const TURN_STEP_BUDGET = 30
-
-/**
- * Per-turn state shared with every descendant.
- *
- * Mutable and shared rather than returned, the same shape and for the same reason as `TurnUsage`:
- * the consumer is a tool invoked mid-turn, so there is no "after the turn" moment to reconcile at.
- */
-export interface TaskBudget {
-	tasksStarted: number
-	stepsUsed: number
-	readonly semaphore: Semaphore.Semaphore
-}
-
-export const makeTaskBudget = (): TaskBudget => ({
-	tasksStarted: 0,
-	stepsUsed: 0,
-	semaphore: Semaphore.makeUnsafe(TASK_CONCURRENCY),
-})
-
-/** Whether the turn may start another step at all. Checked by the loop, not just by this tool. */
-export const hasStepBudget = (budget: TaskBudget | undefined): boolean =>
-	budget === undefined || budget.stepsUsed < TURN_STEP_BUDGET
+import { AGENTS, type AgentDefinition } from "../agents"
+import { hasStepBudget, SUBAGENT_MAX_DEPTH, TASK_BUDGET_PER_TURN, type TaskBudget } from "./budgets"
+import type { ChatTurnEvent, ChatTurnInput } from "./types"
 
 const renderResult = (ref: { id: string; agent: string }, text: string): string =>
 	`<task id="${ref.id}" agent="${ref.agent}" state="completed">\n<task_result>\n${text}\n</task_result>\n</task>`
@@ -104,8 +61,8 @@ const describeSpawnable = (spawnable: ReadonlyArray<AgentDefinition>): string =>
 /**
  * Build the `task` tool for `agent`, or nothing when it has no sub-agents to spawn.
  *
- * `runTurn` is injected rather than imported so this module does not import `agent.ts` while
- * `agent.ts` imports it — the recursion stays visible at the one call site that wires it.
+ * `runTurn` is injected rather than imported so this module does not import `./turn.ts` while
+ * `./turn.ts` imports it — the recursion stays visible at the one call site that wires it.
  */
 export const buildTaskTool = (
 	input: ChatTurnInput,

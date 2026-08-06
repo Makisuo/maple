@@ -1,65 +1,71 @@
 /**
- * The Maple chat agent turn, in process on `@maple/llm`.
+ * The chat turn loop: one submission, driven to completion.
  *
- * This is the streaming sibling of `workflows/triage-agent.ts`: same tool wrapping, same
- * multi-turn loop, but it emits `ChatEvent`s as they happen instead of returning a structured
- * result, and it gates mutating tools.
+ * This module is the control flow and nothing else. Every policy it applies lives next door and is
+ * read here as a decision, not re-derived:
  *
- * **Approvals are a real interrupt now.** Flue's event stream had no human-in-the-loop primitive,
- * so `apps/chat-flue/src/lib/approval.ts` swapped every mutating tool for one whose `execute`
- * returned a `{ status: "proposed" }` marker without mutating — a propose-then-apply stub the web
- * client then re-ran through `POST /api/chat/apply`. Here the loop simply *stops* on a gated call:
- * it emits a `tool-call` event with `proposed: true` and ends the turn. Nothing fabricates a tool
- * result, so the model is never told a mutation happened when it did not.
+ *   - `./budgets.ts`   — every ceiling: steps, attempts, backoff time, delegation fan-out, depth.
+ *   - `./retry.ts`     — which failures are worth another attempt, and how long to wait.
+ *   - `./context.ts`   — keeping the request inside the model's window.
+ *   - `./delegate.ts`  — handing a sub-question to a sub-agent, which re-enters this loop.
+ *   - `./types.ts`     — the input, the events, and one step's state.
+ *   - `../tools.ts`    — what the model may call.
+ *   - `../agents.ts`   — which agent this turn runs as, and what it is allowed to do.
  *
- * `POST /api/chat/apply` still exists and is still how the approved mutation runs — it is the
- * user's action, authenticated as the user, which is exactly where it belongs.
+ * ## The shape of a step
+ *
+ * Stream the model → fold the events into an `LLMResponse` → settle the tool calls → build the next
+ * request → recurse. Recursion rather than a `while` because each step's output is a `Stream` that
+ * must be concatenated lazily: the next request cannot be built until the current step's tool
+ * results exist.
+ *
+ * ## Approvals are a real interrupt
+ *
+ * Flue's event stream had no human-in-the-loop primitive, so `apps/chat-flue/src/lib/approval.ts`
+ * swapped every mutating tool for one whose `execute` returned a `{ status: "proposed" }` marker
+ * without mutating — a propose-then-apply stub the web client re-ran through `POST /api/chat/apply`.
+ * Here the loop simply *stops* on a gated call: it emits a `tool-call` with `proposed: true` and
+ * ends the turn. Nothing fabricates a tool result, so the model is never told a mutation happened
+ * when it did not. `POST /api/chat/apply` is still how the approved mutation runs — the user's own
+ * action, authenticated as the user, which is where it belongs.
  */
-import {
-	investigationIdFromChatSessionId,
-	type ChatEvent,
-	type ChatTaskRef,
-} from "@maple/domain/chat-session"
-import { evaluatePermission, type PermissionRuleset } from "@maple/domain/permission"
-import { AiTriageResult, SubmitDiagnosisRequest } from "@maple/domain/http"
-import { InvestigationId } from "@maple/domain/primitives"
+import { evaluatePermission } from "@maple/domain/permission"
 import {
 	LLM,
 	LLMEvent,
 	LLMResponse,
 	Message,
 	ToolResultPart,
+	toDefinitions,
+	ToolRuntime,
 	type LLMRequest,
-	type Model,
-	type Usage,
+	type Tools,
 } from "@maple/llm"
-import { Tool, ToolFailure, ToolRuntime, toDefinitions, type Tools } from "@maple/llm"
-import { Duration, Effect, Option, Schema, Stream } from "effect"
+import { Duration, Effect, Stream } from "effect"
 import { contextLimitOf, outputLimitOf, toLlmCallError } from "@/platform/Llm"
-import type { TenantContext } from "@/services/auth/tenant-context"
-
-import { buildMapleTools, summarizeToolFailure, withRuntimeServices } from "@/mcp/tools/llm-tools"
-import { isNearContextLimit, pruneToolResults } from "./context-budget"
-import { agentForSession, buildSystemPrompt, spawnableFor, type AgentDefinition } from "./agents"
-import { buildTaskTool, hasStepBudget, makeTaskBudget, type TaskBudget } from "./task-tool"
+import { agentForSession, buildSystemPrompt, spawnableFor } from "../agents"
+import { buildChatTools } from "../tools"
 import {
-	isRetryableStepFailure,
+	hasStepBudget,
 	makeStepRetryBudget,
-	stepRetryDelayMs,
+	makeTaskBudget,
 	MAX_STEP_ATTEMPTS,
+	MAX_STEPS,
 	STEP_RETRY_BUDGET_MS,
-	type StepRetryBudget,
-} from "./llm-retry"
-
-const decodeInvestigationIdOption = Schema.decodeUnknownOption(InvestigationId)
-
-/**
- * Hard cap on *tool-calling* assistant turns per submission.
- *
- * A turn that hits it gets one further, tool-less step so the model can answer from what it found;
- * see `MAX_STEPS_NOTICE`.
- */
-const MAX_STEPS = 10
+	TOOL_CONCURRENCY,
+} from "./budgets"
+import { isNearContextLimit, pruneToolResults } from "./context"
+import { buildTaskTool } from "./delegate"
+import { isRetryableStepFailure, stepRetryDelayMs } from "./retry"
+import {
+	addUsage,
+	isCurrent,
+	tagged,
+	turnEnd,
+	type ChatTurnEvent,
+	type ChatTurnInput,
+	type StepState,
+} from "./types"
 
 /**
  * What the model is told when it runs out of steps.
@@ -72,9 +78,6 @@ const MAX_STEPS_NOTICE =
 	"Using only what you have already found, give the user your answer now, and say plainly what " +
 	"you could not determine."
 
-/** Fan-out cap for tool calls issued in the same assistant turn. */
-const TOOL_CONCURRENCY = 4
-
 /**
  * How many text deltas are folded into one emitted event, and how long a partial batch waits.
  *
@@ -86,180 +89,6 @@ const TOOL_CONCURRENCY = 4
  */
 const DELTA_BATCH_SIZE = 24
 const DELTA_BATCH_WINDOW = "16 millis"
-
-/**
- * Running token total for one turn, accumulated across its steps.
- *
- * Mutable and shared rather than returned, because the one consumer — `submit_diagnosis` — is a
- * *tool* invoked mid-turn, so there is no "after the turn" moment at which to hand it a total.
- * In practice the diagnosis call is the last thing an investigation does, so this is the whole
- * turn bar the final assistant message. Before this, `SubmitDiagnosisRequest` was built with no
- * usage at all, so `InvestigationService`'s `if (env && (inputTokens || outputTokens))` was always
- * false: `investigations.model` stayed null and Autumn was never metered for autonomous
- * investigations, which the pre-`@maple/llm` workflow path did meter.
- */
-export interface TurnUsage {
-	input: number
-	output: number
-	cacheRead: number
-}
-
-export const makeTurnUsage = (): TurnUsage => ({ input: 0, output: 0, cacheRead: 0 })
-
-const addUsage = (total: TurnUsage, usage: Usage | undefined): void => {
-	total.input += usage?.inputTokens ?? 0
-	total.output += usage?.outputTokens ?? 0
-	total.cacheRead += usage?.cacheReadInputTokens ?? 0
-}
-
-export interface ChatTurnInput {
-	readonly sessionId: string
-	readonly tenant: TenantContext
-	readonly model: Model
-	/** The full transcript so far, oldest first, already including the new user message. */
-	readonly messages: ReadonlyArray<Message>
-	readonly messageId: string
-	/**
-	 * Investigate-mode sessions get a `submit_diagnosis` tool. It is supplied rather than built
-	 * here because it needs `InvestigationService`, which would otherwise drag the service graph
-	 * into this module's imports.
-	 */
-	readonly extraTools?: Tools
-	/**
-	 * Whether this turn still holds the session's turn slot.
-	 *
-	 * Checked between steps so an abort takes effect at the next boundary instead of only after the
-	 * in-flight model call drains, and so a turn that has been superseded stops writing into a
-	 * conversation that has moved on. Defaults to "always current" for callers with no session.
-	 */
-	readonly isCurrent?: () => boolean
-	/** Accumulates this turn's token usage; see {@link TurnUsage}. */
-	readonly usage?: TurnUsage
-	/**
-	 * Which agent this turn runs as. Defaults to the primary agent the session id names, so
-	 * existing callers keep the behaviour their mode already had.
-	 */
-	readonly agent?: AgentDefinition
-	/**
-	 * Set when this turn is a sub-agent nested inside a parent turn: every event it produces is
-	 * stamped with this ref, which is what routes them into the parent's task card rather than the
-	 * top-level conversation.
-	 */
-	readonly task?: ChatTaskRef
-	/** Nesting depth. 0 is the conversation's own turn. */
-	readonly depth?: number
-	/** Shared across the parent and every descendant; see {@link TaskBudget}. */
-	readonly taskBudget?: TaskBudget
-	/**
-	 * Sink for events produced by a nested sub-agent turn.
-	 *
-	 * A side channel rather than a merge into the returned stream. `Stream.merge` would race the
-	 * parent's terminal `turn-end` against undrained child events, and `ChatSession.pump` closes
-	 * the SSE connection on a terminal event — so a child's tail could be written to the durable log
-	 * *after* the turn had been declared over. The consumer's `Stream.runForEach` is strictly
-	 * sequential, so an event emitted from inside a tool's `execute` is deterministically ordered
-	 * after the tool-call announcement that introduced it and before the tool-result that closes it.
-	 */
-	readonly emit?: (event: ChatTurnEvent) => void
-}
-
-/**
- * The `submit_diagnosis` tool for an investigate-mode session (`"<orgId>:inv-<id>"`).
- *
- * The agent calls it exactly once at the end of its autonomous pass and its arguments ARE the
- * structured report — `AiTriageResult` directly, not the Valibot mirror `apps/chat-flue` had to
- * keep in sync by hand.
- *
- * Deliberately not approval-gated: it is the structured-output channel, not a user-facing
- * mutation. The investigation id and org ride from the session id, so the agent never chooses
- * which investigation it writes.
- *
- * `submitDiagnosis` arrives as a callback rather than being resolved from `InvestigationService`
- * here: that service is itself what starts an investigation's autonomous turn, so resolving it
- * through the Effect requirements channel would make `InvestigationService` require itself.
- */
-export type SubmitDiagnosis = (
-	orgId: TenantContext["orgId"],
-	investigationId: InvestigationId,
-	request: SubmitDiagnosisRequest,
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-) => Effect.Effect<unknown, unknown, any>
-
-export const buildSubmitDiagnosisTool = (
-	sessionId: string,
-	tenant: TenantContext,
-	submitDiagnosis: SubmitDiagnosis,
-	usage: TurnUsage,
-	model: Model,
-): Tools => {
-	const tools: Tools = {}
-	const rawId = investigationIdFromChatSessionId(sessionId)
-	if (!rawId) return tools
-	// `decodeUnknownSync` here turned a session id whose `inv-` suffix was not a UUID into a thrown
-	// defect on a user-supplied string. An unparseable id simply means this conversation is not an
-	// investigation, so it gets no `submit_diagnosis` tool.
-	const decoded = decodeInvestigationIdOption(rawId)
-	if (Option.isNone(decoded)) return tools
-	const investigationId = decoded.value
-	tools.submit_diagnosis = Tool.make({
-		description:
-			"Record your structured diagnosis for THIS investigation. Call it exactly once, " +
-			"after you have gathered evidence, with your final assessment. It persists the report " +
-			"and renders it for the user. After calling it, stop unless the user asks a follow-up.",
-		parameters: AiTriageResult,
-		success: Schema.String,
-		execute: (report) =>
-			withRuntimeServices(
-				submitDiagnosis(
-					tenant.orgId,
-					investigationId,
-					new SubmitDiagnosisRequest({
-						report,
-						model: String(model.id),
-						inputTokens: usage.input,
-						outputTokens: usage.output,
-					}),
-				).pipe(
-					Effect.as("Diagnosis recorded."),
-					// Named failures only. `catchCause` + `String(cause)` fed the model a rendered
-					// Effect cause — stack frames, and connection details out of a DatabaseError.
-					Effect.catchCause((cause) =>
-						Effect.fail(
-							new ToolFailure({
-								message: `submit_diagnosis failed: ${summarizeToolFailure(cause)}`,
-							}),
-						),
-					),
-				),
-			),
-	})
-	return tools
-}
-
-/**
- * All Maple tools, with mutating ones gated.
- *
- * A gated tool still carries a real handler (rather than being omitted) so the schema the model
- * sees is identical to the read-only case — but the loop never dispatches it, because it breaks on
- * the proposal first, and `POST /api/chat/apply` remains the only path that actually mutates.
- */
-const buildChatTools = (tenant: TenantContext, ruleset: PermissionRuleset): Tools =>
-	buildMapleTools(tenant, {
-		// `deny` means the model never sees the tool. That is a stronger guarantee than refusing the
-		// call afterwards, and it is free — an unoffered tool cannot be called.
-		include: (name) => evaluatePermission(ruleset, name) !== "deny",
-		gate: (name) => evaluatePermission(ruleset, name) === "ask",
-	})
-
-/** Distributive `Omit`, so each union member keeps its own shape. */
-type WithoutSeq<T> = T extends unknown ? Omit<T, "seq"> : never
-
-/**
- * Events this turn wants appended to the session log. `seq` is assigned by the Durable Object,
- * which owns the ordering, so the agent emits everything without one. `user-message` is excluded:
- * the session records the user turn at submission time, before the agent runs.
- */
-export type ChatTurnEvent = WithoutSeq<Exclude<ChatEvent, { type: "user-message" }>>
 
 /**
  * Run one submission to completion, streaming `ChatTurnEvent`s.
@@ -298,54 +127,6 @@ export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> 
 			return Stream.concat(Stream.fromIterable([start]), runStep(input, tools, request, state))
 		}),
 	)
-
-/**
- * Where one step sits in the turn.
- *
- * `attempt` is 0-based and resets per step; `budget` is shared across the whole turn, because a
- * per-step cap composes badly over `MAX_STEPS` steps — ten steps each retrying three times is
- * minutes of pure backoff, and the DO's turn slot is held the entire time.
- */
-interface StepState {
-	readonly step: number
-	readonly attempt: number
-	readonly budget: StepRetryBudget
-	/** Resolved once at the top of the turn, so every step agrees on the ruleset and step cap. */
-	readonly agent: AgentDefinition
-	/** Shared with every descendant sub-agent turn. */
-	readonly taskBudget: TaskBudget
-	/**
-	 * This is the tool-less step that closes a turn which ran out of steps. Its natural exit is
-	 * "no tool calls", which would otherwise report `"stop"` and lose the signal the client badges
-	 * on — so the reason is carried here instead.
-	 */
-	readonly closing?: true
-}
-
-/**
- * Stamp an event with the ref that routes it into a parent's task card.
- *
- * Every emission site goes through this, so a sub-agent's events can never leak into the top-level
- * conversation by omission — the tag is applied once, at the boundary, rather than remembered at
- * each of the seven places a turn emits.
- */
-const tagged = <E extends ChatTurnEvent>(input: ChatTurnInput, event: E): E =>
-	input.task === undefined ? event : { ...event, task: input.task }
-
-const turnEnd = (
-	input: ChatTurnInput,
-	reason: Extract<ChatEvent, { type: "turn-end" }>["reason"],
-	error?: string,
-): ChatTurnEvent =>
-	tagged(input, {
-		type: "turn-end",
-		messageId: input.messageId,
-		reason,
-		...(error === undefined ? {} : { error }),
-	})
-
-/** A turn with no session attached (tests, one-shot callers) is always current. */
-const isCurrent = (input: ChatTurnInput): boolean => input.isCurrent === undefined || input.isCurrent()
 
 /**
  * One assistant turn, then either settle its tool calls and recurse, or stop.

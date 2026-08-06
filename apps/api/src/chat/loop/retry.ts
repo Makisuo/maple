@@ -1,10 +1,13 @@
 /**
  * Which model-call failures a chat step retries, and how long it waits.
  *
- * Pure policy, deliberately separate from the loop that applies it: `apps/api/src/chat/agent.ts`
- * retries a *stream*, so it needs the retraction machinery in `runStepAttempt`, while
- * `apps/api/src/workflows/triage-agent.ts` retries an `Effect` and can use `Effect.retry`
+ * Pure policy, deliberately separate from the loop that applies it. `./turn.ts` retries a
+ * *stream*, so it needs the retraction machinery around the emitted deltas, while
+ * `apps/api/src/workflows/triage-agent.ts` retries an `Effect` and could use `Effect.retry`
  * directly. The classification must not diverge between them, so it lives here.
+
+ * The ceilings this policy is applied under live in `./budgets.ts`, with every other limit the
+ * loop enforces.
  *
  * ## Why this cannot just read `LlmCallError.retryable`
  *
@@ -21,37 +24,7 @@
  */
 import type { LlmCallError } from "@maple/domain/llm"
 
-/** 1 initial attempt + 3 retries. */
-export const MAX_STEP_ATTEMPTS = 4
-
-const STEP_RETRY_BASE_MS = 1_000
-const STEP_RETRY_FACTOR = 2
-
-/**
- * Ceiling on a single backoff.
- *
- * Bounded well below `ChatSession`'s `SUBSCRIBE_IDLE_MS` (25s), which recycles an SSE connection
- * after that much silence. The `turn-retry` event is itself an append and resets that timer, but a
- * longer gap *after* it would still recycle the connection mid-answer.
- */
-const STEP_RETRY_MAX_MS = 8_000
-
-/**
- * Whole-turn ceiling on time spent in backoff, across every step.
- *
- * opencode retries without an attempt ceiling because it runs in a long-lived process where waiting
- * costs nothing but patience. Here the turn holds `ChatSession`'s single turn slot, and
- * `TURN_STALE_MS` (15 minutes) will declare it abandoned and append a terminal event *underneath* a
- * still-running turn. With `MAX_STEPS = 10`, an uncapped per-step retry multiplies past that.
- */
-export const STEP_RETRY_BUDGET_MS = 60_000
-
-/** Mutable, shared across a turn's steps — the same pattern as `TurnUsage`, for the same reason. */
-export interface StepRetryBudget {
-	spentMs: number
-}
-
-export const makeStepRetryBudget = (): StepRetryBudget => ({ spentMs: 0 })
+import { STEP_RETRY_BASE_MS, STEP_RETRY_FACTOR, STEP_RETRY_MAX_MS } from "./budgets"
 
 /**
  * Reasons the vendored executor cannot cover, because they arrive after response headers.

@@ -147,7 +147,7 @@ const compactIfNeeded = (
 ): Effect.Effect<void> =>
 	Effect.gen(function* () {
 		const { contextLimitOf, outputLimitOf } = yield* Effect.promise(() => import("../platform/Llm"))
-		const { isNearContextLimit } = yield* Effect.promise(() => import("./context-budget"))
+		const { isNearContextLimit } = yield* Effect.promise(() => import("./loop"))
 		if (
 			!isNearContextLimit(usage.input, {
 				context: contextLimitOf(model),
@@ -194,12 +194,14 @@ const COMPACTION_TIMEOUT = "20 seconds"
  * client reads, so a turn that dies without one is indistinguishable from a turn that hung.
  */
 export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promise<void> => {
-	const [{ MainLive }, { layerPg }, { layerLlm, resolveTriageModel }, agent] = await Promise.all([
-		import("../app"),
-		import("../platform/DatabasePgLive"),
-		import("../platform/Llm"),
-		import("./agent"),
-	])
+	const [{ MainLive }, { layerPg }, { layerLlm, resolveTriageModel }, loop, { buildSubmitDiagnosisTool }] =
+		await Promise.all([
+			import("../app"),
+			import("../platform/DatabasePgLive"),
+			import("../platform/Llm"),
+			import("./loop"),
+			import("./tools"),
+		])
 	const { InvestigationService } = await import("@/services/errors/InvestigationService")
 
 	const runtime = ManagedRuntime.make(
@@ -224,8 +226,8 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		})
 		// Shared with the turn so `submit_diagnosis` can report what the investigation cost. See
 		// `TurnUsage` — the tool is invoked mid-turn, so there is no later moment to hand it a total.
-		const usage = agent.makeTurnUsage()
-		const extraTools = agent.buildSubmitDiagnosisTool(
+		const usage = loop.makeTurnUsage()
+		const extraTools = buildSubmitDiagnosisTool(
 			input.sessionId,
 			tenant,
 			investigations.submitDiagnosis,
@@ -233,7 +235,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 			model,
 		)
 
-		yield* agent
+		yield* loop
 			.runChatTurn({
 				sessionId: input.sessionId,
 				tenant,

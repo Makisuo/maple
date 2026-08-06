@@ -7,7 +7,7 @@
 import { LLM, Message, ToolResultPart, type LLMRequest, type Model } from "@maple/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
 import { assert, describe, it } from "vitest"
-import { estimateTokens, isNearContextLimit, pruneToolResults } from "./context-budget"
+import { estimateTokens, isNearContextLimit, pruneToolResults } from "./context"
 
 const MODEL: Model = CloudflareWorkersAI.configure({ accountId: "t", apiKey: "t" }).model("@cf/test/model")
 

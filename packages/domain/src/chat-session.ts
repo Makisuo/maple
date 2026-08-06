@@ -162,7 +162,7 @@ export class ChatHistoryResponse extends Schema.Class<ChatHistoryResponse>("@map
  * Marks an event as belonging to a sub-agent turn nested inside a parent turn.
  *
  * A sub-agent runs *in process*, inside the parent's turn, rather than in a Durable Object of its
- * own — see the design note in `apps/api/src/chat/task-tool.ts`. So its events land in the parent's
+ * own — see the design note in `apps/api/src/chat/loop/delegate.ts`. So its events land in the parent's
  * log and need a way to say "I am not part of the top-level conversation". `id` is the parent's
  * `task` tool call id, which is what binds a child transcript to the call that started it.
  *

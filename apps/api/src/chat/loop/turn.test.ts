@@ -9,10 +9,10 @@ import { assert, describe, it } from "vitest"
 import { Effect, Layer, Stream } from "effect"
 import { LLMClient, LLMEvent, type LLMRequest, type Model } from "@maple/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
-import { runChatTurn, type ChatTurnEvent } from "./agent"
-import { MAX_STEP_ATTEMPTS } from "./llm-retry"
-import { DEFAULT_RULESET } from "./permissions"
-import type { AgentDefinition } from "./agents"
+import { runChatTurn, type ChatTurnEvent } from "./index"
+import { MAX_STEP_ATTEMPTS } from "./budgets"
+import { DEFAULT_RULESET } from "../permissions"
+import type { AgentDefinition } from "../agents"
 import { PermissionRule } from "@maple/domain/permission"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
@@ -49,7 +49,7 @@ type Failure = {
 	 * Vendored reason tag. Defaults to a retryable `ProviderInternal`; `"Authentication"` (or any
 	 * other terminal reason) is how a test asserts the non-retrying path. Note that `Transport` and
 	 * `InvalidProviderOutput` carry `retryable: false` on the wire and are still retried — see
-	 * `llm-retry.ts`.
+	 * `./retry.ts`.
 	 */
 	readonly reason?: string
 	readonly retryable?: boolean
@@ -315,7 +315,7 @@ describe("runChatTurn retry", () => {
 	})
 
 	it("retries a Transport failure even though it reports retryable: false", async () => {
-		// The whole point of `llm-retry.ts`. `TransportReason` and `InvalidProviderOutputReason`
+		// The whole point of `./retry.ts`. `TransportReason` and `InvalidProviderOutputReason`
 		// hardcode `retryable = false`, and they are exactly how a body that dies mid-stream
 		// surfaces — a classifier that trusted the flag would pass a naive test and do nothing.
 		for (const reason of ["Transport", "InvalidProviderOutput"]) {

@@ -9,8 +9,8 @@ import { LLMClient, type LLMEvent, type LLMRequest, type Model } from "@maple/ll
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
 import { Effect, Layer, Stream } from "effect"
 import { assert, describe, it } from "vitest"
-import { runChatTurn, type ChatTurnEvent } from "./agent"
-import { AGENTS } from "./agents"
+import { runChatTurn, type ChatTurnEvent } from "./index"
+import { AGENTS } from "../agents"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
 const TENANT: TenantContext = {
@@ -146,8 +146,11 @@ describe("the task tool", () => {
 
 		assert.isNotEmpty(result.emitted)
 		for (const event of result.emitted) {
+			// `compaction` is turn-runner bookkeeping and never reaches this sink; every other
+			// member carries the ref.
+			assert.notEqual(event.type, "compaction")
 			assert.equal(
-				event.type === "user-message" ? undefined : event.task?.id,
+				event.type === "compaction" ? undefined : event.task?.id,
 				"t1",
 				`untagged ${event.type} would surface as a stray top-level message`,
 			)

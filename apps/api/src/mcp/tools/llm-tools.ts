@@ -1,7 +1,7 @@
 /**
  * Maple's MCP registry, wrapped as `@maple/llm` tools.
  *
- * One wrapper, two callers: the streaming chat turn (`apps/api/src/chat/agent.ts`) and the
+ * One wrapper, two callers: the streaming chat turn (`apps/api/src/chat/tools.ts`) and the
  * autonomous triage loop (`apps/api/src/workflows/triage-agent.ts`). They were near-identical
  * copies, down to a duplicated `withRuntimeServices` and `toolResultText` — and they had already
  * drifted in the one place it mattered: triage still rendered a whole Effect `Cause` into the

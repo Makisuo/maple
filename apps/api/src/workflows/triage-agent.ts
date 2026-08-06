@@ -26,7 +26,7 @@ import { ToolRuntime, toDefinitions } from "@maple/llm"
 import { Effect } from "effect"
 import { contextLimitOf, outputLimitOf, toLlmCallError } from "@/platform/Llm"
 import { buildMapleTools } from "@/mcp/tools/llm-tools"
-import { isNearContextLimit, pruneToolResults } from "@/chat/context-budget"
+import { isNearContextLimit, pruneToolResults } from "@/chat/loop"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { buildTriageContextMessage, TRIAGE_SYSTEM_PROMPT, TRIAGE_TOOL_NAMES } from "./triage-prompt"
 
