@@ -21,10 +21,9 @@
  * Gated like every other eval: skips without `OPENROUTER_API_KEY`, runs under
  * `bun run eval`, never as part of `bun run test`.
  */
-import { generateObject } from "ai"
+import { generateObject, jsonSchema } from "ai"
 import { describe, it } from "vitest"
 import { describeEval, type TaskResult } from "vitest-evals"
-import { z } from "zod"
 import { INVESTIGATE_SYSTEM_PROMPT } from "@/chat/prompts"
 import { PLANNER_SYSTEM_PROMPT } from "@/workflows/planner-prompt"
 import { createEvalModel, hasEvalCredentials } from "@/mcp/__evals__/model"
@@ -52,39 +51,114 @@ const fixtureFor = (input: string): DiagnosisFixture => {
  * Hand-written rather than derived from the Effect schema: this suite exists to
  * catch the prompt drifting away from the contract, and deriving both from one
  * source would let a schema change silently move the target it is scored against.
+ *
+ * Expressed as JSON Schema via the SDK's own `jsonSchema()`, the way
+ * `mcp/__evals__/tools.ts` does — `apps/api` carries no zod, and one eval file is
+ * not a reason to add it.
  */
-const PLAN_SCHEMA = z.object({
-	scopeSummary: z.string(),
-	collapseReason: z.string().nullable(),
-	hypotheses: z.array(
-		z.object({
-			id: z.string(),
-			name: z.string(),
-			question: z.string(),
-			claimToTest: z.string(),
-			rationale: z.string(),
-			toolNames: z.array(z.string()),
-			priority: z.number(),
-		}),
-	),
+const stringArray = { type: "array", items: { type: "string" } } as const
+
+interface PlanShape {
+	readonly scopeSummary: string
+	readonly collapseReason: string | null
+	readonly hypotheses: ReadonlyArray<{
+		readonly id: string
+		readonly name: string
+		readonly question: string
+		readonly claimToTest: string
+		readonly rationale: string
+		readonly toolNames: ReadonlyArray<string>
+		readonly priority: number
+	}>
+}
+
+interface ReportShape {
+	readonly summary: string
+	readonly suspectedCause: string
+	readonly severityAssessment: "critical" | "high" | "medium" | "low"
+	readonly affectedScope: string
+	readonly evidence: ReadonlyArray<{
+		readonly traceIds: ReadonlyArray<string>
+		readonly logPatterns: ReadonlyArray<string>
+		readonly relatedServices: ReadonlyArray<string>
+		readonly note: string
+	}>
+	readonly suggestedActions: ReadonlyArray<string>
+	readonly confidence: "high" | "medium" | "low"
+	readonly ruledOut: ReadonlyArray<string>
+}
+
+const PLAN_SCHEMA = jsonSchema<PlanShape>({
+	type: "object",
+	additionalProperties: false,
+	required: ["scopeSummary", "collapseReason", "hypotheses"],
+	properties: {
+		scopeSummary: { type: "string" },
+		collapseReason: { type: ["string", "null"] },
+		hypotheses: {
+			type: "array",
+			items: {
+				type: "object",
+				additionalProperties: false,
+				required: [
+					"id",
+					"name",
+					"question",
+					"claimToTest",
+					"rationale",
+					"toolNames",
+					"priority",
+				],
+				properties: {
+					id: { type: "string" },
+					name: { type: "string" },
+					question: { type: "string" },
+					claimToTest: { type: "string" },
+					rationale: { type: "string" },
+					toolNames: stringArray,
+					priority: { type: "number" },
+				},
+			},
+		},
+	},
 })
 
-const REPORT_SCHEMA = z.object({
-	summary: z.string(),
-	suspectedCause: z.string(),
-	severityAssessment: z.enum(["critical", "high", "medium", "low"]),
-	affectedScope: z.string(),
-	evidence: z.array(
-		z.object({
-			traceIds: z.array(z.string()),
-			logPatterns: z.array(z.string()),
-			relatedServices: z.array(z.string()),
-			note: z.string(),
-		}),
-	),
-	suggestedActions: z.array(z.string()),
-	confidence: z.enum(["high", "medium", "low"]),
-	ruledOut: z.array(z.string()),
+const REPORT_SCHEMA = jsonSchema<ReportShape>({
+	type: "object",
+	additionalProperties: false,
+	required: [
+		"summary",
+		"suspectedCause",
+		"severityAssessment",
+		"affectedScope",
+		"evidence",
+		"suggestedActions",
+		"confidence",
+		"ruledOut",
+	],
+	properties: {
+		summary: { type: "string" },
+		suspectedCause: { type: "string" },
+		severityAssessment: { type: "string", enum: ["critical", "high", "medium", "low"] },
+		affectedScope: { type: "string" },
+		evidence: {
+			type: "array",
+			items: {
+				type: "object",
+				additionalProperties: false,
+				required: ["traceIds", "logPatterns", "relatedServices", "note"],
+				properties: {
+					traceIds: stringArray,
+					logPatterns: stringArray,
+					relatedServices: stringArray,
+					note: { type: "string" },
+				},
+			},
+		},
+		suggestedActions: stringArray,
+		confidence: { type: "string", enum: ["high", "medium", "low"] },
+		ruledOut: stringArray,
+	},
 })
 
 const planTask = async (input: string): Promise<TaskResult> => {
