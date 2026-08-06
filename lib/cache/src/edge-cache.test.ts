@@ -417,3 +417,118 @@ describe("EdgeCacheService.getOrCompute (with Schema.Class schema)", () => {
 		}).pipe(Effect.provide(makeLayer(backend)))
 	})
 })
+
+describe("EdgeCacheService read deadline", () => {
+	// A backend whose `get` hangs for the first `hangCount` calls and then
+	// resolves normally — the shape of a bucket under connection pressure that
+	// later recovers.
+	const makeHangingThenHealthyBackend = (hangCount: number) => {
+		const store = new Map<string, unknown>()
+		const composite = (bucket: string, hash: string) => `${bucket}:${hash}`
+		let getCalls = 0
+		const backend: EdgeCacheBackend = {
+			name: "memory",
+			get: async (bucket, hash) => {
+				getCalls += 1
+				if (getCalls <= hangCount) return await new Promise<never>(() => {})
+				return store.get(composite(bucket, hash))
+			},
+			put: async (bucket, hash, value) => {
+				store.set(composite(bucket, hash), value)
+			},
+			delete: async (bucket, hash) => {
+				store.delete(composite(bucket, hash))
+			},
+		}
+		return { backend, store, getCalls: () => getCalls }
+	}
+
+	// A backend whose reads take `readDelayMs` — slower than a tight service
+	// deadline, well inside a generous per-call one.
+	const makeSlowReadBackend = (readDelayMs: number): EdgeCacheBackend => {
+		const store = new Map<string, unknown>()
+		const composite = (bucket: string, hash: string) => `${bucket}:${hash}`
+		return {
+			name: "memory",
+			get: async (bucket, hash) => {
+				await new Promise((resolve) => setTimeout(resolve, readDelayMs))
+				return store.get(composite(bucket, hash))
+			},
+			put: async (bucket, hash, value) => {
+				store.set(composite(bucket, hash), value)
+			},
+			delete: async (bucket, hash) => {
+				store.delete(composite(bucket, hash))
+			},
+		}
+	}
+
+	it.live("abandons a read slower than the service deadline", () => {
+		// Baseline for the next test: at the service default this read never lands,
+		// so the stored entry is invisible and the value is recomputed.
+		const backend = makeSlowReadBackend(60)
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			const opts = { bucket: "slow-default", key: "k", ttlSeconds: 30 } as const
+			yield* cache.getOrCompute(opts, Effect.succeed("first"))
+			const second = yield* cache.getOrCompute(opts, Effect.succeed("recomputed"))
+
+			assert.deepStrictEqual(second, { value: "recomputed", hit: false })
+		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(2000))
+	})
+
+	it.live("lets a call override the service deadline and wait for the read", () => {
+		// Same backend, same 10ms service default — only the per-call override
+		// differs, and it is what turns the miss above into a hit.
+		const backend = makeSlowReadBackend(60)
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			const opts = { bucket: "slow-override", key: "k", ttlSeconds: 30, readTimeoutMs: 500 } as const
+			yield* cache.getOrCompute(opts, Effect.succeed("first"))
+			const second = yield* cache.getOrCompute(opts, Effect.succeed("recomputed"))
+
+			assert.deepStrictEqual(second, { value: "first", hit: true })
+		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(2000))
+	})
+
+	it.live("stops reading a bucket whose reads keep timing out, then resumes after a success", () => {
+		// Two consecutive timeouts trip the breaker, so the third call must not
+		// issue a read at all — that read would only occupy a connection slot the
+		// rest of the request needs.
+		const { backend, getCalls } = makeHangingThenHealthyBackend(2)
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			const compute = Effect.succeed("computed")
+			const opts = { bucket: "hot", key: "k", ttlSeconds: 30 } as const
+
+			yield* cache.getOrCompute(opts, compute)
+			yield* cache.getOrCompute(opts, compute)
+			assert.strictEqual(getCalls(), 2, "both reads were attempted and timed out")
+
+			yield* cache.getOrCompute(opts, compute)
+			assert.strictEqual(getCalls(), 2, "breaker skipped the read instead of issuing it")
+		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(2000))
+	})
+
+	it.live("keeps serving hits from a bucket that never times out", () => {
+		// Guards against the breaker firing on a healthy bucket: the counter must
+		// reset on every successful read, so an isolated timeout elsewhere in the
+		// bucket's history never accumulates into a skip.
+		const { backend } = makeHangingThenHealthyBackend(0)
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			yield* cache.getOrCompute({ bucket: "warm", key: "k", ttlSeconds: 30 }, Effect.succeed("v"))
+			for (let i = 0; i < 5; i++) {
+				const result = yield* cache.getOrCompute(
+					{ bucket: "warm", key: "k", ttlSeconds: 30 },
+					Effect.succeed("recomputed"),
+				)
+				assert.deepStrictEqual(result, { value: "v", hit: true })
+			}
+		}).pipe(Effect.provide(makeLayer(backend, 50)), Effect.timeout(2000))
+	})
+})

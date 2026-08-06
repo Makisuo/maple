@@ -56,6 +56,14 @@ export interface BucketCacheOutcome {
 	readonly segmentsHit: number
 	readonly segmentsMissed: number
 	readonly segmentsTimedOut: number
+	/**
+	 * Segments whose read the edge cache declined to issue because that bucket's
+	 * reads were already timing out. Distinct from `segmentsTimedOut`: the read
+	 * never went out, so it cost nothing and held no connection slot. A non-zero
+	 * value means the breaker is doing its job — treat it as a signal about
+	 * connection pressure, not as a cache failure.
+	 */
+	readonly segmentsSkipped: number
 	readonly segmentsErrored: number
 }
 
@@ -482,7 +490,7 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 					const segmentStarts = segmentStartsForRange(request.startMs, request.endMs, segmentMs)
 					type SegmentRead = {
 						readonly segmentStartMs: number
-						readonly status: "hit" | "miss" | "timeout" | "error"
+						readonly status: "hit" | "miss" | "timeout" | "skipped" | "error"
 						readonly buckets: ReadonlyArray<CachedBucket>
 					}
 
@@ -590,9 +598,10 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 						[...freshBySegment.entries()],
 						([segmentStartMs, freshBuckets]) => {
 							const readStatus = readStatusBySegment.get(segmentStartMs) ?? "miss"
-							// A read we never got an answer from tells us nothing about what
-							// is stored, so we must not merge against `existingBySegment`
-							// (empty, but only because the read failed) and present the
+							// A read we never got an answer from — timed out, errored, or
+							// skipped by the edge cache's breaker — tells us nothing about
+							// what is stored, so we must not merge against `existingBySegment`
+							// (empty, but only because we never saw it) and present the
 							// result as the whole segment. Skipping the write entirely is
 							// the wrong correction though: under sustained connection
 							// pressure every read for a hot segment times out, so the
@@ -605,7 +614,7 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 							// lose correct data — at worst it drops buckets we couldn't see,
 							// which the next request refetches and merges back.
 							const merged =
-								readStatus === "timeout" || readStatus === "error"
+								readStatus === "timeout" || readStatus === "skipped" || readStatus === "error"
 									? [...freshBuckets].sort((a, b) => a.startMs - b.startMs)
 									: mergeAndDeduplicateBuckets(
 											existingBySegment.get(segmentStartMs) ?? EMPTY_BUCKETS,
@@ -673,6 +682,7 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 						segmentsHit: countStatus("hit"),
 						segmentsMissed: countStatus("miss"),
 						segmentsTimedOut: countStatus("timeout"),
+						segmentsSkipped: countStatus("skipped"),
 						segmentsErrored: countStatus("error"),
 					} satisfies BucketCacheOutcome
 					const coverageRatio =
@@ -688,6 +698,7 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 						"cache.segments_hit": outcome.segmentsHit,
 						"cache.segments_missed": outcome.segmentsMissed,
 						"cache.segments_timed_out": outcome.segmentsTimedOut,
+						"cache.segments_skipped": outcome.segmentsSkipped,
 						"cache.segments_errored": outcome.segmentsErrored,
 					})
 					return outcome

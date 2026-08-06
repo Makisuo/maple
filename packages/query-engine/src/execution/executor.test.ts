@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Fiber, Ref, Schema, Tracer } from "effect"
+import { Duration, Effect, Exit, Fiber, Ref, Schema, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { OrgId, UserId } from "@maple/domain"
 import { RawSqlValidationError } from "@maple/domain/http"
@@ -1023,6 +1023,95 @@ describe("makeWarehouseExecutor client timeout", () => {
 			// so the query is never cut off (it only rides the ambient Worker limit).
 			yield* TestClock.adjust(Duration.seconds(60))
 			assert.strictEqual(yield* Ref.get(outcome), "pending")
+		}),
+	)
+})
+
+// A host that caches per-org routing config and tolerates staleness can serve a
+// retired credential after a rotation. `invalidateRoute` is how the host says
+// "drop it and try again", and its boolean is what stops that retry from firing
+// on failures a second attempt cannot fix.
+describe("makeWarehouseExecutor credential-rotation self-heal", () => {
+	const makeAuthFailingDeps = (options: {
+		readonly failures: number
+		readonly invalidateReturns: boolean
+		readonly attempts: { count: number }
+		readonly invalidations: { count: number }
+	}): WarehouseExecutorDeps => ({
+		createClient: () => ({
+			sql: async () => {
+				options.attempts.count += 1
+				if (options.attempts.count <= options.failures) {
+					throw new Error("Code: 516. DB::Exception: default: Authentication failed")
+				}
+				return { data: [{ c: 1 }] }
+			},
+			insert: async () => {},
+		}),
+		resolveRoute: () =>
+			Effect.succeed({
+				source: "org-byo" as const,
+				config: clickhouseConfig,
+				clientCacheKey: "read:org_test",
+			}),
+		invalidateRoute: () =>
+			Effect.sync(() => {
+				options.invalidations.count += 1
+				return options.invalidateReturns
+			}),
+	})
+
+	it.effect("invalidates and retries once when the warehouse rejects our credentials", () =>
+		Effect.gen(function* () {
+			const attempts = { count: 0 }
+			const invalidations = { count: 0 }
+			const executor = makeWarehouseExecutor(
+				makeAuthFailingDeps({ failures: 1, invalidateReturns: true, attempts, invalidations }),
+			)
+
+			const rows = yield* executor.compiledQuery(tenant, untaggedCompiled, { context: "test" })
+
+			assert.deepStrictEqual(rows, [{ c: 1 }])
+			assert.strictEqual(invalidations.count, 1)
+			assert.strictEqual(attempts.count, 2, "the query ran again against freshly resolved config")
+		}),
+	)
+
+	it.effect("does not retry when the host reports no per-org override was dropped", () =>
+		Effect.gen(function* () {
+			// The shared managed credential is wrong: re-resolving returns the same
+			// bad credential, so a retry would only double the failure.
+			const attempts = { count: 0 }
+			const invalidations = { count: 0 }
+			const executor = makeWarehouseExecutor(
+				makeAuthFailingDeps({ failures: 99, invalidateReturns: false, attempts, invalidations }),
+			)
+
+			const exit = yield* executor
+				.compiledQuery(tenant, untaggedCompiled, { context: "test" })
+				.pipe(Effect.exit)
+
+			assert.isTrue(Exit.isFailure(exit))
+			assert.strictEqual(invalidations.count, 1)
+			assert.strictEqual(attempts.count, 1)
+		}),
+	)
+
+	it.effect("gives up after a single retry rather than looping on a genuinely bad credential", () =>
+		Effect.gen(function* () {
+			const attempts = { count: 0 }
+			const invalidations = { count: 0 }
+			const executor = makeWarehouseExecutor(
+				makeAuthFailingDeps({ failures: 99, invalidateReturns: true, attempts, invalidations }),
+			)
+
+			const exit = yield* executor
+				.compiledQuery(tenant, untaggedCompiled, { context: "test" })
+				.pipe(Effect.exit)
+
+			assert.isTrue(Exit.isFailure(exit))
+			assert.strictEqual(invalidations.count, 1)
+			assert.strictEqual(attempts.count, 2)
 		}),
 	)
 })

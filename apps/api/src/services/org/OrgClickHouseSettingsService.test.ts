@@ -8,6 +8,7 @@ import {
 } from "@maple/domain/http"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import type { TableDiffEntry } from "@maple/domain/clickhouse"
 import { Env } from "@/platform/Env"
@@ -241,10 +242,16 @@ describe("execClickHouse", () => {
 })
 
 // `resolveRuntimeConfig` runs on the hot path of every warehouse SQL execution
-// (and once per missing bucket in the cache fan-out). It now serves the per-org
-// config from the shared edge cache, decrypting per-request. These tests assert
-// (a) a repeat resolve is served from cache (a direct Postgres mutation stays
-// invisible) and (b) a settings write busts the entry.
+// (and once per missing bucket in the cache fan-out), so it must never block on
+// Postgres. It answers from a module-scoped in-isolate memo served
+// stale-while-revalidate, decrypting per-request.
+//
+// These tests pin the three branches that behaviour turns on — fresh, stale
+// (serve + refresh in the background), and past the hard ceiling (block) — plus
+// the invalidation that a settings write performs.
+//
+// The memo is MODULE-scoped, so it outlives any one test: every test here must
+// use its own `orgId` or it will read another test's entry.
 describe("resolveRuntimeConfig caching", () => {
 	const cacheTrackedDbs: TestDb[] = []
 	afterEach(async () => {
@@ -348,6 +355,128 @@ describe("resolveRuntimeConfig caching", () => {
 			const after = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
 			// Would still be a stale `Some` if the write had not busted the cache.
 			expect(Option.isNone(after)).toBe(true)
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	// The memo's soft TTL (5min) and hard ceiling (15min), mirrored from the
+	// service. Tests drive TestClock across them rather than reaching into the
+	// module's private state.
+	const SOFT_TTL_MS = 300_000
+	const HARD_TTL_MS = 900_000
+
+	it.effect("past the soft TTL, serves the stale value and refreshes behind the request", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_swr_stale"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://a.example"))
+			const first = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(first).url).toBe("https://a.example")
+
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					orgId,
+					"https://b.example",
+				]),
+			)
+
+			// Past the soft TTL but inside the hard ceiling: the caller must NOT
+			// wait on Postgres, so it still sees the old URL.
+			yield* TestClock.adjust(SOFT_TTL_MS + 1_000)
+			const stale = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(stale).url).toBe("https://a.example")
+
+			// The refresh forked by that call now lands, so the NEXT resolve sees the
+			// new value without anyone having blocked on the read.
+			yield* TestClock.adjust(1)
+			const refreshed = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(refreshed).url).toBe("https://b.example")
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	it.effect("past the hard ceiling, blocks and reads fresh", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_swr_hard"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://a.example"))
+			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					orgId,
+					"https://b.example",
+				]),
+			)
+
+			// Nothing refreshed the entry in the meantime (an isolate whose requests
+			// all ended before their refresh landed), so the ceiling forces a
+			// blocking read rather than serving an unboundedly old value.
+			yield* TestClock.adjust(HARD_TTL_MS + 1_000)
+			const fresh = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(fresh).url).toBe("https://b.example")
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	// Asserts the observable contract — none of the concurrent callers block, and
+	// the in-flight marker is released so the entry can refresh again. It does
+	// NOT count Postgres reads: the dedup marker is module-private, and a broken
+	// marker would fork N refreshes that all write the same value, which no
+	// assertion on the returned config can distinguish.
+	it.effect("concurrent stale reads all serve stale, and the refresh marker clears", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_swr_dedup"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://a.example"))
+			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			yield* TestClock.adjust(SOFT_TTL_MS + 1_000)
+
+			// Eight widgets hitting a stale entry at once must not become eight
+			// Postgres reads — the whole point of the in-flight marker.
+			const results = yield* Effect.forEach(
+				Array.from({ length: 8 }, (_, index) => index),
+				() => OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId)),
+				{ concurrency: "unbounded" },
+			)
+			for (const result of results) {
+				expect(expectSome(result).url).toBe("https://a.example")
+			}
+
+			// The marker must be cleared once the refresh completes, or the entry
+			// would never refresh again until it aged past the hard ceiling.
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE org_clickhouse_settings SET ch_url = $2 WHERE org_id = $1", [
+					orgId,
+					"https://c.example",
+				]),
+			)
+			yield* TestClock.adjust(SOFT_TTL_MS + 1_000)
+			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			yield* TestClock.adjust(1)
+			const refreshed = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(refreshed).url).toBe("https://c.example")
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	it.effect("invalidateRuntimeConfig reports whether a BYO override was dropped", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const byoOrgId = "org_ch_invalidate_byo"
+		const managedOrgId = "org_ch_invalidate_managed"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, byoOrgId, "https://a.example"))
+			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(byoOrgId))
+			// A managed org memoizes `null` — "we know this org has no override".
+			yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(managedOrgId))
+
+			// This boolean is the warehouse executor's retry gate: re-running a query
+			// can only help when a per-org override was actually dropped.
+			const droppedOverride = yield* OrgClickHouseSettingsService.invalidateRuntimeConfig(
+				asOrgId(byoOrgId),
+			)
+			expect(droppedOverride).toBe(true)
+
+			const droppedManaged = yield* OrgClickHouseSettingsService.invalidateRuntimeConfig(
+				asOrgId(managedOrgId),
+			)
+			expect(droppedManaged).toBe(false)
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 

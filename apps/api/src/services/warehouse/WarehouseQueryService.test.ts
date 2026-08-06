@@ -211,6 +211,12 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 		const configLive = makeConfig({}, false)
 		const envLive = Env.layer.pipe(Layer.provide(configLive))
 		const tokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(envLive))
+		// Partial stub: the cast hides absent members from the compiler, so a
+		// method the executor calls at runtime fails as "not a function" rather
+		// than as a type error. `invalidateRuntimeConfig` is stubbed because
+		// `WarehouseQueryService` wires it into the executor's auth self-heal —
+		// unreachable in this test, but only until someone makes the fake client
+		// throw an auth error.
 		const orgSettingsLive = Layer.succeed(OrgClickHouseSettingsService, {
 			resolveRuntimeConfig: () =>
 				Effect.succeed(
@@ -222,6 +228,7 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 						database: "maple",
 					}),
 				),
+			invalidateRuntimeConfig: () => Effect.succeed(false),
 		} as unknown as OrgClickHouseSettingsServiceShape)
 		const layer = WarehouseQueryService.layer.pipe(
 			Layer.provide(Layer.mergeAll(envLive, tokenLive, orgSettingsLive)),
