@@ -2,13 +2,18 @@ import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "dr
 import { sql } from "drizzle-orm"
 import type { ErrorIssueId, InvestigationId, OrgId, UserId } from "@maple/domain/primitives"
 import type {
+	AiTriageEvidence,
 	AiTriageIncidentKind,
 	AiTriageResult,
 	InvestigationConfidence,
+	InvestigationFanoutState,
 	InvestigationSeededBy,
 	InvestigationStatus,
 	InvestigationSubject,
 	InvestigationSubjectSnapshot,
+	LensId,
+	LensRunStatus,
+	LensVerdict,
 } from "@maple/domain/http"
 import type { IssueSeverity } from "@maple/domain/http"
 
@@ -47,6 +52,23 @@ export const investigations = pgTable(
 		inputTokens: integer("input_tokens"),
 		outputTokens: integer("output_tokens"),
 		error: text("error"),
+		/**
+		 * Where the fan-out is. `none` is the single-pass path — either the routing
+		 * gate declined or the org flag is off — and is what every row predating the
+		 * fan-out backfills to, which is why this migration needs no data pass.
+		 *
+		 * The list query reads this to decide whether to join lens rows at all.
+		 */
+		fanoutState: text("fanout_state").$type<InvestigationFanoutState>().notNull().default("none"),
+		/** Lenses dispatched. 1 on the single-pass path. */
+		fanoutSize: integer("fanout_size").notNull().default(1),
+		validatorNote: text("validator_note"),
+		validatorElapsedMs: integer("validator_elapsed_ms"),
+		fanoutDeadlineAt: timestamp("fanout_deadline_at", { withTimezone: true, mode: "date" }),
+		/** Cloudflare Workflow instance, for correlating a run with its engine trace. */
+		workflowInstanceId: text("workflow_instance_id"),
+		/** Bumped per restart so a retry can claim a fresh workflow instance id. */
+		fanoutAttempt: integer("fanout_attempt").notNull().default(0),
 		startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
 		autonomousTurns: integer("autonomous_turns").notNull().default(0),
 		createdBy: text("created_by").$type<UserId>(),
@@ -68,3 +90,81 @@ export const investigations = pgTable(
 
 export type InvestigationRow = typeof investigations.$inferSelect
 export type InvestigationInsert = typeof investigations.$inferInsert
+
+/**
+ * One row per dispatched lens. This is the record the "Hypotheses considered"
+ * table renders, and the reason it can be trusted: a rejected rival carries the
+ * validator's own reason for rejecting it, written at ranking time.
+ *
+ * The `(investigation_id, lens_id)` unique index is the retry-safety key. A
+ * Cloudflare Workflow step that is replayed after a lost result must upsert its
+ * lane rather than insert a second one, or a retried run grows duplicate lenses.
+ */
+export const investigationLensRuns = pgTable(
+	"investigation_lens_runs",
+	{
+		id: text("id").notNull().primaryKey(),
+		orgId: text("org_id").$type<OrgId>().notNull(),
+		investigationId: text("investigation_id")
+			.$type<InvestigationId>()
+			.notNull()
+			.references(() => investigations.id, { onDelete: "cascade" }),
+		lensId: text("lens_id").$type<LensId>().notNull(),
+		/**
+		 * Which restart produced this lane. Terminating the previous workflow
+		 * instance is best-effort — an instance already past its guard keeps
+		 * running — so without this a straggler from attempt N writes its claims and
+		 * verdicts into attempt N+1's lanes and the board shows one run assembled
+		 * from two.
+		 */
+		attempt: integer("attempt").notNull().default(0),
+		/** Position in the dispatch order — the boards render lanes by this, not by id. */
+		ordinal: integer("ordinal").notNull(),
+		status: text("status").$type<LensRunStatus>().notNull().default("queued"),
+		verdict: text("verdict").$type<LensVerdict>().notNull().default("pending"),
+		/** The candidate cause; null while queued, or if the lens found nothing. */
+		claim: text("claim"),
+		/** Why the validator ruled as it did. Null until ranking. */
+		reason: text("reason"),
+		/** What the lens is doing right now, while `status` is `checking`. */
+		progressNote: text("progress_note"),
+		confidence: text("confidence").$type<InvestigationConfidence>(),
+		toolCount: integer("tool_count").notNull().default(0),
+		elapsedMs: integer("elapsed_ms"),
+		inputTokens: integer("input_tokens"),
+		outputTokens: integer("output_tokens"),
+		model: text("model"),
+		/**
+		 * The lens's own citations. Persisted but deliberately withheld from the v2
+		 * wire in v1 — nothing renders it, and putting five of these on every list
+		 * response multiplies the trace-id decode surface for no gain.
+		 */
+		evidenceJson: jsonb("evidence_json").$type<ReadonlyArray<AiTriageEvidence>>(),
+		/**
+		 * How the claim would produce the symptoms — the causal chain. This is the
+		 * validator's FIRST ranking rule, so dropping it (as an earlier revision did)
+		 * silently degrades every ranking to claim-plus-evidence.
+		 */
+		mechanism: text("mechanism"),
+		/** What would falsify the claim, per the lens. Read by the validator. */
+		selfDoubt: text("self_doubt"),
+		suggestedActionsJson: jsonb("suggested_actions_json").$type<ReadonlyArray<string>>(),
+		error: text("error"),
+		startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+		reportedAt: timestamp("reported_at", { withTimezone: true, mode: "date" }),
+		rankedAt: timestamp("ranked_at", { withTimezone: true, mode: "date" }),
+		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+	},
+	(table) => [
+		uniqueIndex("investigation_lens_runs_lens_idx").on(
+			table.investigationId,
+			table.attempt,
+			table.lensId,
+		),
+		index("investigation_lens_runs_org_inv_idx").on(table.orgId, table.investigationId),
+	],
+)
+
+export type InvestigationLensRunRow = typeof investigationLensRuns.$inferSelect
+export type InvestigationLensRunInsert = typeof investigationLensRuns.$inferInsert

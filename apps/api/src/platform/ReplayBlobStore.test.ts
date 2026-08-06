@@ -128,9 +128,7 @@ describe("ReplayBlobStore.hydrate", () => {
 			Effect.gen(function* () {
 				const store = yield* ReplayBlobStore
 				return yield* store.hydrate("org_1", "sess_1", chunks)
-			}).pipe(
-				Effect.provide(ReplayBlobStore.layer.pipe(Layer.provide(layerFromEnvRecord({})))),
-			),
+			}).pipe(Effect.provide(ReplayBlobStore.layer.pipe(Layer.provide(layerFromEnvRecord({}))))),
 		)
 		expect(result).toEqual(chunks)
 	})

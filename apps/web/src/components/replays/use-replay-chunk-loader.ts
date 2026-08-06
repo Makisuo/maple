@@ -113,10 +113,7 @@ export function useReplayChunkLoader({
 	// so no range can exceed the server's byte ceiling — chunk sizes vary by more
 	// than an order of magnitude, and a fixed chunk count would 413 on a session
 	// whose snapshots are large.
-	const plan = React.useMemo(
-		() => planRanges(chunks, MAX_BYTES_PER_RANGE, MAX_CHUNKS_PER_RANGE),
-		[chunks],
-	)
+	const plan = React.useMemo(() => planRanges(chunks, MAX_BYTES_PER_RANGE, MAX_CHUNKS_PER_RANGE), [chunks])
 
 	// Plan the opening window once the manifest lands — and only once.
 	//
@@ -147,8 +144,9 @@ export function useReplayChunkLoader({
 	// invented window would fire a request for chunks we have no reason to think
 	// exist, so hold at the plan's first range once there is one — that is where
 	// playback starts for most sessions, making it a prefetch rather than waste.
-	const subscribedRange =
-		activeRange ?? loaded[loaded.length - 1]?.range ?? plan[0] ?? { fromChunkSeq: 0, toChunkSeq: 0 }
+	const subscribedRange = activeRange ??
+		loaded[loaded.length - 1]?.range ??
+		plan[0] ?? { fromChunkSeq: 0, toChunkSeq: 0 }
 	const rangeResult = useAtomValue(
 		getReplayEventsResultAtom({ data: replayRangeInput(sessionId, window, subscribedRange) }),
 	)

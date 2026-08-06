@@ -175,9 +175,7 @@ describe("noticeRecipients", () => {
 
 	test("a replier that resolves to the bot itself falls back to everyone", () => {
 		expect(
-			noticeRecipients(
-				disengagement({ reason: "engagement-buried", replierUserId: BOT_USER_ID }),
-			),
+			noticeRecipients(disengagement({ reason: "engagement-buried", replierUserId: BOT_USER_ID })),
 		).toEqual(["U456", "U789"])
 	})
 })

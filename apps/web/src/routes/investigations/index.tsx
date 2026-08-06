@@ -5,14 +5,15 @@ import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-a
 import type { V2Investigation } from "@maple/domain/http/v2"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@maple/ui/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { ToolbarSearch } from "@maple/ui/components/toolbar"
 import { toastManager } from "@maple/ui/components/ui/toast"
+import { formatDuration } from "@maple/ui/lib/format"
+import { toEpochMs } from "@maple/ui/lib/time-format"
 
 import { ErrorState } from "@/components/common/error-state"
 import { ListToolbar } from "@/components/common/list-toolbar"
-import { ChatBubbleSparkleIcon } from "@/components/icons"
+
 import {
 	investigationKindKey,
 	matchesQuery,
@@ -24,6 +25,7 @@ import {
 	InvestigationTable,
 	InvestigationTableSkeleton,
 } from "@/components/investigations/investigation-table"
+import { InvestigateBar } from "@/components/investigations/investigate-bar"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
@@ -67,6 +69,21 @@ const kindFilterLabel = (value: unknown): string =>
 		? KIND_FILTER_LABEL[value as InvestigationKindKey | "all"]
 		: KIND_FILTER_LABEL.all
 
+/**
+ * Sorting moved off the column headers, because the list no longer has any. Each
+ * option is a `key:direction` pair so the control reads as an intent ("Most
+ * severe") rather than a field plus a separate direction toggle.
+ */
+const SORT_OPTIONS = [
+	{ value: "updated:desc", label: "Newest first" },
+	{ value: "updated:asc", label: "Oldest first" },
+	{ value: "severity:desc", label: "Most severe" },
+	{ value: "confidence:desc", label: "Most confident" },
+] as const
+
+const sortLabel = (value: unknown): string =>
+	SORT_OPTIONS.find((option) => option.value === value)?.label ?? SORT_OPTIONS[0].label
+
 function InvestigationsHub() {
 	const navigate = useNavigate({ from: Route.fullPath })
 	const search = Route.useSearch()
@@ -76,7 +93,6 @@ function InvestigationsHub() {
 	const query = search.q ?? ""
 	const isFiltered = query.trim().length > 0 || search.kind !== undefined
 
-	const [subject, setSubject] = useState("")
 	const [creating, setCreating] = useState(false)
 	const listQuery = MapleApiV2AtomClient.query("investigations", "list", {
 		query: { limit: PAGE_SIZE },
@@ -110,21 +126,7 @@ function InvestigationsHub() {
 		return sortInvestigations(filtered, sortKey, sortDirection)
 	}, [page, view, search.kind, query, sortKey, sortDirection])
 
-	const handleSort = (key: InvestigationSortKey) => {
-		void navigate({
-			search: (prev) => ({
-				...prev,
-				sort: key === "updated" ? undefined : key,
-				// A first click on a column means "most of this first"; clicking the
-				// active column flips it.
-				dir: key === sortKey && sortDirection === "desc" ? "asc" : undefined,
-			}),
-		})
-	}
-
-	const handleCreate = async () => {
-		const title = subject.trim()
-		if (!title) return
+	const handleCreate = async (title: string) => {
 		setCreating(true)
 		const created = await create({
 			payload: {
@@ -144,12 +146,16 @@ function InvestigationsHub() {
 		})
 		setCreating(false)
 		if (Exit.isSuccess(created)) {
-			setSubject("")
 			void navigate({ to: "/investigations/$id", params: { id: created.value.id } })
 		} else {
 			toastManager.add({ title: "Investigation could not be started", type: "error" })
 		}
 	}
+
+	// Nothing at all — not "nothing matching your filters". The hero belongs to a
+	// workspace that has never run one, and it replaces the whole page rather than
+	// sitting inside an empty table shell.
+	const isFirstRun = Result.isSuccess(result) && page.length === 0
 
 	const toolbar = (
 		<ListToolbar
@@ -197,6 +203,31 @@ function InvestigationsHub() {
 							))}
 						</SelectContent>
 					</Select>
+					<Select
+						value={`${sortKey}:${sortDirection}`}
+						onValueChange={(value) => {
+							const [key, direction] = String(value).split(":")
+							void navigate({
+								search: (prev) => ({
+									...prev,
+									// Defaults drop out of the URL entirely.
+									sort: key === "updated" ? undefined : (key as InvestigationSortKey),
+									dir: direction === "desc" ? undefined : "asc",
+								}),
+							})
+						}}
+					>
+						<SelectTrigger size="sm" className="h-7 w-[136px] text-xs">
+							<SelectValue>{sortLabel}</SelectValue>
+						</SelectTrigger>
+						<SelectContent>
+							{SORT_OPTIONS.map((option) => (
+								<SelectItem key={option.value} value={option.value}>
+									{option.label}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
 					<ToolbarSearch
 						query={query}
 						onSearch={(value) => void navigate({ search: (prev) => ({ ...prev, q: value }) })}
@@ -213,75 +244,242 @@ function InvestigationsHub() {
 			<DashboardLayout.Breadcrumbs items={[{ label: "Investigations" }]} />
 			<DashboardLayout.Body>
 				<DashboardLayout.Content>
-					<DashboardLayout.Sticky>
-						<DashboardLayout.Header
-							title="Investigations"
-							description="Maple investigates an incident, records what it found, and keeps the thread open for follow-ups."
-						/>
-						<form
-							className="flex gap-2"
-							onSubmit={(event) => {
-								event.preventDefault()
-								void handleCreate()
-							}}
-						>
-							<InputGroup className="flex-1">
-								<InputGroupAddon>
-									<ChatBubbleSparkleIcon />
-								</InputGroupAddon>
-								<InputGroupInput
-									value={subject}
-									onChange={(event) => setSubject(event.target.value)}
-									placeholder="Ask Maple to investigate — a service, a symptom, a question"
-									aria-label="What should Maple investigate?"
-								/>
-							</InputGroup>
-							<Button type="submit" disabled={creating || !subject.trim()}>
-								{creating ? "Starting…" : "Investigate"}
-							</Button>
-						</form>
-					</DashboardLayout.Sticky>
-					<DashboardLayout.Scroll>
-						<div className="overflow-hidden rounded-xl border">
-							{toolbar}
-							{Result.builder(result)
-								.onInitial(() => <InvestigationTableSkeleton />)
-								.onError((error) => (
-									<ErrorState
-										error={error}
-										title="Investigations could not be loaded"
-										onRetry={refresh}
-									/>
-								))
-								.onSuccess(() =>
-									investigations.length === 0 ? (
-										<HubEmptyState
-											view={view}
-											filtered={isFiltered}
-											onClear={() =>
-												void navigate({
-													search: (prev) => ({
-														...prev,
-														kind: undefined,
-														q: undefined,
-													}),
-												})
-											}
-										/>
-									) : (
-										<InvestigationTable
-											investigations={investigations}
-											sort={{ key: sortKey, direction: sortDirection }}
-											onSort={handleSort}
-										/>
-									),
-								)
-								.render()}
-						</div>
-					</DashboardLayout.Scroll>
+					{isFirstRun ? (
+						<DashboardLayout.Scroll>
+							<HubHero onSubmit={handleCreate} busy={creating} />
+						</DashboardLayout.Scroll>
+					) : (
+						<>
+							<DashboardLayout.Sticky>
+								<TriageStrip investigations={page} />
+								<InvestigateBar onSubmit={handleCreate} busy={creating} />
+							</DashboardLayout.Sticky>
+							<DashboardLayout.Scroll>
+								<div className="overflow-hidden rounded-xl border">
+									{toolbar}
+									{Result.builder(result)
+										.onInitial(() => <InvestigationTableSkeleton />)
+										.onError((error) => (
+											<ErrorState
+												error={error}
+												title="Investigations could not be loaded"
+												onRetry={refresh}
+											/>
+										))
+										.onSuccess(() =>
+											investigations.length === 0 ? (
+												<HubEmptyState
+													view={view}
+													filtered={isFiltered}
+													onClear={() =>
+														void navigate({
+															search: (prev) => ({
+																...prev,
+																kind: undefined,
+																q: undefined,
+															}),
+														})
+													}
+												/>
+											) : (
+												<InvestigationTable investigations={investigations} />
+											),
+										)
+										.render()}
+								</div>
+							</DashboardLayout.Scroll>
+						</>
+					)}
 				</DashboardLayout.Content>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
+	)
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Triage strip
+ * -----------------------------------------------------------------------------------------------*/
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Three numbers, above the fold: what is running, what is waiting on a human,
+ * and what the last day cost. Derived from the fetched page rather than a
+ * separate request — the page is the 100 most recent, which is the window these
+ * counts are about anyway.
+ */
+function TriageStrip({ investigations }: { investigations: ReadonlyArray<V2Investigation> }) {
+	const stats = useMemo(() => {
+		const running = investigations.filter((entry) => entry.status === "investigating")
+		const review = investigations.filter((entry) => entry.status === "diagnosed")
+		const cutoff = Date.now() - DAY_MS
+		const resolved = investigations.filter(
+			(entry) => entry.status === "resolved" && toEpochMs(entry.updated_at) >= cutoff,
+		)
+
+		// Dispatched lenses, not the computed size: a single-pass run persists a
+		// size of 1 with zero lenses, so summing size reports lenses in flight for
+		// runs that never dispatched one.
+		const lensesInFlight = running.reduce((total, entry) => total + entry.lens_runs.length, 0)
+		const critical = review.filter(
+			(entry) => (entry.severity ?? entry.snapshot.severity) === "critical",
+		).length
+
+		const durations = resolved
+			.map((entry) =>
+				entry.diagnosed_at ? toEpochMs(entry.diagnosed_at) - toEpochMs(entry.created_at) : null,
+			)
+			.filter((ms): ms is number => ms !== null && Number.isFinite(ms) && ms >= 0)
+			.sort((a, b) => a - b)
+		const median = durations.length > 0 ? durations[Math.floor(durations.length / 2)]! : null
+		const avgLenses =
+			resolved.length > 0
+				? resolved.reduce((total, entry) => total + entry.lens_runs.length, 0) / resolved.length
+				: null
+
+		return { running, review, resolved, lensesInFlight, critical, median, avgLenses }
+	}, [investigations])
+
+	return (
+		// Same grid-with-border-cells reasoning as the detail page's impact strip:
+		// standalone divider elements strand themselves at the end of a row when the
+		// last stat wraps.
+		<div className="grid grid-cols-1 gap-y-5 sm:grid-cols-3 [&>*+*]:border-l [&>*+*]:pl-8 max-sm:[&>*+*]:border-l-0 max-sm:[&>*+*]:pl-0">
+			<TriageStat
+				label="Investigating now"
+				dot="bg-primary"
+				labelTone="text-primary"
+				value={stats.running.length}
+				detail={
+					stats.running.length === 0
+						? "nothing in flight"
+						: `${stats.lensesInFlight} ${stats.lensesInFlight === 1 ? "lens" : "lenses"} in flight`
+				}
+			/>
+			<TriageStat
+				label="Needs review"
+				dot="bg-severity-warn"
+				labelTone="text-severity-warn"
+				value={stats.review.length}
+				detail={
+					stats.review.length === 0
+						? "nothing waiting on you"
+						: stats.critical > 0
+							? `${stats.critical} critical`
+							: "diagnosed, not resolved"
+				}
+			/>
+			<TriageStat
+				label="Resolved · 24h"
+				dot="bg-muted-foreground"
+				labelTone="text-muted-foreground"
+				valueTone="text-muted-foreground"
+				value={stats.resolved.length}
+				detail={
+					stats.median === null
+						? "none in the last day"
+						: `median ${formatDuration(stats.median)}${
+								stats.avgLenses === null ? "" : ` · ${stats.avgLenses.toFixed(1)} lenses`
+							}`
+				}
+			/>
+		</div>
+	)
+}
+
+function TriageStat({
+	label,
+	dot,
+	labelTone,
+	value,
+	valueTone = "text-foreground",
+	detail,
+}: {
+	label: string
+	dot: string
+	labelTone: string
+	value: number
+	valueTone?: string
+	detail: string
+}) {
+	return (
+		<div className="flex min-w-0 flex-col gap-2.5">
+			<div className="flex items-center gap-1.75">
+				<span aria-hidden className={`size-1.5 shrink-0 rounded-[3px] ${dot}`} />
+				<span className={`text-[10px] font-medium uppercase tracking-[0.12em] ${labelTone}`}>
+					{label}
+				</span>
+			</div>
+			<div className="flex items-baseline gap-2.5">
+				<span
+					className={`font-display text-2xl font-semibold tracking-tight tabular-nums ${valueTone}`}
+				>
+					{value}
+				</span>
+				<span className="text-sm text-muted-foreground">{detail}</span>
+			</div>
+		</div>
+	)
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Empty states
+ * -----------------------------------------------------------------------------------------------*/
+
+const HERO_SUGGESTIONS = [
+	"Why did checkout latency spike this afternoon?",
+	"What changed before the last error burst?",
+	"Which service is slowest right now, and why?",
+]
+
+/**
+ * The first-run page. A workspace with no investigations has nothing to filter,
+ * sort or triage, so the table chrome is all cost and no information — the whole
+ * page becomes the invitation instead.
+ */
+function HubHero({ onSubmit, busy }: { onSubmit: (title: string) => void | Promise<void>; busy: boolean }) {
+	return (
+		<div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center gap-5 py-16">
+			<span className="text-[10px] font-medium uppercase tracking-[0.12em] text-primary">
+				Investigations
+			</span>
+			<h1 className="font-display text-[28px] font-semibold leading-9 tracking-tight text-foreground">
+				Ask, and Maple goes and finds out.
+			</h1>
+			<p className="max-w-xl text-sm leading-6 text-muted-foreground">
+				It dispatches up to five agents, each attacking the problem from a different angle — deploys,
+				dependencies, saturation, traffic — then a validator ranks what they found and promotes one
+				answer.
+			</p>
+			<InvestigateBar
+				onSubmit={onSubmit}
+				busy={busy}
+				accent
+				placeholder="A service, a symptom, a question…"
+			/>
+			<ul className="flex flex-col gap-2">
+				{HERO_SUGGESTIONS.map((suggestion) => (
+					<li key={suggestion}>
+						<button
+							type="button"
+							disabled={busy}
+							onClick={() => void onSubmit(suggestion)}
+							className="flex w-full items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 text-left text-sm text-foreground transition-colors hover:border-ring hover:bg-accent/40 disabled:opacity-60"
+						>
+							<span aria-hidden className="shrink-0 text-muted-foreground">
+								›
+							</span>
+							{suggestion}
+						</button>
+					</li>
+				))}
+			</ul>
+			<p className="flex items-baseline gap-2 text-sm text-muted-foreground">
+				<span aria-hidden className="size-1.5 shrink-0 translate-y-[-2px] rounded-full bg-primary" />
+				Maple also opens an investigation on its own whenever an incident fires — you will find those
+				here too.
+			</p>
+		</div>
 	)
 }
 

@@ -81,14 +81,10 @@ const makeHydrate =
 					Effect.flatMap((object) =>
 						object === null
 							? Effect.succeed(Option.none<T>())
-							: object
-									.bytes()
-									.pipe(
-										Effect.flatMap((bytes) =>
-											Effect.promise(() => decodeGzip(bytes)),
-										),
-										Effect.map((events) => Option.some({ ...chunk, events })),
-									),
+							: object.bytes().pipe(
+									Effect.flatMap((bytes) => Effect.promise(() => decodeGzip(bytes))),
+									Effect.map((events) => Option.some({ ...chunk, events })),
+								),
 					),
 					// A failed fetch degrades the recording rather than the request.
 					// Logged at warning because a nonzero rate here means either the
@@ -123,9 +119,7 @@ export class ReplayBlobStore extends Context.Service<ReplayBlobStore, ReplayBlob
 			const hydrate = makeHydrate(bucket.value)
 			return {
 				hydrate: (orgId, sessionId, chunks) =>
-					hydrate(orgId, sessionId, chunks).pipe(
-						Effect.provideService(WorkerEnvironment, env),
-					),
+					hydrate(orgId, sessionId, chunks).pipe(Effect.provideService(WorkerEnvironment, env)),
 			}
 		}),
 	},

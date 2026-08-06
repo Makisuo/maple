@@ -272,18 +272,20 @@ export async function fetchChannelHistoryFromSlack(
 		throw new SlackHistoryError(payload.error ?? "unknown_error")
 	}
 	return (payload.messages ?? [])
-		.map((message): RenderableSlackMessage => ({
-			// Raw Slack text is mrkdwn: eve's GFM rendering only exists for
-			// messages that came through its own thread fetch.
-			text: typeof message.text === "string" ? message.text : undefined,
-			user: typeof message.user === "string" ? message.user : undefined,
-			botId: typeof message.bot_id === "string" ? message.bot_id : undefined,
-			ts: typeof message.ts === "string" ? message.ts : undefined,
-			// Present only when the message itself has replies — worth showing:
-			// it tells the model the discussion continued somewhere it cannot see.
-			threadTs: typeof message.thread_ts === "string" ? message.thread_ts : undefined,
-			raw: message,
-		}))
+		.map(
+			(message): RenderableSlackMessage => ({
+				// Raw Slack text is mrkdwn: eve's GFM rendering only exists for
+				// messages that came through its own thread fetch.
+				text: typeof message.text === "string" ? message.text : undefined,
+				user: typeof message.user === "string" ? message.user : undefined,
+				botId: typeof message.bot_id === "string" ? message.bot_id : undefined,
+				ts: typeof message.ts === "string" ? message.ts : undefined,
+				// Present only when the message itself has replies — worth showing:
+				// it tells the model the discussion continued somewhere it cannot see.
+				threadTs: typeof message.thread_ts === "string" ? message.thread_ts : undefined,
+				raw: message,
+			}),
+		)
 		.reverse()
 }
 

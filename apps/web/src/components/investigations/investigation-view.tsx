@@ -1,18 +1,24 @@
 import { useMemo, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
 import { Exit } from "effect"
 import { useAtomSet } from "@/lib/effect-atom"
 import type { V2Investigation } from "@maple/domain/http/v2"
-import type { IssueSeverity } from "@maple/domain/http"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
 import { ChatConversation } from "@/components/chat/chat-conversation"
 import type { InvestigationContext } from "@/components/chat/investigation-context"
-import { SeverityBadge } from "@/components/errors/severity-badge"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
-import { investigationHeadline, investigationScope } from "./investigation-display"
+import { EvidenceTab } from "./evidence-tab"
+import { FollowUpComposer } from "./follow-up-composer"
+import { HypothesesTab } from "./hypotheses-tab"
+import { ImpactStrip } from "./impact-strip"
+import { investigationHeadline } from "./investigation-display"
+import { InvestigationHeader } from "./investigation-header"
 import { InvestigationRail } from "./investigation-rail"
-import { InvestigationStatusBadge, investigationKindLabel } from "./investigation-status"
+import { type InvestigationTab, InvestigationTabs } from "./investigation-tabs"
+import { NextActions } from "./next-actions"
+import { VerdictCard } from "./verdict-card"
 
 const factKey = (label: string) =>
 	label
@@ -30,10 +36,6 @@ const breadcrumbLabel = (title: string): string => {
 	const line = title.split("\n")[0]!.trim()
 	return line.length > 64 ? `${line.slice(0, 63).trimEnd()}…` : line
 }
-
-/** Only the four canonical severities render as a badge; anything else is unset. */
-const asIssueSeverity = (value: string | null | undefined): IssueSeverity | null =>
-	value === "critical" || value === "high" || value === "medium" || value === "low" ? value : null
 
 /**
  * Read a snapshot fact by label. The snapshot is the only place the signal type
@@ -84,19 +86,27 @@ const contextFromInvestigation = (investigation: V2Investigation): Investigation
 }
 
 /**
- * One investigation, as a workspace rather than a document: the header states the
- * subject, the transcript owns the rest of the viewport and its own scrolling, and
- * the rail carries everything the transcript doesn't — the run's history, what it
- * cost, what it points at, and the actions that change its state. Nothing appears
- * twice.
+ * One investigation, as a finding rather than a conversation.
+ *
+ * The transcript used to *be* this page — the diagnosis was a card buried in a
+ * scrolling chat, and everything that qualified it lived in the rail. Now the
+ * verdict, its impact and what to do about it are the page; the conversation is
+ * one tab among five, and the rail leads with the checks that back the verdict.
+ *
+ * The follow-up composer is docked on every document tab, because the question a
+ * person wants to ask arrives while they're reading the evidence, not after
+ * they've navigated away from it.
  */
 export function InvestigationView({
 	investigation,
+	tab,
 	onRefresh,
 }: {
 	investigation: V2Investigation
+	tab: InvestigationTab
 	onRefresh: () => void
 }) {
+	const navigate = useNavigate()
 	const [busy, setBusy] = useState(false)
 	const restart = useAtomSet(MapleApiV2AtomClient.mutation("investigations", "restart"), {
 		mode: "promiseExit",
@@ -140,6 +150,26 @@ export function InvestigationView({
 		}
 	}
 
+	/**
+	 * The docked composer doesn't own a chat session. Lifting `useMapleChat` out
+	 * of `ChatConversation` to share one would mean rebuilding approvals, failed
+	 * sends and history loading around it — so the question is handed to the Chat
+	 * tab, which is where the answer belongs anyway.
+	 */
+	const handleFollowUp = () => {
+		void navigate({
+			to: "/investigations/$id",
+			params: { id: investigation.id },
+			search: { tab: "chat" },
+		})
+	}
+
+	// Chat and Transcript own their own scrolling and fill the viewport; the
+	// document tabs scroll as a page. `Fill` vs `Scroll` is exactly that
+	// difference — nesting a self-scrolling transcript inside a scrolling page is
+	// what used to need a `calc(100dvh - 12rem)` guess.
+	const isConversation = tab === "chat" || tab === "transcript"
+
 	return (
 		<DashboardLayout.Root>
 			<DashboardLayout.Breadcrumbs
@@ -150,94 +180,66 @@ export function InvestigationView({
 			/>
 			<DashboardLayout.Body>
 				<DashboardLayout.Content>
-					{/* No actions here: Resolve/Reopen/Retry live in the rail, beneath the
-					    run history they act on. The header states the subject and nothing else. */}
 					<DashboardLayout.Sticky>
-						<DashboardLayout.Header
-							titleContent={<InvestigationHeading investigation={investigation} />}
+						<InvestigationHeader
+							investigation={investigation}
+							busy={busy}
+							onResolve={handleResolve}
+							onRestart={handleRestart}
 						/>
+						<InvestigationTabs investigation={investigation} active={tab} />
 					</DashboardLayout.Sticky>
-					{/* `Fill`, not `Scroll`: the transcript scrolls itself. Nesting it in a
-					    scrolling page is what previously needed a `calc(100dvh - 12rem)`
-					    guess that the billing banners could invalidate. */}
-					<DashboardLayout.Fill>
-						<ChatConversation
-							tabId={`inv-${investigation.id}`}
-							isActive
-							mode="investigation"
-							investigationContext={context}
-							subjectSeededByServer
-							showAttachmentCard={false}
-							readOnly={isResolved ? "resolved" : false}
-							fallbackDiagnosis={investigation.report}
-						/>
-					</DashboardLayout.Fill>
+					{isConversation ? (
+						<DashboardLayout.Fill>
+							<ChatConversation
+								tabId={`inv-${investigation.id}`}
+								isActive={tab === "chat"}
+								mode="investigation"
+								investigationContext={context}
+								subjectSeededByServer
+								showAttachmentCard={false}
+								readOnly={
+									tab === "transcript" ? "transcript" : isResolved ? "resolved" : false
+								}
+								fallbackDiagnosis={investigation.report}
+							/>
+						</DashboardLayout.Fill>
+					) : (
+						<>
+							<DashboardLayout.Scroll>
+								<div className="flex flex-col gap-7">
+									{tab === "evidence" ? (
+										<EvidenceTab investigation={investigation} />
+									) : tab === "hypotheses" ? (
+										<HypothesesTab investigation={investigation} />
+									) : (
+										<>
+											<VerdictCard investigation={investigation} />
+											<ImpactStrip investigation={investigation} />
+											<NextActions investigation={investigation} />
+										</>
+									)}
+								</div>
+							</DashboardLayout.Scroll>
+							{/*
+							 * A sibling of `Scroll`, not its last child. Inside it, `mt-auto` only
+							 * reached the bottom while the tab was shorter than the viewport — on
+							 * any real diagnosis the composer sat below the fold and scrolled away,
+							 * which is the opposite of docked. `Content` is a flex column, so a
+							 * `shrink-0` footer here is the same shape as the sticky header above.
+							 */}
+							{isResolved ? null : (
+								<div className="shrink-0 px-4 pb-4">
+									<FollowUpComposer onSubmit={handleFollowUp} />
+								</div>
+							)}
+						</>
+					)}
 				</DashboardLayout.Content>
 				<DashboardLayout.RightPanel title="Investigation context" width="w-80">
-					<InvestigationRail
-						investigation={investigation}
-						busy={busy}
-						onResolve={handleResolve}
-						onRestart={handleRestart}
-					/>
+					<InvestigationRail investigation={investigation} />
 				</DashboardLayout.RightPanel>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
-	)
-}
-
-/**
- * Eyebrow, title, and the snapshot facts as one line of prose-with-values —
- * following the anomaly hero rather than a grid of chips, so the subject reads as
- * a sentence and the numbers still stand out.
- */
-function InvestigationHeading({ investigation }: { investigation: V2Investigation }) {
-	const { snapshot } = investigation
-	const severity = asIssueSeverity(investigation.severity ?? snapshot.severity)
-	// Same derivation as the list, or the two surfaces name the same
-	// investigation differently.
-	const headline = investigationHeadline(investigation)
-	const scope = investigationScope(investigation)
-
-	return (
-		<div className="min-w-0 space-y-2">
-			<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-				<span>Investigation</span>
-				<span aria-hidden>·</span>
-				<span>{investigationKindLabel(investigation.subject)}</span>
-			</div>
-			<DashboardLayout.Title title={headline}>{headline}</DashboardLayout.Title>
-			<div className="flex flex-wrap items-center gap-2">
-				<InvestigationStatusBadge status={investigation.status} />
-				{severity ? <SeverityBadge severity={severity} /> : null}
-				{/* `scope` is free text and a system-seeded investigation can carry a
-				    whole paragraph of it. One line, always — the full string is on the
-				    title, and the diagnosis card states the scope properly anyway. */}
-				{scope ? (
-					<span
-						title={scope}
-						className="min-w-0 max-w-[28rem] truncate font-mono text-xs text-muted-foreground"
-					>
-						{scope}
-					</span>
-				) : null}
-			</div>
-			{snapshot.facts.length > 0 ? (
-				<p className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm text-muted-foreground">
-					{snapshot.facts.map((fact) => (
-						<span key={`${fact.label}:${fact.value}`}>
-							{fact.label}{" "}
-							{/* `inline-block`, or `truncate`'s overflow rules do nothing here. */}
-							<span
-								title={fact.value}
-								className="inline-block max-w-[16rem] truncate align-bottom font-mono font-medium text-foreground"
-							>
-								{fact.value}
-							</span>
-						</span>
-					))}
-				</p>
-			) : null}
-		</div>
 	)
 }

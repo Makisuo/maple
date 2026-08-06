@@ -11,6 +11,8 @@
  * fails if one is ever added without one.
  */
 import { chatModeFromSessionId, type ChatMode } from "@maple/domain/chat-session"
+import { PermissionRule } from "@maple/domain/permission"
+import { LENS_CATALOGUE, buildLensSystemPrompt } from "@/workflows/lens-prompt"
 import type { PermissionRuleset } from "@maple/domain/permission"
 import { DEFAULT_RULESET, READ_ONLY_RULESET } from "./permissions"
 import {
@@ -18,6 +20,7 @@ import {
 	EXPLORE_SYSTEM_PROMPT,
 	INVESTIGATE_SYSTEM_PROMPT,
 	SYSTEM_PROMPT,
+	VALIDATOR_SYSTEM_PROMPT,
 } from "./prompts"
 
 export interface AgentDefinition {
@@ -45,7 +48,51 @@ export interface AgentDefinition {
  */
 export const SUBAGENT_MAX_STEPS = 6
 
+/** A lens asks one question, so it gets a fraction of a full triage pass's budget. */
+export const LENS_MAX_STEPS = 6
+
+/**
+ * One agent per investigation lens, plus the validator that ranks them.
+ *
+ * A lens is a sub-agent by construction — a self-contained question, its own
+ * narrow tool allowlist, its own step budget, and no ability to spawn anything
+ * further. Registering them here rather than running a private loop is what gets
+ * them retry, context pruning and permission gating for free, and it keeps one
+ * answer to "what can this agent reach for" instead of two.
+ *
+ * The fan-out workflow invokes these directly rather than through the `task`
+ * tool: which lenses run is decided by severity in `fanout-policy`, not by a
+ * model choosing to delegate.
+ */
+const LENS_AGENTS: Record<string, AgentDefinition> = Object.fromEntries(
+	LENS_CATALOGUE.map((lens) => [
+		`lens-${lens.id}`,
+		{
+			name: `lens-${lens.id}`,
+			description: lens.question,
+			mode: "subagent" as const,
+			prompt: buildLensSystemPrompt(lens.id),
+			permission: lens.permission,
+			steps: LENS_MAX_STEPS,
+		},
+	]),
+)
+
 export const AGENTS: Readonly<Record<string, AgentDefinition>> = {
+	...LENS_AGENTS,
+	/**
+	 * Ranks the lens candidates. Denied every tool on purpose: it adjudicates text
+	 * the lenses already gathered, and giving it instruments would make it a sixth
+	 * lens with a casting vote — the thing the fan-out exists to avoid.
+	 */
+	"investigation-validator": {
+		name: "investigation-validator",
+		description: "Ranks investigation lens candidates and promotes at most one.",
+		mode: "subagent",
+		prompt: VALIDATOR_SYSTEM_PROMPT,
+		permission: [new PermissionRule({ tool: "*", action: "deny" })],
+		steps: 1,
+	},
 	default: {
 		name: "default",
 		description: "General Maple assistant.",

@@ -82,7 +82,116 @@ const baseInput = (binding: unknown, incidentId: string) => ({
 	agentBinding: binding,
 })
 
+const enableFanout = Effect.gen(function* () {
+	const database = yield* Database
+	const nowMs = yield* Clock.currentTimeMillis
+	yield* database.execute((db) =>
+		db.insert(aiTriageSettings).values({
+			orgId: ORG,
+			enabled: true,
+			fanoutEnabled: true,
+			maxRunsPerDay: 20,
+			updatedAt: new Date(nowMs),
+		}),
+	)
+})
+
+const fakeFanoutWorkflow = () => {
+	const created: Array<{ id: string; params: Record<string, unknown> }> = []
+	return {
+		created,
+		binding: {
+			create: async (input: { id: string; params: Record<string, unknown> }) => {
+				created.push(input)
+				return { id: input.id }
+			},
+		},
+	}
+}
+
+/** A critical incident — severity is what earns an automatic start its fan-out. */
+const criticalInput = (binding: unknown, fanoutBinding: unknown, incidentId: string) => ({
+	orgId: ORG,
+	incidentKind: "error" as const,
+	incidentId,
+	context: { kind: "error", severity: "critical", serviceName: "checkout-api" },
+	agentBinding: binding,
+	fanoutBinding,
+})
+
 describe("maybeEnqueueTriage", () => {
+	/**
+	 * The gap the reviews found: the automatic half of the routing rule was never
+	 * wired. `maybeEnqueueTriage` owns every incident-open start, and it used to
+	 * call `beginTurn` unconditionally — so an org that enabled fan-out got it on
+	 * manual starts only, and the severity branch of the policy was dead code that
+	 * still passed its own unit tests.
+	 */
+	it.effect("dispatches a critical automatic incident to the fan-out workflow", () =>
+		Effect.gen(function* () {
+			yield* enableFanout
+			const chat = fakeBinding()
+			const workflow = fakeFanoutWorkflow()
+
+			const result = yield* maybeEnqueueTriage(
+				criticalInput(chat.binding, workflow.binding, "incident-critical"),
+			)
+			assert.isTrue(result.enqueued)
+			// The workflow ran; the single-pass chat turn did not.
+			assert.lengthOf(workflow.created, 1)
+			assert.lengthOf(chat.created, 0)
+			assert.lengthOf(workflow.created[0]!.params.lensIds as ReadonlyArray<string>, 5)
+
+			const database = yield* Database
+			const rows = yield* database.execute((db) =>
+				db.select().from(investigations).where(eq(investigations.orgId, ORG)),
+			)
+			assert.strictEqual(rows[0]?.fanoutState, "queued")
+			assert.strictEqual(rows[0]?.fanoutSize, 5)
+			// Six model passes, six units of budget.
+			assert.strictEqual(rows[0]?.autonomousTurns, 6)
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("keeps a low-severity automatic incident on the single pass", () =>
+		Effect.gen(function* () {
+			yield* enableFanout
+			const chat = fakeBinding()
+			const workflow = fakeFanoutWorkflow()
+
+			const result = yield* maybeEnqueueTriage({
+				...criticalInput(chat.binding, workflow.binding, "incident-low"),
+				context: { kind: "error", severity: "low" },
+			})
+			assert.isTrue(result.enqueued)
+			assert.lengthOf(workflow.created, 0)
+			assert.lengthOf(chat.created, 1)
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("records agent_unavailable when the fan-out binding is missing", () =>
+		Effect.gen(function* () {
+			yield* enableFanout
+			const chat = fakeBinding()
+
+			const result = yield* maybeEnqueueTriage(
+				criticalInput(chat.binding, undefined, "incident-nobinding"),
+			)
+			assert.isFalse(result.enqueued)
+			assert.strictEqual(result.reason, "no_binding")
+			// It must NOT silently fall back to one agent — a run planned as a
+			// fan-out that quietly ran as a single pass is a lie in the boards.
+			assert.lengthOf(chat.created, 0)
+
+			const database = yield* Database
+			const rows = yield* database.execute((db) =>
+				db.select().from(investigations).where(eq(investigations.orgId, ORG)),
+			)
+			assert.strictEqual(rows[0]?.status, "failed")
+			assert.include(rows[0]?.error ?? "", "agent_unavailable")
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
 	it.effect("does nothing when the org has not opted in", () =>
 		Effect.gen(function* () {
 			const { binding, created } = fakeBinding()

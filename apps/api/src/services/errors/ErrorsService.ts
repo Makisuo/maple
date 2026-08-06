@@ -85,7 +85,11 @@ import {
 } from "@maple/query-engine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
-import { INVESTIGATION_AGENT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
+import {
+	INVESTIGATION_AGENT_BINDING,
+	INVESTIGATION_FANOUT_BINDING,
+	maybeEnqueueTriage,
+} from "@/services/errors/ai-triage-enqueue"
 import { escalationDedupeKey, escalationReasonFor } from "@/services/errors/issue-severity"
 import { SYSTEM_ERRORS_AGENT_NAME, isReservedAgentName } from "@/services/auth/system-actors"
 import { evaluateEscalationPolicy } from "@/services/alerts/escalation-policy"
@@ -475,6 +479,10 @@ const make: Effect.Effect<
 	const investigationAgentBinding = Option.match(workerEnv, {
 		onNone: () => undefined,
 		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
+	})
+	const investigationFanoutBinding = Option.match(workerEnv, {
+		onNone: () => undefined,
+		onSome: (e) => e[INVESTIGATION_FANOUT_BINDING],
 	})
 
 	const newErrorIssueId = () => decodeErrorIssueIdSync(randomUUID())
@@ -2792,6 +2800,7 @@ const make: Effect.Effect<
 							issueId,
 						},
 						agentBinding: investigationAgentBinding,
+						fanoutBinding: investigationFanoutBinding,
 					}).pipe(Effect.provideService(Database, database))
 
 					return { touched: 1, opened: 1 }

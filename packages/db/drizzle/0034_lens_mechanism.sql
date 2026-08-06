@@ -1,0 +1,1 @@
+ALTER TABLE "investigation_lens_runs" ADD COLUMN "mechanism" text;

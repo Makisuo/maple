@@ -1,7 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ErrorIssueId, InvestigationId, IsoDateTimeString, UserId } from "../primitives"
-import { AiTriageIncidentKind, AiTriageResult } from "./ai-triage"
+import { AiTriageEvidence, AiTriageIncidentKind, AiTriageResult } from "./ai-triage"
 import { Authorization } from "./current-tenant"
 import { IssueSeverity } from "./errors"
 
@@ -37,6 +37,136 @@ export const InvestigationConfidence = Schema.Literals(["high", "medium", "low"]
 	title: "Investigation Confidence",
 })
 export type InvestigationConfidence = Schema.Schema.Type<typeof InvestigationConfidence>
+
+// ---------------------------------------------------------------------------
+// Fan-out (lenses + validator)
+// ---------------------------------------------------------------------------
+
+/**
+ * A lens is a *framing*, not a tool: each dispatched agent gets the same subject
+ * and one question to answer about it. The catalogue is fixed rather than
+ * generated per run, which is the whole reason "ruled out" is comparable across
+ * two investigations — a lens that finds nothing is still a result worth
+ * printing.
+ *
+ * Array order is dispatch order.
+ */
+export const LensId = Schema.Literals([
+	"deploy_correlation",
+	"downstream_dependency",
+	"resource_saturation",
+	"traffic_shape",
+	"config_flags",
+]).annotate({ identifier: "@maple/LensId", title: "Lens" })
+export type LensId = Schema.Schema.Type<typeof LensId>
+
+/** Where the lens itself got to, independent of what the validator made of it. */
+export const LensRunStatus = Schema.Literals(["queued", "checking", "reported", "no_finding"]).annotate({
+	identifier: "@maple/LensRunStatus",
+	title: "Lens Run Status",
+})
+export type LensRunStatus = Schema.Schema.Type<typeof LensRunStatus>
+
+/** What the validator did with the lens's candidate. `pending` = not ranked yet. */
+export const LensVerdict = Schema.Literals([
+	"pending",
+	"promoted",
+	"merged",
+	"ruled_out",
+	"rejected",
+]).annotate({ identifier: "@maple/LensVerdict", title: "Lens Verdict" })
+export type LensVerdict = Schema.Schema.Type<typeof LensVerdict>
+
+/**
+ * Where the run as a whole is. `none` is the single-pass path — the gate in
+ * `fanout-policy` declined to fan out — and is what every pre-fan-out row
+ * backfills to.
+ *
+ * `superseded` means a later `submit_diagnosis` (a human follow-up in the Chat
+ * tab) overwrote the report the validator promoted, so the lens verdicts no
+ * longer explain what is on screen.
+ */
+export const InvestigationFanoutState = Schema.Literals([
+	"none",
+	"queued",
+	"running",
+	"validating",
+	"ranked",
+	"rejected_all",
+	"superseded",
+]).annotate({ identifier: "@maple/InvestigationFanoutState", title: "Fan-out State" })
+export type InvestigationFanoutState = Schema.Schema.Type<typeof InvestigationFanoutState>
+
+/** One dispatched lens, as the boards render it. */
+export class InvestigationLensRun extends Schema.Class<InvestigationLensRun>("InvestigationLensRun")({
+	lensId: LensId,
+	status: LensRunStatus,
+	verdict: LensVerdict,
+	/** The candidate cause this lens put forward, or null if it never reached one. */
+	claim: Schema.NullOr(Schema.String),
+	/** The validator's one-line reason — the trust payload of the whole section. */
+	reason: Schema.NullOr(Schema.String),
+	/** What it is doing right now, while `status` is `checking`. */
+	progressNote: Schema.NullOr(Schema.String),
+	confidence: Schema.NullOr(InvestigationConfidence),
+	toolCount: Schema.Number,
+	elapsedSeconds: Schema.NullOr(Schema.Number),
+}) {}
+
+export class InvestigationValidator extends Schema.Class<InvestigationValidator>("InvestigationValidator")({
+	/** `blocked` while lenses are still reporting — the validator has nothing to rank yet. */
+	status: Schema.Literals(["blocked", "ranked", "rejected_all"]),
+	note: Schema.String,
+	elapsedSeconds: Schema.NullOr(Schema.Number),
+}) {}
+
+export class InvestigationFanout extends Schema.Class<InvestigationFanout>("InvestigationFanout")({
+	state: InvestigationFanoutState,
+	/** How many lenses were dispatched. 1 means the single-pass path. */
+	size: Schema.Number,
+}) {}
+
+/**
+ * What a lens agent returns. Deliberately *not* `AiTriageResult`: a lens produces
+ * a candidate to be ranked, not a diagnosis to be published, and conflating the
+ * two is how five rivals end up each looking like a finished verdict.
+ */
+export class LensCandidate extends Schema.Class<LensCandidate>("LensCandidate")({
+	/** One sentence: the cause this lens is putting forward. */
+	claim: Schema.String,
+	/** How it would produce the observed symptoms — the causal chain, not a restatement. */
+	mechanism: Schema.String,
+	confidence: InvestigationConfidence,
+	evidence: Schema.Array(AiTriageEvidence),
+	/**
+	 * What would falsify this claim, in the lens's own words. The validator reads
+	 * it, and a candidate that cannot say what would disprove it should lose.
+	 */
+	selfDoubt: Schema.String,
+	/** Concrete steps a human should take. Text today; actionable later. */
+	suggestedActions: Schema.Array(Schema.String),
+}) {}
+
+/** The validator's ruling on one rival it did not promote. */
+export class LensRival extends Schema.Class<LensRival>("LensRival")({
+	lensId: LensId,
+	verdict: Schema.Literals(["merged", "ruled_out", "rejected"]),
+	/** One sentence saying why it lost. A verdict without one proves nothing. */
+	reason: Schema.String,
+}) {}
+
+/**
+ * The validator's output. `promotedLensId` is null exactly when `report` is —
+ * that pair is the `validation_inconclusive` outcome: the lenses reported and
+ * none of them held up, which is a real answer and not a failure to produce one.
+ */
+export class ValidatorVerdict extends Schema.Class<ValidatorVerdict>("ValidatorVerdict")({
+	promotedLensId: Schema.NullOr(LensId),
+	report: Schema.NullOr(AiTriageResult),
+	rivals: Schema.Array(LensRival),
+	/** One line summarising the ranking, shown on the validator lane. */
+	note: Schema.String,
+}) {}
 
 // ---------------------------------------------------------------------------
 // Subject (what is being investigated)
@@ -131,8 +261,22 @@ export class InvestigationDocument extends Schema.Class<InvestigationDocument>("
 	outputTokens: Schema.NullOr(Schema.Number),
 	error: Schema.NullOr(Schema.String),
 	createdAt: IsoDateTimeString,
+	/**
+	 * When the current pass began. Re-stamped on every restart, which is what makes
+	 * it — and not `createdAt` — the right start for "how long did this run take".
+	 */
+	startedAt: Schema.NullOr(IsoDateTimeString),
 	diagnosedAt: Schema.NullOr(IsoDateTimeString),
 	updatedAt: IsoDateTimeString,
+	/**
+	 * One entry per dispatched lens, in dispatch order. Empty on the single-pass
+	 * path — which is what the UI keys "did this run fan out?" off, rather than
+	 * `fanout.size`: the sizing table and the routing gate are different
+	 * questions, so a run can compute a size of 5 and still have no lenses.
+	 */
+	lensRuns: Schema.Array(InvestigationLensRun),
+	validator: Schema.NullOr(InvestigationValidator),
+	fanout: InvestigationFanout,
 }) {}
 
 export class InvestigationsListResponse extends Schema.Class<InvestigationsListResponse>(

@@ -532,7 +532,7 @@ and **activate public distribution** so the app can be installed into any worksp
   adding the scope would make every existing install report missing scopes until reinstalled.
 - **Every turn carries the clock.** Nothing else in the prompt dates it: eve injects no current
   date, `instructions.md` is compiled at build time, and dynamic instructions resolve on
-  `session.started` — which for Slack is the *first* mention in a thread, since sessions are keyed
+  `session.started` — which for Slack is the _first_ mention in a thread, since sessions are keyed
   `channelId:threadTs`. The model's only temporal signal was the `message_ts` values in the
   transcript, and it read the oldest as "about now", so "chart that now" an hour into an alert
   thread came back anchored to when the alert fired. `agent/lib/turn-time.ts` appends a

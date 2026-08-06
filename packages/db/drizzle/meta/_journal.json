@@ -211,6 +211,34 @@
       "when": 1785800580058,
       "tag": "0030_planetscale_events",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785975725201,
+      "tag": "0031_investigation_lens_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1786007865396,
+      "tag": "0032_fanout_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786016554101,
+      "tag": "0033_lens_run_attempt",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786016873783,
+      "tag": "0034_lens_mechanism",
+      "breakpoints": true
     }
   ]
 }
