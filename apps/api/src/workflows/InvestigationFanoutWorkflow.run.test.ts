@@ -274,6 +274,50 @@ describe("runInvestigationFanout", () => {
 		expect(await loadLanes()).toHaveLength(LENSES.length)
 	})
 
+	/**
+	 * The review caught this dead: the step called `append({ events: [...] })` with
+	 * an `assistant-message` type, neither of which exists — `append` takes one
+	 * `ChatEventInput` and that union has no such member. An `as never` cast got it
+	 * past the compiler and a bare `catch` swallowed the throw, so the Transcript
+	 * tab was empty and Chat follow-ups were ungrounded, silently.
+	 *
+	 * This runs the REAL seedTranscript against a fake session, so the shape is
+	 * checked rather than stubbed away.
+	 */
+	it("seeds a valid turn into the chat session", async () => {
+		const appended: Array<Record<string, unknown>> = []
+		const namespace = {
+			idFromName: (name: string) => name,
+			get: () => ({
+				history: async () => [],
+				append: async (event: Record<string, unknown>) => {
+					appended.push(event)
+					return appended.length
+				},
+			}),
+		}
+		const { seedTranscript, ...rest } = baseDeps()
+		void seedTranscript
+		await runInvestigationFanout(
+			{ ...env, CHAT_SESSION: namespace },
+			{ payload: harness.payload },
+			fakeStep,
+			rest,
+		)
+
+		expect(appended.map((event) => event.type)).toEqual([
+			"user-message",
+			"turn-start",
+			"text-delta",
+			"turn-end",
+		])
+		const delta = appended.find((event) => event.type === "text-delta")!
+		expect(String(delta.text)).toContain("Reconstructed summary")
+		// Telemetry-derived claims become assistant text, so they carry provenance —
+		// a follow-up turn must not read them as its own conclusions.
+		expect(String(delta.text)).toContain("not instructions")
+	})
+
 	it("skips a run whose investigation is no longer investigating", async () => {
 		await harness.db
 			.update(investigations)

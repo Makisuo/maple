@@ -110,6 +110,14 @@ export const investigationLensRuns = pgTable(
 			.notNull()
 			.references(() => investigations.id, { onDelete: "cascade" }),
 		lensId: text("lens_id").$type<LensId>().notNull(),
+		/**
+		 * Which restart produced this lane. Terminating the previous workflow
+		 * instance is best-effort — an instance already past its guard keeps
+		 * running — so without this a straggler from attempt N writes its claims and
+		 * verdicts into attempt N+1's lanes and the board shows one run assembled
+		 * from two.
+		 */
+		attempt: integer("attempt").notNull().default(0),
 		/** Position in the dispatch order — the boards render lanes by this, not by id. */
 		ordinal: integer("ordinal").notNull(),
 		status: text("status").$type<LensRunStatus>().notNull().default("queued"),
@@ -143,7 +151,11 @@ export const investigationLensRuns = pgTable(
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 	},
 	(table) => [
-		uniqueIndex("investigation_lens_runs_lens_idx").on(table.investigationId, table.lensId),
+		uniqueIndex("investigation_lens_runs_lens_idx").on(
+			table.investigationId,
+			table.attempt,
+			table.lensId,
+		),
 		index("investigation_lens_runs_org_inv_idx").on(table.orgId, table.investigationId),
 	],
 )

@@ -376,7 +376,7 @@ describe("InvestigationService", () => {
 		}).pipe(Effect.provide(harness.layer))
 	})
 
-	it.effect("clears the previous attempt's lanes on restart", () => {
+	it.effect("hides the previous attempt's lanes and starts a fresh instance on restart", () => {
 		const chat = chatSessionHarness()
 		const workflow = fanoutWorkflowHarness()
 		const harness = makeHarness({
@@ -419,15 +419,20 @@ describe("InvestigationService", () => {
 
 			yield* service.restartInvestigation(ORG, started.id)
 
+			// The stale lane still exists on attempt 0, but the document no longer
+			// carries it: reads are scoped to the row's current attempt, so a
+			// straggler from the terminated instance cannot appear beside the retry.
+			const restarted = yield* service.getInvestigation(ORG, started.id)
+			assert.lengthOf(restarted.lensRuns, 0)
+
 			const lanes = yield* database.execute((db) =>
 				db
 					.select()
 					.from(investigationLensRuns)
 					.where(eq(investigationLensRuns.investigationId, started.id)),
 			)
-			// The stale lane is gone — the unique index would otherwise make the new
-			// run's inserts no-ops and the board would show the old verdicts.
-			assert.lengthOf(lanes, 0)
+			assert.lengthOf(lanes, 1)
+			assert.strictEqual(lanes[0]?.attempt, 0)
 			// A restart needs a distinct workflow instance id or Cloudflare rejects it.
 			assert.lengthOf(workflow.creates, 2)
 			assert.notStrictEqual(workflow.creates[0]!.id, workflow.creates[1]!.id)

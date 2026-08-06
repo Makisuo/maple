@@ -36,7 +36,7 @@ import {
 } from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
-import { Cause, Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Cause, Clock, Context, Data, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
 import { fanoutPlan, type FanoutPlan } from "@/services/errors/fanout-policy"
@@ -54,6 +54,13 @@ import { Env } from "@/platform/Env"
  * same reason `CHAT_SESSION` is resolved this way.
  */
 export const FANOUT_WORKFLOW_BINDING = "INVESTIGATION_FANOUT_WORKFLOW"
+
+class FanoutStartError extends Data.TaggedError("FanoutStartError")<{ readonly cause: string }> {}
+
+interface FanoutWorkflowBinding {
+	readonly create: (options: { id: string; params: unknown }) => Promise<{ id: string }>
+	readonly get?: (id: string) => Promise<{ terminate: () => Promise<unknown> }>
+}
 
 const decodeIdSync = Schema.decodeUnknownSync(InvestigationId)
 const decodeSubjectSync = Schema.decodeUnknownSync(InvestigationSubject)
@@ -317,8 +324,10 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			 * common case on a list page.
 			 */
 			const loadLensRows = (orgId: OrgId, rows: ReadonlyArray<InvestigationRow>) => {
-				const ids = rows.filter((row) => row.fanoutState !== "none").map((row) => row.id)
-				if (ids.length === 0) return Effect.succeed([] as ReadonlyArray<InvestigationLensRunRow>)
+				const fanned = rows.filter((row) => row.fanoutState !== "none")
+				if (fanned.length === 0) return Effect.succeed([] as ReadonlyArray<InvestigationLensRunRow>)
+				const ids = fanned.map((row) => row.id)
+				const attemptById = new Map(fanned.map((row) => [row.id as string, row.fanoutAttempt]))
 				return dbExecute((db) =>
 					db
 						.select()
@@ -330,6 +339,12 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 							),
 						)
 						.orderBy(investigationLensRuns.investigationId, investigationLensRuns.ordinal),
+				).pipe(
+					// Only the attempt the row is on. A terminated instance can still be
+					// draining, and its lanes must not appear beside the retry's.
+					Effect.map((lanes) =>
+						lanes.filter((lane) => lane.attempt === attemptById.get(lane.investigationId)),
+					),
 				)
 			}
 
@@ -425,35 +440,50 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					)
 				}
 
-				// Two ceilings, both counted in the same column. `autonomousTurns` is
-				// incremented by the pass count, so the run cap is enforced by comparing
-				// against a start that costs one, and the pass cap by the full cost.
+				// Two ceilings counted in two different units, which is the whole point
+				// of having two columns. Summing `autonomousTurns` — which is
+				// incremented by the *pass* count — and comparing it to `maxRunsPerDay`
+				// silently reinterprets a configured 20 runs as 20 passes, i.e. about
+				// three critical incidents a day.
+				//
+				// Windowed on `startedAt`, not `createdAt`: a restart re-stamps
+				// `startedAt`, so restarting an investigation opened last week correctly
+				// spends today's budget instead of escaping the window entirely.
 				const dailyLimit = settings?.maxRunsPerDay ?? 20
 				const passLimit = settings?.maxPassesPerDay ?? 60
 				const usageRows = yield* dbExecute((db) =>
 					db
 						.select({
-							count: sql<number>`coalesce(sum(${investigations.autonomousTurns}), 0)::int`,
+							runs: sql<number>`count(*)::int`,
+							// The passes one start costs: N lenses plus the validator, or 1.
+							passes: sql<number>`coalesce(sum(case when ${investigations.fanoutSize} > 1 then ${investigations.fanoutSize} + 1 else 1 end), 0)::int`,
 						})
 						.from(investigations)
 						.where(
 							and(
 								eq(investigations.orgId, orgId),
-								gte(investigations.createdAt, new Date(startOfUtcDay(nowMs))),
+								gte(investigations.startedAt, new Date(startOfUtcDay(nowMs))),
 							),
 						),
 				)
-				const used = usageRows[0]?.count ?? 0
-				if (used >= dailyLimit || used + passCount > passLimit) {
+				const usedRuns = usageRows[0]?.runs ?? 0
+				const usedPasses = usageRows[0]?.passes ?? 0
+				const overRuns = usedRuns >= dailyLimit
+				const overPasses = usedPasses + passCount > passLimit
+				if (overRuns || overPasses) {
 					const retryableAtMs = startOfUtcDay(nowMs) + 24 * 60 * 60 * 1000
 					yield* Effect.annotateCurrentSpan({
 						"maple.investigation.start_result": "quota_skipped",
 						"maple.investigation.daily_limit": dailyLimit,
+						"maple.investigation.daily_pass_limit": passLimit,
+						"maple.investigation.quota_dimension": overRuns ? "runs" : "passes",
 					})
 					return yield* Effect.fail(
 						new InvestigationQuotaError({
-							message: `Daily investigation budget of ${dailyLimit} has been reached.`,
-							limit: dailyLimit,
+							message: overRuns
+								? `Daily investigation budget of ${dailyLimit} runs has been reached.`
+								: `Daily investigation budget of ${passLimit} model passes has been reached.`,
+							limit: overRuns ? dailyLimit : passLimit,
 							retryableAt: decodeIsoSync(new Date(retryableAtMs).toISOString()),
 						}),
 					)
@@ -494,9 +524,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				nowMs: number,
 			) {
 				const env = Option.getOrUndefined(workerEnv)
-				const binding = env?.[FANOUT_WORKFLOW_BINDING] as
-					| { create: (options: { id: string; params: unknown }) => Promise<{ id: string }> }
-					| undefined
+				const binding = env?.[FANOUT_WORKFLOW_BINDING] as FanoutWorkflowBinding | undefined
 				if (!binding || typeof binding.create !== "function") {
 					yield* markStartFailed(
 						orgId,
@@ -526,19 +554,35 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, doc.id))),
 				)
 
-				const started = yield* Effect.tryPromise(() =>
-					binding.create({
-						id: instanceId,
-						params: {
+				// `Exit`, not `Effect.option`: the reason matters and used to be dropped
+				// on the floor. An id collision means a live instance already owns this
+				// investigation — a bug signal — while a network error means retry, and
+				// both used to produce the same unlogged `start_failed`.
+				const started = yield* Effect.exit(
+					Effect.tryPromise({
+						try: () =>
+							binding.create({
+								id: instanceId,
+								params: {
+									orgId,
+									investigationId: doc.id,
+									lensIds: plan.lenses,
+									attempt,
+								},
+							}),
+						catch: (cause) => new FanoutStartError({ cause: String(cause) }),
+					}),
+				)
+
+				if (Exit.isFailure(started)) {
+					yield* Effect.logWarning("Investigation fan-out could not be started").pipe(
+						Effect.annotateLogs({
 							orgId,
 							investigationId: doc.id,
-							lensIds: plan.lenses,
-							attempt,
-						},
-					}),
-				).pipe(Effect.option)
-
-				if (Option.isNone(started)) {
+							instanceId,
+							error: Cause.pretty(started.cause),
+						}),
+					)
 					yield* markStartFailed(
 						orgId,
 						doc.id,
@@ -867,14 +911,46 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				yield* ensureStartAllowed(orgId, false, nowMs, plan.passCount)
 
 				const attempt = (row?.fanoutAttempt ?? 0) + 1
-				// The previous attempt's lanes have to go: the unique index on
-				// (investigation_id, lens_id) would otherwise make every insert in the
-				// new run a no-op, and the board would render the old verdicts as if
-				// they belonged to the retry. There is no previous-attempt UI, so
-				// deleting is the honest option.
-				yield* dbExecute((db) =>
-					db.delete(investigationLensRuns).where(eq(investigationLensRuns.investigationId, id)),
-				)
+
+				// Stop the run we are replacing before deleting its lanes. Without this
+				// the old instance keeps going, and since lens rows are keyed only by
+				// (investigation_id, lens_id) it writes its claims and verdicts into the
+				// NEW attempt's lanes and can publish a diagnosis over a live run — a
+				// board assembled from two interleaved attempts.
+				if (row?.workflowInstanceId) {
+					const env = Option.getOrUndefined(workerEnv)
+					const binding = env?.[FANOUT_WORKFLOW_BINDING] as FanoutWorkflowBinding | undefined
+					if (binding?.get) {
+						yield* Effect.exit(
+							Effect.tryPromise({
+								try: async () => {
+									const instance = await binding.get!(row.workflowInstanceId!)
+									await instance.terminate()
+								},
+								catch: (cause) => new FanoutStartError({ cause: String(cause) }),
+							}),
+						).pipe(
+							// An instance that already finished cannot be terminated, and
+							// that is the common case — never fail a restart over it.
+							Effect.tap((exit) =>
+								Exit.isFailure(exit)
+									? Effect.logDebug(
+											"Previous fan-out instance could not be terminated",
+										).pipe(
+											Effect.annotateLogs({
+												investigationId: id,
+												instanceId: row.workflowInstanceId,
+											}),
+										)
+									: Effect.void,
+							),
+						)
+					}
+				}
+				// Prior lanes are NOT deleted. They are scoped by `attempt` and the reads
+				// filter to the row's current one, so the retry starts clean while a
+				// straggler from the terminated instance can only write into its own
+				// attempt's rows — where nothing renders them.
 				yield* dbExecute((db) =>
 					db
 						.update(investigations)
