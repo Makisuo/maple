@@ -564,6 +564,11 @@ export const SessionReplays = table("session_replays", {
 	// Heartbeat-refreshed. Recovers duration for sessions killed without an
 	// unload beacon, where EndTime is null.
 	LastActivityAt: T.nullable(T.dateTime64),
+	// 1 on every row of a session that was billed to Autumn. The billed unit is a
+	// visit (one visitor per 30-minute window, spanning tabs and subdomains), not
+	// a SessionId — so countIf(BillableStart = 1) reproduces the invoice and
+	// uniq(SessionId) is the larger, session-level count.
+	BillableStart: T.uint8,
 })
 
 export const SessionReplayEvents = table("session_replay_events", {

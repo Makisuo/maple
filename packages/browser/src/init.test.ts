@@ -101,6 +101,64 @@ describe("lazy replay chunk", () => {
 	})
 })
 
+describe("sampling", () => {
+	const capturePosts = (): Array<{ url: string; body: string }> => {
+		const posts: Array<{ url: string; body: string }> = []
+		vi.stubGlobal("fetch", async (input: RequestInfo | URL, requestInit?: RequestInit) => {
+			posts.push({
+				url: typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+				body: typeof requestInit?.body === "string" ? requestInit.body : "",
+			})
+			return new Response(null, { status: 200 })
+		})
+		vi.stubGlobal("window", {
+			sessionStorage: new MemoryStorage(),
+			localStorage: new MemoryStorage(),
+			location: { href: "https://app.example.com/", host: "app.example.com" },
+		})
+		return posts
+	}
+
+	it("posts nothing at all at sampleRate 0 — no metadata row, so no charge", async () => {
+		const posts = capturePosts()
+		const handle = init({
+			ingestKey: "public-key",
+			serviceName: "test-web",
+			endpoint: "https://collector.test",
+			tracing: { enabled: false },
+			replay: { enabled: true, sampleRate: 0 },
+		})
+
+		track("should-not-ship")
+		await handle.shutdown()
+
+		expect(replay.start).not.toHaveBeenCalled()
+		// The metadata row is the billed unit; the event rows would be orphans
+		// without it. Neither may leave the page.
+		expect(posts.filter((post) => post.url.includes("/v1/sessionReplays/meta"))).toHaveLength(0)
+		expect(posts.filter((post) => post.url.endsWith("/v1/sessionEvents"))).toHaveLength(0)
+	})
+
+	it("still captures the session at sampleRate 1 with replay disabled", async () => {
+		const posts = capturePosts()
+		const handle = init({
+			ingestKey: "public-key",
+			serviceName: "test-web",
+			endpoint: "https://collector.test",
+			tracing: { enabled: false },
+			replay: { enabled: false, sampleRate: 1 },
+		})
+
+		track("keep-me")
+		await handle.shutdown()
+
+		// Turning off video is not a request to turn off analytics.
+		expect(replay.start).not.toHaveBeenCalled()
+		expect(posts.some((post) => post.url.includes("/v1/sessionReplays/meta"))).toBe(true)
+		expect(posts.some((post) => post.body.includes("keep-me"))).toBe(true)
+	})
+})
+
 describe("browser consent lifecycle", () => {
 	it("starts on grant, discards revoked buffers, and restarts with a new session", async () => {
 		const posts: Array<{ url: string; body: string }> = []

@@ -16,8 +16,10 @@ import {
 	noteCounts,
 	onSessionRotate,
 	peekSession,
+	resolveBillable,
 	type SessionRecord,
 } from "./session"
+import { claimVisit } from "./visit"
 import { getVisitorId, isVisitorIdPersisted } from "./visitor"
 
 /**
@@ -28,7 +30,7 @@ import { getVisitorId, isVisitorIdPersisted } from "./visitor"
  * posted at session start, whose counters are all zero and therefore read as a
  * bounce. 60s is the floor worth using: the table is a ReplacingMergeTree, so
  * every heartbeat is an unmerged part until the next merge. Billing meters only
- * `version == 1` rows, so heartbeats do not double-bill.
+ * `billable_start == 1 && version == 1` rows, so heartbeats do not double-bill.
  */
 const HEARTBEAT_INTERVAL_MS = 60_000
 
@@ -180,6 +182,11 @@ export function startSessionLifecycle(
 				// record already carries it, and the two can only disagree.
 				visitorIsNew: record.visitorIsNew === true,
 				visitorIdPersisted: isVisitorIdPersisted(),
+				// Asked once per session and then read back off the record, so every
+				// row of a session agrees about whether it was charged. A second tab
+				// and a second subdomain reach this too and get `false` — they are
+				// real sessions, just not separate charges.
+				billableStart: resolveBillable(record.id, claimVisit),
 				entry: entryContextOf(record),
 				lastUrl: record.lastUrl,
 				clickCount: counts.clickCount,

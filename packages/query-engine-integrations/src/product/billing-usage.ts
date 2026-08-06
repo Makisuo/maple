@@ -10,10 +10,11 @@
 //     chart's totals reconcile with them rather than telling a second story.
 //
 //   `dailySessionCountQuery`  — browser sessions per UTC day, from
-//     `session_replays` (one row per session). Kept as a separate query rather
-//     than a UNION branch: the two tables disagree on column types (byte sums
-//     are UInt64, the session count is UInt64 but the bucket column comes from
-//     DateTime64) and unifying them has bitten us with 502s before.
+//     `session_replays` (many rows per session — see the query). Kept as a
+//     separate query rather than a UNION branch: the two tables disagree on
+//     column types (byte sums are UInt64, the session count is UInt64 but the
+//     bucket column comes from DateTime64) and unifying them has bitten us with
+//     502s before.
 //
 // Day buckets are UTC, matching how the warehouse stores every timestamp. Byte
 // sums are UInt64 and arrive as JSON strings on BYO-ClickHouse, so both row
@@ -90,15 +91,34 @@ export const dailySessionCountRowSchema: CompiledQueryRowSchema<DailySessionCoun
  * Per-UTC-day browser session count for one org.
  *
  * `session_replays` is PARTITION BY toDate(StartTime), so the window predicate
- * on `StartTime` prunes partitions. A session is counted on the day it started —
- * which is also how the ingest gateway meters it to Autumn, so the daily series
- * and the cycle total can't drift.
+ * on `StartTime` prunes partitions. A session is counted on the day it started,
+ * matching how the ingest gateway meters it to Autumn.
+ *
+ * The count is `uniq(SessionId)` rather than `count()` for the same reason the
+ * session facets use it (`session-replays.ts`): the SDK posts one metadata row
+ * at session start, one per 60s heartbeat, and one at unload, and this is a
+ * ReplacingMergeTree read without `FINAL` — so `count()` returns however many of
+ * those rows a background merge has not collapsed yet. That made a 10-minute
+ * session render as ~12 on the spend chart, and made the number move between
+ * refreshes.
+ *
+ * Not yet `countIf(BillableStart = 1)`, which is what would reproduce the
+ * invoice exactly. The billed unit is a visit — one visitor per 30-minute
+ * window, spanning tabs and subdomains — so this series reads *higher* than the
+ * bill by however many extra tabs and subdomains a visitor used. The reason to
+ * wait: `BillableStart` defaults to 0, and rows posted by SDK bundles that
+ * predate the field are billed by the gateway's legacy `Version = 1` fallback
+ * while reading as 0 here. Switching now would under-report for every customer
+ * on a pinned older SDK, which is a worse lie than over-reporting. Switch once
+ * the field is broadly deployed; the mixed window is not distinguishable in the
+ * warehouse, because the surviving row after a merge is the last one posted and
+ * legacy sessions never stamped the flag on it.
  */
 export function dailySessionCountQuery() {
 	return from(SessionReplays)
 		.select(($) => ({
 			day: CH.toStartOfInterval($.StartTime, DAY_SECONDS),
-			sessions: CH.count(),
+			sessions: CH.uniq($.SessionId),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),

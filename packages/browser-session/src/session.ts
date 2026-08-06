@@ -2,8 +2,15 @@ import { claimNewVisitor } from "./visitor"
 
 const STORAGE_KEY = "maple.session"
 
-/** Rotate the session after this much inactivity (PostHog's default). */
-const IDLE_TIMEOUT_MS = 30 * 60_000
+/**
+ * Rotate the session after this much inactivity (PostHog's default).
+ *
+ * Exported because the billable-visit claim in `visit.ts` has to use the exact
+ * same window: if the visit window were longer, an idle rotation would produce a
+ * session nobody is charged for; if shorter, one continuous session would be
+ * charged twice.
+ */
+export const IDLE_TIMEOUT_MS = 30 * 60_000
 /** Hard cap on a single session's lifetime regardless of activity. */
 const MAX_SESSION_MS = 24 * 60 * 60_000
 /**
@@ -44,6 +51,16 @@ export interface SessionRecord {
 	 * used versions 1 (active) and 2 (ended), so the absent case resumes at 2.
 	 */
 	metaVersion?: number
+	/**
+	 * Whether this session won its billing claim (see `visit.ts`). Persisted so
+	 * every row of the session reports the same answer — a reload must not
+	 * re-claim, and the `ended` row must agree with the `active` one or the merged
+	 * row would misreport whether the session was charged.
+	 *
+	 * `undefined` means "not yet resolved"; `resolveBillable` in
+	 * `session-lifecycle.ts` settles it once, on the run's first post.
+	 */
+	billable?: boolean
 
 	// --- Analytics context -------------------------------------------------
 	// All optional: `readRecord`'s validator deliberately still accepts records
@@ -88,6 +105,19 @@ const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_c
 
 /** In-memory fallback when sessionStorage is unavailable (private mode). */
 let ephemeral: SessionRecord | undefined
+/**
+ * Set once a write has failed, after which `ephemeral` outranks whatever is in
+ * sessionStorage.
+ *
+ * The failure mode this exists for is quota exhaustion, where `getItem` keeps
+ * succeeding while `setItem` throws — so a read-side check for "is storage
+ * usable" sees a healthy store and returns a record that can never advance.
+ * `metaVersion` then stays pinned at 1 forever, and since the gateway meters
+ * `version == 1` rows, every 60s heartbeat is billed as a new session. Do not
+ * collapse this back into the `getItem` try/catch: a throwing read is a
+ * different, rarer fault than a throwing write.
+ */
+let writesFailed = false
 
 export type SessionRotationListener = (previous: SessionRecord, next: SessionRecord) => void
 const rotationListeners = new Set<SessionRotationListener>()
@@ -139,6 +169,9 @@ function freshRecord(now: number): SessionRecord {
 }
 
 function readRecord(): SessionRecord | undefined {
+	// Once writes are failing the stored copy is a stale snapshot that can only
+	// get staler; the in-memory one is the only record still advancing.
+	if (writesFailed && ephemeral) return ephemeral
 	try {
 		const raw = window.sessionStorage.getItem(STORAGE_KEY)
 		if (!raw) return undefined
@@ -161,8 +194,14 @@ function writeRecord(record: SessionRecord): void {
 	ephemeral = record
 	try {
 		window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(record))
+		// Cleared on success rather than latched: a quota freed by another tab
+		// closing should put the durable store back in charge, so the record
+		// survives the next reload.
+		writesFailed = false
 	} catch {
-		// Private mode / storage disabled — the ephemeral copy is the source of truth.
+		// Private mode / storage disabled / quota exhausted — the ephemeral copy is
+		// the source of truth from here on, and `readRecord` has to be told so.
+		writesFailed = true
 	}
 }
 
@@ -298,6 +337,27 @@ export function noteCounts(counts: { clickCount?: number; errorCount?: number })
 }
 
 /**
+ * Settle whether `sessionId` is the one charged for its visit, asking `claim`
+ * only the first time and persisting the answer.
+ *
+ * The persistence is the point: a reload, a hide/resume cycle and every 60s
+ * heartbeat all rebuild the metadata row, and each must report the same verdict
+ * the first row did. Re-asking would re-claim on the reload that follows the
+ * claim expiring, and disagree with the row already in the warehouse.
+ *
+ * The `claim` callback is injected rather than imported so `session.ts` stays
+ * free of a dependency on `visit.ts`, which reads this module's idle window.
+ */
+export function resolveBillable(sessionId: string, claim: () => boolean): boolean {
+	const record = readRecord()
+	if (!record || record.id !== sessionId) return false
+	if (record.billable !== undefined) return record.billable
+	const billable = claim()
+	writeRecord({ ...record, billable })
+	return billable
+}
+
+/**
  * The persisted session record as-is — no activity touch, no rotation. Use
  * this to read counters when posting a metadata row; `getSession()` would
  * rotate an idle session out from under the row being written.
@@ -357,4 +417,10 @@ export function nextMetaVersion(): number {
 	const version = (record.metaVersion ?? 2) + 1
 	writeRecord({ ...record, metaVersion: version })
 	return version
+}
+
+/** Test seam — drops the in-memory fallback and its write-failure latch. */
+export function resetSessionStorageStateForTests(): void {
+	ephemeral = undefined
+	writesFailed = false
 }

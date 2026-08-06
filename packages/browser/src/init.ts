@@ -35,7 +35,8 @@ export interface MapleBrowserHandle {
 
 interface BrowserRuntime {
 	readonly initialSessionId: string
-	readonly sink: SessionEventSink
+	/** Absent when the sample rate excluded this visitor — see `captureSession`. */
+	readonly sink: SessionEventSink | undefined
 	replay?: ReplaySessionHandle | undefined
 	metadata?: MetadataSessionHandle | undefined
 	/** Settles when the lazy replay chunk resolved; absent on the metadata path. */
@@ -64,7 +65,23 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 	if (!hasConsent()) clearPendingEvents()
 	setActiveTraceIdProvider(() => trace.getActiveSpan()?.spanContext().traceId)
 
-	const recordReplay = config.replayEnabled && Math.random() < config.replaySampleRate
+	// One draw, two decisions. `captureSession` governs everything that produces a
+	// session — the metadata rows, which are the billed unit, and the distilled
+	// event sink that gives them their contents. `recordReplay` is a strict subset:
+	// there is no such thing as recording a session you are not capturing.
+	//
+	// Sampling deliberately reaches the metadata rows. It used to gate only the
+	// rrweb chunk, which meant an org on `sampleRate: 0.1` was billed for 100% of
+	// its sessions and had no way to buy less — the one lever named "sample" moved
+	// only the part we don't charge for. The cost is that unsampled traffic is
+	// absent from session analytics rather than present-but-unrecorded; that is the
+	// trade a sample rate is supposed to make.
+	//
+	// `replayEnabled: false` must not suppress capture: turning off video is not
+	// the same request as turning off analytics.
+	const sampledIn = Math.random() < config.replaySampleRate
+	const captureSession = sampledIn
+	const recordReplay = config.replayEnabled && sampledIn
 	let runtime: BrowserRuntime | undefined
 	let stopped = false
 	let rotateOnNextStart = false
@@ -78,6 +95,17 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 		setVisitorTracking(config.persistVisitorId && mayPersistIdentifier())
 		const session = (rotateOnNextStart ? rotateSession() : undefined) ?? getSession()
 		rotateOnNextStart = false
+		if (config.tracingEnabled && !shutdownTracing) shutdownTracing = setupTracing(config)
+
+		// Unsampled: no sink published, so `TraceIdCollector` finds none and spans
+		// carry no `session.id`. A link to a session row that was never written is
+		// worse than no link — it dead-ends in the trace UI. Tracing itself is
+		// untouched; spans are billed as traces and sampled by their own tracer.
+		if (!captureSession) {
+			runtime = { initialSessionId: session.id, sink: undefined }
+			return
+		}
+
 		publishSessionSink(session.id)
 		const sink = startEventSink(
 			{
@@ -88,7 +116,6 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 			},
 			session.id,
 		)
-		if (config.tracingEnabled && !shutdownTracing) shutdownTracing = setupTracing(config)
 		const shared = {
 			endpoint: config.endpoint,
 			ingestKey: config.ingestKey,
@@ -150,9 +177,12 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 		const liveSink = getActiveSink()
 		const sink =
 			liveSink && currentSessionId && liveSink.sessionId === currentSessionId ? liveSink : previous.sink
-		if (flush) await sink.flush(true)
-		sink.stop()
-		if (sink !== previous.sink) previous.sink.stop()
+		// Both are absent for an unsampled runtime, which never started a sink.
+		if (sink) {
+			if (flush) await sink.flush(true)
+			sink.stop()
+		}
+		if (sink !== previous.sink) previous.sink?.stop()
 		clearSessionSink(currentSessionId ?? previous.initialSessionId)
 		// Awaiting the import too keeps `shutdown()` a real quiescence point: it
 		// resolves with no replay work still scheduled behind it.

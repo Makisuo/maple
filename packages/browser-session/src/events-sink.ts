@@ -101,10 +101,13 @@ export function getActiveSink(): SessionEventSink | undefined {
 /**
  * Start (or reuse) the distilled-event sink for a session.
  *
- * Runs on **every** page load, not just sampled-for-replay ones: page views and
- * `track()` calls are the analytics substrate, and gating them behind replay
- * sampling would make unique visitors and top pages a sample rather than a
- * count. The rrweb recorder stays sampled — it is the expensive part.
+ * Callers start this only for sessions the sample rate kept. It used to run on
+ * every page load — the argument being that page views and `track()` calls are
+ * the analytics substrate, so sampling them would turn unique visitors and top
+ * pages into estimates rather than counts. That argument lost to billing: the
+ * metadata row is the billed unit, sampling now suppresses it, and events
+ * without their parent session row are orphans no session view can render. A
+ * sampled-out visitor is absent, not partially present.
  */
 export function startEventSink(config: ReplayEngineConfig, sessionId: string): SessionEventSink {
 	const existing = holder()[SINK_KEY]

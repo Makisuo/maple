@@ -78,8 +78,18 @@ describe("dailySessionCountQuery", () => {
 		expect(sql).toContain("FROM session_replays")
 		expect(sql).toContain("OrgId = 'org_123'")
 		expect(sql).toContain("toStartOfInterval(StartTime, INTERVAL 86400 SECOND) AS day")
-		expect(sql).toContain("count() AS sessions")
 		expect(sql).toContain("GROUP BY day")
+	})
+
+	it("counts distinct session ids, not rows", () => {
+		const { sql } = compileCH(dailySessionCountQuery(), params)
+
+		// The SDK posts a row at session start, one per 60s heartbeat, and one at
+		// unload. This is a ReplacingMergeTree read without FINAL, so count() bills
+		// the chart for every row a merge has not collapsed yet — a 10-minute
+		// session rendered as ~12.
+		expect(sql).toContain("uniq(SessionId) AS sessions")
+		expect(sql).not.toContain("count()")
 	})
 
 	it("filters on StartTime so the partition key prunes", () => {

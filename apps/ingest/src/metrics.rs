@@ -204,6 +204,13 @@ static AUTUMN_FLUSHES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
+static BILLED_BROWSER_SESSIONS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_billed_browser_sessions_total")
+        .with_description("Browser sessions metered to Autumn, by how the SDK identified the visitor")
+        .build()
+});
+
 // --- Up/down counter ------------------------------------------------------
 
 static REQUESTS_IN_FLIGHT: LazyLock<UpDownCounter<i64>> = LazyLock::new(|| {
@@ -662,6 +669,24 @@ pub fn clickhouse_export_retry(datasource: &str, status: &str) {
 /// An OTLP Summary metric data point was dropped (unsupported by the encoder).
 pub fn metrics_summary_dropped() {
     METRICS_SUMMARY_DROPPED_TOTAL.add(1, &[]);
+}
+
+/// Browser sessions charged to an org, split by whether the visitor id survives
+/// the page load.
+///
+/// `visitor_persisted=false` means both the cookie and localStorage were blocked
+/// (Safari ITP, incognito, a cookie-blocking extension). Those visitors cannot
+/// hold a visit claim, so every page load they make re-claims and is charged
+/// again — the one over-count the per-visit model does not fix. This exists so
+/// the size of that tail is a number before anyone tries to price around it.
+pub fn billed_browser_sessions(count: u64, visitor_persisted: bool) {
+    if count == 0 {
+        return;
+    }
+    BILLED_BROWSER_SESSIONS_TOTAL.add(
+        count,
+        &[KeyValue::new("visitor_persisted", visitor_persisted)],
+    );
 }
 
 /// An Autumn usage-tracking flush cycle completed (`status` is `ok` or `error`).

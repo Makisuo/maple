@@ -2323,6 +2323,38 @@ async fn handle_replay_meta(
     }
 }
 
+/// Whether one session-metadata row starts a visit Autumn should be charged for.
+///
+/// See the call site for why it takes both conditions. The `billable_start`
+/// fallback is not defensive: customers pin SDK versions, so bundles that predate
+/// the field keep posting for months, and treating their absence as "not
+/// billable" would silently stop billing every one of those orgs. Absent means
+/// "an older SDK that could not claim a visit", and the old `version == 1` rule
+/// is the best answer available for it. Remove the fallback only once the
+/// oldest SDK in the wild emits the field.
+/// Whether the SDK could persist this visitor's id across the page load.
+///
+/// The SDK emits `maple.visitor.persisted: "false"` only when both the cookie and
+/// localStorage were blocked, so an absent key means persisted — including for
+/// older bundles that never emitted it.
+fn visitor_id_is_persisted(obj: &serde_json::Map<String, serde_json::Value>) -> bool {
+    obj.get("resource_attributes")
+        .and_then(|v| v.as_object())
+        .and_then(|attrs| attrs.get("maple.visitor.persisted"))
+        .and_then(|v| v.as_str())
+        != Some("false")
+}
+
+fn is_billable_visit_start(obj: &serde_json::Map<String, serde_json::Value>) -> bool {
+    if obj.get("version").and_then(|v| v.as_u64()) != Some(1) {
+        return false;
+    }
+    match obj.get("billable_start") {
+        Some(value) => value.as_u64() == Some(1),
+        None => true,
+    }
+}
+
 async fn handle_replay_meta_inner(
     state: &AppState,
     headers: &HeaderMap,
@@ -2371,16 +2403,27 @@ async fn handle_replay_meta_inner(
     // NDJSON: one session-metadata object per line. The org_id is always taken
     // from the authenticated key, never from the client-supplied body.
     //
-    // Count session-start rows so we can meter one browser session per session to
-    // Autumn. The browser SDK posts a start row (`version: 1` / `status: "active"`)
-    // at session start and an end row (`version: 2`) at unload; counting only starts
-    // avoids double-counting. Caveat: an in-tab reload recreates the SDK session sink
-    // and re-posts a start row for the same SessionId, so reloads can slightly
-    // over-count — consistent with the at-least-once metering used for the
-    // logs/traces/metrics signals.
+    // Count billable visit starts so we meter one browser session per *visit* to
+    // Autumn. Two conditions, and both are load-bearing:
+    //
+    //   `billable_start == 1` — the SDK claimed this visit against a store shared
+    //     across tabs and subdomains (`visit.ts`). It is sticky: every row of a
+    //     billable session carries it, so the row that survives the
+    //     ReplacingMergeTree merge still records that the session was charged.
+    //   `version == 1`        — the first row of that session record. Since the
+    //     flag is sticky, this is what keeps the ~1/minute heartbeats and the
+    //     unload row from re-billing a visit already paid for.
+    //
+    // Billing used to be `version == 1` alone. That charged once per tab and once
+    // per origin, because the session record lives in sessionStorage, which is
+    // scoped to both — one person with four tabs open paid four times.
     let country = derive_country(headers, state.config.trust_proxy_geo);
     let mut rows: Vec<Vec<u8>> = Vec::new();
     let mut session_starts: u64 = 0;
+    // Of those, the ones from a visitor whose id does not survive the page load —
+    // the tail that re-claims and re-bills on every navigation. Counted, not
+    // corrected: there is nowhere on such a browser to keep the claim.
+    let mut unpersisted_starts: u64 = 0;
     for line in body.split(|&b| b == b'\n') {
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
@@ -2422,8 +2465,11 @@ async fn handle_replay_meta_inner(
         // LowCardinality columns. Clamp before it reaches the warehouse — the
         // SDK's own trimming ships in customer JavaScript.
         sanitize_session_meta(obj);
-        if obj.get("version").and_then(|v| v.as_u64()) == Some(1) {
+        if is_billable_visit_start(obj) {
             session_starts += 1;
+            if !visitor_id_is_persisted(obj) {
+                unpersisted_starts += 1;
+            }
         }
         rows.push(
             serde_json::to_vec(&value).map_err(|e| {
@@ -2456,6 +2502,8 @@ async fn handle_replay_meta_inner(
     if let Some(tracker) = &state.autumn_tracker {
         if org_id != SENTINEL_ORG_ID && session_starts > 0 {
             tracker.track(&org_id, "browser_sessions", session_starts as f64);
+            metrics::billed_browser_sessions(session_starts - unpersisted_starts, true);
+            metrics::billed_browser_sessions(unpersisted_starts, false);
         }
     }
 
@@ -6431,6 +6479,50 @@ mod tests {
             &resolved.paused_features,
             "traces"
         ));
+    }
+
+    fn meta_row(json: &str) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::from_str(json).expect("valid JSON") {
+            serde_json::Value::Object(map) => map,
+            other => panic!("expected an object, got {other}"),
+        }
+    }
+
+    #[test]
+    fn only_the_first_row_of_a_claimed_visit_is_billed() {
+        // The claiming session's first row: the one charge for this visit.
+        assert!(is_billable_visit_start(&meta_row(
+            r#"{"version":1,"billable_start":1,"status":"active"}"#
+        )));
+
+        // `billable_start` is sticky across the session's rows so the merged row
+        // still records the charge — which is exactly why `version` has to gate it.
+        // Heartbeats and the unload row must not re-bill a visit already paid for.
+        assert!(!is_billable_visit_start(&meta_row(
+            r#"{"version":2,"billable_start":1,"status":"active"}"#
+        )));
+        assert!(!is_billable_visit_start(&meta_row(
+            r#"{"version":9,"billable_start":1,"status":"ended"}"#
+        )));
+
+        // A second tab or a second subdomain: a real session, its own record, its
+        // own version 1 — and not a second charge, because the visit was claimed.
+        assert!(!is_billable_visit_start(&meta_row(
+            r#"{"version":1,"billable_start":0,"status":"active"}"#
+        )));
+    }
+
+    #[test]
+    fn a_row_without_the_field_falls_back_to_the_old_version_rule() {
+        // Customers pin SDK versions, so bundles predating `billable_start` keep
+        // posting for months. Reading their silence as "not billable" would stop
+        // billing those orgs entirely.
+        assert!(is_billable_visit_start(&meta_row(
+            r#"{"version":1,"status":"active"}"#
+        )));
+        assert!(!is_billable_visit_start(&meta_row(
+            r#"{"version":2,"status":"ended"}"#
+        )));
     }
 
     #[test]

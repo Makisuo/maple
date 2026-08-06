@@ -57,6 +57,19 @@ export interface SessionMetaRowInput {
 	 * rendering a player with nothing to play.
 	 */
 	readonly recorded: boolean
+	/**
+	 * Whether this session owns its visit claim — see `visit.ts`. Sticky: set on
+	 * every row of a billable session, so the row that survives the merge still
+	 * says whether it was charged.
+	 *
+	 * The gateway meters `billable_start == 1 && version == 1`. Billing used to key
+	 * off `version === 1` alone, which conflated two unrelated jobs: `version`
+	 * exists so `argMax(field, Version)` resolves the newest row, and it happened to
+	 * be 1 on the first row of each session record — one per tab, per origin. The
+	 * claim narrows that to one per visitor per idle window; `version` keeps it to
+	 * one row.
+	 */
+	readonly billableStart?: boolean | undefined
 }
 
 /**
@@ -119,6 +132,12 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, 
 		// the surviving row, which read as "one page, no clicks" — a bounce.
 		visitor_id: input.visitorId ?? "",
 		visitor_is_new: input.visitorIsNew ? 1 : 0,
+		// Sticky across every row of a billable session, not just the first. The
+		// gateway meters `billable_start == 1 && version == 1`, so the conjunction
+		// keeps the charge singular while this column stays on the row that survives
+		// the merge — otherwise the un-flagged `ended` row would replace the flagged
+		// one and nothing in the warehouse could reproduce the invoice.
+		billable_start: input.billableStart ? 1 : 0,
 		user_email: (input.captureUserEmail === false ? undefined : identity?.email) ?? "",
 		user_name: identity?.username ?? "",
 		group_id: identity?.groupId ?? "",
