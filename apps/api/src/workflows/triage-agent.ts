@@ -15,19 +15,17 @@
  *      `AiTriageResult` from `@maple/domain/http` — the canonical schema, so the hand-maintained
  *      Valibot mirror in `apps/chat-flue/src/lib/triage-result.ts` is gone.
  *
- * `ToolRuntime` deliberately exports only `dispatch` for a single call; the multi-turn loop that
- * Flue's `session.prompt` used to hide is owned here, where the step cap and the allowlist are
- * visible.
+ * The loop itself lives in `./tool-loop`, shared with the fan-out's lens passes — they need the
+ * same turns with a different prompt, a narrower allowlist and a deadline. This module keeps what
+ * is specific to a triage pass: its prompt, its step cap, and the schema it is forced to answer in.
  */
 import type { AiTriageIncidentKind } from "@maple/domain/http"
 import { AiTriageResult } from "@maple/domain/http"
-import { LLM, LLMEvent, Message, ToolResultPart, type LLMRequest, type Model, type Usage } from "@maple/llm"
-import { ToolRuntime, toDefinitions } from "@maple/llm"
+import { LLM, Message, type Model } from "@maple/llm"
 import { Effect } from "effect"
-import { contextLimitOf, outputLimitOf, toLlmCallError } from "@/platform/Llm"
-import { buildMapleTools } from "@/mcp/tools/llm-tools"
-import { isNearContextLimit, pruneToolResults } from "@/chat/loop"
+import { toLlmCallError } from "@/platform/Llm"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import { addUsage, runToolLoop } from "./tool-loop"
 import { buildTriageContextMessage, TRIAGE_SYSTEM_PROMPT, TRIAGE_TOOL_NAMES } from "./triage-prompt"
 
 /**
@@ -36,9 +34,6 @@ import { buildTriageContextMessage, TRIAGE_SYSTEM_PROMPT, TRIAGE_TOOL_NAMES } fr
  * number of turns against the org.
  */
 const MAX_TOOL_STEPS = 12
-
-/** Fan-out cap for tool calls issued in the same assistant turn. */
-const TOOL_CONCURRENCY = 4
 
 export interface TriageAgentInput {
 	readonly orgId: string
@@ -55,17 +50,6 @@ export interface TriageAgentOutput {
 	readonly toolSteps: number
 }
 
-/** The read-only allowlist, as `@maple/llm` tools. Nothing here is approval-gated: the triage loop
- * is autonomous and mutating tools are simply not in `TRIAGE_TOOL_NAMES`. */
-const buildTriageTools = (tenant: TenantContext) =>
-	buildMapleTools(tenant, { include: (name) => TRIAGE_TOOL_NAMES.has(name) })
-
-const addUsage = (total: { input: number; output: number; cacheRead: number }, usage: Usage | undefined) => ({
-	input: total.input + (usage?.inputTokens ?? 0),
-	output: total.output + (usage?.outputTokens ?? 0),
-	cacheRead: total.cacheRead + (usage?.cacheReadInputTokens ?? 0),
-})
-
 /**
  * Run the investigation and produce a validated `AiTriageResult`.
  *
@@ -75,72 +59,18 @@ const addUsage = (total: { input: number; output: number; cacheRead: number }, u
  * `cacheRead` being tracked separately in the returned usage.
  */
 export const runTriageAgent = Effect.fn("ai_triage.investigate")(function* (input: TriageAgentInput) {
-	const tools = buildTriageTools(input.tenant)
-	const toolDefinitions = toDefinitions(tools)
-
-	let request: LLMRequest = LLM.request({
+	const loop = yield* runToolLoop({
 		id: `triage_${input.orgId}`,
-		model: input.model,
 		system: TRIAGE_SYSTEM_PROMPT,
 		prompt: buildTriageContextMessage(input.incidentKind, input.context),
-		tools: toolDefinitions,
+		model: input.model,
+		tenant: input.tenant,
+		toolNames: TRIAGE_TOOL_NAMES,
+		maxToolSteps: MAX_TOOL_STEPS,
+		label: "ai-triage.investigate",
 	})
 
-	let usage = { input: 0, output: 0, cacheRead: 0 }
-	let toolSteps = 0
-
-	for (let step = 0; step < MAX_TOOL_STEPS; step++) {
-		const response = yield* LLM.generate(request).pipe(
-			Effect.mapError((error) => toLlmCallError("ai-triage.investigate", error)),
-		)
-		usage = addUsage(usage, response.usage)
-
-		const calls = response.toolCalls.filter(
-			(event) => LLMEvent.is.toolCall(event) && !event.providerExecuted,
-		)
-		if (calls.length === 0) break
-
-		const dispatched = yield* Effect.forEach(
-			calls,
-			(call) =>
-				LLMEvent.is.toolCall(call)
-					? ToolRuntime.dispatch(tools, call).pipe(Effect.map((result) => [call, result] as const))
-					: Effect.die(new Error("tool-call event narrowing failed")),
-			{ concurrency: TOOL_CONCURRENCY },
-		)
-		toolSteps += dispatched.length
-
-		// `response.message` is the assistant turn the response reducer already assembled —
-		// text, reasoning and tool calls in order — so the next request carries the model's own
-		// reasoning rather than just its tool calls.
-		request = LLM.updateRequest(request, {
-			messages: [
-				...request.messages,
-				response.message,
-				...dispatched.map(([call, settled]) =>
-					Message.tool(
-						ToolResultPart.make({ id: call.id, name: call.name, result: settled.result }),
-					),
-				),
-			],
-		})
-
-		// Same exposure as the chat turn, and worse: twelve steps of warehouse-sized tool payloads
-		// with no user in the loop to notice it stalling. Acts on the provider's reported count.
-		if (
-			isNearContextLimit(response.usage?.inputTokens ?? 0, {
-				context: contextLimitOf(input.model),
-				output: outputLimitOf(input.model),
-			})
-		) {
-			request = pruneToolResults(request)
-		}
-	}
-
-	yield* Effect.annotateCurrentSpan({
-		"maple.triage.tool_steps": toolSteps,
-		"gen_ai.request.model": input.model.id,
-	})
+	yield* Effect.annotateCurrentSpan({ "maple.triage.tool_steps": loop.toolSteps })
 
 	// Final pass: the transcript so far, plus a forced structured answer. `generateObject` drives a
 	// synthetic forced tool call under the hood, so it works on every protocol including Workers AI.
@@ -148,17 +78,15 @@ export const runTriageAgent = Effect.fn("ai_triage.investigate")(function* (inpu
 		id: `triage_${input.orgId}_result`,
 		model: input.model,
 		system: TRIAGE_SYSTEM_PROMPT,
-		messages: [...request.messages, Message.user(FINAL_INSTRUCTION)],
+		messages: [...loop.messages, Message.user(FINAL_INSTRUCTION)],
 		schema: AiTriageResult,
 	}).pipe(Effect.mapError((error) => toLlmCallError("ai-triage.report", error)))
-
-	usage = addUsage(usage, structured.usage)
 
 	return {
 		result: structured.object,
 		model: { provider: String(input.model.provider), id: String(input.model.id) },
-		usage,
-		toolSteps,
+		usage: addUsage(loop.usage, structured.usage),
+		toolSteps: loop.toolSteps,
 	} satisfies TriageAgentOutput
 })
 

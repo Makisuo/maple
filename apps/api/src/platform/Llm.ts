@@ -48,7 +48,7 @@ const OPENROUTER_APP_TITLE = "Maple"
  * and `trace` is forwarded to any configured Broadcast destination.
  */
 export interface LlmCallTags {
-	readonly surface: "chat" | "ai-triage"
+	readonly surface: "chat" | "ai-triage" | "investigation-lens" | "investigation-validator"
 	readonly orgId: string
 	/** Groups one conversation or investigation. OpenRouter caps this at 256 characters. */
 	readonly sessionId?: string
@@ -101,6 +101,9 @@ export interface LlmEnv extends Record<string, unknown> {
 	readonly MAPLE_TRIAGE_MODEL_CONTEXT?: string
 	/** Max completion tokens, overriding {@link MODEL_LIMITS} for the configured model. */
 	readonly MAPLE_TRIAGE_MODEL_OUTPUT?: string
+	/** Cheaper model for the fan-out lens passes; falls back to the triage model. */
+	readonly MAPLE_LENS_MODEL_OPENROUTER?: string
+	readonly MAPLE_LENS_MODEL_WORKERS_AI?: string
 	readonly OPENROUTER_API_KEY?: string
 }
 
@@ -203,6 +206,40 @@ const withLimits = (env: LlmEnv, model: Model): Model => {
 		},
 	})
 }
+
+/**
+ * The model a fan-out *lens* runs on.
+ *
+ * Lenses gather evidence through one narrow framing; the validator does the
+ * actual reasoning about which candidate explains the incident. So the spend
+ * belongs on the validator, and a fan-out of five otherwise multiplies the
+ * expensive model by five for work that a cheaper one does adequately.
+ *
+ * Falls back to the triage model when unset, so tiering is opt-in per stage and
+ * an unconfigured environment behaves exactly as it does today. The validator
+ * has no resolver of its own on purpose — it *is* `resolveTriageModel`, and
+ * introducing a third knob would let the ranking silently drift below the
+ * lenses it ranks.
+ */
+export const resolveLensModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
+	resolveLlmProvider(env) === "workers-ai"
+		? CloudflareWorkersAI.configure({
+				accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
+				apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
+			}).model(
+				readString(env, "MAPLE_LENS_MODEL_WORKERS_AI") ??
+					readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ??
+					DEFAULT_WORKERS_AI_MODEL,
+			)
+		: OpenRouter.configure({
+				apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
+				headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
+				...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
+			}).model(
+				readString(env, "MAPLE_LENS_MODEL_OPENROUTER") ??
+					readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ??
+					DEFAULT_OPENROUTER_MODEL,
+			)
 
 /**
  * The runnable LLM stack — identical for both providers, which is what makes the switch a pure
