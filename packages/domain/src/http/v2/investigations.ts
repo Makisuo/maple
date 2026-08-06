@@ -184,10 +184,25 @@ const V2InvestigationSnapshot = Schema.Struct({
  * the trace-id decode surface for no gain. It is persisted and available to the
  * validator.
  */
+/**
+ * Open decode for the catalogue tokens.
+ *
+ * `lens_runs` is documented as an evolving shape, and that promise was empty
+ * while these were closed `Schema.Literals`: a server that learned a sixth lens
+ * failed the decode for every deployed client, blanking the detail page and the
+ * hub — and it made the client's own unknown-lens fallback unreachable. Decoding
+ * openly is what makes the annotation true. The literal unions stay exported for
+ * everything that writes these values.
+ */
+const OpenLensId = Schema.Union([LensId, Schema.String])
+const OpenLensRunStatus = Schema.Union([LensRunStatus, Schema.String])
+const OpenLensVerdict = Schema.Union([LensVerdict, Schema.String])
+const OpenFanoutState = Schema.Union([InvestigationFanoutState, Schema.String])
+
 const V2InvestigationLensRun = Schema.Struct({
-	lensId: LensId,
-	status: LensRunStatus,
-	verdict: LensVerdict,
+	lensId: OpenLensId,
+	status: OpenLensRunStatus,
+	verdict: OpenLensVerdict,
 	claim: Schema.NullOr(Schema.String),
 	reason: Schema.NullOr(Schema.String),
 	progressNote: Schema.NullOr(Schema.String),
@@ -204,13 +219,13 @@ const V2InvestigationLensRun = Schema.Struct({
 )
 
 const V2InvestigationValidator = Schema.Struct({
-	status: Schema.Literals(["blocked", "ranked", "rejected_all"]),
+	status: Schema.Union([Schema.Literals(["blocked", "ranked", "rejected_all"]), Schema.String]),
 	note: Schema.String,
 	elapsedSeconds: Schema.NullOr(Schema.Number),
 }).pipe(Schema.encodeKeys({ elapsedSeconds: "elapsed_seconds" }))
 
 const V2InvestigationFanout = Schema.Struct({
-	state: InvestigationFanoutState,
+	state: OpenFanoutState,
 	size: Schema.Number,
 })
 
@@ -238,7 +253,15 @@ const investigationExample = {
 		incident_started_at: "2026-07-15T09:04:00.000Z",
 		incident_ended_at: null,
 	},
-	report: null,
+	report: {
+		summary: "A deploy to checkout-api four minutes before the onset regressed the timeout budget.",
+		suspected_cause: "Deploy 4f21a shortened the upstream timeout below the p99 of the call it guards.",
+		severity_assessment: "high",
+		affected_scope: "checkout-api",
+		evidence: [],
+		suggested_actions: ["Roll back deploy 4f21a."],
+		confidence: "high",
+	},
 	model: "claude-opus-4-8",
 	severity: "high",
 	confidence: "high",
@@ -263,8 +286,8 @@ const investigationExample = {
 			elapsed_seconds: 12.6,
 		},
 	],
-	validator: { status: "ranked", note: "1 promoted · 0 merged · 3 ruled out", elapsed_seconds: 8.2 },
-	fanout: { state: "ranked", size: 4 },
+	validator: { status: "ranked", note: "1 promoted · 0 merged · 0 ruled out", elapsed_seconds: 8.2 },
+	fanout: { state: "ranked", size: 1 },
 } as const
 
 export const V2Investigation = Schema.Struct({

@@ -1,6 +1,6 @@
 {
-  "id": "28a15535-ff6c-4deb-93fa-218f20be8703",
-  "prevId": "d2ff7853-29e9-4a14-b6c7-006c8a16acbe",
+  "id": "d2ff7853-29e9-4a14-b6c7-006c8a16acbe",
+  "prevId": "d8878bd3-11fe-47fe-b047-0815a648de67",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -208,20 +208,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 20
-        },
-        "fanout_enabled": {
-          "name": "fanout_enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "max_passes_per_day": {
-          "name": "max_passes_per_day",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 60
         },
         "updated_at": {
           "name": "updated_at",

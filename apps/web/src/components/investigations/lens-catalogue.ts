@@ -52,4 +52,8 @@ export const LENS_COPY: Record<LensId, LensCopy> = {
  * wire as an evolving shape, so a server that learns a sixth lens must not blank
  * the page of a client that has not shipped its copy yet.
  */
-export const lensCopy = (id: LensId): LensCopy => LENS_COPY[id] ?? { name: id, question: "", checkLabel: id }
+export const lensCopy = (id: string): LensCopy =>
+	LENS_COPY[id as LensId] ?? { name: humanise(id), question: "", checkLabel: humanise(id) }
+
+/** `cache_pressure` → `Cache pressure`. Better than printing a raw token. */
+const humanise = (id: string): string => id.replace(/_/g, " ").replace(/^./, (first) => first.toUpperCase())

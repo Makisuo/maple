@@ -247,6 +247,29 @@ describe("runInvestigationFanout", () => {
 		expect(row.reportJson).toBeNull()
 	})
 
+	/**
+	 * The lenses really ran, so their cost is real whether or not anything ranked
+	 * them. Before this, a validator that exhausted its retries killed the instance
+	 * and the run consumed N model passes while metering nothing.
+	 */
+	it("still bills the lens passes when the validator dies", async () => {
+		const result = await run(
+			baseDeps({
+				invokeValidator: async () => {
+					throw new Error("validator exploded")
+				},
+			}),
+		)
+		expect(result.status).toBe("failed")
+
+		const row = await loadInvestigation()
+		expect(row.status).toBe("failed")
+		expect(row.error).toContain("validation_failed")
+		// Three lenses at 100/20 each, and no validator tokens because it never answered.
+		expect(row.inputTokens).toBe(3 * 100)
+		expect(row.outputTokens).toBe(3 * 20)
+	})
+
 	it("bills every pass, not just the validator's", async () => {
 		await run(baseDeps())
 		const row = await loadInvestigation()

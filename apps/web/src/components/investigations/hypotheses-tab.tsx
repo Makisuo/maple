@@ -68,16 +68,16 @@ export function HypothesesTab({ investigation }: { investigation: V2Investigatio
 									aria-hidden
 									className={cn(
 										"size-1.5 shrink-0 rounded-full",
-										VERDICT_DOT[entry.verdict],
+										VERDICT_DOT[entry.verdict as LensVerdict] ?? VERDICT_DOT.pending,
 									)}
 								/>
 								<span
 									className={cn(
 										"truncate rounded-sm px-1.5 py-0.5 text-[11px] font-medium",
-										VERDICT_TONE[entry.verdict],
+										VERDICT_TONE[entry.verdict as LensVerdict] ?? VERDICT_TONE.pending,
 									)}
 								>
-									{VERDICT_LABEL[entry.verdict]}
+									{VERDICT_LABEL[entry.verdict as LensVerdict] ?? entry.verdict}
 								</span>
 							</span>
 							<span className="w-40 shrink-0">

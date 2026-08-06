@@ -140,6 +140,12 @@ export const investigationLensRuns = pgTable(
 		 * response multiplies the trace-id decode surface for no gain.
 		 */
 		evidenceJson: jsonb("evidence_json").$type<ReadonlyArray<AiTriageEvidence>>(),
+		/**
+		 * How the claim would produce the symptoms — the causal chain. This is the
+		 * validator's FIRST ranking rule, so dropping it (as an earlier revision did)
+		 * silently degrades every ranking to claim-plus-evidence.
+		 */
+		mechanism: text("mechanism"),
 		/** What would falsify the claim, per the lens. Read by the validator. */
 		selfDoubt: text("self_doubt"),
 		suggestedActionsJson: jsonb("suggested_actions_json").$type<ReadonlyArray<string>>(),

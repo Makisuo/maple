@@ -232,6 +232,13 @@
       "when": 1786016554101,
       "tag": "0033_lens_run_attempt",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786016873783,
+      "tag": "0034_lens_mechanism",
+      "breakpoints": true
     }
   ]
 }

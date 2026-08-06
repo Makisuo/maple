@@ -107,6 +107,25 @@ describe("lensChecks", () => {
 	})
 })
 
+/**
+ * `lens_runs` is documented as an evolving shape. That promise was empty while
+ * the tokens were closed literals: a server that learned a sixth lens failed the
+ * decode for every deployed client and blanked the page. These assert the client
+ * survives one.
+ */
+describe("unknown catalogue tokens", () => {
+	it("renders a lens it has never heard of", () => {
+		const checks = lensChecks([lens({ lensId: "cache_pressure" } as never)])
+		expect(checks[0]!.label).toBe("Cache pressure")
+		expect(checks[0]!.result).toBeTruthy()
+	})
+
+	it("does not claim an unknown verdict held", () => {
+		const checks = lensChecks([lens({ verdict: "deferred" } as never)])
+		expect(checksHeld(checks)).toBe(0)
+	})
+})
+
 describe("lensTally", () => {
 	it("splits the verdicts", () => {
 		const tally = lensTally([

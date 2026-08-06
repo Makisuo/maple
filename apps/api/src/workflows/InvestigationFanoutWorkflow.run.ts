@@ -456,6 +456,7 @@ async function runWithDb(
 									.set({
 										status: "reported",
 										claim: output.claim,
+										mechanism: output.mechanism,
 										progressNote: null,
 										confidence: output.confidence,
 										toolCount: output.toolCount,
@@ -534,81 +535,130 @@ async function runWithDb(
 		)
 
 		// ----------------------------------------------------------- validate
-		const verdict = await step.do("validate", VALIDATE_STEP, async () => {
-			const startedAt = clock()
-			await dbStep((db) =>
-				db
-					.update(investigations)
-					.set({ fanoutState: "validating", updatedAt: new Date(startedAt) })
-					.where(and(eq(investigations.orgId, orgIdTyped), eq(investigations.id, idTyped))),
-			)
-
-			// Read the lanes back from Postgres rather than from the step results: a
-			// step whose *return value* was lost to a retry boundary still wrote its row.
-			const lanes = await dbStep((db) =>
-				db
-					.select()
-					.from(investigationLensRuns)
-					.where(
-						and(
-							eq(investigationLensRuns.investigationId, idTyped),
-							eq(investigationLensRuns.attempt, attempt),
+		// A validator that exhausts its retries used to kill the instance outright:
+		// the run ended with N lens passes consumed and NOTHING metered or written,
+		// because tokens are only ever reported from `persist`. The lenses really
+		// ran, so their cost is real whether or not anything ranked them.
+		let verdict: Awaited<ReturnType<typeof runValidateStep>>
+		try {
+			verdict = await runValidateStep()
+		} catch (error) {
+			await step.do("validate-failed", PERSIST_STEP, async () => {
+				const now = clock()
+				const lanes = await dbStep((db) =>
+					db
+						.select()
+						.from(investigationLensRuns)
+						.where(
+							and(
+								eq(investigationLensRuns.investigationId, idTyped),
+								eq(investigationLensRuns.attempt, attempt),
+							),
 						),
-					)
-					.orderBy(investigationLensRuns.ordinal),
-			)
-
-			const output = await (deps.invokeValidator ?? invokeValidator)({
-				env,
-				orgId,
-				investigationId,
-				subject,
-				snapshot,
-				candidates: lanes.map((lane) => ({
-					lensId: lane.lensId,
-					claim: lane.claim,
-					mechanism: null,
-					confidence: lane.confidence,
-					selfDoubt: lane.selfDoubt,
-					suggestedActions: (lane.suggestedActionsJson ?? []) as ReadonlyArray<string>,
-					evidence: (lane.evidenceJson ?? []) as ReadonlyArray<unknown>,
-					note: lane.error,
-				})),
-				runtime,
-			})
-
-			const finishedAt = clock()
-			const byLens = new Map(output.rivals.map((rival) => [rival.lensId, rival]))
-			await dbStep(async (db) => {
-				for (const lane of lanes) {
-					const promoted = output.promotedLensId === lane.lensId
-					const rival = byLens.get(lane.lensId)
-					const nextVerdict: LensVerdict = promoted ? "promoted" : (rival?.verdict ?? "rejected")
-					await db
-						.update(investigationLensRuns)
+				)
+				const inputTokens = lanes.reduce((total, lane) => total + (lane.inputTokens ?? 0), 0)
+				const outputTokens = lanes.reduce((total, lane) => total + (lane.outputTokens ?? 0), 0)
+				await dbStep((db) =>
+					db
+						.update(investigations)
 						.set({
-							verdict: nextVerdict,
-							reason: promoted
-								? "Promoted — the candidate that best explains the incident."
-								: (rival?.reason ??
-									"The validator did not rank this lens; treated as rejected."),
-							rankedAt: new Date(finishedAt),
-							updatedAt: new Date(finishedAt),
+							status: "failed",
+							fanoutState: "rejected_all",
+							error: `validation_failed: ${error instanceof Error ? error.message : String(error)}`.slice(
+								0,
+								500,
+							),
+							inputTokens,
+							outputTokens,
+							updatedAt: new Date(now),
 						})
-						.where(eq(investigationLensRuns.id, lane.id))
+						.where(and(eq(investigations.orgId, orgIdTyped), eq(investigations.id, idTyped))),
+				)
+				await meterTokens(env, orgId, investigationId, attempt, inputTokens, outputTokens)
+				return { metered: inputTokens + outputTokens }
+			})
+			return { status: "failed" }
+		}
+
+		async function runValidateStep() {
+			return await step.do("validate", VALIDATE_STEP, async () => {
+				const startedAt = clock()
+				await dbStep((db) =>
+					db
+						.update(investigations)
+						.set({ fanoutState: "validating", updatedAt: new Date(startedAt) })
+						.where(and(eq(investigations.orgId, orgIdTyped), eq(investigations.id, idTyped))),
+				)
+
+				// Read the lanes back from Postgres rather than from the step results: a
+				// step whose *return value* was lost to a retry boundary still wrote its row.
+				const lanes = await dbStep((db) =>
+					db
+						.select()
+						.from(investigationLensRuns)
+						.where(
+							and(
+								eq(investigationLensRuns.investigationId, idTyped),
+								eq(investigationLensRuns.attempt, attempt),
+							),
+						)
+						.orderBy(investigationLensRuns.ordinal),
+				)
+
+				const output = await (deps.invokeValidator ?? invokeValidator)({
+					env,
+					orgId,
+					investigationId,
+					subject,
+					snapshot,
+					candidates: lanes.map((lane) => ({
+						lensId: lane.lensId,
+						claim: lane.claim,
+						mechanism: lane.mechanism,
+						confidence: lane.confidence,
+						selfDoubt: lane.selfDoubt,
+						suggestedActions: (lane.suggestedActionsJson ?? []) as ReadonlyArray<string>,
+						evidence: (lane.evidenceJson ?? []) as ReadonlyArray<unknown>,
+						note: lane.error,
+					})),
+					runtime,
+				})
+
+				const finishedAt = clock()
+				const byLens = new Map(output.rivals.map((rival) => [rival.lensId, rival]))
+				await dbStep(async (db) => {
+					for (const lane of lanes) {
+						const promoted = output.promotedLensId === lane.lensId
+						const rival = byLens.get(lane.lensId)
+						const nextVerdict: LensVerdict = promoted
+							? "promoted"
+							: (rival?.verdict ?? "rejected")
+						await db
+							.update(investigationLensRuns)
+							.set({
+								verdict: nextVerdict,
+								reason: promoted
+									? "Promoted — the candidate that best explains the incident."
+									: (rival?.reason ??
+										"The validator did not rank this lens; treated as rejected."),
+								rankedAt: new Date(finishedAt),
+								updatedAt: new Date(finishedAt),
+							})
+							.where(eq(investigationLensRuns.id, lane.id))
+					}
+				})
+
+				return {
+					promotedLensId: output.promotedLensId,
+					report: output.report,
+					note: output.note,
+					model: output.model,
+					inputTokens: output.inputTokens,
+					outputTokens: output.outputTokens,
+					elapsedMs: finishedAt - startedAt,
 				}
 			})
-
-			return {
-				promotedLensId: output.promotedLensId,
-				report: output.report,
-				note: output.note,
-				model: output.model,
-				inputTokens: output.inputTokens,
-				outputTokens: output.outputTokens,
-				elapsedMs: finishedAt - startedAt,
-			}
-		})
+		}
 
 		// ---------------------------------------------------- seed-transcript
 		await step.do("seed-transcript", async () => {
@@ -697,7 +747,7 @@ async function runWithDb(
 						})
 						.where(and(eq(investigations.orgId, orgIdTyped), eq(investigations.id, idTyped))),
 				)
-				await meterTokens(env, orgId, investigationId, inputTokens, outputTokens)
+				await meterTokens(env, orgId, investigationId, attempt, inputTokens, outputTokens)
 				return { status: "inconclusive" as const }
 			}
 
@@ -716,7 +766,7 @@ async function runWithDb(
 					validatorElapsedMs: verdict.elapsedMs,
 				}),
 			)
-			await meterTokens(env, orgId, investigationId, inputTokens, outputTokens)
+			await meterTokens(env, orgId, investigationId, attempt, inputTokens, outputTokens)
 			return { status: "ranked" as const }
 		})
 	}
@@ -726,17 +776,23 @@ const meterTokens = async (
 	env: InvestigationFanoutWorkflowEnv,
 	orgId: string,
 	investigationId: string,
+	attempt: number,
 	inputTokens: number,
 	outputTokens: number,
 ): Promise<void> => {
 	if (!inputTokens && !outputTokens) return
 	// Metering must never fail the run — the diagnosis is the product, the meter is
-	// bookkeeping. Keyed on the investigation id so a retried persist bills once.
+	// bookkeeping.
+	//
+	// The key carries the attempt. Keyed on the bare investigation id, a restart
+	// reused attempt 1's key and its real, different spend was deduplicated away —
+	// every retry after the first was free. Within one attempt the key is still
+	// stable, so a retried `persist` bills once.
 	await trackTokenUsage(env, {
 		orgId: decodeOrgId(orgId),
 		inputTokens,
 		outputTokens,
-		idempotencyKey: investigationId,
+		idempotencyKey: `${investigationId}:${attempt}`,
 		source: "triage",
 	}).catch(() => undefined)
 }
