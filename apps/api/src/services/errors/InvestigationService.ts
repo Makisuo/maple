@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto"
+import { randomUUID } from "node:crypto"
 import {
 	type AiTriageIncidentKind,
 	AiTriageResult,
@@ -22,19 +22,13 @@ import {
 	type SubmitDiagnosisRequest,
 	type UserId,
 } from "@maple/domain/http"
-import {
-	ErrorIssueEventId,
-	ErrorIssueId,
-	InvestigationId,
-	UserId as UserIdSchema,
-} from "@maple/domain/primitives"
+import { ErrorIssueId, InvestigationId, UserId as UserIdSchema } from "@maple/domain/primitives"
 import { wrapChatContext } from "@maple/domain/chat-preamble"
 import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { chatSessionStub } from "@/chat/session"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import {
 	aiTriageSettings,
-	errorIssueEvents,
 	investigationLensRuns,
 	investigations,
 	type InvestigationLensRunRow,
@@ -44,7 +38,7 @@ import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
 import { Cause, Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
-import { applyTriageSeverity } from "@/services/errors/issue-severity"
+import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
 import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 
@@ -53,27 +47,8 @@ const decodeSubjectSync = Schema.decodeUnknownSync(InvestigationSubject)
 const decodeSnapshotOption = Schema.decodeUnknownOption(InvestigationSubjectSnapshot)
 const decodeResultOption = Schema.decodeUnknownOption(AiTriageResult)
 const decodeIsoSync = Schema.decodeUnknownSync(InvestigationDocument.fields.createdAt)
-const decodeIssueId = Schema.decodeUnknownSync(ErrorIssueId)
-const decodeEventId = Schema.decodeUnknownSync(ErrorIssueEventId)
 
 export const newInvestigationId = () => decodeIdSync(randomUUID())
-
-/**
- * Deterministic UUIDv5-style id derived from the investigation id, so the
- * `submit_diagnosis` timeline-event insert is idempotent across re-diagnosis:
- * the same investigation regenerates the SAME id and the primary key (+
- * onConflictDoNothing) absorbs the duplicate. Mirrors the legacy triage path.
- */
-const deterministicEventId = (investigationId: string): string => {
-	const hex = createHash("sha256").update(`investigation-event:${investigationId}`).digest("hex")
-	return [
-		hex.slice(0, 8),
-		hex.slice(8, 12),
-		`5${hex.slice(13, 16)}`,
-		`${((Number.parseInt(hex.slice(16, 17), 16) & 0x3) | 0x8).toString(16)}${hex.slice(17, 20)}`,
-		hex.slice(20, 32),
-	].join("-")
-}
 
 /**
  * Milliseconds are what the column stores — seconds are a display unit, and the
@@ -824,65 +799,24 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				const result = request.report
 				const confidence: InvestigationConfidence = result.confidence
 
+				// Shared with the fan-out workflow's `persist` step so a diagnosis means
+				// the same thing whichever path produced it — same status transition, same
+				// severity application, same deterministically-keyed timeline event.
 				yield* dbExecute((db) =>
-					db
-						.update(investigations)
-						.set({
-							status: "diagnosed",
-							reportJson: result,
-							severity: result.severityAssessment,
-							confidence,
-							model: request.model ?? row.model ?? null,
-							inputTokens: request.inputTokens ?? row.inputTokens ?? null,
-							outputTokens: request.outputTokens ?? row.outputTokens ?? null,
-							error: null,
-							diagnosedAt: new Date(nowMs),
-							updatedAt: new Date(nowMs),
-						})
-						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, id))),
+					applyDiagnosisWrites(db, {
+						orgId,
+						investigationId: id,
+						report: result,
+						issueId: row.issueId ?? null,
+						model: request.model ?? row.model ?? null,
+						inputTokens: request.inputTokens ?? row.inputTokens ?? null,
+						outputTokens: request.outputTokens ?? row.outputTokens ?? null,
+						nowMs,
+						// A human follow-up that re-diagnoses a ranked fan-out orphans the lens
+						// verdicts: they explain a cause that is no longer on screen.
+						...(row.fanoutState === "ranked" ? { fanoutState: "superseded" as const } : {}),
+					}),
 				)
-
-				// Linked error issue (error fingerprint / alert-backed / anomaly-linked)
-				// gets the diagnosis applied: severity (respecting manual override) +
-				// a timeline event, both idempotent via the investigation-derived ids.
-				const issueId = row.issueId
-				if (issueId) {
-					const decodedIssueId = decodeIssueId(issueId)
-					// Severity write + timeline event commit atomically: a crash between
-					// them must not leave the issue escalated without its audit event.
-					yield* dbExecute((db) =>
-						db.transaction(async (tx) => {
-							const applied = await applyTriageSeverity(tx, {
-								orgId,
-								issueId: decodedIssueId,
-								runId: id,
-								investigationId: id,
-								severity: result.severityAssessment,
-								confidence,
-								timestamp: nowMs,
-								result,
-							})
-							await tx
-								.insert(errorIssueEvents)
-								.values({
-									id: decodeEventId(deterministicEventId(id)),
-									orgId,
-									issueId: decodedIssueId,
-									actorId: applied.actorId,
-									type: "ai_triage",
-									payloadJson: {
-										investigationId: id,
-										summary: result.summary,
-										severityAssessment: result.severityAssessment,
-										confidence,
-										applied: applied.applied,
-									},
-									createdAt: new Date(nowMs),
-								})
-								.onConflictDoNothing()
-						}),
-					)
-				}
 
 				const env = Option.getOrUndefined(workerEnv)
 				if (env && (request.inputTokens || request.outputTokens)) {

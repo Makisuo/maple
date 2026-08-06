@@ -87,6 +87,11 @@
 			"binding": "AI_TRIAGE_WORKFLOW",
 			"class_name": "AiTriageWorkflow",
 		},
+		{
+			"name": "investigation-fanout-workflow",
+			"binding": "INVESTIGATION_FANOUT_WORKFLOW",
+			"class_name": "InvestigationFanoutWorkflow",
+		},
 	],
 	// Declaring both a producer binding and a consumer on the same queue name
 	// makes miniflare run the VCS sync queue end-to-end in-process under
