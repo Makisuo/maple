@@ -26,7 +26,7 @@ import { ToolRuntime, toDefinitions } from "@maple/llm"
 import { Effect } from "effect"
 import { contextLimitOf, outputLimitOf, toLlmCallError } from "@/platform/Llm"
 import { buildMapleTools } from "@/mcp/tools/llm-tools"
-import { isNearContextLimit, pruneToolResults } from "@/chat/loop"
+import { dropOldestToolStep, isNearContextLimit } from "@/chat/loop"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { buildTriageContextMessage, TRIAGE_SYSTEM_PROMPT, TRIAGE_TOOL_NAMES } from "./triage-prompt"
 
@@ -127,13 +127,15 @@ export const runTriageAgent = Effect.fn("ai_triage.investigate")(function* (inpu
 
 		// Same exposure as the chat turn, and worse: twelve steps of warehouse-sized tool payloads
 		// with no user in the loop to notice it stalling. Acts on the provider's reported count.
+		// Results arrive already bounded (`mcp/tools/tool-output.ts`), so this is the rare case where
+		// even bounded output fills the window — shed the oldest step rather than editing any of them.
 		if (
 			isNearContextLimit(response.usage?.inputTokens ?? 0, {
 				context: contextLimitOf(input.model),
 				output: outputLimitOf(input.model),
 			})
 		) {
-			request = pruneToolResults(request)
+			request = dropOldestToolStep(request)
 		}
 	}
 

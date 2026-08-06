@@ -6,8 +6,8 @@
  * Every failure mode here was invisible to `tsc` and to the branch's suite.
  */
 import { assert, describe, it } from "vitest"
-import { Effect, Layer, Stream } from "effect"
-import { LLMClient, LLMEvent, type LLMRequest, type Model } from "@maple/llm"
+import { Effect, Layer, Schema, Stream } from "effect"
+import { LLMClient, LLMEvent, Tool, type LLMRequest, type Model, type Tools } from "@maple/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
 import { runChatTurn, type ChatTurnEvent } from "./index"
 import { MAX_STEP_ATTEMPTS } from "./budgets"
@@ -33,8 +33,13 @@ const textDelta = (text: string): LLMEvent => ({ type: "text-delta", id: "t1", t
 
 const finish = (): LLMEvent => ({ type: "finish", reason: "stop" }) as LLMEvent
 
-const toolCall = (id: string, name: string): LLMEvent =>
-	({ type: "tool-call", id, name, input: {}, providerExecuted: false }) as LLMEvent
+/**
+ * `input` matters to more than the tool: `stop.ts` fingerprints it, so a fixture that wants many
+ * steps without tripping the repeated-batch detector has to vary it, and one that wants to trip the
+ * detector has to hold it still.
+ */
+const toolCall = (id: string, name: string, input: unknown = {}): LLMEvent =>
+	({ type: "tool-call", id, name, input, providerExecuted: false }) as LLMEvent
 
 /**
  * Stub the model with a scripted event stream per step.
@@ -90,14 +95,16 @@ const stubModel = (steps: ReadonlyArray<Step>, log: RequestLog = []) => {
 	return { layer: Layer.succeed(LLMClient.Service, service as never), log, calls: () => step }
 }
 
-const collect = (
-	steps: ReadonlyArray<Step>,
-	overrides: {
-		readonly sessionId?: string
-		readonly isCurrent?: () => boolean
-		readonly agent?: AgentDefinition
-	} = {},
-) => {
+interface CollectOverrides {
+	readonly sessionId?: string
+	readonly isCurrent?: () => boolean
+	readonly softStop?: () => boolean
+	readonly agent?: AgentDefinition
+	readonly extraTools?: Tools
+	readonly closingSubmit?: { readonly toolName: string }
+}
+
+const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) => {
 	const stub = stubModel(steps)
 	return runChatTurn({
 		sessionId: overrides.sessionId ?? "org_test:tab",
@@ -106,7 +113,10 @@ const collect = (
 		messages: [],
 		messageId: "m1",
 		...(overrides.isCurrent ? { isCurrent: overrides.isCurrent } : {}),
+		...(overrides.softStop ? { softStop: overrides.softStop } : {}),
 		...(overrides.agent ? { agent: overrides.agent } : {}),
+		...(overrides.extraTools ? { extraTools: overrides.extraTools } : {}),
+		...(overrides.closingSubmit ? { closingSubmit: overrides.closingSubmit } : {}),
 	}).pipe(
 		Stream.runCollect,
 		Effect.map((events) => Array.from(events) as ChatTurnEvent[]),
@@ -116,14 +126,8 @@ const collect = (
 }
 
 /** The common case: only the events matter. */
-const collectEvents = (
-	steps: ReadonlyArray<Step>,
-	overrides: {
-		readonly sessionId?: string
-		readonly isCurrent?: () => boolean
-		readonly agent?: AgentDefinition
-	} = {},
-) => collect(steps, overrides).pipe(Effect.map((result) => result.events))
+const collectEvents = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) =>
+	collect(steps, overrides).pipe(Effect.map((result) => result.events))
 
 const types = (events: ReadonlyArray<ChatTurnEvent>) => events.map((event) => event.type)
 
@@ -228,11 +232,15 @@ describe("runChatTurn", () => {
 
 describe("runChatTurn max steps", () => {
 	it("spends a final tool-less step answering instead of stopping dead", async () => {
-		// Ten steps that each call a read-only tool, then a text-only step.
-		const looping: Step = [toolCall("c1", "find_errors"), finish()]
+		// Ten steps that each call a read-only tool, then a text-only step. Each call carries
+		// different arguments: this is a model working through a wide search, not one stuck on the
+		// same question, and `stop.ts` must not confuse the two.
 		const result = await Effect.runPromise(
 			collect([
-				...Array.from({ length: 10 }, () => looping),
+				...Array.from(
+					{ length: 10 },
+					(_, i): Step => [toolCall("c1", "find_errors", { page: i }), finish()],
+				),
 				[textDelta("Here is what I found."), finish()],
 			]),
 		)
@@ -251,6 +259,76 @@ describe("runChatTurn max steps", () => {
 		assert.lengthOf(terminal(result.events), 1)
 		const end = terminal(result.events)[0]
 		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "max-steps")
+	}, 30_000)
+})
+
+describe("runChatTurn repeated tool calls", () => {
+	/** The same call, forever — a model that has stopped reading the results it is being handed. */
+	const stuck = (): Step => [toolCall("c1", "query_data", { sql: "select 1" }), finish()]
+
+	it("stops well short of the step budget and still answers", async () => {
+		const result = await Effect.runPromise(
+			collect([
+				...Array.from({ length: 3 }, stuck),
+				[textDelta("I keep getting the same empty result."), finish()],
+			]),
+		)
+
+		// Three identical batches trip it, so the closing step is the fourth request. `MAX_STEPS` is
+		// 10 — compare the max-steps test above, where ten *varied* steps take eleven requests to
+		// reach the same closing step. Seven of those were going to return what the first already had.
+		assert.lengthOf(result.requests, 4)
+
+		const last = result.events[result.events.length - 2]
+		assert.equal(last?.type, "text-delta")
+		assert.equal(
+			last?.type === "text-delta" ? last.text : undefined,
+			"I keep getting the same empty result.",
+		)
+	}, 30_000)
+
+	it("settles the batch that tripped it rather than dropping it", async () => {
+		const result = await Effect.runPromise(
+			collect([...Array.from({ length: 3 }, stuck), [textDelta("Done."), finish()]]),
+		)
+
+		// Stopping *before* dispatching would leave the model's last call unanswered in the
+		// transcript — a tool call with no result, which is exactly what the approval path is
+		// careful never to produce.
+		assert.lengthOf(
+			result.events.filter((event) => event.type === "tool-result"),
+			3,
+		)
+	}, 30_000)
+
+	it("tells the model why it is being stopped", async () => {
+		const result = await Effect.runPromise(
+			collect([...Array.from({ length: 3 }, stuck), [textDelta("Done."), finish()]]),
+		)
+
+		const closing = result.requests[result.requests.length - 1]
+		const notice = closing?.messages[closing.messages.length - 1]
+		const text = notice?.content.map((part) => (part.type === "text" ? part.text : "")).join("")
+		// Named, not just forbidden: a model told only "stop" tends to report the plan it was
+		// looping on as though it had carried it out.
+		assert.include(text ?? "", "same tool calls several times")
+		assert.isEmpty(closing?.tools ?? [{}])
+		assert.equal(closing?.toolChoice?.type, "none")
+	}, 30_000)
+
+	it("does not fire when the model varies its arguments", async () => {
+		const result = await Effect.runPromise(
+			collect([
+				...Array.from(
+					{ length: 4 },
+					(_, i): Step => [toolCall("c1", "query_data", { sql: `select ${i}` }), finish()],
+				),
+				[textDelta("Found it."), finish()],
+			]),
+		)
+
+		// Four working steps plus the answer — no closing step was forced.
+		assert.lengthOf(result.requests, 5)
 	}, 30_000)
 })
 
@@ -467,4 +545,122 @@ describe("runChatTurn max steps, defensively", () => {
 		const end = terminal(result.events)[0]
 		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "max-steps")
 	}, 30_000)
+})
+
+/**
+ * The headless closing step.
+ *
+ * An attended turn answers in prose, so the step that closes it is sent with no
+ * tools at all. An investigation answers *through* a tool, and that same closing
+ * step silenced it: a pass that spent its whole budget gathering evidence could
+ * not report any of it, and was recorded identically to one that never looked.
+ */
+describe("runChatTurn closing submit", () => {
+	const SUBMIT = "submit_candidate"
+
+	const submitTool = (record: Array<unknown>): Tools => ({
+		[SUBMIT]: Tool.make({
+			description: "Record the candidate.",
+			parameters: Schema.Struct({ claim: Schema.String }),
+			success: Schema.String,
+			execute: (value) =>
+				Effect.sync(() => {
+					record.push(value)
+					return "Recorded."
+				}),
+		}),
+	})
+
+	/** Ten tool-calling steps, then the model finally calls submit. */
+	const exhaustingSteps = (): ReadonlyArray<Step> => [
+		...Array.from({ length: 10 }, (_, i): Step => [toolCall("c1", "find_errors", { page: i }), finish()]),
+		[toolCall("s1", SUBMIT, { claim: "pool exhaustion" }), finish()],
+	]
+
+	it("offers the submit tool, forced, when the turn runs out of steps", async () => {
+		const submitted: Array<unknown> = []
+		const result = await Effect.runPromise(
+			collect(exhaustingSteps(), {
+				extraTools: submitTool(submitted),
+				closingSubmit: { toolName: SUBMIT },
+			}),
+		)
+
+		const closing = result.requests[result.requests.length - 1]
+		assert.lengthOf(closing?.tools ?? [], 1)
+		assert.equal(closing?.tools?.[0]?.name, SUBMIT)
+		assert.equal(closing?.toolChoice?.type, "tool")
+		assert.equal(closing?.toolChoice?.name, SUBMIT)
+	}, 30_000)
+
+	it("dispatches the forced call, then ends without another step", async () => {
+		const submitted: Array<unknown> = []
+		const result = await Effect.runPromise(
+			collect(exhaustingSteps(), {
+				extraTools: submitTool(submitted),
+				closingSubmit: { toolName: SUBMIT },
+			}),
+		)
+
+		// The regression: the answer actually reaches the tool.
+		assert.deepEqual(submitted, [{ claim: "pool exhaustion" }])
+		// And the bound still holds — the closing step never recurses.
+		assert.lengthOf(terminal(result.events), 1)
+		const end = terminal(result.events)[0]
+		assert.equal(end?.type === "turn-end" ? end.reason : undefined, "max-steps")
+		assert.equal(result.calls, 11)
+	}, 30_000)
+
+	/**
+	 * The deadline path. It used to ride on `isCurrent`, which is the *abort* hook,
+	 * so a pass past its wall clock returned an empty stream and submitted nothing —
+	 * indistinguishable from a pass that found nothing.
+	 */
+	it("closes with the submit tool when a soft stop fires mid-run", async () => {
+		const submitted: Array<unknown> = []
+		let stopped = false
+		const result = await Effect.runPromise(
+			collect(
+				[
+					[toolCall("c1", "find_errors", { page: 0 }), finish()],
+					[toolCall("s1", SUBMIT, { claim: "out of clock" }), finish()],
+				],
+				{
+					extraTools: submitTool(submitted),
+					closingSubmit: { toolName: SUBMIT },
+					softStop: () => {
+						// False on the first check so one real step runs, then true.
+						const previous = stopped
+						stopped = true
+						return previous
+					},
+				},
+			),
+		)
+
+		assert.deepEqual(submitted, [{ claim: "out of clock" }])
+		assert.equal(
+			terminal(result.events)[0]?.type === "turn-end"
+				? (terminal(result.events)[0] as { reason: string }).reason
+				: undefined,
+			"max-steps",
+		)
+	}, 30_000)
+
+	/**
+	 * A hard abort is still a hard abort: the session already wrote a terminal
+	 * event, so this turn must write nothing more — no closing step, no submit.
+	 */
+	it("still writes nothing when isCurrent goes false", async () => {
+		const submitted: Array<unknown> = []
+		const events = await Effect.runPromise(
+			collectEvents([[textDelta("hi"), finish()]], {
+				extraTools: submitTool(submitted),
+				closingSubmit: { toolName: SUBMIT },
+				isCurrent: () => false,
+			}),
+		)
+		assert.isEmpty(terminal(events))
+		assert.isEmpty(submitted)
+	})
 })

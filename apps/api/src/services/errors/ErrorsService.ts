@@ -86,7 +86,6 @@ import {
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import {
-	INVESTIGATION_AGENT_BINDING,
 	INVESTIGATION_FANOUT_BINDING,
 	maybeEnqueueTriage,
 } from "@/services/errors/ai-triage-enqueue"
@@ -476,10 +475,6 @@ const make: Effect.Effect<
 	// Optional: present only inside a Worker isolate. Used to kick off the
 	// AI triage Workflow when an incident opens (org opt-in).
 	const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
-	const investigationAgentBinding = Option.match(workerEnv, {
-		onNone: () => undefined,
-		onSome: (e) => e[INVESTIGATION_AGENT_BINDING],
-	})
 	const investigationFanoutBinding = Option.match(workerEnv, {
 		onNone: () => undefined,
 		onSome: (e) => e[INVESTIGATION_FANOUT_BINDING],
@@ -2842,7 +2837,6 @@ const make: Effect.Effect<
 							lastSeen: row.lastSeen,
 							issueId,
 						},
-						agentBinding: investigationAgentBinding,
 						fanoutBinding: investigationFanoutBinding,
 					}).pipe(Effect.provideService(Database, database))
 

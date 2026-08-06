@@ -21,6 +21,7 @@ import { Cause, Effect } from "effect"
 import { callMcpTool } from "@/mcp/dispatcher"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { mapleToolDefinitions, toInputSchema } from "@/mcp/tools/registry"
+import { truncateToolOutput } from "@/mcp/tools/tool-output"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
 /**
@@ -41,9 +42,12 @@ export const withRuntimeServices = <A, E>(effect: Effect.Effect<A, E, any>): Eff
  * Serialize an MCP tool result for the model. Maple's tools already return model-facing text
  * blocks, so this is a join rather than a re-encode; `isError` is surfaced as a `ToolFailure` so
  * the runtime emits a `tool-error` event and the model can self-correct.
+ *
+ * Bounded here, at creation, and never again — see `./tool-output.ts` for why that matters more than
+ * the token saving. A warehouse query with no `limit` used to enter the transcript whole.
  */
 export const toolResultText = (result: { content: ReadonlyArray<{ text: string }> }): string =>
-	result.content.map((block) => block.text).join("\n")
+	truncateToolOutput(result.content.map((block) => block.text).join("\n")).text
 
 /**
  * A one-line reason for a failed tool, safe to hand the model.
@@ -51,14 +55,25 @@ export const toolResultText = (result: { content: ReadonlyArray<{ text: string }
  * `String(cause)` renders the whole Effect cause: stack frames, and — inside a `DatabaseError` —
  * connection details. That went into the model's context and, through the tool-result event, into
  * a durable transcript the browser reads back.
+ *
+ * Capped, because "one line" is a convention the error's author never agreed to: a ClickHouse
+ * syntax error arrives with the whole offending query inlined, and on a retry loop that lands in the
+ * transcript once per attempt.
  */
+const MAX_FAILURE_MESSAGE_CHARS = 500
+
+const cap = (message: string): string =>
+	message.length <= MAX_FAILURE_MESSAGE_CHARS
+		? message
+		: `${message.slice(0, MAX_FAILURE_MESSAGE_CHARS)}…[truncated]`
+
 export const summarizeToolFailure = (cause: Cause.Cause<unknown>): string => {
 	const failure = cause.reasons.find(Cause.isFailReason)
 	const error: unknown = failure?.error
-	if (error instanceof Error) return error.message
+	if (error instanceof Error) return cap(error.message)
 	if (error && typeof error === "object" && "message" in error) {
 		const message = (error as { message?: unknown }).message
-		if (typeof message === "string") return message
+		if (typeof message === "string") return cap(message)
 	}
 	return "the tool failed"
 }

@@ -80,7 +80,7 @@ export interface LensCheck {
  */
 export const lensChecks = (lenses: ReadonlyArray<LensRun>): ReadonlyArray<LensCheck> =>
 	lenses.map((lens) => {
-		const label = lensCopy(lens.lensId).checkLabel
+		const label = lensCopy(lens).checkLabel
 		const base = { key: lens.lensId, label }
 		switch (lens.status) {
 			case "checking":

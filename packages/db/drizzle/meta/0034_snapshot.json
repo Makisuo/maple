@@ -1,6 +1,6 @@
 {
-  "id": "95e04c2f-0036-49a2-bd4c-2a3ba208d57b",
-  "prevId": "5ec1bdd0-8098-4902-bf3b-90376265bd21",
+  "id": "f50adb8b-0021-4d95-9e31-038472eaf823",
+  "prevId": "95e04c2f-0036-49a2-bd4c-2a3ba208d57b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -221,7 +221,7 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": 60
+          "default": 90
         },
         "updated_at": {
           "name": "updated_at",
@@ -4504,6 +4504,37 @@
           "primaryKey": false,
           "notNull": false
         },
+        "lens_name": {
+          "name": "lens_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lens_question": {
+          "name": "lens_question",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "priority": {
+          "name": "priority",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deadline_hit": {
+          "name": "deadline_hit",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "hypothesis_json": {
+          "name": "hypothesis_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "input_tokens": {
           "name": "input_tokens",
           "type": "integer",
@@ -4769,6 +4800,24 @@
           "primaryKey": false,
           "notNull": true,
           "default": 1
+        },
+        "plan_json": {
+          "name": "plan_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "planner_model": {
+          "name": "planner_model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "planner_elapsed_ms": {
+          "name": "planner_elapsed_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "validator_note": {
           "name": "validator_note",

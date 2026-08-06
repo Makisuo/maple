@@ -171,8 +171,15 @@ function DiagnosedVerdict({ investigation }: { investigation: V2Investigation })
 							<CheckIcon size={9} />
 							Validated
 						</span>
+						{/*
+							Quoted verbatim, not lowercased into a sentence. That read fine
+							against a four-word catalogue label ("the deploy correlation
+							lens"); a planner writes "The 14:02 payments-api rollout", and
+							"promoted from the the 14:02 payments-api rollout lens" is not a
+							sentence at all.
+						*/}
 						<span className="normal-case tracking-normal text-muted-foreground">
-							promoted from the {lensCopy(promoted.lensId).name.toLowerCase()} lens
+							promoted from “{lensCopy(promoted).name}”
 						</span>
 					</>
 				) : null}
@@ -403,7 +410,7 @@ function LensLanes({
 						className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", LANE_DOT[entry.status])}
 					/>
 					<span className="w-40 shrink-0">
-						<span className="block text-sm text-foreground">{lensCopy(entry.lensId).name}</span>
+						<span className="block text-sm text-foreground">{lensCopy(entry).name}</span>
 						<span
 							className={cn(
 								"block text-xs",

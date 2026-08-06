@@ -37,6 +37,17 @@ export const TOOL_CONCURRENCY = 4
 export const SUBAGENT_MAX_STEPS = 6
 
 /**
+ * Identical consecutive tool-call batches that mean the model is stuck rather than working.
+ *
+ * The one ceiling here that is not about *volume*. Every other number bounds how much a productive
+ * turn may consume; this one bounds how long an unproductive one may look productive. Three, because
+ * two is a plausible retry — a model re-issuing a call after a transient tool failure is behaving
+ * correctly — and the third identical batch is the one that says nothing in the results is being
+ * read. The policy that applies it is in `./stop.ts`.
+ */
+export const REPEATED_TOOL_CALLS = 3
+
+/**
  * Model calls across the parent turn and every descendant.
  *
  * The backstop against the multiplication above. If real turns start approaching this, lower

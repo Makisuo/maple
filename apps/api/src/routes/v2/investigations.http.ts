@@ -193,6 +193,10 @@ const toV2Investigation = Effect.fn("HttpV2Investigations.toV2Investigation")(fu
 			confidence: lens.confidence,
 			toolCount: lens.toolCount,
 			elapsedSeconds: lens.elapsedSeconds,
+			name: lens.name,
+			question: lens.question,
+			priority: lens.priority,
+			deadlineHit: lens.deadlineHit,
 		})),
 		validator:
 			doc.validator === null

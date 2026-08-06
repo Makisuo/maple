@@ -33,7 +33,7 @@ Work out what happened, how bad it is, and what a human responder should do firs
 
 ## Result guidance
 - summary: 2-4 sentences a responder can read in 15 seconds.
-- suspectedCause: the most likely root cause, with the mechanism ("X deploys at 14:00, p95 doubled because ...") — say "unknown" honestly if the data is inconclusive and lower your confidence.
+- suspectedCause: the most likely root cause, with the mechanism ("X deploys at 14:00, p95 doubled because ..."). "unknown" is honest when the data is inconclusive — but only with \`ruledOut\` naming at least two causes you actually tested and the evidence that eliminated each, and confidence set to "low". An unknown that lists nothing is indistinguishable from not having investigated. Never report a bare grouping label like "Unknown Error" as a cause: that is the name of the thing you were asked to explain.
 - affectedScope: which services/endpoints/users are hit and roughly how broadly.
 - evidence: trace IDs, log patterns, related services that support the diagnosis.
 - suggestedActions: ordered, concrete next steps (what to check, what to roll back, who to page).
@@ -53,30 +53,8 @@ export const buildTriageContextMessage = (incidentKind: string, context: Record<
 }
 
 /**
- * Read-only investigation subset of the Maple tool registry. Everything that mutates state
- * and the session-replay tools are excluded — the prompt's "You have READ-ONLY tools" rule is
- * enforced here, not just asserted to the model.
+ * @deprecated Moved to `hypothesis-catalogue.ts` as `INVESTIGATION_READ_ONLY_TOOLS`, which is
+ * where the planner and the hypothesis lanes read it from. Re-exported here for the legacy triage
+ * workflow only, which is deleted a release after its Cloudflare Workflow binding is removed.
  */
-export const TRIAGE_TOOL_NAMES: ReadonlySet<string> = new Set([
-	"diagnose_service",
-	"error_detail",
-	"find_errors",
-	"inspect_trace",
-	"inspect_span",
-	"search_traces",
-	"find_slow_traces",
-	"search_logs",
-	"mine_log_patterns",
-	"compare_periods",
-	"service_map",
-	"get_service_top_operations",
-	"list_services",
-	"explore_attributes",
-	"list_metrics",
-	"query_data",
-	"get_incident_timeline",
-	"list_error_issue_events",
-	"list_source_repositories",
-	"search_source_code",
-	"read_source_file",
-])
+export { INVESTIGATION_READ_ONLY_TOOLS as TRIAGE_TOOL_NAMES } from "./hypothesis-catalogue"

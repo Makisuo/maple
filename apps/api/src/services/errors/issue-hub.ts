@@ -53,8 +53,6 @@ export interface UpsertAlertIssueInput {
 	readonly incidentId: AlertIncidentId
 	readonly serviceName: string
 	readonly timestamp: number
-	/** Raw CHAT_SESSION Durable Object namespace off the worker env (may be undefined). */
-	readonly agentBinding: unknown
 	/** `INVESTIGATION_FANOUT_WORKFLOW`, for incidents whose severity earns a fan-out. */
 	readonly fanoutBinding?: unknown
 }
@@ -333,7 +331,6 @@ export const upsertAlertIssue: (
 				lastTriggeredAt: new Date(input.timestamp).toISOString(),
 				issueId,
 			},
-			agentBinding: input.agentBinding,
 			fanoutBinding: input.fanoutBinding,
 		})
 

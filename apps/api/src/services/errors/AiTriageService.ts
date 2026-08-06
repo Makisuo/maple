@@ -36,6 +36,7 @@ import {
 	isAiTriageWorkflowBinding,
 	newAiTriageRunId,
 } from "@/services/errors/ai-triage-enqueue"
+import { DEFAULT_MAX_PASSES_PER_DAY, DEFAULT_MAX_RUNS_PER_DAY } from "@/services/errors/investigation-quota"
 
 const decodeIsoSync = Schema.decodeUnknownSync(AiTriageRunDocument.fields.createdAt)
 const decodeResultSync = Schema.decodeUnknownSync(AiTriageResult)
@@ -138,7 +139,8 @@ export class AiTriageService extends Context.Service<AiTriageService, AiTriageSe
 			const settingsToDocument = (row: AiTriageSettingsRow | undefined): AiTriageSettingsDocument =>
 				new AiTriageSettingsDocument({
 					enabled: row?.enabled ?? false,
-					maxRunsPerDay: row?.maxRunsPerDay ?? 20,
+					maxRunsPerDay: row?.maxRunsPerDay ?? DEFAULT_MAX_RUNS_PER_DAY,
+					maxPassesPerDay: row?.maxPassesPerDay ?? DEFAULT_MAX_PASSES_PER_DAY,
 					updatedAt: row?.updatedAt ? isoFromEpoch(row.updatedAt.getTime()) : null,
 					updatedBy: row?.updatedBy ?? null,
 				})
@@ -165,7 +167,10 @@ export class AiTriageService extends Context.Service<AiTriageService, AiTriageSe
 
 				const next = {
 					enabled: nextEnabled,
-					maxRunsPerDay: request.maxRunsPerDay ?? existing?.maxRunsPerDay ?? 20,
+					maxRunsPerDay:
+						request.maxRunsPerDay ?? existing?.maxRunsPerDay ?? DEFAULT_MAX_RUNS_PER_DAY,
+					maxPassesPerDay:
+						request.maxPassesPerDay ?? existing?.maxPassesPerDay ?? DEFAULT_MAX_PASSES_PER_DAY,
 					updatedAt: new Date(nowMs),
 					updatedBy: userId,
 				}

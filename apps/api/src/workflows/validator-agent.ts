@@ -1,36 +1,50 @@
 /**
- * The validator: reads every lens candidate, promotes at most one, and records
- * why each rival lost.
+ * The validator: reads every hypothesis candidate, promotes at most one, and
+ * records why each rival lost.
  *
  * It has **no tools**. It ranks text that other agents already gathered, and
- * letting it re-investigate would make it a sixth lens with a casting vote —
- * which is exactly the thing the fan-out exists to avoid. Its only job is
+ * letting it re-investigate would make it one more investigator with a casting
+ * vote — exactly the thing the fan-out exists to avoid. Its only job is
  * adjudication, and its output is the trust payload the Hypotheses table renders.
  *
  * Promoting nothing is an allowed and meaningful outcome (`validation_inconclusive`):
- * lenses reported, none held up. That is a real answer about the incident, not a
+ * lanes reported, none held up. That is a real answer about the incident, not a
  * failure to produce one, and the boards already draw it.
  */
 import { ValidatorVerdict } from "@maple/domain/http"
-import type { InvestigationSubject, InvestigationSubjectSnapshot, LensId } from "@maple/domain/http"
+import type { InvestigationSubject, InvestigationSubjectSnapshot } from "@maple/domain/http"
 import type { Model } from "@maple/llm"
 import { Effect, Option } from "effect"
 import { AGENTS } from "@/chat/agents"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { runAgentPass } from "./agent-pass"
-import { lensById } from "./lens-prompt"
+import { buildIncidentContextMessage } from "./incident-context"
 
-/** What one lens handed the validator. `null` candidate = the lens found nothing. */
+/** What one lane handed the validator. `null` candidate = the lane found nothing. */
 export interface ValidatorCandidateInput {
-	readonly lensId: LensId
+	readonly lensId: string
+	/**
+	 * The planner's label for this lane. Null on legacy rows, where `lensId` was a
+	 * catalogue token the validator could look copy up for; there is no catalogue
+	 * to look in now, so the name travels with the candidate.
+	 */
+	readonly name: string | null
 	readonly claim: string | null
 	readonly mechanism: string | null
 	readonly confidence: string | null
 	readonly selfDoubt: string | null
 	readonly suggestedActions: ReadonlyArray<string>
 	readonly evidence: ReadonlyArray<unknown>
-	/** Why this lens has no candidate, when it has none. */
+	/** Why this lane has no candidate, when it has none. */
 	readonly note: string | null
+	/**
+	 * True when the lane ran out of clock rather than finishing.
+	 *
+	 * Surfaced to the validator because the ranking rules turn on it: a clean
+	 * negative is evidence that can rule out a rival, and a lane that was cut short
+	 * did not produce one — it produced silence that looks identical.
+	 */
+	readonly deadlineHit: boolean
 }
 
 export interface ValidatorAgentInput {
@@ -49,30 +63,34 @@ export interface ValidatorAgentOutput {
 }
 
 const buildValidatorPrompt = (input: ValidatorAgentInput): string => {
-	const lines = [
-		"## Subject",
-		JSON.stringify({ subject: input.subject, snapshot: input.snapshot }, null, 2),
-		"",
-		`## Candidates (${input.candidates.length} lenses dispatched)`,
-	]
+	const lines = [`## Candidates (${input.candidates.length} hypotheses dispatched)`]
 	for (const candidate of input.candidates) {
-		const lens = lensById(candidate.lensId)
-		lines.push("", `### ${lens.name} (\`${candidate.lensId}\`)`, `Question: ${lens.question}`)
+		lines.push("", `### ${candidate.name ?? candidate.lensId} (\`${candidate.lensId}\`)`)
 		if (candidate.claim === null) {
-			lines.push(`**No candidate.** ${candidate.note ?? "This lens did not report."}`)
+			// The distinction the ranking rules hang on. A lane with no candidate that
+			// also ran out of clock reported nothing *about the world*; saying so here
+			// is what stops its silence being read as a clean negative.
+			lines.push(
+				candidate.deadlineHit
+					? `**No candidate — CUT SHORT by the time budget.** It did not finish checking; its silence is not a negative result. ${candidate.note ?? ""}`.trim()
+					: `**No candidate.** ${candidate.note ?? "This hypothesis did not report."}`,
+			)
 			continue
 		}
 		lines.push(
+			...(candidate.deadlineHit
+				? ["**CUT SHORT by the time budget** — this is what it had, not what there was."]
+				: []),
 			`- claim: ${candidate.claim}`,
 			`- mechanism: ${candidate.mechanism ?? "(none given)"}`,
 			`- confidence: ${candidate.confidence ?? "(none given)"}`,
-			`- what would falsify it: ${candidate.selfDoubt ?? "(the lens did not say)"}`,
+			`- what would falsify it: ${candidate.selfDoubt ?? "(the agent did not say)"}`,
 			`- suggested actions: ${candidate.suggestedActions.join("; ") || "(none)"}`,
 			`- evidence: ${JSON.stringify(candidate.evidence)}`,
 		)
 	}
 	lines.push("", "Rank these now and produce your structured verdict.")
-	return lines.join("\n")
+	return buildIncidentContextMessage(lines.join("\n"), input.subject, input.snapshot)
 }
 
 export const runValidatorAgent = Effect.fn("investigation.validator")(function* (input: ValidatorAgentInput) {

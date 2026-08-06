@@ -238,10 +238,9 @@ describe("InvestigationService", () => {
 	}
 
 	/**
-	 * Fan-out routing. The gate lives in `fanout-policy` and is tested there as a
-	 * table; what these assert is that the service actually *branches* on it —
-	 * that a fan-out start reaches the workflow and never the chat session, and a
-	 * single-pass start the reverse.
+	 * Routing. The table lives in `investigation-route.test.ts`; what these assert
+	 * is that the service actually *branches* on it — that a planned start reaches
+	 * the workflow and never the chat session, and a single-pass start the reverse.
 	 */
 	const fanoutWorkflowHarness = (options?: { readonly failing?: boolean }) => {
 		const creates: Array<{ id: string; params: Record<string, unknown> }> = []
@@ -257,20 +256,12 @@ describe("InvestigationService", () => {
 		}
 	}
 
-	const enableFanout = (harness: ReturnType<typeof makeHarness>) =>
-		Effect.gen(function* () {
-			const database = yield* Database
-			yield* database.execute((db) =>
-				db.insert(aiTriageSettings).values({
-					orgId: ORG,
-					enabled: true,
-					fanoutEnabled: true,
-					updatedAt: new Date(),
-				}),
-			)
-		}).pipe(Effect.provide(harness.layer))
-
-	it.effect("routes a manual critical incident to the fan-out workflow", () => {
+	/**
+	 * No settings row at all, which is the point: the flag this replaced defaulted
+	 * false and had no write path, so an untouched org could never reach the
+	 * multi-hypothesis path. An untouched org now gets it by default.
+	 */
+	it.effect("routes a manual incident to the planned workflow with no setup", () => {
 		const chat = chatSessionHarness()
 		const workflow = fanoutWorkflowHarness()
 		const harness = makeHarness({
@@ -279,14 +270,6 @@ describe("InvestigationService", () => {
 		})
 		return Effect.gen(function* () {
 			const database = yield* Database
-			yield* database.execute((db) =>
-				db.insert(aiTriageSettings).values({
-					orgId: ORG,
-					enabled: true,
-					fanoutEnabled: true,
-					updatedAt: new Date(),
-				}),
-			)
 			const started = yield* InvestigationService.pipe(
 				Effect.flatMap((service) =>
 					service.createAndStartInvestigation(ORG, null, criticalIncidentRequest("err_fanout"), {
@@ -299,19 +282,25 @@ describe("InvestigationService", () => {
 			assert.lengthOf(workflow.creates, 1)
 			assert.lengthOf(chat.beginTurns, 0)
 			assert.strictEqual(workflow.creates[0]!.params.investigationId, started.id)
-			assert.lengthOf(workflow.creates[0]!.params.lensIds as ReadonlyArray<string>, 5)
+			assert.strictEqual(workflow.creates[0]!.params.maxWidth, 5)
 
 			const rows = yield* database.execute((db) =>
 				db.select().from(investigations).where(eq(investigations.id, started.id)),
 			)
 			assert.strictEqual(rows[0]?.fanoutState, "queued")
 			assert.strictEqual(rows[0]?.fanoutSize, 5)
-			// Quota counts passes, not runs: five lenses plus the validator.
-			assert.strictEqual(rows[0]?.autonomousTurns, 6)
+			// Quota counts passes, not runs: the width plus the planner and the
+			// validator. Reserved high and reconciled down once the planner has run.
+			assert.strictEqual(rows[0]?.autonomousTurns, 7)
 		}).pipe(Effect.provide(harness.layer))
 	})
 
-	it.effect("keeps the single pass when the org has not enabled fan-out", () => {
+	/**
+	 * The only single-pass route left. A free-form question is a conversation the
+	 * user keeps talking to, which the workflow path cannot host — that is a
+	 * property of the work, not a setting anyone can get wrong.
+	 */
+	it.effect("keeps a free-form question on the single pass", () => {
 		const chat = chatSessionHarness()
 		const workflow = fanoutWorkflowHarness()
 		const harness = makeHarness({
@@ -321,7 +310,7 @@ describe("InvestigationService", () => {
 		return Effect.gen(function* () {
 			const started = yield* InvestigationService.pipe(
 				Effect.flatMap((service) =>
-					service.createAndStartInvestigation(ORG, null, criticalIncidentRequest("err_fanout"), {
+					service.createAndStartInvestigation(ORG, null, freeformRequest("why is checkout slow"), {
 						automatic: false,
 					}),
 				),
@@ -339,19 +328,11 @@ describe("InvestigationService", () => {
 		}).pipe(Effect.provide(harness.layer))
 	})
 
-	it.effect("marks the row agent_unavailable when the fan-out binding is missing", () => {
+	it.effect("marks the row agent_unavailable when the workflow binding is missing", () => {
 		const chat = chatSessionHarness()
 		const harness = makeHarness(chat.env)
 		return Effect.gen(function* () {
 			const database = yield* Database
-			yield* database.execute((db) =>
-				db.insert(aiTriageSettings).values({
-					orgId: ORG,
-					enabled: true,
-					fanoutEnabled: true,
-					updatedAt: new Date(),
-				}),
-			)
 			const exit = yield* Effect.exit(
 				InvestigationService.pipe(
 					Effect.flatMap((service) =>
@@ -385,14 +366,6 @@ describe("InvestigationService", () => {
 		})
 		return Effect.gen(function* () {
 			const database = yield* Database
-			yield* database.execute((db) =>
-				db.insert(aiTriageSettings).values({
-					orgId: ORG,
-					enabled: true,
-					fanoutEnabled: true,
-					updatedAt: new Date(),
-				}),
-			)
 			const service = yield* InvestigationService
 			const started = yield* InvestigationService.pipe(
 				Effect.flatMap((service) =>
@@ -443,16 +416,22 @@ describe("InvestigationService", () => {
 		const chat = chatSessionHarness()
 		const harness = makeHarness(chat.env)
 		return Effect.gen(function* () {
+			// Free-form, because that is the only route that reaches a chat turn — and
+			// this test is about what that turn is handed.
 			const service = yield* InvestigationService
 			const started = yield* service.createAndStartInvestigation(
 				ORG,
 				null,
-				incidentRequest("err_autonomous_start"),
+				freeformRequest("err_autonomous_start"),
 				{ automatic: false },
 			)
 			assert.strictEqual(started.status, "investigating")
 			assert.lengthOf(chat.beginTurns, 1)
-			assert.include(chat.beginTurns[0]!.text, '"incidentId":"err_autonomous_start"')
+			// Labelled sections, not a bare JSON blob. The two facts the prompt opens
+			// by demanding — the interval and the identifiers — were being buried in
+			// one, and the model routinely skipped both.
+			assert.include(chat.beginTurns[0]!.text, "## Interval")
+			assert.include(chat.beginTurns[0]!.text, "err_autonomous_start")
 			assert.include(chat.beginTurns[0]!.text, '"snapshot"')
 
 			const database = yield* Database

@@ -9,6 +9,7 @@ import type { Message, Model, Tools, Usage } from "@maple/llm"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import type { AgentDefinition } from "../agents"
 import type { StepRetryBudget, TaskBudget } from "./budgets"
+import type { DoomLoopState } from "./stop"
 
 /** Distributive `Omit`, so each union member keeps its own shape. */
 type WithoutSeq<T> = T extends unknown ? Omit<T, "seq"> : never
@@ -41,6 +42,30 @@ export interface ChatTurnInput {
 	 * conversation that has moved on. Defaults to "always current" for callers with no session.
 	 */
 	readonly isCurrent?: () => boolean
+	/**
+	 * A *soft* stop, deliberately not `isCurrent`.
+	 *
+	 * `isCurrent` returning false is a real abort: the turn was superseded, the session already wrote
+	 * a terminal event, and this turn must write nothing more. This is the other thing — "you are out
+	 * of wall clock" — and the correct response to it is to finish by answering, not to vanish.
+	 *
+	 * Conflating the two is what made a headless pass that hit its deadline indistinguishable from
+	 * one that found nothing: the loop returned an empty stream, the submit tool was never called,
+	 * and the lane was recorded as a no-finding.
+	 */
+	readonly softStop?: () => boolean
+	/**
+	 * The tool a headless turn answers *through*.
+	 *
+	 * The closing step that serves attended chat sends `tools: []` and `toolChoice: "none"`, because
+	 * there the answer is prose. An investigation's answer is a `submit_diagnosis` / `submit_candidate`
+	 * call, so that same closing step silences it — an agent that spent its whole budget investigating
+	 * could not report what it found. When this is set, the closing step instead carries exactly this
+	 * one tool with `toolChoice` forcing it. The name must be a key of {@link extraTools}.
+	 *
+	 * Unset — every attended surface — keeps the tool-less closing step byte-for-byte.
+	 */
+	readonly closingSubmit?: { readonly toolName: string }
 	/** Accumulates this turn's token usage; see {@link TurnUsage}. */
 	readonly usage?: TurnUsage
 	/**
@@ -81,11 +106,24 @@ export interface StepState {
 	/** Shared with every descendant sub-agent turn. */
 	readonly taskBudget: TaskBudget
 	/**
-	 * This is the tool-less step that closes a turn which ran out of steps. Its natural exit is
+	 * This is the step that closes a turn which ran out of steps or clock. Its natural exit is
 	 * "no tool calls", which would otherwise report `"stop"` and lose the signal the client badges
 	 * on — so the reason is carried here instead.
+	 *
+	 * Two shapes, because there are two kinds of answer. `"prose"` is the tool-less step attended
+	 * chat gets. `"submit"` carries the single forced submit tool a headless pass answers through
+	 * (see {@link ChatTurnInput.closingSubmit}); its one tool call is dispatched and then the turn
+	 * ends, never recursing.
 	 */
-	readonly closing?: true
+	readonly closing?: "prose" | "submit"
+	/**
+	 * Repeated-batch detector state (`./stop.ts`).
+	 *
+	 * Threaded through the recursion like `step` and `attempt` rather than shared like `budget` and
+	 * `taskBudget`: those two are *turn-wide* totals every branch draws down, while this is a property
+	 * of one chain of steps. A sub-agent starts a fresh chain, and its loop is not the parent's.
+	 */
+	readonly doomLoop: DoomLoopState
 }
 
 /**

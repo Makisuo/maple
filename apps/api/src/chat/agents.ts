@@ -12,7 +12,11 @@
  */
 import { chatModeFromSessionId, type ChatMode } from "@maple/domain/chat-session"
 import { PermissionRule } from "@maple/domain/permission"
-import { LENS_CATALOGUE, buildLensSystemPrompt } from "@/workflows/lens-prompt"
+// The specific file, not the `./loop` barrel: the barrel re-exports `turn.ts`, which imports this
+// module back. `budgets.ts` depends on nothing but `effect`.
+import { SUBAGENT_MAX_STEPS } from "./loop/budgets"
+import { buildHypothesisSystemPrompt, hypothesisRuleset } from "@/workflows/hypothesis-catalogue"
+import { PLANNER_MAX_STEPS, PLANNER_SYSTEM_PROMPT, PLANNER_TOOL_NAMES } from "@/workflows/planner-prompt"
 import type { PermissionRuleset } from "@maple/domain/permission"
 import { DEFAULT_RULESET, READ_ONLY_RULESET } from "./permissions"
 import {
@@ -41,45 +45,65 @@ export interface AgentDefinition {
 }
 
 /**
- * Assistant turns a sub-agent gets.
+ * Assistant turns a hypothesis lane gets.
  *
- * Two-thirds of the parent's budget: enough to search and summarize, not enough to wander. A
- * sub-agent that runs out simply reports what it found, which is a fine answer.
+ * Raised from the lens era's 6. That number was sized for a *framing* with
+ * nothing specific to look at — "is there a deploy correlation here?" — where
+ * more steps mostly bought more ways to say no. A lane now arrives with a named
+ * claim, a confirmed evidence source and an established interval, so the extra
+ * steps go into testing it rather than into finding something to test.
  */
-export const SUBAGENT_MAX_STEPS = 6
-
-/** A lens asks one question, so it gets a fraction of a full triage pass's budget. */
-export const LENS_MAX_STEPS = 6
+export const HYPOTHESIS_MAX_STEPS = 8
 
 /**
- * One agent per investigation lens, plus the validator that ranks them.
+ * The agent that tests one hypothesis.
  *
- * A lens is a sub-agent by construction — a self-contained question, its own
- * narrow tool allowlist, its own step budget, and no ability to spawn anything
- * further. Registering them here rather than running a private loop is what gets
- * them retry, context pruning and permission gating for free, and it keeps one
- * answer to "what can this agent reach for" instead of two.
+ * Built per run rather than registered in {@link AGENTS}, which is the visible
+ * consequence of hypotheses being planner-written: there is no fixed set of them
+ * to register. It is still an `AgentDefinition` on the shared turn loop, so it
+ * keeps retry, context pruning, permission gating and the step budget — none of
+ * that is re-implemented for headless passes.
  *
- * The fan-out workflow invokes these directly rather than through the `task`
- * tool: which lenses run is decided by severity in `fanout-policy`, not by a
- * model choosing to delegate.
+ * A sub-agent by construction: no `spawns`, so it never sees the `task` tool and
+ * cannot delegate. A lane that could fan out further would make the width of an
+ * investigation unbounded and unattributable.
  */
-const LENS_AGENTS: Record<string, AgentDefinition> = Object.fromEntries(
-	LENS_CATALOGUE.map((lens) => [
-		`lens-${lens.id}`,
-		{
-			name: `lens-${lens.id}`,
-			description: lens.question,
-			mode: "subagent" as const,
-			prompt: buildLensSystemPrompt(lens.id),
-			permission: lens.permission,
-			steps: LENS_MAX_STEPS,
-		},
-	]),
-)
+export const hypothesisAgent = (hypothesis: {
+	readonly id: string
+	readonly name: string
+	readonly question: string
+	readonly claimToTest: string
+	readonly rationale: string
+	readonly toolNames: ReadonlyArray<string>
+}): AgentDefinition => ({
+	name: `hypothesis-${hypothesis.id}`,
+	description: hypothesis.question,
+	mode: "subagent",
+	prompt: buildHypothesisSystemPrompt(hypothesis),
+	// Gated twice, as the tool `include` filter and as a ruleset, for the same
+	// reason the read-only ruleset is: a tool the model never sees cannot be
+	// called, and a tool that slips through the filter is still denied.
+	permission: hypothesisRuleset(new Set(hypothesis.toolNames)),
+	steps: HYPOTHESIS_MAX_STEPS,
+})
+
+/**
+ * The agent that decides what the run is spent on.
+ *
+ * Also built rather than registered, and for a duller reason than the lanes: it
+ * is only ever invoked directly by the workflow, so a registry entry would be a
+ * second name for the same thing plus a test asserting they agree.
+ */
+export const plannerAgent = (): AgentDefinition => ({
+	name: "investigation-planner",
+	description: "Scopes an incident and writes the hypotheses worth testing.",
+	mode: "subagent",
+	prompt: PLANNER_SYSTEM_PROMPT,
+	permission: hypothesisRuleset(PLANNER_TOOL_NAMES),
+	steps: PLANNER_MAX_STEPS,
+})
 
 export const AGENTS: Readonly<Record<string, AgentDefinition>> = {
-	...LENS_AGENTS,
 	/**
 	 * Ranks the lens candidates. Denied every tool on purpose: it adjudicates text
 	 * the lenses already gathered, and giving it instruments would make it a sixth
@@ -87,7 +111,7 @@ export const AGENTS: Readonly<Record<string, AgentDefinition>> = {
 	 */
 	"investigation-validator": {
 		name: "investigation-validator",
-		description: "Ranks investigation lens candidates and promotes at most one.",
+		description: "Ranks investigation hypothesis candidates and promotes at most one.",
 		mode: "subagent",
 		prompt: VALIDATOR_SYSTEM_PROMPT,
 		permission: [new PermissionRule({ tool: "*", action: "deny" })],
@@ -129,6 +153,16 @@ export const AGENTS: Readonly<Record<string, AgentDefinition>> = {
 		prompt: INVESTIGATE_SYSTEM_PROMPT,
 		permission: DEFAULT_RULESET,
 		spawns: ["explore"],
+		/**
+		 * Four steps above the shared default.
+		 *
+		 * The per-agent override exists so this can move without moving `MAX_STEPS`,
+		 * which every attended surface reads. An investigation that must both gather
+		 * evidence and test an alternative before concluding needs the room; a chat
+		 * turn answering a question does not, and giving it the same budget mostly
+		 * buys latency.
+		 */
+		steps: 14,
 	},
 	explore: {
 		name: "explore",

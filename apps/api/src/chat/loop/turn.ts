@@ -6,6 +6,7 @@
  *
  *   - `./budgets.ts`   — every ceiling: steps, attempts, backoff time, delegation fan-out, depth.
  *   - `./retry.ts`     — which failures are worth another attempt, and how long to wait.
+ *   - `./stop.ts`      — when the model has stopped reacting to its own results.
  *   - `./context.ts`   — keeping the request inside the model's window.
  *   - `./delegate.ts`  — handing a sub-question to a sub-agent, which re-enters this loop.
  *   - `./types.ts`     — the input, the events, and one step's state.
@@ -54,9 +55,10 @@ import {
 	STEP_RETRY_BUDGET_MS,
 	TOOL_CONCURRENCY,
 } from "./budgets"
-import { isNearContextLimit, pruneToolResults } from "./context"
+import { dropOldestToolStep, isNearContextLimit } from "./context"
 import { buildTaskTool } from "./delegate"
 import { isRetryableStepFailure, stepRetryDelayMs } from "./retry"
+import { initialDoomLoopState, observeToolCallBatch } from "./stop"
 import {
 	addUsage,
 	isCurrent,
@@ -77,6 +79,80 @@ const MAX_STEPS_NOTICE =
 	"You have reached the maximum number of tool calls for this turn. Do NOT call any more tools. " +
 	"Using only what you have already found, give the user your answer now, and say plainly what " +
 	"you could not determine."
+
+/**
+ * What the model is told when it has stopped reading its own results.
+ *
+ * Names the behaviour rather than just forbidding more calls, because the failure is not that the
+ * budget ran out — it is that the last few results went unread, and a model that is told only "stop"
+ * tends to summarize the plan it was looping on as though it had carried it out.
+ */
+const DOOM_LOOP_NOTICE =
+	"You have now issued the same tool calls several times in a row and received the same results. " +
+	"Do NOT call any more tools. The results you already have are all these calls will return — " +
+	"answer the user from them now, and say plainly what they do not tell you and what a different " +
+	"approach would need."
+
+/**
+ * What a *headless* agent is told when its turn is cut short.
+ *
+ * The attended notices above say "give the user your answer", which for an investigation pass is
+ * advice it cannot take: its answer is a `submit_diagnosis` / `submit_candidate` call, and the
+ * tool-less closing step it used to get made that call impossible. So the pass reported nothing,
+ * and a lane that had investigated for its whole budget was recorded identically to one that never
+ * looked. The last clause matters as much as the first: a cut-short pass that leaves fields blank
+ * is no more useful than silence, and one that fills them with a guess is worse.
+ */
+const forcedSubmitNotice = (toolName: string) =>
+	`You have reached the maximum number of tool calls for this turn. Stop gathering evidence. ` +
+	`Call \`${toolName}\` now, exactly once, using only what you already found. Where a field is ` +
+	`uncertain, say what you checked, what it showed, and what you could not determine — do not ` +
+	`leave it blank and do not invent a value to fill it.`
+
+/**
+ * Whether this turn is out of wall clock. Distinct from {@link isCurrent}; see `ChatTurnInput`.
+ */
+const isSoftStopped = (input: ChatTurnInput): boolean => input.softStop !== undefined && input.softStop()
+
+/**
+ * Build the step that closes a turn, in whichever of its two shapes applies.
+ *
+ * Attended chat gets `tools: []` / `toolChoice: "none"` and answers in prose. A headless pass gets
+ * exactly its one submit tool, forced — anything wider and the model spends the last step on more
+ * evidence it has no budget to use.
+ *
+ * The `"submit"` shape still cannot loop, and for a stronger reason than the `"prose"` one: the
+ * `state.closing` branch in `settleAndRecurse` dispatches its call and ends unconditionally, so the
+ * bound does not depend on the provider honouring `toolChoice` at all.
+ */
+const closingStep = (
+	input: ChatTurnInput,
+	tools: Tools,
+	request: LLMRequest,
+	messages: ReadonlyArray<Message>,
+	notice: string,
+): { readonly request: LLMRequest; readonly closing: "prose" | "submit" } => {
+	const forced = input.closingSubmit
+	const submitTool = forced === undefined ? undefined : tools[forced.toolName]
+	if (forced === undefined || submitTool === undefined) {
+		return {
+			request: LLM.updateRequest(request, {
+				messages: [...messages, Message.user(notice)],
+				tools: [],
+				toolChoice: "none",
+			}),
+			closing: "prose",
+		}
+	}
+	return {
+		request: LLM.updateRequest(request, {
+			messages: [...messages, Message.user(forcedSubmitNotice(forced.toolName))],
+			tools: toDefinitions({ [forced.toolName]: submitTool }),
+			toolChoice: forced.toolName,
+		}),
+		closing: "submit",
+	}
+}
 
 /**
  * How many text deltas are folded into one emitted event, and how long a partial batch waits.
@@ -123,6 +199,7 @@ export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> 
 				budget: makeStepRetryBudget(),
 				agent,
 				taskBudget,
+				doomLoop: initialDoomLoopState,
 			}
 			return Stream.concat(Stream.fromIterable([start]), runStep(input, tools, request, state))
 		}),
@@ -192,10 +269,10 @@ const runStep = (
 
 				// Overflow is the one failure worth retrying with a *different* request. Sending the
 				// same oversized transcript again cannot start fitting, so `isRetryableStepFailure`
-				// refuses it — but a pruned transcript is a genuinely new attempt. This is what
+				// refuses it — but a shorter transcript is a genuinely new attempt. This is what
 				// `LlmCallError.contextOverflow` was added for; nothing acted on it before.
 				if (called.contextOverflow) {
-					const pruned = pruneToolResults(request)
+					const pruned = dropOldestToolStep(request)
 					if (pruned === request || state.attempt + 1 >= MAX_STEP_ATTEMPTS) {
 						return Stream.fromIterable([turnEnd(input, "error", called.message)])
 					}
@@ -280,11 +357,60 @@ const runStep = (
 					return Stream.fromIterable([turnEnd(input, state.closing ? "max-steps" : "stop")])
 				}
 
-				// The closing step is sent with `tools: []` and `toolChoice: "none"`, so a call here
-				// means the provider ignored both. Ending rather than dispatching keeps `MAX_STEPS`
-				// a real bound: without this the closing step would recurse into another closing
-				// step, and a provider that always emits a call would loop forever.
-				if (state.closing) return Stream.fromIterable([turnEnd(input, "max-steps")])
+				// A prose closing step is sent with `tools: []` and `toolChoice: "none"`, so a call
+				// here means the provider ignored both. Ending rather than dispatching keeps
+				// `MAX_STEPS` a real bound: without this the closing step would recurse into another
+				// closing step, and a provider that always emits a call would loop forever.
+				if (state.closing === "prose") return Stream.fromIterable([turnEnd(input, "max-steps")])
+
+				// A submit closing step, by contrast, exists precisely so one tool call happens. It is
+				// dispatched and the turn then ends unconditionally — no recursion, no doom-loop
+				// accounting, no permission gate (the submit tool is the structured-output channel,
+				// never a mutation). Anything the provider emitted besides the forced tool is dropped
+				// rather than run, because this step offered exactly one tool.
+				if (state.closing === "submit") {
+					const submitName = input.closingSubmit?.toolName
+					const forced = calls.filter((call) => call.name === submitName)
+					if (forced.length === 0) return Stream.fromIterable([turnEnd(input, "max-steps")])
+					return Stream.unwrap(
+						Effect.gen(function* () {
+							const dispatched = yield* Effect.forEach(
+								forced,
+								(call) =>
+									ToolRuntime.dispatch(tools, call).pipe(
+										Effect.map((result) => [call, result] as const),
+									),
+								{ concurrency: 1 },
+							)
+							return Stream.fromIterable([
+								...forced.map((call) =>
+									tagged(input, {
+										type: "tool-call" as const,
+										messageId: input.messageId,
+										callId: call.id,
+										name: call.name,
+										input: call.input,
+									}),
+								),
+								...dispatched.map(([call, outcome]) =>
+									tagged(input, {
+										type: "tool-result" as const,
+										messageId: input.messageId,
+										callId: call.id,
+										output: outcome.result.value,
+										...(outcome.result.type === "error" ? { isError: true } : {}),
+									}),
+								),
+								turnEnd(input, "max-steps"),
+							])
+						}),
+					)
+				}
+
+				// Observed before the permission gate, so a repeating *gated* batch is still counted:
+				// a proposal ends the turn anyway, but the count belongs to the chain of steps that
+				// produced it, not to whether this particular one got dispatched.
+				const observed = observeToolCallBatch(state.doomLoop, calls)
 
 				// The real interrupt. A gated call ends the turn immediately — the client renders an
 				// approval card from this event and applies it through `POST /api/chat/apply`.
@@ -359,17 +485,21 @@ const runStep = (
 						]
 
 						/**
-						 * Prune before the next step if the *provider's own* count says we are near
-						 * the wall. Acting on the reported figure rather than an estimate is what
-						 * makes this trustworthy — the estimate exists only to decide whether a
-						 * prune is worth doing.
+						 * Shed a step before the next request if the *provider's own* count says we
+						 * are near the wall. Acting on the reported figure rather than an estimate is
+						 * what makes this trustworthy.
+						 *
+						 * Rare by design: results are bounded when they are created
+						 * (`mcp/tools/tool-output.ts`), so reaching here means enough already-bounded
+						 * output to fill the window anyway. Dropping the oldest step costs one break
+						 * in the cached prefix; the rewrite this replaced cost one on every step.
 						 */
 						const withBudget = (next: LLMRequest): LLMRequest =>
 							isNearContextLimit(response.usage?.inputTokens ?? 0, {
 								context: contextLimitOf(input.model),
 								output: outputLimitOf(input.model),
 							})
-								? pruneToolResults(next)
+								? dropOldestToolStep(next)
 								: next
 
 						// Out of steps. Rather than cutting the turn off after a wall of tool rows
@@ -383,22 +513,44 @@ const runStep = (
 						// meaning "at most this many tool-calling steps".
 						// Either this turn's own step cap, or the budget shared with every sub-agent it
 						// spawned. Both land in the same place: one closing step to say what was found.
+						//
+						// A repeating batch closes the turn the same way, for the same reason: the
+						// model has what it is going to get, so spend the last step on an answer. The
+						// batch that tripped it still settled above — stopping *before* dispatching it
+						// would leave the model's last call unanswered in the transcript.
+						//
+						// It reports `"max-steps"` rather than a reason of its own. Both are "a ceiling
+						// cut this turn short", the client badges them identically, and a new reason
+						// would be a wire change through `@maple/domain/chat-session` and the web
+						// client for a distinction only this file acts on.
+						//
+						// A soft stop — the caller's wall clock, not a step count — lands here too, and
+						// that is the whole point of it being separate from `isCurrent`. A headless pass
+						// past its deadline used to return an empty stream from the abort check above,
+						// so it never reached a closing step and never submitted what it had found.
+						// Checked *after* the current step's tools settled, so a deadline costs at most
+						// one more step and never leaves a dangling tool call in the transcript.
 						if (
+							observed.stop ||
+							isSoftStopped(input) ||
 							state.step + 1 >= (state.agent.steps ?? MAX_STEPS) ||
 							!hasStepBudget(state.taskBudget)
 						) {
-							const closing = LLM.updateRequest(request, {
-								messages: [...transcript, Message.user(MAX_STEPS_NOTICE)],
-								tools: [],
-								toolChoice: "none",
-							})
+							const closing = closingStep(
+								input,
+								tools,
+								request,
+								transcript,
+								observed.stop ? DOOM_LOOP_NOTICE : MAX_STEPS_NOTICE,
+							)
 							return Stream.concat(
 								Stream.fromIterable(results),
-								runStep(input, tools, withBudget(closing), {
+								runStep(input, tools, withBudget(closing.request), {
 									...state,
 									step: state.step + 1,
 									attempt: 0,
-									closing: true,
+									closing: closing.closing,
+									doomLoop: observed.state,
 								}),
 							)
 						}
@@ -412,6 +564,7 @@ const runStep = (
 								...state,
 								step: state.step + 1,
 								attempt: 0,
+								doomLoop: observed.state,
 							}),
 						)
 					}),
