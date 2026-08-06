@@ -144,8 +144,42 @@ export function humanThreadParticipants(disengagement: ThreadDisengagement): rea
 }
 
 /**
- * DMs everyone in the thread that the bot did not pick up the latest reply, and
- * how to bring it back. Intended to be fired without awaiting — it never throws.
+ * Who actually receives the DM, which is deliberately not the same as who was
+ * in the thread. The two disengagement reasons describe opposite situations and
+ * a single fan-out rule cannot serve both.
+ *
+ * `thread-dormant` — the conversation itself went quiet for a day and the bot
+ * stepped out of it. Nobody is mid-discussion, everyone who took part has a
+ * stake in knowing it is no longer listening, and the DM is the only thing that
+ * will tell them. Everyone gets it.
+ *
+ * `engagement-buried` — the exact opposite: the thread is *lively*, it has
+ * simply run past the bot's last involvement. Fanning out here would DM people
+ * who moved on long ago, about a message they did not write, in a thread that
+ * is still busy — the notification becomes the noise. Only the person whose
+ * reply went unanswered actually needs to know.
+ *
+ * Falls back to the full list when the replier is unknown or is the bot itself:
+ * telling the wrong set of people is recoverable, telling nobody is the failure
+ * this whole path exists to prevent.
+ *
+ * Exported for the tests; `notifyThreadDisengagement` calls it itself.
+ */
+export function noticeRecipients(disengagement: ThreadDisengagement): readonly string[] {
+	const participants = humanThreadParticipants(disengagement)
+	if (disengagement.reason !== "engagement-buried") return participants
+
+	const replier = disengagement.replierUserId
+	if (replier === undefined || replier.length === 0 || replier === disengagement.botUserId) {
+		return participants
+	}
+	return [replier]
+}
+
+/**
+ * DMs that the bot did not pick up the latest reply, and how to bring it back.
+ * Who receives it depends on why it disengaged — see `noticeRecipients`.
+ * Intended to be fired without awaiting — it never throws.
  */
 export async function notifyThreadDisengagement(
 	disengagement: ThreadDisengagement,
@@ -155,7 +189,7 @@ export async function notifyThreadDisengagement(
 		const key = noticeKey(disengagement.teamId, disengagement.channelId, disengagement.threadTs)
 		if (noticedThreads.get(key) !== undefined) return
 
-		const recipients = humanThreadParticipants(disengagement)
+		const recipients = noticeRecipients(disengagement)
 		if (recipients.length === 0) return
 
 		// Claimed before the sends, not after: a Slack outage mid-notice must not

@@ -4,6 +4,7 @@ import {
 	disengagementNoticeText,
 	getPermalinkFromSlack,
 	humanThreadParticipants,
+	noticeRecipients,
 	notifyThreadDisengagement,
 	postDirectMessageViaSlack,
 	resetDisengageNoticeStateForTests,
@@ -121,7 +122,60 @@ describe("humanThreadParticipants", () => {
 
 // ── the notice ──────────────────────────────────────────────────────────────
 
+// The two reasons describe opposite situations, so they cannot share one
+// fan-out rule: `thread-dormant` is a quiet thread nobody is mid-discussion in,
+// while `engagement-buried` is a *lively* one that ran past the bot — DMing
+// everyone there reaches people who moved on, about someone else's message.
+
+describe("noticeRecipients", () => {
+	test("a dormant thread notifies everyone who took part", () => {
+		expect(noticeRecipients(disengagement({ reason: "thread-dormant" }))).toEqual(["U456", "U789"])
+	})
+
+	test("a buried engagement notifies only the author of the unanswered reply", () => {
+		expect(
+			noticeRecipients(disengagement({ reason: "engagement-buried", replierUserId: "U789" })),
+		).toEqual(["U789"])
+	})
+
+	test("the replier is notified even when this is their first message in the thread", () => {
+		// Their message is the one that triggered this, so it is not in `messages`.
+		expect(
+			noticeRecipients(
+				disengagement({
+					reason: "engagement-buried",
+					replierUserId: "U999",
+					messages: [humanMessage("U456", "1700000000.000100")],
+				}),
+			),
+		).toEqual(["U999"])
+	})
+
+	test("an unknown replier falls back to everyone rather than telling nobody", () => {
+		expect(
+			noticeRecipients(disengagement({ reason: "engagement-buried", replierUserId: undefined })),
+		).toEqual(["U456", "U789"])
+	})
+
+	test("a replier that resolves to the bot itself falls back to everyone", () => {
+		expect(
+			noticeRecipients(
+				disengagement({ reason: "engagement-buried", replierUserId: BOT_USER_ID }),
+			),
+		).toEqual(["U456", "U789"])
+	})
+})
+
 describe("notifyThreadDisengagement", () => {
+	test("a buried engagement DMs only the replier, not the whole thread", async () => {
+		const { deps, dms } = makeDeps()
+		await notifyThreadDisengagement(
+			disengagement({ reason: "engagement-buried", replierUserId: "U789" }),
+			deps,
+		)
+		expect(dms.map((d) => d.userId)).toEqual(["U789"])
+	})
+
 	test("DMs every human in the thread, with a permalink and how to resume", async () => {
 		const { deps, dms } = makeDeps()
 		await notifyThreadDisengagement(disengagement(), deps)
