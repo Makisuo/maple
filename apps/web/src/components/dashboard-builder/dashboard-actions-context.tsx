@@ -23,11 +23,15 @@ interface DashboardActionsContextValue {
 	updateWidgetDisplay: (widgetId: string, display: Partial<WidgetDisplayConfig>) => void
 	updateWidgetDataSource: (widgetId: string, dataSource: WidgetDataSource) => void
 	updateWidgetLayouts: (layouts: Array<{ i: string; x: number; y: number; w: number; h: number }>) => void
+	/**
+	 * Returns the widget that was applied, or `undefined` when the add was
+	 * refused — callers (the picker) use that to decide whether to close.
+	 */
 	addWidget: (
 		visualization: VisualizationType,
 		dataSource: WidgetDataSource,
 		display: WidgetDisplayConfig,
-	) => void
+	) => DashboardWidget | undefined
 	autoLayoutWidgets: () => void
 }
 
@@ -44,7 +48,7 @@ interface DashboardActionsProviderProps {
 			visualization: VisualizationType,
 			dataSource: WidgetDataSource,
 			display: WidgetDisplayConfig,
-		) => void
+		) => DashboardWidget
 		removeWidget: (dashboardId: string, widgetId: string) => DashboardWidget | undefined
 		restoreWidget: (dashboardId: string, widget: DashboardWidget) => void
 		cloneWidget: (dashboardId: string, widgetId: string) => void
@@ -125,9 +129,32 @@ export function DashboardActionsProvider({
 				if (readOnly) return
 				store.updateWidgetLayouts(dashboardId, layouts)
 			},
+			// Never fails silently: a refused or failed add used to return here with
+			// no trace, while the picker closed anyway — so the user saw a dialog
+			// dismiss itself and no widget appear. The optimistic apply is
+			// synchronous, so the returned widget is a true "it landed" signal; a
+			// later persistence failure surfaces through the store's error banner.
 			addWidget: (visualization, dataSource, display) => {
-				if (readOnly) return
-				store.addWidget(dashboardId, visualization, dataSource, display)
+				if (readOnly) {
+					toastManager.add({
+						title: "Dashboard editing is unavailable right now",
+						description: "Reconnect to the dashboard store, then add the widget again.",
+						type: "error",
+					})
+					return undefined
+				}
+
+				let widget: DashboardWidget
+				try {
+					widget = store.addWidget(dashboardId, visualization, dataSource, display)
+				} catch (cause) {
+					toastManager.add({
+						title: cause instanceof Error ? cause.message : "Couldn’t add the widget",
+						type: "error",
+					})
+					return undefined
+				}
+
 				if (mode === "view") {
 					navigate({
 						to: "/dashboards/$dashboardId",
@@ -135,6 +162,7 @@ export function DashboardActionsProvider({
 						search: { mode: "edit" },
 					})
 				}
+				return widget
 			},
 			autoLayoutWidgets: () => {
 				if (readOnly) return
