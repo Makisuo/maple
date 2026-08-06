@@ -8,6 +8,7 @@ import SeoHead from "../../components/SeoHead.astro";
 import PostCover from "../../components/blog/PostCover.astro";
 import PostCard from "../../components/blog/PostCard.astro";
 import { CATEGORY_META, formatDate, isoDate, readingTime, getSortedPosts } from "../../lib/blog";
+import { MapleMark } from "@maple/ui/components/icons/maple-mark";
 
 export async function getStaticPaths() {
     const posts = await getCollection("blog", ({ data }) => !data.draft || import.meta.env.DEV);
@@ -92,7 +93,7 @@ const hasToc = toc.length > 0;
                     <p class="mt-5 max-w-[68ch] font-sans text-[15px] leading-[1.7] text-pretty text-fg-muted">{description}</p>
 
                     <div class="mt-6 flex items-center gap-2.5 font-mono text-xs text-fg/80">
-                        <span class="inline-flex h-6 w-6 items-center justify-center bg-primary font-display text-xs font-bold text-primary-foreground" aria-hidden="true">M</span>
+                        <MapleMark size={22} className="text-primary" aria-hidden="true" />
                         <span>{author}</span>
                     </div>
 

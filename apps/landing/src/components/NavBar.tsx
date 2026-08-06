@@ -10,6 +10,7 @@ import {
 } from "@maple/ui/components/ui/navigation-menu"
 import { buttonVariants } from "@maple/ui/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@maple/ui/components/ui/sheet"
+import { MapleMark } from "@maple/ui/components/icons/maple-mark"
 import { cn } from "@maple/ui/lib/utils"
 import * as m from "../paraglide/messages"
 import { broadcastSignedIn } from "./auth-signal"
@@ -142,10 +143,8 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 			    between the two groups, so the centring survives the asymmetric
 			    right-hand group (star pill + Log in + CTA). */}
 			<div className="flex items-center">
-				<a href={l("/")} className="flex items-center gap-3">
-					<div className="w-7 h-7 bg-primary flex items-center justify-center">
-						<span className="text-primary-foreground text-sm font-bold">M</span>
-					</div>
+				<a href={l("/")} className="flex items-center gap-2.5">
+					<MapleMark size={26} className="text-primary shrink-0" />
 					<span className="text-fg font-medium text-sm">Maple</span>
 				</a>
 			</div>

@@ -1,10 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <!-- Maple mark: primary amber tile, primary-foreground charcoal M.
-       The M is an outlined path lifted from Geist SemiBold (the brand display
-       face) rather than a text node. Favicons get rasterized by browsers and
-       OS shells that have no access to the site's webfonts, so a text node
-       falls back to whatever system font happens to be installed and the
-       glyph shifts. Regenerate the rasters with scripts/generate-icons.sh. -->
-  <rect width="32" height="32" rx="6" fill="#E8872B"/>
-  <path d="M8.94 22.75V9.25H12.28L16.01 19.71L19.72 9.25H23.06V22.75H20.58V13.43L17.18 22.73H14.81L11.42 13.43V22.75Z" fill="#272219"/>
+  <!-- Maple mark: ink tile, amber tree. The "Soot" colorway from the brand
+       sheet: the tile dissolves into dark browser chrome so the tree floats
+       free, and it still holds its own edge on a light tab strip.
+
+       The tree is one evenodd path, and the two eyes plus the notch beside the
+       trunk are knockouts, not shapes: the tile reads THROUGH them. So the
+       fill-rule below is load-bearing, and the tile must stay a flat fill
+       (a gradient shows through the eyes at the wrong value and they stop
+       reading as eyes).
+
+       The path is drawn in its own 739 unit box and scaled into the tile, so
+       the artwork stays byte-identical to the source in the Maple Logo file.
+       It sits 74% of the tile wide and 2.5 units off the bottom rather than
+       optically centred, because the trunk runs to the very bottom of its box
+       and a centred mark reads bottom-heavy.
+
+       Regenerate every raster from this file with scripts/generate-icons.sh. -->
+  <rect width="32" height="32" rx="7" fill="#171410"/>
+  <g transform="translate(4.1667 5.8333) scale(.0320253)">
+    <path d="M369.38 0C480.324 2.908e-08 572.686 76.542 592.669 177.775C681.438 222.749 738.763 293.878 738.765 373.942C738.763 482.538 633.316 574.71 486.96 607.449C499.978 645.591 508.455 690.397 510.789 738.765L227.967 738.764C229.399 709.074 233.146 680.725 238.834 654.436C269.538 661.732 306.949 666.785 347.396 664.859L345.194 618.741C208.102 625.268 0.005 528.243 0 373.948C2.099e-08 293.883 57.322 222.751 146.093 177.775C166.076 76.543 258.436 0.001 369.38 0ZM202.322 258.434C174.48 255.016 149.271 273.738 146.015 300.254L133.046 405.874C129.791 432.389 149.721 456.662 177.563 460.08C205.404 463.499 230.614 444.769 233.87 418.254L246.839 312.633C250.095 286.118 230.163 261.853 202.322 258.434ZM367.3 278.691C339.459 275.273 314.117 295.071 310.699 322.913L298.319 423.736C294.902 451.576 314.7 476.918 342.541 480.337C370.382 483.755 395.724 463.955 399.143 436.115L411.523 335.292C414.941 307.451 395.142 282.109 367.3 278.691Z" fill-rule="evenodd" fill="#E86F00"/>
+  </g>
 </svg>

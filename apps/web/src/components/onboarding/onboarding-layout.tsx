@@ -1,4 +1,5 @@
 import { motion } from "motion/react"
+import { MapleMark } from "@maple/ui/components/icons/maple-mark"
 import { cn } from "@maple/ui/lib/utils"
 import { OnboardingOrgSwitcher, OnboardingUserMenu } from "./onboarding-header-actions"
 
@@ -37,7 +38,7 @@ export function OnboardingLayout({
 
 			<header className="relative z-10 flex items-center justify-between px-6 py-5 shrink-0">
 				<div className="flex items-center gap-2.5">
-					<div className="size-7 rounded-md bg-primary shadow-sm shadow-primary/30" />
+					<MapleMark size={26} className="text-primary shrink-0" />
 					<span className="text-base font-semibold tracking-tight">Maple</span>
 				</div>
 

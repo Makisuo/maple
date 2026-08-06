@@ -17,6 +17,7 @@ import { TimeRangePicker } from "../../components/ui/time-range-picker"
 import { ErrorView } from "../../components/ui/state-view"
 import { SkeletonBlock, TelemetrySkeleton } from "../../components/ui/skeleton"
 import { OrgSwitcherModal } from "../../components/org-switcher-modal"
+import { MapleMark } from "../../components/icons/maple-mark"
 import { SparklesIcon } from "../../components/icons/sparkles-icon"
 
 const TIME_OPTIONS: TimeRangeKey[] = ["1h", "24h", "7d", "30d"]
@@ -105,10 +106,7 @@ export default function DashboardScreen() {
 			{/* Logo / brand bar — unique to Overview */}
 			<View className="flex-row justify-between items-center px-5 pb-2">
 				<View className="flex-row items-center gap-2.5">
-					<View
-						className="rounded-md"
-						style={{ width: 28, height: 28, backgroundColor: colors.primary }}
-					/>
+					<MapleMark size={28} />
 					<Text className="text-xl font-bold text-foreground font-mono">Maple</Text>
 				</View>
 				<View className="flex-row items-center gap-3">
