@@ -24,6 +24,7 @@
  * giving them real instruments is separate work.
  */
 import type { LensId } from "@maple/domain/http"
+import { PermissionRule, type PermissionRuleset } from "@maple/domain/permission"
 
 export interface LensDefinition {
 	readonly id: LensId
@@ -39,10 +40,14 @@ export interface LensDefinition {
 	 * fan-out width.
 	 */
 	readonly toolNames: ReadonlySet<string>
+	/**
+	 * The same allowlist as a ruleset, which is what the turn loop actually gates
+	 * on. Deny-then-allow-by-name, matching `READ_ONLY_RULESET`: a mutating tool
+	 * added next month is denied here by default rather than slipping through a
+	 * glob.
+	 */
+	readonly permission: PermissionRuleset
 }
-
-/** A lens asks one question, so it gets a fraction of a full triage pass's budget. */
-export const LENS_MAX_TOOL_STEPS = 6
 
 const NO_FINDING_RULE = `Returning no finding is a CORRECT and valuable outcome. If the evidence does not support your lens, say so plainly and set confidence to "low" with a claim that states what you checked and did not find. Do not stretch weak evidence into a cause — a lens that invents a correlation poisons the ranking that follows.`
 
@@ -75,7 +80,13 @@ When you have finished gathering evidence you will be asked for a structured can
 - **selfDoubt** — what would falsify your claim. A candidate that cannot say what would disprove it should lose, and saying so is how you earn trust rather than lose it.
 - **suggestedActions** — concrete steps a human should take. Plain text; nothing is executed automatically.`
 
-export const LENS_CATALOGUE: ReadonlyArray<LensDefinition> = [
+/** Deny everything, then name what this lens may reach for. */
+export const lensRuleset = (toolNames: ReadonlySet<string>): PermissionRuleset => [
+	new PermissionRule({ tool: "*", action: "deny" }),
+	...[...toolNames].sort().map((tool) => new PermissionRule({ tool, action: "allow" })),
+]
+
+const LENS_SPECS: ReadonlyArray<Omit<LensDefinition, "permission">> = [
 	{
 		id: "deploy_correlation",
 		name: "Deploy correlation",
@@ -165,6 +176,11 @@ If there is no such signal, the correct answer is no finding, with a suggested a
 	},
 ]
 
+export const LENS_CATALOGUE: ReadonlyArray<LensDefinition> = LENS_SPECS.map((spec) => ({
+	...spec,
+	permission: lensRuleset(spec.toolNames),
+}))
+
 const BY_ID = new Map(LENS_CATALOGUE.map((lens) => [lens.id, lens]))
 
 export const lensById = (id: LensId): LensDefinition => {
@@ -186,6 +202,3 @@ export const buildLensContextMessage = (subject: unknown, snapshot: unknown): st
 		"Investigate the subject below through your assigned lens only.",
 		JSON.stringify({ subject, snapshot }, null, 2),
 	].join("\n\n")
-
-export const LENS_FINAL_INSTRUCTION =
-	"Stop investigating. Using only the evidence you gathered above, produce your structured candidate now. If your lens found nothing, say so honestly — that is a valid and useful result."

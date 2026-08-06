@@ -39,7 +39,7 @@ import { InvestigationId, OrgId, UserId } from "@maple/domain/primitives"
 import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
 import { randomUUID } from "node:crypto"
 import { and, eq } from "drizzle-orm"
-import { Effect, Layer, ManagedRuntime, Schema } from "effect"
+import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import {
@@ -151,10 +151,11 @@ export interface InvokeLensInput {
 }
 
 export interface InvokeLensOutput {
-	readonly claim: string
-	readonly mechanism: string
-	readonly confidence: "high" | "medium" | "low"
-	readonly selfDoubt: string
+	/** Null when the lens reached no candidate. */
+	readonly claim: string | null
+	readonly mechanism: string | null
+	readonly confidence: "high" | "medium" | "low" | null
+	readonly selfDoubt: string | null
 	readonly suggestedActions: ReadonlyArray<string>
 	readonly evidence: ReadonlyArray<unknown>
 	readonly model: string
@@ -190,13 +191,17 @@ const invokeLens = async (input: InvokeLensInput): Promise<InvokeLensOutput> => 
 			deadlineAtMs: input.deadlineAtMs,
 		}),
 	)
+	// A lens that reached no candidate is a real result, not a failure — the
+	// workflow records it as a `no_finding` lane and the validator is told it
+	// reported nothing.
+	const candidate = Option.getOrUndefined(output.candidate)
 	return {
-		claim: output.candidate.claim,
-		mechanism: output.candidate.mechanism,
-		confidence: output.candidate.confidence,
-		selfDoubt: output.candidate.selfDoubt,
-		suggestedActions: output.candidate.suggestedActions,
-		evidence: output.candidate.evidence,
+		claim: candidate?.claim ?? null,
+		mechanism: candidate?.mechanism ?? null,
+		confidence: candidate?.confidence ?? null,
+		selfDoubt: candidate?.selfDoubt ?? null,
+		suggestedActions: candidate?.suggestedActions ?? [],
+		evidence: candidate?.evidence ?? [],
 		model: output.model,
 		inputTokens: output.usage.input,
 		outputTokens: output.usage.output,
@@ -253,6 +258,12 @@ const invokeValidator = async (input: InvokeValidatorInput): Promise<InvokeValid
 				orgId: input.orgId,
 				sessionId: `inv_${input.investigationId}`,
 			}),
+			tenant: {
+				orgId: decodeOrgId(input.orgId),
+				userId: internalServiceUserId,
+				roles: [],
+				authMode: "self_hosted",
+			},
 		}),
 	)
 	return {
@@ -454,7 +465,7 @@ async function runWithDb(
 								db
 									.update(investigationLensRuns)
 									.set({
-										status: "reported",
+										status: output.claim === null ? "no_finding" : "reported",
 										claim: output.claim,
 										mechanism: output.mechanism,
 										progressNote: null,
@@ -480,7 +491,7 @@ async function runWithDb(
 							)
 							return {
 								lensId,
-								status: "reported",
+								status: output.claim === null ? "no_finding" : "reported",
 								toolCount: output.toolCount,
 								elapsedMs: finishedAt - startedAt,
 								inputTokens: output.inputTokens,

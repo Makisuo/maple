@@ -2,25 +2,21 @@
  * One lens pass: gather evidence through a single framing, then answer in a
  * `LensCandidate`.
  *
- * Headless by design — no Durable Object, no transcript, no `submit_diagnosis`
- * tool. A lens produces a candidate to be *ranked*, and giving it the tool that
- * publishes a diagnosis would let any one of five rivals declare itself the
- * answer before the validator ever ran.
+ * Runs as a registered sub-agent (`lens-<lensId>` in `chat/agents.ts`) on the
+ * shared turn loop, so it inherits its retry policy, context pruning, step budget
+ * and permission ruleset. It has no `task` tool — a lens cannot spawn anything —
+ * and no `submit_diagnosis`: a lens produces a candidate to be *ranked*, and
+ * handing it the tool that publishes a diagnosis would let any one of five rivals
+ * declare itself the answer before the validator ran.
  */
 import { LensCandidate } from "@maple/domain/http"
 import type { InvestigationSubject, InvestigationSubjectSnapshot, LensId } from "@maple/domain/http"
-import { LLM, Message, type Model } from "@maple/llm"
-import { Effect } from "effect"
-import { toLlmCallError } from "@/platform/Llm"
+import type { Model } from "@maple/llm"
+import { Effect, Option } from "effect"
+import { AGENTS } from "@/chat/agents"
 import type { TenantContext } from "@/services/auth/tenant-context"
-import {
-	LENS_FINAL_INSTRUCTION,
-	LENS_MAX_TOOL_STEPS,
-	buildLensContextMessage,
-	buildLensSystemPrompt,
-	lensById,
-} from "./lens-prompt"
-import { addUsage, runToolLoop, type TokenUsage } from "./tool-loop"
+import { runAgentPass } from "./agent-pass"
+import { buildLensContextMessage } from "./lens-prompt"
 
 export interface LensAgentInput {
 	readonly investigationId: string
@@ -29,52 +25,54 @@ export interface LensAgentInput {
 	readonly snapshot: InvestigationSubjectSnapshot | null
 	readonly model: Model
 	readonly tenant: TenantContext
-	/** Wall-clock budget; the loop stops gathering past it and answers on what it has. */
+	/** Wall-clock budget; the turn stops at its next step boundary past it. */
 	readonly deadlineAtMs: number
 }
 
 export interface LensAgentOutput {
-	readonly candidate: LensCandidate
+	/** `None` when the lens reached no candidate — a valid result, not a failure. */
+	readonly candidate: Option.Option<LensCandidate>
 	readonly model: string
-	readonly usage: TokenUsage
+	readonly usage: { readonly input: number; readonly output: number; readonly cacheRead: number }
 	readonly toolSteps: number
 	readonly deadlineHit: boolean
 }
 
+const SUBMIT_DESCRIPTION =
+	"Record your candidate for this lens. Call it exactly once, after you have gathered evidence. " +
+	"If your lens found nothing, still call it — say so in `claim` with low confidence. A lens that " +
+	"reports honestly that it found nothing is doing its job."
+
 export const runLensAgent = Effect.fn("investigation.lens")(function* (input: LensAgentInput) {
-	const lens = lensById(input.lensId)
+	const agent = AGENTS[`lens-${input.lensId}`]
+	if (!agent) return yield* Effect.die(new Error(`no agent registered for lens ${input.lensId}`))
+
 	yield* Effect.annotateCurrentSpan({
 		"maple.investigation.id": input.investigationId,
 		"maple.lens.id": input.lensId,
 	})
 
-	const system = buildLensSystemPrompt(input.lensId)
-
-	const loop = yield* runToolLoop({
+	const pass = yield* runAgentPass({
 		id: `inv_${input.investigationId}_${input.lensId}`,
-		system,
-		prompt: buildLensContextMessage(input.subject, input.snapshot),
-		model: input.model,
+		agent,
 		tenant: input.tenant,
-		toolNames: lens.toolNames,
-		maxToolSteps: LENS_MAX_TOOL_STEPS,
+		model: input.model,
+		prompt: buildLensContextMessage(input.subject, input.snapshot),
+		submitToolName: "submit_candidate",
+		submitToolDescription: SUBMIT_DESCRIPTION,
+		schema: LensCandidate,
 		deadlineAtMs: input.deadlineAtMs,
-		label: `investigation.lens.${input.lensId}`,
 	})
 
-	const structured = yield* LLM.generateObject({
-		id: `inv_${input.investigationId}_${input.lensId}_candidate`,
-		model: input.model,
-		system,
-		messages: [...loop.messages, Message.user(LENS_FINAL_INSTRUCTION)],
-		schema: LensCandidate,
-	}).pipe(Effect.mapError((error) => toLlmCallError(`investigation.lens.${input.lensId}.candidate`, error)))
-
 	return {
-		candidate: structured.object,
+		candidate: pass.answer,
 		model: String(input.model.id),
-		usage: addUsage(loop.usage, structured.usage),
-		toolSteps: loop.toolSteps,
-		deadlineHit: loop.deadlineHit,
+		usage: {
+			input: pass.usage.input,
+			output: pass.usage.output,
+			cacheRead: pass.usage.cacheRead,
+		},
+		toolSteps: pass.toolCalls,
+		deadlineHit: pass.deadlineHit,
 	} satisfies LensAgentOutput
 })
