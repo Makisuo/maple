@@ -26,7 +26,7 @@ import {
 	type ChatTurnTenantEncoded,
 } from "@maple/domain/chat-session"
 import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
-import { Message } from "@maple/llm"
+import { LLM, Message, type Model } from "@maple/llm"
 import { Effect, Layer, ManagedRuntime, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
 import type { TenantContext } from "@/services/auth/tenant-context"
@@ -76,15 +76,35 @@ const toTenantContext = (encoded: ChatTurnTenantEncoded): TenantContext => {
 const MAX_REPLAYED_MESSAGES = 40
 const MAX_REPLAYED_CHARS = 60_000
 
+/** How the summary is introduced to the model. */
+const COMPACTION_PREAMBLE =
+	"Summary of the earlier part of this conversation, which is no longer shown in full:\n\n"
+
 /**
  * Project the durable transcript into `@maple/llm` messages, most recent first-limited.
  *
  * Tool calls are deliberately NOT replayed as tool messages: a rehydrated conversation needs the
  * *conclusions*, not a second copy of every tool payload, and replaying tool results without their
  * matching provider-native call ids is what makes providers reject a continuation. The assistant's
- * text is what carries forward.
+ * text is what carries forward. Sub-agent text is likewise excluded for free — it lives nested
+ * inside a tool call, not at the top level.
+ *
+ * With a compaction, the head is replaced by its summary instead of being dropped. Without one, the
+ * head-drop below is the fallback and stays exactly as it was: a compaction can fail or be evicted
+ * before it is written, and a degraded turn is much better than a broken one.
+ *
+ * The summary rides as a **user** message. A synthetic assistant turn would assert the model said
+ * something it did not, and several protocols dislike a conversation opening on an assistant turn.
  */
-const toLlmMessages = (history: ReadonlyArray<ChatMessage>): ReadonlyArray<Message> => {
+export const toLlmMessages = (
+	history: ReadonlyArray<ChatMessage>,
+	compaction?: { readonly summary: string; readonly throughSeq: number },
+): ReadonlyArray<Message> => {
+	if (compaction !== undefined) {
+		const tail = toLlmMessages(history.filter((message) => message.startSeq > compaction.throughSeq))
+		return [Message.user(COMPACTION_PREAMBLE + compaction.summary), ...tail]
+	}
+
 	const spoken = history.filter((message) => message.text.trim() !== "")
 
 	// Walk backwards so the newest turns are the ones kept: the tail is the part the next turn
@@ -104,6 +124,67 @@ const toLlmMessages = (history: ReadonlyArray<ChatMessage>): ReadonlyArray<Messa
 		message.role === "user" ? Message.user(message.text) : Message.assistant(message.text),
 	)
 }
+
+/**
+ * Summarize the conversation so far, if the last turn came close to the context wall.
+ *
+ * **After the answer, not during it.** opencode compacts mid-turn and re-enters its loop, which it
+ * can afford: one flat transcript, no client-side message identity, a process that lives as long as
+ * the terminal. Here that would interleave a second model call into a stream the browser is
+ * rendering keyed by `messageId`, add seconds to the visible answer, and need a second `turn-start`
+ * the client would have to learn. Doing it after costs the user nothing — the answer is already
+ * delivered — and the worst case if the isolate is evicted first is that the next turn falls back to
+ * the head-drop. A degradation, not a corruption.
+ *
+ * Runs inside the turn's own program, *before* the runtime is disposed and before `endTurn` releases
+ * the slot: a separate `waitUntil` after the slot was freed could let a new turn start against a
+ * half-written compaction.
+ */
+const compactIfNeeded = (
+	input: RunChatSessionTurnInput,
+	model: Model,
+	usage: { readonly input: number },
+): Effect.Effect<void> =>
+	Effect.gen(function* () {
+		const { contextLimitOf, outputLimitOf } = yield* Effect.promise(() => import("../platform/Llm"))
+		const { isNearContextLimit } = yield* Effect.promise(() => import("./context-budget"))
+		if (
+			!isNearContextLimit(usage.input, {
+				context: contextLimitOf(model),
+				output: outputLimitOf(model),
+			})
+		) {
+			return
+		}
+		// An aborted turn must not append a compaction: the conversation it would summarize is not
+		// the one the user is looking at.
+		if (!input.session.holdsTurn(input.messageId)) return
+
+		const { COMPACTION_SYSTEM_PROMPT } = yield* Effect.promise(() => import("./prompts"))
+		const history = input.session.history()
+		const throughSeq = input.session.cursor()
+		const previous = input.session.compaction()
+
+		const response = yield* LLM.generate(
+			LLM.request({
+				model,
+				system: COMPACTION_SYSTEM_PROMPT,
+				messages: [...toLlmMessages(history, previous)],
+				prompt: "Compact the conversation above now.",
+			}),
+		)
+		const summary = response.text.trim()
+		if (summary === "") return
+		input.session.append({ type: "compaction", messageId: input.messageId, summary, throughSeq })
+	}).pipe(
+		// Bounded, and never allowed to turn a delivered answer into a failed turn. A conversation
+		// that stays uncompacted just falls back to the head-drop next time.
+		Effect.timeout(COMPACTION_TIMEOUT),
+		Effect.catchCause(() => Effect.void),
+	)
+
+/** Compaction is housekeeping; it must not hold the turn slot open. */
+const COMPACTION_TIMEOUT = "20 seconds"
 
 /**
  * Drive one turn to completion.
@@ -157,18 +238,27 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 				sessionId: input.sessionId,
 				tenant,
 				model,
-				messages: toLlmMessages(history),
+				messages: toLlmMessages(history, input.session.compaction()),
 				messageId: input.messageId,
 				extraTools,
 				usage,
 				// An abort clears the claim; the turn notices here and stops at the next event
 				// rather than streaming into a conversation that has moved on.
 				isCurrent: () => input.session.holdsTurn(input.messageId),
+				// Sub-agent events reach the log through here rather than through the returned
+				// stream — see the note on `ChatTurnInput.emit`. The `holdsTurn` guard mirrors the
+				// `Stream.takeWhile` below, so an aborted turn's in-flight sub-agent stops writing
+				// too rather than appending into a conversation that has moved on.
+				emit: (event) => {
+					if (input.session.holdsTurn(input.messageId)) input.session.append(event)
+				},
 			})
 			.pipe(
 				Stream.takeWhile(() => input.session.holdsTurn(input.messageId)),
 				Stream.runForEach((event) => Effect.sync(() => input.session.append(event))),
 			)
+
+		yield* compactIfNeeded(input, model, usage)
 	}).pipe(
 		Effect.withSpan("chat.turn", {
 			attributes: {

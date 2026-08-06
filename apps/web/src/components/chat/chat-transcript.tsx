@@ -21,6 +21,7 @@ import { StatusMarker } from "@/components/ai-elements/status-marker"
 import { Tool, ToolRow, toolLabel } from "@/components/ai-elements/tool"
 import { ToolGroup } from "@/components/ai-elements/tool-group"
 import { ApprovalCard } from "./approval-card"
+import { TaskCard } from "./task-card"
 import { DiagnosisReportCard } from "./diagnosis-report-card"
 import { MessageActions, messageText } from "./message-actions"
 import { parseDiagnosisMarker } from "./diagnosis-marker"
@@ -146,6 +147,20 @@ function renderMessageParts({
 			// Context the model needs but the reader doesn't — see `wrapChatContext`.
 			const text = stripContextPreamble(part.text)
 			if (text) nodes.push(<RichText key={`text-${i}`}>{text}</RichText>)
+			continue
+		}
+		// A sub-agent run is content, not plumbing: its own card, never folded into a tool group.
+		if (part.type === "task") {
+			flushTools()
+			nodes.push(
+				<TaskCard
+					key={part.toolCallId ?? `task-${i}`}
+					agent={part.agent}
+					description={part.description}
+					status={part.status}
+					messages={part.messages}
+				/>,
+			)
 			continue
 		}
 		if (!isToolPart(part)) continue

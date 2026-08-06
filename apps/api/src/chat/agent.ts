@@ -16,10 +16,11 @@
  * user's action, authenticated as the user, which is exactly where it belongs.
  */
 import {
-	chatModeFromSessionId,
 	investigationIdFromChatSessionId,
 	type ChatEvent,
+	type ChatTaskRef,
 } from "@maple/domain/chat-session"
+import { evaluatePermission, type PermissionRuleset } from "@maple/domain/permission"
 import { AiTriageResult, SubmitDiagnosisRequest } from "@maple/domain/http"
 import { InvestigationId } from "@maple/domain/primitives"
 import {
@@ -33,19 +34,43 @@ import {
 	type Usage,
 } from "@maple/llm"
 import { Tool, ToolFailure, ToolRuntime, toDefinitions, type Tools } from "@maple/llm"
-import { Cause, Effect, Option, Schema, Stream } from "effect"
-import { toLlmCallError } from "@/platform/Llm"
+import { Duration, Effect, Option, Schema, Stream } from "effect"
+import { contextLimitOf, outputLimitOf, toLlmCallError } from "@/platform/Llm"
 import type { TenantContext } from "@/services/auth/tenant-context"
-import { callMcpTool } from "@/mcp/dispatcher"
-import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import { MUTATING_TOOL_NAMES } from "@/mcp/tools/mutating"
-import { mapleToolDefinitions, toInputSchema } from "@/mcp/tools/registry"
-import { buildSystemPrompt } from "./modes"
+
+import { buildMapleTools, summarizeToolFailure, withRuntimeServices } from "@/mcp/tools/llm-tools"
+import { isNearContextLimit, pruneToolResults } from "./context-budget"
+import { agentForSession, buildSystemPrompt, spawnableFor, type AgentDefinition } from "./agents"
+import { buildTaskTool, hasStepBudget, makeTaskBudget, type TaskBudget } from "./task-tool"
+import {
+	isRetryableStepFailure,
+	makeStepRetryBudget,
+	stepRetryDelayMs,
+	MAX_STEP_ATTEMPTS,
+	STEP_RETRY_BUDGET_MS,
+	type StepRetryBudget,
+} from "./llm-retry"
 
 const decodeInvestigationIdOption = Schema.decodeUnknownOption(InvestigationId)
 
-/** Hard cap on assistant turns per submission. */
+/**
+ * Hard cap on *tool-calling* assistant turns per submission.
+ *
+ * A turn that hits it gets one further, tool-less step so the model can answer from what it found;
+ * see `MAX_STEPS_NOTICE`.
+ */
 const MAX_STEPS = 10
+
+/**
+ * What the model is told when it runs out of steps.
+ *
+ * The turn used to stop dead here, so the user was left with a wall of tool rows and no words —
+ * the model had gathered the answer and never got to say it.
+ */
+const MAX_STEPS_NOTICE =
+	"You have reached the maximum number of tool calls for this turn. Do NOT call any more tools. " +
+	"Using only what you have already found, give the user your answer now, and say plainly what " +
+	"you could not determine."
 
 /** Fan-out cap for tool calls issued in the same assistant turn. */
 const TOOL_CONCURRENCY = 4
@@ -87,44 +112,6 @@ const addUsage = (total: TurnUsage, usage: Usage | undefined): void => {
 	total.cacheRead += usage?.cacheReadInputTokens ?? 0
 }
 
-/**
- * Re-pin the service requirements of an MCP tool handler. See the identical helper in
- * `workflows/triage-agent.ts` — `MapleToolDefinition.handler` erases its requirements to `any`
- * at the registry boundary, and `Tool.make` insists on `never`.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const withRuntimeServices = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Effect<A, E> =>
-	effect as Effect.Effect<A, E>
-
-const toolResultText = (result: { content: ReadonlyArray<{ text: string }> }): string =>
-	result.content.map((block) => block.text).join("\n")
-
-/**
- * A one-line reason for a failed tool, safe to hand the model.
- *
- * `String(cause)` renders the whole Effect cause: stack frames, and — inside a `DatabaseError` —
- * connection details. That went into the model's context and, through the tool-result event, into
- * a durable transcript the browser reads back.
- */
-const summarizeToolFailure = (cause: Cause.Cause<unknown>): string => {
-	const failure = cause.reasons.find(Cause.isFailReason)
-	const error: unknown = failure?.error
-	if (error instanceof Error) return error.message
-	if (error && typeof error === "object" && "message" in error) {
-		const message = (error as { message?: unknown }).message
-		if (typeof message === "string") return message
-	}
-	return "the tool failed"
-}
-
-/**
- * Description suffix on gated tools. The model still calls them normally; it just needs to know
- * the call is a proposal so it stops rather than narrating a completed change.
- */
-const APPROVAL_NOTE =
-	"\n\nThis is an approval-gated action. Calling it proposes the change for the user to approve; " +
-	"it does NOT take effect until they do. Call it once with the intended arguments and stop."
-
 export interface ChatTurnInput {
 	readonly sessionId: string
 	readonly tenant: TenantContext
@@ -148,6 +135,32 @@ export interface ChatTurnInput {
 	readonly isCurrent?: () => boolean
 	/** Accumulates this turn's token usage; see {@link TurnUsage}. */
 	readonly usage?: TurnUsage
+	/**
+	 * Which agent this turn runs as. Defaults to the primary agent the session id names, so
+	 * existing callers keep the behaviour their mode already had.
+	 */
+	readonly agent?: AgentDefinition
+	/**
+	 * Set when this turn is a sub-agent nested inside a parent turn: every event it produces is
+	 * stamped with this ref, which is what routes them into the parent's task card rather than the
+	 * top-level conversation.
+	 */
+	readonly task?: ChatTaskRef
+	/** Nesting depth. 0 is the conversation's own turn. */
+	readonly depth?: number
+	/** Shared across the parent and every descendant; see {@link TaskBudget}. */
+	readonly taskBudget?: TaskBudget
+	/**
+	 * Sink for events produced by a nested sub-agent turn.
+	 *
+	 * A side channel rather than a merge into the returned stream. `Stream.merge` would race the
+	 * parent's terminal `turn-end` against undrained child events, and `ChatSession.pump` closes
+	 * the SSE connection on a terminal event — so a child's tail could be written to the durable log
+	 * *after* the turn had been declared over. The consumer's `Stream.runForEach` is strictly
+	 * sequential, so an event emitted from inside a tool's `execute` is deterministically ordered
+	 * after the tool-call announcement that introduced it and before the tool-result that closes it.
+	 */
+	readonly emit?: (event: ChatTurnEvent) => void
 }
 
 /**
@@ -223,51 +236,20 @@ export const buildSubmitDiagnosisTool = (
 	return tools
 }
 
-/** All Maple tools, with mutating ones flagged. Read-only tools execute; gated ones never do. */
-const buildChatTools = (tenant: TenantContext): Tools =>
-	Object.fromEntries(
-		mapleToolDefinitions.map((definition) => {
-			const gated = MUTATING_TOOL_NAMES.has(definition.name)
-			return [
-				definition.name,
-				Tool.make({
-					description: gated ? `${definition.description}${APPROVAL_NOTE}` : definition.description,
-					jsonSchema: toInputSchema(definition.schema),
-					// A gated tool still executes as far as `Tool.make` is concerned, but the loop
-					// never dispatches it — it breaks on the proposal first. Keeping a real handler
-					// here (rather than omitting it) means the tool schema the model sees is
-					// identical to the read-only case, and `POST /api/chat/apply` remains the only
-					// path that actually mutates.
-					execute: (params): Effect.Effect<unknown, ToolFailure> =>
-						gated
-							? Effect.fail(
-									new ToolFailure({
-										message: `${definition.name} requires user approval and was not executed.`,
-									}),
-								)
-							: withRuntimeServices(
-									callMcpTool(definition.name, params).pipe(
-										Effect.provideService(CurrentMcpTenant, tenant),
-										Effect.flatMap((result) =>
-											result.isError
-												? Effect.fail(
-														new ToolFailure({ message: toolResultText(result) }),
-													)
-												: Effect.succeed(toolResultText(result)),
-										),
-										Effect.catchCause((cause) =>
-											Effect.fail(
-												new ToolFailure({
-													message: `Tool failed: ${summarizeToolFailure(cause)}`,
-												}),
-											),
-										),
-									),
-								),
-				}),
-			]
-		}),
-	)
+/**
+ * All Maple tools, with mutating ones gated.
+ *
+ * A gated tool still carries a real handler (rather than being omitted) so the schema the model
+ * sees is identical to the read-only case — but the loop never dispatches it, because it breaks on
+ * the proposal first, and `POST /api/chat/apply` remains the only path that actually mutates.
+ */
+const buildChatTools = (tenant: TenantContext, ruleset: PermissionRuleset): Tools =>
+	buildMapleTools(tenant, {
+		// `deny` means the model never sees the tool. That is a stronger guarantee than refusing the
+		// call afterwards, and it is free — an unoffered tool cannot be called.
+		include: (name) => evaluatePermission(ruleset, name) !== "deny",
+		gate: (name) => evaluatePermission(ruleset, name) === "ask",
+	})
 
 /** Distributive `Omit`, so each union member keeps its own shape. */
 type WithoutSeq<T> = T extends unknown ? Omit<T, "seq"> : never
@@ -290,30 +272,77 @@ export type ChatTurnEvent = WithoutSeq<Exclude<ChatEvent, { type: "user-message"
 export const runChatTurn = (input: ChatTurnInput): Stream.Stream<ChatTurnEvent> =>
 	Stream.unwrap(
 		Effect.sync(() => {
-			const tools = { ...buildChatTools(input.tenant), ...input.extraTools }
-			const system = buildSystemPrompt({ mode: chatModeFromSessionId(input.sessionId) })
+			const agent = input.agent ?? agentForSession(input.sessionId)
+			const taskBudget = input.taskBudget ?? makeTaskBudget()
+			const tools = {
+				...buildChatTools(input.tenant, agent.permission),
+				// Delegation is opt-in per agent: an agent with no `spawns` never sees `task` at all.
+				...buildTaskTool(input, spawnableFor(agent), taskBudget, runChatTurn),
+				...input.extraTools,
+			}
 			const request = LLM.request({
 				id: input.messageId,
 				model: input.model,
-				system,
+				system: buildSystemPrompt(agent),
 				messages: [...input.messages],
 				tools: toDefinitions(tools),
 			})
-			const start: ChatTurnEvent = { type: "turn-start", messageId: input.messageId }
-			return Stream.concat(Stream.fromIterable([start]), runStep(input, tools, request, 0))
+			const start = tagged(input, { type: "turn-start", messageId: input.messageId })
+			const state: StepState = {
+				step: 0,
+				attempt: 0,
+				budget: makeStepRetryBudget(),
+				agent,
+				taskBudget,
+			}
+			return Stream.concat(Stream.fromIterable([start]), runStep(input, tools, request, state))
 		}),
 	)
+
+/**
+ * Where one step sits in the turn.
+ *
+ * `attempt` is 0-based and resets per step; `budget` is shared across the whole turn, because a
+ * per-step cap composes badly over `MAX_STEPS` steps — ten steps each retrying three times is
+ * minutes of pure backoff, and the DO's turn slot is held the entire time.
+ */
+interface StepState {
+	readonly step: number
+	readonly attempt: number
+	readonly budget: StepRetryBudget
+	/** Resolved once at the top of the turn, so every step agrees on the ruleset and step cap. */
+	readonly agent: AgentDefinition
+	/** Shared with every descendant sub-agent turn. */
+	readonly taskBudget: TaskBudget
+	/**
+	 * This is the tool-less step that closes a turn which ran out of steps. Its natural exit is
+	 * "no tool calls", which would otherwise report `"stop"` and lose the signal the client badges
+	 * on — so the reason is carried here instead.
+	 */
+	readonly closing?: true
+}
+
+/**
+ * Stamp an event with the ref that routes it into a parent's task card.
+ *
+ * Every emission site goes through this, so a sub-agent's events can never leak into the top-level
+ * conversation by omission — the tag is applied once, at the boundary, rather than remembered at
+ * each of the seven places a turn emits.
+ */
+const tagged = <E extends ChatTurnEvent>(input: ChatTurnInput, event: E): E =>
+	input.task === undefined ? event : { ...event, task: input.task }
 
 const turnEnd = (
 	input: ChatTurnInput,
 	reason: Extract<ChatEvent, { type: "turn-end" }>["reason"],
 	error?: string,
-): ChatTurnEvent => ({
-	type: "turn-end",
-	messageId: input.messageId,
-	reason,
-	...(error === undefined ? {} : { error }),
-})
+): ChatTurnEvent =>
+	tagged(input, {
+		type: "turn-end",
+		messageId: input.messageId,
+		reason,
+		...(error === undefined ? {} : { error }),
+	})
 
 /** A turn with no session attached (tests, one-shot callers) is always current. */
 const isCurrent = (input: ChatTurnInput): boolean => input.isCurrent === undefined || input.isCurrent()
@@ -328,9 +357,14 @@ const runStep = (
 	input: ChatTurnInput,
 	tools: Tools,
 	request: LLMRequest,
-	step: number,
+	state: StepState,
 ): Stream.Stream<ChatTurnEvent> =>
 	Stream.suspend(() => {
+		// Counted per model call, not per logical step, because a retry costs the same wall clock
+		// and the same money. Shared with every descendant, so a fan-out of sub-agents cannot
+		// multiply its way past the turn's ceiling.
+		state.taskBudget.stepsUsed += 1
+
 		const collected: Array<LLMEvent> = []
 		// Set by the catch below. `Stream.concat`'s second half runs unconditionally, so without an
 		// explicit flag a failed stream that still assembled a partial response would emit a
@@ -339,6 +373,15 @@ const runStep = (
 		// Those extra events land invisibly (the SSE route stops at the first `turn-end`) and
 		// surface on the next reload.
 		let failed = false
+		// Characters of *this attempt's* text that reached the log. Counted after the batching
+		// window, not at the raw delta, so it matches exactly what the consumer appended — that
+		// equality is what makes `retractChars` a complete undo rather than an approximation.
+		//
+		// It also means a batch still buffering when the stream fails contributes nothing, because
+		// `Stream.groupedWithin` discards its pending buffer on an upstream failure rather than
+		// flushing it. So a provider that dies inside one batching window costs a retraction of
+		// zero, and only text that actually reached a consumer is ever taken back.
+		let emitted = 0
 
 		const live: Stream.Stream<ChatTurnEvent> = LLM.stream(request).pipe(
 			Stream.tap((event) => Effect.sync(() => collected.push(event))),
@@ -350,21 +393,87 @@ const runStep = (
 			// tool calls and the terminal event live in the concatenated segment below, so nothing
 			// here can reorder them.
 			Stream.groupedWithin(DELTA_BATCH_SIZE, DELTA_BATCH_WINDOW),
-			Stream.map(
-				(events): ChatTurnEvent => ({
-					type: "text-delta",
-					messageId: input.messageId,
-					text: events.map((event) => ("text" in event ? event.text : "")).join(""),
-				}),
-			),
-			// A model failure ends the turn as a recorded event rather than killing the stream —
-			// the session log is durable, so a client reconnecting after the failure must still be
-			// able to read why the turn stopped.
+			Stream.map((events): ChatTurnEvent => {
+				const text = events.map((event) => ("text" in event ? event.text : "")).join("")
+				emitted += text.length
+				return tagged(input, { type: "text-delta", messageId: input.messageId, text })
+			}),
+			// A model failure either retries the step or ends the turn as a recorded event. Either
+			// way it does not kill the stream: the session log is durable, so a client reconnecting
+			// after the failure must still be able to read what happened.
 			Stream.catch((error) => {
 				failed = true
-				return Stream.fromIterable([
-					turnEnd(input, "error", toLlmCallError("chat.turn", error).message),
-				])
+				const called = toLlmCallError("chat.turn", error)
+
+				// Aborted mid-stream. The DO already recorded the terminal event when it cleared the
+				// claim, so emitting anything here would be a second one.
+				if (!isCurrent(input)) return Stream.empty
+
+				// Overflow is the one failure worth retrying with a *different* request. Sending the
+				// same oversized transcript again cannot start fitting, so `isRetryableStepFailure`
+				// refuses it — but a pruned transcript is a genuinely new attempt. This is what
+				// `LlmCallError.contextOverflow` was added for; nothing acted on it before.
+				if (called.contextOverflow) {
+					const pruned = pruneToolResults(request)
+					if (pruned === request || state.attempt + 1 >= MAX_STEP_ATTEMPTS) {
+						return Stream.fromIterable([turnEnd(input, "error", called.message)])
+					}
+					return Stream.concat(
+						Stream.fromIterable([
+							tagged(input, {
+								type: "turn-retry" as const,
+								messageId: input.messageId,
+								attempt: state.attempt + 2,
+								retractChars: emitted,
+								reason: called.reason,
+								delayMs: 0,
+							}),
+						]),
+						runStep(input, tools, pruned, { ...state, attempt: state.attempt + 1 }),
+					)
+				}
+
+				const delayMs = stepRetryDelayMs(state.attempt)
+				const affordable = state.budget.spentMs + delayMs <= STEP_RETRY_BUDGET_MS
+				if (
+					!isRetryableStepFailure(called) ||
+					state.attempt + 1 >= MAX_STEP_ATTEMPTS ||
+					!affordable
+				) {
+					return Stream.fromIterable([turnEnd(input, "error", called.message)])
+				}
+				state.budget.spentMs += delayMs
+
+				// The retraction and the progress signal are one event: either alone is useless.
+				// Safe to express as a character count because a failed attempt emitted nothing but
+				// text — tool calls live in `settleAndRecurse`, which `failed` short-circuits.
+				const marker = tagged(input, {
+					type: "turn-retry" as const,
+					messageId: input.messageId,
+					attempt: state.attempt + 2,
+					retractChars: emitted,
+					reason: called.reason,
+					delayMs,
+				})
+				return Stream.concat(
+					Stream.fromIterable([marker]),
+					// `Stream.unwrap` + `Effect.sleep` rather than `Stream.retry`: a schedule would
+					// resubscribe this whole pipeline, replaying the deltas it already emitted, and
+					// would leave nowhere to put the retraction between attempts.
+					Stream.unwrap(
+						Effect.sleep(Duration.millis(delayMs)).pipe(
+							Effect.map(() =>
+								// Re-checked *after* the sleep: an abort landing during backoff wins.
+								isCurrent(input)
+									? runStep(input, tools, request, {
+											...state,
+											attempt: state.attempt + 1,
+										})
+									: Stream.empty,
+							),
+						),
+					),
+				)
 			}),
 		)
 
@@ -386,28 +495,38 @@ const runStep = (
 					.filter(LLMEvent.is.toolCall)
 					.filter((call) => !call.providerExecuted)
 
-				if (calls.length === 0) return Stream.fromIterable([turnEnd(input, "stop")])
+				if (calls.length === 0) {
+					return Stream.fromIterable([turnEnd(input, state.closing ? "max-steps" : "stop")])
+				}
+
+				// The closing step is sent with `tools: []` and `toolChoice: "none"`, so a call here
+				// means the provider ignored both. Ending rather than dispatching keeps `MAX_STEPS`
+				// a real bound: without this the closing step would recurse into another closing
+				// step, and a provider that always emits a call would loop forever.
+				if (state.closing) return Stream.fromIterable([turnEnd(input, "max-steps")])
 
 				// The real interrupt. A gated call ends the turn immediately — the client renders an
 				// approval card from this event and applies it through `POST /api/chat/apply`.
 				// Read-only calls issued in the same turn are dropped rather than half-run, so the
 				// transcript never shows a partial turn.
-				const gated = calls.find((call) => MUTATING_TOOL_NAMES.has(call.name))
+				const gated = calls.find(
+					(call) => evaluatePermission(state.agent.permission, call.name) === "ask",
+				)
 				if (gated) {
-					const proposal: ChatTurnEvent = {
-						type: "tool-call",
+					const proposal = tagged(input, {
+						type: "tool-call" as const,
 						messageId: input.messageId,
 						callId: gated.id,
 						name: gated.name,
 						input: gated.input,
 						proposed: true,
-					}
+					})
 					return Stream.fromIterable([proposal, turnEnd(input, "stop")])
 				}
 
-				const announced = calls.map(
-					(call): ChatTurnEvent => ({
-						type: "tool-call",
+				const announced = calls.map((call) =>
+					tagged(input, {
+						type: "tool-call" as const,
 						messageId: input.messageId,
 						callId: call.id,
 						name: call.name,
@@ -430,9 +549,9 @@ const runStep = (
 							{ concurrency: TOOL_CONCURRENCY },
 						)
 
-						const results = dispatched.map(
-							([call, outcome]): ChatTurnEvent => ({
-								type: "tool-result",
+						const results = dispatched.map(([call, outcome]) =>
+							tagged(input, {
+								type: "tool-result" as const,
 								messageId: input.messageId,
 								callId: call.id,
 								output: outcome.result.value,
@@ -444,28 +563,75 @@ const runStep = (
 						// transcript is not left with dangling calls, then stop.
 						if (!isCurrent(input)) return Stream.fromIterable(results)
 
-						if (step + 1 >= MAX_STEPS) {
-							return Stream.fromIterable([...results, turnEnd(input, "max-steps")])
+						const transcript = [
+							...request.messages,
+							response.message,
+							...dispatched.map(([call, outcome]) =>
+								Message.tool(
+									ToolResultPart.make({
+										id: call.id,
+										name: call.name,
+										result: outcome.result,
+									}),
+								),
+							),
+						]
+
+						/**
+						 * Prune before the next step if the *provider's own* count says we are near
+						 * the wall. Acting on the reported figure rather than an estimate is what
+						 * makes this trustworthy — the estimate exists only to decide whether a
+						 * prune is worth doing.
+						 */
+						const withBudget = (next: LLMRequest): LLMRequest =>
+							isNearContextLimit(response.usage?.inputTokens ?? 0, {
+								context: contextLimitOf(input.model),
+								output: outputLimitOf(input.model),
+							})
+								? pruneToolResults(next)
+								: next
+
+						// Out of steps. Rather than cutting the turn off after a wall of tool rows
+						// with no words — which is what the user was left with — spend one more
+						// non-tool step letting the model answer from what it already found.
+						//
+						// A trailing *user* instruction, not opencode's assistant prefill: prefill is
+						// an Anthropic-shaped affordance, and Maple's default route is OpenRouter.
+						// `tools: []` and `toolChoice: "none"` together mean the closing step cannot
+						// loop even if the model ignores the instruction, so `MAX_STEPS` keeps
+						// meaning "at most this many tool-calling steps".
+						// Either this turn's own step cap, or the budget shared with every sub-agent it
+						// spawned. Both land in the same place: one closing step to say what was found.
+						if (
+							state.step + 1 >= (state.agent.steps ?? MAX_STEPS) ||
+							!hasStepBudget(state.taskBudget)
+						) {
+							const closing = LLM.updateRequest(request, {
+								messages: [...transcript, Message.user(MAX_STEPS_NOTICE)],
+								tools: [],
+								toolChoice: "none",
+							})
+							return Stream.concat(
+								Stream.fromIterable(results),
+								runStep(input, tools, withBudget(closing), {
+									...state,
+									step: state.step + 1,
+									attempt: 0,
+									closing: true,
+								}),
+							)
 						}
 
-						const next = LLM.updateRequest(request, {
-							messages: [
-								...request.messages,
-								response.message,
-								...dispatched.map(([call, outcome]) =>
-									Message.tool(
-										ToolResultPart.make({
-											id: call.id,
-											name: call.name,
-											result: outcome.result,
-										}),
-									),
-								),
-							],
-						})
+						const next = withBudget(LLM.updateRequest(request, { messages: transcript }))
+						// A fresh attempt count per step: `attempt` counts retries of *this* step's
+						// model call, and the shared `budget` is what bounds the turn overall.
 						return Stream.concat(
 							Stream.fromIterable(results),
-							runStep(input, tools, next, step + 1),
+							runStep(input, tools, next, {
+								...state,
+								step: state.step + 1,
+								attempt: 0,
+							}),
 						)
 					}),
 				)

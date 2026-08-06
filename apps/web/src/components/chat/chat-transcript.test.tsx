@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ChatTranscript, findDiagnosisMessageId } from "./chat-transcript"
@@ -242,5 +242,54 @@ describe("machine-written turns", () => {
 
 		expect(screen.getByText("Why is it slow?")).toBeTruthy()
 		expect(screen.queryByText(/subject: api/)).toBeNull()
+	})
+})
+
+describe("ChatTranscript sub-agent cards", () => {
+	const taskMessage = (status: "running" | "completed" = "completed"): UIMessage =>
+		({
+			id: "m1",
+			role: "assistant",
+			parts: [
+				{
+					type: "task",
+					toolCallId: "t1",
+					agent: "explore",
+					description: "trace checkout latency",
+					status,
+					messages: [
+						{
+							id: "c1",
+							role: "assistant",
+							parts: [{ type: "text", text: "p99 is 4.2s in checkout-api.", state: "done" }],
+						},
+					],
+				},
+			],
+		}) as unknown as UIMessage
+
+	it("renders a collapsed card naming the sub-agent and what it was asked", () => {
+		render(<ChatTranscript {...baseProps} messages={[taskMessage()]} />)
+
+		expect(screen.getByText("explore")).toBeTruthy()
+		expect(screen.getByText("trace checkout latency")).toBeTruthy()
+		// Collapsed by default: the point of delegating is that the parent thread does not carry
+		// the sub-agent's search.
+		expect(screen.queryByText("p99 is 4.2s in checkout-api.")).toBeNull()
+	})
+
+	it("expands to the sub-agent's own transcript on click", () => {
+		render(<ChatTranscript {...baseProps} messages={[taskMessage()]} />)
+
+		fireEvent.click(screen.getByText("explore"))
+		expect(screen.getByText("p99 is 4.2s in checkout-api.")).toBeTruthy()
+	})
+
+	it("never folds a sub-agent into a Used N tools header", () => {
+		// A sub-agent run is content, not plumbing.
+		render(<ChatTranscript {...baseProps} messages={[taskMessage()]} />)
+
+		expect(screen.queryByText(/Used \d+ tools/)).toBeNull()
+		expect(items().map((el) => (el as HTMLElement).dataset.messageId)).toEqual(["m1"])
 	})
 })

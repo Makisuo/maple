@@ -13,7 +13,14 @@ import { LLM } from "@maple/llm"
 import { Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { describe, expect, it } from "vitest"
-import { layerLlm, resolveTriageModel, type LlmCallTags, type LlmEnv } from "./Llm"
+import {
+	contextLimitOf,
+	layerLlm,
+	outputLimitOf,
+	resolveTriageModel,
+	type LlmCallTags,
+	type LlmEnv,
+} from "./Llm"
 
 interface CapturedRequest {
 	readonly url: string
@@ -111,5 +118,45 @@ describe("resolveTriageModel — OpenRouter attribution", () => {
 		expect(captured.body).not.toHaveProperty("user")
 		expect(captured.body).not.toHaveProperty("session_id")
 		expect(captured.body).not.toHaveProperty("trace")
+	})
+})
+
+describe("resolveTriageModel — context limits", () => {
+	it("attaches the configured model's window, which the vendored provider leaves unset", () => {
+		// `@maple/llm` declares `ModelLimits` but no provider populates it, so before this every
+		// model reported `undefined` and nothing could tell when a transcript was near the wall.
+		const model = resolveTriageModel(openRouterEnv)
+
+		expect(contextLimitOf(model)).toBe(1_050_000)
+		expect(outputLimitOf(model)).toBe(128_000)
+	})
+
+	it("falls back to a conservative window for a model it does not know", () => {
+		// Too low costs a summarization call; too high costs the whole turn. Unknown means low.
+		const model = resolveTriageModel({
+			...openRouterEnv,
+			MAPLE_TRIAGE_MODEL_OPENROUTER: "some/model-shipped-after-this-table",
+		})
+
+		expect(contextLimitOf(model)).toBe(128_000)
+	})
+
+	it("lets the environment override the table", () => {
+		const model = resolveTriageModel({
+			...openRouterEnv,
+			MAPLE_TRIAGE_MODEL_CONTEXT: "64000",
+			MAPLE_TRIAGE_MODEL_OUTPUT: "4000",
+		})
+
+		expect(contextLimitOf(model)).toBe(64_000)
+		expect(outputLimitOf(model)).toBe(4_000)
+	})
+
+	it("ignores an unparseable or nonsensical override rather than trusting it", () => {
+		// A zero or negative window would make every turn look overflowed on its first step.
+		for (const bad of ["", "not-a-number", "0", "-5", "1.5"]) {
+			const model = resolveTriageModel({ ...openRouterEnv, MAPLE_TRIAGE_MODEL_CONTEXT: bad })
+			expect(contextLimitOf(model)).toBe(1_050_000)
+		}
 	})
 })

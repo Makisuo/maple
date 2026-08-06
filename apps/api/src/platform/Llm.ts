@@ -20,8 +20,8 @@ import { LlmCallError } from "@maple/domain/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
 import * as OpenRouter from "@maple/llm/providers/openrouter"
 import { LLMClient, RequestExecutor } from "@maple/llm/route"
-import { isContextOverflowFailure } from "@maple/llm"
-import type { LLMClientService, LLMError, Model } from "@maple/llm"
+import { isContextOverflowFailure, Model } from "@maple/llm"
+import type { LLMClientService, LLMError } from "@maple/llm"
 import { Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { layerWorkersAi } from "./WorkersAiHttpClient"
@@ -97,8 +97,52 @@ export interface LlmEnv extends Record<string, unknown> {
 	readonly MAPLE_LLM_PROVIDER?: string
 	readonly MAPLE_TRIAGE_MODEL_OPENROUTER?: string
 	readonly MAPLE_TRIAGE_MODEL_WORKERS_AI?: string
+	/** Context window in tokens, overriding {@link MODEL_LIMITS} for the configured model. */
+	readonly MAPLE_TRIAGE_MODEL_CONTEXT?: string
+	/** Max completion tokens, overriding {@link MODEL_LIMITS} for the configured model. */
+	readonly MAPLE_TRIAGE_MODEL_OUTPUT?: string
 	readonly OPENROUTER_API_KEY?: string
 }
+
+/**
+ * Context windows for the models Maple configures.
+ *
+ * `@maple/llm` has a `ModelLimits { context, output }` on `Model.defaults`, but **no provider
+ * populates it** — it is `undefined` for every model the vendored package builds. Maple needs it to
+ * know when a transcript is approaching the wall, so it is filled in here, at the Maple seam, via
+ * `Model.update`. Nothing is added to `lib/llm` (see `lib/llm/MAPLE.md`).
+ *
+ * Conservative on purpose. A limit set too low compacts early, which costs a summarization call; a
+ * limit set too high overflows, which costs the whole turn. When in doubt, go low.
+ */
+const MODEL_LIMITS: Record<string, { readonly context: number; readonly output: number }> = {
+	// Verified against OpenRouter's public model catalogue.
+	"openai/gpt-5.6-luna": { context: 1_050_000, output: 128_000 },
+	// Moonshot's own `kimi-k2.6` is 262_144, but Cloudflare does not publish the window its Workers
+	// AI deployment actually serves, and a serving deployment is usually narrower than upstream's
+	// maximum. Held at the conservative default until someone measures it; override with
+	// `MAPLE_TRIAGE_MODEL_CONTEXT` if the real figure turns out to be higher.
+	"@cf/moonshotai/kimi-k2.6": { context: 128_000, output: 8_000 },
+}
+
+/** For a model not in the table at all. Low enough that an unknown model compacts rather than fails. */
+const DEFAULT_MODEL_LIMITS = { context: 128_000, output: 8_000 } as const
+
+const readPositiveInt = (env: LlmEnv, key: keyof LlmEnv): number | undefined => {
+	const raw = readString(env, key)
+	if (raw === undefined) return undefined
+	const value = Number(raw)
+	return Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
+/**
+ * The context budget a turn should plan against, in tokens, or `undefined` if the model declares
+ * none. Callers treat `undefined` as "don't compact" rather than guessing a number.
+ */
+export const contextLimitOf = (model: Model): number | undefined => model.defaults?.limits?.context
+
+/** Max completion tokens, used to reserve headroom when deciding whether the input still fits. */
+export const outputLimitOf = (model: Model): number | undefined => model.defaults?.limits?.output
 
 const readString = (env: LlmEnv, key: keyof LlmEnv): string | undefined => {
 	const value = env[key]
@@ -126,16 +170,39 @@ export const resolveLlmProvider = (env: LlmEnv): LlmProvider =>
  * OpenRouter's body fields and have no meaning to Cloudflare.
  */
 export const resolveTriageModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
-	resolveLlmProvider(env) === "workers-ai"
-		? CloudflareWorkersAI.configure({
-				accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
-				apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
-			}).model(readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ?? DEFAULT_WORKERS_AI_MODEL)
-		: OpenRouter.configure({
-				apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
-				headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
-				...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
-			}).model(readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL)
+	withLimits(
+		env,
+		resolveLlmProvider(env) === "workers-ai"
+			? CloudflareWorkersAI.configure({
+					accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
+					apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
+				}).model(readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ?? DEFAULT_WORKERS_AI_MODEL)
+			: OpenRouter.configure({
+					apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
+					headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
+					...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
+				}).model(readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL),
+	)
+
+/**
+ * Attach the model's context window, which the vendored providers leave unset.
+ *
+ * Purely additive — `defaults.limits` was `undefined` before — so nothing that ignores it can
+ * regress. `defaults` is spread rather than replaced so a provider that *does* set generation or
+ * HTTP defaults keeps them.
+ */
+const withLimits = (env: LlmEnv, model: Model): Model => {
+	const known = MODEL_LIMITS[String(model.id)] ?? DEFAULT_MODEL_LIMITS
+	return Model.update(model, {
+		defaults: {
+			...model.defaults,
+			limits: {
+				context: readPositiveInt(env, "MAPLE_TRIAGE_MODEL_CONTEXT") ?? known.context,
+				output: readPositiveInt(env, "MAPLE_TRIAGE_MODEL_OUTPUT") ?? known.output,
+			},
+		},
+	})
+}
 
 /**
  * The runnable LLM stack — identical for both providers, which is what makes the switch a pure

@@ -12,6 +12,7 @@
 		"./http/v2": "./src/http/v2/index.ts",
 		"./internal-rpc": "./src/internal-rpc.ts",
 		"./llm": "./src/llm.ts",
+		"./permission": "./src/permission.ts",
 		"./primitives": "./src/primitives.ts",
 		"./query-engine": "./src/query-engine.ts",
 		"./recommendations": "./src/recommendations.ts",

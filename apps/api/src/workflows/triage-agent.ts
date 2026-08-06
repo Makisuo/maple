@@ -22,12 +22,11 @@
 import type { AiTriageIncidentKind } from "@maple/domain/http"
 import { AiTriageResult } from "@maple/domain/http"
 import { LLM, LLMEvent, Message, ToolResultPart, type LLMRequest, type Model, type Usage } from "@maple/llm"
-import { Tool, ToolFailure, ToolRuntime, toDefinitions, type Tools } from "@maple/llm"
+import { ToolRuntime, toDefinitions } from "@maple/llm"
 import { Effect } from "effect"
-import { toLlmCallError } from "@/platform/Llm"
-import { callMcpTool } from "@/mcp/dispatcher"
-import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import { mapleToolDefinitions, toInputSchema } from "@/mcp/tools/registry"
+import { contextLimitOf, outputLimitOf, toLlmCallError } from "@/platform/Llm"
+import { buildMapleTools } from "@/mcp/tools/llm-tools"
+import { isNearContextLimit, pruneToolResults } from "@/chat/context-budget"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { buildTriageContextMessage, TRIAGE_SYSTEM_PROMPT, TRIAGE_TOOL_NAMES } from "./triage-prompt"
 
@@ -56,69 +55,10 @@ export interface TriageAgentOutput {
 	readonly toolSteps: number
 }
 
-/**
- * Re-pin the service requirements of an MCP tool handler.
- *
- * `MapleToolDefinition.handler` types its requirements as `any` — a deliberate erasure at the
- * boundary between ~57 heterogeneous tool implementations and the single `McpServer.addTool`
- * signature (see the comment on the type in `mcp/tools/registry.ts`). `@maple/llm`'s `Tool.make`
- * insists on `never`, and `any` is not assignable to `never` in that position, so the erasure has
- * to be undone somewhere. Doing it here, once and by name, keeps it visible: the services really
- * are supplied, by the `ManagedRuntime` the workflow builds around this loop.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const withRuntimeServices = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Effect<A, E> =>
-	effect as Effect.Effect<A, E>
-
-/**
- * Serialize an MCP tool result for the model. Maple's tools already return model-facing text
- * blocks, so this is a join rather than a re-encode; `isError` is surfaced as a `ToolFailure` so
- * the runtime emits a `tool-error` event and the model can self-correct.
- */
-const toolResultText = (result: { content: ReadonlyArray<{ text: string }> }): string =>
-	result.content.map((block) => block.text).join("\n")
-
-/**
- * Wrap the Maple MCP registry as `@maple/llm` tools, restricted to the read-only allowlist.
- *
- * Dynamic (`jsonSchema`) mode is the right fit: `toInputSchema` already produces the exact JSON
- * Schema the MCP surface publishes, and `callMcpTool` does its own Effect Schema decode with the
- * tool's own error messages. Decoding twice would only give the model a second, worse phrasing of
- * the same validation failure.
- *
- * The tenant is provided per call rather than ambiently so the loop can never widen its own scope:
- * every tool executes under exactly the org the workflow was enqueued for.
- */
-const buildTriageTools = (tenant: TenantContext): Tools =>
-	Object.fromEntries(
-		mapleToolDefinitions
-			.filter((definition) => TRIAGE_TOOL_NAMES.has(definition.name))
-			.map((definition) => [
-				definition.name,
-				Tool.make({
-					description: definition.description,
-					jsonSchema: toInputSchema(definition.schema),
-					execute: (params): Effect.Effect<unknown, ToolFailure> =>
-						withRuntimeServices(
-							callMcpTool(definition.name, params).pipe(
-								Effect.provideService(CurrentMcpTenant, tenant),
-								Effect.flatMap((result) =>
-									result.isError
-										? Effect.fail(new ToolFailure({ message: toolResultText(result) }))
-										: Effect.succeed(toolResultText(result)),
-								),
-								// A tool that fails outright (unknown tool, tenant error) must not kill
-								// the investigation — hand the model the message and let it route around.
-								Effect.catchCause((cause) =>
-									Effect.fail(
-										new ToolFailure({ message: `Tool failed: ${String(cause)}` }),
-									),
-								),
-							),
-						),
-				}),
-			]),
-	)
+/** The read-only allowlist, as `@maple/llm` tools. Nothing here is approval-gated: the triage loop
+ * is autonomous and mutating tools are simply not in `TRIAGE_TOOL_NAMES`. */
+const buildTriageTools = (tenant: TenantContext) =>
+	buildMapleTools(tenant, { include: (name) => TRIAGE_TOOL_NAMES.has(name) })
 
 const addUsage = (total: { input: number; output: number; cacheRead: number }, usage: Usage | undefined) => ({
 	input: total.input + (usage?.inputTokens ?? 0),
@@ -184,6 +124,17 @@ export const runTriageAgent = Effect.fn("ai_triage.investigate")(function* (inpu
 				),
 			],
 		})
+
+		// Same exposure as the chat turn, and worse: twelve steps of warehouse-sized tool payloads
+		// with no user in the loop to notice it stalling. Acts on the provider's reported count.
+		if (
+			isNearContextLimit(response.usage?.inputTokens ?? 0, {
+				context: contextLimitOf(input.model),
+				output: outputLimitOf(input.model),
+			})
+		) {
+			request = pruneToolResults(request)
+		}
 	}
 
 	yield* Effect.annotateCurrentSpan({

@@ -34,6 +34,8 @@ import {
 	type ChatEvent,
 	type ChatEventInput,
 	type ChatMessage,
+	type ChatTaskRef,
+	type ChatTaskState,
 	type ChatToolCall,
 	type ChatTurnTenantEncoded,
 } from "@maple/domain/chat-session"
@@ -129,6 +131,27 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 				// Already present.
 			}
 		}
+	}
+
+	/**
+	 * The most recent compaction, if the conversation has been summarized.
+	 *
+	 * A targeted reverse scan rather than a second full fold: `history()` already walks every row,
+	 * and this is read once per turn by `toLlmMessages`. `LIMIT 1` on a descending scan stops at the
+	 * newest compaction, which by definition is near the end of the log.
+	 */
+	compaction(): { summary: string; throughSeq: number } | undefined {
+		const rows = this.sql
+			.exec<EventRow>(
+				"SELECT seq, created_at, payload FROM events WHERE payload LIKE ? ORDER BY seq DESC LIMIT 1",
+				'%"type":"compaction"%',
+			)
+			.toArray()
+		const row = rows[0]
+		if (!row) return undefined
+		const event = decodeChatEventPayload(row.payload, row.seq)
+		if (event.type !== "compaction") return undefined
+		return { summary: event.summary, throughSeq: event.throughSeq }
 	}
 
 	/** Highest assigned seq, i.e. the cursor a client that has read everything holds. */
@@ -275,7 +298,11 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 					await writer.write(encoder.encode(frameChatEvent(event)))
 					position = event.seq
 				}
-				if (events.some((event) => event.type === "turn-end")) break
+				// Only the *conversation's* turn ending closes the stream. A sub-agent's `turn-end`
+				// is tagged with `task` and merely closes its card — treating it as terminal would
+				// cut the connection the moment the first delegated search finished, and the rest of
+				// the parent's answer would only arrive on the client's next reconnect.
+				if (events.some((event) => event.type === "turn-end" && event.task === undefined)) break
 				// The idle budget is spent on silence only: a batch that went out resets it, so a
 				// long turn streams over one connection instead of being recycled mid-answer.
 				if (!(await this.waitForAppend(SUBSCRIBE_IDLE_MS))) break
@@ -405,33 +432,8 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 	 * message that issued them and are completed in place by their result.
 	 */
 	history(): ReadonlyArray<ChatMessage> {
-		// A mutable mirror of `ChatMessage`. The fold concatenates deltas and completes tool calls
-		// in place; building it against the readonly wire type would force a copy per delta, which
-		// is exactly the shape that used to desynchronise `byId` from `messages`.
-		type Draft = {
-			id: string
-			role: ChatMessage["role"]
-			text: string
-			toolCalls: Array<ChatToolCall>
-			createdAt: number
-		}
-		const messages: Array<Draft> = []
-		const byId = new Map<string, Draft>()
-
-		const openAssistant = (id: string, createdAt: number) => {
-			const existing = byId.get(id)
-			if (existing) return existing
-			const message = {
-				id,
-				role: "assistant" as const,
-				text: "",
-				toolCalls: [] as Array<ChatToolCall>,
-				createdAt,
-			}
-			byId.set(id, message)
-			messages.push(message)
-			return message
-		}
+		const top = makeTranscript()
+		const nested = new Map<string, Transcript>()
 
 		const rows = this.sql
 			.exec<EventRow>("SELECT seq, created_at, payload FROM events ORDER BY seq ASC")
@@ -439,58 +441,174 @@ export class ChatSession extends DurableObject<Record<string, unknown>> {
 
 		for (const row of rows) {
 			const event = decodeChatEventPayload(row.payload, row.seq)
-			switch (event.type) {
-				case "user-message": {
-					const message = {
-						id: event.id,
-						role: "user" as const,
-						text: event.text,
-						toolCalls: [] as Array<ChatToolCall>,
-						createdAt: row.created_at,
-					}
-					byId.set(event.id, message)
-					messages.push(message)
-					break
-				}
-				case "turn-start":
-					openAssistant(event.messageId, row.created_at)
-					break
-				case "text-delta": {
-					// Mutate in place. Replacing the array slot with a copy left `byId` pointing at
-					// an object no longer in `messages`, so the *next* delta opened a brand-new
-					// assistant message — a 400-token reply folded into ~400 one-token messages, in
-					// what the browser rendered and in what the model was replayed on the next turn.
-					const message = openAssistant(event.messageId, row.created_at)
-					message.text += event.text
-					break
-				}
-				case "tool-call": {
-					const message = openAssistant(event.messageId, row.created_at)
-					message.toolCalls.push({
-						id: event.callId,
-						name: event.name,
-						input: event.input,
-						...(event.proposed === true ? { proposed: true } : {}),
-					} as ChatToolCall)
-					break
-				}
-				case "tool-result": {
-					const message = openAssistant(event.messageId, row.created_at)
-					const index = message.toolCalls.findIndex((call) => call.id === event.callId)
-					if (index >= 0) {
-						message.toolCalls[index] = {
-							...message.toolCalls[index],
-							output: event.output,
-							...(event.isError === true ? { isError: true } : {}),
-						} as ChatToolCall
-					}
-					break
-				}
-				case "turn-end":
-					break
+
+			// A task-tagged event belongs to a sub-agent's transcript, which hangs off the parent's
+			// `task` tool call — not to the top-level conversation. Routing it here is what keeps a
+			// fan-out of sub-agents from appearing as a dozen stray assistant messages, in the
+			// browser *and* in what `toLlmMessages` replays to the model on the next turn.
+			if (event.type !== "user-message" && event.type !== "compaction" && event.task !== undefined) {
+				foldTaskEvent(top, nested, event, event.task, row.created_at)
+				continue
 			}
+
+			foldInto(top, event, row.created_at)
 		}
 
-		return messages
+		return top.messages
 	}
+}
+
+/**
+ * A mutable mirror of `ChatMessage`.
+ *
+ * The fold concatenates deltas and completes tool calls in place; building it against the readonly
+ * wire type would force a copy per delta, which is exactly the shape that used to desynchronise
+ * `byId` from `messages`.
+ */
+interface Draft {
+	id: string
+	role: ChatMessage["role"]
+	text: string
+	toolCalls: Array<ChatToolCall>
+	createdAt: number
+	startSeq: number
+}
+
+interface Transcript {
+	readonly messages: Array<Draft>
+	readonly byId: Map<string, Draft>
+}
+
+const makeTranscript = (): Transcript => ({ messages: [], byId: new Map() })
+
+const openAssistant = (transcript: Transcript, id: string, createdAt: number, startSeq: number): Draft => {
+	const existing = transcript.byId.get(id)
+	if (existing) return existing
+	const message: Draft = { id, role: "assistant", text: "", toolCalls: [], createdAt, startSeq }
+	transcript.byId.set(id, message)
+	transcript.messages.push(message)
+	return message
+}
+
+/**
+ * Fold one event into a transcript.
+ *
+ * Extracted so the top-level conversation and a sub-agent's nested transcript are folded by
+ * *literally the same code* — two implementations of "concatenate deltas, settle tool calls in
+ * place" would drift, and the nested one is the harder to notice when it does.
+ */
+const foldInto = (transcript: Transcript, event: ChatEvent, createdAt: number): void => {
+	const open = (messageId: string) => openAssistant(transcript, messageId, createdAt, event.seq)
+	switch (event.type) {
+		case "user-message": {
+			const message: Draft = {
+				id: event.id,
+				role: "user",
+				text: event.text,
+				toolCalls: [],
+				createdAt,
+				startSeq: event.seq,
+			}
+			transcript.byId.set(event.id, message)
+			transcript.messages.push(message)
+			break
+		}
+		case "turn-start":
+			open(event.messageId)
+			break
+		case "text-delta": {
+			// Mutate in place. Replacing the array slot with a copy left `byId` pointing at an
+			// object no longer in `messages`, so the *next* delta opened a brand-new assistant
+			// message — a 400-token reply folded into ~400 one-token messages, in what the browser
+			// rendered and in what the model was replayed on the next turn.
+			open(event.messageId).text += event.text
+			break
+		}
+		case "tool-call": {
+			const message = open(event.messageId)
+			message.toolCalls.push({
+				id: event.callId,
+				name: event.name,
+				input: event.input,
+				...(event.proposed === true ? { proposed: true } : {}),
+			} as ChatToolCall)
+			break
+		}
+		case "tool-result": {
+			const message = open(event.messageId)
+			const index = message.toolCalls.findIndex((call) => call.id === event.callId)
+			if (index >= 0) {
+				message.toolCalls[index] = {
+					...message.toolCalls[index],
+					output: event.output,
+					...(event.isError === true ? { isError: true } : {}),
+				} as ChatToolCall
+			}
+			break
+		}
+		case "turn-retry": {
+			// Undo the text of the attempt that failed. The clamp is not defensive noise:
+			// `Stream.takeWhile(holdsTurn)` in `turn-runner.ts` can drop appends between a delta and
+			// the retraction that accounts for it, so `retractChars` can legitimately exceed what
+			// actually landed.
+			const message = open(event.messageId)
+			message.text = message.text.slice(0, Math.max(0, message.text.length - event.retractChars))
+			break
+		}
+		// Inert for display. Unlike opencode — where the transcript and the model input are the same
+		// list — a Maple user scrolling back must still see what they actually said. Only
+		// `toLlmMessages` reads a compaction, through `ChatSession.compaction()`.
+		case "compaction":
+			break
+		case "turn-end":
+			break
+	}
+}
+
+/** Terminal reason → the status the UI shows on the sub-agent's card. */
+const TASK_STATUS: Record<string, ChatTaskState["status"]> = {
+	stop: "completed",
+	error: "error",
+	aborted: "aborted",
+	"max-steps": "aborted",
+}
+
+/**
+ * Route one sub-agent event into the transcript hanging off its parent's `task` tool call.
+ *
+ * **Deny by default.** If the parent message or the parent tool call is not found, the event is
+ * dropped. That is the guarantee that a malformed or out-of-order child event cannot corrupt the
+ * parent conversation — and it costs nothing in practice, because the parent's `tool-call`
+ * announcement is appended strictly before the tool's `execute` runs.
+ */
+const foldTaskEvent = (
+	top: Transcript,
+	/** Nested transcripts by task call id, owned by the enclosing `history()` call. */
+	nested: Map<string, Transcript>,
+	event: ChatEvent,
+	ref: ChatTaskRef,
+	createdAt: number,
+): void => {
+	const parent = top.byId.get(ref.parentMessageId)
+	if (!parent) return
+	const index = parent.toolCalls.findIndex((call) => call.id === ref.id)
+	if (index < 0) return
+
+	const child = nested.get(ref.id) ?? makeTranscript()
+	nested.set(ref.id, child)
+	foldInto(child, event, createdAt)
+
+	// `ChatToolCall` is the readonly wire type, so the call is rebuilt rather than mutated. Keying
+	// the nested transcript by task id rather than by object identity is what makes that safe.
+	parent.toolCalls[index] = {
+		...parent.toolCalls[index]!,
+		task: {
+			id: ref.id,
+			agent: ref.agent,
+			status: event.type === "turn-end" ? (TASK_STATUS[event.reason] ?? "completed") : "running",
+			// The nested drafts are structurally `ChatSubMessage` already — a sub-agent cannot nest
+			// further, so no `task` field is ever present on them.
+			messages: child.messages,
+		},
+	} as ChatToolCall
 }
