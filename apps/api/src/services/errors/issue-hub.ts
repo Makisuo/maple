@@ -12,6 +12,7 @@ import { and, eq, sql } from "drizzle-orm"
 import { Cause, Clock, Effect, Option, Redacted, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { maybeEnqueueTriage } from "./ai-triage-enqueue"
+import { issueSeverityFromAlert } from "./severity-map"
 import { SYSTEM_ALERTS_AGENT_NAME } from "@/services/auth/system-actors"
 
 /**
@@ -148,52 +149,83 @@ export const upsertAlertIssue: (
 		let action: UpsertAlertIssueResult["action"]
 
 		if (prior === undefined) {
-			issueId = decodeIssueId(randomUUID())
-			action = "created"
-			yield* database.execute((db) =>
-				db.insert(errorIssues).values({
-					id: issueId,
-					orgId: input.orgId,
-					kind: "alert",
-					sourceRefJson,
-					fingerprintHash,
-					serviceName: input.serviceName,
-					exceptionType: input.ruleName,
-					exceptionMessage: describeIncident(input),
-					errorLabel: input.ruleName,
-					topFrame: "",
-					workflowState: "triage",
-					priority: 3,
-					severity: detectorSeverityFor(input.severity),
-					severitySource: "detector",
-					assignedActorId: null,
-					leaseHolderActorId: null,
-					leaseExpiresAt: null,
-					claimedAt: null,
-					notes: null,
-					firstSeenAt: new Date(input.timestamp),
-					lastSeenAt: new Date(input.timestamp),
-					occurrenceCount: 1,
-					resolvedAt: null,
-					resolvedByActorId: null,
-					snoozeUntil: null,
-					archivedAt: null,
-					createdAt: new Date(input.timestamp),
-					updatedAt: new Date(input.timestamp),
-				}),
+			const candidateId = decodeIssueId(randomUUID())
+			// The select above and this insert are separate statements, so two
+			// scheduler ticks can both miss the fingerprint and both insert. Without
+			// the conflict clause the loser raises `error_issues_org_fp_idx`.
+			const claimed = yield* database.execute((db) =>
+				db
+					.insert(errorIssues)
+					.values({
+						id: candidateId,
+						orgId: input.orgId,
+						kind: "alert",
+						sourceRefJson,
+						fingerprintHash,
+						serviceName: input.serviceName,
+						exceptionType: input.ruleName,
+						exceptionMessage: describeIncident(input),
+						errorLabel: input.ruleName,
+						topFrame: "",
+						workflowState: "triage",
+						priority: 3,
+						severity: detectorSeverityFor(input.severity),
+						severitySource: "detector",
+						assignedActorId: null,
+						leaseHolderActorId: null,
+						leaseExpiresAt: null,
+						claimedAt: null,
+						notes: null,
+						firstSeenAt: new Date(input.timestamp),
+						lastSeenAt: new Date(input.timestamp),
+						occurrenceCount: 1,
+						resolvedAt: null,
+						resolvedByActorId: null,
+						snoozeUntil: null,
+						archivedAt: null,
+						createdAt: new Date(input.timestamp),
+						updatedAt: new Date(input.timestamp),
+					})
+					.onConflictDoNothing({
+						target: [errorIssues.orgId, errorIssues.fingerprintHash],
+					})
+					.returning({ id: errorIssues.id }),
 			)
-			const actorId = yield* ensureSystemAlertsActor(input.orgId)
-			yield* recordIssueEvent(input.orgId, issueId, actorId, "created", {
-				toState: "triage",
-				payload: {
-					ruleId: input.ruleId,
-					ruleName: input.ruleName,
-					groupKey: input.groupKey,
-					signalType: input.signalType,
-					incidentId: input.incidentId,
-				},
-				timestamp: input.timestamp,
-			})
+
+			const insertedId = claimed[0]?.id
+			if (insertedId === undefined) {
+				// A concurrent tick created it. Adopt their row and report it as an
+				// update — emitting a second `created` event would double the history.
+				const winner = yield* database.execute((db) =>
+					db
+						.select({ id: errorIssues.id })
+						.from(errorIssues)
+						.where(
+							and(
+								eq(errorIssues.orgId, input.orgId),
+								eq(errorIssues.fingerprintHash, fingerprintHash),
+							),
+						)
+						.limit(1),
+				)
+				issueId = winner[0]?.id ?? candidateId
+				action = "refreshed"
+			} else {
+				issueId = insertedId
+				action = "created"
+				const actorId = yield* ensureSystemAlertsActor(input.orgId)
+				yield* recordIssueEvent(input.orgId, issueId, actorId, "created", {
+					toState: "triage",
+					payload: {
+						ruleId: input.ruleId,
+						ruleName: input.ruleName,
+						groupKey: input.groupKey,
+						signalType: input.signalType,
+						incidentId: input.incidentId,
+					},
+					timestamp: input.timestamp,
+				})
+			}
 		} else {
 			issueId = prior.id
 			const snoozeActive =
@@ -285,7 +317,10 @@ export const upsertAlertIssue: (
 				kind: "alert",
 				ruleName: input.ruleName,
 				signalType: input.signalType,
-				severity: input.severity,
+				// `AlertSeverity` is a two-value scale and the snapshot decodes a
+				// four-value one, so passing it through unmapped meant every `warning`
+				// alert failed the decode and arrived as an unclassified incident.
+				severity: issueSeverityFromAlert(input.severity),
 				comparator: input.comparator,
 				threshold: input.threshold,
 				thresholdUpper: input.thresholdUpper,
@@ -295,6 +330,7 @@ export const upsertAlertIssue: (
 				observedValue: input.observedValue,
 				sampleCount: input.sampleCount,
 				firstTriggeredAt: new Date(input.timestamp).toISOString(),
+				lastTriggeredAt: new Date(input.timestamp).toISOString(),
 				issueId,
 			},
 			agentBinding: input.agentBinding,

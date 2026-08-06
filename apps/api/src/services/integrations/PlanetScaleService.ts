@@ -836,6 +836,11 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 								and(
 									eq(planetscaleDatabases.orgId, connection.orgId),
 									isNull(planetscaleDatabases.deletedAt),
+									// Deploy requests are a MySQL/Vitess-only resource — Postgres
+									// databases answer 405 on this endpoint. Polling them anyway
+									// burned a slot in every tick's batch and buried the result
+									// in a logWarning, so it repeated forever.
+									eq(planetscaleDatabases.kind, "mysql"),
 								),
 							),
 					)

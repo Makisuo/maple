@@ -42,8 +42,17 @@ const readHttpStatus = (value: unknown): number | undefined => {
 	return typeof status === "number" ? status : undefined
 }
 
+/**
+ * Identifiers that can't be derived from our own exports because Effect owns the
+ * class. `HttpApiSchemaError` is Effect's request-decode failure — it always
+ * responds 400, so by the 4xx→Ok rule above it belongs here. It was also the
+ * worst offender for legibility: its `message` is its `kind`, so a failed decode
+ * arrived as an Error span whose entire description was the word "Payload".
+ */
+const EXTERNAL_ANTICIPATED_IDENTIFIERS = ["HttpApiSchemaError"] as const
+
 const deriveAnticipatedIdentifiers = (): ReadonlySet<string> => {
-	const identifiers = new Set<string>()
+	const identifiers = new Set<string>(EXTERNAL_ANTICIPATED_IDENTIFIERS)
 	for (const value of [...Object.values(Http), ...Object.values(HttpV2)]) {
 		if (typeof value !== "function") continue
 		const identifier = readIdentifier(value)

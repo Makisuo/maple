@@ -2653,45 +2653,82 @@ const make: Effect.Effect<
 						wasRegression = true
 					}
 				} else {
-					wasNew = true
-					issueId = newErrorIssueId()
-					yield* dbExecute((db) =>
-						db.insert(errorIssues).values({
-							id: issueId,
-							orgId,
-							fingerprintHash: row.fingerprintHash,
-							serviceName: row.serviceName,
-							exceptionType: row.exceptionType,
-							exceptionMessage: row.exceptionMessage,
-							errorLabel: row.errorLabel,
-							topFrame: row.topFrame,
-							workflowState: "triage",
-							priority: 3,
-							assignedActorId: null,
-							leaseHolderActorId: null,
-							leaseExpiresAt: null,
-							claimedAt: null,
-							notes: null,
-							firstSeenAt: new Date(firstSeenMs),
-							lastSeenAt: new Date(lastSeenMs),
-							occurrenceCount: row.count,
-							resolvedAt: null,
-							resolvedByActorId: null,
-							snoozeUntil: null,
-							archivedAt: null,
-							createdAt: new Date(windowEndMs),
-							updatedAt: new Date(windowEndMs),
-						}),
+					const candidateId = newErrorIssueId()
+					// The SELECT above and this INSERT are not one transaction, so
+					// overlapping ticks can both miss the fingerprint and both try to
+					// create it. Without the conflict clause the loser raised
+					// `error_issues_org_fp_idx` and aborted processOrg for the *whole*
+					// org, losing every remaining fingerprint in the window.
+					const claimedIssue = yield* dbExecute((db) =>
+						db
+							.insert(errorIssues)
+							.values({
+								id: candidateId,
+								orgId,
+								fingerprintHash: row.fingerprintHash,
+								serviceName: row.serviceName,
+								exceptionType: row.exceptionType,
+								exceptionMessage: row.exceptionMessage,
+								errorLabel: row.errorLabel,
+								topFrame: row.topFrame,
+								workflowState: "triage",
+								priority: 3,
+								assignedActorId: null,
+								leaseHolderActorId: null,
+								leaseExpiresAt: null,
+								claimedAt: null,
+								notes: null,
+								firstSeenAt: new Date(firstSeenMs),
+								lastSeenAt: new Date(lastSeenMs),
+								occurrenceCount: row.count,
+								resolvedAt: null,
+								resolvedByActorId: null,
+								snoozeUntil: null,
+								archivedAt: null,
+								createdAt: new Date(windowEndMs),
+								updatedAt: new Date(windowEndMs),
+							})
+							.onConflictDoNothing({
+								target: [errorIssues.orgId, errorIssues.fingerprintHash],
+							})
+							.returning({ id: errorIssues.id }),
 					)
-					yield* recordEvent(orgId, issueId, systemActor.id, "created", {
-						toState: "triage",
-						payload: {
-							serviceName: row.serviceName,
-							exceptionType: row.exceptionType,
-							occurrenceCount: row.count,
-						},
-						timestamp: windowEndMs,
-					})
+
+					const insertedId = claimedIssue[0]?.id
+					if (insertedId === undefined) {
+						// Another tick won the race. Adopt its issue and treat this as a
+						// sighting of an existing one — it already emitted `created`, and a
+						// second event would double-count the issue's history.
+						const winner = yield* dbExecute((db) =>
+							db
+								.select({ id: errorIssues.id })
+								.from(errorIssues)
+								.where(
+									and(
+										eq(errorIssues.orgId, orgId),
+										eq(errorIssues.fingerprintHash, row.fingerprintHash),
+									),
+								)
+								.limit(1),
+						)
+						const winnerId = winner[0]?.id
+						// Unreachable in practice — the conflict fired, so the row exists.
+						// Bail rather than invent an id if the row vanished under us.
+						if (winnerId === undefined) return { touched: 0, opened: 0 }
+						issueId = winnerId
+					} else {
+						wasNew = true
+						issueId = insertedId
+						yield* recordEvent(orgId, issueId, systemActor.id, "created", {
+							toState: "triage",
+							payload: {
+								serviceName: row.serviceName,
+								exceptionType: row.exceptionType,
+								occurrenceCount: row.count,
+							},
+							timestamp: windowEndMs,
+						})
+					}
 				}
 
 				const stateRow = yield* dbExecute((db) =>
@@ -2788,6 +2825,12 @@ const make: Effect.Effect<
 						context: {
 							kind: "error",
 							reason,
+							// The one field the enqueue path could never see. Without it the
+							// snapshot's severity decoded to null on every error incident, and
+							// severity is what sizes an investigation. A brand-new issue has
+							// none yet, and null is the honest value — the routing table reads
+							// it as medium rather than as "skip".
+							severity: prior?.severity ?? null,
 							serviceName: row.serviceName,
 							exceptionType: row.exceptionType,
 							exceptionMessage: row.exceptionMessage,

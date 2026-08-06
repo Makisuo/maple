@@ -77,6 +77,13 @@ export interface ScrapeOutcome {
 }
 
 class ScrapeAttemptFailed extends Schema.TaggedErrorClass<ScrapeAttemptFailed>()("ScrapeAttemptFailed", {
+	/**
+	 * The SDK derives a span's `status.message` from the failure's `Error.message`
+	 * (`Cause.prettyErrors`), so without this field every failed scrape produced an
+	 * Error span with a blank description and the reason lived only in the log line
+	 * emitted after the span had already closed.
+	 */
+	message: Schema.String,
 	outcome: Schema.Struct({
 		error: Schema.NullOr(Schema.String),
 		samplesScraped: Schema.optional(Schema.Number),
@@ -315,7 +322,22 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 							)
 
 							if (attempt.error !== null) {
-								return yield* new ScrapeAttemptFailed({ outcome: attempt })
+								// `error.type` buckets the failure so the reason is groupable
+								// without parsing the free-text message.
+								yield* Effect.annotateCurrentSpan(
+									"error.type",
+									attempt.deliveryBlocked
+										? "delivery_blocked"
+										: attempt.rateLimited
+											? "rate_limited"
+											: attempt.authFailed
+												? "auth_failed"
+												: "scrape_failed",
+								)
+								return yield* new ScrapeAttemptFailed({
+									message: attempt.error,
+									outcome: attempt,
+								})
 							}
 							return attempt
 						}).pipe(

@@ -964,6 +964,10 @@ const acquireMaintenance = async (
 ): Promise<() => Promise<void>> => {
 	const lockPath = maintenanceLockPath(dataDir)
 	if (existsSync(lockPath)) await assertRealDirectory(lockPath, "maintenance lock")
+	// The lock is a *sibling* of the data dir, so its parent (`~/.maple`) may not
+	// exist yet — on a fresh CI runner it never does, and the bare mkdir below
+	// failed with ENOENT before the lock could be taken.
+	await mkdir(dirname(lockPath), { recursive: true })
 	try {
 		await mkdir(lockPath, { mode: 0o700 })
 	} catch (error) {

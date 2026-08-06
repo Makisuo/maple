@@ -1633,7 +1633,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				reasonOverride?: string,
 			): EvaluatedRule => {
 				const noDataBehavior = rule.compiledPlan.noDataBehavior
-				const sampleCount = obs.sampleCount
+				// Sample-weighted counts arrive fractional from the warehouse
+				// (`sum(SampleRate)`), and this flows into `last_sample_count`, an
+				// `integer` column — an unrounded value fails the insert outright.
+				const sampleCount = Math.round(obs.sampleCount)
 				const value = obs.hasData ? obs.value : noDataBehavior === "zero" ? 0 : null
 
 				if (!obs.hasData && noDataBehavior === "skip") {

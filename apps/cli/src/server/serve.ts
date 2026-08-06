@@ -152,7 +152,19 @@ interface IngestResult {
 }
 
 async function ingest(db: Chdb, signal: Signal, req: Request): Promise<IngestResult> {
-	const raw = new Uint8Array(await req.arrayBuffer())
+	let raw: Uint8Array
+	try {
+		raw = new Uint8Array(await req.arrayBuffer())
+	} catch (error) {
+		// A client that hangs up mid-body rejects here. Unguarded, this became an
+		// Effect *defect* — no `error.type`, no 4xx suppression, and a span reading
+		// only "The connection was closed." It is a caller outcome, so 400 it.
+		return {
+			response: text(`read ${signal} body: ${(error as Error).message}`, 400),
+			accepted: 0,
+			requestBytes: 0,
+		}
+	}
 	const requestBytes = raw.length
 	const contentType = req.headers.get("content-type") ?? ""
 	const contentEncoding = req.headers.get("content-encoding")
