@@ -70,6 +70,34 @@ describe("compilePipeQuery", () => {
 		expect(result).toBeUndefined()
 	})
 
+	// `errorsOnly` is tri-state downstream: `false` means "only NON-errored
+	// spans", not "no filter". Coercing an absent `errors_only` to `false` put
+	// `StatusCode != 'Error'` in the WHERE, which made `errorRate` structurally 0
+	// and understated every count for `maple timeseries` / `maple breakdown` and
+	// the digest service.
+	for (const pipe of ["custom_traces_timeseries", "custom_traces_breakdown"]) {
+		describe(`${pipe} errors_only`, () => {
+			it("applies no status filter when errors_only is absent", () => {
+				const sql = compilePipeQuery(pipe, baseParams())!.sql
+				expect(sql).not.toContain("StatusCode != 'Error'")
+				expect(sql).not.toContain("AND StatusCode = 'Error'")
+			})
+
+			it("keeps only errored spans when errors_only is set", () => {
+				const sql = compilePipeQuery(pipe, { ...baseParams(), errors_only: "1" })!.sql
+				expect(sql).toContain("AND StatusCode = 'Error'")
+			})
+
+			it("treats a falsy errors_only value as absent", () => {
+				for (const raw of ["0", "false", ""]) {
+					const sql = compilePipeQuery(pipe, { ...baseParams(), errors_only: raw })!.sql
+					expect(sql).not.toContain("StatusCode != 'Error'")
+					expect(sql).not.toContain("AND StatusCode = 'Error'")
+				}
+			})
+		})
+	}
+
 	it("metric_attribute_values reads metric-scoped values for the given key", () => {
 		const result = compilePipeQuery("metric_attribute_values", {
 			...baseParams(),
