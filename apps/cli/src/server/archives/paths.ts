@@ -56,6 +56,17 @@ export const nextMidnightUtc = (rangeDate: string): string => {
 	return date.toISOString()
 }
 
+/** Require a UTC day to have ended, optionally with an additional lateness lag. */
+export const validateSealedRangeDate = (value: string, sealingLagHours = 0, now = Date.now()): string => {
+	const rangeDate = validateRangeDate(value)
+	if (!Number.isSafeInteger(sealingLagHours) || sealingLagHours < 0)
+		throw new Error(`sealing lag hours must be a non-negative integer: ${sealingLagHours}`)
+	const eligibleAt = Date.parse(nextMidnightUtc(rangeDate)) + sealingLagHours * 60 * 60 * 1000
+	if (now < eligibleAt)
+		throw new Error(`UTC day ${rangeDate} is not sealed until ${new Date(eligibleAt).toISOString()}`)
+	return rangeDate
+}
+
 export const newArchiveGenerationId = (): string => validateArchiveId(randomUUID(), "archive generation")
 
 export const archiveRoot = (archiveDir: string): string => resolve(archiveDir)

@@ -136,8 +136,8 @@ released after the generation is durable. Calibration pins use the purpose
 
 ## Commands
 
-`maple archive` has six operator-facing subcommands (`create`, `list`,
-`rebuild`, `reconcile`, `gc`, `calibrate`) plus the internal
+`maple archive` has eight operator-facing subcommands (`create`, `list`,
+`rebuild`, `reconcile`, `gc`, `calibrate`, `retire-live`, `expire`) plus the internal
 `calibrate-session` and `calibrate-run` commands used by calibration and its
 fault probes. There are no short flags anywhere in this command tree. Root
 flags fall back to `~/.maple` defaults when omitted.
@@ -207,6 +207,44 @@ in `errors`, other ranges still list). Only the active generation is exposed.
 Rebuild a signal's `catalog.jsonl` from the authoritative generation manifests,
 recovering from a truncated or missing catalog without rescanning Parquet bytes.
 `<signal>` is positional.
+
+### `maple archive retire-live <range-date> --apply`
+
+Remove one sealed UTC day from all six live raw telemetry tables. The CLI first
+reconciles interrupted archive work, then asks the running server to close
+ingest/query admission, drain accepted requests, re-hash the frozen active
+generation, and compare a canonical day-wide content digest—not only counts.
+
+The server durably commits the retired day and its archive evidence to
+`<data-dir>.retired-days.json` before deleting any live row. That authority is
+outside the replaceable chDB directory: startup repairs only retired dates that
+actually reappeared before binding after a checkpoint restore. OTLP ingestion
+filters retired rows while accepting current rows from the same request and
+returns an OTLP partial-success response. Once any day is retired, arbitrary
+SQL writes through `/local/query` are refused before execution, preventing
+insert-trigger materialized views from retaining a late contribution.
+A crash before the ledger commit leaves the live day intact; a crash after it is
+repaired by replay. The default `--sealing-lag-hours 24` can be increased but
+never bypassed accidentally. The command refuses to run without `--apply`.
+
+The command does not hard-code an active-data window. Scheduling policy chooses
+which eligible day to retire (for example, the deployment may configure 60,
+90, or 120 days). If the policy relies on database TTL as a backstop, configure
+it independently with `maple start --minimum-raw-telemetry-retention-days N`.
+That setting is durable beside the data directory, survives reset/restore, and
+can only be increased; omitting it on later launches preserves the configured
+value. Maple validates the live table TTLs before persisting the request and
+never shortens a higher schema TTL. `N` must be between 90 and 3650 days, and operators should keep it strictly above
+their active rotation window so TTL cannot delete a day before archival.
+
+### `maple archive expire <range-date> --apply`
+
+Delete one complete, already-retired archived UTC day across all six signals.
+Maple first reconciles interrupted archive work, freezes the generation IDs,
+re-hashes each generation before its destructive step, tombstone-renames each
+signal range before removal, rebuilds each catalog, and journals progress at
+`<archive-dir>/.retention/expire.json`. A rerun resumes only the exact frozen day
+and generations. The command refuses to run without `--apply`.
 
 ### `maple archive reconcile`
 
@@ -700,6 +738,8 @@ idempotently confirms an already-absent target.
 | **Supersession**                                        | Same as late telemetry: the newest generation becomes active; superseded ones remain on disk until `archive gc` reclaims them.                                                  |
 | **Interrupted create**                                  | Reconciles automatically on the next `create`, or via `archive reconcile`. Pre-publication output moves to retained quarantine; post-publication repairs pointer and catalog.   |
 | **Interrupted GC**                                      | Resumes the frozen target set; a half-removed tombstone is finished, an already-absent target is confirmed. Out-of-order mutation fails closed.                                 |
+| **Interrupted live retirement**                         | Before ledger commit, all live rows remain. After commit, startup replays the authoritative retired day before binding and finishes exact UTC deletion.                         |
+| **Interrupted archive expiration**                      | Resumes the frozen day and generation IDs; a tombstoned range is removed and its catalog rebuilt before progress advances.                                                      |
 | **Interrupted calibration**                             | The derived-pin and owned-dir reconciliation releases the pin and removes the sample; the record is preserved until cleanup is proven.                                          |
 | **Insufficient memory budget**                          | Calibration reports `low` confidence (or no recommendation) rather than presenting synthetic precision.                                                                         |
 | **Failed calibration**                                  | No config is written; temporary calibration output is cleaned up. Existing configuration is unchanged.                                                                          |

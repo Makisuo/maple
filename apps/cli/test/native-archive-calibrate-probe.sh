@@ -32,7 +32,7 @@ ARCHIVE="$ROOT/archive"
 SCRATCH="$ROOT/scratch"
 CONFIG="$ROOT/backups.xml"
 SERVER_PID=""
-RANGE_DATE="$(date -u +%Y-%m-%d)"
+RANGE_DATE="$(date -u -d '1 day ago' +%F 2>/dev/null || date -u -v-1d +%F)"
 
 cleanup() {
 	if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then

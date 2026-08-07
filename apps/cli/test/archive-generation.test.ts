@@ -44,8 +44,11 @@ import {
 	checkpointRoot,
 	checkpointSnapshotDir,
 	checkpointStatePath,
+	withMaintenanceLock,
 } from "../src/server/checkpoints"
 import { assertCatalogExact, rebuildCatalog } from "../src/server/archives/listing"
+import { RetiredDayAuthority } from "../src/server/archives/retention"
+import { ARCHIVE_SIGNALS } from "../src/server/archives/signals"
 
 // Filesystem-level tests for generation promotion, supersession, and catalog
 // append. These exercise the durable state machine without a restored chDB; the
@@ -297,6 +300,61 @@ describe("archive generation promotion", () => {
 				/below the required/,
 			)
 			strictEqual(listActiveOperationIds(archiveDir).length, 0)
+		})
+	})
+
+	it("rechecks retired-day authority after acquiring the maintenance lock", async () => {
+		await withArchive(async (archiveDir) => {
+			const parent = join(archiveDir, "..")
+			const dataDir = join(parent, "data")
+			const scratchRoot = join(parent, "scratch")
+			mkdirSync(dataDir, { recursive: true })
+			mkdirSync(scratchRoot, { recursive: true })
+			let reachedPreLock!: () => void
+			let resumeCreate!: () => void
+			const preLock = new Promise<void>((resolve) => (reachedPreLock = resolve))
+			const resume = new Promise<void>((resolve) => (resumeCreate = resolve))
+			const creating = createArchiveGeneration(
+				dataDir,
+				archiveDir,
+				"traces",
+				"2026-06-01",
+				{
+					writerThreads: 1,
+					rowGroupRows: 1,
+					maxShardRows: 1,
+					maxShardBytes: 1,
+					targetChunkBytes: 1,
+					minFreeSpaceReserve: 0,
+					archiveDir,
+					scratchRoot,
+				},
+				"current",
+				{
+					beforeMaintenanceLock: async () => {
+						reachedPreLock()
+						await resume
+					},
+				},
+			)
+			await preLock
+			await withMaintenanceLock(dataDir, randomUUID(), () =>
+				new RetiredDayAuthority(dataDir).commit({
+					rangeDate: "2026-06-01",
+					retiredAt: "2026-06-03T00:00:00.000Z",
+					signals: ARCHIVE_SIGNALS.map((signal) => ({
+						signal: signal.name,
+						generationId: randomUUID(),
+						manifestSha256: "a".repeat(64),
+						archivedRowCount: 1,
+						contentDigest: "1:2:3:4",
+					})),
+				}),
+			)
+			resumeCreate()
+			await rejects(creating, /permanently retired/)
+			strictEqual(listActiveOperationIds(archiveDir).length, 0)
+			strictEqual(existsSync(activePointerPath(archiveDir, "traces", "2026-06-01")), false)
 		})
 	})
 

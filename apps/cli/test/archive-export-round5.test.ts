@@ -1,10 +1,11 @@
 import { describe, it } from "@effect/vitest"
-import { deepStrictEqual, throws } from "node:assert"
+import { deepStrictEqual, strictEqual, throws } from "node:assert"
 import { randomUUID } from "node:crypto"
 import {
 	normalizeType,
 	planHourShards,
 	COMPLEX_DIGEST_ALGORITHM,
+	multisetDigestSql,
 	type ExportSettings,
 } from "../src/server/archives/export"
 import { parseArchiveGenerationManifest } from "../src/server/archives/manifest"
@@ -21,6 +22,15 @@ const settings = (overrides: Partial<ExportSettings> = {}): ExportSettings => ({
 	maxShardRows: 500_000,
 	maxShardBytes: 256 * 1024 * 1024,
 	...overrides,
+})
+
+describe("bounded multiset digest", () => {
+	it("uses fixed-size aggregate state instead of materializing every row", () => {
+		const sql = multisetDigestSql([{ name: "Body", type: "String" }], "logs")
+		strictEqual(sql.includes("groupArray"), false)
+		strictEqual(sql.includes("sumWithOverflow"), true)
+		strictEqual(sql.includes("groupBitXor"), true)
+	})
 })
 
 describe("schema normalizeType (measured chDB Parquet mapping)", () => {
@@ -156,7 +166,7 @@ const manifestWith = (
 			sha256: "a".repeat(64),
 			bytes: 4096,
 			columns: ["Timestamp"],
-			complexDigest: "123456789",
+			complexDigest: "1:2:3:4",
 			complexDigestAlgorithm: COMPLEX_DIGEST_ALGORITHM,
 			...shardOverrides,
 		},

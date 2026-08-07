@@ -41,7 +41,7 @@ import {
 	newArchiveGenerationId,
 	nextMidnightUtc,
 	rangeRoot,
-	validateRangeDate,
+	validateSealedRangeDate,
 } from "./paths"
 import { type ArchiveSignal, archiveSignal } from "./signals"
 import { COMPLEX_DIGEST_ALGORITHM, exportSignalShards, type WrittenShard } from "./export"
@@ -87,6 +87,8 @@ import {
 // reported; only provably owned `building/<gen>/` temporary output is removed.
 
 export interface ArchiveGenerationFaults {
+	/** Pause after all pre-lock checks but before maintenance-lock acquisition. */
+	readonly beforeMaintenanceLock?: () => void | Promise<void>
 	readonly afterPinAcquired?: () => void | Promise<void>
 	readonly afterScratchRestored?: () => void | Promise<void>
 	readonly afterBuildingCreated?: () => void | Promise<void>
@@ -336,7 +338,14 @@ export const createArchiveGeneration = async (
 	faults: ArchiveGenerationFaults = {},
 	loadedTuningConfig: LoadedTuningConfig | null = null,
 ): Promise<ArchiveGenerationResult> => {
-	validateRangeDate(rangeDate)
+	validateSealedRangeDate(rangeDate)
+	// This invariant belongs at the mutation boundary, not only in the CLI:
+	// callers must never supersede durable retirement evidence with a new
+	// empty/partial archive generation.
+	const { readRetiredDayLedger } = await import("./retention")
+	if (readRetiredDayLedger(dataDir).retiredDays.some((day) => day.rangeDate === rangeDate)) {
+		throw new Error(`refusing archive create: UTC day ${rangeDate} is permanently retired`)
+	}
 	assertArchiveRootSeparate(archiveDir, dataDir)
 	if (resolve(archiveDir) !== resolve(tuning.archiveDir)) {
 		throw new Error(
@@ -356,10 +365,17 @@ export const createArchiveGeneration = async (
 	const pinPurpose = `archive:${generationId}`
 	const scratchSubdir = `archive-${operationId}`
 
+	await faults.beforeMaintenanceLock?.()
 	return withMaintenanceLock(dataDir, operationId, async () => {
 		// Step 1: reconcile any prior interrupted operation before allocating a
 		// new one. This is the crash-recovery entry point.
 		await reconcileArchiveGeneration(dataDir, archiveDir, tuning.scratchRoot, faults)
+		// The pre-lock check is only a fast refusal. Retirement uses this same
+		// maintenance lock, so this re-read is the authoritative check that closes
+		// the create-versus-retire TOCTOU window.
+		if (readRetiredDayLedger(dataDir).retiredDays.some((day) => day.rangeDate === rangeDate)) {
+			throw new Error(`refusing archive create: UTC day ${rangeDate} is permanently retired`)
+		}
 		// Step 2: resolve and validate the checkpoint so its immutable backup size
 		// can be included in scratch-volume capacity planning. This is read-only.
 		const resolved = await resolveCheckpoint(dataDir, parseCheckpointSelector(checkpointSelector))
