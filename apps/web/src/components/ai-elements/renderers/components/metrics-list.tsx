@@ -1,4 +1,4 @@
-import type { BaseComponentProps } from "@json-render/react"
+import type { RendererComponentProps } from "./types"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { formatNumber } from "@maple/ui/lib/format"
 
@@ -17,7 +17,7 @@ interface MetricsListProps {
 	}>
 }
 
-export function MetricsList({ props }: BaseComponentProps<MetricsListProps>) {
+export function MetricsList({ props }: RendererComponentProps<MetricsListProps>) {
 	const { summary, metrics } = props
 
 	return (

@@ -1,4 +1,4 @@
-import type { BaseComponentProps } from "@json-render/react"
+import type { RendererComponentProps } from "./types"
 import { formatDuration, formatErrorRate, formatNumber } from "@maple/ui/lib/format"
 
 interface StatCardsProps {
@@ -27,7 +27,7 @@ function formatValue(value: number | string, format: string): string {
 	}
 }
 
-export function StatCards({ props }: BaseComponentProps<StatCardsProps>) {
+export function StatCards({ props }: RendererComponentProps<StatCardsProps>) {
 	const { cards } = props
 
 	return (

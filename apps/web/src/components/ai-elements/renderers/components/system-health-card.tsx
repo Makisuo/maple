@@ -1,4 +1,4 @@
-import type { BaseComponentProps } from "@json-render/react"
+import type { RendererComponentProps } from "./types"
 import { cn } from "@maple/ui/lib/utils"
 import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import { formatDuration, formatErrorRate, formatNumber } from "@maple/ui/lib/format"
@@ -26,7 +26,7 @@ function StatCell({ label, value, color }: { label: string; value: string; color
 	)
 }
 
-export function SystemHealthCard({ props }: BaseComponentProps<SystemHealthCardProps>) {
+export function SystemHealthCard({ props }: RendererComponentProps<SystemHealthCardProps>) {
 	const { serviceCount, totalSpans, totalErrors, errorRate, latency, topErrors } = props
 
 	return (

@@ -10,7 +10,7 @@ import {
 /**
  * Pure declutter pipeline applied between {@link buildFlowElements} and layout:
  * collapse namespaces → focus subgraph → traffic filter. Everything downstream
- * (topology key, ELK layout, persisted positions, particles, minimap, namespace
+ * (topology key, layout, persisted positions, particles, minimap, namespace
  * boxes) operates on the effective graph this returns, so the stages compose
  * with the existing signature caching for free.
  */
@@ -141,7 +141,7 @@ function collapseNamespaces(
 				avgLatencyMs: throughput > 0 ? latencyWeighted / throughput : 0,
 				selected: false,
 				// Deliberately NO `namespace`: the aggregate must not spawn a dotted
-				// box or join an ELK namespace container.
+				// box or join a namespace layout container.
 			},
 		})
 	}

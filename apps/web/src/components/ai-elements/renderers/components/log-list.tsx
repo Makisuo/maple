@@ -1,4 +1,4 @@
-import type { BaseComponentProps } from "@json-render/react"
+import type { RendererComponentProps } from "./types"
 import { SeverityBadge } from "@maple/ui/components/logs/severity-badge"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
@@ -14,7 +14,7 @@ interface LogListProps {
 	totalCount?: number
 }
 
-export function LogList({ props }: BaseComponentProps<LogListProps>) {
+export function LogList({ props }: RendererComponentProps<LogListProps>) {
 	const { logs, totalCount } = props
 
 	return (

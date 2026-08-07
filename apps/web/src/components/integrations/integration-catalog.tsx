@@ -1,5 +1,3 @@
-import { motion, useReducedMotion } from "motion/react"
-
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
@@ -285,22 +283,6 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 		github,
 		slack,
 	}
-}
-
-const GRID_VARIANTS = {
-	hidden: {},
-	show: {
-		transition: { staggerChildren: 0.05, delayChildren: 0.05 },
-	},
-}
-
-const ITEM_VARIANTS = {
-	hidden: { opacity: 0, y: 6 },
-	show: {
-		opacity: 1,
-		y: 0,
-		transition: { duration: 0.32, ease: [0.16, 1, 0.3, 1] as const },
-	},
 }
 
 /**
@@ -687,9 +669,8 @@ function ConnectedRow({
 }) {
 	const connected = overview.kind === "connected" ? overview : null
 	return (
-		<motion.button
+		<button
 			type="button"
-			variants={ITEM_VARIANTS}
 			onClick={() => onSelect(entry.id)}
 			className="group flex w-full items-center gap-4 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
 		>
@@ -731,7 +712,7 @@ function ConnectedRow({
 					className="text-muted-foreground/70 transition-colors group-hover:text-foreground"
 				/>
 			</span>
-		</motion.button>
+		</button>
 	)
 }
 
@@ -745,9 +726,8 @@ function AvailableCard({
 	onSelect: (id: IntegrationId) => void
 }) {
 	return (
-		<motion.button
+		<button
 			type="button"
-			variants={ITEM_VARIANTS}
 			onClick={() => onSelect(entry.id)}
 			className="group flex items-center gap-4 rounded-lg border border-border/60 bg-card p-4 text-left outline-none transition-colors hover:border-border hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
 		>
@@ -771,7 +751,7 @@ function AvailableCard({
 			>
 				{cta} →
 			</span>
-		</motion.button>
+		</button>
 	)
 }
 
@@ -798,7 +778,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 export function IntegrationCatalog({ onSelect }: { onSelect: (id: IntegrationId) => void }) {
 	const overviews = useIntegrationOverviews()
-	const reduceMotion = useReducedMotion()
 
 	const connected = CATALOG.flatMap((entry) => {
 		const overview = overviews[entry.id]
@@ -813,13 +792,7 @@ export function IntegrationCatalog({ onSelect }: { onSelect: (id: IntegrationId)
 	const loading = CATALOG.filter((entry) => overviews[entry.id] === null)
 
 	return (
-		<motion.div
-			className="flex flex-col gap-6"
-			variants={GRID_VARIANTS}
-			// Reduced motion: render everything in place with no staggered transform.
-			initial={reduceMotion ? false : "hidden"}
-			animate="show"
-		>
+		<div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-1 [animation-duration:300ms] motion-reduce:animate-none">
 			{(connected.length > 0 || loading.length > 0) && (
 				<section className="flex flex-col gap-2">
 					<SectionLabel>Connected</SectionLabel>
@@ -853,6 +826,6 @@ export function IntegrationCatalog({ onSelect }: { onSelect: (id: IntegrationId)
 					</div>
 				</section>
 			)}
-		</motion.div>
+		</div>
 	)
 }

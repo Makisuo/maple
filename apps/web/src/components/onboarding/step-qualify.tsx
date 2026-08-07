@@ -1,4 +1,3 @@
-import { motion } from "motion/react"
 import { Button } from "@maple/ui/components/ui/button"
 import {
 	ArrowLeftIcon,
@@ -35,22 +34,6 @@ export const QUALIFY_QUESTIONS = {
 		columns: 2,
 	},
 } as const
-
-const GRID_VARIANTS = {
-	hidden: {},
-	show: {
-		transition: { staggerChildren: 0.05, delayChildren: 0.05 },
-	},
-}
-
-const ITEM_VARIANTS = {
-	hidden: { opacity: 0, y: 6 },
-	show: {
-		opacity: 1,
-		y: 0,
-		transition: { duration: 0.32, ease: [0.16, 1, 0.3, 1] as const },
-	},
-}
 
 export function StepQualifyQuestion<T extends string>({
 	intro,
@@ -95,31 +78,30 @@ export function StepQualifyQuestion<T extends string>({
 					)}
 				</div>
 
-				<motion.div
-					variants={GRID_VARIANTS}
-					initial="hidden"
-					animate="show"
+				<div
 					className={cn(
 						"grid gap-2.5",
 						columns === 2 ? "grid-cols-2" : "grid-cols-2 md:grid-cols-4",
 					)}
 				>
-					{options.map((opt) => {
+					{options.map((opt, optionIndex) => {
 						const active = value === opt
 						const Icon = iconMap[opt]
 						return (
-							<motion.button
+							<button
 								key={opt}
 								type="button"
-								variants={ITEM_VARIANTS}
 								onClick={() => onSelect(opt)}
-								whileTap={{ scale: 0.98 }}
 								className={cn(
-									"group relative flex flex-col items-center justify-center gap-2.5 rounded-xl border px-4 py-5 text-sm font-medium transition-colors duration-200 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+									"group relative flex flex-col items-center justify-center gap-2.5 rounded-xl border px-4 py-5 text-sm font-medium outline-none transition-[color,background-color,border-color,transform] [transition-duration:200ms] animate-in fade-in slide-in-from-bottom-1 [animation-duration:200ms] active:scale-[0.98] motion-reduce:animate-none focus-visible:ring-2 focus-visible:ring-ring",
 									active
 										? "border-primary bg-primary/5 text-primary"
 										: "border-border hover:border-foreground/30 hover:bg-foreground/[0.02]",
 								)}
+								style={{
+									animationDelay: `${50 + optionIndex * 50}ms`,
+									animationFillMode: "backwards",
+								}}
 							>
 								{Icon && (
 									<div
@@ -135,23 +117,14 @@ export function StepQualifyQuestion<T extends string>({
 								)}
 								<span className="text-[13px] leading-tight text-center">{labels[opt]}</span>
 								{active && (
-									<motion.span
-										className="absolute top-2 right-2 text-primary"
-										initial={{ scale: 0, opacity: 0 }}
-										animate={{ scale: 1, opacity: 1 }}
-										transition={{
-											type: "spring",
-											stiffness: 380,
-											damping: 22,
-										}}
-									>
+									<span className="absolute top-2 right-2 animate-in fade-in zoom-in-50 text-primary motion-reduce:animate-none">
 										<CircleCheckIcon size={14} />
-									</motion.span>
+									</span>
 								)}
-							</motion.button>
+							</button>
 						)
 					})}
-				</motion.div>
+				</div>
 
 				<div className="flex items-center justify-between gap-3">
 					{onBack ? (

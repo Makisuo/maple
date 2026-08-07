@@ -1,6 +1,6 @@
 import { useAuth } from "@clerk/clerk-react"
 import { useNavigate } from "@tanstack/react-router"
-import { motion, AnimatePresence } from "motion/react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { Card, CardContent } from "@maple/ui/components/ui/card"
 import { Button } from "@maple/ui/components/ui/button"
 import { ChartLineIcon, RocketIcon, XmarkIcon } from "@/components/icons"
@@ -9,6 +9,7 @@ import { useQuickStart } from "@/hooks/use-quick-start"
 export function FirstActionHint() {
 	const { orgId } = useAuth()
 	const navigate = useNavigate()
+	const reduceMotion = useReducedMotion()
 	const { demoDataRequested, firstActionHintDismissed, dismissFirstActionHint } = useQuickStart(orgId)
 
 	const visible = demoDataRequested && !firstActionHintDismissed
@@ -22,10 +23,10 @@ export function FirstActionHint() {
 		<AnimatePresence initial={false}>
 			{visible && (
 				<motion.div
-					initial={{ opacity: 0, y: -8 }}
+					initial={{ opacity: 0, y: reduceMotion ? 0 : -8 }}
 					animate={{ opacity: 1, y: 0 }}
-					exit={{ opacity: 0, y: -8 }}
-					transition={{ duration: 0.2 }}
+					exit={{ opacity: 0, y: reduceMotion ? 0 : -8 }}
+					transition={{ duration: reduceMotion ? 0 : 0.2 }}
 				>
 					<Card className="mb-4 shrink-0 border-primary/40 bg-primary/[0.04] overflow-hidden">
 						<CardContent className="flex items-center gap-4 p-4">

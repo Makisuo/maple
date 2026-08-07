@@ -27,8 +27,6 @@
 		"@effect/atom-react": "catalog:effect",
 		"@fontsource-variable/geist": "^5.2.9",
 		"@fontsource-variable/geist-mono": "^5.2.8",
-		"@json-render/core": "^0.19.0",
-		"@json-render/react": "^0.19.0",
 		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/domain": "workspace:*",
 		"@maple/effect-db": "workspace:*",
@@ -64,8 +62,7 @@
 		"sugar-high": "^1.2.1",
 		"tailwindcss": "catalog:tailwind",
 		"tw-animate-css": "catalog:tailwind",
-		"web-vitals": "^5.3.0",
-		"zod": "^4.4.3"
+		"web-vitals": "^5.3.0"
 	},
 	"devDependencies": {
 		"@effect/language-service": "catalog:effect",

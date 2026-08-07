@@ -1,9 +1,6 @@
-import { motion } from "motion/react"
 import { MapleMark } from "@maple/ui/components/icons/maple-mark"
 import { cn } from "@maple/ui/lib/utils"
 import { OnboardingOrgSwitcher, OnboardingUserMenu } from "./onboarding-header-actions"
-
-const PIP_TRANSITION = { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const }
 
 export function OnboardingLayout({
 	currentStep,
@@ -47,19 +44,19 @@ export function OnboardingLayout({
 						const reached = i < currentStep
 						return (
 							<div key={i} className="flex h-1 w-7 items-center justify-center">
-								<motion.div
-									className={cn("h-full w-full overflow-hidden rounded-full bg-muted")}
-									initial={false}
-									animate={{ scaleX: reached ? 1 : 4 / 7 }}
-									transition={PIP_TRANSITION}
+								<div
+									className={cn(
+										"h-full w-full origin-center overflow-hidden rounded-full bg-muted transition-transform duration-400 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+										reached ? "scale-x-100" : "scale-x-[0.5714]",
+									)}
 								>
-									<motion.div
-										className="h-full rounded-full bg-primary origin-left"
-										initial={false}
-										animate={{ scaleX: reached ? 1 : 0 }}
-										transition={PIP_TRANSITION}
+									<div
+										className={cn(
+											"h-full origin-left rounded-full bg-primary transition-transform duration-400 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+											reached ? "scale-x-100" : "scale-x-0",
+										)}
 									/>
-								</motion.div>
+								</div>
 							</div>
 						)
 					})}

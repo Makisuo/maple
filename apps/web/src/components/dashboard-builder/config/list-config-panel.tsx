@@ -1,4 +1,4 @@
-import * as React from "react"
+import { useMemo, useState } from "react"
 import { Reorder, useDragControls } from "motion/react"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
@@ -77,6 +77,7 @@ function DraggableColumnRow({
 	allSuggestedFields,
 	updateColumn,
 	removeColumn,
+	onMoveBy,
 }: {
 	id: string
 	column: ListColumnDraft
@@ -87,6 +88,7 @@ function DraggableColumnRow({
 	allSuggestedFields: string[]
 	updateColumn: (index: number, updates: Partial<ListColumnDraft>) => void
 	removeColumn: (index: number) => void
+	onMoveBy: (delta: -1 | 1) => void
 }) {
 	const controls = useDragControls()
 
@@ -96,7 +98,7 @@ function DraggableColumnRow({
 			dragListener={false}
 			dragControls={controls}
 			as="div"
-			className="flex items-center gap-2 rounded-md bg-background py-1 relative"
+			className="relative flex items-center gap-2 rounded-md bg-background py-1"
 			whileDrag={{
 				scale: 1.02,
 				boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
@@ -106,8 +108,18 @@ function DraggableColumnRow({
 		>
 			<button
 				type="button"
-				className="shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground touch-none"
-				onPointerDown={(e) => controls.start(e)}
+				aria-label={`Reorder ${column.header || column.field || `column ${index + 1}`}`}
+				className="shrink-0 cursor-grab touch-none text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing"
+				onPointerDown={(event) => controls.start(event)}
+				onKeyDown={(event) => {
+					if (event.key === "ArrowUp") {
+						event.preventDefault()
+						onMoveBy(-1)
+					} else if (event.key === "ArrowDown") {
+						event.preventDefault()
+						onMoveBy(1)
+					}
+				}}
 			>
 				<GripDotsIcon size={14} />
 			</button>
@@ -220,12 +232,12 @@ export function ListConfigPanel() {
 		listRootOnly?: boolean
 		listColumns?: ListColumnDraft[]
 	}) => setState((current) => ({ ...current, ...updates }))
-	const [showFieldSuggestions, setShowFieldSuggestions] = React.useState<number | null>(null)
+	const [showFieldSuggestions, setShowFieldSuggestions] = useState<number | null>(null)
 
 	// Stable IDs for Reorder — kept in sync with columns array.
 	// addColumn/removeColumn/reorderColumns update the state before calling onChange,
 	// so a length mismatch here means an external reset (e.g. parent replaced columns).
-	const [storedColumnIds, setStoredColumnIds] = React.useState<string[]>(() =>
+	const [storedColumnIds, setStoredColumnIds] = useState<string[]>(() =>
 		columns.map(() => crypto.randomUUID()),
 	)
 	let columnIds = storedColumnIds
@@ -240,7 +252,7 @@ export function ListConfigPanel() {
 	const attributePrefix = listDataSource === "traces" ? "spanAttributes." : "logAttributes."
 	const resourcePrefix = "resourceAttributes."
 
-	const dynamicAttributeKeys = React.useMemo(() => {
+	const dynamicAttributeKeys = useMemo(() => {
 		const vals = autocompleteValues[listDataSource]
 		const keys: string[] = []
 		if (vals && "attributeKeys" in vals && Array.isArray(vals.attributeKeys)) {
@@ -256,7 +268,7 @@ export function ListConfigPanel() {
 		return keys
 	}, [autocompleteValues, listDataSource, attributePrefix])
 
-	const allSuggestedFields = React.useMemo(
+	const allSuggestedFields = useMemo(
 		() => [...knownFields, ...dynamicAttributeKeys],
 		[knownFields, dynamicAttributeKeys],
 	)
@@ -298,6 +310,23 @@ export function ListConfigPanel() {
 		})
 		setStoredColumnIds(newIdOrder)
 		onChange({ listColumns: reordered })
+	}
+
+	const moveColumn = (id: string, targetId: string) => {
+		const from = columnIds.indexOf(id)
+		const to = columnIds.indexOf(targetId)
+		if (from < 0 || to < 0 || from === to) return
+		const next = [...columnIds]
+		next.splice(from, 1)
+		next.splice(to, 0, id)
+		reorderColumns(next)
+	}
+
+	const moveColumnBy = (id: string, delta: -1 | 1) => {
+		const from = columnIds.indexOf(id)
+		const to = Math.max(0, Math.min(columnIds.length - 1, from + delta))
+		const target = columnIds[to]
+		if (target) moveColumn(id, target)
 	}
 
 	return (
@@ -440,6 +469,7 @@ export function ListConfigPanel() {
 							allSuggestedFields={allSuggestedFields}
 							updateColumn={updateColumn}
 							removeColumn={removeColumn}
+							onMoveBy={(delta) => moveColumnBy(columnIds[i]!, delta)}
 						/>
 					))}
 				</Reorder.Group>

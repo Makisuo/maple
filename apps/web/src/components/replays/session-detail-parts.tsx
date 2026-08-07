@@ -1,5 +1,4 @@
-import * as React from "react"
-import { motion, useReducedMotion } from "motion/react"
+import type { ReactNode } from "react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { GlobeIcon, ClockIcon } from "@/components/icons"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
@@ -11,18 +10,15 @@ import { parseChTimestampMs } from "./replay-timeline"
 // from the route so both the real page and the placeholder-data preview render
 // the exact same components (no drift between what ships and what we review).
 
-/** One-shot entrance reveal, skipped when the user prefers reduced motion. */
-export function Reveal({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
-	const reduceMotion = useReducedMotion()
-	if (reduceMotion) return <>{children}</>
+/** One-shot CSS entrance reveal, skipped when the user prefers reduced motion. */
+export function Reveal({ children, delay = 0 }: { children: ReactNode; delay?: number }) {
 	return (
-		<motion.div
-			initial={{ opacity: 0, y: 8 }}
-			animate={{ opacity: 1, y: 0 }}
-			transition={{ duration: 0.3, delay, ease: "easeOut" }}
+		<div
+			className="animate-in fade-in slide-in-from-bottom-2 [animation-duration:300ms] [animation-timing-function:ease-out] motion-reduce:animate-none"
+			style={{ animationDelay: `${delay}s`, animationFillMode: "backwards" }}
 		>
 			{children}
-		</motion.div>
+		</div>
 	)
 }
 

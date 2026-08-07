@@ -21,7 +21,6 @@
 		"class-variance-authority": "catalog:ui",
 		"clsx": "catalog:ui",
 		"effect": "catalog:effect",
-		"embla-carousel-react": "^8.6.0",
 		"react-day-picker": "^10.0.1",
 		"react-resizable-panels": "^4.9.0",
 		"recharts": "catalog:ui",

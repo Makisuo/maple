@@ -1,4 +1,4 @@
-import type { BaseComponentProps } from "@json-render/react"
+import type { RendererComponentProps } from "./types"
 
 interface DataTableProps {
 	headers: string[]
@@ -15,7 +15,7 @@ function maybeFormatNumber(value: string): string {
 	return value
 }
 
-export function DataTable({ props }: BaseComponentProps<DataTableProps>) {
+export function DataTable({ props }: RendererComponentProps<DataTableProps>) {
 	const { headers, rows, title } = props
 
 	return (

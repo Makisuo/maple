@@ -1,4 +1,4 @@
-import type { BaseComponentProps } from "@json-render/react"
+import type { RendererComponentProps } from "./types"
 import { cn } from "@maple/ui/lib/utils"
 import { LatencyValue } from "@maple/ui/components/latency-value"
 import { formatDuration } from "@maple/ui/lib/format"
@@ -23,7 +23,7 @@ interface TraceListProps {
 	}
 }
 
-export function TraceList({ props }: BaseComponentProps<TraceListProps>) {
+export function TraceList({ props }: RendererComponentProps<TraceListProps>) {
 	const { traces, stats } = props
 
 	return (

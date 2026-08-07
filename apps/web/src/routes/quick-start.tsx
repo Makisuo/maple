@@ -1,7 +1,7 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { createFileRoute, Navigate } from "@tanstack/react-router"
 import { useAuth } from "@clerk/clerk-react"
-import { AnimatePresence, motion } from "motion/react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useMapleCustomer } from "@/hooks/use-maple-customer"
 
 import { OnboardingLayout } from "@/components/onboarding/onboarding-layout"
@@ -92,15 +92,16 @@ function QuickStartPage() {
 	)
 }
 
-function MotionStep({ children, direction }: { children: React.ReactNode; direction: number }) {
+function MotionStep({ children, direction }: { children: ReactNode; direction: number }) {
+	const reduceMotion = useReducedMotion()
 	return (
 		<motion.div
 			custom={direction}
-			initial={{ opacity: 0, x: direction * 24 }}
+			initial={{ opacity: 0, x: reduceMotion ? 0 : direction * 24 }}
 			animate={{ opacity: 1, x: 0 }}
-			exit={{ opacity: 0, x: direction * -24 }}
-			transition={STEP_MOTION}
-			className="flex-1 flex flex-col"
+			exit={{ opacity: 0, x: reduceMotion ? 0 : direction * -24 }}
+			transition={reduceMotion ? { duration: 0 } : STEP_MOTION}
+			className="flex flex-1 flex-col"
 		>
 			{children}
 		</motion.div>

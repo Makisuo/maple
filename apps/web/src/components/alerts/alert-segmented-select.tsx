@@ -1,6 +1,5 @@
-import type { ReactNode } from "react"
-import { useId } from "react"
-import { motion } from "motion/react"
+import { useId, type ReactNode } from "react"
+import { motion, useReducedMotion } from "motion/react"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import { cn } from "@maple/ui/lib/utils"
 import { CheckIcon } from "@/components/icons"
@@ -15,11 +14,7 @@ export type AlertSegmentedOption<T extends string> = {
 type Size = "sm" | "default"
 
 /* The shared segmented control (a recessed track with one raised pill — see
-   packages/ui toggle-group.tsx) plus a *sliding* pill: the indicator is a Motion
-   shared-layout element (`layoutId`), so changing the selection animates it
-   gliding to its new slot instead of snapping a background on and off. The track
-   and pill styling come from the shared component; this only swaps the static
-   pill for the animated one. */
+   packages/ui toggle-group.tsx) plus a sliding shared-layout indicator. */
 export function AlertSegmentedSelect<T extends string>({
 	options,
 	value,
@@ -36,6 +31,7 @@ export function AlertSegmentedSelect<T extends string>({
 	"aria-label"?: string
 }) {
 	const pillId = useId()
+	const reduceMotion = useReducedMotion()
 	return (
 		<ToggleGroup
 			value={[value]}
@@ -69,7 +65,11 @@ export function AlertSegmentedSelect<T extends string>({
 								aria-hidden
 								layoutId={`alert-seg-pill-${pillId}`}
 								className="-z-10 absolute inset-0 rounded-md bg-background shadow-sm ring-1 ring-border/70 dark:bg-input dark:ring-white/10"
-								transition={{ type: "spring", stiffness: 380, damping: 32 }}
+								transition={
+									reduceMotion
+										? { duration: 0 }
+										: { type: "spring", stiffness: 380, damping: 32 }
+								}
 							/>
 						)}
 						{option.icon}

@@ -1,5 +1,5 @@
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
-import type { BaseComponentProps } from "@json-render/react"
+import type { RendererComponentProps } from "./types"
 
 interface ErrorListProps {
 	errors: Array<{
@@ -10,7 +10,7 @@ interface ErrorListProps {
 	}>
 }
 
-export function ErrorList({ props }: BaseComponentProps<ErrorListProps>) {
+export function ErrorList({ props }: RendererComponentProps<ErrorListProps>) {
 	const { errors } = props
 
 	return (

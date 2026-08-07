@@ -301,7 +301,7 @@ interface ReactRecorder {
 
 interface SmBench {
 	ready: boolean
-	/** Time from harness install to ready (nodes measured + edges in the DOM) — includes the async ELK layout. */
+	/** Time from harness install to ready (nodes measured + edges in the DOM). */
 	readyMs: number | null
 	last: BenchMetrics | null
 	run: (opts?: { durationMs?: number; pan?: boolean }) => Promise<BenchMetrics>
@@ -466,7 +466,7 @@ function BenchDriver({
 				// oxlint-disable-next-line react-doctor/server-sequential-independent-await -- Scenarios share the graph and recorder, so they must not overlap.
 				const topologyChange = await measureUpdates(topologyChanges, async () => {
 					onTopologyChange()
-					// The graph remains visible while the worker computes the next ELK
+					// The graph remains visible while the next deterministic layout
 					// layout. Give that asynchronous layout enough time to commit before
 					// taking the scenario snapshot.
 					await new Promise((resolve) => setTimeout(resolve, 1500))

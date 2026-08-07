@@ -1,5 +1,13 @@
 import { formatLatency, formatPercent } from "@maple/ui/lib/format"
-import { useDeferredValue, useEffect, useMemo, useRef, useState, useCallback } from "react"
+import {
+	useCallback,
+	useDeferredValue,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react"
 import {
 	ReactFlow,
 	Controls,
@@ -123,7 +131,6 @@ import {
 import type { HyperdriveConfigInput, HyperdriveNodeInfo } from "./service-map-hyperdrive"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useMapleOrganizationId } from "@/hooks/use-maple-organization"
-import { useMountEffect } from "@/hooks/use-mount-effect"
 
 const nodeTypes = {
 	serviceNode: ServiceMapNode,
@@ -726,7 +733,7 @@ function ServiceMapEmptyState() {
 				}}
 			/>
 
-			<div className="relative z-10 flex flex-col items-center motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-300">
+			<div className="relative z-10 flex flex-col items-center motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:[animation-duration:300ms]">
 				{/* Ghost graph drawn in the node/edge vocabulary of the real map. */}
 				<svg
 					aria-hidden
@@ -1657,17 +1664,6 @@ function LayoutDebugPanel({
 	)
 }
 
-/**
- * Run ELK's async layout whenever the topology/namespace/config key changes,
- * returning the result once it resolves for the CURRENT key (`layout` is null
- * while pending, so callers fall back to the synchronous layout). `settled`
- * flips once the current key has resolved — success OR failure — so the reveal
- * gate never pins the skeleton on a layout error (the sync fallback positions
- * are already final in that case). One effect: this is genuine synchronization
- * with an external, imperative async layout engine — not derivable render
- * state. Reads live nodes/edges through refs so the effect only re-fires on the
- * stable string key, not on array identity churn.
- */
 interface LayoutRequest {
 	key: string
 	nodes: Node<ServiceNodeData>[]
@@ -1675,6 +1671,11 @@ interface LayoutRequest {
 	config: LayoutConfig
 }
 
+/**
+ * Metric refreshes replace the node objects even when the layout inputs have not
+ * changed. Keep the request identity pinned to the topology/config signature so
+ * those refreshes do not restart ELK's worker.
+ */
 function useLayoutRequest(
 	rawNodes: Node<ServiceNodeData>[],
 	flowEdges: Edge<ServiceEdgeData>[],
@@ -1694,36 +1695,68 @@ function useLayoutRequest(
 	return next
 }
 
-function useElkLayout(request: LayoutRequest): {
-	layout: ElkLayoutResult | null
-	hasEverSettled: boolean
-} {
-	const [state, setState] = useState<{
-		key: string
-		layout: ElkLayoutResult | null
-		hasEverSettled: boolean
-	} | null>(null)
+type ElkLayoutSnapshot =
+	| { status: "pending"; layout: null }
+	| { status: "fallback"; layout: null }
+	| { status: "ready"; layout: ElkLayoutResult }
 
-	useEffect(() => {
-		let cancelled = false
+const ELK_PENDING: ElkLayoutSnapshot = { status: "pending", layout: null }
+const ELK_FALLBACK: ElkLayoutSnapshot = { status: "fallback", layout: null }
+
+interface ElkLayoutStore {
+	getSnapshot: () => ElkLayoutSnapshot
+	getServerSnapshot: () => ElkLayoutSnapshot
+	subscribe: (listener: () => void) => () => void
+}
+
+/**
+ * ELK is an external async engine, so expose it as an external store. This keeps
+ * async work out of render and avoids adding another state-synchronizing effect.
+ * After two seconds the synchronous layout is revealed; a late ELK result still
+ * replaces it once available.
+ */
+function createElkLayoutStore(request: LayoutRequest): ElkLayoutStore {
+	let snapshot = ELK_PENDING
+	let started = false
+	const listeners = new Set<() => void>()
+
+	const publish = (next: ElkLayoutSnapshot) => {
+		if (snapshot === next) return
+		snapshot = next
+		for (const listener of listeners) listener()
+	}
+
+	const start = () => {
+		if (started) return
+		started = true
+		const graceTimer = setTimeout(() => publish(ELK_FALLBACK), 2000)
+
 		layoutServiceMapWithElk(request.nodes, request.edges, request.config)
 			.then((layout) => {
-				if (!cancelled) setState({ key: request.key, layout, hasEverSettled: true })
+				clearTimeout(graceTimer)
+				publish({ status: "ready", layout })
 			})
 			.catch((error) => {
+				clearTimeout(graceTimer)
 				logClientError("service_map.elk_layout_failed", error)
-				if (!cancelled) setState({ key: request.key, layout: null, hasEverSettled: true })
+				publish(ELK_FALLBACK)
 			})
-		return () => {
-			cancelled = true
-		}
-	}, [request])
-
-	const current = state?.key === request.key ? state : null
-	return {
-		layout: current?.layout ?? null,
-		hasEverSettled: state?.hasEverSettled ?? false,
 	}
+
+	return {
+		getSnapshot: () => snapshot,
+		getServerSnapshot: () => ELK_PENDING,
+		subscribe: (listener) => {
+			listeners.add(listener)
+			start()
+			return () => listeners.delete(listener)
+		},
+	}
+}
+
+function useElkLayout(request: LayoutRequest): ElkLayoutSnapshot {
+	const store = useMemo(() => createElkLayoutStore(request), [request])
+	return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getServerSnapshot)
 }
 
 export function ServiceMapCanvas({
@@ -1869,7 +1902,7 @@ export function ServiceMapCanvas({
 	}, [rawNodes])
 
 	// Declutter stage: collapse namespaces → focus subgraph → traffic filter.
-	// Everything downstream (topology key, ELK, persisted positions, particles,
+	// Everything downstream (topology key, layout, persisted positions, particles,
 	// minimap, namespace boxes) operates on the EFFECTIVE graph, so declutter
 	// changes that alter the node set naturally re-key the layout signature while
 	// focus-dim (topology unchanged) costs no re-layout.
@@ -1926,10 +1959,10 @@ export function ServiceMapCanvas({
 				.join(","),
 		[effectiveNodes],
 	)
-	// The trailing `elk2` is a layout-engine version token: bumping it invalidates
+	// The trailing token is a layout-engine version: changing it invalidates
 	// persisted drag snapshots captured against a previous engine's base positions
-	// (mixing the two scatters nodes). elk2 = always-on ELK for flat graphs.
-	const layoutSignature = `${topoKey}|${nsKey}|${JSON.stringify(layoutConfig)}|elk2`
+	// (mixing coordinate systems scatters nodes).
+	const layoutSignature = `${topoKey}|${nsKey}|${JSON.stringify(layoutConfig)}|elk3`
 
 	// Persisted drag positions / viewport are absolute coordinates tied to a
 	// specific layout. Honour them ONLY while their captured signature still
@@ -1947,21 +1980,25 @@ export function ServiceMapCanvas({
 			},
 		[layout, layoutSignature],
 	)
-	// ELK's layered layout (async, in a web worker) produces the final node
-	// positions for ALL graphs. Until it resolves for the current signature we
-	// fall back to the synchronous layout below (also the terminal fallback if
-	// ELK errors). Edges always render as smooth-step curves (ELK is positions
-	// only).
+	// ELK's layered layout runs in a worker. The deterministic synchronous layout
+	// remains the timeout/error fallback, so a worker failure never blanks the map.
 	const layoutRequest = useLayoutRequest(effectiveNodes, effectiveEdges, layoutConfig, layoutSignature)
-	const { layout: elk, hasEverSettled: elkHasEverSettled } = useElkLayout(layoutRequest)
+	const elkSnapshot = useElkLayout(layoutRequest)
+	// Wait for the first final/fallback layout so the initial graph never jumps.
+	// Once revealed, keep the current map visible during later ELK recomputes,
+	// matching the previous behavior for filter and topology changes.
+	const [layoutHasEverSettled, setLayoutHasEverSettled] = useState(false)
+	const currentLayoutSettled = elkSnapshot.status !== "pending"
+	if (!layoutHasEverSettled && currentLayoutSettled) setLayoutHasEverSettled(true)
+	const layoutRevealed = layoutHasEverSettled || currentLayoutSettled
 	const fallbackPositions = useMemo(
 		() => computeNodePositions(layoutRequest.nodes, layoutRequest.edges, layoutRequest.config),
 		[layoutRequest],
 	)
 	const layoutedNodes = useMemo(() => {
-		const positions = elk?.positions ?? fallbackPositions
+		const positions = elkSnapshot.layout?.positions ?? fallbackPositions
 		return effectiveNodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position }))
-	}, [effectiveNodes, elk, fallbackPositions])
+	}, [effectiveNodes, elkSnapshot.layout, fallbackPositions])
 
 	// Merge layout positions with selection + color-mode + focus-dim state.
 	// Persisted drag positions (keyed by node id) override the deterministic
@@ -2014,13 +2051,9 @@ export function ServiceMapCanvas({
 	// Programmatic fitView after ALL nodes are measured (the fitView prop fires too early).
 	// Skip auto-fit entirely when a saved viewport exists so the restored camera survives.
 	const rfInstance = useRef<ReactFlowInstance | null>(null)
-	const hasFitView = useRef(persisted.viewport != null)
-
-	// Capture the saved camera AT THE MOMENT a signature becomes live. onMoveEnd
-	// persists programmatic camera moves too, so by the time ELK resolves for a
-	// declutter change the new signature often already has a (stale, pre-layout)
-	// viewport stamped on it — deciding from `persisted.viewport` then would skip
-	// the refit and strand the re-laid-out graph off-camera.
+	// Capture the camera that existed when this signature became live. A fallback
+	// fit can itself trigger onMoveEnd before a late ELK result lands; that camera
+	// is not a user-saved camera and must not suppress ELK's final refit.
 	const [viewportSnapshot, setViewportSnapshot] = useState(() => ({
 		signature: layoutSignature,
 		viewport: persisted.viewport,
@@ -2030,49 +2063,42 @@ export function ServiceMapCanvas({
 		savedViewport = persisted.viewport
 		setViewportSnapshot({ signature: layoutSignature, viewport: savedViewport })
 	}
-
-	// ELK repositions every node when it resolves (positions, not dimensions, so
-	// onNodesChange's measure-based fit won't fire). Once per ELK result, after
-	// the new positions paint: restore the camera the user saved for this exact
-	// layout, or fit the fresh layout into view.
-	const elkFitKeyRef = useRef<string | null>(null)
-	useEffect(() => {
-		if (!elk) return
-		if (elkFitKeyRef.current === layoutSignature) return
-		elkFitKeyRef.current = layoutSignature
-		const raf = requestAnimationFrame(() =>
-			requestAnimationFrame(() => {
-				if (savedViewport) rfInstance.current?.setViewport(savedViewport)
-				else rfInstance.current?.fitView({ duration: 300 })
-			}),
-		)
-		return () => cancelAnimationFrame(raf)
-	}, [elk, layoutSignature, savedViewport])
+	const hasSavedViewport = savedViewport != null
+	const flowLayoutKey = `${layoutSignature}:${elkSnapshot.status === "ready" ? "ready" : "fallback"}`
+	const fitViewState = useRef({ signature: flowLayoutKey, fitted: hasSavedViewport })
 
 	const fitCheckPending = useRef(false)
 	const onNodesChange = useCallback(
 		(changes: NodeChange[]) => {
+			// React Flow is keyed by signature. Reset the camera gate in this external
+			// measurement event instead of mutating a ref during React render.
+			if (fitViewState.current.signature !== flowLayoutKey) {
+				fitViewState.current = { signature: flowLayoutKey, fitted: hasSavedViewport }
+			}
+
 			setNodeState((current) => ({
 				...current,
 				nodes: applyNodeChanges(changes, current.nodes) as typeof current.nodes,
 			}))
 
 			if (
-				!hasFitView.current &&
+				!fitViewState.current.fitted &&
 				!fitCheckPending.current &&
 				rfInstance.current &&
 				changes.some((change) => change.type === "dimensions")
 			) {
 				fitCheckPending.current = true
+				const requestedSignature = flowLayoutKey
 				requestAnimationFrame(() => {
 					fitCheckPending.current = false
+					if (fitViewState.current.signature !== requestedSignature) return
 					const measuredNodes = rfInstance.current?.getNodes() ?? []
 					if (
-						!hasFitView.current &&
+						!fitViewState.current.fitted &&
 						measuredNodes.length > 0 &&
 						measuredNodes.every((node) => node.measured?.width && node.measured?.height)
 					) {
-						hasFitView.current = true
+						fitViewState.current.fitted = true
 						rfInstance.current?.fitView()
 					}
 				})
@@ -2095,7 +2121,7 @@ export function ServiceMapCanvas({
 				)
 			}
 		},
-		[layoutSignature, setLayout],
+		[flowLayoutKey, hasSavedViewport, layoutSignature, setLayout],
 	)
 
 	const onMoveEnd = useCallback(
@@ -2236,22 +2262,6 @@ export function ServiceMapCanvas({
 	// LIVE `nodes` (must stay current); only the derived boxes run a frame behind.
 	const renderedNodes = useMemo(() => [...namespaceGroupNodes, ...nodes], [namespaceGroupNodes, nodes])
 
-	// Hold the skeleton until the first layout for the initial data is FINAL, so
-	// the graph paints once in its settled positions instead of jumping. The
-	// async ELK pass repositions every node, so wait for it to settle (resolve or
-	// fail — a failure means the sync fallback positions ARE final) before
-	// revealing — but never for more than a grace period: on a cold dev server /
-	// slow network the worker chunk can take seconds to arrive, and a usable
-	// sync-layout graph beats a skeleton (ELK repositions + refits when it
-	// lands). Reveal once, then never fall back to the skeleton — later
-	// refresh-driven ELK recomputes keep showing the current graph.
-	const [revealGraceExpired, setRevealGraceExpired] = useState(false)
-	useMountEffect(() => {
-		const timer = setTimeout(() => setRevealGraceExpired(true), 2000)
-		return () => clearTimeout(timer)
-	})
-	const revealed = elkHasEverSettled || revealGraceExpired
-
 	if (nodes.length === 0) {
 		// The graph exists but declutter hid everything — offer a reset instead of
 		// the "no instrumentation" empty state.
@@ -2282,7 +2292,7 @@ export function ServiceMapCanvas({
 		return <ServiceMapEmptyState />
 	}
 
-	if (!revealed) {
+	if (!layoutRevealed) {
 		return <ServiceMapLoading />
 	}
 
@@ -2309,13 +2319,14 @@ export function ServiceMapCanvas({
 							/>
 							<ParticleRegistryProvider value={registry}>
 								<ReactFlow
+									key={flowLayoutKey}
 									nodes={renderedNodes}
 									edges={renderedEdges}
 									onNodesChange={onNodesChange}
 									onNodeClick={handleNodeClick}
 									onPaneClick={handlePaneClick}
 									onMoveEnd={onMoveEnd}
-									defaultViewport={persisted.viewport ?? undefined}
+									defaultViewport={savedViewport ?? undefined}
 									onInit={(instance) => {
 										rfInstance.current = instance as unknown as ReactFlowInstance
 									}}

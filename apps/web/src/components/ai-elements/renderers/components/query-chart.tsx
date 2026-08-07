@@ -1,6 +1,6 @@
 import { useMemo, useId } from "react"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
-import type { BaseComponentProps } from "@json-render/react"
+import type { RendererComponentProps } from "./types"
 import {
 	type ChartConfig,
 	ChartContainer,
@@ -24,7 +24,7 @@ interface QueryChartProps {
 	groupBy?: string
 }
 
-export function QueryChart({ props }: BaseComponentProps<QueryChartProps>) {
+export function QueryChart({ props }: RendererComponentProps<QueryChartProps>) {
 	const { data, metric, unit } = props
 	const id = useId()
 	const cleanId = id.replace(/:/g, "")

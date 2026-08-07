@@ -1,8 +1,6 @@
 import { Children, createContext, isValidElement, use } from "react"
 import type React from "react"
 
-import { motion, useReducedMotion } from "motion/react"
-
 import { cn } from "@maple/ui/lib/utils"
 import { IntegrationIconPlate } from "./integration-catalog"
 
@@ -87,28 +85,21 @@ export interface IntegrationFeatureCopy {
 
 /**
  * The what-you-get row above the empty card: staggered grid of value-prop tiles.
- * Owns the motion wrappers (per-index delay) so tiles animate reliably no matter
+ * Owns the entry wrappers (per-index delay) so tiles animate reliably no matter
  * where the `IntegrationEmptyFeature` children were rendered.
  */
 export function IntegrationEmptyFeatures({ children }: { children: React.ReactNode }) {
-	const reduceMotion = useReducedMotion()
 	return (
 		<ul className="grid grid-cols-1 gap-3 text-left sm:grid-cols-3">
 			{Children.toArray(children).map((child, index) => (
-				<motion.li
+				<li
 					// Children.toArray prefixes existing keys; tiles are a static list, so this is stable.
 					key={isValidElement(child) ? child.key : index}
-					className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card px-4 py-3.5"
-					initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-					animate={{ opacity: 1, y: 0 }}
-					transition={{
-						duration: 0.32,
-						ease: [0.16, 1, 0.3, 1],
-						delay: 0.05 + index * 0.05,
-					}}
+					className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card px-4 py-3.5 animate-in fade-in slide-in-from-bottom-1 [animation-duration:300ms] motion-reduce:animate-none"
+					style={{ animationDelay: `${50 + index * 50}ms`, animationFillMode: "backwards" }}
 				>
 					{child}
-				</motion.li>
+				</li>
 			))}
 		</ul>
 	)

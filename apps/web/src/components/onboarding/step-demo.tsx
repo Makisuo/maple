@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
-import { motion, useReducedMotion } from "motion/react"
 import { toastManager } from "@maple/ui/components/ui/toast"
 import { Exit } from "effect"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
@@ -19,22 +18,6 @@ import { DemoSeedRequest } from "@maple/domain/http"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { getServiceOverviewResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { cn } from "@maple/ui/lib/utils"
-
-const CARDS_VARIANTS = {
-	hidden: {},
-	show: {
-		transition: { staggerChildren: 0.07, delayChildren: 0.05 },
-	},
-}
-
-const CARD_ITEM_VARIANTS = {
-	hidden: { opacity: 0, y: 8 },
-	show: {
-		opacity: 1,
-		y: 0,
-		transition: { duration: 0.32, ease: [0.16, 1, 0.3, 1] as const },
-	},
-}
 
 export function StepDemo({
 	onComplete,
@@ -196,21 +179,12 @@ export function StepDemo({
 					</p>
 				</div>
 
-				<motion.div
-					initial={{ opacity: 0, y: 12 }}
-					animate={{ opacity: 1, y: 0 }}
-					transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-				>
+				<div className="animate-in fade-in slide-in-from-bottom-3 [animation-duration:500ms] motion-reduce:animate-none">
 					<DemoPreview />
-				</motion.div>
+				</div>
 
-				<motion.div
-					variants={CARDS_VARIANTS}
-					initial="hidden"
-					animate="show"
-					className="grid grid-cols-1 md:grid-cols-2 gap-4"
-				>
-					<motion.div variants={CARD_ITEM_VARIANTS}>
+				<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+					<div className="animate-in fade-in slide-in-from-bottom-2 [animation-duration:300ms] motion-reduce:animate-none">
 						<DemoOption
 							icon={ChartLineIcon}
 							title="Explore with demo data"
@@ -227,8 +201,11 @@ export function StepDemo({
 							loading={isSeeding}
 							primary
 						/>
-					</motion.div>
-					<motion.div variants={CARD_ITEM_VARIANTS}>
+					</div>
+					<div
+						className="animate-in fade-in slide-in-from-bottom-2 [animation-duration:300ms] motion-reduce:animate-none"
+						style={{ animationDelay: "70ms", animationFillMode: "backwards" }}
+					>
 						<DemoOption
 							icon={CodeIcon}
 							title="I'll connect my app"
@@ -242,8 +219,8 @@ export function StepDemo({
 							onAction={handleSkip}
 							disabled={isSeeding}
 						/>
-					</motion.div>
-				</motion.div>
+					</div>
+				</div>
 
 				{onBack && !isSeeding && (
 					<div className="flex justify-start">
@@ -265,20 +242,13 @@ export function StepDemo({
 const SEEDING_BARS = [0, 1, 2, 3] as const
 
 function SeedingBars() {
-	const reduceMotion = useReducedMotion()
 	return (
 		<span aria-hidden className="inline-flex h-3.5 items-end gap-px">
 			{SEEDING_BARS.map((i) => (
-				<motion.span
+				<span
 					key={i}
-					className="h-full w-0.5 origin-bottom rounded-full bg-current"
-					initial={{ scaleY: 0.35 }}
-					animate={reduceMotion ? { scaleY: 0.6 } : { scaleY: [0.35, 1, 0.35] }}
-					transition={
-						reduceMotion
-							? { duration: 0 }
-							: { duration: 0.9, repeat: Infinity, ease: "easeInOut", delay: i * 0.14 }
-					}
+					className="seeding-bar h-full w-0.5 origin-bottom rounded-full bg-current"
+					style={{ animationDelay: `${i * 140}ms` }}
 				/>
 			))}
 		</span>
@@ -369,11 +339,9 @@ function DemoOption({
 			)}
 		>
 			{loading && (
-				<motion.div
+				<div
 					aria-hidden
-					className="pointer-events-none absolute inset-0 rounded-[inherit] ring-2 ring-inset ring-primary/40"
-					animate={{ opacity: [0.35, 0.85, 0.35] }}
-					transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+					className="pointer-events-none absolute inset-0 animate-pulse rounded-[inherit] ring-2 ring-inset ring-primary/40 motion-reduce:animate-none"
 					style={{ boxShadow: "0 0 0 6px hsl(var(--primary) / 0.06) inset" }}
 				/>
 			)}

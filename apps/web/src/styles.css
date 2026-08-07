@@ -10,6 +10,9 @@
 
 @source "../../../packages/ui/src";
 @source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+@source "../node_modules/@streamdown/math/dist/*.js";
+@source "../node_modules/@streamdown/mermaid/dist/*.js";
 
 /* Sugar High syntax highlighting */
 :root {
@@ -60,6 +63,28 @@
 
 .pulse-dot:nth-child(3) {
 	animation-delay: 0.32s;
+}
+
+/* Demo seed — telemetry bars rising in a staggered wave. */
+@keyframes seeding-bar {
+	0%,
+	100% {
+		transform: scaleY(0.35);
+	}
+	50% {
+		transform: scaleY(1);
+	}
+}
+
+.seeding-bar {
+	animation: seeding-bar 0.9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.seeding-bar {
+		animation: none;
+		transform: scaleY(0.6);
+	}
 }
 
 /* Cold-boot splash — branded self-assembling trace waterfall (see boot-splash.tsx

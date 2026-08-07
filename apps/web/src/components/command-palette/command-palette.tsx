@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
-import { Link } from "@tanstack/react-router"
+import { useMemo, useState, type KeyboardEvent } from "react"
 import Fuse, { type IFuseOptions } from "fuse.js"
+import { Link } from "@tanstack/react-router"
 import { useTheme } from "@maple/ui/hooks/use-theme"
 import {
 	Command,
@@ -120,22 +120,17 @@ function PaletteContent({
 		.onSuccess((r) => r.data.map((item) => item.name))
 		.orElse(() => [])
 
-	// The forced-open Autocomplete stopPropagation()s Escape (and swallows ⌘K)
-	// before the Dialog or the document-level hotkey manager sees it, so handle
-	// both from the capture phase while the palette is mounted.
-	useEffect(() => {
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === "Escape") {
-				event.preventDefault()
-				close()
-			} else if ((event.key === "k" || event.key === "K") && (event.metaKey || event.ctrlKey)) {
-				event.preventDefault()
-				toggle()
-			}
+	// The forced-open Autocomplete swallows Escape and ⌘K. Its parent popup sees
+	// the capture phase first, so keep those actions in the event that caused them.
+	const handleKeyDownCapture = (event: KeyboardEvent) => {
+		if (event.key === "Escape") {
+			event.preventDefault()
+			close()
+		} else if ((event.key === "k" || event.key === "K") && (event.metaKey || event.ctrlKey)) {
+			event.preventDefault()
+			toggle()
 		}
-		document.addEventListener("keydown", onKeyDown, true)
-		return () => document.removeEventListener("keydown", onKeyDown, true)
-	}, [close, toggle])
+	}
 
 	const entries = useMemo<PaletteEntry[]>(() => {
 		// Sections *and* their children — Traces, Logs, Metrics, Replays, Hosts,
@@ -215,20 +210,19 @@ function PaletteContent({
 		return [...navigation, ...serviceEntries, ...dashboardEntries, ...actions]
 	}, [dashboards, favorites, infraEnabled, serviceNames, theme, setTheme, onShowShortcuts])
 
-	const fuse = useMemo(() => new Fuse(entries, FUSE_OPTIONS), [entries])
-
 	// Browse mode shows only a taste of the services list — the full set stays
 	// searchable, but dozens of service rows shouldn't bury Dashboards/Actions.
 	const browseEntries = useMemo(() => {
 		let serviceCount = 0
 		return entries.filter((entry) => entry.group !== "Services" || serviceCount++ < 5)
 	}, [entries])
+	const fuse = useMemo(() => new Fuse(entries, FUSE_OPTIONS), [entries])
 
-	// `null` => browse mode (empty query); otherwise the ranked Fuse hits.
+	// `null` => browse mode (empty query); otherwise locally ranked hits.
 	const results = useMemo<PaletteEntry[] | null>(() => {
 		const trimmed = query.trim()
 		if (!trimmed) return null
-		return fuse.search(trimmed, { limit: MAX_RESULTS }).map((r) => r.item)
+		return fuse.search(trimmed, { limit: MAX_RESULTS }).map(({ item }) => item)
 	}, [fuse, query])
 
 	const renderEntry = (entry: PaletteEntry) => {
@@ -303,7 +297,7 @@ function PaletteContent({
 	const grouped = groupEntries(results ?? browseEntries)
 
 	return (
-		<CommandDialogPopup>
+		<CommandDialogPopup onKeyDownCapture={handleKeyDownCapture}>
 			<Command
 				inline={false}
 				filter={null}

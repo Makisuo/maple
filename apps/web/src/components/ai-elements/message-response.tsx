@@ -16,9 +16,9 @@ const streamdownPlugins = { cjk, code, math, mermaid } as PluginConfig
 
 /**
  * Markdown renderer for assistant text. Memoized on `children` identity so a
- * streaming token only re-renders the message it lands in — the shiki/katex/mermaid
- * plugins are expensive enough that re-parsing the whole transcript per token is
- * visible as jank.
+ * streaming token only re-renders the message it lands in — the Shiki, KaTeX,
+ * and Mermaid plugins are expensive enough that re-parsing the whole transcript
+ * per token is visible as jank.
  */
 export const MessageResponse = memo(
 	({ className, ...props }: MessageResponseProps) => (

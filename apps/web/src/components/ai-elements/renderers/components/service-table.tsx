@@ -1,4 +1,4 @@
-import type { BaseComponentProps } from "@json-render/react"
+import type { RendererComponentProps } from "./types"
 import { cn } from "@maple/ui/lib/utils"
 import { LatencyValue } from "@maple/ui/components/latency-value"
 import { formatErrorRate, formatNumber } from "@maple/ui/lib/format"
@@ -20,7 +20,7 @@ interface ServiceTableProps {
 	}>
 }
 
-export function ServiceTable({ props }: BaseComponentProps<ServiceTableProps>) {
+export function ServiceTable({ props }: RendererComponentProps<ServiceTableProps>) {
 	const { services } = props
 
 	return (
