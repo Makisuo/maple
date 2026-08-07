@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router"
 import { useOrganization } from "@clerk/clerk-react"
 import { useMapleCustomer } from "@/hooks/use-maple-customer"
 
@@ -22,7 +21,7 @@ import {
 	UserIcon,
 	type IconComponent,
 } from "@/components/icons"
-import { cn } from "@maple/ui/lib/utils"
+import { SettingsNavShell } from "@/components/settings/settings-nav-shell"
 
 export const settingsTabValues = [
 	"organization",
@@ -214,18 +213,6 @@ export function useVisibleSettingsSections() {
 	}
 }
 
-const rowClass = (isActive: boolean) =>
-	cn(
-		"group relative flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors text-left",
-		isActive
-			? "bg-accent text-accent-foreground font-medium"
-			: "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-	)
-
-function ActiveIndicator() {
-	return <span aria-hidden className="absolute inset-y-1.5 left-0 w-[2px] rounded-full bg-primary" />
-}
-
 export function SettingsNav({
 	sections,
 	active,
@@ -236,42 +223,5 @@ export function SettingsNav({
 	active: SettingsTab | "integrations"
 	onSelectTab: (tab: SettingsTab) => void
 }) {
-	return (
-		<nav className="flex flex-col gap-5">
-			{sections.map((section) => (
-				<div key={section.id} className="flex flex-col gap-1">
-					<div className="px-2.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/60">
-						{section.title}
-					</div>
-					<div className="flex flex-col gap-0.5">
-						{section.items.map((item) => {
-							const isActive = item.id === active
-							return (
-								<button
-									key={item.id}
-									type="button"
-									onClick={() => onSelectTab(item.id)}
-									className={rowClass(isActive)}
-								>
-									{isActive && <ActiveIndicator />}
-									<item.icon size={16} className="shrink-0" />
-									{item.label}
-								</button>
-							)
-						})}
-						{section.links?.map((link) => {
-							const isActive = link.id === active
-							return (
-								<Link key={link.to} to={link.to} className={rowClass(isActive)}>
-									{isActive && <ActiveIndicator />}
-									<link.icon size={16} className="shrink-0" />
-									{link.label}
-								</Link>
-							)
-						})}
-					</div>
-				</div>
-			))}
-		</nav>
-	)
+	return <SettingsNavShell sections={sections} active={active} onSelectTab={onSelectTab} />
 }

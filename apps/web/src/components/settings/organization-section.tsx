@@ -335,7 +335,8 @@ export function OrganizationSection() {
 							be permanently deleted. This cannot be undone.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
-					<div className="space-y-2">
+					{/* AlertDialog has no panel slot, so a body between header and footer pads itself. */}
+					<div className="space-y-2 px-6 py-2">
 						<Label htmlFor="org-delete-confirm" className="text-xs">
 							Type <span className="font-mono font-semibold">{organization.name}</span> to
 							confirm.

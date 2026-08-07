@@ -6,6 +6,7 @@ import { apiBaseUrl } from "./lib/services/common/api-base-url"
 import { ClerkAuthBridge } from "./lib/services/common/clerk-auth-bridge"
 import { purgeForeignClerkCookies } from "./lib/services/common/clerk-cookie-guard"
 import { isClerkAuthEnabled } from "./lib/services/common/auth-mode"
+import { clerkAppearance } from "./lib/clerk-appearance"
 import {
 	installSelfHostedAuthHeadersProvider,
 	resolveSelfHostedRouterAuth,
@@ -181,6 +182,10 @@ const app = isClerkAuthEnabled ? (
 		signUpUrl={clerkSignUpUrl}
 		signUpFallbackRedirectUrl="/quick-start"
 		afterSignOutUrl={clerkSignInUrl}
+		// `/account` is hand-built, but a `useReverification`-wrapped call still opens Clerk's own
+		// challenge modal when the instance requires re-verification. Theming the provider is what
+		// keeps that modal from rendering in Clerk's default light theme mid-flow.
+		appearance={clerkAppearance}
 	>
 		<ClerkAuthBridge />
 		<ClerkInnerApp />

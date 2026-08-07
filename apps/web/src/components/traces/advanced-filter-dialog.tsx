@@ -5,6 +5,7 @@ import {
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
+	DialogPanel,
 	DialogTitle,
 	DialogTrigger,
 } from "@maple/ui/components/ui/dialog"
@@ -96,7 +97,7 @@ export function AdvancedFilterDialog({ initialValue, onApply }: AdvancedFilterDi
 						apply.
 					</DialogDescription>
 				</DialogHeader>
-				<div className="py-4">
+				<DialogPanel>
 					<WhereClauseEditor
 						className="w-full"
 						rows={8}
@@ -110,7 +111,7 @@ export function AdvancedFilterDialog({ initialValue, onApply }: AdvancedFilterDi
 						textareaClassName="font-mono text-sm leading-relaxed resize-y min-h-[200px]"
 						ariaLabel="Advanced traces where clause"
 					/>
-				</div>
+				</DialogPanel>
 				<DialogFooter>
 					<div className="flex w-full items-center justify-between sm:justify-between">
 						<Button variant="ghost" onClick={handleClear} className="text-muted-foreground">

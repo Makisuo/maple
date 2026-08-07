@@ -10,6 +10,7 @@ import {
 	KeyboardIcon,
 	LogoutIcon,
 	MagnifierIcon,
+	UserIcon,
 } from "@/components/icons"
 import {
 	isNavItemActive,
@@ -21,6 +22,7 @@ import {
 } from "@/components/dashboard/nav-items"
 import { openCommandPalette, showKeyboardShortcuts } from "@/components/command-palette/global-shortcuts"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
+import { UserAvatar, userInitials } from "@/components/dashboard/user-avatar"
 import { ThemeToggle } from "@/components/dashboard/theme-toggle"
 import {
 	DropdownMenu,
@@ -74,29 +76,6 @@ const GROUP_LABEL = "h-6 text-muted-foreground"
 /** Beyond this the Pinned list stops being a shortcut and becomes a second list. */
 const MAX_PINNED = 5
 
-function UserAvatar({
-	imageUrl,
-	initials,
-	name,
-	className,
-}: {
-	imageUrl?: string
-	initials: string
-	name: string
-	className?: string
-}) {
-	const base = className ?? "size-6 rounded-md text-[10px]"
-	return imageUrl ? (
-		<img alt={name} className={`${base} shrink-0 object-cover`} src={imageUrl} />
-	) : (
-		<div
-			className={`${base} flex shrink-0 items-center justify-center bg-muted font-medium text-muted-foreground`}
-		>
-			{initials}
-		</div>
-	)
-}
-
 function UserMenu() {
 	const { user } = useUser()
 	const { signOut } = useClerk()
@@ -104,12 +83,7 @@ function UserMenu() {
 	const name = user?.fullName ?? "User"
 	const email = user?.primaryEmailAddress?.emailAddress ?? ""
 	const imageUrl = user?.imageUrl
-	const initials = name
-		.split(" ")
-		.map((n) => n[0])
-		.join("")
-		.slice(0, 2)
-		.toUpperCase()
+	const initials = userInitials(name)
 
 	return (
 		<DropdownMenu>
@@ -149,6 +123,10 @@ function UserMenu() {
 				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
 				<DropdownMenuGroup>
+					<DropdownMenuItem render={<Link to="/account" />}>
+						<UserIcon size={16} />
+						Account
+					</DropdownMenuItem>
 					<DropdownMenuItem render={<Link to="/settings" />}>
 						<GearIcon size={16} />
 						Settings
