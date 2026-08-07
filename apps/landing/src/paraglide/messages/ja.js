@@ -5111,6 +5111,14 @@ export const nav_local = () => `ローカル`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_guides = () => `ガイド`
+
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const nav_blog = () => `ブログ`
 
 
@@ -5132,6 +5140,14 @@ export const footer_learn = () => `学ぶ`
 
 /**
  * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_what_is_apm = () => `APMとは？`
+
+
+/**
+ *
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */

@@ -690,9 +690,11 @@
 	"nav_login": "Log in",
 	"nav_docs": "Docs",
 	"nav_local": "Local",
+	"nav_guides": "Guides",
 	"nav_blog": "Blog",
 	"nav_changelog": "Changelog",
 	"footer_learn": "Learn",
+	"footer_what_is_apm": "What is APM?",
 	"footer_what_is_observability": "What is observability?",
 	"footer_best_tools": "Best open-source tools",
 

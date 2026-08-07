@@ -5111,6 +5111,14 @@ export const nav_local = () => `Local`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_guides = () => `Guides`
+
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const nav_blog = () => `Blog`
 
 
@@ -5132,6 +5140,14 @@ export const footer_learn = () => `Learn`
 
 /**
  * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_what_is_apm = () => `What is APM?`
+
+
+/**
+ *
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */

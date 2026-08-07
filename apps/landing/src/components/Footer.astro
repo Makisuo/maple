@@ -50,6 +50,7 @@ const stars = await getGitHubStars();
                     <li><a href={l("/roadmap")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_roadmap()}</a></li>
                     <li><a href={l("/local")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.nav_local()}</a></li>
                     <li><a href="/docs" class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.nav_docs()}</a></li>
+                    <li><a href="/guides" class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.nav_guides()}</a></li>
                     <li><a href="/blog" class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.nav_blog()}</a></li>
                     <!-- English-only, like /docs and /blog above: bare href, not l(). -->
                     <li><a href="/changelog" class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.nav_changelog()}</a></li>
@@ -100,6 +101,7 @@ const stars = await getGitHubStars();
 
                 <h4 class="text-[10px] text-foreground font-medium uppercase tracking-wider mb-4 mt-6">{m.footer_learn()}</h4>
                 <ul class="space-y-2">
+                    <li><a href="/guides/what-is-apm" class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_what_is_apm()}</a></li>
                     <li><a href={l("/observability")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_what_is_observability()}</a></li>
                     <li><a href={l("/best-open-source-observability-tools")} class="text-fg-muted text-xs hover:text-foreground transition-colors">{m.footer_best_tools()}</a></li>
                 </ul>

@@ -77,6 +77,17 @@ export const GET: APIRoute = ({ site }) => {
 		...useCases.map((useCase) => `- [${useCase.navLabel()}](${url(`/use-cases/${useCase.slug}.md`)})`),
 		"",
 
+		"## Guides",
+		"",
+		"Evergreen explanations of application performance monitoring, observability, OpenTelemetry, and the tools used to operate production software.",
+		"",
+		`- [Guides index](${url("/guides")})`,
+		`- [What is APM, and why is it important?](${url("/guides/what-is-apm")})`,
+		`- [What is observability?](${url("/observability")})`,
+		`- [What is OpenTelemetry?](${url("/opentelemetry")})`,
+		`- [Best open-source observability tools](${url("/best-open-source-observability-tools")})`,
+		"",
+
 		"## Command line tool",
 		"",
 		"Run Maple locally against a single embedded ClickHouse binary — no account required.",

@@ -1,0 +1,467 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import Footer from "../../components/Footer.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Breadcrumb from "../../components/Breadcrumb.astro";
+import FAQ from "../../components/FAQ.astro";
+import SeoHead from "../../components/SeoHead.astro";
+
+const pageTitle = "What Is APM? Application Performance Monitoring Explained";
+const pageDescription =
+    "APM tracks application health and helps engineers find the cause of slow requests and errors. Learn how APM works, why it matters, which metrics to watch, and how OpenTelemetry fits.";
+const published = "2026-08-08";
+const updatedLabel = "August 8, 2026";
+
+const toc = [
+    ["definition", "What APM means"],
+    ["why-apm-matters", "Why APM matters"],
+    ["how-apm-works", "How APM works"],
+    ["apm-signals", "Signals and metrics"],
+    ["incident-example", "Incident example"],
+    ["choosing-apm", "Choosing an APM tool"],
+    ["getting-started", "Getting started"],
+] as const;
+
+const faqs = [
+    {
+        question: "What does APM stand for?",
+        answer:
+            "APM stands for application performance monitoring or application performance management. Monitoring is the continuous collection and analysis of application telemetry; management is the broader practice of using that evidence to improve availability, latency, reliability, and user experience.",
+    },
+    {
+        question: "What are the most important APM metrics?",
+        answer:
+            "Start with request rate, error rate, and latency percentiles for each service and operation. Add saturation signals such as queue depth, connection-pool waits, CPU, or memory where they explain application behavior. The exact set depends on the service, but rate, errors, and duration are the durable baseline.",
+    },
+    {
+        question: "What is the difference between APM and observability?",
+        answer:
+            "APM is focused on the performance and reliability of applications and their dependencies. Observability is broader: it is the ability to understand a system's internal state from its outputs, including questions that were not predicted in advance. Modern APM usually operates on the same traces, logs, metrics, and context used for observability.",
+    },
+    {
+        question: "Is distributed tracing the same as APM?",
+        answer:
+            "No. Distributed tracing follows one request across services and is a core APM capability. A complete APM practice also aggregates service health, tracks errors and dependencies, alerts on degradations, and compares performance across releases. Tracing is one instrument inside the wider APM workflow.",
+    },
+    {
+        question: "Do I need APM for a monolith?",
+        answer:
+            "Yes, if the application matters in production. A monolith has fewer network boundaries than a microservice system, but requests can still slow down in database calls, queues, caches, external APIs, runtime pauses, or application code. APM makes those costs visible before and during an incident.",
+    },
+];
+
+const siteUrl = Astro.site?.toString().replace(/\/$/, "") ?? "https://maple.dev";
+const articleJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    headline: "What is APM, and why is it important?",
+    description: pageDescription,
+    datePublished: published,
+    dateModified: published,
+    author: { "@type": "Organization", name: "Maple" },
+    publisher: {
+        "@type": "Organization",
+        name: "Maple",
+        logo: { "@type": "ImageObject", url: `${siteUrl}/logo192.png` },
+    },
+    mainEntityOfPage: `${siteUrl}/guides/what-is-apm`,
+};
+---
+
+<Layout title={pageTitle} description={pageDescription} ogType="article" alternates={["en"]}>
+    <SeoHead title={pageTitle} description={pageDescription} type="WebPage" />
+    <script is:inline type="application/ld+json" set:html={JSON.stringify(articleJsonLd)} />
+    <Nav />
+    <Breadcrumb
+        items={[
+            { label: "Home", href: "/" },
+            { label: "Guides", href: "/guides" },
+            { label: "What is APM?" },
+        ]}
+    />
+
+    <main>
+        <header class="relative overflow-hidden border-b border-border pt-[19px]">
+            <div
+                class="pointer-events-none absolute inset-0"
+                aria-hidden="true"
+                style="background-image: linear-gradient(to right, oklch(1 0 0 / 4%) 1px, transparent 1px), linear-gradient(to bottom, oklch(1 0 0 / 4%) 1px, transparent 1px); background-size: 60px 60px; mask-image: radial-gradient(ellipse 78% 68% at 22% 26%, black, transparent);"
+            >
+            </div>
+            <div class="relative mx-auto grid max-w-6xl gap-12 px-6 pb-16 pt-20 md:pb-24 md:pt-28 lg:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.75fr)] lg:items-center lg:gap-16">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted">
+                        <span class="border border-primary/40 px-2 py-1 text-primary">APM fundamentals</span>
+                        <span>12 min read</span>
+                    </div>
+                    <h1 class="mt-6 max-w-[15ch] font-display text-[clamp(40px,6.3vw,72px)] font-medium leading-[0.98] tracking-[-0.045em] text-fg">
+                        What is APM, and why is it important?
+                    </h1>
+                    <p class="mt-7 max-w-[62ch] text-[15px] leading-[1.75] text-fg-muted md:text-base">
+                        Application performance monitoring turns production telemetry into a path from a degraded user experience to the service, operation, dependency, or release responsible.
+                    </p>
+                    <div class="mt-7 flex flex-wrap gap-x-5 gap-y-2 font-mono text-[10px] text-fg-muted">
+                        <span>By Maple</span>
+                        <time datetime={published}>Updated {updatedLabel}</time>
+                    </div>
+                </div>
+
+                <div class="rounded-xl border border-border bg-bg-deep p-4 shadow-2xl shadow-black/20 md:p-5" aria-label="The five questions a useful APM workflow answers">
+                    <div class="flex items-center justify-between border-b border-border pb-3 font-mono text-[10px] text-fg-muted">
+                        <span>apm / investigation</span>
+                        <span class="text-primary">5 questions</span>
+                    </div>
+                    <ol class="divide-y divide-border">
+                        {[
+                            ["01", "Health", "Is the application meeting its promise?", "rate · errors · latency"],
+                            ["02", "Scope", "Which users, service, or operation?", "service · route · region"],
+                            ["03", "Path", "Where did this request spend time?", "trace · dependency map"],
+                            ["04", "Cause", "What actually failed or waited?", "span · error · log"],
+                            ["05", "Proof", "Did the change restore performance?", "release · before / after"],
+                        ].map(([number, label, question, evidence]) => (
+                            <li class="grid grid-cols-[2rem_1fr] gap-3 py-3.5">
+                                <span class="font-mono text-[10px] text-primary">{number}</span>
+                                <div>
+                                    <div class="flex items-baseline justify-between gap-3">
+                                        <span class="text-xs font-medium text-fg">{label}</span>
+                                        <span class="font-mono text-[9px] text-fg-muted">{evidence}</span>
+                                    </div>
+                                    <p class="mt-1 text-[11px] leading-relaxed text-fg-muted">{question}</p>
+                                </div>
+                            </li>
+                        ))}
+                    </ol>
+                </div>
+            </div>
+        </header>
+
+        <nav aria-label="Guide sections" class="border-b border-border bg-bg-deep">
+            <div class="mx-auto flex max-w-6xl gap-6 overflow-x-auto px-6 py-4 font-mono text-[10px] whitespace-nowrap text-fg-muted">
+                {toc.map(([id, label]) => (
+                    <a href={`#${id}`} class="transition-colors hover:text-primary">{label}</a>
+                ))}
+            </div>
+        </nav>
+
+        <div class="mx-auto grid max-w-6xl gap-12 px-6 py-16 md:py-24 lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-16">
+            <aside class="hidden lg:block">
+                <nav aria-label="On this page" class="sticky top-28">
+                    <p class="font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted">On this page</p>
+                    <ol class="mt-4 space-y-3 border-l border-border">
+                        {toc.map(([id, label], index) => (
+                            <li>
+                                <a href={`#${id}`} class="-ml-px grid grid-cols-[1.7rem_1fr] border-l border-transparent pl-3 text-[12px] leading-snug text-fg-muted transition-colors hover:border-primary hover:text-fg">
+                                    <span class="font-mono text-[9px] text-fg-muted">{String(index + 1).padStart(2, "0")}</span>
+                                    <span>{label}</span>
+                                </a>
+                            </li>
+                        ))}
+                    </ol>
+                </nav>
+            </aside>
+
+            <article class="guide-copy min-w-0">
+                <section id="definition" class="scroll-mt-24">
+                    <p class="guide-eyebrow">01 · Definition</p>
+                    <h2>APM measures how an application behaves and helps explain why</h2>
+
+                    <div class="guide-answer">
+                        <p>
+                            <strong>Application performance monitoring (APM)</strong> is the practice of continuously measuring the health, speed, and reliability of software applications, then using that telemetry to detect problems, find their cause, and verify improvements.
+                        </p>
+                    </div>
+
+                    <p>
+                        The acronym is also expanded as <strong>application performance management</strong>. The two meanings overlap. Monitoring is the evidence layer: collect request rates, errors, latency distributions, traces, logs, and dependency data. Management is the operating discipline built on top: set expectations, respond to degradations, prioritize performance work, and confirm that releases made the system better rather than worse.
+                    </p>
+                    <p>
+                        APM is application-centered. Infrastructure monitoring might tell you a node is using 90% of its CPU. APM tells you whether checkout requests are slower, which service or endpoint is affected, and whether CPU is the cause or merely happening at the same time.
+                    </p>
+
+                    <h3>APM, observability, and distributed tracing are related, but not interchangeable</h3>
+                    <div class="overflow-x-auto">
+                        <table>
+                            <thead>
+                                <tr><th>Practice</th><th>Primary question</th><th>Typical evidence</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td><strong>APM</strong></td><td>Is the application healthy, and what is affecting its performance?</td><td>Service metrics, operations, traces, errors, dependencies, releases</td></tr>
+                                <tr><td><strong>Observability</strong></td><td>Can we understand the internal state of the whole system from its outputs?</td><td>Explorable, high-context traces, logs, metrics, events, and profiles</td></tr>
+                                <tr><td><strong>Distributed tracing</strong></td><td>What happened to this request as it crossed services?</td><td>A trace made of timed parent and child spans</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p>
+                        Modern APM sits inside a broader <a href="/observability">observability</a> practice and uses distributed tracing as one of its most important instruments. A dashboard can reveal a slow service. A trace can show the database call that consumed 842 ms. A correlated log can explain that the call waited for a connection.
+                    </p>
+                </section>
+
+                <section id="why-apm-matters" class="scroll-mt-24">
+                    <p class="guide-eyebrow">02 · Why it matters</p>
+                    <h2>Users experience one request. Your system executes a chain of work.</h2>
+                    <p>
+                        A user clicks “Pay” once. Behind that action, a gateway authenticates the request, an application service validates the cart, inventory and pricing services respond, a database transaction commits, and a payment provider authorizes the charge. The user sees one wait and one outcome; the system creates many possible places for that wait or failure to begin.
+                    </p>
+                    <p>
+                        Without APM, teams often discover a problem through a support ticket and debug it by checking tools one at a time. Each team sees its own slice. APM creates a shared path from user impact to technical cause.
+                    </p>
+
+                    <div class="guide-grid guide-grid--two">
+                        <div>
+                            <p class="guide-kicker">Detect before the complaint</p>
+                            <h3>See regressions in the tail</h3>
+                            <p>Average latency can stay flat while the slowest 1% of requests becomes painful. Percentiles and error rates expose that degradation while there is still time to act.</p>
+                        </div>
+                        <div>
+                            <p class="guide-kicker">Shorten the search</p>
+                            <h3>Move from symptom to evidence</h3>
+                            <p>Service maps, operation breakdowns, and trace waterfalls reduce the number of plausible causes instead of asking every team to prove its component is healthy.</p>
+                        </div>
+                        <div>
+                            <p class="guide-kicker">Ship with confidence</p>
+                            <h3>Compare releases with the same signals</h3>
+                            <p>Version and deployment context lets a team see whether a change moved latency, error rate, or resource consumption. The team can then roll back with evidence.</p>
+                        </div>
+                        <div>
+                            <p class="guide-kicker">Protect the experience</p>
+                            <h3>Connect reliability to user impact</h3>
+                            <p>A technically “up” application can still be unusably slow. APM keeps the operating target closer to what users actually encounter.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="how-apm-works" class="scroll-mt-24">
+                    <p class="guide-eyebrow">03 · The operating loop</p>
+                    <h2>How APM works</h2>
+                    <p>
+                        APM is not a dashboard you install once. It is a loop: instrument the application, collect and correlate its signals, summarize health, investigate exceptions, and use the result to improve the system.
+                    </p>
+
+                    <ol class="guide-steps">
+                        <li>
+                            <span>01</span>
+                            <div><h3>Instrument the application</h3><p>Libraries, framework integrations, auto-instrumentation, or manual code create telemetry around inbound requests, internal work, database calls, queues, and outbound dependencies.</p></div>
+                        </li>
+                        <li>
+                            <span>02</span>
+                            <div><h3>Attach stable context</h3><p>Attributes such as service name, environment, version, operation, route, region, and status make the data comparable and explorable. Trace and span IDs preserve the relationship between signals.</p></div>
+                        </li>
+                        <li>
+                            <span>03</span>
+                            <div><h3>Aggregate application health</h3><p>The backend turns individual measurements into service and operation views: rate, errors, duration percentiles, dependencies, and trends over time.</p></div>
+                        </li>
+                        <li>
+                            <span>04</span>
+                            <div><h3>Detect and investigate</h3><p>An alert or anomaly narrows the time and scope. Engineers move from a service chart to the affected operation, then to representative traces, slow spans, errors, and logs.</p></div>
+                        </li>
+                        <li>
+                            <span>05</span>
+                            <div><h3>Verify the outcome</h3><p>After a rollback, configuration change, or fix, the same signals show whether performance returned to baseline and whether the user-visible symptom disappeared.</p></div>
+                        </li>
+                    </ol>
+
+                    <h3>Why OpenTelemetry changes the instrumentation layer</h3>
+                    <p>
+                        Historically, many APM products required proprietary agents and data models. <a href="/opentelemetry">OpenTelemetry</a> provides vendor-neutral APIs, SDKs, semantic conventions, and the OTLP protocol for producing and exporting telemetry. Its official documentation describes both <a href="https://opentelemetry.io/docs/concepts/instrumentation/" target="_blank" rel="noopener noreferrer">code-based and zero-code instrumentation</a>, so teams can start automatically and add business-specific spans or metrics where deeper context matters.
+                    </p>
+                    <p>
+                        Open instrumentation does not choose an APM backend for you. It separates the code that produces telemetry from the platform that stores, queries, visualizes, and alerts on it. That makes the instrumentation a longer-lived engineering asset instead of a vendor migration cost.
+                    </p>
+                </section>
+
+                <section id="apm-signals" class="scroll-mt-24">
+                    <p class="guide-eyebrow">04 · Signals</p>
+                    <h2>The core APM signals answer different questions</h2>
+                    <p>
+                        OpenTelemetry defines traces, metrics, logs, and baggage as supported signals and context. APM becomes useful when the backend preserves the relationships between them, not when it displays four disconnected tabs.
+                    </p>
+
+                    <div class="guide-signal-list">
+                        <div><span>Metrics</span><p>Summarize behavior across many requests. They are efficient for health views, trends, percentiles, and alerts.</p></div>
+                        <div><span>Traces</span><p>Reconstruct individual requests as timed spans. They show the call path, fan-out, retries, and where duration accumulated.</p></div>
+                        <div><span>Logs</span><p>Record discrete events and details. Trace and span IDs let a log explain the exact operation visible in a waterfall.</p></div>
+                        <div><span>Context</span><p>Connects evidence to a service, version, environment, region, tenant, or business operation so teams can isolate who and what changed.</p></div>
+                    </div>
+
+                    <h3>Start with rate, errors, and duration</h3>
+                    <div class="overflow-x-auto">
+                        <table>
+                            <thead><tr><th>Measure</th><th>What it tells you</th><th>Useful breakdowns</th></tr></thead>
+                            <tbody>
+                                <tr><td><strong>Request rate</strong></td><td>How much work the service is receiving or completing</td><td>Service, operation, status, region</td></tr>
+                                <tr><td><strong>Error rate</strong></td><td>What share of work fails, and whether failures are concentrated</td><td>Error type, operation, dependency, version</td></tr>
+                                <tr><td><strong>Latency</strong></td><td>How long work takes; p50 shows typical behavior while p95 and p99 expose the tail</td><td>Operation, status, version, customer tier</td></tr>
+                                <tr><td><strong>Saturation</strong></td><td>Whether a constrained resource is creating waits</td><td>Queue, pool, process, host, container</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p>
+                        Avoid using the average as the only latency signal. A small number of very slow requests can be invisible inside a healthy-looking mean. Keep a distribution or histogram and inspect percentiles that reflect the experience you need to protect. Then use traces from the slow window to explain the tail.
+                    </p>
+                </section>
+
+                <section id="incident-example" class="scroll-mt-24">
+                    <p class="guide-eyebrow">05 · Example</p>
+                    <h2>From a p99 alert to one exhausted connection pool</h2>
+                    <p>
+                        Imagine the checkout API normally serves p99 requests in 240 ms. Ten minutes after a release, p99 rises to 1.4 seconds while the median barely moves. The application is available, most requests are still fast, and an average could understate the problem.
+                    </p>
+
+                    <div class="guide-timeline">
+                        <div><span>T+00</span><div><h3>Detect</h3><p>An alert fires on checkout p99, scoped to production. Request rate is normal, so the change is not explained by a traffic surge.</p></div></div>
+                        <div><span>T+02</span><div><h3>Scope</h3><p>The service view shows one operation, <code>POST /checkout</code>, and only the new service version carries the slow tail.</p></div></div>
+                        <div><span>T+04</span><div><h3>Follow the path</h3><p>Slow traces share an 800–900 ms database client span. The payment and inventory calls remain near baseline.</p></div></div>
+                        <div><span>T+06</span><div><h3>Explain</h3><p>A log on the database span records a connection-pool wait. Pool saturation rose immediately after the release increased per-request concurrency.</p></div></div>
+                        <div><span>T+12</span><div><h3>Prove</h3><p>The release is rolled back. Pool wait, database span duration, and checkout p99 return to baseline together.</p></div></div>
+                    </div>
+                    <p>
+                        No single chart provides the whole answer. The value comes from the transitions: alert to service, service to operation, operation to trace, span to log, and release to before-and-after evidence. That is the practical shape of APM.
+                    </p>
+                </section>
+
+                <section id="choosing-apm" class="scroll-mt-24">
+                    <p class="guide-eyebrow">06 · Evaluation</p>
+                    <h2>What to look for in an APM solution</h2>
+                    <p>
+                        Vendor pages differ in emphasis, but the durable capabilities are consistent: Datadog highlights service inventory, tracing, errors, databases, and user experience; SigNoz centers service latency, rate, errors, dependencies, and drill-down from metrics to traces; Dash0 emphasizes OpenTelemetry-native service context and correlated telemetry. Use those workflows as a test, not a feature-counting exercise.
+                    </p>
+
+                    <div class="guide-checklist">
+                        {[
+                            ["Open instrumentation", "Native OpenTelemetry ingestion, standard semantic conventions, and a clear path to export your data."],
+                            ["Service and operation health", "Out-of-the-box rate, error, and latency views with filters that match how you own production."],
+                            ["End-to-end traces", "Search across high-cardinality attributes, inspect complete waterfalls, and retain the traces that matter."],
+                            ["Dependency context", "See databases, queues, caches, external APIs, and upstream or downstream service relationships."],
+                            ["Signal correlation", "Move between a metric window, trace, error, and log without manually rebuilding the investigation context."],
+                            ["Release evidence", "Attach service versions or deployment events and compare performance before and after a change."],
+                            ["Actionable alerts", "Alert on user-relevant signals and preserve the filters, time range, and evidence needed to investigate."],
+                            ["Understandable cost", "Know how ingestion, retention, cardinality, hosts, seats, and sampling affect the bill as the system scales."],
+                        ].map(([title, body], index) => (
+                            <div><span>{String(index + 1).padStart(2, "0")}</span><div><h3>{title}</h3><p>{body}</p></div></div>
+                        ))}
+                    </div>
+
+                    <h3>APM is necessary, but it is not the whole production picture</h3>
+                    <p>
+                        Application telemetry can show a slow server request without seeing the browser's DNS lookup, rendering work, or a broken click handler. It can show database duration without replacing query-plan analysis. It can reveal a service failure without explaining the health of the Kubernetes node beneath it. Real user monitoring, session replay, synthetics, infrastructure monitoring, database monitoring, profiling, and security signals extend the view where the application boundary stops.
+                    </p>
+                    <p>
+                        The goal is not to buy every module. It is to make the boundaries explicit and preserve enough shared context that an investigation can cross them.
+                    </p>
+                </section>
+
+                <section id="getting-started" class="scroll-mt-24">
+                    <p class="guide-eyebrow">07 · First implementation</p>
+                    <h2>Start with one important request path</h2>
+                    <p>
+                        A small, complete APM loop is more valuable than broad telemetry nobody trusts. Choose one service or user journey that matters, then make the path from health signal to root cause work end to end.
+                    </p>
+                    <ol class="guide-start-list">
+                        <li><span>1</span><p><strong>Name the promise.</strong> Define the operation, expected success rate, and latency target from the user's point of view.</p></li>
+                        <li><span>2</span><p><strong>Instrument the boundaries.</strong> Capture the inbound request and its database, queue, cache, and external calls with OpenTelemetry.</p></li>
+                        <li><span>3</span><p><strong>Verify the context.</strong> Check service name, environment, version, route, status, trace IDs, and error details before building dashboards.</p></li>
+                        <li><span>4</span><p><strong>Build one health view and one alert.</strong> Use rate, error rate, and latency percentiles with an owner and an investigation link.</p></li>
+                        <li><span>5</span><p><strong>Run a controlled failure.</strong> Add latency or trigger a safe error, then confirm you can detect, scope, explain, and verify it.</p></li>
+                    </ol>
+
+                    <div class="guide-maple">
+                        <p class="guide-kicker">APM with Maple</p>
+                        <h3>One OpenTelemetry path from service health to evidence</h3>
+                        <p>
+                            Maple receives standard OpenTelemetry traces, logs, and metrics, then connects them across the <a href="/features/service-catalog">service catalog and map</a>, <a href="/features/distributed-tracing">distributed traces</a>, <a href="/features/error-tracking">grouped errors</a>, correlated logs, dashboards, and alerts. Instrument once, keep the telemetry portable, and investigate without switching data models.
+                        </p>
+                        <div class="mt-6 flex flex-wrap gap-3">
+                            <a href="/docs/getting-started/introduction" class="guide-button guide-button--primary">Instrument an application</a>
+                            <a href="/use-cases/api-performance" class="guide-button">See the API performance workflow</a>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="guide-sources">
+                    <p class="guide-eyebrow">Sources and further reading</p>
+                    <ul>
+                        <li><a href="https://opentelemetry.io/docs/concepts/signals/" target="_blank" rel="noopener noreferrer">OpenTelemetry: Signals</a></li>
+                        <li><a href="https://opentelemetry.io/docs/concepts/instrumentation/" target="_blank" rel="noopener noreferrer">OpenTelemetry: Instrumentation</a></li>
+                        <li><a href="https://www.datadoghq.com/knowledge-center/application-performance-management/" target="_blank" rel="noopener noreferrer">Datadog: What is application performance management?</a></li>
+                        <li><a href="https://signoz.io/guides/what-is-apm/" target="_blank" rel="noopener noreferrer">SigNoz: What is APM?</a></li>
+                        <li><a href="https://www.dash0.com/application-performance-management" target="_blank" rel="noopener noreferrer">Dash0: Application performance management</a></li>
+                    </ul>
+                </section>
+            </article>
+        </div>
+    </main>
+
+    <FAQ items={faqs} />
+    <BottomCTA />
+    <Footer />
+</Layout>
+
+<style is:global>
+    .guide-copy section + section { margin-top: 5.5rem; }
+    .guide-copy .guide-eyebrow { margin: 0 0 0.9rem; font-family: var(--font-mono); font-size: 10px; line-height: 1.4; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted-foreground); }
+    .guide-copy h2 { max-width: 21ch; margin: 0 0 1.5rem; font-family: var(--font-display); font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 500; line-height: 1.08; letter-spacing: -0.03em; color: var(--foreground); text-wrap: balance; }
+    .guide-copy h3 { margin: 2.5rem 0 0.8rem; font-family: var(--font-display); font-size: 1.15rem; font-weight: 550; line-height: 1.3; letter-spacing: -0.015em; color: var(--foreground); }
+    .guide-copy > section > p:not(.guide-eyebrow, .guide-kicker), .guide-copy .guide-answer p { max-width: 70ch; margin: 0 0 1.15rem; font-size: 15px; line-height: 1.8; color: var(--muted-foreground); }
+    .guide-copy strong { font-weight: 600; color: var(--foreground); }
+    .guide-copy a:not(.guide-button) { color: var(--primary); text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--primary) 42%, transparent); text-underline-offset: 3px; transition: color 150ms ease; }
+    .guide-copy a:not(.guide-button):hover { color: var(--foreground); }
+    .guide-answer { margin: 2rem 0; border-left: 2px solid var(--primary); background: var(--bg-deep); padding: 1.25rem 1.35rem; }
+    .guide-copy .guide-answer p { margin: 0; font-size: 16px; color: var(--foreground); }
+    .guide-copy table { width: 100%; min-width: 640px; margin: 1.6rem 0 2rem; border-collapse: collapse; font-size: 13px; line-height: 1.6; color: var(--muted-foreground); }
+    .guide-copy th { border-bottom: 1px solid var(--border); padding: 0.7rem 0.9rem; text-align: left; font-family: var(--font-mono); font-size: 9px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--foreground); }
+    .guide-copy td { border-bottom: 1px solid var(--border); padding: 0.9rem; vertical-align: top; }
+    .guide-grid { display: grid; gap: 1px; margin-top: 2rem; overflow: hidden; border: 1px solid var(--border); border-radius: 0.75rem; background: var(--border); }
+    .guide-grid > div { background: var(--background); padding: 1.5rem; }
+    .guide-grid h3 { margin: 0.4rem 0 0.65rem; font-size: 1rem; }
+    .guide-grid p:not(.guide-kicker) { margin: 0; font-size: 13px; line-height: 1.65; color: var(--muted-foreground); }
+    .guide-copy .guide-kicker { margin: 0; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--primary); }
+    .guide-steps { margin: 2rem 0 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+    .guide-steps li { display: grid; grid-template-columns: 2.5rem 1fr; gap: 1rem; border-bottom: 1px solid var(--border); padding: 1.35rem 0; }
+    .guide-steps > li > span { padding-top: 0.2rem; font-family: var(--font-mono); font-size: 10px; color: var(--primary); }
+    .guide-steps h3, .guide-steps p { margin: 0; }
+    .guide-steps h3 { font-size: 1rem; }
+    .guide-steps p { margin-top: 0.45rem; font-size: 13px; line-height: 1.65; color: var(--muted-foreground); }
+    .guide-signal-list { display: grid; gap: 1px; margin: 2rem 0; overflow: hidden; border: 1px solid var(--border); border-radius: 0.75rem; background: var(--border); }
+    .guide-signal-list > div { display: grid; grid-template-columns: 6rem 1fr; gap: 1rem; background: var(--background); padding: 1.1rem 1.25rem; }
+    .guide-signal-list span { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--primary); }
+    .guide-signal-list p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--muted-foreground); }
+    .guide-timeline { position: relative; margin: 2rem 0; border-left: 1px solid var(--border); }
+    .guide-timeline > div { display: grid; grid-template-columns: 3.5rem 1fr; gap: 1rem; padding: 0 0 1.7rem 1.25rem; }
+    .guide-timeline > div:last-child { padding-bottom: 0; }
+    .guide-timeline > div::before { position: absolute; left: -3px; width: 5px; height: 5px; margin-top: 0.4rem; background: var(--primary); content: ""; }
+    .guide-timeline span { font-family: var(--font-mono); font-size: 9px; color: var(--primary); }
+    .guide-timeline h3, .guide-timeline p { margin: 0; }
+    .guide-timeline h3 { font-size: 1rem; }
+    .guide-timeline p { margin-top: 0.45rem; font-size: 13px; line-height: 1.65; color: var(--muted-foreground); }
+    .guide-timeline code { border: 1px solid var(--border); background: var(--bg-elevated); padding: 0.1rem 0.3rem; font-family: var(--font-mono); font-size: 11px; color: var(--foreground); }
+    .guide-checklist { display: grid; gap: 1px; margin: 2rem 0; overflow: hidden; border: 1px solid var(--border); border-radius: 0.75rem; background: var(--border); }
+    .guide-checklist > div { display: grid; grid-template-columns: 2rem 1fr; gap: 0.8rem; background: var(--background); padding: 1.15rem 1.25rem; }
+    .guide-checklist span { padding-top: 0.2rem; font-family: var(--font-mono); font-size: 9px; color: var(--primary); }
+    .guide-checklist h3, .guide-checklist p { margin: 0; }
+    .guide-checklist h3 { font-size: 0.95rem; }
+    .guide-checklist p { margin-top: 0.35rem; font-size: 12px; line-height: 1.6; color: var(--muted-foreground); }
+    .guide-start-list { margin: 2rem 0; padding: 0; list-style: none; }
+    .guide-start-list li { display: grid; grid-template-columns: 2rem 1fr; gap: 0.9rem; border-top: 1px solid var(--border); padding: 1rem 0; }
+    .guide-start-list li:last-child { border-bottom: 1px solid var(--border); }
+    .guide-start-list span { display: inline-flex; height: 1.5rem; width: 1.5rem; align-items: center; justify-content: center; border: 1px solid var(--border); font-family: var(--font-mono); font-size: 9px; color: var(--primary); }
+    .guide-start-list p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted-foreground); }
+    .guide-maple { margin-top: 3.5rem; border: 1px solid var(--primary); border-radius: 0.75rem; background: var(--bg-deep); padding: 1.5rem; }
+    .guide-maple h3 { margin: 0.55rem 0 0.8rem; font-size: 1.35rem; }
+    .guide-maple > p:not(.guide-kicker) { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted-foreground); }
+    .guide-button { display: inline-flex; min-height: 2.25rem; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.55rem 0.8rem; font-size: 12px; font-weight: 550; color: var(--foreground); text-decoration: none; transition: background-color 150ms ease, border-color 150ms ease; }
+    .guide-button:hover { border-color: var(--primary); background: color-mix(in oklab, var(--primary) 8%, transparent); }
+    .guide-button--primary { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
+    .guide-button--primary:hover { background: color-mix(in oklab, var(--primary) 82%, black); }
+    .guide-sources { border-top: 1px solid var(--border); padding-top: 2rem; }
+    .guide-sources ul { display: grid; gap: 0.6rem; margin: 0; padding: 0; list-style: none; }
+    .guide-sources li { font-family: var(--font-mono); font-size: 10px; }
+    @media (min-width: 640px) {
+        .guide-grid--two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .guide-checklist { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .guide-maple { padding: 2rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .guide-copy a, .guide-button { transition: none; }
+    }
+</style>

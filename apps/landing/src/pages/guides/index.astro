@@ -1,0 +1,225 @@
+---
+import { getCollection } from "astro:content";
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import Footer from "../../components/Footer.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Breadcrumb from "../../components/Breadcrumb.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import { formatDate, readingTime } from "../../lib/blog";
+import type { BlogPost } from "../../lib/blog";
+
+const pageTitle = "Guides to APM, Observability & OpenTelemetry | Maple";
+const pageDescription =
+    "Practical guides to application performance monitoring, observability, OpenTelemetry, latency, and choosing an open-source observability stack.";
+
+const coreGuides = [
+    {
+        href: "/observability",
+        label: "Foundation",
+        title: "What is observability?",
+        description: "Understand traces, logs, and metrics, and why correlation matters more than collecting each signal in isolation.",
+        read: "8 min",
+    },
+    {
+        href: "/opentelemetry",
+        label: "Open standard",
+        title: "What is OpenTelemetry?",
+        description: "Learn how vendor-neutral instrumentation keeps telemetry portable across languages, collectors, and backends.",
+        read: "7 min",
+    },
+    {
+        href: "/best-open-source-observability-tools",
+        label: "Field guide",
+        title: "Best open-source observability tools",
+        description: "Compare the leading open-source options by architecture, signals, license, operating cost, and best fit.",
+        read: "14 min",
+    },
+];
+
+const fieldNotes = (await getCollection("blog") as BlogPost[])
+    .filter((post) => (!post.data.draft || import.meta.env.DEV) && post.data.category === "guides")
+    .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+
+const siteUrl = Astro.site?.toString().replace(/\/$/, "") ?? "https://maple.dev";
+const itemListJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name: "Maple observability guides",
+    itemListElement: [
+        { href: "/guides/what-is-apm", title: "What is APM, and why is it important?" },
+        ...coreGuides,
+    ].map((guide, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        name: guide.title,
+        url: `${siteUrl}${guide.href}`,
+    })),
+};
+---
+
+<Layout title={pageTitle} description={pageDescription} alternates={["en"]}>
+    <SeoHead title={pageTitle} description={pageDescription} type="WebPage" />
+    <script is:inline type="application/ld+json" set:html={JSON.stringify(itemListJsonLd)} />
+    <Nav />
+    <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Guides" }]} />
+
+    <main>
+        <header class="relative overflow-hidden border-b border-border pt-[19px]">
+            <div
+                class="pointer-events-none absolute inset-0"
+                aria-hidden="true"
+                style="background-image: linear-gradient(to right, oklch(1 0 0 / 4%) 1px, transparent 1px), linear-gradient(to bottom, oklch(1 0 0 / 4%) 1px, transparent 1px); background-size: 60px 60px; mask-image: radial-gradient(ellipse 75% 65% at 22% 24%, black, transparent);"
+            >
+            </div>
+            <div class="relative mx-auto max-w-6xl px-6 pb-14 pt-20 md:pb-20 md:pt-28">
+                <p class="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">Maple field manual</p>
+                <h1 class="mt-5 max-w-[12ch] font-display text-[clamp(42px,8vw,80px)] font-medium leading-[0.94] tracking-[-0.045em] text-fg">
+                    Operate from evidence.
+                </h1>
+                <p class="mt-7 max-w-[64ch] text-[15px] leading-[1.75] text-fg-muted">
+                    Plain-English foundations and hands-on investigations for engineers running production software.
+                    Start with APM, then go deeper into observability, OpenTelemetry, and the signals behind a useful answer.
+                </p>
+            </div>
+        </header>
+
+        <section class="border-b border-border py-16 md:py-24" aria-labelledby="featured-guide">
+            <div class="mx-auto max-w-6xl px-6">
+                <div class="mb-7 flex items-center gap-3">
+                    <span class="font-mono text-xs text-primary">01</span>
+                    <span class="h-px w-9 bg-border" aria-hidden="true"></span>
+                    <p class="font-mono text-[10px] uppercase tracking-[0.16em] text-fg-muted">Start here</p>
+                </div>
+
+                <a
+                    href="/guides/what-is-apm"
+                    class="group grid overflow-hidden rounded-xl border border-border bg-bg-deep transition-colors hover:border-primary/45 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring md:grid-cols-[1.05fr_0.95fr]"
+                >
+                    <div class="flex flex-col justify-center p-7 md:p-10 lg:p-14">
+                        <div class="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted">
+                            <span class="border border-primary/40 px-2 py-1 text-primary">APM fundamentals</span>
+                            <span>12 min read</span>
+                        </div>
+                        <h2 id="featured-guide" class="mt-6 max-w-[16ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.03em] text-fg transition-colors group-hover:text-primary md:text-4xl lg:text-[46px]">
+                            What is APM, and why is it important?
+                        </h2>
+                        <p class="mt-5 max-w-[55ch] text-sm leading-[1.7] text-fg-muted">
+                            Learn how application performance monitoring turns service metrics, traces, errors, and logs into a repeatable path from “users are waiting” to “this dependency caused it.”
+                        </p>
+                        <span class="mt-8 inline-flex items-center gap-2 font-mono text-xs text-fg transition-colors group-hover:text-primary">
+                            Read the guide
+                            <span class="transition-transform group-hover:translate-x-1 motion-reduce:transition-none" aria-hidden="true">→</span>
+                        </span>
+                    </div>
+
+                    <div class="border-t border-border bg-bg p-5 md:border-l md:border-t-0 md:p-8" aria-hidden="true">
+                        <div class="flex h-full min-h-[320px] flex-col rounded-lg border border-border bg-bg-deep p-4 font-mono shadow-2xl shadow-black/15">
+                            <div class="flex items-center justify-between border-b border-border pb-3 text-[10px] text-fg-muted">
+                                <span>checkout-api / production</span>
+                                <span class="text-primary">degraded</span>
+                            </div>
+                            <div class="grid grid-cols-3 gap-px border-b border-border bg-border py-px">
+                                <div class="bg-bg-deep px-3 py-4">
+                                    <p class="text-[9px] uppercase tracking-wider text-fg-muted">rate</p>
+                                    <p class="mt-1 text-sm text-fg">1.8k/s</p>
+                                </div>
+                                <div class="bg-bg-deep px-3 py-4">
+                                    <p class="text-[9px] uppercase tracking-wider text-fg-muted">errors</p>
+                                    <p class="mt-1 text-sm text-primary">3.7%</p>
+                                </div>
+                                <div class="bg-bg-deep px-3 py-4">
+                                    <p class="text-[9px] uppercase tracking-wider text-fg-muted">p99</p>
+                                    <p class="mt-1 text-sm text-primary">1.42s</p>
+                                </div>
+                            </div>
+                            <div class="flex flex-1 flex-col justify-center gap-3 py-5 text-[10px] text-fg-muted">
+                                {[
+                                    ["gateway", "18 ms", "14%"],
+                                    ["checkout", "112 ms", "54%"],
+                                    ["inventory", "76 ms", "38%"],
+                                    ["postgres", "842 ms", "92%"],
+                                ].map(([name, duration, width], index) => (
+                                    <div>
+                                        <div class="mb-1.5 flex justify-between">
+                                            <span class={index === 3 ? "text-primary" : "text-fg/80"}>{name}</span>
+                                            <span>{duration}</span>
+                                        </div>
+                                        <div class="h-1.5 bg-border/60">
+                                            <div class:list={["h-full", index === 3 ? "bg-primary" : "bg-fg-muted/45"]} style={`width: ${width}`}></div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div class="border-t border-border pt-3 text-[10px] text-fg-muted">
+                                cause <span class="text-fg">db.client.connections.wait_time</span>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </section>
+
+        <section class="border-b border-border py-16 md:py-24" aria-labelledby="guide-library">
+            <div class="mx-auto max-w-6xl px-6">
+                <div class="mb-9 flex items-end justify-between gap-6">
+                    <div>
+                        <p class="font-mono text-[10px] uppercase tracking-[0.16em] text-fg-muted">02 · Foundations</p>
+                        <h2 id="guide-library" class="mt-3 font-display text-3xl font-medium tracking-[-0.025em] text-fg">Build the mental model</h2>
+                    </div>
+                    <p class="hidden max-w-[38ch] text-right text-xs leading-relaxed text-fg-muted md:block">
+                        Read in any order. Each guide answers one durable question without assuming a vendor or stack.
+                    </p>
+                </div>
+
+                <div class="grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-3">
+                    {coreGuides.map((guide, index) => (
+                        <a
+                            href={guide.href}
+                            class="group flex min-h-[280px] flex-col bg-bg p-6 transition-colors hover:bg-bg-deep focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring md:p-8"
+                        >
+                            <div class="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-fg-muted">
+                                <span>{guide.label}</span>
+                                <span>{String(index + 2).padStart(2, "0")}</span>
+                            </div>
+                            <h3 class="mt-10 font-display text-2xl font-medium leading-tight tracking-[-0.02em] text-fg transition-colors group-hover:text-primary">
+                                {guide.title}
+                            </h3>
+                            <p class="mt-4 text-[13px] leading-[1.65] text-fg-muted">{guide.description}</p>
+                            <div class="mt-auto flex items-center justify-between pt-8 font-mono text-[10px] text-fg-muted">
+                                <span>{guide.read}</span>
+                                <span class="text-fg transition-transform group-hover:translate-x-1 group-hover:text-primary motion-reduce:transition-none">→</span>
+                            </div>
+                        </a>
+                    ))}
+                </div>
+            </div>
+        </section>
+
+        {fieldNotes.length > 0 && (
+            <section class="py-16 md:py-24" aria-labelledby="field-notes">
+                <div class="mx-auto max-w-6xl px-6">
+                    <p class="font-mono text-[10px] uppercase tracking-[0.16em] text-fg-muted">03 · Field notes</p>
+                    <h2 id="field-notes" class="mt-3 font-display text-3xl font-medium tracking-[-0.025em] text-fg">Investigations you can run</h2>
+                    <div class="mt-9 divide-y divide-border border-y border-border">
+                        {fieldNotes.map((post) => (
+                            <a href={`/blog/${post.id}`} class="group grid gap-3 py-6 transition-colors sm:grid-cols-[9rem_1fr_auto] sm:items-center sm:gap-6">
+                                <time datetime={post.data.date.toISOString()} class="font-mono text-[10px] text-fg-muted">
+                                    {formatDate(post.data.date)}
+                                </time>
+                                <div>
+                                    <h3 class="font-display text-lg font-medium text-fg transition-colors group-hover:text-primary">{post.data.title}</h3>
+                                    <p class="mt-1.5 max-w-[68ch] text-xs leading-relaxed text-fg-muted">{post.data.description}</p>
+                                </div>
+                                <span class="font-mono text-[10px] text-fg-muted">{readingTime(post.body)} min →</span>
+                            </a>
+                        ))}
+                    </div>
+                </div>
+            </section>
+        )}
+    </main>
+
+    <BottomCTA />
+    <Footer />
+</Layout>

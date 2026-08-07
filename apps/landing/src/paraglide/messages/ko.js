@@ -5111,6 +5111,14 @@ export const nav_local = () => `로컬`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_guides = () => `가이드`
+
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const nav_blog = () => `블로그`
 
 
@@ -5132,6 +5140,14 @@ export const footer_learn = () => `알아보기`
 
 /**
  * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_what_is_apm = () => `APM이란?`
+
+
+/**
+ *
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */

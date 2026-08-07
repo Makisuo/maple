@@ -369,6 +369,13 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 							>
 								{m.nav_docs()}
 							</a>
+							<a
+								href="/blog"
+								onClick={() => setMenuOpen(false)}
+								className="text-xs text-fg hover:text-fg transition-colors py-2 font-medium"
+							>
+								{m.nav_blog()}
+							</a>
 						</div>
 
 						<div className="pt-6 flex flex-col gap-4">
