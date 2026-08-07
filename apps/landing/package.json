@@ -29,7 +29,7 @@
 		"@types/react-dom": "catalog:react",
 		"@xyflow/react": "catalog:ui",
 		"astro": "^5.17.1",
-		"autumn-js": "^1.2.29",
+		"autumn-js": "^1.2.51",
 		"class-variance-authority": "catalog:ui",
 		"clsx": "catalog:ui",
 		"fuse.js": "^7.4.2",

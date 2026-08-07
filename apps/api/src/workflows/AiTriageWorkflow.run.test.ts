@@ -14,6 +14,7 @@ import { AiTriageRunId, AnomalyIncidentId, ErrorIssueId, OrgId } from "@maple/do
 import { eq } from "drizzle-orm"
 import { Schema } from "effect"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { AUTUMN_API_VERSION, AUTUMN_TRACK_PATH } from "@/services/billing/autumn-api"
 import { type AiTriageRunDeps, runAiTriage, type AiTriageWorkflowPayload } from "./AiTriageWorkflow.run"
 import type { WorkflowStepLike } from "./ClickHouseSchemaApplyWorkflow.run"
 
@@ -380,9 +381,17 @@ describe("runAiTriage", () => {
 	})
 
 	it("tracks token usage against Autumn with run-scoped idempotency keys", async () => {
-		const trackCalls: Array<{ url: string; body: Record<string, unknown> }> = []
+		const trackCalls: Array<{
+			url: string
+			headers: Headers
+			body: Record<string, unknown>
+		}> = []
 		vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-			trackCalls.push({ url: String(input), body: JSON.parse(String(init?.body)) })
+			trackCalls.push({
+				url: String(input),
+				headers: new Headers(init?.headers),
+				body: JSON.parse(String(init?.body)),
+			})
 			return new Response("{}", { status: 200 })
 		})
 
@@ -395,7 +404,10 @@ describe("runAiTriage", () => {
 		expect(result.status).toBe("completed")
 
 		expect(trackCalls).toHaveLength(2)
-		expect(trackCalls.every((call) => call.url.endsWith("/v1/track"))).toBe(true)
+		expect(trackCalls.every((call) => call.url.endsWith(AUTUMN_TRACK_PATH))).toBe(true)
+		expect(trackCalls.every((call) => call.headers.get("x-api-version") === AUTUMN_API_VERSION)).toBe(
+			true,
+		)
 		expect(trackCalls.every((call) => call.body.customer_id === ORG)).toBe(true)
 		const byFeature = new Map(trackCalls.map((call) => [call.body.feature_id, call.body]))
 		expect(byFeature.get("ai_input_tokens")?.value).toBe(120)

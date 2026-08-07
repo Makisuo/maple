@@ -117,10 +117,6 @@ import { API_CORS_OPTIONS } from "@/http/api-cors"
 
 const HealthRouter = HttpRouter.use((router) => router.add("GET", "/health", HttpServerResponse.text("OK")))
 
-const McpGetFallback = HttpRouter.use((router) =>
-	router.add("GET", "/mcp", HttpServerResponse.empty({ status: 405 })),
-)
-
 // `layerCdn` loads Scalar's browser bundle from jsDelivr at runtime instead of
 // inlining its ~MB `standalone.min.js` string into the worker bundle — keeps the
 // script out of the deployed bundle (guards the 3 MB worker size limit, error
@@ -376,7 +372,6 @@ export const AllRoutes = Layer.mergeAll(
 	VcsWebhookRouter,
 	McpLive,
 	HealthRouter,
-	McpGetFallback,
 	DocsRoute,
 	DocsV2Route,
 ).pipe(Layer.provideMerge(HttpRouter.cors(API_CORS_OPTIONS)))

@@ -16,6 +16,8 @@
 import { Autumn } from "autumn-js"
 import * as m from "../paraglide/messages"
 
+const AUTUMN_API_VERSION = "2.3.0"
+
 /** browser_sessions is metered per session; every other signal is per GB. */
 export type Unit = "gb" | "count"
 
@@ -86,7 +88,10 @@ export async function getOffer(): Promise<Offer> {
 	const labels = dataFeatureLabels()
 
 	try {
-		const autumn = new Autumn({ secretKey: import.meta.env.AUTUMN_SECRET_KEY })
+		const autumn = new Autumn({
+			secretKey: import.meta.env.AUTUMN_SECRET_KEY,
+			xApiVersion: AUTUMN_API_VERSION,
+		})
 		const result = await autumn.plans.list()
 		const products = (result.list ?? []).filter((p) => !p.addOn)
 

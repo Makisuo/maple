@@ -59,7 +59,7 @@
         "@maple/query-engine-integrations": "workspace:*",
         "@react-email/components": "^1.0.11",
         "@tinybirdco/sdk": "catalog:tinybird",
-        "autumn-js": "^1.2.29",
+        "autumn-js": "^1.2.51",
         "drizzle-orm": "^0.45.1",
         "effect": "catalog:effect",
       },
@@ -70,7 +70,7 @@
         "@electric-sql/pglite": "^0.5.2",
         "@types/node": "catalog:tooling",
         "ai": "^6.0.196",
-        "atmn": "^1.0.1",
+        "atmn": "^1.1.17",
         "gpt-tokenizer": "^3.0.1",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
@@ -145,7 +145,7 @@
         "@types/react-dom": "catalog:react",
         "@xyflow/react": "catalog:ui",
         "astro": "^5.17.1",
-        "autumn-js": "^1.2.29",
+        "autumn-js": "^1.2.51",
         "class-variance-authority": "catalog:ui",
         "clsx": "catalog:ui",
         "fuse.js": "^7.4.2",
@@ -2825,13 +2825,13 @@
 
     "asynckit": ["asynckit@0.4.0", "", {}, "sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q=="],
 
-    "atmn": ["atmn@1.1.16", "", { "dependencies": { "@inquirer/prompts": "^7.6.0", "@mishieck/ink-titled-box": "^0.3.0", "@tanstack/react-query": "^5.90.17", "@types/prettier": "^3.0.0", "arctic": "^3.7.0", "axios": "^1.10.0", "cfonts": "^3.3.1", "chalk": "^5.2.0", "clipboardy": "^5.0.2", "commander": "^14.0.0", "conf": "^13.0.1", "dotenv": "^17.2.0", "ervy": "^1.0.7", "ink": "^6.6.0", "ink-big-text": "^2.0.0", "ink-chart": "^0.1.1", "ink-confirm-input": "^2.0.0", "ink-scroll-list": "^0.4.1", "ink-scroll-view": "^0.3.5", "ink-select-input": "^6.2.0", "ink-spinner": "^5.0.0", "ink-table": "^3.1.0", "ink-text-input": "^6.0.0", "inquirer": "^12.7.0", "jiti": "^2.4.2", "open": "^10.1.2", "prettier": "^3.6.2", "react": "^19.2.3", "yocto-spinner": "^1.0.0", "zod": "^4.0.0" }, "bin": { "atmn": "dist/cli.js" } }, "sha512-mJhcA7iaREcUjJbDjvFyH35Pzu2TqdARsV3SJD0mzK3tlc77wNyUWICu2fjlcc6eZ7rRxm+eeUBEIddvPDy6Jg=="],
+    "atmn": ["atmn@1.1.17", "", { "dependencies": { "@inquirer/prompts": "^7.6.0", "@mishieck/ink-titled-box": "^0.3.0", "@tanstack/react-query": "^5.90.17", "@types/prettier": "^3.0.0", "arctic": "^3.7.0", "axios": "^1.10.0", "cfonts": "^3.3.1", "chalk": "^5.2.0", "clipboardy": "^5.0.2", "commander": "^14.0.0", "conf": "^13.0.1", "dotenv": "^17.2.0", "ervy": "^1.0.7", "ink": "^6.6.0", "ink-big-text": "^2.0.0", "ink-chart": "^0.1.1", "ink-confirm-input": "^2.0.0", "ink-scroll-list": "^0.4.1", "ink-scroll-view": "^0.3.5", "ink-select-input": "^6.2.0", "ink-spinner": "^5.0.0", "ink-table": "^3.1.0", "ink-text-input": "^6.0.0", "inquirer": "^12.7.0", "jiti": "^2.4.2", "open": "^10.1.2", "prettier": "^3.6.2", "react": "^19.2.3", "yocto-spinner": "^1.0.0", "zod": "^4.0.0" }, "bin": { "atmn": "dist/cli.js" } }, "sha512-ycPdNVHqFcKzeu7T7IHLxsO/Nspf50OSyzL/wmwPAdQ+ixnu5KMcMC+kFltIE7EvWtvQIA5ALhc9Zw+sSX7ngw=="],
 
     "atomically": ["atomically@2.1.1", "", { "dependencies": { "stubborn-fs": "^2.0.0", "when-exit": "^2.1.4" } }, "sha512-P4w9o2dqARji6P7MHprklbfiArZAWvo07yW7qs3pdljb3BWr12FIB7W+p0zJiuiVsUpRO0iZn1kFFcpPegg0tQ=="],
 
     "auto-bind": ["auto-bind@5.0.1", "", {}, "sha512-ooviqdwwgfIfNmDwo94wlshcdzfO64XV0Cg6oDsDYBJfITDz1EngD2z7DkbvCWn+XIMsIqW27sEVF6qcpJrRcg=="],
 
-    "autumn-js": ["autumn-js@1.2.45", "", { "dependencies": { "query-string": "^9.2.2", "rou3": "^0.6.1", "zod": "^4.0.0" }, "peerDependencies": { "better-auth": "^1.6.0", "better-call": "^1.0.12", "express": "^5.2.1", "hono": "^4.0.0", "next": "^14.0.0 || ^15.0.0 || ^16.0.0", "react": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["better-auth", "better-call", "express", "hono", "next", "react"] }, "sha512-BtpAnwiq8BVSDvAfS43OpgW3gHV2YDb3cCULKKDL8l8zC7NoFemrZ5Y4nahcXdKjxA6YjlfVt17st/Z2GY3ZlQ=="],
+    "autumn-js": ["autumn-js@1.2.51", "", { "dependencies": { "query-string": "^9.2.2", "rou3": "^0.6.1", "zod": "^4.0.0" }, "peerDependencies": { "better-auth": "^1.6.0", "better-call": "^1.0.12", "express": "^5.2.1", "hono": "^4.0.0", "next": "^14.0.0 || ^15.0.0 || ^16.0.0", "react": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["better-auth", "better-call", "express", "hono", "next", "react"] }, "sha512-cRGpwiC8lDTWZfGw+3dBNA/634JqjkQ2aZmZc0FI5Xv+FW8OL7L30+yS4zCGYJk6hYFFnRIODS7wvTp4GeC4Ew=="],
 
     "aws-ssl-profiles": ["aws-ssl-profiles@1.1.2", "", {}, "sha512-NZKeq9AfyQvEeNlN0zSYAaWrmBffJh3IELMZfRpJVWgrpEbtEpnjvzqBPf+mxoI287JohRDoa+/nsfqqiZmF6g=="],
 

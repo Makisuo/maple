@@ -44,7 +44,7 @@
 		"@maple/query-engine-integrations": "workspace:*",
 		"@react-email/components": "^1.0.11",
 		"@tinybirdco/sdk": "catalog:tinybird",
-		"autumn-js": "^1.2.29",
+		"autumn-js": "^1.2.51",
 		"drizzle-orm": "^0.45.1",
 		"effect": "catalog:effect"
 	},
@@ -55,7 +55,7 @@
 		"@electric-sql/pglite": "^0.5.2",
 		"@types/node": "catalog:tooling",
 		"ai": "^6.0.196",
-		"atmn": "^1.0.1",
+		"atmn": "^1.1.17",
 		"gpt-tokenizer": "^3.0.1",
 		"typescript": "catalog:tooling",
 		"vitest": "catalog:",

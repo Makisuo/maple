@@ -10,6 +10,10 @@ use tokio::time::Instant;
 use tracing::{error, info, warn, Instrument};
 use uuid::Uuid;
 
+const AUTUMN_API_VERSION: &str = "2.3.0";
+const AUTUMN_TRACK_PATH: &str = "/v1/balances.track";
+const AUTUMN_CHECK_PATH: &str = "/v1/balances.check";
+
 pub struct UsageEvent {
     pub org_id: String,
     pub feature_id: &'static str,
@@ -126,8 +130,9 @@ async fn flush_loop(
                         "peer.service" = "autumn",
                     );
                     let result: Result<reqwest::Response, reqwest::Error> = client
-                        .post(format!("{}/v1/track", api_url))
+                        .post(format!("{}{}", api_url, AUTUMN_TRACK_PATH))
                         .header("Authorization", format!("Bearer {}", secret_key))
+                        .header("x-api-version", AUTUMN_API_VERSION)
                         .json(&body)
                         .send()
                         .instrument(span)
@@ -247,8 +252,9 @@ async fn flush_all(
             "peer.service" = "autumn",
         );
         let result: Result<reqwest::Response, reqwest::Error> = client
-            .post(format!("{}/v1/track", api_url))
+            .post(format!("{}{}", api_url, AUTUMN_TRACK_PATH))
             .header("Authorization", format!("Bearer {}", secret_key))
+            .header("x-api-version", AUTUMN_API_VERSION)
             .json(&body)
             .send()
             .instrument(span)
@@ -278,7 +284,8 @@ async fn flush_all(
     }
 }
 
-/// Synchronous, cached entitlement check against Autumn's `POST /v1/check`.
+/// Synchronous, cached entitlement check against Autumn's
+/// `POST /v1/balances.check`.
 ///
 /// Unlike [`AutumnTracker`] (fire-and-forget usage metering), this sits in the
 /// ingest hot path and gates a request *before* it is accepted. It is only
@@ -365,8 +372,9 @@ impl AutumnEntitlements {
         );
         let result = self
             .client
-            .post(format!("{}/v1/check", self.api_url))
+            .post(format!("{}{}", self.api_url, AUTUMN_CHECK_PATH))
             .header("Authorization", format!("Bearer {}", self.secret_key))
+            .header("x-api-version", AUTUMN_API_VERSION)
             .timeout(Duration::from_secs(5))
             .json(&body)
             .send()
@@ -396,10 +404,10 @@ impl AutumnEntitlements {
         };
 
         // Parse to an untyped Value rather than a fixed struct: Autumn's
-        // `/v1/check` body has shifted shape across versions (the hosted REST
-        // body is flat with a numeric `balance`; the SDK's typed view nests a
-        // `balance` object with `remaining`). A struct that assumes one shape
-        // fails to decode the other and silently fails us open — which is
+        // `/v1/balances.check` body has shifted shape across versions (the
+        // hosted REST body is flat with a numeric `balance`; the SDK's typed
+        // view nests a `balance` object with `remaining`). A struct that assumes
+        // one shape fails to decode the other and silently fails us open —
         // exactly the bug this replaces. Value parsing only fails on non-JSON.
         let text = match response.text().await {
             Ok(text) => text,
@@ -456,10 +464,11 @@ fn truncate_for_log(body: &str) -> String {
     format!("{}…", &body[..end])
 }
 
-/// Decide whether an org may ingest, from Autumn's `/v1/check` body. Tolerant of
-/// both the flat hosted REST shape (`balance` is a number, `unlimited` /
-/// `overage_allowed` top-level) and the SDK's nested shape (`balance` is an
-/// object carrying `remaining` / `unlimited` / `overage_allowed`).
+/// Decide whether an org may ingest, from Autumn's `/v1/balances.check` body.
+/// Tolerant of both the flat hosted REST shape (`balance` is a number,
+/// `unlimited` / `overage_allowed` top-level) and the SDK's nested shape
+/// (`balance` is an object carrying `remaining` / `unlimited` /
+/// `overage_allowed`).
 ///
 /// Returns `None` when the JSON carries none of the fields we understand, so the
 /// caller can log the body and fail open rather than guess.
@@ -677,19 +686,72 @@ mod tests {
         );
     }
 
+    async fn record_check(
+        State(tx): State<tokio::sync::mpsc::UnboundedSender<(serde_json::Value, Option<String>)>>,
+        headers: axum::http::HeaderMap,
+        body: String,
+    ) -> axum::Json<serde_json::Value> {
+        let api_version = headers
+            .get("x-api-version")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let _ = tx.send((serde_json::from_str(&body).unwrap(), api_version));
+        axum::Json(serde_json::json!({
+            "allowed": true,
+            "balance": {
+                "remaining": 12.5,
+                "unlimited": false,
+                "overage_allowed": false
+            }
+        }))
+    }
+
+    #[tokio::test]
+    async fn check_uses_v23_canonical_route_and_header() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route(AUTUMN_CHECK_PATH, post(record_check))
+            .with_state(tx);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let entitlements = AutumnEntitlements::new(
+            Client::new(),
+            "sk_test".to_string(),
+            &format!("http://{addr}"),
+            60,
+        );
+        assert!(entitlements.is_allowed("org_123", "logs").await);
+
+        let (body, api_version) = rx.recv().await.expect("check request");
+        assert_eq!(body["customer_id"], "org_123");
+        assert_eq!(body["feature_id"], "logs");
+        assert_eq!(api_version.as_deref(), Some(AUTUMN_API_VERSION));
+    }
+
     // --- Idempotency: one key per accumulated entry, stable across retries. ---
 
-    /// Stand-in for Autumn's `/v1/track`. Records every body it receives and
-    /// answers with `status`, so a test can drive the flush loop through a
-    /// failure and inspect what the retry sent.
+    /// Stand-in for Autumn's `/v1/balances.track`. Records every body and API
+    /// version it receives and answers with `status`, so a test can drive the
+    /// flush loop through a failure and inspect what the retry sent.
     async fn record_track(
         State((tx, status)): State<(
-            tokio::sync::mpsc::UnboundedSender<serde_json::Value>,
+            tokio::sync::mpsc::UnboundedSender<(serde_json::Value, Option<String>)>,
             StatusCode,
         )>,
+        headers: axum::http::HeaderMap,
         body: String,
     ) -> StatusCode {
-        let _ = tx.send(serde_json::from_str(&body).unwrap());
+        let api_version = headers
+            .get("x-api-version")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let _ = tx.send((serde_json::from_str(&body).unwrap(), api_version));
         status
     }
 
@@ -697,7 +759,7 @@ mod tests {
         status: StatusCode,
     ) -> (
         String,
-        tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
+        tokio::sync::mpsc::UnboundedReceiver<(serde_json::Value, Option<String>)>,
     ) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
@@ -705,7 +767,7 @@ mod tests {
             .unwrap();
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
-            .route("/v1/track", post(record_track))
+            .route(AUTUMN_TRACK_PATH, post(record_track))
             .with_state((tx, status));
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
@@ -721,8 +783,8 @@ mod tests {
         let tracker = AutumnTracker::spawn("sk_test".to_string(), &api_url, 1);
         tracker.track("org_retry", "logs", 1.5);
 
-        let first = rx.recv().await.expect("first flush attempt");
-        let second = rx.recv().await.expect("retry after the 500");
+        let (first, first_api_version) = rx.recv().await.expect("first flush attempt");
+        let (second, second_api_version) = rx.recv().await.expect("retry after the 500");
 
         assert_eq!(
             first["idempotency_key"], second["idempotency_key"],
@@ -733,6 +795,8 @@ mod tests {
         assert_eq!(first["value"], second["value"]);
         assert_eq!(first["customer_id"], "org_retry");
         assert_eq!(first["feature_id"], "logs");
+        assert_eq!(first_api_version.as_deref(), Some(AUTUMN_API_VERSION));
+        assert_eq!(second_api_version.as_deref(), Some(AUTUMN_API_VERSION));
     }
 
     #[tokio::test]
@@ -744,12 +808,14 @@ mod tests {
         let tracker = AutumnTracker::spawn("sk_test".to_string(), &api_url, 1);
 
         tracker.track("org_fresh", "traces", 2.0);
-        let first = rx.recv().await.expect("first flush");
+        let (first, first_api_version) = rx.recv().await.expect("first flush");
         tracker.track("org_fresh", "traces", 3.0);
-        let second = rx.recv().await.expect("second flush");
+        let (second, second_api_version) = rx.recv().await.expect("second flush");
 
         assert_ne!(first["idempotency_key"], second["idempotency_key"]);
         assert_eq!(first["value"], 2.0);
         assert_eq!(second["value"], 3.0);
+        assert_eq!(first_api_version.as_deref(), Some(AUTUMN_API_VERSION));
+        assert_eq!(second_api_version.as_deref(), Some(AUTUMN_API_VERSION));
     }
 }

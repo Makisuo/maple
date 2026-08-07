@@ -5,6 +5,8 @@
  * a triage run can never collide.
  */
 
+import { AUTUMN_API_VERSION, AUTUMN_TRACK_PATH } from "@/services/billing/autumn-api"
+
 const DEFAULT_AUTUMN_API_URL = "https://api.useautumn.com"
 
 export interface TrackTokenUsageOptions {
@@ -28,11 +30,12 @@ const postTrack = async (
 	event: TrackEvent,
 ): Promise<void> => {
 	try {
-		const response = await fetch(`${apiUrl}/v1/track`, {
+		const response = await fetch(`${apiUrl}${AUTUMN_TRACK_PATH}`, {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${secretKey}`,
 				"Content-Type": "application/json",
+				"x-api-version": AUTUMN_API_VERSION,
 			},
 			body: JSON.stringify({
 				customer_id: customerId,
