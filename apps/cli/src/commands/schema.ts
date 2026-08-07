@@ -15,12 +15,9 @@ import {
 } from "../server/local-store-migrations"
 import { readMarker } from "../server/store-version"
 
-class SchemaCommandError extends Schema.TaggedErrorClass<SchemaCommandError>()(
-	"@maple/cli/SchemaCommandError",
-	{
-		message: Schema.String,
-	},
-) {}
+class SchemaCommandError extends Schema.TaggedError<SchemaCommandError>()("@maple/cli/SchemaCommandError", {
+	message: Schema.String,
+}) {}
 
 const defaultDataDir = (): string => join(homedir(), ".maple", "data")
 

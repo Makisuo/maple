@@ -25,7 +25,7 @@ export interface TinybirdOrgTokenServiceShape {
 	readonly getOrgReadToken: (orgId: OrgId) => Effect.Effect<string, TinybirdOrgTokenError>
 }
 
-export class TinybirdOrgTokenError extends Schema.TaggedErrorClass<TinybirdOrgTokenError>()(
+export class TinybirdOrgTokenError extends Schema.TaggedError<TinybirdOrgTokenError>()(
 	"@maple/api/services/TinybirdOrgTokenError",
 	{
 		reason: Schema.Literals(["MissingSigningKey", "MissingWorkspaceId", "MintFailed"]),

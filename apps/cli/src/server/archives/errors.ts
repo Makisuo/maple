@@ -6,7 +6,7 @@ import { Schema } from "effect"
  * {@link CheckpointError}. Archive failures are never silent: an actionable
  * summary is preferable to a generic return code.
  */
-export class ArchiveError extends Schema.TaggedErrorClass<ArchiveError>()("@maple/cli/ArchiveError", {
+export class ArchiveError extends Schema.TaggedError<ArchiveError>()("@maple/cli/ArchiveError", {
 	message: Schema.String,
 	operation: Schema.optional(Schema.String),
 	cause: Schema.optional(Schema.String),

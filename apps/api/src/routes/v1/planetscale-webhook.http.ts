@@ -30,7 +30,7 @@ const textResponse = (body: string, status: number) => HttpServerResponse.text(b
 
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 
-class PlanetScaleWebhookUnavailable extends Schema.TaggedErrorClass<PlanetScaleWebhookUnavailable>()(
+class PlanetScaleWebhookUnavailable extends Schema.TaggedError<PlanetScaleWebhookUnavailable>()(
 	"PlanetScaleWebhookUnavailable",
 	{ body: Schema.String },
 ) {}

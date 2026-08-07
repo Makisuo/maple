@@ -14,7 +14,7 @@ import { Schema } from "effect"
  * long". It is a genuinely different retry signal from `retryable` — retrying an overflow unchanged
  * always fails again; the transcript has to shrink first.
  */
-export class LlmCallError extends Schema.TaggedErrorClass<LlmCallError>()("@maple/llm/LlmCallError", {
+export class LlmCallError extends Schema.TaggedError<LlmCallError>()("@maple/llm/LlmCallError", {
 	/** Maple-side label for what was being attempted, e.g. `"ai-triage.investigate"`. */
 	operation: Schema.String,
 	/** Vendored `LLMError.module` — which part of the LLM core failed. */

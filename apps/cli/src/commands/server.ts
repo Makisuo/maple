@@ -36,7 +36,7 @@ import {
 /** A `maple start`/`maple stop` failure. The message is shown to the user and
  *  the process exits non-zero — same role the old `process.exit(1)` paths had,
  *  but typed and handled by the CLI runtime (matches `ModeError`). */
-class ServerError extends Schema.TaggedErrorClass<ServerError>()("@maple/cli/ServerError", {
+class ServerError extends Schema.TaggedError<ServerError>()("@maple/cli/ServerError", {
 	message: Schema.String,
 }) {}
 

@@ -44,7 +44,7 @@ const TRACE_WINDOW_MINUTES = 60
 const TRACE_WINDOW_LAG_MINUTES = 15
 const TRACE_PARENT_LOOKBACK_MINUTES = 60
 
-export class SetupAuditError extends Schema.TaggedErrorClass<SetupAuditError>()(
+export class SetupAuditError extends Schema.TaggedError<SetupAuditError>()(
 	"@maple/api/services/SetupAuditError",
 	{ message: Schema.String },
 ) {}

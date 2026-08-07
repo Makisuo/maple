@@ -247,7 +247,7 @@ const errorText = (message: string, status: number) =>
 		headers: { "content-type": "text/plain; charset=utf-8" },
 	})
 
-class ElectricSyncUnavailable extends Schema.TaggedErrorClass<ElectricSyncUnavailable>()(
+class ElectricSyncUnavailable extends Schema.TaggedError<ElectricSyncUnavailable>()(
 	"ElectricSyncUnavailable",
 	{
 		/**

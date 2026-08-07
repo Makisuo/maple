@@ -5,7 +5,7 @@ import { updateCurrentSpanName } from "./span-name"
 
 export type DatabaseClient = MapleDatabaseClient
 
-export class DatabaseError extends Schema.TaggedErrorClass<DatabaseError>()("@maple/api/lib/DatabaseError", {
+export class DatabaseError extends Schema.TaggedError<DatabaseError>()("@maple/api/lib/DatabaseError", {
 	message: Schema.String,
 	cause: Schema.Unknown,
 }) {}

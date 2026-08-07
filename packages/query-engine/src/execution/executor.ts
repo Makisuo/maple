@@ -62,7 +62,7 @@ const CAPABILITIES_INSPECTION_TIMEOUT = Duration.seconds(2)
 const WarehouseCapabilityMetadataTarget = Schema.Literals(["version", "indexes", "columns", "settings"])
 type WarehouseCapabilityMetadataTarget = Schema.Schema.Type<typeof WarehouseCapabilityMetadataTarget>
 
-class WarehouseCapabilityProbeError extends Schema.TaggedErrorClass<WarehouseCapabilityProbeError>()(
+class WarehouseCapabilityProbeError extends Schema.TaggedError<WarehouseCapabilityProbeError>()(
 	"@maple/query-engine/execution/WarehouseCapabilityProbeError",
 	{
 		target: WarehouseCapabilityMetadataTarget,

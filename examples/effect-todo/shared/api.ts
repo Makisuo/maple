@@ -24,7 +24,7 @@ export class CreateTodoRequest extends Schema.Class<CreateTodoRequest>("CreateTo
 }) {}
 
 /** Returned when an id doesn't exist (toggle/remove of a missing todo). */
-export class TodoNotFoundError extends Schema.TaggedErrorClass<TodoNotFoundError>()(
+export class TodoNotFoundError extends Schema.TaggedError<TodoNotFoundError>()(
 	"@maple-examples/todo/TodoNotFoundError",
 	{ id: Schema.String, message: Schema.String },
 	{ httpApiStatus: 404 },
@@ -35,7 +35,7 @@ export class TodoNotFoundError extends Schema.TaggedErrorClass<TodoNotFoundError
  * error so Maple's Errors view, the Error span status, and the apdex/error-rate
  * metrics all have something to show during the demo.
  */
-export class ToggleFailedError extends Schema.TaggedErrorClass<ToggleFailedError>()(
+export class ToggleFailedError extends Schema.TaggedError<ToggleFailedError>()(
 	"@maple-examples/todo/ToggleFailedError",
 	{ message: Schema.String },
 	{ httpApiStatus: 500 },

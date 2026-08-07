@@ -262,7 +262,7 @@ function applyTransform(
 	return rows
 }
 
-class WidgetDataAtomError extends Schema.TaggedErrorClass<WidgetDataAtomError>()(
+class WidgetDataAtomError extends Schema.TaggedError<WidgetDataAtomError>()(
 	"@maple/web/hooks/WidgetDataAtomError",
 	{
 		message: Schema.String,

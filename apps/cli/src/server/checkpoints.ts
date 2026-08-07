@@ -192,22 +192,22 @@ const checkpointErrorFields = {
 	cause: Schema.String,
 }
 
-export class CheckpointCreateError extends Schema.TaggedErrorClass<CheckpointCreateError>()(
+export class CheckpointCreateError extends Schema.TaggedError<CheckpointCreateError>()(
 	"@maple/cli/CheckpointCreateError",
 	{ ...checkpointErrorFields, checkpointId: CheckpointId },
 ) {}
 
-export class CheckpointRecoveryError extends Schema.TaggedErrorClass<CheckpointRecoveryError>()(
+export class CheckpointRecoveryError extends Schema.TaggedError<CheckpointRecoveryError>()(
 	"@maple/cli/CheckpointRecoveryError",
 	checkpointErrorFields,
 ) {}
 
-export class CheckpointResetError extends Schema.TaggedErrorClass<CheckpointResetError>()(
+export class CheckpointResetError extends Schema.TaggedError<CheckpointResetError>()(
 	"@maple/cli/CheckpointResetError",
 	checkpointErrorFields,
 ) {}
 
-export class CheckpointRestoreError extends Schema.TaggedErrorClass<CheckpointRestoreError>()(
+export class CheckpointRestoreError extends Schema.TaggedError<CheckpointRestoreError>()(
 	"@maple/cli/CheckpointRestoreError",
 	{ ...checkpointErrorFields, selector: Schema.String },
 ) {}
@@ -417,15 +417,12 @@ export const writeBackupConfig = (path: string, sourceDataDir?: string): void =>
 	)
 }
 
-export class LocalQueryError extends Schema.TaggedErrorClass<LocalQueryError>()(
-	"@maple/cli/LocalQueryError",
-	{
-		status: NonNegativeInt,
-		detail: Schema.String,
-		message: Schema.String,
-		cause: Schema.String,
-	},
-) {}
+export class LocalQueryError extends Schema.TaggedError<LocalQueryError>()("@maple/cli/LocalQueryError", {
+	status: NonNegativeInt,
+	detail: Schema.String,
+	message: Schema.String,
+	cause: Schema.String,
+}) {}
 
 const localQueryError = (status: number, detail: string, cause = detail): LocalQueryError =>
 	new LocalQueryError({

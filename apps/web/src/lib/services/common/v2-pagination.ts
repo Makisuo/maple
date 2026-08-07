@@ -6,7 +6,7 @@ export interface V2Page<T> {
 	readonly next_cursor: string | null
 }
 
-export class V2PaginationCursorLoopError extends Schema.TaggedErrorClass<V2PaginationCursorLoopError>()(
+export class V2PaginationCursorLoopError extends Schema.TaggedError<V2PaginationCursorLoopError>()(
 	"@maple/web/services/V2PaginationCursorLoopError",
 	{
 		cursor: Schema.String,

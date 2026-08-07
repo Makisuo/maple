@@ -24,6 +24,7 @@ vi.mock("@/lib/registry", () => ({
 	mapleRuntime: {},
 	mapleApiClientLayer: Layer.empty,
 	mapleApiV2ClientLayer: Layer.empty,
+	appMemoMap: Layer.makeMemoMapUnsafe(),
 }))
 
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"

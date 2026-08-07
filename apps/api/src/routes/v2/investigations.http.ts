@@ -34,7 +34,7 @@ import type {
 import { Effect, Match, Schema } from "effect"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 
-class InvestigationSubjectDecodeError extends Schema.TaggedErrorClass<InvestigationSubjectDecodeError>()(
+class InvestigationSubjectDecodeError extends Schema.TaggedError<InvestigationSubjectDecodeError>()(
 	"@maple/api/routes/v2/InvestigationSubjectDecodeError",
 	{
 		investigationId: InvestigationId,

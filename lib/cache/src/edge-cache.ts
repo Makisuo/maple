@@ -3,7 +3,7 @@ import { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 
 export { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 
-export class EdgeCacheIOError extends Schema.TaggedErrorClass<EdgeCacheIOError>()(
+export class EdgeCacheIOError extends Schema.TaggedError<EdgeCacheIOError>()(
 	"@maple/cache/EdgeCacheIOError",
 	{
 		op: Schema.Literals(["get", "put"]),

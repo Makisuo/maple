@@ -5,7 +5,7 @@ import { Schema } from "effect"
  * `{ "error": { "type", "code", "message", "param"?, "doc_url"? } }` with a
  * closed set of `type`s and stable machine-readable `code`s.
  *
- * These are `Schema.ErrorClass`es (not Tagged) so the wire body carries no
+ * These are `Schema.Error`s (not Tagged) so the wire body carries no
  * internal `_tag` — exactly the envelope, nothing else.
  */
 
@@ -55,16 +55,16 @@ const errorBody = <const T extends V2ErrorType>(type: T, example: ErrorExample) 
 		),
 	})
 
-export class V2InvalidRequestError extends Schema.ErrorClass<V2InvalidRequestError>(
+export class V2InvalidRequestError extends Schema.Error<V2InvalidRequestError>(
 	"@maple/http/v2/InvalidRequestError",
 )(
-	{
+	Schema.Struct({
 		error: errorBody("invalid_request_error", {
 			code: "parameter_invalid",
 			message: "Invalid request query: limit must be between 1 and 100.",
 			param: "limit",
 		}),
-	},
+	}).annotate({ identifier: "InvalidRequestError" }),
 	{
 		httpApiStatus: 400,
 		identifier: "InvalidRequestError",
@@ -74,15 +74,15 @@ export class V2InvalidRequestError extends Schema.ErrorClass<V2InvalidRequestErr
 	},
 ) {}
 
-export class V2AuthenticationError extends Schema.ErrorClass<V2AuthenticationError>(
+export class V2AuthenticationError extends Schema.Error<V2AuthenticationError>(
 	"@maple/http/v2/AuthenticationError",
 )(
-	{
+	Schema.Struct({
 		error: errorBody("authentication_error", {
 			code: "invalid_credentials",
 			message: "Invalid or missing credentials.",
 		}),
-	},
+	}).annotate({ identifier: "AuthenticationError" }),
 	{
 		httpApiStatus: 401,
 		identifier: "AuthenticationError",
@@ -91,13 +91,13 @@ export class V2AuthenticationError extends Schema.ErrorClass<V2AuthenticationErr
 	},
 ) {}
 
-export class V2PermissionError extends Schema.ErrorClass<V2PermissionError>("@maple/http/v2/PermissionError")(
-	{
+export class V2PermissionError extends Schema.Error<V2PermissionError>("@maple/http/v2/PermissionError")(
+	Schema.Struct({
 		error: errorBody("permission_error", {
 			code: "insufficient_scope",
 			message: 'This API key does not have the "api_keys:write" scope required for this request.',
 		}),
-	},
+	}).annotate({ identifier: "PermissionError" }),
 	{
 		httpApiStatus: 403,
 		identifier: "PermissionError",
@@ -107,14 +107,14 @@ export class V2PermissionError extends Schema.ErrorClass<V2PermissionError>("@ma
 	},
 ) {}
 
-export class V2NotFoundError extends Schema.ErrorClass<V2NotFoundError>("@maple/http/v2/NotFoundError")(
-	{
+export class V2NotFoundError extends Schema.Error<V2NotFoundError>("@maple/http/v2/NotFoundError")(
+	Schema.Struct({
 		error: errorBody("not_found_error", {
 			code: "api_key_not_found",
 			message: "No such api_key.",
 			param: "id",
 		}),
-	},
+	}).annotate({ identifier: "NotFoundError" }),
 	{
 		httpApiStatus: 404,
 		identifier: "NotFoundError",
@@ -123,13 +123,13 @@ export class V2NotFoundError extends Schema.ErrorClass<V2NotFoundError>("@maple/
 	},
 ) {}
 
-export class V2ConflictError extends Schema.ErrorClass<V2ConflictError>("@maple/http/v2/ConflictError")(
-	{
+export class V2ConflictError extends Schema.Error<V2ConflictError>("@maple/http/v2/ConflictError")(
+	Schema.Struct({
 		error: errorBody("conflict_error", {
 			code: "resource_conflict",
 			message: "The object was modified concurrently; retry the request.",
 		}),
-	},
+	}).annotate({ identifier: "ConflictError" }),
 	{
 		httpApiStatus: 409,
 		identifier: "ConflictError",
@@ -147,17 +147,17 @@ export class V2ConflictError extends Schema.ErrorClass<V2ConflictError>("@maple/
  * the size of the answer, so retrying it unchanged can only fail identically;
  * the message says what to narrow.
  */
-export class V2PayloadTooLargeError extends Schema.ErrorClass<V2PayloadTooLargeError>(
+export class V2PayloadTooLargeError extends Schema.Error<V2PayloadTooLargeError>(
 	"@maple/http/v2/PayloadTooLargeError",
 )(
-	{
+	Schema.Struct({
 		error: errorBody("invalid_request_error", {
 			code: "range_too_large",
 			message:
 				"That part of the recording is too large to load in one request. Request a narrower chunk range.",
 			param: "to_chunk_seq",
 		}),
-	},
+	}).annotate({ identifier: "PayloadTooLargeError" }),
 	{
 		httpApiStatus: 413,
 		identifier: "PayloadTooLargeError",
@@ -167,13 +167,13 @@ export class V2PayloadTooLargeError extends Schema.ErrorClass<V2PayloadTooLargeE
 	},
 ) {}
 
-export class V2RateLimitError extends Schema.ErrorClass<V2RateLimitError>("@maple/http/v2/RateLimitError")(
-	{
+export class V2RateLimitError extends Schema.Error<V2RateLimitError>("@maple/http/v2/RateLimitError")(
+	Schema.Struct({
 		error: errorBody("rate_limit_error", {
 			code: "rate_limited",
 			message: "Too many requests; slow down and retry after the interval in the Retry-After header.",
 		}),
-	},
+	}).annotate({ identifier: "RateLimitError" }),
 	{
 		httpApiStatus: 429,
 		identifier: "RateLimitError",
@@ -182,13 +182,13 @@ export class V2RateLimitError extends Schema.ErrorClass<V2RateLimitError>("@mapl
 	},
 ) {}
 
-export class V2ApiError extends Schema.ErrorClass<V2ApiError>("@maple/http/v2/ApiError")(
-	{
+export class V2ApiError extends Schema.Error<V2ApiError>("@maple/http/v2/ApiError")(
+	Schema.Struct({
 		error: errorBody("api_error", {
 			code: "internal_error",
 			message: "An unexpected error occurred on our end.",
 		}),
-	},
+	}).annotate({ identifier: "ApiError" }),
 	{
 		httpApiStatus: 500,
 		identifier: "ApiError",
@@ -203,13 +203,13 @@ export class V2ApiError extends Schema.ErrorClass<V2ApiError>("@maple/http/v2/Ap
  * credentials or failed at the transport level. Distinct from 503 so consumers
  * can tell "the provider is misbehaving" from "Maple's storage is unavailable".
  */
-export class V2UpstreamError extends Schema.ErrorClass<V2UpstreamError>("@maple/http/v2/UpstreamError")(
-	{
+export class V2UpstreamError extends Schema.Error<V2UpstreamError>("@maple/http/v2/UpstreamError")(
+	Schema.Struct({
 		error: errorBody("api_error", {
 			code: "upstream_error",
 			message: "The upstream provider rejected the request.",
 		}),
-	},
+	}).annotate({ identifier: "UpstreamError" }),
 	{
 		httpApiStatus: 502,
 		identifier: "UpstreamError",
@@ -220,15 +220,15 @@ export class V2UpstreamError extends Schema.ErrorClass<V2UpstreamError>("@maple/
 ) {}
 
 /** `api_error` flavor for upstream/persistence unavailability (503). */
-export class V2ServiceUnavailableError extends Schema.ErrorClass<V2ServiceUnavailableError>(
+export class V2ServiceUnavailableError extends Schema.Error<V2ServiceUnavailableError>(
 	"@maple/http/v2/ServiceUnavailableError",
 )(
-	{
+	Schema.Struct({
 		error: errorBody("api_error", {
 			code: "api_key_lookup_unavailable",
 			message: "The service is temporarily unavailable; retry after a short delay.",
 		}),
-	},
+	}).annotate({ identifier: "ServiceUnavailableError" }),
 	{
 		httpApiStatus: 503,
 		identifier: "ServiceUnavailableError",

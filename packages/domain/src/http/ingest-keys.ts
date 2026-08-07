@@ -10,7 +10,7 @@ export class IngestKeysResponse extends Schema.Class<IngestKeysResponse>("Ingest
 	privateRotatedAt: IsoDateTimeString,
 }) {}
 
-export class IngestKeyPersistenceError extends Schema.TaggedErrorClass<IngestKeyPersistenceError>()(
+export class IngestKeyPersistenceError extends Schema.TaggedError<IngestKeyPersistenceError>()(
 	"@maple/http/errors/IngestKeyPersistenceError",
 	{
 		message: Schema.String,
@@ -18,7 +18,7 @@ export class IngestKeyPersistenceError extends Schema.TaggedErrorClass<IngestKey
 	{ httpApiStatus: 503 },
 ) {}
 
-export class IngestKeyEncryptionError extends Schema.TaggedErrorClass<IngestKeyEncryptionError>()(
+export class IngestKeyEncryptionError extends Schema.TaggedError<IngestKeyEncryptionError>()(
 	"@maple/http/errors/IngestKeyEncryptionError",
 	{
 		message: Schema.String,
@@ -26,7 +26,7 @@ export class IngestKeyEncryptionError extends Schema.TaggedErrorClass<IngestKeyE
 	{ httpApiStatus: 500 },
 ) {}
 
-export class IngestKeyForbiddenError extends Schema.TaggedErrorClass<IngestKeyForbiddenError>()(
+export class IngestKeyForbiddenError extends Schema.TaggedError<IngestKeyForbiddenError>()(
 	"@maple/http/errors/IngestKeyForbiddenError",
 	{
 		message: Schema.String,

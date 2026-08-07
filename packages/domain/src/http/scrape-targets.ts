@@ -130,7 +130,7 @@ export const ListScrapeTargetChecksQuery = Schema.Struct({
 	),
 })
 
-export class ScrapeTargetPersistenceError extends Schema.TaggedErrorClass<ScrapeTargetPersistenceError>()(
+export class ScrapeTargetPersistenceError extends Schema.TaggedError<ScrapeTargetPersistenceError>()(
 	"@maple/http/errors/ScrapeTargetPersistenceError",
 	{
 		message: Schema.String,
@@ -138,7 +138,7 @@ export class ScrapeTargetPersistenceError extends Schema.TaggedErrorClass<Scrape
 	{ httpApiStatus: 503 },
 ) {}
 
-export class ScrapeTargetNotFoundError extends Schema.TaggedErrorClass<ScrapeTargetNotFoundError>()(
+export class ScrapeTargetNotFoundError extends Schema.TaggedError<ScrapeTargetNotFoundError>()(
 	"@maple/http/errors/ScrapeTargetNotFoundError",
 	{
 		targetId: ScrapeTargetId,
@@ -147,7 +147,7 @@ export class ScrapeTargetNotFoundError extends Schema.TaggedErrorClass<ScrapeTar
 	{ httpApiStatus: 404 },
 ) {}
 
-export class ScrapeTargetValidationError extends Schema.TaggedErrorClass<ScrapeTargetValidationError>()(
+export class ScrapeTargetValidationError extends Schema.TaggedError<ScrapeTargetValidationError>()(
 	"@maple/http/errors/ScrapeTargetValidationError",
 	{
 		message: Schema.String,
@@ -155,7 +155,7 @@ export class ScrapeTargetValidationError extends Schema.TaggedErrorClass<ScrapeT
 	{ httpApiStatus: 400 },
 ) {}
 
-export class ScrapeTargetEncryptionError extends Schema.TaggedErrorClass<ScrapeTargetEncryptionError>()(
+export class ScrapeTargetEncryptionError extends Schema.TaggedError<ScrapeTargetEncryptionError>()(
 	"@maple/http/errors/ScrapeTargetEncryptionError",
 	{
 		message: Schema.String,
@@ -172,7 +172,7 @@ export class ScrapeTargetEncryptionError extends Schema.TaggedErrorClass<ScrapeT
  * provider failure, `config` is a credential/OAuth-app misconfiguration
  * (bad service token, missing scope).
  */
-export class ScrapeTargetAuthError extends Schema.TaggedErrorClass<ScrapeTargetAuthError>()(
+export class ScrapeTargetAuthError extends Schema.TaggedError<ScrapeTargetAuthError>()(
 	"@maple/http/errors/ScrapeTargetAuthError",
 	{
 		message: Schema.String,
@@ -191,7 +191,7 @@ export class ScrapeTargetAuthError extends Schema.TaggedErrorClass<ScrapeTargetA
  * regex-sniffing the HTTP status back out of a persistence message. `status`
  * carries the upstream HTTP status when the failure reached one.
  */
-export class ScrapeTargetUpstreamError extends Schema.TaggedErrorClass<ScrapeTargetUpstreamError>()(
+export class ScrapeTargetUpstreamError extends Schema.TaggedError<ScrapeTargetUpstreamError>()(
 	"@maple/http/errors/ScrapeTargetUpstreamError",
 	{
 		message: Schema.String,

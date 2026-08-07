@@ -6,7 +6,7 @@ import { Schema } from "effect"
 // classes without pulling the HttpApi AST builder into their bundles.
 // `warehouse.ts` re-exports everything here and owns the `WarehouseApiGroup`.
 //
-// Each distinct warehouse failure mode is its own `Schema.TaggedErrorClass`,
+// Each distinct warehouse failure mode is its own `Schema.TaggedError`,
 // discriminated by `_tag` / `instanceof` / `catchTags` rather than a stringly-
 // typed `category` field. This used to be a single `WarehouseQueryError` with a
 // `category` literal; it was kept that way to avoid adding TaggedError classes
@@ -28,35 +28,35 @@ const warehouseErrorBaseFields = {
 }
 
 /** Generic ClickHouse/SQL query failure — the default when nothing more specific matches. */
-export class WarehouseQueryError extends Schema.TaggedErrorClass<WarehouseQueryError>()(
+export class WarehouseQueryError extends Schema.TaggedError<WarehouseQueryError>()(
 	"@maple/http/errors/WarehouseQueryError",
 	warehouseErrorBaseFields,
 	{ httpApiStatus: 502 },
 ) {}
 
 /** Transient query-backend / CDN / network failure. Retryable; mapped to 503. */
-export class WarehouseUpstreamError extends Schema.TaggedErrorClass<WarehouseUpstreamError>()(
+export class WarehouseUpstreamError extends Schema.TaggedError<WarehouseUpstreamError>()(
 	"@maple/http/errors/WarehouseUpstreamError",
 	{ ...warehouseErrorBaseFields, upstreamStatus: Schema.optional(Schema.Number) },
 	{ httpApiStatus: 503 },
 ) {}
 
 /** Upstream 401/403 or database credentials failure. */
-export class WarehouseAuthError extends Schema.TaggedErrorClass<WarehouseAuthError>()(
+export class WarehouseAuthError extends Schema.TaggedError<WarehouseAuthError>()(
 	"@maple/http/errors/WarehouseAuthError",
 	{ ...warehouseErrorBaseFields, upstreamStatus: Schema.optional(Schema.Number) },
 	{ httpApiStatus: 502 },
 ) {}
 
 /** Backend/database is misconfigured (unknown database/table, bad URL, etc.). */
-export class WarehouseConfigError extends Schema.TaggedErrorClass<WarehouseConfigError>()(
+export class WarehouseConfigError extends Schema.TaggedError<WarehouseConfigError>()(
 	"@maple/http/errors/WarehouseConfigError",
 	warehouseErrorBaseFields,
 	{ httpApiStatus: 502 },
 ) {}
 
 /** Maple's query client could not decode/consume the response. */
-export class WarehouseClientError extends Schema.TaggedErrorClass<WarehouseClientError>()(
+export class WarehouseClientError extends Schema.TaggedError<WarehouseClientError>()(
 	"@maple/http/errors/WarehouseClientError",
 	warehouseErrorBaseFields,
 	{ httpApiStatus: 502 },
@@ -73,7 +73,7 @@ export class WarehouseClientError extends Schema.TaggedErrorClass<WarehouseClien
  * rows failed Maple's own row schema — schema apply cannot fix that and the
  * presenter must not suggest it.
  */
-export class WarehouseSchemaDriftError extends Schema.TaggedErrorClass<WarehouseSchemaDriftError>()(
+export class WarehouseSchemaDriftError extends Schema.TaggedError<WarehouseSchemaDriftError>()(
 	"@maple/http/errors/WarehouseSchemaDriftError",
 	{ ...warehouseErrorBaseFields, kind: Schema.optional(Schema.Literals(["cluster", "decode"])) },
 	{ httpApiStatus: 502 },
@@ -91,14 +91,14 @@ export class WarehouseSchemaDriftError extends Schema.TaggedErrorClass<Warehouse
  * UI stops telling people to check their database. Mapped to 500 — the fault is
  * ours.
  */
-export class WarehouseMalformedQueryError extends Schema.TaggedErrorClass<WarehouseMalformedQueryError>()(
+export class WarehouseMalformedQueryError extends Schema.TaggedError<WarehouseMalformedQueryError>()(
 	"@maple/http/errors/WarehouseMalformedQueryError",
 	warehouseErrorBaseFields,
 	{ httpApiStatus: 500 },
 ) {}
 
 /** A query exceeded a ClickHouse resource quota. Mapped to 429. */
-export class WarehouseQuotaExceededError extends Schema.TaggedErrorClass<WarehouseQuotaExceededError>()(
+export class WarehouseQuotaExceededError extends Schema.TaggedError<WarehouseQuotaExceededError>()(
 	"@maple/http/errors/WarehouseQuotaExceededError",
 	{
 		...warehouseErrorBaseFields,
@@ -112,7 +112,7 @@ export class WarehouseQuotaExceededError extends Schema.TaggedErrorClass<Warehou
  * missing OrgId filter, unsupported pipe). This is a bad request, not a backend
  * failure — mapped to 400.
  */
-export class WarehouseValidationError extends Schema.TaggedErrorClass<WarehouseValidationError>()(
+export class WarehouseValidationError extends Schema.TaggedError<WarehouseValidationError>()(
 	"@maple/http/errors/WarehouseValidationError",
 	warehouseErrorBaseFields,
 	{ httpApiStatus: 400 },

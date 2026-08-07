@@ -32,7 +32,7 @@ export interface EdgeCacheBackend {
  * tests/dev).
  *
  * The tag string still names the old home. Tags are identity, not
- * documentation — `EdgeCacheIOError` next door is a `Schema.TaggedErrorClass`
+ * documentation — `EdgeCacheIOError` next door is a `Schema.TaggedError`
  * whose tag is its serialized `_tag`, so renaming this family for tidiness
  * would be a wire-contract change for no behavioural gain.
  */

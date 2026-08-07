@@ -25,7 +25,7 @@ export const ParsedClause = Schema.Struct({
 })
 export type ParsedClause = Schema.Schema.Type<typeof ParsedClause>
 
-export class WhereClauseParseWarning extends Schema.TaggedErrorClass<WhereClauseParseWarning>()(
+export class WhereClauseParseWarning extends Schema.TaggedError<WhereClauseParseWarning>()(
 	"@maple/where-clause/errors/WhereClauseParseWarning",
 	{
 		message: Schema.String,

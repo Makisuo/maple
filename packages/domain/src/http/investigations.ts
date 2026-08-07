@@ -454,7 +454,7 @@ export class SubmitDiagnosisRequest extends Schema.Class<SubmitDiagnosisRequest>
 // Errors
 // ---------------------------------------------------------------------------
 
-export class InvestigationPersistenceError extends Schema.TaggedErrorClass<InvestigationPersistenceError>()(
+export class InvestigationPersistenceError extends Schema.TaggedError<InvestigationPersistenceError>()(
 	"@maple/http/investigations/InvestigationPersistenceError",
 	{
 		message: Schema.String,
@@ -463,7 +463,7 @@ export class InvestigationPersistenceError extends Schema.TaggedErrorClass<Inves
 	{ httpApiStatus: 503 },
 ) {}
 
-export class InvestigationValidationError extends Schema.TaggedErrorClass<InvestigationValidationError>()(
+export class InvestigationValidationError extends Schema.TaggedError<InvestigationValidationError>()(
 	"@maple/http/investigations/InvestigationValidationError",
 	{
 		message: Schema.String,
@@ -471,7 +471,7 @@ export class InvestigationValidationError extends Schema.TaggedErrorClass<Invest
 	{ httpApiStatus: 400 },
 ) {}
 
-export class InvestigationNotFoundError extends Schema.TaggedErrorClass<InvestigationNotFoundError>()(
+export class InvestigationNotFoundError extends Schema.TaggedError<InvestigationNotFoundError>()(
 	"@maple/http/investigations/InvestigationNotFoundError",
 	{
 		message: Schema.String,
@@ -479,7 +479,7 @@ export class InvestigationNotFoundError extends Schema.TaggedErrorClass<Investig
 	{ httpApiStatus: 404 },
 ) {}
 
-export class InvestigationQuotaError extends Schema.TaggedErrorClass<InvestigationQuotaError>()(
+export class InvestigationQuotaError extends Schema.TaggedError<InvestigationQuotaError>()(
 	"@maple/http/investigations/InvestigationQuotaError",
 	{
 		message: Schema.String,
@@ -489,7 +489,7 @@ export class InvestigationQuotaError extends Schema.TaggedErrorClass<Investigati
 	{ httpApiStatus: 429 },
 ) {}
 
-export class InvestigationUnavailableError extends Schema.TaggedErrorClass<InvestigationUnavailableError>()(
+export class InvestigationUnavailableError extends Schema.TaggedError<InvestigationUnavailableError>()(
 	"@maple/http/investigations/InvestigationUnavailableError",
 	{
 		message: Schema.String,
@@ -499,7 +499,7 @@ export class InvestigationUnavailableError extends Schema.TaggedErrorClass<Inves
 	{ httpApiStatus: 503 },
 ) {}
 
-export class InvestigationRejectedError extends Schema.TaggedErrorClass<InvestigationRejectedError>()(
+export class InvestigationRejectedError extends Schema.TaggedError<InvestigationRejectedError>()(
 	"@maple/http/investigations/InvestigationRejectedError",
 	{
 		message: Schema.String,

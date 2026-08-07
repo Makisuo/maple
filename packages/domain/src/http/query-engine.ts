@@ -1583,7 +1583,7 @@ export class RawSqlExecuteResponse extends Schema.Class<RawSqlExecuteResponse>("
 	}),
 }) {}
 
-export class RawSqlValidationError extends Schema.TaggedErrorClass<RawSqlValidationError>()(
+export class RawSqlValidationError extends Schema.TaggedError<RawSqlValidationError>()(
 	"@maple/http/errors/RawSqlValidationError",
 	{
 		code: Schema.Literals([
@@ -1599,7 +1599,7 @@ export class RawSqlValidationError extends Schema.TaggedErrorClass<RawSqlValidat
 	{ httpApiStatus: 400 },
 ) {}
 
-export class QueryEngineValidationError extends Schema.TaggedErrorClass<QueryEngineValidationError>()(
+export class QueryEngineValidationError extends Schema.TaggedError<QueryEngineValidationError>()(
 	"@maple/http/errors/QueryEngineValidationError",
 	{
 		message: Schema.String,
@@ -1608,7 +1608,7 @@ export class QueryEngineValidationError extends Schema.TaggedErrorClass<QueryEng
 	{ httpApiStatus: 400 },
 ) {}
 
-export class QueryEngineExecutionError extends Schema.TaggedErrorClass<QueryEngineExecutionError>()(
+export class QueryEngineExecutionError extends Schema.TaggedError<QueryEngineExecutionError>()(
 	"@maple/http/errors/QueryEngineExecutionError",
 	{
 		message: Schema.String,
@@ -1618,7 +1618,7 @@ export class QueryEngineExecutionError extends Schema.TaggedErrorClass<QueryEngi
 	{ httpApiStatus: 502 },
 ) {}
 
-export class QueryEngineTimeoutError extends Schema.TaggedErrorClass<QueryEngineTimeoutError>()(
+export class QueryEngineTimeoutError extends Schema.TaggedError<QueryEngineTimeoutError>()(
 	"@maple/http/errors/QueryEngineTimeoutError",
 	{
 		message: Schema.String,

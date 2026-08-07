@@ -58,7 +58,7 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			url: false,
+			workersDev: false,
 			// `0 9 * * *` (the onboarding drip) was retired when that sequence moved to
 			// maple-portal's campaign system. Removing it here is what stops the two
 			// from both sending during cutover.

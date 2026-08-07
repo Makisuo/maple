@@ -1,4 +1,4 @@
-import { McpServer } from "effect/unstable/ai"
+import { McpProtocol, McpServer } from "effect/unstable/ai"
 import { Effect, Layer } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { McpToolsLive } from "./server"
@@ -58,6 +58,7 @@ const McpHttpLive = McpServer.layerHttp({
 	name: "maple-observability",
 	version: "1.0.0",
 	path: "/mcp",
+	protocols: [McpProtocol.v2025_06_18],
 	clientSessions: sessionStore,
 }).pipe(Layer.provide(McpAuthorizationMiddleware.layer))
 

@@ -40,14 +40,11 @@ export interface ServerOptions {
 	readonly assets?: AssetResolver
 }
 
-export class ServerBindError extends Schema.TaggedErrorClass<ServerBindError>()(
-	"@maple/cli/ServerBindError",
-	{
-		hostname: Schema.String,
-		port: Schema.Number,
-		message: Schema.String,
-	},
-) {}
+export class ServerBindError extends Schema.TaggedError<ServerBindError>()("@maple/cli/ServerBindError", {
+	hostname: Schema.String,
+	port: Schema.Number,
+	message: Schema.String,
+}) {}
 
 export const isBrowserOriginAllowed = (
 	requestUrl: URL,
@@ -304,7 +301,7 @@ type SpanRunner = <A>(effect: Effect.Effect<A>) => Promise<A>
 // hand back to the client in `recoverResponse`. (Failing with a bare `Response`
 // recorded an empty `{}` — a `Response` has no enumerable own fields — which lost
 // the cause entirely and bucketed every failure under one "Error" fingerprint.)
-class IngestRejected extends Schema.TaggedErrorClass<IngestRejected>()("@maple/cli/IngestRejected", {
+class IngestRejected extends Schema.TaggedError<IngestRejected>()("@maple/cli/IngestRejected", {
 	response: Schema.instanceOf(Response),
 	status: Schema.Number,
 	message: Schema.String,

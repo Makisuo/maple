@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect"
 import { mapleToolDefinitions, toInputSchema, type MapleToolDefinition } from "./tools/registry"
 import type { McpToolResult } from "./tools/types"
 
-class McpDecodeError extends Schema.TaggedErrorClass<McpDecodeError>()("@maple/mcp/decode-error", {
+class McpDecodeError extends Schema.TaggedError<McpDecodeError>()("@maple/mcp/decode-error", {
 	errorMessage: Schema.String,
 }) {}
 

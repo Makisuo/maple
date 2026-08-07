@@ -55,7 +55,7 @@ export const createLocalUiWorker = ({
 					destinations: [tracesDestination?.slug ?? "maple"],
 				},
 			},
-			url: true,
+			workersDev: true,
 			domain: domains.local,
 		})
 

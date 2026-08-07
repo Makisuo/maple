@@ -1,0 +1,54 @@
+diff --git a/bin/exec.js b/bin/exec.js
+--- a/bin/exec.js
++++ b/bin/exec.js
+@@ -181 +181 @@
+-	AuthError = class extends Schema.TaggedErrorClass()("AuthError", {
++	AuthError = class extends Schema.TaggedError()("AuthError", {
+diff --git a/lib/Auth/AuthProvider.js b/lib/Auth/AuthProvider.js
+--- a/lib/Auth/AuthProvider.js
++++ b/lib/Auth/AuthProvider.js
+@@ -39 +39 @@
+-export class AuthError extends Schema.TaggedErrorClass()("AuthError", {
++export class AuthError extends Schema.TaggedError()("AuthError", {
+diff --git a/lib/Bundle/Bundle.js b/lib/Bundle/Bundle.js
+--- a/lib/Bundle/Bundle.js
++++ b/lib/Bundle/Bundle.js
+@@ -18 +18 @@
+-export class BundleError extends Schema.TaggedErrorClass()("BundleError", {
++export class BundleError extends Schema.TaggedError()("BundleError", {
+diff --git a/lib/Cloudflare/Access.js b/lib/Cloudflare/Access.js
+--- a/lib/Cloudflare/Access.js
++++ b/lib/Cloudflare/Access.js
+@@ -10 +10 @@
+-export class AccessError extends Schema.TaggedErrorClass()("AccessError", {
++export class AccessError extends Schema.TaggedError()("AccessError", {
+diff --git a/lib/Cloudflare/Workers/RuntimeBindings.js b/lib/Cloudflare/Workers/RuntimeBindings.js
+--- a/lib/Cloudflare/Workers/RuntimeBindings.js
++++ b/lib/Cloudflare/Workers/RuntimeBindings.js
+@@ -6 +6 @@
+-export class WorkerValidationError extends Schema.TaggedErrorClass()("WorkerValidationError", {
++export class WorkerValidationError extends Schema.TaggedError()("WorkerValidationError", {
+diff --git a/src/Auth/AuthProvider.ts b/src/Auth/AuthProvider.ts
+--- a/src/Auth/AuthProvider.ts
++++ b/src/Auth/AuthProvider.ts
+@@ -43 +43 @@
+-export class AuthError extends Schema.TaggedErrorClass<AuthError>()(
++export class AuthError extends Schema.TaggedError<AuthError>()(
+diff --git a/src/Bundle/Bundle.ts b/src/Bundle/Bundle.ts
+--- a/src/Bundle/Bundle.ts
++++ b/src/Bundle/Bundle.ts
+@@ -98 +98 @@
+-export class BundleError extends Schema.TaggedErrorClass<BundleError>()(
++export class BundleError extends Schema.TaggedError<BundleError>()(
+diff --git a/src/Cloudflare/Access.ts b/src/Cloudflare/Access.ts
+--- a/src/Cloudflare/Access.ts
++++ b/src/Cloudflare/Access.ts
+@@ -11 +11 @@
+-export class AccessError extends Schema.TaggedErrorClass<AccessError>()(
++export class AccessError extends Schema.TaggedError<AccessError>()(
+diff --git a/src/Cloudflare/Workers/RuntimeBindings.ts b/src/Cloudflare/Workers/RuntimeBindings.ts
+--- a/src/Cloudflare/Workers/RuntimeBindings.ts
++++ b/src/Cloudflare/Workers/RuntimeBindings.ts
+@@ -45 +45 @@
+-export class WorkerValidationError extends Schema.TaggedErrorClass<WorkerValidationError>()(
++export class WorkerValidationError extends Schema.TaggedError<WorkerValidationError>()(

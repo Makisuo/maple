@@ -8,7 +8,7 @@ export class DeleteOrganizationResponse extends Schema.Class<DeleteOrganizationR
 	deleted: Schema.Literal(true),
 }) {}
 
-export class OrganizationForbiddenError extends Schema.TaggedErrorClass<OrganizationForbiddenError>()(
+export class OrganizationForbiddenError extends Schema.TaggedError<OrganizationForbiddenError>()(
 	"@maple/http/errors/OrganizationForbiddenError",
 	{
 		message: Schema.String,
@@ -16,7 +16,7 @@ export class OrganizationForbiddenError extends Schema.TaggedErrorClass<Organiza
 	{ httpApiStatus: 403 },
 ) {}
 
-export class OrganizationPersistenceError extends Schema.TaggedErrorClass<OrganizationPersistenceError>()(
+export class OrganizationPersistenceError extends Schema.TaggedError<OrganizationPersistenceError>()(
 	"@maple/http/errors/OrganizationPersistenceError",
 	{
 		message: Schema.String,
@@ -24,7 +24,7 @@ export class OrganizationPersistenceError extends Schema.TaggedErrorClass<Organi
 	{ httpApiStatus: 503 },
 ) {}
 
-export class OrganizationProviderError extends Schema.TaggedErrorClass<OrganizationProviderError>()(
+export class OrganizationProviderError extends Schema.TaggedError<OrganizationProviderError>()(
 	"@maple/http/errors/OrganizationProviderError",
 	{
 		message: Schema.String,

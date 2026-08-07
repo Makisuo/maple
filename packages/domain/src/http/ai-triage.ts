@@ -122,7 +122,7 @@ export class AiTriageRunCreateRequest extends Schema.Class<AiTriageRunCreateRequ
 // Errors
 // ---------------------------------------------------------------------------
 
-export class AiTriagePersistenceError extends Schema.TaggedErrorClass<AiTriagePersistenceError>()(
+export class AiTriagePersistenceError extends Schema.TaggedError<AiTriagePersistenceError>()(
 	"@maple/http/ai-triage/AiTriagePersistenceError",
 	{
 		message: Schema.String,
@@ -131,7 +131,7 @@ export class AiTriagePersistenceError extends Schema.TaggedErrorClass<AiTriagePe
 	{ httpApiStatus: 503 },
 ) {}
 
-export class AiTriageForbiddenError extends Schema.TaggedErrorClass<AiTriageForbiddenError>()(
+export class AiTriageForbiddenError extends Schema.TaggedError<AiTriageForbiddenError>()(
 	"@maple/http/ai-triage/AiTriageForbiddenError",
 	{
 		message: Schema.String,
@@ -139,7 +139,7 @@ export class AiTriageForbiddenError extends Schema.TaggedErrorClass<AiTriageForb
 	{ httpApiStatus: 403 },
 ) {}
 
-export class AiTriageValidationError extends Schema.TaggedErrorClass<AiTriageValidationError>()(
+export class AiTriageValidationError extends Schema.TaggedError<AiTriageValidationError>()(
 	"@maple/http/ai-triage/AiTriageValidationError",
 	{
 		message: Schema.String,
@@ -147,7 +147,7 @@ export class AiTriageValidationError extends Schema.TaggedErrorClass<AiTriageVal
 	{ httpApiStatus: 400 },
 ) {}
 
-export class AiTriageNotFoundError extends Schema.TaggedErrorClass<AiTriageNotFoundError>()(
+export class AiTriageNotFoundError extends Schema.TaggedError<AiTriageNotFoundError>()(
 	"@maple/http/ai-triage/AiTriageNotFoundError",
 	{
 		message: Schema.String,

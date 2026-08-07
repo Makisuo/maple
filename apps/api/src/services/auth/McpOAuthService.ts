@@ -44,7 +44,7 @@ const isRateLimitBinding = (value: unknown): value is RateLimitBinding =>
 	"limit" in value &&
 	typeof (value as { limit?: unknown }).limit === "function"
 
-export class McpOAuthProtocolError extends Schema.TaggedErrorClass<McpOAuthProtocolError>()(
+export class McpOAuthProtocolError extends Schema.TaggedError<McpOAuthProtocolError>()(
 	"@maple/api/errors/McpOAuthProtocolError",
 	{
 		error: Schema.String,
@@ -54,7 +54,7 @@ export class McpOAuthProtocolError extends Schema.TaggedErrorClass<McpOAuthProto
 	},
 ) {}
 
-export class McpOAuthRateLimitError extends Schema.TaggedErrorClass<McpOAuthRateLimitError>()(
+export class McpOAuthRateLimitError extends Schema.TaggedError<McpOAuthRateLimitError>()(
 	"@maple/api/errors/McpOAuthRateLimitError",
 	{ message: Schema.String },
 ) {}

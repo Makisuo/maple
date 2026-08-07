@@ -28,7 +28,8 @@
 	"dependencies": {
 		"@clerk/backend": "^2.30.1",
 		"@clickhouse/client-web": "catalog:clickhouse",
-		"@distilled.cloud/cloudflare": "0.30.1",
+		"@distilled.cloud/cloudflare": "1.0.0-rc.2",
+		"@distilled.cloud/core": "1.0.0-rc.2",
 		"@effect/platform-bun": "catalog:effect",
 		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/auth": "workspace:*",

@@ -12,7 +12,7 @@
 //   bun run scripts/bench-queries.ts compare  <a> <b>   # diff two runs
 //
 // Built on Effect v4 end-to-end: `effect/unstable/cli` for the command tree
-// (help/version/usage come for free), `Config` for env, `Schema.TaggedErrorClass`
+// (help/version/usage come for free), `Config` for env, `Schema.TaggedError`
 // for failures, `Context.Service` HTTP clients, core `FileSystem` for IO, and
 // `@effect/platform-bun` for the runtime + CLI environment. Env (via `Config`):
 //   TINYBIRD_HOST, TINYBIRD_TOKEN          — source (where prod traces live)
@@ -45,7 +45,7 @@ import * as Integrations from "@maple/query-engine-integrations"
 // Errors
 // ---------------------------------------------------------------------------
 
-class MissingConfigError extends Schema.TaggedErrorClass<MissingConfigError>()(
+class MissingConfigError extends Schema.TaggedError<MissingConfigError>()(
 	"@maple/api/scripts/bench-queries/MissingConfigError",
 	{
 		what: Schema.String,
@@ -53,7 +53,7 @@ class MissingConfigError extends Schema.TaggedErrorClass<MissingConfigError>()(
 	},
 ) {}
 
-class HttpRequestError extends Schema.TaggedErrorClass<HttpRequestError>()(
+class HttpRequestError extends Schema.TaggedError<HttpRequestError>()(
 	"@maple/api/scripts/bench-queries/HttpRequestError",
 	{
 		url: Schema.String,
@@ -61,7 +61,7 @@ class HttpRequestError extends Schema.TaggedErrorClass<HttpRequestError>()(
 	},
 ) {}
 
-class UpstreamStatusError extends Schema.TaggedErrorClass<UpstreamStatusError>()(
+class UpstreamStatusError extends Schema.TaggedError<UpstreamStatusError>()(
 	"@maple/api/scripts/bench-queries/UpstreamStatusError",
 	{
 		source: Schema.String,
@@ -70,7 +70,7 @@ class UpstreamStatusError extends Schema.TaggedErrorClass<UpstreamStatusError>()
 	},
 ) {}
 
-class BenchFileError extends Schema.TaggedErrorClass<BenchFileError>()(
+class BenchFileError extends Schema.TaggedError<BenchFileError>()(
 	"@maple/api/scripts/bench-queries/BenchFileError",
 	{
 		path: Schema.String,
@@ -79,7 +79,7 @@ class BenchFileError extends Schema.TaggedErrorClass<BenchFileError>()(
 	},
 ) {}
 
-class InvalidDurationError extends Schema.TaggedErrorClass<InvalidDurationError>()(
+class InvalidDurationError extends Schema.TaggedError<InvalidDurationError>()(
 	"@maple/api/scripts/bench-queries/InvalidDurationError",
 	{
 		input: Schema.String,

@@ -11,7 +11,7 @@ bun add @maple-dev/clickhouse-builder effect@beta
 
 > **Note the `@beta` tag.** This package requires **Effect 4** (`>=4.0.0-beta.33`), which is
 > not yet published under npm's `latest` tag. A bare `npm i effect` installs 3.x, and the
-> package then throws `Schema.TaggedErrorClass is not a function` on import.
+> package then throws `Schema.TaggedError is not a function` on import.
 
 The package is ESM-only and ships its own type declarations.
 

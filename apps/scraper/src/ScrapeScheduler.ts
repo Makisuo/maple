@@ -76,7 +76,7 @@ export interface ScrapeOutcome {
 	readonly retryAfterMs: number | null
 }
 
-class ScrapeAttemptFailed extends Schema.TaggedErrorClass<ScrapeAttemptFailed>()("ScrapeAttemptFailed", {
+class ScrapeAttemptFailed extends Schema.TaggedError<ScrapeAttemptFailed>()("ScrapeAttemptFailed", {
 	/**
 	 * The SDK derives a span's `status.message` from the failure's `Error.message`
 	 * (`Cause.prettyErrors`), so without this field every failed scrape produced an
