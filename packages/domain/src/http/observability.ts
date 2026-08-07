@@ -228,7 +228,7 @@ const SearchLogsResponse = Schema.Struct({
 
 // --- Error class ---
 
-export class ObservabilityApiError extends Schema.TaggedErrorClass<ObservabilityApiError>()(
+export class ObservabilityApiError extends Schema.TaggedError<ObservabilityApiError>()(
 	"@maple/http/errors/ObservabilityApiError",
 	{
 		message: Schema.String,

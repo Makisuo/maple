@@ -15,7 +15,7 @@ import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-lis
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import type { ErrorIssueId } from "@maple/domain/http"
+import type { AlertIncidentDocument, ErrorIssueId } from "@maple/domain/http"
 
 const SearchSchema = Schema.Struct({
 	/** Base64url alert context carried by the "Ask Maple AI" notification link. */
@@ -117,7 +117,12 @@ function AlertIncidentPage() {
 	}
 
 	return (
-		<AlertInvestigationRedirect alertContext={alertContext} incidentId={incidentId} issueId={issueId} />
+		<AlertInvestigationRedirect
+			alertContext={alertContext}
+			incidentId={incidentId}
+			issueId={issueId}
+			incident={incident ?? null}
+		/>
 	)
 }
 
@@ -125,10 +130,18 @@ function AlertInvestigationRedirect({
 	alertContext,
 	incidentId,
 	issueId,
+	incident,
 }: {
 	alertContext: AlertContext
 	incidentId: string
 	issueId?: ErrorIssueId
+	/**
+	 * The incident row, purely for its window. `AlertContext` is the *chat*
+	 * preamble shape and carries no timestamps, so without this the snapshot's
+	 * interval was hardcoded null — and the agent's first instruction is to scope
+	 * every query to the incident interval.
+	 */
+	incident: AlertIncidentDocument | null
 }) {
 	const navigate = useNavigate()
 	const create = useAtomSet(MapleApiV2AtomClient.mutation("investigations", "create"), {
@@ -155,8 +168,12 @@ function AlertInvestigationRedirect({
 						{ label: "Observed", value: String(alertContext.value ?? "no data") },
 					],
 					references: issueId ? [{ label: "Issue", url: `/errors/issues/${issueId}` }] : [],
-					incidentStartedAt: null,
-					incidentEndedAt: null,
+					incidentStartedAt: incident?.firstTriggeredAt ?? null,
+					incidentEndedAt: incident?.resolvedAt ?? incident?.lastTriggeredAt ?? null,
+					signalType: alertContext.signalType,
+					observedValue: alertContext.value,
+					thresholdValue: alertContext.threshold,
+					serviceName: alertContext.groupKey,
 				},
 			},
 			reactivityKeys: ["investigations"],

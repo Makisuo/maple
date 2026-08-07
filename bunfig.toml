@@ -1,0 +1,7 @@
+[install]
+# Don't resolve a version published less than 3 days ago — skips the window in
+# which most compromised npm releases are caught and unpublished. Only affects
+# new resolution; versions already pinned in bun.lock install as-is, so
+# `bun install --frozen-lockfile` in CI is unaffected.
+# Emergency override: bun install --minimum-release-age=0
+minimumReleaseAge = 259200

@@ -165,7 +165,7 @@ export class AnomalyDetectorSettingsUpdateRequest extends Schema.Class<AnomalyDe
 // Errors
 // ---------------------------------------------------------------------------
 
-export class AnomalyPersistenceError extends Schema.TaggedErrorClass<AnomalyPersistenceError>()(
+export class AnomalyPersistenceError extends Schema.TaggedError<AnomalyPersistenceError>()(
 	"@maple/http/anomalies/AnomalyPersistenceError",
 	{
 		message: Schema.String,
@@ -174,7 +174,7 @@ export class AnomalyPersistenceError extends Schema.TaggedErrorClass<AnomalyPers
 	{ httpApiStatus: 503 },
 ) {}
 
-export class AnomalyForbiddenError extends Schema.TaggedErrorClass<AnomalyForbiddenError>()(
+export class AnomalyForbiddenError extends Schema.TaggedError<AnomalyForbiddenError>()(
 	"@maple/http/anomalies/AnomalyForbiddenError",
 	{
 		message: Schema.String,
@@ -182,7 +182,7 @@ export class AnomalyForbiddenError extends Schema.TaggedErrorClass<AnomalyForbid
 	{ httpApiStatus: 403 },
 ) {}
 
-export class AnomalyIncidentNotFoundError extends Schema.TaggedErrorClass<AnomalyIncidentNotFoundError>()(
+export class AnomalyIncidentNotFoundError extends Schema.TaggedError<AnomalyIncidentNotFoundError>()(
 	"@maple/http/anomalies/AnomalyIncidentNotFoundError",
 	{
 		message: Schema.String,
@@ -191,7 +191,7 @@ export class AnomalyIncidentNotFoundError extends Schema.TaggedErrorClass<Anomal
 	{ httpApiStatus: 404 },
 ) {}
 
-export class AnomalyLinkedIssueNotFoundError extends Schema.TaggedErrorClass<AnomalyLinkedIssueNotFoundError>()(
+export class AnomalyLinkedIssueNotFoundError extends Schema.TaggedError<AnomalyLinkedIssueNotFoundError>()(
 	"@maple/http/anomalies/AnomalyLinkedIssueNotFoundError",
 	{
 		message: Schema.String,

@@ -64,7 +64,6 @@ const baseInput = (overrides: Partial<Parameters<typeof upsertAlertIssue>[0]> = 
 	incidentId: INCIDENT_1,
 	serviceName: "checkout",
 	timestamp: T0,
-	agentBinding: undefined,
 	internalServiceToken: Option.none(),
 	...overrides,
 })

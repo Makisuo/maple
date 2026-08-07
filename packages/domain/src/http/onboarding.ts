@@ -23,7 +23,7 @@ export class UpdateOnboardingStateRequest extends Schema.Class<UpdateOnboardingS
 	markChecklistDismissed: Schema.optionalKey(Schema.Boolean),
 }) {}
 
-export class OnboardingPersistenceError extends Schema.TaggedErrorClass<OnboardingPersistenceError>()(
+export class OnboardingPersistenceError extends Schema.TaggedError<OnboardingPersistenceError>()(
 	"@maple/http/errors/OnboardingPersistenceError",
 	{
 		message: Schema.String,

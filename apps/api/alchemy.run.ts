@@ -119,6 +119,18 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			runId: string
 		}>(resolveWorkerName("ai-triage", stage), { className: "AiTriageWorkflow" })
 
+		// Fan-out investigation: N lens agents in parallel, then a validator that
+		// promotes one cause and records why each rival lost. Class is exported from
+		// src/worker.ts.
+		const investigationFanoutWorkflow = Cloudflare.Workflow<{
+			orgId: string
+			investigationId: string
+			lensIds: ReadonlyArray<string>
+			attempt: number
+		}>(resolveWorkerName("investigation-fanout", stage), {
+			className: "InvestigationFanoutWorkflow",
+		})
+
 		// Durable chat transcripts, one Durable Object per "<orgId>:<tabId>". v2 provisions new
 		// DO classes as SQLite-backed by default. Class is exported from src/worker.ts.
 		const chatSession = Cloudflare.DurableObject("chat-session", { className: "ChatSession" })
@@ -168,7 +180,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			url: true,
+			workersDev: true,
 			// Custom domain (not a zone route): routes don't create DNS records, so
 			// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains
 			// provision DNS + edge certs automatically.
@@ -203,6 +215,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				PLANETSCALE_WEBHOOK_QUEUE_NAME: planetScaleWebhookQueueName,
 				CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: schemaApplyWorkflow,
 				AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
+				INVESTIGATION_FANOUT_WORKFLOW: investigationFanoutWorkflow,
 				API_V2_RATE_LIMITER: Cloudflare.RateLimit("API_V2_RATE_LIMITER", {
 					namespaceId: 2026071801,
 					simple: { limit: 600, period: 60 },
@@ -260,8 +273,16 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				// 16/250 and the code defaults moved to 6/40 underneath them.
 				QE_BUCKET_CACHE_READ_CONCURRENCY: process.env.QE_BUCKET_CACHE_READ_CONCURRENCY?.trim() || "6",
 				EDGE_CACHE_READ_TIMEOUT_MS: process.env.EDGE_CACHE_READ_TIMEOUT_MS?.trim() || "40",
+				// Migration 0008's rollout gate. Flipped to on after verifying parity on
+				// the managed warehouse: `service_operations_minutely` matches raw
+				// `traces` to the digit over 2026-07-28..08-01 (36.07 / 30.76 / 5.15 /
+				// 33.08 / 29.19 M estimated spans), and both rollups are continuous back
+				// to 2026-07-01, so the backfill ran. Live-write parity is within 0.4%
+				// (boundary-minute inclusion). BYO clusters that never ran 0008 are
+				// unaffected: `isMissingServiceOperationsRollup` falls the read back to
+				// the raw path per-org.
 				SERVICE_OPERATIONS_ROLLUP_ENABLED:
-					process.env.SERVICE_OPERATIONS_ROLLUP_ENABLED?.trim() || "false",
+					process.env.SERVICE_OPERATIONS_ROLLUP_ENABLED?.trim() || "true",
 				...optionalPlain("MAPLE_ENDPOINT"),
 				// Derived from the stage, deliberately NOT `optionalPlain` — that helper
 				// lets `process.env` win over the fallback, so a stray

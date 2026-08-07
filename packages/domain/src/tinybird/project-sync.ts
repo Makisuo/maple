@@ -121,7 +121,7 @@ const WorkspaceProbeSchema = Schema.Struct({
 	name: Schema.optional(Schema.String),
 })
 
-export class TinybirdSyncRejectedError extends Schema.TaggedErrorClass<TinybirdSyncRejectedError>()(
+export class TinybirdSyncRejectedError extends Schema.TaggedError<TinybirdSyncRejectedError>()(
 	"@maple/tinybird/errors/SyncRejected",
 	{
 		message: Schema.String,
@@ -129,7 +129,7 @@ export class TinybirdSyncRejectedError extends Schema.TaggedErrorClass<TinybirdS
 	},
 ) {}
 
-export class TinybirdSyncUnavailableError extends Schema.TaggedErrorClass<TinybirdSyncUnavailableError>()(
+export class TinybirdSyncUnavailableError extends Schema.TaggedError<TinybirdSyncUnavailableError>()(
 	"@maple/tinybird/errors/SyncUnavailable",
 	{
 		message: Schema.String,
@@ -139,9 +139,9 @@ export class TinybirdSyncUnavailableError extends Schema.TaggedErrorClass<Tinybi
 
 // Not-yet-ready signal for poll steps. Thrown so Cloudflare Workflow step retry
 // policies re-run the step; not a real failure. Cloudflare inspects the thrown
-// JS Error for retry semantics — TaggedErrorClass produces a class that extends
+// JS Error for retry semantics — TaggedError produces a class that extends
 // Error, so `instanceof` still works at the step boundary.
-export class TinybirdDeploymentNotReadyError extends Schema.TaggedErrorClass<TinybirdDeploymentNotReadyError>()(
+export class TinybirdDeploymentNotReadyError extends Schema.TaggedError<TinybirdDeploymentNotReadyError>()(
 	"@maple/tinybird/errors/DeploymentNotReady",
 	{
 		message: Schema.String,

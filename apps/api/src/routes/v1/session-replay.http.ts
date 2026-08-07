@@ -146,6 +146,10 @@ export const HttpSessionReplaysLive = HttpApiBuilder.group(MapleApi, "sessionRep
 						}),
 						{ orgId: tenant.orgId, sessionId: payload.sessionId },
 					)
+					// Resolve the org's route before fanning out, so the config read lands
+					// on an empty connection pool instead of queueing behind a sibling's
+					// warehouse fetch. No-op once the in-isolate memo is warm.
+					yield* warehouse.warmRoute(tenant)
 					const [maybeData, maybeActivity] = yield* Effect.all(
 						[
 							warehouse.compiledQueryFirst(tenant, compiled, {

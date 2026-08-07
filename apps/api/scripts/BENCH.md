@@ -38,7 +38,7 @@ Built on Effect v4 end-to-end:
   `BunServices.layer` providing the CLI `Environment` (FileSystem, Path,
   Terminal, Stdio). Exits non-zero on failure with structured error logging.
 - **Config** — env resolved via `Config` (`CLICKHOUSE_*`, `TINYBIRD_*`).
-- **Errors** — `Schema.TaggedErrorClass`: `MissingConfigError`,
+- **Errors** — `Schema.TaggedError`: `MissingConfigError`,
   `HttpRequestError`, `UpstreamStatusError`, `BenchFileError`,
   `InvalidDurationError`.
 - **Services** — ClickHouse + Tinybird HTTP clients as `Context.Service`s wired

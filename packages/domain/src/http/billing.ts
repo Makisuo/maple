@@ -224,7 +224,7 @@ export class UpdateSpendLimitsRequest extends Schema.Class<UpdateSpendLimitsRequ
 	featureCaps: Schema.Record(Schema.String, Schema.NullOr(Schema.Number)),
 }) {}
 
-export class SpendLimitValidationError extends Schema.TaggedErrorClass<SpendLimitValidationError>()(
+export class SpendLimitValidationError extends Schema.TaggedError<SpendLimitValidationError>()(
 	"@maple/http/errors/SpendLimitValidationError",
 	{
 		message: Schema.String,
@@ -232,7 +232,7 @@ export class SpendLimitValidationError extends Schema.TaggedErrorClass<SpendLimi
 	{ httpApiStatus: 400 },
 ) {}
 
-export class SpendLimitPersistenceError extends Schema.TaggedErrorClass<SpendLimitPersistenceError>()(
+export class SpendLimitPersistenceError extends Schema.TaggedError<SpendLimitPersistenceError>()(
 	"@maple/http/errors/SpendLimitPersistenceError",
 	{
 		message: Schema.String,
@@ -282,7 +282,7 @@ export class CustomerPortalResult extends Schema.Class<CustomerPortalResult>("Cu
 
 // ---- Errors ----
 
-export class BillingUpstreamError extends Schema.TaggedErrorClass<BillingUpstreamError>()(
+export class BillingUpstreamError extends Schema.TaggedError<BillingUpstreamError>()(
 	"@maple/http/errors/BillingUpstreamError",
 	{
 		message: Schema.String,

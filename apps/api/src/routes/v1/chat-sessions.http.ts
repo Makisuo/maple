@@ -56,7 +56,7 @@ const decodeSendRequest = Schema.decodeUnknownEffect(Schema.fromJsonString(ChatS
  * `Effect.promise` would promote those to defects — a 500 with no domain error, and, in the turn
  * path, a defect escaping into a recovery handler that fails the same way.
  */
-class ChatSessionUnavailableError extends Schema.TaggedErrorClass<ChatSessionUnavailableError>()(
+class ChatSessionUnavailableError extends Schema.TaggedError<ChatSessionUnavailableError>()(
 	"@maple/api/chat/ChatSessionUnavailableError",
 	{ operation: Schema.String },
 ) {}

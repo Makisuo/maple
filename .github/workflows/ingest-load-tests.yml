@@ -34,7 +34,7 @@ permissions:
 jobs:
     load:
         name: OTLP protobuf load test
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 45
         defaults:
             run:

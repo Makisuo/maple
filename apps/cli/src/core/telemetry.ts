@@ -30,4 +30,10 @@ export const TelemetryLayer = Maple.layer({
 	repositoryUrl: "https://github.com/Makisuo/maple",
 	ingestKey: process.env.MAPLE_INGEST_KEY ?? DEFAULT_INGEST_KEY,
 	shutdownTimeout: "3 seconds",
+	// NOTE: expected user errors (bad flag, "maple is already running") still
+	// record as Error spans here. `anticipatedErrorIdentifiers` — which the API
+	// and alerting workers use to map 4xx-ish outcomes to Ok — is implemented in
+	// Maple's flushable tracer, and this server layer wires Effect's stock
+	// `Otlp.layerJson` instead. Supporting it on the CLI means giving the server
+	// SDK the flushable tracer, which is an SDK change, not a CLI one.
 })

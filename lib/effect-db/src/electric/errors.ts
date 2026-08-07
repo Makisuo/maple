@@ -3,7 +3,7 @@ import { Schema } from "effect"
 /**
  * Base error for Electric Collection operations
  */
-export class ElectricCollectionError extends Schema.TaggedErrorClass<ElectricCollectionError>()(
+export class ElectricCollectionError extends Schema.TaggedError<ElectricCollectionError>()(
 	"ElectricCollectionError",
 	{
 		message: Schema.String,
@@ -14,7 +14,7 @@ export class ElectricCollectionError extends Schema.TaggedErrorClass<ElectricCol
 /**
  * Error thrown when an insert operation fails
  */
-export class InsertError extends Schema.TaggedErrorClass<InsertError>()("InsertError", {
+export class InsertError extends Schema.TaggedError<InsertError>()("InsertError", {
 	message: Schema.String,
 	data: Schema.optional(Schema.Unknown),
 	cause: Schema.optional(Schema.Unknown),
@@ -23,7 +23,7 @@ export class InsertError extends Schema.TaggedErrorClass<InsertError>()("InsertE
 /**
  * Error thrown when an update operation fails
  */
-export class UpdateError extends Schema.TaggedErrorClass<UpdateError>()("UpdateError", {
+export class UpdateError extends Schema.TaggedError<UpdateError>()("UpdateError", {
 	message: Schema.String,
 	key: Schema.optional(Schema.Unknown),
 	cause: Schema.optional(Schema.Unknown),
@@ -32,7 +32,7 @@ export class UpdateError extends Schema.TaggedErrorClass<UpdateError>()("UpdateE
 /**
  * Error thrown when a delete operation fails
  */
-export class DeleteError extends Schema.TaggedErrorClass<DeleteError>()("DeleteError", {
+export class DeleteError extends Schema.TaggedError<DeleteError>()("DeleteError", {
 	message: Schema.String,
 	key: Schema.optional(Schema.Unknown),
 	cause: Schema.optional(Schema.Unknown),
@@ -41,7 +41,7 @@ export class DeleteError extends Schema.TaggedErrorClass<DeleteError>()("DeleteE
 /**
  * Error thrown when waiting for a transaction ID times out
  */
-export class TxIdTimeoutError extends Schema.TaggedErrorClass<TxIdTimeoutError>()("TxIdTimeoutError", {
+export class TxIdTimeoutError extends Schema.TaggedError<TxIdTimeoutError>()("TxIdTimeoutError", {
 	message: Schema.String,
 	txid: Schema.Number,
 	timeout: Schema.Number,
@@ -50,7 +50,7 @@ export class TxIdTimeoutError extends Schema.TaggedErrorClass<TxIdTimeoutError>(
 /**
  * Error thrown when a required transaction ID is missing from handler result
  */
-export class MissingTxIdError extends Schema.TaggedErrorClass<MissingTxIdError>()("MissingTxIdError", {
+export class MissingTxIdError extends Schema.TaggedError<MissingTxIdError>()("MissingTxIdError", {
 	message: Schema.String,
 	operation: Schema.Literals(["insert", "update", "delete"]),
 }) {}
@@ -58,7 +58,7 @@ export class MissingTxIdError extends Schema.TaggedErrorClass<MissingTxIdError>(
 /**
  * Error thrown when an invalid transaction ID type is provided
  */
-export class InvalidTxIdError extends Schema.TaggedErrorClass<InvalidTxIdError>()("InvalidTxIdError", {
+export class InvalidTxIdError extends Schema.TaggedError<InvalidTxIdError>()("InvalidTxIdError", {
 	message: Schema.String,
 	receivedType: Schema.String,
 }) {}
@@ -68,7 +68,7 @@ export class InvalidTxIdError extends Schema.TaggedErrorClass<InvalidTxIdError>(
  * than a timeout. Carries the original rejection in `cause` so callers can
  * inspect it without parsing error strings.
  */
-export class AwaitTxIdError extends Schema.TaggedErrorClass<AwaitTxIdError>()("AwaitTxIdError", {
+export class AwaitTxIdError extends Schema.TaggedError<AwaitTxIdError>()("AwaitTxIdError", {
 	message: Schema.String,
 	txid: Schema.Number,
 	collectionId: Schema.optional(Schema.String),
@@ -78,7 +78,7 @@ export class AwaitTxIdError extends Schema.TaggedErrorClass<AwaitTxIdError>()("A
 /**
  * Error thrown when the backoff retry budget is exhausted for a collection.
  */
-export class MaxRetriesExceededError extends Schema.TaggedErrorClass<MaxRetriesExceededError>()(
+export class MaxRetriesExceededError extends Schema.TaggedError<MaxRetriesExceededError>()(
 	"MaxRetriesExceededError",
 	{
 		message: Schema.String,
@@ -91,7 +91,7 @@ export class MaxRetriesExceededError extends Schema.TaggedErrorClass<MaxRetriesE
 /**
  * Error thrown when sync configuration is invalid
  */
-export class SyncConfigError extends Schema.TaggedErrorClass<SyncConfigError>()("SyncConfigError", {
+export class SyncConfigError extends Schema.TaggedError<SyncConfigError>()("SyncConfigError", {
 	message: Schema.String,
 	cause: Schema.optional(Schema.Unknown),
 }) {}
@@ -99,7 +99,7 @@ export class SyncConfigError extends Schema.TaggedErrorClass<SyncConfigError>()(
 /**
  * Error thrown when an optimistic action fails
  */
-export class OptimisticActionError extends Schema.TaggedErrorClass<OptimisticActionError>()(
+export class OptimisticActionError extends Schema.TaggedError<OptimisticActionError>()(
 	"OptimisticActionError",
 	{
 		message: Schema.String,
@@ -110,7 +110,7 @@ export class OptimisticActionError extends Schema.TaggedErrorClass<OptimisticAct
 /**
  * Error thrown when collection sync fails during optimistic action
  */
-export class SyncError extends Schema.TaggedErrorClass<SyncError>()("SyncError", {
+export class SyncError extends Schema.TaggedError<SyncError>()("SyncError", {
 	message: Schema.String,
 	txid: Schema.optional(Schema.Number),
 	collectionName: Schema.optional(Schema.String),

@@ -17,6 +17,7 @@ Atom.runtime.addGlobalLayer(MapleFetchHttpClientLive)
 Atom.runtime.addGlobalLayer(mapleOtelLayer)
 
 export const appRegistry = AtomRegistry.make({ scheduleTask })
+export const appMemoMap = appRegistry.get(Atom.runtime.memoMap)
 
 export const sharedAtomRuntime = MapleApiAtomClient.runtime
 

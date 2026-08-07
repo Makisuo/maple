@@ -47,6 +47,7 @@ import {
 	type IssueSeverity,
 	type WorkflowState,
 } from "@maple/domain/http"
+import type { ErrorIssueDocument } from "@maple/domain/http"
 import type { V2Investigation } from "@maple/domain/http/v2"
 import {
 	makeIssueClaimPayload,
@@ -240,20 +241,42 @@ function IssueDetailPage() {
 		await applySeverity(next)
 	}
 
+	/**
+	 * What this issue is called, for a human and for an agent.
+	 *
+	 * This used to be `issue.exceptionType || "Unknown error"`, and that fallback
+	 * was the literal source of the "it's an unknown error" diagnoses: the title
+	 * becomes the free-form subject's entire prompt, so an issue with no exception
+	 * type briefed the agent with `Investigate this issue: Unknown error`. Both
+	 * `errorLabel` and `exceptionMessage` were sitting on the row unused, and a
+	 * status-message-only error — precisely the class with no exception type — is
+	 * exactly the one whose label carries the only readable thing about it.
+	 */
+	const issueHeadline = (issue: ErrorIssueDocument): string => {
+		if (issue.exceptionType && issue.exceptionMessage) {
+			return `${issue.exceptionType}: ${issue.exceptionMessage}`
+		}
+		return issue.exceptionType || issue.exceptionMessage || issue.errorLabel || "Unlabelled error"
+	}
+
+	// Takes the whole issue rather than a handful of scraped strings. The previous
+	// signature — title, serviceName, occurrences — is why the snapshot was so thin:
+	// adding a field meant threading a fourth parameter through two call sites, so
+	// nobody did, and the agent got a title and a service name.
 	const startInvestigation = async (params: {
-		title: string
-		serviceName: string
+		issue: ErrorIssueDocument
 		kind: "error" | "alert"
 		incidentId: string | null
-		occurrences: number
 	}) => {
 		setBusy("investigation")
+		const issue = params.issue
+		const title = issueHeadline(issue)
 		const subject =
 			params.incidentId === null
 				? {
 						type: "freeform" as const,
-						title: params.title,
-						prompt: `Investigate this issue: ${params.title}`,
+						title,
+						prompt: `Investigate this issue: ${title}`,
 						context_refs: [{ issue_id: issueId }],
 					}
 				: {
@@ -266,17 +289,32 @@ function IssueDetailPage() {
 			payload: {
 				subject: subject as never,
 				snapshot: {
-					title: params.title,
-					scope: params.serviceName || null,
+					title,
+					scope: issue.serviceName || null,
 					status: "open",
-					severity: null,
+					severity: issue.severity,
 					facts: [
-						{ label: "Service", value: params.serviceName || "unknown" },
-						{ label: "Occurrences", value: String(params.occurrences) },
+						{ label: "Service", value: issue.serviceName || "unknown" },
+						{ label: "Occurrences", value: String(issue.occurrenceCount) },
+						...(issue.exceptionType ? [{ label: "Exception", value: issue.exceptionType }] : []),
+						...(issue.topFrame ? [{ label: "Top frame", value: issue.topFrame }] : []),
 					],
 					references: [{ label: "Issue", url: `/errors/issues/${issueId}` }],
-					incidentStartedAt: null,
-					incidentEndedAt: null,
+					// The agent is told to scope every query to the incident interval. It
+					// could not, because both of these were hardcoded null while the row
+					// carried them.
+					incidentStartedAt: issue.firstSeenAt,
+					incidentEndedAt: issue.lastSeenAt,
+					// The identifiers the agent needs to *call tools with*, as opposed to
+					// the display facts above. `error_detail` takes a fingerprint and there
+					// was no way for the agent to learn one.
+					fingerprintHash: issue.fingerprintHash || null,
+					exceptionType: issue.exceptionType || null,
+					exceptionMessage: issue.exceptionMessage || null,
+					topFrame: issue.topFrame || null,
+					errorLabel: issue.errorLabel || null,
+					occurrenceCount: issue.occurrenceCount,
+					serviceName: issue.serviceName || null,
 				},
 			},
 			reactivityKeys: ["investigations", `errorIssue:${issueId}:investigations`],
@@ -372,14 +410,14 @@ function IssueDetailPage() {
 						items={[
 							{ label: "Errors", href: "/errors" },
 							{ label: "Issues", href: "/errors/issues" },
-							{ label: issue.exceptionType || "Unknown error" },
+							{ label: issue.exceptionType || issue.errorLabel || "Unlabelled error" },
 						]}
 					/>
 					<DashboardLayout.Body>
 						<DashboardLayout.Content>
 							<DashboardLayout.Sticky>
 								<DashboardLayout.Header
-									title={issue.exceptionType || "Unknown error"}
+									title={issue.exceptionType || issue.errorLabel || "Unlabelled error"}
 									description={issue.serviceName}
 								>
 									<div className="flex items-center gap-2">
@@ -414,11 +452,9 @@ function IssueDetailPage() {
 												disabled={busy === "investigation"}
 												onClick={() =>
 													void startInvestigation({
-														title: issue.exceptionType || "Unknown error",
-														serviceName: issue.serviceName,
+														issue,
 														kind: issue.kind === "alert" ? "alert" : "error",
 														incidentId: latestIncidentId,
-														occurrences: issue.occurrenceCount,
 													})
 												}
 											>
@@ -472,11 +508,9 @@ function IssueDetailPage() {
 											escalation={linkedEscalation}
 											onStart={() =>
 												void startInvestigation({
-													title: issue.exceptionType || "Unknown error",
-													serviceName: issue.serviceName,
+													issue,
 													kind: issue.kind === "alert" ? "alert" : "error",
 													incidentId: latestIncidentId,
-													occurrences: issue.occurrenceCount,
 												})
 											}
 											starting={busy === "investigation"}

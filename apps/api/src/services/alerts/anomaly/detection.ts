@@ -25,6 +25,13 @@ export interface AnomalyEvaluation {
 	readonly baselineMedian: number
 	readonly baselineSigma: number
 	readonly threshold: number
+	/**
+	 * Always an integer. Volume counts are sample-weighted (`sum(SampleRate)`), so
+	 * they arrive fractional from the warehouse — and `anomaly_detector_states`
+	 * / `anomaly_incidents` store them in `integer` columns, which rejects
+	 * `6102857.511138143` outright. Rounded at every construction site below so
+	 * the invariant holds for every consumer, not just the ones that remember.
+	 */
 	readonly sampleCount: number
 	readonly severity: AnomalyIncidentSeverity
 }
@@ -131,7 +138,7 @@ const skipped = (
 	baselineMedian: 0,
 	baselineSigma: 0,
 	threshold: 0,
-	sampleCount,
+	sampleCount: Math.round(sampleCount),
 	severity: "warning",
 })
 
@@ -187,7 +194,7 @@ export function evaluateGoldenSignals(
 		baselineMedian: m,
 		baselineSigma: sigma,
 		threshold,
-		sampleCount,
+		sampleCount: Math.round(sampleCount),
 		severity,
 	})
 
@@ -315,7 +322,7 @@ export function evaluateLogVolume(series: LogVolumeSeries, config: DetectionConf
 		baselineMedian: m,
 		baselineSigma: sigma,
 		threshold,
-		sampleCount: current.errorLogCount,
+		sampleCount: Math.round(current.errorLogCount),
 		severity: "warning",
 	}
 }
@@ -372,7 +379,7 @@ export function evaluateErrorSpike(
 		baselineMedian: lambda,
 		baselineSigma: Math.sqrt(Math.max(lambda, 1)),
 		threshold,
-		sampleCount: count,
+		sampleCount: Math.round(count),
 		severity: count >= threshold * 3 ? "critical" : "warning",
 	}
 }
@@ -408,7 +415,7 @@ export function healthyErrorSpikeRecovery(
 		baselineMedian,
 		baselineSigma: Math.sqrt(Math.max(baselineMedian, 1)),
 		threshold,
-		sampleCount: observation.count,
+		sampleCount: Math.round(observation.count),
 		severity: "warning",
 	}
 }

@@ -59,14 +59,11 @@ export interface ServerOptions {
 	readonly assets?: AssetResolver
 }
 
-export class ServerBindError extends Schema.TaggedErrorClass<ServerBindError>()(
-	"@maple/cli/ServerBindError",
-	{
-		hostname: Schema.String,
-		port: Schema.Number,
-		message: Schema.String,
-	},
-) {}
+export class ServerBindError extends Schema.TaggedError<ServerBindError>()("@maple/cli/ServerBindError", {
+	hostname: Schema.String,
+	port: Schema.Number,
+	message: Schema.String,
+}) {}
 
 export const isBrowserOriginAllowed = (
 	requestUrl: URL,
@@ -176,7 +173,19 @@ async function ingest(
 	signal: Signal,
 	req: Request,
 ): Promise<IngestResult> {
-	const raw = new Uint8Array(await req.arrayBuffer())
+	let raw: Uint8Array
+	try {
+		raw = new Uint8Array(await req.arrayBuffer())
+	} catch (error) {
+		// A client that hangs up mid-body rejects here. Unguarded, this became an
+		// Effect *defect* — no `error.type`, no 4xx suppression, and a span reading
+		// only "The connection was closed." It is a caller outcome, so 400 it.
+		return {
+			response: text(`read ${signal} body: ${(error as Error).message}`, 400),
+			accepted: 0,
+			requestBytes: 0,
+		}
+	}
 	const requestBytes = raw.length
 	const contentType = req.headers.get("content-type") ?? ""
 	const contentEncoding = req.headers.get("content-encoding")
@@ -352,7 +361,7 @@ type SpanRunner = <A>(effect: Effect.Effect<A>) => Promise<A>
 // hand back to the client in `recoverResponse`. (Failing with a bare `Response`
 // recorded an empty `{}` — a `Response` has no enumerable own fields — which lost
 // the cause entirely and bucketed every failure under one "Error" fingerprint.)
-class IngestRejected extends Schema.TaggedErrorClass<IngestRejected>()("@maple/cli/IngestRejected", {
+class IngestRejected extends Schema.TaggedError<IngestRejected>()("@maple/cli/IngestRejected", {
 	response: Schema.instanceOf(Response),
 	status: Schema.Number,
 	message: Schema.String,

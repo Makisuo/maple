@@ -15,6 +15,7 @@ import {
 	tabIdFromChatSessionId,
 	ChatTextDeltaEvent,
 	ChatToolCallEvent,
+	ChatTurnRetryEvent,
 	type ChatEventInput,
 } from "./chat-session"
 
@@ -74,6 +75,23 @@ describe("chat events", () => {
 		expect(decoded).toMatchObject({ type: "tool-call", proposed: true, name: "update_dashboard" })
 	})
 
+	it("round-trips a retry retraction", () => {
+		// The two unions — the seq'd wire classes and the storage payload — are declared separately
+		// from one shared `eventFields` record. A member added to one and not the other typechecks
+		// fine and only shows up as a round-trip failure, here or in the storage-codec suite.
+		const event = new ChatTurnRetryEvent({
+			seq: 9,
+			type: "turn-retry",
+			messageId: "a1",
+			attempt: 2,
+			retractChars: 5,
+			reason: "Transport",
+			delayMs: 1_000,
+		})
+		const decoded = decodeChatEvent(encodeChatEvent(event))
+		expect(decoded).toMatchObject({ type: "turn-retry", retractChars: 5, attempt: 2 })
+	})
+
 	it("skips a frame it does not understand instead of throwing", () => {
 		// A throwing decode escaped the client's read loop, which then reconnected from *before* the
 		// bad frame — so the server replayed it and the client threw again, until the retry budget
@@ -104,6 +122,38 @@ describe("chat event storage codec", () => {
 			{ type: "tool-call", messageId: "a1", callId: "c2", name: "t", input: {}, proposed: true },
 			{ type: "tool-result", messageId: "a1", callId: "c1", output: "ok" },
 			{ type: "tool-result", messageId: "a1", callId: "c1", output: "no", isError: true },
+			{
+				type: "turn-retry",
+				messageId: "a1",
+				attempt: 2,
+				retractChars: 12,
+				reason: "Transport",
+				delayMs: 1_000,
+			},
+			{
+				type: "compaction",
+				messageId: "a1",
+				summary: "the user asked about checkout",
+				throughSeq: 12,
+			},
+			// Sub-agent events: the same members, tagged.
+			{
+				type: "turn-start",
+				messageId: "c1",
+				task: { id: "t1", agent: "explore", parentMessageId: "a1" },
+			},
+			{
+				type: "text-delta",
+				messageId: "c1",
+				text: "child",
+				task: { id: "t1", agent: "explore", parentMessageId: "a1" },
+			},
+			{
+				type: "turn-end",
+				messageId: "c1",
+				reason: "stop",
+				task: { id: "t1", agent: "explore", parentMessageId: "a1" },
+			},
 			{ type: "turn-end", messageId: "a1", reason: "stop" },
 			{ type: "turn-end", messageId: "a1", reason: "error", error: "boom" },
 		]

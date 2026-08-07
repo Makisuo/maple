@@ -20,7 +20,7 @@ import { markStoreClosed, markStoreOpen, storeHasData } from "./store-version"
 
 /** A chDB failure — locating libchdb, opening the connection, or bootstrapping
  *  the schema. Carries the underlying message verbatim. */
-export class ChdbError extends Schema.TaggedErrorClass<ChdbError>()("@maple/cli/ChdbError", {
+export class ChdbError extends Schema.TaggedError<ChdbError>()("@maple/cli/ChdbError", {
 	message: Schema.String,
 }) {}
 

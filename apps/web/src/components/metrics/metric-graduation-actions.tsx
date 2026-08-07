@@ -10,6 +10,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
+import { defaultWidgetLayout } from "@maple/domain/http"
 import { BellIcon, GridSquareCirclePlusIcon, LinkIcon } from "@/components/icons"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
@@ -85,17 +86,16 @@ function AddToDashboardDialog({
 	draft: MetricsQueryDraft
 }) {
 	const navigate = useNavigate()
-	const { dashboards, readOnly, addWidget, createDashboard } = useDashboardStore()
+	const { dashboards, readOnly, addWidget, importDashboard } = useDashboardStore()
 	const [newName, setNewName] = React.useState("")
 	const [creating, setCreating] = React.useState(false)
 	const [error, setError] = React.useState<string | null>(null)
 
+	const widgetDisplay = { title: draft.metricName, chartId: "query-builder-area" }
+
 	const addToDashboard = (dashboardId: string) => {
 		try {
-			addWidget(dashboardId, "chart", buildWidgetDataSource(draft), {
-				title: draft.metricName,
-				chartId: "query-builder-area",
-			})
+			addWidget(dashboardId, "chart", buildWidgetDataSource(draft), widgetDisplay)
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "Failed to add widget")
 			return
@@ -107,14 +107,37 @@ function AddToDashboardDialog({
 		})
 	}
 
+	/**
+	 * Creates the dashboard WITH the widget in one call rather than creating it
+	 * and then adding to it. The widget mutators write through the Electric
+	 * collection, and a dashboard created a moment ago may not have synced into it
+	 * yet — that gap used to swallow the widget, leaving a brand-new empty
+	 * dashboard and no explanation.
+	 */
 	const handleCreate = async () => {
 		const name = newName.trim()
 		if (!name || creating) return
 		setCreating(true)
 		setError(null)
 		try {
-			const dashboard = await createDashboard(name)
-			addToDashboard(dashboard.id)
+			const dashboard = await importDashboard({
+				name,
+				timeRange: { type: "relative", value: "12h" },
+				widgets: [
+					{
+						id: crypto.randomUUID(),
+						visualization: "chart",
+						dataSource: buildWidgetDataSource(draft),
+						display: widgetDisplay,
+						layout: { x: 0, y: 0, ...defaultWidgetLayout("chart") },
+					},
+				],
+			})
+			onOpenChange(false)
+			void navigate({
+				to: "/dashboards/$dashboardId",
+				params: { dashboardId: dashboard.id },
+			})
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "Failed to create dashboard")
 		} finally {

@@ -208,7 +208,7 @@ Types: `WindowSpec`, `CompiledWindowSpec`, `WindowFrameBound`, `WindowRowsFrame`
 
 ## Errors
 
-Both are Effect `Schema.TaggedErrorClass`es, catchable by tag.
+Both are Effect `Schema.TaggedError`s, catchable by tag.
 
 ### `QueryBuilderError`
 

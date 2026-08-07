@@ -30,13 +30,13 @@ export class RecommendationIssuesListResponse extends Schema.Class<Recommendatio
 	issues: Schema.Array(RecommendationIssue),
 }) {}
 
-export class RecommendationIssuePersistenceError extends Schema.TaggedErrorClass<RecommendationIssuePersistenceError>()(
+export class RecommendationIssuePersistenceError extends Schema.TaggedError<RecommendationIssuePersistenceError>()(
 	"@maple/http/errors/RecommendationIssuePersistenceError",
 	{ message: Schema.String },
 	{ httpApiStatus: 503 },
 ) {}
 
-export class RecommendationIssueNotFoundError extends Schema.TaggedErrorClass<RecommendationIssueNotFoundError>()(
+export class RecommendationIssueNotFoundError extends Schema.TaggedError<RecommendationIssueNotFoundError>()(
 	"@maple/http/errors/RecommendationIssueNotFoundError",
 	{ id: RecommendationIssueId, message: Schema.String },
 	{ httpApiStatus: 404 },

@@ -719,6 +719,20 @@ function buildAttributeFiltersFromParams(
 // Parameter adapters — translate pipe-style params to typed query opts
 // ---------------------------------------------------------------------------
 
+/**
+ * `errorsOnly` is tri-state in the query layer: `true` keeps only errored spans,
+ * `false` keeps only *non*-errored ones, and `undefined` applies no filter at
+ * all. A pipe param is a two-state thing, so an absent `errors_only` must lower
+ * to `undefined` — coercing it to `false` appends `StatusCode != 'Error'` and
+ * silently drops every errored span, which makes the `errorRate` these queries
+ * select (`sumIf(SampleRate, StatusCode = 'Error') / sum(SampleRate)`)
+ * structurally 0 and understates every count.
+ */
+function errorsOnlyParam(raw: string | undefined): boolean | undefined {
+	if (raw == null || raw === "" || raw === "0" || raw === "false") return undefined
+	return true
+}
+
 function pipeParamsToTracesTimeseriesOpts(params: PipeParams): CH.TracesTimeseriesOpts {
 	const str = (key: string) => (params[key] != null ? String(params[key]) : undefined)
 	const int = (key: string, def: number) => (params[key] != null ? Number(params[key]) : def)
@@ -741,7 +755,7 @@ function pipeParamsToTracesTimeseriesOpts(params: PipeParams): CH.TracesTimeseri
 		spanName: str("span_name"),
 		rootOnly: !!str("root_only"),
 
-		errorsOnly: !!str("errors_only"),
+		errorsOnly: errorsOnlyParam(str("errors_only")),
 		environments: str("environments")?.split(",").filter(Boolean),
 		commitShas: str("commit_shas")?.split(",").filter(Boolean),
 		attributeFilters: buildAttributeFiltersFromParams(params, "attribute_filter"),
@@ -775,7 +789,7 @@ function pipeParamsToTracesBreakdownOpts(params: PipeParams): CH.TracesBreakdown
 		spanName: str("span_name"),
 		rootOnly: !!str("root_only"),
 
-		errorsOnly: !!str("errors_only"),
+		errorsOnly: errorsOnlyParam(str("errors_only")),
 		environments: str("environments")?.split(",").filter(Boolean),
 		commitShas: str("commit_shas")?.split(",").filter(Boolean),
 		attributeFilters: buildAttributeFiltersFromParams(params, "attribute_filter"),

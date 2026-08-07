@@ -411,9 +411,19 @@ export class WarehouseQueryService extends Context.Service<
 			return { source: "managed" as const, config: managed.config, clientCacheKey }
 		})
 
+		// Credential-rotation self-heal. `resolveRuntimeConfig` answers from a
+		// stale-tolerant memo, so a rotated BYO ClickHouse password keeps resolving
+		// to the retired credential until the entry ages out; the executor calls
+		// this on `WarehouseAuthError` and retries once. The boolean it returns is
+		// the retry gate — `false` for managed orgs, where re-resolving would
+		// produce the same shared credential that just failed.
+		const invalidateRoute: NonNullable<WarehouseExecutorDeps["invalidateRoute"]> = (tenant) =>
+			orgClickHouseSettings.invalidateRuntimeConfig(tenant.orgId)
+
 		return makeWarehouseExecutor({
 			createClient: (config) => sqlClientFactory(config),
 			resolveRoute,
+			invalidateRoute,
 		})
 	}),
 }) {

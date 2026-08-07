@@ -22,7 +22,7 @@ import { Effect, Option, Schema } from "effect"
 // Catchable via `Effect.catchTag("@maple-dev/clickhouse-builder/QueryBuilderError")` at the service layer.
 // ---------------------------------------------------------------------------
 
-export class QueryBuilderError extends Schema.TaggedErrorClass<QueryBuilderError>()(
+export class QueryBuilderError extends Schema.TaggedError<QueryBuilderError>()(
 	"@maple-dev/clickhouse-builder/QueryBuilderError",
 	{
 		code: Schema.Literals(["SelectRequired", "UnresolvedParam", "InvalidOrderBySpec"]),
@@ -30,7 +30,7 @@ export class QueryBuilderError extends Schema.TaggedErrorClass<QueryBuilderError
 	},
 ) {}
 
-export class CompiledQueryDecodeError extends Schema.TaggedErrorClass<CompiledQueryDecodeError>()(
+export class CompiledQueryDecodeError extends Schema.TaggedError<CompiledQueryDecodeError>()(
 	"@maple-dev/clickhouse-builder/CompiledQueryDecodeError",
 	{
 		message: Schema.String,

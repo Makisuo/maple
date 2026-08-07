@@ -56,7 +56,7 @@ export class CreateApiKeyRequest extends Schema.Class<CreateApiKeyRequest>("Crea
 	scopes: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
-export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersistenceError>()(
+export class ApiKeyPersistenceError extends Schema.TaggedError<ApiKeyPersistenceError>()(
 	"@maple/http/errors/ApiKeyPersistenceError",
 	{
 		message: Schema.String,
@@ -64,7 +64,7 @@ export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersis
 	{ httpApiStatus: 503 },
 ) {}
 
-export class ApiKeyLookupPersistenceError extends Schema.TaggedErrorClass<ApiKeyLookupPersistenceError>()(
+export class ApiKeyLookupPersistenceError extends Schema.TaggedError<ApiKeyLookupPersistenceError>()(
 	"@maple/http/errors/ApiKeyLookupPersistenceError",
 	{
 		message: Schema.String,
@@ -73,7 +73,7 @@ export class ApiKeyLookupPersistenceError extends Schema.TaggedErrorClass<ApiKey
 	{ httpApiStatus: 503 },
 ) {}
 
-export class ApiKeyForbiddenError extends Schema.TaggedErrorClass<ApiKeyForbiddenError>()(
+export class ApiKeyForbiddenError extends Schema.TaggedError<ApiKeyForbiddenError>()(
 	"@maple/http/errors/ApiKeyForbiddenError",
 	{
 		message: Schema.String,
@@ -81,7 +81,7 @@ export class ApiKeyForbiddenError extends Schema.TaggedErrorClass<ApiKeyForbidde
 	{ httpApiStatus: 403 },
 ) {}
 
-export class ApiKeyNotFoundError extends Schema.TaggedErrorClass<ApiKeyNotFoundError>()(
+export class ApiKeyNotFoundError extends Schema.TaggedError<ApiKeyNotFoundError>()(
 	"@maple/http/errors/ApiKeyNotFoundError",
 	{
 		keyId: ApiKeyId,

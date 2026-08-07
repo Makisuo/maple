@@ -688,7 +688,7 @@ export class VcsCommitDetailResponse extends Schema.Class<VcsCommitDetailRespons
 	},
 ) {}
 
-export class IntegrationsForbiddenError extends Schema.TaggedErrorClass<IntegrationsForbiddenError>()(
+export class IntegrationsForbiddenError extends Schema.TaggedError<IntegrationsForbiddenError>()(
 	"@maple/http/errors/IntegrationsForbiddenError",
 	{
 		message: Schema.String,
@@ -696,7 +696,7 @@ export class IntegrationsForbiddenError extends Schema.TaggedErrorClass<Integrat
 	{ httpApiStatus: 403 },
 ) {}
 
-export class IntegrationsValidationError extends Schema.TaggedErrorClass<IntegrationsValidationError>()(
+export class IntegrationsValidationError extends Schema.TaggedError<IntegrationsValidationError>()(
 	"@maple/http/errors/IntegrationsValidationError",
 	{
 		message: Schema.String,
@@ -704,7 +704,7 @@ export class IntegrationsValidationError extends Schema.TaggedErrorClass<Integra
 	{ httpApiStatus: 400 },
 ) {}
 
-export class IntegrationsNotConnectedError extends Schema.TaggedErrorClass<IntegrationsNotConnectedError>()(
+export class IntegrationsNotConnectedError extends Schema.TaggedError<IntegrationsNotConnectedError>()(
 	"@maple/http/errors/IntegrationsNotConnectedError",
 	{
 		message: Schema.String,
@@ -712,7 +712,7 @@ export class IntegrationsNotConnectedError extends Schema.TaggedErrorClass<Integ
 	{ httpApiStatus: 409 },
 ) {}
 
-export class IntegrationsRevokedError extends Schema.TaggedErrorClass<IntegrationsRevokedError>()(
+export class IntegrationsRevokedError extends Schema.TaggedError<IntegrationsRevokedError>()(
 	"@maple/http/errors/IntegrationsRevokedError",
 	{
 		message: Schema.String,
@@ -720,7 +720,7 @@ export class IntegrationsRevokedError extends Schema.TaggedErrorClass<Integratio
 	{ httpApiStatus: 401 },
 ) {}
 
-export class IntegrationsUpstreamError extends Schema.TaggedErrorClass<IntegrationsUpstreamError>()(
+export class IntegrationsUpstreamError extends Schema.TaggedError<IntegrationsUpstreamError>()(
 	"@maple/http/errors/IntegrationsUpstreamError",
 	{
 		message: Schema.String,
@@ -730,7 +730,7 @@ export class IntegrationsUpstreamError extends Schema.TaggedErrorClass<Integrati
 	{ httpApiStatus: 502 },
 ) {}
 
-export class IntegrationsPersistenceError extends Schema.TaggedErrorClass<IntegrationsPersistenceError>()(
+export class IntegrationsPersistenceError extends Schema.TaggedError<IntegrationsPersistenceError>()(
 	"@maple/http/errors/IntegrationsPersistenceError",
 	{
 		message: Schema.String,

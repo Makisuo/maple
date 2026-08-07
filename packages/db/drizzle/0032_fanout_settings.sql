@@ -1,0 +1,2 @@
+ALTER TABLE "ai_triage_settings" ADD COLUMN "fanout_enabled" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "ai_triage_settings" ADD COLUMN "max_passes_per_day" integer DEFAULT 60 NOT NULL;

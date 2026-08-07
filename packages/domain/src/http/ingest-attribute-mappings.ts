@@ -54,7 +54,7 @@ export class IngestAttributeMappingDeleteResponse extends Schema.Class<IngestAtt
 	id: IngestAttributeMappingId,
 }) {}
 
-export class IngestAttributeMappingPersistenceError extends Schema.TaggedErrorClass<IngestAttributeMappingPersistenceError>()(
+export class IngestAttributeMappingPersistenceError extends Schema.TaggedError<IngestAttributeMappingPersistenceError>()(
 	"@maple/http/errors/IngestAttributeMappingPersistenceError",
 	{
 		message: Schema.String,
@@ -62,7 +62,7 @@ export class IngestAttributeMappingPersistenceError extends Schema.TaggedErrorCl
 	{ httpApiStatus: 503 },
 ) {}
 
-export class IngestAttributeMappingNotFoundError extends Schema.TaggedErrorClass<IngestAttributeMappingNotFoundError>()(
+export class IngestAttributeMappingNotFoundError extends Schema.TaggedError<IngestAttributeMappingNotFoundError>()(
 	"@maple/http/errors/IngestAttributeMappingNotFoundError",
 	{
 		mappingId: IngestAttributeMappingId,
@@ -71,7 +71,7 @@ export class IngestAttributeMappingNotFoundError extends Schema.TaggedErrorClass
 	{ httpApiStatus: 404 },
 ) {}
 
-export class IngestAttributeMappingValidationError extends Schema.TaggedErrorClass<IngestAttributeMappingValidationError>()(
+export class IngestAttributeMappingValidationError extends Schema.TaggedError<IngestAttributeMappingValidationError>()(
 	"@maple/http/errors/IngestAttributeMappingValidationError",
 	{
 		message: Schema.String,

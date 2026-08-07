@@ -1032,9 +1032,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								"query.rollup.enabled",
 								serviceOperationsRollupEnabled,
 							)
-							// The rollout flag stays off until migration 0008 is deployed,
-							// backfilled, and parity-checked. Disabling it restores the all-raw
-							// rollback path without changing the endpoint contract.
+							// Migration 0008 is deployed, backfilled, and parity-checked, so
+							// deployed stages ship this on (`alchemy.run.ts`). The Config
+							// default stays `false` for local/test, where the rollup tables
+							// may not exist. Disabling it restores the all-raw rollback path
+							// without changing the endpoint contract.
 							const runRawSummary = () =>
 								runQuery(Queries.serviceOperationsSummaryRaw, tenant, payload)
 							let useRollup = serviceOperationsRollupEnabled
@@ -1190,6 +1192,14 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						// but collect positionally: Effect.forEach returns results in input
 						// order regardless of concurrency, so series naming/merge order stays
 						// deterministic instead of depending on which query finishes first.
+						//
+						// Warm first, like the other fan-outs. `queryEngine.execute` warms
+						// inside the bucket cache, but only when a fill splits into more than
+						// one range — so a cold 4-way fan-out here still raced four config
+						// reads, each contending for a connection slot with its siblings'
+						// warehouse fetches. Measured cost of that contention: a cache read
+						// abandoned at its 40ms deadline whose span still runs ~2.3s.
+						yield* warehouse.warmRoute(tenant)
 						const outcomes: QueryOutcome[] = yield* Effect.forEach(
 							enabledQueries,
 							(query) =>

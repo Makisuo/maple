@@ -31,8 +31,8 @@ import {
 	PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
-import { StatusMarker } from "@/components/ai-elements/status-marker"
 import { Button } from "@maple/ui/components/ui/button"
+import { Spinner } from "@maple/ui/components/ui/spinner"
 import { trackProduct } from "@/lib/analytics"
 import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { AiTriageResult } from "@maple/domain/http"
@@ -53,7 +53,7 @@ interface ChatConversationProps {
 	investigationContext?: InvestigationContext
 	widgetFixContext?: WidgetFixContext
 	/** Render the conversation with no composer, and say why. */
-	readOnly?: false | "shared" | "resolved"
+	readOnly?: false | "shared" | "resolved" | "transcript"
 	/**
 	 * The backend already seeded this conversation with its subject (an
 	 * investigation's autonomous pass sends the snapshot server-side), so the
@@ -255,6 +255,11 @@ export function ChatConversation({
 							This investigation was resolved before anything was recorded. Reopen it to pick
 							the thread back up.
 						</EmptyNotice>
+					) : readOnly === "transcript" ? (
+						<EmptyNotice title="Nothing recorded yet">
+							The agents' reasoning log appears here as the pass runs — every tool call and what
+							it returned.
+						</EmptyNotice>
 					) : isInvestigationMode ? (
 						<InvestigationLead ctx={investigationContext!} />
 					) : isWidgetFixMode ? (
@@ -330,7 +335,16 @@ export function ChatConversation({
  */
 function InvestigationLead({ ctx }: { ctx: InvestigationContext }) {
 	if (ctx.status === "investigating") {
-		return <StatusMarker>Gathering evidence…</StatusMarker>
+		// Not a `StatusMarker`: that is a full-width transcript row built to sit at
+		// the end of a thread, and the empty slot centres its child — so it stranded
+		// a left-aligned progress line in the middle of an otherwise blank pane. A
+		// thread with no turns yet is a state, and it reads like its three siblings.
+		return (
+			<EmptyNotice title="Investigating" busy>
+				Maple is gathering evidence — the Transcript tab shows what it is doing as it goes. You can
+				ask a question here without waiting for it to finish.
+			</EmptyNotice>
+		)
 	}
 	if (ctx.status === "failed") {
 		return (
@@ -366,10 +380,22 @@ function FailedSendNotice({ failed, onRetry }: { failed: FailedSend; onRetry: (t
 	)
 }
 
-function EmptyNotice({ title, children }: { title: string; children: ReactNode }) {
+function EmptyNotice({
+	title,
+	busy = false,
+	children,
+}: {
+	title: string
+	/** Something is still running behind this state — keeps the live signal. */
+	busy?: boolean
+	children: ReactNode
+}) {
 	return (
 		<div className="flex flex-col items-center justify-center gap-2 text-center">
-			<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">{title}</p>
+			<p className="flex items-center gap-1.5 text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
+				{busy ? <Spinner className="size-3" /> : null}
+				<span className={busy ? "shimmer" : undefined}>{title}</span>
+			</p>
 			<p className="max-w-sm text-sm text-muted-foreground">{children}</p>
 		</div>
 	)

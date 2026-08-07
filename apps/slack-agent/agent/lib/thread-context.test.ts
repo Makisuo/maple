@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { SlackThreadMessage } from "eve/channels/slack"
 import { botUserIdForTeam, rememberBotUserId, resetBotUserIdCacheForTests } from "./bot-identity.js"
-import { formatThreadContext, loadThreadContext, slackMessageContent } from "./thread-context.js"
+import { slackMessageContent } from "./slack-context-format.js"
+import { formatThreadContext, loadThreadMessages } from "./thread-context.js"
 
 afterEach(() => {
 	resetBotUserIdCacheForTests()
@@ -205,7 +206,7 @@ describe("formatThreadContext", () => {
 	})
 })
 
-describe("loadThreadContext", () => {
+describe("loadThreadMessages", () => {
 	const thread = (messages: readonly SlackThreadMessage[]) => {
 		const recentMessages: SlackThreadMessage[] = []
 		return {
@@ -217,27 +218,31 @@ describe("loadThreadContext", () => {
 		}
 	}
 
-	test("includes the whole thread before the triggering message", async () => {
+	test("returns the whole thread before the triggering message", async () => {
 		const trigger = userMessage("<@UBOT> why did this fire?", "1700000000.000300")
-		const context = await loadThreadContext(
+		const messages = await loadThreadMessages(
 			thread([alertMessage(), userMessage("hm", "1700000000.000200"), trigger]),
 			{ threadTs: trigger.threadTs, ts: trigger.ts },
-			{ botUserId: BOT_USER_ID },
 		)
-		expect(context).toHaveLength(1)
+		expect(messages?.map((message) => message.ts)).toEqual(["1700000000.000100", "1700000000.000200"])
+
+		const context = formatThreadContext(messages ?? [], { botUserId: BOT_USER_ID })
 		// The alert survives — this is the bug: `since: "last-agent-reply"` used to
 		// cut context off after it, leaving the model nothing to answer from.
-		expect(context[0]).toContain("🚨 checkout p95 — Firing")
-		expect(context[0]).toContain("hm")
-		expect(context[0]).not.toContain("why did this fire?")
+		expect(context).toContain("🚨 checkout p95 — Firing")
+		expect(context).toContain("hm")
+		expect(context).not.toContain("why did this fire?")
 	})
 
-	test("adds nothing for a thread root", async () => {
+	test("returns nothing for a thread root", async () => {
 		const root = userMessage("<@UBOT> hello", "1700000000.000100")
-		expect(await loadThreadContext(thread([root]), { threadTs: root.ts, ts: root.ts })).toEqual([])
+		expect(await loadThreadMessages(thread([root]), { threadTs: root.ts, ts: root.ts })).toEqual([])
 	})
 
-	test("degrades to no context when Slack fails, so the turn still dispatches", async () => {
+	test("returns null when Slack fails, which is not the same as an empty thread", async () => {
+		// The turn still dispatches without context; the follow-up check reads the
+		// difference too — "nobody said anything" declines, "we could not look"
+		// fails open (#lib/thread-follow-up.js).
 		const failing = {
 			recentMessages: [] as SlackThreadMessage[],
 			refresh: async () => {
@@ -245,8 +250,8 @@ describe("loadThreadContext", () => {
 			},
 		}
 		expect(
-			await loadThreadContext(failing, { threadTs: "1700000000.000100", ts: "1700000000.000300" }),
-		).toEqual([])
+			await loadThreadMessages(failing, { threadTs: "1700000000.000100", ts: "1700000000.000300" }),
+		).toBeNull()
 	})
 })
 

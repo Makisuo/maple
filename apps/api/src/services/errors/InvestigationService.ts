@@ -1,10 +1,12 @@
-import { createHash, randomUUID } from "node:crypto"
+import { randomUUID } from "node:crypto"
 import {
 	type AiTriageIncidentKind,
 	AiTriageResult,
 	type InvestigationConfidence,
 	InvestigationCreateRequest,
 	InvestigationDocument,
+	InvestigationFanout,
+	InvestigationLensRun,
 	InvestigationNotFoundError,
 	InvestigationPersistenceError,
 	InvestigationQuotaError,
@@ -12,6 +14,7 @@ import {
 	InvestigationSnapshotFact,
 	InvestigationSubjectSnapshot,
 	InvestigationUnavailableError,
+	InvestigationValidator,
 	InvestigationsListResponse,
 	type InvestigationStatus,
 	InvestigationSubject,
@@ -19,50 +22,127 @@ import {
 	type SubmitDiagnosisRequest,
 	type UserId,
 } from "@maple/domain/http"
-import {
-	ErrorIssueEventId,
-	ErrorIssueId,
-	InvestigationId,
-	UserId as UserIdSchema,
-} from "@maple/domain/primitives"
+import { ErrorIssueId, InvestigationId, UserId as UserIdSchema } from "@maple/domain/primitives"
 import { wrapChatContext } from "@maple/domain/chat-preamble"
 import { encodeChatTurnTenant } from "@maple/domain/chat-session"
 import { chatSessionStub } from "@/chat/session"
 import type { TenantContext } from "@/services/auth/tenant-context"
-import { aiTriageSettings, errorIssueEvents, investigations, type InvestigationRow } from "@maple/db"
+import {
+	aiTriageSettings,
+	investigationLensRuns,
+	investigations,
+	type InvestigationLensRunRow,
+	type InvestigationRow,
+} from "@maple/db"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm"
-import { Cause, Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
+import { Cause, Clock, Context, Data, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
-import { applyTriageSeverity } from "@/services/errors/issue-severity"
+import { applyDiagnosisWrites } from "@/services/errors/apply-diagnosis"
+import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
+import {
+	routeInvestigation,
+	type InvestigationRoute,
+} from "@/services/errors/investigation-route"
+import { evaluateInvestigationQuota, selectInvestigationUsage } from "@/services/errors/investigation-quota"
+import {
+	STALE_BUDGETS,
+	isInvestigationStale,
+	staleTimeoutMessage,
+} from "@/services/errors/investigation-stale"
 import { Database, DatabaseError, type DatabaseClient } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
+
+/**
+ * Cloudflare Workflow binding that runs a fan-out. Named here rather than read
+ * off `Env` because the binding is only present inside a Worker isolate — the
+ * same reason `CHAT_SESSION` is resolved this way.
+ */
+export const FANOUT_WORKFLOW_BINDING = "INVESTIGATION_FANOUT_WORKFLOW"
+
+class FanoutStartError extends Data.TaggedError("FanoutStartError")<{ readonly cause: string }> {}
+
+interface FanoutWorkflowBinding {
+	readonly create: (options: { id: string; params: unknown }) => Promise<{ id: string }>
+	readonly get?: (id: string) => Promise<{ terminate: () => Promise<unknown> }>
+}
 
 const decodeIdSync = Schema.decodeUnknownSync(InvestigationId)
 const decodeSubjectSync = Schema.decodeUnknownSync(InvestigationSubject)
 const decodeSnapshotOption = Schema.decodeUnknownOption(InvestigationSubjectSnapshot)
 const decodeResultOption = Schema.decodeUnknownOption(AiTriageResult)
 const decodeIsoSync = Schema.decodeUnknownSync(InvestigationDocument.fields.createdAt)
-const decodeIssueId = Schema.decodeUnknownSync(ErrorIssueId)
-const decodeEventId = Schema.decodeUnknownSync(ErrorIssueEventId)
 
 export const newInvestigationId = () => decodeIdSync(randomUUID())
 
 /**
- * Deterministic UUIDv5-style id derived from the investigation id, so the
- * `submit_diagnosis` timeline-event insert is idempotent across re-diagnosis:
- * the same investigation regenerates the SAME id and the primary key (+
- * onConflictDoNothing) absorbs the duplicate. Mirrors the legacy triage path.
+ * Milliseconds are what the column stores — seconds are a display unit, and the
+ * boards render one decimal. Rounding here rather than in five components keeps
+ * two lanes of the same run from disagreeing by a tenth.
  */
-const deterministicEventId = (investigationId: string): string => {
-	const hex = createHash("sha256").update(`investigation-event:${investigationId}`).digest("hex")
-	return [
-		hex.slice(0, 8),
-		hex.slice(8, 12),
-		`5${hex.slice(13, 16)}`,
-		`${((Number.parseInt(hex.slice(16, 17), 16) & 0x3) | 0x8).toString(16)}${hex.slice(17, 20)}`,
-		hex.slice(20, 32),
-	].join("-")
+const elapsedSeconds = (ms: number | null): number | null =>
+	ms === null ? null : Math.round((ms / 1000) * 10) / 10
+
+const lensRowToDocument = (row: InvestigationLensRunRow): InvestigationLensRun =>
+	new InvestigationLensRun({
+		lensId: row.lensId,
+		status: row.status,
+		verdict: row.verdict,
+		claim: row.claim ?? null,
+		reason: row.reason ?? null,
+		progressNote: row.progressNote ?? null,
+		confidence: row.confidence ?? null,
+		toolCount: row.toolCount,
+		elapsedSeconds: elapsedSeconds(row.elapsedMs ?? null),
+		// Null on lanes written before the planner. The client falls back to the seed
+		// catalogue for those, so a null here is a real "no copy", not a gap to fill
+		// with the id.
+		name: row.lensName ?? null,
+		question: row.lensQuestion ?? null,
+		priority: row.priority ?? null,
+		deadlineHit: row.deadlineHit,
+	})
+
+/**
+ * The validator lane, derived rather than stored: its status is a function of
+ * how far the run got, and deriving it is what stops the rail from claiming a
+ * ranking that the lens rows contradict.
+ *
+ * Null on the single-pass path — there were never rivals to rank.
+ */
+const validatorFor = (
+	row: InvestigationRow,
+	lensRows: ReadonlyArray<InvestigationLensRunRow>,
+): InvestigationValidator | null => {
+	if (lensRows.length === 0) return null
+	const elapsed = elapsedSeconds(row.validatorElapsedMs ?? null)
+	if (row.fanoutState === "ranked" || row.fanoutState === "superseded") {
+		const promoted = lensRows.filter((lens) => lens.verdict === "promoted").length
+		const merged = lensRows.filter((lens) => lens.verdict === "merged").length
+		const ruledOut = lensRows.filter((lens) => lens.verdict === "ruled_out").length
+		return new InvestigationValidator({
+			status: "ranked",
+			note: row.validatorNote ?? `${promoted} promoted · ${merged} merged · ${ruledOut} ruled out`,
+			elapsedSeconds: elapsed,
+		})
+	}
+	if (row.fanoutState === "rejected_all") {
+		return new InvestigationValidator({
+			status: "rejected_all",
+			note:
+				row.validatorNote ??
+				"No candidate survived: each was contradicted by at least one other lens",
+			elapsedSeconds: elapsed,
+		})
+	}
+	const reported = lensRows.filter((lens) => lens.status === "reported").length
+	return new InvestigationValidator({
+		status: "blocked",
+		note:
+			row.validatorNote ??
+			`Starts once all ${lensRows.length} lenses report — then ranks the candidates and promotes one (${reported} in)`,
+		elapsedSeconds: elapsed,
+	})
 }
 
 const describeCause = (cause: unknown): string | undefined => {
@@ -161,7 +241,6 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				database.execute(fn).pipe(Effect.mapError(makePersistenceError))
 
 			const iso = (date: Date) => decodeIsoSync(date.toISOString())
-			const staleBeforeMs = 15 * 60 * 1000
 
 			const fallbackSnapshot = (subject: InvestigationSubject) =>
 				new InvestigationSubjectSnapshot({
@@ -201,7 +280,15 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				return decoded.value
 			})
 
-			const rowToDocument = Effect.fnUntraced(function* (row: InvestigationRow) {
+			/**
+			 * Lens rows arrive as a parameter rather than being fetched here: this runs
+			 * once per row from `listInvestigations`, so a query inside it is an N+1 on
+			 * every page load. The callers batch by `investigationId IN (…)`.
+			 */
+			const rowToDocument = Effect.fnUntraced(function* (
+				row: InvestigationRow,
+				lensRows: ReadonlyArray<InvestigationLensRunRow> = [],
+			) {
 				const subject = decodeSubjectSync(row.subjectJson)
 				const storedSnapshot = decodeSnapshotOption(row.snapshotJson)
 				return new InvestigationDocument({
@@ -222,8 +309,12 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					outputTokens: row.outputTokens ?? null,
 					error: row.error ?? null,
 					createdAt: iso(row.createdAt),
+					startedAt: row.startedAt ? iso(row.startedAt) : null,
 					diagnosedAt: row.diagnosedAt ? iso(row.diagnosedAt) : null,
 					updatedAt: iso(row.updatedAt),
+					lensRuns: lensRows.map(lensRowToDocument),
+					validator: validatorFor(row, lensRows),
+					fanout: new InvestigationFanout({ state: row.fanoutState, size: row.fanoutSize }),
 				})
 			})
 
@@ -235,6 +326,46 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, id)))
 						.limit(1),
 				).pipe(Effect.map((rows) => rows[0]))
+
+			/**
+			 * Lens lanes for a set of investigations, in dispatch order. Ordering is a
+			 * contract — `LENS_DISPATCH_ORDER` decides which lenses a narrow run gets —
+			 * so it belongs in SQL rather than in each of the five components that
+			 * render a lane.
+			 *
+			 * Skips the query entirely when nothing in the set fanned out, which is the
+			 * common case on a list page.
+			 */
+			const loadLensRows = (orgId: OrgId, rows: ReadonlyArray<InvestigationRow>) => {
+				const fanned = rows.filter((row) => row.fanoutState !== "none")
+				if (fanned.length === 0) return Effect.succeed([] as ReadonlyArray<InvestigationLensRunRow>)
+				const ids = fanned.map((row) => row.id)
+				const attemptById = new Map(fanned.map((row) => [row.id as string, row.fanoutAttempt]))
+				return dbExecute((db) =>
+					db
+						.select()
+						.from(investigationLensRuns)
+						.where(
+							and(
+								eq(investigationLensRuns.orgId, orgId),
+								inArray(investigationLensRuns.investigationId, ids),
+							),
+						)
+						.orderBy(investigationLensRuns.investigationId, investigationLensRuns.ordinal),
+				).pipe(
+					// Only the attempt the row is on. A terminated instance can still be
+					// draining, and its lanes must not appear beside the retry's.
+					Effect.map((lanes) =>
+						lanes.filter((lane) => lane.attempt === attemptById.get(lane.investigationId)),
+					),
+				)
+			}
+
+			/** `rowToDocument` for a single row, fetching its lanes if it has any. */
+			const documentFor = Effect.fnUntraced(function* (orgId: OrgId, row: InvestigationRow) {
+				const lensRows = yield* loadLensRows(orgId, [row])
+				return yield* rowToDocument(row, lensRows)
+			})
 
 			// Look up the single incident-anchored row (the partial unique index key).
 			// Used for both the dedup fast-path and the concurrent-insert race loser.
@@ -260,43 +391,53 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			 * detail page polls every 3s, which otherwise turns every read into a write.
 			 */
 			const isStale = (row: InvestigationRow, nowMs: number): boolean =>
-				row.status === "investigating" &&
-				row.startedAt !== null &&
-				row.startedAt.getTime() < nowMs - staleBeforeMs
+				isInvestigationStale(row, nowMs)
 
 			const failStaleInvestigations = Effect.fnUntraced(function* (orgId: OrgId, nowMs: number) {
-				yield* dbExecute((db) =>
-					db
-						.update(investigations)
-						.set({
-							status: "failed",
-							error: "diagnosis_timeout: no diagnosis was submitted within 15 minutes; retry",
-							updatedAt: new Date(nowMs),
-						})
-						.where(
-							and(
-								eq(investigations.orgId, orgId),
-								eq(investigations.status, "investigating"),
-								lt(investigations.startedAt, new Date(nowMs - staleBeforeMs)),
+				// Two budgets, applied as two statements: a healthy five-lens fan-out
+				// legitimately outlives the single-pass timeout, and sweeping it on the
+				// short budget would mark the row `failed` moments before the workflow
+				// wrote a diagnosis onto it — leaving `diagnosed` next to a
+				// `diagnosis_timeout` error and a failure card over a real finding.
+				for (const [budget, states] of STALE_BUDGETS) {
+					yield* dbExecute((db) =>
+						db
+							.update(investigations)
+							.set({
+								status: "failed",
+								error: staleTimeoutMessage(budget),
+								updatedAt: new Date(nowMs),
+							})
+							.where(
+								and(
+									eq(investigations.orgId, orgId),
+									eq(investigations.status, "investigating"),
+									inArray(investigations.fanoutState, states),
+									lt(investigations.startedAt, new Date(nowMs - budget)),
+								),
 							),
-						),
-				).pipe(Effect.asVoid)
+					).pipe(Effect.asVoid)
+				}
 			})
 
-			const startOfUtcDay = (nowMs: number) => {
-				const date = new Date(nowMs)
-				return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-			}
+			/**
+			 * Settings drive two independent decisions: whether an automatic start is
+			 * allowed at all, and whether the org has budget left. How an investigation
+			 * *runs* is deliberately not among them — see `investigation-route.ts`.
+			 */
+			const loadSettings = (orgId: OrgId) =>
+				dbExecute((db) =>
+					db.select().from(aiTriageSettings).where(eq(aiTriageSettings.orgId, orgId)).limit(1),
+				).pipe(Effect.map((rows) => rows[0]))
 
 			const ensureStartAllowed = Effect.fnUntraced(function* (
 				orgId: OrgId,
 				automatic: boolean,
 				nowMs: number,
+				/** Model passes this start will consume. A fan-out of five is six. */
+				passCount: number,
 			) {
-				const settingsRows = yield* dbExecute((db) =>
-					db.select().from(aiTriageSettings).where(eq(aiTriageSettings.orgId, orgId)).limit(1),
-				)
-				const settings = settingsRows[0]
+				const settings = yield* loadSettings(orgId)
 				if (automatic && (settings === undefined || !settings.enabled)) {
 					return yield* Effect.fail(
 						new InvestigationUnavailableError({
@@ -307,31 +448,31 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					)
 				}
 
-				const dailyLimit = settings?.maxRunsPerDay ?? 20
-				const usageRows = yield* dbExecute((db) =>
-					db
-						.select({
-							count: sql<number>`coalesce(sum(${investigations.autonomousTurns}), 0)::int`,
-						})
-						.from(investigations)
-						.where(
-							and(
-								eq(investigations.orgId, orgId),
-								gte(investigations.createdAt, new Date(startOfUtcDay(nowMs))),
-							),
-						),
-				)
-				if ((usageRows[0]?.count ?? 0) >= dailyLimit) {
-					const retryableAtMs = startOfUtcDay(nowMs) + 24 * 60 * 60 * 1000
+				// Two ceilings counted in two different units, which is the whole point
+				// of having two columns. Both the query and the verdict live in
+				// `investigation-quota.ts` so the enqueue path cannot drift back into
+				// comparing passes against the runs limit — see that module's header.
+				const usage = yield* dbExecute((db) => selectInvestigationUsage(db, orgId, nowMs))
+				const verdict = evaluateInvestigationQuota({
+					usage,
+					limits: settings,
+					passCount,
+					nowMs,
+				})
+				if (verdict.kind === "exceeded") {
 					yield* Effect.annotateCurrentSpan({
 						"maple.investigation.start_result": "quota_skipped",
-						"maple.investigation.daily_limit": dailyLimit,
+						"maple.investigation.quota_dimension": verdict.dimension,
+						"maple.investigation.quota_limit": verdict.limit,
 					})
 					return yield* Effect.fail(
 						new InvestigationQuotaError({
-							message: `Daily investigation budget of ${dailyLimit} has been reached.`,
-							limit: dailyLimit,
-							retryableAt: decodeIsoSync(new Date(retryableAtMs).toISOString()),
+							message:
+								verdict.dimension === "runs"
+									? `Daily investigation budget of ${verdict.limit} runs has been reached.`
+									: `Daily investigation budget of ${verdict.limit} model passes has been reached.`,
+							limit: verdict.limit,
+							retryableAt: decodeIsoSync(new Date(verdict.retryableAtMs).toISOString()),
 						}),
 					)
 				}
@@ -349,6 +490,115 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						.set({ status: "failed", error: reason, updatedAt: new Date(nowMs) })
 						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, id))),
 				).pipe(Effect.asVoid)
+			})
+
+			/**
+			 * Kick off a fan-out run on the Cloudflare Workflow.
+			 *
+			 * Mirrors `sendAutonomousTurn`'s failure discipline exactly, because the
+			 * caller cannot tell which path it took: a missing binding writes
+			 * `agent_unavailable` onto the row and fails retryably, and a duplicate
+			 * instance id (Cloudflare throws on collision) becomes `start_failed` —
+			 * the same signal `beginTurn` returning `undefined` produces.
+			 *
+			 * The instance id carries the attempt so a restart can claim a fresh one;
+			 * without it Cloudflare would reject every retry of a finished run.
+			 */
+			const startFanout = Effect.fnUntraced(function* (
+				orgId: OrgId,
+				doc: InvestigationDocument,
+				route: Extract<InvestigationRoute, { kind: "planned" }>,
+				attempt: number,
+				nowMs: number,
+			) {
+				const env = Option.getOrUndefined(workerEnv)
+				const binding = env?.[FANOUT_WORKFLOW_BINDING] as FanoutWorkflowBinding | undefined
+				if (!binding || typeof binding.create !== "function") {
+					yield* markStartFailed(
+						orgId,
+						doc.id,
+						"agent_unavailable: the investigation fan-out workflow is not configured; retry",
+						nowMs,
+					)
+					return yield* Effect.fail(
+						new InvestigationUnavailableError({
+							message: "The investigation fan-out workflow is not configured.",
+							reason: "agent_unavailable",
+							retryable: true,
+						}),
+					)
+				}
+
+				// Cloudflare rejects a colon in an instance id ("Workflow instance has
+				// invalid id"), so the attempt is appended with a dash. Attempt 0 keeps
+				// the bare investigation id, which is what gives a first start free
+				// duplicate-detection against a live instance.
+				const instanceId = attempt === 0 ? doc.id : `${doc.id}-a${attempt}`
+				yield* dbExecute((db) =>
+					db
+						.update(investigations)
+						.set({
+							fanoutState: "queued",
+							// Provisional. The planner may return fewer hypotheses than the
+							// ceiling, and the workflow's `plan` step corrects this — along with
+							// the reservation — once the real width exists.
+							fanoutSize: route.maxWidth,
+							workflowInstanceId: instanceId,
+							updatedAt: new Date(nowMs),
+						})
+						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, doc.id))),
+				)
+
+				// `Exit`, not `Effect.option`: the reason matters and used to be dropped
+				// on the floor. An id collision means a live instance already owns this
+				// investigation — a bug signal — while a network error means retry, and
+				// both used to produce the same unlogged `start_failed`.
+				const started = yield* Effect.exit(
+					Effect.tryPromise({
+						try: () =>
+							binding.create({
+								id: instanceId,
+								params: {
+									orgId,
+									investigationId: doc.id,
+									maxWidth: route.maxWidth,
+									reservedPasses: route.reservedPasses,
+									attempt,
+								},
+							}),
+						catch: (cause) => new FanoutStartError({ cause: String(cause) }),
+					}),
+				)
+
+				if (Exit.isFailure(started)) {
+					yield* Effect.logWarning("Investigation fan-out could not be started").pipe(
+						Effect.annotateLogs({
+							orgId,
+							investigationId: doc.id,
+							instanceId,
+							error: Cause.pretty(started.cause),
+						}),
+					)
+					yield* markStartFailed(
+						orgId,
+						doc.id,
+						"start_failed: the investigation fan-out could not be started; retry",
+						nowMs,
+					)
+					return yield* Effect.fail(
+						new InvestigationUnavailableError({
+							message: "The investigation fan-out could not be started.",
+							reason: "start_failed",
+							retryable: true,
+						}),
+					)
+				}
+
+				yield* Effect.annotateCurrentSpan({
+					"maple.investigation.id": doc.id,
+					"maple.investigation.start_result": "fanout_started",
+					"maple.investigation.fanout_max_width": route.maxWidth,
+				})
 			})
 
 			/**
@@ -390,11 +640,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				// turns to everyone who opens the investigation. Unfenced it renders as a wall of
 				// JSON attributed to whoever started the thread.
 				const message = wrapChatContext(
-					[
-						"Begin the autonomous investigation now.",
-						"Use the preserved subject snapshot below as the source context, gather evidence with tools, and call submit_diagnosis exactly once.",
-						JSON.stringify({ subject: doc.subject, snapshot: doc.snapshot }),
-					].join("\n\n"),
+					buildIncidentContextMessage(AUTONOMOUS_KICKOFF_LEAD, doc.subject, doc.snapshot),
 					"",
 				)
 
@@ -462,8 +708,19 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					yield* failStaleInvestigations(orgId, nowMs)
 					rows = yield* selectPage
 				}
+				// One extra query for the whole page, and none at all when nothing on it
+				// fanned out — the alternative is a query per row inside `rowToDocument`.
+				const lensRows = yield* loadLensRows(orgId, rows)
+				const byInvestigation = new Map<string, InvestigationLensRunRow[]>()
+				for (const lens of lensRows) {
+					const bucket = byInvestigation.get(lens.investigationId)
+					if (bucket) bucket.push(lens)
+					else byInvestigation.set(lens.investigationId, [lens])
+				}
 				return new InvestigationsListResponse({
-					investigations: yield* Effect.forEach(rows, rowToDocument),
+					investigations: yield* Effect.forEach(rows, (row) =>
+						rowToDocument(row, byInvestigation.get(row.id) ?? []),
+					),
 				})
 			})
 
@@ -478,11 +735,11 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					)
 				}
 				const nowMs = yield* Clock.currentTimeMillis
-				if (!isStale(row, nowMs)) return yield* rowToDocument(row)
+				if (!isStale(row, nowMs)) return yield* documentFor(orgId, row)
 				// This run timed out: settle it, then report the corrected status.
 				yield* failStaleInvestigations(orgId, nowMs)
 				const settled = yield* loadRow(orgId, id)
-				return yield* rowToDocument(settled ?? row)
+				return yield* documentFor(orgId, settled ?? row)
 			})
 
 			const createInvestigation: InvestigationServiceShape["createInvestigation"] = Effect.fn(
@@ -500,7 +757,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				// creating a duplicate. Free-form investigations are always new.
 				if (subject.type === "incident") {
 					const existing = yield* loadIncidentRow(orgId, subject.incidentKind, subject.incidentId)
-					if (existing) return yield* rowToDocument(existing)
+					if (existing) return yield* documentFor(orgId, existing)
 				}
 
 				const id = newInvestigationId()
@@ -539,7 +796,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				if (inserted.length === 0) {
 					if (subject.type === "incident") {
 						const winner = yield* loadIncidentRow(orgId, subject.incidentKind, subject.incidentId)
-						if (winner) return yield* rowToDocument(winner)
+						if (winner) return yield* documentFor(orgId, winner)
 					}
 					return yield* Effect.fail(
 						new InvestigationPersistenceError({
@@ -556,7 +813,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						}),
 					)
 				}
-				return yield* rowToDocument(row)
+				return yield* documentFor(orgId, row)
 			})
 
 			const createAndStartInvestigation: InvestigationServiceShape["createAndStartInvestigation"] =
@@ -579,17 +836,30 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								existing &&
 								(existing.status !== "investigating" || existing.startedAt !== null)
 							) {
-								return yield* rowToDocument(existing)
+								return yield* documentFor(orgId, existing)
 							}
 						}
-						yield* ensureStartAllowed(orgId, options.automatic, nowMs)
+						// The route decides the cost, so it has to be known before the quota
+						// check and before the claim increments the counter.
+						const settings = yield* loadSettings(orgId)
+						const route = routeInvestigation({
+							subject: request.subject,
+							snapshot: request.snapshot ?? null,
+						})
+						const reservedPasses = route.kind === "planned" ? route.reservedPasses : 1
+						yield* ensureStartAllowed(orgId, options.automatic, nowMs, reservedPasses)
 						const doc = yield* createInvestigation(orgId, userId, request)
 						const claimed = yield* dbExecute((db) =>
 							db
 								.update(investigations)
 								.set({
 									startedAt: new Date(nowMs),
-									autonomousTurns: sql`${investigations.autonomousTurns} + 1`,
+									// Counted in passes, not runs: a planned investigation costs
+									// planner + N + validator model calls and must burn that many units
+									// of the daily budget. Reserved high here and reconciled downward by
+									// the workflow, because the real width is not knowable until the
+									// planner has run.
+									autonomousTurns: sql`${investigations.autonomousTurns} + ${reservedPasses}`,
 									updatedAt: new Date(nowMs),
 								})
 								.where(
@@ -603,7 +873,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 								.returning({ id: investigations.id }),
 						)
 						if (claimed.length === 0) return doc
-						yield* sendAutonomousTurn(orgId, doc, nowMs)
+						if (route.kind === "planned") yield* startFanout(orgId, doc, route, 0, nowMs)
+						else yield* sendAutonomousTurn(orgId, doc, nowMs)
 						return yield* getInvestigation(orgId, doc.id).pipe(
 							Effect.catchTag("@maple/http/investigations/InvestigationNotFoundError", () =>
 								Effect.fail(
@@ -621,8 +892,55 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			)(function* (orgId, id) {
 				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
 				const nowMs = yield* Clock.currentTimeMillis
-				yield* ensureStartAllowed(orgId, false, nowMs)
 				const existing = yield* getInvestigation(orgId, id)
+				const row = yield* loadRow(orgId, id)
+				const settings = yield* loadSettings(orgId)
+				const route = routeInvestigation({
+					subject: existing.subject,
+					snapshot: existing.snapshot,
+				})
+				const reservedPasses = route.kind === "planned" ? route.reservedPasses : 1
+				yield* ensureStartAllowed(orgId, false, nowMs, reservedPasses)
+
+				const attempt = (row?.fanoutAttempt ?? 0) + 1
+
+				// Stop the run we are replacing. Without this the old instance keeps
+				// going and can publish a diagnosis over a live run — a board assembled
+				// from two interleaved attempts.
+				if (row?.workflowInstanceId) {
+					const env = Option.getOrUndefined(workerEnv)
+					const binding = env?.[FANOUT_WORKFLOW_BINDING] as FanoutWorkflowBinding | undefined
+					if (binding?.get) {
+						yield* Effect.exit(
+							Effect.tryPromise({
+								try: async () => {
+									const instance = await binding.get!(row.workflowInstanceId!)
+									await instance.terminate()
+								},
+								catch: (cause) => new FanoutStartError({ cause: String(cause) }),
+							}),
+						).pipe(
+							// An instance that already finished cannot be terminated, and
+							// that is the common case — never fail a restart over it.
+							Effect.tap((exit) =>
+								Exit.isFailure(exit)
+									? Effect.logDebug(
+											"Previous fan-out instance could not be terminated",
+										).pipe(
+											Effect.annotateLogs({
+												investigationId: id,
+												instanceId: row.workflowInstanceId,
+											}),
+										)
+									: Effect.void,
+							),
+						)
+					}
+				}
+				// Prior lanes are NOT deleted. They are scoped by `attempt` and the reads
+				// filter to the row's current one, so the retry starts clean while a
+				// straggler from the terminated instance can only write into its own
+				// attempt's rows — where nothing renders them.
 				yield* dbExecute((db) =>
 					db
 						.update(investigations)
@@ -630,7 +948,12 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 							status: "investigating",
 							error: null,
 							startedAt: new Date(nowMs),
-							autonomousTurns: sql`${investigations.autonomousTurns} + 1`,
+							autonomousTurns: sql`${investigations.autonomousTurns} + ${reservedPasses}`,
+							fanoutState: "none",
+							fanoutSize: route.kind === "planned" ? route.maxWidth : 1,
+							fanoutAttempt: attempt,
+							validatorNote: null,
+							validatorElapsedMs: null,
 							updatedAt: new Date(nowMs),
 						})
 						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, id))),
@@ -641,7 +964,8 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					error: null,
 					updatedAt: decodeIsoSync(new Date(nowMs).toISOString()),
 				})
-				yield* sendAutonomousTurn(orgId, restarting, nowMs)
+				if (route.kind === "planned") yield* startFanout(orgId, restarting, route, attempt, nowMs)
+				else yield* sendAutonomousTurn(orgId, restarting, nowMs)
 				return yield* getInvestigation(orgId, id)
 			})
 
@@ -672,7 +996,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						new InvestigationNotFoundError({ message: `No such investigation: '${id}'` }),
 					)
 				}
-				return yield* rowToDocument(row)
+				return yield* documentFor(orgId, row)
 			})
 
 			/**
@@ -697,65 +1021,24 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				const result = request.report
 				const confidence: InvestigationConfidence = result.confidence
 
+				// Shared with the fan-out workflow's `persist` step so a diagnosis means
+				// the same thing whichever path produced it — same status transition, same
+				// severity application, same deterministically-keyed timeline event.
 				yield* dbExecute((db) =>
-					db
-						.update(investigations)
-						.set({
-							status: "diagnosed",
-							reportJson: result,
-							severity: result.severityAssessment,
-							confidence,
-							model: request.model ?? row.model ?? null,
-							inputTokens: request.inputTokens ?? row.inputTokens ?? null,
-							outputTokens: request.outputTokens ?? row.outputTokens ?? null,
-							error: null,
-							diagnosedAt: new Date(nowMs),
-							updatedAt: new Date(nowMs),
-						})
-						.where(and(eq(investigations.orgId, orgId), eq(investigations.id, id))),
+					applyDiagnosisWrites(db, {
+						orgId,
+						investigationId: id,
+						report: result,
+						issueId: row.issueId ?? null,
+						model: request.model ?? row.model ?? null,
+						inputTokens: request.inputTokens ?? row.inputTokens ?? null,
+						outputTokens: request.outputTokens ?? row.outputTokens ?? null,
+						nowMs,
+						// A human follow-up that re-diagnoses a ranked fan-out orphans the lens
+						// verdicts: they explain a cause that is no longer on screen.
+						...(row.fanoutState === "ranked" ? { fanoutState: "superseded" as const } : {}),
+					}),
 				)
-
-				// Linked error issue (error fingerprint / alert-backed / anomaly-linked)
-				// gets the diagnosis applied: severity (respecting manual override) +
-				// a timeline event, both idempotent via the investigation-derived ids.
-				const issueId = row.issueId
-				if (issueId) {
-					const decodedIssueId = decodeIssueId(issueId)
-					// Severity write + timeline event commit atomically: a crash between
-					// them must not leave the issue escalated without its audit event.
-					yield* dbExecute((db) =>
-						db.transaction(async (tx) => {
-							const applied = await applyTriageSeverity(tx, {
-								orgId,
-								issueId: decodedIssueId,
-								runId: id,
-								investigationId: id,
-								severity: result.severityAssessment,
-								confidence,
-								timestamp: nowMs,
-								result,
-							})
-							await tx
-								.insert(errorIssueEvents)
-								.values({
-									id: decodeEventId(deterministicEventId(id)),
-									orgId,
-									issueId: decodedIssueId,
-									actorId: applied.actorId,
-									type: "ai_triage",
-									payloadJson: {
-										investigationId: id,
-										summary: result.summary,
-										severityAssessment: result.severityAssessment,
-										confidence,
-										applied: applied.applied,
-									},
-									createdAt: new Date(nowMs),
-								})
-								.onConflictDoNothing()
-						}),
-					)
-				}
 
 				const env = Option.getOrUndefined(workerEnv)
 				if (env && (request.inputTokens || request.outputTokens)) {
@@ -781,7 +1064,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				}
 
 				const updated = yield* loadRow(orgId, id)
-				return yield* rowToDocument(updated ?? row)
+				return yield* documentFor(orgId, updated ?? row)
 			})
 
 			return {

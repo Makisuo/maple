@@ -80,6 +80,26 @@ export interface WarehouseExecutorDeps {
 		purpose: RoutePurpose,
 		label: string,
 	) => Effect.Effect<WarehouseRoute, WarehouseSqlError>
+	/**
+	 * Drop whatever the host caches to answer `resolveRoute` for this tenant, and
+	 * report whether that actually invalidated a per-org routing override.
+	 *
+	 * Exists for exactly one failure: the host serves org routing config from a
+	 * stale-tolerant cache, so a BYO-ClickHouse credential rotation keeps
+	 * resolving to the retired password until the entry ages out. The executor
+	 * calls this once on `WarehouseAuthError` and retries the query, turning
+	 * "the org is broken until the cache expires" into "the first request after
+	 * the rotation pays one extra round-trip".
+	 *
+	 * The boolean is the retry gate, and it is the host's job to be honest about
+	 * it: return `true` only when a per-org override was actually dropped.
+	 * Returning `true` unconditionally would make every auth failure on the
+	 * shared managed credential — where re-resolving cannot change the answer —
+	 * run its query twice.
+	 *
+	 * Optional: hosts without per-org routing omit it and get no retry.
+	 */
+	readonly invalidateRoute?: (tenant: ExecutionTenant) => Effect.Effect<boolean>
 }
 
 export interface WarehouseQueryServiceShape {

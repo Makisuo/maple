@@ -247,9 +247,17 @@ const errorText = (message: string, status: number) =>
 		headers: { "content-type": "text/plain; charset=utf-8" },
 	})
 
-class ElectricSyncUnavailable extends Schema.TaggedErrorClass<ElectricSyncUnavailable>()(
+class ElectricSyncUnavailable extends Schema.TaggedError<ElectricSyncUnavailable>()(
 	"ElectricSyncUnavailable",
-	{ response: Schema.Any },
+	{
+		/**
+		 * The SDK reads a span's `status.message` off the failure's `Error.message`,
+		 * so without this the span carried `error.type` and nothing else — you could
+		 * see that Electric had failed but not what it said.
+		 */
+		message: Schema.String,
+		response: Schema.Any,
+	},
 ) {}
 
 export const ElectricSyncRouter = HttpRouter.use((router) =>
@@ -302,6 +310,9 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 						"error.type": electricUrl ? "ElectricConfigIncoherent" : "ElectricConfigUnavailable",
 					})
 					return yield* new ElectricSyncUnavailable({
+						message: electricUrl
+							? "Electric Cloud credentials are half-configured (ELECTRIC_URL set, source_id/secret missing)"
+							: "Electric sync is not configured (no ELECTRIC_URL)",
 						response: errorText("Electric sync is not configured", 503),
 					})
 				}
@@ -329,16 +340,20 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 				// Electric `live` requests long-poll, then return a COMPLETE response
 				// (not an open SSE stream), and control-plane shapes are small, so we
 				// buffer the body rather than manage a scoped pass-through stream.
+				// `Effect.option` discards the cause, so the reason is captured here on
+				// the way past — otherwise the span can only say "it failed".
+				let upstreamFailure = "unknown transport failure"
 				const result = yield* client.get(upstreamUrl).pipe(
 					Effect.annotateSpans("peer.service", "electric"),
 					Effect.flatMap((response) =>
 						response.text.pipe(Effect.map((body) => ({ response, body }))),
 					),
-					Effect.tapError((error) =>
-						Effect.logWarning("Electric shape upstream request failed").pipe(
-							Effect.annotateLogs({ shape: shapeParam, error: String(error) }),
-						),
-					),
+					Effect.tapError((error) => {
+						upstreamFailure = String(error)
+						return Effect.logWarning("Electric shape upstream request failed").pipe(
+							Effect.annotateLogs({ shape: shapeParam, error: upstreamFailure }),
+						)
+					}),
 					Effect.option,
 				)
 				if (Option.isNone(result)) {
@@ -347,6 +362,7 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 						"error.type": "ElectricUpstreamUnavailable",
 					})
 					return yield* new ElectricSyncUnavailable({
+						message: `Electric upstream unreachable (${shapeParam}): ${upstreamFailure}`,
 						response: errorText("Electric upstream unreachable", 502),
 					})
 				}
@@ -357,6 +373,9 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 						"error.type": "ElectricUpstreamError",
 					})
 					return yield* new ElectricSyncUnavailable({
+						// The body is what Electric actually said; truncated because a
+						// status description is not a place to put a whole payload.
+						message: `Electric returned ${response.status} for shape ${shapeParam}: ${body.slice(0, 300)}`,
 						response: HttpServerResponse.raw(body, {
 							status: response.status,
 							headers: shapeResponseHeaders(response.headers),

@@ -2,7 +2,15 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { AiTriageIncidentKind } from "../ai-triage"
 import { IssueSeverity } from "../errors"
-import { InvestigationConfidence, InvestigationSeededBy, InvestigationStatus } from "../investigations"
+import {
+	InvestigationConfidence,
+	InvestigationFanoutState,
+	InvestigationSeededBy,
+	InvestigationStatus,
+	LensId,
+	LensRunStatus,
+	LensVerdict,
+} from "../investigations"
 import { TraceId, UserId } from "../../primitives"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
@@ -163,12 +171,110 @@ const V2InvestigationSnapshot = Schema.Struct({
 	),
 	incidentStartedAt: Schema.NullOr(Timestamp),
 	incidentEndedAt: Schema.NullOr(Timestamp),
+
+	// The identifiers the agent needs to call tools with, as distinct from the
+	// display `facts` above. On the create payload these are what let a caller
+	// hand the investigation a fingerprint and an incident window instead of
+	// making the agent guess both — `error_detail` cannot be called without the
+	// former, and every prompt opens by scoping to the latter. All optional so a
+	// caller that has none of them, and every client built before this, still
+	// posts a valid snapshot.
+	fingerprintHash: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	exceptionType: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	exceptionMessage: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	topFrame: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	errorLabel: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	occurrenceCount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	serviceName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	deploymentEnv: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	signalType: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	observedValue: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	thresholdValue: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 }).pipe(
 	Schema.encodeKeys({
 		incidentStartedAt: "incident_started_at",
 		incidentEndedAt: "incident_ended_at",
+		fingerprintHash: "fingerprint_hash",
+		exceptionType: "exception_type",
+		exceptionMessage: "exception_message",
+		topFrame: "top_frame",
+		errorLabel: "error_label",
+		occurrenceCount: "occurrence_count",
+		serviceName: "service_name",
+		deploymentEnv: "deployment_env",
+		signalType: "signal_type",
+		observedValue: "observed_value",
+		thresholdValue: "threshold_value",
 	}),
 )
+
+/**
+ * One dispatched lens. `evidence` is deliberately NOT on the wire: nothing
+ * renders it, and putting five evidence blocks on every list row would multiply
+ * the trace-id decode surface for no gain. It is persisted and available to the
+ * validator.
+ */
+/**
+ * Open decode for the catalogue tokens.
+ *
+ * `lens_runs` is documented as an evolving shape, and that promise was empty
+ * while these were closed `Schema.Literals`: a server that learned a sixth lens
+ * failed the decode for every deployed client, blanking the detail page and the
+ * hub — and it made the client's own unknown-lens fallback unreachable. Decoding
+ * openly is what makes the annotation true. The literal unions stay exported for
+ * everything that writes these values.
+ */
+const OpenLensId = Schema.Union([LensId, Schema.String])
+const OpenLensRunStatus = Schema.Union([LensRunStatus, Schema.String])
+const OpenLensVerdict = Schema.Union([LensVerdict, Schema.String])
+const OpenFanoutState = Schema.Union([InvestigationFanoutState, Schema.String])
+
+const V2InvestigationLensRun = Schema.Struct({
+	lensId: OpenLensId,
+	status: OpenLensRunStatus,
+	verdict: OpenLensVerdict,
+	claim: Schema.NullOr(Schema.String),
+	reason: Schema.NullOr(Schema.String),
+	progressNote: Schema.NullOr(Schema.String),
+	confidence: Schema.NullOr(InvestigationConfidence),
+	toolCount: Schema.Number,
+	elapsedSeconds: Schema.NullOr(Schema.Number),
+	/**
+	 * Label and question for this lane, written by the planner.
+	 *
+	 * On the wire because the ids are per-incident now: a client cannot map
+	 * `pool_exhaustion_payments_api` to readable copy from a static table, and the
+	 * server is the only place that knows what the lane was actually asked. Null
+	 * on lanes from before the planner, where `lens_id` still names a catalogue
+	 * entry the client has copy for.
+	 */
+	name: Schema.NullOr(Schema.String),
+	question: Schema.NullOr(Schema.String),
+	priority: Schema.NullOr(Schema.Number),
+	/** True when this lane ran out of clock rather than finishing. */
+	deadlineHit: Schema.Boolean,
+}).pipe(
+	Schema.encodeKeys({
+		lensId: "lens_id",
+		progressNote: "progress_note",
+		toolCount: "tool_count",
+		elapsedSeconds: "elapsed_seconds",
+		name: "lens_name",
+		question: "lens_question",
+		deadlineHit: "deadline_hit",
+	}),
+)
+
+const V2InvestigationValidator = Schema.Struct({
+	status: Schema.Union([Schema.Literals(["blocked", "ranked", "rejected_all"]), Schema.String]),
+	note: Schema.String,
+	elapsedSeconds: Schema.NullOr(Schema.Number),
+}).pipe(Schema.encodeKeys({ elapsedSeconds: "elapsed_seconds" }))
+
+const V2InvestigationFanout = Schema.Struct({
+	state: OpenFanoutState,
+	size: Schema.Number,
+})
 
 // ---------------------------------------------------------------------------
 // Resource
@@ -194,7 +300,15 @@ const investigationExample = {
 		incident_started_at: "2026-07-15T09:04:00.000Z",
 		incident_ended_at: null,
 	},
-	report: null,
+	report: {
+		summary: "A deploy to checkout-api four minutes before the onset regressed the timeout budget.",
+		suspected_cause: "Deploy 4f21a shortened the upstream timeout below the p99 of the call it guards.",
+		severity_assessment: "high",
+		affected_scope: "checkout-api",
+		evidence: [],
+		suggested_actions: ["Roll back deploy 4f21a."],
+		confidence: "high",
+	},
 	model: "claude-opus-4-8",
 	severity: "high",
 	confidence: "high",
@@ -204,8 +318,28 @@ const investigationExample = {
 	output_tokens: 800,
 	error: null,
 	created_at: "2026-07-15T09:12:00.000Z",
+	started_at: "2026-07-15T09:12:05.000Z",
 	diagnosed_at: "2026-07-15T09:12:42.000Z",
 	updated_at: "2026-07-15T09:12:42.000Z",
+	lens_runs: [
+		{
+			lens_id: "deploy_correlation",
+			status: "reported",
+			verdict: "promoted",
+			claim: "A deploy to checkout-api landed four minutes before the onset.",
+			reason: "Promoted — the only candidate that explains both the onset delay and the recovery.",
+			progress_note: null,
+			confidence: "high",
+			tool_count: 4,
+			elapsed_seconds: 12.6,
+			lens_name: "Checkout-api 14:02 rollout",
+			lens_question: "Did the 14:02 checkout-api rollout introduce the timeout?",
+			priority: 1,
+			deadline_hit: false,
+		},
+	],
+	validator: { status: "ranked", note: "1 promoted · 0 merged · 0 ruled out", elapsed_seconds: 8.2 },
+	fanout: { state: "ranked", size: 1 },
 } as const
 
 export const V2Investigation = Schema.Struct({
@@ -253,10 +387,26 @@ export const V2Investigation = Schema.Struct({
 		description: "The failure message if the diagnostic pass errored, or `null`.",
 	}),
 	created_at: Timestamp.annotate({ description: "When the investigation was opened." }),
+	started_at: Schema.NullOr(Timestamp).annotate({
+		description:
+			"When the current pass began, re-stamped on each restart. Use this rather than `created_at` to measure how long a run took.",
+	}),
 	diagnosed_at: Schema.NullOr(Timestamp).annotate({
 		description: "When a diagnosis was first attached, or `null`.",
 	}),
 	updated_at: Timestamp.annotate({ description: "When the investigation was last updated." }),
+	lens_runs: Schema.Array(V2InvestigationLensRun).annotate({
+		description:
+			"One entry per dispatched lens, in dispatch order, for investigations that fanned out; empty for single-pass runs. Use its emptiness — not `fanout.size` — to tell whether a run fanned out. The lens catalogue is an evolving shape: treat `lens_id` as an open string, not a stability-committed enum.",
+	}),
+	validator: Schema.NullOr(V2InvestigationValidator).annotate({
+		description:
+			"The validator that ranked the lens candidates: `blocked` while lenses are still reporting, `ranked` once one was promoted, `rejected_all` when none held up. `null` for single-pass runs.",
+	}),
+	fanout: V2InvestigationFanout.annotate({
+		description:
+			"Fan-out bookkeeping. `state` is `none` for single-pass runs; `size` is how many lenses were dispatched.",
+	}),
 }).annotate({
 	identifier: "Investigation",
 	title: "Investigation",

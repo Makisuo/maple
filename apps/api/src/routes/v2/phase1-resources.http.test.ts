@@ -24,6 +24,7 @@ import {
 	ErrorIssuesListResponse,
 	ErrorIssueTimeseriesPoint,
 	InvestigationDocument,
+	InvestigationFanout,
 	InvestigationIncidentSubject,
 	InvestigationNotFoundError,
 	InvestigationQuotaError,
@@ -153,8 +154,13 @@ const investigationFixture = new InvestigationDocument({
 	outputTokens: 40,
 	error: null,
 	createdAt: decodeIso("2026-07-15T09:12:00.000Z"),
+	startedAt: decodeIso("2026-07-15T09:12:05.000Z"),
 	diagnosedAt: decodeIso("2026-07-15T09:12:42.000Z"),
 	updatedAt: decodeIso("2026-07-15T09:12:42.000Z"),
+	// Single-pass fixture: no lenses were dispatched, so nothing ranked them.
+	lensRuns: [],
+	validator: null,
+	fanout: new InvestigationFanout({ state: "none", size: 1 }),
 })
 
 const corruptInvestigationFixture = new InvestigationDocument({
@@ -305,6 +311,9 @@ const warehouseStub: WarehouseQueryServiceShape = {
 	// response-byte ceiling), so the stub has to answer it too.
 	compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.succeed(Option.none()),
+	// Handlers warm the org route before fanning out; the real one resolves
+	// route + capabilities, which this stub has nothing to resolve.
+	warmRoute: () => Effect.void,
 	ingest: () => Effect.void,
 	asExecutor: () => {
 		throw new Error("asExecutor is not supported by this test stub")
@@ -1132,11 +1141,9 @@ describe("v2 session_replays over HTTP", () => {
 			const key = await harness.bootstrapKey()
 			const sessionId = encodePublicId("srep", "sess_manifest")
 
-			const response = await harness.request(
-				"GET",
-				`/v2/session_replays/${sessionId}/manifest`,
-				{ token: key.secret },
-			)
+			const response = await harness.request("GET", `/v2/session_replays/${sessionId}/manifest`, {
+				token: key.secret,
+			})
 			expect(response.status).toBe(200)
 			expect(response.body.object).toBe("session_replay.manifest")
 			expect(response.body.chunk_count).toBe(40)
@@ -1200,11 +1207,9 @@ describe("v2 session_replays over HTTP", () => {
 			const key = await harness.bootstrapKey()
 			const sessionId = encodePublicId("srep", "sess_legacy")
 
-			const response = await harness.request(
-				"GET",
-				`/v2/session_replays/${sessionId}/manifest`,
-				{ token: key.secret },
-			)
+			const response = await harness.request("GET", `/v2/session_replays/${sessionId}/manifest`, {
+				token: key.secret,
+			})
 			expect(response.status).toBe(200)
 			expect(response.body.chunk_count).toBe(40)
 			expect(response.body.chunks.every((c: { is_checkpoint: boolean }) => !c.is_checkpoint)).toBe(true)
@@ -1229,11 +1234,9 @@ describe("v2 session_replays over HTTP", () => {
 			const key = await harness.bootstrapKey()
 			const sessionId = encodePublicId("srep", "sess_quoted")
 
-			const manifest = await harness.request(
-				"GET",
-				`/v2/session_replays/${sessionId}/manifest`,
-				{ token: key.secret },
-			)
+			const manifest = await harness.request("GET", `/v2/session_replays/${sessionId}/manifest`, {
+				token: key.secret,
+			})
 			expect(manifest.status).toBe(200)
 			expect(manifest.body.total_byte_size).toBe(200_000)
 

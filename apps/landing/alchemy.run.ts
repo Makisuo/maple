@@ -72,7 +72,7 @@ export const createLandingWorker = ({
 					destinations: [tracesDestination?.slug ?? "maple"],
 				},
 			},
-			url: true,
+			workersDev: true,
 			domain: domains.landing,
 		})
 

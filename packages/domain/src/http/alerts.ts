@@ -643,7 +643,7 @@ export class AlertDestinationTestResponse extends Schema.Class<AlertDestinationT
 	message: Schema.String,
 }) {}
 
-export class AlertForbiddenError extends Schema.TaggedErrorClass<AlertForbiddenError>()(
+export class AlertForbiddenError extends Schema.TaggedError<AlertForbiddenError>()(
 	"@maple/http/errors/AlertForbiddenError",
 	{
 		message: Schema.String,
@@ -652,7 +652,7 @@ export class AlertForbiddenError extends Schema.TaggedErrorClass<AlertForbiddenE
 	{ httpApiStatus: 403 },
 ) {}
 
-export class AlertValidationError extends Schema.TaggedErrorClass<AlertValidationError>()(
+export class AlertValidationError extends Schema.TaggedError<AlertValidationError>()(
 	"@maple/http/errors/AlertValidationError",
 	{
 		message: Schema.String,
@@ -662,7 +662,7 @@ export class AlertValidationError extends Schema.TaggedErrorClass<AlertValidatio
 	{ httpApiStatus: 400 },
 ) {}
 
-export class AlertPersistenceError extends Schema.TaggedErrorClass<AlertPersistenceError>()(
+export class AlertPersistenceError extends Schema.TaggedError<AlertPersistenceError>()(
 	"@maple/http/errors/AlertPersistenceError",
 	{
 		message: Schema.String,
@@ -671,7 +671,7 @@ export class AlertPersistenceError extends Schema.TaggedErrorClass<AlertPersiste
 	{ httpApiStatus: 503 },
 ) {}
 
-export class AlertNotFoundError extends Schema.TaggedErrorClass<AlertNotFoundError>()(
+export class AlertNotFoundError extends Schema.TaggedError<AlertNotFoundError>()(
 	"@maple/http/errors/AlertNotFoundError",
 	{
 		message: Schema.String,
@@ -681,7 +681,7 @@ export class AlertNotFoundError extends Schema.TaggedErrorClass<AlertNotFoundErr
 	{ httpApiStatus: 404 },
 ) {}
 
-export class AlertDeliveryError extends Schema.TaggedErrorClass<AlertDeliveryError>()(
+export class AlertDeliveryError extends Schema.TaggedError<AlertDeliveryError>()(
 	"@maple/http/errors/AlertDeliveryError",
 	{
 		message: Schema.String,
@@ -691,7 +691,7 @@ export class AlertDeliveryError extends Schema.TaggedErrorClass<AlertDeliveryErr
 	{ httpApiStatus: 502 },
 ) {}
 
-export class AlertDestinationInUseError extends Schema.TaggedErrorClass<AlertDestinationInUseError>()(
+export class AlertDestinationInUseError extends Schema.TaggedError<AlertDestinationInUseError>()(
 	"@maple/http/errors/AlertDestinationInUseError",
 	{
 		message: Schema.String,

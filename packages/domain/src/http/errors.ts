@@ -489,7 +489,7 @@ const IssueEventsQuery = Schema.Struct({
 // Errors
 // ---------------------------------------------------------------------------
 
-export class ErrorPersistenceError extends Schema.TaggedErrorClass<ErrorPersistenceError>()(
+export class ErrorPersistenceError extends Schema.TaggedError<ErrorPersistenceError>()(
 	"@maple/http/errors/ErrorPersistenceError",
 	{
 		message: Schema.String,
@@ -558,7 +558,7 @@ export class IssueEscalationAttemptsResponse extends Schema.Class<IssueEscalatio
 	attempts: Schema.Array(IssueEscalationAttemptDocument),
 }) {}
 
-export class ErrorValidationError extends Schema.TaggedErrorClass<ErrorValidationError>()(
+export class ErrorValidationError extends Schema.TaggedError<ErrorValidationError>()(
 	"@maple/http/errors/ErrorValidationError",
 	{
 		message: Schema.String,
@@ -567,7 +567,7 @@ export class ErrorValidationError extends Schema.TaggedErrorClass<ErrorValidatio
 	{ httpApiStatus: 400 },
 ) {}
 
-export class ErrorForbiddenError extends Schema.TaggedErrorClass<ErrorForbiddenError>()(
+export class ErrorForbiddenError extends Schema.TaggedError<ErrorForbiddenError>()(
 	"@maple/http/errors/ErrorForbiddenError",
 	{
 		message: Schema.String,
@@ -575,7 +575,7 @@ export class ErrorForbiddenError extends Schema.TaggedErrorClass<ErrorForbiddenE
 	{ httpApiStatus: 403 },
 ) {}
 
-export class ErrorIssueNotFoundError extends Schema.TaggedErrorClass<ErrorIssueNotFoundError>()(
+export class ErrorIssueNotFoundError extends Schema.TaggedError<ErrorIssueNotFoundError>()(
 	"@maple/http/errors/ErrorIssueNotFoundError",
 	{
 		message: Schema.String,
@@ -593,7 +593,7 @@ export class ErrorIssueNotFoundError extends Schema.TaggedErrorClass<ErrorIssueN
 	}
 }
 
-export class ErrorIssueTransitionError extends Schema.TaggedErrorClass<ErrorIssueTransitionError>()(
+export class ErrorIssueTransitionError extends Schema.TaggedError<ErrorIssueTransitionError>()(
 	"@maple/http/errors/ErrorIssueTransitionError",
 	{
 		message: Schema.String,
@@ -604,7 +604,7 @@ export class ErrorIssueTransitionError extends Schema.TaggedErrorClass<ErrorIssu
 	{ httpApiStatus: 409 },
 ) {}
 
-export class ErrorIssueLeaseConflictError extends Schema.TaggedErrorClass<ErrorIssueLeaseConflictError>()(
+export class ErrorIssueLeaseConflictError extends Schema.TaggedError<ErrorIssueLeaseConflictError>()(
 	"@maple/http/errors/ErrorIssueLeaseConflictError",
 	{
 		message: Schema.String,
@@ -615,7 +615,7 @@ export class ErrorIssueLeaseConflictError extends Schema.TaggedErrorClass<ErrorI
 	{ httpApiStatus: 409 },
 ) {}
 
-export class ActorNotFoundError extends Schema.TaggedErrorClass<ActorNotFoundError>()(
+export class ActorNotFoundError extends Schema.TaggedError<ActorNotFoundError>()(
 	"@maple/http/errors/ActorNotFoundError",
 	{
 		message: Schema.String,

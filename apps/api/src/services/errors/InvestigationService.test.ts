@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { ConfigProvider, Effect, Exit, Layer, Schema } from "effect"
 import {
 	AiTriageEvidence,
 	AiTriageResult,
@@ -9,12 +9,19 @@ import {
 	InvestigationIncidentSubject,
 	InvestigationId,
 	InvestigationNotFoundError,
+	InvestigationSubjectSnapshot,
 	InvestigationUnavailableError,
 	OrgId,
 	SubmitDiagnosisRequest,
 } from "@maple/domain/http"
 import { ErrorIssueId } from "@maple/domain/primitives"
-import { errorIssues, errorIssueEvents, investigations } from "@maple/db"
+import {
+	aiTriageSettings,
+	errorIssues,
+	errorIssueEvents,
+	investigationLensRuns,
+	investigations,
+} from "@maple/db"
 import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { eq } from "drizzle-orm"
@@ -77,6 +84,25 @@ const incidentRequest = (incidentId: string) =>
 			type: "incident",
 			incidentKind: "error",
 			incidentId,
+		}),
+	})
+
+const criticalIncidentRequest = (incidentId: string) =>
+	new InvestigationCreateRequest({
+		subject: new InvestigationIncidentSubject({
+			type: "incident",
+			incidentKind: "error",
+			incidentId,
+		}),
+		snapshot: new InvestigationSubjectSnapshot({
+			title: "Checkout timeouts",
+			scope: "checkout-api",
+			status: "open",
+			severity: "critical",
+			facts: [],
+			references: [],
+			incidentStartedAt: null,
+			incidentEndedAt: null,
 		}),
 	})
 
@@ -211,20 +237,201 @@ describe("InvestigationService", () => {
 		return { beginTurns, env: { CHAT_SESSION: namespace } }
 	}
 
+	/**
+	 * Routing. The table lives in `investigation-route.test.ts`; what these assert
+	 * is that the service actually *branches* on it — that a planned start reaches
+	 * the workflow and never the chat session, and a single-pass start the reverse.
+	 */
+	const fanoutWorkflowHarness = (options?: { readonly failing?: boolean }) => {
+		const creates: Array<{ id: string; params: Record<string, unknown> }> = []
+		return {
+			creates,
+			binding: {
+				create: async (input: { id: string; params: Record<string, unknown> }) => {
+					if (options?.failing === true) throw new Error("instance already exists")
+					creates.push(input)
+					return { id: input.id }
+				},
+			},
+		}
+	}
+
+	/**
+	 * No settings row at all, which is the point: the flag this replaced defaulted
+	 * false and had no write path, so an untouched org could never reach the
+	 * multi-hypothesis path. An untouched org now gets it by default.
+	 */
+	it.effect("routes a manual incident to the planned workflow with no setup", () => {
+		const chat = chatSessionHarness()
+		const workflow = fanoutWorkflowHarness()
+		const harness = makeHarness({
+			...chat.env,
+			INVESTIGATION_FANOUT_WORKFLOW: workflow.binding,
+		})
+		return Effect.gen(function* () {
+			const database = yield* Database
+			const started = yield* InvestigationService.pipe(
+				Effect.flatMap((service) =>
+					service.createAndStartInvestigation(ORG, null, criticalIncidentRequest("err_fanout"), {
+						automatic: false,
+					}),
+				),
+			)
+			assert.strictEqual(started.status, "investigating")
+			// The workflow ran; the single-pass chat turn did not.
+			assert.lengthOf(workflow.creates, 1)
+			assert.lengthOf(chat.beginTurns, 0)
+			assert.strictEqual(workflow.creates[0]!.params.investigationId, started.id)
+			assert.strictEqual(workflow.creates[0]!.params.maxWidth, 5)
+
+			const rows = yield* database.execute((db) =>
+				db.select().from(investigations).where(eq(investigations.id, started.id)),
+			)
+			assert.strictEqual(rows[0]?.fanoutState, "queued")
+			assert.strictEqual(rows[0]?.fanoutSize, 5)
+			// Quota counts passes, not runs: the width plus the planner and the
+			// validator. Reserved high and reconciled down once the planner has run.
+			assert.strictEqual(rows[0]?.autonomousTurns, 7)
+		}).pipe(Effect.provide(harness.layer))
+	})
+
+	/**
+	 * The only single-pass route left. A free-form question is a conversation the
+	 * user keeps talking to, which the workflow path cannot host — that is a
+	 * property of the work, not a setting anyone can get wrong.
+	 */
+	it.effect("keeps a free-form question on the single pass", () => {
+		const chat = chatSessionHarness()
+		const workflow = fanoutWorkflowHarness()
+		const harness = makeHarness({
+			...chat.env,
+			INVESTIGATION_FANOUT_WORKFLOW: workflow.binding,
+		})
+		return Effect.gen(function* () {
+			const started = yield* InvestigationService.pipe(
+				Effect.flatMap((service) =>
+					service.createAndStartInvestigation(ORG, null, freeformRequest("why is checkout slow"), {
+						automatic: false,
+					}),
+				),
+			)
+			assert.strictEqual(started.status, "investigating")
+			assert.lengthOf(workflow.creates, 0)
+			assert.lengthOf(chat.beginTurns, 1)
+
+			const database = yield* Database
+			const rows = yield* database.execute((db) =>
+				db.select().from(investigations).where(eq(investigations.id, started.id)),
+			)
+			assert.strictEqual(rows[0]?.fanoutState, "none")
+			assert.strictEqual(rows[0]?.autonomousTurns, 1)
+		}).pipe(Effect.provide(harness.layer))
+	})
+
+	it.effect("marks the row agent_unavailable when the workflow binding is missing", () => {
+		const chat = chatSessionHarness()
+		const harness = makeHarness(chat.env)
+		return Effect.gen(function* () {
+			const database = yield* Database
+			const exit = yield* Effect.exit(
+				InvestigationService.pipe(
+					Effect.flatMap((service) =>
+						service.createAndStartInvestigation(
+							ORG,
+							null,
+							criticalIncidentRequest("err_fanout"),
+							{
+								automatic: false,
+							},
+						),
+					),
+				),
+			)
+			assert.isTrue(Exit.isFailure(exit))
+
+			const rows = yield* database.execute((db) =>
+				db.select().from(investigations).where(eq(investigations.orgId, ORG)),
+			)
+			assert.strictEqual(rows[0]?.status, "failed")
+			assert.include(rows[0]?.error ?? "", "agent_unavailable")
+		}).pipe(Effect.provide(harness.layer))
+	})
+
+	it.effect("hides the previous attempt's lanes and starts a fresh instance on restart", () => {
+		const chat = chatSessionHarness()
+		const workflow = fanoutWorkflowHarness()
+		const harness = makeHarness({
+			...chat.env,
+			INVESTIGATION_FANOUT_WORKFLOW: workflow.binding,
+		})
+		return Effect.gen(function* () {
+			const database = yield* Database
+			const service = yield* InvestigationService
+			const started = yield* InvestigationService.pipe(
+				Effect.flatMap((service) =>
+					service.createAndStartInvestigation(ORG, null, criticalIncidentRequest("err_fanout"), {
+						automatic: false,
+					}),
+				),
+			)
+			// Seed a lane from the first attempt.
+			yield* database.execute((db) =>
+				db.insert(investigationLensRuns).values({
+					id: "lane-1",
+					orgId: ORG,
+					investigationId: started.id,
+					lensId: "deploy_correlation",
+					ordinal: 0,
+					status: "reported",
+					verdict: "promoted",
+					claim: "stale claim from the first attempt",
+					createdAt: new Date(),
+					updatedAt: new Date(),
+				}),
+			)
+
+			yield* service.restartInvestigation(ORG, started.id)
+
+			// The stale lane still exists on attempt 0, but the document no longer
+			// carries it: reads are scoped to the row's current attempt, so a
+			// straggler from the terminated instance cannot appear beside the retry.
+			const restarted = yield* service.getInvestigation(ORG, started.id)
+			assert.lengthOf(restarted.lensRuns, 0)
+
+			const lanes = yield* database.execute((db) =>
+				db
+					.select()
+					.from(investigationLensRuns)
+					.where(eq(investigationLensRuns.investigationId, started.id)),
+			)
+			assert.lengthOf(lanes, 1)
+			assert.strictEqual(lanes[0]?.attempt, 0)
+			// A restart needs a distinct workflow instance id or Cloudflare rejects it.
+			assert.lengthOf(workflow.creates, 2)
+			assert.notStrictEqual(workflow.creates[0]!.id, workflow.creates[1]!.id)
+		}).pipe(Effect.provide(harness.layer))
+	})
+
 	it.effect("starts an autonomous turn carrying the preserved context", () => {
 		const chat = chatSessionHarness()
 		const harness = makeHarness(chat.env)
 		return Effect.gen(function* () {
+			// Free-form, because that is the only route that reaches a chat turn — and
+			// this test is about what that turn is handed.
 			const service = yield* InvestigationService
 			const started = yield* service.createAndStartInvestigation(
 				ORG,
 				null,
-				incidentRequest("err_autonomous_start"),
+				freeformRequest("err_autonomous_start"),
 				{ automatic: false },
 			)
 			assert.strictEqual(started.status, "investigating")
 			assert.lengthOf(chat.beginTurns, 1)
-			assert.include(chat.beginTurns[0]!.text, '"incidentId":"err_autonomous_start"')
+			// Labelled sections, not a bare JSON blob. The two facts the prompt opens
+			// by demanding — the interval and the identifiers — were being buried in
+			// one, and the model routinely skipped both.
+			assert.include(chat.beginTurns[0]!.text, "## Interval")
+			assert.include(chat.beginTurns[0]!.text, "err_autonomous_start")
 			assert.include(chat.beginTurns[0]!.text, '"snapshot"')
 
 			const database = yield* Database

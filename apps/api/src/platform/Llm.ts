@@ -20,8 +20,8 @@ import { LlmCallError } from "@maple/domain/llm"
 import { CloudflareWorkersAI } from "@maple/llm/providers/cloudflare"
 import * as OpenRouter from "@maple/llm/providers/openrouter"
 import { LLMClient, RequestExecutor } from "@maple/llm/route"
-import { isContextOverflowFailure } from "@maple/llm"
-import type { LLMClientService, LLMError, Model } from "@maple/llm"
+import { isContextOverflowFailure, Model } from "@maple/llm"
+import type { LLMClientService, LLMError } from "@maple/llm"
 import { Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { layerWorkersAi } from "./WorkersAiHttpClient"
@@ -48,7 +48,7 @@ const OPENROUTER_APP_TITLE = "Maple"
  * and `trace` is forwarded to any configured Broadcast destination.
  */
 export interface LlmCallTags {
-	readonly surface: "chat" | "ai-triage"
+	readonly surface: "chat" | "ai-triage" | "investigation-lens" | "investigation-validator"
 	readonly orgId: string
 	/** Groups one conversation or investigation. OpenRouter caps this at 256 characters. */
 	readonly sessionId?: string
@@ -97,8 +97,108 @@ export interface LlmEnv extends Record<string, unknown> {
 	readonly MAPLE_LLM_PROVIDER?: string
 	readonly MAPLE_TRIAGE_MODEL_OPENROUTER?: string
 	readonly MAPLE_TRIAGE_MODEL_WORKERS_AI?: string
+	/** Context window in tokens, overriding {@link MODEL_LIMITS} for the configured model. */
+	readonly MAPLE_TRIAGE_MODEL_CONTEXT?: string
+	/** Max completion tokens, overriding {@link MODEL_LIMITS} for the configured model. */
+	readonly MAPLE_TRIAGE_MODEL_OUTPUT?: string
+	/** Cheaper model for the fan-out lens passes; falls back to the triage model. */
+	readonly MAPLE_LENS_MODEL_OPENROUTER?: string
+	readonly MAPLE_LENS_MODEL_WORKERS_AI?: string
+	/** `low` | `medium` | `high` | `off`. See {@link ReasoningEffort}. */
+	readonly MAPLE_TRIAGE_REASONING_EFFORT?: string
+	readonly MAPLE_LENS_REASONING_EFFORT?: string
 	readonly OPENROUTER_API_KEY?: string
 }
+
+/**
+ * How hard the model should think before answering.
+ *
+ * The other dial. Maple has always tiered spend by swapping model *ids* — `resolveLensModel` picks a
+ * cheaper model than `resolveTriageModel` — but on a gpt-5.6-family model the reasoning budget moves
+ * cost and latency at least as much, and it does so without changing which model's judgement you are
+ * getting. Two different framings of "spend less on this stage", and they compose.
+ *
+ * `off` omits the field entirely rather than sending a zero budget: a model that does not support
+ * reasoning must see no `reasoning` key at all, so this is also the escape hatch if a swapped-in
+ * model rejects it.
+ */
+export type ReasoningEffort = "low" | "medium" | "high" | "off"
+
+const REASONING_EFFORTS: ReadonlySet<string> = new Set(["low", "medium", "high", "off"])
+
+const readReasoningEffort = (env: LlmEnv, key: keyof LlmEnv): ReasoningEffort | undefined => {
+	const raw = readString(env, key)?.toLowerCase()
+	// An unrecognized value falls through to the caller's default rather than throwing. This is read
+	// on a request path in a Worker; a typo'd env var must not take the agent down.
+	return raw !== undefined && REASONING_EFFORTS.has(raw) ? (raw as ReasoningEffort) : undefined
+}
+
+/**
+ * Bind the reasoning budget onto a model's defaults.
+ *
+ * `providerOptions` on `Model.defaults` is merged into every request by `resolveRequestOptions` in
+ * `lib/llm`'s route client, under the *request's* own options — so this is a default a call site can
+ * still override, which is what makes it the right place for a per-stage policy.
+ *
+ * OpenRouter-only, and namespaced under `openrouter` because that is whose field it is: the Workers
+ * AI protocol reads its own namespace and would ignore this, but sending Cloudflare a key addressed
+ * to another provider is the kind of thing that reads as a bug six months from now.
+ */
+const withReasoning = (model: Model, effort: ReasoningEffort | undefined): Model =>
+	effort === undefined || effort === "off"
+		? model
+		: Model.update(model, {
+				defaults: {
+					...model.defaults,
+					providerOptions: {
+						...model.defaults?.providerOptions,
+						openrouter: {
+							...model.defaults?.providerOptions?.openrouter,
+							reasoning: { effort },
+						},
+					},
+				},
+			})
+
+/**
+ * Context windows for the models Maple configures.
+ *
+ * `@maple/llm` has a `ModelLimits { context, output }` on `Model.defaults`, but **no provider
+ * populates it** — it is `undefined` for every model the vendored package builds. Maple needs it to
+ * know when a transcript is approaching the wall, so it is filled in here, at the Maple seam, via
+ * `Model.update`. Nothing is added to `lib/llm` (see `lib/llm/MAPLE.md`).
+ *
+ * Conservative on purpose. A limit set too low compacts early, which costs a summarization call; a
+ * limit set too high overflows, which costs the whole turn. When in doubt, go low.
+ */
+const MODEL_LIMITS: Record<string, { readonly context: number; readonly output: number }> = {
+	// Verified against OpenRouter's public model catalogue.
+	"openai/gpt-5.6-luna": { context: 1_050_000, output: 128_000 },
+	// Moonshot's own `kimi-k2.6` is 262_144, but Cloudflare does not publish the window its Workers
+	// AI deployment actually serves, and a serving deployment is usually narrower than upstream's
+	// maximum. Held at the conservative default until someone measures it; override with
+	// `MAPLE_TRIAGE_MODEL_CONTEXT` if the real figure turns out to be higher.
+	"@cf/moonshotai/kimi-k2.6": { context: 128_000, output: 8_000 },
+}
+
+/** For a model not in the table at all. Low enough that an unknown model compacts rather than fails. */
+const DEFAULT_MODEL_LIMITS = { context: 128_000, output: 8_000 } as const
+
+const readPositiveInt = (env: LlmEnv, key: keyof LlmEnv): number | undefined => {
+	const raw = readString(env, key)
+	if (raw === undefined) return undefined
+	const value = Number(raw)
+	return Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
+/**
+ * The context budget a turn should plan against, in tokens, or `undefined` if the model declares
+ * none. Callers treat `undefined` as "don't compact" rather than guessing a number.
+ */
+export const contextLimitOf = (model: Model): number | undefined => model.defaults?.limits?.context
+
+/** Max completion tokens, used to reserve headroom when deciding whether the input still fits. */
+export const outputLimitOf = (model: Model): number | undefined => model.defaults?.limits?.output
 
 const readString = (env: LlmEnv, key: keyof LlmEnv): string | undefined => {
 	const value = env[key]
@@ -126,16 +226,102 @@ export const resolveLlmProvider = (env: LlmEnv): LlmProvider =>
  * OpenRouter's body fields and have no meaning to Cloudflare.
  */
 export const resolveTriageModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
-	resolveLlmProvider(env) === "workers-ai"
-		? CloudflareWorkersAI.configure({
-				accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
-				apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
-			}).model(readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ?? DEFAULT_WORKERS_AI_MODEL)
-		: OpenRouter.configure({
-				apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
-				headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
-				...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
-			}).model(readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL)
+	withLimits(
+		env,
+		resolveLlmProvider(env) === "workers-ai"
+			? CloudflareWorkersAI.configure({
+					accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
+					apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
+				}).model(readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ?? DEFAULT_WORKERS_AI_MODEL)
+			: withReasoning(
+					OpenRouter.configure({
+						apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
+						headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
+						...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
+					}).model(readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ?? DEFAULT_OPENROUTER_MODEL),
+					// No default. This resolver serves chat, AI triage *and* the validator, so a
+					// number picked here would silently retune three stages with different shapes at
+					// once — worth doing per stage, with measurement, not as a side effect of adding
+					// the knob.
+					readReasoningEffort(env, "MAPLE_TRIAGE_REASONING_EFFORT"),
+				),
+	)
+
+/**
+ * Attach the model's context window, which the vendored providers leave unset.
+ *
+ * Purely additive — `defaults.limits` was `undefined` before — so nothing that ignores it can
+ * regress. `defaults` is spread rather than replaced so a provider that *does* set generation or
+ * HTTP defaults keeps them.
+ */
+const withLimits = (env: LlmEnv, model: Model): Model => {
+	const known = MODEL_LIMITS[String(model.id)] ?? DEFAULT_MODEL_LIMITS
+	return Model.update(model, {
+		defaults: {
+			...model.defaults,
+			limits: {
+				context: readPositiveInt(env, "MAPLE_TRIAGE_MODEL_CONTEXT") ?? known.context,
+				output: readPositiveInt(env, "MAPLE_TRIAGE_MODEL_OUTPUT") ?? known.output,
+			},
+		},
+	})
+}
+
+/**
+ * The model a fan-out *lens* runs on.
+ *
+ * Lenses gather evidence through one narrow framing; the validator does the
+ * actual reasoning about which candidate explains the incident. So the spend
+ * belongs on the validator, and a fan-out of five otherwise multiplies the
+ * expensive model by five for work that a cheaper one does adequately.
+ *
+ * Falls back to the triage model when unset, so tiering is opt-in per stage and
+ * an unconfigured environment behaves exactly as it does today. The validator
+ * has no resolver of its own on purpose — it *is* `resolveTriageModel`, and
+ * introducing a third knob would let the ranking silently drift below the
+ * lenses it ranks.
+ *
+ * The reasoning budget is that same argument in its other form, and it is the one
+ * part of this that is **not** opt-in: `low` by default, because "gather evidence
+ * through one narrow framing" describes a task that does not need a long think,
+ * and the fan-out multiplies whatever it does need by five. Raise it with
+ * `MAPLE_LENS_REASONING_EFFORT`, or set that to `off` to send no reasoning field.
+ *
+ * `withLimits` is not optional here, though it looked it: without it
+ * `defaults.limits` is `undefined`, so `contextLimitOf` returns `undefined`, so
+ * the turn loop's `isNearContextLimit` check never fires and a lens pass never
+ * sheds a step — the one agent class that fills its window with raw
+ * telemetry was the only one running without the guard. Note the coupling this
+ * introduces: `MAPLE_TRIAGE_MODEL_CONTEXT`/`_OUTPUT` are read inside
+ * `withLimits`, so a lens on a *different* model inherits the triage overrides.
+ * Acceptable — an override is set to describe a deployment, not a single model —
+ * but it is the thing to fix first if the two stages ever diverge that far.
+ */
+export const resolveLensModel = (env: LlmEnv, tags?: LlmCallTags): Model =>
+	withLimits(
+		env,
+		resolveLlmProvider(env) === "workers-ai"
+			? CloudflareWorkersAI.configure({
+					accountId: readString(env, "CLOUDFLARE_ACCOUNT_ID") ?? BINDING_PLACEHOLDER,
+					apiKey: readString(env, "CLOUDFLARE_API_KEY") ?? BINDING_PLACEHOLDER,
+				}).model(
+					readString(env, "MAPLE_LENS_MODEL_WORKERS_AI") ??
+						readString(env, "MAPLE_TRIAGE_MODEL_WORKERS_AI") ??
+						DEFAULT_WORKERS_AI_MODEL,
+				)
+			: withReasoning(
+					OpenRouter.configure({
+						apiKey: readString(env, "OPENROUTER_API_KEY") ?? "",
+						headers: { "HTTP-Referer": OPENROUTER_APP_URL, "X-Title": OPENROUTER_APP_TITLE },
+						...(tags === undefined ? {} : { http: { body: openRouterTagBody(tags) } }),
+					}).model(
+						readString(env, "MAPLE_LENS_MODEL_OPENROUTER") ??
+							readString(env, "MAPLE_TRIAGE_MODEL_OPENROUTER") ??
+							DEFAULT_OPENROUTER_MODEL,
+					),
+					readReasoningEffort(env, "MAPLE_LENS_REASONING_EFFORT") ?? "low",
+				),
+	)
 
 /**
  * The runnable LLM stack — identical for both providers, which is what makes the switch a pure

@@ -832,7 +832,7 @@ interface DatasetPollFailure {
  * `find_errors` / the errors page through the SAME pipeline as every other error, instead of being
  * buried in `cloudflare_analytics_state.lastError` where nothing watches it.
  */
-class CloudflareAnalyticsPollError extends Schema.TaggedErrorClass<CloudflareAnalyticsPollError>()(
+class CloudflareAnalyticsPollError extends Schema.TaggedError<CloudflareAnalyticsPollError>()(
 	"@maple/cloudflare/AnalyticsPollError",
 	{
 		message: Schema.String,

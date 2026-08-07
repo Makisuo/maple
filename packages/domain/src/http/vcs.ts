@@ -394,25 +394,25 @@ export type VcsSyncJob = Schema.Schema.Type<typeof VcsSyncJob>
 
 // ---- Tagged errors --------------------------------------------------------
 
-export class VcsRepoPersistenceError extends Schema.TaggedErrorClass<VcsRepoPersistenceError>()(
+export class VcsRepoPersistenceError extends Schema.TaggedError<VcsRepoPersistenceError>()(
 	"@maple/http/errors/VcsRepoPersistenceError",
 	{ message: Schema.String },
 	{ httpApiStatus: 503 },
 ) {}
 
-export class VcsRepoDecodeError extends Schema.TaggedErrorClass<VcsRepoDecodeError>()(
+export class VcsRepoDecodeError extends Schema.TaggedError<VcsRepoDecodeError>()(
 	"@maple/http/errors/VcsRepoDecodeError",
 	{ message: Schema.String, table: Schema.String, column: Schema.optionalKey(Schema.String) },
 	{ httpApiStatus: 500 },
 ) {}
 
-export class VcsQueueError extends Schema.TaggedErrorClass<VcsQueueError>()(
+export class VcsQueueError extends Schema.TaggedError<VcsQueueError>()(
 	"@maple/http/errors/VcsQueueError",
 	{ message: Schema.String },
 	{ httpApiStatus: 503 },
 ) {}
 
-export class VcsProviderError extends Schema.TaggedErrorClass<VcsProviderError>()(
+export class VcsProviderError extends Schema.TaggedError<VcsProviderError>()(
 	"@maple/http/errors/VcsProviderError",
 	{
 		message: Schema.String,
@@ -429,7 +429,7 @@ export class VcsProviderError extends Schema.TaggedErrorClass<VcsProviderError>(
  * as a disconnect — raw HTTP status never drives that decision. Providers must
  * only raise this when the signal is unambiguous.
  */
-export class VcsInstallationGoneError extends Schema.TaggedErrorClass<VcsInstallationGoneError>()(
+export class VcsInstallationGoneError extends Schema.TaggedError<VcsInstallationGoneError>()(
 	"@maple/http/errors/VcsInstallationGoneError",
 	{ message: Schema.String },
 	{ httpApiStatus: 410 },
@@ -439,7 +439,7 @@ export class VcsInstallationGoneError extends Schema.TaggedErrorClass<VcsInstall
  * The provider is certain a specific repository is permanently inaccessible
  * (deleted / renamed / access lost). Scoped to the repo — never the installation.
  */
-export class VcsRepoUnavailableError extends Schema.TaggedErrorClass<VcsRepoUnavailableError>()(
+export class VcsRepoUnavailableError extends Schema.TaggedError<VcsRepoUnavailableError>()(
 	"@maple/http/errors/VcsRepoUnavailableError",
 	{ message: Schema.String },
 	{ httpApiStatus: 404 },
@@ -451,25 +451,25 @@ export class VcsRepoUnavailableError extends Schema.TaggedErrorClass<VcsRepoUnav
  * consumer redelivers the failed job with this delay; backfill catches it earlier
  * and requeues from a cursor (see `VcsCommitFetch.next`).
  */
-export class VcsRateLimitedError extends Schema.TaggedErrorClass<VcsRateLimitedError>()(
+export class VcsRateLimitedError extends Schema.TaggedError<VcsRateLimitedError>()(
 	"@maple/http/errors/VcsRateLimitedError",
 	{ message: Schema.String, retryAfterSeconds: Schema.Number },
 	{ httpApiStatus: 429 },
 ) {}
 
-export class VcsWebhookSignatureError extends Schema.TaggedErrorClass<VcsWebhookSignatureError>()(
+export class VcsWebhookSignatureError extends Schema.TaggedError<VcsWebhookSignatureError>()(
 	"@maple/http/errors/VcsWebhookSignatureError",
 	{ message: Schema.String },
 	{ httpApiStatus: 401 },
 ) {}
 
-export class VcsWebhookParseError extends Schema.TaggedErrorClass<VcsWebhookParseError>()(
+export class VcsWebhookParseError extends Schema.TaggedError<VcsWebhookParseError>()(
 	"@maple/http/errors/VcsWebhookParseError",
 	{ message: Schema.String },
 	{ httpApiStatus: 400 },
 ) {}
 
-export class UnknownVcsProviderError extends Schema.TaggedErrorClass<UnknownVcsProviderError>()(
+export class UnknownVcsProviderError extends Schema.TaggedError<UnknownVcsProviderError>()(
 	"@maple/http/errors/UnknownVcsProviderError",
 	{ provider: Schema.String, message: Schema.String },
 	{ httpApiStatus: 404 },
@@ -483,7 +483,7 @@ export class UnknownVcsProviderError extends Schema.TaggedErrorClass<UnknownVcsP
  * (422) rather than a generic 400, so the dashboard can render a muted
  * "non-standard commit reference" state instead of a failure.
  */
-export class VcsCommitShaInvalidError extends Schema.TaggedErrorClass<VcsCommitShaInvalidError>()(
+export class VcsCommitShaInvalidError extends Schema.TaggedError<VcsCommitShaInvalidError>()(
 	"@maple/http/errors/VcsCommitShaInvalidError",
 	{ message: Schema.String, sha: Schema.String },
 	{ httpApiStatus: 422 },
@@ -493,13 +493,13 @@ export class VcsCommitShaInvalidError extends Schema.TaggedErrorClass<VcsCommitS
  * The SHA is a valid 40-hex commit, but no connected repository in the org
  * contains it (neither stored nor resolvable on the fly from any provider).
  */
-export class VcsCommitNotFoundError extends Schema.TaggedErrorClass<VcsCommitNotFoundError>()(
+export class VcsCommitNotFoundError extends Schema.TaggedError<VcsCommitNotFoundError>()(
 	"@maple/http/errors/VcsCommitNotFoundError",
 	{ message: Schema.String, sha: Schema.String },
 	{ httpApiStatus: 404 },
 ) {}
 
-export class OAuthStatePersistenceError extends Schema.TaggedErrorClass<OAuthStatePersistenceError>()(
+export class OAuthStatePersistenceError extends Schema.TaggedError<OAuthStatePersistenceError>()(
 	"@maple/http/errors/OAuthStatePersistenceError",
 	{ message: Schema.String },
 	{ httpApiStatus: 503 },

@@ -16,19 +16,19 @@ const errorFields = {
 	code: Schema.optionalKey(Schema.String),
 }
 
-export class MapleApiError extends Schema.TaggedErrorClass<MapleApiError>()("Maple::ApiError", errorFields) {}
+export class MapleApiError extends Schema.TaggedError<MapleApiError>()("Maple::ApiError", errorFields) {}
 
-export class MapleNotFoundError extends Schema.TaggedErrorClass<MapleNotFoundError>()(
+export class MapleNotFoundError extends Schema.TaggedError<MapleNotFoundError>()(
 	"Maple::NotFoundError",
 	errorFields,
 ) {}
 
-export class MapleConflictError extends Schema.TaggedErrorClass<MapleConflictError>()(
+export class MapleConflictError extends Schema.TaggedError<MapleConflictError>()(
 	"Maple::ConflictError",
 	errorFields,
 ) {}
 
-export class MapleUnauthorizedError extends Schema.TaggedErrorClass<MapleUnauthorizedError>()(
+export class MapleUnauthorizedError extends Schema.TaggedError<MapleUnauthorizedError>()(
 	"Maple::UnauthorizedError",
 	errorFields,
 ) {}

@@ -1,4 +1,4 @@
-import { Effect, Option, Schema, SchemaGetter, SchemaIssue } from "effect"
+import { Effect, Schema, SchemaAST, SchemaGetter, SchemaIssue } from "effect"
 
 /**
  * Stripe-style prefixed public object IDs for the v2 API.
@@ -177,9 +177,12 @@ export const PublicId = <S extends Schema.Codec<any, string>>(prefix: PublicIdPr
 						const internalId = decodePublicId(prefix, publicId)
 						return internalId === null
 							? Effect.fail(
-									new SchemaIssue.InvalidValue(Option.some(publicId), {
-										message: `Invalid ID: expected an ID with prefix "${prefix}_"`,
-									}),
+									new SchemaIssue.InvalidValue(
+										{
+											message: `Invalid ID: expected an ID with prefix "${prefix}_"`,
+										},
+										publicId,
+									),
 								)
 							: Effect.succeed(internalId)
 					}),
@@ -190,5 +193,10 @@ export const PublicId = <S extends Schema.Codec<any, string>>(prefix: PublicIdPr
 				Schema.decodeTo(internal),
 			)
 			.annotate({ title: `Public ID (${prefix}_…)` })
+			.pipe(
+				Schema.annotateEncoded({
+					identifier: SchemaAST.resolveIdentifier(internal.ast),
+				}),
+			)
 	)
 }

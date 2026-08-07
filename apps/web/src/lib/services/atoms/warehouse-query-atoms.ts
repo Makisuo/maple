@@ -125,7 +125,7 @@ interface QueryAtomOptions {
 	staleTime?: number
 }
 
-class QueryAtomError extends Schema.TaggedErrorClass<QueryAtomError>()("@maple/web/services/QueryAtomError", {
+class QueryAtomError extends Schema.TaggedError<QueryAtomError>()("@maple/web/services/QueryAtomError", {
 	message: Schema.String,
 	cause: Schema.optionalKey(Schema.Unknown),
 }) {}

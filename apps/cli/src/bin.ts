@@ -65,13 +65,15 @@ if (checkpointProbeDataDir !== undefined) {
 				Effect.trackDuration(cliInvocationDuration),
 			),
 		),
-		Effect.withSpan("maple", { attributes: { "cli.argv": process.argv.slice(2).join(" ") } }),
+		// The recovery sits *inside* the span: applied outside it, a gracefully
+		// handled archive error still closed the root span as Error.
 		Effect.catchTag("@maple/cli/ArchiveError", (error) =>
 			Effect.sync(() => {
 				process.stderr.write(archiveErrorMessage(error))
 				process.exitCode = 1
 			}),
 		),
+		Effect.withSpan("maple", { attributes: { "cli.argv": process.argv.slice(2).join(" ") } }),
 		Effect.provide(MainLayer),
 		Effect.provide(TelemetryLayer),
 		BunRuntime.runMain,

@@ -30,12 +30,17 @@ export function TooltipPopup({
 	anchor?: TooltipPrimitive.Positioner.Props["anchor"]
 	portalProps?: TooltipPrimitive.Portal.Props
 }): React.ReactElement {
+	// Overlay bands, all body-portalled siblings: modal surfaces (sheet, dialog,
+	// drawer, alert-dialog) at z-50, transient hover surfaces (tooltip,
+	// hover-card, popover) at z-55, toasts at z-60. Transient sits *above* modal
+	// on purpose — a tooltip triggered from inside a drawer has to be readable.
+	// Leaving them tied at z-50 makes paint order depend on portal mount order.
 	return (
 		<TooltipPrimitive.Portal {...portalProps}>
 			<TooltipPrimitive.Positioner
 				align={align}
 				anchor={anchor}
-				className="z-50 h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
+				className="z-55 h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
 				data-slot="tooltip-positioner"
 				side={side}
 				sideOffset={sideOffset}

@@ -1,29 +1,30 @@
 import type { Effect } from "effect"
 import { Schema } from "effect"
 
-class McpTenantError extends Schema.TaggedErrorClass<McpTenantError>()("@maple/mcp/errors/McpTenantError", {
+class McpTenantError extends Schema.TaggedError<McpTenantError>()("@maple/mcp/errors/McpTenantError", {
 	message: Schema.String,
 }) {}
 
-export class McpAuthMissingError extends Schema.TaggedErrorClass<McpAuthMissingError>()(
+export class McpAuthMissingError extends Schema.TaggedError<McpAuthMissingError>()(
 	"@maple/mcp/errors/McpAuthMissingError",
 	{ message: Schema.String, header: Schema.optionalKey(Schema.String) },
 ) {}
 
-export class McpAuthInvalidError extends Schema.TaggedErrorClass<McpAuthInvalidError>()(
+export class McpAuthInvalidError extends Schema.TaggedError<McpAuthInvalidError>()(
 	"@maple/mcp/errors/McpAuthInvalidError",
 	{ message: Schema.String, reason: Schema.optionalKey(Schema.String) },
 ) {}
 
-export class McpInvalidTenantError extends Schema.TaggedErrorClass<McpInvalidTenantError>()(
+export class McpInvalidTenantError extends Schema.TaggedError<McpInvalidTenantError>()(
 	"@maple/mcp/errors/McpInvalidTenantError",
 	{ message: Schema.String, field: Schema.String },
 ) {}
 
-export class McpQueryError extends Schema.TaggedErrorClass<McpQueryError>()(
-	"@maple/mcp/errors/McpQueryError",
-	{ message: Schema.String, pipeName: Schema.String, cause: Schema.optionalKey(Schema.Defect()) },
-) {}
+export class McpQueryError extends Schema.TaggedError<McpQueryError>()("@maple/mcp/errors/McpQueryError", {
+	message: Schema.String,
+	pipeName: Schema.String,
+	cause: Schema.optionalKey(Schema.Defect()),
+}) {}
 
 export type McpToolError =
 	| McpTenantError

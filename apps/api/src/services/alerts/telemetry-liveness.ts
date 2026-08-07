@@ -77,7 +77,10 @@ export type ServiceWindowPair = readonly [
  * dependency legible, and it keeps `WarehouseQueryService` out of the R channel
  * of callers that already resolved the service inside their own closure.
  */
-export type LivenessWarehouse = Pick<WarehouseQueryServiceShape, "compiledQuery" | "compiledQueryFirst">
+export type LivenessWarehouse = Pick<
+	WarehouseQueryServiceShape,
+	"compiledQuery" | "compiledQueryFirst" | "warmRoute"
+>
 
 export interface LivenessProbeInput {
 	readonly warehouse: LivenessWarehouse
@@ -166,6 +169,11 @@ export const probeLiveness: (input: LivenessProbeInput) => Effect.Effect<Livenes
 )(function* (input) {
 	const { warehouse, tenant, serviceNames } = input
 	const { windowStartMs, windowEndMs, baselineStartMs, baselineEndMs } = input
+
+	// Both branches fan out (the service branch to 4×2 concurrent probes), so warm
+	// the route once up front rather than letting the first wave race for it.
+	// `warmRoute` never fails, which keeps this probe's `never` error channel.
+	yield* warehouse.warmRoute(tenant)
 
 	const result =
 		serviceNames.length === 0

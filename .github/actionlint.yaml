@@ -1,7 +1,0 @@
-# Blacksmith runner labels. actionlint only knows the GitHub-hosted set, so without
-# this every `runs-on:` in the repo reports as an unknown label and drowns out real
-# findings. Add new sizes here when a job starts using one.
-self-hosted-runner:
-    labels:
-        - blacksmith-4vcpu-ubuntu-2404
-        - blacksmith-8vcpu-ubuntu-2404

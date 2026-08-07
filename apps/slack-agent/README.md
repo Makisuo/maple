@@ -41,9 +41,13 @@ agent/
   channels/eve.ts     # auth policy for the browser/API routes
   connections/maple.ts # Maple MCP connection (per-workspace API key auth + approval gate)
   tools/render_chart.ts # renders a PNG chart in-process and posts it into the thread
+  tools/read_channel_history.ts # on-demand read of the channel's recent top-level messages
   tools/{bash,glob,grep,read_file,write_file,web_fetch,web_search}.ts
                       # `disableTool()` sentinels — see Framework tools below
   lib/thread-context.ts # full-thread turn context (renders Block Kit / alert cards too)
+  lib/channel-context.ts # channel turn context for a mention that starts its own thread
+  lib/slack-context-format.ts # shared renderer for both (blocks/attachments + attribution)
+  lib/turn-time.ts    # per-turn `<current_time>` block (nothing else dates the prompt)
   lib/bot-identity.ts # per-team bot user id learned from the webhook envelope
   lib/chart.ts        # pure SVG chart renderer + unicode-sparkline fallback
   lib/slack-upload.ts # Slack external-upload flow (files.getUploadURLExternal → complete)
@@ -134,10 +138,10 @@ oauth_config:
             - chat:write # post replies
             - chat:write.public # post in channels the bot isn't a member of
             - channels:read # resolve public channel metadata
-            - channels:history
+            - channels:history # thread + channel context, follow-ups (no mpim:history — group DMs opt out)
             - files:write # upload rendered chart images (render_chart tool)
             - groups:read # resolve private channel metadata
-            - groups:history # thread context + follow-ups in private channels
+            - groups:history # thread + channel context + follow-ups in private channels
             - im:history # read DM history (message.im)
             - im:read # resolve DM conversation metadata
             - im:write # open/DM the user
@@ -149,8 +153,9 @@ settings:
         bot_events:
             - app_mention
             - message.im
-            # Thread follow-ups without re-mentioning the bot: replies in threads the
-            # bot is engaged in are promoted to app_mention by the webhookVerifier
+            # Thread follow-ups without re-mentioning the bot: candidate thread
+            # replies are promoted to app_mention by the webhookVerifier, and
+            # confirmed (or dropped) after the 200 by the mention handler
             # (agent/lib/thread-follow-up.ts). Only channels the bot is a member of
             # deliver these events.
             - message.channels
@@ -284,11 +289,17 @@ Both should show a green **Verified ✓** next to the field once saved. Event Su
 `app_mention`, `message.im`, `message.channels`, and `message.groups` listed under _Subscribe to bot
 events_ — the manifest from step 1 sets these, so they should already be there. The two channel
 message events power thread follow-ups: once the bot has been mentioned (or replied) in a thread,
-further replies in that thread reach it without a new `@mention` — but only while the engagement is
-**recent**: within 30 minutes and within the last 15 messages of the thread (see
-`agent/lib/thread-follow-up.ts`). Past either bound, replies pass through untouched and the user
-@-mentions the bot again. Unbounded, one mention would turn every later reply by anyone into a full
-agent turn, forever.
+further replies in that thread reach it without a new `@mention` — but only while the thread is
+still **alive** (nobody has touched it for less than 24 hours) and the bot is still within its
+**last 15 messages**. Past either bound the reply is dropped, everyone who spoke in the thread gets
+a DM saying so, and one `@mention` brings the bot back (`agent/lib/thread-follow-up.ts`,
+`agent/lib/disengage-notice.ts`). Unbounded, one mention would turn every later reply by anyone into
+a full agent turn, forever.
+
+The decision deliberately does **not** happen in the webhook verifier — that is the only awaited work
+before eve's 200, so anything it fetches is spent out of Slack's ~3s delivery budget. Promotion there
+is parse-only and optimistic; the mention handler confirms it afterwards, against the thread it loads
+for turn context anyway.
 
 Changing a request URL does **not** require reinstalling the app; only changing _scopes_ does. (If
 you did edit scopes, the sidebar shows a yellow reinstall banner — follow it, and note that
@@ -506,6 +517,30 @@ and **activate public distribution** so the app can be installed into any worksp
   falls back to blocks/attachments for content, keeps the full thread (which also survives a
   session lost to a redeploy), and attributes speakers with the workspace's real bot user id from
   `agent/lib/bot-identity.ts` so a third-party app in the channel isn't quoted back as the agent.
+- **A mention that isn't in a thread gets the channel instead.** Maple posts alert cards to a
+  channel; people answer them by writing a new channel message ("the ship is sinking @Maple"), not
+  by replying inside a card's thread. That mention is its own thread root, so the thread transcript
+  is one message long — the user's own. `agent/lib/channel-context.ts` fills the gap with the
+  channel's last few top-level messages (`conversations.history`) as `<slack_channel_context>`,
+  rendered by the same code, on the same `waitUntil` path, degrading the same way. The trigger is
+  structural (`threadTs === ts`), not a model judgment call: the model cannot ask for context it
+  has never been shown a trace of. Inside a thread the same fetch is available on demand as the
+  `read_channel_history` tool. `conversations.history` returns top-level messages only, so the two
+  surfaces never quote the same message twice. Scope-wise this is free — `channels:history` /
+  `groups:history` / `im:history` are already installed. `mpim:history` is not requested, so a
+  group DM answers `missing_scope`; that degrades to a note telling the model not to retry, and
+  adding the scope would make every existing install report missing scopes until reinstalled.
+- **Every turn carries the clock.** Nothing else in the prompt dates it: eve injects no current
+  date, `instructions.md` is compiled at build time, and dynamic instructions resolve on
+  `session.started` — which for Slack is the _first_ mention in a thread, since sessions are keyed
+  `channelId:threadTs`. The model's only temporal signal was the `message_ts` values in the
+  transcript, and it read the oldest as "about now", so "chart that now" an hour into an alert
+  thread came back anchored to when the alert fired. `agent/lib/turn-time.ts` appends a
+  `<current_time>` block (now in UTC + unix seconds, plus the thread's age) to each turn's
+  `context`, and `instructions.md` § Time says the last one is now. Deliberately turn `context`
+  rather than a `turn.started` dynamic instruction: instructions lower into the system prompt, and
+  a value that changes every turn would invalidate the prompt cache at its first token and
+  re-ingest the whole conversation each turn.
 - **Auth:** `agent/channels/eve.ts` fails closed in deployed environments (`RAILWAY_ENVIRONMENT_NAME`
   set, or `NODE_ENV=production`): the browser/API routes always require HTTP Basic there. With
   `ROUTE_AUTH_BASIC_PASSWORD` set that's your stable credential; without it, a random per-boot

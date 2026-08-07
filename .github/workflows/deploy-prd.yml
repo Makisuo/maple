@@ -20,7 +20,7 @@ permissions:
 
 jobs:
     deploy-prd:
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 30
         # On a workflow_run event `github.sha` is the default branch head, not the
         # commit CI actually ran against — so pin everything to head_sha, both for

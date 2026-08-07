@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect"
 import { mapleToolDefinitions, toInputSchema, type MapleToolDefinition } from "./tools/registry"
 import type { McpToolResult } from "./tools/types"
 
-class McpDecodeError extends Schema.TaggedErrorClass<McpDecodeError>()("@maple/mcp/decode-error", {
+class McpDecodeError extends Schema.TaggedError<McpDecodeError>()("@maple/mcp/decode-error", {
 	errorMessage: Schema.String,
 }) {}
 
@@ -26,8 +26,8 @@ const toDecodeErrorMessage = (definition: MapleToolDefinition, error: unknown): 
 /**
  * Built on first use, not at module scope.
  *
- * `apps/api/src/chat/agent.ts` imports this module and is itself reachable from the tool registry's
- * own import graph (registry -> a tool -> issue-hub/ai-triage-enqueue -> chat/session -> chat/agent
+ * `apps/api/src/chat/tools.ts` imports this module and is itself reachable from the tool registry's
+ * own import graph (registry -> a tool -> issue-hub/ai-triage-enqueue -> chat/session -> chat/tools
  * -> here). Computing the descriptors eagerly meant that whichever module the bundler happened to
  * evaluate first could observe `mapleToolDefinitions` as `undefined`. Deferring removes the
  * ordering dependency entirely rather than papering over one edge of the cycle.

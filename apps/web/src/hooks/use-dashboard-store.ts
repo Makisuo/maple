@@ -12,6 +12,7 @@ import {
 import type { DashboardRefreshIntervalSeconds } from "@maple/domain/http"
 import type { V2DashboardMutation } from "@maple/domain/http/v2"
 import { useLiveQuery } from "@tanstack/react-db"
+import { toastManager } from "@maple/ui/components/ui/toast"
 import { trackProduct } from "@/lib/analytics"
 import { runMapleApiV2 } from "@/lib/collections/api-runner"
 import { rowToDashboard, v2DashboardToDashboard } from "@/lib/collections/dashboards"
@@ -110,7 +111,7 @@ function getErrorMessage(error: unknown): string {
 // txid never appears and TanStack DB rolls the optimistic state back. Latching
 // the read-only banner here would punish a *successful* write; instead the
 // caller triggers the stuck-collection self-heal so a fresh stream re-syncs the
-// saved row.
+// saved row, and tells the user why their change just disappeared from view.
 function isTxidAwaitTimeout(error: unknown): boolean {
 	if (typeof error !== "object" || error === null) return false
 	const named = error as { name?: unknown; message?: unknown }
@@ -193,18 +194,30 @@ function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDash
 // transform pushed through the injected `mutateDashboard`. `readDashboard`
 // supplies the current dashboard (from the collection) for the two mutators
 // that read it.
+//
+// Every fire-and-forget call routes its rejection through `onMutationFailed`.
+// These used to be bare `void mutateDashboard(...)`, which turned a synchronous
+// encode throw (a Schema.Class constructor rejecting a widget, a bad ISO
+// timestamp) into an unhandled promise rejection: the edit vanished and the UI
+// said nothing.
 function makeWidgetMutators(deps: {
 	mutateDashboard: (id: string, updater: (dashboard: Dashboard) => Dashboard) => Promise<void>
 	readOnly: boolean
 	readDashboard: (id: string) => Dashboard | undefined
+	onMutationFailed: (error: unknown) => void
 }) {
-	const { mutateDashboard, readOnly, readDashboard } = deps
+	const { mutateDashboard, readOnly, readDashboard, onMutationFailed } = deps
+
+	/** Fire-and-forget, but never silent: a rejection reaches the persistence banner. */
+	const push = (id: string, updater: (dashboard: Dashboard) => Dashboard): void => {
+		void mutateDashboard(id, updater).catch(onMutationFailed)
+	}
 
 	const updateDashboard = (
 		id: string,
 		updates: Partial<Pick<Dashboard, "name" | "description" | "tags">>,
 	) => {
-		void mutateDashboard(id, (dashboard) => ({
+		push(id, (dashboard) => ({
 			...dashboard,
 			...updates,
 			updatedAt: new Date().toISOString(),
@@ -212,7 +225,7 @@ function makeWidgetMutators(deps: {
 	}
 
 	const updateDashboardTimeRange = (id: string, timeRange: TimeRange) => {
-		void mutateDashboard(id, (dashboard) => ({
+		push(id, (dashboard) => ({
 			...dashboard,
 			timeRange,
 			updatedAt: new Date().toISOString(),
@@ -220,7 +233,7 @@ function makeWidgetMutators(deps: {
 	}
 
 	const updateDashboardVariables = (id: string, variables: DashboardVariable[]) => {
-		void mutateDashboard(id, (dashboard) => ({
+		push(id, (dashboard) => ({
 			...dashboard,
 			variables,
 			updatedAt: new Date().toISOString(),
@@ -234,7 +247,7 @@ function makeWidgetMutators(deps: {
 		id: string,
 		refreshIntervalSeconds: DashboardRefreshIntervalSeconds,
 	) => {
-		void mutateDashboard(id, (dashboard) => ({
+		push(id, (dashboard) => ({
 			...dashboard,
 			refreshIntervalSeconds,
 			updatedAt: new Date().toISOString(),
@@ -259,7 +272,19 @@ function makeWidgetMutators(deps: {
 		// inside it would still be null at return — the old `widgetRef!` masked a
 		// runtime null. `readDashboard` reads the current dashboard in both paths;
 		// the grid compactor resolves any position drift between build and apply.
-		const position = findNextPosition(readDashboard(dashboardId)?.widgets ?? [], layoutDefaults.w)
+		//
+		// Fail here rather than defaulting to an empty widget list: `mutateDashboard`
+		// can only write a dashboard the collection holds, so building a widget for
+		// one it doesn't would return a widget to the caller that is never persisted
+		// and never rendered — the "the picker just closed and nothing happened" bug.
+		// `readDashboard` returns undefined both for a row this tab hasn't synced
+		// yet and for one whose payload won't decode, so the message covers both.
+		const current = readDashboard(dashboardId)
+		if (!current) {
+			throw new Error("Couldn’t read this dashboard — it may still be loading. Try again.")
+		}
+
+		const position = findNextPosition(current.widgets, layoutDefaults.w)
 		const widget: DashboardWidget = {
 			id: generateId(),
 			visualization,
@@ -268,7 +293,7 @@ function makeWidgetMutators(deps: {
 			layout: { ...position, ...layoutDefaults },
 		}
 
-		void mutateDashboard(dashboardId, (dashboard) => ({
+		push(dashboardId, (dashboard) => ({
 			...dashboard,
 			widgets: [...dashboard.widgets, widget],
 			updatedAt: new Date().toISOString(),
@@ -279,7 +304,7 @@ function makeWidgetMutators(deps: {
 
 	const cloneWidget = (dashboardId: string, widgetId: string) => {
 		if (readOnly) return
-		void mutateDashboard(dashboardId, (dashboard) => {
+		push(dashboardId, (dashboard) => {
 			const source = dashboard.widgets.find((w) => w.id === widgetId)
 			if (!source) return dashboard
 
@@ -313,7 +338,7 @@ function makeWidgetMutators(deps: {
 		// here matches what the async write will actually delete.
 		const removed = readDashboard(dashboardId)?.widgets.find((w) => w.id === widgetId)
 
-		void mutateDashboard(dashboardId, (dashboard) => ({
+		push(dashboardId, (dashboard) => ({
 			...dashboard,
 			widgets: dashboard.widgets.filter((widget) => widget.id !== widgetId),
 			updatedAt: new Date().toISOString(),
@@ -324,7 +349,7 @@ function makeWidgetMutators(deps: {
 
 	const restoreWidget = (dashboardId: string, widget: DashboardWidget) => {
 		if (readOnly) return
-		void mutateDashboard(dashboardId, (dashboard) => {
+		push(dashboardId, (dashboard) => {
 			// Idempotent: a server refetch may have already reinstated the widget.
 			if (dashboard.widgets.some((w) => w.id === widget.id)) return dashboard
 			return {
@@ -340,7 +365,7 @@ function makeWidgetMutators(deps: {
 		widgetId: string,
 		display: Partial<WidgetDisplayConfig>,
 	) => {
-		void mutateDashboard(dashboardId, (dashboard) => ({
+		push(dashboardId, (dashboard) => ({
 			...dashboard,
 			widgets: dashboard.widgets.map((widget) =>
 				widget.id === widgetId ? { ...widget, display: { ...widget.display, ...display } } : widget,
@@ -353,7 +378,7 @@ function makeWidgetMutators(deps: {
 		dashboardId: string,
 		layouts: Array<{ i: string; x: number; y: number; w: number; h: number }>,
 	) => {
-		void mutateDashboard(dashboardId, (dashboard) => {
+		push(dashboardId, (dashboard) => {
 			let changed = false
 			const widgets = dashboard.widgets.map((widget) => {
 				const layout = layouts.find((item) => item.i === widget.id)
@@ -411,7 +436,7 @@ function makeWidgetMutators(deps: {
 	}
 
 	const autoLayoutWidgets = (dashboardId: string) => {
-		void mutateDashboard(dashboardId, (dashboard) => {
+		push(dashboardId, (dashboard) => {
 			if (dashboard.widgets.length === 0) return dashboard
 
 			const sorted = dashboard.widgets.toSorted((a, b) => {
@@ -529,14 +554,26 @@ export function useDashboardsRead(): DashboardsRead {
 	const syncFailed = useCollectionLoadFailed(collection.id, stillLoading)
 	const fallback = useDashboardsFallback(syncFailed)
 
+	// Whether the live query has produced a real answer. Gate the fallback on
+	// THIS rather than on the row count: `useDashboardsFallback` is a module-level
+	// store that latches at `ready` for the rest of the session, so keying off
+	// `synced.length === 0` marked a perfectly healthy org that simply has no
+	// dashboards yet (or has just deleted its last one) as degraded — which
+	// consumers turn into `readOnly`, disabling "New dashboard" and forcing the
+	// dashboard page out of edit mode with nothing on screen to explain it.
+	const liveResolved = !liveLoading && !isError
+
 	// Live rows always win. The HTTP snapshot only stands in while sync is down,
 	// and once it has loaded it keeps standing in across heal attempts rather than
 	// blinking back to a skeleton every time a retry re-enters `loading`.
-	const degraded = synced.length === 0 && fallback.status === "ready"
+	const degraded = !liveResolved && fallback.status === "ready"
 	// `idle` counts as pending for one commit: `useSyncExternalStore` fires the
 	// fetch from `subscribe`, i.e. after the render that first saw the failure.
 	const fallbackPending = fallback.status === "loading" || (syncFailed && fallback.status === "idle")
-	const failed = isError || fallback.status === "failed" || (syncFailed && !fallbackPending)
+	// A resolved live query is the answer even when a stale stuck-verdict lingers
+	// in `syncFailed`; only an unresolved one can be a failure.
+	const failed =
+		!liveResolved && (isError || fallback.status === "failed" || (syncFailed && !fallbackPending))
 
 	return {
 		dashboards: degraded ? fallback.dashboards : synced,
@@ -573,8 +610,21 @@ export function useDashboardMutations() {
 			if (isTxidAwaitTimeout(error)) {
 				// The write reached the server (the handler returned a txid) — only the
 				// sync-back timed out because this tab's shape stream is dead. Heal the
-				// stream instead of disabling editing; the refetch restores the saved row.
+				// stream instead of disabling editing, since editing still works.
+				//
+				// Say so, though: TanStack DB has already rolled the optimistic edit off
+				// the screen, and `handleCollectionStuck` is a *bounded* heal that is a
+				// no-op once its budget is spent — so staying quiet here left the user
+				// watching a change they made get undone for no stated reason.
 				handleCollectionStuck()
+				toastManager.add({
+					title: "Saved, but this tab is behind",
+					description:
+						"The change reached the server; this tab’s live sync didn’t catch up, so it isn’t shown yet.",
+					type: "warning",
+					actionProps: { children: "Reconnect", onClick: retryOrgCollections },
+					timeout: 10000,
+				})
 				return
 			}
 			const concurrency =
@@ -602,10 +652,17 @@ export function useDashboardMutations() {
 		// next render, which reading the collection directly avoids.
 		async (dashboardId: string, updater: (dashboard: Dashboard) => Dashboard): Promise<void> => {
 			const active = collection
+			// Both misses used to `return` silently, which is how an edit could
+			// disappear with nothing on screen to explain it. They are real failures:
+			// the caller asked to write a dashboard this tab cannot read.
 			const row = active.get(dashboardId)
-			if (!row) return
+			if (!row) {
+				throw new Error("This dashboard hasn’t finished loading — try again in a moment")
+			}
 			const current = rowToDashboard(row)
-			if (!current) return
+			if (!current) {
+				throw new Error("This dashboard’s saved layout couldn’t be read, so it can’t be edited")
+			}
 
 			const updated = updater(current)
 			if (updated === current) return // no-op
@@ -714,8 +771,14 @@ export function useDashboardMutations() {
 	)
 
 	const widgetMutators = useMemo(
-		() => makeWidgetMutators({ mutateDashboard, readOnly, readDashboard }),
-		[mutateDashboard, readOnly, readDashboard],
+		() =>
+			makeWidgetMutators({
+				mutateDashboard,
+				readOnly,
+				readDashboard,
+				onMutationFailed: applyMutationError,
+			}),
+		[mutateDashboard, readOnly, readDashboard, applyMutationError],
 	)
 
 	const deleteDashboard = useCallback(

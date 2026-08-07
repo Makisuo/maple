@@ -146,3 +146,43 @@ export function sortInvestigations(
 		return updatedWeight(b) - updatedWeight(a) || a.id.localeCompare(b.id)
 	})
 }
+
+/* -------------------------------------------------------------------------------------------------
+ * Durations
+ * -----------------------------------------------------------------------------------------------*/
+
+export interface Elapsed {
+	value: string
+	unit: string
+}
+
+const pad = (n: number) => String(n).padStart(2, "0")
+
+/**
+ * A duration split into the number and its unit, so the number can carry the
+ * display weight and the unit ride its baseline.
+ *
+ * Deliberately not `formatDuration`, which is tuned for span durations: it gives
+ * seconds two decimals ("7.04s") and minutes one ("1.4min"). At this display
+ * weight the decimals read as false precision, and on the live Elapsed stat a
+ * tenth-of-a-minute resolution sits frozen for six seconds and then lurches.
+ * Clock notation past a minute keeps every second visible.
+ *
+ * It lives here rather than in `verdict-card` because the rail states the same
+ * time-to-diagnosis one panel over, and having one component import the other
+ * for it built an import cycle that left `RunSpine` throwing at runtime.
+ */
+export const splitDuration = (ms: number): Elapsed => {
+	// A pass that died before it started is a real case (`workflow_binding_unavailable`
+	// fails in microseconds), and "0 µs" reads as a broken clock rather than an
+	// instant failure. Sub-second resolution buys nothing at this display size.
+	if (ms < 1000) return { value: "<1", unit: "s" }
+	const totalSeconds = Math.floor(ms / 1000)
+	if (totalSeconds < 60) return { value: String(totalSeconds), unit: "s" }
+	const seconds = totalSeconds % 60
+	const totalMinutes = Math.floor(totalSeconds / 60)
+	if (totalMinutes < 60) return { value: `${totalMinutes}:${pad(seconds)}`, unit: "min" }
+	const minutes = totalMinutes % 60
+	const hours = Math.floor(totalMinutes / 60)
+	return { value: `${hours}:${pad(minutes)}:${pad(seconds)}`, unit: "h" }
+}

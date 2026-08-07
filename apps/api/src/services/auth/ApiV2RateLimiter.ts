@@ -17,7 +17,7 @@ export interface ApiV2RateLimiterShape {
 	readonly check: (keyId: ApiKeyId) => Effect.Effect<ApiV2RateLimitOutcome>
 }
 
-class ApiV2RateLimiterBindingError extends Schema.TaggedErrorClass<ApiV2RateLimiterBindingError>()(
+class ApiV2RateLimiterBindingError extends Schema.TaggedError<ApiV2RateLimiterBindingError>()(
 	"@maple/api/services/ApiV2RateLimiterBindingError",
 	{
 		message: Schema.String,

@@ -34,7 +34,7 @@ export class ChatApplyResponse extends Schema.Class<ChatApplyResponse>("ChatAppl
 	isError: Schema.optionalKey(Schema.Boolean),
 }) {}
 
-export class ChatToolNotFoundError extends Schema.TaggedErrorClass<ChatToolNotFoundError>()(
+export class ChatToolNotFoundError extends Schema.TaggedError<ChatToolNotFoundError>()(
 	"@maple/http/errors/ChatToolNotFoundError",
 	{
 		tool: Schema.String,
@@ -43,7 +43,7 @@ export class ChatToolNotFoundError extends Schema.TaggedErrorClass<ChatToolNotFo
 	{ httpApiStatus: 404 },
 ) {}
 
-export class ChatToolNotApplicableError extends Schema.TaggedErrorClass<ChatToolNotApplicableError>()(
+export class ChatToolNotApplicableError extends Schema.TaggedError<ChatToolNotApplicableError>()(
 	"@maple/http/errors/ChatToolNotApplicableError",
 	{
 		tool: Schema.String,
@@ -52,7 +52,7 @@ export class ChatToolNotApplicableError extends Schema.TaggedErrorClass<ChatTool
 	{ httpApiStatus: 400 },
 ) {}
 
-export class ChatToolInvalidInputError extends Schema.TaggedErrorClass<ChatToolInvalidInputError>()(
+export class ChatToolInvalidInputError extends Schema.TaggedError<ChatToolInvalidInputError>()(
 	"@maple/http/errors/ChatToolInvalidInputError",
 	{
 		tool: Schema.String,

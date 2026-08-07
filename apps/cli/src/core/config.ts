@@ -28,7 +28,7 @@ interface StoredConfig {
 /** Malformed on-disk config JSON. Caught immediately by `Effect.orElseSucceed`
  *  (a bad/unreadable file falls back to an empty config), but typed so the error
  *  channel isn't a bare `Error`. */
-class ConfigParseError extends Schema.TaggedErrorClass<ConfigParseError>()("@maple/cli/ConfigParseError", {
+class ConfigParseError extends Schema.TaggedError<ConfigParseError>()("@maple/cli/ConfigParseError", {
 	message: Schema.String,
 }) {}
 

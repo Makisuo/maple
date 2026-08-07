@@ -135,7 +135,10 @@ export function AiTriageSettingsSection({ isAdmin, hasEntitlement }: AiTriageSet
 									}}
 								/>
 								<p className="text-xs text-muted-foreground">
-									Bounds LLM spend — additional incidents skip triage once reached.
+									Bounds LLM spend — additional incidents skip triage once reached. A
+									planned investigation also spends about six of the{" "}
+									{current.maxPassesPerDay} daily model passes, whichever ceiling is reached
+									first.
 								</p>
 							</div>
 

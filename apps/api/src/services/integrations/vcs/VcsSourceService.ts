@@ -12,12 +12,12 @@ import { VcsProviderRegistry } from "./VcsProviderRegistry"
 import { VcsRepository } from "./VcsRepository"
 import type { VcsCodeSearchMatch, VcsSourceFile } from "./VcsProviderClient"
 
-export class VcsSourceRepositoryNotFoundError extends Schema.TaggedErrorClass<VcsSourceRepositoryNotFoundError>()(
+export class VcsSourceRepositoryNotFoundError extends Schema.TaggedError<VcsSourceRepositoryNotFoundError>()(
 	"@maple/api/vcs/VcsSourceRepositoryNotFoundError",
 	{ repository: Schema.String, message: Schema.String },
 ) {}
 
-export class VcsSourceFileNotFoundError extends Schema.TaggedErrorClass<VcsSourceFileNotFoundError>()(
+export class VcsSourceFileNotFoundError extends Schema.TaggedError<VcsSourceFileNotFoundError>()(
 	"@maple/api/vcs/VcsSourceFileNotFoundError",
 	{ repository: Schema.String, path: Schema.String, ref: Schema.String, message: Schema.String },
 ) {}

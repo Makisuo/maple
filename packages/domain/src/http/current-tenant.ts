@@ -2,7 +2,7 @@ import { HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
 import { Schema, Context as EffectContext } from "effect"
 import { AuthMode, OrgId, RoleName, UserId } from "../primitives"
 
-export class UnauthorizedError extends Schema.TaggedErrorClass<UnauthorizedError>()(
+export class UnauthorizedError extends Schema.TaggedError<UnauthorizedError>()(
 	"@maple/http/errors/UnauthorizedError",
 	{
 		message: Schema.String,

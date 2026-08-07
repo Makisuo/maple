@@ -14,9 +14,9 @@ class ReportableError extends Data.TaggedError("ReportableError")<{}> {}
 
 // An anticipated 4xx business error (e.g. unauthorized / not-found).
 class UnauthorizedError extends Data.TaggedError("UnauthorizedError")<{}> {}
-class V2InvalidRequestError extends Schema.ErrorClass<V2InvalidRequestError>(
-	"@maple/http/v2/InvalidRequestError",
-)({ error: Schema.Struct({ type: Schema.Literal("invalid_request_error") }) }) {}
+class V2InvalidRequestError extends Schema.Error<V2InvalidRequestError>("@maple/http/v2/InvalidRequestError")(
+	{ error: Schema.Struct({ type: Schema.Literal("invalid_request_error") }) },
+) {}
 
 const runSpan = (buffer: ReturnType<typeof makeSpanBuffer>, effect: Effect.Effect<unknown, unknown>) =>
 	effect.pipe(Effect.withSpan("http.server GET"), Effect.provide(buffer.tracerLayer), Effect.exit)
@@ -86,7 +86,7 @@ describe("makeSpanBuffer anticipated-error classification", () => {
 		}),
 	)
 
-	it.effect("classifies Schema.ErrorClass failures by Error.name", () =>
+	it.effect("classifies Schema.Error failures by Error.name", () =>
 		Effect.gen(function* () {
 			const buffer = makeSpanBuffer({
 				anticipatedErrorIdentifiers: new Set(["@maple/http/v2/InvalidRequestError"]),

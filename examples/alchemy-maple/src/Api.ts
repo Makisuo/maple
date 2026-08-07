@@ -39,7 +39,7 @@ export default class Api extends Cloudflare.Worker<Api>()(
 	{
 		main: import.meta.filename,
 		compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
-		url: true,
+		workersDev: true,
 		env: {
 			// Alchemy resolves the resource, ships the value as a Worker secret, and
 			// orders the deploy behind it — it stays `Redacted` in the plan output.

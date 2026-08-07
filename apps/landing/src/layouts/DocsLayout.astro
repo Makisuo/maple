@@ -9,6 +9,7 @@ import AvailableSdks from "../components/docs/AvailableSdks.astro";
 import DocsSearch from "../components/docs/DocsSearch.tsx";
 import { getGitHubStars } from "../lib/github-stars";
 import { GithubStarButton } from "../components/GithubStarButton";
+import { MapleMark } from "@maple/ui/components/icons/maple-mark";
 
 interface Props {
     title: string;
@@ -36,7 +37,7 @@ const absoluteImage = image.startsWith("http") ? image : new URL(image, Astro.si
         <link rel="icon" href="/favicon.ico" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="description" content={description} />
-        <meta name="theme-color" content="#272219" />
+        <meta name="theme-color" content="#171410" />
         <meta name="robots" content="index,follow" />
         <link rel="canonical" href={canonicalUrl} />
         {mdHref && (
@@ -67,10 +68,8 @@ const absoluteImage = image.startsWith("http") ? image : new URL(image, Astro.si
         <header class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/95 backdrop-blur-md">
             <div class="h-12 flex items-center justify-between px-5">
                 <div class="flex items-center gap-3">
-                    <a href="/" class="flex items-center gap-2.5 text-fg-muted hover:text-fg transition-colors">
-                        <div class="w-5 h-5 bg-primary flex items-center justify-center">
-                            <span class="text-primary-foreground text-[9px] font-bold">M</span>
-                        </div>
+                    <a href="/" class="flex items-center gap-2 text-fg-muted hover:text-fg transition-colors">
+                        <MapleMark size={19} className="text-primary shrink-0" />
                         <span class="text-xs font-medium text-fg">Maple</span>
                     </a>
                     <a

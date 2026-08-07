@@ -9,7 +9,7 @@ export interface Range {
 }
 
 /** A bad `--since` / time-range input, surfaced to the user with a hint. */
-export class TimeRangeError extends Schema.TaggedErrorClass<TimeRangeError>()("@maple/cli/TimeRangeError", {
+export class TimeRangeError extends Schema.TaggedError<TimeRangeError>()("@maple/cli/TimeRangeError", {
 	message: Schema.String,
 }) {}
 

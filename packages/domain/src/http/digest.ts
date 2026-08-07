@@ -37,7 +37,7 @@ export class DigestPreviewResponse extends Schema.Class<DigestPreviewResponse>("
 	html: Schema.String,
 }) {}
 
-export class DigestPersistenceError extends Schema.TaggedErrorClass<DigestPersistenceError>()(
+export class DigestPersistenceError extends Schema.TaggedError<DigestPersistenceError>()(
 	"@maple/http/errors/DigestPersistenceError",
 	{
 		message: Schema.String,
@@ -45,7 +45,7 @@ export class DigestPersistenceError extends Schema.TaggedErrorClass<DigestPersis
 	{ httpApiStatus: 503 },
 ) {}
 
-export class DigestNotFoundError extends Schema.TaggedErrorClass<DigestNotFoundError>()(
+export class DigestNotFoundError extends Schema.TaggedError<DigestNotFoundError>()(
 	"@maple/http/errors/DigestNotFoundError",
 	{
 		message: Schema.String,
@@ -53,7 +53,7 @@ export class DigestNotFoundError extends Schema.TaggedErrorClass<DigestNotFoundE
 	{ httpApiStatus: 404 },
 ) {}
 
-export class DigestNotConfiguredError extends Schema.TaggedErrorClass<DigestNotConfiguredError>()(
+export class DigestNotConfiguredError extends Schema.TaggedError<DigestNotConfiguredError>()(
 	"@maple/http/errors/DigestNotConfiguredError",
 	{
 		message: Schema.String,
@@ -61,7 +61,7 @@ export class DigestNotConfiguredError extends Schema.TaggedErrorClass<DigestNotC
 	{ httpApiStatus: 501 },
 ) {}
 
-export class DigestRenderError extends Schema.TaggedErrorClass<DigestRenderError>()(
+export class DigestRenderError extends Schema.TaggedError<DigestRenderError>()(
 	"@maple/http/errors/DigestRenderError",
 	{
 		message: Schema.String,

@@ -3,7 +3,7 @@
  *
  * This module is deliberately tiny and dependency-free: it is imported by `ai-triage-enqueue` and
  * `InvestigationService`, which are themselves reachable from the MCP tool registry, so anything
- * heavy here would close an import cycle back through `chat/agent.ts`.
+ * heavy here would close an import cycle back through `chat/loop`.
  *
  * Starting a turn is now a single `beginTurn` call. Under Flue there were two very different paths
  * into the same conversation — the browser POSTed to `/agents/maple-chat/:id` on the chat-flue

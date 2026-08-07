@@ -37,7 +37,7 @@ env:
 jobs:
     test:
         name: Cargo test and load benchmark
-        runs-on: blacksmith-4vcpu-ubuntu-2404
+        runs-on: ubuntu-latest
         timeout-minutes: 45
         defaults:
             run:

@@ -42,7 +42,7 @@ export const createElectricSyncWorker = ({ stage, domains }: CreateElectricSyncW
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			url: true,
+			workersDev: true,
 			// Custom domain (not a zone route): routes don't create DNS records, so
 			// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains
 			// provision DNS + edge certs automatically.

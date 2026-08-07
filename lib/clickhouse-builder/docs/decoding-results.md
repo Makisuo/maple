@@ -78,7 +78,7 @@ error.message // "Compiled query row 0 did not match its declared output schema"
 error.cause // the underlying Schema parse error
 ```
 
-It is an Effect `Schema.TaggedErrorClass`, so `Effect.catchTag` works on it directly. Decoding
+It is an Effect `Schema.TaggedError`, so `Effect.catchTag` works on it directly. Decoding
 stops at the first bad row rather than accumulating.
 
 _(Backed by `docs/decoding-results.md > A bad row fails with CompiledQueryDecodeError`.)_

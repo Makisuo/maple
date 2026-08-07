@@ -1,5 +1,6 @@
 export { GithubIcon } from "./github-icon"
 export { GoogleIcon } from "./google-icon"
+export { MapleMark } from "./maple-mark"
 export { SendIcon } from "./send-icon"
 export { StopIcon } from "./stop-icon"
 export { SparklesIcon } from "./sparkles-icon"

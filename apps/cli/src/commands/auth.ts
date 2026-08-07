@@ -7,7 +7,7 @@ import { deleteNativeCredential } from "../core/credential-store"
 import { Mode } from "../core/mode"
 import { printJson } from "../lib/output"
 
-class CliAuthError extends Schema.TaggedErrorClass<CliAuthError>()("@maple/cli/CliAuthError", {
+class CliAuthError extends Schema.TaggedError<CliAuthError>()("@maple/cli/CliAuthError", {
 	message: Schema.String,
 }) {}
 

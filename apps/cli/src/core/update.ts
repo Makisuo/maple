@@ -24,7 +24,7 @@ import { MapleConfig } from "./config"
 
 /** A `maple update` / version-check failure. The message is shown to the user
  *  and the process exits non-zero (handled by the CLI runtime, like ServerError). */
-export class UpdateError extends Schema.TaggedErrorClass<UpdateError>()("@maple/cli/UpdateError", {
+export class UpdateError extends Schema.TaggedError<UpdateError>()("@maple/cli/UpdateError", {
 	message: Schema.String,
 }) {}
 
