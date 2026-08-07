@@ -249,14 +249,6 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 							</a>
 						</NavigationMenuItem>
 
-						<NavigationMenuItem>
-							<a
-								href="/blog"
-								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-[13px] font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
-							>
-								{m.nav_blog()}
-							</a>
-						</NavigationMenuItem>
 					</NavigationMenuList>
 				</NavigationMenu>
 			</div>
@@ -368,13 +360,6 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 								className="text-xs text-fg hover:text-fg transition-colors py-2 font-medium"
 							>
 								{m.nav_docs()}
-							</a>
-							<a
-								href="/blog"
-								onClick={() => setMenuOpen(false)}
-								className="text-xs text-fg hover:text-fg transition-colors py-2 font-medium"
-							>
-								{m.nav_blog()}
 							</a>
 						</div>
 
