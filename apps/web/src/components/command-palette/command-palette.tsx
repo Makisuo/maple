@@ -23,7 +23,9 @@ import {
 	KeyboardIcon,
 	MoonIcon,
 	SunIcon,
+	UserIcon,
 } from "@/components/icons"
+import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { openGlobalChat } from "@/components/chat/global-chat-sheet"
 import { paletteNavItems } from "@/components/dashboard/nav-items"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
@@ -153,6 +155,20 @@ function PaletteContent({
 				icon: GearIcon,
 				href: "/settings",
 			},
+			// `/account` redirects away in self-hosted mode, where there is no user record to manage.
+			...(isClerkAuthEnabled
+				? [
+						{
+							id: "nav:/account",
+							title: "Account",
+							group: "Navigation" as const,
+							keywords:
+								"account profile picture name password two-factor 2fa mfa passkey email security sessions devices",
+							icon: UserIcon,
+							href: "/account",
+						},
+					]
+				: []),
 		]
 
 		const serviceEntries: PaletteEntry[] = serviceNames.map((name) => ({
