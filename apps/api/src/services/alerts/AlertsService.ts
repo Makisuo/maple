@@ -1,3 +1,13 @@
+import {
+	alertDeliveryRetryDelayMs,
+	canRetryAlertDelivery,
+	evaluateAlertObservation,
+	interleaveAlertRulesByTenant,
+	makeAlertDeliveryKey,
+	planAlertLifecycle,
+	type AlertEvaluation as EvaluatedRule,
+	type AlertLifecycleInput,
+} from "@maple/alerting-core"
 import { formatWarehouseDateTime } from "@maple/query-engine"
 import {
 	AlertComparator as AlertComparatorSchema,
@@ -127,31 +137,12 @@ const WAREHOUSE_FAILURE_CATEGORIES = {
 	"@maple/http/errors/WarehouseValidationError": "tinybird_validation",
 } satisfies Record<WarehouseErrorTag, string>
 
-interface EvaluatedRule {
-	readonly status: Schema.Schema.Type<typeof AlertEvaluationResult.fields.status>
-	readonly value: number | null
-	readonly sampleCount: number
-	readonly threshold: number
-	readonly thresholdUpper: number | null
-	readonly comparator: AlertComparator
-	readonly reason: string
-	/**
-	 * The window returned nothing and `noDataBehavior: "zero"` synthesized the
-	 * value. Such a status is a statement about the absence of data, not about
-	 * the health of the system — a `gt` rule reads a total ingest outage as
-	 * `healthy` this way. Anything that acts on "healthy" destructively (i.e.
-	 * resolving an open incident) must prove telemetry is still flowing first.
-	 */
-	readonly derivedFromNoData: boolean
-}
-
 interface DeliveryAttemptFailure {
 	readonly message: string
 	readonly kind: "transport" | "timeout" | "payload" | "destination" | "unknown"
 	readonly retryable: boolean
 }
 
-const MAX_DELIVERY_ATTEMPTS = 5
 const ALERT_TEST_DELIVERY_CONCURRENCY = 5
 const ALERT_CHECK_INGEST_CONCURRENCY = 4
 // Storm fuse: cap issue-hub upserts per scheduler tick so a pathological
@@ -238,25 +229,7 @@ const MAX_PREVIEW_BUCKETS = 200
 /** Preserve each org's oldest-first order while preventing one org from monopolizing a tick. */
 export const interleaveAlertRulesByOrg = <T extends { readonly orgId: string }>(
 	rows: ReadonlyArray<T>,
-): ReadonlyArray<T> => {
-	const queues = new Map<string, T[]>()
-	for (const row of rows) {
-		const queue = queues.get(row.orgId)
-		if (queue) queue.push(row)
-		else queues.set(row.orgId, [row])
-	}
-
-	const fair: T[] = []
-	let index = 0
-	while (fair.length < rows.length) {
-		for (const queue of queues.values()) {
-			const row = queue[index]
-			if (row !== undefined) fair.push(row)
-		}
-		index += 1
-	}
-	return fair
-}
+): ReadonlyArray<T> => interleaveAlertRulesByTenant(rows, (row) => row.orgId)
 
 // Tinybird DateTime64(3) wire format for alert_checks ingest:
 // "YYYY-MM-DD HH:MM:SS.SSS" (UTC, no timezone).
@@ -265,27 +238,6 @@ const toIngestDateTime64 = (epochMs: number) => {
 	const pad = (n: number, w = 2) => n.toString().padStart(w, "0")
 	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
 }
-
-const compareThreshold = (
-	value: number,
-	comparator: AlertComparator,
-	threshold: number,
-	thresholdUpper: number | null = null,
-): boolean =>
-	Match.value(comparator).pipe(
-		Match.when("gt", () => value > threshold),
-		Match.when("gte", () => value >= threshold),
-		Match.when("lt", () => value < threshold),
-		Match.when("lte", () => value <= threshold),
-		Match.when("eq", () => value === threshold),
-		Match.when("neq", () => value !== threshold),
-		Match.when("between", () => thresholdUpper != null && value >= threshold && value <= thresholdUpper),
-		Match.when(
-			"not_between",
-			() => thresholdUpper != null && (value < threshold || value > thresholdUpper),
-		),
-		Match.exhaustive,
-	)
 
 const makePersistenceError = (error: unknown) => {
 	const cause = describeCause(error instanceof Error ? error.cause : error)
@@ -553,79 +505,26 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				rule: NormalizedRule,
 				obs: Pick<GroupedAlertObservation, "value" | "sampleCount" | "hasData">,
 				reasonOverride?: string,
-			): EvaluatedRule => {
-				const noDataBehavior = rule.compiledPlan.noDataBehavior
-				// Sample-weighted counts arrive fractional from the warehouse
-				// (`sum(SampleRate)`), and this flows into `last_sample_count`, an
-				// `integer` column — an unrounded value fails the insert outright.
-				const sampleCount = Math.round(obs.sampleCount)
-				const value = obs.hasData ? obs.value : noDataBehavior === "zero" ? 0 : null
-
-				if (!obs.hasData && noDataBehavior === "skip") {
-					return {
-						status: "skipped",
-						value: null,
-						sampleCount,
+			): EvaluatedRule =>
+				evaluateAlertObservation(
+					{
+						comparator: rule.comparator,
 						threshold: rule.threshold,
 						thresholdUpper: rule.thresholdUpper,
-						comparator: rule.comparator,
-						reason: "No data in the selected window",
-						// Inert: `skipped` never resolves an incident, so this branch
-						// short-circuits before any status is derived from a synthesized value.
-						derivedFromNoData: false,
-					}
-				}
-
-				if (sampleCount < rule.minimumSampleCount) {
-					return {
-						status: "skipped",
-						value,
-						sampleCount,
-						threshold: rule.threshold,
-						thresholdUpper: rule.thresholdUpper,
-						comparator: rule.comparator,
-						reason: `Sample count ${sampleCount} is below minimum ${rule.minimumSampleCount}`,
-						derivedFromNoData: false,
-					}
-				}
-
-				if (value == null) {
-					return {
-						status: "skipped",
-						value: null,
-						sampleCount,
-						threshold: rule.threshold,
-						thresholdUpper: rule.thresholdUpper,
-						comparator: rule.comparator,
-						reason: "Alert evaluation did not return a scalar value",
-						derivedFromNoData: false,
-					}
-				}
-
-				return {
-					status: compareThreshold(value, rule.comparator, rule.threshold, rule.thresholdUpper)
-						? "breached"
-						: "healthy",
-					value,
-					sampleCount,
-					threshold: rule.threshold,
-					thresholdUpper: rule.thresholdUpper,
-					comparator: rule.comparator,
-					reason:
-						reasonOverride ??
+						minimumSampleCount: rule.minimumSampleCount,
+						noDataBehavior: rule.compiledPlan.noDataBehavior,
+					},
+					obs,
+					reasonOverride ??
 						`${rule.signalType} ${formatComparator(rule.comparator, rule.threshold, rule.thresholdUpper)}`,
-					// Only reachable with `noDataBehavior: "zero"` — the "skip" branch
-					// returned above. The comparison ran against a fabricated 0.
-					derivedFromNoData: !obs.hasData,
-				}
-			}
+				)
 
 			const buildDeliveryKey = (
 				incidentId: string,
 				destinationId: string,
 				eventType: AlertEventTypeValue,
 				scheduledAt: number,
-			) => [incidentId, destinationId, eventType, scheduledAt].join(":")
+			) => makeAlertDeliveryKey(incidentId, destinationId, eventType, scheduledAt)
 
 			const insertDeliveryEventRecord = (
 				db: DatabaseExecutor,
@@ -811,9 +710,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const computeRetryDelayMs = Effect.fn("AlertsService.computeRetryDelayMs")(function* (
 				attemptNumber: number,
 			) {
-				const base = Math.min(60_000 * Math.pow(2, attemptNumber - 1), 15 * 60_000)
 				const jitter = yield* Random.nextIntBetween(0, 1_000)
-				return base + jitter
+				return alertDeliveryRetryDelayMs(attemptNumber, jitter)
 			})
 
 			const updateRule = Effect.fn("AlertsService.updateRule")(function* (
@@ -1511,7 +1409,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						errorMessage: failure.message,
 					})
 
-					if (failure.retryable && row.attemptNumber < MAX_DELIVERY_ATTEMPTS) {
+					const willRetry = canRetryAlertDelivery(row.attemptNumber, failure.retryable)
+					if (willRetry) {
 						// Carry the original delivery payload through the retry. Empty
 						// payloads here would force the next attempt to fall back on
 						// rule-row defaults, losing observed value, sample count,
@@ -1540,7 +1439,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							destinationId: row.destinationId,
 							failureKind: failure.kind,
 							errorMessage: failure.message,
-							willRetry: failure.retryable && row.attemptNumber < MAX_DELIVERY_ATTEMPTS,
+							willRetry,
 						}),
 					)
 				})
@@ -1648,63 +1547,51 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						)
 					}
 
-					if (evaluation.status === "skipped") {
-						const consecutiveBreaches = state?.consecutiveBreaches ?? 0
-						const consecutiveHealthy = state?.consecutiveHealthy ?? 0
-						yield* upsertState({
-							consecutiveBreaches,
-							consecutiveHealthy,
-							lastStatus: evaluation.status,
-							lastValue: evaluation.value,
-							lastSampleCount: evaluation.sampleCount,
-						})
-						return {
-							transition: "none" as const,
-							incidentId: carriedIncidentId,
-							openedIncidentId: null,
-							consecutiveBreaches,
-							consecutiveHealthy,
-						}
+					const lifecycleInput: AlertLifecycleInput = {
+						policy: {
+							consecutiveBreachesRequired: normalized.consecutiveBreachesRequired,
+							consecutiveHealthyRequired: normalized.consecutiveHealthyRequired,
+							renotifyIntervalMinutes: normalized.renotifyIntervalMinutes,
+						},
+						evaluation,
+						state:
+							state == null
+								? null
+								: {
+										consecutiveBreaches: state.consecutiveBreaches,
+										consecutiveHealthy: state.consecutiveHealthy,
+									},
+						openIncident:
+							openIncident == null
+								? null
+								: {
+										firstTriggeredAtMs: openIncident.firstTriggeredAt.getTime(),
+										lastNotifiedAtMs: openIncident.lastNotifiedAt?.getTime() ?? null,
+										lastDeliveredEventType:
+											openIncident.lastDeliveredEventType == null
+												? null
+												: decodeAlertEventTypeSync(
+														openIncident.lastDeliveredEventType,
+													),
+									},
+						nowMs: timestamp,
 					}
 
-					// Capped at the rule's thresholds: the counters are only ever compared
-					// with >= against *Required, so saturating keeps open/resolve behavior
-					// identical while letting steady-state ticks skip the state upsert above.
-					const consecutiveBreaches =
-						evaluation.status === "breached"
-							? Math.min(
-									(state?.consecutiveBreaches ?? 0) + 1,
-									normalized.consecutiveBreachesRequired,
-								)
-							: 0
-					const consecutiveHealthy =
-						evaluation.status === "healthy"
-							? Math.min(
-									(state?.consecutiveHealthy ?? 0) + 1,
-									normalized.consecutiveHealthyRequired,
-								)
-							: 0
-
+					let lifecycle = planAlertLifecycle(lifecycleInput)
+					// Persist the counter/state decision before follow-up adapter work, as
+					// before extraction. A failed flap-history or liveness query must not
+					// discard an evaluation that already completed successfully.
 					yield* upsertState({
-						consecutiveBreaches,
-						consecutiveHealthy,
+						consecutiveBreaches: lifecycle.state.consecutiveBreaches,
+						consecutiveHealthy: lifecycle.state.consecutiveHealthy,
 						lastStatus: evaluation.status,
 						lastValue: evaluation.value,
 						lastSampleCount: evaluation.sampleCount,
 					})
 
-					if (
-						evaluation.status === "breached" &&
-						openIncident == null &&
-						consecutiveBreaches >= normalized.consecutiveBreachesRequired
-					) {
-						// Flap suppression: a metric oscillating around the threshold opens
-						// a fresh incident per flap, which would email an identical trigger
-						// notification every few minutes. If the previous incident for this
-						// (rule, group) was notified within the renotify interval, open the
-						// incident but skip the trigger notification and carry the prior
-						// lastNotifiedAt forward — the renotify gate then enforces one
-						// email per interval while the flapping persists.
+					// Ask the persistence adapter for flap history only when the pure core
+					// has decided that a new incident is otherwise ready to open.
+					if (lifecycle.transition === "opened") {
 						const priorNotified =
 							(yield* dbExecute((db) =>
 								db
@@ -1728,9 +1615,46 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									.orderBy(desc(alertIncidents.lastNotifiedAt))
 									.limit(1),
 							))[0] ?? null
-						const flapSuppressedAt = priorNotified?.lastNotifiedAt ?? null
+						lifecycle = planAlertLifecycle({
+							...lifecycleInput,
+							previousNotificationAtMs: priorNotified?.lastNotifiedAt?.getTime() ?? null,
+						})
+					}
 
+					// A zero synthesized from an empty window cannot resolve an incident
+					// until the host query adapter proves telemetry is still arriving.
+					if (lifecycle.hold === "missing_telemetry" && openIncident != null) {
+						const liveness = yield* telemetryStillFlowing(
+							row.orgId,
+							normalized,
+							openIncident.firstTriggeredAt.getTime(),
+							timestamp,
+						)
+						if (liveness.dataFlowing) {
+							lifecycle = planAlertLifecycle({ ...lifecycleInput, allowNoDataResolution: true })
+						} else {
+							yield* Effect.logWarning(
+								"Holding incident open: healthy evaluation came from missing telemetry",
+							).pipe(
+								Effect.annotateLogs({
+									orgId: row.orgId,
+									ruleId: row.id,
+									incidentId: openIncident.id,
+									groupKey,
+									livenessReason: liveness.reason,
+									observedCount: liveness.observedCount,
+									baselineCount: liveness.baselineCount,
+								}),
+							)
+						}
+					}
+
+					if (lifecycle.transition === "opened") {
 						const incidentId = decodeAlertIncidentIdSync(makeUuid())
+						const inheritedNotificationAt =
+							lifecycle.inheritedNotificationAtMs == null
+								? null
+								: new Date(lifecycle.inheritedNotificationAtMs)
 						const incident: AlertIncidentRow = {
 							id: incidentId,
 							orgId: row.orgId,
@@ -1752,45 +1676,42 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							lastEvaluatedAt: new Date(timestamp),
 							dedupeKey: `${row.orgId}:${row.id}:${groupKey}`,
 							lastDeliveredEventType: null,
-							// Suppressed flaps inherit the prior incident's notify anchor so
-							// the renotify gate spaces the next email a full interval from
-							// the last one the user actually received.
-							lastNotifiedAt: flapSuppressedAt,
+							lastNotifiedAt: inheritedNotificationAt,
 							errorIssueId: null,
 							createdAt: new Date(timestamp),
 							updatedAt: new Date(timestamp),
 						}
 
 						yield* dbExecute((db) => db.insert(alertIncidents).values(incident))
-						if (flapSuppressedAt != null) {
+						if (lifecycle.notificationSuppression === "flapping") {
 							yield* Effect.logInfo("Skipping trigger notification for flapping incident").pipe(
 								Effect.annotateLogs({
 									ruleId: row.id,
 									incidentId,
 									groupKey,
-									priorNotifiedAt: flapSuppressedAt.toISOString(),
+									priorNotifiedAt: inheritedNotificationAt?.toISOString(),
 								}),
 							)
-						} else {
+						} else if (lifecycle.eventType === "trigger") {
 							yield* queueIncidentNotifications(
 								row.orgId,
 								normalized,
 								incident,
 								evaluation,
-								"trigger",
+								lifecycle.eventType,
 								timestamp,
 							)
 						}
 						return {
-							transition: "opened" as const,
+							transition: lifecycle.transition,
 							incidentId,
 							openedIncidentId: incidentId,
-							consecutiveBreaches,
-							consecutiveHealthy,
+							consecutiveBreaches: lifecycle.state.consecutiveBreaches,
+							consecutiveHealthy: lifecycle.state.consecutiveHealthy,
 						}
 					}
 
-					if (evaluation.status === "breached" && openIncident != null) {
+					if (lifecycle.transition === "continued" && openIncident != null) {
 						const refreshedIncident = {
 							...openIncident,
 							lastTriggeredAt: new Date(timestamp),
@@ -1799,19 +1720,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							lastEvaluatedAt: new Date(timestamp),
 							updatedAt: new Date(timestamp),
 						}
-
-						const renotifyDueAt =
-							(openIncident.lastNotifiedAt ?? openIncident.firstTriggeredAt).getTime() +
-							normalized.renotifyIntervalMinutes * 60_000
-						const renotifyDue = renotifyDueAt <= timestamp
-
-						// The gate closes at QUEUE time, not delivery time: advancing
-						// lastNotifiedAt only on delivery success re-queues a fresh event
-						// (new scheduledAt → new deliveryKey) every tick while a delivery
-						// is failing or slow, and the whole backlog fires once the
-						// destination recovers. Failed deliveries are covered by the
-						// per-event retry chain instead. Written before queueing so a
-						// crash in between skips one interval rather than duplicating.
 						yield* dbExecute((db) =>
 							db
 								.update(alertIncidents)
@@ -1821,72 +1729,32 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									lastSampleCount: evaluation.sampleCount,
 									lastEvaluatedAt: new Date(timestamp),
 									updatedAt: new Date(timestamp),
-									...(renotifyDue ? { lastNotifiedAt: new Date(timestamp) } : {}),
+									...(lifecycle.advanceNotificationAnchor
+										? { lastNotifiedAt: new Date(timestamp) }
+										: {}),
 								})
 								.where(eq(alertIncidents.id, openIncident.id)),
 						)
-
-						if (renotifyDue) {
+						if (lifecycle.eventType === "renotify") {
 							yield* queueIncidentNotifications(
 								row.orgId,
 								normalized,
 								refreshedIncident,
 								evaluation,
-								"renotify",
+								lifecycle.eventType,
 								timestamp,
 							)
 						}
 						return {
-							transition: "continued" as const,
+							transition: lifecycle.transition,
 							incidentId: openIncident.id,
 							openedIncidentId: null,
-							consecutiveBreaches,
-							consecutiveHealthy,
+							consecutiveBreaches: lifecycle.state.consecutiveBreaches,
+							consecutiveHealthy: lifecycle.state.consecutiveHealthy,
 						}
 					}
 
-					if (
-						evaluation.status === "healthy" &&
-						openIncident != null &&
-						consecutiveHealthy >= normalized.consecutiveHealthyRequired
-					) {
-						// A "healthy" synthesized from an empty window is a statement
-						// about missing data, not about a recovered system: with
-						// `noDataBehavior: "zero"` a total ingest outage compares as 0 <
-						// threshold and would resolve every incident it touches, paging
-						// out a wave of false all-clears. Believe it only once telemetry
-						// is provably still arriving.
-						if (evaluation.derivedFromNoData) {
-							const liveness = yield* telemetryStillFlowing(
-								row.orgId,
-								normalized,
-								openIncident.firstTriggeredAt.getTime(),
-								timestamp,
-							)
-							if (!liveness.dataFlowing) {
-								yield* Effect.logWarning(
-									"Holding incident open: healthy evaluation came from missing telemetry",
-								).pipe(
-									Effect.annotateLogs({
-										orgId: row.orgId,
-										ruleId: row.id,
-										incidentId: openIncident.id,
-										groupKey,
-										livenessReason: liveness.reason,
-										observedCount: liveness.observedCount,
-										baselineCount: liveness.baselineCount,
-									}),
-								)
-								return {
-									transition: "none" as const,
-									incidentId: carriedIncidentId,
-									openedIncidentId: null,
-									consecutiveBreaches,
-									consecutiveHealthy,
-								}
-							}
-						}
-
+					if (lifecycle.transition === "resolved" && openIncident != null) {
 						const resolvedIncident = {
 							...openIncident,
 							status: "resolved" as const,
@@ -1896,7 +1764,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							lastEvaluatedAt: new Date(timestamp),
 							updatedAt: new Date(timestamp),
 						}
-
 						yield* dbExecute((db) =>
 							db
 								.update(alertIncidents)
@@ -1910,14 +1777,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								})
 								.where(eq(alertIncidents.id, openIncident.id)),
 						)
-
-						// A flap-suppressed incident (notify anchor inherited, nothing ever
-						// delivered for it) resolves silently too — pairing every silent
-						// open with a resolve email would spam just as hard as the
-						// triggers we suppressed.
-						const resolveSuppressed =
-							openIncident.lastDeliveredEventType == null && openIncident.lastNotifiedAt != null
-						if (resolveSuppressed) {
+						if (lifecycle.notificationSuppression === "flap_resolution") {
 							yield* Effect.logInfo("Skipping resolve notification for flapping incident").pipe(
 								Effect.annotateLogs({
 									ruleId: row.id,
@@ -1925,31 +1785,31 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									groupKey,
 								}),
 							)
-						} else {
+						} else if (lifecycle.eventType === "resolve") {
 							yield* queueIncidentNotifications(
 								row.orgId,
 								normalized,
 								resolvedIncident,
 								evaluation,
-								"resolve",
+								lifecycle.eventType,
 								timestamp,
 							)
 						}
 						return {
-							transition: "resolved" as const,
+							transition: lifecycle.transition,
 							incidentId: openIncident.id,
 							openedIncidentId: null,
-							consecutiveBreaches,
-							consecutiveHealthy,
+							consecutiveBreaches: lifecycle.state.consecutiveBreaches,
+							consecutiveHealthy: lifecycle.state.consecutiveHealthy,
 						}
 					}
 
 					return {
-						transition: "none" as const,
+						transition: lifecycle.transition,
 						incidentId: carriedIncidentId,
 						openedIncidentId: null,
-						consecutiveBreaches,
-						consecutiveHealthy,
+						consecutiveBreaches: lifecycle.state.consecutiveBreaches,
+						consecutiveHealthy: lifecycle.state.consecutiveHealthy,
 					}
 				})
 				const outcome = yield* evaluateTransition()

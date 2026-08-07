@@ -52,6 +52,7 @@
         "@effect/platform-bun": "catalog:effect",
         "@maple-dev/clickhouse-builder": "workspace:*",
         "@maple-dev/effect-sdk": "workspace:*",
+        "@maple/alerting-core": "workspace:*",
         "@maple/auth": "workspace:*",
         "@maple/cache": "workspace:*",
         "@maple/db": "workspace:*",
@@ -505,6 +506,15 @@
       "peerDependencies": {
         "alchemy": ">=2.0.0-beta.64 <3",
         "effect": ">=4.0.0-beta.100 || >=4.0.0",
+      },
+    },
+    "packages/alerting-core": {
+      "name": "@maple/alerting-core",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
       },
     },
     "packages/auth": {
@@ -1518,6 +1528,8 @@
     "@maple-examples/effect-todo": ["@maple-examples/effect-todo@workspace:examples/effect-todo"],
 
     "@maple/alerting": ["@maple/alerting@workspace:apps/alerting"],
+
+    "@maple/alerting-core": ["@maple/alerting-core@workspace:packages/alerting-core"],
 
     "@maple/api": ["@maple/api@workspace:apps/api"],
 

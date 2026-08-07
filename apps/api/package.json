@@ -34,6 +34,7 @@
 		"@effect/platform-bun": "catalog:effect",
 		"@maple-dev/clickhouse-builder": "workspace:*",
 		"@maple-dev/effect-sdk": "workspace:*",
+		"@maple/alerting-core": "workspace:*",
 		"@maple/auth": "workspace:*",
 		"@maple/cache": "workspace:*",
 		"@maple/db": "workspace:*",
