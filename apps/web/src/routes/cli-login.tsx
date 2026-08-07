@@ -1,8 +1,9 @@
 import { useOrganization } from "@clerk/clerk-react"
 import { createFileRoute } from "@tanstack/react-router"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { Schema } from "effect"
 import { Button } from "@maple/ui/components/ui/button"
+import { Label } from "@maple/ui/components/ui/label"
 import { OTPField, OTPFieldInput, OTPFieldSeparator } from "@maple/ui/components/ui/otp-field"
 import { AuthLayout } from "@/components/layout/auth-layout"
 import { ClerkOrgSwitcherMenu } from "@/components/dashboard/org-switcher-menu"
@@ -108,6 +109,7 @@ const ActiveWorkspaceChoice = isClerkAuthEnabled ? ClerkWorkspaceChoice : Worksp
 function CliLoginPage() {
 	const { user_code: initialCode } = Route.useSearch()
 	const [userCode, setUserCode] = useState(() => normalizeCliUserCode(initialCode ?? "").replace("-", ""))
+	const codeFieldId = useId()
 	const [state, setState] = useState<PageState>(() =>
 		initialCode ? { _tag: "loading" } : { _tag: "entry" },
 	)
@@ -163,7 +165,9 @@ function CliLoginPage() {
 				{state._tag === "entry" || state._tag === "error" ? (
 					<div className="space-y-3">
 						<div className="space-y-1.5">
-							<span className="text-sm font-medium">One-time code</span>
+							{/* Base UI ignores `aria-label` on the first input — that slot carries the
+							    whole field's name, which has to come from a real <label>. */}
+							<Label htmlFor={codeFieldId}>One-time code</Label>
 							<OTPField
 								length={8}
 								size="lg"
@@ -172,10 +176,9 @@ function CliLoginPage() {
 								onValueComplete={(value) => void inspect(value)}
 								validationType="alphanumeric"
 								normalizeValue={(value) => value.toUpperCase()}
-								aria-label="One-time code"
 								aria-invalid={state._tag === "error"}
 							>
-								<OTPFieldInput aria-label="Character 1 of 8" />
+								<OTPFieldInput id={codeFieldId} />
 								<OTPFieldInput aria-label="Character 2 of 8" />
 								<OTPFieldInput aria-label="Character 3 of 8" />
 								<OTPFieldInput aria-label="Character 4 of 8" />
